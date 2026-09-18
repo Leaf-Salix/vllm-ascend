@@ -345,6 +345,8 @@ cd /data/sunkaixuan/codex_sh/dsv4_vllm_20260917 && bash run_trace_ab.sh
 | `PTO_CSA_PROBE=<dir>` | 只读探针，把两处调用点的张量长相落盘 |
 | `PTO_CSA_VERIFY=1` | 逐入参按**内容**对拍：用两边各自的约定把 KV 取一遍比结果 |
 | `PTO_CSA_DUMP=<dir>` | 第一次替换那一步的全部入参 + vendor 输出落盘，供 `analyze_dump.py` 归因 |
+| `PTO_CSA_MODE` | `program`（默认）或 `kernel`。见 §12 |
+| `PTO_CSA_CMP_COLS` | kernel 模式下压缩块表的固定列数，默认 128。见 §12 |
 | `PTO_CSA_PLATFORM` | PyPTO 平台，默认 `a2a3` |
 | `VLLM_ASCEND_PROFILER_LEVEL` | `Level0/1/2`，默认 `Level1`；Level2 额外带 AICPU 与通信算子 |
 | `PROFILE=1` + `PROFILE_TOKENS` / `PROFILE_WARMUP` | 走 profiling 客户端，录几个 decode token |
@@ -400,7 +402,10 @@ cd /data/sunkaixuan/codex_sh/csa_b_tier_20260917 && bash run_adapter_check.sh
   三个 CSA 变体的 kernel 签名全都写死 `INT8 + per-channel scale`，只能在 setup 时量化一次
   （相对误差 3.9e-3）；RoPE 表 vLLM 用 FP32 而 kernel 签名要 BF16（差 1.8e-3，正好一个
   BF16 ULP）。分段归因证实残差几乎全在 o_proj 段，注意力段只有 mean 3.0e-4。
-- **`pypto.torch` 那条路没走过**：白名单不含实际在用的 torch_npu 2.10.0，接 torch 侧会炸。
+- **aclgraph 下替换不生效**，两种模式都是。开 aclgraph 后 vLLM 每步重放捕获好的图，
+  `AscendDSAImpl.forward` 整轮只被进入个位数次，且实测 `is_current_stream_capturing()`
+  全为 False —— 替换一次都没在捕获期执行，所以录进图里的是 vendor 路径。判据是输出
+  token 指纹：`aclgraph 原生` 与 `aclgraph + PTO` 完全相同。见 §12。
 
 ---
 
@@ -418,3 +423,52 @@ cd /data/sunkaixuan/codex_sh/csa_b_tier_20260917 && bash run_adapter_check.sh
 **三 · fixture 的 `init_*` 返回 fp32，而 spec 声明的是 bf16。** 自己造张量时要调
 `sp.create_tensor()` 套上 spec 的 dtype，否则 vendor 算子直接拒：
 `Io input dtype or format is not supported`。
+
+---
+
+## 12. kernel 模式（`PTO_CSA_MODE=kernel`）
+
+### 两种模式的区别
+
+| | `program`（默认） | `kernel` |
+| --- | --- | --- |
+| 调用方式 | `op.compile(...)(...)`，走 `CompiledProgram` | 直接调 `@pl.jit` 对象 |
+| 张量 | 只吃 host 张量，PyPTO 自己做 H2D/D2H | 直接吃 vLLM 的 NPU 张量，kernel 借用 |
+| KV cache | 每步把用到的页收拢成小 cache 再上传 | 整份 cache 原样交过去，用原始物理索引 |
+| 前置 | 无 | 每进程一次 `pypto.torch.init()`，且在 capture 之外 |
+
+kernel 模式要求 PyPTO 构建时开了 `-DPYPTO_BUILD_TORCH_NPU=ON`（**默认 OFF**），
+且 `_torch_npu` 与 `pypto_core` 必须按**同一套 torch** 一起重编 —— 只重编一个会留下
+ABI 不一致，症状是首次 invoke 段错误，栈停在构造 `at::Tensor` 时给 `TensorImpl` 加引用计数。
+
+### 数值
+
+kernel 模式与 program 模式**逐 token 一致**（输出指纹相同），整网相对误差同为 0.77%。
+
+### kernel 路径上不能有 host 读回
+
+捕获期 CPU 不等 NPU 算完，读回的值没有意义，而且会被当成常量固定进图里，之后每步重放
+都用这个过期值 —— 不报错，结果悄悄错。更糟的是这类值往往还决定张量形状。
+
+所以 `run_decode` 里两条路径是**完全分开**的：`bool(ok.any())`、`int(pblk[ok].max())`、
+`torch.unique(...)`、布尔掩码索引、`int(idx_t.max().item())` 这些全部只出现在 `else`
+（program）分支。kernel 分支用固定宽度块表（`PTO_CSA_CMP_COLS`）绕开 `max_slot` 那次读回，
+越界改成在设备上 `clamp` / 置 -1。**改这段代码时不要把校验挪回共用位置。**
+
+### 已验证 / 未通过
+
+`tools/pto_csa/kernel/run_kernel_mode.sh` 按 handoff 的三项判据验真实 CSA kernel：
+
+```
+eager.max_abs                                  1.53e-5   < 1e-2  ✅
+replay.max_abs                                 1.53e-5   < 1e-2  ✅
+replay_follows_input.max_abs_vs_new_golden     1.53e-5   < 1e-2  ✅
+replay_follows_input.differs_from_first_replay true              ✅
+```
+
+**独立脚本里 kernel 能被 NPUGraph 捕获、重放正确、改输入后输出跟着变。**
+
+但**接进 vLLM 之后，替换进不了 vLLM 捕获的图**（见 §10）。断点不在 kernel 的捕获能力，
+而在接入点：钩子在 `AscendDSAImpl.forward` 这段 Python 里，而 vLLM 捕获时不走到这里。
+要打通得把调用改造成"固定缓冲区 + 原地更新"的形态（参照 PyPTO 仓内
+`examples/runtime/torch_kernel_capture.py` 的 `step()`），再设法让它落在 vLLM 捕获的执行路径上。

@@ -17,15 +17,25 @@ tools/pto_csa/kernel/run_adapter_check.sh
 窗口物理槽反推、wo_a 转置、wo_b 再量化、decode 批次摊到编译期固定的 `(B, S)`）全靠它守着。
 改完 `pto_csa.py` 先跑它，不要直接去起整网。
 
-## 两组脚本
+## 三组脚本
 
 | | 用途 |
 | --- | --- |
 | `serving/` | 建 venv、拉权重、占卡起 vLLM、压测、采 trace |
-| `kernel/` | 只验 CSA 本身：离线对拍、共存门禁、失败归因 |
+| `kernel/` | 只验 CSA 本身：离线对拍、共存门禁、kernel 模式捕获验证、失败归因 |
+| `stack/` | 从零建一套**不依赖他人目录**的栈：自带 CPython、从上游自建 PyPTO/simpler |
+
+`stack/build_own.sh` 是 `serving/build_env.sh` 的替代路线。（目录不叫 `env/` 是因为仓库的 `.gitignore` 用 `env/` 挡 virtualenv。）后者的基础解释器和 ATB 都借自
+别人的目录，前者自带 CPython（python-build-standalone，含 ssl）、把 ATB 拷进自己目录、
+从上游 clone 并自建 PyPTO 与它的 simpler 子模块。kernel 模式必须走这条 —— 它要求
+`-DPYPTO_BUILD_TORCH_NPU=ON`，而那个扩展必须与实际运行的 torch 版本同套重编。
 
 `serving/` 里的入口是 `run_dsv4_mtp_vllm.sh`（挑端口 → `task-submit` 拿设备锁 → 把整轮交给
 `dsv4_case_inner.sh`）。卡是共用的，**不要绕过 `task-submit` 直接起服务**。
+
+`kernel/run_kernel_mode.sh` 验 kernel 模式：真实 CSA kernel 能否被 `NPUGraph` 捕获、
+重放是否正确、改输入后输出是否跟着变。第三条最容易漏 —— 捕获若把值烘死在图里，重放会
+"成功"但结果不更新，接到服务里表现为输出静止不动，很难定位。
 
 ## 出了问题从哪查
 
