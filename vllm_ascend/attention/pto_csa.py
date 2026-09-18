@@ -193,8 +193,15 @@ class PtoCsaRunner:
         self._csa = None
         self._compiled = None
         self._cfg = None
-        self._weights: dict[int, tuple] = {}
-        self.stats = {"dispatches": 0, "fallbacks": {}}
+        self._weights: dict[tuple, tuple] = {}
+        # program: 只吃 host 张量，PyPTO 自己做 H2D/D2H，KV cache 要先把用到的页收拢。
+        # kernel : 直接拿 vLLM 的 NPU 张量调 @pl.jit 对象，省掉每步搬运，且**不需要收拢**
+        #          —— kernel 模式借用调用方的张量，整份 cache 原样交过去、用原始物理索引。
+        self._mode = os.environ.get("PTO_CSA_MODE", "program").strip().lower()
+        self._kernel_ready = False
+        # 替换有没有在**捕获期**执行，决定它会不会进 aclgraph。靠日志条数推断不可靠，
+        # 直接问 torch：捕获期 is_current_stream_capturing() 为真。
+        self.stats = {"dispatches": 0, "fallbacks": {}, "capturing": {"yes": 0, "no": 0}}
 
     def _lazy_import(self):
         if self._csa is None:
@@ -225,11 +232,21 @@ class PtoCsaRunner:
               f"HEAD_DIM={csa.HEAD_DIM} device_id={device_id}", flush=True)
         return self._compiled
 
-    def weights_for(self, impl):
+    def ensure_kernel_init(self) -> None:
+        """kernel 模式每进程一次，且必须在首次 kernel 调用前、graph capture 之外。"""
+        if self._kernel_ready:
+            return
+        from pypto.torch import init
+
+        init()
+        self._kernel_ready = True
+        print("[pto-csa] pypto.torch.init() 完成（kernel 模式）", flush=True)
+
+    def weights_for(self, impl, dev=None):
         """把这一层的 wo_a / wo_b 翻译成 PTO 要的 layout 与量化形态，按层缓存。"""
         import torch
 
-        key = id(impl)
+        key = (id(impl), self._mode)
         if key in self._weights:
             return self._weights[key]
         csa = self._lazy_import()
@@ -252,6 +269,8 @@ class PtoCsaRunner:
                   f"(kernel 签名不接受 BF16)", flush=True)
 
         out = (wo_a, wo_b, wo_b_scale)
+        if self._mode == "kernel" and dev is not None:
+            out = tuple(t.to(dev) for t in out)
         self._weights[key] = out
         return out
 
@@ -316,16 +335,28 @@ class PtoCsaRunner:
         pblk = torch.gather(obt_t, 1, lblk.clamp(0, obt_t.shape[1] - 1))
         ok = ok & (pblk >= 0)
 
-        pages = torch.unique(pblk[ok])
-        if pages.numel() == 0:
-            return self._fallback("窗口没有任何有效页")
-        if int(pages.max()) >= ori_kv.shape[0]:
-            return self._fallback("窗口块表指到了 KV cache 之外")
-        ori_small = ori_kv.index_select(0, pages).contiguous()
-        premap = torch.zeros(int(pages.max()) + 1, dtype=torch.int64, device=dev)
-        premap[pages] = torch.arange(pages.numel(), device=dev)
-        win_new = torch.where(ok, premap[pblk.clamp_min(0)] * BS + intra,
-                              torch.full_like(abs_pos, -1)).to(torch.int32)
+        # 下面的校验与收拢都要把 NPU 上的值读回 CPU（`bool(...)`、`int(...)`、布尔掩码
+        # 索引、torch.unique 的输出长度依赖数据）。捕获期不能读回：那时 CPU 不等 NPU 算完，
+        # 读到的是未写入或上一轮的残留，而且读回的值会被当成常量固定进图里，之后每步重放
+        # 都用这个过期值 —— 不报错，结果悄悄错。所以 kernel 路径上一处都不能留。
+        if self._mode == "kernel":
+            # 整份 cache 原样交过去，槽号用原始物理值，不收拢、不搬运。越界由
+            # lblk < obt_t.shape[1] 与 pblk >= 0 两个逐元素条件挡住，二者都已折进 ok，
+            # 无效位置写 -1，kernel 按 -1 跳过。
+            ori_small = ori_kv
+            win_new = torch.where(ok, pblk.clamp_min(0) * BS + intra,
+                                  torch.full_like(abs_pos, -1)).to(torch.int32)
+        else:
+            if not bool(ok.any()):
+                return self._fallback("窗口没有任何有效页")
+            if int(pblk[ok].max()) >= ori_kv.shape[0]:
+                return self._fallback("窗口块表指到了 KV cache 之外")
+            pages = torch.unique(pblk[ok])
+            ori_small = ori_kv.index_select(0, pages).contiguous()
+            premap = torch.zeros(int(pages.max()) + 1, dtype=torch.int64, device=dev)
+            premap[pages] = torch.arange(pages.numel(), device=dev)
+            win_new = torch.where(ok, premap[pblk.clamp_min(0)] * BS + intra,
+                                  torch.full_like(abs_pos, -1)).to(torch.int32)
 
         # --- 压缩侧：块表从 vLLM 的 128 槽页换算到 PTO 的 32 槽页，再收拢 ---
         idx = st["cmp_sparse_indices"].to(dev).to(torch.int64)
@@ -337,13 +368,6 @@ class PtoCsaRunner:
             idx_t = torch.nn.functional.pad(
                 idx_t, (0, csa.IDX_TOPK - idx_t.shape[1]), value=-1)
 
-        max_slot = int(idx_t.max().item())
-        if max_slot < 0:
-            return self._fallback("这一步没有任何有效压缩槽")
-        n_logical = max_slot // CMP_PAGE + 1
-        if n_logical > self.MAX_CMP_PAGES:
-            return self._fallback(f"压缩逻辑块 {n_logical} 超过上限 {self.MAX_CMP_PAGES}")
-
         # vLLM 的压缩缓存一页装 BLOCK_SIZE 个**压缩槽**（4098 token = 1024 槽，实测正好
         # 写满 8 页），PTO 的一页装 CMP_PAGE=32 个。两边都是 `page * rows + intra` 的线性
         # 编址，所以把 [nblk, 128, 1, D] 重排成 [nblk*4, 32, 1, D] 后物理地址不变，
@@ -353,27 +377,55 @@ class PtoCsaRunner:
         # 但其中只有前 8 页真被写过。判断页容量要看写没写，不是看分配了几块。
         vcbt = st["cmp_block_table"].to(dev).to(torch.int64)
         vcbt_t = vcbt.index_select(0, batch_src.clamp(0, vcbt.shape[0] - 1))   # [B, cols]
-        j = torch.arange(n_logical, device=dev)
-        v_col = torch.div(j, PER_ORI, rounding_mode="floor")
-        if int(v_col.max()) >= vcbt_t.shape[1]:
-            return self._fallback("压缩块表列数不够覆盖这一步用到的槽")
-        cmp_phys = (torch.gather(vcbt_t, 1, v_col.unsqueeze(0).expand(B, -1)) * PER_ORI
-                    + (j % PER_ORI).unsqueeze(0))                             # [B, n_logical]
 
-        cmp_view = cmp_kv.reshape(-1, CMP_PAGE, *cmp_kv.shape[2:])
-        used = torch.unique(cmp_phys[cmp_phys >= 0])
-        if used.numel() == 0 or int(used.max()) >= cmp_view.shape[0]:
-            return self._fallback("压缩块表指到了缓存之外")
-        cmp_small = cmp_view.index_select(0, used).contiguous()
-        cremap = torch.zeros(int(used.max()) + 1, dtype=torch.int64, device=dev)
-        cremap[used] = torch.arange(used.numel(), device=dev)
-        cmp_bt = cremap[cmp_phys.clamp_min(0)].to(torch.int32)
+        if self._mode == "kernel":
+            # 重排必须是**视图**：整份压缩缓存十几 GiB，触发拷贝就废了。用 view 而不是
+            # reshape —— 不连续时直接报错，而不是悄悄搬一份。
+            try:
+                cmp_view = cmp_kv.view(-1, CMP_PAGE, *cmp_kv.shape[2:])
+            except RuntimeError:
+                return self._fallback("压缩缓存不连续，重排成 32 槽页会触发整份拷贝")
+            # 按固定宽度直接建块表，绕开 `max_slot = int(idx_t.max().item())` 那次读回。
+            # 宽度是 host 常量，所以 @pl.jit 的特化键不再随 decode 推进而变（实测宽度每步
+            # 变化会导致每次调用重新特化）；越界也不靠读回判断，而是在设备上 clamp / 置 -1。
+            n_cols = int(os.environ.get("PTO_CSA_CMP_COLS", "128"))
+            j = torch.arange(n_cols, device=dev)
+            v_col = torch.div(j, PER_ORI, rounding_mode="floor").clamp(max=vcbt_t.shape[1] - 1)
+            cmp_phys = (torch.gather(vcbt_t, 1, v_col.unsqueeze(0).expand(B, -1)) * PER_ORI
+                        + (j % PER_ORI).unsqueeze(0))                         # [B, n_cols]
+            cmp_small = cmp_view
+            cmp_bt = cmp_phys.clamp(0, cmp_view.shape[0] - 1).to(torch.int32)
+            # 超出这张固定宽度块表能表达范围的槽号直接作废：kernel 对 -1 的处理是跳过，
+            # 与 golden 一致。这样不必把最大槽号读回来校验。
+            idx_t = torch.where(idx_t < n_cols * CMP_PAGE, idx_t,
+                                torch.full_like(idx_t, -1))
+        else:
+            max_slot = int(idx_t.max().item())
+            if max_slot < 0:
+                return self._fallback("这一步没有任何有效压缩槽")
+            n_logical = max_slot // CMP_PAGE + 1
+            if n_logical > self.MAX_CMP_PAGES:
+                return self._fallback(f"压缩逻辑块 {n_logical} 超过上限 {self.MAX_CMP_PAGES}")
+            j = torch.arange(n_logical, device=dev)
+            v_col = torch.div(j, PER_ORI, rounding_mode="floor")
+            if int(v_col.max()) >= vcbt_t.shape[1]:
+                return self._fallback("压缩块表列数不够覆盖这一步用到的槽")
+            cmp_phys = (torch.gather(vcbt_t, 1, v_col.unsqueeze(0).expand(B, -1)) * PER_ORI
+                        + (j % PER_ORI).unsqueeze(0))                         # [B, n_logical]
+            cmp_view = cmp_kv.reshape(-1, CMP_PAGE, *cmp_kv.shape[2:])
+            used = torch.unique(cmp_phys[cmp_phys >= 0])
+            if used.numel() == 0 or int(used.max()) >= cmp_view.shape[0]:
+                return self._fallback("压缩块表指到了缓存之外")
+            cmp_small = cmp_view.index_select(0, used).contiguous()
+            cremap = torch.zeros(int(used.max()) + 1, dtype=torch.int64, device=dev)
+            cremap[used] = torch.arange(used.numel(), device=dev)
+            cmp_bt = cremap[cmp_phys.clamp_min(0)].to(torch.int32)
 
         # --- 其余入参 ---
         sink = impl.attn_sink.detach().float().reshape(-1)
         cos_t = _rope_table(cos, src, csa)
         sin_t = _rope_table(sin, src, csa)
-        wo_a, wo_b, wo_b_scale = self.weights_for(impl)
+        wo_a, wo_b, wo_b_scale = self.weights_for(impl, dev)
 
         if _VERIFY and "inputs" not in self.stats:
             self.stats["inputs"] = verify_inputs(impl, csa, st, dict(
@@ -385,26 +437,56 @@ class PtoCsaRunner:
             print("[pto-csa] verify " + json.dumps(self.stats["inputs"],
                                                    ensure_ascii=False), flush=True)
 
-        compiled = self.ensure_compiled(_device_index(dev))
-        attn_out = torch.zeros((T, csa.D), dtype=torch.bfloat16)
-        compiled(
-            q_t.to(torch.bfloat16).cpu(),
-            ori_small.to(torch.bfloat16).cpu(),
-            win_new.cpu(),
-            cmp_small.to(torch.bfloat16).cpu(),
-            cmp_bt.cpu(),
-            idx_t.to(torch.int32).cpu(),
-            pos_t.to(torch.int32).reshape(T, 1).cpu(),
-            sink.cpu(),
-            cos_t.to(torch.bfloat16).cpu(),
-            sin_t.to(torch.bfloat16).cpu(),
-            wo_a, wo_b, wo_b_scale,
-            attn_out,
-            config=self._cfg,
-        )
+        if self._mode == "kernel":
+            # 全程 NPU 张量，直接调 @pl.jit 对象（不是 op.compile(...)(...)）。张量由调用方
+            # 持有、kernel 借用，所以没有 H2D/D2H，也挂在当前 torch NPU 流上。
+            self.ensure_kernel_init()
+            attn_out = torch.zeros((T, csa.D), dtype=torch.bfloat16, device=dev)
+            csa.sparse_attn_test(
+                q_t.to(torch.bfloat16),
+                ori_small.to(torch.bfloat16),
+                win_new,
+                cmp_small.to(torch.bfloat16),
+                cmp_bt,
+                idx_t.to(torch.int32),
+                pos_t.to(torch.int32).reshape(T, 1),
+                sink,
+                cos_t.to(torch.bfloat16),
+                sin_t.to(torch.bfloat16),
+                wo_a, wo_b, wo_b_scale,
+                attn_out,
+            )
+            take = torch.arange(n, dtype=torch.int64, device=dev) * S
+            out = attn_out.index_select(0, take)
+        else:
+            compiled = self.ensure_compiled(_device_index(dev))
+            attn_out = torch.zeros((T, csa.D), dtype=torch.bfloat16)
+            compiled(
+                q_t.to(torch.bfloat16).cpu(),
+                ori_small.to(torch.bfloat16).cpu(),
+                win_new.cpu(),
+                cmp_small.to(torch.bfloat16).cpu(),
+                cmp_bt.cpu(),
+                idx_t.to(torch.int32).cpu(),
+                pos_t.to(torch.int32).reshape(T, 1).cpu(),
+                sink.cpu(),
+                cos_t.to(torch.bfloat16).cpu(),
+                sin_t.to(torch.bfloat16).cpu(),
+                wo_a, wo_b, wo_b_scale,
+                attn_out,
+                config=self._cfg,
+            )
+            take = torch.arange(n, dtype=torch.int64) * S
+            out = attn_out.index_select(0, take).to(dev)
         self.stats["dispatches"] += 1
-        take = torch.arange(n, dtype=torch.int64) * S
-        out = attn_out.index_select(0, take).to(dev)
+        try:
+            cap = bool(torch.npu.is_current_stream_capturing())
+        except Exception:
+            cap = None
+        if cap is not None:
+            self.stats["capturing"]["yes" if cap else "no"] += 1
+            if self.stats["capturing"]["yes"] + self.stats["capturing"]["no"] <= 8:
+                print(f"[pto-csa] dispatch #{self.stats['dispatches']} 捕获期={cap}", flush=True)
         _dump_once(st, dict(
             q_t=q_t, win_new=win_new, ori_small=ori_small, cmp_small=cmp_small,
             cmp_bt=cmp_bt, idx_t=idx_t, pos_t=pos_t, sink=sink,
