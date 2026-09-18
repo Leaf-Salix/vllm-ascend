@@ -140,6 +140,40 @@ _RUNNER = None
 _DUMPED = False
 # 逐入参一致性校验。默认关，开了每步都跑（成本是几 MiB 的 gather）。
 _VERIFY = os.environ.get("PTO_CSA_VERIFY", "").strip() not in ("", "0", "false", "False")
+_DEBUG_REFUSED = False
+
+
+def _capture_active() -> bool:
+    """当前是否正在 ACLGraph 捕获期。
+
+    两套 runner 的标记位置不同：v1/piecewise 由 `acl_graph.py` 置
+    `forward_context.capturing`，v2 full-graph 由 `worker/v2/aclgraph_utils.py` 置
+    `_EXTRA_CTX.capturing`。本版 `_EXTRA_CTX` 是读写 forward_context 的代理，
+    两者落在同一个属性上，读它即可覆盖两条路。
+    """
+    try:
+        from vllm.forward_context import get_forward_context
+
+        return bool(getattr(get_forward_context(), "capturing", False))
+    except Exception:
+        return False
+
+
+def _debug_allowed(what: str) -> bool:
+    """落盘与逐参对拍这类调试设施只能在 eager 下用，捕获期一律拒绝。
+
+    它们都要把张量读回 CPU。捕获期读回要么报错、要么把当时的值固定进图里，
+    之后每步重放都用这个过期值 —— 不报错，结果悄悄错，比直接崩更难查。
+    graph 模式的全部意义就是进图，所以整个模式下都不开。
+    """
+    global _DEBUG_REFUSED
+    if os.environ.get("PTO_CSA_MODE", "").strip().lower() == "graph" or _capture_active():
+        if not _DEBUG_REFUSED:
+            _DEBUG_REFUSED = True
+            print(f"[pto-csa] 已禁用调试设施({what})：它要把张量读回 CPU，"
+                  "aclgraph 捕获期不允许；要用请加 --enforce-eager。", flush=True)
+        return False
+    return True
 
 
 def enabled() -> bool:
@@ -202,6 +236,11 @@ class PtoCsaRunner:
         # 替换有没有在**捕获期**执行，决定它会不会进 aclgraph。靠日志条数推断不可靠，
         # 直接问 torch：捕获期 is_current_stream_capturing() 为真。
         self.stats = {"dispatches": 0, "fallbacks": {}, "capturing": {"yes": 0, "no": 0}}
+        # kernel 与 graph 共用同一套无同步推导（整份 cache 原样交、块表定宽）；
+        # 二者只差最后怎么下发：kernel 直接调 @pl.jit 对象，graph 写常驻缓冲 + 调注册算子。
+        self._nosync = self._mode in ("kernel", "graph")
+        self._op = None          # graph 模式：注册后的 torch 算子
+        self._bufs = None        # graph 模式：常驻入参缓冲区
 
     def _lazy_import(self):
         if self._csa is None:
@@ -242,6 +281,54 @@ class PtoCsaRunner:
         self._kernel_ready = True
         print("[pto-csa] pypto.torch.init() 完成（kernel 模式）", flush=True)
 
+    def ensure_registered(self):
+        """把 kernel 注册成正规的 torch 算子，返回 `torch.ops.pypto_csa.sparse_attn`。
+
+        注册本身不编译、不建 Worker、也不需要 `pypto.torch.init`；它只特化前端 IR 去
+        推导哪些参数是 Out/InOut。真正下发时和直接调 @pl.jit 对象共用同一份产物与
+        进程 Worker，所以仍然要先 init。
+
+        注册不是捕获的必要条件（直接调 @pl.jit 对象一样能被捕获），但注册之后这个
+        kernel 在 torch 眼里是一个正规算子节点，才谈得上把它放进 vLLM 构的图里。
+        """
+        if self._op is not None:
+            return self._op
+        from pypto.torch import register
+
+        csa = self._lazy_import()
+        self._op = register(csa.sparse_attn_test, "pypto_csa::sparse_attn")
+        print(f"[pto-csa] 已注册 torch 算子: {self._op}", flush=True)
+        return self._op
+
+    def ensure_buffers(self, dev, n_cols: int):
+        """一次性分配全部每步会变的入参，之后只原地写。
+
+        重放用的是捕获时记下的**地址**：每步新建张量地址就变了，图里记的还是老地址，
+        重放读到的是旧数据。所以这些缓冲区必须常驻、原地更新。
+        不变的几项（两份 KV cache、wo_a/wo_b/wo_b_scale）本来地址就固定，不用建缓冲。
+        """
+        import torch
+
+        if self._bufs is not None and self._bufs["n_cols"] == n_cols:
+            return self._bufs
+        csa = self._lazy_import()
+        T, B, H, HD = csa.T, csa.B, csa.H, csa.HEAD_DIM
+        z = lambda shape, dt: torch.zeros(shape, dtype=dt, device=dev)
+        self._bufs = {
+            "n_cols": n_cols,
+            "q":      z((T, H, HD), torch.bfloat16),
+            "win":    z((T, csa.WIN), torch.int32),
+            "cmp_bt": z((B, n_cols), torch.int32),
+            "idx":    z((T, csa.IDX_TOPK), torch.int32),
+            "pos":    z((T, 1), torch.int32),
+            "sink":   z((H,), torch.float32),
+            "cos":    z((T, csa.ROPE_DIM), torch.bfloat16),
+            "sin":    z((T, csa.ROPE_DIM), torch.bfloat16),
+            "out":    z((T, csa.D), torch.bfloat16),
+        }
+        print(f"[pto-csa] 常驻缓冲区已分配 T={T} B={B} n_cols={n_cols}", flush=True)
+        return self._bufs
+
     def weights_for(self, impl, dev=None):
         """把这一层的 wo_a / wo_b 翻译成 PTO 要的 layout 与量化形态，按层缓存。"""
         import torch
@@ -269,7 +356,7 @@ class PtoCsaRunner:
                   f"(kernel 签名不接受 BF16)", flush=True)
 
         out = (wo_a, wo_b, wo_b_scale)
-        if self._mode == "kernel" and dev is not None:
+        if self._nosync and dev is not None:
             out = tuple(t.to(dev) for t in out)
         self._weights[key] = out
         return out
@@ -279,6 +366,11 @@ class PtoCsaRunner:
         # 但一次都不打就只能看到"输出没变"，定位不到是哪一条前置条件没过。
         n = self.stats["fallbacks"].get(why, 0) + 1
         self.stats["fallbacks"][why] = n
+        total = sum(self.stats["fallbacks"].values())
+        # 只打第一次会让人把"1 个不同原因"误读成"回退 1 次"，所以再定期报一次总量。
+        if total % 100 == 0:
+            print(f"[pto-csa] 回退累计={total} dispatch累计={self.stats['dispatches']} "
+                  f"明细={self.stats['fallbacks']}", flush=True)
         if n == 1:
             print(f"[pto-csa] 回退到 vendor: {why}", flush=True)
         return None
@@ -339,7 +431,7 @@ class PtoCsaRunner:
         # 索引、torch.unique 的输出长度依赖数据）。捕获期不能读回：那时 CPU 不等 NPU 算完，
         # 读到的是未写入或上一轮的残留，而且读回的值会被当成常量固定进图里，之后每步重放
         # 都用这个过期值 —— 不报错，结果悄悄错。所以 kernel 路径上一处都不能留。
-        if self._mode == "kernel":
+        if self._nosync:
             # 整份 cache 原样交过去，槽号用原始物理值，不收拢、不搬运。越界由
             # lblk < obt_t.shape[1] 与 pblk >= 0 两个逐元素条件挡住，二者都已折进 ok，
             # 无效位置写 -1，kernel 按 -1 跳过。
@@ -378,7 +470,7 @@ class PtoCsaRunner:
         vcbt = st["cmp_block_table"].to(dev).to(torch.int64)
         vcbt_t = vcbt.index_select(0, batch_src.clamp(0, vcbt.shape[0] - 1))   # [B, cols]
 
-        if self._mode == "kernel":
+        if self._nosync:
             # 重排必须是**视图**：整份压缩缓存十几 GiB，触发拷贝就废了。用 view 而不是
             # reshape —— 不连续时直接报错，而不是悄悄搬一份。
             try:
@@ -427,7 +519,7 @@ class PtoCsaRunner:
         sin_t = _rope_table(sin, src, csa)
         wo_a, wo_b, wo_b_scale = self.weights_for(impl, dev)
 
-        if _VERIFY and "inputs" not in self.stats:
+        if _VERIFY and _debug_allowed("verify") and "inputs" not in self.stats:
             self.stats["inputs"] = verify_inputs(impl, csa, st, dict(
                 n=n, src=src, batch_src=batch_src, q_t=q_t, win_new=win_new,
                 ori_small=ori_small, cmp_bt=cmp_bt, cmp_small=cmp_small,
@@ -437,7 +529,28 @@ class PtoCsaRunner:
             print("[pto-csa] verify " + json.dumps(self.stats["inputs"],
                                                    ensure_ascii=False), flush=True)
 
-        if self._mode == "kernel":
+        if self._mode == "graph":
+            # 可捕获形态：入参全部是常驻缓冲区，每步只原地写内容，不新建张量。
+            # 重放用的是捕获时记下的地址，新建张量地址会变，图里记的还是老地址。
+            # 下发走注册后的 torch 算子，它在 torch 眼里是一个正规算子节点。
+            self.ensure_kernel_init()
+            op = self.ensure_registered()
+            b = self.ensure_buffers(dev, int(cmp_bt.shape[1]))
+            b["q"].copy_(q_t.to(torch.bfloat16))
+            b["win"].copy_(win_new)
+            b["cmp_bt"].copy_(cmp_bt)
+            b["idx"].copy_(idx_t.to(torch.int32))
+            b["pos"].copy_(pos_t.to(torch.int32).reshape(T, 1))
+            b["sink"].copy_(sink)
+            b["cos"].copy_(cos_t.to(torch.bfloat16))
+            b["sin"].copy_(sin_t.to(torch.bfloat16))
+            op(b["q"], ori_small.to(torch.bfloat16), b["win"],
+               cmp_small.to(torch.bfloat16), b["cmp_bt"], b["idx"], b["pos"],
+               b["sink"], b["cos"], b["sin"], wo_a, wo_b, wo_b_scale, b["out"])
+            attn_out = b["out"]
+            take = torch.arange(n, dtype=torch.int64, device=dev) * S
+            out = attn_out.index_select(0, take)
+        elif self._mode == "kernel":
             # 全程 NPU 张量，直接调 @pl.jit 对象（不是 op.compile(...)(...)）。张量由调用方
             # 持有、kernel 借用，所以没有 H2D/D2H，也挂在当前 torch NPU 流上。
             self.ensure_kernel_init()
@@ -510,6 +623,11 @@ def report(layer_name: str, vendor_out, pto_out) -> None:
     每层只累计统计量，不落盘每步的张量：decode 会跑上百步，逐步落盘既慢又没用。
     `PTO_CSA_REPORT=<file>` 指定最终写到哪里，不设就只在进程退出时打印。
     """
+    # 逐步对拍要把两边的 max/mean 读回 CPU，捕获期不允许：实测会以
+    #   "Not allow to synchronize captured-stream" / LocalScalarDenseNpu.cpp:23 / 107027
+    # 直接把引擎初始化打挂。它是调试设施，捕获期跳过即可，eager 轮照常统计。
+    if _capture_active():
+        return
     import torch
 
     d = (vendor_out.float() - pto_out.float()).abs()
@@ -544,6 +662,8 @@ def _dump_once(stash, derived) -> None:
     live 路径和离线 fixture 的差别只能靠真实入参定位：翻译层哪一步走偏了，
     在服务日志里只表现为"输出不对"。落一份盘就能离线重放、逐段对拍。
     """
+    if not _debug_allowed("dump"):
+        return
     global _DUMPED
     d = os.environ.get("PTO_CSA_DUMP", "").strip()
     if not d or _DUMPED:
@@ -569,6 +689,8 @@ def _dump_once(stash, derived) -> None:
 
 def dump_vendor(vendor_out) -> None:
     """把同一步 vendor 的输出补进 dump，作为对拍基准。"""
+    if not _debug_allowed("dump_vendor"):
+        return
     d = os.environ.get("PTO_CSA_DUMP", "").strip()
     if not d:
         return
@@ -590,6 +712,8 @@ def dump_vendor_attn(attn_output) -> None:
     直接在这里写盘会取到**另一步**的结果：这个钩子每一步都过，而 step0 只在第一次真正
     发生替换时落。两者不同步就没法对拍（表现为 batch 维对不上）。
     """
+    if not _debug_allowed("dump_vendor_attn"):
+        return
     global _PENDING_VENDOR_ATTN
     if not os.environ.get("PTO_CSA_DUMP", "").strip() or _DUMPED:
         return
