@@ -119,25 +119,6 @@ def test_warmup_capture_limit_and_window_paths(runtime):
     runtime.resolve.assert_called_once_with(args, {"config": SimpleNamespace(platform="a2a3")})
 
 
-def test_perfetto_ids_preserve_flow_pairs_and_slice_bindings():
-    events = [
-        {"ph": "X", "id": "launch0:1"},
-        {"ph": "s", "id": "launch0:7", "bind_id": "launch0:1"},
-        {"ph": "f", "id": "launch0:7", "bind_id": "launch0:2"},
-        {"ph": "X", "id": "launch0:2"},
-        {"ph": "s", "id": "launch1:7", "bind_id": "launch1:1"},
-        {"ph": "f", "id": "launch1:7", "bind_id": "launch1:2"},
-        {"ph": "X", "id": 1},
-    ]
-    pto_csa._normalize_swimlane_ids(events)
-    assert all(isinstance(event[key], int) for event in events for key in ("id", "bind_id") if key in event)
-    assert events[1]["id"] == events[2]["id"]
-    assert events[4]["id"] == events[5]["id"] != events[1]["id"]
-    assert events[1]["bind_id"] == events[0]["id"]
-    assert events[2]["bind_id"] == events[3]["id"]
-    assert events[6]["id"] != events[0]["id"]
-
-
 def test_conflicting_specialization_names_are_rejected(runtime):
     runner = pto_csa.PtoCsaRunner()
     runner._swimlane_names = {"0": "different_kernel"}

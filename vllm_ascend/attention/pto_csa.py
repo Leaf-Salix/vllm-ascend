@@ -36,21 +36,6 @@ _LOCK = threading.Lock()
 _SEEN: set[str] = set()
 
 
-def _normalize_swimlane_ids(events: list[dict]) -> None:
-    """Keep namespaced launch/flow IDs usable by Perfetto's JSON importer."""
-    ids: dict[tuple[type, object], int] = {}
-    for event in events:
-        for field in ("id", "bind_id"):
-            if field in event:
-                value = event[field]
-                key = (type(value), value)
-                if key not in ids:
-                    ids[key] = len(ids) + 1
-                # Perfetto accepts integer IDs or hexadecimal strings, but
-                # Simpler's launch namespaces can contain strings like launch0:1.
-                event[field] = ids[key]
-
-
 # ---------------------------------------------------------------------------
 # 探针
 # ---------------------------------------------------------------------------
@@ -505,8 +490,6 @@ class PtoCsaRunner:
             for event in events
         ):
             raise RuntimeError(f"CSA swimlane is missing kernel function names: {merged}")
-        _normalize_swimlane_ids(events)
-        merged.write_text(json.dumps(trace, indent=2))
         self.stats.setdefault("swimlane", []).append(str(merged))
         print(f"[pto-csa] {metadata['mode']} swimlane -> {merged}", flush=True)
 

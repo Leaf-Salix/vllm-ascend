@@ -88,8 +88,9 @@ tools/pto_csa/serving/run_dsv4_mtp_vllm.sh
 - `capture.json`：执行模式和进程；eager 包含模型层、设备、下发序号、入参形状，
   replay 包含对应的图描述。
 
-导出时会将运行时的 launch 命名空间 ID 转为 Perfetto 可读取的整数 ID，
-保留每条依赖的起止对应关系。泳道图应显示实际 kernel 函数名，而不是 `func_0_a` 等占位名称。
+依赖 ID 的转换由 runtime 的 `simpler_setup.tools.swimlane_converter` 负责，
+需包含 `hw-native-sys/simpler#2393`（`17ea3002`）的整数 ID 修复；vLLM 不再改写转换结果。
+泳道图应显示实际 kernel 函数名，而不是 `func_0_a` 等占位名称。
 
 日志中的 `[pto-csa] eager swimlane -> ...` 或 `graph_replay swimlane -> ...` 给出文件路径。
 这会同步当前流并收集依赖图，增加推理开销；采集期间的整网 TPOT/吞吐不能作为
