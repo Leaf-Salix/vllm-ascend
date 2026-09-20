@@ -216,6 +216,14 @@ def dsa_forward(
         )
         print(f"[pto-attn-probe] {layer_name} -> {_probe}", flush=True)
 
+    if _os.environ.get("PTO_ATTN_REPLACE", "").strip() not in ("", "0"):
+        from vllm_ascend.attention import pto_attn
+        # The kernel owns the six caches when it runs, so this is a choice
+        # between the two paths, never both. It declines prefill and the
+        # layers whose compression ratio it does not implement.
+        if pto_attn.substitute(self, hidden_states, kv_cache, attn_metadata, output):
+            return
+
     self.dsa_attn.impl.forward(
         self.dsa_attn.layer_name, hidden_states, kv_cache, attn_metadata, need_gather_q_kv, output
     )

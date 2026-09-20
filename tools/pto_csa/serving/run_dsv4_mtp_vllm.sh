@@ -69,6 +69,7 @@ task-submit "${DEV_ARGS[@]}" \
     --env PTO_ATTN_PROBE="${PTO_ATTN_PROBE:-}" \
     --env GPU_UTIL="${GPU_UTIL:-}" \
     --env PTO_ATTN_COMPARE="${PTO_ATTN_COMPARE:-}" \
+    --env PTO_ATTN_REPLACE="${PTO_ATTN_REPLACE:-}" \
     --env PTO_ATTN_SEQ="${PTO_ATTN_SEQ:-}" \
     --env PTO_ATTN_TP="${PTO_ATTN_TP:-}" \
     --env PTO_DSPARK_SPEC_TOKENS="${PTO_DSPARK_SPEC_TOKENS:-}" \

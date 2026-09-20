@@ -767,6 +767,19 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
     return True
 
 
+_TALLY: dict = {}
+_RAN = [0]
+
+
+def _tally(layer: str, ratio, has_decode: bool) -> None:
+    """Count what the substitution was offered, so a silent decline is visible."""
+    k = (layer, int(ratio or 0), bool(has_decode))
+    _TALLY[k] = _TALLY.get(k, 0) + 1
+    if _TALLY[k] <= 3 or _TALLY[k] % 25 == 0:
+        print("[pto-attn-offer] %s ratio=%s decode=%s n=%d"
+              % (layer, ratio, has_decode, _TALLY[k]), flush=True)
+
+
 # --- replacement -------------------------------------------------------------
 
 
@@ -778,8 +791,10 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     the rectangle are dropped on the way out.
     """
     impl = self.dsa_attn.impl
-    if (getattr(impl, "compress_ratio", 0) != COMPRESS_RATIO
-            or metadata_list[0].decode is None):
+    ratio = getattr(impl, "compress_ratio", 0)
+    decode = metadata_list[0].decode
+    _tally(self.dsa_attn.layer_name, ratio, decode is not None)
+    if ratio != COMPRESS_RATIO or decode is None:
         return False
     seq = _env_int("PTO_ATTN_SEQ", 1)
     args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq,
@@ -796,4 +811,7 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     take = torch.arange(n_real, device=output.device) * ks
     rows = args[-1].index_select(0, take)
     output[: n_real * seq] = rows.to(output.dtype)
+    _RAN[0] += 1
+    if _RAN[0] <= 5 or _RAN[0] % 10 == 0:
+        print("[pto-attn-ran] n=%d tokens=%d" % (_RAN[0], n_real * seq), flush=True)
     return True
