@@ -77,6 +77,8 @@ def enabled() -> bool:
 
 @pl.jit.inline
 def _linear_body(x: pl.Tensor, weight: pl.Tensor, out: pl.Tensor) -> pl.Tensor:
+    # Every supported Qwen3 projection has K aligned to _K_TILE.  Keeping that
+    # contract explicit avoids dynamic tail handling in every reduction tile.
     rows = pl.tensor.dim(x, 0)
     input_cols = pl.tensor.dim(x, 1)
     output_cols = pl.tensor.dim(weight, 0)
@@ -90,33 +92,31 @@ def _linear_body(x: pl.Tensor, weight: pl.Tensor, out: pl.Tensor) -> pl.Tensor:
                 block_count * _MATMUL_COL_TILE,
             ):
                 valid_cols = pl.min(_MATMUL_COL_TILE, output_cols - col)
-                first_valid_k = pl.min(_K_TILE, input_cols)
                 x_first = pl.slice(
                     x,
                     [_MATMUL_ROW_TILE, _K_TILE],
                     [row, 0],
-                    valid_shape=[valid_rows, first_valid_k],
+                    valid_shape=[valid_rows, _K_TILE],
                 )
                 w_first = pl.slice(
                     weight,
                     [_MATMUL_COL_TILE, _K_TILE],
                     [col, 0],
-                    valid_shape=[valid_cols, first_valid_k],
+                    valid_shape=[valid_cols, _K_TILE],
                 )
                 acc = pl.matmul(x_first, w_first, b_trans=True, out_dtype=pl.FP32)
                 for k0 in pl.range(_K_TILE, input_cols, _K_TILE):
-                    valid_k = pl.min(_K_TILE, input_cols - k0)
                     x_tile = pl.slice(
                         x,
                         [_MATMUL_ROW_TILE, _K_TILE],
                         [row, k0],
-                        valid_shape=[valid_rows, valid_k],
+                        valid_shape=[valid_rows, _K_TILE],
                     )
                     w_tile = pl.slice(
                         weight,
                         [_MATMUL_COL_TILE, _K_TILE],
                         [col, k0],
-                        valid_shape=[valid_cols, valid_k],
+                        valid_shape=[valid_cols, _K_TILE],
                     )
                     acc = pl.matmul_acc(acc, x_tile, w_tile, b_trans=True)
                 out = pl.assemble(out, pl.cast(acc, target_type=pl.BF16), [row, col])
@@ -842,8 +842,8 @@ def init() -> None:
 def linear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     if x.dtype != torch.bfloat16 or weight.dtype != torch.bfloat16 or x.ndim != 2 or weight.ndim != 2:
         raise ValueError("PyPTO Qwen3 linear requires 2D BF16 input and weight")
-    if x.shape[1] != weight.shape[1] or not x.is_contiguous() or not weight.is_contiguous():
-        raise ValueError("PyPTO Qwen3 linear requires contiguous [M,K] input and [N,K] weight")
+    if x.shape[1] != weight.shape[1] or x.shape[1] % _K_TILE or not x.is_contiguous() or not weight.is_contiguous():
+        raise ValueError("PyPTO Qwen3 linear requires contiguous [M,K] input and [N,K] weight with K % 256 == 0")
     out = torch.empty((x.shape[0], weight.shape[0]), dtype=x.dtype, device=x.device)
     return registered_ops()["linear"](x, weight, out)
 
