@@ -36,6 +36,21 @@ _LOCK = threading.Lock()
 _SEEN: set[str] = set()
 
 
+def _normalize_swimlane_ids(events: list[dict]) -> None:
+    """Keep namespaced launch/flow IDs usable by Perfetto's JSON importer."""
+    ids: dict[tuple[type, object], int] = {}
+    for event in events:
+        for field in ("id", "bind_id"):
+            if field in event:
+                value = event[field]
+                key = (type(value), value)
+                if key not in ids:
+                    ids[key] = len(ids) + 1
+                # Perfetto accepts integer IDs or hexadecimal strings, but
+                # Simpler's launch namespaces can contain strings like launch0:1.
+                event[field] = ids[key]
+
+
 # ---------------------------------------------------------------------------
 # 探针
 # ---------------------------------------------------------------------------
@@ -306,6 +321,7 @@ class PtoCsaRunner:
                 raise ValueError("CSA swimlane requires a nonempty SWIMLANE_DIR and positive SWIMLANE_MAX_CAPTURES")
         self._swimlane_dir: Path | None = None
         self._swimlane_warmed: set[tuple] = set()
+        self._swimlane_names: dict[str, str] = {}
         self._swimlane_captures = 0
         self._swimlane_lock = threading.Lock()
         self._swimlane_replay_only = False
@@ -379,7 +395,7 @@ class PtoCsaRunner:
             return
         with self._swimlane_lock:
             self.ensure_kernel_init()
-            if self._swimlane_replay_only or _capture_active() or self._swimlane_captures >= self._swimlane_limit:
+            if _capture_active() or self._swimlane_captures >= self._swimlane_limit:
                 op(*args)
                 return
             signature = (layer_name, tuple((tuple(t.shape), tuple(t.stride()), t.dtype, t.device) for t in args))
@@ -387,7 +403,11 @@ class PtoCsaRunner:
                 # The real first call compiles/warms this shape. Never replay a
                 # live decode just for profiling: it may mutate caller storage.
                 op(*args)
+                self._remember_swimlane_names(args)
                 self._swimlane_warmed.add(signature)
+                return
+            if self._swimlane_replay_only:
+                op(*args)
                 return
             metadata = {
                 "mode": "eager",
@@ -398,6 +418,25 @@ class PtoCsaRunner:
             }
             with self._collect_swimlane(metadata):
                 op(*args)
+
+    def _remember_swimlane_names(self, args: tuple) -> None:
+        """Read names from the exact warmed specialization, outside capture."""
+        from pypto.runtime import CompileOptions
+        from pypto.runtime.kernel.context import get_process_kernel_state
+
+        # The integration branch exposes kernel artifacts separately from
+        # program-mode compile(). Resolving this warmed artifact never launches
+        # an operator or creates another Worker.
+        platform = get_process_kernel_state().require_config().platform
+        artifact = self._lazy_import().sparse_attn_test._resolve_kernel_artifact(
+            args, {"config": CompileOptions(platform=platform)}
+        )
+        manifest = json.loads((Path(artifact.output_dir) / "binary_manifest.json").read_text())
+        names = {str(kernel["func_id"]): kernel["name"] for kernel in manifest["kernels"]}
+        for func_id, name in names.items():
+            if func_id in self._swimlane_names and self._swimlane_names[func_id] != name:
+                raise RuntimeError(f"CSA specializations have conflicting swimlane names for function {func_id}")
+        self._swimlane_names.update(names)
 
     @contextmanager
     def _collect_swimlane(self, metadata: dict) -> Iterator[None]:
@@ -436,6 +475,8 @@ class PtoCsaRunner:
         if not deps.is_file() or not deps.stat().st_size:
             raise RuntimeError(f"CSA swimlane did not produce a nonempty artifact: {deps}")
         (output / "capture.json").write_text(json.dumps(metadata, indent=2))
+        name_map = output / "name_map.json"
+        name_map.write_text(json.dumps({"level": 2, "callable_id_to_name": self._swimlane_names}, indent=2))
         merged = output / "merged_swimlane.json"
         subprocess.run(
             [
@@ -445,15 +486,27 @@ class PtoCsaRunner:
                 str(records),
                 "--deps-json",
                 str(deps),
+                "--func-names",
+                str(name_map),
                 "-o",
                 str(merged),
             ],
             check=True,
             timeout=60,
         )
-        events = json.loads(merged.read_text()).get("traceEvents", []) if merged.is_file() else []
+        trace = json.loads(merged.read_text()) if merged.is_file() else {}
+        events = trace.get("traceEvents", [])
         if not any(event.get("ph") == "X" and "taskId" in event.get("args", {}) for event in events):
             raise RuntimeError(f"CSA swimlane conversion did not produce a nonempty trace: {merged}")
+        if any(
+            event.get("ph") == "X"
+            and "taskId" in event.get("args", {})
+            and event.get("name", "").startswith(("func_", "task("))
+            for event in events
+        ):
+            raise RuntimeError(f"CSA swimlane is missing kernel function names: {merged}")
+        _normalize_swimlane_ids(events)
+        merged.write_text(json.dumps(trace, indent=2))
         self.stats.setdefault("swimlane", []).append(str(merged))
         print(f"[pto-csa] {metadata['mode']} swimlane -> {merged}", flush=True)
 
@@ -461,7 +514,7 @@ class PtoCsaRunner:
         """把 kernel 注册成正规的 torch 算子，返回 `torch.ops.pypto_csa.sparse_attn`。
 
         注册本身不编译、不建 Worker、也不需要 `pypto.torch.init`；它只特化前端 IR 去
-        推导哪些参数是 Out/InOut。真正下发时和直接调 @pl.jit 对象共用同一份产物与
+        推导哪些参数是输出或读写参数。真正下发时和直接调 @pl.jit 对象共用同一份产物与
         进程 Worker，所以仍然要先 init。
 
         注册不是捕获的必要条件（直接调 @pl.jit 对象一样能被捕获），但注册之后这个

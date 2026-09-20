@@ -30,6 +30,12 @@ def runtime(monkeypatch, tmp_path):
     npu = SimpleNamespace(current_device=lambda: 0, is_current_stream_capturing=Mock(return_value=False))
     monkeypatch.setattr(torch, "npu", npu, raising=False)
     config = SimpleNamespace(model_config=SimpleNamespace(enforce_eager=True))
+    artifact_dir = tmp_path / "kernel"
+    artifact_dir.mkdir()
+    (artifact_dir / "binary_manifest.json").write_text(json.dumps({"kernels": [{"func_id": 0, "name": "CSA"}]}))
+    resolve = Mock(return_value=SimpleNamespace(output_dir=artifact_dir))
+    csa = SimpleNamespace(sparse_attn_test=SimpleNamespace(_resolve_kernel_artifact=resolve))
+    monkeypatch.setattr(pto_csa.PtoCsaRunner, "_lazy_import", lambda self: self._csa or csa)
 
     events = []
     state = {}
@@ -53,19 +59,28 @@ def runtime(monkeypatch, tmp_path):
     adapter.begin_dfx = Mock(side_effect=lambda: events.append("begin"))
     adapter.end_dfx = Mock(side_effect=end)
     monkeypatch.setitem(sys.modules, "pypto.torch", adapter)
+    compiler = ModuleType("pypto.runtime")
+    compiler.CompileOptions = SimpleNamespace
+    monkeypatch.setitem(sys.modules, "pypto.runtime", compiler)
+    context = ModuleType("pypto.runtime.kernel.context")
+    context.get_process_kernel_state = lambda: SimpleNamespace(require_config=lambda: SimpleNamespace(platform="a2a3"))
+    monkeypatch.setitem(sys.modules, "pypto.runtime.kernel.context", context)
 
     def convert(command, **kwargs):
         events.append("convert")
         assert command[:3] == [sys.executable, "-m", "simpler_setup.tools.swimlane_converter"]
         assert Path(command[3]).is_file()
         assert command[4] == "--deps-json" and Path(command[5]).is_file()
-        assert command[6] == "-o"
+        assert command[6] == "--func-names" and Path(command[7]).is_file()
+        assert command[8] == "-o"
         assert kwargs == {"check": True, "timeout": 60}
         Path(command[-1]).write_text(json.dumps({"traceEvents": [{"name": "CSA", "ph": "X", "args": {"taskId": 0}}]}))
 
     converter = Mock(side_effect=convert)
     monkeypatch.setattr(pto_csa.subprocess, "run", converter)
-    return SimpleNamespace(adapter=adapter, events=events, state=state, converter=converter, npu=npu, config=config)
+    return SimpleNamespace(
+        adapter=adapter, events=events, state=state, converter=converter, npu=npu, config=config, resolve=resolve
+    )
 
 
 def test_warmup_capture_limit_and_window_paths(runtime):
@@ -100,6 +115,34 @@ def test_warmup_capture_limit_and_window_paths(runtime):
     metadata = json.loads((root / "capture.json").read_text())
     assert metadata["layer"] == "model.layers.1"
     assert metadata["args"][0]["shape"] == [2, 4]
+    assert json.loads((root / "name_map.json").read_text())["callable_id_to_name"] == {"0": "CSA"}
+    runtime.resolve.assert_called_once_with(args, {"config": SimpleNamespace(platform="a2a3")})
+
+
+def test_perfetto_ids_preserve_flow_pairs_and_slice_bindings():
+    events = [
+        {"ph": "X", "id": "launch0:1"},
+        {"ph": "s", "id": "launch0:7", "bind_id": "launch0:1"},
+        {"ph": "f", "id": "launch0:7", "bind_id": "launch0:2"},
+        {"ph": "X", "id": "launch0:2"},
+        {"ph": "s", "id": "launch1:7", "bind_id": "launch1:1"},
+        {"ph": "f", "id": "launch1:7", "bind_id": "launch1:2"},
+        {"ph": "X", "id": 1},
+    ]
+    pto_csa._normalize_swimlane_ids(events)
+    assert all(isinstance(event[key], int) for event in events for key in ("id", "bind_id") if key in event)
+    assert events[1]["id"] == events[2]["id"]
+    assert events[4]["id"] == events[5]["id"] != events[1]["id"]
+    assert events[1]["bind_id"] == events[0]["id"]
+    assert events[2]["bind_id"] == events[3]["id"]
+    assert events[6]["id"] != events[0]["id"]
+
+
+def test_conflicting_specialization_names_are_rejected(runtime):
+    runner = pto_csa.PtoCsaRunner()
+    runner._swimlane_names = {"0": "different_kernel"}
+    with pytest.raises(RuntimeError, match="conflicting swimlane names"):
+        runner._remember_swimlane_names(())
 
 
 def test_each_layer_and_shape_warms_outside_window(runtime):
@@ -109,6 +152,8 @@ def test_each_layer_and_shape_warms_outside_window(runtime):
         runner._run_kernel(op, (torch.empty(shape),), layer)
     assert op.call_count == 3
     runtime.adapter.begin_dfx.assert_not_called()
+    assert runtime.resolve.call_count == 3
+    assert runner._swimlane_names == {"0": "CSA"}
     runner._run_kernel(op, (torch.empty(3, 4),), "layer1")
     runtime.adapter.begin_dfx.assert_called_once_with()
 
@@ -163,6 +208,8 @@ def test_graph_enabled_model_reserves_budget_for_replay(runtime):
         runner._run_kernel(op, (torch.empty(2, 4),), "layer1")
     assert op.call_count == 3
     runtime.adapter.begin_dfx.assert_not_called()
+    runtime.resolve.assert_called_once()
+    assert runner._swimlane_names == {"0": "CSA"}
 
 
 def test_graph_capture_records_kernel_without_dfx_boundaries(runtime):
@@ -273,7 +320,7 @@ def test_failed_begin_does_not_close_another_window(runtime):
     runtime.adapter.end_dfx.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["missing_records", "converter", "empty_trace", "metadata_only"])
+@pytest.mark.parametrize("failure", ["missing_records", "converter", "empty_trace", "metadata_only", "missing_names"])
 def test_export_failure_is_visible(runtime, failure):
     runner = pto_csa.PtoCsaRunner()
     args = (torch.empty(2, 4),)
@@ -287,6 +334,10 @@ def test_export_failure_is_visible(runtime, failure):
         if failure == "metadata_only":
             (runner._swimlane_dir / "merged_swimlane.json").write_text(
                 json.dumps({"traceEvents": [{"ph": "M", "name": "process_name"}]})
+            )
+        elif failure == "missing_names":
+            (runner._swimlane_dir / "merged_swimlane.json").write_text(
+                json.dumps({"traceEvents": [{"ph": "X", "name": "func_0_a(t0)", "args": {"taskId": 0}}]})
             )
     with pytest.raises((RuntimeError, subprocess.CalledProcessError)):
         runner._run_kernel(Mock(), args, "layer1")
@@ -306,6 +357,7 @@ def test_live_run_decode_profiles_actual_kernel_without_extra_invocations(runtim
     monkeypatch.setenv("PTO_CSA_MODE", mode)
     runner = pto_csa.PtoCsaRunner()
     op = Mock(side_effect=lambda *args: args[-1].fill_(7))
+    op._resolve_kernel_artifact = runtime.resolve
     runner._csa = SimpleNamespace(
         T=2,
         B=1,

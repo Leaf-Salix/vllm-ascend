@@ -84,8 +84,12 @@ tools/pto_csa/serving/run_dsv4_mtp_vllm.sh
 
 - `merged_swimlane.json`：用 Perfetto 打开，查看 CSA 内部任务与依赖边。
 - `chip_swimlane_records.json`、`deps.json`：原始计时记录和依赖图。
+- `name_map.json`：从实际 warmup 的 kernel 编译产物读取的函数名映射。
 - `capture.json`：执行模式和进程；eager 包含模型层、设备、下发序号、入参形状，
   replay 包含对应的图描述。
+
+导出时会将运行时的 launch 命名空间 ID 转为 Perfetto 可读取的整数 ID，
+保留每条依赖的起止对应关系。泳道图应显示实际 kernel 函数名，而不是 `func_0_a` 等占位名称。
 
 日志中的 `[pto-csa] eager swimlane -> ...` 或 `graph_replay swimlane -> ...` 给出文件路径。
 这会同步当前流并收集依赖图，增加推理开销；采集期间的整网 TPOT/吞吐不能作为
@@ -98,7 +102,7 @@ tools/pto_csa/serving/run_dsv4_mtp_vllm.sh
 
 `kernel/analyze_dump.py` 把 live 那一步的入参重放一遍，切成三段分别归因：
 
-```
+```text
 golden(翻译后入参) vs PTO 输出   -> kernel 有没有照着算
 golden stage-1 vs vendor stage-1 -> 窗口/压缩槽的翻译对不对（不含投影）
 golden 后半段 vs vendor 输出     -> 逆 RoPE + o_proj 的建模对不对
