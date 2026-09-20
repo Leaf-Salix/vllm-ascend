@@ -21,6 +21,8 @@
 # limitations under the License.
 from dataclasses import dataclass
 
+import os as _os
+
 import torch
 from torch import nn
 from vllm.config import CacheConfig, get_current_vllm_config
@@ -180,6 +182,10 @@ class AscendDeepseekSparseAttention(MultiHeadLatentAttentionWrapper):
         return output
 
 
+_PROBED: set[str] = set()
+_COMPARED: set[str] = set()
+
+
 def dsa_forward(
     hidden_states: torch.Tensor,
     need_gather_q_kv: bool,
@@ -200,9 +206,25 @@ def dsa_forward(
 
     kv_cache = _build_kv_cache(self, forward_context)
 
+    _probe = _os.environ.get("PTO_ATTN_PROBE", "").strip()
+    if _probe and layer_name not in _PROBED:
+        _PROBED.add(layer_name)
+        from vllm_ascend.attention import pto_attn
+        pto_attn.dump_structure(
+            f"{_probe}/{layer_name.replace('.', '_')}.json",
+            hidden_states, kv_cache, attn_metadata, self.dsa_attn.impl,
+        )
+        print(f"[pto-attn-probe] {layer_name} -> {_probe}", flush=True)
+
     self.dsa_attn.impl.forward(
         self.dsa_attn.layer_name, hidden_states, kv_cache, attn_metadata, need_gather_q_kv, output
     )
+
+    _cmp = _os.environ.get("PTO_ATTN_COMPARE", "").strip()
+    if _cmp and layer_name not in _COMPARED:
+        _COMPARED.add(layer_name)
+        from vllm_ascend.attention import pto_attn
+        pto_attn.compare_once(self, hidden_states, kv_cache, attn_metadata, output, _cmp)
     return
 
 

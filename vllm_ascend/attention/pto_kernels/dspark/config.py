@@ -8,6 +8,7 @@
 # -----------------------------------------------------------------------------------------------------------
 """DeepSeek-V4 configuration"""
 
+import os
 from dataclasses import dataclass
 from typing import Literal, Optional, Tuple
 
@@ -240,7 +241,10 @@ PRESETS = {p.name: p for p in (DEMO, FLASH, PRO)}
 
 # Deployment constants
 DECODE_BATCH = 64                 # B: requests per decode step, per DP rank
-DSPARK_SPEC_TOKENS = 7            # drafts the DSpark drafter proposes per request
+# S must equal the host's tokens-per-request: the kernels map token to request
+# with a compile-time t // S (decode_sparse_attn_csa.py:202), so a framework that
+# submits a different count per step would silently read the wrong request's rows.
+DSPARK_SPEC_TOKENS = int(os.environ.get("PTO_DSPARK_SPEC_TOKENS", "7"))
 DECODE_SEQ = 1 + DSPARK_SPEC_TOKENS  # S: tokens the target model verifies per step
 DECODE_TOKENS = DECODE_BATCH * DECODE_SEQ
 DECODE_START_POS = 8192
