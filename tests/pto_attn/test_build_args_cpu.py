@@ -52,21 +52,29 @@ class Cmp:
 
 
 class Indexer:
-    def __init__(self):
+    def __init__(self, quantized=True):
         self.head_dim = K.IDX_HEAD_DIM
-        self.wq_b = Lin(M.q_lora_rank, K.IDX_N_HEADS * K.IDX_HEAD_DIM,
-                        dtype=torch.int8, scale=K.IDX_N_HEADS * K.IDX_HEAD_DIM)
+        self.wq_b = (Lin(M.q_lora_rank, K.IDX_N_HEADS * K.IDX_HEAD_DIM,
+                         dtype=torch.int8, scale=K.IDX_N_HEADS * K.IDX_HEAD_DIM)
+                     if quantized else Lin(K.IDX_N_HEADS * K.IDX_HEAD_DIM, M.q_lora_rank))
         self.weights_proj = Lin(K.IDX_N_HEADS, D)
         self.compressor = Cmp(K.INNER_OUT_DIM, K.IDX_HEAD_DIM)
 
 
 class Impl:
-    def __init__(self):
+    def __init__(self, quantized: bool):
+        q = dict(dtype=torch.int8) if quantized else {}
         self.layer_name = "model.layers.2.self_attn.attn"
-        self.wq_a = Lin(D, M.q_lora_rank, dtype=torch.int8, scale=M.q_lora_rank)
-        self.wq_b = Lin(M.q_lora_rank, K.H * K.HEAD_DIM, dtype=torch.int8,
-                        scale=K.H * K.HEAD_DIM)
-        self.wkv = Lin(D, K.HEAD_DIM, dtype=torch.int8, scale=K.HEAD_DIM)
+        if quantized:
+            self.wq_a = Lin(D, M.q_lora_rank, dtype=torch.int8, scale=M.q_lora_rank)
+            self.wq_b = Lin(M.q_lora_rank, K.H * K.HEAD_DIM, dtype=torch.int8,
+                            scale=K.H * K.HEAD_DIM)
+            self.wkv = Lin(D, K.HEAD_DIM, dtype=torch.int8, scale=K.HEAD_DIM)
+        else:
+            # An unquantized checkpoint keeps torch's [out, in].
+            self.wq_a = Lin(M.q_lora_rank, D)
+            self.wq_b = Lin(K.H * K.HEAD_DIM, M.q_lora_rank)
+            self.wkv = Lin(K.HEAD_DIM, D)
         self.q_norm, self.kv_norm = Norm(M.q_lora_rank), Norm(K.HEAD_DIM)
         self.compressor_wkv = Lin(K.MAIN_OUT_DIM, D)
         self.compressor_wgate = Lin(K.MAIN_OUT_DIM, D)
@@ -76,7 +84,7 @@ class Impl:
         self.indexcom_wgate = Lin(K.INNER_OUT_DIM, D)
         self.indexcom_ape = torch.randn(4, K.INNER_OUT_DIM)
         self.indexcom_norm = Norm(K.IDX_HEAD_DIM)
-        self.indexer = Indexer()
+        self.indexer = Indexer(quantized)
         self.inderxer_wq_b = self.indexer.wq_b
         self.weights_proj = self.indexer.weights_proj
         self.attn_sink = torch.rand(K.H)
@@ -105,7 +113,9 @@ def strided(nblk, rows, dim, pad):
     return torch.as_strided(raw, (nblk, rows, dim), (pad, dim, 1))
 
 
-impl = Impl()
+QUANT = os.environ.get("TEST_QUANT", "0") == "1"
+print(f"== checkpoint: {'W8A8' if QUANT else 'BF16'} ==")
+impl = Impl(QUANT)
 L = impl.layer_name
 metas = [md(128, 64, 4096, L) for _ in range(5)]
 kvc = (

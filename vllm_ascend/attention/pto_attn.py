@@ -26,7 +26,13 @@ import torch
 # decode_csa fixes its TP specialization at import time from sys.argv, which a
 # vLLM process never carries. Inject it so B = DECODE_BATCH // TP and T = B * S
 # land on the intended shape instead of the module's own default of 2.
-_TP = int(os.environ.get("PTO_ATTN_TP", "4"))
+def _env_int(name: str, default: int) -> int:
+    """The launcher forwards unset switches as empty strings, so a present-but-empty
+    variable has to fall back the same way an absent one does."""
+    return int(os.environ.get(name, "") or default)
+
+
+_TP = _env_int("PTO_ATTN_TP", 4)
 
 
 def _import_kernel():
@@ -79,21 +85,55 @@ def _to_nd(w: torch.Tensor) -> torch.Tensor:
     return torch_npu.npu_format_cast(w, ACL_FORMAT_ND)
 
 
-def _dequant_w8a8(linear) -> torch.Tensor:
-    """W8A8 per-channel INT8 -> BF16, for the two weights the kernel wants dense."""
-    w = _to_nd(linear.weight.detach())
-    scale = getattr(linear, "weight_scale_fp32", None)
-    if scale is None:
-        scale = linear.weight_scale
-    return (w.float() * scale.detach().float().view(1, -1)).to(torch.bfloat16)
-
-
 def _quant_int8_per_channel(w: torch.Tensor, kcfg):
-    """BF16 -> INT8 + per-channel scale, matching the kernel's wo_b contract."""
+    """BF16 -> INT8 plus per-channel scale, matching the kernel's contract."""
     amax = w.float().abs().amax(dim=-1).clamp_min(kcfg.INT8_AMAX_EPS)
     sq = kcfg.INT8_SCALE_MAX / amax
     q = torch.round(w.float() * sq.unsqueeze(-1)).clamp(-127, 127).to(torch.int8)
     return q, (1.0 / sq).float()
+
+
+def _oriented(w: torch.Tensor, want: tuple) -> torch.Tensor:
+    """Give the kernel its orientation, whichever one vLLM stored.
+
+    A W8A8 linear comes out of process_weights_after_loading already transposed to
+    [in, out], while an unquantized one keeps torch's [out, in]. Deciding by shape
+    rather than by quantization keeps both checkpoints working.
+    """
+    shape = tuple(w.shape)
+    if shape == want:
+        return w
+    if shape == want[::-1]:
+        return w.t().contiguous()
+    raise ValueError(f"weight is {shape}, expected {want} or its transpose")
+
+
+def _dense(linear, want: tuple) -> torch.Tensor:
+    """A BF16 weight in the kernel's orientation, dequantizing if vLLM quantized it."""
+    w = _to_nd(linear.weight.detach())
+    scale = getattr(linear, "weight_scale_fp32", None)
+    if scale is None:
+        scale = getattr(linear, "weight_scale", None)
+    if scale is not None and w.dtype in (torch.int8, torch.uint8):
+        w = w.float() * scale.detach().float().view(1, -1)
+    return _oriented(w.to(torch.bfloat16), want)
+
+
+def _int8(linear, want: tuple, kcfg):
+    """An INT8 weight plus per-channel scale, quantizing if vLLM kept it dense.
+
+    The kernel's signature fixes INT8 for wq_b / idx_wq_b / wo_b, so an
+    unquantized checkpoint has to be quantized here. That is a real numerical
+    difference, not an adapter artifact.
+    """
+    w = _to_nd(linear.weight.detach())
+    scale = getattr(linear, "weight_scale_fp32", None)
+    if scale is None:
+        scale = getattr(linear, "weight_scale", None)
+    if w.dtype in (torch.int8, torch.uint8) and scale is not None:
+        return _oriented(w, want), scale.detach().float()
+    q, sc = _quant_int8_per_channel(_oriented(w, want).t().contiguous(), kcfg)
+    return q.t().contiguous(), sc
 
 
 def _hadamard(dim: int, device, dtype=torch.bfloat16) -> torch.Tensor:
@@ -117,34 +157,36 @@ def prepare_weights(impl):
     if cached is not None:
         return cached
 
-    _, kcfg = kernel()
-    wo_b_q, wo_b_scale = _quant_int8_per_channel(impl.wo_b.weight.detach(), kcfg)
-    idx_dim = impl.indexer.head_dim
+    kcsa, kcfg = kernel()
+    D, QL, HD = kcsa.D, kcsa.Q_LORA, kcsa.HEAD_DIM
+    IH, ID = kcsa.IDX_N_HEADS, kcsa.IDX_HEAD_DIM
+    wq_b, wq_b_scale = _int8(impl.wq_b, (QL, kcsa.H * HD), kcfg)
+    idx_wq_b, idx_wq_b_scale = _int8(impl.inderxer_wq_b, (QL, IH * ID), kcfg)
+    wo_b, wo_b_scale = _int8(impl.wo_b, (D, kcsa.O_GROUPS * kcsa.O_LORA), kcfg)
 
     w = {
-        "wq_a": _dequant_w8a8(impl.wq_a),
-        "wq_b": _to_nd(impl.wq_b.weight.detach()),
-        "wq_b_scale": impl.wq_b.weight_scale_fp32.detach().float(),
-        "wkv": _dequant_w8a8(impl.wkv),
+        "wq_a": _dense(impl.wq_a, (D, QL)),
+        "wq_b": wq_b,
+        "wq_b_scale": wq_b_scale,
+        "wkv": _dense(impl.wkv, (D, HD)),
         "gamma_cq": impl.q_norm.weight.detach().to(torch.bfloat16),
         "gamma_ckv": impl.kv_norm.weight.detach().to(torch.bfloat16),
-        "cmp_wkv": impl.compressor_wkv.weight.detach().to(torch.bfloat16),
-        "cmp_wgate": impl.compressor_wgate.weight.detach().to(torch.bfloat16),
+        "cmp_wkv": _dense(impl.compressor_wkv, (kcsa.MAIN_OUT_DIM, D)),
+        "cmp_wgate": _dense(impl.compressor_wgate, (kcsa.MAIN_OUT_DIM, D)),
         "cmp_ape": impl.compressor_ape.detach().float(),
         "cmp_norm_w": impl.compressor_norm.weight.detach().to(torch.bfloat16),
-        "idx_wq_b": _to_nd(impl.inderxer_wq_b.weight.detach()),
-        "idx_wq_b_scale": impl.inderxer_wq_b.weight_scale_fp32.detach().float(),
-        # ReplicatedLinear stores [out, in]; the kernel wants [in, out].
-        "weights_proj": impl.weights_proj.weight.detach().t().contiguous().to(torch.bfloat16),
-        "hadamard_idx": _hadamard(idx_dim, impl.wq_a.weight.device),
-        "inner_wkv": impl.indexcom_wkv.weight.detach().to(torch.bfloat16),
-        "inner_wgate": impl.indexcom_wgate.weight.detach().to(torch.bfloat16),
+        "idx_wq_b": idx_wq_b,
+        "idx_wq_b_scale": idx_wq_b_scale,
+        "weights_proj": _dense(impl.weights_proj, (D, IH)),
+        "hadamard_idx": _hadamard(ID, impl.wo_b.weight.device),
+        "inner_wkv": _dense(impl.indexcom_wkv, (kcsa.INNER_OUT_DIM, D)),
+        "inner_wgate": _dense(impl.indexcom_wgate, (kcsa.INNER_OUT_DIM, D)),
         "inner_ape": impl.indexcom_ape.detach().float(),
         "inner_norm_w": impl.indexcom_norm.weight.detach().to(torch.bfloat16),
         "attn_sink": impl.attn_sink.detach().float(),
         # vLLM keeps [G, O_GROUP_IN, O_LORA]; the kernel wants the transpose.
         "wo_a": impl.wo_a.weight.detach().transpose(1, 2).contiguous().to(torch.bfloat16),
-        "wo_b": wo_b_q,
+        "wo_b": wo_b,
         "wo_b_scale": wo_b_scale,
     }
     impl._pto_attn_weights = w
@@ -616,7 +658,7 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
         path.write_text(json.dumps(rec, indent=2, default=str), encoding="utf-8")
 
     try:
-        seq = int(os.environ.get("PTO_ATTN_SEQ", "1"))
+        seq = _env_int("PTO_ATTN_SEQ", 1)
         rec["seq"] = seq
         rec["stage"] = "build_args"
         save()
