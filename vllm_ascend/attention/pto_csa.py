@@ -313,7 +313,7 @@ class PtoCsaRunner:
 
     def _lazy_import(self):
         if self._csa is None:
-            import decode_sparse_attn_csa as csa  # pypto-lib models/deepseek_v4_flash_mtp
+            from vllm_ascend.attention.pto_kernels.mtp import decode_sparse_attn_csa as csa
 
             self._csa = csa
         return self._csa
