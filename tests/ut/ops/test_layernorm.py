@@ -12,7 +12,7 @@ from vllm_ascend.utils import is_310p as is_310p_hw
 enable_custom_op()
 
 
-@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+@pytest.mark.parametrize("mode", ["off", "partial", "attention_block", "full"])
 def test_pypto_qwen3_mode(mode):
     from vllm_ascend.ops.layernorm import _pypto_qwen3_mode
 

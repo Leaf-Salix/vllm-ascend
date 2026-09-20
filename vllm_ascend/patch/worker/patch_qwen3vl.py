@@ -2,13 +2,19 @@ import os
 
 import torch
 from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
-from vllm.model_executor.models.qwen3 import Qwen3Attention, Qwen3ForCausalLM, Qwen3MLP
+from vllm.model_executor.models.qwen3 import (
+    Qwen3Attention,
+    Qwen3DecoderLayer,
+    Qwen3ForCausalLM,
+    Qwen3MLP,
+)
 from vllm.model_executor.models.qwen3_moe import Qwen3MoeAttention
 from vllm.model_executor.models.qwen3_vl import (
     Qwen3_VisionTransformer,
     Qwen3VLForConditionalGeneration,
     pos_embed_interpolate_native,
 )
+from vllm.utils.torch_utils import direct_register_custom_op
 
 from vllm_ascend.ascend_forward_context import _EXTRA_CTX
 from vllm_ascend.ops.rotary_embedding import AscendMRotaryEmbedding
@@ -101,6 +107,182 @@ def _patched_qwen3_moe_attention_init(self, *args, **kwargs) -> None:
 
 Qwen3Attention.__init__ = _patched_qwen3_attention_init
 Qwen3MoeAttention.__init__ = _patched_qwen3_moe_attention_init
+
+
+_original_qwen3_decoder_layer_init = Qwen3DecoderLayer.__init__
+_original_qwen3_decoder_layer_forward = Qwen3DecoderLayer.forward
+
+
+def _pypto_qwen3_attention_residual_block(
+    positions: torch.Tensor,
+    hidden_states: torch.Tensor,
+    residual: torch.Tensor | None,
+    input_norm_weight: torch.Tensor,
+    qkv_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+    cos_sin_cache: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    post_attention_norm_weight: torch.Tensor,
+    mlp_input_out: torch.Tensor,
+    updated_residual_out: torch.Tensor,
+    layer_name: str,
+) -> None:
+    from vllm.model_executor.layers.attention.attention import get_attention_context
+
+    from vllm_ascend.ops import pypto_qwen3_full
+
+    attn_metadata, attn_layer, kv_cache, layer_slot_mapping = get_attention_context(layer_name)
+    if attn_metadata is None or attn_layer is None or attn_layer.layer_name != layer_name:
+        raise RuntimeError("PyPTO Qwen3 attention block could not resolve this layer's vLLM attention context")
+    if not isinstance(kv_cache, (torch.Tensor, list, tuple)) or len(kv_cache) < 2:
+        raise RuntimeError("PyPTO Qwen3 attention block requires a bound vLLM KV cache")
+    key_cache, value_cache = kv_cache[0], kv_cache[1]
+    if key_cache.ndim != 4 or key_cache.shape[1:] != (128, 8, 128) or value_cache.shape != key_cache.shape:
+        raise ValueError("PyPTO Qwen3 attention block received an incompatible vLLM KV cache layout")
+
+    rows = hidden_states.shape[0]
+    # Match vLLM Attention.forward: use the per-layer mapping when the backend
+    # publishes one, otherwise let the attention metadata own cache placement.
+    slot_mapping = layer_slot_mapping if layer_slot_mapping is not None else attn_metadata.slot_mapping
+    if slot_mapping is None or slot_mapping.numel() < rows:
+        raise ValueError("PyPTO Qwen3 attention block slot mapping is shorter than the token dimension")
+    pypto_qwen3_full.attention_residual_block(
+        positions=positions,
+        hidden_states=hidden_states,
+        residual=residual,
+        input_norm_weight=input_norm_weight,
+        qkv_weight=qkv_weight,
+        q_norm_weight=q_norm_weight,
+        k_norm_weight=k_norm_weight,
+        cos_sin_cache=cos_sin_cache,
+        o_proj_weight=o_proj_weight,
+        post_attention_norm_weight=post_attention_norm_weight,
+        slot_mapping=slot_mapping[:rows],
+        key_cache=key_cache.view(-1, 1024),
+        value_cache=value_cache.view(-1, 1024),
+        block_table=attn_metadata.block_tables,
+        seq_lens=attn_metadata.seq_lens_device,
+        query_start_loc=attn_metadata.query_start_loc,
+        mlp_input_out=mlp_input_out,
+        updated_residual_out=updated_residual_out,
+    )
+
+
+def _pypto_qwen3_attention_residual_block_fake(
+    positions: torch.Tensor,
+    hidden_states: torch.Tensor,
+    residual: torch.Tensor | None,
+    input_norm_weight: torch.Tensor,
+    qkv_weight: torch.Tensor,
+    q_norm_weight: torch.Tensor,
+    k_norm_weight: torch.Tensor,
+    cos_sin_cache: torch.Tensor,
+    o_proj_weight: torch.Tensor,
+    post_attention_norm_weight: torch.Tensor,
+    mlp_input_out: torch.Tensor,
+    updated_residual_out: torch.Tensor,
+    layer_name: str,
+) -> None:
+    return
+
+
+direct_register_custom_op(
+    op_name="pypto_qwen3_attention_residual_block",
+    op_func=_pypto_qwen3_attention_residual_block,
+    fake_impl=_pypto_qwen3_attention_residual_block_fake,
+    mutates_args=["mlp_input_out", "updated_residual_out"],
+    dispatch_key="PrivateUse1",
+)
+
+
+def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
+    _original_qwen3_decoder_layer_init(self, *args, **kwargs)
+    from vllm_ascend import envs
+
+    self._pypto_attention_block_enabled = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block"
+    if not self._pypto_attention_block_enabled:
+        return
+
+    config = args[0] if args else kwargs["config"]
+    cache_config = kwargs.get("cache_config", args[1] if len(args) > 1 else None)
+    quant_config = kwargs.get("quant_config", args[2] if len(args) > 2 else None)
+    head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+    if (
+        config.hidden_size != 5120
+        or config.num_hidden_layers != 40
+        or config.num_attention_heads != 40
+        or config.num_key_value_heads != 8
+        or head_dim != 128
+        or config.rms_norm_eps != 1e-6
+        or getattr(config, "attention_bias", False)
+        or not getattr(config, "is_causal", True)
+        or self.self_attn.dual_chunk_attention_config is not None
+        or isinstance(self.self_attn.rotary_emb, AscendMRotaryEmbedding)
+        or get_tensor_model_parallel_world_size() != 1
+        or quant_config is not None
+    ):
+        raise ValueError(
+            "PyPTO Qwen3 attention-block mode requires unquantized BF16 Qwen3-14B "
+            "decoder attention (40 query heads, 8 KV heads, head size 128, TP1)"
+        )
+    if cache_config is None or cache_config.block_size != 128 or cache_config.cache_dtype not in ("auto", "bfloat16"):
+        raise ValueError("PyPTO Qwen3 attention-block mode requires a BF16 128-token KV cache block")
+
+    from vllm.config import get_current_vllm_config
+
+    from vllm_ascend.ops import pypto_qwen3_full
+
+    vllm_config = get_current_vllm_config()
+    if (
+        vllm_config.model_config.dtype != torch.bfloat16
+        or vllm_config.speculative_config is not None
+        or vllm_config.scheduler_config.enable_chunked_prefill
+    ):
+        raise ValueError(
+            "PyPTO Qwen3 attention-block mode requires BF16 and does not support "
+            "speculative decoding or chunked prefill"
+        )
+    self.self_attn.qkv_proj._pypto_qwen3_attention_block_weight = True
+    self.self_attn.o_proj._pypto_qwen3_attention_block_weight = True
+    pypto_qwen3_full.init()
+    pypto_qwen3_full.registered_attention_block_ops()
+
+
+def _patched_qwen3_decoder_layer_forward(
+    self,
+    positions: torch.Tensor,
+    hidden_states: torch.Tensor,
+    residual: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # vLLM's memory-sizing profile intentionally runs before KV caches and
+    # attention metadata exist.  Preserve the native profile path; every real
+    # request still enters the fail-closed PyPTO adapter below.
+    if not self._pypto_attention_block_enabled or _EXTRA_CTX.in_profile_run:
+        return _original_qwen3_decoder_layer_forward(self, positions, hidden_states, residual)
+
+    mlp_input = torch.empty_like(hidden_states)
+    updated_residual = torch.empty_like(hidden_states)
+    torch.ops.vllm.pypto_qwen3_attention_residual_block(
+        positions,
+        hidden_states,
+        residual,
+        self.input_layernorm.weight,
+        self.self_attn.qkv_proj.weight,
+        self.self_attn.q_norm.weight,
+        self.self_attn.k_norm.weight,
+        self.self_attn.rotary_emb.cos_sin_cache,
+        self.self_attn.o_proj.weight,
+        self.post_attention_layernorm.weight,
+        mlp_input,
+        updated_residual,
+        self.self_attn.attn.layer_name,
+    )
+    return self.mlp(mlp_input), updated_residual
+
+
+Qwen3DecoderLayer.__init__ = _patched_qwen3_decoder_layer_init
+Qwen3DecoderLayer.forward = _patched_qwen3_decoder_layer_forward
 
 
 _original_qwen3_mlp_init = Qwen3MLP.__init__

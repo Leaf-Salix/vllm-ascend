@@ -213,7 +213,7 @@ class AscendMetadata:
     # should simplified these parameters once attention schema in vLLM-Ascend
     # is unified.
     seq_lens: torch.Tensor = None
-    # Device view of CommonAttentionMetadata.seq_lens for PyPTO full mode.
+    # Device view of CommonAttentionMetadata.seq_lens for PyPTO attention modes.
     # Keep seq_lens above unchanged because native paths consume its CPU form.
     seq_lens_device: torch.Tensor = None
     seq_lens_cpu: torch.Tensor = None
@@ -348,7 +348,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
 
         from vllm_ascend import envs
 
-        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE in ("attention_block", "full"):
             query_start_loc = common_attn_metadata.query_start_loc[: num_reqs + 1]
         else:
             # Preserve the native path exactly; only full mode requires the

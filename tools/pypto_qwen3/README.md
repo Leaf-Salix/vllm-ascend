@@ -1,10 +1,12 @@
 # Qwen3 PyPTO 整网泳道采集
 
+功能、性能和 ACLGraph 验证结果见 [TEST_REPORT.md](TEST_REPORT.md)。
+
 当前实验分支可在不额外重跑请求的前提下，采集 Qwen3 PyPTO kernel 模式的真实 eager
 model forward 或 ACLGraph replay。先保持原有 Qwen3 启动配置，再增加：
 
 ```bash
-export VLLM_ASCEND_PYPTO_QWEN3_MODE=partial  # 或 full
+export VLLM_ASCEND_PYPTO_QWEN3_MODE=partial  # 或 attention_block / full
 export VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_LEVEL=4
 export VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_DIR="$PWD/qwen3_swimlane"
 export VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_MAX_CAPTURES=1

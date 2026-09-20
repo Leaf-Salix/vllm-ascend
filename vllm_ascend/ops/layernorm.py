@@ -29,7 +29,7 @@ _QWEN3_14B_NUM_HEADS = 40
 _QWEN3_14B_NUM_KV_HEADS = 8
 _QWEN3_HEAD_DIM = 128
 _QWEN3_MAX_PADDED_TOKENS = 1024
-_PYPTO_QWEN3_MODES = {"off", "partial", "full"}
+_PYPTO_QWEN3_MODES = {"off", "partial", "attention_block", "full"}
 
 
 def _pypto_qwen3_mode() -> str:
@@ -82,7 +82,7 @@ class AscendRMSNorm(RMSNorm):
         self._pypto_qwen3_mode = _pypto_qwen3_mode()
         self._pypto_qk_op = None
         self._pypto_full_ops = None
-        if self._pypto_qwen3_mode != "off":
+        if self._pypto_qwen3_mode in ("partial", "full"):
             _validate_pypto_qwen3_config()
             if hidden_size == _QWEN3_HEAD_DIM:
                 from vllm_ascend.ops import pypto_qwen3_rms
@@ -123,7 +123,7 @@ class AscendRMSNorm(RMSNorm):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         import torch_npu
 
-        if self._pypto_qwen3_mode != "off" and self.hidden_size == _QWEN3_HEAD_DIM:
+        if self._pypto_qwen3_mode in ("partial", "full") and self.hidden_size == _QWEN3_HEAD_DIM:
             if residual is not None:
                 raise ValueError("Qwen3 q/k RMSNorm does not accept a residual tensor")
             if x.ndim != 3 or x.shape[1] not in (_QWEN3_14B_NUM_HEADS, _QWEN3_14B_NUM_KV_HEADS):

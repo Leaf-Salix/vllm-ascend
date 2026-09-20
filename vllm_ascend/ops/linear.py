@@ -86,6 +86,13 @@ class AscendUnquantizedLinearMethod(UnquantizedLinearMethod):
             pypto_qwen3_full.init()
             layer._pypto_qwen3_linear_op = pypto_qwen3_full.registered_ops()["linear"]
             return
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block" and getattr(
+            layer, "_pypto_qwen3_attention_block_weight", False
+        ):
+            if layer.weight.dtype != torch.bfloat16 or layer.weight.ndim != 2:
+                raise ValueError("PyPTO Qwen3 attention-block projection requires a 2D BF16 weight")
+            layer.weight.data = layer.weight.data.contiguous()
+            return
         # must use fp32 to avoid accuracy degradation in dsv4.
         if getattr(layer, "precast_fp32_weight", False):
             layer.weight_fp32 = maybe_trans_nz(layer.weight.data.to(torch.float32))

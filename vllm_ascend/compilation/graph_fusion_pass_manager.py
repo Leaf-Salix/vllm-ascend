@@ -49,12 +49,13 @@ class GraphFusionPassManager:
     def configure(self, config: VllmConfig):
         from vllm_ascend import envs
 
-        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE != "off":
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE in ("partial", "full"):
             # The PyPTO experiments route selected model-compute nodes through
             # explicitly registered PyPTO operators. Native fusion passes must
             # neither trace unavailable native kernels nor replace those OOT
-            # nodes with an Ascend-native implementation. Partial mode needs
-            # the same isolation for its q/k RMSNorm nodes.
+            # nodes with an Ascend-native implementation. Attention-block mode
+            # is already opaque to these passes and keeps the native MLP pass
+            # pipeline intact.
             self.passes.clear()
             return
 

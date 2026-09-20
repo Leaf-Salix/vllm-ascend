@@ -276,7 +276,7 @@ class NPUPlatform(Platform):
     @classmethod
     def _update_pypto_qwen3_mode_config(cls, vllm_config: VllmConfig) -> None:
         mode = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE
-        valid_modes = {"off", "partial", "full"}
+        valid_modes = {"off", "partial", "attention_block", "full"}
         if mode not in valid_modes:
             raise ValueError(f"VLLM_ASCEND_PYPTO_QWEN3_MODE must be one of {sorted(valid_modes)}, got {mode!r}")
         if mode == "off":
