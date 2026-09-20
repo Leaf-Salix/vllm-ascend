@@ -222,9 +222,11 @@ def dsa_forward(
 
     _cmp = _os.environ.get("PTO_ATTN_COMPARE", "").strip()
     if _cmp and layer_name not in _COMPARED:
-        _COMPARED.add(layer_name)
         from vllm_ascend.attention import pto_attn
-        pto_attn.compare_once(self, hidden_states, kv_cache, attn_metadata, output, _cmp)
+        # Only a step that actually ran counts: prefill and the non-ratio-4
+        # layers decline, and marking those would spend the single turn.
+        if pto_attn.compare_once(self, hidden_states, kv_cache, attn_metadata, output, _cmp):
+            _COMPARED.add(layer_name)
     return
 
 

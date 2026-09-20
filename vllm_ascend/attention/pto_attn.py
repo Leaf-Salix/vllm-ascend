@@ -73,16 +73,19 @@ def _enabled(name: str) -> str:
 
 
 def _to_nd(w: torch.Tensor) -> torch.Tensor:
-    """Undo the FRACTAL_NZ layout vLLM applies to quantized weights.
+    """Undo the FRACTAL_NZ layout vLLM gives quantized weights.
 
-    ``weight_nz_mode`` defaults to 1, and a NZ-laid-out INT8 weight read as ND is
-    silently wrong rather than an error, so this runs unconditionally.
+    ``weight_nz_mode`` defaults to 1, and an NZ-laid-out weight read as ND is
+    silently wrong rather than an error, so every INT8 weight goes through this.
+    Dense weights are never converted, so they are returned untouched.
     """
+    if w.dtype not in (torch.int8, torch.uint8):
+        return w
     import torch_npu
 
-    from vllm_ascend.utils import ACL_FORMAT_ND
+    from vllm_ascend.utils import ACL_FORMAT_FRACTAL_ND
 
-    return torch_npu.npu_format_cast(w, ACL_FORMAT_ND)
+    return torch_npu.npu_format_cast(w, ACL_FORMAT_FRACTAL_ND)
 
 
 def _quant_int8_per_channel(w: torch.Tensor, kcfg):
@@ -119,21 +122,27 @@ def _dense(linear, want: tuple) -> torch.Tensor:
     return _oriented(w.to(torch.bfloat16), want)
 
 
-def _int8(linear, want: tuple, kcfg):
-    """An INT8 weight plus per-channel scale, quantizing if vLLM kept it dense.
+def _int8(linear, want: tuple, scale_len: int, kcfg):
+    """An INT8 weight plus its per-channel scale, quantizing if vLLM kept it dense.
 
-    The kernel's signature fixes INT8 for wq_b / idx_wq_b / wo_b, so an
-    unquantized checkpoint has to be quantized here. That is a real numerical
-    difference, not an adapter artifact.
+    The scale's axis is not the same for every slot: wq_b and idx_wq_b carry one
+    scale per output column, wo_b one per output row. ``scale_len`` picks which,
+    so a mismatch is a shape error here rather than at kernel launch.
     """
     w = _to_nd(linear.weight.detach())
     scale = getattr(linear, "weight_scale_fp32", None)
     if scale is None:
         scale = getattr(linear, "weight_scale", None)
     if w.dtype in (torch.int8, torch.uint8) and scale is not None:
-        return _oriented(w, want), scale.detach().float()
-    q, sc = _quant_int8_per_channel(_oriented(w, want).t().contiguous(), kcfg)
-    return q.t().contiguous(), sc
+        return _oriented(w, want), scale.detach().float().reshape(-1)
+
+    dense = _oriented(w, want)
+    if scale_len == want[1]:
+        q, sc = _quant_int8_per_channel(dense.t().contiguous(), kcfg)
+        return q.t().contiguous(), sc
+    if scale_len == want[0]:
+        return _quant_int8_per_channel(dense, kcfg)
+    raise ValueError(f"scale length {scale_len} matches neither axis of {want}")
 
 
 def _hadamard(dim: int, device, dtype=torch.bfloat16) -> torch.Tensor:
@@ -160,9 +169,9 @@ def prepare_weights(impl):
     kcsa, kcfg = kernel()
     D, QL, HD = kcsa.D, kcsa.Q_LORA, kcsa.HEAD_DIM
     IH, ID = kcsa.IDX_N_HEADS, kcsa.IDX_HEAD_DIM
-    wq_b, wq_b_scale = _int8(impl.wq_b, (QL, kcsa.H * HD), kcfg)
-    idx_wq_b, idx_wq_b_scale = _int8(impl.inderxer_wq_b, (QL, IH * ID), kcfg)
-    wo_b, wo_b_scale = _int8(impl.wo_b, (D, kcsa.O_GROUPS * kcsa.O_LORA), kcfg)
+    wq_b, wq_b_scale = _int8(impl.wq_b, (QL, kcsa.H * HD), kcsa.H * HD, kcfg)
+    idx_wq_b, idx_wq_b_scale = _int8(impl.inderxer_wq_b, (QL, IH * ID), IH * ID, kcfg)
+    wo_b, wo_b_scale = _int8(impl.wo_b, (D, kcsa.O_GROUPS * kcsa.O_LORA), D, kcfg)
 
     w = {
         "wq_a": _dense(impl.wq_a, (D, QL)),
@@ -439,9 +448,46 @@ def state_slots(positions: torch.Tensor, seq: int) -> torch.Tensor:
     return (req * rr + (pos % rr)).to(torch.int64)
 
 
-def repage_kv(cache: torch.Tensor):
-    """Restate a 128-slot KV cache as the kernel's 32-slot pages, as a view."""
-    return cache.view(-1, VLLM_PAGE // COMPRESS_RATIO, *cache.shape[2:])
+def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
+              dtype: torch.dtype | None = None):
+    """Give the kernel a 32-slot-page view of a 128-slot vLLM cache.
+
+    A contiguous cache reshapes for free. The indexer's pair does not: vLLM lays
+    the key and its scale into one padded 16640-byte page, so each is strided and
+    the gap in one holds the other's data. Those are compacted to the pages the
+    block table names, which both makes them contiguous and drops the sibling.
+
+    Returns ``(view, block_table_for_the_view)``.
+    """
+    per = COMPRESS_RATIO
+    rows = VLLM_PAGE // per
+    b, ncols = block_table.shape
+    want = min(kernel_cols, ncols * per)
+
+    if cache.is_contiguous() and dtype in (None, cache.dtype):
+        view = cache.view(-1, rows, *cache.shape[2:])
+        bt = _repage_block_table(block_table, want, per, view.shape[0])
+        return view, _pad_cols(bt, kernel_cols)
+
+    src = block_table.long().reshape(-1).clamp(0, cache.shape[0] - 1)
+    packed = cache.index_select(0, src).contiguous()
+    if dtype is not None:
+        packed = packed.to(dtype)
+    view = packed.view(b * ncols * per, rows, *packed.shape[2:])
+    compact = torch.arange(b * ncols, device=cache.device).view(b, ncols, 1) * per
+    bt = (compact + torch.arange(per, device=cache.device).view(1, 1, per))
+    return view, _pad_cols(bt.reshape(b, ncols * per).to(torch.int32), kernel_cols)
+
+
+def _pad_cols(bt: torch.Tensor, cols: int) -> torch.Tensor:
+    """Fixed column count: the kernel's table width is a compile-time constant."""
+    have = bt.shape[1]
+    if have == cols:
+        return bt
+    if have > cols:
+        return bt[:, :cols].contiguous()
+    pad = torch.full((bt.shape[0], cols - have), -1, dtype=bt.dtype, device=bt.device)
+    return torch.cat([bt, pad], dim=1)
 
 
 # --- structure probe ---------------------------------------------------------
@@ -533,18 +579,23 @@ def rectangular(n_real: int, kernel_seq: int, device):
     return req, real
 
 
-def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int):
+def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: str):
     """Translate one decode step into the kernel's 46 arguments.
 
     ``metadata_list`` is what ``filter_metadata`` returns for a ratio-4 layer:
     five per-cache metadata objects sorted by key -- attn, compressor state,
     indexer-compressor state, indexer k, sliding window.
     """
+    if not isinstance(layer, str):
+        # RopeDataProxy takes a non-string key as a slice and hands back another
+        # proxy, so a wrong name surfaces two frames later as a missing reshape.
+        raise TypeError(f"layer must be the layer's name, got {type(layer).__name__}")
     kcsa, kcfg = kernel()
     cmp_md, cst_md, ist_md, idx_md, swa_md = (m.decode for m in metadata_list)
     cmp_kv_c, swa_kv_c, state_c, ist_c, idx_k_c, idx_s_c = kv_cache
 
-    layer = impl.layer_name if hasattr(impl, "layer_name") else None
+    # The RoPE proxy resolves by layer name and quietly returns another proxy for a
+    # non-string key, so the name has to come from the wrapper, not the impl.
     host_pos = metadata_list[0].decode.input_positions
     n_real = host_pos.shape[0] // seq            # host requests this step
     ks = kcsa.S                                  # the kernel's compile-time S
@@ -574,15 +625,15 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int):
     a["cmp_freqs_sin"] = cs.index_select(0, rc)
 
     # Paged KV: the kernel's page is a quarter of vLLM's.
-    per = COMPRESS_RATIO
-    a["kv_cache"] = repage_kv(swa_kv_c)
-    a["cmp_kv"] = repage_kv(cmp_kv_c)
-    a["idx_kv_cache"] = repage_kv(idx_k_c)
-    a["idx_kv_scale"] = repage_kv(idx_s_c)
-    a["cmp_block_table"] = _repage_block_table(
-        cmp_md.block_table, kcsa.CMP_MAX_BLOCKS, per, a["cmp_kv"].shape[0])
-    a["idx_block_table"] = _repage_block_table(
-        idx_md.block_table, kcsa.IDX_MAX_BLOCKS, per, a["idx_kv_cache"].shape[0])
+    a["kv_cache"], _ = repage_kv(swa_kv_c, swa_md.block_table, kcsa.CMP_MAX_BLOCKS)
+    a["cmp_kv"], a["cmp_block_table"] = repage_kv(
+        cmp_kv_c, cmp_md.block_table, kcsa.CMP_MAX_BLOCKS)
+    a["idx_kv_cache"], a["idx_block_table"] = repage_kv(
+        idx_k_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS)
+    # The scale cache shares its page with the key cache and is FP16 there; the
+    # kernel's signature is FP32, and it cannot be cast in place.
+    a["idx_kv_scale"], _ = repage_kv(
+        idx_s_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS, dtype=torch.float32)
 
     # Compressor state: a private ring per request, seeded from vLLM's cache.
     main_dim = kcsa.MAIN_STATE_DIM
@@ -613,14 +664,23 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int):
     a["state_slot_mapping"] = _inert(a["state_slot_mapping"])
     a["inner_state_slot_mapping"] = a["state_slot_mapping"]
 
-    return [a[name] for name in ARG_ORDER], (plan_m, plan_i, state_c, ist_c, main_dim, inner_dim)
+    return [a[name] for name in ARG_ORDER], (plan_m, plan_i, state_c, ist_c,
+                                             main_dim, inner_dim, pos, ks, n_real)
 
 
 def _pick(table, layer):
-    """vLLM keeps some RoPE tables per layer in a dict."""
-    if isinstance(table, dict):
-        return table[layer] if layer in table else next(iter(table.values()))
-    return table
+    """The RoPE tables are keyed by layer, behind a dict or a RopeDataProxy.
+
+    The proxy resolves a layer name to its registered cache group and hands back
+    the tensor; only a layer registered for several groups gets a dict, and the
+    DSA layers are single-group.
+    """
+    if isinstance(table, torch.Tensor):
+        return table
+    value = table[layer]
+    if isinstance(value, dict):
+        value = next(iter(value.values()))
+    return value
 
 
 # --- one-shot comparison -----------------------------------------------------
@@ -640,7 +700,7 @@ def _registered():
     return _OP
 
 
-def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_dir: str) -> None:
+def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_dir: str) -> bool:
     """Run the kernel on this step's real tensors and record how it compares.
 
     The kernel writes six caches, so this runs after the native path and reads
@@ -650,6 +710,14 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
     """
     impl = self.dsa_attn.impl
     layer = self.dsa_attn.layer_name
+    if getattr(impl, "compress_ratio", 0) != COMPRESS_RATIO:
+        # Only the ratio-4 layers carry the five cache groups this kernel needs.
+        return False
+    if metadata_list[0].decode is None:
+        # A prefill step: this kernel is the decode path only. Returning False
+        # leaves the caller's once-per-layer bookkeeping untouched, so the first
+        # decode step still gets its turn.
+        return False
     rec = {"layer": layer, "stage": "start"}
     path = Path(out_dir) / f"compare__{layer.replace('.', '_')}.json"
 
@@ -662,7 +730,7 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
         rec["seq"] = seq
         rec["stage"] = "build_args"
         save()
-        args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq)
+        args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq, layer)
         rec["arg_shapes"] = {
             n: [list(a.shape), str(a.dtype), bool(a.is_contiguous())]
             for n, a in zip(ARG_ORDER, args)
@@ -696,3 +764,36 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
     finally:
         save()
         print(f"[pto-attn-compare] {layer} stage={rec['stage']} ok={rec.get('ok')}", flush=True)
+    return True
+
+
+# --- replacement -------------------------------------------------------------
+
+
+def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
+    """Run the kernel in place of the native attention and publish its result.
+
+    Unlike :func:`compare_once` this owns the step: the kernel's six caches are
+    the live ones, the compressor ring is written back, and the padding rows of
+    the rectangle are dropped on the way out.
+    """
+    impl = self.dsa_attn.impl
+    if (getattr(impl, "compress_ratio", 0) != COMPRESS_RATIO
+            or metadata_list[0].decode is None):
+        return False
+    seq = _env_int("PTO_ATTN_SEQ", 1)
+    args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq,
+                            self.dsa_attn.layer_name)
+    plan_m, plan_i, state_c, ist_c, main_dim, inner_dim, pos, ks, n_real = plan
+
+    _registered()(*args)
+
+    write_state_ring(state_c, args[ARG_ORDER.index("compress_state")],
+                     plan_m, ks, pos, main_dim)
+    write_state_ring(ist_c, args[ARG_ORDER.index("inner_compress_state")],
+                     plan_i, ks, pos, inner_dim)
+
+    take = torch.arange(n_real, device=output.device) * ks
+    rows = args[-1].index_select(0, take)
+    output[: n_real * seq] = rows.to(output.dtype)
+    return True

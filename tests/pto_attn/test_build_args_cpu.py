@@ -118,19 +118,26 @@ print(f"== checkpoint: {'W8A8' if QUANT else 'BF16'} ==")
 impl = Impl(QUANT)
 L = impl.layer_name
 metas = [md(128, 64, 4096, L) for _ in range(5)]
+def strided_t(nblk, rows, dim, pad, dtype):
+    raw = torch.zeros(nblk * pad, dtype=dtype)
+    return torch.as_strided(raw, (nblk, rows, 1, dim), (pad, dim, dim, 1))
+
+
+# Shapes, strides and dtypes as the live probe recorded them: the indexer key and
+# its scale share one padded page, so both are strided and the scale is FP16.
 kvc = (
-    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),           # compress kv
-    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),           # swa kv
-    strided(64, 8, K.MAIN_STATE_DIM, 2 * 8 * K.MAIN_STATE_DIM),          # main state
-    strided(64, 8, K.INNER_STATE_DIM, 8 * K.INNER_STATE_DIM + 64),       # inner state
-    torch.zeros(64, 128, 1, K.IDX_HEAD_DIM, dtype=torch.int8),           # indexer k
-    torch.zeros(64, 128, 1, 1, dtype=torch.float32),                     # indexer scale
+    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),
+    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),
+    strided_t(64, 8, K.MAIN_STATE_DIM, 2 * 8 * K.MAIN_STATE_DIM, torch.float32),
+    strided_t(64, 8, K.INNER_STATE_DIM, 8 * K.INNER_STATE_DIM + 64, torch.float32),
+    strided_t(64, 128, K.IDX_HEAD_DIM, 16640, torch.int8),
+    strided_t(64, 128, 1, 8320, torch.float16),
 )
 hs = torch.randn(NREQ, D).to(torch.bfloat16)
 
 print("== build_args ==")
 try:
-    args, plan = pa.build_args(impl, hs, kvc, metas, HOST_SEQ)
+    args, plan = pa.build_args(impl, hs, kvc, metas, HOST_SEQ, L)
     check("returned 46", len(args) == 46, str(len(args)))
 except Exception:
     import traceback
@@ -150,14 +157,27 @@ want = {
     "ori_slot_mapping": [RT], "state_slot_mapping": [RT],
     "compress_state_block_table": [NREQ, K.MAIN_STATE_MAX_BLOCKS],
     "cmp_block_table": [NREQ, K.CMP_MAX_BLOCKS],
+    "idx_block_table": [NREQ, K.IDX_MAX_BLOCKS],
     "wo_a": [K.O_GROUPS, K.O_LORA, K.O_GROUP_IN],
     "weights_proj": [D, K.IDX_N_HEADS],
     "hadamard_idx": [K.IDX_HEAD_DIM, K.IDX_HEAD_DIM],
+    # The three INT8 slots do not share a scale axis.
+    "wq_b": [M.q_lora_rank, K.H * K.HEAD_DIM], "wq_b_scale": [K.H * K.HEAD_DIM],
+    "idx_wq_b": [M.q_lora_rank, K.IDX_N_HEADS * K.IDX_HEAD_DIM],
+    "idx_wq_b_scale": [K.IDX_N_HEADS * K.IDX_HEAD_DIM],
+    "wo_b": [D, K.O_GROUPS * K.O_LORA], "wo_b_scale": [D],
+    "wq_a": [D, M.q_lora_rank], "wkv": [D, K.HEAD_DIM],
+    "cmp_ape": [4, K.MAIN_OUT_DIM], "inner_ape": [4, K.INNER_OUT_DIM],
+    "attn_sink": [K.H],
 }
 by = dict(zip(pa.ARG_ORDER, args))
 for n, w in want.items():
     got = list(by[n].shape)
     check(n, got == w, f"{got} want {w}")
+
+print("== dtypes the signature fixes ==")
+check("idx_kv_scale is FP32", by["idx_kv_scale"].dtype == torch.float32, str(by["idx_kv_scale"].dtype))
+check("idx_kv_cache is INT8", by["idx_kv_cache"].dtype == torch.int8, str(by["idx_kv_cache"].dtype))
 
 print("== contiguity (the binding rejects anything else) ==")
 bad = [n for n, a in by.items() if not a.is_contiguous()]

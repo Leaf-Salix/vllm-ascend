@@ -16,15 +16,19 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$HERE/env_dsv4_vllm.sh"
 
-# PTO 层级替换打开时，把 pypto-lib 与 PyPTO 挂到 PYTHONPATH 上。pypto-lib 的模型脚本
-# 用平铺 import（from config import FLASH），所以模型目录本身也必须在路径上。
-# 解释器必须是 cp310：PyPTO 的 _task_interface 是 cpython-310 ABI。
-if [ -n "${PTO_CSA:-}" ] && [ "${PTO_CSA}" != "0" ]; then
-    : "${PYPTO_LIB_ROOT:?PTO_CSA 打开时必须给 PYPTO_LIB_ROOT}"
-    : "${PYPTO_ROOT:?PTO_CSA 打开时必须给 PYPTO_ROOT}"
+# PTO 层级替换打开时只需要 PyPTO 工具链（DSL + 编译器 + 运行时）。kernel 源码内联在
+# vllm_ascend/attention/pto_kernels/ 下，走包内相对 import，pypto-lib 不上路径。
+# 解释器由 env_own.sh 固定（own_stack 的 cp311）；_task_interface 是按该 ABI 编的。
+# The attention-level entry points need the same toolchain, so any of them arms it.
+PTO_NEEDS_PYPTO=0
+for _v in "${PTO_CSA:-}" "${PTO_ATTN_COMPARE:-}" "${PTO_ATTN_REPLACE:-}"; do
+    [ -n "$_v" ] && [ "$_v" != "0" ] && PTO_NEEDS_PYPTO=1
+done
+if [ "$PTO_NEEDS_PYPTO" = "1" ]; then
+    : "${PYPTO_ROOT:?PTO 替换打开时必须给 PYPTO_ROOT}"
     export PTO_ISA_ROOT="${PTO_ISA_ROOT:-$PYPTO_ROOT/runtime/build/pto-isa}"
-    export PYTHONPATH="$PYPTO_LIB_ROOT:$PYPTO_LIB_ROOT/models/deepseek_v4_flash_mtp:$PYPTO_ROOT/python:$PYPTO_ROOT/runtime:$PYPTO_ROOT/runtime/python${PYTHONPATH:+:$PYTHONPATH}"
-    echo "[dsv4-vllm] PTO CSA 替换已开启 pypto-lib=$PYPTO_LIB_ROOT ptoas=${PTOAS_ROOT:-}"
+    export PYTHONPATH="$PYPTO_ROOT/python:$PYPTO_ROOT/runtime:$PYPTO_ROOT/runtime/python${PYTHONPATH:+:$PYTHONPATH}"
+    echo "[dsv4-vllm] PTO 工具链已上路径 pypto=$PYPTO_ROOT ptoas=${PTOAS_ROOT:-}"
     echo "[dsv4-vllm] python=$(command -v python)"
 fi
 
@@ -169,7 +173,7 @@ start_server() {
         --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
         --port "$PORT" \
         --block-size 128 \
-        --gpu-memory-utilization 0.9 \
+        --gpu-memory-utilization "${GPU_UTIL:-0.9}" \
         --kv-cache-dtype fp8 \
         --enable-logging-iteration-details \
         --no-enable-prefix-caching \
