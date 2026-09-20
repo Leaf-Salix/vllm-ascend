@@ -1675,8 +1675,7 @@ class AscendDSAImpl(DSAAttentionImpl):
         if _PTO_CSA_ON:
             from vllm_ascend.attention.pto_csa import note_forward
 
-            note_forward(self, layer_name, has_decode=has_decode,
-                         has_prefill=has_prefill, md=attn_metadata[0])
+            note_forward(self, layer_name, has_decode=has_decode, has_prefill=has_prefill, md=attn_metadata[0])
 
         # 只要这一步有 decode 就替换，**不要求纯 decode**：开了 aclgraph + chunked prefill
         # 之后，调度基本每步都把 prefill 和 decode 混在一起，纯 decode 的步一次都不出现。
@@ -1685,7 +1684,7 @@ class AscendDSAImpl(DSAAttentionImpl):
         if _PTO_CSA_ON and has_decode:
             from vllm_ascend.attention.pto_csa import dump_vendor, get_runner, report
 
-            pto_out = get_runner().run_decode(self, cos=cos, sin=sin)
+            pto_out = get_runner().run_decode(self, cos=cos, sin=sin, layer_name=layer_name)
             if pto_out is not None:
                 rows = pto_out.shape[0]
                 dump_vendor(output[:rows])
