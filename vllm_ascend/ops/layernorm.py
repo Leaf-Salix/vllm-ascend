@@ -23,6 +23,47 @@ from vllm.model_executor.layers.layernorm import GemmaRMSNorm, RMSNorm, RMSNormG
 from vllm_ascend.ops.triton.layernorm_gated import layer_norm_fwd_npu
 from vllm_ascend.utils import enable_custom_op, get_weight_prefetch_method
 
+_QWEN3_14B_HIDDEN_SIZE = 5120
+_QWEN3_14B_NUM_LAYERS = 40
+_QWEN3_14B_NUM_HEADS = 40
+_QWEN3_14B_NUM_KV_HEADS = 8
+_QWEN3_HEAD_DIM = 128
+_QWEN3_MAX_PADDED_TOKENS = 1024
+_PYPTO_QWEN3_MODES = {"off", "partial", "full"}
+
+
+def _pypto_qwen3_mode() -> str:
+    from vllm_ascend import envs
+
+    mode = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE
+    if mode not in _PYPTO_QWEN3_MODES:
+        raise ValueError(f"VLLM_ASCEND_PYPTO_QWEN3_MODE must be one of {sorted(_PYPTO_QWEN3_MODES)}, got {mode!r}")
+    return mode
+
+
+def _validate_pypto_qwen3_config() -> None:
+    vllm_config = get_current_vllm_config()
+    config = vllm_config.model_config.hf_config
+    supported = (
+        config.model_type == "qwen3"
+        and config.hidden_size == _QWEN3_14B_HIDDEN_SIZE
+        and config.num_hidden_layers == _QWEN3_14B_NUM_LAYERS
+        and config.num_attention_heads == _QWEN3_14B_NUM_HEADS
+        and config.num_key_value_heads == _QWEN3_14B_NUM_KV_HEADS
+        and getattr(config, "head_dim", None) == _QWEN3_HEAD_DIM
+        and config.rms_norm_eps == 1e-6
+        and vllm_config.model_config.dtype == torch.bfloat16
+        and vllm_config.parallel_config.tensor_parallel_size == 1
+        and vllm_config.quant_config is None
+        and vllm_config.speculative_config is None
+        and not vllm_config.scheduler_config.enable_chunked_prefill
+    )
+    if not supported:
+        raise ValueError(
+            "PyPTO Qwen3 mode currently requires Qwen3-14B BF16, TP1, "
+            "head_dim=128, no quantization, no speculative decoding, and chunked prefill disabled"
+        )
+
 
 class AscendRMSNorm(RMSNorm):
     def __init__(
@@ -37,6 +78,22 @@ class AscendRMSNorm(RMSNorm):
         vllm_config = get_current_vllm_config()
         self.bias = None
         self.bias_loaded = False
+
+        self._pypto_qwen3_mode = _pypto_qwen3_mode()
+        self._pypto_qk_op = None
+        self._pypto_full_ops = None
+        if self._pypto_qwen3_mode != "off":
+            _validate_pypto_qwen3_config()
+            if hidden_size == _QWEN3_HEAD_DIM:
+                from vllm_ascend.ops import pypto_qwen3_rms
+
+                pypto_qwen3_rms.warmup(torch.device("npu", torch.npu.current_device()))
+                self._pypto_qk_op = pypto_qwen3_rms.registered_op()
+            elif self._pypto_qwen3_mode == "full":
+                from vllm_ascend.ops import pypto_qwen3_full
+
+                pypto_qwen3_full.init()
+                self._pypto_full_ops = pypto_qwen3_full.registered_ops()
 
         # quantization with anti_method m4 will generate none-zero norm bias
         if vllm_config.quant_config is not None and any(
@@ -66,9 +123,56 @@ class AscendRMSNorm(RMSNorm):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         import torch_npu
 
+        if self._pypto_qwen3_mode != "off" and self.hidden_size == _QWEN3_HEAD_DIM:
+            if residual is not None:
+                raise ValueError("Qwen3 q/k RMSNorm does not accept a residual tensor")
+            if x.ndim != 3 or x.shape[1] not in (_QWEN3_14B_NUM_HEADS, _QWEN3_14B_NUM_KV_HEADS):
+                raise ValueError(f"PyPTO Qwen3 q/k RMSNorm requires [tokens, 40|8, 128] input, got {tuple(x.shape)}")
+            if not 1 <= x.shape[0] <= _QWEN3_MAX_PADDED_TOKENS:
+                raise ValueError(
+                    f"PyPTO Qwen3 q/k RMSNorm supports 1..{_QWEN3_MAX_PADDED_TOKENS} padded tokens, got {x.shape[0]}"
+                )
+            contiguous_x = x.contiguous()
+            output = torch.empty_like(contiguous_x)
+            assert self._pypto_qk_op is not None
+            return self._pypto_qk_op(
+                contiguous_x.view(-1, _QWEN3_HEAD_DIM),
+                self.weight.contiguous().view(1, _QWEN3_HEAD_DIM),
+                output.view(-1, _QWEN3_HEAD_DIM),
+            ).view_as(x)
+
+        if self._pypto_qwen3_mode == "full":
+            if x.dtype != torch.bfloat16 or x.shape[-1] != _QWEN3_14B_HIDDEN_SIZE:
+                raise ValueError("PyPTO Qwen3 full RMSNorm requires BF16 [..., 5120] input")
+            if not x.is_contiguous() or not self.weight.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full RMSNorm requires contiguous input and weight")
+            rows = x.numel() // x.shape[-1]
+            x_2d = x.view(rows, x.shape[-1])
+            assert self._pypto_full_ops is not None
+            if residual is None:
+                output = torch.empty_like(x_2d)
+                result = self._pypto_full_ops["rms_norm"](
+                    x_2d,
+                    self.weight.view(1, -1),
+                    output,
+                )
+                return result.view_as(x)
+            if residual.shape != x.shape or residual.dtype != torch.bfloat16 or not residual.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full add-RMSNorm requires matching contiguous BF16 residual")
+            norm_output = torch.empty_like(x_2d)
+            residual_output = torch.empty_like(x_2d)
+            normalized, added = self._pypto_full_ops["add_rms_norm"](
+                x_2d,
+                residual.view_as(x_2d),
+                self.weight.view(1, -1),
+                norm_output,
+                residual_output,
+            )
+            return normalized.view_as(x), added.view_as(residual)
+
         if residual is not None:
             residual = torch.ops.vllm.maybe_chunk_residual(x, residual)
-            if enable_custom_op():
+            if enable_custom_op() and self._pypto_qwen3_mode == "off":
                 x, _, residual = torch.ops._C_ascend.npu_add_rms_norm_bias(
                     x, residual, self.weight, self.bias, self.variance_epsilon
                 )

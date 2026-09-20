@@ -30,7 +30,26 @@ class AscendQuickGELU(QuickGELU):
 
 
 class AscendSiluAndMul(SiluAndMul):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pypto_full_op = None
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            pypto_qwen3_full.init()
+            self._pypto_full_op = pypto_qwen3_full.registered_ops()["silu_and_mul"]
+
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
+        if self._pypto_full_op is not None:
+            if x.dtype != torch.bfloat16 or x.ndim != 2 or x.shape[1] % 2 or not x.is_contiguous():
+                raise ValueError(
+                    "PyPTO Qwen3 full SwiGLU requires contiguous 2D BF16 input with an even last dimension"
+                )
+            output = torch.empty((x.shape[0], x.shape[1] // 2), dtype=x.dtype, device=x.device)
+            return self._pypto_full_op(x, output)
+
         import torch_npu
 
         weight_prefetch_method = get_weight_prefetch_method()

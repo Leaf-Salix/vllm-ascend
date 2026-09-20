@@ -60,6 +60,41 @@ class TestNPUPlatform(TestBase):
         self.assertEqual(NPUPlatform.dispatch_key, "PrivateUse1")
         self.assertEqual(NPUPlatform.supported_quantization, [ASCEND_QUANTIZATION_METHOD, COMPRESSED_TENSORS_METHOD])
 
+    @pytest.mark.parametrize("mode", ["partial", "full"])
+    def test_pypto_qwen3_mode_is_part_of_config_hash_inputs(self, mode):
+        vllm_config = MagicMock()
+        vllm_config.additional_config = {"existing": "value"}
+
+        with patch("vllm_ascend.platform.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", mode):
+            self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
+        self.assertEqual(vllm_config.additional_config, {"existing": "value", "pypto_qwen3_mode": mode})
+
+    def test_pypto_qwen3_off_preserves_config_hash_inputs(self):
+        vllm_config = MagicMock()
+        vllm_config.additional_config = {"existing": "value"}
+
+        with patch("vllm_ascend.platform.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "off"):
+            self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
+        self.assertEqual(vllm_config.additional_config, {"existing": "value"})
+
+    def test_pypto_qwen3_mode_rejects_invalid_or_conflicting_config(self):
+        vllm_config = MagicMock()
+        vllm_config.additional_config = {}
+        with (
+            patch("vllm_ascend.platform.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "invalid"),
+            self.assertRaisesRegex(ValueError, "must be one of"),
+        ):
+            self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
+        vllm_config.additional_config = {"pypto_qwen3_mode": "partial"}
+        with (
+            patch("vllm_ascend.platform.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "full"),
+            self.assertRaisesRegex(ValueError, "conflicts"),
+        ):
+            self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
     def test_is_sleep_mode_available(self):
         self.assertTrue(self.platform.is_sleep_mode_available())
 

@@ -47,6 +47,17 @@ class GraphFusionPassManager:
         self.passes.append(pass_)
 
     def configure(self, config: VllmConfig):
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE != "off":
+            # The PyPTO experiments route selected model-compute nodes through
+            # explicitly registered PyPTO operators. Native fusion passes must
+            # neither trace unavailable native kernels nor replace those OOT
+            # nodes with an Ascend-native implementation. Partial mode needs
+            # the same isolation for its q/k RMSNorm nodes.
+            self.passes.clear()
+            return
+
         # By default, we enable the graph fusion and quantization fusion pass.
         self.ascend_compilation_config: dict = config.additional_config.get("ascend_compilation_config", {})
         if self.ascend_compilation_config.get("fuse_norm_quant", True):

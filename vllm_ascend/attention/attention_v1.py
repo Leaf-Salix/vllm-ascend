@@ -17,6 +17,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import cache
 
 import torch
 import torch_npu
@@ -68,6 +69,40 @@ from vllm_ascend.worker.kvcomp_utils import KVCompMetaData
 # default max value of sliding window size
 SWA_INT_MAX = 2147483647
 _ATTN_KEYS_BUFFER = None
+
+
+@cache
+def _warmup_pypto_qwen3_attention(device_index: int) -> None:
+    """Prepare all attention callables before ACLGraph capture begins."""
+    from vllm_ascend.ops import pypto_qwen3_full
+
+    device = torch.device("npu", device_index)
+    ops = pypto_qwen3_full.registered_ops()
+    query = torch.zeros((1, 5120), dtype=torch.bfloat16, device=device)
+    key = torch.zeros((1, 1024), dtype=torch.bfloat16, device=device)
+    value_storage_span = torch.zeros((1024,), dtype=torch.bfloat16, device=device)
+    slot_mapping = torch.zeros((1,), dtype=torch.int32, device=device)
+    key_cache = torch.zeros((128, 1024), dtype=torch.bfloat16, device=device)
+    value_cache = torch.zeros_like(key_cache)
+    block_tables = torch.zeros((1, 1), dtype=torch.int32, device=device)
+    seq_lens = torch.ones((1,), dtype=torch.int32, device=device)
+    query_start_loc = torch.tensor([0, 1], dtype=torch.int32, device=device)
+    output = torch.empty_like(query)
+
+    ops["kv_scatter_paged_attention"](
+        query.view(-1, 128),
+        key,
+        value_storage_span,
+        1024,
+        slot_mapping,
+        key_cache,
+        value_cache,
+        block_tables,
+        seq_lens,
+        query_start_loc,
+        output.view(-1, 128),
+    )
+    torch.npu.synchronize()
 
 
 @register_backend(AttentionBackendEnum.CUSTOM, "ASCEND")
@@ -178,6 +213,9 @@ class AscendMetadata:
     # should simplified these parameters once attention schema in vLLM-Ascend
     # is unified.
     seq_lens: torch.Tensor = None
+    # Device view of CommonAttentionMetadata.seq_lens for PyPTO full mode.
+    # Keep seq_lens above unchanged because native paths consume its CPU form.
+    seq_lens_device: torch.Tensor = None
     seq_lens_cpu: torch.Tensor = None
     seq_lens_list: list[int] = None  # type: ignore
     actual_seq_lengths_q: list[int] = None  # type: ignore
@@ -308,8 +346,14 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         # Get attn_mask from singleton AttentionMaskBuilder
         attn_mask = self.attn_mask_builder.get_attention_mask(common_attn_metadata.causal, self.model_config)
 
-        # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device
-        query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            query_start_loc = common_attn_metadata.query_start_loc[: num_reqs + 1]
+        else:
+            # Preserve the native path exactly; only full mode requires the
+            # already device-resident metadata owned by vLLM.
+            query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)
 
         attn_metadata = AscendMetadata(
             num_actual_tokens=num_actual_tokens,
@@ -317,6 +361,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             block_tables=block_table,
             query_start_loc=query_start_loc,
             seq_lens=seq_lens,
+            seq_lens_device=common_attn_metadata.seq_lens[:num_reqs],
             seq_lens_cpu=seq_lens,
             seq_lens_list=seq_lens.tolist(),
             max_query_len=common_attn_metadata.max_query_len,
@@ -397,6 +442,37 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self.sinks = sinks
         self.layerIndex = 0
         self.enable_hamming_sparse = is_enable_hamming_sparse()
+        self._pypto_qwen3_ops = None
+        self._pypto_qwen3_max_tokens = 0
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            if (
+                self.num_heads != 40
+                or self.num_kv_heads != 8
+                or self.head_size != 128
+                or get_tensor_model_parallel_world_size() != 1
+                or self.kv_cache_dtype not in ("auto", "bfloat16")
+                or self.sliding_window is not None
+                or self.sinks is not None
+                or self.attn_type != AttentionType.DECODER
+            ):
+                raise ValueError(
+                    "PyPTO Qwen3 full attention requires BF16 Qwen3-14B decoder attention "
+                    "(40 query heads, 8 KV heads, head size 128, TP1, no sliding window or sinks)"
+                )
+            cache_config = self.vllm_config.cache_config
+            if cache_config is None or cache_config.block_size != 128:
+                raise ValueError("PyPTO Qwen3 full attention requires a 128-token KV cache block size")
+            if self.vllm_config.speculative_config is not None:
+                raise ValueError("PyPTO Qwen3 full attention does not support speculative decoding")
+            pypto_qwen3_full.init()
+            self._pypto_qwen3_ops = pypto_qwen3_full.registered_ops()
+            self._pypto_qwen3_max_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
+            device_index = torch.npu.current_device()
+            _warmup_pypto_qwen3_attention(device_index)
 
     @staticmethod
     def update_graph_params(
@@ -1273,6 +1349,108 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         return output
 
+    def _forward_pypto_qwen3_full(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: torch.Tensor,
+    ) -> torch.Tensor:
+        if self._pypto_qwen3_ops is None:
+            raise RuntimeError("PyPTO Qwen3 full attention was not initialized")
+        if key is None or value is None or self.key_cache is None or self.value_cache is None:
+            raise ValueError("PyPTO Qwen3 full attention requires current K/V and an initialized paged KV cache")
+        num_tokens = query.shape[0]
+        tensors = (query, key, value, self.key_cache, self.value_cache, output)
+        if any(tensor.dtype != torch.bfloat16 for tensor in tensors):
+            raise ValueError("PyPTO Qwen3 full attention requires BF16 Q/K/V, cache, and output")
+        contiguous_tensors = (query, key, self.key_cache, self.value_cache, output)
+        if any(not tensor.is_contiguous() for tensor in contiguous_tensors):
+            raise ValueError("PyPTO Qwen3 full attention requires contiguous Q/K, cache, and output")
+        # Qwen's V is a view into the fused QKV projection.  Its rows are
+        # separated by the full projection width, but each 8x128 value row is
+        # contiguous.  Expose the reachable backing-storage span as a 1D
+        # contiguous tensor and pass the row stride as an explicit scalar, so
+        # full mode needs neither a copy nor general strided-tensor support in
+        # the PyPTO Torch adapter.
+        value_layout_supported = (
+            value.ndim == 2
+            and value.shape == (num_tokens, 1024)
+            and value.stride(1) == 1
+            or value.ndim == 3
+            and value.shape == (num_tokens, 8, 128)
+            and value.stride(1) == 128
+            and value.stride(2) == 1
+        )
+        if not value_layout_supported:
+            raise ValueError("PyPTO Qwen3 full attention requires row-contiguous [tokens, 1024] or [tokens, 8, 128] V")
+
+        if num_tokens > self._pypto_qwen3_max_tokens:
+            raise ValueError(
+                f"PyPTO Qwen3 attention token count {num_tokens} exceeds prepared capacity "
+                f"{self._pypto_qwen3_max_tokens}"
+            )
+        query_flat = query.view(num_tokens, -1)
+        key_flat = key.view(num_tokens, -1)
+        value_flat = value.view(num_tokens, -1)
+        output_flat = output.view(num_tokens, -1)
+        if query_flat.shape[1] != 5120 or key_flat.shape[1] != 1024 or value_flat.shape[1] != 1024:
+            raise ValueError("PyPTO Qwen3 full attention received a non-Qwen3-14B Q/K/V layout")
+        if output_flat.shape[1] != 5120:
+            raise ValueError("PyPTO Qwen3 full attention output layout mismatch")
+
+        slot_mapping = attn_metadata.slot_mapping
+        block_tables = attn_metadata.block_tables
+        seq_lens = attn_metadata.seq_lens_device
+        query_start_loc = attn_metadata.query_start_loc
+        if (
+            slot_mapping is None
+            or block_tables is None
+            or seq_lens is None
+            or query_start_loc is None
+            or slot_mapping.device.type != "npu"
+            or block_tables.device.type != "npu"
+            or seq_lens.device.type != "npu"
+            or query_start_loc.device.type != "npu"
+        ):
+            raise ValueError("PyPTO Qwen3 full attention requires device-resident paging metadata")
+        if slot_mapping.dtype != torch.int32:
+            raise ValueError("PyPTO Qwen3 full attention requires INT32 slot_mapping")
+        if block_tables.dtype != torch.int32 or seq_lens.dtype != torch.int32 or query_start_loc.dtype != torch.int32:
+            raise ValueError("PyPTO Qwen3 full attention requires INT32 block tables and sequence metadata")
+        if slot_mapping.numel() < num_tokens:
+            raise ValueError("PyPTO Qwen3 full attention slot_mapping is shorter than the Q/K/V token dimension")
+
+        key_cache = self.key_cache.view(-1, 1024)
+        value_cache = self.value_cache.view(-1, 1024)
+        value_row_stride = value_flat.stride(0)
+        if value_row_stride < 1024:
+            raise ValueError(
+                "PyPTO Qwen3 full attention requires row-contiguous V with a row stride "
+                f"of at least 1024, got {value_row_stride}"
+            )
+        value_span_elements = (num_tokens - 1) * value_row_stride + 1024
+        value_storage_span = torch.as_strided(
+            value_flat,
+            size=(value_span_elements,),
+            stride=(1,),
+        )
+        self._pypto_qwen3_ops["kv_scatter_paged_attention"](
+            query_flat.view(-1, 128),
+            key_flat,
+            value_storage_span,
+            value_row_stride,
+            slot_mapping[:num_tokens],
+            key_cache,
+            value_cache,
+            block_tables,
+            seq_lens,
+            query_start_loc,
+            output_flat.view(-1, 128),
+        )
+        return output
+
     def forward(
         self,
         layer: AttentionLayer,
@@ -1320,6 +1498,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 and len(kv_cache) >= 2
             ):
                 self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
+
+        if self._pypto_qwen3_ops is not None:
+            return self._forward_pypto_qwen3_full(query, key, value, attn_metadata, output)
 
         output_padded = None
         if key is not None and value is not None:

@@ -33,6 +33,7 @@ os.environ["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] = "1"
 
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+from vllm_ascend import envs
 from vllm_ascend.ascend_config import get_ascend_config, init_ascend_config
 
 # isort: off
@@ -273,8 +274,28 @@ class NPUPlatform(Platform):
             raise ValueError("additional_config.layer_sharding can only be enabled in PD-disaggregated's P node.")
 
     @classmethod
+    def _update_pypto_qwen3_mode_config(cls, vllm_config: VllmConfig) -> None:
+        mode = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE
+        valid_modes = {"off", "partial", "full"}
+        if mode not in valid_modes:
+            raise ValueError(f"VLLM_ASCEND_PYPTO_QWEN3_MODE must be one of {sorted(valid_modes)}, got {mode!r}")
+        if mode == "off":
+            return
+
+        if vllm_config.additional_config is None:
+            vllm_config.additional_config = {}
+        configured_mode = vllm_config.additional_config.setdefault("pypto_qwen3_mode", mode)
+        if configured_mode != mode:
+            raise ValueError(
+                "additional_config.pypto_qwen3_mode conflicts with "
+                f"VLLM_ASCEND_PYPTO_QWEN3_MODE: {configured_mode!r} != {mode!r}"
+            )
+
+    @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         from vllm_ascend.quantization.utils import maybe_auto_detect_quantization
+
+        cls._update_pypto_qwen3_mode_config(vllm_config)
 
         if vllm_config.model_config is not None:
             maybe_auto_detect_quantization(vllm_config)

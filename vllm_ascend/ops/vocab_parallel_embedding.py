@@ -132,6 +132,16 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
             params_dtype=params_dtype,
             weight_loader=self.weight_loader,
         )
+        self._pypto_embedding_op = None
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full" and "head" not in prefix:
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            if self.tp_size != 1 or quant_config is not None:
+                raise ValueError("PyPTO Qwen3 full embedding requires TP1 and unquantized weights")
+            pypto_qwen3_full.init()
+            self._pypto_embedding_op = pypto_qwen3_full.registered_ops()["embedding"]
 
     def _get_masked_input_and_mask(
         self,
@@ -161,6 +171,18 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         return input_, ~vocab_mask
 
     def forward(self, input_):
+        if self._pypto_embedding_op is not None:
+            if input_.dtype != torch.int32 or not input_.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full embedding requires contiguous INT32 token ids")
+            if self.weight.dtype != torch.bfloat16 or not self.weight.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full embedding requires contiguous BF16 weight")
+            flat_input = input_.view(-1)
+            output = torch.empty(
+                (flat_input.shape[0], self.weight.shape[1]),
+                dtype=self.weight.dtype,
+                device=self.weight.device,
+            )
+            return self._pypto_embedding_op(flat_input, self.weight, output).view(*input_.shape, self.weight.shape[1])
         if self.forward_type == "embed_tp":
             return self._forward_embed_tp(input_)
         else:
@@ -226,6 +248,16 @@ class AscendParallelLMHead(ParallelLMHead):
         )
 
         self.quant_config = quant_config
+        self._pypto_lm_head_op = None
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            if self.tp_size != 1 or quant_config is not None or bias:
+                raise ValueError("PyPTO Qwen3 full LM head requires TP1, no quantization, and no bias")
+            pypto_qwen3_full.init()
+            self._pypto_lm_head_op = pypto_qwen3_full.registered_ops()["linear"]
         if bias:
             self.bias = Parameter(torch.empty(self.num_embeddings_per_partition, dtype=params_dtype))
             set_weight_attrs(
@@ -283,7 +315,22 @@ class AscendLogitsProcessor(LogitsProcessor):
         lm_head: AscendParallelLMHead,
         embedding_bias: torch.Tensor | None,
     ) -> torch.Tensor | None:
-        logits = lm_head.quant_method.apply(lm_head, hidden_states, bias=embedding_bias)
+        pypto_op = getattr(lm_head, "_pypto_lm_head_op", None)
+        if pypto_op is not None:
+            if embedding_bias is not None:
+                raise ValueError("PyPTO Qwen3 full LM head does not support an embedding bias")
+            if hidden_states.dtype != torch.bfloat16 or hidden_states.ndim != 2:
+                raise ValueError("PyPTO Qwen3 full LM head requires a 2D BF16 hidden-state tensor")
+            if not hidden_states.is_contiguous() or not lm_head.weight.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full LM head requires contiguous input and weight")
+            logits = torch.empty(
+                (hidden_states.shape[0], lm_head.weight.shape[0]),
+                dtype=hidden_states.dtype,
+                device=hidden_states.device,
+            )
+            logits = pypto_op(hidden_states, lm_head.weight, logits)
+        else:
+            logits = lm_head.quant_method.apply(lm_head, hidden_states, bias=embedding_bias)
         # Gather logits for tensor parallel
         if not get_ascend_config().enable_reduce_sample:
             logits = self._gather_logits(logits)

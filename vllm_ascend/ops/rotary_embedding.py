@@ -229,6 +229,16 @@ class AscendRotaryEmbedding(RotaryEmbedding):
         self.use_mtp = vllm_config.speculative_config and vllm_config.speculative_config.method == "mtp"
         _record_cos_sin_cache(self.cos_sin_cache)
         _record_cos_and_sin_cache_interleaved(self.cos_sin_cache)
+        self._pypto_full_rope_op = None
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            if head_size != 128 or rotary_dim != 128 or not is_neox_style or dtype != torch.bfloat16:
+                raise ValueError("PyPTO Qwen3 full RoPE requires BF16 NeoX-style 128-dimensional rotation")
+            pypto_qwen3_full.init()
+            self._pypto_full_rope_op = pypto_qwen3_full.registered_ops()["rope"]
 
     def forward_oot(
         self,
@@ -238,6 +248,29 @@ class AscendRotaryEmbedding(RotaryEmbedding):
         offsets: torch.Tensor | None = None,
         is_neox_style_override: bool | None = None,
     ):
+        if self._pypto_full_rope_op is not None:
+            if offsets is not None or is_neox_style_override not in (None, True):
+                raise ValueError("PyPTO Qwen3 full RoPE does not support offsets or a style override")
+            if query.shape[-1] != 5120 or key.shape[-1] != 1024:
+                raise ValueError("PyPTO Qwen3 full RoPE requires flattened query/key widths 5120/1024")
+            if positions.dtype != torch.int64 or query.dtype != torch.bfloat16 or key.dtype != torch.bfloat16:
+                raise ValueError("PyPTO Qwen3 full RoPE requires INT64 positions and BF16 query/key")
+            if not positions.is_contiguous() or not query.is_contiguous() or not key.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full RoPE requires contiguous tensors")
+            query_shape, key_shape = query.shape, key.shape
+            query_2d = query.view(-1, 5120)
+            key_2d = key.view(-1, 1024)
+            query_out = torch.empty_like(query_2d)
+            key_out = torch.empty_like(key_2d)
+            rotated_query, rotated_key = self._pypto_full_rope_op(
+                positions.view(-1),
+                query_2d,
+                key_2d,
+                self.cos_sin_cache,
+                query_out,
+                key_out,
+            )
+            return rotated_query.view(query_shape), rotated_key.view(key_shape)
         is_neox_style = self.is_neox_style
         if is_neox_style_override is not None:
             is_neox_style = is_neox_style_override

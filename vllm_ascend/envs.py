@@ -114,6 +114,19 @@ env_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_ENABLE_BATCH_MEMCPY": lambda: os.getenv("VLLM_ASCEND_ENABLE_BATCH_MEMCPY", None),
     # Whether to use MultiBlockPool for KV cache management
     "VLLM_ASCEND_APPLY_DSV4_PATCH": lambda: bool(int(os.getenv("VLLM_ASCEND_APPLY_DSV4_PATCH", "0"))),
+    # Experimental Qwen3-14B PyPTO L2 kernel mode. Valid values are
+    # "off" (disabled), "partial" (q/k RMSNorm only), and "full".
+    "VLLM_ASCEND_PYPTO_QWEN3_MODE": lambda: os.getenv("VLLM_ASCEND_PYPTO_QWEN3_MODE", "off").lower(),
+    # Qwen3 PyPTO eager / ACLGraph replay diagnostics. Level 0 disables
+    # collection; levels 1..4 enable chip swimlane plus dependency collection.
+    "VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_LEVEL": lambda: int(os.getenv("VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_LEVEL", "0")),
+    # Artifact root required when Qwen3 PyPTO swimlane collection is enabled.
+    # Each worker creates a unique child directory below this path.
+    "VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_DIR": lambda: os.getenv("VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_DIR", ""),
+    # Maximum number of live eager/replay collection windows per worker.
+    "VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_MAX_CAPTURES": lambda: int(
+        os.getenv("VLLM_ASCEND_PYPTO_QWEN3_SWIMLANE_MAX_CAPTURES", "1")
+    ),
 }
 
 # end-env-vars-definition

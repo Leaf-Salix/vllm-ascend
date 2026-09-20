@@ -75,6 +75,17 @@ class AscendUnquantizedLinearMethod(UnquantizedLinearMethod):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "full":
+            from vllm_ascend.ops import pypto_qwen3_full
+
+            if layer.weight.dtype != torch.bfloat16 or layer.weight.ndim != 2:
+                raise ValueError("PyPTO Qwen3 full linear requires a 2D BF16 weight")
+            layer.weight.data = layer.weight.data.contiguous()
+            pypto_qwen3_full.init()
+            layer._pypto_qwen3_linear_op = pypto_qwen3_full.registered_ops()["linear"]
+            return
         # must use fp32 to avoid accuracy degradation in dsv4.
         if getattr(layer, "precast_fp32_weight", False):
             layer.weight_fp32 = maybe_trans_nz(layer.weight.data.to(torch.float32))
@@ -87,6 +98,21 @@ class AscendUnquantizedLinearMethod(UnquantizedLinearMethod):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        pypto_op = getattr(layer, "_pypto_qwen3_linear_op", None)
+        if pypto_op is not None:
+            if bias is not None:
+                raise ValueError("PyPTO Qwen3 full linear does not support bias")
+            if x.dtype != torch.bfloat16 or x.shape[-1] != layer.weight.shape[1]:
+                raise ValueError("PyPTO Qwen3 full linear input/weight mismatch")
+            if not x.is_contiguous() or not layer.weight.is_contiguous():
+                raise ValueError("PyPTO Qwen3 full linear requires contiguous input and weight")
+            x_2d = x.view(-1, x.shape[-1])
+            output = torch.empty(
+                (x_2d.shape[0], layer.weight.shape[0]),
+                dtype=x.dtype,
+                device=x.device,
+            )
+            return pypto_op(x_2d, layer.weight, output).view(*x.shape[:-1], layer.weight.shape[0])
         return torch.ops.vllm.unquantized_gemm(x, layer.weight, bias)
 
 

@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +10,24 @@ from vllm_ascend.utils import enable_custom_op
 from vllm_ascend.utils import is_310p as is_310p_hw
 
 enable_custom_op()
+
+
+@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+def test_pypto_qwen3_mode(mode):
+    from vllm_ascend.ops.layernorm import _pypto_qwen3_mode
+
+    with patch.dict(os.environ, {"VLLM_ASCEND_PYPTO_QWEN3_MODE": mode}):
+        assert _pypto_qwen3_mode() == mode
+
+
+def test_pypto_qwen3_mode_rejects_unknown_value():
+    from vllm_ascend.ops.layernorm import _pypto_qwen3_mode
+
+    with (
+        patch.dict(os.environ, {"VLLM_ASCEND_PYPTO_QWEN3_MODE": "unexpected"}),
+        pytest.raises(ValueError, match="must be one of"),
+    ):
+        _pypto_qwen3_mode()
 
 
 @pytest.fixture
