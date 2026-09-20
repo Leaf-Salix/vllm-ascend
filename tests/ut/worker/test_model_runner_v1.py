@@ -3,9 +3,50 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import torch
+from vllm.config import CUDAGraphMode
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheConfig, KVCacheGroupSpec, KVCacheTensor
 
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
+
+
+class TestNPUModelRunnerDummyAttention(unittest.TestCase):
+    def setUp(self):
+        self.runner = NPUModelRunner.__new__(NPUModelRunner)
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    def test_pypto_attention_builds_metadata_for_warmup_and_capture(self):
+        self.assertTrue(
+            self.runner._should_build_dummy_attn_metadata(
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+            )
+        )
+        self.assertTrue(
+            self.runner._should_build_dummy_attn_metadata(
+                cudagraph_runtime_mode=CUDAGraphMode.PIECEWISE,
+            )
+        )
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    def test_pypto_attention_does_not_require_profile_kv_cache(self):
+        self.assertFalse(
+            self.runner._should_build_dummy_attn_metadata(
+                is_profile=True,
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+            )
+        )
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "off")
+    def test_native_piecewise_metadata_policy_is_unchanged(self):
+        self.assertFalse(
+            self.runner._should_build_dummy_attn_metadata(
+                cudagraph_runtime_mode=CUDAGraphMode.PIECEWISE,
+            )
+        )
+        self.assertTrue(
+            self.runner._should_build_dummy_attn_metadata(
+                cudagraph_runtime_mode=CUDAGraphMode.FULL,
+            )
+        )
 
 
 class TestNPUModelRunnerKVCache(unittest.TestCase):

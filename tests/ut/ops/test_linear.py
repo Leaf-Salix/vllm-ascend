@@ -86,6 +86,19 @@ class TestAscendUnquantizedLinearMethod(TestBase):
         self.method.process_weights_after_loading(self.layer)
         mock_format_cast.assert_called_once()
 
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    @patch("vllm_ascend.ops.linear.maybe_trans_nz")
+    def test_pypto_attention_projection_keeps_standard_contiguous_weight(self, mock_trans_nz):
+        layer = torch.nn.Linear(8, 4, bias=False, dtype=torch.bfloat16)
+        layer._pypto_qwen3_attention_block_weight = True
+        layer.weight.data = layer.weight.data.t().contiguous().t()
+        self.assertFalse(layer.weight.is_contiguous())
+
+        self.method.process_weights_after_loading(layer)
+
+        self.assertTrue(layer.weight.is_contiguous())
+        mock_trans_nz.assert_not_called()
+
 
 class TestAscendRowParallelLinear(BaseLinearTest):
     @patch("vllm_ascend.ops.linear_op.get_weight_prefetch_method", return_value=MagicMock())

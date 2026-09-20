@@ -3047,9 +3047,21 @@ class NPUModelRunner(GPUModelRunner):
         Determine whether attention metadata should be built during dummy_run.
         SubClass can override this to add custom conditions.
         """
-        # If force_attention is True, we always capture attention, Otherwise,
-        # it only happens for cudagraph_runtime_mode=FULL.
-        return force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL
+        # If force_attention is True, we always capture attention. Otherwise,
+        # native attention needs metadata only for FULL graphs because the
+        # attention op is a PIECEWISE split point.
+        #
+        # The experimental PyPTO Qwen3 block deliberately remains inside the
+        # compiled segment so its kernel launch is recorded by ACLGraph. Its
+        # capture warmup therefore also needs the normal vLLM-owned device
+        # metadata. Memory profiling is excluded because no KV cache is bound
+        # at that stage.
+        from vllm_ascend import envs
+
+        pypto_qwen3_attention = (
+            envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block" and not is_profile
+        )
+        return force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL or pypto_qwen3_attention
 
     @torch.inference_mode()
     def _dummy_run(

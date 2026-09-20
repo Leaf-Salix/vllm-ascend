@@ -31,6 +31,7 @@ class TestNPUPlatform(TestBase):
         mock_vllm_config.additional_config = {}
         mock_vllm_config.compilation_config.pass_config.enable_sp = False
         mock_vllm_config.compilation_config.cudagraph_mode = None
+        mock_vllm_config.compilation_config.splitting_ops = []
         return mock_vllm_config
 
     @staticmethod
@@ -62,6 +63,20 @@ class TestNPUPlatform(TestBase):
 
     def test_is_sleep_mode_available(self):
         self.assertTrue(self.platform.is_sleep_mode_available())
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    def test_pypto_qwen3_attention_mode_is_recorded_in_additional_config(self):
+        vllm_config = self.mock_vllm_config()
+
+        self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
+        self.assertEqual(vllm_config.additional_config["pypto_qwen3_mode"], "attention_block")
+        self.assertEqual(vllm_config.compilation_config.splitting_ops, [])
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "full")
+    def test_pypto_qwen3_rejects_non_attention_experimental_modes(self):
+        with self.assertRaisesRegex(ValueError, "off.*attention_block"):
+            self.platform._update_pypto_qwen3_mode_config(self.mock_vllm_config())
 
     @patch("vllm_ascend.utils.adapt_patch")
     @patch("vllm_ascend.quantization.modelslim_config.AscendModelSlimConfig")

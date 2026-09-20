@@ -178,6 +178,9 @@ class AscendMetadata:
     # should simplified these parameters once attention schema in vLLM-Ascend
     # is unified.
     seq_lens: torch.Tensor = None
+    # Device-resident view consumed only by the PyPTO Qwen3 attention block.
+    # Keep seq_lens above unchanged for the native backend.
+    seq_lens_device: torch.Tensor = None
     seq_lens_cpu: torch.Tensor = None
     seq_lens_list: list[int] = None  # type: ignore
     actual_seq_lengths_q: list[int] = None  # type: ignore
@@ -308,8 +311,16 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         # Get attn_mask from singleton AttentionMaskBuilder
         attn_mask = self.attn_mask_builder.get_attention_mask(common_attn_metadata.causal, self.model_config)
 
-        # TODO: Yet another unnecessary H2D while we already have a query_start_loc on device
-        query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block":
+            query_start_loc = common_attn_metadata.query_start_loc[: num_reqs + 1]
+            seq_lens_device = common_attn_metadata.seq_lens[:num_reqs]
+        else:
+            # Preserve the native path; the PyPTO block consumes the existing
+            # device-resident metadata instead of creating another H2D copy.
+            query_start_loc = query_start_loc_cpu.pin_memory().to(self.device, non_blocking=True)
+            seq_lens_device = None
 
         attn_metadata = AscendMetadata(
             num_actual_tokens=num_actual_tokens,
@@ -317,6 +328,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
             block_tables=block_table,
             query_start_loc=query_start_loc,
             seq_lens=seq_lens,
+            seq_lens_device=seq_lens_device,
             seq_lens_cpu=seq_lens,
             seq_lens_list=seq_lens.tolist(),
             max_query_len=common_attn_metadata.max_query_len,
