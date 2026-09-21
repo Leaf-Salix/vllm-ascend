@@ -14,6 +14,9 @@ export OWN_VENV="${OWN_VENV:-$OWN/.venv}"
 export OWN_WORK="${OWN_WORK:-/data/sunkaixuan/skx_log_output/own_stack}"
 
 export PYPTO_ROOT="$OWN/pypto"
+# pypto#2822 turned persistent JIT caching off by default; without this every
+# call recompiles (~3.5 s) and throughput drops by ~8x with no error surfaced.
+export PYPTO_CACHE=1
 export PYPTO_LIB_ROOT="${PYPTO_LIB_ROOT:-/data/sunkaixuan/sunkaixuan_subdir/all_libs/pypto-lib-csa-20260917}"
 # 登录环境自带 PTOAS_ROOT=/usr/local/bin/ptoas-bin（机器级默认，指的是可执行文件不是根目录），
 # 所以这里必须无条件覆盖；要换版本用 PTOAS_VER。

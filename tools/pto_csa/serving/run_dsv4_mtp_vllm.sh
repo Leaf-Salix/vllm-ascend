@@ -35,6 +35,10 @@ TS=$(date +%Y%m%d_%H%M%S)
 TAG="dp${DEVICE_NUM}_bs${BATCH_SIZE}"
 OUT="$RUN_ROOT/dsv4_mtp_vllm_${TS}_${TAG}"
 mkdir -p "$OUT"
+# The AICPU/CCECPU device log defaults to a directory shared with every other
+# user on the box. The driver only fopens it, so the directory has to exist.
+export ASCEND_PROCESS_LOG_PATH="${ASCEND_PROCESS_LOG_PATH:-$OUT/ascend}"
+mkdir -p "$ASCEND_PROCESS_LOG_PATH"
 printf '%s\n' "$OUT" > "$RUN_ROOT/latest_out.txt"
 
 # --device auto 只在白名单内挑卡（本机默认白名单是奇数卡）；要整机 16 卡得放开白名单。
@@ -46,6 +50,7 @@ else
 fi
 
 echo "[dsv4] OUT=$OUT"
+echo "[dsv4] device log -> $ASCEND_PROCESS_LOG_PATH"
 echo "[dsv4] model=$MODEL bs=$BATCH_SIZE device_num=$DEVICE_NUM profile=$PROFILE layers=${NUM_LAYERS:-all}"
 task-submit --list 2>&1 | sed -n '1,8p'
 
@@ -85,6 +90,7 @@ task-submit "${DEV_ARGS[@]}" \
     --env VLLM_ASCEND_PROFILER_LEVEL="${VLLM_ASCEND_PROFILER_LEVEL:-}" \
     --env PYPTO_ROOT="${PYPTO_ROOT:-}" \
     --env PYPTO_LIB_ROOT="${PYPTO_LIB_ROOT:-}" \
+    --env ASCEND_PROCESS_LOG_PATH="$ASCEND_PROCESS_LOG_PATH" \
     --env PTOAS_ROOT="${PTOAS_ROOT:-}" \
     --run "bash $HERE/dsv4_case_inner.sh" 2>&1 | tee "$OUT/task_submit.log"
 rc=${PIPESTATUS[0]}

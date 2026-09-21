@@ -238,7 +238,8 @@ def _repage_block_table(bt: torch.Tensor, n_cols: int, per: int, n_blocks: int) 
     return phys.clamp(0, n_blocks - 1).to(torch.int32)
 
 
-def _window_indices(positions: torch.Tensor, swa_bt: torch.Tensor, seq: int, win: int) -> torch.Tensor:
+def _window_indices(positions: torch.Tensor, swa_bt: torch.Tensor, seq: int, win: int,
+                    paged=None) -> torch.Tensor:
     """Per-token physical KV rows for the sliding window, -1 where unmapped.
 
     The row is ordered oldest-to-current with the padding on the left; the kernel
@@ -257,9 +258,14 @@ def _window_indices(positions: torch.Tensor, swa_bt: torch.Tensor, seq: int, win
     ok = (abs_pos >= 0) & (lblk >= 0) & (lblk < bt_t.shape[1])
     pblk = torch.gather(bt_t, 1, lblk.clamp(0, bt_t.shape[1] - 1))
     ok = ok & (pblk >= 0)
-    return torch.where(
-        ok, pblk.clamp_min(0) * VLLM_PAGE + intra, torch.full_like(abs_pos, -1)
-    ).to(torch.int32)
+    if paged is not None and paged.compacted:
+        # The logical column is the block-table column, so the row a compacted
+        # cache put this block in follows without searching for it.
+        col = lblk.clamp(0, bt_t.shape[1] - 1)
+        flat = (req.unsqueeze(1) * bt_t.shape[1] + col) * VLLM_PAGE + intra
+    else:
+        flat = pblk.clamp_min(0) * VLLM_PAGE + intra
+    return torch.where(ok, flat, torch.full_like(abs_pos, -1)).to(torch.int32)
 
 
 def _compressed_rows(positions: torch.Tensor):
@@ -448,6 +454,79 @@ def state_slots(positions: torch.Tensor, seq: int) -> torch.Tensor:
     return (req * rr + (pos % rr)).to(torch.int64)
 
 
+class Paged:
+    """A KV cache as the kernel addresses it, plus the translation that implies.
+
+    A contiguous cache is only reinterpreted, so a vLLM slot still names the same
+    row and the kernel writes into vLLM's own pages. A strided one has to be
+    compacted into a private buffer, and that moves every row: slots computed
+    against the original cache name rows the buffer does not have, and whatever
+    the kernel writes there is invisible to vLLM until it is copied back.
+
+    ``remap`` records what it translated, so ``commit`` needs no arguments; a
+    cache the kernel writes but is given no slot mapping for is declared with
+    ``track``.
+    """
+
+    def __init__(self, view, table, block_table, cache=None):
+        self.view = view
+        self.table = table
+        self._bt = block_table
+        self._cache = cache
+        self._slots = None
+
+    @property
+    def compacted(self) -> bool:
+        return self._cache is not None
+
+    def _located(self, flat, req):
+        """Where a row of the original cache sits after compaction, and if at all.
+
+        The physical block is searched for in the request's own block table rather
+        than derived from the position, so this holds whatever rule vLLM used to
+        assign the slot.
+        """
+        phys = torch.div(flat, VLLM_PAGE, rounding_mode="floor")
+        intra = flat - phys * VLLM_PAGE
+        bt = self._bt.long()
+        rows = bt.index_select(0, req.clamp(max=bt.shape[0] - 1))
+        hit = rows == phys.unsqueeze(1)
+        col = torch.argmax(hit.to(torch.int32), dim=1)
+        ok = hit.any(dim=1) & (flat >= 0)
+        return (req * bt.shape[1] + col) * VLLM_PAGE + intra, ok
+
+    def track(self, flat, req):
+        """Declare the slots the kernel writes, for a cache with no mapping arg."""
+        self._slots = (flat.long(), req.long())
+
+    def remap(self, flat, req):
+        """Restate vLLM slots against the buffer the kernel was actually handed."""
+        self.track(flat, req)
+        if not self.compacted:
+            return flat
+        moved, ok = self._located(flat.long(), req.long())
+        return torch.where(ok, moved, torch.full_like(moved, -1)).to(flat.dtype)
+
+    def commit(self):
+        """Copy rows the kernel wrote in a private buffer back into vLLM's cache.
+
+        Boolean indexing reads the mask on the host. That is exact but forbidden
+        under graph capture, which is what keeps the compacted path eager-only.
+        """
+        if not self.compacted or self._slots is None:
+            return
+        flat, req = self._slots
+        moved, ok = self._located(flat, req)
+        if not bool(ok.any()):
+            return
+        d = flat[ok]
+        src = self.view.reshape(-1, *self.view.shape[2:])
+        # vLLM's page is strided, so the destination is indexed as (block, row)
+        # rather than flattened: a reshape there would write to a copy instead.
+        blk = torch.div(d, VLLM_PAGE, rounding_mode="floor")
+        self._cache[blk, d - blk * VLLM_PAGE] = src[moved[ok]].to(self._cache.dtype)
+
+
 def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
               dtype: torch.dtype | None = None):
     """Give the kernel a 32-slot-page view of a 128-slot vLLM cache.
@@ -457,7 +536,7 @@ def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
     the gap in one holds the other's data. Those are compacted to the pages the
     block table names, which both makes them contiguous and drops the sibling.
 
-    Returns ``(view, block_table_for_the_view)``.
+    Returns a :class:`Paged`.
     """
     per = COMPRESS_RATIO
     rows = VLLM_PAGE // per
@@ -467,7 +546,7 @@ def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
     if cache.is_contiguous() and dtype in (None, cache.dtype):
         view = cache.view(-1, rows, *cache.shape[2:])
         bt = _repage_block_table(block_table, want, per, view.shape[0])
-        return view, _pad_cols(bt, kernel_cols)
+        return Paged(view, _pad_cols(bt, kernel_cols), block_table)
 
     src = block_table.long().reshape(-1).clamp(0, cache.shape[0] - 1)
     packed = cache.index_select(0, src).contiguous()
@@ -476,7 +555,8 @@ def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
     view = packed.view(b * ncols * per, rows, *packed.shape[2:])
     compact = torch.arange(b * ncols, device=cache.device).view(b, ncols, 1) * per
     bt = (compact + torch.arange(per, device=cache.device).view(1, 1, per))
-    return view, _pad_cols(bt.reshape(b, ncols * per).to(torch.int32), kernel_cols)
+    return Paged(view, _pad_cols(bt.reshape(b, ncols * per).to(torch.int32), kernel_cols),
+                 block_table, cache=cache)
 
 
 def _pad_cols(bt: torch.Tensor, cols: int) -> torch.Tensor:
@@ -625,15 +705,18 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     a["cmp_freqs_sin"] = cs.index_select(0, rc)
 
     # Paged KV: the kernel's page is a quarter of vLLM's.
-    a["kv_cache"], _ = repage_kv(swa_kv_c, swa_md.block_table, kcsa.CMP_MAX_BLOCKS)
-    a["cmp_kv"], a["cmp_block_table"] = repage_kv(
-        cmp_kv_c, cmp_md.block_table, kcsa.CMP_MAX_BLOCKS)
-    a["idx_kv_cache"], a["idx_block_table"] = repage_kv(
-        idx_k_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS)
+    pg_swa = repage_kv(swa_kv_c, swa_md.block_table, kcsa.CMP_MAX_BLOCKS)
+    pg_cmp = repage_kv(cmp_kv_c, cmp_md.block_table, kcsa.CMP_MAX_BLOCKS)
+    pg_idx = repage_kv(idx_k_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS)
     # The scale cache shares its page with the key cache and is FP16 there; the
     # kernel's signature is FP32, and it cannot be cast in place.
-    a["idx_kv_scale"], _ = repage_kv(
-        idx_s_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS, dtype=torch.float32)
+    pg_ids = repage_kv(idx_s_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS,
+                       dtype=torch.float32)
+    paged = (pg_swa, pg_cmp, pg_idx, pg_ids)
+    a["kv_cache"] = pg_swa.view
+    a["cmp_kv"], a["cmp_block_table"] = pg_cmp.view, pg_cmp.table
+    a["idx_kv_cache"], a["idx_block_table"] = pg_idx.view, pg_idx.table
+    a["idx_kv_scale"] = pg_ids.view
 
     # Compressor state: a private ring per request, seeded from vLLM's cache.
     main_dim = kcsa.MAIN_STATE_DIM
@@ -651,13 +734,19 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     def _inert(x):
         return torch.where(real, x, torch.full_like(x, -1))
 
-    a["ori_slot_mapping"] = _inert(
+    ori_flat = _inert(
         _flat_slots(swa_md.slot_mapping, VLLM_PAGE).index_select(0, src * seq))
-    a["cmp_slot_mapping"] = _inert(_to_token_rows(
+    cmp_flat = _inert(_to_token_rows(
         _flat_slots(cmp_md.slot_mapping, VLLM_PAGE), row, boundary, -1))
-    a["idx_slot_mapping"] = _inert(_to_token_rows(
+    idx_flat = _inert(_to_token_rows(
         _flat_slots(idx_md.slot_mapping, VLLM_PAGE), row, boundary, -1))
-    a["window_swa_indices"] = _window_indices(pos, swa_md.block_table, ks, kcsa.WIN)
+    a["ori_slot_mapping"] = pg_swa.remap(ori_flat, src)
+    a["cmp_slot_mapping"] = pg_cmp.remap(cmp_flat, src)
+    a["idx_slot_mapping"] = pg_idx.remap(idx_flat, src)
+    # The scale is written at the key's slots but takes no mapping of its own.
+    pg_ids.track(idx_flat, src)
+    a["window_swa_indices"] = _window_indices(pos, swa_md.block_table, ks, kcsa.WIN,
+                                              paged=pg_swa)
 
     a["position_ids"] = pos.to(torch.int32)
     a["kv_seq_lens"] = cmp_md.seq_lens.to(torch.int32)[:b]
@@ -665,7 +754,8 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     a["inner_state_slot_mapping"] = a["state_slot_mapping"]
 
     return [a[name] for name in ARG_ORDER], (plan_m, plan_i, state_c, ist_c,
-                                             main_dim, inner_dim, pos, ks, n_real)
+                                             main_dim, inner_dim, pos, ks, n_real,
+                                             paged)
 
 
 def _pick(table, layer):
@@ -799,7 +889,7 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     seq = _env_int("PTO_ATTN_SEQ", 1)
     args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq,
                             self.dsa_attn.layer_name)
-    plan_m, plan_i, state_c, ist_c, main_dim, inner_dim, pos, ks, n_real = plan
+    plan_m, plan_i, state_c, ist_c, main_dim, inner_dim, pos, ks, n_real, paged = plan
 
     _registered()(*args)
 
@@ -807,6 +897,8 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
                      plan_m, ks, pos, main_dim)
     write_state_ring(ist_c, args[ARG_ORDER.index("inner_compress_state")],
                      plan_i, ks, pos, inner_dim)
+    for pg in paged:
+        pg.commit()
 
     take = torch.arange(n_real, device=output.device) * ks
     rows = args[-1].index_select(0, take)
