@@ -16,25 +16,24 @@ artifact 路径。答不出来的列为待补，没有猜。
 | --- | --- |
 | 已复核通过 | 复核方确认每条引用属实 |
 | 复核未通过 | 复核方推翻了实质内容，本文已按更正改写，原答复保留在后面供对照 |
-| 复核进行中 | 调查已完成但复核未回，**按未经验证对待** |
 
 ## 状态
 
 | 项 | 内容 | 状态 |
 | --- | --- | --- |
 | 第 1 项 | 准确的代码版本 | 已复核通过 |
-| 第 2 项 | 主压缩器 state 的完整布局 | 复核进行中 |
+| 第 2 项 | 主压缩器 state 的完整布局 | 已复核通过 |
 | 第 3 项 | inner compressor state 的完整布局 | **复核未通过，已按更正改写** |
 | 第 4 项 | indexer key/scale 的共享存储契约 | **复核未通过，已按更正改写** |
-| 第 5+6 项 | raw/cmp KV 分页语义 + 五类 slot mapping | 复核进行中 |
-| 第 7 项 | 运行时 batch/token 维度关系 | 复核进行中 |
-| 第 8 项 | 可复现 fixture | 复核进行中 |
+| 第 5+6 项 | raw/cmp KV 分页语义 + 五类 slot mapping | 已复核通过 |
+| 第 7 项 | 运行时 batch/token 维度关系 | 已复核通过 |
+| 第 8 项 | 可复现 fixture | **复核未通过，已按更正改写** |
 
 ## 先看这三条
 
 对方点名说第 2、3、4、6 项必须确认后才能改生产代码。目前：
 
-**一、state block table 记的是绝对历史页，不是固定环形槽。**【第 2 项，已查实】
+**一、state block table 记的是绝对历史页，不是固定环形槽。**【第 2 项，已复核通过】
 shape `[B, 1088]` INT32，列 j 对应 position ∈ [8j, 8j+8)。ring 语义**只存在于算子这一侧**，
 vLLM 侧没有 wrap，它靠 sliding-window allocator 回收物理页。这就是对方担心「答错会在多步
 decode 中静默写坏状态」的那条，现在有答案。
@@ -371,7 +370,7 @@ official-l3 里 layer 0/1 的 `compress_ratio=0`，它们的 `kv_cache[2..5]` �
 
 # 第 2 项 · 主压缩器 state 的完整布局
 
-> 复核状态：复核进行中
+> 复核状态：已复核通过
 
 #### 问卷第 2 项 —— 主压缩器 state 的完整布局
 
@@ -605,6 +604,17 @@ kernel 只读表的前 8 列（`MAIN_STATE_MAX_BLOCKS=8`）。把 `[B,1088]` 的
 - 第 2(f) 里点出的重复页 index_copy_ 覆盖风险、以及未来 7 行写回陈旧列的风险，都是按代码推导的『可能路径』；在当前 bs=4 / prompt=1024 / max_model_len=8704 下是否真的触发，没有实测。两者今天看起来都是 read-modify-write 恒等操作因而良性，但重复页那条一旦触发就是静默丢更新。
 - probe/compare artifact 来自 B=1、prompt 8192 的 run（num_blocks=21777），msprof 来自 bs=4 的 run（num_blocks=34730）。两者 num_blocks 不同属正常（随可用显存变），但本答案里凡涉及 num_blocks 的绝对数字都要按目标 run 重新取。
 
+
+## 复核补充的细节更正
+
+- SUMMARY BULLET IS WRONG AS WRITTEN (the one precision defect a kernel author could act on): "state_c 实际传给 kernel 的是 [num_blocks, 8, 1, 2048]". [nb,8,1,2048] is what vLLM hands the CONVERSION LAYER (dsa.py:279 tuple index 2) and, after .squeeze(-2), what the NATIVE CANN Compressor op receives ([34730,8,2048], dsa_v1.py:2306, confirmed in prof_native kernel_details.csv). What our registered kernel receives is the private ring: compress_state = [8,2,2048] fp32 contiguous (measured in compare__model_layers_2_self_attn_attn.json), built by make_state_ring at pto_attn.py:776 with layout [b*RR/2, 2, MAIN_STATE_DIM]. The body of the answer gets this right in sections (d)/(e); only the opening summary conflates them. Anyone sizing a kernel argument from the summary alone would size the wrong tensor.
+- WRONG ANCHOR for the shared-pool claim, though the conclusion survives. vllm-v0.20.2/vllm/v1/core/kv_cache_utils.py:1285-1288 does contain the quoted text ("As layers of different groups have different block table, they will use different parts of the shared Tensor"), but it sits in the `else:` general-case branch. Lines 1275-1283 route `all(isinstance(group.kv_cache_spec, UniformTypeKVCacheSpecs))` — i.e. DeepSeek-V4 — to `_get_kv_cache_config_deepseek_v4`, which vllm_ascend replaces at patch/platform/patch_kv_cache_utils.py:249 with its own :184-244. So that comment is NOT the code path for this configuration; only the patch_kv_cache_utils.py:232-240 citation is load-bearing.
+- The shared-tensor mechanism is SHARPER than the answer states, and the kernel team should be told the sharper version. model_runner_v1.py:3656-3658 assigns the SAME torch.Tensor object to every layer_name in kv_cache_tensor.shared_by, and _adjust_kv_layout (:3771-3776) then gives each of those layers a view at storage_offset 0 with page stride = page_size_bytes. So layers sharing the 131072-byte bucket (state cache; compress-attn and swa caches, whose probe stride0 of 65536 bf16 = 131072 B confirms the same bucket) are aliased PAGE FOR PAGE onto one allocation. The only thing keeping state page p's upper 64 KB free is global block-id exclusivity: there is a single BlockPool for all groups (vllm/v1/core/kv_cache_coordinator.py:50). State it that way — "padding" is not reserved dead space, it is another group's page-p second half, unowned only because the allocator never hands block id p to two groups at once.
+- FORMULA MISSTATED (numerically harmless here). gpu_model_runner.py:6480-6482 is `cdiv(max_model_len, block_size * get_total_cp_world_size())`, and `max_model_len` at :6474 is `max(self.max_model_len, self.max_encoder_len)` — not `cdiv(max_model_len, block_size)` as quoted. With TP=1 / no CP it still gives cdiv(8704,8)=1088, and 1088 is independently MEASURED (probe [1,1088]; msprof `4,1088` INT32), so the number is safe. The formula as written would be wrong on any CP-enabled deployment.
+- MSPROF ATTRIBUTION INCOMPLETE, and the omitted part is a cost the requester should see. Per layer per decode step the prof_pto CSV shows THREE rows carrying the base shape 34730,16,2048: two aclnnIndexSelect_SliceAiCore_Slice and one aclnnInplaceIndexCopy_SliceAiCore_Slice. The answer maps them to pto_attn.py:378 and :433 only; the second index_select is write_state_ring's read-modify-write at :426. Each row measures ~3.52-3.59 ms, so the main-state ring conversion alone costs ~10.6 ms per layer per step in the profiled run. The answer never quantifies the conversion layer's price while recommending keeping it.
+- MINOR CITATION DRIFT, no effect: real_page_size_bytes in kv_cache_interface.py is the property at :472-485 with the return expression at :480-485, cited as :479-484 (lands inside). decode_metadata.py has two guards the answer did not quote — :228 `csa_state_count >= CSA_STATE_REQUIRED_BLOCKS` before the table read and :239 `csa_state_physical_block >= 0` — neither changes the modulo semantics the answer derives.
+- ONE ADDITION TO THEIR LIVE-READ LIST: they propose adding storage_offset()/data_ptr() to describe(). Confirmed describe() at pto_attn.py:626 records none of these — but pto_attn.py:867-869 already maintains `_SEEN_ADDRS[n] = t.data_ptr()`, so a data_ptr audit hook exists and can be extended rather than written from scratch.
+- CONFIRMED-AS-HONEST, not a defect: the two items the answer flags as strong inference really are unreadable in-tree. compressor_kernel_perf.h:258 `constInfo.blockSize = tilingData_->pageAttentionParams.blockSize` and :264 `constInfo.stride = tilingData_->baseParams.stride`; the only file matching `maxBlockNumPerBatch` on the host side is the binary op_tiling/lib/linux/aarch64/libcust_opmaster_rt2.0.so. So blockSize=8 and stride=32768 floats genuinely cannot be read, only inferred — exactly as the answer says.
 
 ---
 
@@ -1090,7 +1100,7 @@ untyped_storage().nbytes() == num_blocks * 16640        # + 2MiB 若开 kv_trans
 
 # 第 5+6 项 · raw/cmp KV 分页语义 + 五类 slot mapping
 
-> 复核状态：复核进行中
+> 复核状态：已复核通过
 
 ### ITEM 5 — raw KV 与 compressed KV 的 128 行分页语义
 
@@ -1356,11 +1366,21 @@ n_blocks = view.shape[0] = cache.shape[0] * 4
 - 本次全程只读文件、只跑了一次纯 python 算术复算,没有启动任何 NPU 作业,也没有插桩重跑。上面 needs_live 里的每一项都需要一次带打印的 eager(非 capture)decode 才能落地。
 
 
+## 复核补充的细节更正
+
+- WRONG ANCHOR, right conclusion — kv_seq_lens. The answer says '实测 kv_seq_lens 是 token 数(probe1 seqused_kv=4098 @ pos 4097)'. `seqused_kv` in /data/sunkaixuan/skx_log_output/csa_b_tier/probe1/attn__model_layers_2_self_attn_attn.json is an argument to the NATIVE sparse-attn op; it says nothing about `cmp_md.seq_lens`, which is what pto_attn.py:802 actually passes. The correct chain, which I verified and which does confirm the conclusion: dsa_v1.py:540 `self.seq_lens = common_attn_metadata.seq_lens[:num_reqs]` (raw token lengths) → dsa_v1.py:1085 `seq_lens=self.seq_lens[:self.num_decodes]` into AscendDSADecodeMetadata. Contrast dsa_v1.py:668-670, where compressed lengths are derived by an explicit `// compress_ratio` and only for prefill. This matters enough to fix before sending: if the decode metadata had carried the compressed length, decode_indexer.py:197's `cache_len = kv_seq_lens[b] // COMPRESS_RATIO` would see 1/16 of the candidate rows, and the failure would be silent truncation of the indexer's search, not an error.
+- MISSING ARTIFACT FACT — the one end-to-end number, and it is bad. /data/sunkaixuan/skx_log_output/csa_cut_20260920/compare/compare__model_layers_2_self_attn_attn.json records `max_abs_diff = 5.7109375`, `cosine = 0.36145833` (with `ok: true`, threshold unknown), at stage=complete, seq=1, B=1/S=8. The answer cites this file for arg shapes and omits the result. Note B=1 means n_real=1, the one configuration in which the confirmed `_compressed_rows` defect cannot fire — so this discrepancy is something else again. Five sections of exact-identity arithmetic (5b, 5c, the 6(4) two-way ring proof) go to the lib team with no statement that the only measured end-to-end comparison on this host does not match. Every 'identity, zero error' conclusion in items 5 and 6 is derived, never corroborated; say so.
+- OVERSTATED UNKNOWN — the '24 occurrences' gap is resolvable from code and should move out of `unknowns`. The answer says '24 这个倍数没有对上任何已读到的代码路径,归属未定'. The pto CSV splits it for you: `aclnnIndexSelect_SliceAiCore_Slice` 34730,16,2048→34730,8,2048 appears 16 times and `aclnnInplaceIndexCopy_SliceAiCore_Slice` 8 times; identically for AsStrided (16 + 8). That is exactly 2 `cache.index_select` + 1 `cache.index_copy_` per step over 8 profiled steps: pto_attn.py:378 (`_pick_rows`, called from `make_state_ring`), pto_attn.py:426 (`write_state_ring`'s read-modify-write), pto_attn.py:433 (`cache.index_copy_`). The GatherV3 row counts corroborate it — `34730,8,1,2048;64;1` is b*_RR = 4*16 = 64 (the seed) and `;12;1` is b*span = 4*3 = 12 (the writeback). The conversion layer's ~86 ms of state-cache traffic per 8 steps is fully attributed; leaving it as 'unassigned' invites the lib team to go looking for a phantom path.
+- IMPRECISE, and the imprecision weakens the answer's own defect case. The answer writes '只有 sparse_bias / valid_block_mask(:154-173) 用 row-max'. Only `valid_block_mask` is a row-max (decode_sparse_attn_csa.py:161 `raw_block_valid = pl.row_max(v_win_valid)`, written at :163-164). `sparse_bias` is strictly per-column (:173, `sparse_bias[..., 0:WIN] = (v_win_valid - 1) * -NEG_INF`). That is the stronger form of the argument: because the bias is keyed to the same column index as the gather at :277, a misaligned host row produces KV rows for the wrong absolute positions while the bias still marks those columns valid.
+- UNDER-SPECIFIED MECHANISM — state the window defect the way someone editing kernel source needs it. For `pos < WIN-1 = 127`, the kernel bounds its gather to columns `< qk_win_len = pos+1` (decode_sparse_attn_csa.py:269-272) while the host writes valid entries only at columns `>= WIN-1-pos` (pto_attn.py:254-255, `abs_pos = pos - 127 + k`). The intersection is columns `127-pos .. pos`, carrying absolute positions `0 .. 2*pos-127` — so the sliding window silently attends to the OLDEST positions and drops the most recent ones. Below pos≈63 the intersection is empty, every column the kernel reads is -1, the `if qk_raw_row >= 0` at :278 skips the gather, and the KV tile stays zero. Also, the answer says the CPU test merely fails to cover this; it is worse than that — test_pto_attn_cpu.py:46-48 asserts `w[:, -1]` is the current token, so the right-aligned convention is pinned by an assertion. Changing only the host reddens that test, so the fix has to name it.
+- CITATION DRIFT — four line numbers point at the wrong construct. They all resolve to something real, but a reader who opens them finds unrelated code, which is a doc-consistency defect in a document whose whole premise is 'every claim carries a file:line'. (a) `describe()` is at pto_attn.py:626-630, NOT :230-231 — :228-231 is the docstring/first line of `_repage_block_table`. The answer cites :230-231 three separate times, including in the unknowns and in needs_live #3, where it is the anchor for 'the probe records no storage_offset/data_ptr'. The fact is true at :626-630. (b) `Paged._located`'s `moved` formula is at :531, not :532 (the answer's '`pto_attn.py:132(方法内) → 文件 :532`' is also an artifact of an editing pass and should go). (c) `commit`'s early return for a non-compacted cache is at :555-556, not :546 (:546 is the docstring). (d) the 'parked' logic is at :570-577; the answer cites ':171-178', which is inside `prepare_weights`. Minor: the 'cache dim0 is strided' comment is at :352-355, not :356-358.
+- WORTH ADDING, not a correction to anything said — `compressed_tokens_start`, the length of the packed array that the defective `row` indexes into, is computed by `mask.sum().item()` at dsa_v1.py:950 and memoized in `decode_ratio_to_sas_metadata` at :953-961 (a dict handed in at :512, shared across the three layers of a build). The answer describes it correctly as '本步 boundary token 数', and I found no evidence the dict survives a step, so this is not a staleness defect. But it is a device→host `.item()` sitting on the same path, in vLLM's own builder rather than in pto_attn, and the lib team asking about capture-safety will hit it.
+
 ---
 
 # 第 7 项 · 运行时 batch/token 维度关系
 
-> 复核状态：复核进行中
+> 复核状态：已复核通过
 
 #### 第 7 题 —— 运行时 batch / token 维度关系
 
@@ -1623,11 +1643,42 @@ if len(shape) != len(info.shape) or any(
 - 我没有验证 `decode_csa_attn_tp1_test` 在 T_DYN 不是 T_PAD 时，`o_packed_heads` 中 t_dim..T_PAD 之间的行是否被清零。decode_o_proj.py:213-215 有一段把 t_dim..proj_b_padded_rows 填 0 的逻辑（针对 o_r_i8_pad），但 o_packed_heads 本身的尾部行由 sparse_attn_csa_tp1 写，我没读到它是否覆盖全部 T_PAD 行。若未清零且 proj_a 的 pa_rows 用 pl.min 截断（decode_o_proj.py:178），则应该无害，但未确证。
 
 
+## 复核补充的细节更正
+
+- FALSE as stated: '这些在 prof_native 里一个都没有' (the Range/GatherV3/FloorDiv/SelectV2/ClipByValueV2/LogicalAnd/ScatterUpdate/IndexPutV2 list). Exact counts by the CSV's Type column — pto vs native: Range 216/0, GatherV3 208/0, ClipByValueV2 256/0, LogicalAnd 112/0, ScatterUpdate 32/0, IndexPutV2 32/0, but FloorDiv 176/40 and SelectV2 184/24. Rewrite as 'six of these eight are absent from prof_native; FloorDiv and SelectV2 exist natively (40 and 24) and rise to 176 and 184.' The per-op numbers the answer gave are all correct — only the blanket statement is wrong.
+- Off by one: '其余 21 个是权重/常量表' should be 22. 46 args − 13 token-indexed − 5 request-indexed − 6 cache-indexed = 22 (decode_csa.py:1190-1195, 1200-1203, 1206-1213, 1230-1233).
+- Mis-attributed log line: 'server.log:27/93 记 … cudagraph_num_of_warmups: 1'. Line 27 (the non-default-args dump) actually shows cudagraph_num_of_warmups': 0 and cudagraph_capture_size': None; only line 93 (the resolved engine config) shows 1 and 4. cudagraph_capture_sizes: [1,2,4], FULL_DECODE_ONLY and max_num_seqs: 4 are where claimed.
+- Mislabeled citation: decode_sparse_attn_csa.py:535 ('b = t // S') is inside the torch golden reference, not kernel code — line 531 is `o = torch.zeros(tokens, H, HEAD_DIM)` and 539 calls `.tolist()`. Drop it from the list of device-side compile-time `// S` sites; the claim stands on :202 plus decode_indexer.py:195/324/380/388, which are all genuine kernel code.
+- Incomplete quote: the print gate at pto_attn.py:1015 is `if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0`, not `_RAN[0] <= 5 or _RAN[0] % 10 == 0`. The inference is unaffected (cap is False after capture), but the `cap or` is why n=6 printed at all, so omitting it makes the six-line sequence look unexplained.
+- Unanchored: '6 个 KV cache 来自 _build_kv_cache（dsa.py:269-303），引擎初始化时一次性分配'. Lines 269-303 re-read `self.swa_cache_layer.kv_cache` / `self.compressor.state_cache.kv_cache` / etc. on every call and say nothing about when the storage was allocated or whether its address is stable. Keep the 6-tuple and its order (which are correct and match pto_attn.py:725), drop '一次性分配', and move the stability question wholly into the live-read list where the data_ptr item already sits.
+- Wrong for one of four: 'o_r_pad / o_r_i8_pad / act_scale_dq / partials 全是 T_PAD 行'. decode_o_proj.py:161 declares `act_scale_dq = pl.create_tensor([O_GROUPS, T_PAD])` — T_PAD is its column count. The other three (159, 160, 164) are T_PAD-row as claimed.
+- Name mismatch a reader will grep for: decode_o_proj.py:139 declares the parameter `o_packed`, not `o_packed_heads`. `o_packed_heads` is the caller's local at decode_csa.py:993. Both shapes are [O_GROUPS*T_PAD, O_GROUP_IN] as claimed.
+- Over-labeled as 【实测】: '本次实测里它们确实都等于 4' (cmp/idx block-table rows == n_real). What the CSV shows is a [4,68] tensor gathered by a 32-long index (`in:"4,68;32;1"`), i.e. vLLM's decode block_table has 4 rows; the kernel arg's row count is then inferred through repage_kv:593 + _pad_cols. No artifact prints the kernel arg's shape at bs=4. Relabel as inferred, which makes the accompanying 'no one checks this' live-read item read as the open question it is.
+
 ---
 
 # 第 8 项 · 可复现 fixture
 
-> 复核状态：复核进行中
+> 复核状态：**复核未通过，已按更正改写**
+
+## 复核的更正（以这一节为准）
+
+- §d indexer page-crossing, WRONG ARITHMETIC — kills the 'default run misses it' claim. Their own formula gives straddling writes at pos = 512m-1 and 512m+3. m=2 -> pos 1023 and 1027. With pos_k = 1023+k (their own definition), pos 1027 is DECODE STEP 4 of the default P≈1024 / MAX_TOKENS=32 run. The answer reports the nearest pair as '1535/1539 = step 512/516' — wrong m, and a position read as a step index. '差两个数量级' is false. Note they identify step 4 as a compression step (pos ≡ 3 mod 4) two lines earlier. Consequence: the default configuration already exercises an indexer key/scale page change on the decode side; P=1535 is still preferable only because it puts BOTH straddling writes (1535 at step 1, 1539 at step 5) inside decode rather than one of them in prefill. Say that instead.
+- §d '1536 同时满足 ... 1536/4 = 384 且 384 % 128 == 0 -> 压缩 KV 128 行页沿' is wrong. boundary = ((pos + 1) % COMPRESS_RATIO) == 0 at pto_attn.py:278, so a boundary token is pos ≡ 3 (mod 4). 1536 % 4 == 0, so at pos 1536 cmp_slot_mapping and idx_slot_mapping are BOTH -1 (pto_attn.py:789-795) and nothing is written to cmp_kv or idx_kv_cache at all. The compressed-KV page crossing actually occurs at pos 1539 (compressed row 384), i.e. at step 5 together with the indexer one — not at step 2. Their claim '四项仅靠 step 1->2 这一对就能覆盖' is true only for the four token-granular boundaries (128-slot KV page, 32-slot kernel page, 16-row ring wrap, 8-row state page).
+- §a-3 'overall KV cache excluded by the numel() <= 1<<22 filter' is contradicted by the artifact cited for it. Measured: /data/sunkaixuan/skx_log_output/csa_b_tier/dump1/step0.pt is 18,953,448,427 bytes (18.95 GB), and dump1/analysis.json lists stash.ori_kv = [71894,128,1,512] torch.bfloat16 and stash.cmp_kv = [71894,128,1,512] torch.bfloat16 — 4.71e9 elements each, ~1100x above 1<<22. dump2/3/4 are 103 MB, so the filter at pto_csa.py:956 postdates dump1. Correct statement: the filter exists in today's code and DOES exclude the KV caches from stash, but it is unverified by dump1, it does not apply to the `derived` half of the payload (payload.update has no filter), and the one existing artifact of this facility is a 19 GB file. Also: dump1 has no vendor_attn0.pt — only dump2/3/4 do (the code writes it only if _PENDING_VENDOR_ATTN is not None).
+- e-2 'six caches' physical page 0 / row 0 holds capture-period garbage' — BOTH cited anchors say something else. dsa_v1.py:434 is inside AscendDSAMetadataBuilder.__init__ (class at :339, __init__ at :355) and allocates the persistent reusable buffer self.slot_mapping = torch.zeros((max_num_batched_tokens, 2), int32); it is filled from common_attn_metadata.slot_mapping at :562-565 as [slot//block_size, slot%block_size]. It is not 'dummy metadata's slot mapping is zeros'. dsa_v1.py:1506-1514 creates LOCAL THROWAWAY tensors — indexer_k_cache = torch.zeros((1,1,1,head_dim)), indexer_scale_cache likewise — and scatters into THOSE, with the comment 'In profiling stage, create dummy tensors to ensure ACL graph captures scatter operator.' The real indexer cache is never touched. The claim must move from `answer` to `unknowns` in full.
+- The mechanism that DOES aim inert rows at page 0 was missed, and it is worse than the one claimed. dsa_v1.py:970-971: `self.start_pos_decode[num_reqs_actual:].fill_(0)` and `self.block_table[num_reqs_actual : self.num_decodes, ...].fill_(0)`. Under graph padding, a padded request's block table row is all zeros, so pto_attn's state_ring_plan (:349-374) gathers blk=0, make_state_ring seeds from physical page 0, and write_state_ring (:395-434) writes back to page 0 — while `real` in rectangular() marks lane t%S==0 of EVERY n_real request (including padded ones) as valid, so _inert does not suppress it. That is a live-tensor question worth putting at the top of the live-read list, phrased against :970-971.
+- 'commit() 之前六份 cache 里没有这一步的结果' is false for four of six caches. repage_kv (pto_attn.py:580-596) takes the contiguous branch for swa and cmp and returns a Paged whose `view` is a reinterpretation of vLLM's own cache — the kernel writes vLLM's pages directly and nothing needs copying back. Paged.commit() begins `if not self.compacted or self._slots is None: return` (:554), and `compacted` is true only for the strided indexer key/scale pair. So: kv_cache/cmp_kv are live immediately; idx_kv_cache/idx_kv_scale need commit(); compress_state/inner_compress_state need write_state_ring. Dumping after :1005 is still the right rule — fix the reason, or a reader will believe kv_cache is a private buffer.
+- 'Paged.commit 特意把 inert 行停泊在行 0' implies pollution; the cited docstring says the opposite. pto_attn.py:545-553 ends 'Nothing here assumes vLLM keeps row 0 free', and :570-575 computes parked = rows[first] if a real slot owns row 0 else self._cache[0,0] — i.e. the scatter is an IDENTITY for parked rows when row 0 is not really owned. commit() does not contribute to page-0 contamination.
+- The live-read recipe for the one item called decision-critical cannot decide it. Printing idx_md.slot_mapping.shape[0] / cmp_md.slot_mapping.shape[0] / host_pos.shape[0] yields identical lengths under both hypotheses, because pto_attn.py:791-793 already gathers idx_md.slot_mapping by the compressed `row` index — so its length is the compressed-row count either way. What separates them is the VALUE. At pto_attn.py:735-740 (after `boundary, row = _compressed_rows(pos)`) print, for one known step: host_pos[:8], _flat_slots(cmp_md.slot_mapping, VLLM_PAGE)[:8], _flat_slots(idx_md.slot_mapping, VLLM_PAGE)[:8], idx_md.block_table[0,:8], cmp_md.block_table[0,:8], and both block_table.shape[1]. Token granularity ⇒ the idx flat row tracks pos; compressed-row granularity ⇒ it tracks pos//4. Nothing short of that settles it.
+- The '68 columns' evidence is misattributed. The '4,68' in kernel_details.csv is an input of the vendor SparseAttnSharedkv op (its ATTENTION block table), and stash.ori_block_table [4,68] in dump1/analysis.json is the same table. Neither is the indexer's. The real measurement is in the compare JSON: idx_kv_cache = [272, 32, 1, 128] int8. repage_kv's compacted branch (pto_attn.py:598-610) builds view = packed.view(b*ncols*per, rows, ...), so 272 = 1 x 68 x 4 -> the indexer's vLLM block table has 68 columns = max_model_len/128. That is evidence, but it is CAPACITY, not addressing: 68x128 = 8704 slots would hold every token, or every compressed row with 4x waste. It does not settle the open question either — do not let it look like it does.
+- e-4's self-consistency check does not hold for the two state caches. The tensors dumped under the names compress_state / inner_compress_state are the PRIVATE RING rebuilt each step by make_state_ring (:383-393), not vLLM's cache. Because ring_row = pos % 16 is stable per position but the window shifts by one (first-8..first+7 -> first-7..first+8), the ring row holding pos=first-8 at step 0 holds pos=first+8 at step 1 — same index, different content, by construction, one row per request. A whole-tensor bitwise comparison of step0/out vs step1/in will report a false failure. State the check as: bitwise equality applies to kv_cache / cmp_kv / idx_kv_cache / idx_kv_scale on touched rows, and to the two state caches only via their vLLM-side rows, excluding the rotated ring row.
+- e-5 overstates the 'future 7 rows' hazard by omitting the kernel-side guard. decode_compressor_ratio4.py:191 reads `if logical_pos >= 0 and logical_pos < first_pos_b:` before it resolves ring_row/state_row — so the 7 rows seeded from positions > first are never read by the compressor pooling and cannot change the golden output. They still must be dumped verbatim for a bit-exact input tensor (the host-side `ok` at :369 genuinely lacks a pos <= first term, which I confirmed), but the answer presents them as a live correctness trap. Fix the framing or the lib team will go hunting for a bug that is not there.
+- Anchor corrections (each verified against the file on the host): VLLM_PAGE=128 / VLLM_STATE_PAGE=8 / COMPRESS_RATIO=4 are pto_attn.py:63/64/65, not 64/65/66. KERNEL_STATE_PAGE=2 is :340, not :341. The `_RAN[0] <= 5 or % 10 == 0` print condition is :1015 (:1010 is `_RAN[0] += 1`). MAIN_STATE_LEN / MAIN_STATE_STORAGE_LEN are decode_csa.py:162/163, not 160-161 (the value 16 = COFF(2)*4 + S(8) is right). IDX_MAX_BLOCKS = CMP_MAX_BLOCKS is decode_csa.py:179, not :172. PROFILE_WARMUP is passed through at run_dsv4_mtp_vllm.sh:89, not :81. `--no-enable-prefix-caching` is dsv4_case_inner.sh:179, not :180. prepare_weights returns 22 weight entries, not 23. pypto.torch.init()'s signature is device/platform/runtime/aicpu_thread_num plus the three DFX fields — '签名只有 enable_chip_swimlane / enable_dep_gen / output_dir' is wrong as written; say 'the only DFX fields are those three'. Probe JSON: layer 2 has 5 metadata groups, layers 0 and 1 have 1 each — '5 个 metadata 组' is not true of all three files.
+- Size estimates, recomputed from the compare JSON's own arg_shapes rather than estimated: the 22 weights are ~176 MB, not ~140 MB (wo_a [8,1024,4096] bf16 = 67 MB, wq_b [1024,32768] int8 = 34 MB, wo_b [4096,8192] int8 = 34 MB, cmp_wkv + cmp_wgate = 17 MB, wq_a + idx_wq_b = 17 MB, wkv = 4 MB, inner_wkv + inner_wgate = 4 MB). The idx pair estimate of 4.6 MB is right for bs=4 (272 pages at n_real=1 -> 1088 at n_real=4 -> 4.25 MB + 0.14 MB). Two-step fixture ~195 MB, not ~160 MB.
+
+<details>
+<summary>原答复（已被上面的更正推翻，保留供对照）</summary>
 
 ### 问卷第 8 项 —— 可复现 fixture：现状盘点 + 生产规格
 
@@ -1924,11 +1975,14 @@ MODEL=/data/sunkaixuan/skx_log_output/dsv4_vllm/models/official-l3 \
 - `--enforce-eager` 下 vLLM 是否仍会做批 padding（若会，e-9 里"inert 请求消失"的结论需修正）。
 - fixture 每步体积的估算基于 bs=4 / T=32 与实测 block table 68 列推算，未实际落盘验证；权重一次性约 140 MB 是按 compare 记录里的 arg 形状算出的。
 
+</details>
 
 ---
 
 # 待办
 
-复核仍在进行的四项（2、5+6、7、8）回来后会更新本文。另需一轮带数值转储的运行，
-补齐各张量的 `data_ptr` 关系与各块表的实际示例值，并产出覆盖边界的 fixture；
-所需的转储内容各项的「需要活体读取」一节已列明。
+七项全部完成复核。第 3、4、8 项复核未通过，已按更正改写，原答复折叠保留。
+
+仍待补的是几处只能从活跃张量上读的：各张量的 `data_ptr` 关系、各块表的实际示例值，
+以及一份覆盖边界的 fixture。所需的转储内容各项的「需要活体读取」一节已列明；
+第 8 项的边界覆盖算式以复核更正为准。
