@@ -454,6 +454,41 @@ def state_slots(positions: torch.Tensor, seq: int) -> torch.Tensor:
     return (req * rr + (pos % rr)).to(torch.int64)
 
 
+_DEBUG_REFUSED = set()
+
+
+def capture_active() -> bool:
+    """Whether an ACLGraph capture is recording right now.
+
+    vllm-ascend clears ``forward_context.capturing`` at the start of every forward
+    and sets it immediately before entering the graph context, so it is true for
+    the recorded pass and false for the warm-up that precedes it.
+    """
+    try:
+        from vllm.forward_context import get_forward_context
+
+        return bool(getattr(get_forward_context(), "capturing", False))
+    except Exception:
+        return False
+
+
+def debug_allowed(what: str) -> bool:
+    """Whether a diagnostic that reads tensors back to the host may run.
+
+    Capture forbids the readback outright -- that is error 107027 -- and where it
+    does not raise it bakes the capture-time value into the graph, so every replay
+    reports a stale number instead of failing.
+    """
+    if not capture_active():
+        return True
+    if what not in _DEBUG_REFUSED:
+        _DEBUG_REFUSED.add(what)
+        print(f"[pto-attn] {what} declined: it reads tensors back to the host, "
+              "which ACLGraph capture rejects. Use --enforce-eager for it.",
+              flush=True)
+    return False
+
+
 class Paged:
     """A KV cache as the kernel addresses it, plus the translation that implies.
 
@@ -510,21 +545,36 @@ class Paged:
     def commit(self):
         """Copy rows the kernel wrote in a private buffer back into vLLM's cache.
 
-        Boolean indexing reads the mask on the host. That is exact but forbidden
-        under graph capture, which is what keeps the compacted path eager-only.
+        Every shape here is a function of the token count alone, so this is legal
+        under graph capture. Rows the kernel did not write are parked on the
+        cache's first row, which makes the scatter an identity for them -- unless
+        a real slot is parked there too, in which case they all write what that
+        slot's owner writes, so the duplicates agree and the real write cannot be
+        the one the scatter discards. Nothing here assumes vLLM keeps row 0 free.
         """
         if not self.compacted or self._slots is None:
             return
         flat, req = self._slots
         moved, ok = self._located(flat, req)
-        if not bool(ok.any()):
-            return
-        d = flat[ok]
         src = self.view.reshape(-1, *self.view.shape[2:])
+        rows = src.index_select(0, moved.clamp(0, src.shape[0] - 1)).to(self._cache.dtype)
         # vLLM's page is strided, so the destination is indexed as (block, row)
         # rather than flattened: a reshape there would write to a copy instead.
+        d = flat.clamp_min(0)
         blk = torch.div(d, VLLM_PAGE, rounding_mode="floor")
-        self._cache[blk, d - blk * VLLM_PAGE] = src[moved[ok]].to(self._cache.dtype)
+        row = d - blk * VLLM_PAGE
+        blk = torch.where(ok, blk, torch.zeros_like(blk))
+        row = torch.where(ok, row, torch.zeros_like(row))
+        mask = ok.reshape(-1, *([1] * (rows.dim() - 1)))
+
+        owns_park = ok & (d == 0)
+        first = torch.argmax(owns_park.to(torch.int32)).reshape(1)
+        parked = torch.where(
+            owns_park.any(),
+            rows.index_select(0, first).squeeze(0),
+            self._cache[0, 0].to(rows.dtype),
+        )
+        self._cache[blk, row] = torch.where(mask, rows, parked)
 
 
 def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
@@ -790,6 +840,46 @@ def _registered():
     return _OP
 
 
+_SEEN_ADDRS = {}
+_AUDITS = [0]
+
+
+def audit_inputs(metadata_list, n_real: int) -> None:
+    """Check that vLLM hands us the same buffers each step, on the first two.
+
+    Capture bakes the address of every tensor read here into the recorded pass, so
+    a buffer vLLM reallocates per step makes each replay read whatever now sits at
+    the old address -- with no error anywhere. Block 0 matters for the same
+    reason the recorded addresses matter at all.
+
+    This reads tensor values, so the caller must keep it off the captured pass.
+    """
+    _AUDITS[0] += 1
+    names = []
+    for i, m in enumerate(metadata_list):
+        d = m.decode
+        for attr in ("block_table", "slot_mapping", "seq_lens", "input_positions"):
+            t = getattr(d, attr, None)
+            if isinstance(t, torch.Tensor):
+                names.append((f"md{i}.{attr}", t))
+
+    moved = [n for n, t in names
+             if n in _SEEN_ADDRS and _SEEN_ADDRS[n] != t.data_ptr()]
+    for n, t in names:
+        _SEEN_ADDRS[n] = t.data_ptr()
+
+    if _AUDITS[0] == 1:
+        print("[pto-attn-audit] tensors=%d requests=%d" % (len(names), n_real),
+              flush=True)
+        return
+
+    print("[pto-attn-audit] moved_between_steps=%s"
+          % (",".join(moved) or "none"), flush=True)
+    if moved:
+        print("[pto-attn-audit] WARNING: those buffers are reallocated per step; "
+              "an ACLGraph replay would read stale addresses", flush=True)
+
+
 def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_dir: str) -> bool:
     """Run the kernel on this step's real tensors and record how it compares.
 
@@ -887,9 +977,23 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     if ratio != COMPRESS_RATIO or decode is None:
         return False
     seq = _env_int("PTO_ATTN_SEQ", 1)
+    kcsa, _ = kernel()
+    n_offered = decode.input_positions.shape[0] // seq
+    if n_offered > kcsa.B:
+        # Under capture this is the padded graph batch, not the live request
+        # count, and raising here would abort capture_model with a half-recorded
+        # graph. Declining leaves that one descriptor on the native path.
+        if "batch" not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add("batch")
+            print(f"[pto-attn] declined a batch of {n_offered}: the kernel takes "
+                  f"B={kcsa.B}", flush=True)
+        return False
     args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq,
                             self.dsa_attn.layer_name)
     plan_m, plan_i, state_c, ist_c, main_dim, inner_dim, pos, ks, n_real, paged = plan
+
+    if not capture_active() and _AUDITS[0] < 2:
+        audit_inputs(metadata_list, n_real)
 
     _registered()(*args)
 
@@ -904,6 +1008,11 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     rows = args[-1].index_select(0, take)
     output[: n_real * seq] = rows.to(output.dtype)
     _RAN[0] += 1
-    if _RAN[0] <= 5 or _RAN[0] % 10 == 0:
-        print("[pto-attn-ran] n=%d tokens=%d" % (_RAN[0], n_real * seq), flush=True)
+    # Capture happens once per descriptor and Python never runs on replay, so an
+    # ungated print there costs one line per captured shape and is the only way
+    # to tell a recorded pass from the warm-up that precedes it.
+    cap = capture_active()
+    if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0:
+        print("[pto-attn-ran] n=%d tokens=%d capturing=%s"
+              % (_RAN[0], n_real * seq, cap), flush=True)
     return True

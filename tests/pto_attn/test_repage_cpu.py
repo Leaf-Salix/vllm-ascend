@@ -90,6 +90,50 @@ check("written rows reached vLLM's page",
 touched = (after != before).any(dim=-1)
 check("only those rows moved", int(touched.sum()) == B, f"{int(touched.sum())} rows")
 
+print("== rejected slots write nothing, and nothing syncs ==")
+# The kernel is handed -1 for a padding lane or a non-boundary token. commit has
+# to leave those rows alone WITHOUT reading a mask on the host, so it redirects
+# them onto (block 0, row 0) and writes back what is already there.
+pg3 = pa.repage_kv(strided_key(), bt, KCOLS)
+mixed = torch.stack([flat[0], torch.tensor(-1), flat[2], torch.tensor(-1)])
+moved3 = pg3.remap(mixed, req)
+pg3.view.reshape(-1, DIM)[moved3.clamp_min(0)] = torch.full((B, DIM), 7, dtype=torch.int8)
+base = pg3._cache.clone()
+pg3.commit()
+after3 = pg3._cache
+moved_rows = (after3 != base).any(dim=-1)
+check("only the two real slots moved", int(moved_rows.sum()) == 2,
+      f"{int(moved_rows.sum())} rows")
+check("both real slots carry the write",
+      bool((after3[bt.long()[req, col], intra][[0, 2]] == 7).all()))
+check("block 0 row 0 untouched", bool((after3[0, 0] == base[0, 0]).all()))
+
+print("== a real slot parked on row 0 is not lost to the rejected ones ==")
+# Rejected rows have to go somewhere, and commit parks them on row 0. When a live
+# token is written there too, every rejected row must write what that token
+# writes -- otherwise the scatter picks among disagreeing duplicates and the real
+# write is the one that can vanish. vLLM is not assumed to keep row 0 free.
+bt0 = bt.clone()
+bt0[0, 0] = 0                       # request 0 column 0 -> physical page 0
+pg4 = pa.repage_kv(strided_key(), bt0, KCOLS)
+with_zero = torch.stack([torch.tensor(0), torch.tensor(-1),
+                         torch.tensor(-1), torch.tensor(-1)])
+moved4 = pg4.remap(with_zero, req)
+pg4.view.reshape(-1, DIM)[moved4.clamp_min(0)] = torch.full((B, DIM), 99, dtype=torch.int8)
+base4 = pg4._cache.clone()
+pg4.commit()
+check("the real write at row 0 survived", bool((pg4._cache[0, 0] == 99).all()),
+      f"got {pg4._cache[0, 0][:4].tolist()}")
+moved_rows4 = (pg4._cache != base4).any(dim=-1)
+check("and nothing else moved", int(moved_rows4.sum()) == 1,
+      f"{int(moved_rows4.sum())} rows")
+
+print("== commit does not read the device on the host ==")
+import inspect
+body = inspect.getsource(pa.Paged.commit)
+for probe in ("bool(", "[ok]", ".item(", ".cpu(", ".tolist(", "nonzero"):
+    check(f"no {probe!r}", probe not in body)
+
 print("== a contiguous cache is left alone ==")
 cont = torch.zeros(N_PAGES, PAGE, DIM, dtype=torch.int8)
 pgc = pa.repage_kv(cont, bt, KCOLS)

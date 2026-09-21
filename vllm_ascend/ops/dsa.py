@@ -208,13 +208,16 @@ def dsa_forward(
 
     _probe = _os.environ.get("PTO_ATTN_PROBE", "").strip()
     if _probe and layer_name not in _PROBED:
-        _PROBED.add(layer_name)
         from vllm_ascend.attention import pto_attn
-        pto_attn.dump_structure(
-            f"{_probe}/{layer_name.replace('.', '_')}.json",
-            hidden_states, kv_cache, attn_metadata, self.dsa_attn.impl,
-        )
-        print(f"[pto-attn-probe] {layer_name} -> {_probe}", flush=True)
+        # This walks the metadata and writes a file, both of which read tensors
+        # back to the host; capture rejects that outright.
+        if pto_attn.debug_allowed("PTO_ATTN_PROBE"):
+            _PROBED.add(layer_name)
+            pto_attn.dump_structure(
+                f"{_probe}/{layer_name.replace('.', '_')}.json",
+                hidden_states, kv_cache, attn_metadata, self.dsa_attn.impl,
+            )
+            print(f"[pto-attn-probe] {layer_name} -> {_probe}", flush=True)
 
     if _os.environ.get("PTO_ATTN_REPLACE", "").strip() not in ("", "0"):
         from vllm_ascend.attention import pto_attn
@@ -232,8 +235,10 @@ def dsa_forward(
     if _cmp and layer_name not in _COMPARED:
         from vllm_ascend.attention import pto_attn
         # Only a step that actually ran counts: prefill and the non-ratio-4
-        # layers decline, and marking those would spend the single turn.
-        if pto_attn.compare_once(self, hidden_states, kv_cache, attn_metadata, output, _cmp):
+        # layers decline, and marking those would spend the single turn. The
+        # comparison synchronizes and reads scalars, so capture declines it.
+        if pto_attn.debug_allowed("PTO_ATTN_COMPARE") and pto_attn.compare_once(
+                self, hidden_states, kv_cache, attn_metadata, output, _cmp):
             _COMPARED.add(layer_name)
     return
 
