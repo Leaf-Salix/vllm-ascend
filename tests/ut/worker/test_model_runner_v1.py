@@ -13,7 +13,7 @@ class TestNPUModelRunnerDummyAttention(unittest.TestCase):
     def setUp(self):
         self.runner = NPUModelRunner.__new__(NPUModelRunner)
 
-    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_only")
     def test_pypto_attention_builds_metadata_for_warmup_and_capture(self):
         self.assertTrue(
             self.runner._should_build_dummy_attn_metadata(
@@ -26,7 +26,7 @@ class TestNPUModelRunnerDummyAttention(unittest.TestCase):
             )
         )
 
-    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_block")
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_only")
     def test_pypto_attention_does_not_require_profile_kv_cache(self):
         self.assertFalse(
             self.runner._should_build_dummy_attn_metadata(

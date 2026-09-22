@@ -39,6 +39,20 @@ def tensor_parallel_wrap(func):
 
 
 def forward_with_split_qkv_rmsnorm_mrope(self, positions: torch.Tensor, hidden_states: torch.Tensor):
+    if getattr(self, "_pypto_attention_only_enabled", False):
+        output = torch.empty_like(hidden_states)
+        torch.ops.vllm.pypto_qwen3_attention_only(
+            positions,
+            hidden_states,
+            self.qkv_proj.weight,
+            self.q_norm.weight,
+            self.k_norm.weight,
+            self.rotary_emb.cos_sin_cache,
+            self.o_proj.weight,
+            output,
+            _encode_layer_name(self.attn.layer_name),
+        )
+        return output
     qkv, _ = self.qkv_proj(hidden_states)
     if isinstance(self.rotary_emb, AscendMRotaryEmbedding):
         cos_sin = self.rotary_emb.cos_sin_cache[positions]
@@ -77,29 +91,21 @@ Qwen3Attention.forward = forward_with_split_qkv_rmsnorm_mrope
 Qwen3MoeAttention.forward = forward_with_split_qkv_rmsnorm_mrope
 
 
-def _pypto_qwen3_attention_residual_block(
+def _pypto_qwen3_attention_only(
     positions: torch.Tensor,
-    hidden_states: torch.Tensor,
-    residual: torch.Tensor | None,
-    input_norm_weight: torch.Tensor,
+    normalized_hidden: torch.Tensor,
     qkv_weight: torch.Tensor,
     q_norm_weight: torch.Tensor,
     k_norm_weight: torch.Tensor,
     cos_sin_cache: torch.Tensor,
     o_proj_weight: torch.Tensor,
-    post_attention_norm_weight: torch.Tensor,
-    mlp_input_out: torch.Tensor,
-    updated_residual_out: torch.Tensor,
+    output: torch.Tensor,
     layer_name: LayerNameType,
 ) -> None:
-    # Keep the op in the compiled model during the memory-profile run, but do
-    # not require a KV cache before vLLM creates one.  The values are immaterial
-    # to profiling; only the output shapes and the native MLP allocation matter.
-    # The custom-op body is opaque to Dynamo, so this branch is evaluated again
-    # when graph capture invokes the op with a live forward context.
+    # Keep this opaque op in the compiled model while KV cache allocation is
+    # being profiled. Capture invokes it again after vLLM binds the real cache.
     if _EXTRA_CTX.in_profile_run:
-        updated_residual_out.copy_(hidden_states if residual is None else hidden_states + residual)
-        mlp_input_out.copy_(updated_residual_out)
+        output.copy_(normalized_hidden)
         return
 
     from vllm.model_executor.layers.attention.attention import get_attention_context
@@ -109,86 +115,67 @@ def _pypto_qwen3_attention_residual_block(
     layer_name = _resolve_layer_name(layer_name)
     attn_metadata, attn_layer, kv_cache, layer_slot_mapping = get_attention_context(layer_name)
     if attn_metadata is None or attn_layer is None or attn_layer.layer_name != layer_name:
-        raise RuntimeError(
-            "PyPTO Qwen3 attention block could not resolve this layer's vLLM "
-            f"attention context: requested={layer_name!r}, "
-            f"resolved={getattr(attn_layer, 'layer_name', None)!r}, "
-            f"metadata={type(attn_metadata).__name__ if attn_metadata is not None else None}"
-        )
+        raise RuntimeError(f"PyPTO Qwen3 attention could not resolve layer context: {layer_name!r}")
     if not isinstance(kv_cache, (torch.Tensor, list, tuple)) or len(kv_cache) < 2:
-        raise RuntimeError("PyPTO Qwen3 attention block requires a bound vLLM KV cache")
+        raise RuntimeError("PyPTO Qwen3 attention requires a bound vLLM KV cache")
     key_cache, value_cache = kv_cache[0], kv_cache[1]
     if key_cache.ndim != 4 or key_cache.shape[1:] != (128, 8, 128) or value_cache.shape != key_cache.shape:
-        raise ValueError("PyPTO Qwen3 attention block received an incompatible vLLM KV cache layout")
-    rows = hidden_states.shape[0]
+        raise ValueError("PyPTO Qwen3 attention received an incompatible vLLM KV cache layout")
+    rows = normalized_hidden.shape[0]
     slot_mapping = layer_slot_mapping if layer_slot_mapping is not None else attn_metadata.slot_mapping
     if slot_mapping is None or slot_mapping.numel() < rows:
-        raise ValueError("PyPTO Qwen3 attention block slot mapping is shorter than the token dimension")
-
-    pypto_qwen3_attention.attention_residual_block(
+        raise ValueError("PyPTO Qwen3 attention slot mapping is shorter than the token dimension")
+    pypto_qwen3_attention.attention_only(
         positions=positions,
-        hidden_states=hidden_states,
-        residual=residual,
-        input_norm_weight=input_norm_weight,
+        normalized_hidden=normalized_hidden,
         qkv_weight=qkv_weight,
         q_norm_weight=q_norm_weight,
         k_norm_weight=k_norm_weight,
         cos_sin_cache=cos_sin_cache,
         o_proj_weight=o_proj_weight,
-        post_attention_norm_weight=post_attention_norm_weight,
         slot_mapping=slot_mapping[:rows],
         key_cache=key_cache.view(-1, 1024),
         value_cache=value_cache.view(-1, 1024),
         block_table=attn_metadata.block_tables,
         seq_lens=attn_metadata.seq_lens_device,
         query_start_loc=attn_metadata.query_start_loc,
-        mlp_input_out=mlp_input_out,
-        updated_residual_out=updated_residual_out,
+        output=output,
     )
 
 
-def _pypto_qwen3_attention_residual_block_fake(
+def _pypto_qwen3_attention_only_fake(
     positions: torch.Tensor,
-    hidden_states: torch.Tensor,
-    residual: torch.Tensor | None,
-    input_norm_weight: torch.Tensor,
+    normalized_hidden: torch.Tensor,
     qkv_weight: torch.Tensor,
     q_norm_weight: torch.Tensor,
     k_norm_weight: torch.Tensor,
     cos_sin_cache: torch.Tensor,
     o_proj_weight: torch.Tensor,
-    post_attention_norm_weight: torch.Tensor,
-    mlp_input_out: torch.Tensor,
-    updated_residual_out: torch.Tensor,
+    output: torch.Tensor,
     layer_name: LayerNameType,
 ) -> None:
     return
 
 
 direct_register_custom_op(
-    op_name="pypto_qwen3_attention_residual_block",
-    op_func=_pypto_qwen3_attention_residual_block,
-    fake_impl=_pypto_qwen3_attention_residual_block_fake,
-    # vLLM's unified_attention custom op follows the same model: graph-visible
-    # outputs are explicit mutations, while the live KV cache is resolved from
-    # the forward context inside the opaque custom op. Unlike native PIECEWISE
-    # attention this op remains inside the compiled segment so ACLGraph records
-    # the PyPTO launch itself.
-    mutates_args=["mlp_input_out", "updated_residual_out"],
+    op_name="pypto_qwen3_attention_only",
+    op_func=_pypto_qwen3_attention_only,
+    fake_impl=_pypto_qwen3_attention_only_fake,
+    mutates_args=["output"],
     dispatch_key="PrivateUse1",
 )
 
 
 _original_qwen3_decoder_layer_init = Qwen3DecoderLayer.__init__
-_original_qwen3_decoder_layer_forward = Qwen3DecoderLayer.forward
 
 
 def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
     _original_qwen3_decoder_layer_init(self, *args, **kwargs)
     from vllm_ascend import envs
 
-    self._pypto_attention_block_enabled = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block"
-    if not self._pypto_attention_block_enabled:
+    attention_only_enabled = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_only"
+    self.self_attn._pypto_attention_only_enabled = attention_only_enabled
+    if not attention_only_enabled:
         return
 
     config = args[0] if args else kwargs["config"]
@@ -211,11 +198,11 @@ def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
         or quant_config is not None
     ):
         raise ValueError(
-            "PyPTO Qwen3 attention-block mode requires unquantized BF16 Qwen3-14B "
+            "PyPTO Qwen3 attention-only mode requires unquantized BF16 Qwen3-14B "
             "decoder attention (40 query heads, 8 KV heads, head size 128, TP1)"
         )
     if cache_config is None or cache_config.block_size != 128 or cache_config.cache_dtype not in ("auto", "bfloat16"):
-        raise ValueError("PyPTO Qwen3 attention-block mode requires a BF16 128-token KV cache block")
+        raise ValueError("PyPTO Qwen3 attention-only mode requires a BF16 128-token KV cache block")
 
     from vllm.config import get_current_vllm_config
 
@@ -229,46 +216,16 @@ def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
         or vllm_config.scheduler_config.enable_chunked_prefill
     ):
         raise ValueError(
-            "PyPTO Qwen3 attention-block mode requires BF16, max_model_len <= 512, "
+            "PyPTO Qwen3 attention-only mode requires BF16, max_model_len <= 512, "
             "and does not support speculative decoding or chunked prefill"
         )
-    self.self_attn.qkv_proj._pypto_qwen3_attention_block_weight = True
-    self.self_attn.o_proj._pypto_qwen3_attention_block_weight = True
+    self.self_attn.qkv_proj._pypto_qwen3_attention_weight = True
+    self.self_attn.o_proj._pypto_qwen3_attention_weight = True
     pypto_qwen3_attention.init()
-    pypto_qwen3_attention.registered_attention_block_ops()
-
-
-def _patched_qwen3_decoder_layer_forward(
-    self,
-    positions: torch.Tensor,
-    hidden_states: torch.Tensor,
-    residual: torch.Tensor | None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    if not self._pypto_attention_block_enabled:
-        return _original_qwen3_decoder_layer_forward(self, positions, hidden_states, residual)
-
-    mlp_input = torch.empty_like(hidden_states)
-    updated_residual = torch.empty_like(hidden_states)
-    torch.ops.vllm.pypto_qwen3_attention_residual_block(
-        positions,
-        hidden_states,
-        residual,
-        self.input_layernorm.weight,
-        self.self_attn.qkv_proj.weight,
-        self.self_attn.q_norm.weight,
-        self.self_attn.k_norm.weight,
-        self.self_attn.rotary_emb.cos_sin_cache,
-        self.self_attn.o_proj.weight,
-        self.post_attention_layernorm.weight,
-        mlp_input,
-        updated_residual,
-        _encode_layer_name(self.self_attn.attn.layer_name),
-    )
-    return self.mlp(mlp_input), updated_residual
+    pypto_qwen3_attention.registered_attention_only_op()
 
 
 Qwen3DecoderLayer.__init__ = _patched_qwen3_decoder_layer_init
-Qwen3DecoderLayer.forward = _patched_qwen3_decoder_layer_forward
 Qwen3VLForConditionalGeneration._get_deepstack_input_embeds = tensor_parallel_wrap(
     Qwen3VLForConditionalGeneration._get_deepstack_input_embeds
 )

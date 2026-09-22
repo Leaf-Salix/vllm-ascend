@@ -3059,7 +3059,7 @@ class NPUModelRunner(GPUModelRunner):
         from vllm_ascend import envs
 
         pypto_qwen3_attention = (
-            envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block" and not is_profile
+            envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_only" and not is_profile
         )
         return force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL or pypto_qwen3_attention
 

@@ -50,7 +50,7 @@ def main() -> None:
         }
         for result in results
     ]
-    print("QWEN3_ATTENTION_BLOCK_E2E", json.dumps(payload, ensure_ascii=False), flush=True)
+    print("QWEN3_ATTENTION_ONLY_E2E", json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

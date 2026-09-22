@@ -277,8 +277,8 @@ class NPUPlatform(Platform):
         from vllm_ascend import envs
 
         mode = envs.VLLM_ASCEND_PYPTO_QWEN3_MODE
-        if mode not in {"off", "attention_block"}:
-            raise ValueError(f"VLLM_ASCEND_PYPTO_QWEN3_MODE must be 'off' or 'attention_block', got {mode!r}")
+        if mode not in {"off", "attention_only"}:
+            raise ValueError(f"VLLM_ASCEND_PYPTO_QWEN3_MODE must be 'off' or 'attention_only', got {mode!r}")
         if mode == "off":
             return
         if vllm_config.additional_config is None:

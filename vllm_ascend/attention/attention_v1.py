@@ -313,7 +313,7 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
 
         from vllm_ascend import envs
 
-        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_block":
+        if envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_only":
             query_start_loc = common_attn_metadata.query_start_loc[: num_reqs + 1]
             seq_lens_device = common_attn_metadata.seq_lens[:num_reqs]
         else:

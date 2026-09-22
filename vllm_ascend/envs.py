@@ -114,8 +114,8 @@ env_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_ENABLE_BATCH_MEMCPY": lambda: os.getenv("VLLM_ASCEND_ENABLE_BATCH_MEMCPY", None),
     # Whether to use MultiBlockPool for KV cache management
     "VLLM_ASCEND_APPLY_DSV4_PATCH": lambda: bool(int(os.getenv("VLLM_ASCEND_APPLY_DSV4_PATCH", "0"))),
-    # Experimental Qwen3-14B PyPTO L2-kernel attention residual block.
-    # Valid values are "off" and "attention_block".
+    # Experimental Qwen3-14B PyPTO L2-kernel attention replacement.
+    # Valid values are "off" and "attention_only".
     "VLLM_ASCEND_PYPTO_QWEN3_MODE": lambda: os.getenv("VLLM_ASCEND_PYPTO_QWEN3_MODE", "off").lower(),
 }
 
