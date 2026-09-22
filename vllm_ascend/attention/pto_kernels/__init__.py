@@ -14,8 +14,8 @@ vllm-ascend 不依赖 pypto-lib 仓：这些 .py 就是全部所需。仍然依�
     python -m vllm_ascend.attention.pto_kernels.resync /path/to/pypto-lib
 """
 
-PYPTO_LIB_COMMIT = "15d9ae75aaba452594bff0fe16500fadc250564d"
+PYPTO_LIB_COMMIT = "a791b1d7e1ba3f1ddae68e343709a8b8a418f35b"
 VARIANTS = {
-    "dspark": ("models/deepseek_v4_flash_dspark", ("decode_csa", "decode_metadata")),
+    "dspark": ("models/deepseek_v4_flash_dspark", ("decode_csa",)),
     "mtp": ("models/deepseek_v4_flash_mtp", ("decode_sparse_attn_csa",)),
 }

@@ -4,20 +4,21 @@ build_args is the piece with the most ways to be quietly wrong -- a misspelled
 attribute, a transposed weight, a table whose width does not match the kernel's
 compile-time column count. None of that needs a device to surface.
 """
-import os, sys, types
+import os
+import sys
+import types
+
 import torch
 
-ROOT = "/data/sunkaixuan/sunkaixuan_subdir/own_stack_20260918/vllm-ascend-v0.20.2rc1"
-sys.path.insert(0, ROOT)
 sys.argv = [sys.argv[0], "--tp", "4"]
 
-import vllm_ascend.attention.pto_attn as pa
+import vllm_ascend.attention.pto_attn as pa  # noqa: E402
 
 # torch_npu's format cast is a device op; on CPU the identity is the right stand-in.
 pa._to_nd = lambda w: w
 
-from vllm_ascend.attention.pto_kernels.dspark import decode_csa as K
-from vllm_ascend.attention.pto_kernels.dspark import config as C
+from vllm_ascend.attention.pto_kernels.dspark import decode_csa as K  # noqa: E402
+from vllm_ascend.attention.pto_kernels.dspark import config as C  # noqa: E402
 
 M = C.FLASH
 D = M.hidden_size
@@ -63,7 +64,6 @@ class Indexer:
 
 class Impl:
     def __init__(self, quantized: bool):
-        q = dict(dtype=torch.int8) if quantized else {}
         self.layer_name = "model.layers.2.self_attn.attn"
         if quantized:
             self.wq_a = Lin(D, M.q_lora_rank, dtype=torch.int8, scale=M.q_lora_rank)
@@ -123,22 +123,49 @@ def strided_t(nblk, rows, dim, pad, dtype):
     return torch.as_strided(raw, (nblk, rows, 1, dim), (pad, dim, dim, 1))
 
 
-# Shapes, strides and dtypes as the live probe recorded them: the indexer key and
-# its scale share one padded page, so both are strided and the scale is FP16.
+# Shapes, strides and dtypes as the live probe/code contract records them.  Main
+# state, raw KV and compressed KV are independent 131072-byte page allocations;
+# inner state/index key/index scale share one 16640-byte allocation.
+main_state_dim = 2 * K.MAIN_OUT_DIM
+inner_state_dim = 2 * K.INNER_OUT_DIM
+main_state_parent = torch.zeros(64, 16, main_state_dim, dtype=torch.float32)
+main_state = torch.as_strided(
+    main_state_parent,
+    (64, 8, 1, main_state_dim),
+    (32768, main_state_dim, main_state_dim, 1),
+    0,
+)
+raw_parent = torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16)
+cmp_parent = torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16)
+index_parent = torch.zeros(64 * 16640, dtype=torch.int8)
+inner_state = torch.as_strided(
+    index_parent.view(torch.float32),
+    (64, 8, 1, inner_state_dim),
+    (4160, inner_state_dim, inner_state_dim, 1),
+    0,
+)
+index_key = torch.as_strided(
+    index_parent, (64, 128, 1, K.IDX_HEAD_DIM),
+    (16640, K.IDX_HEAD_DIM, K.IDX_HEAD_DIM, 1), 0,
+)
+index_scale = torch.as_strided(
+    index_parent.view(torch.float16), (64, 128, 1, 1),
+    (8320, 1, 1, 1), 8192,
+)
 kvc = (
-    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),
-    torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16),
-    strided_t(64, 8, K.MAIN_STATE_DIM, 2 * 8 * K.MAIN_STATE_DIM, torch.float32),
-    strided_t(64, 8, K.INNER_STATE_DIM, 8 * K.INNER_STATE_DIM + 64, torch.float32),
-    strided_t(64, 128, K.IDX_HEAD_DIM, 16640, torch.int8),
-    strided_t(64, 128, 1, 8320, torch.float16),
+    cmp_parent,
+    raw_parent,
+    main_state,
+    inner_state,
+    index_key,
+    index_scale,
 )
 hs = torch.randn(NREQ, D).to(torch.bfloat16)
 
 print("== build_args ==")
 try:
     args, plan = pa.build_args(impl, hs, kvc, metas, HOST_SEQ, L)
-    check("returned 46", len(args) == 46, str(len(args)))
+    check("returned 40", len(args) == 40, str(len(args)))
 except Exception:
     import traceback
     traceback.print_exc()
@@ -153,11 +180,16 @@ RT = NREQ * K.S
 want = {
     "x_normed": [RT, D], "attn_out": [RT, D],
     "freqs_cos": [RT, 64], "cmp_freqs_cos": [RT, 64],
-    "position_ids": [RT], "window_swa_indices": [RT, K.WIN],
-    "ori_slot_mapping": [RT], "state_slot_mapping": [RT],
-    "compress_state_block_table": [NREQ, K.MAIN_STATE_MAX_BLOCKS],
-    "cmp_block_table": [NREQ, K.CMP_MAX_BLOCKS],
-    "idx_block_table": [NREQ, K.IDX_MAX_BLOCKS],
+    "position_ids": [RT], "token_valid": [RT],
+    "compress_state_pages": [64, 16, main_state_dim],
+    "kv_cache_pages": [64, 128, 1, K.HEAD_DIM],
+    "cmp_kv_pages": [64, 128, 1, K.HEAD_DIM],
+    "inner_index_pages": [64, 130, K.IDX_HEAD_DIM],
+    "compress_state_block_table": [NREQ, 64],
+    "inner_compress_state_block_table": [NREQ, 64],
+    "ori_block_table": [NREQ, 64],
+    "cmp_block_table": [NREQ, 64],
+    "index_block_table": [NREQ, 64],
     "wo_a": [K.O_GROUPS, K.O_LORA, K.O_GROUP_IN],
     "weights_proj": [D, K.IDX_N_HEADS],
     "hadamard_idx": [K.IDX_HEAD_DIM, K.IDX_HEAD_DIM],
@@ -176,17 +208,39 @@ for n, w in want.items():
     check(n, got == w, f"{got} want {w}")
 
 print("== dtypes the signature fixes ==")
-check("idx_kv_scale is FP32", by["idx_kv_scale"].dtype == torch.float32, str(by["idx_kv_scale"].dtype))
-check("idx_kv_cache is INT8", by["idx_kv_cache"].dtype == torch.int8, str(by["idx_kv_cache"].dtype))
+check(
+    "inner_index_pages is INT8",
+    by["inner_index_pages"].dtype == torch.int8,
+    str(by["inner_index_pages"].dtype),
+)
+check(
+    "shared page aliases allocator parent",
+    by["inner_index_pages"].data_ptr() == inner_state.data_ptr(),
+)
+check("main state aliases its parent",
+      by["compress_state_pages"].data_ptr() == main_state.data_ptr())
+check("raw KV aliases its parent",
+      by["kv_cache_pages"].data_ptr() == raw_parent.data_ptr())
+check("compressed KV aliases its parent",
+      by["cmp_kv_pages"].data_ptr() == cmp_parent.data_ptr())
 
 print("== contiguity (the binding rejects anything else) ==")
 bad = [n for n, a in by.items() if not a.is_contiguous()]
 check("all contiguous", not bad, str(bad))
 
-print("== padding slots are inert ==")
-for n in ("ori_slot_mapping", "cmp_slot_mapping", "idx_slot_mapping", "state_slot_mapping"):
-    v = by[n].view(NREQ, K.S)
-    check(f"{n} padding = -1", bool((v[:, 1:] == -1).all()), str(v[0].tolist()[:4]))
+print("== padding lanes are inert ==")
+valid = by["token_valid"].view(NREQ, K.S)
+check("first lane valid", bool((valid[:, 0] == 1).all()))
+check("later lanes invalid", bool((valid[:, 1:] == 0).all()))
+
+print("== graph-padded request is inert ==")
+# vLLM pads a size-3 replay to the size-4 descriptor by filling the last raw
+# block-table row with null block 0.  That request must not write any shared page.
+metas[-1].decode.block_table[-1].zero_()
+padded_args, _ = pa.build_args(impl, hs, kvc, metas, HOST_SEQ, L)
+padded = dict(zip(pa.ARG_ORDER, padded_args))["token_valid"].view(NREQ, K.S)
+check("three live requests stay active", bool((padded[:3, 0] == 1).all()))
+check("padded request is inactive", bool((padded[3] == 0).all()))
 
 print()
 print("FAILED:" if fails else "ALL PASS", fails or "")
