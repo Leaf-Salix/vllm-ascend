@@ -87,6 +87,10 @@ env_variables: dict[str, Callable[[], Any]] = {
     # (safe for Ascend 910B/A3). Set to a positive value to override when
     # auto-detection is unavailable or for debugging UB overflow issues.
     "VLLM_ASCEND_ROPE_UB_SIZE_KB": lambda: int(os.getenv("VLLM_ASCEND_ROPE_UB_SIZE_KB") or 0),
+    # Enable the experimental DSV4 C4 decode attention PyPTO replacement.
+    # 0 (default): native attention; 1: use PyPTO for supported A3 32-token
+    # page, TP1, single-token decode steps. Valid values: 0 or 1. Not sensitive.
+    "VLLM_ASCEND_PYPTO_DSV4_CSA": lambda: _strict_binary_env("VLLM_ASCEND_PYPTO_DSV4_CSA"),
 }
 
 # end-env-vars-definition
