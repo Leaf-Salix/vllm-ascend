@@ -1,10 +1,10 @@
-"""hc_pre→hc_post 的整条 attention 半层（动态形状，TP1/TP2/TP4），外加设备侧 metadata kernel。
+"""DeepSeek-V4 CSA attention-only kernel for vLLM's native cache pages.
 
-上游：hw-native-sys/pypto-lib  models/deepseek_v4_flash_dspark/
-入口模块：
-  decode_csa       —— decode_csa_tp1_test（单卡）/ decode_csa_test（TP≥2）
-  decode_metadata  —— 设备侧一次算出全部 slot_mapping + swa_indices / swa_lens
+The public entry is ``decode_csa.decode_csa_attn_tp1_test``. Its 40 arguments
+bind vLLM's independent main-state, raw-KV, and compressed-KV page pools plus
+the packed inner-state/index pages directly. The vendored path does not retain
+the former 46-argument ring and slot-mapping ABI.
 """
 
 UPSTREAM_SUBDIR = "models/deepseek_v4_flash_dspark"
-ENTRY_MODULES = ("decode_csa", "decode_metadata")
+ENTRY_MODULES = ("decode_csa",)

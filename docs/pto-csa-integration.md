@@ -1,5 +1,14 @@
 # PyPTO CSA 算子接入 vLLM 的对接说明
 
+> **Run 062 更新（2026-09-21）**：本文第 2～8 节记录的是旧 46 参数转换层及其性能，
+> 仅作为问题背景保留，不再描述当前工作树。当前实现已切换为 lib 提供的 40 参数
+> vLLM-native attention-only ABI：主 state、raw KV、compressed KV 分别直接绑定
+> `[N,16,2048] FP32`、`[N,128,1,512] BF16`、`[N,128,1,512] BF16`
+> 三份独立物理页 allocation；inner state/index key/FP16 scale 直接绑定同一份
+> `[N,130,128] INT8` 物理页；adapter 不再构造私有 state ring、repage cache 或五类
+> slot mapping。本文将在真实 eager/ACLGraph/performance A/B 完成后整体改写；在此之前不要复制下文的
+> 46 参数 `ARG_ORDER` 或旧性能数字作为新接口说明。
+
 这条分支把 DeepSeek-V4 某一层的 `attention.forward` 整段换成 PyPTO 写的 CSA 算子,
 在 vLLM 的真实推理服务路径上跑。本文给 pypto-lib 侧同事看,不假设读者了解 vLLM 这边。
 

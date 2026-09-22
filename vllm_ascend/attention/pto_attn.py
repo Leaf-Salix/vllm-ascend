@@ -3,7 +3,7 @@
 The kernel is ``pto_kernels.dspark.decode_csa.decode_csa_attn_tp1_test``: it takes
 ``x_normed [T, D] BF16`` and fills ``attn_out [T, D] BF16``, leaving ``npu_hc_pre``,
 the input RMSNorm and ``npu_hc_post`` to the native path. Everything here is the
-translation between vLLM's decode state and that kernel's 46 arguments.
+binding between vLLM's decode state and the kernel's native-layout arguments.
 
 Two properties the per-step path must keep, because it has to survive ACLGraph
 capture: no device-to-host read (no ``.item()``, no boolean-mask indexing, no
@@ -61,12 +61,12 @@ def kernel():
 # --- constants ---------------------------------------------------------------
 
 VLLM_PAGE = 128          # swa / compressed / indexer KV page, in slots
-VLLM_STATE_PAGE = 8      # both compressor state caches, in rows
+VLLM_STATE_PAGE = 8
 COMPRESS_RATIO = 4
 
 
-def _enabled(name: str) -> str:
-    return os.environ.get(name, "").strip()
+class NativeLayoutError(ValueError):
+    """The live vLLM allocation does not satisfy the native CSA ABI."""
 
 
 # --- weights: one-time, cached on the impl -----------------------------------
@@ -217,241 +217,31 @@ def _rope_to_pto(t: torch.Tensor) -> torch.Tensor:
     return torch.cat([uniq, uniq], dim=1).to(torch.bfloat16)
 
 
-def _flat_slots(sm_2d: torch.Tensor, page: int) -> torch.Tensor:
-    """vLLM's (block, intra) INT32 pair -> the kernel's flat INT64 row index."""
-    return sm_2d[:, 0].long() * page + sm_2d[:, 1].long()
-
-
-def _repage_block_table(bt: torch.Tensor, n_cols: int, per: int, n_blocks: int) -> torch.Tensor:
-    """Restate a 128-slot-page block table over ``per``-times-smaller pages.
-
-    Fixed column count on purpose: deriving the width from the table's contents
-    would need a device read, which capture forbids.
-    """
-    b = bt.shape[0]
-    j = torch.arange(n_cols, device=bt.device)
-    src = torch.div(j, per, rounding_mode="floor").clamp(max=bt.shape[1] - 1)
-    phys = (
-        torch.gather(bt.long(), 1, src.unsqueeze(0).expand(b, -1)) * per
-        + (j % per).unsqueeze(0)
-    )
-    return phys.clamp(0, n_blocks - 1).to(torch.int32)
-
-
-def _window_indices(positions: torch.Tensor, swa_bt: torch.Tensor, seq: int, win: int,
-                    paged=None) -> torch.Tensor:
-    """Per-token physical KV rows for the sliding window, -1 where unmapped.
-
-    The row is ordered oldest-to-current with the padding on the left; the kernel
-    only takes a row-wise max over the validity mask, so the side the padding sits
-    on does not matter.
-    """
-    dev = positions.device
-    t = positions.shape[0]
-    req = (torch.arange(t, device=dev) // seq).clamp(max=swa_bt.shape[0] - 1)
-    bt_t = swa_bt.long().index_select(0, req)
-
-    offs = torch.arange(win, device=dev) - (win - 1)
-    abs_pos = positions.long().unsqueeze(1) + offs.unsqueeze(0)
-    lblk = torch.div(abs_pos, VLLM_PAGE, rounding_mode="floor")
-    intra = abs_pos - lblk * VLLM_PAGE
-    ok = (abs_pos >= 0) & (lblk >= 0) & (lblk < bt_t.shape[1])
-    pblk = torch.gather(bt_t, 1, lblk.clamp(0, bt_t.shape[1] - 1))
-    ok = ok & (pblk >= 0)
-    if paged is not None and paged.compacted:
-        # The logical column is the block-table column, so the row a compacted
-        # cache put this block in follows without searching for it.
-        col = lblk.clamp(0, bt_t.shape[1] - 1)
-        flat = (req.unsqueeze(1) * bt_t.shape[1] + col) * VLLM_PAGE + intra
-    else:
-        flat = pblk.clamp_min(0) * VLLM_PAGE + intra
-    return torch.where(ok, flat, torch.full_like(abs_pos, -1)).to(torch.int32)
-
-
-def _compressed_rows(positions: torch.Tensor):
+def _compressed_rows(positions: torch.Tensor, seq: int):
     """Which compressed row each token maps to, and whether it is a boundary.
 
-    vLLM packs the compressed tables by boundary token; the kernel indexes them by
-    token. ``cumsum`` gives the mapping without a device read.
+    The rectangular CSA input repeats one host decode token ``seq`` times. vLLM
+    packs only boundary requests, in request order. Count boundaries on the host
+    request axis first, then expand the packed-row ordinal to the rectangle.
     """
-    pos = positions.long()
-    boundary = ((pos + 1) % COMPRESS_RATIO) == 0
-    row = (torch.cumsum(boundary.long(), 0) - 1).clamp_min(0)
-    return boundary, row
-
-
-def _to_token_rows(src: torch.Tensor, row: torch.Tensor, boundary: torch.Tensor, fill):
-    g = src.index_select(0, row.clamp(max=src.shape[0] - 1))
-    return torch.where(boundary, g, torch.full_like(g, fill))
-
-
-def _state_slots(positions: torch.Tensor, state_bt: torch.Tensor, seq: int,
-                 logical_page: int, physical_page: int) -> torch.Tensor:
-    """Per-token compressor-state rows.
-
-    vLLM never materializes these: its compressor op takes the block table plus a
-    start position and resolves slots inside the closed-source kernel. The formula
-    is the ordinary paged lookup -- no modulo, no ring -- so wrap-around follows
-    whatever vLLM's allocator wrote into the block table.
-
-    ``logical_page`` is vLLM's rows-per-page; ``physical_page`` is the stride of the
-    view handed to the kernel, which differs when the cache is reinterpreted to
-    absorb vLLM's page padding.
-    """
-    dev = positions.device
-    t = positions.shape[0]
-    req = (torch.arange(t, device=dev) // seq).clamp(max=state_bt.shape[0] - 1)
-    bt_t = state_bt.long().index_select(0, req)
-
-    pos = positions.long()
-    lblk = torch.div(pos, logical_page, rounding_mode="floor")
-    intra = pos - lblk * logical_page
-    ok = (lblk >= 0) & (lblk < bt_t.shape[1])
-    blk = torch.gather(bt_t, 1, lblk.clamp(0, bt_t.shape[1] - 1))
-    ok = ok & (blk >= 0)
-    return torch.where(
-        ok, blk * physical_page + intra, torch.full_like(pos, -1)
-    ).to(torch.int64)
-
-
-# --- compressor state: a private ring per request ----------------------------
-#
-# Two things rule out handing vLLM's state cache to the kernel directly.
-#
-# Layout: vLLM pads each state page to a fixed byte size and builds the cache
-# with torch.as_strided, so the tensor is non-contiguous -- main carries 65536 B
-# of content in a 131072 B stride, inner 16384 B in 16640 B. PyPTO's binding
-# rejects any tensor whose strides are not canonical row-major, in three
-# independent places, the innermost being torch_npu_adapter.cpp's
-# Require(tensor.is_contiguous()).
-#
-# Addressing: the kernel's state is a per-request ring of STATE_STORAGE_LEN rows
-# reached through a fixed-width block table of 2-row pages --
-#   ring_row  = logical_pos % 16                       (ratio4:191)
-#   state_row = bt[req, ring_row // 2] * 2 + ring_row % 2   (ratio4:192-197)
-# while vLLM's block table holds absolute page indices with null_block == 0 for
-# holes. Feeding vLLM's table in would make every request address pages 0..7,
-# i.e. positions 0..63, and then collide on the null block -- silently.
-#
-# So the kernel gets its own contiguous ring, seeded from vLLM's cache before the
-# call and written back after. Sixteen consecutive positions cover the ring
-# exactly once, which makes the seed a single gather with no device read.
-
-KERNEL_STATE_PAGE = 2   # C4A_COMPRESSOR_BLOCK_SIZE
-
-
-def state_ring_len() -> int:
-    """STATE_STORAGE_LEN: the history window plus this step's S rows."""
-    kcsa, _ = kernel()
-    return kcsa.MAIN_STATE_STORAGE_LEN
-
-
-def state_ring_plan(positions: torch.Tensor, seq: int, vllm_bt: torch.Tensor):
-    """Which vLLM page and row seed which ring row, for every request.
-
-    Returns ``(blk, intra, ring_rows, valid)``, each ``[B * _RR]``. Pages and
-    rows stay separate because vLLM's cache is strided on dim 0: selecting whole
-    pages keeps the copy proportional to the ring, while flattening it to rows
-    first would materialize the entire cache.
-    """
-    dev = positions.device
-    _RR = state_ring_len()
-    b = positions.shape[0] // seq
-    first = positions.long().view(b, seq)[:, 0]                    # [B]
-
-    i = torch.arange(_RR, device=dev)
-    pos = first.unsqueeze(1) - (_RR - seq) + i.unsqueeze(0)  # [B, _RR]
-
-    lblk = torch.div(pos, VLLM_STATE_PAGE, rounding_mode="floor")
-    intra = pos - lblk * VLLM_STATE_PAGE
-    ok = (pos >= 0) & (lblk >= 0) & (lblk < vllm_bt.shape[1])
-    blk = torch.gather(vllm_bt.long(), 1, lblk.clamp(0, vllm_bt.shape[1] - 1))
-    ok = ok & (blk >= 0)
-
-    ring = (torch.arange(b, device=dev).unsqueeze(1) * _RR + (pos % _RR))
-    return (blk.clamp_min(0).reshape(-1), intra.clamp_min(0).reshape(-1),
-            ring.reshape(-1), ok.reshape(-1))
-
-
-def _pick_rows(cache: torch.Tensor, blk: torch.Tensor, intra: torch.Tensor, dim: int):
-    """One row per (page, offset) pair, as a contiguous [k, dim]."""
-    pages = cache.index_select(0, blk.clamp(0, cache.shape[0] - 1))   # [k, rows, ..., dim]
-    pages = pages.reshape(pages.shape[0], VLLM_STATE_PAGE, dim)
-    return pages[torch.arange(blk.shape[0], device=cache.device), intra]
-
-
-def make_state_ring(cache: torch.Tensor, plan, b: int, dim: int):
-    """Seed a contiguous per-request ring from vLLM's padded, strided cache."""
-    _RR = state_ring_len()
-    blk, intra, ring_rows, valid = plan
-    rows = _pick_rows(cache, blk, intra, dim)
-    rows = torch.where(valid.unsqueeze(1), rows, torch.zeros_like(rows))
-
-    ring = torch.zeros(b * _RR, dim, dtype=cache.dtype, device=cache.device)
-    ring.index_copy_(0, ring_rows, rows)
-    return ring.view(b * _RR // KERNEL_STATE_PAGE, KERNEL_STATE_PAGE, dim)
-
-
-def write_state_ring(cache: torch.Tensor, ring: torch.Tensor, plan, seq: int,
-                     positions: torch.Tensor, dim: int) -> None:
-    """Return the ring's rows to vLLM's cache.
-
-    The pages are addressed by construction rather than by de-duplicating the
-    plan's page list: several ring rows share a vLLM page, and ``index_copy_``
-    writes whole pages, so duplicate page indices would make the last entry's
-    copy overwrite the earlier entries' edits. A request's ring spans
-    ``RING/VSP + 1`` consecutive logical pages, so gathering exactly those gives a
-    duplicate-free index without a device read.
-    """
-    blk, intra, ring_rows, valid = plan
-    rr = state_ring_len()
-    dev = cache.device
-    b = positions.shape[0] // seq
-    span = rr // VLLM_STATE_PAGE + 1
-
-    first = positions.long().view(b, seq)[:, 0]
-    base = torch.div(first - (rr - seq), VLLM_STATE_PAGE, rounding_mode="floor")
-    lb = base.unsqueeze(1) + torch.arange(span, device=dev).unsqueeze(0)    # [B, span]
-
-    pages_bt = blk.view(b, rr)
-    lblk_of = torch.div(
-        (first.unsqueeze(1) - (rr - seq) + torch.arange(rr, device=dev).unsqueeze(0)),
-        VLLM_STATE_PAGE, rounding_mode="floor")                            # [B, rr]
-    # Physical page for each of the span slots, taken from the row that uses it.
-    slot_of_row = (lblk_of - base.unsqueeze(1)).clamp(0, span - 1)          # [B, rr]
-    phys = torch.zeros(b, span, dtype=torch.long, device=dev)
-    phys.scatter_(1, slot_of_row, pages_bt)
-
-    flat_pages = phys.reshape(-1).clamp(0, cache.shape[0] - 1)
-    buf = cache.index_select(0, flat_pages).reshape(b * span, VLLM_STATE_PAGE, dim).clone()
-
-    rows = ring.reshape(-1, dim).index_select(0, ring_rows)
-    tgt_page = (torch.arange(b, device=dev).unsqueeze(1) * span + slot_of_row).reshape(-1)
-    keep = buf[tgt_page, intra]
-    buf[tgt_page, intra] = torch.where(valid.unsqueeze(1), rows, keep)
-
-    cache.index_copy_(0, flat_pages, buf.reshape(-1, *cache.shape[1:]))
-
-
-def state_block_table(b: int, device) -> torch.Tensor:
-    """The ring's own block table: request r owns its whole slice of pages."""
-    pages = state_ring_len() // KERNEL_STATE_PAGE
-    return (torch.arange(b, device=device).unsqueeze(1) * pages
-            + torch.arange(pages, device=device).unsqueeze(0)).to(torch.int32)
-
-
-def state_slots(positions: torch.Tensor, seq: int) -> torch.Tensor:
-    """Flat ring rows the kernel writes this step, one per token.
-
-    Matches decode_metadata.py:225-248 with the ring's own block table folded in:
-    ``bt[r, (pos//2) % 8] * 2 + pos % 2`` reduces to ``r*16 + pos % 16``.
-    """
-    dev = positions.device
-    t = positions.shape[0]
-    req = torch.arange(t, device=dev) // seq
-    pos = positions.long()
-    rr = state_ring_len()
-    return (req * rr + (pos % rr)).to(torch.int64)
+    if seq <= 0 or positions.shape[0] % seq:
+        raise NativeLayoutError(
+            f"token rows {positions.shape[0]} are not divisible by seq={seq}"
+        )
+    request_count = positions.shape[0] // seq
+    host_rows = torch.arange(request_count, device=positions.device) * seq
+    host_positions = positions.long().index_select(0, host_rows)
+    host_boundary = ((host_positions + 1) % COMPRESS_RATIO) == 0
+    host_row = (torch.cumsum(host_boundary.long(), dim=0) - 1).clamp_min(0)
+    request = torch.div(
+        torch.arange(positions.shape[0], device=positions.device),
+        seq,
+        rounding_mode="floor",
+    )
+    return (
+        host_boundary.index_select(0, request),
+        host_row.index_select(0, request),
+    )
 
 
 _DEBUG_REFUSED = set()
@@ -470,154 +260,6 @@ def capture_active() -> bool:
         return bool(getattr(get_forward_context(), "capturing", False))
     except Exception:
         return False
-
-
-def debug_allowed(what: str) -> bool:
-    """Whether a diagnostic that reads tensors back to the host may run.
-
-    Capture forbids the readback outright -- that is error 107027 -- and where it
-    does not raise it bakes the capture-time value into the graph, so every replay
-    reports a stale number instead of failing.
-    """
-    if not capture_active():
-        return True
-    if what not in _DEBUG_REFUSED:
-        _DEBUG_REFUSED.add(what)
-        print(f"[pto-attn] {what} declined: it reads tensors back to the host, "
-              "which ACLGraph capture rejects. Use --enforce-eager for it.",
-              flush=True)
-    return False
-
-
-class Paged:
-    """A KV cache as the kernel addresses it, plus the translation that implies.
-
-    A contiguous cache is only reinterpreted, so a vLLM slot still names the same
-    row and the kernel writes into vLLM's own pages. A strided one has to be
-    compacted into a private buffer, and that moves every row: slots computed
-    against the original cache name rows the buffer does not have, and whatever
-    the kernel writes there is invisible to vLLM until it is copied back.
-
-    ``remap`` records what it translated, so ``commit`` needs no arguments; a
-    cache the kernel writes but is given no slot mapping for is declared with
-    ``track``.
-    """
-
-    def __init__(self, view, table, block_table, cache=None):
-        self.view = view
-        self.table = table
-        self._bt = block_table
-        self._cache = cache
-        self._slots = None
-
-    @property
-    def compacted(self) -> bool:
-        return self._cache is not None
-
-    def _located(self, flat, req):
-        """Where a row of the original cache sits after compaction, and if at all.
-
-        The physical block is searched for in the request's own block table rather
-        than derived from the position, so this holds whatever rule vLLM used to
-        assign the slot.
-        """
-        phys = torch.div(flat, VLLM_PAGE, rounding_mode="floor")
-        intra = flat - phys * VLLM_PAGE
-        bt = self._bt.long()
-        rows = bt.index_select(0, req.clamp(max=bt.shape[0] - 1))
-        hit = rows == phys.unsqueeze(1)
-        col = torch.argmax(hit.to(torch.int32), dim=1)
-        ok = hit.any(dim=1) & (flat >= 0)
-        return (req * bt.shape[1] + col) * VLLM_PAGE + intra, ok
-
-    def track(self, flat, req):
-        """Declare the slots the kernel writes, for a cache with no mapping arg."""
-        self._slots = (flat.long(), req.long())
-
-    def remap(self, flat, req):
-        """Restate vLLM slots against the buffer the kernel was actually handed."""
-        self.track(flat, req)
-        if not self.compacted:
-            return flat
-        moved, ok = self._located(flat.long(), req.long())
-        return torch.where(ok, moved, torch.full_like(moved, -1)).to(flat.dtype)
-
-    def commit(self):
-        """Copy rows the kernel wrote in a private buffer back into vLLM's cache.
-
-        Every shape here is a function of the token count alone, so this is legal
-        under graph capture. Rows the kernel did not write are parked on the
-        cache's first row, which makes the scatter an identity for them -- unless
-        a real slot is parked there too, in which case they all write what that
-        slot's owner writes, so the duplicates agree and the real write cannot be
-        the one the scatter discards. Nothing here assumes vLLM keeps row 0 free.
-        """
-        if not self.compacted or self._slots is None:
-            return
-        flat, req = self._slots
-        moved, ok = self._located(flat, req)
-        src = self.view.reshape(-1, *self.view.shape[2:])
-        rows = src.index_select(0, moved.clamp(0, src.shape[0] - 1)).to(self._cache.dtype)
-        # vLLM's page is strided, so the destination is indexed as (block, row)
-        # rather than flattened: a reshape there would write to a copy instead.
-        d = flat.clamp_min(0)
-        blk = torch.div(d, VLLM_PAGE, rounding_mode="floor")
-        row = d - blk * VLLM_PAGE
-        blk = torch.where(ok, blk, torch.zeros_like(blk))
-        row = torch.where(ok, row, torch.zeros_like(row))
-        mask = ok.reshape(-1, *([1] * (rows.dim() - 1)))
-
-        owns_park = ok & (d == 0)
-        first = torch.argmax(owns_park.to(torch.int32)).reshape(1)
-        parked = torch.where(
-            owns_park.any(),
-            rows.index_select(0, first).squeeze(0),
-            self._cache[0, 0].to(rows.dtype),
-        )
-        self._cache[blk, row] = torch.where(mask, rows, parked)
-
-
-def repage_kv(cache: torch.Tensor, block_table: torch.Tensor, kernel_cols: int,
-              dtype: torch.dtype | None = None):
-    """Give the kernel a 32-slot-page view of a 128-slot vLLM cache.
-
-    A contiguous cache reshapes for free. The indexer's pair does not: vLLM lays
-    the key and its scale into one padded 16640-byte page, so each is strided and
-    the gap in one holds the other's data. Those are compacted to the pages the
-    block table names, which both makes them contiguous and drops the sibling.
-
-    Returns a :class:`Paged`.
-    """
-    per = COMPRESS_RATIO
-    rows = VLLM_PAGE // per
-    b, ncols = block_table.shape
-    want = min(kernel_cols, ncols * per)
-
-    if cache.is_contiguous() and dtype in (None, cache.dtype):
-        view = cache.view(-1, rows, *cache.shape[2:])
-        bt = _repage_block_table(block_table, want, per, view.shape[0])
-        return Paged(view, _pad_cols(bt, kernel_cols), block_table)
-
-    src = block_table.long().reshape(-1).clamp(0, cache.shape[0] - 1)
-    packed = cache.index_select(0, src).contiguous()
-    if dtype is not None:
-        packed = packed.to(dtype)
-    view = packed.view(b * ncols * per, rows, *packed.shape[2:])
-    compact = torch.arange(b * ncols, device=cache.device).view(b, ncols, 1) * per
-    bt = (compact + torch.arange(per, device=cache.device).view(1, 1, per))
-    return Paged(view, _pad_cols(bt.reshape(b, ncols * per).to(torch.int32), kernel_cols),
-                 block_table, cache=cache)
-
-
-def _pad_cols(bt: torch.Tensor, cols: int) -> torch.Tensor:
-    """Fixed column count: the kernel's table width is a compile-time constant."""
-    have = bt.shape[1]
-    if have == cols:
-        return bt
-    if have > cols:
-        return bt[:, :cols].contiguous()
-    pad = torch.full((bt.shape[0], cols - have), -1, dtype=bt.dtype, device=bt.device)
-    return torch.cat([bt, pad], dim=1)
 
 
 # --- structure probe ---------------------------------------------------------
@@ -667,26 +309,54 @@ def dump_structure(path, hidden_states, kv_cache, attn_metadata, impl) -> None:
     Path(path).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
-# --- the 46 arguments --------------------------------------------------------
+# --- native-layout arguments -------------------------------------------------
 
 ARG_ORDER = (
     "x_normed",
     "wq_a", "wq_b", "wq_b_scale", "wkv", "gamma_cq", "gamma_ckv",
     "freqs_cos", "freqs_sin", "cmp_freqs_cos", "cmp_freqs_sin",
     "cmp_wkv", "cmp_wgate", "cmp_ape", "cmp_norm_w",
-    "compress_state", "compress_state_block_table",
+    "compress_state_pages", "kv_cache_pages", "cmp_kv_pages",
+    "compress_state_block_table",
     "idx_wq_b", "idx_wq_b_scale", "weights_proj", "hadamard_idx",
     "inner_wkv", "inner_wgate", "inner_ape", "inner_norm_w",
-    "inner_compress_state", "inner_compress_state_block_table",
-    "kv_cache", "cmp_kv", "cmp_block_table",
-    "idx_kv_cache", "idx_kv_scale", "idx_block_table",
-    "ori_slot_mapping", "window_swa_indices",
-    "cmp_slot_mapping", "idx_slot_mapping",
-    "state_slot_mapping", "inner_state_slot_mapping",
-    "position_ids", "kv_seq_lens", "attn_sink",
+    "inner_index_pages", "inner_compress_state_block_table",
+    "ori_block_table", "cmp_block_table",
+    "index_block_table",
+    "position_ids", "token_valid", "kv_seq_lens", "attn_sink",
     "wo_a", "wo_b", "wo_b_scale",
     "attn_out",
 )
+
+
+def _full_page_view(cache: torch.Tensor, rows: int, row_shape: tuple[int, ...]):
+    """Expose a padded physical page as a canonical contiguous tensor view."""
+    row_elems = 1
+    for extent in row_shape:
+        row_elems *= extent
+    page_elems = rows * row_elems
+    if cache.stride(0) != page_elems:
+        raise NativeLayoutError(
+            f"physical page stride is {cache.stride(0)}, expected {page_elems}"
+        )
+    trailing = 1
+    trailing_strides = []
+    for extent in reversed(row_shape):
+        trailing_strides.append(trailing)
+        trailing *= extent
+    shape = (cache.shape[0], rows, *row_shape)
+    strides = (page_elems, row_elems, *reversed(trailing_strides))
+    view = torch.as_strided(
+        cache,
+        size=shape,
+        stride=strides,
+        storage_offset=cache.storage_offset(),
+    )
+    if not view.is_contiguous():
+        raise NativeLayoutError(
+            f"native page view {shape} is not contiguous: {view.stride()}"
+        )
+    return view
 
 
 def rectangular(n_real: int, kernel_seq: int, device):
@@ -697,7 +367,7 @@ def rectangular(n_real: int, kernel_seq: int, device):
     host that submits one token per request: T_PAD would drop below the 128-row
     O-B tile and decode_o_proj refuses to build. So a host token occupies slot
     ``r * S`` and the other S-1 slots of that request are padding, kept inert by
-    writing -1 into every slot mapping.
+    the explicit ``token_valid`` input.
 
     Returns ``(src, real)``: ``src[t]`` is the host row slot ``t`` reads, and
     ``real[t]`` marks the slots that are not padding.
@@ -710,7 +380,7 @@ def rectangular(n_real: int, kernel_seq: int, device):
 
 
 def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: str):
-    """Translate one decode step into the kernel's 46 arguments.
+    """Bind one decode step to the kernel's native-layout arguments.
 
     ``metadata_list`` is what ``filter_metadata`` returns for a ratio-4 layer:
     five per-cache metadata objects sorted by key -- attn, compressor state,
@@ -719,22 +389,83 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     if not isinstance(layer, str):
         # RopeDataProxy takes a non-string key as a slice and hands back another
         # proxy, so a wrong name surfaces two frames later as a missing reshape.
-        raise TypeError(f"layer must be the layer's name, got {type(layer).__name__}")
-    kcsa, kcfg = kernel()
+        raise NativeLayoutError(
+            f"layer must be the layer's name, got {type(layer).__name__}"
+        )
+    if seq != 1:
+        raise NativeLayoutError(
+            f"native CSA currently requires one host token per request, got seq={seq}"
+        )
+    if len(metadata_list) != 5 or len(kv_cache) != 6:
+        raise NativeLayoutError(
+            f"ratio-4 CSA requires 5 metadata groups and 6 cache views, got "
+            f"{len(metadata_list)} and {len(kv_cache)}"
+        )
+    if any(m.decode is None for m in metadata_list):
+        raise NativeLayoutError("native CSA only accepts decode metadata")
+    kcsa, _ = kernel()
     cmp_md, cst_md, ist_md, idx_md, swa_md = (m.decode for m in metadata_list)
     cmp_kv_c, swa_kv_c, state_c, ist_c, idx_k_c, idx_s_c = kv_cache
 
     # The RoPE proxy resolves by layer name and quietly returns another proxy for a
     # non-string key, so the name has to come from the wrapper, not the impl.
     host_pos = metadata_list[0].decode.input_positions
-    n_real = host_pos.shape[0] // seq            # host requests this step
+    if host_pos.shape[0] % seq:
+        raise NativeLayoutError(
+            f"position rows {host_pos.shape[0]} are not divisible by seq={seq}"
+        )
+    n_real = host_pos.shape[0] // seq            # graph descriptor request rows
     ks = kcsa.S                                  # the kernel's compile-time S
     if n_real > kcsa.B:
-        raise ValueError(f"{n_real} requests exceed the kernel's B={kcsa.B}")
+        raise NativeLayoutError(
+            f"{n_real} requests exceed the kernel's B={kcsa.B}"
+        )
+    if hidden_states.shape[0] < host_pos.shape[0]:
+        raise NativeLayoutError(
+            f"hidden_states has {hidden_states.shape[0]} rows, expected at least "
+            f"{host_pos.shape[0]}"
+        )
 
     src, real = rectangular(n_real, ks, host_pos.device)
     b, t = n_real, n_real * ks
     pos = host_pos.index_select(0, src * seq)    # [T], padding repeats its request
+    host_rows = torch.arange(b, device=host_pos.device) * seq
+    host_positions = host_pos.index_select(0, host_rows).long()
+    raw_logical_page = torch.div(
+        host_positions, VLLM_PAGE, rounding_mode="floor",
+    )
+    raw_page_in_range = (raw_logical_page >= 0) & (
+        raw_logical_page < swa_md.block_table.shape[1]
+    )
+    raw_logical_page = raw_logical_page.clamp(
+        min=0, max=swa_md.block_table.shape[1] - 1,
+    )
+    raw_pages = swa_md.block_table[:b].gather(
+        1, raw_logical_page.reshape(b, 1),
+    ).reshape(b)
+    host_valid = raw_page_in_range & (raw_pages > 0)
+    token_valid = real & host_valid.index_select(0, src * seq)
+
+    def native_table(name: str, table: torch.Tensor) -> torch.Tensor:
+        if table.dtype != torch.int32:
+            raise NativeLayoutError(f"{name} must be INT32, got {table.dtype}")
+        if table.shape[0] < b:
+            raise NativeLayoutError(
+                f"{name} has {table.shape[0]} requests, expected at least {b}"
+            )
+        return table[:b].contiguous()
+
+    expected_dtypes = {
+        "main state": (state_c, torch.float32),
+        "inner state": (ist_c, torch.float32),
+        "raw KV": (swa_kv_c, torch.bfloat16),
+        "compressed KV": (cmp_kv_c, torch.bfloat16),
+        "index key page": (idx_k_c, torch.int8),
+        "index scale view": (idx_s_c, torch.float16),
+    }
+    for name, (tensor, dtype) in expected_dtypes.items():
+        if tensor.dtype != dtype:
+            raise NativeLayoutError(f"{name} must be {dtype}, got {tensor.dtype}")
 
     a = dict(prepare_weights(impl))
     a["x_normed"] = hidden_states.index_select(0, src * seq).to(torch.bfloat16)
@@ -742,7 +473,7 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
                                 dtype=torch.bfloat16, device=hidden_states.device)
 
     # RoPE: vLLM keeps the compressed table packed by boundary row.
-    boundary, row = _compressed_rows(pos)
+    _, row = _compressed_rows(pos, ks)
     # The per-token tables are indexed by host row, so they follow the same
     # rectangle as x_normed; the compressed ones are indexed by boundary row and
     # are expanded through `row` below.
@@ -754,58 +485,72 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     a["cmp_freqs_cos"] = cc.index_select(0, rc)
     a["cmp_freqs_sin"] = cs.index_select(0, rc)
 
-    # Paged KV: the kernel's page is a quarter of vLLM's.
-    pg_swa = repage_kv(swa_kv_c, swa_md.block_table, kcsa.CMP_MAX_BLOCKS)
-    pg_cmp = repage_kv(cmp_kv_c, cmp_md.block_table, kcsa.CMP_MAX_BLOCKS)
-    pg_idx = repage_kv(idx_k_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS)
-    # The scale cache shares its page with the key cache and is FP16 there; the
-    # kernel's signature is FP32, and it cannot be cast in place.
-    pg_ids = repage_kv(idx_s_c, idx_md.block_table, kcsa.IDX_MAX_BLOCKS,
-                       dtype=torch.float32)
-    paged = (pg_swa, pg_cmp, pg_idx, pg_ids)
-    a["kv_cache"] = pg_swa.view
-    a["cmp_kv"], a["cmp_block_table"] = pg_cmp.view, pg_cmp.table
-    a["idx_kv_cache"], a["idx_block_table"] = pg_idx.view, pg_idx.table
-    a["idx_kv_scale"] = pg_ids.view
-
-    # Compressor state: a private ring per request, seeded from vLLM's cache.
-    main_dim = kcsa.MAIN_STATE_DIM
-    inner_dim = kcsa.INNER_STATE_DIM
-    plan_m = state_ring_plan(pos, ks, cst_md.block_table)
-    plan_i = state_ring_plan(pos, ks, ist_md.block_table)
-    a["compress_state"] = make_state_ring(state_c, plan_m, b, main_dim)
-    a["inner_compress_state"] = make_state_ring(ist_c, plan_i, b, inner_dim)
-    a["compress_state_block_table"] = state_block_table(b, pos.device)
-    a["inner_compress_state_block_table"] = state_block_table(b, pos.device)
-    a["state_slot_mapping"] = _inert_later = state_slots(pos, ks)
-    a["inner_state_slot_mapping"] = a["state_slot_mapping"]
-
-    # Slots and window.
-    def _inert(x):
-        return torch.where(real, x, torch.full_like(x, -1))
-
-    ori_flat = _inert(
-        _flat_slots(swa_md.slot_mapping, VLLM_PAGE).index_select(0, src * seq))
-    cmp_flat = _inert(_to_token_rows(
-        _flat_slots(cmp_md.slot_mapping, VLLM_PAGE), row, boundary, -1))
-    idx_flat = _inert(_to_token_rows(
-        _flat_slots(idx_md.slot_mapping, VLLM_PAGE), row, boundary, -1))
-    a["ori_slot_mapping"] = pg_swa.remap(ori_flat, src)
-    a["cmp_slot_mapping"] = pg_cmp.remap(cmp_flat, src)
-    a["idx_slot_mapping"] = pg_idx.remap(idx_flat, src)
-    # The scale is written at the key's slots but takes no mapping of its own.
-    pg_ids.track(idx_flat, src)
-    a["window_swa_indices"] = _window_indices(pos, swa_md.block_table, ks, kcsa.WIN,
-                                              paged=pg_swa)
-
+    # vLLM allocates these three cache groups independently even though every
+    # physical page is 131072 bytes.  Restore each group's full padded page in
+    # place; no alias between the three arguments is required or assumed.
+    if state_c.stride(0) != 32768:
+        raise NativeLayoutError(
+            f"main state page stride is {state_c.stride(0)}, expected 32768 FP32"
+        )
+    if swa_kv_c.stride(0) != 65536 or cmp_kv_c.stride(0) != 65536:
+        raise NativeLayoutError(
+            "raw/compressed KV page stride does not match 131072 bytes"
+        )
+    a["compress_state_pages"] = _full_page_view(
+        state_c, kcsa.VLLM_COMPRESS_STATE_PAGE_ROWS, (kcsa.MAIN_STATE_DIM,),
+    )
+    a["kv_cache_pages"] = _full_page_view(
+        swa_kv_c, kcsa.VLLM_KV_PAGE_ROWS, (1, kcsa.HEAD_DIM),
+    )
+    a["cmp_kv_pages"] = _full_page_view(
+        cmp_kv_c, kcsa.VLLM_KV_PAGE_ROWS, (1, kcsa.HEAD_DIM),
+    )
+    a["compress_state_block_table"] = native_table(
+        "main state block table", cst_md.block_table,
+    )
+    a["inner_compress_state_block_table"] = native_table(
+        "inner state block table", ist_md.block_table,
+    )
+    a["ori_block_table"] = native_table(
+        "raw KV block table", swa_md.block_table,
+    )
+    a["cmp_block_table"] = native_table(
+        "compressed KV block table", cmp_md.block_table,
+    )
+    shared_storage = idx_k_c.untyped_storage().data_ptr()
+    if ist_c.untyped_storage().data_ptr() != shared_storage:
+        raise NativeLayoutError(
+            "inner state and index key do not share one vLLM allocation"
+        )
+    if ist_c.data_ptr() != idx_k_c.data_ptr():
+        raise NativeLayoutError(
+            "inner state and index key do not start at the same physical page"
+        )
+    if ist_c.stride(0) != 4160:
+        raise NativeLayoutError(
+            f"inner state page stride is {ist_c.stride(0)}, expected 4160 FP32"
+        )
+    if idx_s_c.untyped_storage().data_ptr() != shared_storage:
+        raise NativeLayoutError("index key and scale do not share one vLLM page")
+    if idx_k_c.stride(0) != 16640 or idx_s_c.stride(0) != 8320:
+        raise NativeLayoutError(
+            "index key/scale physical strides do not match the 16640-byte page"
+        )
+    if idx_s_c.data_ptr() - idx_k_c.data_ptr() != 16384:
+        raise NativeLayoutError(
+            "index scale does not start at byte 16384 of the packed page"
+        )
+    a["inner_index_pages"] = _full_page_view(
+        idx_k_c, kcsa.VLLM_INDEX_PAGE_ROWS, (kcsa.IDX_HEAD_DIM,),
+    )
+    a["index_block_table"] = native_table(
+        "index block table", idx_md.block_table,
+    )
     a["position_ids"] = pos.to(torch.int32)
+    a["token_valid"] = token_valid.to(torch.int32)
     a["kv_seq_lens"] = cmp_md.seq_lens.to(torch.int32)[:b]
-    a["state_slot_mapping"] = _inert(a["state_slot_mapping"])
-    a["inner_state_slot_mapping"] = a["state_slot_mapping"]
 
-    return [a[name] for name in ARG_ORDER], (plan_m, plan_i, state_c, ist_c,
-                                             main_dim, inner_dim, pos, ks, n_real,
-                                             paged)
+    return [a[name] for name in ARG_ORDER], (pos, ks, n_real)
 
 
 def _pick(table, layer):
@@ -842,6 +587,114 @@ def _registered():
 
 _SEEN_ADDRS = {}
 _AUDITS = [0]
+_OWNERSHIP_AUDITS = [0]
+
+
+def audit_shared_pool_ownership(
+    metadata_list, kv_cache, n_real: int, seq: int,
+) -> None:
+    """Verify groups sharing each physical allocation own disjoint blocks.
+
+    This intentionally reads a scalar back to the host and therefore runs only
+    on eager/warm-up calls, never while ACLGraph capture is active.
+    """
+    cmp_md, cst_md, ist_md, idx_md, swa_md = (
+        m.decode for m in metadata_list
+    )
+    host_rows = torch.arange(
+        n_real, device=ist_md.input_positions.device,
+    ) * seq
+    positions = ist_md.input_positions.index_select(0, host_rows).long()
+    raw_current_column = torch.div(
+        positions, VLLM_PAGE, rounding_mode="floor",
+    )
+    raw_in_range = (raw_current_column >= 0) & (
+        raw_current_column < swa_md.block_table.shape[1]
+    )
+    raw_current_column = raw_current_column.clamp(
+        min=0, max=swa_md.block_table.shape[1] - 1,
+    )
+    raw_current_page = swa_md.block_table[:n_real].gather(
+        1, raw_current_column.reshape(-1, 1),
+    ).reshape(-1)
+    active = raw_in_range & (raw_current_page > 0)
+
+    history = positions.reshape(-1, 1) - torch.arange(
+        8, device=positions.device,
+    ).reshape(1, -1)
+    state_valid = (history >= 0) & active.reshape(-1, 1)
+    state_columns = torch.div(
+        history.clamp_min(0), VLLM_STATE_PAGE, rounding_mode="floor",
+    ).clamp(max=ist_md.block_table.shape[1] - 1)
+    inner_ids = ist_md.block_table[:n_real].gather(1, state_columns)
+    inner_ids = inner_ids.masked_select(state_valid & (inner_ids > 0))
+
+    compressed_rows = torch.div(
+        positions + 1, COMPRESS_RATIO, rounding_mode="floor",
+    ).clamp_min(0)
+    index_page_count = torch.div(
+        compressed_rows + VLLM_PAGE - 1,
+        VLLM_PAGE,
+        rounding_mode="floor",
+    )
+    columns = torch.arange(
+        idx_md.block_table.shape[1], device=positions.device,
+    ).reshape(1, -1)
+    index_ids = idx_md.block_table[:n_real]
+    index_ids = index_ids.masked_select(
+        active.reshape(-1, 1)
+        & (columns < index_page_count.reshape(-1, 1))
+        & (index_ids > 0)
+    )
+
+    inner_set = set(inner_ids.detach().cpu().tolist())
+    index_set = set(index_ids.detach().cpu().tolist())
+    inner_capacity = kv_cache[4].shape[0]
+    if any(block >= inner_capacity for block in inner_set | index_set):
+        raise NativeLayoutError(
+            "inner/index block table contains a physical page outside the pool"
+        )
+    if inner_set & index_set:
+        raise NativeLayoutError(
+            "inner-state and index block tables overlap in the shared page pool"
+        )
+
+    state_ids = cst_md.block_table[:n_real].gather(1, state_columns)
+    state_ids = state_ids.masked_select(state_valid & (state_ids > 0))
+
+    raw_first = (positions - 127).clamp_min(0)
+    raw_columns = torch.stack(
+        (
+            torch.div(raw_first, VLLM_PAGE, rounding_mode="floor"),
+            torch.div(positions, VLLM_PAGE, rounding_mode="floor"),
+        ),
+        dim=1,
+    ).clamp(min=0, max=swa_md.block_table.shape[1] - 1)
+    raw_ids = swa_md.block_table[:n_real].gather(1, raw_columns)
+    raw_ids = raw_ids.masked_select(active.reshape(-1, 1) & (raw_ids > 0))
+
+    cmp_columns = torch.arange(
+        cmp_md.block_table.shape[1], device=positions.device,
+    ).reshape(1, -1)
+    cmp_ids = cmp_md.block_table[:n_real]
+    cmp_ids = cmp_ids.masked_select(
+        active.reshape(-1, 1)
+        & (cmp_columns < index_page_count.reshape(-1, 1))
+        & (cmp_ids > 0)
+    )
+    # These three groups use independent 131072-byte allocations.  Their block
+    # IDs may therefore overlap; only each table's own pool bound matters.
+    main_sets = (
+        ("main-state", set(state_ids.detach().cpu().tolist()), kv_cache[2].shape[0]),
+        ("raw-kv", set(raw_ids.detach().cpu().tolist()), kv_cache[1].shape[0]),
+        ("compressed-kv", set(cmp_ids.detach().cpu().tolist()), kv_cache[0].shape[0]),
+    )
+    for name, blocks, capacity in main_sets:
+        if any(block >= capacity for block in blocks):
+            raise NativeLayoutError(
+                f"{name} block table contains a physical page outside its pool"
+            )
+    _OWNERSHIP_AUDITS[0] += 1
 
 
 def audit_inputs(metadata_list, n_real: int) -> None:
@@ -885,7 +738,7 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
 
     The kernel writes six caches, so this runs after the native path and reads
     caches the native path has already advanced: the output is not numerically
-    comparable, and is not meant to be. What it answers is whether the 46
+    comparable, and is not meant to be. What it answers is whether the native
     arguments assemble, bind and execute on live vLLM state at all.
     """
     impl = self.dsa_attn.impl
@@ -966,9 +819,9 @@ def _tally(layer: str, ratio, has_decode: bool) -> None:
 def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     """Run the kernel in place of the native attention and publish its result.
 
-    Unlike :func:`compare_once` this owns the step: the kernel's six caches are
-    the live ones, the compressor ring is written back, and the padding rows of
-    the rectangle are dropped on the way out.
+    Unlike :func:`compare_once` this owns the step: the kernel directly updates
+    vLLM's live state and cache pages, and the padding rows of the rectangle are
+    dropped on the way out.
     """
     impl = self.dsa_attn.impl
     ratio = getattr(impl, "compress_ratio", 0)
@@ -977,7 +830,24 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     if ratio != COMPRESS_RATIO or decode is None:
         return False
     seq = _env_int("PTO_ATTN_SEQ", 1)
+    if seq != 1:
+        if "seq" not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add("seq")
+            print(
+                f"[pto-attn] declined host seq={seq}: native CSA currently "
+                "supports one token per request",
+                flush=True,
+            )
+        return False
     kcsa, _ = kernel()
+    if decode.input_positions.shape[0] % seq:
+        if "position_rows" not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add("position_rows")
+            print(
+                "[pto-attn] declined: position rows are not divisible by host seq",
+                flush=True,
+            )
+        return False
     n_offered = decode.input_positions.shape[0] // seq
     if n_offered > kcsa.B:
         # Under capture this is the padded graph batch, not the live request
@@ -988,21 +858,31 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
             print(f"[pto-attn] declined a batch of {n_offered}: the kernel takes "
                   f"B={kcsa.B}", flush=True)
         return False
-    args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq,
-                            self.dsa_attn.layer_name)
-    plan_m, plan_i, state_c, ist_c, main_dim, inner_dim, pos, ks, n_real, paged = plan
-
-    if not capture_active() and _AUDITS[0] < 2:
-        audit_inputs(metadata_list, n_real)
+    try:
+        args, plan = build_args(
+            impl,
+            hidden_states,
+            kv_cache,
+            metadata_list,
+            seq,
+            self.dsa_attn.layer_name,
+        )
+        _pos, ks, n_real = plan
+        if not capture_active():
+            if _OWNERSHIP_AUDITS[0] < 2:
+                audit_shared_pool_ownership(
+                    metadata_list, kv_cache, n_real, seq,
+                )
+            if _AUDITS[0] < 2:
+                audit_inputs(metadata_list, n_real)
+    except NativeLayoutError as error:
+        key = f"layout:{error}"
+        if key not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add(key)
+            print(f"[pto-attn] declined native layout: {error}", flush=True)
+        return False
 
     _registered()(*args)
-
-    write_state_ring(state_c, args[ARG_ORDER.index("compress_state")],
-                     plan_m, ks, pos, main_dim)
-    write_state_ring(ist_c, args[ARG_ORDER.index("inner_compress_state")],
-                     plan_i, ks, pos, inner_dim)
-    for pg in paged:
-        pg.commit()
 
     take = torch.arange(n_real, device=output.device) * ks
     rows = args[-1].index_select(0, take)
