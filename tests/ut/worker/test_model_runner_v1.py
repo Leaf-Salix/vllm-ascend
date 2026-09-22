@@ -458,7 +458,6 @@ class TestDeviceMetadataFullGraphEvents(unittest.TestCase):
         runner.enable_prompt_embeds = False
         runner.input_ids = SimpleNamespace(gpu=torch.zeros(4, dtype=torch.int64))
         runner.uses_mrope = False
-        runner.uses_xdrope_dim = 0
         runner.positions = torch.zeros(4, dtype=torch.int64)
         runner.drafter = None
         # _dummy_run reads multimodal_config for the mm_encoder_only
