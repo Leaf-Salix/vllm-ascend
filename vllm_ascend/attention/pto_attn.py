@@ -485,9 +485,8 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     a["cmp_freqs_cos"] = cc.index_select(0, rc)
     a["cmp_freqs_sin"] = cs.index_select(0, rc)
 
-    # vLLM allocates these three cache groups independently even though every
-    # physical page is 131072 bytes.  Restore each group's full padded page in
-    # place; no alias between the three arguments is required or assumed.
+    # Main state and compressed KV are different views of one physical page
+    # pool; raw sliding KV uses a separate allocation.
     if state_c.stride(0) != 32768:
         raise NativeLayoutError(
             f"main state page stride is {state_c.stride(0)}, expected 32768 FP32"
@@ -505,6 +504,14 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
     a["cmp_kv_pages"] = _full_page_view(
         cmp_kv_c, kcsa.VLLM_KV_PAGE_ROWS, (1, kcsa.HEAD_DIM),
     )
+    if (a["compress_state_pages"].data_ptr() != a["cmp_kv_pages"].data_ptr()
+            or a["compress_state_pages"].numel()
+            * a["compress_state_pages"].element_size()
+            != a["cmp_kv_pages"].numel()
+            * a["cmp_kv_pages"].element_size()):
+        raise NativeLayoutError(
+            "main state and compressed KV must cover the same page pool"
+        )
     a["compress_state_block_table"] = native_table(
         "main state block table", cst_md.block_table,
     )
@@ -682,8 +689,8 @@ def audit_shared_pool_ownership(
         & (cmp_columns < index_page_count.reshape(-1, 1))
         & (cmp_ids > 0)
     )
-    # These three groups use independent 131072-byte allocations.  Their block
-    # IDs may therefore overlap; only each table's own pool bound matters.
+    # Main state and compressed KV share one physical pool, while raw KV has
+    # its own allocation. Check both bounds and active ownership.
     main_sets = (
         ("main-state", set(state_ids.detach().cpu().tolist()), kv_cache[2].shape[0]),
         ("raw-kv", set(raw_ids.detach().cpu().tolist()), kv_cache[1].shape[0]),
@@ -694,6 +701,10 @@ def audit_shared_pool_ownership(
             raise NativeLayoutError(
                 f"{name} block table contains a physical page outside its pool"
             )
+    if main_sets[0][1] & main_sets[2][1]:
+        raise NativeLayoutError(
+            "main-state and compressed-KV block tables overlap in the shared page pool"
+        )
     _OWNERSHIP_AUDITS[0] += 1
 
 

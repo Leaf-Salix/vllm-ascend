@@ -429,7 +429,7 @@ def _decode_csa_attn_tp1(
         o_packed_heads,
         attention_ready,
     )
-    return decode_o_proj_tp1(
+    decode_o_proj_tp1(
         o_packed_heads,
         wo_a,
         wo_b,
@@ -437,6 +437,7 @@ def _decode_csa_attn_tp1(
         attn_out,
         heads_dep,
     )
+    return attn_out
 
 
 decode_csa_attn_tp1 = pl.jit.inline(_decode_csa_attn_tp1)

@@ -124,8 +124,8 @@ def strided_t(nblk, rows, dim, pad, dtype):
 
 
 # Shapes, strides and dtypes as the live probe/code contract records them.  Main
-# state, raw KV and compressed KV are independent 131072-byte page allocations;
-# inner state/index key/index scale share one 16640-byte allocation.
+# state and compressed KV share a 131072-byte page pool; raw KV is separate.
+# Inner state/index key/index scale share one 16640-byte allocation.
 main_state_dim = 2 * K.MAIN_OUT_DIM
 inner_state_dim = 2 * K.INNER_OUT_DIM
 main_state_parent = torch.zeros(64, 16, main_state_dim, dtype=torch.float32)
@@ -136,7 +136,7 @@ main_state = torch.as_strided(
     0,
 )
 raw_parent = torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16)
-cmp_parent = torch.zeros(64, 128, 1, K.HEAD_DIM, dtype=torch.bfloat16)
+cmp_parent = main_state_parent.view(torch.bfloat16).view(64, 128, 1, K.HEAD_DIM)
 index_parent = torch.zeros(64 * 16640, dtype=torch.int8)
 inner_state = torch.as_strided(
     index_parent.view(torch.float32),
@@ -223,6 +223,8 @@ check("raw KV aliases its parent",
       by["kv_cache_pages"].data_ptr() == raw_parent.data_ptr())
 check("compressed KV aliases its parent",
       by["cmp_kv_pages"].data_ptr() == cmp_parent.data_ptr())
+check("main state and compressed KV share pages",
+      by["compress_state_pages"].data_ptr() == by["cmp_kv_pages"].data_ptr())
 
 print("== contiguity (the binding rejects anything else) ==")
 bad = [n for n, a in by.items() if not a.is_contiguous()]
