@@ -861,6 +861,45 @@ class TestNPUModelRunnerKVCache(unittest.TestCase):
         runner.attn_backend = backend
         return runner
 
+    def test_layer_cache_specs_use_planned_geometry_after_block_size_update(self):
+        from vllm_ascend.models.deepseek_v4.indexer import AscendDeepseekV4IndexerCache
+
+        dsv4_name = "model.layers.0.self_attn.indexer.k_cache"
+        sfa_name = "model.layers.1.self_attn.indexer.k_cache"
+        dsv4_spec = AscendMLAAttentionSpec(
+            block_size=128,
+            num_kv_heads=1,
+            head_size=128,
+            dtype=torch.bfloat16,
+            model_version="deepseek_v4",
+        )
+        sfa_spec = AscendSFAIndexerCacheSpec(
+            block_size=8,
+            num_kv_heads=1,
+            head_size=128,
+            dtype=torch.bfloat16,
+        )
+        cache_config = KVCacheConfig(
+            num_blocks=2,
+            kv_cache_tensors=[],
+            kv_cache_groups=[
+                KVCacheGroupSpec(layer_names=[dsv4_name], kv_cache_spec=dsv4_spec),
+                KVCacheGroupSpec(layer_names=[sfa_name], kv_cache_spec=sfa_spec),
+            ],
+        )
+        layer = AscendDeepseekV4IndexerCache.__new__(AscendDeepseekV4IndexerCache)
+        torch.nn.Module.__init__(layer)
+        layer.get_kv_cache_spec = MagicMock(side_effect=AssertionError("planned spec must not be recomputed"))
+        runner = self._build_runner()
+        runner.vllm_config.cache_config.block_size = 8
+        runner.compilation_config = SimpleNamespace(static_forward_context={dsv4_name: layer})
+
+        specs = runner._get_layer_kv_cache_specs(cache_config)
+
+        self.assertIs(specs[dsv4_name], dsv4_spec)
+        self.assertIs(specs[sfa_name], sfa_spec)
+        layer.get_kv_cache_spec.assert_not_called()
+
     def test_kvpp_allocate_and_reshape_views(self):
         from tests.ut.kvpp_utils import assert_attention_cache_views, make_attention_cache_case, make_cache_config
         from vllm_ascend.core import kv_cache_placement
