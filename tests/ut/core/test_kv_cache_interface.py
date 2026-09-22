@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 
 import torch
-from vllm.v1.kv_cache_interface import UniformTypeKVCacheSpecs
+from vllm.v1.kv_cache_interface import MLAAttentionSpec, UniformTypeKVCacheSpecs
 
 from vllm_ascend.core.kv_cache_interface import (
     AscendMLAAttentionSpec,
@@ -38,6 +38,21 @@ def test_get_storage_block_size_and_dcp_memory():
         parallel_config=SimpleNamespace(decode_context_parallel_size=2),
     )
     assert spec.max_memory_usage_bytes(vllm_config) > 0
+
+
+def test_ascend_mla_preserves_upstream_storage_field():
+    if "storage_block_size" not in MLAAttentionSpec.__dataclass_fields__:
+        return
+
+    spec = AscendMLAAttentionSpec(
+        block_size=16,
+        num_kv_heads=1,
+        head_size=128,
+        dtype=torch.bfloat16,
+        storage_block_size=8,
+    )
+    assert spec.storage_block_size == 8
+    assert get_storage_block_size(spec) == 16 // get_kv_cache_compression_ratio(spec)
 
 
 def test_sliding_window_mla_storage_and_page_size():
