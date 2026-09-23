@@ -30,7 +30,6 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.utils.torch_utils import direct_register_custom_op
 from vllm.v1.attention.backend import AttentionMetadata
 
-from vllm_ascend import envs
 from vllm_ascend.models.layer.attention.layer import DSAAttention
 from vllm_ascend.utils import (
     AscendDeviceType,
@@ -196,12 +195,6 @@ def dsa_forward(
         return
 
     kv_cache = _build_kv_cache(self, forward_context)
-
-    if envs.VLLM_ASCEND_PYPTO_DSV4_CSA and not need_gather_q_kv:
-        from vllm_ascend.attention import pto_attn
-
-        if pto_attn.substitute(self, hidden_states, kv_cache, attn_metadata, output):
-            return
 
     self.dsa_attn.impl.forward(
         self.dsa_attn.layer_name, hidden_states, kv_cache, attn_metadata, need_gather_q_kv, output

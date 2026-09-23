@@ -1,965 +1,327 @@
-"""Feed vLLM's decode tensors to the PyPTO attention-only CSA kernel.
+# SPDX-License-Identifier: Apache-2.0
+"""PyPTO implementation of the native AscendDSAImpl forward contract.
 
-The kernel is ``pto_kernels.dspark.decode_csa.decode_csa_attn_tp1_test``: it takes
-``x_normed [T, D] BF16`` and fills ``attn_out [T, D] BF16``, leaving ``npu_hc_pre``,
-the input RMSNorm and ``npu_hc_post`` to the native path. Everything here is the
-binding between vLLM's decode state and the kernel's native-layout arguments.
-
-Two properties the per-step path must keep, because it has to survive ACLGraph
-capture: no device-to-host read (no ``.item()``, no boolean-mask indexing, no
-``torch.unique``), and no allocation whose shape depends on a device value.
-
-``compare_once`` is a legacy diagnostic helper, not connected to serving and
-not a substitute for a comparison with independently initialized cache state.
+Native metadata producers own slots and compact RoPE rows. This implementation
+passes their tensors to the kernel; it does not regenerate token masks or cache
+addresses. Kernel math and physical-page descriptors are derived from nalinaly
+8a4c4e6f, with the surrounding contract defined by v0.25.1rc1 AscendDSAImpl.
 """
 
-from __future__ import annotations
-
-import json
-import sys
-from pathlib import Path
+from functools import lru_cache
 
 import torch
+from vllm.forward_context import get_forward_context
 
-# --- kernel import -----------------------------------------------------------
-# decode_csa fixes its TP specialization at import time from sys.argv, which a
-# vLLM process never carries. Inject it so B = DECODE_BATCH // TP and T = B * S
-# land on the intended shape instead of the module's own default of 1.
-_TP = 1
-
-
-def _import_kernel():
-    argv = sys.argv
-    sys.argv = [argv[0], "--tp", str(_TP)]
-    try:
-        from .pto_kernels.dspark import config as kcfg
-        from .pto_kernels.dspark import decode_csa as kcsa
-    finally:
-        sys.argv = argv
-    return kcsa, kcfg
-
-
-_KCSA = None
-_KCFG = None
-
-
-def kernel():
-    global _KCSA, _KCFG
-    if _KCSA is None:
-        _KCSA, _KCFG = _import_kernel()
-    return _KCSA, _KCFG
-
-
-# --- constants ---------------------------------------------------------------
-
-VLLM_PAGE = 128  # swa / compressed / indexer KV page, in slots
-VLLM_STATE_PAGE = 8
-COMPRESS_RATIO = 4
-
-
-class NativeLayoutError(ValueError):
-    """The live vLLM allocation does not satisfy the native CSA ABI."""
-
-
-# --- weights: one-time, cached on the impl -----------------------------------
-
-
-def _to_nd(w: torch.Tensor) -> torch.Tensor:
-    """Undo the FRACTAL_NZ layout vLLM gives quantized weights.
-
-    ``weight_nz_mode`` defaults to 1, and an NZ-laid-out weight read as ND is
-    silently wrong rather than an error, so every INT8 weight goes through this.
-    Dense weights are never converted, so they are returned untouched.
-    """
-    if w.dtype not in (torch.int8, torch.uint8):
-        return w
-    import torch_npu
-
-    from vllm_ascend.utils import ACL_FORMAT_FRACTAL_ND
-
-    return torch_npu.npu_format_cast(w, ACL_FORMAT_FRACTAL_ND)
-
-
-def _quant_int8_per_channel(w: torch.Tensor, kcfg):
-    """BF16 -> INT8 plus per-channel scale, matching the kernel's contract."""
-    amax = w.float().abs().amax(dim=-1).clamp_min(kcfg.INT8_AMAX_EPS)
-    sq = kcfg.INT8_SCALE_MAX / amax
-    q = torch.round(w.float() * sq.unsqueeze(-1)).clamp(-127, 127).to(torch.int8)
-    return q, (1.0 / sq).float()
-
-
-def _oriented(w: torch.Tensor, want: tuple) -> torch.Tensor:
-    """Give the kernel its orientation, whichever one vLLM stored.
-
-    A W8A8 linear comes out of process_weights_after_loading already transposed to
-    [in, out], while an unquantized one keeps torch's [out, in]. Deciding by shape
-    rather than by quantization keeps both checkpoints working.
-    """
-    shape = tuple(w.shape)
-    if shape == want:
-        return w
-    if shape == want[::-1]:
-        return w.t().contiguous()
-    raise ValueError(f"weight is {shape}, expected {want} or its transpose")
-
-
-def _dense(linear, want: tuple) -> torch.Tensor:
-    """A BF16 weight in the kernel's orientation, dequantizing if vLLM quantized it."""
-    w = _to_nd(linear.weight.detach())
-    scale = getattr(linear, "weight_scale_fp32", None)
-    if scale is None:
-        scale = getattr(linear, "weight_scale", None)
-    if scale is not None and w.dtype in (torch.int8, torch.uint8):
-        w = w.float() * scale.detach().float().view(1, -1)
-    return _oriented(w.to(torch.bfloat16), want)
-
-
-def _int8(linear, want: tuple, scale_len: int, kcfg):
-    """An INT8 weight plus its per-channel scale, quantizing if vLLM kept it dense.
-
-    The scale's axis is not the same for every slot: wq_b and idx_wq_b carry one
-    scale per output column, wo_b one per output row. ``scale_len`` picks which,
-    so a mismatch is a shape error here rather than at kernel launch.
-    """
-    w = _to_nd(linear.weight.detach())
-    scale = getattr(linear, "weight_scale_fp32", None)
-    if scale is None:
-        scale = getattr(linear, "weight_scale", None)
-    if w.dtype in (torch.int8, torch.uint8) and scale is not None:
-        return _oriented(w, want), scale.detach().float().reshape(-1)
-
-    dense = _oriented(w, want)
-    if scale_len == want[1]:
-        q, sc = _quant_int8_per_channel(dense.t().contiguous(), kcfg)
-        return q.t().contiguous(), sc
-    if scale_len == want[0]:
-        return _quant_int8_per_channel(dense, kcfg)
-    raise ValueError(f"scale length {scale_len} matches neither axis of {want}")
-
-
-def _hadamard(dim: int, device, dtype=torch.bfloat16) -> torch.Tensor:
-    """Sylvester Hadamard, normalized.
-
-    The kernel treats this as a bare right-hand matmul operand with no scaling of
-    its own, so the 1/sqrt(dim) that vLLM's rotate_activation applies separately
-    has to be folded in here. Mirrors decode_csa.py::init_hadamard_idx.
-    """
-    h = torch.ones((1, 1), dtype=torch.float32)
-    while h.shape[0] < dim:
-        h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
-    return (h / (dim**0.5)).to(dtype).to(device)
-
-
-def prepare_weights(impl):
-    """Build and cache the kernel's weight arguments on the impl."""
-    cached = getattr(impl, "_pto_attn_weights", None)
-    if cached is not None:
-        return cached
-
-    kcsa, kcfg = kernel()
-    D, QL, HD = kcsa.D, kcsa.Q_LORA, kcsa.HEAD_DIM
-    IH, ID = kcsa.IDX_N_HEADS, kcsa.IDX_HEAD_DIM
-    wq_b, wq_b_scale = _int8(impl.wq_b, (QL, kcsa.H * HD), kcsa.H * HD, kcfg)
-    idx_wq_b, idx_wq_b_scale = _int8(impl.inderxer_wq_b, (QL, IH * ID), IH * ID, kcfg)
-    wo_b, wo_b_scale = _int8(impl.wo_b, (D, kcsa.O_GROUPS * kcsa.O_LORA), D, kcfg)
-
-    w = {
-        "wq_a": _dense(impl.wq_a, (D, QL)),
-        "wq_b": wq_b,
-        "wq_b_scale": wq_b_scale,
-        "wkv": _dense(impl.wkv, (D, HD)),
-        "gamma_cq": impl.q_norm.weight.detach().to(torch.bfloat16),
-        "gamma_ckv": impl.kv_norm.weight.detach().to(torch.bfloat16),
-        "cmp_wkv": _dense(impl.compressor_wkv, (kcsa.MAIN_OUT_DIM, D)),
-        "cmp_wgate": _dense(impl.compressor_wgate, (kcsa.MAIN_OUT_DIM, D)),
-        "cmp_ape": impl.compressor_ape.detach().float(),
-        "cmp_norm_w": impl.compressor_norm.weight.detach().to(torch.bfloat16),
-        "idx_wq_b": idx_wq_b,
-        "idx_wq_b_scale": idx_wq_b_scale,
-        "weights_proj": _dense(impl.weights_proj, (D, IH)),
-        "hadamard_idx": _hadamard(ID, impl.wo_b.weight.device),
-        "inner_wkv": _dense(impl.indexcom_wkv, (kcsa.INNER_OUT_DIM, D)),
-        "inner_wgate": _dense(impl.indexcom_wgate, (kcsa.INNER_OUT_DIM, D)),
-        "inner_ape": impl.indexcom_ape.detach().float(),
-        "inner_norm_w": impl.indexcom_norm.weight.detach().to(torch.bfloat16),
-        "attn_sink": impl.attn_sink.detach().float(),
-        # vLLM keeps [G, O_GROUP_IN, O_LORA]; the kernel wants the transpose.
-        "wo_a": impl.wo_a.weight.detach().transpose(1, 2).contiguous().to(torch.bfloat16),
-        "wo_b": wo_b,
-        "wo_b_scale": wo_b_scale,
-    }
-    impl._pto_attn_weights = w
-    return w
-
-
-# --- per-step derivation: everything below must stay device-only ------------
-
-
-def _native_rope_tables(layer: str):
-    """Alias the layer's persistent, interleaved FP32 vLLM RoPE tables.
-
-    Do not use the per-step proxy: compressed rows there are compacted by
-    boundary. The kernel can address the same static table by absolute position.
-    """
-    from vllm_ascend.ops.rope_dsv4 import _ROPE_STATE
-
-    try:
-        config_key, _ = _ROPE_STATE.layer_info[layer]
-        cos, sin = _ROPE_STATE.full_rope_cache[config_key]
-    except KeyError as error:
-        raise NativeLayoutError(f"no persistent RoPE table registered for {layer}") from error
-    for name, table in (("cos", cos), ("sin", sin)):
-        if table.dtype != torch.float32 or not table.is_contiguous() or table.shape[-1] != 64:
-            raise NativeLayoutError(f"native RoPE {name} must be contiguous FP32 with 64 columns")
-    if cos.shape != sin.shape:
-        raise NativeLayoutError("native RoPE cos/sin shapes differ")
-    return cos.view(-1, 64), sin.view(-1, 64)
-
-
-_DEBUG_REFUSED = set()
-
-
-def capture_active() -> bool:
-    """Whether an ACLGraph capture is recording right now.
-
-    vllm-ascend clears ``forward_context.capturing`` at the start of every forward
-    and sets it immediately before entering the graph context, so it is true for
-    the recorded pass and false for the warm-up that precedes it.
-    """
-    try:
-        from vllm.forward_context import get_forward_context
-
-        return bool(getattr(get_forward_context(), "capturing", False))
-    except Exception:
-        return False
-
-
-# --- structure probe ---------------------------------------------------------
-
-
-def describe(obj, depth: int = 0, limit: int = 3):
-    """Shape/dtype sketch of a metadata object, for the first-call dump."""
-    if isinstance(obj, torch.Tensor):
-        return {
-            "shape": list(obj.shape),
-            "dtype": str(obj.dtype),
-            "contig": bool(obj.is_contiguous()),
-            "stride": list(obj.stride()),
-        }
-    if isinstance(obj, (int, float, bool, str)) or obj is None:
-        return obj
-    if isinstance(obj, (list, tuple)):
-        return [describe(x, depth + 1, limit) for x in obj[:8]]
-    if isinstance(obj, dict):
-        return {str(k): describe(v, depth + 1, limit) for k, v in list(obj.items())[:24]}
-    if depth < limit:
-        out = {"__class__": type(obj).__name__}
-        for name in dir(obj):
-            if name.startswith("_"):
-                continue
-            try:
-                v = getattr(obj, name)
-            except Exception:
-                continue
-            if callable(v):
-                continue
-            out[name] = describe(v, depth + 1, limit)
-        return out
-    return {"__class__": type(obj).__name__}
-
-
-def dump_structure(path, hidden_states, kv_cache, attn_metadata, impl) -> None:
-    payload = {
-        "hidden_states": describe(hidden_states),
-        "kv_cache": [describe(c, 2) for c in kv_cache],
-        "attn_metadata": describe(attn_metadata, 0, 4),
-        "impl_shapes": {
-            k: describe(getattr(impl, k, None), 2)
-            for k in (
-                "wq_a",
-                "wq_b",
-                "wkv",
-                "q_norm",
-                "kv_norm",
-                "wo_a",
-                "wo_b",
-                "attn_sink",
-                "weights_proj",
-                "inderxer_wq_b",
-                "compressor_wkv",
-                "compressor_wgate",
-                "compressor_ape",
-                "compressor_norm",
-                "indexcom_wkv",
-                "indexcom_wgate",
-                "indexcom_ape",
-                "indexcom_norm",
-            )
-        },
-    }
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-
-
-# --- native-layout arguments -------------------------------------------------
-
-ARG_ORDER = (
-    "x_normed",
-    "wq_a",
-    "wq_b",
-    "wq_b_scale",
-    "wkv",
-    "gamma_cq",
-    "gamma_ckv",
-    "freqs_cos",
-    "freqs_sin",
-    "cmp_freqs_cos",
-    "cmp_freqs_sin",
-    "cmp_wkv",
-    "cmp_wgate",
-    "cmp_ape",
-    "cmp_norm_w",
-    "compress_state_pages",
-    "kv_cache_pages",
-    "cmp_kv_pages",
-    "compress_state_block_table",
-    "idx_wq_b",
-    "idx_wq_b_scale",
-    "weights_proj",
-    "hadamard_idx",
-    "inner_wkv",
-    "inner_wgate",
-    "inner_ape",
-    "inner_norm_w",
-    "inner_index_pages",
-    "inner_compress_state_block_table",
-    "ori_block_table",
-    "cmp_block_table",
-    "index_block_table",
-    "position_ids",
-    "token_valid",
-    "kv_seq_lens",
-    "attn_sink",
-    "wo_a",
-    "wo_b",
-    "wo_b_scale",
-    "attn_out",
+from vllm_ascend.attention.dsa_v1 import AscendDSAImpl, DSAMetadataList
+from vllm_ascend.attention.utils import (
+    maybe_save_kv_layer_to_connector,
+    notify_kv_cache_written,
+    wait_for_kv_layer_from_connector,
 )
+from vllm_ascend.memcache_comm_fence import record_attention_compute_start
+from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type, olora_tp_enable, oproj_tp_enable
 
 
-def _full_page_view(cache: torch.Tensor, rows: int, row_shape: tuple[int, ...]):
-    """Expose a padded physical page as a canonical contiguous tensor view."""
-    row_elems = 1
-    for extent in row_shape:
-        row_elems *= extent
-    page_elems = rows * row_elems
-    if cache.stride(0) != page_elems:
-        raise NativeLayoutError(f"physical page stride is {cache.stride(0)}, expected {page_elems}")
-    trailing = 1
-    trailing_strides = []
-    for extent in reversed(row_shape):
-        trailing_strides.append(trailing)
-        trailing *= extent
-    shape = (cache.shape[0], rows, *row_shape)
-    strides = (page_elems, row_elems, *reversed(trailing_strides))
-    view = torch.as_strided(
-        cache,
-        size=shape,
-        stride=strides,
-        storage_offset=cache.storage_offset(),
-    )
-    if not view.is_contiguous():
-        raise NativeLayoutError(f"native page view {shape} is not contiguous: {view.stride()}")
-    return view
+class PyptoDSAImpl(AscendDSAImpl):
+    """Use native forward arguments and output ownership for target CSA S6."""
 
+    def _prepare_weights(self, hadamard: torch.Tensor | None) -> dict[str, torch.Tensor] | None:
+        """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
+        import torch_npu
 
-def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: str, output=None):
-    """Bind one decode step to the kernel's native-layout arguments.
+        if self.compress_ratio != 4 or self.n_local_heads != 64 or self.n_local_groups != 8:
+            raise ValueError("CSA specialization requires C4 and TP1 with 64 heads / 8 output groups")
+        # Some checkpoints quantize these projections too. This specialization
+        # must leave them native, rather than dequantizing their weights.
+        if self.wq_a.weight.dtype != torch.bfloat16 or self.wkv.weight.dtype != torch.bfloat16:
+            return None
 
-    ``metadata_list`` is what ``filter_metadata`` returns for a ratio-4 layer:
-    five per-cache metadata objects sorted by key -- attn, compressor state,
-    indexer-compressor state, indexer k, sliding window.
-    """
-    if not isinstance(layer, str):
-        # RopeDataProxy takes a non-string key as a slice and hands back another
-        # proxy, so a wrong name surfaces two frames later as a missing reshape.
-        raise NativeLayoutError(f"layer must be the layer's name, got {type(layer).__name__}")
-    if len(metadata_list) != 5 or len(kv_cache) != 6:
-        raise NativeLayoutError(
-            f"ratio-4 CSA requires 5 metadata groups and 6 cache views, got {len(metadata_list)} and {len(kv_cache)}"
+        def weight(module, shape, dtype, transpose=False):
+            value = module.weight.detach()
+            if tuple(value.shape) != shape or value.dtype != dtype:
+                raise ValueError(f"Unexpected loaded weight: {value.shape}/{value.dtype}; expected {shape}/{dtype}")
+            if torch_npu.get_npu_format(value) not in (0, 2):
+                raise ValueError("CSA weights must already be Native ND after loading")
+            if transpose:
+                value = value.transpose(-1, -2)
+            return value.contiguous()
+
+        def scale(module, width):
+            result = module.weight_scale.detach().reshape(-1)
+            if result.numel() != width:
+                raise ValueError("Unexpected quantized channel-scale count")
+            offset = getattr(module, "weight_offset", None)
+            if offset is not None and bool(torch.count_nonzero(offset).cpu()):
+                raise ValueError("The reference CSA chain requires symmetric INT8 weights")
+            return result.float().contiguous()
+
+        bf16, int8 = torch.bfloat16, torch.int8
+        main, indexer = self.compressor, self.indexer
+        inner = indexer.compressor
+        return {
+            "wq_a": weight(self.wq_a, (1024, 4096), bf16, True),
+            "wq_b": weight(self.wq_b, (1024, 32768), int8),
+            "wq_b_scale": scale(self.wq_b, 32768),
+            "wkv": weight(self.wkv, (512, 4096), bf16, True),
+            "gamma_cq": weight(self.q_norm, (1024,), bf16),
+            "gamma_ckv": weight(self.kv_norm, (512,), bf16),
+            "cmp_wkv": weight(main.wkv, (1024, 4096), bf16),
+            "cmp_wgate": weight(main.wgate, (1024, 4096), bf16),
+            "cmp_ape": main.ape.detach().float().contiguous(),
+            # Match Native A3 storage; the RMS task widens loaded BF16 tiles.
+            "cmp_norm_w": weight(main.norm, (512,), bf16),
+            "idx_wq_b": weight(indexer.wq_b, (1024, 8192), int8),
+            "idx_wq_b_scale": scale(indexer.wq_b, 8192),
+            "weights_proj": weight(indexer.weights_proj, (64, 4096), bf16, True),
+            **({"hadamard_idx": hadamard.detach().T.to(bf16).contiguous()} if hadamard is not None else {}),
+            "inner_wkv": weight(inner.wkv, (256, 4096), bf16),
+            "inner_wgate": weight(inner.wgate, (256, 4096), bf16),
+            "inner_ape": inner.ape.detach().float().contiguous(),
+            "inner_norm_w": weight(inner.norm, (128,), bf16),
+            "attn_sink": self.attn_sink.detach().contiguous(),
+            "wo_a": weight(self.wo_a, (8, 4096, 1024), bf16, True),
+            "wo_b": weight(self.wo_b, (8192, 4096), int8, True),
+            "wo_b_scale": scale(self.wo_b, 4096),
+        }
+
+    @staticmethod
+    def _physical_pages(view):
+        # Only expose allocated storage: a descriptor, never a repacked cache.
+        if view.ndim != 4 or view.shape[2] != 1 or view.stride(-1) != 1:
+            raise ValueError("Unsupported native physical page view")
+        pages, rows, _, width = view.shape
+        stride = view.stride(0)
+        if view.stride(1) != width or stride < rows * width:
+            raise ValueError("Native page rows must be contiguous")
+        if (view.storage_offset() + pages * stride) * view.element_size() > view.untyped_storage().nbytes():
+            raise ValueError("Native storage does not cover the complete final page")
+        return view.as_strided((pages, stride), (stride, 1), view.storage_offset())
+
+    @staticmethod
+    def _table_view(table):
+        if table.dtype != torch.int32 or table.ndim != 2 or table.stride(1) != 1:
+            raise ValueError("Native block table must have contiguous INT32 columns")
+        if table.is_contiguous():
+            return table
+        rows, columns = table.shape
+        stride = table.stride(0)
+        if stride < columns or (table.storage_offset() + rows * stride) * 4 > table.untyped_storage().nbytes():
+            raise ValueError("Native table storage does not cover padded rows")
+        return table.as_strided((rows, stride), (stride, 1), table.storage_offset())
+
+    def _supports_configuration(self):
+        config = self.vllm_config
+        parallel = config.parallel_config
+        spec = config.speculative_config
+        return not (
+            self.compress_ratio != 4
+            or self.skip_topk
+            or self.use_index_cache
+            or get_ascend_device_type() != AscendDeviceType.A3
+            or parallel.tensor_parallel_size != 1
+            or parallel.pipeline_parallel_size != 1
+            or parallel.decode_context_parallel_size != 1
+            or parallel.prefill_context_parallel_size != 1
+            or olora_tp_enable()
+            or oproj_tp_enable()
+            or config.kv_transfer_config is not None
+            or config.lora_config is not None
+            or spec is None
+            or spec.method != "dspark"
+            or spec.num_speculative_tokens != 5
+            or not config.model_config.enforce_eager
         )
-    if any(m.decode is None for m in metadata_list):
-        raise NativeLayoutError("native CSA only accepts decode metadata")
-    kcsa, _ = kernel()
-    if not 1 <= seq <= kcsa.S:
-        raise NativeLayoutError(f"native CSA requires 1..{kcsa.S} tokens per request, got seq={seq}")
-    cmp_md, cst_md, inner_state_md, idx_md, swa_md = (m.decode for m in metadata_list)
-    cmp_kv_c, swa_kv_c, state_c, inner_state_cache, idx_k_c, idx_s_c = kv_cache
 
-    host_pos = metadata_list[0].decode.input_positions
-    if host_pos.dtype != torch.int64 or host_pos.ndim != 1 or not host_pos.is_contiguous():
-        raise NativeLayoutError("input_positions must be contiguous INT64 token rows")
-    if host_pos.shape[0] % seq:
-        raise NativeLayoutError(f"position rows {host_pos.shape[0]} are not divisible by seq={seq}")
-    n_real = host_pos.shape[0] // seq  # graph descriptor request rows
-    if not 1 <= n_real <= kcsa.B:
-        raise NativeLayoutError(f"{n_real} requests exceed the kernel's B={kcsa.B}")
-    if hidden_states.shape[0] < host_pos.shape[0]:
-        raise NativeLayoutError(
-            f"hidden_states has {hidden_states.shape[0]} rows, expected at least {host_pos.shape[0]}"
+    def process_weights_after_loading(self, act_dtype: torch.dtype):
+        super().process_weights_after_loading(act_dtype)
+        for name in ("_pto_weights", "_pto_operator", "_pto_hadamard"):
+            if hasattr(self, name):
+                delattr(self, name)
+        if self._supports_configuration():
+            self._pto_weights = self._prepare_weights(None)
+
+    def _eligible(self, hidden, cache, metadata, gather):
+        if gather or not self._supports_configuration() or getattr(self, "_pto_weights", None) is None:
+            return False
+        if not isinstance(metadata, list) or len(metadata) != 5 or cache is None or len(cache) != 6:
+            return False
+        if getattr(get_forward_context(), "is_draft_model", False):
+            return False
+        if hidden.ndim != 2 or hidden.shape[1] != 4096 or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
+            return False
+        tokens = hidden.shape[0]
+        if tokens % 6 or not 1 <= tokens // 6 <= 64:
+            return False
+        batch = tokens // 6
+        for m in metadata:
+            if m.decode is None or m.num_prefills or m.num_actual_tokens != tokens or m.num_decodes != batch:
+                return False
+            d = m.decode
+            offsets = d.query_start_loc_cpu
+            if (
+                m.num_decode_tokens != tokens
+                or offsets is None
+                or offsets.device.type != "cpu"
+                or offsets.tolist() != list(range(0, tokens + 1, 6))
+                or d.seq_lens.numel() != batch
+                or d.num_reqs_actual not in (None, batch)
+                or d.ori_win_right not in (None, 0)
+                or d.dspark_swa_indices is not None
+            ):
+                return False
+        if metadata[-1].decode.ori_win_left not in (None, 127):
+            return False
+        # This kernel consumes the release's 32-token KV / 2-token state pages.
+        # Unsupported native page configurations remain entirely native.
+        return all(
+            tuple(cache[i].shape[1:]) == shape
+            for i, shape in (
+                (0, (32, 1, 512)),
+                (1, (32, 1, 512)),
+                (2, (2, 1, 2048)),
+                (3, (2, 1, 512)),
+                (4, (32, 1, 128)),
+                (5, (32, 1, 1)),
+            )
+        ) and all(
+            cache[i].dtype == dtype
+            for i, dtype in enumerate(
+                (torch.bfloat16, torch.bfloat16, torch.float32, torch.float32, torch.int8, torch.float16)
+            )
         )
 
-    b, t = n_real, host_pos.shape[0]
-    pos = host_pos
-    host_positions = pos.view(b, seq)
-    raw_logical_page = torch.div(
-        host_positions,
-        VLLM_PAGE,
-        rounding_mode="floor",
-    )
-    raw_page_in_range = (raw_logical_page >= 0) & (raw_logical_page < swa_md.block_table.shape[1])
-    raw_logical_page = raw_logical_page.clamp(
-        min=0,
-        max=swa_md.block_table.shape[1] - 1,
-    )
-    raw_pages = swa_md.block_table[:b].gather(
-        1,
-        raw_logical_page,
-    )
-    rope_cos, rope_sin = _native_rope_tables(layer)
-    if cmp_md.seq_lens.dtype != torch.int32 or not cmp_md.seq_lens.is_contiguous():
-        raise NativeLayoutError("seq_lens must be contiguous INT32 request rows")
-    seq_lens = cmp_md.seq_lens[:b]
-    token_valid = (
-        raw_page_in_range
-        & (raw_pages > 0)
-        & (host_positions < rope_cos.shape[0])
-        & (host_positions < seq_lens.view(b, 1))
-    ).reshape(t)
-
-    def native_table(name: str, table: torch.Tensor) -> torch.Tensor:
-        if table.dtype != torch.int32:
-            raise NativeLayoutError(f"{name} must be INT32, got {table.dtype}")
-        if table.shape[0] < b:
-            raise NativeLayoutError(f"{name} has {table.shape[0]} requests, expected at least {b}")
-        if not table.is_contiguous():
-            raise NativeLayoutError(f"{name} must be contiguous; no per-step copy is made")
-        return table[:b]
-
-    expected_dtypes = {
-        "main state": (state_c, torch.float32),
-        "inner state": (inner_state_cache, torch.float32),
-        "raw KV": (swa_kv_c, torch.bfloat16),
-        "compressed KV": (cmp_kv_c, torch.bfloat16),
-        "index key page": (idx_k_c, torch.int8),
-        "index scale view": (idx_s_c, torch.float16),
-    }
-    for name, (tensor, dtype) in expected_dtypes.items():
-        if tensor.dtype != dtype:
-            raise NativeLayoutError(f"{name} must be {dtype}, got {tensor.dtype}")
-
-    a = dict(prepare_weights(impl))
-    a["x_normed"] = hidden_states[:t]
-    a["attn_out"] = output[:t] if output is not None else torch.empty_like(a["x_normed"])
-    for name in ("x_normed", "attn_out"):
-        tensor = a[name]
-        if tensor.dtype != torch.bfloat16 or not tensor.is_contiguous() or tensor.shape != (t, kcsa.D):
-            raise NativeLayoutError(f"{name} must be contiguous BF16 [{t}, {kcsa.D}]")
-
-    a["freqs_cos"], a["freqs_sin"] = rope_cos, rope_sin
-    a["cmp_freqs_cos"], a["cmp_freqs_sin"] = rope_cos, rope_sin
-
-    # Main state and compressed KV are different views of one physical page
-    # pool; raw sliding KV uses a separate allocation.
-    if state_c.stride(0) != 32768:
-        raise NativeLayoutError(f"main state page stride is {state_c.stride(0)}, expected 32768 FP32")
-    if swa_kv_c.stride(0) != 65536 or cmp_kv_c.stride(0) != 65536:
-        raise NativeLayoutError("raw/compressed KV page stride does not match 131072 bytes")
-    a["compress_state_pages"] = _full_page_view(
-        state_c,
-        kcsa.VLLM_COMPRESS_STATE_PAGE_ROWS,
-        (kcsa.MAIN_STATE_DIM,),
-    )
-    a["kv_cache_pages"] = _full_page_view(
-        swa_kv_c,
-        kcsa.VLLM_KV_PAGE_ROWS,
-        (1, kcsa.HEAD_DIM),
-    )
-    a["cmp_kv_pages"] = _full_page_view(
-        cmp_kv_c,
-        kcsa.VLLM_KV_PAGE_ROWS,
-        (1, kcsa.HEAD_DIM),
-    )
-    if (
-        a["compress_state_pages"].data_ptr() != a["cmp_kv_pages"].data_ptr()
-        or a["compress_state_pages"].numel() * a["compress_state_pages"].element_size()
-        != a["cmp_kv_pages"].numel() * a["cmp_kv_pages"].element_size()
-    ):
-        raise NativeLayoutError("main state and compressed KV must cover the same page pool")
-    a["compress_state_block_table"] = native_table(
-        "main state block table",
-        cst_md.block_table,
-    )
-    a["inner_compress_state_block_table"] = native_table(
-        "inner state block table",
-        inner_state_md.block_table,
-    )
-    a["ori_block_table"] = native_table(
-        "raw KV block table",
-        swa_md.block_table,
-    )
-    a["cmp_block_table"] = native_table(
-        "compressed KV block table",
-        cmp_md.block_table,
-    )
-    shared_storage = idx_k_c.untyped_storage().data_ptr()
-    if inner_state_cache.untyped_storage().data_ptr() != shared_storage:
-        raise NativeLayoutError("inner state and index key do not share one vLLM allocation")
-    if inner_state_cache.data_ptr() != idx_k_c.data_ptr():
-        raise NativeLayoutError("inner state and index key do not start at the same physical page")
-    if inner_state_cache.stride(0) != 4160:
-        raise NativeLayoutError(f"inner state page stride is {inner_state_cache.stride(0)}, expected 4160 FP32")
-    if idx_s_c.untyped_storage().data_ptr() != shared_storage:
-        raise NativeLayoutError("index key and scale do not share one vLLM page")
-    if idx_k_c.stride(0) != 16640 or idx_s_c.stride(0) != 8320:
-        raise NativeLayoutError("index key/scale physical strides do not match the 16640-byte page")
-    if idx_s_c.data_ptr() - idx_k_c.data_ptr() != 16384:
-        raise NativeLayoutError("index scale does not start at byte 16384 of the packed page")
-    a["inner_index_pages"] = _full_page_view(
-        idx_k_c,
-        kcsa.VLLM_INDEX_PAGE_ROWS,
-        (kcsa.IDX_HEAD_DIM,),
-    )
-    a["index_block_table"] = native_table(
-        "index block table",
-        idx_md.block_table,
-    )
-    a["position_ids"] = pos
-    a["token_valid"] = token_valid.to(torch.int32)
-    a["kv_seq_lens"] = seq_lens
-
-    return [a[name] for name in ARG_ORDER], (pos, seq, n_real)
-
-
-# --- one-shot comparison -----------------------------------------------------
-
-_OP = None
-_DONE: set = set()
-
-
-def _registered():
-    global _OP
-    if _OP is None:
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _register_kernel():
         from pypto.torch import init, register
 
-        kcsa, _ = kernel()
+        from .pto_kernels.dspark.decode_csa import decode_csa_tp1_attention_test
+
         init()
-        _OP = register(kcsa.decode_csa_attn_tp1_test, "pypto_csa::attention_csa")
-    return _OP
+        return register(decode_csa_tp1_attention_test, "pypto_csa::native_attention_v2")
 
+    def _initialize_kernel(self, hadamard, device):
+        if torch.npu.is_current_stream_capturing():
+            raise RuntimeError("PyPTO CSA initialization must precede graph capture")
+        if not hasattr(self, "_pto_weights"):
+            raise RuntimeError("Native post-load hook must prepare CSA weights before execution")
+        self._pto_weights["hadamard_idx"] = hadamard.detach().T.to(torch.bfloat16).contiguous()
+        self._pto_hadamard = hadamard
+        self._pto_operator = self._register_kernel()
+        capacity = min(self.vllm_config.scheduler_config.max_num_seqs, 64) * 6
+        self._pto_scores = torch.empty((capacity, 512), dtype=torch.float32, device=device)
+        self._pto_topk = torch.empty((capacity, 512), dtype=torch.int32, device=device)
+        self._pto_calls = 0
 
-_SEEN_ADDRS = {}
-_AUDITS = [0]
-_OWNERSHIP_AUDITS = [0]
+    def forward(
+        self,
+        layer_name,
+        hidden_states: torch.Tensor,
+        kv_cache: tuple[torch.Tensor, ...] | None,
+        attn_metadata: DSAMetadataList,
+        need_gather_q_kv: bool = False,
+        output: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Preserve the native input/output and cache lifecycle contract.
 
-
-def audit_shared_pool_ownership(
-    metadata_list,
-    kv_cache,
-    n_real: int,
-    seq: int,
-) -> None:
-    """Verify groups sharing each physical allocation own disjoint blocks.
-
-    This intentionally reads a scalar back to the host and therefore runs only
-    on eager/warm-up calls, never while ACLGraph capture is active.
-    """
-    cmp_md, cst_md, inner_state_md, idx_md, swa_md = (m.decode for m in metadata_list)
-    host_rows = (
-        torch.arange(
-            n_real,
-            device=inner_state_md.input_positions.device,
-        )
-        * seq
-    )
-    positions = inner_state_md.input_positions.index_select(0, host_rows).long()
-    raw_current_column = torch.div(
-        positions,
-        VLLM_PAGE,
-        rounding_mode="floor",
-    )
-    raw_in_range = (raw_current_column >= 0) & (raw_current_column < swa_md.block_table.shape[1])
-    raw_current_column = raw_current_column.clamp(
-        min=0,
-        max=swa_md.block_table.shape[1] - 1,
-    )
-    raw_current_page = (
-        swa_md.block_table[:n_real]
-        .gather(
-            1,
-            raw_current_column.reshape(-1, 1),
-        )
-        .reshape(-1)
-    )
-    active = raw_in_range & (raw_current_page > 0)
-
-    # Include both the old seven-row history and every submitted token. An S=6
-    # step can cross an 8-row state page or a 128-row cache page.
-    history = positions.reshape(-1, 1) + torch.arange(
-        -7,
-        seq,
-        device=positions.device,
-    ).reshape(1, -1)
-    state_valid = (history >= 0) & active.reshape(-1, 1)
-    state_valid &= history < cmp_md.seq_lens[:n_real].reshape(-1, 1)
-    state_columns = torch.div(
-        history.clamp_min(0),
-        VLLM_STATE_PAGE,
-        rounding_mode="floor",
-    ).clamp(max=inner_state_md.block_table.shape[1] - 1)
-    inner_ids = inner_state_md.block_table[:n_real].gather(1, state_columns)
-    inner_ids = inner_ids.masked_select(state_valid & (inner_ids > 0))
-
-    last_positions = torch.minimum(positions + seq - 1, cmp_md.seq_lens[:n_real] - 1)
-    compressed_rows = torch.div(
-        last_positions + 1,
-        COMPRESS_RATIO,
-        rounding_mode="floor",
-    ).clamp_min(0)
-    index_page_count = torch.div(
-        compressed_rows + VLLM_PAGE - 1,
-        VLLM_PAGE,
-        rounding_mode="floor",
-    )
-    columns = torch.arange(
-        idx_md.block_table.shape[1],
-        device=positions.device,
-    ).reshape(1, -1)
-    index_ids = idx_md.block_table[:n_real]
-    index_ids = index_ids.masked_select(
-        active.reshape(-1, 1) & (columns < index_page_count.reshape(-1, 1)) & (index_ids > 0)
-    )
-
-    inner_set = set(inner_ids.detach().cpu().tolist())
-    index_set = set(index_ids.detach().cpu().tolist())
-    inner_capacity = kv_cache[4].shape[0]
-    if any(block >= inner_capacity for block in inner_set | index_set):
-        raise NativeLayoutError("inner/index block table contains a physical page outside the pool")
-    if inner_set & index_set:
-        raise NativeLayoutError("inner-state and index block tables overlap in the shared page pool")
-
-    state_ids = cst_md.block_table[:n_real].gather(1, state_columns)
-    state_ids = state_ids.masked_select(state_valid & (state_ids > 0))
-
-    raw_first = (positions - 127).clamp_min(0)
-    first_raw_page = torch.div(raw_first, VLLM_PAGE, rounding_mode="floor")
-    raw_columns = (
-        first_raw_page[:, None]
-        + torch.arange(
-            (128 + seq + VLLM_PAGE - 2) // VLLM_PAGE + 1,
-            device=positions.device,
-        )[None, :]
-    )
-    raw_columns = torch.minimum(raw_columns, torch.div(last_positions, VLLM_PAGE, rounding_mode="floor")[:, None])
-    raw_columns = raw_columns.clamp(min=0, max=swa_md.block_table.shape[1] - 1)
-    raw_ids = swa_md.block_table[:n_real].gather(1, raw_columns)
-    raw_ids = raw_ids.masked_select(active.reshape(-1, 1) & (raw_ids > 0))
-
-    cmp_columns = torch.arange(
-        cmp_md.block_table.shape[1],
-        device=positions.device,
-    ).reshape(1, -1)
-    cmp_ids = cmp_md.block_table[:n_real]
-    cmp_ids = cmp_ids.masked_select(
-        active.reshape(-1, 1) & (cmp_columns < index_page_count.reshape(-1, 1)) & (cmp_ids > 0)
-    )
-    # Main state and compressed KV share one physical pool, while raw KV has
-    # its own allocation. Check both bounds and active ownership.
-    main_sets = (
-        ("main-state", set(state_ids.detach().cpu().tolist()), kv_cache[2].shape[0]),
-        ("raw-kv", set(raw_ids.detach().cpu().tolist()), kv_cache[1].shape[0]),
-        ("compressed-kv", set(cmp_ids.detach().cpu().tolist()), kv_cache[0].shape[0]),
-    )
-    for name, blocks, capacity in main_sets:
-        if any(block >= capacity for block in blocks):
-            raise NativeLayoutError(f"{name} block table contains a physical page outside its pool")
-    if main_sets[0][1] & main_sets[2][1]:
-        raise NativeLayoutError("main-state and compressed-KV block tables overlap in the shared page pool")
-    _OWNERSHIP_AUDITS[0] += 1
-
-
-def audit_inputs(metadata_list, n_real: int) -> None:
-    """Check that vLLM hands us the same buffers each step, on the first two.
-
-    Capture bakes the address of every tensor read here into the recorded pass, so
-    a buffer vLLM reallocates per step makes each replay read whatever now sits at
-    the old address -- with no error anywhere. Block 0 matters for the same
-    reason the recorded addresses matter at all.
-
-    This reads tensor values, so the caller must keep it off the captured pass.
-    """
-    _AUDITS[0] += 1
-    names = []
-    for i, m in enumerate(metadata_list):
-        d = m.decode
-        for attr in ("block_table", "slot_mapping", "seq_lens", "input_positions"):
-            t = getattr(d, attr, None)
-            if isinstance(t, torch.Tensor):
-                names.append((f"md{i}.{attr}", t))
-
-    moved = [n for n, t in names if n in _SEEN_ADDRS and _SEEN_ADDRS[n] != t.data_ptr()]
-    for n, t in names:
-        _SEEN_ADDRS[n] = t.data_ptr()
-
-    if _AUDITS[0] == 1:
-        print(f"[pto-attn-audit] tensors={len(names)} requests={n_real}", flush=True)
-        return
-
-    print("[pto-attn-audit] moved_between_steps=%s" % (",".join(moved) or "none"), flush=True)
-    if moved:
-        print(
-            "[pto-attn-audit] WARNING: those buffers are reallocated per step; "
-            "an ACLGraph replay would read stale addresses",
-            flush=True,
-        )
-
-
-def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_dir: str) -> bool:
-    """Run the kernel on this step's real tensors and record how it compares.
-
-    The kernel writes six caches, so this runs after the native path and reads
-    caches the native path has already advanced: the output is not numerically
-    comparable, and is not meant to be. What it answers is whether the native
-    arguments assemble, bind and execute on live vLLM state at all.
-    """
-    impl = self.dsa_attn.impl
-    layer = self.dsa_attn.layer_name
-    if getattr(impl, "compress_ratio", 0) != COMPRESS_RATIO:
-        # Only the ratio-4 layers carry the five cache groups this kernel needs.
-        return False
-    if metadata_list[0].decode is None:
-        # A prefill step: this kernel is the decode path only. Returning False
-        # leaves the caller's once-per-layer bookkeeping untouched, so the first
-        # decode step still gets its turn.
-        return False
-    rec = {"layer": layer, "stage": "start"}
-    path = Path(out_dir) / f"compare__{layer.replace('.', '_')}.json"
-
-    def save():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(rec, indent=2, default=str), encoding="utf-8")
-
-    try:
-        seq = 1
-        rec["seq"] = seq
-        rec["stage"] = "build_args"
-        save()
-        args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq, layer)
-        rec["arg_shapes"] = {n: [list(a.shape), str(a.dtype), bool(a.is_contiguous())] for n, a in zip(ARG_ORDER, args)}
-        rec["stage"] = "register"
-        save()
-        op = _registered()
-
-        rec["stage"] = "launch"
-        save()
-        op(*args)
-        torch.npu.synchronize()
-
-        pto = args[-1].float()
-        nat = native_out[: pto.shape[0]].float()
-        rec["pto"] = {
-            "finite": bool(torch.isfinite(pto).all().item()),
-            "absmax": pto.abs().max().item(),
-            "absmean": pto.abs().mean().item(),
-        }
-        rec["native"] = {"absmax": nat.abs().max().item(), "absmean": nat.abs().mean().item()}
-        rec["max_abs_diff"] = (pto - nat).abs().max().item()
-        denom = (pto.norm() * nat.norm()).clamp_min(1e-12)
-        rec["cosine"] = ((pto * nat).sum() / denom).item()
-        rec["ok"] = True
-        rec["stage"] = "complete"
-    except Exception:
-        import traceback
-
-        rec["ok"] = False
-        rec["error"] = traceback.format_exc()
-    finally:
-        save()
-        print(f"[pto-attn-compare] {layer} stage={rec['stage']} ok={rec.get('ok')}", flush=True)
-    return True
-
-
-_TALLY: dict = {}
-_RAN = [0]
-
-
-def _tally(layer: str, ratio, has_decode: bool) -> None:
-    """Count what the substitution was offered, so a silent decline is visible."""
-    k = (layer, int(ratio or 0), bool(has_decode))
-    _TALLY[k] = _TALLY.get(k, 0) + 1
-    if _TALLY[k] <= 3 or _TALLY[k] % 25 == 0:
-        print(f"[pto-attn-offer] {layer} ratio={ratio} decode={has_decode} n={_TALLY[k]}", flush=True)
-
-
-# --- replacement -------------------------------------------------------------
-
-
-def decode_query_length(impl, metadata_list, kv_cache) -> int | None:
-    """Return the uniform native query length before any cache is mutated.
-
-    DSpark verification can offer fewer than six tokens at scheduling boundaries.
-    Use the native CPU query offsets, not a process-wide sequence-length override.
-    Ragged batches stay on the native path; their packed rows cannot be reshaped
-    into the kernel's rectangular [B, S] input without a separate packing layer.
-    """
-    config = impl.vllm_config
-    parallel = config.parallel_config
-    spec = config.speculative_config
-    if (
-        impl.compress_ratio != COMPRESS_RATIO
-        or parallel.tensor_parallel_size != 1
-        or parallel.decode_context_parallel_size != 1
-        or parallel.prefill_context_parallel_size != 1
-        or (
-            spec is not None
-            and (getattr(spec, "method", None) != "dspark" or getattr(spec, "num_speculative_tokens", None) != 5)
-        )
-        or config.kv_transfer_config is not None
-        or impl.skip_topk
-        or impl.use_index_cache
-        or len(metadata_list) != 5
-        or len(kv_cache) != 6
-    ):
-        return None
-    swa = metadata_list[-1].decode
-    if (
-        getattr(swa, "dspark_swa_indices", None) is not None
-        or getattr(swa, "ori_win_left", None) not in (None, 127)
-        or getattr(swa, "ori_win_right", None) not in (None, 0)
-    ):
-        return None
-    seq = None
-    batch = metadata_list[0].num_decodes
-    for m in metadata_list:
+        The ordered metadata groups and cache tuple are exactly those unpacked
+        by AscendDSAImpl._forward_decode. All layout checks precede writes;
+        exceptions after kernel launch propagate without native re-execution.
+        """
+        assert output is not None, "Output tensor must be provided."
+        if not self._eligible(hidden_states, kv_cache, attn_metadata, need_gather_q_kv):
+            return super().forward(layer_name, hidden_states, kv_cache, attn_metadata, need_gather_q_kv, output)
+        main, state, inner, index, swa = (m.decode for m in attn_metadata)
+        compressed, raw, main_state, inner_state, key, scale = kv_cache
+        if not output.is_contiguous() or output.shape != hidden_states.shape or output.dtype != hidden_states.dtype:
+            raise ValueError("Native output must match the contiguous BF16 hidden states")
+        if not raw.is_contiguous() or not compressed.is_contiguous():
+            raise ValueError("Native KV pages must be contiguous")
         if (
-            m.decode is None
-            or m.num_prefills != 0
-            or m.num_decodes <= 0
-            or m.num_decodes != batch
-            or m.num_actual_tokens != m.num_decode_tokens
+            key.untyped_storage().data_ptr() != scale.untyped_storage().data_ptr()
+            or scale.storage_offset() * 2 != key.storage_offset() + 4096
+            or key.stride(0) < 4160
+            or key.stride(0) % 64
+            or scale.stride(0) * 2 != key.stride(0)
         ):
-            return None
-        length, remainder = divmod(m.num_decode_tokens, batch)
-        if remainder or not 1 <= length <= (6 if spec is not None else 1):
-            return None
-        if seq is not None and seq != length:
-            return None
-        if spec is not None:
-            offsets = m.decode.query_start_loc_cpu
-            if offsets is None or offsets.device.type != "cpu" or offsets.ndim != 1 or offsets.numel() != batch + 1:
-                return None
-            # Already host metadata: this never synchronizes an NPU tensor.
-            if offsets.tolist() != list(range(0, (batch + 1) * length, length)):
-                return None
-        seq = length
-    return seq
-
-
-def supports_decode(impl, metadata_list, kv_cache) -> bool:
-    return decode_query_length(impl, metadata_list, kv_cache) is not None
-
-
-def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
-    """Run the kernel in place of the native attention and publish its result.
-
-    Unlike :func:`compare_once` this owns the step: the kernel directly updates
-    vLLM's live state and cache pages, and writes directly to its output buffer.
-    """
-    from vllm_ascend.utils import (
-        AscendDeviceType,
-        enable_dsa_cp,
-        get_ascend_device_type,
-        olora_tp_enable,
-        oproj_tp_enable,
-    )
-
-    impl = self.dsa_attn.impl
-    if (
-        get_ascend_device_type() != AscendDeviceType.A3
-        or enable_dsa_cp()
-        or olora_tp_enable()
-        or oproj_tp_enable()
-        or not supports_decode(impl, metadata_list, kv_cache)
-    ):
-        return False
-    ratio = impl.compress_ratio
-    decode = metadata_list[0].decode
-    _tally(self.dsa_attn.layer_name, ratio, decode is not None)
-    if ratio != COMPRESS_RATIO or decode is None:
-        return False
-    seq = decode_query_length(impl, metadata_list, kv_cache)
-    assert seq is not None
-    kcsa, _ = kernel()
-    if not 1 <= seq <= kcsa.S:
-        if "seq" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("seq")
-            print(
-                f"[pto-attn] declined host seq={seq}: native CSA currently supports 1..{kcsa.S} tokens per request",
-                flush=True,
-            )
-        return False
-    if decode.input_positions.shape[0] % seq:
-        if "position_rows" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("position_rows")
-            print(
-                "[pto-attn] declined: position rows are not divisible by host seq",
-                flush=True,
-            )
-        return False
-    n_offered = decode.input_positions.shape[0] // seq
-    if n_offered > kcsa.B:
-        # Under capture this is the padded graph batch, not the live request
-        # count, and raising here would abort capture_model with a half-recorded
-        # graph. Declining leaves that one descriptor on the native path.
-        if "batch" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("batch")
-            print(f"[pto-attn] declined a batch of {n_offered}: the kernel takes B={kcsa.B}", flush=True)
-        return False
-    try:
-        args, plan = build_args(
-            impl,
+            raise ValueError("Native index key/scale page layout is inconsistent")
+        main_pages = self._physical_pages(main_state)
+        inner_pages = self._physical_pages(inner_state)
+        index_pages = self._physical_pages(key)
+        tables = [self._table_view(m.block_table) for m in (main, state, inner, index, swa)]
+        hadamard = attn_metadata[3].hadamard
+        if hadamard is None:
+            raise ValueError("Native indexer metadata did not supply Hadamard")
+        if not hasattr(self, "_pto_operator"):
+            self._initialize_kernel(hadamard, hidden_states.device)
+        elif self._pto_hadamard is not hadamard:
+            raise RuntimeError("Native Hadamard changed after CSA initialization; reload weights before reuse")
+        w = self._pto_weights
+        tokens = hidden_states.shape[0]
+        wait_for_kv_layer_from_connector(layer_name)
+        # These are the same producers called by the native compressor/indexer.
+        cmp_cos, cmp_sin, cmp_slots = self._compute_compressor_metadata(main)
+        idx_cos, idx_sin, idx_slots = self._compute_compressor_metadata(index)
+        record_attention_compute_start()
+        self._pto_operator(
             hidden_states,
-            kv_cache,
-            metadata_list,
-            seq,
-            self.dsa_attn.layer_name,
-            output=output,
+            w["wq_a"],
+            w["wq_b"],
+            w["wq_b_scale"],
+            w["wkv"],
+            w["gamma_cq"],
+            w["gamma_ckv"],
+            main.cos[layer_name].view(tokens, 64),
+            main.sin[layer_name].view(tokens, 64),
+            cmp_cos.view(-1, 64),
+            cmp_sin.view(-1, 64),
+            idx_cos.view(-1, 64),
+            idx_sin.view(-1, 64),
+            w["cmp_wkv"],
+            w["cmp_wgate"],
+            w["cmp_ape"],
+            w["cmp_norm_w"],
+            main_pages,
+            tables[1],
+            w["idx_wq_b"],
+            w["idx_wq_b_scale"],
+            w["weights_proj"],
+            w["hadamard_idx"],
+            w["inner_wkv"],
+            w["inner_wgate"],
+            w["inner_ape"],
+            w["inner_norm_w"],
+            inner_pages,
+            tables[2],
+            raw,
+            compressed,
+            tables[0],
+            index_pages,
+            tables[3],
+            swa.slot_mapping,
+            tables[4],
+            cmp_slots,
+            idx_slots,
+            state.slot_mapping,
+            inner.slot_mapping,
+            main.input_positions,
+            index.seq_lens,
+            main.query_start_loc,
+            main.seq_lens,
+            index.query_start_loc,
+            w["attn_sink"],
+            w["wo_a"],
+            w["wo_b"],
+            w["wo_b_scale"],
+            self._pto_scores[:tokens],
+            self._pto_topk[:tokens],
+            output,
         )
-        _pos, _, n_real = plan
-        if not capture_active():
-            if _OWNERSHIP_AUDITS[0] < 2:
-                audit_shared_pool_ownership(
-                    metadata_list,
-                    kv_cache,
-                    n_real,
-                    seq,
-                )
-            if _AUDITS[0] < 2:
-                audit_inputs(metadata_list, n_real)
-    except NativeLayoutError as error:
-        key = f"layout:{error}"
-        if key not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add(key)
-            print(f"[pto-attn] declined native layout: {error}", flush=True)
-        return False
-
-    _registered()(*args)
-
-    _RAN[0] += 1
-    # Capture happens once per descriptor and Python never runs on replay, so an
-    # ungated print there costs one line per captured shape and is the only way
-    # to tell a recorded pass from the warm-up that precedes it.
-    cap = capture_active()
-    if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0:
-        print(f"[pto-attn-ran] n={_RAN[0]} tokens={n_real * seq} seq={seq} capturing={cap}", flush=True)
-    return True
+        # This fused call contains both cache writes and attention. Notify after
+        # submission; there is no separate prolog/attention overlap boundary.
+        notify_kv_cache_written(layer_name)
+        maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
+        self._pto_calls += 1
+        if self._pto_calls <= 3 or self._pto_calls % 25 == 0:
+            print(f"[pto-native-csa] layer={layer_name} calls={self._pto_calls} tokens={tokens} seq=6", flush=True)
+        return output

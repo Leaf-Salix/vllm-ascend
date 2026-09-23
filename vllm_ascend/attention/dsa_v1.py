@@ -14,6 +14,7 @@ from vllm.triton_utils import HAS_TRITON
 from vllm.v1.attention.backend import AttentionBackend, AttentionCGSupport, AttentionMetadataBuilder
 from vllm.v1.kv_cache_interface import AttentionSpec
 
+from vllm_ascend import envs
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.abstract import DSAAttentionImpl
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
@@ -224,6 +225,10 @@ class AscendDSABackend(AttentionBackend):
             from vllm_ascend.attention.context_parallel.dsa_cp import AscendDSACPImpl
 
             return AscendDSACPImpl
+        if envs.VLLM_ASCEND_PYPTO_DSV4_CSA:
+            from vllm_ascend.attention.pto_attn import PyptoDSAImpl
+
+            return PyptoDSAImpl
         return AscendDSAImpl
 
     @staticmethod

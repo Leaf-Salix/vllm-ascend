@@ -1,38 +1,46 @@
-# v0.25.1rc1：PyPTO DSV4 CSA 接入
+# v0.25.1rc1：PyPTO DSV4 CSA 原生接口实现
 
 ## 来源与目标
 
-- 基线：[v0.25.1rc1](https://github.com/vllm-project/vllm-ascend/tree/v0.25.1rc1)，提交 `9bf964cb4b87c8cd0d6852c41a55b3c29711fa95`。
-- kernel 与原生页适配来自 [CSA 分支](https://github.com/sunkaixuan2018/vllm-ascend/tree/feat/csa-attn-cut-20260920) 和 [PR #5](https://github.com/sunkaixuan2018/vllm-ascend/pull/5) 的累计提交 `721209207edcc4ad8de2cb174859c5411067073b`，包含前序 PR #3/#4。
-- 目标组合：A3、CANN 9.0.1、vLLM 0.25.1、Python 3.12、Torch 2.10.0、TorchNPU 2.10.0.post2。此处是验证目标，不能据此认为完整组合已经验收。
+基线为官方 `v0.25.1rc1`（`9bf964cb4b87c8cd0d6852c41a55b3c29711fa95`），vLLM 0.25.1、A3、CANN 9.0.1、Torch 2.10.0、TorchNPU 2.10.0.post2。
 
-## 启用与原生接口
+此前迁移自 sunkaixuan CSA 分支及 PR #5（`72120920`）。本次 kernel 的 native slots、compact metadata 和物理页寻址参考 nalinaly `dsv4-flash-pto-v0.25.1rc1` 的 `8a4c4e6f01fc862fdd458c9238520946f46e22f3`。原生接口及 metadata 语义以官方 0.25.1rc1 为准。
 
-设置 `VLLM_ASCEND_PYPTO_DSV4_CSA=1` 启用；默认 `0` 使用原生 attention。
+## 入口和数据所有权
 
-入口位于 `dsa_forward` 构建原生 KV tuple 之后、调用 `impl.forward` 之前。适配层接收原生 hidden states、六项 KV cache、五组 metadata 和调用方 output；成功时直接写入该 output，保持 `dsa_forward` 返回 `None`。不改变 vLLM 模型接口、KV cache 分配或原生 attention 函数签名。
+`VLLM_ASCEND_PYPTO_DSV4_CSA=1` 使 DSA backend 选择 `PyptoDSAImpl`，它继承 `AscendDSAImpl`。`forward` 与原生签名相同，原地写入调用方 `output` 并返回同一 tensor。默认关闭；CP backend 优先级保持不变。外层 `dsa_forward` 恢复原生实现，不增加调用参数、模型别名或独立 substitute/build_args 层。
 
-本次只替换 attention：HC-pre、输入 RMSNorm、HC-post、MoE 仍由原模型执行。profiling 的 metadata 为 `None` 时保留原生调用，以维持原有分布式通信语义。
+| 数据 | 新实现处理 |
+| --- | --- |
+| 五组 metadata / 六项 KV tuple | 按原生顺序直接解包 |
+| slots、query offsets、seq lengths、positions | 直接传原生 tensor，不重建 token mask 或 slot-to-page 表 |
+| compressor / indexer compact RoPE 和 slots | 分别调用原生 `_compute_compressor_metadata` |
+| 主 state / compressed KV | 共享原生分配；使用覆盖完整物理页的零拷贝 view |
+| index state / key / scale | 保留原生共享页；kernel 消费物理页 descriptor |
+| padded block table | 用 stride 建立零拷贝 view，检查最后一行实际存储边界 |
+| 权重 | 原生 post-load 后准备转置和连续视图；不反量化或重新量化权重 |
+| 输出 | kernel 直接写调用方 output，返回值与原生一致 |
 
-当前 serving 接入范围：A3、TP1、ratio4，支持普通单 token decode 和 DSpark 出5验6的 target verification。DSpark 读取原生 CPU query offsets，只有每请求均匀 S1～S6 的调用进入 CSA，不依赖 `PTO_ATTN_SEQ` 强制解释行数。混合 query 长度、非因果 draft 窗口、其他 speculative 方法、KV transfer、CP、特殊 output projection TP 或 index cache 在运行 kernel 前回退原生。DP/EP 由原生框架处理。
+内层 kernel 当前为 52 参数 ABI，包含必要权重及 scratch。它是实现内部调用，不增加原生 forward 参数。HC、输入 RMSNorm、MoE、缓存分配和调度仍使用原生代码。
 
-S6 直接绑定原生绝对位置和分页缓存；被拒绝 token 的未来槽位由后续位置覆盖，逐 query 因果长度限制可见范围，适配层不自行提交或回滚 speculative 状态。该语义需通过多步接受/拒绝测试验收。`[pto-attn-ran]` 包含 `seq`，真实 DSpark 验收必须观察 `seq=6`，不能仅凭生成成功判断替换命中。
+## 当前支持范围
 
-kernel 开始执行后发生错误会向上传播，不在可能已修改 KV cache 后再执行原生 attention。
+当前 kernel 专化为 A3、TP1、C4、均匀 S6、DSpark 出5验6、eager、32-token KV 页及2-row state 页。仅支持输入 Q/KV 投影为 BF16、后续指定投影为 INT8 的权重组合；输入投影量化的 checkpoint 保留原生执行。
 
-## 数据绑定
+prefill、profiling、ragged、dummy padding、其他 query 长度、graph、其他页规格、draft 非因果窗口、KV transfer、CP、LoRA、特殊 output projection TP、index cache 均在 kernel 写缓存前回退原生。不修改 allocator 来迎合 kernel，也不把回退生成成功算作 CSA 命中。
 
-- 沿用 PR #5 的 40 参数 attention-only ABI，直接绑定真实 token 和调用方输出。
-- 主 compressor state 与 compressed KV 共享原生物理分配；raw KV 独立。
-- index state、INT8 index key 和 FP16 scale 使用同一原生页的不同 view。
-- RoPE 读取此标签的 `_ROPE_STATE.full_rope_cache`，保持常驻 FP32 全表 view；旧分支的 `static_cache` 字段不适用于此标签。
-- 不引入私有分页 KV cache，也不复制 main/vLLM 0.29 的 KV 分配修补。
-- 新 kernel/ABI 必须使用新编译缓存，不能复用旧的 46 参数版本。
+kernel 成功提交后通知 cache write 并保存；失败直接抛出，禁止再次原生执行。融合调用内部没有独立的 prolog/attention 通信重叠边界，不能宣称与原生重叠性能相同。
 
 ## 验证与限制
 
-回归文件：`tests/pto_attn/test_decode_contract_cpu.py`、独立脚本 `check_pto_attn_cpu.py`、`check_build_args_cpu.py` 和 `tests/ut/ops/test_dsa_pto_dispatch.py`。分别检查接入条件、共享页布局、参数绑定、调用方输出与原生回退契约。
+CPU 回归：`tests/pto_attn/test_decode_contract_cpu.py`，检查签名、返回值、指针别名、原生 producer、回退、生命周期与写后异常传播。使用独立 PyPTO feat 组合：`54957491`（含 PR #2867）与 Simpler `166852bf`，须重编译原生扩展并核对 revision。
 
-完整验证需要在同一环境完成原生与 CSA 的真实模型短生成，并确认 `[pto-attn-ran]`、正常进程退出及设备释放。连续 decode、ACLGraph capture/replay、单层数值对拍分别验收，不能互相替代。
+新路径命中标志为 `[pto-native-csa] ... seq=6`。真实完整模型、S6 接受/拒绝后的多步 cache 状态、单层数值对拍必须重新验收。旧 40 参数版本的 S1、S6、graph 结果不能证明此版本通过。历史单层精度未通过，不放宽阈值；生成成功也不等于精度通过。
 
-PR #5 历史单层测试存在 native/PTO 数值差异，不能把历史 kernel golden 通过或本次生成成功称为精度通过。W8A8 权重的适配和原生动态激活量化也需单独对拍。遗留 `compare_once` 不接入 serving；精度测试应从相同但独立的 cache 初态分别执行两条路径。
+## 本次验证结果
+
+- 原生接口 CPU 回归：23 项通过；完整 kernel lowering 通过；增量 pre-commit 通过。
+- 独立审查后补齐输入投影量化时原生回退、融合调用生命周期通知及对应测试。
+- 完整 `DeepSeek-V4-Flash-0731-w8a8`：TP1、DP/EP16、DSpark5、EPLB、eager、32-token 页；每rank提交4个短自然语言请求，各生成64 tokens，16个rank全部完成，确认 `[pto-native-csa]` S6命中，正常退出。
+- 上述请求总数不能证明固定decode GBS64；CSA 128K、固定并发、graph及数值精度仍未验收。
+- PyPTO `54957491` / Simpler `166852bf`：138项相关CPU回归、单卡eager和capture/replay冒烟通过。运行时graph冒烟不代表本CSA实现支持graph。
