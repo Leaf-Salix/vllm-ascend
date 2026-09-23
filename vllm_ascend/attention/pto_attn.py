@@ -804,36 +804,69 @@ def _tally(layer: str, ratio, has_decode: bool) -> None:
 # --- replacement -------------------------------------------------------------
 
 
-def supports_decode(impl, metadata_list, kv_cache) -> bool:
-    """Decline unsupported calls before preparing weights or mutating any cache.
+def decode_query_length(impl, metadata_list, kv_cache) -> int | None:
+    """Return the uniform native query length before any cache is mutated.
 
-    The first integration supports ordinary one-token decode. PR #5's S6
-    kernel remains available, but speculative request/acceptance metadata needs
-    a separate integration before it can replace a serving call.
+    DSpark verification can offer fewer than six tokens at scheduling boundaries.
+    Use the native CPU query offsets, not a process-wide sequence-length override.
+    Ragged batches stay on the native path; their packed rows cannot be reshaped
+    into the kernel's rectangular [B, S] input without a separate packing layer.
     """
     config = impl.vllm_config
     parallel = config.parallel_config
+    spec = config.speculative_config
     if (
         impl.compress_ratio != COMPRESS_RATIO
         or parallel.tensor_parallel_size != 1
         or parallel.decode_context_parallel_size != 1
         or parallel.prefill_context_parallel_size != 1
-        or config.speculative_config is not None
+        or (
+            spec is not None
+            and (getattr(spec, "method", None) != "dspark" or getattr(spec, "num_speculative_tokens", None) != 5)
+        )
         or config.kv_transfer_config is not None
         or impl.skip_topk
         or impl.use_index_cache
         or len(metadata_list) != 5
         or len(kv_cache) != 6
     ):
-        return False
-    return all(
-        m.decode is not None
-        and m.num_prefills == 0
-        and m.num_decodes > 0
-        and m.num_decode_tokens == m.num_decodes
-        and m.num_actual_tokens == m.num_decode_tokens
-        for m in metadata_list
-    )
+        return None
+    swa = metadata_list[-1].decode
+    if (
+        getattr(swa, "dspark_swa_indices", None) is not None
+        or getattr(swa, "ori_win_left", None) not in (None, 127)
+        or getattr(swa, "ori_win_right", None) not in (None, 0)
+    ):
+        return None
+    seq = None
+    batch = metadata_list[0].num_decodes
+    for m in metadata_list:
+        if (
+            m.decode is None
+            or m.num_prefills != 0
+            or m.num_decodes <= 0
+            or m.num_decodes != batch
+            or m.num_actual_tokens != m.num_decode_tokens
+        ):
+            return None
+        length, remainder = divmod(m.num_decode_tokens, batch)
+        if remainder or not 1 <= length <= (6 if spec is not None else 1):
+            return None
+        if seq is not None and seq != length:
+            return None
+        if spec is not None:
+            offsets = m.decode.query_start_loc_cpu
+            if offsets is None or offsets.device.type != "cpu" or offsets.ndim != 1 or offsets.numel() != batch + 1:
+                return None
+            # Already host metadata: this never synchronizes an NPU tensor.
+            if offsets.tolist() != list(range(0, (batch + 1) * length, length)):
+                return None
+        seq = length
+    return seq
+
+
+def supports_decode(impl, metadata_list, kv_cache) -> bool:
+    return decode_query_length(impl, metadata_list, kv_cache) is not None
 
 
 def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
@@ -864,7 +897,8 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     _tally(self.dsa_attn.layer_name, ratio, decode is not None)
     if ratio != COMPRESS_RATIO or decode is None:
         return False
-    seq = 1
+    seq = decode_query_length(impl, metadata_list, kv_cache)
+    assert seq is not None
     kcsa, _ = kernel()
     if not 1 <= seq <= kcsa.S:
         if "seq" not in _DEBUG_REFUSED:
@@ -927,5 +961,5 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     # to tell a recorded pass from the warm-up that precedes it.
     cap = capture_active()
     if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0:
-        print(f"[pto-attn-ran] n={_RAN[0]} tokens={n_real * seq} capturing={cap}", flush=True)
+        print(f"[pto-attn-ran] n={_RAN[0]} tokens={n_real * seq} seq={seq} capturing={cap}", flush=True)
     return True

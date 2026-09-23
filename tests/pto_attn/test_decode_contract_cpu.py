@@ -123,9 +123,13 @@ def test_kernel_import_pins_tp1_and_restores_argv(monkeypatch, fails):
     assert sys.argv is original
 
 
-def test_kernel_layout_exception_propagates_after_launch(monkeypatch):
-    impl, metadata, cache = decode_call()
-    metadata[0].decode = SimpleNamespace(input_positions=torch.arange(4))
+@pytest.mark.parametrize("seq", [1, 6])
+def test_kernel_layout_exception_propagates_after_launch(monkeypatch, seq):
+    impl, metadata, cache = decode_call() if seq == 1 else dspark_call()
+    if seq == 1:
+        metadata[0].decode = SimpleNamespace(input_positions=torch.arange(4))
+    else:
+        metadata[0].decode.input_positions = torch.arange(4 * seq)
     layer = SimpleNamespace(dsa_attn=SimpleNamespace(impl=impl, layer_name="layer"))
     utils = ModuleType("vllm_ascend.utils")
     utils.AscendDeviceType = SimpleNamespace(A3="A3")
@@ -135,11 +139,66 @@ def test_kernel_layout_exception_propagates_after_launch(monkeypatch):
     monkeypatch.setattr(pto_attn, "kernel", lambda: (SimpleNamespace(S=6, B=64), None))
     monkeypatch.setattr(pto_attn, "capture_active", lambda: True)
     monkeypatch.setattr(pto_attn, "_tally", lambda *args: None)
-    monkeypatch.setattr(pto_attn, "build_args", lambda *args, **kwargs: ((), (None, None, 4)))
+
+    def bind_args(*args, **kwargs):
+        assert args[4] == seq
+        assert kwargs["output"].shape == (4 * seq, 4)
+        return (), (None, seq, 4)
+
+    monkeypatch.setattr(pto_attn, "build_args", bind_args)
 
     def launched_kernel():
         raise pto_attn.NativeLayoutError("failure after launch")
 
     monkeypatch.setattr(pto_attn, "_registered", lambda: launched_kernel)
     with pytest.raises(pto_attn.NativeLayoutError, match="failure after launch"):
-        pto_attn.substitute(layer, torch.zeros(4, 4), cache, metadata, torch.zeros(4, 4))
+        pto_attn.substitute(layer, torch.zeros(4 * seq, 4), cache, metadata, torch.zeros(4 * seq, 4))
+
+
+def dspark_call(lengths=(6, 6, 6, 6)):
+    impl, metadata, cache = decode_call()
+    impl.vllm_config.speculative_config = SimpleNamespace(method="dspark", num_speculative_tokens=5)
+    offsets = torch.tensor([0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32)
+    for m in metadata:
+        m.num_decodes = len(lengths)
+        m.num_decode_tokens = m.num_actual_tokens = sum(lengths)
+        m.decode = SimpleNamespace(query_start_loc_cpu=offsets)
+    return impl, metadata, cache
+
+
+@pytest.mark.parametrize("length", range(1, 7))
+def test_dspark_uniform_verification_uses_native_query_length(length):
+    call = dspark_call((length,) * 4)
+    assert pto_attn.decode_query_length(*call) == length
+
+
+@pytest.mark.parametrize("lengths", [(5, 7, 6, 6), (1, 3, 1, 3), (0, 6, 6, 6), (7,) * 4])
+def test_dspark_ragged_or_invalid_query_lengths_decline(lengths):
+    assert not pto_attn.supports_decode(*dspark_call(lengths))
+
+
+@pytest.mark.parametrize("group", range(5))
+def test_dspark_all_cache_groups_must_agree(group):
+    impl, metadata, cache = dspark_call()
+    metadata[group].decode.query_start_loc_cpu = torch.tensor([0, 5, 12, 18, 24])
+    assert not pto_attn.supports_decode(impl, metadata, cache)
+
+
+@pytest.mark.parametrize("method,tokens", [("mtp", 5), ("dspark", 1), ("dspark", 6)])
+def test_other_speculative_contracts_decline(method, tokens):
+    impl, metadata, cache = dspark_call()
+    impl.vllm_config.speculative_config = SimpleNamespace(method=method, num_speculative_tokens=tokens)
+    assert not pto_attn.supports_decode(impl, metadata, cache)
+
+
+def test_dspark_missing_host_offsets_declines():
+    impl, metadata, cache = dspark_call()
+    metadata[0].decode.query_start_loc_cpu = None
+    assert not pto_attn.supports_decode(impl, metadata, cache)
+
+
+@pytest.mark.parametrize("field,value", [("dspark_swa_indices", object()), ("ori_win_left", 132), ("ori_win_right", 5)])
+def test_dspark_noncausal_draft_window_declines(field, value):
+    impl, metadata, cache = dspark_call()
+    setattr(metadata[-1].decode, field, value)
+    assert not pto_attn.supports_decode(impl, metadata, cache)

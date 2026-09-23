@@ -14,7 +14,9 @@
 
 本次只替换 attention：HC-pre、输入 RMSNorm、HC-post、MoE 仍由原模型执行。profiling 的 metadata 为 `None` 时保留原生调用，以维持原有分布式通信语义。
 
-当前 serving 接入范围：A3、TP1、普通单 token decode、ratio4，且未启用 speculative decode、KV transfer、CP、特殊 output projection TP 或 index cache。其他调用在运行 kernel 前回退原生。PR #5 的 S6 kernel 容量保留，但不等于 speculative serving 已接通。
+当前 serving 接入范围：A3、TP1、ratio4，支持普通单 token decode 和 DSpark 出5验6的 target verification。DSpark 读取原生 CPU query offsets，只有每请求均匀 S1～S6 的调用进入 CSA，不依赖 `PTO_ATTN_SEQ` 强制解释行数。混合 query 长度、非因果 draft 窗口、其他 speculative 方法、KV transfer、CP、特殊 output projection TP 或 index cache 在运行 kernel 前回退原生。DP/EP 由原生框架处理。
+
+S6 直接绑定原生绝对位置和分页缓存；被拒绝 token 的未来槽位由后续位置覆盖，逐 query 因果长度限制可见范围，适配层不自行提交或回滚 speculative 状态。该语义需通过多步接受/拒绝测试验收。`[pto-attn-ran]` 包含 `seq`，真实 DSpark 验收必须观察 `seq=6`，不能仅凭生成成功判断替换命中。
 
 kernel 开始执行后发生错误会向上传播，不在可能已修改 KV cache 后再执行原生 attention。
 
