@@ -289,6 +289,19 @@ class NPUPlatform(Platform):
                 "additional_config.pypto_qwen3_mode conflicts with "
                 f"VLLM_ASCEND_PYPTO_QWEN3_MODE: {configured_mode!r} != {mode!r}"
             )
+        # Keep prefill on the native eager path and capture only the decode
+        # graph. A PIECEWISE torch-compiled graph specializes the profile-time
+        # branch for the entire dynamic token range and would route prefill to
+        # the one-token PyPTO decode kernel as well.
+        from vllm.config.compilation import CompilationMode, CUDAGraphMode
+
+        vllm_config.compilation_config.mode = CompilationMode.NONE
+        vllm_config.compilation_config.cudagraph_mode = (
+            CUDAGraphMode.NONE
+            if vllm_config.model_config.enforce_eager
+            else CUDAGraphMode.FULL_DECODE_ONLY
+        )
+        vllm_config.compilation_config.splitting_ops = []
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:

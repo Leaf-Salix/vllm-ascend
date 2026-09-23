@@ -60,6 +60,7 @@ def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
 
     with (
         patch.object(pypto_qwen3_attention, "get_attention_context") as context,
+        patch.object(pypto_qwen3_attention, "_EXTRA_CTX", SimpleNamespace(in_profile_run=False)),
         patch.object(torch.ops.vllm, "pypto_qwen3_attention_only", create=True) as pypto_op,
     ):
         for state, actual_tokens, use_pypto in (
@@ -93,6 +94,33 @@ def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
         assert result.shape == two_rows.shape
         assert qkv_proj.called
         assert not pypto_op.called
+
+
+def test_pypto_qwen3_profile_keeps_opaque_attention_without_cache_metadata():
+    hidden = torch.empty((1, 5120), dtype=torch.bfloat16)
+    attention = SimpleNamespace(
+        _pypto_attention_only_enabled=True,
+        qkv_proj=Mock(),
+        q_norm=SimpleNamespace(weight=torch.empty(0)),
+        k_norm=SimpleNamespace(weight=torch.empty(0)),
+        rotary_emb=SimpleNamespace(cos_sin_cache=torch.empty(0)),
+        o_proj=SimpleNamespace(weight=torch.empty(0)),
+        attn=SimpleNamespace(layer_name="model.layers.0.self_attn.attn"),
+    )
+
+    with (
+        patch.object(pypto_qwen3_attention, "get_attention_context", return_value=(None, None, None, None)),
+        patch.object(pypto_qwen3_attention, "_EXTRA_CTX", SimpleNamespace(in_profile_run=True)),
+        patch.object(torch.ops.vllm, "pypto_qwen3_attention_only", create=True) as pypto_op,
+    ):
+        result = pypto_qwen3_attention.forward_with_split_qkv_rmsnorm_mrope(
+            attention,
+            torch.zeros(1, dtype=torch.int64),
+            hidden,
+        )
+
+    assert result.shape == hidden.shape
+    pypto_op.assert_called_once()
 
 
 def test_pypto_qwen3_decode_graph_has_no_native_attention_update_handles():

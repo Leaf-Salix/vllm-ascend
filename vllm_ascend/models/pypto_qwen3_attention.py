@@ -13,11 +13,13 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 
-"""Qwen3 model adapter for the experimental PyPTO attention kernel.
+"""Qwen3 dispatch for the experimental PyPTO attention kernel.
 
-The vLLM 0.20 model classes are patched by :func:`install`. The adapter keeps
-prefill on the native path and routes eligible single-token decode attention
-through the pure PyPTO L2-kernel implementation.
+The vLLM 0.20 model classes are patched by :func:`install`. Prefill stays on
+the native path. Eligible single-token decode directly lends the native model
+weights, paging metadata, KV-cache storage, and output to the pure PyPTO
+L2-kernel implementation; this module does not build a second cache or
+metadata representation.
 """
 
 import torch
@@ -35,9 +37,12 @@ def forward_with_split_qkv_rmsnorm_mrope(self, positions: torch.Tensor, hidden_s
     if getattr(self, "_pypto_attention_only_enabled", False):
         metadata, _, _, _ = get_attention_context(self.attn.layer_name)
         if (
-            metadata is not None
-            and getattr(metadata.attn_state, "name", None) == "DecodeOnly"
-            and hidden_states.shape[0] == 1
+            _EXTRA_CTX.in_profile_run
+            or (
+                metadata is not None
+                and getattr(metadata.attn_state, "name", None) == "DecodeOnly"
+                and hidden_states.shape[0] == 1
+            )
         ):
             output = torch.empty_like(hidden_states)
             torch.ops.vllm.pypto_qwen3_attention_only(

@@ -23,6 +23,7 @@ class TestNPUPlatform(TestBase):
         mock_vllm_config = MagicMock()
         mock_vllm_config.compilation_config = MagicMock()
         mock_vllm_config.model_config = MagicMock()
+        mock_vllm_config.model_config.enforce_eager = False
         mock_vllm_config.parallel_config = MagicMock()
         mock_vllm_config.cache_config = MagicMock()
         mock_vllm_config.scheduler_config = MagicMock()
@@ -71,7 +72,19 @@ class TestNPUPlatform(TestBase):
         self.platform._update_pypto_qwen3_mode_config(vllm_config)
 
         self.assertEqual(vllm_config.additional_config["pypto_qwen3_mode"], "attention_only")
+        self.assertEqual(vllm_config.compilation_config.mode, CompilationMode.NONE)
+        self.assertEqual(vllm_config.compilation_config.cudagraph_mode, CUDAGraphMode.FULL_DECODE_ONLY)
         self.assertEqual(vllm_config.compilation_config.splitting_ops, [])
+
+    @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_only")
+    def test_pypto_qwen3_attention_eager_does_not_enable_graph(self):
+        vllm_config = self.mock_vllm_config()
+        vllm_config.model_config.enforce_eager = True
+
+        self.platform._update_pypto_qwen3_mode_config(vllm_config)
+
+        self.assertEqual(vllm_config.compilation_config.mode, CompilationMode.NONE)
+        self.assertEqual(vllm_config.compilation_config.cudagraph_mode, CUDAGraphMode.NONE)
 
     @patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "full")
     def test_pypto_qwen3_rejects_non_attention_experimental_modes(self):

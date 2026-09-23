@@ -21,9 +21,12 @@ python tests/pypto_test/qwen3_attention_only_e2e.py \
   --model /data/models/Qwen3-14B
 ```
 
-两条命令应在不同进程运行。当前 graph 命令会被 adapter 的
-`CompilationMode.NONE` 准入拒绝，需另行对齐 PIECEWISE graph 契约；不能将
-历史 trace 视为当前版本通过。旧 attention residual-block 单算子脚本已从
+两条命令应在不同进程运行。PyPTO 路径直接借用 vLLM 原生 metadata builder
+和 KV cache owner 创建的 Device Tensor，不重建 block table、不复制 KV 页，
+也不创建逐调用 Device metadata。attention-only 模式使用原生
+`FULL_DECODE_ONLY` 图拓扑：prefill 保持原生 eager，单 token decode 才进入
+PyPTO ACLGraph；不使用会将动态 prefill/decode 分支固化的 PIECEWISE 编译。
+旧 attention residual-block 单算子脚本已从
 本分支移除；其代码和历史结果保存在旧提交及实验备份分支中，不能当作
 当前 attention-only 算子的验收结果。当前证据和未覆盖范围见
 [TEST_REPORT.md](TEST_REPORT.md)。

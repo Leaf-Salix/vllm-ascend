@@ -8,8 +8,11 @@ mapping、seq_lens 和 query_start_loc；不分配或复制 KV 页。
 
 - Qwen3-14B BF16、TP1 eager 整网短测；两个 prompt 均完成 prefill 和
   4-token decode，并正常 shutdown。
-- 相关 Host UT 5 项通过；包含原生 DecoderLayer.forward 保留，以及
-  PyPTO 借用 vLLM paging metadata 的检查。
+- Qwen3-14B BF16、TP1 `FULL_DECODE_ONLY` 整网短测；decode 图完成 capture，
+  日志明确出现 `Replaying aclgraph`，两个 prompt 均完成 4-token 输出并正常
+  shutdown。
+- 相关 Host UT 通过；包含原生 DecoderLayer.forward 保留、PyPTO 借用
+  vLLM paging metadata 的 storage identity，以及 eager/Graph 拓扑选择。
 
 本轮更新 PyPTO/Simpler feat 后的四份 Perfetto JSON、版本、运行条件和
 性能观察记录于工作区的
@@ -20,15 +23,17 @@ mapping、seq_lens 和 query_start_loc；不分配或复制 KV 页。
 
 - 多请求、跨页、长 prefill、不同 capture bucket 的 attention-only
   精度和 replay；目前的两个短 token 输出不能外推至这些场景。
-- 当前 adapter 要求 `CompilationMode.NONE`，而 vLLM PIECEWISE ACLGraph
-  使用 `VLLM_COMPILE`。当前代码会在模型初始化阶段拒绝 graph 配置；历史
-  graph trace 不能作为这次目录对齐后的通过证据。
+- attention-only Graph 模式统一选择 `CompilationMode.NONE` 与
+  `FULL_DECODE_ONLY`：prefill 保持原生 eager，decode 图直接消费 vLLM 原生
+  metadata builder 与 KV cache owner 提供的 Device Tensor。`enforce_eager`
+  模式保持 `CUDAGraphMode.NONE`。
 - 同条件下的长期性能稳定性与内存生命周期。
 
 性能 trace 里约 9 ms 的 `vllm::pypto_qwen3_attention_only` 是 CPU 算子
 范围，不是 Device kernel 执行时间。第一次 `npu::get_npu_format` 出现在
 范围开始约 8.5 ms 后；格式查询本身很短。KV cache 只借用原有 storage
-并创建 view，没有按层重建。该 Host 空档的更细分归因尚需 Python
+并创建共享原生 storage 的 view，没有复制 tensor 内容或按层重建。该 Host
+空档的更细分归因尚需 Python
 分段计时或采样，不能将其直接称为 KV cache 重建或重复编译。
 
 PyPTO feat 的 registered-op ST 已覆盖 eager、`torch.compile` 和
