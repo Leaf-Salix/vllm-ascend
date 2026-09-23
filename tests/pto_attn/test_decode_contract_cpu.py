@@ -40,14 +40,14 @@ def call(monkeypatch):
     monkeypatch.setattr(pto, "record_attention_compute_start", Mock())
     hidden = torch.zeros(24, 4096, dtype=torch.bfloat16)
     output = torch.empty_like(hidden)
-    pool = torch.zeros(4 * 32768, dtype=torch.uint8)
-    main = pool.view(torch.float32).as_strided((4, 2, 1, 2048), (8192, 2048, 2048, 1))
-    compressed = pool.view(torch.bfloat16).view(4, 32, 1, 512)
+    pool = torch.zeros(4 * 131072, dtype=torch.uint8)
+    main = pool.view(torch.float32).as_strided((4, 8, 1, 2048), (32768, 2048, 2048, 1))
+    compressed = pool.view(torch.bfloat16).view(4, 128, 1, 512)
     raw = torch.zeros_like(compressed)
-    idx = torch.zeros(4 * 4160, dtype=torch.int8)
-    key = idx.as_strided((4, 32, 1, 128), (4160, 128, 128, 1))
-    scale = idx.view(torch.float16).as_strided((4, 32, 1, 1), (2080, 1, 1, 1), 2048)
-    inner = idx.view(torch.float32).as_strided((4, 2, 1, 512), (1040, 512, 512, 1))
+    idx = torch.zeros(4 * 16640, dtype=torch.int8)
+    key = idx.as_strided((4, 128, 1, 128), (16640, 128, 128, 1))
+    scale = idx.view(torch.float16).as_strided((4, 128, 1, 1), (8320, 1, 1, 1), 8192)
+    inner = idx.view(torch.float32).as_strided((4, 8, 1, 512), (4160, 512, 512, 1))
     cache = (compressed, raw, main, inner, key, scale)
     hadamard = torch.eye(128)
     metadata = []
@@ -70,7 +70,7 @@ def call(monkeypatch):
             NS(decode=d, num_prefills=0, num_decodes=4, num_decode_tokens=24, num_actual_tokens=24, hadamard=hadamard)
         )
     impl._pto_hadamard = hadamard
-    impl._pto_weights = dict.fromkeys(
+    impl._pto_attn_weights = dict.fromkeys(
         [
             "wq_a",
             "wq_b",
@@ -97,59 +97,103 @@ def call(monkeypatch):
         ],
         torch.zeros(1),
     )
-    impl._pto_scores = torch.zeros(24, 512)
-    impl._pto_topk = torch.zeros(24, 512, dtype=torch.int32)
-    impl._pto_calls = 0
     impl._pto_operator = Mock(side_effect=lambda *args: args[-1].fill_(3))
-    compact = [(torch.ones(8, 64), torch.zeros(8, 64), torch.full((8, 2), i, dtype=torch.int32)) for i in (7, 9)]
-    impl._compute_compressor_metadata = Mock(side_effect=compact)
+    monkeypatch.setattr(pto, "_registered", lambda: impl._pto_operator)
+    monkeypatch.setattr(
+        pto,
+        "kernel",
+        lambda: (
+            NS(
+                B=64,
+                S=6,
+                D=4096,
+                VLLM_COMPRESS_STATE_PAGE_ROWS=16,
+                MAIN_STATE_DIM=2048,
+                VLLM_KV_PAGE_ROWS=128,
+                HEAD_DIM=512,
+                VLLM_INDEX_PAGE_ROWS=130,
+                IDX_HEAD_DIM=128,
+            ),
+            NS(),
+        ),
+    )
+    rope = (torch.ones(256, 64), torch.zeros(256, 64))
+    monkeypatch.setattr(pto, "_native_rope_tables", lambda layer: rope)
     native = Mock(return_value=output)
     monkeypatch.setattr(AscendDSAImpl, "forward", native)
-    return NS(impl=impl, hidden=hidden, output=output, cache=cache, metadata=metadata, compact=compact, native=native)
+    return NS(impl=impl, hidden=hidden, output=output, cache=cache, metadata=metadata, rope=rope, native=native)
 
 
 def test_signature_is_identical():
     assert inspect.signature(pto.PyptoDSAImpl.forward) == inspect.signature(AscendDSAImpl.forward)
 
 
-def test_native_tensors_and_compact_producers_are_used_directly(call):
+def test_original_kernel_abi_and_native_storage(call):
     c = call
     assert c.impl.forward("layer", c.hidden, c.cache, c.metadata, False, c.output) is c.output
     assert torch.all(c.output == 3)
     c.native.assert_not_called()
-    calls = c.impl._compute_compressor_metadata.call_args_list
-    assert calls[0].args[0] is c.metadata[0].decode
-    assert calls[1].args[0] is c.metadata[3].decode
-    args = c.impl._pto_operator.call_args.args
-    assert len(args) == 52 and args[0] is c.hidden and args[-1] is c.output
-    for arg, expected in (
-        (29, c.cache[1]),
-        (30, c.cache[0]),
-        (34, c.metadata[4].decode.slot_mapping),
-        (36, c.compact[0][2]),
-        (37, c.compact[1][2]),
-        (38, c.metadata[1].decode.slot_mapping),
-        (39, c.metadata[2].decode.slot_mapping),
-        (40, c.metadata[0].decode.input_positions),
-        (42, c.metadata[0].decode.query_start_loc),
-        (44, c.metadata[3].decode.query_start_loc),
+    args = dict(zip(pto.ARG_ORDER, c.impl._pto_operator.call_args.args, strict=True))
+    assert len(args) == 40
+    for name, expected in (
+        ("x_normed", c.hidden),
+        ("attn_out", c.output),
+        ("compress_state_pages", c.cache[2]),
+        ("kv_cache_pages", c.cache[1]),
+        ("cmp_kv_pages", c.cache[0]),
+        ("inner_index_pages", c.cache[4]),
+        ("position_ids", c.metadata[0].decode.input_positions),
+        ("kv_seq_lens", c.metadata[0].decode.seq_lens),
+        ("freqs_cos", c.rope[0]),
+        ("cmp_freqs_cos", c.rope[0]),
     ):
-        assert args[arg] is expected
-    for arg, expected in (
-        (17, c.cache[2]),
-        (27, c.cache[3]),
-        (32, c.cache[4]),
-        (9, c.compact[0][0]),
-        (11, c.compact[1][0]),
+        assert args[name].data_ptr() == expected.data_ptr()
+    for name, i in (
+        ("cmp_block_table", 0),
+        ("compress_state_block_table", 1),
+        ("inner_compress_state_block_table", 2),
+        ("index_block_table", 3),
+        ("ori_block_table", 4),
     ):
-        assert args[arg].data_ptr() == expected.data_ptr()
-    pto.wait_for_kv_layer_from_connector.assert_called_once_with("layer")
-    pto.maybe_save_kv_layer_to_connector.assert_called_once_with("layer", list(c.cache))
+        assert args[name].data_ptr() == c.metadata[i].decode.block_table.data_ptr()
+    assert torch.equal(args["token_valid"], torch.ones(24, dtype=torch.int32))
+
+
+@pytest.mark.parametrize("seq", [1, 2, 3, 4, 5, 6])
+def test_uniform_query_lengths(call, seq):
+    c = call
+    tokens = 4 * seq
+    c.hidden, c.output = c.hidden[:tokens], c.output[:tokens]
+    for m in c.metadata:
+        m.num_actual_tokens = m.num_decode_tokens = tokens
+        m.decode.input_positions = torch.arange(128, 128 + seq).repeat(4)
+        m.decode.query_start_loc_cpu = torch.arange(0, tokens + 1, seq)
+    if seq == 1:
+        c.impl.vllm_config.speculative_config = None
+    assert c.impl.forward("layer", c.hidden, c.cache, c.metadata, False, c.output) is c.output
+    c.impl._pto_operator.assert_called_once()
+    c.native.assert_not_called()
 
 
 @pytest.mark.parametrize(
     "reason",
-    ["profiling", "gather", "prefill", "ragged", "dummy", "draft", "ratio", "tp", "graph", "spec", "cache", "window"],
+    [
+        "profiling",
+        "gather",
+        "prefill",
+        "ragged",
+        "dummy",
+        "draft",
+        "ratio",
+        "tp",
+        "spec",
+        "cache",
+        "window",
+        "short_lens",
+        "position_rows",
+        "group_tokens",
+        "storage",
+    ],
 )
 def test_unsupported_calls_preserve_native_arguments(call, reason):
     c = call
@@ -165,23 +209,28 @@ def test_unsupported_calls_preserve_native_arguments(call, reason):
     elif reason == "dummy":
         metadata[0].decode.num_reqs_actual = 3
     elif reason == "draft":
-        metadata[0].decode.dspark_swa_indices = torch.ones(1)
+        metadata[-1].decode.dspark_swa_indices = torch.ones(1)
     elif reason == "ratio":
         c.impl.compress_ratio = 128
     elif reason == "tp":
         c.impl.vllm_config.parallel_config.tensor_parallel_size = 2
-    elif reason == "graph":
-        c.impl.vllm_config.model_config.enforce_eager = False
     elif reason == "spec":
         c.impl.vllm_config.speculative_config.method = "mtp"
     elif reason == "cache":
-        c.cache = (torch.zeros(4, 128, 1, 512), *c.cache[1:])
+        c.cache = (torch.zeros(4, 32, 1, 512), *c.cache[1:])
     elif reason == "window":
         metadata[-1].decode.ori_win_left = 132
+    elif reason == "short_lens":
+        metadata[0].decode.seq_lens = metadata[0].decode.seq_lens[:3]
+    elif reason == "position_rows":
+        metadata[0].decode.input_positions = metadata[0].decode.input_positions[:18]
+    elif reason == "group_tokens":
+        metadata[2].num_decode_tokens = 18
+    elif reason == "storage":
+        c.cache = (*c.cache[:3], c.cache[3].clone(), *c.cache[4:])
     assert c.impl.forward("layer", c.hidden, c.cache, metadata, gather, c.output) is c.output
     c.native.assert_called_once_with("layer", c.hidden, c.cache, metadata, gather, c.output)
     c.impl._pto_operator.assert_not_called()
-    c.impl._compute_compressor_metadata.assert_not_called()
 
 
 def test_kernel_failure_never_falls_back(call):
@@ -213,78 +262,26 @@ def test_fused_lifecycle_order(call):
     ]
 
 
-def test_quantized_input_projection_preserves_native_path(call):
-    impl = call.impl
-    impl.n_local_heads, impl.n_local_groups = 64, 8
-    impl.wq_a = NS(weight=torch.empty((4096, 1024), dtype=torch.int8, device="meta"))
-    impl.wkv = NS(weight=torch.empty((4096, 512), dtype=torch.int8, device="meta"))
-    impl.process_weights_after_loading(torch.bfloat16)
-    assert impl._pto_weights is None
-    assert impl.forward("layer", call.hidden, call.cache, call.metadata, False, call.output) is call.output
-    call.native.assert_called_once()
+def test_padded_output_tail_is_not_written(call):
+    output = torch.full((32, 4096), -12.5, dtype=torch.bfloat16)
+    assert call.impl.forward("layer", call.hidden, call.cache, call.metadata, False, output) is output
+    assert torch.all(output[:24] == 3) and torch.all(output[24:] == -12.5)
 
 
-def test_full_model_loaded_weight_layout(call, monkeypatch):
-    import torch_npu
+def test_postload_refreshes_weights(call, monkeypatch):
+    def prepare():
+        assert not hasattr(call.impl, "_pto_attn_weights")
+        call.impl._pto_attn_weights = {"new": 1}
 
-    monkeypatch.setattr(torch_npu, "get_npu_format", lambda tensor: 2)
-
-    def module(shape, dtype=torch.bfloat16, channels=None):
-        value = NS(weight=torch.empty(shape, dtype=dtype, device="meta"))
-        if channels is not None:
-            value.weight_scale = torch.empty(channels, dtype=torch.bfloat16, device="meta")
-        return value
-
-    def compressor(width):
-        return NS(
-            wkv=module((width * 2, 4096)),
-            wgate=module((width * 2, 4096)),
-            ape=torch.empty((4, width * 2), device="meta"),
-            norm=module((width,)),
-        )
-
-    impl = call.impl
-    impl.n_local_heads, impl.n_local_groups = 64, 8
-    impl.wq_a = module((1024, 4096))
-    impl.wq_b = module((1024, 32768), torch.int8, 32768)
-    impl.wkv = module((512, 4096))
-    impl.q_norm, impl.kv_norm = module((1024,)), module((512,))
-    impl.compressor = compressor(512)
-    impl.indexer = NS(
-        compressor=compressor(128), wq_b=module((1024, 8192), torch.int8, 8192), weights_proj=module((64, 4096))
-    )
-    impl.attn_sink = torch.empty(64, device="meta")
-    impl.wo_a, impl.wo_b = module((8, 4096, 1024)), module((8192, 4096), torch.int8, 4096)
-    result = impl._prepare_weights(None)
-    assert result["wq_a"].shape == (4096, 1024)
-    assert result["wkv"].shape == (4096, 512)
-    assert result["wo_b"].shape == (4096, 8192)
-    assert result["wq_b"].dtype == torch.int8
-    assert result["wq_b_scale"].dtype == torch.float32
+    monkeypatch.setattr(call.impl, "_prepare_weights", prepare)
+    call.impl.process_weights_after_loading(torch.bfloat16)
+    assert call.impl._pto_attn_weights == {"new": 1}
 
 
-def test_padded_table_view_aliases_storage():
-    owner = torch.arange(32, dtype=torch.int32).view(4, 8)
-    table = owner[:, :5]
-    view = pto.PyptoDSAImpl._table_view(table)
-    assert view.data_ptr() == table.data_ptr() and view.shape == (4, 8)
-
-
-def test_physical_page_rejects_incomplete_final_page():
-    owner = torch.zeros(22)
-    view = owner.as_strided((2, 2, 1, 3), (16, 3, 3, 1))
-    with pytest.raises(ValueError, match="final page"):
-        pto.PyptoDSAImpl._physical_pages(view)
-
-
-def test_postload_rebuilds_weights_and_clears_runtime(call, monkeypatch):
-    c = call
-    prepare = Mock(side_effect=[{"new": 1}, {"new": 2}])
-    monkeypatch.setattr(c.impl, "_prepare_weights", prepare)
-    c.impl.process_weights_after_loading(torch.bfloat16)
-    assert c.impl._pto_weights == {"new": 1} and not hasattr(c.impl, "_pto_operator")
-    c.impl.process_weights_after_loading(torch.bfloat16)
-    assert c.impl._pto_weights == {"new": 2}
+def test_incomplete_physical_page_rejected():
+    cache = torch.zeros(22).as_strided((2, 2, 3), (16, 3, 1))
+    with pytest.raises(pto.NativeLayoutError, match="complete final page"):
+        pto._full_page_view(cache, 4, (4,))
 
 
 @pytest.mark.parametrize("enabled", [False, True])

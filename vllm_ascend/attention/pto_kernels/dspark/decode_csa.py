@@ -6,72 +6,85 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
+# ci: devices=1
+# ruff: noqa: E402
+"""DeepSeek-V4 CSA attention over vLLM-native paged cache layouts."""
 
-"""TP1 attention-only CSA adapted from the pinned pypto-lib reference."""
+import sys
+
+from . import config
+
+# TP specialization before sub-kernel imports.
+_TP_CHOICES = (1, 2, 4)
+_TP_DEFAULT = 1
+
+
+def _parse_tp_argv():
+    for index, arg in enumerate(sys.argv):
+        if arg == "--tp" and index + 1 < len(sys.argv):
+            return int(sys.argv[index + 1])
+        if arg.startswith("--tp="):
+            return int(arg.split("=", 1)[1])
+    return _TP_DEFAULT
+
+
+TP_SIZE = _parse_tp_argv()
+if TP_SIZE not in _TP_CHOICES:
+    raise ValueError(f"--tp must be one of {_TP_CHOICES} (got {TP_SIZE})")
+config.TP = TP_SIZE
 
 import pypto.language as pl
 
-from .compact_metadata import build_compact_row_offsets
 from .config import (
-    BLOCK_SIZE,
-    C4A_COMPRESSOR_BLOCK_SIZE,
     DECODE_BATCH,
     DECODE_SEQ,
-    KV_ORI_BLOCK_NUM,
 )
 from .config import (
     FLASH as M,
 )
-from .config import (
-    TP as TP_SIZE,
+from .decode_compressor_ratio4 import compressor_ratio4_vllm
+from .decode_indexer import indexer_vllm
+from .decode_indexer_compressor import indexer_compressor_vllm
+from .decode_o_proj import (
+    LOCAL_T,
+    LOCAL_T_PAD,
+    decode_o_proj_tp1,
 )
-from .decode_compressor_ratio4 import compressor_ratio4
-from .decode_indexer import indexer
-from .decode_indexer_compressor import indexer_compressor
-from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
-from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
-from .layout import (
-    COMPRESSED_ROWS_DYN,
-    COMPRESSED_TABLE_COLUMNS_DYN,
-    INDEXER_PAGE_BYTES_DYN,
-    INDEXER_ROWS_DYN,
-    INDEXER_TABLE_COLUMNS_DYN,
-    INNER_STATE_PAGE_ELEMENTS_DYN,
-    INNER_STATE_TABLE_COLUMNS_DYN,
-    ORIGINAL_TABLE_COLUMNS_DYN,
-    QUERY_BOUNDS_DYN,
-    STATE_PAGE_ELEMENTS_DYN,
-    STATE_TABLE_COLUMNS_DYN,
+from .decode_sparse_attn_csa import (
+    T_PAD,
+    sparse_attn_csa_tp1_vllm,
 )
-from .qkv_proj_rope import qkv_proj_rope
+from .qkv_proj_rope import kv_proj_rope, q_proj_rope
 
 # Dynamic shape variables.
 B_DYN = pl.dynamic("B_DYN")  # per-request axis
 T_DYN = pl.dynamic("T_DYN")  # T = B * S
-ORI_BLOCK_NUM_DYN = pl.dynamic("ORI_BLOCK_NUM_DYN")
-CMP_BLOCK_NUM_DYN = pl.dynamic("CMP_BLOCK_NUM_DYN")
-IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
-MAIN_STATE_BLOCK_NUM_DYN = pl.dynamic("CSA_STATE_BLOCK_NUM_DYN")
-INNER_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
+ROPE_ROWS_DYN = pl.dynamic("VLLM_ROPE_ROWS_DYN")
+CMP_ROPE_ROWS_DYN = pl.dynamic("VLLM_CMP_ROPE_ROWS_DYN")
+VLLM_COMPRESS_STATE_PAGE_NUM_DYN = pl.dynamic("VLLM_COMPRESS_STATE_PAGE_NUM_DYN")
+VLLM_KV_CACHE_PAGE_NUM_DYN = pl.dynamic("VLLM_KV_CACHE_PAGE_NUM_DYN")
+VLLM_CMP_KV_PAGE_NUM_DYN = pl.dynamic("VLLM_CMP_KV_PAGE_NUM_DYN")
+VLLM_MAIN_STATE_TABLE_WIDTH_DYN = pl.dynamic("VLLM_MAIN_STATE_TABLE_WIDTH_DYN")
+VLLM_INNER_STATE_TABLE_WIDTH_DYN = pl.dynamic("VLLM_INNER_STATE_TABLE_WIDTH_DYN")
+VLLM_ORI_TABLE_WIDTH_DYN = pl.dynamic("VLLM_ORI_TABLE_WIDTH_DYN")
+VLLM_CMP_TABLE_WIDTH_DYN = pl.dynamic("VLLM_CMP_TABLE_WIDTH_DYN")
+VLLM_INNER_INDEX_PAGE_NUM_DYN = pl.dynamic("VLLM_INNER_INDEX_PAGE_NUM_DYN")
+VLLM_INDEX_TABLE_WIDTH_DYN = pl.dynamic("VLLM_INDEX_TABLE_WIDTH_DYN")
 
 # model config
 B = DECODE_BATCH // TP_SIZE
 S = DECODE_SEQ
 T = B * S
-EPS = M.rms_norm_eps
 D = M.hidden_size
 H = M.num_attention_heads
 HEAD_DIM = M.head_dim
 ROPE_HEAD_DIM = M.qk_rope_head_dim
 Q_LORA = M.q_lora_rank
-WIN = M.sliding_window
-MAX_SEQ_LEN = M.max_position_embeddings
 IDX_N_HEADS = M.index_n_heads
 IDX_HEAD_DIM = M.index_head_dim
 IDX_TOPK = M.index_topk
 O_LORA = M.o_lora_rank
 O_GROUPS = M.o_groups
-HEADS_PER_GROUP = H // O_GROUPS
 O_GROUP_IN = H * HEAD_DIM // O_GROUPS
 
 # kernel constants
@@ -80,32 +93,14 @@ OVERLAP = COMPRESS_RATIO == 4
 COFF = 1 + int(OVERLAP)
 MAIN_OUT_DIM = COFF * HEAD_DIM
 MAIN_STATE_DIM = 2 * MAIN_OUT_DIM
-MAIN_STATE_BLOCK_SIZE = C4A_COMPRESSOR_BLOCK_SIZE
-MAIN_STATE_LEN = COFF * COMPRESS_RATIO
 INNER_OUT_DIM = COFF * IDX_HEAD_DIM
-INNER_STATE_DIM = 2 * INNER_OUT_DIM
-INNER_STATE_BLOCK_SIZE = C4A_COMPRESSOR_BLOCK_SIZE
-INNER_STATE_LEN = COFF * COMPRESS_RATIO
-ORI_MAX_BLOCKS = (MAX_SEQ_LEN + BLOCK_SIZE - 1) // BLOCK_SIZE
-ORI_BLOCK_NUM = KV_ORI_BLOCK_NUM
-CMP_MAX_ROWS = MAX_SEQ_LEN // COMPRESS_RATIO
-CMP_MAX_BLOCKS = (CMP_MAX_ROWS + BLOCK_SIZE - 1) // BLOCK_SIZE
-IDX_MAX_BLOCKS = CMP_MAX_BLOCKS
-
-# Indexer dependency slots across conditional scopes.
-IDX_QUERY_DEP_SLOT = 0
-IDX_HADAMARD_DEP_SLOT = 1
-IDX_QUANT_DEP_SLOT = 2
-IDX_LEAF_DEP_SLOT = 3
-IDX_DEP_COUNT = IDX_LEAF_DEP_SLOT + 1
 
 # tiling
-CSA_PROJECTION_PACK_ROW_TILE = 8
-CSA_PROJECTION_PACK_WORKERS = 16
-CSA_ALL_VISIBLE_WORKERS = 16
-CSA_WB_TOKEN_TILE = 8
-CSA_WB_WORKERS = 48  # CSA cache-write workers
 TP1_CSA_WB_WORKERS = 8  # TP1 CSA cache-write workers
+VLLM_KV_PAGE_ROWS = 128
+VLLM_COMPRESS_STATE_PAGE_ROWS = 16
+VLLM_COMPRESS_STATE_LIVE_ROWS = 8
+VLLM_INDEX_PAGE_ROWS = 130
 
 if T != LOCAL_T:
     raise ValueError(f"CSA token capacity {T} must equal TP local token capacity {LOCAL_T}")
@@ -113,26 +108,45 @@ if T_PAD != LOCAL_T_PAD:
     raise ValueError(f"CSA token capacity {T_PAD} must equal TP local token capacity {LOCAL_T_PAD}")
 
 
-def _decode_csa_tp1_attention(
-    x_normed_t: pl.Tensor[[T_DYN, D], pl.BF16],
+def _decode_csa_attn_tp1(
+    x_normed: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
     gamma_ckv: pl.Tensor[[HEAD_DIM], pl.BF16],
-    freqs_cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
-    freqs_sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
-    cmp_freqs_cos: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
-    cmp_freqs_sin: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
-    inner_freqs_cos: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
-    inner_freqs_sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+    freqs_cos: pl.Tensor[[ROPE_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+    freqs_sin: pl.Tensor[[ROPE_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+    cmp_freqs_cos: pl.Tensor[[CMP_ROPE_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+    cmp_freqs_sin: pl.Tensor[[CMP_ROPE_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     cmp_wkv: pl.Tensor[[MAIN_OUT_DIM, D], pl.BF16],
     cmp_wgate: pl.Tensor[[MAIN_OUT_DIM, D], pl.BF16],
     cmp_ape: pl.Tensor[[COMPRESS_RATIO, MAIN_OUT_DIM], pl.FP32],
     cmp_norm_w: pl.Tensor[[HEAD_DIM], pl.BF16],
-    compress_state: pl.InOut[pl.Tensor[[MAIN_STATE_BLOCK_NUM_DYN, STATE_PAGE_ELEMENTS_DYN], pl.FP32]],
-    state_block_table: pl.Tensor[[B_DYN, STATE_TABLE_COLUMNS_DYN], pl.INT32],
+    compress_state_pages: pl.InOut[
+        pl.Tensor[
+            [
+                VLLM_COMPRESS_STATE_PAGE_NUM_DYN,
+                VLLM_COMPRESS_STATE_PAGE_ROWS,
+                MAIN_STATE_DIM,
+            ],
+            pl.FP32,
+        ]
+    ],
+    kv_cache_pages: pl.InOut[
+        pl.Tensor[
+            [VLLM_KV_CACHE_PAGE_NUM_DYN, VLLM_KV_PAGE_ROWS, 1, HEAD_DIM],
+            pl.BF16,
+        ]
+    ],
+    cmp_kv_pages: pl.InOut[
+        pl.Tensor[
+            [VLLM_CMP_KV_PAGE_NUM_DYN, VLLM_KV_PAGE_ROWS, 1, HEAD_DIM],
+            pl.BF16,
+        ]
+    ],
+    compress_state_block_table: pl.Tensor[[B_DYN, VLLM_MAIN_STATE_TABLE_WIDTH_DYN], pl.INT32],
     idx_wq_b: pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8],
     idx_wq_b_scale: pl.Tensor[[IDX_N_HEADS * IDX_HEAD_DIM], pl.FP32],
     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
@@ -141,213 +155,275 @@ def _decode_csa_tp1_attention(
     inner_wgate: pl.Tensor[[INNER_OUT_DIM, D], pl.BF16],
     inner_ape: pl.Tensor[[COMPRESS_RATIO, INNER_OUT_DIM], pl.FP32],
     inner_norm_w: pl.Tensor[[IDX_HEAD_DIM], pl.BF16],
-    inner_compress_state: pl.InOut[pl.Tensor[[INNER_STATE_BLOCK_NUM_DYN, INNER_STATE_PAGE_ELEMENTS_DYN], pl.FP32]],
-    inner_state_block_table: pl.Tensor[[B_DYN, INNER_STATE_TABLE_COLUMNS_DYN], pl.INT32],
-    kv_cache: pl.InOut[pl.Tensor[[ORI_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16]],
-    cmp_kv: pl.InOut[pl.Tensor[[CMP_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16]],
-    cmp_block_table: pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32],
-    idx_kv_cache: pl.InOut[pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]],
-    idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
-    ori_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
-    ori_block_table: pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32],
-    cmp_slot_mapping: pl.Tensor[[COMPRESSED_ROWS_DYN, 2], pl.INT32],
-    idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
-    state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
-    inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+    inner_index_pages: pl.InOut[
+        pl.Tensor[
+            [
+                VLLM_INNER_INDEX_PAGE_NUM_DYN,
+                VLLM_INDEX_PAGE_ROWS,
+                IDX_HEAD_DIM,
+            ],
+            pl.INT8,
+        ]
+    ],
+    inner_compress_state_block_table: pl.Tensor[[B_DYN, VLLM_INNER_STATE_TABLE_WIDTH_DYN], pl.INT32],
+    ori_block_table: pl.Tensor[[B_DYN, VLLM_ORI_TABLE_WIDTH_DYN], pl.INT32],
+    cmp_block_table: pl.Tensor[[B_DYN, VLLM_CMP_TABLE_WIDTH_DYN], pl.INT32],
+    index_block_table: pl.Tensor[[B_DYN, VLLM_INDEX_TABLE_WIDTH_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+    token_valid: pl.Tensor[[T_DYN], pl.INT32],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
-    cmp_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
-    cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
-    idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16],
     wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
-    idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
-    idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     attn_out: pl.Out[pl.Tensor[[T_DYN, D], pl.BF16]],
 ):
-    """TP1 attention with Native interleaved FP32 frequencies and no outer HC."""
-    x_normed_t.bind_dynamic(0, T_DYN)
-    freqs_cos.bind_dynamic(0, T_DYN)
-    freqs_sin.bind_dynamic(0, T_DYN)
-    cmp_freqs_cos.bind_dynamic(0, COMPRESSED_ROWS_DYN)
-    cmp_freqs_sin.bind_dynamic(0, COMPRESSED_ROWS_DYN)
-    inner_freqs_cos.bind_dynamic(0, INDEXER_ROWS_DYN)
-    inner_freqs_sin.bind_dynamic(0, INDEXER_ROWS_DYN)
-    compress_state.bind_dynamic(0, MAIN_STATE_BLOCK_NUM_DYN)
-    compress_state.bind_dynamic(1, STATE_PAGE_ELEMENTS_DYN)
-    state_block_table.bind_dynamic(0, B_DYN)
-    state_block_table.bind_dynamic(1, STATE_TABLE_COLUMNS_DYN)
-    inner_compress_state.bind_dynamic(0, INNER_STATE_BLOCK_NUM_DYN)
-    inner_compress_state.bind_dynamic(1, INNER_STATE_PAGE_ELEMENTS_DYN)
-    inner_state_block_table.bind_dynamic(0, B_DYN)
-    inner_state_block_table.bind_dynamic(1, INNER_STATE_TABLE_COLUMNS_DYN)
-    kv_cache.bind_dynamic(0, ORI_BLOCK_NUM_DYN)
-    cmp_kv.bind_dynamic(0, CMP_BLOCK_NUM_DYN)
-    idx_kv_cache.bind_dynamic(0, IDX_CACHE_BLOCK_NUM_DYN)
-    idx_kv_cache.bind_dynamic(1, INDEXER_PAGE_BYTES_DYN)
-    ori_slot_mapping.bind_dynamic(0, T_DYN)
-    ori_block_table.bind_dynamic(0, B_DYN)
-    ori_block_table.bind_dynamic(1, ORIGINAL_TABLE_COLUMNS_DYN)
-    cmp_slot_mapping.bind_dynamic(0, COMPRESSED_ROWS_DYN)
-    idx_slot_mapping.bind_dynamic(0, INDEXER_ROWS_DYN)
-    state_slot_mapping.bind_dynamic(0, T_DYN)
-    inner_state_slot_mapping.bind_dynamic(0, T_DYN)
-    position_ids.bind_dynamic(0, T_DYN)
-    kv_seq_lens.bind_dynamic(0, B_DYN)
-    cmp_query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
-    cmp_seq_lens.bind_dynamic(0, B_DYN)
-    idx_query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
-    cmp_block_table.bind_dynamic(0, B_DYN)
-    cmp_block_table.bind_dynamic(1, COMPRESSED_TABLE_COLUMNS_DYN)
-    idx_block_table.bind_dynamic(0, B_DYN)
-    idx_block_table.bind_dynamic(1, INDEXER_TABLE_COLUMNS_DYN)
-    attn_out.bind_dynamic(0, T_DYN)
-    idx_topk.bind_dynamic(0, T_DYN)
-    idx_topk_scores.bind_dynamic(0, T_DYN)
-    t_dim = pl.tensor.dim(x_normed_t, 0)
-    wb_blocks = (t_dim + CSA_WB_TOKEN_TILE - 1) // CSA_WB_TOKEN_TILE
+    """Consume real token rows and native interleaved FP32 RoPE tables.
 
-    idx_sin_signed = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
-    cmp_row_offsets = pl.create_tensor([pl.tensor.dim(cmp_seq_lens, 0)], dtype=pl.INT32)
-    idx_row_offsets = pl.create_tensor([pl.tensor.dim(kv_seq_lens, 0)], dtype=pl.INT32)
-    # Reuse this task for per-request compact offsets and normal-RoPE signs.
-    with pl.at(level=pl.Level.CORE_GROUP, name_hint="csa_rope_sign") as rope_tid:
-        build_compact_row_offsets(cmp_query_start_loc, cmp_seq_lens, cmp_row_offsets)
-        build_compact_row_offsets(idx_query_start_loc, kv_seq_lens, idx_row_offsets)
-        il_ones = pl.tile.full([4, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
-        il_lane_ids = pl.cast(pl.tile.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32), target_type=pl.FP32)
-        il_col = pl.col_expand_mul(il_ones, il_lane_ids)
-        il_dup_f = pl.cast(pl.cast(pl.mul(il_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32)
-        il_lane = pl.sub(il_col, pl.mul(il_dup_f, 2.0))
-        il_sign = pl.sub(pl.mul(il_lane, 2.0), 1.0)
-        for rope_t0 in pl.range(0, t_dim, 4):
-            rope_rows = pl.min(4, t_dim - rope_t0)
-            rope_sin_rows = pl.load(freqs_sin, [rope_t0, 0], [4, ROPE_HEAD_DIM], valid_shape=[rope_rows, ROPE_HEAD_DIM])
-            rope_sign_rows = pl.set_validshape(il_sign, rope_rows, ROPE_HEAD_DIM)
-            pl.store(pl.mul(rope_sin_rows, rope_sign_rows), [rope_t0, 0], idx_sin_signed)
+    RoPE inputs are persistent tables indexed by absolute position, not
+    token-local or compact boundary rows. Their extents are independent of T.
+    """
+    x_normed.bind_dynamic(0, T_DYN)
+    freqs_cos.bind_dynamic(0, ROPE_ROWS_DYN)
+    freqs_sin.bind_dynamic(0, ROPE_ROWS_DYN)
+    cmp_freqs_cos.bind_dynamic(0, CMP_ROPE_ROWS_DYN)
+    cmp_freqs_sin.bind_dynamic(0, CMP_ROPE_ROWS_DYN)
+    position_ids.bind_dynamic(0, T_DYN)
+    token_valid.bind_dynamic(0, T_DYN)
+    attn_out.bind_dynamic(0, T_DYN)
+    kv_seq_lens.bind_dynamic(0, B_DYN)
+    compress_state_pages.bind_dynamic(0, VLLM_COMPRESS_STATE_PAGE_NUM_DYN)
+    kv_cache_pages.bind_dynamic(0, VLLM_KV_CACHE_PAGE_NUM_DYN)
+    cmp_kv_pages.bind_dynamic(0, VLLM_CMP_KV_PAGE_NUM_DYN)
+    compress_state_block_table.bind_dynamic(0, B_DYN)
+    compress_state_block_table.bind_dynamic(
+        1,
+        VLLM_MAIN_STATE_TABLE_WIDTH_DYN,
+    )
+    inner_index_pages.bind_dynamic(0, VLLM_INNER_INDEX_PAGE_NUM_DYN)
+    inner_compress_state_block_table.bind_dynamic(0, B_DYN)
+    inner_compress_state_block_table.bind_dynamic(
+        1,
+        VLLM_INNER_STATE_TABLE_WIDTH_DYN,
+    )
+    ori_block_table.bind_dynamic(0, B_DYN)
+    ori_block_table.bind_dynamic(1, VLLM_ORI_TABLE_WIDTH_DYN)
+    cmp_block_table.bind_dynamic(0, B_DYN)
+    cmp_block_table.bind_dynamic(1, VLLM_CMP_TABLE_WIDTH_DYN)
+    index_block_table.bind_dynamic(0, B_DYN)
+    index_block_table.bind_dynamic(1, VLLM_INDEX_TABLE_WIDTH_DYN)
+
+    t_dim = pl.tensor.dim(x_normed, 0)
+    b_dim = pl.tensor.dim(kv_seq_lens, 0)
+    s_dim = t_dim // b_dim
+    positions_i32 = pl.create_tensor([t_dim], dtype=pl.INT32)
+    rope_swap_idx = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.INT32)
+    idx_cos_il = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
+    idx_sin_signed = pl.create_tensor(
+        [t_dim, ROPE_HEAD_DIM],
+        dtype=pl.FP32,
+    )
+    cmp_cos_il = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
+    cmp_sin_signed = pl.create_tensor(
+        [t_dim, ROPE_HEAD_DIM],
+        dtype=pl.FP32,
+    )
+    with pl.at(
+        level=pl.Level.CORE_GROUP,
+        name_hint="csa_vllm_rope_interleave",
+    ) as rope_tid:
+        ones = pl.full([1, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
+        columns = pl.col_expand_mul(
+            ones,
+            pl.cast(
+                pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32),
+                target_type=pl.FP32,
+            ),
+        )
+        duplicate = pl.cast(
+            pl.cast(
+                pl.mul(columns, 0.5),
+                target_type=pl.INT32,
+                mode="trunc",
+            ),
+            target_type=pl.FP32,
+        )
+        lane = pl.sub(columns, pl.mul(duplicate, 2.0))
+        sign = pl.sub(pl.mul(lane, 2.0), 1.0)
+        swap = pl.cast(
+            pl.sub(pl.add(columns, 1.0), pl.mul(lane, 2.0)),
+            pl.INT32,
+        )
+        for token in pl.range(t_dim):
+            position = pl.cast(pl.read(position_ids, [token]), pl.INDEX)
+            active_position = -1
+            if pl.read(token_valid, [token]) != 0:
+                active_position = position
+            pl.write(positions_i32, [token], pl.cast(active_position, pl.INT32))
+            # Inactive rows only read table row zero and never publish state.
+            rope_row = pl.max(active_position, 0)
+            cmp_row = pl.max(active_position + 1 - COMPRESS_RATIO, 0)
+            idx_cos_il[token : token + 1, :] = freqs_cos[rope_row : rope_row + 1, :]
+            idx_sin_signed[token : token + 1, :] = pl.mul(
+                freqs_sin[rope_row : rope_row + 1, :],
+                sign,
+            )
+            cmp_cos_il[token : token + 1, :] = cmp_freqs_cos[cmp_row : cmp_row + 1, :]
+            cmp_sin_signed[token : token + 1, :] = pl.mul(
+                cmp_freqs_sin[cmp_row : cmp_row + 1, :],
+                sign,
+            )
+            rope_swap_idx[token : token + 1, :] = swap
 
     q = pl.create_tensor([t_dim, H, HEAD_DIM], dtype=pl.BF16)
     kv = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.BF16)
     qr = pl.create_tensor([t_dim, Q_LORA], dtype=pl.INT8)
     qr_scale = pl.create_tensor([t_dim, 1], dtype=pl.FP32)
-    position_ids_t1 = pl.reshape(position_ids, [t_dim, 1])
-    with pl.scope():
-        # Projection-chain dependency marker.
-        late_dep = pl.system.task_dummy(deps=[rope_tid])
-        qkv_proj_rope(
-            x_normed_t,
-            wq_a,
-            wq_b,
-            wq_b_scale,
-            wkv,
-            freqs_cos,
-            freqs_sin,
-            gamma_cq,
-            gamma_ckv,
-            q,
-            kv,
-            qr,
-            qr_scale,
-            late_dep,
-        )
+    topk_scores = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.FP32)
+    topk_indices = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.INT32)
+    position_ids_2d = pl.reshape(positions_i32, [t_dim, 1])
+    late_dep = pl.system.task_dummy(deps=[rope_tid])
+    q_proj_rope(
+        x_normed,
+        wq_a,
+        wq_b,
+        wq_b_scale,
+        gamma_cq,
+        idx_cos_il,
+        idx_sin_signed,
+        rope_swap_idx,
+        q,
+        qr,
+        qr_scale,
+        late_dep,
+    )
+    kv_proj_rope(
+        x_normed,
+        wkv,
+        gamma_ckv,
+        idx_cos_il,
+        idx_sin_signed,
+        rope_swap_idx,
+        kv,
+        late_dep,
+    )
 
-        ori_block_num = pl.tensor.dim(kv_cache, 0)
-        kv_cache_flat = pl.reshape(kv_cache, [ori_block_num * BLOCK_SIZE, HEAD_DIM])
-        with pl.spmd(TP1_CSA_WB_WORKERS, name_hint="csa_cache_writeback"):
-            wb_worker = pl.tile.get_block_idx()
-            for wb_blk in pl.range(wb_worker, wb_blocks, TP1_CSA_WB_WORKERS):
-                wb_t0 = wb_blk * CSA_WB_TOKEN_TILE
-                for write_dt in pl.range(pl.min(CSA_WB_TOKEN_TILE, t_dim - wb_t0)):
-                    write_t = wb_t0 + write_dt
-                    write_page = pl.read(ori_slot_mapping, [write_t, 0])
-                    write_offset = pl.read(ori_slot_mapping, [write_t, 1])
-                    if write_page >= 0 and write_offset >= 0:
-                        write_row = pl.cast(write_page, pl.INDEX) * BLOCK_SIZE + write_offset
-                        kv_cache_flat[write_row : write_row + 1, 0:HEAD_DIM] = kv[write_t : write_t + 1, 0:HEAD_DIM]
+    with pl.spmd(
+        TP1_CSA_WB_WORKERS,
+        name_hint="csa_vllm_raw_cache_write",
+    ) as raw_cache_tid:
+        worker = pl.tile.get_block_idx()
+        for token in pl.range(worker, t_dim, TP1_CSA_WB_WORKERS):
+            if pl.read(token_valid, [token]) != 0:
+                request = token // s_dim
+                position = pl.cast(pl.read(positions_i32, [token]), pl.INDEX)
+                logical_page = position // VLLM_KV_PAGE_ROWS
+                physical_page_i32 = pl.read(
+                    ori_block_table,
+                    [request, logical_page],
+                )
+                if physical_page_i32 > 0:
+                    physical_page = pl.cast(physical_page_i32, pl.INDEX)
+                    intra = position % VLLM_KV_PAGE_ROWS
+                    kv_cache_pages[
+                        physical_page : physical_page + 1,
+                        intra : intra + 1,
+                        0:1,
+                        0:HEAD_DIM,
+                    ] = pl.reshape(
+                        kv[token : token + 1, 0:HEAD_DIM],
+                        [1, 1, 1, HEAD_DIM],
+                    )
 
-        cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
-        cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
-            x_normed_t,
-            cmp_out,
-            compress_state,
-            state_block_table,
-            cmp_wkv,
-            cmp_wgate,
-            cmp_ape,
-            cmp_norm_w,
-            cmp_freqs_cos,
-            cmp_freqs_sin,
-            cmp_row_offsets,
-            cmp_kv,
-            position_ids,
-            cmp_slot_mapping,
-            state_slot_mapping,
-            late_dep,
-        )
-        idx_kv_unused = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
-        idx_cache_write_tid = indexer_compressor(
-            x_normed_t,
-            idx_kv_unused,
-            inner_compress_state,
-            inner_state_block_table,
-            inner_wkv,
-            inner_wgate,
-            inner_ape,
-            inner_norm_w,
-            inner_freqs_cos,
-            inner_freqs_sin,
-            idx_row_offsets,
-            hadamard_idx,
-            idx_kv_cache,
-            position_ids,
-            idx_slot_mapping,
-            inner_state_slot_mapping,
-            late_dep,
-            cmp_kv_score_tid,
-        )
-        # Bound indexer scratch to its own runtime scope.
-        with pl.scope():
-            idx_topk_scores, idx_topk = indexer(
-                x_normed_t,
-                qr,
-                qr_scale,
-                idx_wq_b,
-                idx_wq_b_scale,
-                weights_proj,
-                freqs_cos,
-                idx_sin_signed,
-                hadamard_idx,
-                idx_kv_cache,
-                idx_block_table,
-                idx_topk_scores,
-                idx_topk,
-                position_ids,
-                kv_seq_lens,
-                late_dep,
-                idx_cache_write_tid,
-            )
+    cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
+    cmp_out, cmp_cache_tid, cmp_projection_tid = compressor_ratio4_vllm(
+        x_normed,
+        cmp_out,
+        compress_state_pages,
+        cmp_kv_pages,
+        compress_state_block_table,
+        cmp_wkv,
+        cmp_wgate,
+        cmp_ape,
+        cmp_norm_w,
+        cmp_cos_il,
+        cmp_sin_signed,
+        cmp_block_table,
+        positions_i32,
+        token_valid,
+        late_dep,
+        raw_cache_tid,
+    )
+    idx_out = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
+    idx_cache_tid = indexer_compressor_vllm(
+        x_normed,
+        idx_out,
+        inner_index_pages,
+        inner_compress_state_block_table,
+        inner_wkv,
+        inner_wgate,
+        inner_ape,
+        inner_norm_w,
+        cmp_cos_il,
+        cmp_sin_signed,
+        hadamard_idx,
+        index_block_table,
+        positions_i32,
+        token_valid,
+        late_dep,
+        cmp_projection_tid,
+    )
+    topk_scores, topk_indices, topk_tid = indexer_vllm(
+        x_normed,
+        qr,
+        qr_scale,
+        idx_wq_b,
+        idx_wq_b_scale,
+        weights_proj,
+        idx_cos_il,
+        idx_sin_signed,
+        hadamard_idx,
+        inner_index_pages,
+        index_block_table,
+        topk_scores,
+        topk_indices,
+        positions_i32,
+        kv_seq_lens,
+        idx_cache_tid,
+    )
 
-        # sparse_attn_csa folds the compressed-slot masking + valid-block flags in from the
-        # raw indexer topk + position.
-        o_packed_heads = pl.create_tensor([O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16)
-        o_packed_heads, heads_dep = sparse_attn_csa_tp1(
-            q,
-            kv_cache,
-            ori_block_table,
-            cmp_kv,
-            cmp_block_table,
-            idx_topk,
-            position_ids_t1,
-            attn_sink,
-            freqs_cos,
-            freqs_sin,
-            o_packed_heads,
-        )
-        attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
+    attention_ready = pl.system.task_dummy(
+        deps=[raw_cache_tid, cmp_cache_tid, topk_tid],
+    )
+    o_packed_heads = pl.create_tensor(
+        [O_GROUPS * T_PAD, O_GROUP_IN],
+        dtype=pl.BF16,
+    )
+    o_packed_heads, heads_dep = sparse_attn_csa_tp1_vllm(
+        q,
+        kv_cache_pages,
+        ori_block_table,
+        cmp_kv_pages,
+        cmp_block_table,
+        topk_indices,
+        position_ids_2d,
+        token_valid,
+        attn_sink,
+        idx_cos_il,
+        idx_sin_signed,
+        o_packed_heads,
+        attention_ready,
+    )
+    decode_o_proj_tp1(
+        o_packed_heads,
+        wo_a,
+        wo_b,
+        wo_b_scale,
+        attn_out,
+        heads_dep,
+    )
     return attn_out
 
 
-decode_csa_tp1_attention = pl.jit.inline(auto_scope=False)(_decode_csa_tp1_attention)
-decode_csa_tp1_attention_test = pl.jit(auto_scope=False)(_decode_csa_tp1_attention)
+decode_csa_attn_tp1 = pl.jit.inline(_decode_csa_attn_tp1)
+decode_csa_attn_tp1_test = pl.jit(_decode_csa_attn_tp1)

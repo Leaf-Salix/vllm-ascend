@@ -6,8 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-
-"""Explicit TP1, six-token CSA specialization; no process-argv parsing."""
+"""DeepSeek-V4 configuration"""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -100,6 +99,49 @@ class DeepSeekV4Config:
         return (2 + self.hc_mult) * self.hc_mult
 
 
+DEMO = DeepSeekV4Config(
+    name="demo",
+    hidden_size=4096,
+    num_attention_heads=64,
+    head_dim=512,
+    qk_rope_head_dim=64,
+    q_lora_rank=1024,
+    o_lora_rank=1024,
+    o_groups=8,
+    sliding_window=128,
+    rms_norm_eps=1e-6,
+    vocab_size=129280,
+    moe_intermediate_size=4096,
+    n_routed_experts=16,
+    n_shared_experts=1,
+    num_experts_per_tok=2,
+    scoring_func="sqrtsoftplus",
+    routed_scaling_factor=1.0,
+    swiglu_limit=0.0,
+    num_hidden_layers=8,
+    num_hash_layers=0,
+    num_nextn_predict_layers=1,
+    compress_ratios=(0, 0, 4, 128, 4, 128, 4, 0),
+    index_n_heads=64,
+    index_head_dim=128,
+    index_topk=512,
+    hc_mult=4,
+    hc_sinkhorn_iters=20,
+    hc_eps=1e-6,
+    max_position_embeddings=4096,
+    rope_theta=10000.0,
+    compress_rope_theta=40000.0,
+    rope_factor=40.0,
+    beta_fast=32,
+    beta_slow=1,
+    original_max_position_embeddings=0,
+    dtype="fp8",
+    scale_fmt="ue8m0",
+    expert_dtype=None,
+    scale_dtype="fp8",
+    max_batch_size=4,
+)
+
 FLASH = DeepSeekV4Config(
     name="flash",
     hidden_size=4096,
@@ -188,19 +230,161 @@ FLASH = DeepSeekV4Config(
     max_batch_size=4,
 )
 
+PRO = DeepSeekV4Config(
+    name="pro",
+    hidden_size=7168,
+    num_attention_heads=128,
+    head_dim=512,
+    qk_rope_head_dim=64,
+    q_lora_rank=1536,
+    o_lora_rank=1024,
+    o_groups=16,
+    sliding_window=128,
+    rms_norm_eps=1e-6,
+    vocab_size=129280,
+    moe_intermediate_size=3072,
+    n_routed_experts=384,
+    n_shared_experts=1,
+    num_experts_per_tok=6,
+    scoring_func="sqrtsoftplus",
+    routed_scaling_factor=2.5,
+    swiglu_limit=10.0,
+    num_hidden_layers=61,
+    num_hash_layers=3,
+    num_nextn_predict_layers=1,
+    compress_ratios=(
+        128,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        128,
+        4,
+        0,
+    ),
+    index_n_heads=64,
+    index_head_dim=128,
+    index_topk=1024,
+    hc_mult=4,
+    hc_sinkhorn_iters=20,
+    hc_eps=1e-6,
+    max_position_embeddings=1048576,
+    rope_theta=10000.0,
+    compress_rope_theta=160000.0,
+    rope_factor=16.0,
+    beta_fast=32,
+    beta_slow=1,
+    original_max_position_embeddings=65536,
+    dtype="fp8",
+    scale_fmt="ue8m0",
+    expert_dtype=None,
+    scale_dtype="fp8",
+    max_batch_size=4,
+)
 
-# Compile capacity covers all six requested batch sizes (up to B=40).
-# 64 * 6 = 384 also meets the reference output projection's 128-row tile.
-TP = 1
-DECODE_BATCH = 64
+PRESETS = {p.name: p for p in (DEMO, FLASH, PRO)}
+
+
+# Deployment constants
+DECODE_BATCH = 64  # B: requests per decode step, per DP rank
+# Preserve PR #5's S6 capacity. The attention-only entry accepts runtime_seq;
+# this serving adapter currently supplies one real token per decode request.
 DSPARK_SPEC_TOKENS = 5
-DECODE_SEQ = 1 + DSPARK_SPEC_TOKENS
+DECODE_SEQ = 1 + DSPARK_SPEC_TOKENS  # S: tokens the target model verifies per step
 DECODE_TOKENS = DECODE_BATCH * DECODE_SEQ
-BLOCK_SIZE = 32
-C4A_COMPRESSOR_BLOCK_SIZE = 2
+DECODE_START_POS = 8192
+PREFILL_BATCH = 1  # B: prefill batch for the current kernel programs
+PREFILL_SEQ = 512  # S: prefill sequence for the current kernel programs
+PREFILL_TOKENS = PREFILL_BATCH * PREFILL_SEQ
+
+# Paging constants
+BLOCK_SIZE = 32  # paged-KV page size / weight-quant block size
+C4A_COMPRESSOR_BLOCK_SIZE = 2  # ratio-4 compressor state page size
+C128_COMPRESSOR_BLOCK_SIZE = 8  # ratio-128 compressor state page size
 KV_ORI_BLOCK_NUM = 512
 KV_CMP_BLOCK_NUM = 256
 IDX_CACHE_BLOCK_NUM = 256
-INT8_SCALE_MAX = 127.0
-INT8_AMAX_EPS = 1e-4
-FP32_NEG_INF = -3.4028234663852886e38
+
+# Persistent compressor state pool capacities shared by prefill and decode.
+# HCA eagerly writes one full decode step before pooling a 128-row state window,
+# so each request needs 128 historical rows plus DECODE_SEQ transaction rows.
+HCA_STATE_PHYSICAL_BLOCKS = DECODE_BATCH * (
+    (128 + DECODE_SEQ + C128_COMPRESSOR_BLOCK_SIZE - 1) // C128_COMPRESSOR_BLOCK_SIZE
+)
+# Ratio-4 compressor state: eight history rows plus one decode transaction.
+CSA_STATE_BLOCKS_PER_REQUEST = (8 + DECODE_SEQ + C4A_COMPRESSOR_BLOCK_SIZE - 1) // C4A_COMPRESSOR_BLOCK_SIZE
+# Main compressor state pool across all request slots.
+CSA_STATE_PHYSICAL_BLOCKS = DECODE_BATCH * CSA_STATE_BLOCKS_PER_REQUEST
+# Inner compressor state pool with the same request-local geometry.
+CSA_INNER_STATE_BLOCKS_PER_REQUEST = CSA_STATE_BLOCKS_PER_REQUEST
+CSA_INNER_STATE_PHYSICAL_BLOCKS = DECODE_BATCH * CSA_INNER_STATE_BLOCKS_PER_REQUEST
+
+# Int8 quantization constants
+INT8_SCALE_MAX = 127.0  # per-row INT8 quant: clamp scale so |q| <= 127
+INT8_AMAX_EPS = 1e-4  # amax floor: avoids 127/0 on all-zero rows
+FP32_NEG_INF = -3.4028234663852886e38  # most-negative finite fp32 (softmax masking)
+
+# Parallelism constants
+TP = 1  # tensor-parallel ranks per DP group
+DP = 4  # DP groups per node
+EP = 16  # expert-parallel world size (moe overrides it from --ep)
+
+# MoE constants
+MOE_TOKENS = DECODE_TOKENS * DP // EP
+DECODE_RECV_MAX = DP * DECODE_TOKENS
+PREFILL_RECV_MAX = DP * PREFILL_TOKENS
+RECV_MAX = DECODE_RECV_MAX
