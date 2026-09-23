@@ -33,10 +33,25 @@ _BATCH = pl.dynamic("QWEN3_BATCH")
 _BLOCKS_PER_REQUEST = pl.dynamic("QWEN3_BLOCKS_PER_REQUEST")
 _BATCH_PLUS_ONE = pl.dynamic("QWEN3_BATCH_PLUS_ONE")
 _HEAD_TILE_ROWS = 8
-_MATMUL_ROW_TILE = 16
-_MATMUL_COL_TILE = 256
-_K_TILE = 256
-_K_SPLITS = 5
+_BATCH_PAD = 16
+_IO_BLOCKS = 5
+_IO_BLOCK_WIDTH = 1024
+_IO_CHUNK = 256
+_QKV_TN = 256
+_QKV_TK = 256
+_QKV_N_TILE = 512
+_QKV_N_SUB = 2
+_QKV_K_SPLITS = 5
+_QKV_K_SLICE = 1024
+_QKV_K_CHUNKS = 4
+_Q_N_TILES = 10
+_KV_N_TILES = 2
+_OUT_N_SPLITS = 10
+_OUT_K_SPLITS = 5
+_OUT_TN = 512
+_OUT_K_SLICE = 1024
+_OUT_TK = 64
+_OUT_K_CHUNKS = 16
 _EPS = 1e-6
 _MODEL_HIDDEN = 5120
 _KV_HIDDEN = 1024
@@ -50,69 +65,143 @@ _BLOCK_SIZE = 128
 _ATTN_SCALE = 1.0 / (_HEAD_DIM**0.5)
 
 
-@pl.jit.inline
-def _linear_split_k_body(x: pl.Tensor, weight: pl.Tensor, out: pl.Tensor) -> pl.Tensor:
-    # A decode projection has only a few output tiles. Split its 5120-wide K
-    # reduction across cores, as in the tuned Qwen3 decode kernel, then round
-    # to BF16 once after the FP32 partial sums have been combined.
+@pl.jit.inline(auto_scope=False)
+def _qkv_projection_body(
+    x: pl.Tensor,
+    weight: pl.Tensor,
+    q_proj: pl.Tensor,
+    k_proj: pl.Tensor,
+    v_proj: pl.Tensor,
+) -> tuple[
+    pl.Tensor,
+    pl.Tensor,
+    pl.Tensor,
+    pl.Scalar[pl.TASK_ID],
+    pl.Scalar[pl.TASK_ID],
+    pl.Scalar[pl.TASK_ID],
+]:
+    """Project Q/K/V with the tuned PyPTO-Lib decode topology."""
     rows = pl.tensor.dim(x, 0)
-    input_cols = pl.tensor.dim(x, 1)
-    output_cols = pl.tensor.dim(weight, 0)
-    tile_count = output_cols // _MATMUL_COL_TILE
-    k_per_split = input_cols // _K_SPLITS
-    partial = pl.create_tensor([_MATMUL_ROW_TILE, output_cols], dtype=pl.FP32)
-    with pl.spmd(tile_count, name_hint="qwen3_linear_seed") as seed_tid:
-        col = pl.get_block_idx() * _MATMUL_COL_TILE
-        partial = pl.assemble(
-            partial,
-            pl.full([_MATMUL_ROW_TILE, _MATMUL_COL_TILE], dtype=pl.FP32, value=0.0),
-            [0, col],
-        )
+    hidden_pad = pl.create_tensor([_BATCH_PAD, _MODEL_HIDDEN], dtype=pl.BF16)
     with pl.spmd(
-        tile_count * _K_SPLITS,
-        name_hint="qwen3_linear_split_k",
-        deps=[seed_tid],
-    ) as linear_tid:
-        work = pl.get_block_idx()
-        col = (work // _K_SPLITS) * _MATMUL_COL_TILE
-        k_base = (work % _K_SPLITS) * k_per_split
-        for row in pl.range(0, rows, _MATMUL_ROW_TILE):
-            valid_rows = pl.min(_MATMUL_ROW_TILE, rows - row)
-            x_first = pl.slice(
-                x,
-                [_MATMUL_ROW_TILE, _K_TILE],
-                [row, k_base],
-                valid_shape=[valid_rows, _K_TILE],
+        _IO_BLOCKS,
+        name_hint="qwen3_pad_normalized_input",
+        allow_early_resolve=True,
+    ) as input_pad_tid:
+        block_base = pl.get_block_idx() * _IO_BLOCK_WIDTH
+        for chunk in pl.pipeline(_IO_BLOCK_WIDTH // _IO_CHUNK, stage=2):
+            col = block_base + chunk * _IO_CHUNK
+            tile = pl.fillpad(
+                pl.slice(x, [_BATCH_PAD, _IO_CHUNK], [0, col], valid_shape=[rows, _IO_CHUNK]),
+                pad_value=pl.PadValue.zero,
             )
-            w_first = pl.slice(weight, [_MATMUL_COL_TILE, _K_TILE], [col, k_base])
-            acc = pl.matmul(x_first, w_first, b_trans=True, out_dtype=pl.FP32)
-            for k_offset in pl.pipeline(1, k_per_split // _K_TILE, stage=2):
-                k0 = k_base + k_offset * _K_TILE
-                x_tile = pl.slice(
-                    x,
-                    [_MATMUL_ROW_TILE, _K_TILE],
-                    [row, k0],
-                    valid_shape=[valid_rows, _K_TILE],
+            hidden_pad = pl.assemble(hidden_pad, tile, [0, col])
+
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_q_seed", allow_early_resolve=True) as q_seed_tid:
+        for tile_index in pl.pipeline(_Q_N_TILES, stage=2):
+            col = tile_index * _QKV_N_TILE
+            q_proj = pl.assemble(
+                q_proj,
+                pl.full([_BATCH_PAD, _QKV_N_TILE], dtype=pl.FP32, value=0.0),
+                [0, col],
+            )
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_kv_seed", allow_early_resolve=True) as kv_seed_tid:
+        for tile_index in pl.pipeline(_KV_N_TILES, stage=2):
+            col = tile_index * _QKV_N_TILE
+            zero = pl.full([_BATCH_PAD, _QKV_N_TILE], dtype=pl.FP32, value=0.0)
+            k_proj = pl.assemble(k_proj, zero, [0, col])
+            v_proj = pl.assemble(v_proj, zero, [0, col])
+
+    with pl.spmd(
+        _Q_N_TILES * _QKV_K_SPLITS,
+        name_hint="qwen3_q_proj",
+        allow_early_resolve=True,
+        deps=[input_pad_tid, q_seed_tid],
+    ) as q_proj_tid:
+        work = pl.get_block_idx()
+        n_region = (work // _QKV_K_SPLITS) * _QKV_N_TILE
+        k_base = (work % _QKV_K_SPLITS) * _QKV_K_SLICE
+        for n_sub in pl.range(_QKV_N_SUB):
+            n0 = n_region + n_sub * _QKV_TN
+            acc = pl.matmul(
+                hidden_pad[:, k_base : k_base + _QKV_TK],
+                weight[n0 : n0 + _QKV_TN, k_base : k_base + _QKV_TK],
+                b_trans=True,
+                out_dtype=pl.FP32,
+            )
+            for k_chunk in pl.pipeline(1, _QKV_K_CHUNKS, stage=2):
+                k0 = k_base + k_chunk * _QKV_TK
+                acc = pl.matmul_acc(
+                    acc,
+                    hidden_pad[:, k0 : k0 + _QKV_TK],
+                    weight[n0 : n0 + _QKV_TN, k0 : k0 + _QKV_TK],
+                    b_trans=True,
                 )
-                w_tile = pl.slice(weight, [_MATMUL_COL_TILE, _K_TILE], [col, k0])
-                acc = pl.matmul_acc(acc, x_tile, w_tile, b_trans=True)
-            partial = pl.assemble(partial, acc, [row, col], atomic=pl.AtomicType.Add)
-    with pl.spmd(tile_count, name_hint="qwen3_linear_output", deps=[linear_tid]) as _output_tid:
-        col = pl.get_block_idx() * _MATMUL_COL_TILE
-        out = pl.assemble(
-            out,
-            pl.cast(
-                pl.slice(partial, [_MATMUL_ROW_TILE, _MATMUL_COL_TILE], [0, col], valid_shape=[rows, _MATMUL_COL_TILE]),
-                target_type=pl.BF16,
-            ),
-            [0, col],
-        )
-    return out
+            q_proj = pl.assemble(q_proj, acc, [0, n0], atomic=pl.AtomicType.Add)
+
+    with pl.spmd(
+        _KV_N_TILES * _QKV_K_SPLITS,
+        name_hint="qwen3_k_proj",
+        allow_early_resolve=True,
+        deps=[input_pad_tid, kv_seed_tid],
+    ) as k_proj_tid:
+        work = pl.get_block_idx()
+        n_region = (work // _QKV_K_SPLITS) * _QKV_N_TILE
+        k_base = (work % _QKV_K_SPLITS) * _QKV_K_SLICE
+        for n_sub in pl.range(_QKV_N_SUB):
+            n0 = n_region + n_sub * _QKV_TN
+            weight_row = _MODEL_HIDDEN + n0
+            acc = pl.matmul(
+                hidden_pad[:, k_base : k_base + _QKV_TK],
+                weight[weight_row : weight_row + _QKV_TN, k_base : k_base + _QKV_TK],
+                b_trans=True,
+                out_dtype=pl.FP32,
+            )
+            for k_chunk in pl.pipeline(1, _QKV_K_CHUNKS, stage=2):
+                k0 = k_base + k_chunk * _QKV_TK
+                acc = pl.matmul_acc(
+                    acc,
+                    hidden_pad[:, k0 : k0 + _QKV_TK],
+                    weight[weight_row : weight_row + _QKV_TN, k0 : k0 + _QKV_TK],
+                    b_trans=True,
+                )
+            k_proj = pl.assemble(k_proj, acc, [0, n0], atomic=pl.AtomicType.Add)
+
+    with pl.spmd(
+        _KV_N_TILES * _QKV_K_SPLITS,
+        name_hint="qwen3_v_proj",
+        allow_early_resolve=True,
+        deps=[input_pad_tid, kv_seed_tid],
+    ) as v_proj_tid:
+        work = pl.get_block_idx()
+        n_region = (work // _QKV_K_SPLITS) * _QKV_N_TILE
+        k_base = (work % _QKV_K_SPLITS) * _QKV_K_SLICE
+        for n_sub in pl.range(_QKV_N_SUB):
+            n0 = n_region + n_sub * _QKV_TN
+            weight_row = _MODEL_HIDDEN + _KV_HIDDEN + n0
+            acc = pl.matmul(
+                hidden_pad[:, k_base : k_base + _QKV_TK],
+                weight[weight_row : weight_row + _QKV_TN, k_base : k_base + _QKV_TK],
+                b_trans=True,
+                out_dtype=pl.FP32,
+            )
+            for k_chunk in pl.pipeline(1, _QKV_K_CHUNKS, stage=2):
+                k0 = k_base + k_chunk * _QKV_TK
+                acc = pl.matmul_acc(
+                    acc,
+                    hidden_pad[:, k0 : k0 + _QKV_TK],
+                    weight[weight_row : weight_row + _QKV_TN, k0 : k0 + _QKV_TK],
+                    b_trans=True,
+                )
+            v_proj = pl.assemble(v_proj, acc, [0, n0], atomic=pl.AtomicType.Add)
+    return q_proj, k_proj, v_proj, q_proj_tid, k_proj_tid, v_proj_tid
 
 
-@pl.jit.inline
+@pl.jit.inline(auto_scope=False)
 def _qkv_norm_rope_body(
-    qkv: pl.Tensor,
+    q_proj: pl.Tensor,
+    k_proj: pl.Tensor,
+    v_proj: pl.Tensor,
     q_norm_weight: pl.Tensor,
     k_norm_weight: pl.Tensor,
     positions: pl.Tensor,
@@ -121,10 +210,19 @@ def _qkv_norm_rope_body(
     key_cache: pl.Tensor,
     value_cache: pl.Tensor,
     query_out: pl.Tensor,
-) -> tuple[pl.Tensor, pl.Tensor, pl.Tensor]:
-    rows = pl.tensor.dim(qkv, 0)
+    q_proj_tid: pl.Scalar[pl.TASK_ID],
+    k_proj_tid: pl.Scalar[pl.TASK_ID],
+    v_proj_tid: pl.Scalar[pl.TASK_ID],
+) -> tuple[pl.Tensor, pl.Tensor, pl.Tensor, pl.Scalar[pl.TASK_ID]]:
+    rows = pl.tensor.dim(positions, 0)
 
-    for work in pl.spmd(rows * _NUM_KV_HEADS, name_hint="qwen3_qkv_norm_rope"):
+    with pl.spmd(
+        rows * _NUM_KV_HEADS,
+        name_hint="qwen3_qkv_norm_rope",
+        allow_early_resolve=True,
+        deps=[q_proj_tid, k_proj_tid, v_proj_tid],
+    ) as qkv_finalize_tid:
+        work = pl.get_block_idx()
         row = work // _NUM_KV_HEADS
         kv_head = work % _NUM_KV_HEADS
         position = pl.cast(pl.tensor.read(positions, [row]), pl.INDEX)
@@ -137,9 +235,12 @@ def _qkv_norm_rope_body(
         k_gamma = pl.cast(k_norm_weight, target_type=pl.FP32)
 
         q_col = kv_head * _Q_PER_KV * _HEAD_DIM
-        q_raw = pl.reshape(pl.slice(qkv, [1, _Q_PER_KV * _HEAD_DIM], [row, q_col]), [_Q_PER_KV, _HEAD_DIM])
+        q_raw = pl.reshape(
+            pl.slice(q_proj, [1, _Q_PER_KV * _HEAD_DIM], [row, q_col]),
+            [_Q_PER_KV, _HEAD_DIM],
+        )
         q_pad = pl.full([_Q_PAD, _HEAD_DIM], dtype=pl.FP32, value=0.0)
-        q_pad = pl.assemble(q_pad, pl.cast(q_raw, target_type=pl.FP32), [0, 0])
+        q_pad = pl.assemble(q_pad, q_raw, [0, 0])
         q_sum = pl.row_sum(pl.mul(q_pad, q_pad))
         q_inv = pl.rsqrt(pl.add(pl.mul(q_sum, 1.0 / _HEAD_DIM), _EPS), high_precision=True)
         q_normed = pl.col_expand_mul(pl.row_expand_mul(q_pad, pl.reshape(q_inv, [_Q_PAD, 1])), q_gamma)
@@ -166,9 +267,11 @@ def _qkv_norm_rope_body(
         )
 
         kv_col = kv_head * _HEAD_DIM
-        k_value = pl.cast(
-            pl.slice(qkv, [_HEAD_TILE_ROWS, _HEAD_DIM], [row, _MODEL_HIDDEN + kv_col], valid_shape=[1, _HEAD_DIM]),
-            target_type=pl.FP32,
+        k_value = pl.slice(
+            k_proj,
+            [_HEAD_TILE_ROWS, _HEAD_DIM],
+            [row, kv_col],
+            valid_shape=[1, _HEAD_DIM],
         )
         k_sum = pl.row_sum(pl.mul(k_value, k_value))
         k_inv = pl.rsqrt(pl.add(pl.mul(k_sum, 1.0 / _HEAD_DIM), _EPS), high_precision=True)
@@ -192,13 +295,13 @@ def _qkv_norm_rope_body(
             )
             value_cache = pl.assemble(
                 value_cache,
-                pl.slice(qkv, [1, _HEAD_DIM], [row, _MODEL_HIDDEN + _KV_HIDDEN + kv_col]),
+                pl.cast(pl.slice(v_proj, [1, _HEAD_DIM], [row, kv_col]), target_type=pl.BF16),
                 [slot, kv_col],
             )
-    return query_out, key_cache, value_cache
+    return query_out, key_cache, value_cache, qkv_finalize_tid
 
 
-@pl.jit.inline
+@pl.jit.inline(auto_scope=False)
 def _paged_attention_decode_body(
     query_heads: pl.Tensor,
     key_cache: pl.Tensor,
@@ -206,10 +309,25 @@ def _paged_attention_decode_body(
     block_table: pl.Tensor,
     seq_lens: pl.Tensor,
     query_start_loc: pl.Tensor,
-    heads_out: pl.Tensor,
-) -> pl.Tensor:
+    attention_pad: pl.Tensor,
+    qkv_finalize_tid: pl.Scalar[pl.TASK_ID],
+) -> tuple[pl.Tensor, pl.Scalar[pl.TASK_ID]]:
     batch = pl.tensor.dim(seq_lens, 0)
-    for work in pl.spmd(batch * _NUM_KV_HEADS, name_hint="qwen3_paged_attention_decode"):
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_attention_seed", allow_early_resolve=True) as seed_tid:
+        for tile_index in pl.pipeline(_Q_N_TILES, stage=2):
+            col = tile_index * _QKV_N_TILE
+            attention_pad = pl.assemble(
+                attention_pad,
+                pl.full([_BATCH_PAD, _QKV_N_TILE], dtype=pl.BF16, value=0.0),
+                [0, col],
+            )
+    with pl.spmd(
+        batch * _NUM_KV_HEADS,
+        name_hint="qwen3_paged_attention_decode",
+        allow_early_resolve=True,
+        deps=[qkv_finalize_tid, seed_tid],
+    ) as attention_tid:
+        work = pl.get_block_idx()
         request = work // _NUM_KV_HEADS
         kv_head = work % _NUM_KV_HEADS
         query_row = pl.cast(pl.tensor.read(query_start_loc, [request]), pl.INDEX)
@@ -253,12 +371,72 @@ def _paged_attention_decode_body(
             )
             running_max = merged_max
         normalized = pl.row_expand_div(running_out, pl.reshape(running_sum, [_Q_PAD, 1]))
-        heads_out = pl.assemble(
-            heads_out,
-            pl.set_validshape(pl.cast(normalized, target_type=pl.BF16), _Q_PER_KV, _HEAD_DIM),
-            [query_row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV, 0],
+        context_row = pl.reshape(
+            pl.slice(
+                pl.cast(normalized, target_type=pl.BF16),
+                [_Q_PER_KV, _HEAD_DIM],
+                [0, 0],
+            ),
+            [1, _Q_PER_KV * _HEAD_DIM],
         )
-    return heads_out
+        attention_pad = pl.assemble(
+            attention_pad,
+            context_row,
+            [request, kv_head * _Q_PER_KV * _HEAD_DIM],
+        )
+    return attention_pad, attention_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def _output_projection_body(
+    attention_pad: pl.Tensor,
+    weight: pl.Tensor,
+    output: pl.Tensor,
+    attention_tid: pl.Scalar[pl.TASK_ID],
+) -> pl.Tensor:
+    rows = pl.tensor.dim(output, 0)
+    projected = pl.create_tensor([_BATCH_PAD, _MODEL_HIDDEN], dtype=pl.FP32)
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_out_proj_seed", allow_early_resolve=True) as seed_tid:
+        for n_split in pl.pipeline(_OUT_N_SPLITS, stage=2):
+            n0 = n_split * _OUT_TN
+            projected = pl.assemble(
+                projected,
+                pl.full([_BATCH_PAD, _OUT_TN], dtype=pl.FP32, value=0.0),
+                [0, n0],
+            )
+    with pl.spmd(
+        _OUT_N_SPLITS * _OUT_K_SPLITS,
+        name_hint="qwen3_out_proj",
+        allow_early_resolve=True,
+        deps=[attention_tid, seed_tid],
+    ) as out_proj_tid:
+        work = pl.get_block_idx()
+        n0 = (work // _OUT_K_SPLITS) * _OUT_TN
+        k_base = (work % _OUT_K_SPLITS) * _OUT_K_SLICE
+        acc = pl.matmul(
+            attention_pad[:, k_base : k_base + _OUT_TK],
+            weight[n0 : n0 + _OUT_TN, k_base : k_base + _OUT_TK],
+            b_trans=True,
+            out_dtype=pl.FP32,
+        )
+        for k_chunk in pl.pipeline(1, _OUT_K_CHUNKS, stage=2):
+            k0 = k_base + k_chunk * _OUT_TK
+            acc = pl.matmul_acc(
+                acc,
+                attention_pad[:, k0 : k0 + _OUT_TK],
+                weight[n0 : n0 + _OUT_TN, k0 : k0 + _OUT_TK],
+                b_trans=True,
+            )
+        projected = pl.assemble(projected, acc, [0, n0], atomic=pl.AtomicType.Add)
+    with pl.spmd(_IO_BLOCKS, name_hint="qwen3_attention_output", deps=[out_proj_tid]):
+        col = pl.get_block_idx() * _IO_BLOCK_WIDTH
+        tile = pl.cast(projected[:, col : col + _IO_BLOCK_WIDTH], target_type=pl.BF16)
+        output = pl.assemble(
+            output,
+            pl.set_validshape(tile, rows, _IO_BLOCK_WIDTH),
+            [0, col],
+        )
+    return output
 
 
 @lru_cache(maxsize=1)
@@ -286,38 +464,46 @@ def _attention_only(
     output: pl.Out[pl.Tensor[[_ROWS, _MODEL_HIDDEN], pl.BF16]],
 ) -> pl.Tensor[[_ROWS, _MODEL_HIDDEN], pl.BF16]:
     rows = pl.tensor.dim(normalized_hidden, 0)
-    qkv = pl.create_tensor([rows, _QKV_HIDDEN], dtype=pl.BF16)
-    qkv = _linear_split_k_body(normalized_hidden, qkv_weight, qkv)
+    q_proj = pl.create_tensor([_BATCH_PAD, _MODEL_HIDDEN], dtype=pl.FP32)
+    k_proj = pl.create_tensor([_BATCH_PAD, _KV_HIDDEN], dtype=pl.FP32)
+    v_proj = pl.create_tensor([_BATCH_PAD, _KV_HIDDEN], dtype=pl.FP32)
     query_heads = pl.create_tensor([rows * (_NUM_KV_HEADS * _Q_PER_KV), _HEAD_DIM], dtype=pl.BF16)
-    query_heads, key_cache, value_cache = _qkv_norm_rope_body(
-        qkv,
-        q_norm_weight,
-        k_norm_weight,
-        positions,
-        cos_sin_cache,
-        slot_mapping,
-        key_cache,
-        value_cache,
-        query_heads,
-    )
-    attention_heads = pl.create_tensor([rows * (_NUM_KV_HEADS * _Q_PER_KV), _HEAD_DIM], dtype=pl.BF16)
-    attention_heads = _paged_attention_decode_body(
-        query_heads, key_cache, value_cache, block_table, seq_lens, query_start_loc, attention_heads
-    )
-    attention_output = pl.reshape(attention_heads, [rows, _MODEL_HIDDEN])
-    projected = pl.create_tensor([rows, _MODEL_HIDDEN], dtype=pl.BF16)
-    projected = _linear_split_k_body(attention_output, o_proj_weight, projected)
-    for col_block in pl.spmd(_MODEL_HIDDEN // _MATMUL_COL_TILE, name_hint="qwen3_attention_output"):
-        col = col_block * _MATMUL_COL_TILE
-        for row in pl.range(0, rows, _MATMUL_ROW_TILE):
-            valid_rows = pl.min(_MATMUL_ROW_TILE, rows - row)
-            tile = pl.slice(
-                projected,
-                [_MATMUL_ROW_TILE, _MATMUL_COL_TILE],
-                [row, col],
-                valid_shape=[valid_rows, _MATMUL_COL_TILE],
-            )
-            output = pl.assemble(output, tile, [row, col])
+    attention_pad = pl.create_tensor([_BATCH_PAD, _MODEL_HIDDEN], dtype=pl.BF16)
+    with pl.manual_scope():
+        q_proj, k_proj, v_proj, q_proj_tid, k_proj_tid, v_proj_tid = _qkv_projection_body(
+            normalized_hidden,
+            qkv_weight,
+            q_proj,
+            k_proj,
+            v_proj,
+        )
+        query_heads, key_cache, value_cache, qkv_finalize_tid = _qkv_norm_rope_body(
+            q_proj,
+            k_proj,
+            v_proj,
+            q_norm_weight,
+            k_norm_weight,
+            positions,
+            cos_sin_cache,
+            slot_mapping,
+            key_cache,
+            value_cache,
+            query_heads,
+            q_proj_tid,
+            k_proj_tid,
+            v_proj_tid,
+        )
+        attention_pad, attention_tid = _paged_attention_decode_body(
+            query_heads,
+            key_cache,
+            value_cache,
+            block_table,
+            seq_lens,
+            query_start_loc,
+            attention_pad,
+            qkv_finalize_tid,
+        )
+        output = _output_projection_body(attention_pad, o_proj_weight, output, attention_tid)
     return output
 
 
