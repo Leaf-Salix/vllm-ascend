@@ -13,7 +13,7 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 
-"""Pure PyPTO L2-kernel implementation of Qwen3 attention.
+"""Pure PyPTO L2-kernel implementation of Qwen3-14B decode attention.
 
 The operators borrow vLLM-owned tensors. They never retain a weight, allocate
 device memory at launch time, or interpret a host pointer. Callable-local

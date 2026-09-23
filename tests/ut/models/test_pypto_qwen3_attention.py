@@ -6,7 +6,7 @@ from vllm.model_executor.models.qwen3 import Qwen3DecoderLayer
 
 from vllm_ascend.attention.attention_v1 import AscendAttentionBackendImpl
 from vllm_ascend.compilation.graph_fusion_pass_manager import GraphFusionPassManager
-from vllm_ascend.patch.worker import patch_qwen3vl
+from vllm_ascend.models import pypto_qwen3_attention
 
 
 def test_pypto_qwen3_attention_preserves_native_mlp_fusion_passes():
@@ -59,7 +59,7 @@ def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
     positions = torch.zeros(1, dtype=torch.int64)
 
     with (
-        patch.object(patch_qwen3vl, "get_attention_context") as context,
+        patch.object(pypto_qwen3_attention, "get_attention_context") as context,
         patch.object(torch.ops.vllm, "pypto_qwen3_attention_only", create=True) as pypto_op,
     ):
         for state, actual_tokens, use_pypto in (
@@ -75,7 +75,7 @@ def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
             )
             qkv_proj.reset_mock()
             pypto_op.reset_mock()
-            result = patch_qwen3vl.forward_with_split_qkv_rmsnorm_mrope(attention, positions, hidden)
+            result = pypto_qwen3_attention.forward_with_split_qkv_rmsnorm_mrope(attention, positions, hidden)
             assert result.shape == hidden.shape
             assert pypto_op.called is use_pypto
             assert qkv_proj.called is not use_pypto
@@ -89,7 +89,7 @@ def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
         context.return_value = (SimpleNamespace(attn_state=SimpleNamespace(name="DecodeOnly")), None, None, None)
         qkv_proj.reset_mock()
         pypto_op.reset_mock()
-        result = patch_qwen3vl.forward_with_split_qkv_rmsnorm_mrope(attention, positions, two_rows)
+        result = pypto_qwen3_attention.forward_with_split_qkv_rmsnorm_mrope(attention, positions, two_rows)
         assert result.shape == two_rows.shape
         assert qkv_proj.called
         assert not pypto_op.called
@@ -126,14 +126,15 @@ def test_pypto_qwen3_attention_only_borrows_vllm_paging_metadata():
         layer_name,
     )
     with (
-        patch(
-            "vllm.model_executor.layers.attention.attention.get_attention_context",
+        patch.object(
+            pypto_qwen3_attention,
+            "get_attention_context",
             return_value=(metadata, SimpleNamespace(layer_name=layer_name), cache, slot_mapping),
         ),
-        patch.object(patch_qwen3vl, "_EXTRA_CTX", SimpleNamespace(in_profile_run=False)),
-        patch("vllm_ascend.ops.pypto_qwen3_attention.attention_only") as kernel,
+        patch.object(pypto_qwen3_attention, "_EXTRA_CTX", SimpleNamespace(in_profile_run=False)),
+        patch("vllm_ascend.ops.pypto.qwen3_14b.decode_attention.attention_only") as kernel,
     ):
-        patch_qwen3vl._pypto_qwen3_attention_only(*args)
+        pypto_qwen3_attention._pypto_qwen3_attention_only(*args)
 
     call = kernel.call_args.kwargs
     assert call["normalized_hidden"] is args[1]

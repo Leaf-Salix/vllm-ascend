@@ -21,7 +21,7 @@ def main() -> None:
         dtype="bfloat16",
         tensor_parallel_size=1,
         max_model_len=512,
-        max_num_seqs=len(prompts),
+        max_num_seqs=1,
         enable_chunked_prefill=False,
         gpu_memory_utilization=0.75,
         enforce_eager=args.enforce_eager,

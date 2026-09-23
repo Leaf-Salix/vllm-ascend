@@ -6,11 +6,9 @@ mapping、seq_lens 和 query_start_loc；不分配或复制 KV 页。
 
 ## 已验证
 
-- Qwen3-14B BF16、TP1、2-token prompt、2-token 输出的 eager 和 PIECEWISE
-  ACLGraph 短测；PyPTO 与原生 token IDs 均为 `[198, 43256]`。
-- Graph 日志出现 `Replaying aclgraph`。完整 trace 中两次 forward 共 80 个
-  PyPTO AICore 事件、160 个原生 AddRmsNorm 事件，没有原生 FIA 事件。
-- 相关 Host UT 8 项通过；包含原生 DecoderLayer.forward 保留，以及
+- Qwen3-14B BF16、TP1 eager 整网短测；两个 prompt 均完成 prefill 和
+  4-token decode，并正常 shutdown。
+- 相关 Host UT 5 项通过；包含原生 DecoderLayer.forward 保留，以及
   PyPTO 借用 vLLM paging metadata 的检查。
 
 本轮更新 PyPTO/Simpler feat 后的四份 Perfetto JSON、版本、运行条件和
@@ -22,6 +20,9 @@ mapping、seq_lens 和 query_start_loc；不分配或复制 KV 页。
 
 - 多请求、跨页、长 prefill、不同 capture bucket 的 attention-only
   精度和 replay；目前的两个短 token 输出不能外推至这些场景。
+- 当前 adapter 要求 `CompilationMode.NONE`，而 vLLM PIECEWISE ACLGraph
+  使用 `VLLM_COMPILE`。当前代码会在模型初始化阶段拒绝 graph 配置；历史
+  graph trace 不能作为这次目录对齐后的通过证据。
 - 同条件下的长期性能稳定性与内存生命周期。
 
 性能 trace 里约 9 ms 的 `vllm::pypto_qwen3_attention_only` 是 CPU 算子
