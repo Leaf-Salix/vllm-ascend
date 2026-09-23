@@ -1,9 +1,10 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 from vllm.model_executor.models.qwen3 import Qwen3DecoderLayer
 
+from vllm_ascend.attention.attention_v1 import AscendAttentionBackendImpl
 from vllm_ascend.compilation.graph_fusion_pass_manager import GraphFusionPassManager
 from vllm_ascend.patch.worker import patch_qwen3vl
 
@@ -32,6 +33,75 @@ def test_pypto_qwen3_attention_preserves_native_mlp_fusion_passes():
 
 def test_pypto_qwen3_keeps_native_decoder_layer_forward():
     assert Qwen3DecoderLayer.forward.__module__ == "vllm.model_executor.models.qwen3"
+
+
+def test_pypto_qwen3_attention_only_routes_decode_and_prefill_separately():
+    hidden = torch.empty((1, 5120), dtype=torch.bfloat16)
+    qkv = torch.empty((1, 7168), dtype=torch.bfloat16)
+    qkv_proj = Mock(return_value=(qkv, None))
+    qkv_proj.weight = torch.empty(0)
+    o_proj = Mock(return_value=(hidden, None))
+    o_proj.weight = torch.empty(0)
+    attention = SimpleNamespace(
+        _pypto_attention_only_enabled=True,
+        qkv_proj=qkv_proj,
+        q_norm=Mock(side_effect=lambda tensor: tensor, weight=torch.empty(0)),
+        k_norm=Mock(side_effect=lambda tensor: tensor, weight=torch.empty(0)),
+        rotary_emb=Mock(return_value=(hidden, hidden)),
+        o_proj=o_proj,
+        attn=Mock(return_value=hidden),
+        q_size=5120,
+        kv_size=1024,
+        head_dim=128,
+    )
+    attention.attn.layer_name = "model.layers.0.self_attn.attn"
+    attention.rotary_emb.cos_sin_cache = torch.empty(0)
+    positions = torch.zeros(1, dtype=torch.int64)
+
+    with (
+        patch.object(patch_qwen3vl, "get_attention_context") as context,
+        patch.object(torch.ops.vllm, "pypto_qwen3_attention_only", create=True) as pypto_op,
+    ):
+        for state, actual_tokens, use_pypto in (
+            ("PrefillNoCache", 1, False),
+            ("DecodeOnly", 0, True),
+            ("DecodeOnly", 1, True),
+        ):
+            context.return_value = (
+                SimpleNamespace(attn_state=SimpleNamespace(name=state), num_actual_tokens=actual_tokens),
+                None,
+                None,
+                None,
+            )
+            qkv_proj.reset_mock()
+            pypto_op.reset_mock()
+            result = patch_qwen3vl.forward_with_split_qkv_rmsnorm_mrope(attention, positions, hidden)
+            assert result.shape == hidden.shape
+            assert pypto_op.called is use_pypto
+            assert qkv_proj.called is not use_pypto
+
+        # A decode bucket with more than one row is outside the first kernel's
+        # one-token contract and must stay on the native path.
+        two_rows = torch.empty((2, 5120), dtype=torch.bfloat16)
+        qkv_proj.return_value = (torch.empty((2, 7168), dtype=torch.bfloat16), None)
+        attention.attn.return_value = two_rows
+        o_proj.return_value = (two_rows, None)
+        context.return_value = (SimpleNamespace(attn_state=SimpleNamespace(name="DecodeOnly")), None, None, None)
+        qkv_proj.reset_mock()
+        pypto_op.reset_mock()
+        result = patch_qwen3vl.forward_with_split_qkv_rmsnorm_mrope(attention, positions, two_rows)
+        assert result.shape == two_rows.shape
+        assert qkv_proj.called
+        assert not pypto_op.called
+
+
+def test_pypto_qwen3_decode_graph_has_no_native_attention_update_handles():
+    with (
+        patch("vllm_ascend.envs.VLLM_ASCEND_PYPTO_QWEN3_MODE", "attention_only"),
+        patch("vllm_ascend.attention.attention_v1.get_graph_params", return_value=None),
+        patch("vllm_ascend.attention.attention_v1._EXTRA_CTX", SimpleNamespace(is_draft_model=False)),
+    ):
+        assert AscendAttentionBackendImpl.update_graph_params(None, None, 1, None) is None
 
 
 def test_pypto_qwen3_attention_only_borrows_vllm_paging_metadata():

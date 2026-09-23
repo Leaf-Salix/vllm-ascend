@@ -1,5 +1,6 @@
 import torch
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
+from vllm.model_executor.layers.attention.attention import get_attention_context
 from vllm.model_executor.models.qwen3 import Qwen3Attention, Qwen3DecoderLayer
 from vllm.model_executor.models.qwen3_moe import Qwen3MoeAttention
 from vllm.model_executor.models.qwen3_vl import (
@@ -40,19 +41,25 @@ def tensor_parallel_wrap(func):
 
 def forward_with_split_qkv_rmsnorm_mrope(self, positions: torch.Tensor, hidden_states: torch.Tensor):
     if getattr(self, "_pypto_attention_only_enabled", False):
-        output = torch.empty_like(hidden_states)
-        torch.ops.vllm.pypto_qwen3_attention_only(
-            positions,
-            hidden_states,
-            self.qkv_proj.weight,
-            self.q_norm.weight,
-            self.k_norm.weight,
-            self.rotary_emb.cos_sin_cache,
-            self.o_proj.weight,
-            output,
-            _encode_layer_name(self.attn.layer_name),
-        )
-        return output
+        metadata, _, _, _ = get_attention_context(self.attn.layer_name)
+        if (
+            metadata is not None
+            and getattr(metadata.attn_state, "name", None) == "DecodeOnly"
+            and hidden_states.shape[0] == 1
+        ):
+            output = torch.empty_like(hidden_states)
+            torch.ops.vllm.pypto_qwen3_attention_only(
+                positions,
+                hidden_states,
+                self.qkv_proj.weight,
+                self.q_norm.weight,
+                self.k_norm.weight,
+                self.rotary_emb.cos_sin_cache,
+                self.o_proj.weight,
+                output,
+                _encode_layer_name(self.attn.layer_name),
+            )
+            return output
     qkv, _ = self.qkv_proj(hidden_states)
     if isinstance(self.rotary_emb, AscendMRotaryEmbedding):
         cos_sin = self.rotary_emb.cos_sin_cache[positions]
@@ -204,7 +211,7 @@ def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
     if cache_config is None or cache_config.block_size != 128 or cache_config.cache_dtype not in ("auto", "bfloat16"):
         raise ValueError("PyPTO Qwen3 attention-only mode requires a BF16 128-token KV cache block")
 
-    from vllm.config import get_current_vllm_config
+    from vllm.config import CompilationMode, get_current_vllm_config
 
     from vllm_ascend.ops import pypto_qwen3_attention
 
@@ -214,10 +221,12 @@ def _patched_qwen3_decoder_layer_init(self, *args, **kwargs) -> None:
         or vllm_config.model_config.max_model_len > 512
         or vllm_config.speculative_config is not None
         or vllm_config.scheduler_config.enable_chunked_prefill
+        or vllm_config.scheduler_config.max_num_seqs != 1
+        or vllm_config.compilation_config.mode != CompilationMode.NONE
     ):
         raise ValueError(
             "PyPTO Qwen3 attention-only mode requires BF16, max_model_len <= 512, "
-            "and does not support speculative decoding or chunked prefill"
+            "max_num_seqs=1, compilation mode NONE, and does not support speculative decoding or chunked prefill"
         )
     self.self_attn.qkv_proj._pypto_qwen3_attention_weight = True
     self.self_attn.o_proj._pypto_qwen3_attention_weight = True

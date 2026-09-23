@@ -39,6 +39,7 @@ from vllm.v1.attention.backends.registry import (  # type: ignore
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import AttentionSpec, CrossAttentionSpec
 
+from vllm_ascend import envs
 from vllm_ascend.ascend_forward_context import _EXTRA_CTX
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
 from vllm_ascend.attention.context_parallel.common_cp import AscendMetadataForDecode, AscendMetadataForPrefill
@@ -420,6 +421,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_dcp_pcp_tokens=None,
         draft_attn_metadatas=None,
     ):
+        # Decode-only PyPTO attention captures no native FIA/PA task-update
+        # handles. vLLM still calls this backend hook before graph replay.
+        if (
+            envs.VLLM_ASCEND_PYPTO_QWEN3_MODE == "attention_only"
+            and not _EXTRA_CTX.is_draft_model
+            and get_graph_params() is None
+        ):
+            return
         if using_paged_attention(num_tokens, vllm_config):
             # Paged Attention update logic
             if _EXTRA_CTX.is_draft_model:

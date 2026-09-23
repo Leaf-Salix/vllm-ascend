@@ -35,8 +35,8 @@ _BATCH_PLUS_ONE = pl.dynamic("QWEN3_BATCH_PLUS_ONE")
 _HEAD_TILE_ROWS = 8
 _MATMUL_ROW_TILE = 16
 _MATMUL_COL_TILE = 256
-_COL_TILE = 128
 _K_TILE = 256
+_K_SPLITS = 5
 _EPS = 1e-6
 _MODEL_HIDDEN = 5120
 _KV_HIDDEN = 1024
@@ -51,50 +51,62 @@ _ATTN_SCALE = 1.0 / (_HEAD_DIM**0.5)
 
 
 @pl.jit.inline
-def _linear_body(x: pl.Tensor, weight: pl.Tensor, out: pl.Tensor) -> pl.Tensor:
-    # Every supported Qwen3 projection has K aligned to _K_TILE.  Keeping that
-    # contract explicit avoids dynamic tail handling in every reduction tile.
+def _linear_split_k_body(x: pl.Tensor, weight: pl.Tensor, out: pl.Tensor) -> pl.Tensor:
+    # A decode projection has only a few output tiles. Split its 5120-wide K
+    # reduction across cores, as in the tuned Qwen3 decode kernel, then round
+    # to BF16 once after the FP32 partial sums have been combined.
     rows = pl.tensor.dim(x, 0)
     input_cols = pl.tensor.dim(x, 1)
     output_cols = pl.tensor.dim(weight, 0)
-    for block in pl.spmd(pl.system.available_cluster_count(), name_hint="qwen3_linear"):
-        block_count = pl.tile.get_block_num()
+    tile_count = output_cols // _MATMUL_COL_TILE
+    k_per_split = input_cols // _K_SPLITS
+    partial = pl.create_tensor([_MATMUL_ROW_TILE, output_cols], dtype=pl.FP32)
+    with pl.spmd(tile_count, name_hint="qwen3_linear_seed") as seed_tid:
+        col = pl.get_block_idx() * _MATMUL_COL_TILE
+        partial = pl.assemble(
+            partial,
+            pl.full([_MATMUL_ROW_TILE, _MATMUL_COL_TILE], dtype=pl.FP32, value=0.0),
+            [0, col],
+        )
+    with pl.spmd(
+        tile_count * _K_SPLITS,
+        name_hint="qwen3_linear_split_k",
+        deps=[seed_tid],
+    ) as linear_tid:
+        work = pl.get_block_idx()
+        col = (work // _K_SPLITS) * _MATMUL_COL_TILE
+        k_base = (work % _K_SPLITS) * k_per_split
         for row in pl.range(0, rows, _MATMUL_ROW_TILE):
             valid_rows = pl.min(_MATMUL_ROW_TILE, rows - row)
-            for col in pl.range(
-                block * _MATMUL_COL_TILE,
-                output_cols,
-                block_count * _MATMUL_COL_TILE,
-            ):
-                valid_cols = pl.min(_MATMUL_COL_TILE, output_cols - col)
-                x_first = pl.slice(
+            x_first = pl.slice(
+                x,
+                [_MATMUL_ROW_TILE, _K_TILE],
+                [row, k_base],
+                valid_shape=[valid_rows, _K_TILE],
+            )
+            w_first = pl.slice(weight, [_MATMUL_COL_TILE, _K_TILE], [col, k_base])
+            acc = pl.matmul(x_first, w_first, b_trans=True, out_dtype=pl.FP32)
+            for k_offset in pl.pipeline(1, k_per_split // _K_TILE, stage=2):
+                k0 = k_base + k_offset * _K_TILE
+                x_tile = pl.slice(
                     x,
                     [_MATMUL_ROW_TILE, _K_TILE],
-                    [row, 0],
+                    [row, k0],
                     valid_shape=[valid_rows, _K_TILE],
                 )
-                w_first = pl.slice(
-                    weight,
-                    [_MATMUL_COL_TILE, _K_TILE],
-                    [col, 0],
-                    valid_shape=[valid_cols, _K_TILE],
-                )
-                acc = pl.matmul(x_first, w_first, b_trans=True, out_dtype=pl.FP32)
-                for k0 in pl.range(_K_TILE, input_cols, _K_TILE):
-                    x_tile = pl.slice(
-                        x,
-                        [_MATMUL_ROW_TILE, _K_TILE],
-                        [row, k0],
-                        valid_shape=[valid_rows, _K_TILE],
-                    )
-                    w_tile = pl.slice(
-                        weight,
-                        [_MATMUL_COL_TILE, _K_TILE],
-                        [col, k0],
-                        valid_shape=[valid_cols, _K_TILE],
-                    )
-                    acc = pl.matmul_acc(acc, x_tile, w_tile, b_trans=True)
-                out = pl.assemble(out, pl.cast(acc, target_type=pl.BF16), [row, col])
+                w_tile = pl.slice(weight, [_MATMUL_COL_TILE, _K_TILE], [col, k0])
+                acc = pl.matmul_acc(acc, x_tile, w_tile, b_trans=True)
+            partial = pl.assemble(partial, acc, [row, col], atomic=pl.AtomicType.Add)
+    with pl.spmd(tile_count, name_hint="qwen3_linear_output", deps=[linear_tid]) as _output_tid:
+        col = pl.get_block_idx() * _MATMUL_COL_TILE
+        out = pl.assemble(
+            out,
+            pl.cast(
+                pl.slice(partial, [_MATMUL_ROW_TILE, _MATMUL_COL_TILE], [0, col], valid_shape=[rows, _MATMUL_COL_TILE]),
+                target_type=pl.BF16,
+            ),
+            [0, col],
+        )
     return out
 
 
@@ -105,180 +117,89 @@ def _qkv_norm_rope_body(
     k_norm_weight: pl.Tensor,
     positions: pl.Tensor,
     cos_sin_cache: pl.Tensor,
-    query_out: pl.Tensor,
-    key_out: pl.Tensor,
-    value_out: pl.Tensor,
-) -> tuple[pl.Tensor, pl.Tensor, pl.Tensor]:
-    rows = pl.tensor.dim(qkv, 0)
-
-    for row in pl.parallel(rows):
-        position = pl.cast(pl.tensor.read(positions, [row]), pl.INDEX)
-        with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_qkv_norm_rope"):
-            cos = pl.cast(
-                pl.slice(cos_sin_cache, [1, _HALF_HEAD_DIM], [position, 0]),
-                target_type=pl.FP32,
-            )
-            sin = pl.cast(
-                pl.slice(
-                    cos_sin_cache,
-                    [1, _HALF_HEAD_DIM],
-                    [position, _HALF_HEAD_DIM],
-                ),
-                target_type=pl.FP32,
-            )
-            q_gamma = pl.cast(q_norm_weight, target_type=pl.FP32)
-            k_gamma = pl.cast(k_norm_weight, target_type=pl.FP32)
-
-            for head in pl.range(_MODEL_HIDDEN // _HEAD_DIM):
-                offset = head * _HEAD_DIM
-                head_value = pl.cast(
-                    pl.slice(
-                        qkv,
-                        [_HEAD_TILE_ROWS, _HEAD_DIM],
-                        [row, offset],
-                        valid_shape=[1, _HEAD_DIM],
-                    ),
-                    target_type=pl.FP32,
-                )
-                square_sum = pl.row_sum(pl.mul(head_value, head_value))
-                inv_rms = pl.rsqrt(
-                    pl.add(pl.mul(square_sum, 1.0 / _HEAD_DIM), _EPS),
-                    high_precision=True,
-                )
-                normalized = pl.col_expand_mul(
-                    pl.row_expand_mul(
-                        head_value,
-                        pl.reshape(inv_rms, [_HEAD_TILE_ROWS, 1]),
-                    ),
-                    q_gamma,
-                )
-                first = pl.slice(
-                    normalized,
-                    [_HEAD_TILE_ROWS, _HALF_HEAD_DIM],
-                    [0, 0],
-                    valid_shape=[1, _HALF_HEAD_DIM],
-                )
-                second = pl.slice(
-                    normalized,
-                    [_HEAD_TILE_ROWS, _HALF_HEAD_DIM],
-                    [0, _HALF_HEAD_DIM],
-                    valid_shape=[1, _HALF_HEAD_DIM],
-                )
-                query_out = pl.assemble(
-                    query_out,
-                    pl.cast(
-                        pl.sub(pl.mul(first, cos), pl.mul(second, sin)),
-                        target_type=pl.BF16,
-                    ),
-                    [row * (_NUM_KV_HEADS * _Q_PER_KV) + head, 0],
-                )
-                query_out = pl.assemble(
-                    query_out,
-                    pl.cast(
-                        pl.add(pl.mul(second, cos), pl.mul(first, sin)),
-                        target_type=pl.BF16,
-                    ),
-                    [
-                        row * (_NUM_KV_HEADS * _Q_PER_KV) + head,
-                        _HALF_HEAD_DIM,
-                    ],
-                )
-
-            for head in pl.range(_KV_HIDDEN // _HEAD_DIM):
-                qkv_offset = _MODEL_HIDDEN + head * _HEAD_DIM
-                output_offset = head * _HEAD_DIM
-                head_value = pl.cast(
-                    pl.slice(
-                        qkv,
-                        [_HEAD_TILE_ROWS, _HEAD_DIM],
-                        [row, qkv_offset],
-                        valid_shape=[1, _HEAD_DIM],
-                    ),
-                    target_type=pl.FP32,
-                )
-                square_sum = pl.row_sum(pl.mul(head_value, head_value))
-                inv_rms = pl.rsqrt(
-                    pl.add(pl.mul(square_sum, 1.0 / _HEAD_DIM), _EPS),
-                    high_precision=True,
-                )
-                normalized = pl.col_expand_mul(
-                    pl.row_expand_mul(
-                        head_value,
-                        pl.reshape(inv_rms, [_HEAD_TILE_ROWS, 1]),
-                    ),
-                    k_gamma,
-                )
-                first = pl.slice(
-                    normalized,
-                    [_HEAD_TILE_ROWS, _HALF_HEAD_DIM],
-                    [0, 0],
-                    valid_shape=[1, _HALF_HEAD_DIM],
-                )
-                second = pl.slice(
-                    normalized,
-                    [_HEAD_TILE_ROWS, _HALF_HEAD_DIM],
-                    [0, _HALF_HEAD_DIM],
-                    valid_shape=[1, _HALF_HEAD_DIM],
-                )
-                key_out = pl.assemble(
-                    key_out,
-                    pl.cast(
-                        pl.sub(pl.mul(first, cos), pl.mul(second, sin)),
-                        target_type=pl.BF16,
-                    ),
-                    [row, output_offset],
-                )
-                key_out = pl.assemble(
-                    key_out,
-                    pl.cast(
-                        pl.add(pl.mul(second, cos), pl.mul(first, sin)),
-                        target_type=pl.BF16,
-                    ),
-                    [row, output_offset + _HALF_HEAD_DIM],
-                )
-
-            value_out = pl.assemble(
-                value_out,
-                pl.slice(
-                    qkv,
-                    [1, _KV_HIDDEN],
-                    [row, _MODEL_HIDDEN + _KV_HIDDEN],
-                ),
-                [row, 0],
-            )
-    return query_out, key_out, value_out
-
-
-@pl.jit.inline
-def _kv_scatter_contiguous_body(
-    key: pl.Tensor,
-    value: pl.Tensor,
     slot_mapping: pl.Tensor,
     key_cache: pl.Tensor,
     value_cache: pl.Tensor,
-) -> tuple[pl.Tensor, pl.Tensor]:
-    rows = pl.tensor.dim(key, 0)
-    for row in pl.parallel(rows):
+    query_out: pl.Tensor,
+) -> tuple[pl.Tensor, pl.Tensor, pl.Tensor]:
+    rows = pl.tensor.dim(qkv, 0)
+
+    for work in pl.spmd(rows * _NUM_KV_HEADS, name_hint="qwen3_qkv_norm_rope"):
+        row = work // _NUM_KV_HEADS
+        kv_head = work % _NUM_KV_HEADS
+        position = pl.cast(pl.tensor.read(positions, [row]), pl.INDEX)
+        cos = pl.cast(pl.slice(cos_sin_cache, [1, _HALF_HEAD_DIM], [position, 0]), target_type=pl.FP32)
+        sin = pl.cast(
+            pl.slice(cos_sin_cache, [1, _HALF_HEAD_DIM], [position, _HALF_HEAD_DIM]),
+            target_type=pl.FP32,
+        )
+        q_gamma = pl.cast(q_norm_weight, target_type=pl.FP32)
+        k_gamma = pl.cast(k_norm_weight, target_type=pl.FP32)
+
+        q_col = kv_head * _Q_PER_KV * _HEAD_DIM
+        q_raw = pl.reshape(pl.slice(qkv, [1, _Q_PER_KV * _HEAD_DIM], [row, q_col]), [_Q_PER_KV, _HEAD_DIM])
+        q_pad = pl.full([_Q_PAD, _HEAD_DIM], dtype=pl.FP32, value=0.0)
+        q_pad = pl.assemble(q_pad, pl.cast(q_raw, target_type=pl.FP32), [0, 0])
+        q_sum = pl.row_sum(pl.mul(q_pad, q_pad))
+        q_inv = pl.rsqrt(pl.add(pl.mul(q_sum, 1.0 / _HEAD_DIM), _EPS), high_precision=True)
+        q_normed = pl.col_expand_mul(pl.row_expand_mul(q_pad, pl.reshape(q_inv, [_Q_PAD, 1])), q_gamma)
+        q_first = pl.slice(q_normed, [_Q_PAD, _HALF_HEAD_DIM], [0, 0])
+        q_second = pl.slice(q_normed, [_Q_PAD, _HALF_HEAD_DIM], [0, _HALF_HEAD_DIM])
+        q_out_row = row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV
+        query_out = pl.assemble(
+            query_out,
+            pl.set_validshape(
+                pl.cast(pl.sub(pl.col_expand_mul(q_first, cos), pl.col_expand_mul(q_second, sin)), pl.BF16),
+                _Q_PER_KV,
+                _HALF_HEAD_DIM,
+            ),
+            [q_out_row, 0],
+        )
+        query_out = pl.assemble(
+            query_out,
+            pl.set_validshape(
+                pl.cast(pl.add(pl.col_expand_mul(q_second, cos), pl.col_expand_mul(q_first, sin)), pl.BF16),
+                _Q_PER_KV,
+                _HALF_HEAD_DIM,
+            ),
+            [q_out_row, _HALF_HEAD_DIM],
+        )
+
+        kv_col = kv_head * _HEAD_DIM
+        k_value = pl.cast(
+            pl.slice(qkv, [_HEAD_TILE_ROWS, _HEAD_DIM], [row, _MODEL_HIDDEN + kv_col], valid_shape=[1, _HEAD_DIM]),
+            target_type=pl.FP32,
+        )
+        k_sum = pl.row_sum(pl.mul(k_value, k_value))
+        k_inv = pl.rsqrt(pl.add(pl.mul(k_sum, 1.0 / _HEAD_DIM), _EPS), high_precision=True)
+        k_normed = pl.col_expand_mul(pl.row_expand_mul(k_value, pl.reshape(k_inv, [_HEAD_TILE_ROWS, 1])), k_gamma)
+        k_first = pl.slice(k_normed, [_HEAD_TILE_ROWS, _HALF_HEAD_DIM], [0, 0], valid_shape=[1, _HALF_HEAD_DIM])
+        k_second = pl.slice(
+            k_normed, [_HEAD_TILE_ROWS, _HALF_HEAD_DIM], [0, _HALF_HEAD_DIM], valid_shape=[1, _HALF_HEAD_DIM]
+        )
         slot_value = pl.tensor.read(slot_mapping, [row])
         if slot_value >= 0:
             slot = pl.cast(slot_value, pl.INDEX)
-            for col in pl.range(0, _KV_HIDDEN, _COL_TILE):
-                with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_kv_scatter_contiguous"):
-                    key_cache = pl.assemble(
-                        key_cache,
-                        pl.slice(key, [1, _COL_TILE], [row, col]),
-                        [slot, col],
-                    )
-                    value_cache = pl.assemble(
-                        value_cache,
-                        pl.slice(value, [1, _COL_TILE], [row, col]),
-                        [slot, col],
-                    )
-    return key_cache, value_cache
+            key_cache = pl.assemble(
+                key_cache,
+                pl.cast(pl.sub(pl.mul(k_first, cos), pl.mul(k_second, sin)), target_type=pl.BF16),
+                [slot, kv_col],
+            )
+            key_cache = pl.assemble(
+                key_cache,
+                pl.cast(pl.add(pl.mul(k_second, cos), pl.mul(k_first, sin)), target_type=pl.BF16),
+                [slot, kv_col + _HALF_HEAD_DIM],
+            )
+            value_cache = pl.assemble(
+                value_cache,
+                pl.slice(qkv, [1, _HEAD_DIM], [row, _MODEL_HIDDEN + _KV_HIDDEN + kv_col]),
+                [slot, kv_col],
+            )
+    return query_out, key_cache, value_cache
 
 
 @pl.jit.inline
-def _paged_attention_body(
+def _paged_attention_decode_body(
     query_heads: pl.Tensor,
     key_cache: pl.Tensor,
     value_cache: pl.Tensor,
@@ -288,106 +209,55 @@ def _paged_attention_body(
     heads_out: pl.Tensor,
 ) -> pl.Tensor:
     batch = pl.tensor.dim(seq_lens, 0)
-    for request in pl.range(batch):
-        query_start = pl.cast(pl.tensor.read(query_start_loc, [request]), pl.INDEX)
-        query_end = pl.cast(pl.tensor.read(query_start_loc, [request + 1]), pl.INDEX)
-        query_len = query_end - query_start
-        sequence_len = pl.cast(pl.tensor.read(seq_lens, [request]), pl.INDEX)
-        prefix_len = sequence_len - query_len
-        for query_offset in pl.range(query_len):
-            query_row = query_start + query_offset
-            context_len = prefix_len + query_offset + 1
-            context_blocks = (context_len + _BLOCK_SIZE - 1) // _BLOCK_SIZE
-            for kv_head in pl.range(_NUM_KV_HEADS):
-                with pl.at(level=pl.Level.CORE_GROUP, name_hint="qwen3_paged_attention"):
-                    q_tile = pl.slice(
-                        query_heads,
-                        [_Q_PAD, _HEAD_DIM],
-                        [query_row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV, 0],
-                        valid_shape=[_Q_PER_KV, _HEAD_DIM],
-                    )
-                    first_physical_block = pl.cast(pl.tensor.read(block_table, [request, 0]), pl.INDEX)
-                    first_cache_row = first_physical_block * _BLOCK_SIZE
-                    cache_col = kv_head * _HEAD_DIM
-                    first_key_tile = pl.slice(
-                        key_cache,
-                        [_BLOCK_SIZE, _HEAD_DIM],
-                        [first_cache_row, cache_col],
-                    )
-                    first_value_tile = pl.slice(
-                        value_cache,
-                        [_BLOCK_SIZE, _HEAD_DIM],
-                        [first_cache_row, cache_col],
-                    )
-                    first_valid_len = pl.min(_BLOCK_SIZE, context_len)
-                    first_scores = pl.matmul(q_tile, first_key_tile, b_trans=True, out_dtype=pl.FP32)
-                    first_scores = pl.fillpad(
-                        pl.set_validshape(
-                            pl.mul(first_scores, _ATTN_SCALE),
-                            _Q_PER_KV,
-                            first_valid_len,
-                        ),
-                        pad_value=pl.PadValue.min,
-                    )
-                    first_max = pl.row_max(first_scores)
-                    first_probabilities = pl.exp(pl.row_expand_sub(first_scores, first_max))
-                    first_probabilities_bf16 = pl.cast(first_probabilities, target_type=pl.BF16)
-                    first_sum = pl.row_sum(pl.cast(first_probabilities_bf16, target_type=pl.FP32))
-                    first_out = pl.matmul(first_probabilities_bf16, first_value_tile, out_dtype=pl.FP32)
-                    first_scale_nd = pl.full([1, _Q_PAD], dtype=pl.FP32, value=1.0)
-                    running_out = pl.row_expand_mul(first_out, pl.reshape(first_scale_nd, [_Q_PAD, 1]))
-                    running_max = pl.reshape(first_max, [1, _Q_PAD])
-                    running_sum = pl.reshape(first_sum, [1, _Q_PAD])
-                    for block in pl.range(1, context_blocks):
-                        physical_block = pl.cast(pl.tensor.read(block_table, [request, block]), pl.INDEX)
-                        cache_row = physical_block * _BLOCK_SIZE
-                        key_tile = pl.slice(
-                            key_cache,
-                            [_BLOCK_SIZE, _HEAD_DIM],
-                            [cache_row, cache_col],
-                        )
-                        value_tile = pl.slice(
-                            value_cache,
-                            [_BLOCK_SIZE, _HEAD_DIM],
-                            [cache_row, cache_col],
-                        )
-                        valid_len = pl.min(_BLOCK_SIZE, context_len - block * _BLOCK_SIZE)
-                        scores = pl.matmul(q_tile, key_tile, b_trans=True, out_dtype=pl.FP32)
-                        scores = pl.fillpad(
-                            pl.set_validshape(pl.mul(scores, _ATTN_SCALE), _Q_PER_KV, valid_len),
-                            pad_value=pl.PadValue.min,
-                        )
-                        block_max = pl.row_max(scores)
-                        probabilities = pl.exp(pl.row_expand_sub(scores, block_max))
-                        probabilities_bf16 = pl.cast(probabilities, target_type=pl.BF16)
-                        block_sum = pl.row_sum(pl.cast(probabilities_bf16, target_type=pl.FP32))
-                        block_out = pl.matmul(probabilities_bf16, value_tile, out_dtype=pl.FP32)
-                        block_max_nd = pl.reshape(block_max, [1, _Q_PAD])
-                        block_sum_nd = pl.reshape(block_sum, [1, _Q_PAD])
-                        merged_max_nd = pl.maximum(running_max, block_max_nd)
-                        old_scale_nd = pl.exp(pl.sub(running_max, merged_max_nd))
-                        new_scale_nd = pl.exp(pl.sub(block_max_nd, merged_max_nd))
-                        running_sum = pl.add(
-                            pl.mul(old_scale_nd, running_sum),
-                            pl.mul(new_scale_nd, block_sum_nd),
-                        )
-                        old_scale = pl.reshape(old_scale_nd, [_Q_PAD, 1])
-                        new_scale = pl.reshape(new_scale_nd, [_Q_PAD, 1])
-                        running_out = pl.add(
-                            pl.row_expand_mul(running_out, old_scale),
-                            pl.row_expand_mul(block_out, new_scale),
-                        )
-                        running_max = merged_max_nd
-                    normalized = pl.row_expand_div(running_out, pl.reshape(running_sum, [_Q_PAD, 1]))
-                    heads_out = pl.assemble(
-                        heads_out,
-                        pl.set_validshape(
-                            pl.cast(normalized, pl.BF16),
-                            _Q_PER_KV,
-                            _HEAD_DIM,
-                        ),
-                        [query_row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV, 0],
-                    )
+    for work in pl.spmd(batch * _NUM_KV_HEADS, name_hint="qwen3_paged_attention_decode"):
+        request = work // _NUM_KV_HEADS
+        kv_head = work % _NUM_KV_HEADS
+        query_row = pl.cast(pl.tensor.read(query_start_loc, [request]), pl.INDEX)
+        context_len = pl.cast(pl.tensor.read(seq_lens, [request]), pl.INDEX)
+        context_blocks = (context_len + _BLOCK_SIZE - 1) // _BLOCK_SIZE
+        cache_col = kv_head * _HEAD_DIM
+        q_tile = pl.slice(
+            query_heads,
+            [_Q_PAD, _HEAD_DIM],
+            [query_row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV, 0],
+            valid_shape=[_Q_PER_KV, _HEAD_DIM],
+        )
+        running_max = pl.full([1, _Q_PAD], dtype=pl.FP32, value=-3.0e38)
+        running_sum = pl.full([1, _Q_PAD], dtype=pl.FP32, value=0.0)
+        running_out = pl.full([_Q_PAD, _HEAD_DIM], dtype=pl.FP32, value=0.0)
+        for block in pl.range(context_blocks):
+            physical_block = pl.cast(pl.tensor.read(block_table, [request, block]), pl.INDEX)
+            cache_row = physical_block * _BLOCK_SIZE
+            key_tile = pl.slice(key_cache, [_BLOCK_SIZE, _HEAD_DIM], [cache_row, cache_col])
+            value_tile = pl.slice(value_cache, [_BLOCK_SIZE, _HEAD_DIM], [cache_row, cache_col])
+            valid_len = pl.min(_BLOCK_SIZE, context_len - block * _BLOCK_SIZE)
+            scores = pl.matmul(q_tile, key_tile, b_trans=True, out_dtype=pl.FP32)
+            scores = pl.fillpad(
+                pl.set_validshape(pl.mul(scores, _ATTN_SCALE), _Q_PER_KV, valid_len),
+                pad_value=pl.PadValue.min,
+            )
+            block_max = pl.row_max(scores)
+            probabilities = pl.exp(pl.row_expand_sub(scores, block_max))
+            probabilities_bf16 = pl.cast(probabilities, target_type=pl.BF16)
+            block_sum = pl.row_sum(pl.cast(probabilities_bf16, target_type=pl.FP32))
+            block_out = pl.matmul(probabilities_bf16, value_tile, out_dtype=pl.FP32)
+            block_max_nd = pl.reshape(block_max, [1, _Q_PAD])
+            block_sum_nd = pl.reshape(block_sum, [1, _Q_PAD])
+            merged_max = pl.maximum(running_max, block_max_nd)
+            old_scale = pl.exp(pl.sub(running_max, merged_max))
+            new_scale = pl.exp(pl.sub(block_max_nd, merged_max))
+            running_sum = pl.add(pl.mul(old_scale, running_sum), pl.mul(new_scale, block_sum_nd))
+            running_out = pl.add(
+                pl.row_expand_mul(running_out, pl.reshape(old_scale, [_Q_PAD, 1])),
+                pl.row_expand_mul(block_out, pl.reshape(new_scale, [_Q_PAD, 1])),
+            )
+            running_max = merged_max
+        normalized = pl.row_expand_div(running_out, pl.reshape(running_sum, [_Q_PAD, 1]))
+        heads_out = pl.assemble(
+            heads_out,
+            pl.set_validshape(pl.cast(normalized, target_type=pl.BF16), _Q_PER_KV, _HEAD_DIM),
+            [query_row * (_NUM_KV_HEADS * _Q_PER_KV) + kv_head * _Q_PER_KV, 0],
+        )
     return heads_out
 
 
@@ -417,21 +287,26 @@ def _attention_only(
 ) -> pl.Tensor[[_ROWS, _MODEL_HIDDEN], pl.BF16]:
     rows = pl.tensor.dim(normalized_hidden, 0)
     qkv = pl.create_tensor([rows, _QKV_HIDDEN], dtype=pl.BF16)
-    qkv = _linear_body(normalized_hidden, qkv_weight, qkv)
+    qkv = _linear_split_k_body(normalized_hidden, qkv_weight, qkv)
     query_heads = pl.create_tensor([rows * (_NUM_KV_HEADS * _Q_PER_KV), _HEAD_DIM], dtype=pl.BF16)
-    key = pl.create_tensor([rows, _KV_HIDDEN], dtype=pl.BF16)
-    value = pl.create_tensor([rows, _KV_HIDDEN], dtype=pl.BF16)
-    query_heads, key, value = _qkv_norm_rope_body(
-        qkv, q_norm_weight, k_norm_weight, positions, cos_sin_cache, query_heads, key, value
+    query_heads, key_cache, value_cache = _qkv_norm_rope_body(
+        qkv,
+        q_norm_weight,
+        k_norm_weight,
+        positions,
+        cos_sin_cache,
+        slot_mapping,
+        key_cache,
+        value_cache,
+        query_heads,
     )
-    key_cache, value_cache = _kv_scatter_contiguous_body(key, value, slot_mapping, key_cache, value_cache)
     attention_heads = pl.create_tensor([rows * (_NUM_KV_HEADS * _Q_PER_KV), _HEAD_DIM], dtype=pl.BF16)
-    attention_heads = _paged_attention_body(
+    attention_heads = _paged_attention_decode_body(
         query_heads, key_cache, value_cache, block_table, seq_lens, query_start_loc, attention_heads
     )
     attention_output = pl.reshape(attention_heads, [rows, _MODEL_HIDDEN])
     projected = pl.create_tensor([rows, _MODEL_HIDDEN], dtype=pl.BF16)
-    projected = _linear_body(attention_output, o_proj_weight, projected)
+    projected = _linear_split_k_body(attention_output, o_proj_weight, projected)
     for col_block in pl.spmd(_MODEL_HIDDEN // _MATMUL_COL_TILE, name_hint="qwen3_attention_output"):
         col = col_block * _MATMUL_COL_TILE
         for row in pl.range(0, rows, _MATMUL_ROW_TILE):
@@ -471,6 +346,8 @@ def attention_only(
     output: torch.Tensor,
 ) -> None:
     rows = normalized_hidden.shape[0]
+    if rows != 1:
+        raise ValueError("PyPTO Qwen3 decode attention requires one token")
     if normalized_hidden.shape != (rows, _MODEL_HIDDEN) or normalized_hidden.dtype != torch.bfloat16:
         raise ValueError("PyPTO Qwen3 attention requires BF16 [tokens, 5120] normalized hidden states")
     if positions.shape != (rows,) or positions.dtype != torch.int64:
