@@ -346,7 +346,6 @@ def q_proj_qr(
                 valid_rows = pl.min(T_TILE, tile_rows - tg)
                 out_tg = tile_base + tg
                 qr_sq_sum = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
-                qr_amax_g = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
                 for qr_rms_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
                     # Native materializes q_a as BF16 (npu_quant_matmul with
                     # output_dtype=hidden_states.dtype) before handing it to
@@ -363,17 +362,32 @@ def q_proj_qr(
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                     qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
-                    gamma_rms_cast = pl.cast(gamma_cq[qr_rms_col0 : qr_rms_col0 + Q_LORA_TILE], target_type=pl.FP32)
-                    gamma_rms_chunk = pl.reshape(gamma_rms_cast, [1, Q_LORA_TILE])
-                    qr_g = pl.col_expand_mul(qr_rms_chunk, gamma_rms_chunk)
-                    qr_g_abs = pl.abs(qr_g)
-                    qr_g_row_max = pl.reshape(pl.row_max(qr_g_abs), [1, T_TILE])
-                    qr_amax_g = pl.maximum(qr_amax_g, qr_g_row_max)
                 qr_inv_rms = pl.rsqrt(pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS), high_precision=True)
                 qr_inv_rms_t = pl.reshape(qr_inv_rms, [T_TILE, 1])
+                # npu_rms_norm_dynamic_quant takes the amax over the normalized
+                # values themselves -- the same expression it then quantizes.
+                # Taking max|x * gamma| and scaling it by inv_rms afterwards is
+                # algebraically equal but rounds differently, which flips codes
+                # sitting on a quantization boundary.
+                qr_amax_acc = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
+                for qr_amax_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
+                    qr_amax_chunk = pl.cast(
+                        pl.cast(
+                            qr_fp32[tg : tg + T_TILE, qr_amax_col0 : qr_amax_col0 + Q_LORA_TILE],
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
+                    gamma_amax_cast = pl.cast(gamma_cq[qr_amax_col0 : qr_amax_col0 + Q_LORA_TILE], target_type=pl.FP32)
+                    gamma_amax_chunk = pl.reshape(gamma_amax_cast, [1, Q_LORA_TILE])
+                    qr_amax_normed_chunk = pl.col_expand_mul(
+                        pl.row_expand_mul(qr_amax_chunk, qr_inv_rms_t), gamma_amax_chunk,
+                    )
+                    qr_amax_row = pl.reshape(pl.row_max(pl.abs(qr_amax_normed_chunk)), [1, T_TILE])
+                    qr_amax_acc = pl.maximum(qr_amax_acc, qr_amax_row)
                 qr_amax_floor = pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
-                qr_amax_normed = pl.mul(qr_inv_rms, qr_amax_g)
-                qr_tile_amax = pl.maximum(qr_amax_floor, qr_amax_normed)
+                qr_tile_amax = pl.maximum(qr_amax_floor, qr_amax_acc)
 
                 qr_scale_quant_row = pl.div(pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), qr_tile_amax)
                 qr_scale_quant_t = pl.reshape(qr_scale_quant_row, [T_TILE, 1])
