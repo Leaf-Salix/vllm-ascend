@@ -1053,12 +1053,16 @@ def indexer_qr_hadamard_mm(
                 qh_amax = pl.maximum(qh_amax, qh_a_max)
             qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
             qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
-            qh_scale_recip = pl.recip(qh_scale_quant_row)
-            # indexer_quantize_query returns npu_dynamic_quant's scale cast to
-            # float16 (device_op.py), so the scoring dequant sees an FP16 value.
-            # The INT8 codes below keep the FP32 scale, matching the operator.
+            # npu_dynamic_quant returns amax / 127 as the dequant scale, and
+            # indexer_quantize_query then casts it to float16 (device_op.py).
+            # Deriving it as recip(127 / amax) rounds twice and lands a ULP off.
+            # The INT8 codes below keep the FP32 quant scale, as the operator does.
             qh_scale_recip = pl.cast(
-                pl.cast(qh_scale_recip, target_type=pl.FP16, mode="rint"),
+                pl.cast(
+                    pl.div(qh_amax, qh_scale_numerator),
+                    target_type=pl.FP16,
+                    mode="rint",
+                ),
                 target_type=pl.FP32,
             )
             qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
