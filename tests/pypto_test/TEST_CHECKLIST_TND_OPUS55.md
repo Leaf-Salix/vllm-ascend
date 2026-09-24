@@ -358,7 +358,21 @@ grep "pto-attn" \
 - uniform-b4：native 0.588 ms，CSA 0.638 ms（CSA 慢 8.5%，可能含首轮编译 warmup 抖动）
 - varlen-b4：native 0.571 ms，CSA 0.545 ms（CSA **快 4.5%**）
 
-**结论**
-压缩状态（compressed KV、state）已对齐原生路径，误差集中在 index_key 量化和 output（O-proj）。下一步按精度链路分阶段定位：indexer 量化路径 → O-proj 计算路径。
+### 2026-09-24 精度根因诊断（commit `d309e9e27`）
+
+**结论：误差不在 vllm-ascend 绑定层，在 pypto-lib kernel 本身**
+
+opus55 第一批精度数字与 tnd scope3 **完全一致**（8 位小数精确到小数点后 8 位），确认问题在 kernel 层面，不是 vllm-ascend 绑定差异。
+
+**已排除的方向：**
+- `cmp_norm_w` / `inner_norm_w` dtype：kernel ABI 是 FP32，`process_weights_after_loading` 把它们从 BF16 扩到 FP32，tnd 原始 FP32 验证是正确的。
+- HADAMARD_SCALE（`indexer_compressor_write` 旧路径）：该函数不被 ab.py 走到，加了也无效（精度数字完全未变）。
+- HADAMARD_SCALE（`indexer_key_write_vllm`）：tnd 的 `prepare_weights` 里 `hadamard_idx = H^T / sqrt(IDX_HEAD_DIM)` 已做归一化，kernel 里不能再乘，否则 index_scale L2 爆炸到 91%。
+
+**关键架构区别：**
+- nalinaly 用 `indexer_compressor_write`（非 vLLM 路径），`hadamard_idx` 没有归一化，需要 kernel 里乘 HADAMARD_SCALE
+- tnd/opus55 用 `indexer_compressor_pool_projected_vllm`，`hadamard_idx` 在 `prepare_weights:179` 已做 `.T / sqrt(IDX_HEAD_DIM)` 归一化，kernel 里不能再乘
+
+**下一步**：用 tnd-main 现有的 `decode_csa_stage_probe.py` / `precision_probe.py` 框架，hook `normed_kv` 中间量（Hadamard 之前），对比 CSA 和 native 在 RMS norm 之后、Hadamard 之前的数值，定位 index_key 0.63% 误差的具体引入位置。
 
 *后续每次测试追加新节，带日期和提交 hash。*
