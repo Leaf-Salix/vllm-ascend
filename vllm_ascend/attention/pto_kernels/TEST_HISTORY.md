@@ -1,0 +1,140 @@
+# DeepSeek V4 Flash PyPTO CSA 测试历史
+
+本记录属于 `dev/pypto-dsv4-csa-tnd-main-20260924` 分支，覆盖从首次接入
+`6c9d552a1` 到作用域修复 `9243a5f5e` 的提交。更新日期：2026-09-24。
+后续改变 kernel、绑定、原生基线或测量方法时，在本文追加记录，保留旧结果，
+以便按提交比较。这里的“通过运行”仅指程序完成；数值验收单独标注。
+
+## 测试边界和比较规则
+
+- 227 单卡测试使用 DeepSeek-V4-Flash-0731-w8a8 的真实第 2 层 C4 attention
+  权重，固定 seed=62 构造 hidden states 与历史 cache/state。Native 与 CSA 使用
+  独立但初值相同的缓存。它不是整模型生成，也没有测 TP/DP/EP=16、EPLB、
+  DSpark 接收率或 GBS=16×4 吞吐。
+- Native 精度基线开启 `torch_npu.npu.set_deterministic_level(1)` 和
+  `HCCL_DETERMINISTIC=true`。`relative L2 = ||CSA - Native||₂ / ||Native||₂`；
+  逐元素验收为 `torch.allclose(rtol=1e-2, atol=1e-2)`。记录输出及实际写入的
+  cache/state，不能用整块未写历史缓存稀释误差。
+- Graph 延迟是固定地址 ACLGraph replay 的单层 attention forward 时间，不含
+  编译、权重准备、capture、scheduler 或模型其他层。正数“CSA 慢”表示
+  `(CSA / Native - 1) × 100% > 0`。只有相同权重、输入、软件、设备、测量循环
+  和精度语义的同组 Native/CSA 数字可直接相除；跨提交数字只用于定位趋势。
+- 除特别注明，TND 测试环境为 CANN `9.2.0-beta.2`、Torch `2.10.0`、
+  Torch-NPU `2.10.0.post4`、vLLM `0.29.0`、PyPTO
+  `54957491ede07ad5d5015f5e69874f367113cf45`（包含 PR #2867）、Simpler
+  `32dff953d07f6bd2aacab8532860f28aca6df931`。TP=1、128 槽 cache 页。
+  测试使用已存在的独立环境；这些结果不证明全新安装可直接复现。
+
+## 逐提交记录
+
+| 提交 | 改动及实际验证 | 性能/精度证据与限制 |
+| --- | --- | --- |
+| `6c9d552a1` | 首次在 main 接入模型级 CSA adapter、PyPTO kernel 与 CPU 合约测试；19 个相关文件 AST 解析和 ABI 参数顺序静态核对通过。 | 当时本机缺少 `vllm`，pytest 在 conftest 导入阶段中止；没有可归属此提交的 NPU 精度或延迟结果。 |
+| `22beafb39` | 修正 MLA storage 字段；新增 `test_kv_cache_interface.py` 回归用例。 | 提交包含测试代码；现有记录没有此提交独立的测试执行结果或 NPU A/B，不能记作通过。 |
+| `45c0e1ae4` | 对齐固定 vLLM 版本的 NPU runner RoPE 路径；Python 编译、`git diff --check`、增量 pre-commit 通过。 | 当时 227 重测仍在待办，未记录此提交独立的 NPU 延迟/精度。 |
+| `3b45322e7` | 分配时复用计划好的每层 KV cache spec；新增 model runner 回归用例。 | 现有记录没有该提交独立的测试执行结果或 NPU A/B。 |
+| `362073aba` | 改成 `AscendDSAImpl.forward` 内的原生 metadata 接入，50 tensor ABI，删除 Python `token_valid` 计算；CPU 合约 25 项通过，单层 Graph A/B 见下表。 | B4/S6 的 8K、128K 输出 relative L2 约 1.83%、1.84%，均未通过 1e-2 allclose；不能视为精度等价。 |
+| `39993cd43` | O-proj 改成整行动态量化语义；新增 `test_pto_oproj.py` 的 CPU 数学边界测试。 | 该测试仅覆盖 W8A8 O-proj 数学边界。没有记录此提交在 227 同口径的完整 CSA Graph A/B；此前 8K/128K 数据不能自动归属此提交。 |
+| `9f1599864` | 使用原生 `query_start_loc` 驱动 TND 非等长请求；新增 CPU 合约及 ABI 校验。 | 后续 `f53cdacf8` 快照的 CPU 合约 29 项通过；此提交之后又修正了标量 dtype 才完成正式单卡 NPU A/B，不能把该数据单独归给它。 |
+| `f53cdacf8` | 修正 TND scalar dtype；CPU 合约 29 项、ABI AST 校验、specialize/lower、B4 等长/非等长单卡 eager 与 Graph 通过；B16/T60 首次运行遇到 256 MiB ring heap 耗尽。 | 下表列出 B4 对拍及 B16 失败；最终输出约 1.5% relative L2，未通过精度验收。 |
+| `9243a5f5e` | 将 Indexer 与 Attention/O-proj 分到兄弟 `pl.scope()`，TopK 输出保留父级零拷贝 view；B4 回归和 B16/T60 单卡运行通过。 | 6×200 replay 长测显示 B4/T18 CSA 慢 2.52%，B16/T60 慢 9.68%；输出精度仍未通过。 |
+
+`6c9d552a1` 至 `3b45322e7` 的条目如实区分“有测试代码/静态检查”和
+“有可核实的测试执行结果”。请勿将后续提交的 NPU 结果反向标记为早期提交通过。
+
+### 原生 metadata 接入后的 B4/S6 记录
+
+`362073aba` 的仓库 README 留存了以下单次单层 Graph 结果。真实权重、合成
+hidden/history、固定 S6，按上下文长度分组；原始逐轮样本未随提交保存，
+因此只作为历史定位点，不作跨提交显著性判断。
+
+| 上下文 | Native graph | CSA graph | CSA 相对 Native | 最终输出 relative L2 |
+| --- | ---: | ---: | ---: | ---: |
+| 8K | 0.5842 ms | 0.5731 ms | 快 1.90% | 约 1.83% |
+| 128K | 0.7763 ms | 0.8159 ms | 慢 5.10% | 约 1.84% |
+
+`39993cd43` 的 O-proj 变更需要区分 checkpoint 的真实量化方式。
+旧的 `official-l3` BF16 O-B 数据属于另一实验分支与另一套环境；不能拿它与
+本分支 W8A8 TND 测试直接比较。该提交的 CPU 用例也不证明整层输出对齐。
+
+### 原生 TND：`f53cdacf8`
+
+等长 B4 和非等长 B4 均完成单卡 eager、Graph capture/replay，CSA 入口实际执行，
+输出 guard 未被误写。每组 Graph 测量窗口较短，仅作功能烟测。
+对应单卡任务分别为 `task_20260924_125844_294850715570` 和
+`task_20260924_130056_327280129560`，均退出 0。
+
+| 请求长度 / 总 token | Native graph | CSA graph | CSA 相对 Native | eager / graph 输出 relative L2 |
+| --- | ---: | ---: | ---: | ---: |
+| `[6,6,6,6]` / T24 | 0.5814 ms | 0.6085 ms | 慢 4.67% | 1.5042% / 1.5495% |
+| `[3,4,5,6]` / T18 | 0.5768 ms | 0.5601 ms | 快 2.90% | 1.5536% / 1.7460% |
+
+非等长 T18 的 compressed KV 逐元素相同，main/inner state relative L2
+分别约 `3.04e-7` / `2.16e-7`；raw KV 为 `2.86e-3`，index key 为
+`7.53e-3`，最终输出为 `1.55e-2`。两组输出均未通过 1e-2 allclose。
+
+B16 请求长度为 `[1,2,3,4,5,6,1,2,3,4,5,6,3,4,5,6]`，T60。
+首次设备任务在 CSA 首次执行时遇到 Simpler 256 MiB ring heap
+head-of-line deadlock：已使用 `265,095,168` bytes，下次申请
+`7,864,320` bytes。任务为 `task_20260924_125523_26342996500`；设备没有
+进入可比较的 Graph A/B，这不是精度结果。
+
+### 作用域修复：`9243a5f5e`
+
+此提交的 NPU 验证先在与最终提交内容相同的工作树快照上执行。生成的
+orchestration C++ 将 Indexer 的已知静态分配约 129.56 MiB（含 96 MiB
+`pair_arena`、12 MiB `score_arena`）和 Attention/O-proj 的约 108.42 MiB
+（含 48 MiB `partials`、24 MiB `o_packed_heads`）放入两个兄弟 scope。
+首两版（任务 `task_20260924_140618_106971418693`、
+`task_20260924_141803_143837220280`）在 C++ 编译阶段因 TopK SSA
+别名跨 scope 失败；父级 view 方案编译通过。
+这些编译失败没有执行设备 kernel。修复后 B16/T60 不再触发 ring heap deadlock。
+
+| 用例 | 首次通过的任务 | 短测 Native / CSA graph | eager 输出 relative L2 |
+| --- | --- | ---: | ---: |
+| B4 `[6,6,6,6]`，T24 | `task_20260924_142117_158004131317` | 0.6084 / 0.5804 ms | 1.5042% |
+| B4 `[3,4,5,6]`，T18 | `task_20260924_142245_161927419622` | 0.5854 / 0.5661 ms | 1.7820% |
+| B4 `[3,4,5,6]`，T18 重复 | `task_20260924_142531_17036064917` | 0.6060 / 0.5407 ms | 1.5536% |
+| B16 非等长，T60 | `task_20260924_142245_161848814870` | 0.7504 / 0.8401 ms | 1.4525% |
+
+短测每轮仅 5 次，出现 B4 “CSA 快 3%～11%” 的假象。扩大为每轮 200 次、
+6 轮后，得到可用于本次比较的结果（设备 Graph replay，单位 ms/forward）：
+
+| 用例 | 任务 | Native 中位数 | CSA 中位数 | CSA 差距 | 去首轮均值差距 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| B4 `[3,4,5,6]`，T18 | `task_20260924_143258_19254782899` | 0.5813 | 0.5960 | 慢 2.52% | 慢 2.03% |
+| B16 非等长，T60 | `task_20260924_143258_192532413449` | 0.7232 | 0.7932 | 慢 9.68% | 慢 10.38% |
+
+| 用例 | Native 六轮均值 | CSA 六轮均值 |
+| --- | --- | --- |
+| B4/T18 | `.5855, .5815, .5811, .5810, .5818, .5811` | `.6051, .5949, .5897, .5863, .5970, .5975` |
+| B16/T60 | `.7252, .7231, .7118, .7237, .7129, .7233` | `.7986, .7936, .7928, .7985, .7911, .7918` |
+
+B4 六轮 CSA 均慢 0.92%～3.35%；B16 六轮均慢 9.47%～11.38%。
+本次精度仍未通过：B4/T18 eager 输出 relative L2 在独立任务间为
+1.5536% 或 1.7820%，长测任务为 1.7820%；B16/T60 为 1.4525%。
+重复的 B4 短测与修复前 eager 输出指标一致，但跨任务仍有波动，不能仅凭
+作用域改动宣布逐元素输出不变。单层测量也不能外推到整模型吞吐。
+
+## 后续每次测试的记录方式
+
+在每次影响 CSA 的提交或实验后，先保存原始 JSON/日志，再在本文**追加**一节。
+一项记录至少包含以下字段；未测的字段写“未测”，失败也保留：
+
+```text
+日期与源码：vllm-ascend commit（若有工作树补丁，附 diff/hash）、
+              PyPTO commit、Simpler commit、runner 脚本版本
+环境：服务器/设备、CANN、Torch、Torch-NPU、vLLM、确定性开关
+负载：模型与权重层、TP/DP/EP、B、每请求 query 长度、总 T、历史长度、页规格
+精度：Native/CSA 入口、输出及实际写入 cache/state 的 relative L2、
+      allclose 阈值与结果、重复运行是否稳定
+性能：eager 或 Graph、测量边界、预热次数、轮数×每轮 replay 次数、
+      Native/CSA 每轮值、中位数、相对差距
+执行：静态/CPU/NPU 各阶段结果、任务或日志标识、失败阶段和根因
+结论：通过了什么、未通过什么、与哪一条同口径历史记录可比较
+```
+
+延迟优化至少同时记录同组 Native；出现小于约 3% 的差距时增加轮数与
+每轮 replay 次数，再根据轮间波动判断方向。精度未通过时，性能结果标为
+“实验性能”，不能当作等价替换收益。未来 B32/B40、128K、整模型、
+GBS=16×4 或 DP=EP=16 的结果必须另立负载记录，不能复用这里的单层数值。
