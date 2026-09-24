@@ -1,7 +1,7 @@
 # DeepSeek V4 Flash PyPTO CSA 测试历史
 
 本记录属于 `dev/pypto-dsv4-csa-tnd-main-20260924` 分支，覆盖从首次接入
-`6c9d552a1` 到作用域修复 `9243a5f5e` 的提交。更新日期：2026-09-24。
+`6c9d552a1` 到 Q/KV 舍入提交 `b39b2b4d3` 的全部分支提交。更新日期：2026-09-24。
 后续改变 kernel、绑定、原生基线或测量方法时，在本文追加记录，保留旧结果，
 以便按提交比较。这里的“通过运行”仅指程序完成；数值验收单独标注。
 
@@ -38,9 +38,19 @@
 | `9f1599864` | 使用原生 `query_start_loc` 驱动 TND 非等长请求；新增 CPU 合约及 ABI 校验。 | 后续 `f53cdacf8` 快照的 CPU 合约 29 项通过；此提交之后又修正了标量 dtype 才完成正式单卡 NPU A/B，不能把该数据单独归给它。 |
 | `f53cdacf8` | 修正 TND scalar dtype；CPU 合约 29 项、ABI AST 校验、specialize/lower、B4 等长/非等长单卡 eager 与 Graph 通过；B16/T60 首次运行遇到 256 MiB ring heap 耗尽。 | 下表列出 B4 对拍及 B16 失败；最终输出约 1.5% relative L2，未通过精度验收。 |
 | `9243a5f5e` | 将 Indexer 与 Attention/O-proj 分到兄弟 `pl.scope()`，TopK 输出保留父级零拷贝 view；B4 回归和 B16/T60 单卡运行通过。 | 6×200 replay 长测显示 B4/T18 CSA 慢 2.52%，B16/T60 慢 9.68%；输出精度仍未通过。 |
+| `882405b33` | 建立按提交记录测试历史的文档；不改运行代码。 | 沿用前面各提交的证据；没有新的 NPU 对拍。 |
+| `e0e81f51e` | 写入确定性 Native 的负槽 scatter 排查结果；不改运行代码。 | B4/T18 约 1.4943% 的输出差异不能由该组负槽解释；见下文。 |
+| `8b9d430aa` | 写入单层 Q/KV、Indexer 和 attention heads 的阶段探针结果；不改运行代码。 | 诊断副本最低输出 relative L2 为 0.7028%，不是此提交正式 kernel 的结果。 |
+| `b39b2b4d3` | 仅将 Q/KV 的 14 处原生 BF16 舍入边界加入正式 TND kernel；与已测 Q/KV 诊断副本 AST 一致，本地相关合约 29 项通过。 | 尚未在该正式提交上重跑 NPU 精度、Graph 延迟或整模型；不能把包含 Indexer 修改的 0.7028% 记作此提交结果。 |
 
 `6c9d552a1` 至 `3b45322e7` 的条目如实区分“有测试代码/静态检查”和
 “有可核实的测试执行结果”。请勿将后续提交的 NPU 结果反向标记为早期提交通过。
+
+截至 `b39b2b4d3`，最近完成正式分支 NPU 性能对拍的**运行代码快照**仍是
+`9243a5f5e`：B4/T18 和 B16/T60 的 Graph 长测分别慢 2.52% 和 9.68%。
+`882405b33`、`e0e81f51e`、`8b9d430aa` 只改文档；`b39b2b4d3` 已改
+正式 kernel，但还没有该提交自己的 NPU A/B。因此下文的诊断改善不能直接
+替代正式分支的精度或性能结论。
 
 ### 原生 metadata 接入后的 B4/S6 记录
 
@@ -150,7 +160,7 @@ seed=62 的合成 hidden/history，测试请求长度 `[3,4,5,6]`、T18、
 
 原始 JSON 和 Native 阶段张量保存在 227 独立实验目录的
 `logs/tnd-precision/{filtered-b4-t18,unfiltered-compare-b4-t18}/`。
-当前探针尚未导出 PyPTO 内部 Q、KV、TopK、attention 和 O-proj 阶段张量，
+该版探针尚未导出 PyPTO 内部 Q、KV、TopK、attention 和 O-proj 阶段张量，
 所以这些缓存差异不能单独证明最终输出的首个误差来源。
 
 ### 单层阶段定位：原生舍入边界的诊断副本
@@ -178,14 +188,50 @@ seed=62 的合成 hidden/history，测试请求长度 `[3,4,5,6]`、T18、
 输入处的 BF16 舍入；Indexer 副本补入反量化、Hadamard 归一化、权重投影
 后的 BF16 边界，同时用原生 Hadamard 矩阵替代适配层折叠版本。
 因此证据支持“Q/KV 和 Indexer 的数值边界均有贡献”，尚不能把剩余差异
-归因于其中某一行。第三组还没有证明六类实际写入 cache/state 全部通过，
-也未测 ACLGraph replay、延迟、B16 或整模型。单卡 cache 复核任务
-`task_20260924_155829_171093213983` 已提交，记录本节时仍在队列中；
-其结果应在完成后追加，不能把本节的输出通过当作整个 CSA 精度通过。
+归因于其中某一行。这些诊断未测 ACLGraph replay、延迟、B16 或整模型；
+不能把单层输出通过当作整个 CSA 精度通过。后续 cache 复核和输入注入结果如下。
+
+### Cache 复核与 Native 输入注入：独立诊断副本
+
+以下四次任务沿用同一 B4/T18 输入、确定性 Native、真实 C4 第 2 层权重，
+均只修改独立诊断脚本。正式分支的 Indexer、sparse attention 代码没有因
+这些实验改变；每个任务均成功退出。表中“heads”是 inverse RoPE 后、
+O-proj 前的输出；两列差异均为相对 Native 的 relative L2。
+
+| 任务与诊断 | heads | 最终输出 | 能说明什么 |
+| --- | ---: | ---: | --- |
+| `task_20260924_155829_171093213983`，六类有效写入 cache/state 复核 | 0.229699% | 0.702845% | compressed KV、index key、index scale 逐元素一致；raw KV 0.008113%，main/inner state 约 `3.04e-7` / `2.16e-7`；六类均通过逐元素验收。 |
+| `task_20260924_161018_220927013747`，候选 heads 送入原生 O-proj | 0.229699% | 0.702845% | 同一组 heads 经原生 O-proj 与 PyPTO O-proj 的输出逐元素一致；剩余误差位于 O-proj 前。 |
+| `task_20260924_164035_45942720423`，attention 只注入 Native TopK | 0.085967% | 0.595854% | TopK 选点或排序有贡献，但不能解释全部剩余差异；PyPTO Indexer 仍执行并写 cache。 |
+| `task_20260924_165327_179152121329`，再注入 Native RoPE 后 Q | 0.084888% | 0.594030% | Q 的额外贡献很小；尚未排除 raw KV 读取、稀疏索引/mask 和 attention 算术。 |
+
+四次实验的候选 cache 写入指标相同；TopK 和 Q 注入只改变 attention 的
+读取输入。未注入时 TopK 为 `7131/9216` 个位置完全相同，集合平均重合
+`511.72/512`；顺序差异可能影响归约结果。原始 `result.json` 和阶段张量
+保存在工作区 `reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/` 的相应
+任务目录；该目录不属于本 Git 仓库，本文保留了可跨提交比较的数值摘要。
+下一步应单独验证 Native raw KV 读取，再区分地址/mask 与计算顺序；
+目前没有可归属这些诊断副本的 Graph 性能结论。
+
+### 正式 Q/KV 舍入提交：`b39b2b4d3`
+
+此提交只改 `qkv_proj_rope.py`，新增 14 处原生 BF16 中间舍入边界。
+提交前将正式源码与已完成单卡测试的 `qkv_proj_rope_bf16_probe.py`
+做 AST 比较，结果一致；`test_pto_attn_029.py` 在本地跳过仓库级
+`conftest` 后 29 项通过，Python 编译、Ruff E501 和 `git diff --check`
+通过。仓库级 `conftest` 在本机因缺少 `vllm` 无法导入；pre-commit 的
+密钥扫描因本机缺少 `gitleaks`、下载脚本缺少 `wget` 未运行，其余适用项
+通过。独立 Q/KV 诊断副本在相同 B4/T18 输入下的最终输出 relative L2
+为 1.248881%，但正式提交尚未直接跑该对拍，也没有包含后续 Indexer
+诊断修改。因此 0.702845% 与 0.594030% 均不能作为此提交的精度指标。
 
 ## 后续每次测试的记录方式
 
-在每次影响 CSA 的提交或实验后，先保存原始 JSON/日志，再在本文**追加**一节。
+在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文
+**追加**一节，提交并推送文档。源码提交写入上面的逐提交表；本文件的文档
+提交可通过 `git log -- TEST_HISTORY.md` 追溯，避免在文档内引用自身尚未
+确定的提交号。尚未完成的任务写“待验证”，任务完成后再追加实测，不回填为
+之前源码提交的运行结果。
 一项记录至少包含以下字段；未测的字段写“未测”，失败也保留：
 
 ```text
