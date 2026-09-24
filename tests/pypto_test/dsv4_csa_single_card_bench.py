@@ -23,6 +23,42 @@ from pathlib import Path
 from dsv4_csa_env import activate, write_json
 
 
+def _export_swimlane(directory: Path) -> dict:
+    """把本次 DFX 记录转成带真实任务名的泳道，任务名取自本进程实际生成的 kernel_config。"""
+    import ast
+    import json as _json
+    import subprocess
+
+    records = directory / "chip_swimlane_records.json"
+    deps = directory / "deps.json"
+    if not records.is_file() or not deps.is_file():
+        return {"exported": False, "reason": "DFX 未产出记录或依赖"}
+    # 单卡进程只编一份 kernel，按 mtime 取最新的即可，不像多 rank 那样有歧义。
+    builds = sorted(Path("build_output").glob("_jit__decode_csa_tp1_attention_*/kernel_config.py"),
+                    key=lambda p: p.stat().st_mtime)
+    if not builds:
+        return {"exported": False, "reason": "未找到 kernel_config.py"}
+    table = builds[-1]
+    tree = ast.parse(table.read_text())
+    tables = [node.value for node in tree.body if isinstance(node, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == "KERNELS" for t in node.targets)]
+    if len(tables) != 1:
+        return {"exported": False, "reason": f"{table} 里的 KERNELS 表不唯一"}
+    names = {}
+    for node in tables[0].elts:
+        values = {ast.literal_eval(k): v for k, v in zip(node.keys, node.values)}
+        names[str(ast.literal_eval(values["func_id"]))] = ast.literal_eval(values["name"])
+    name_map = directory / "name_map.json"
+    name_map.write_text(_json.dumps({"callable_id_to_name": names}, ensure_ascii=False, indent=2))
+    merged = directory / "merged_swimlane.json"
+    proc = subprocess.run([sys.executable, "-m", "simpler_setup.tools.swimlane_converter", str(records),
+                           "--func-names", str(name_map), "-o", str(merged)],
+                          capture_output=True, text=True)
+    (directory / "converter_output.txt").write_text(proc.stdout + proc.stderr)
+    return {"exported": proc.returncode == 0, "kernel_config": str(table),
+            "merged_swimlane": str(merged), "name_map": str(name_map)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--args-dir", type=Path, required=True, help="run.py argdump 落盘目录")
@@ -35,31 +71,32 @@ def main() -> None:
     args = parser.parse_args()
     activate()
 
-    import numpy as np
     import torch
     import torch_npu  # noqa: F401  加载 NPU 后端
 
-    from pypto.runtime import RunConfig
+    import pypto.torch
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     package = variant_package()
     kernel = __import__(f"{package}.decode_csa", fromlist=["decode_csa_tp1_attention_test"]).decode_csa_tp1_attention_test
 
     meta = json.loads((args.args_dir / "csa_args_meta.json").read_text())
-    blob = np.load(args.args_dir / "csa_args.npz")
+    blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu")
     names = list(kernel.param_names)
     if names != meta["param_names"]:
         raise ValueError("落盘入参的参数表与当前 kernel 不一致，需重新 argdump")
 
     device = f"npu:{args.device}"
     torch.npu.set_device(args.device)
-    tensors = {name: torch.from_numpy(blob[name]).to(device) for name in names}
+    tensors = {name: blob[name].to(device) for name in names}
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
-    config = RunConfig(platform="a2a3", device_id=args.device,
-                       enable_chip_swimlane=args.swimlane,
-                       enable_dep_gen=args.swimlane >= 4)
+    # 执行目标一次性定在进程上：JIT 调用本身不接 RunConfig。
+    pypto.torch.init(device=args.device, platform="a2a3",
+                     enable_chip_swimlane=args.swimlane,
+                     enable_dep_gen=args.swimlane >= 4,
+                     output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None)
 
     report = {"variant": selected_variant(), "package": package, "device": args.device,
               "layer_index": meta["layer_index"], "tokens": meta["tokens"],
@@ -67,21 +104,36 @@ def main() -> None:
               "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"}
     try:
         for _ in range(args.warmup):
-            kernel(*call_args, config=config)
+            kernel(*call_args)
         torch.npu.synchronize()
 
         samples = []
         for _ in range(args.iters):
             torch.npu.synchronize()
             start = time.perf_counter()
-            kernel(*call_args, config=config)
+            kernel(*call_args)
             torch.npu.synchronize()
             samples.append((time.perf_counter() - start) * 1e6)
         samples.sort()
+        if args.swimlane:
+            # 只给一次调用开窗口：不然每轮都记一遍，产物没法逐任务对照。
+            # 墙钟里绝大部分是 eager 下的主机侧派发开销（PyPTO 的 _resolve_compiled
+            # 按调用次数计费），要量 kernel 本身必须看泳道的 kernel-duration。
+            torch.npu.synchronize()
+            pypto.torch.begin_dfx()
+            try:
+                kernel(*call_args)
+            finally:
+                pypto.torch.end_dfx()
+            torch.npu.synchronize()
         report.update(status="PASS",
                       us_min=samples[0], us_p50=statistics.median(samples),
                       us_p90=samples[int(len(samples) * 0.9) - 1], us_max=samples[-1],
-                      samples_us=samples)
+                      samples_us=samples,
+                      wallclock_scope="墙钟含 eager 主机侧派发开销，不是 kernel 时间；"
+                                      "逐任务 kernel 时长看 --swimlane 4 的产物")
+        if args.swimlane >= 4:
+            report["swimlane"] = _export_swimlane(args.output / "dfx")
         out = tensors["attn_out"].detach().float().cpu()
         report["attn_out"] = {"finite": bool(torch.isfinite(out).all()),
                               "absmax": float(out.abs().max()), "mean": float(out.mean())}

@@ -900,7 +900,6 @@ class OfflineCSAObserver:
                     and hidden.shape[0] == expected_tokens):
                 call = latest.get("call")
                 if call is not None:
-                    import numpy as np
                     import torch
                     target = Path(out_dir)
                     target.mkdir(parents=True, exist_ok=True)
@@ -912,15 +911,16 @@ class OfflineCSAObserver:
                         if not isinstance(value, torch.Tensor):
                             raise TypeError(f"CSA argument {name} is not a tensor: {type(value)}")
                         # 输出缓冲也一并存：回放要的是完全相同的形状与 dtype。
-                        payload[name] = value.detach().cpu().contiguous().numpy()
-                    np.savez(target / "csa_args.npz", **payload)
+                        # 用 torch.save 而不是 np.savez——numpy 不认 bfloat16。
+                        payload[name] = value.detach().cpu().contiguous().clone()
+                    torch.save(payload, target / "csa_args.pt")
                     meta = {"layer_index": layer_index, "layer_name": wanted.layer_name,
                             "tokens": int(hidden.shape[0]), "param_names": names,
                             "dtypes": {k: str(call.args[k].dtype) for k in names},
                             "shapes": {k: list(call.args[k].shape) for k in names}}
                     (target / "csa_args_meta.json").write_text(json.dumps(meta, indent=2))
                     state["dumped"] += 1
-                    state["path"] = str(target / "csa_args.npz")
+                    state["path"] = str(target / "csa_args.pt")
             return result
 
         CSAServiceRuntime.__call__ = traced
