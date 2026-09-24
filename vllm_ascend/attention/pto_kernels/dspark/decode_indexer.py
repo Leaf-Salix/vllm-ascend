@@ -210,7 +210,11 @@ def indexer_topk_query_merge_one(
         half_count = leaf_count * 2
         arena_base = query * TOPK_ROWS_PER_QUERY
         for child in pl.range(1, half_count):
-            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
+            # Native MrgSort takes the new block first and the running result
+            # second (quant_lightning_indexer_v2_vector.h::MergeSort sets
+            # srcList.src1 = mrgSrc, src2 = mrgDst). That order decides which
+            # candidate survives a tie, so the operands go new-then-accumulated.
+            merge2_top512_pairs(pair_arena, arena_base + child, arena_base, arena_base)
 
         root_slot = arena_base
         root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
