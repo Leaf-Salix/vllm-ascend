@@ -1239,6 +1239,11 @@ task-submit --ptoas 0.63 --device auto --device-num 1 --max-time 1800 \
   'bash /data/pyptouser/yejia/vllm-cann92-dsv4-tnd-opus55-20260924/bin/opus55-ab/probe.sh'
 ```
 
-AB（graph 模式）：CSA 0.6156 ms vs native 0.5792 ms，`accuracy_pass=True`。
+varlen-b4（18 token，`PROBE_LENGTHS=3,4,5,6`）复核：topk 集合差异 0、
+`heads` 0.000104085、`output` 0.001314259、`compressed`/`index_key`/
+`index_scale`/`qr_int8` 均为 0。
+
+AB（graph 模式）：uniform-b4 CSA 0.6156 ms vs native 0.5792 ms，varlen-b4
+CSA 0.5719 ms vs native 0.5702 ms，两种形状 `accuracy_pass=True`。
 剩余误差已归因到 wkv 投影矩阵乘的 K 块顺序，见
 `reports/dsv4-tnd-opus55-20260924/handoff.md` 第十二节。
