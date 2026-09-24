@@ -10,6 +10,7 @@ This section is for developers who want to contribute to vLLM Ascend or understa
 - **[Multi-Node Test](contribution/multi_node_test.md)** — Multi-node testing guide
 - **[Nightly CI Test](contribution/nightly_ci_test.md)** — Nightly CI testing
 - **[E2E CI Test](contribution/e2e_ci_test.md)** — E2E CI testing
+- **[DSV4 CSA 历史测试](DSV4_CSA_TEST_HISTORY.md)** — 历史测试结果与后续记录规范
 
 ## Design Documents
 
