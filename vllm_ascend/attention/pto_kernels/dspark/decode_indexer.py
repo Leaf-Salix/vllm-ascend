@@ -722,22 +722,15 @@ def indexer_score_topk_forest_vllm(
                             ),
                             0.0,
                         )
-                        # Every input the scoring operator receives is now
-                        # bit-identical to native's: the INT8 query, its FP16
-                        # dequant scale, the key cache and its scale, and the
-                        # weights. topk still diverges on a few tokens, and the
-                        # boundary gaps are ~1e-3 relative -- far too wide for
-                        # an FP32 ULP (6e-8) to cross but right at an FP16 ULP
-                        # (4.9e-4). Native's weights and query scale both arrive
-                        # as FP16, so round the weighted per-head term to FP16
-                        # before reducing, matching an FP16 accumulator.
-                        score_shard = pl.cast(
-                            pl.cast(
-                                pl.row_expand_mul(score_shard, head_coefficient),
-                                target_type=pl.FP16,
-                                mode="rint",
-                            ),
-                            target_type=pl.FP32,
+                        # Native hands the operator FP16 weights and query
+                        # scale, but rounding this term to FP16 was measured and
+                        # did not converge: the topk divergence stayed at four
+                        # keys and merely moved to a different set of tokens,
+                        # which is what a perturbation of the right magnitude
+                        # does to near-ties. Keep the plain FP32 product until
+                        # there is evidence for the operator's actual accumulator.
+                        score_shard = pl.row_expand_mul(
+                            score_shard, head_coefficient,
                         )
                         # The packed page holds 128 FP16 scales.  Candidate
                         # shards begin on 64-row boundaries, so 64 is the
