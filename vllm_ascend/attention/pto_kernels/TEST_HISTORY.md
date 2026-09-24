@@ -245,7 +245,7 @@ sparse attention 计算中同时导出 inverse RoPE 前 BF16 heads、原 FP32
 此前同一组 heads 的原生 O-proj 与 PyPTO O-proj 已逐元素一致，但本次未在
 正式 CSA 内运行第二次 PyPTO O-proj。两版本的 NoPE 448 维逐元素相同；
 RoPE 64 维对 Native 的 relative L2 从 0.276496% 降到 0.045079%。
-原生 `npu_sparse_flash_mla` 返回 BF16 heads 后才调用 inverse RoPE；
+本次 0.29 原生 `npu_sparse_attn_sharedkv` 返回 BF16 heads 后才调用 inverse RoPE；
 本分支 `decode_sparse_attn_csa.py` 在构造 BF16 值后，仍用舍入前的 FP32
 值做 inverse RoPE。此次实验确认该数值边界是主要放大点之一。
 
