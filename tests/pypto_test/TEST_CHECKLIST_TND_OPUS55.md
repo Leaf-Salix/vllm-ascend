@@ -324,10 +324,41 @@ grep "pto-attn" \
 
 ## 历史测试结果
 
-### 2026-09-24 初始实现
+### 2026-09-24 第一批精度测试（commit `0b268ff8a`）
 
-- 本机 CPU 合约（阶段一）：待测
-- dtype 静态检查（阶段二）：待测
-- 227 NPU 对拍（阶段四）：待测
+**环境**
+- vllm-ascend branch: `dev/pypto-dsv4-csa-tnd-opus55-20260924` commit `0b268ff8a`
+- 227 实验根: `/data/pyptouser/yejia/vllm-cann92-dsv4-tnd-opus55-20260924`
+- CANN 9.2.0-beta.2, ATB 9.2.0-beta.2, Torch 2.10.0, Torch-NPU 2.10.0.post4, vLLM 0.29.0
+- PyPTO: `feat/kernel-mode-integration-test` commit `54957491`
+- Simpler: commit `32dff953`
+
+**调试过程**
+- 初版 BF16 验证（错误方向）：kernel ABI 期望 FP32，`cmp_norm_w must retain native torch.bfloat16` 报错，任务 exit=1
+- 原因：`process_weights_after_loading` 把 norm weight 从 BF16 扩展到 FP32；kernel 签名是 FP32；tnd 原始 FP32 验证是正确的
+- 修复：恢复 FP32 验证，task exit=0
+
+**精度结果（均使用 8186 历史缓存，200 iter，确定性模式）**
+
+| 中间量 | uniform-b4 (`6,6,6,6`) L2 | varlen-b4 (`3,4,5,6`) L2 | allclose 1e-2 |
+|--------|---------------------------|--------------------------|---------------|
+| compressed KV | 0.0001% | ~0% | ✅ |
+| main_state | ~0% | ~0% | ✅ |
+| inner_state | ~0% | ~0% | ✅ |
+| raw KV | 0.286% | 0.286% | ✅ |
+| index_scale | 0.261% | 0.403% | ✅ |
+| **index_key** | **0.633%** | **0.753%** | ❌ |
+| **output** | **1.435%** | **1.494%** | ❌ |
+
+任务 ID：
+- uniform-b4：`task_20260924_181554_191992030190`（exit=0）
+- varlen-b4：`task_20260924_181554_19198061867`（exit=0）
+
+**性能（graph median）**
+- uniform-b4：native 0.588 ms，CSA 0.638 ms（CSA 慢 8.5%，可能含首轮编译 warmup 抖动）
+- varlen-b4：native 0.571 ms，CSA 0.545 ms（CSA **快 4.5%**）
+
+**结论**
+压缩状态（compressed KV、state）已对齐原生路径，误差集中在 index_key 量化和 output（O-proj）。下一步按精度链路分阶段定位：indexer 量化路径 → O-proj 计算路径。
 
 *后续每次测试追加新节，带日期和提交 hash。*
