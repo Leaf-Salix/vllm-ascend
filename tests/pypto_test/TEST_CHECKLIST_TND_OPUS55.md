@@ -930,3 +930,33 @@ BF16 翻转的总数，而不是 FP32 末位。
 **待测**：已扩展探针同时暴露两侧的 indexer 量化 query
 （`decode_indexer_probe.py` 加 `pl.Out`，native 侧钩 `quantize_query`），
 任务 `task_20260924_230708_235411323422`，用于定位 token 0、7。
+
+### 2026-09-24 探针扩展：暴露两侧的 indexer 量化 query
+
+目的是定位 token 0、7——它们的 indexer 投影与原生逐位相同、无 BF16 翻转，
+但 topk 仍分歧，原因未知。
+
+**CSA 侧**：`qr_hadamard_i8` / `qr_hadamard_scale_dq` 是 `indexer_vllm` 内部的
+`pl.create_tensor`。做了 `decode_indexer_probe.py` 诊断副本，给 `indexer_vllm`
+加两个 `pl.Out` 参数并替换这两处创建，再把 `decode_csa_stage_probe.py` 的
+`from .decode_indexer import indexer_vllm` 改指向副本。**生产代码未改动。**
+
+注意：`indexer_vllm` 的签名模式在文件里重复 5 次，必须按函数边界切片替换，
+不能全局 replace。
+
+**native 侧钩子踩了两次坑**：
+
+1. 钩 `impl.indexer.ops.quantize_query` **没触发**。原生走的是
+   `indexer_quant_scatter`——把 q 的量化和 kv 的 scatter 融合在一个入口里，
+   不单独调用 `quantize_query`。
+2. 改钩 `torch_npu.npu_dynamic_quant` 并按形状筛，**仍没触发**。过滤条件写了
+   `codes.dim() == 2`，而原生的 indexer q 是 `q.view(-1, n_heads, head_dim)`
+   之后的 **3 维张量** `[24, 64, 128]`。已放宽为只看最后一维和总元素数，
+   并加了 `[dynquant]` 形状日志以便下次一眼看出是否命中。
+
+**验证批次 14 的 FP16 改动确实生效**：我们的 indexer query dequant scale
+**100% 落在 FP16 网格上**（1536 个值），取值范围 6.46e-04 ~ 4.74e-03，
+远离 FP16 的下溢与溢出边界。
+
+**若第三次仍抓不到**：说明原生的 indexer q 量化发生在 C++ 融合算子内部，
+Python 层不可观测，该对比无法完成，只能按底噪收口。
