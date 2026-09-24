@@ -102,3 +102,28 @@ python summarize.py /path/to/results
 还断言Q-only因子的六类cache逐元素不变，KV-only因子的QR/Q与其他五类cache逐元素不变。
 O-proj比较heads与权重hash，并计算INT8×各自scale后的activation差异；
 不同量化范围下直接比较INT8编码不代表反量化值的误差。结果写入summary.json。
+
+## 合并五个已验证边界后的精度与Graph性能
+
+`generate_graph.py` 从正式源码生成无诊断Out参数的两份kernel；`baseline`逐字节等于正式源码，
+`aligned`仅将上述五类QKV舍入合并。O-proj、Indexer/Hadamard和参数适配器均不变。
+
+```bash
+python generate_graph.py --repo /path/to/vllm-ascend --output /path/to/graph-variants
+python graph.py \
+  --model /path/to/DeepSeek-V4-Flash-0731-w8a8 \
+  --extension-dir /path/to/runtime/vllm_ascend \
+  --sdk-root /path/to/simpler-sdk \
+  --variants /path/to/graph-variants \
+  --out-dir /path/to/graph-results/8186 --start-pos 8186
+```
+
+输出目录必须不存在；128K另以`--start-pos 131066`运行。沿用上述环境和确定性前提。
+同一进程内捕获原生、baseline、aligned三个Graph，CSA不允许静默回退。
+精度取warmup/capture后重置cache的单次replay，保存输出和六类cache有效写槽。
+所有模型参数做不变性检查，输出guard检查在计时前后执行。
+
+计时默认12轮×100次，轮换三个路径的次序，以NPU Event测每次replay均摊毫秒数。
+每轮先重置cache；编译、重置和CPU取数均在计时外，没有诊断hook或额外输出。
+这是固定metadata重复replay，**不能解释为真实请求连续推进100步或整模型吞吐**。
+保存每轮时间、输出/输入hash和所有kernel源码hash；性能与单因素插桩结果分开报告。

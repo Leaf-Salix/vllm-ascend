@@ -36,3 +36,26 @@ def test_generated_factors_are_independent(tmp_path):
     # Syntax-check every generated diagnostic entry before any expensive NPU JIT.
     for path in (tmp_path / "variants").rglob("*.py"):
         ast.parse(path.read_text(), filename=str(path))
+
+
+def test_graph_variant_contains_only_verified_rounding(tmp_path):
+    repo = Path(__file__).resolve().parents[2]
+    source = repo / "benchmarks/scripts/dsv4_csa_precision/generate_graph.py"
+    spec = importlib.util.spec_from_file_location("graph_generator", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    output = tmp_path / "graph"
+    module.generate(repo, output)
+    relative = "pto_kernels/dspark/qkv_proj_rope.py"
+    text = (output / "aligned" / relative).read_text()
+    factors = json.loads(source.with_name("factors.json").read_text())
+    assert set(factors) == {"qa", "q_mm", "q_rms", "kv_mm", "kv_rms"}
+    for edits in factors.values():
+        for edit in edits:
+            assert text.count(edit["anchor"] + edit["insert"]) == 1
+            text = text.replace(edit["anchor"] + edit["insert"], edit["anchor"], 1)
+    assert text == (repo / "vllm_ascend/attention" / relative).read_text()
+    for path in (output / "baseline").rglob("*.py"):
+        relative_path = path.relative_to(output / "baseline")
+        assert path.read_bytes() == (repo / "vllm_ascend/attention" / relative_path).read_bytes()
+        ast.parse((output / "aligned" / relative_path).read_text())

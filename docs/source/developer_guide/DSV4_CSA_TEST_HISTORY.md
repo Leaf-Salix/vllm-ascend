@@ -706,3 +706,22 @@ Ruff、format、codespell、typos与diff whitespace检查通过。Gitleaks因环
 
 这些是分模块因果对照，不能宣称所有因素合并后的整层精度已通过。本轮没有正式延迟结果，
 插桩实验kernel不能与G6性能相混；Indexer仍有差异，动态padding/生产metadata刷新仍未验证。
+
+## G8：五类QKV边界合并后的无插桩Graph复测（2026-09-24，待结果）
+
+基线`4a83f66d5`。`generate_graph.py`生成正式baseline和aligned；aligned只合并G7验证的
+Q-A、Q-B、Q RMS、KV projection、KV RMS五类BF16边界，O-proj/Indexer/Hadamard保持正式版。
+没有改动正式服务算法。生成器CPU回归2项通过；独立审查通过；目标环境无设备import与ATB预检通过。
+
+已提交8K/128K同卡三路Graph测试，等待NPU调度，**尚无新的精度或性能结果**。
+脚本与复现说明见[测试README](../../../benchmarks/scripts/dsv4_csa_precision/README.md)。
+TP1/B4/S6/block128，真实C4层权重、seed62合成hidden/history，原生level1/HCCL确定性。
+精度取reset后的单次Graph replay，记录输出及六类cache有效写槽。
+性能取12轮×100次固定metadata replay，顺序轮换、reset和CPU检查在计时外；不代表真实请求推进100步。
+
+Python文件清单规范JSON的SHA256：
+
+- baseline：`c5c6b97ddf363c860a98085d18c5c83e222ee7fa9a694d7fad4ad8f7ff43aa5c`
+- aligned：`0dc0b1b8716bfe2b58a819e5b8836718588476b7034104951aa392ddc33cce5b`
+
+本轮候选与G6混合数值候选不同，不能将G6的0.38%～0.44%误差或延迟作为本轮结果。
