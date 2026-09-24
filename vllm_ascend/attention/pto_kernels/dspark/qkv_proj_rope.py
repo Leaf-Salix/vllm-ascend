@@ -49,7 +49,10 @@ MAX_SEQ_LEN = M.max_position_embeddings
 # tiling
 Q_PROJ_TILE = 256  # qproj K-tile (Q_LORA reduction)
 QPROJ_MM_N_TILE = 512  # qproj output-column tile
-Q_LORA_TILE = 256  # qr rms-norm / quant N granularity
+# Reduce the qr sum of squares and its amax over the whole row in one pass.
+# npu_rms_norm_dynamic_quant reduces the row once; accumulating partial
+# sums leaves inv_rms about a ULP off, which rides into the dequant scale.
+Q_LORA_TILE = 1024  # qr rms-norm / quant N granularity
 KV_TILE = 64  # kv rms-norm / rope / NOPE N granularity
 QUANT_TILE = 256
 T_TILE = 8
