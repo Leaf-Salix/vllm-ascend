@@ -401,7 +401,9 @@ def q_proj_qr(
                 qr_var_bits = pl.reinterpret_view(qr_var_store, pl.INT32, shape=[1, T_TILE])
                 qr_cand_bits = pl.reinterpret_view(qr_rms_store, pl.INT32, shape=[1, T_TILE])
                 qr_root_bits = pl.create_tensor([1, T_TILE], dtype=pl.INT32)
-                qr_wide = pl.create_tensor([1, 2], dtype=pl.INT64)
+                # Four lanes, not two: alloc_tile wants the row byte size
+                # 32-byte aligned and 2 * sizeof(int64) is only 16.
+                qr_wide = pl.create_tensor([1, 4], dtype=pl.INT64)
                 for qr_row in pl.range(T_TILE):
                     # The parser offers + - * / // % << >> and no bitwise ops,
                     # so split the float with arithmetic. Both values are
