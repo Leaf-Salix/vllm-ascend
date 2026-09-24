@@ -338,6 +338,10 @@ class AscendDSAReqMetadata:
     slot_mapping: torch.Tensor | None
     storage_block_size: int
     query_start_loc: torch.Tensor
+    # Keep the scheduler-owned position buffer available to optional fused
+    # decode backends. It has a stable address during graph capture and avoids
+    # reconstructing positions from request lengths in the attention hot path.
+    input_positions: torch.Tensor | None = None
 
     num_compressed_tokens: int | None = None
     sin: torch.Tensor = None
@@ -1230,6 +1234,7 @@ class AscendDSAMetadataBuilder(AttentionMetadataBuilder[AscendDSAMetadata]):
             slot_mapping=slot_mapping,
             storage_block_size=self.storage_block_size,
             query_start_loc=query_start_loc,
+            input_positions=common_attn_metadata.positions[: common_attn_metadata.num_input_tokens].long(),
             num_compressed_tokens=num_compressed_tokens,
             sin=sin,
             cos=cos,
@@ -1454,6 +1459,7 @@ class AscendDSAMetadataBuilder(AttentionMetadataBuilder[AscendDSAMetadata]):
             slot_mapping=slot_mapping,
             storage_block_size=self.storage_block_size,
             query_start_loc=query_start_loc,
+            input_positions=common_attn_metadata.positions[: common_attn_metadata.num_input_tokens].long(),
             num_compressed_tokens=self.num_actual_tokens,
             sin=sin,
             cos=cos,
@@ -1783,6 +1789,30 @@ class AscendDSAImpl(AttentionImplBase[Any]):
                 pass
             maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
             return output
+
+        # The optional PyPTO path consumes the same live cache allocations and
+        # writes the final attention projection directly into ``output``. Keep
+        # it inside the native connector lifecycle so P/D cache transfer still
+        # waits for incoming data and publishes completed writes.
+        from vllm_ascend import envs
+
+        if envs.VLLM_ASCEND_PYPTO_DSV4_CSA and not oproj_tp_enable():
+            from vllm_ascend.attention import pto_attn
+
+            with attention_transfer_window():
+                pto_ran = pto_attn.substitute(
+                    self,
+                    layer_name,
+                    hidden_states,
+                    kv_cache,
+                    layer_metadata,
+                    output,
+                    cache_is_prepared=cache_is_prepared,
+                )
+            if pto_ran:
+                notify_kv_cache_written(layer_name)
+                maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
+                return output_padded
 
         req_metadata = _require_req_metadata(common_attn_metadata)
         o_proj_input[:actual_tokens] = self._forward_attention(

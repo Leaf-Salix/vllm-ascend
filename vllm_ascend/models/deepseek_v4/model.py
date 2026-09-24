@@ -76,7 +76,6 @@ from vllm.utils.torch_utils import kv_cache_dtype_str_to_dtype
 from vllm.v1.attention.backends.mla.sparse_swa import DeepseekV4SWACache as VllmDeepseekV4SWACache
 from vllm.v1.kv_cache_interface import KVCacheSpec
 
-from vllm_ascend import envs as ascend_envs
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.core.kv_cache_interface import AscendSlidingWindowMLASpec
 from vllm_ascend.models.common.ops.sequence_parallel import (
@@ -666,10 +665,6 @@ class DeepseekV4Attention(nn.Module):
         hidden_states: torch.Tensor,
         llama_4_scaling: torch.Tensor | None,
     ) -> torch.Tensor:
-        if ascend_envs.VLLM_ASCEND_PYPTO_DSV4_CSA:
-            from vllm_ascend.ops.dsv4_csa_attention import forward as pypto_attention_forward
-
-            return pypto_attention_forward(self, positions, hidden_states, llama_4_scaling)
         return self.dsa_attn(positions, hidden_states, llama_4_scaling)
 
 

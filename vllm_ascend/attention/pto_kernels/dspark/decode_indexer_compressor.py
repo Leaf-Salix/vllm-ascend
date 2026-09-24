@@ -11,6 +11,8 @@
 
 import pypto.language as pl
 
+from .native_rope import load_compact_rope
+
 from .config import (
     FLASH as M,
     DECODE_BATCH,
@@ -59,6 +61,20 @@ COMPRESS_STATE_DIM = 2 * OUT_DIM
 IDX_MAX_BLOCKS = (MAX_SEQ_LEN // COMPRESS_RATIO + BLOCK_SIZE - 1) // BLOCK_SIZE
 IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
 COMPRESS_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
+
+# vLLM-native shared 16640-byte pages.  Inner-state blocks interpret the first
+# 16384 bytes as [8, 512] FP32.  Index blocks interpret the same byte range as
+# [128, 128] INT8 keys and the last 256 bytes as 128 FP16 scales.  The allocator
+# keeps the two block-id sets disjoint inside one physical allocation.
+VLLM_STATE_LOGICAL_ROWS = 8
+VLLM_SHARED_PAGE_BYTES = 16640
+VLLM_INDEX_PAGE_ROWS = 130
+VLLM_INDEX_KEY_ROWS = 128
+VLLM_STATE_BYTE_ROWS = COMPRESS_STATE_DIM * 4 // HEAD_DIM
+NATIVE_COMPACT_ROWS = pl.dynamic("NATIVE_INNER_COMPACT_ROWS")
+VLLM_SHARED_PAGE_NUM_DYN = pl.dynamic("VLLM_CSA_SHARED_PAGES_DYN")
+VLLM_INNER_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_INNER_STATE_TABLE_DYN")
+VLLM_INDEX_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_INDEX_TABLE_DYN")
 
 # tiling
 K_TILE = 512
@@ -417,6 +433,564 @@ def indexer_compressor_write(
                 )
 
     return hadamard_tid, scale_commit_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_compressor_pool_projected_vllm(
+    kv_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    score_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    shared_pages: pl.Tensor[
+        [VLLM_SHARED_PAGE_NUM_DYN, VLLM_INDEX_PAGE_ROWS, HEAD_DIM], pl.INT8
+    ],
+    compress_state_block_table: pl.Tensor[
+        [B_DYN, VLLM_INNER_TABLE_BLOCKS_DYN], pl.INT32
+    ],
+    ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
+    norm_w: pl.Tensor[[HEAD_DIM], pl.FP32],
+    cos: pl.Tensor[[NATIVE_COMPACT_ROWS, ROPE_HEAD_DIM], pl.FP32],
+    sin: pl.Tensor[[NATIVE_COMPACT_ROWS, ROPE_HEAD_DIM], pl.FP32],
+    position_ids: pl.Tensor[[T_DYN], pl.INT32],
+    token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+    idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
+    compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    normed_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16]],
+    late_dep: pl.Scalar[pl.TASK_ID],
+):
+    """Pool and commit inner state through vLLM's shared byte pages."""
+    b_dim = pl.tensor.dim(compress_state_block_table, 0)
+    tokens = pl.tensor.dim(position_ids, 0)
+    s_dim = tokens // b_dim
+    page_count = pl.tensor.dim(shared_pages, 0)
+    shared_pages_flat = pl.reshape(
+        shared_pages, [page_count * VLLM_INDEX_PAGE_ROWS, HEAD_DIM],
+    )
+    pooled_kv = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
+    pool_workers = pl.min(b_dim, POOL_WORKERS)
+    with pl.spmd(
+        pool_workers,
+        name_hint="indexer_scatter_softmax_pool_vllm",
+        deps=[late_dep],
+    ) as pool_tid:
+        worker = pl.tile.get_block_idx()
+        for request in pl.range(worker, b_dim, pool_workers):
+            request_begin = request * s_dim
+            first_position = pl.read(position_ids, [request_begin])
+            for step in pl.range(s_dim):
+                token = request_begin + step
+                pooled_kv[token : token + 1, :] = pl.full(
+                    [1, HEAD_DIM], dtype=pl.FP32, value=0.0,
+                )
+                valid = pl.read(token_valid, [token])
+                position = pl.read(position_ids, [token])
+                if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
+                    window_start = position - STATE_LEN + 1
+                    for h0 in pl.range(0, HEAD_DIM, HEAD_TILE):
+                        last_ape_row = pl.cast(
+                            position % COMPRESS_RATIO, target_type=pl.INDEX,
+                        )
+                        mi = pl.add(
+                            score_proj_pad[
+                                token : token + 1,
+                                HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE,
+                            ],
+                            ape[
+                                last_ape_row : last_ape_row + 1,
+                                HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE,
+                            ],
+                        )
+                        li = pl.exp(pl.sub(mi, mi))
+                        oi = kv_proj_pad[
+                            token : token + 1,
+                            HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE,
+                        ]
+                        for state_idx in pl.range(STATE_LEN - 1):
+                            logical_position = window_start + state_idx
+                            value = pl.full(
+                                [1, HEAD_TILE], dtype=pl.FP32, value=0.0,
+                            )
+                            score = pl.full(
+                                [1, HEAD_TILE],
+                                dtype=pl.FP32,
+                                value=FP32_NEG_INF,
+                            )
+                            if logical_position >= 0 and logical_position < first_position:
+                                logical_page = (
+                                    logical_position // VLLM_STATE_LOGICAL_ROWS
+                                )
+                                physical_page_i32 = pl.read(
+                                    compress_state_block_table,
+                                    [request, logical_page],
+                                )
+                                if physical_page_i32 > 0:
+                                    physical_page = pl.cast(
+                                        physical_page_i32, pl.INDEX,
+                                    )
+                                    intra = logical_position % VLLM_STATE_LOGICAL_ROWS
+                                    byte_row = (
+                                        physical_page * VLLM_INDEX_PAGE_ROWS
+                                        + intra * VLLM_STATE_BYTE_ROWS
+                                    )
+                                    state_bytes = pl.slice(
+                                        shared_pages_flat,
+                                        [VLLM_STATE_BYTE_ROWS, HEAD_DIM],
+                                        [byte_row, 0],
+                                    )
+                                    state_row = pl.reinterpret_view(
+                                        state_bytes,
+                                        pl.FP32,
+                                        shape=[1, COMPRESS_STATE_DIM],
+                                    )
+                                    if state_idx < COMPRESS_RATIO:
+                                        value = pl.slice(
+                                            state_row, [1, HEAD_TILE], [0, h0],
+                                        )
+                                        score = pl.slice(
+                                            state_row,
+                                            [1, HEAD_TILE],
+                                            [0, OUT_DIM + h0],
+                                        )
+                                    else:
+                                        value = pl.slice(
+                                            state_row,
+                                            [1, HEAD_TILE],
+                                            [0, HEAD_DIM + h0],
+                                        )
+                                        score = pl.slice(
+                                            state_row,
+                                            [1, HEAD_TILE],
+                                            [0, OUT_DIM + HEAD_DIM + h0],
+                                        )
+                            if (
+                                logical_position >= first_position
+                                and logical_position <= position
+                            ):
+                                overlay_token = (
+                                    request_begin
+                                    + logical_position
+                                    - first_position
+                                )
+                                overlay_valid = pl.read(token_valid, [overlay_token])
+                                if overlay_valid != 0:
+                                    ape_row = pl.cast(
+                                        logical_position % COMPRESS_RATIO,
+                                        target_type=pl.INDEX,
+                                    )
+                                    if state_idx < COMPRESS_RATIO:
+                                        value = kv_proj_pad[
+                                            overlay_token : overlay_token + 1,
+                                            h0 : h0 + HEAD_TILE,
+                                        ]
+                                        score = pl.add(
+                                            score_proj_pad[
+                                                overlay_token : overlay_token + 1,
+                                                h0 : h0 + HEAD_TILE,
+                                            ],
+                                            ape[
+                                                ape_row : ape_row + 1,
+                                                h0 : h0 + HEAD_TILE,
+                                            ],
+                                        )
+                                    else:
+                                        value = kv_proj_pad[
+                                            overlay_token : overlay_token + 1,
+                                            HEAD_DIM
+                                            + h0 : HEAD_DIM
+                                            + h0
+                                            + HEAD_TILE,
+                                        ]
+                                        score = pl.add(
+                                            score_proj_pad[
+                                                overlay_token : overlay_token + 1,
+                                                HEAD_DIM
+                                                + h0 : HEAD_DIM
+                                                + h0
+                                                + HEAD_TILE,
+                                            ],
+                                            ape[
+                                                ape_row : ape_row + 1,
+                                                HEAD_DIM
+                                                + h0 : HEAD_DIM
+                                                + h0
+                                                + HEAD_TILE,
+                                            ],
+                                        )
+                            mi_next = pl.maximum(mi, score)
+                            alpha = pl.exp(pl.sub(mi, mi_next))
+                            beta = pl.exp(pl.sub(score, mi_next))
+                            li = pl.add(pl.mul(alpha, li), beta)
+                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
+                            mi = mi_next
+                        pooled_kv[
+                            token : token + 1, h0 : h0 + HEAD_TILE
+                        ] = pl.div(oi, li)
+
+    commit_workers = pl.min(b_dim, COMMIT_WORKERS)
+    with pl.spmd(
+        commit_workers,
+        name_hint="indexer_state_commit_vllm",
+        deps=[pool_tid],
+    ) as state_commit_tid:
+        worker = pl.tile.get_block_idx()
+        for request in pl.range(worker, b_dim, commit_workers):
+            for step in pl.range(s_dim):
+                token = request * s_dim + step
+                valid = pl.read(token_valid, [token])
+                if valid != 0:
+                    position = pl.read(position_ids, [token])
+                    physical_page_i32 = pl.read(state_slot_mapping, [token, 0])
+                    intra = pl.cast(pl.read(state_slot_mapping, [token, 1]), pl.INDEX)
+                    if physical_page_i32 >= 0 and intra >= 0:
+                        physical_page = pl.cast(physical_page_i32, pl.INDEX)
+                        ape_row = pl.cast(
+                            position % COMPRESS_RATIO, target_type=pl.INDEX,
+                        )
+                        state_row = pl.concat(
+                            kv_proj_pad[token : token + 1, 0:OUT_DIM],
+                            pl.add(
+                                score_proj_pad[token : token + 1, 0:OUT_DIM],
+                                ape[ape_row : ape_row + 1, 0:OUT_DIM],
+                            ),
+                        )
+                        state_bytes = pl.reinterpret_view(
+                            state_row,
+                            pl.INT8,
+                            shape=[VLLM_STATE_BYTE_ROWS, HEAD_DIM],
+                        )
+                        byte_row = (
+                            physical_page * VLLM_INDEX_PAGE_ROWS
+                            + intra * VLLM_STATE_BYTE_ROWS
+                        )
+                        shared_pages_flat[
+                            byte_row : byte_row + VLLM_STATE_BYTE_ROWS,
+                            0:HEAD_DIM,
+                        ] = state_bytes
+
+    norm_w_2d = pl.reshape(norm_w, [1, HEAD_DIM])
+    rms_blocks = (tokens + RMS_PAD_TILE - 1) // RMS_PAD_TILE
+    with pl.spmd(
+        rms_blocks,
+        name_hint="indexer_rmsnorm_rope_vllm",
+        deps=[pool_tid],
+    ) as rms_tid:
+        block = pl.tile.get_block_idx()
+        row_begin = block * RMS_PAD_TILE
+        rows = pl.min(RMS_PAD_TILE, tokens - row_begin)
+        rope_ones = pl.tile.full(
+            [RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0,
+        )
+        rope_columns = pl.col_expand_mul(
+            rope_ones,
+            pl.cast(
+                pl.tile.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32),
+                target_type=pl.FP32,
+            ),
+        )
+        duplicate = pl.cast(
+            pl.cast(pl.mul(rope_columns, 0.5), target_type=pl.INT32, mode="trunc"),
+            target_type=pl.FP32,
+        )
+        lane = pl.sub(rope_columns, pl.mul(duplicate, 2.0))
+        swap = pl.cast(
+            pl.sub(pl.add(rope_columns, 1.0), pl.mul(lane, 2.0)),
+            target_type=pl.INT32,
+        )
+        row_seed = pl.mul(pl.cast(pl.tile.arange(0, [1, RMS_PAD_TILE], dtype=pl.INT32),
+                                  target_type=pl.FP32), 1.0 * ROPE_HEAD_DIM)
+        row_offsets = pl.transpose(pl.col_expand_mul(
+            pl.tile.full([ROPE_HEAD_DIM, RMS_PAD_TILE], dtype=pl.FP32, value=1.0), row_seed),
+            axis1=0, axis2=1)
+        swap = pl.cast(pl.add(pl.cast(swap, pl.FP32), row_offsets), pl.INT32)
+        gather_tmp = pl.create_tile([RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.INT32,
+                                    target_memory=pl.MemorySpace.Vec)
+
+        pooled_block = pl.load(pooled_kv, [row_begin, 0], [RMS_PAD_TILE, HEAD_DIM],
+                               valid_shape=[rows, HEAD_DIM])
+        cos_block, sin_block = load_compact_rope(
+            cos, sin, position_ids, token_valid, compact_offsets, row_begin, rows,
+        )
+        reduce_tmp = pl.create_tile([RMS_PAD_TILE, HEAD_TILE], dtype=pl.FP32,
+                                    target_memory=pl.MemorySpace.Vec)
+        # This kernel specializes the native 128-wide indexer to two 64-wide
+        # reductions. Explicit slices keep both offsets compile-time constants.
+        first = pooled_block[:, 0:HEAD_TILE]
+        second = pooled_block[:, HEAD_TILE:HEAD_DIM]
+        partial_sq = pl.add(
+            pl.reshape(pl.row_sum(pl.mul(first, first), reduce_tmp), [1, RMS_PAD_TILE]),
+            pl.reshape(pl.row_sum(pl.mul(second, second), reduce_tmp), [1, RMS_PAD_TILE]),
+        )
+        inv_rms = pl.recip(
+            pl.sqrt(
+                pl.reshape(
+                    pl.add(pl.mul(partial_sq, HEAD_DIM_INV), EPS),
+                    [RMS_PAD_TILE, 1],
+                ),
+            ),
+        )
+        nope = pooled_block[:, 0:NOPE_HEAD_DIM]
+        nope_gamma = pl.load(norm_w_2d, [0, 0], [1, NOPE_HEAD_DIM])
+        normed_nope = pl.cast(
+            pl.col_expand_mul(pl.row_expand_mul(nope, inv_rms), nope_gamma),
+            target_type=pl.BF16,
+            mode="rint",
+        )
+        rope = pooled_block[:, NOPE_HEAD_DIM:HEAD_DIM]
+        rope_gamma = pl.load(norm_w_2d, [0, NOPE_HEAD_DIM], [1, ROPE_HEAD_DIM])
+        rope_normed = pl.col_expand_mul(
+            pl.row_expand_mul(rope, inv_rms), rope_gamma,
+        )
+        sin_block = pl.mul(sin_block, pl.sub(pl.mul(lane, 2.0), 1.0))
+        normed_rope = pl.cast(
+            pl.add(
+                pl.mul(rope_normed, cos_block),
+                pl.mul(pl.tile.gather(rope_normed, swap, gather_tmp), sin_block),
+            ),
+            target_type=pl.BF16,
+            mode="rint",
+        )
+        pl.store(normed_nope, [row_begin, 0], normed_kv)
+        pl.store(normed_rope, [row_begin, NOPE_HEAD_DIM], normed_kv)
+    return rms_tid, state_commit_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_compressor_write_vllm(
+    normed_kv: pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16],
+    hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
+    shared_pages: pl.Tensor[
+        [VLLM_SHARED_PAGE_NUM_DYN, VLLM_INDEX_PAGE_ROWS, HEAD_DIM], pl.INT8
+    ],
+    index_block_table: pl.Tensor[
+        [B_DYN, VLLM_INDEX_TABLE_BLOCKS_DYN], pl.INT32
+    ],
+    position_ids: pl.Tensor[[T_DYN], pl.INT32],
+    token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+    idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
+    compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    rms_tid: pl.Scalar[pl.TASK_ID],
+    hadamard_dep: pl.Scalar[pl.TASK_ID],
+    state_commit_tid: pl.Scalar[pl.TASK_ID],
+):
+    """Write key and FP16 scale into one packed vLLM index page."""
+    b_dim = pl.tensor.dim(index_block_table, 0)
+    tokens = pl.tensor.dim(position_ids, 0)
+    s_dim = tokens // b_dim
+    page_count = pl.tensor.dim(shared_pages, 0)
+    shared_pages_flat = pl.reshape(
+        shared_pages, [page_count * VLLM_INDEX_PAGE_ROWS, HEAD_DIM],
+    )
+    token_blocks = (tokens + RMS_PAD_TILE - 1) // RMS_PAD_TILE
+    kv_final = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
+    with pl.spmd(
+        token_blocks,
+        name_hint="indexer_kv_hadamard_vllm",
+        deps=[rms_tid, hadamard_dep],
+    ) as hadamard_tid:
+        block = pl.tile.get_block_idx()
+        row_begin = block * RMS_PAD_TILE
+        rows = pl.min(RMS_PAD_TILE, tokens - row_begin)
+        values = pl.slice(
+            normed_kv,
+            [RMS_PAD_TILE, HEAD_DIM],
+            [row_begin, 0],
+            valid_shape=[rows, HEAD_DIM],
+        )
+        for o0 in pl.range(0, HEAD_DIM, OUT_TILE):
+            projected = pl.matmul(
+                values,
+                hadamard[:, o0 : o0 + OUT_TILE],
+                out_dtype=pl.FP32,
+            )
+            kv_final[
+                row_begin : row_begin + RMS_PAD_TILE, o0 : o0 + OUT_TILE
+            ] = projected
+
+    key_workers = pl.min(token_blocks, COMMIT_WORKERS)
+    scale_values = pl.create_tensor([BS_PAD, 1], dtype=pl.FP32)
+    with pl.spmd(
+        key_workers,
+        name_hint="indexer_key_write_vllm",
+        deps=[hadamard_tid, state_commit_tid],
+    ) as key_write_tid:
+        worker = pl.tile.get_block_idx()
+        for token_block in pl.range(worker, token_blocks, key_workers):
+            token_begin = token_block * RMS_PAD_TILE
+            token_rows = pl.min(RMS_PAD_TILE, tokens - token_begin)
+            row_fp32 = pl.cast(
+                pl.cast(
+                    pl.slice(
+                        kv_final,
+                        [RMS_PAD_TILE, HEAD_DIM],
+                        [token_begin, 0],
+                    ),
+                    target_type=pl.BF16,
+                    mode="rint",
+                ),
+                target_type=pl.FP32,
+            )
+            amax = pl.reshape(
+                pl.row_max(pl.abs(row_fp32)), [1, RMS_PAD_TILE],
+            )
+            amax = pl.maximum(
+                amax,
+                pl.full(
+                    [1, RMS_PAD_TILE],
+                    dtype=pl.FP32,
+                    value=INT8_AMAX_EPS,
+                ),
+            )
+            quant_scale_row = pl.div(
+                pl.full(
+                    [1, RMS_PAD_TILE],
+                    dtype=pl.FP32,
+                    value=INT8_SCALE_MAX,
+                ),
+                amax,
+            )
+            quant_scale = pl.reshape(quant_scale_row, [RMS_PAD_TILE, 1])
+            dequant_scale = pl.reshape(
+                pl.recip(quant_scale_row), [RMS_PAD_TILE, 1],
+            )
+            scale_values[
+                token_begin : token_begin + RMS_PAD_TILE, 0:1
+            ] = dequant_scale
+            scaled = pl.row_expand_mul(row_fp32, quant_scale)
+            key_i8 = pl.cast(
+                pl.cast(
+                    pl.cast(scaled, target_type=pl.INT32, mode="rint"),
+                    target_type=pl.FP16,
+                    mode="round",
+                ),
+                target_type=pl.INT8,
+                mode="trunc",
+            )
+            for inner in pl.range(token_rows):
+                token = token_begin + inner
+                request = token // s_dim
+                valid = pl.read(token_valid, [token])
+                position = pl.read(position_ids, [token])
+                if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
+                    compact_row = pl.cast(pl.read(compact_offsets, [request]), pl.INDEX) + (position + 1) // COMPRESS_RATIO
+                    physical_page_i32 = pl.read(idx_slot_mapping, [compact_row, 0])
+                    intra = pl.cast(pl.read(idx_slot_mapping, [compact_row, 1]), pl.INDEX)
+                    if physical_page_i32 >= 0 and intra >= 0:
+                        physical_page = pl.cast(physical_page_i32, pl.INDEX)
+                        physical_row = (
+                            physical_page * VLLM_INDEX_PAGE_ROWS + intra
+                        )
+                        shared_pages_flat[
+                            physical_row : physical_row + 1, 0:HEAD_DIM
+                        ] = key_i8[inner : inner + 1, 0:HEAD_DIM]
+
+    with pl.at(
+        level=pl.Level.CORE_GROUP,
+        name_hint="indexer_scale_write_vllm",
+        deps=[key_write_tid],
+    ) as scale_write_tid:
+        for token in pl.range(tokens):
+            request = token // s_dim
+            valid = pl.read(token_valid, [token])
+            position = pl.read(position_ids, [token])
+            if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
+                compact_row = pl.cast(pl.read(compact_offsets, [request]), pl.INDEX) + (position + 1) // COMPRESS_RATIO
+                physical_page_i32 = pl.read(idx_slot_mapping, [compact_row, 0])
+                intra = pl.cast(pl.read(idx_slot_mapping, [compact_row, 1]), pl.INDEX)
+                if physical_page_i32 >= 0 and intra >= 0:
+                    physical_page = pl.cast(physical_page_i32, pl.INDEX)
+                    tail_row = (
+                        physical_page * VLLM_INDEX_PAGE_ROWS
+                        + VLLM_INDEX_KEY_ROWS
+                    )
+                    tail_i8 = pl.load(
+                        shared_pages_flat, [tail_row, 0], [2, HEAD_DIM],
+                    )
+                    scales = pl.reinterpret_view(
+                        tail_i8, pl.FP16, shape=[1, VLLM_INDEX_KEY_ROWS],
+                    )
+                    pl.tile.write(
+                        scales,
+                        [0, intra],
+                        pl.cast(pl.read(scale_values, [token, 0]), pl.FP16),
+                    )
+                    tail_out = pl.reinterpret_view(
+                        scales, pl.INT8, shape=[2, HEAD_DIM],
+                    )
+                    pl.store(tail_out, [tail_row, 0], shared_pages_flat)
+    return scale_write_tid
+
+
+@pl.jit.inline
+def indexer_compressor_vllm(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    shared_pages: pl.Tensor[
+        [VLLM_SHARED_PAGE_NUM_DYN, VLLM_INDEX_PAGE_ROWS, HEAD_DIM], pl.INT8
+    ],
+    compress_state_block_table: pl.Tensor[
+        [B_DYN, VLLM_INNER_TABLE_BLOCKS_DYN], pl.INT32
+    ],
+    wkv: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    wgate: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
+    norm_w: pl.Tensor[[HEAD_DIM], pl.FP32],
+    cos: pl.Tensor[[NATIVE_COMPACT_ROWS, ROPE_HEAD_DIM], pl.FP32],
+    sin: pl.Tensor[[NATIVE_COMPACT_ROWS, ROPE_HEAD_DIM], pl.FP32],
+    hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
+    index_block_table: pl.Tensor[
+        [B_DYN, VLLM_INDEX_TABLE_BLOCKS_DYN], pl.INT32
+    ],
+    position_ids: pl.Tensor[[T_DYN], pl.INT32],
+    token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+    idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
+    compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    late_dep: pl.Scalar[pl.TASK_ID],
+    hadamard_dep: pl.Scalar[pl.TASK_ID],
+):
+    """Run the inner compressor on vLLM-native shared pages."""
+    kv_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
+    score_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
+    projection_tid = indexer_compressor_project(
+        x,
+        wkv,
+        wgate,
+        kv_proj_pad,
+        score_proj_pad,
+        late_dep,
+        hadamard_dep,
+    )
+    normed_kv = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.BF16)
+    rms_tid, state_commit_tid = indexer_compressor_pool_projected_vllm(
+        kv_proj_pad,
+        score_proj_pad,
+        shared_pages,
+        compress_state_block_table,
+        ape,
+        norm_w,
+        cos,
+        sin,
+        position_ids,
+        token_valid,
+        state_slot_mapping,
+        idx_slot_mapping,
+        compact_offsets,
+        normed_kv,
+        projection_tid,
+    )
+    return indexer_compressor_write_vllm(
+        normed_kv,
+        hadamard,
+        shared_pages,
+        index_block_table,
+        position_ids,
+        token_valid,
+        state_slot_mapping,
+        idx_slot_mapping,
+        compact_offsets,
+        rms_tid,
+        hadamard_dep,
+        state_commit_tid,
+    )
 
 
 @pl.jit.inline
