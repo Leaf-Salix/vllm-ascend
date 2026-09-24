@@ -411,18 +411,20 @@ def q_proj_qr(
                     v_sig = (v_bits % 0x800000) + 0x800000
                     v_exp = (v_bits >> 23) - 127
                     cand_bits = pl.read(qr_cand_bits, [0, qr_row])
-                    pl.write(qr_root_bits, [0, qr_row], cand_bits + 1)
+                    # Scalar arithmetic yields an index-typed value; the write
+                    # needs it cast to the tensor dtype.
+                    pl.write(qr_root_bits, [0, qr_row], pl.cast(cand_bits + 1, pl.INT32))
                     for qr_step in (0, -1):
                         step_bits = cand_bits + qr_step
                         step_sig = (step_bits % 0x800000) + 0x800000
                         step_exp = (step_bits >> 23) - 127
-                        pl.write(qr_wide, [0, 0], 2 * step_sig + 1)
+                        pl.write(qr_wide, [0, 0], pl.cast(2 * step_sig + 1, pl.INT64))
                         mid_hi = pl.read(qr_wide, [0, 0])
-                        pl.write(qr_wide, [0, 1], v_sig)
+                        pl.write(qr_wide, [0, 1], pl.cast(v_sig, pl.INT64))
                         v_wide = pl.read(qr_wide, [0, 1])
                         shift = (v_exp - 23) - (2 * step_exp - 48)
                         if (v_wide << shift) < mid_hi * mid_hi:
-                            pl.write(qr_root_bits, [0, qr_row], step_bits)
+                            pl.write(qr_root_bits, [0, qr_row], pl.cast(step_bits, pl.INT32))
                 qr_root_store = pl.reinterpret_view(qr_root_bits, pl.FP32, shape=[1, T_TILE])
                 qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
                 for qr_inv_row in pl.range(T_TILE):
