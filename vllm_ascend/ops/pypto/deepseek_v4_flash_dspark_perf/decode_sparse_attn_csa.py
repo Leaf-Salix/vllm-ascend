@@ -199,17 +199,42 @@ def sparse_attn_csa(
         plan_worker = pl.tile.get_block_idx()
         for bias_t0 in pl.range(plan_worker * BIAS_T_TILE, t_dim, CSA_PLAN_WORKERS * BIAS_T_TILE):
             bias_rows = pl.min(BIAS_T_TILE, t_dim - bias_t0)
+            # 压缩索引这段按整个 BIAS_T_TILE 一次算完（上游写法）。原先逐 token 做
+            # [1, IDX_TOPK]，向量操作条数是现在的 BIAS_T_TILE 倍、每条只有 1/8 宽，
+            # 实测该任务 2.53x 上游。SWA 那段仍需逐 token，因为它要按 token 读
+            # position_ids 与页表；这里只把能向量化的部分提出来。
+            c_raw_tile = pl.cast(
+                idx_topk[bias_t0 : bias_t0 + BIAS_T_TILE, 0:IDX_TOPK], target_type=pl.FP32
+            )
+            c_pos = pl.cast(position_ids[bias_t0 : bias_t0 + BIAS_T_TILE, 0:1], target_type=pl.FP32)
+            c_pos_q = pl.cast(
+                pl.cast(pl.mul(pl.add(c_pos, 1.0), COMPRESS_RATIO_INV), target_type=pl.INT32, mode="trunc"),
+                target_type=pl.FP32,
+            )
+            c_upper_b = pl.row_expand_mul(
+                pl.full([BIAS_T_TILE, IDX_TOPK], dtype=pl.FP32, value=1.0), c_pos_q
+            )
+            c_ge_tile = pl.minimum(pl.maximum(pl.add(c_raw_tile, CSA_CMP_GE_BIAS), 0.0), 1.0)
+            c_lt_tile = pl.minimum(pl.maximum(pl.sub(c_upper_b, c_raw_tile), 0.0), 1.0)
+            c_mask_tile = pl.mul(c_ge_tile, c_lt_tile)
+            c_out_tile = pl.sub(pl.mul(c_mask_tile, pl.add(c_raw_tile, 1.0)), 1.0)
+            cmp_sparse_indices[bias_t0 : bias_t0 + BIAS_T_TILE, 0:IDX_TOPK] = pl.cast(
+                c_out_tile, target_type=pl.INT32
+            )
+            sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, ATTN_K_TILE : ATTN_K_TILE + CMP_TOPK] = pl.mul(
+                pl.minimum(c_out_tile, 0.0), -NEG_INF
+            )
+            # 每块的有效位直接由 c_mask_tile 归约得到，不再回读 cmp_sparse_indices。
+            for c_sb in pl.range(1, SPARSE_BLOCKS):
+                c_s0 = (c_sb - 1) * ATTN_K_TILE
+                c_blk_valid = pl.row_max(c_mask_tile[:, c_s0 : c_s0 + ATTN_K_TILE])
+                for c_dt in pl.range(bias_rows):
+                    c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
+                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
             for bias_dt in pl.range(bias_rows):
                 bias_t = bias_t0 + bias_dt
                 bias_request = bias_t // S
                 c_position = pl.cast(pl.read(position_ids, [bias_t, 0]), pl.INDEX)
-                c_raw = pl.cast(idx_topk[bias_t : bias_t + 1, 0:IDX_TOPK], target_type=pl.FP32)
-                c_upper = pl.cast(pl.cast((c_position + 1) // COMPRESS_RATIO, pl.INT32), pl.FP32)
-                c_ge = pl.minimum(pl.maximum(pl.add(c_raw, CSA_CMP_GE_BIAS), 0.0), 1.0)
-                c_lt = pl.minimum(pl.maximum(pl.add(pl.neg(c_raw), c_upper), 0.0), 1.0)
-                c_mask = pl.mul(c_ge, c_lt)
-                c_out = pl.sub(pl.mul(c_mask, pl.add(c_raw, 1.0)), 1.0)
-                cmp_sparse_indices[bias_t : bias_t + 1, 0:IDX_TOPK] = pl.cast(c_out, target_type=pl.INT32)
 
                 # Match the Native page-valid window, including short histories
                 # and negative page entries. Intervals from distinct pages do not overlap.
@@ -246,22 +271,6 @@ def sparse_attn_csa(
                     sparse_bias[bias_t : bias_t + 1, WIN:ATTN_K_TILE] = pl.full(
                         [1, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF
                     )
-                sparse_bias[bias_t : bias_t + 1, ATTN_K_TILE:ATTN_K_TILE + CMP_TOPK] = pl.mul(
-                    pl.minimum(c_out, 0.0), -NEG_INF
-                )
-            # Eight rows keep the column-major reduction output 32-byte aligned.
-            # Reuse the final sparse indices; no position/window adapter buffer.
-            c_blk_tmp = pl.create_tile([BIAS_T_TILE, ATTN_K_TILE], dtype=pl.FP32)
-            for c_sb in pl.range(1, SPARSE_BLOCKS):
-                c_s0 = (c_sb - 1) * ATTN_K_TILE
-                c_block_slots = pl.cast(pl.load(
-                    cmp_sparse_indices, [bias_t0, c_s0], [BIAS_T_TILE, ATTN_K_TILE],
-                    valid_shape=[bias_rows, ATTN_K_TILE],
-                ), target_type=pl.FP32)
-                c_blk_valid = pl.row_max(pl.minimum(pl.maximum(pl.add(c_block_slots, 1.0), 0.0), 1.0), c_blk_tmp)
-                for c_dt in pl.range(bias_rows):
-                    c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
-                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
 
     # QK/PV scratch tensors.
     cmp_block_num = pl.tensor.dim(cmp_kv, 0)
