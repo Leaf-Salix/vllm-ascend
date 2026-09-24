@@ -199,7 +199,42 @@ if hasattr(attn_backend, "get_supported_kernel_block_sizes") and self.use_hybrid
 但 `AscendSFAIndexerCacheSpec` 的分配分支（同文件 4082 起）没有这段，
 直接用了全局的 `current_kv_cache_spec.block_size`（=32），于是页跨度成了 4160。
 
-**建议优先评估这条**：让 indexer 分支也尊重后端声明的 kernel block size。
+**⚠ 2026-09-25 实测更正：block size 这条走不通。**
+vLLM 在 `v1/core/kv_cache_utils.py:1456` 用 `block_size=uniform_block_size`
+**统一所有 KV cache group 的块大小**，改单个 spec 的 `block_size` 会被覆盖
+（实测：设成 64 后 key 每页仍是 32 token）。要走这条得改 vLLM 的统一块大小机制，
+代价远超收益。
+
+**改为建议这条：用 `page_size_padded` 把页跨度对齐到键行宽。**
+vLLM 的 `KVCacheSpec` 基类本来就有这个字段，`page_size_bytes` 会优先返回它：
+
+```python
+page_size_padded: int | None = None
+...
+if self.page_size_padded is not None:
+    assert self.page_size_padded >= real_page_size
+    return self.page_size_padded
+```
+
+而 `vllm_ascend/core/kv_cache_interface.py` 的 `AscendSFAIndexerCacheSpec`
+**覆盖了 `page_size_bytes` 并直接返回 `real_page_size_bytes`**，把基类这个机制屏蔽了。
+若让它像基类一样尊重 `page_size_padded`，把页从 4160 填到 **4224 = 33×128**：
+
+- 块大小不变、块表不变、调度与 block id 共享不受影响；
+- 键仍在页内偏移 0 起的 4096 连续字节，scale 在其后，只是每页多 64 字节空洞；
+- 显存代价 **+1.54%**，且只在 indexer 这一块 cache 上；
+- 之后 `[blocks*33, 128]` 即合法连续视图，第 p 页的键正好是第 `p*33` 起的 32 行，
+  第四节上游那段整页直搬 L1 的代码可以原样用。
+
+这正是「只加一点描述信息 + 多占一点内存」的形态，不改语义、不改 PTO。
+
+实测提示：本轮试做时改了 `AscendSFAIndexerCacheSpec.page_size_bytes` 与其
+`merge()`（后者原本不透传 `page_size_padded`），但分配层拿到的跨度仍是 4160。
+框架里存在两条 KV cache 重整路径，实际生效的是
+`model_runner_v1.py` 中用 `torch.as_strided(..., (page_size_bytes // dtype_size, *stride[1:]), ...)`
+的通用那条；要落地需确认 `page_size_padded` 能贯穿到该处。这是留给框架侧的收尾。
+
+（原文保留：让 indexer 分支尊重后端声明的 kernel block size。）
 它不改 PTO、不改 cache spec 结构、不拆分配、不增加 KV transfer 的注册段数，
 用的是框架自己已有且已在别处生效的机制。
 
