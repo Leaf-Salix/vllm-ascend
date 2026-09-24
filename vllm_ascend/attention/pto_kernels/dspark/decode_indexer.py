@@ -1268,9 +1268,23 @@ def indexer_weights_score_vllm(
                     0:IDX_N_HEADS,
                 ],
             )
+        # Native's weights_proj is a BF16 Linear and the softmax_scale *
+        # n_heads**-0.5 factor is applied to that BF16 tensor, so both the
+        # projection and the scaled result are rounded.
+        total_bf16 = pl.cast(
+            pl.cast(total, target_type=pl.BF16, mode="rint"),
+            target_type=pl.FP32,
+        )
         weights[
             row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS
-        ] = pl.mul(total, WEIGHTS_SCALE)
+        ] = pl.cast(
+            pl.cast(
+                pl.mul(total_bf16, WEIGHTS_SCALE),
+                target_type=pl.BF16,
+                mode="rint",
+            ),
+            target_type=pl.FP32,
+        )
 
     scores, indices, completion = indexer_score_topk_forest_vllm(
         qr_hadamard_i8,
