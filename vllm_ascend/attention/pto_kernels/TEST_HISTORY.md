@@ -1,7 +1,7 @@
 # DeepSeek V4 Flash PyPTO CSA 测试历史
 
 本记录属于 `dev/pypto-dsv4-csa-tnd-main-20260924` 分支，覆盖从首次接入
-`6c9d552a1` 到在线 softmax 提交 `3982ad343` 的全部分支提交。更新日期：2026-09-24。
+`6c9d552a1` 到 Hadamard 对齐提交 `34fd15d54` 的全部源码提交。更新日期：2026-09-24。
 后续改变 kernel、绑定、原生基线或测量方法时，在本文追加记录，保留旧结果，
 以便按提交比较。这里的“通过运行”仅指程序完成；数值验收单独标注。
 
@@ -44,13 +44,14 @@
 | `b39b2b4d3` | 仅将 Q/KV 的 14 处原生 BF16 舍入边界加入正式 TND kernel；与已测 Q/KV 诊断副本 AST 一致，本地相关合约 29 项通过。 | 尚未在该正式提交上重跑 NPU 精度、Graph 延迟或整模型；不能把包含 Indexer 修改的 0.7028% 记作此提交结果。 |
 | `67ef8afa7` | 正式 sparse attention 在 inverse RoPE 前把归一化 heads 舍入 BF16，CPU golden 同步该边界；Python 编译与增量 pre-commit 通过。 | 后续仅改文档的 `99296493f` 快照在 227 完成正式 B4/T18：输出 relative L2 `1.231282%`，未通过精度验收；Graph 结果见下文。独立诊断副本的 `0.376710%` 不能当作正式提交结果。 |
 | `3982ad343` | 依原生在线 softmax 顺序，将 sink 计入初始和，概率舍入前使用累计最大值；同步 CPU golden。诊断副本 `sparse_attn_csa` 的 AST 与正式源码相同；227 CPU 合约 29 项通过。 | 正式 B4/T18 输出 relative L2 `1.229696%`，仍未通过精度验收；固定 Native 输入的诊断 heads 差异从 `0.030104%` 降到 `0.005752%`。Graph 结果和限制见下文。 |
+| `34fd15d54` | 将原生 Hadamard 矩阵直接传入，在矩阵乘法之后缩放并保留 cache 量化前的两次 BF16 舍入；227 CPU 合约 29 项通过，单卡 B4/T18 完成。 | index_key 和 index_scale 从 `0.753399%`、`0.403080%` 降至逐位相同；最终输出仍为 `1.229696%`，精度未通过。Graph 结果见下文。 |
 
 `6c9d552a1` 至 `3b45322e7` 的条目如实区分“有测试代码/静态检查”和
 “有可核实的测试执行结果”。请勿将后续提交的 NPU 结果反向标记为早期提交通过。
 
 `882405b33`、`e0e81f51e`、`8b9d430aa` 只改文档。`b39b2b4d3`
-没有该提交自己的 NPU A/B；`67ef8afa7` 和 `3982ad343` 已有短测，
-但后者还没有 B16、长时间 Graph 或整模型结果。跨提交的短测延迟不能直接
+没有该提交自己的 NPU A/B；`67ef8afa7`、`3982ad343` 和 `34fd15d54` 已有短测，
+但仍没有 B16、长时间 Graph 或整模型结果。跨提交的短测延迟不能直接
 代替同组性能结论，精度未通过时也不能视为等价替换收益。
 
 ### 原生 metadata 接入后的 B4/S6 记录
@@ -360,6 +361,49 @@ softmax 从 `max=sink`、`sum=1` 开始，并在每个 S2 块持续更新；tili
 两个正式快照的 227 CPU 合约各 29 项通过，Graph capture/replay 完成，
 CSA 调用计数各为 37，输出 guard 未改。未测 B16、整模型及长时间延迟；
 上述同组延迟只保留为实验数据，不构成性能收益结论。
+
+### TopK 候选集合：单因素诊断
+
+`task_20260924_213336_1524231443` 在 227 单卡完成，退出码 0。保持
+Native Q、raw KV、compressed KV 注入和在线 softmax 诊断实现，仅把 sparse
+attention 的 TopK 输入从 Native 改为 PyPTO 自己算出的 TopK。两组保存的
+13 个 Native 阶段张量逐元素相同；PyPTO Q、KV、QR、QR scale 和 TopK
+也逐元素相同，只有 attention 及其后续结果改变。
+
+| TopK 来源 | inverse RoPE 前 heads relative L2 | BF16 边界后 heads relative L2 | 最终输出 relative L2 |
+| --- | ---: | ---: | ---: |
+| Native，`task_20260924_211516_124009615551` | 0.005752% | 0.005841% | 0.565954% |
+| PyPTO，`task_20260924_213336_1524231443` | 0.213835% | 0.214313% | 0.687120% |
+
+PyPTO 与 Native 的 TopK 逐位置一致 `7131/9216`，但排序差异本身
+不是主要误差：14 个候选**集合完全一致**的 token，换顺序后 heads
+相对变化最大仅约 `0.0011%`。另外 4 个 token 的集合交集为
+`511、511、510、511/512`，heads 相对变化约
+`0.40%～0.55%`。因此应继续核对临界候选的 Indexer 分数、量化输入
+和 TopK 截断边界。原始结果和阶段张量在工作区
+`reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/running-max-own-topk-b4-t18/`；
+此实验是独立诊断副本，不是正式源码的 Graph 性能测试。
+
+### Indexer Hadamard 缩放位置：正式提交
+
+提交 `34fd15d54` 把原生 Hadamard 矩阵不带缩放地传给 kernel，在矩阵乘法后
+缩放，并在 Indexer cache 量化前按原生顺序做两次 BF16 舍入。227 上的独立
+工作树 `vllm-ascend-34fd15d54` 经 29 项 CPU 合约测试通过；单卡任务
+`task_20260924_214652_176158827118` 在同组 B4/T18 真实第 2 层权重、
+确定性 Native 和 Graph 6 轮×30 replay 下退出码 0，CSA 调用计数 37。
+
+| 正式提交 | index_key relative L2 | index_scale relative L2 | 最终输出 relative L2 | Native / CSA Graph 中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| `3982ad343` | 0.753399% | 0.403080% | 1.229696% | 0.5646 / 0.5491 ms |
+| `34fd15d54` | 0%，逐位相同 | 0%，逐位相同 | 1.229696% | 0.5668 / 0.5522 ms |
+
+两次最终输出的 relative L2 数值完全相同；该修正解决 Indexer cache
+写入精度，不解决当前输出误差，精度验收仍未通过。raw KV 和 compressed
+cache 的指标不变。Graph 数值仅为短测记录，未测 B16、整模型或长时间
+延迟。原始结果保存在工作区
+`reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/formal-34fd15d54-b4-t18/`。
+下一步优先定位 TopK 截断附近的少数候选差异，并继续隔离未注入 Native
+Q/cache 时的输出误差。
 
 ## 后续每次测试的记录方式
 
