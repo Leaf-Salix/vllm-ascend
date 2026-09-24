@@ -61,13 +61,17 @@ QR_M_TILE = MATMUL_T_TILE  # qr_proj token (M) tile; cube rows must be a 16-row 
 QR_DENSE_M_TILE = 64
 QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul
 QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
-QR_OK = 2  # qr_proj split-K factor         | D//QR_OK cores share each N-group
+# Split-K combines its partials with an FP32 atomic add, an accumulation order
+# native's single F.linear never performs. Keep one chain over the whole K so
+# the projection is reproducible against it; costs parallelism, and precision
+# outranks speed in this branch.
+QR_OK = 1  # qr_proj split-K factor         | D//QR_OK cores share each N-group
 QR_SPLIT_K_TILE = D // QR_OK  # qr_proj K per split (=2048)
 KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
 KV_DENSE_M_TILE = 64
 KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
-KV_OK = 2  # kv_proj split-K factor         | D//KV_OK cores share each N-group
+KV_OK = 1  # kv_proj split-K factor         | D//KV_OK cores share each N-group
 KV_OM = 3  # maximum kv_proj split-M factor
 KV_SPLIT_K_TILE = D // KV_OK  # kv_proj K per split (=2048)
 QPROJ_M_TILE = 64  # dense qproj token tile; fills the 128 KiB L0C accumulator
