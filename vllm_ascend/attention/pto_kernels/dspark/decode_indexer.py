@@ -1058,16 +1058,23 @@ def indexer_qr_hadamard_mm(
                 qh_a_max_col = pl.row_max(qh_a_abs)
                 qh_a_max = pl.reshape(qh_a_max_col, [1, QH_QUANT_TILE])
                 qh_amax = pl.maximum(qh_amax, qh_a_max)
-            qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
-            qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
-            # npu_dynamic_quant carries the recip(127 / amax) double rounding
-            # -- measured on the q path, that form reproduces 20 of 24 native
-            # scale rows bitwise against 16 for amax / 127. indexer_quantize_query
-            # then casts the result to float16 (device_op.py); the INT8 codes
-            # below keep the FP32 quant scale, as the operator does.
+            # Scalar unit, matching native: quantMaxVal / maxTemp and its
+            # reciprocal, the recip(127 / amax) double rounding included.
+            # Vector TDIV is a ULP off on A3. indexer_quantize_query then casts
+            # the dequant scale to float16 (device_op.py); the INT8 codes below
+            # keep the FP32 quant scale, as the operator does.
+            qh_amax_store = pl.create_tensor([1, QH_QUANT_TILE], dtype=pl.FP32)
+            qh_amax_store[0:1, 0:QH_QUANT_TILE] = qh_amax
+            qh_quant_store = pl.create_tensor([1, QH_QUANT_TILE], dtype=pl.FP32)
+            qh_dq_store = pl.create_tensor([1, QH_QUANT_TILE], dtype=pl.FP32)
+            for qh_row in pl.range(QH_QUANT_TILE):
+                qh_scalar = INT8_SCALE_MAX / pl.read(qh_amax_store, [0, qh_row])
+                pl.write(qh_quant_store, [0, qh_row], qh_scalar)
+                pl.write(qh_dq_store, [0, qh_row], 1.0 / qh_scalar)
+            qh_scale_quant_row = qh_quant_store[0:1, 0:QH_QUANT_TILE]
             qh_scale_recip = pl.cast(
                 pl.cast(
-                    pl.recip(qh_scale_quant_row),
+                    qh_dq_store[0:1, 0:QH_QUANT_TILE],
                     target_type=pl.FP16,
                     mode="rint",
                 ),

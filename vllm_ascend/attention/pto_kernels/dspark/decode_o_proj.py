@@ -198,7 +198,19 @@ def decode_o_proj_tp1(
                 chunk = pl.slice(o_r_pad, [QUANT_TOKEN_TILE, O_LORA], [qt, qc], valid_shape=[qrows, O_LORA])
                 rounded = pl.cast(pl.cast(chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                 row_max = pl.maximum(row_max, pl.reshape(pl.row_max(pl.abs(rounded)), [1, QUANT_TOKEN_TILE]))
-            scale_q = pl.div(pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), row_max)
+            # Native derives the per-token quant multiplier on the scalar unit
+            # (quantMaxVal / maxTemp). The vector TDIV lands a ULP off on A3,
+            # where its high_precision option is ignored.
+            o_amax_store = pl.create_tensor([1, QUANT_TOKEN_TILE], dtype=pl.FP32)
+            o_amax_store[0:1, 0:QUANT_TOKEN_TILE] = row_max
+            o_quant_store = pl.create_tensor([1, QUANT_TOKEN_TILE], dtype=pl.FP32)
+            for o_row in pl.range(QUANT_TOKEN_TILE):
+                pl.write(
+                    o_quant_store,
+                    [0, o_row],
+                    INT8_SCALE_MAX / pl.read(o_amax_store, [0, o_row]),
+                )
+            scale_q = o_quant_store[0:1, 0:QUANT_TOKEN_TILE]
             scale_dq = pl.mul(row_max, 1.0 / INT8_SCALE_MAX)
             for qg in pl.range(O_GROUPS):
                 qc = qg * O_LORA
@@ -569,9 +581,18 @@ def o_proj_reduce_scatter(
                     qz_amax = pl.reshape(pl.row_max(pl.abs(qz_tile)), [1, QUANT_T_TILE])
                     qz_floor = pl.full([1, QUANT_T_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
                     qz_amax = pl.maximum(qz_floor, qz_amax)
-                    qz_max = pl.full([1, QUANT_T_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
-                    qz_sq = pl.div(qz_max, qz_amax)
-                    qz_sdq = pl.recip(qz_sq)
+                    # Scalar unit, as native does: quantMaxVal / maxTemp and
+                    # its reciprocal. Vector TDIV is a ULP off on A3.
+                    qz_amax_store = pl.create_tensor([1, QUANT_T_TILE], dtype=pl.FP32)
+                    qz_amax_store[0:1, 0:QUANT_T_TILE] = qz_amax
+                    qz_sq_store = pl.create_tensor([1, QUANT_T_TILE], dtype=pl.FP32)
+                    qz_sdq_store = pl.create_tensor([1, QUANT_T_TILE], dtype=pl.FP32)
+                    for qz_row in pl.range(QUANT_T_TILE):
+                        qz_scalar = INT8_SCALE_MAX / pl.read(qz_amax_store, [0, qz_row])
+                        pl.write(qz_sq_store, [0, qz_row], qz_scalar)
+                        pl.write(qz_sdq_store, [0, qz_row], 1.0 / qz_scalar)
+                    qz_sq = qz_sq_store[0:1, 0:QUANT_T_TILE]
+                    qz_sdq = qz_sdq_store[0:1, 0:QUANT_T_TILE]
                     own_scale[local_group : local_group + 1, qz_t : qz_t + QUANT_T_TILE] = pl.set_validshape(
                         qz_sdq, 1, qz_rows
                     )

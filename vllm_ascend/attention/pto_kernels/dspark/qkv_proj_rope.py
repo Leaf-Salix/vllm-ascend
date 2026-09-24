@@ -890,7 +890,21 @@ def kv_proj_rope(
                         kv_sq = pl.mul(kv_chunk, kv_chunk)
                         kv_row_sum = pl.reshape(pl.row_sum(kv_sq), [1, KV_RMS_T_TILE])
                         kv_sq_sum = pl.add(kv_sq_sum, kv_row_sum)
-                    kv_inv_rms = pl.recip(pl.sqrt(pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS)))
+                    # Same scalar reciprocal as the q path: native derives the
+                    # row coefficient on the scalar unit, and the vector TDIV
+                    # lands a ULP off on A3.
+                    kv_rms_store = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
+                    kv_rms_store[0:1, 0:KV_RMS_T_TILE] = pl.sqrt(
+                        pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS)
+                    )
+                    kv_inv_store = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
+                    for kv_row in pl.range(KV_RMS_T_TILE):
+                        pl.write(
+                            kv_inv_store,
+                            [0, kv_row],
+                            1.0 / pl.read(kv_rms_store, [0, kv_row]),
+                        )
+                    kv_inv_rms = kv_inv_store[0:1, 0:KV_RMS_T_TILE]
                     kv_inv_rms_t = pl.reshape(kv_inv_rms, [KV_RMS_T_TILE, 1])
 
                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
@@ -961,7 +975,18 @@ def kv_proj_rope(
                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
                         kv_sq_sum_tail = pl.add(kv_sq_sum_tail, kv_row_sum_tail)
-                    kv_inv_rms_tail = pl.recip(pl.sqrt(pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)))
+                    kv_rms_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
+                    kv_rms_store_tail[0:1, 0:KV_RMS_T_TILE] = pl.sqrt(
+                        pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)
+                    )
+                    kv_inv_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
+                    for kv_row_tail in pl.range(KV_RMS_T_TILE):
+                        pl.write(
+                            kv_inv_store_tail,
+                            [0, kv_row_tail],
+                            1.0 / pl.read(kv_rms_store_tail, [0, kv_row_tail]),
+                        )
+                    kv_inv_rms_tail = kv_inv_store_tail[0:1, 0:KV_RMS_T_TILE]
                     kv_inv_rms_t_tail = pl.reshape(kv_inv_rms_tail, [KV_RMS_T_TILE, 1])
 
                     for n0_tail in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
