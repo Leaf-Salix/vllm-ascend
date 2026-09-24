@@ -469,11 +469,14 @@ def _sparse_attn_csa_tp1_prepared(
             n_full = pl.row_expand_div(m_oi, n_denom)
             n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
 
-            # Inverse-RoPE head tile.
-            m_rope = n_full[0:H_TILE, NOPE_DIM:HEAD_DIM]
+            # Inverse-RoPE head tile. Native's attention operator emits BF16 and
+            # inplace_partial_rotary_mul rotates that tensor in place, so the
+            # rotation reads the rounded output, not the FP32 normalization.
+            n_rounded = pl.cast(n_bf16, target_type=pl.FP32)
+            m_rope = n_rounded[0:H_TILE, NOPE_DIM:HEAD_DIM]
             m_cos_il = pl.load(freqs_cos, [m_t, 0], [1, ROPE_DIM])
             m_sin_signed = pl.neg(pl.load(freqs_sin, [m_t, 0], [1, ROPE_DIM]))
-            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
+            m_swapped = pl.tile.gather(n_rounded, m_swap_idx, m_gather_tmp)
             m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed))
             n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
             n_full_bf16 = pl.concat(n_bf16[0:H_TILE, 0:NOPE_DIM], n_rope_bf16)
@@ -740,6 +743,9 @@ def golden_sparse_attn(tensors):
         denom = li + torch.exp(attn_sink.unsqueeze(-1) - score_max)
         o[t] = oi_num / denom
 
+    # Native's attention operator emits BF16 and the inverse RoPE rotates that
+    # tensor in place, so the rotation reads the rounded output.
+    o = o.to(torch.bfloat16).float()
     rope_pair = o[..., NOPE_DIM:].unflatten(-1, (-1, 2))
     rope_even = rope_pair[..., 0]
     rope_odd = rope_pair[..., 1]
