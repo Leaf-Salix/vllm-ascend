@@ -1,8 +1,10 @@
 # DSV4 CSA 历史测试记录
 
 更新日期：2026-09-24  
-记录分支：`Leaf-Salix/vllm-ascend:dev/pypto-dsv4-csa-v0.25.1rc1-cann9.0.1`  
-当前 HEAD：`778bf158b53e3a7dbd86065d775115e3e6d01d3e`
+记录分支：`Leaf-Salix/vllm-ascend:dev/pypto-dsv4-csa-v0.25.1rc1-cann9.0.1`
+
+被测运行时代码基线：`778bf158b53e3a7dbd86065d775115e3e6d01d3e`
+本轮归档开始前 HEAD：`cf271b359be3ae3c72f883733721aaa296f69955`（仅测试历史文档提交，运行时代码与 `778bf158b` 相同）
 
 本文汇总当前分支提交历史中可归属的主要功能、精度、回归和性能测试，也记录以当前分支源码为基线的隔离试验。没有证据的项目明确标记为未测；不同测试口径不合并比较。
 
@@ -10,10 +12,11 @@
 
 - 0.25.1rc1 / CANN 9.0.1 环境中，三层 `official-l3` 模型的原生、CSA eager、CSA graph 冒烟均运行成功；连续64-token请求也完成，CSA 确认命中。它是三层裁剪模型，不是完整 DeepSeek-V4。
 - 早期直接 kernel S1/S6 对拍的状态/压缩缓存误差很小，但 output relative L2 为 1.21%–1.29%，超过既定 `torch.allclose(rtol=1e-2, atol=1e-2)` 门槛。
-- 大幅重构提交 `fb734041c` 的 8K/32K 单层输出误差降到 0.0744%/0.0703%，但 replay 比旧实现慢约10.9%/31.8%。随后当前 HEAD `778bf158b` 恢复原有 CSA kernel；不能把 `fb734041c` 的精度成绩记到 HEAD。
-- 当前 HEAD 的 S6、128K、BS4/8/16/24/32/40 单层 graph 数据已采集。output relative L2 均约1.81%–1.85%，精度未通过；CSA 在 BS8 及以上慢于原生，BS40 约为原生的1.98倍。CSA 的 BS8–40 诊断需把每个 ring heap 提高到2GiB，不能代表默认配置容量。
+- 大幅重构提交 `fb734041c` 的 8K/32K 单层输出误差降到 0.0744%/0.0703%，但 replay 比旧实现慢约10.9%/31.8%。随后最后一次运行时代码提交 `778bf158b` 恢复原有 CSA kernel；不能把 `fb734041c` 的精度成绩记到 `778bf158b`。
+- 运行时代码基线 `778bf158b` 的 S6、128K、BS4/8/16/24/32/40 单层 graph 数据已采集。output relative L2 均约1.81%–1.85%，精度未通过；CSA 在 BS8 及以上慢于原生，BS40 约为原生的1.98倍。CSA 的 BS8–40 诊断需把每个 ring heap 提高到2GiB，不能代表默认配置容量。
 - 16卡完整 DeepSeek-V4 的短生成和实际 S6 CSA 命中已完成；采集到的纯 decode 步骤是每 rank B1，不是单卡 B4，也不能作为固定 GBS64 的持续 decode / 性能验收。观察到平均接受 draft token 数为3.0，目标3.8未达到；输入是重复合成文本。
 - 因此当前分支达到“功能路径能运行、CSA能命中”的阶段；尚未通过整层数值精度，也没有证明固定 BS4/GBS64、目标接收步长或完整服务性能达标。
+- 最新单因素边界对拍显示，Q-A BF16 舍入可把 heads relative-L2 从1.9196%降至0.7586%；O-B改为完整8192维共享量化 scale，可把固定同一 heads 的 O-proj 误差从1.5741%降至0.5943%并通过该局部阈值。但完整attention输出仍为2.0639%，heads误差仍为1.9196%，整层精度没有通过。详见[DSV4 CSA 数值边界单因素对拍（2026-09-24）](DSV4_CSA_PRECISION_BOUNDARIES_20260924.md)。
 
 ## 版本与提交对应
 
@@ -25,7 +28,8 @@
 | `873984b5c0f81dd935a3af2bd708920868bc8dc0` | 修正文档中的共享 state / KV 分配描述 | 本提交本身未增加 kernel 行为；早期 `official-l3` 功能测试记录在此阶段分支版本。 |
 | `8990a7d8e320c5b9a8119bb4272441bd1c5c5491` | 让服务入口在均匀 S1–S6 下接入 DSpark 验证请求 | CPU 合约扩展通过；S6 NPU服务作业曾提交，但不能把早期直接 kernel S6 精度测试当成此提交的服务验收。 |
 | `fb734041c8a45f4a35eafe87f3c403ad0191fd64` | 将 CSA 接入原生 DSA 实现，改为52-tensor kernel ABI、消费原生 slot metadata/cache layout | 做过旧/新单层精度及 graph 对照；精度改善、性能退化，见“native DSA 重构对照”。 |
-| `778bf158b53e3a7dbd86065d775115e3e6d01d3e`（HEAD） | 按要求恢复 `8990a7d8e` 的原 CSA kernel 数学/40-tensor ABI，同时保留必要的原生 DSA 接口校验与生命周期组织 | CPU合约、原生与 CSA 输出/cache 复现性、S6/128K 单层 profiling及16卡功能路径有记录。HEAD 的精度仍未通过。 |
+| `778bf158b53e3a7dbd86065d775115e3e6d01d3e`（最后运行时代码基线） | 按要求恢复 `8990a7d8e` 的原 CSA kernel 数学/40-tensor ABI，同时保留必要的原生 DSA 接口校验与生命周期组织 | CPU合约、原生与 CSA 输出/cache 复现性、S6/128K 单层 profiling及16卡功能路径有记录。该代码基线的整层精度仍未通过。 |
+| `cf271b359be3ae3c72f883733721aaa296f69955` | 新增历史测试文档、目录索引和后续记录要求；不改运行时代码 | 文档提交。之后在该运行时代码上完成了独立精度边界对拍，见日期报告。 |
 
 每个提交没有独立、同口径硬件结果的，不能继承后续提交的测试成绩。尤其 `fb734041c` 和 `778bf158b` 是不同 kernel ABI/计算路径。
 
@@ -52,6 +56,10 @@
 ### HEAD 图与整网 profiling 验证
 
 后续复测采用 CANN 9.0.1、Torch 2.10.0+cpu / Torch-NPU 2.10.0.post2、PyPTO `54957491`（含 PR #2867 修复）、Simpler `166852bf`、PTOAS 0.63。报告中逐项记录了实际导入路径；这些依赖快照与初始安装阶段的 Simpler SHA 不同，结果不能在未核对环境时直接横向合并。
+
+### 2026-09-24 单因素精度边界对拍
+
+按相同单层真实权重、合成 hidden/history、TP1、B4/S6、position 8191，对 Q-A、Q-B、Q RMS、KV projection、KV RMS、O-A BF16 和 O-B full-row 8192 分别做了单因素对照。记录了 QR/Q/raw KV/heads/final output 和六类 cache，并保留原生及候选阶段张量。Q-A BF16 明显改善 attention heads；KV projection BF16 主要改善 raw KV；O-A BF16 的中间值精确对齐 native，但仍留下量化路径差异；O-B full-row scale 显著改善固定-heads O-proj 对拍，但最终输出仍未过 allclose。所有指标、源 hash、任务 ID 和失败尝试见[日期报告](DSV4_CSA_PRECISION_BOUNDARIES_20260924.md)。本轮是 eager 单层归因，不是 graph/performance 或完整模型验收。
 
 ## 初始功能验证：三层 `official-l3`
 
