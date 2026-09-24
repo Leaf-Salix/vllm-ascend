@@ -365,7 +365,10 @@ def q_proj_qr(
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                     qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
-                qr_inv_rms = pl.rsqrt(pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS), high_precision=True)
+                # decode_indexer_compressor.py derives the inverse RMS as
+                # recip(sqrt(..)) and that path reaches bit-exact index_key, while
+                # rsqrt lands a ULP away. Use the form that is already proven here.
+                qr_inv_rms = pl.recip(pl.sqrt(pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS)))
                 qr_inv_rms_t = pl.reshape(qr_inv_rms, [T_TILE, 1])
                 # npu_rms_norm_dynamic_quant takes the amax over the normalized
                 # values themselves -- the same expression it then quantizes.
@@ -557,7 +560,7 @@ def q_proj_q_dequant(
                     q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
                     q_head_sq_mean = pl.mul(q_head_sq_sum, 1.0 / HEAD_DIM)
                     q_head_var = pl.add(q_head_sq_mean, EPS)
-                    q_head_inv_rms = pl.rsqrt(q_head_var, high_precision=True)
+                    q_head_inv_rms = pl.recip(pl.sqrt(q_head_var))
                     q_head_inv_rms_t = pl.reshape(q_head_inv_rms, [Q_ROPE_T_TILE, 1])
 
                     q_nope_normed = pl.row_expand_mul(q_head_dq[:, 0:NOPE_DIM], q_head_inv_rms_t)
@@ -860,7 +863,7 @@ def kv_proj_rope(
                         kv_sq = pl.mul(kv_chunk, kv_chunk)
                         kv_row_sum = pl.reshape(pl.row_sum(kv_sq), [1, KV_RMS_T_TILE])
                         kv_sq_sum = pl.add(kv_sq_sum, kv_row_sum)
-                    kv_inv_rms = pl.rsqrt(pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS), high_precision=True)
+                    kv_inv_rms = pl.recip(pl.sqrt(pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS)))
                     kv_inv_rms_t = pl.reshape(kv_inv_rms, [KV_RMS_T_TILE, 1])
 
                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
