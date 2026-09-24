@@ -14,15 +14,19 @@
 
 | 文件 | 类型 | 内容 |
 |------|------|------|
-| `vllm_ascend/attention/pto_attn.py` | 精度修复 | `cmp_norm_w` / `inner_norm_w` dtype FP32 → BF16（核心精度修复） |
 | `vllm_ascend/attention/pto_kernels/dspark/service_config.py` | 新建 | `QUERY_TOKENS=6`、`can_replay_csa_graph()` |
 | `vllm_ascend/platform.py` | 新增逻辑 | ACLGraph 捕获档位对齐到 6 的倍数 |
 | `vllm_ascend/worker/model_runner_v1.py` | 新增逻辑 | CSA 图重放闸门 + `process_weights_after_loading` hook |
 
-**精度修复的根因**：tnd 分支在 `prepare_weights()` 中把 compressor 和 inner compressor 的
-RMS norm weight 验证为 `torch.float32`，实际它们在加载后保持 `bfloat16`。验证失败会静默
-转换或报错，导致 kernel 的 RMS norm 路径收到错误类型。nalinaly 分支在同位置保持 BF16，
-与此修复一致。
+`vllm_ascend/attention/pto_attn.py` 与 `decode_indexer_compressor.py` 经过两轮精度尝试和
+两轮回退，当前内容与 tnd 起点 `8b9d430aa` 一致，不计入本分支净改动。
+
+**已被推翻的结论（保留作为排查记录）**：初版曾把 `cmp_norm_w` / `inner_norm_w` 的 dtype
+由 FP32 改成 BF16，并称其为「核心精度修复」。227 实测证明该方向错误：kernel ABI 要求
+FP32，`process_weights_after_loading` 把这两个权重从 BF16 扩展到 FP32 是正确行为，tnd 原始
+的 FP32 验证也是对的。改成 BF16 会直接报
+`Parameter 'cmp_norm_w' expects dtype torch.float32, got torch.bfloat16`（批次 1、2，
+exit=1）。该改动已由 `0b268ff8a` 回退。
 
 ---
 
@@ -58,8 +62,13 @@ RMS norm weight 验证为 `torch.float32`，实际它们在加载后保持 `bflo
 
 ```bash
 source /Users/jiayetcs/Desktop/Project/PyPTO/.venv311/bin/activate
+# 本机 .venv311 没有装 vllm，导入整个 vllm_ascend 包会失败，按文件直接加载模块。
 python -c "
-from vllm_ascend.attention.pto_kernels.dspark.service_config import QUERY_TOKENS, can_replay_csa_graph
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    'service_config', 'vllm_ascend/attention/pto_kernels/dspark/service_config.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+QUERY_TOKENS, can_replay_csa_graph = m.QUERY_TOKENS, m.can_replay_csa_graph
 
 assert QUERY_TOKENS == 6
 
@@ -83,31 +92,30 @@ print('service_config CPU 合约：PASS')
 ```
 
 **预期结果**：`service_config CPU 合约：PASS`  
-**实际结果**：待填
+**实际结果**：PASS（2026-09-24）
 
 ---
 
 ## 阶段二：导入和 dtype 静态验证（本机，无 NPU）
 
-验证 `cmp_norm_w` / `inner_norm_w` dtype 修复不引起 import 或 lint 错误。
+验证 `cmp_norm_w` / `inner_norm_w` 仍按 kernel ABI 保持 FP32 验证（不得改回 BF16）。
 
 ```bash
 source /Users/jiayetcs/Desktop/Project/PyPTO/.venv311/bin/activate
 python -c "
-import ast, sys
+import sys
 with open('vllm_ascend/attention/pto_attn.py') as f:
     src = f.read()
-# 确认不再出现 float32 在这两个 weight 的位置
 lines = [l for l in src.splitlines() if ('cmp_norm_w' in l or 'inner_norm_w' in l) and 'float32' in l]
-if lines:
-    print('FAIL: 仍有 float32 引用:', lines)
+if not lines:
+    print('FAIL: norm weight 的 float32 验证丢失，kernel ABI 要求 FP32')
     sys.exit(1)
 print('dtype 静态检查：PASS')
 "
 ```
 
 **预期结果**：`dtype 静态检查：PASS`  
-**实际结果**：待填
+**实际结果**：PASS（2026-09-24）
 
 ---
 
@@ -197,7 +205,7 @@ ldd \$plugin | grep -E 'libatb|not found'
 
 ## 阶段四：227 NPU 单层精度对拍
 
-对拍脚本基于 tnd 分支已有的 `ab.py` 模式，新增对 `cmp_norm_w` BF16 修复前后的精度对比。
+对拍脚本基于 tnd 分支已有的 `ab.py` 模式，逐中间量对比 CSA 与原生路径。
 使用第 2 层真实 C4 权重，B4/S6，合成 hidden。
 
 ### 4.1 对拍脚本路径
@@ -376,3 +384,49 @@ opus55 第一批精度数字与 tnd scope3 **完全一致**（8 位小数精确�
 **下一步**：用 tnd-main 现有的 `decode_csa_stage_probe.py` / `precision_probe.py` 框架，hook `normed_kv` 中间量（Hadamard 之前），对比 CSA 和 native 在 RMS norm 之后、Hadamard 之前的数值，定位 index_key 0.63% 误差的具体引入位置。
 
 *后续每次测试追加新节，带日期和提交 hash。*
+
+### 2026-09-24 第六批：Hadamard 缩放位置对齐原生（待跑）
+
+**改动内容**
+
+| 文件 | 改动 |
+|------|------|
+| `vllm_ascend/attention/pto_attn.py` | `hadamard_idx` 传原生未归一化的 `H.T`，绑定层不再除 `sqrt(IDX_HEAD_DIM)` |
+| `decode_indexer_compressor.py` | 新增 `HADAMARD_SCALE`；`indexer_compressor_write_vllm` 与旧路径 `indexer_compressor_write` 均改为「矩阵乘 → 舍入 BF16 → 乘 scale → 再舍入 BF16」 |
+| `decode_indexer.py` | 新增 `HADAMARD_SCALE`；q 路径在矩阵乘之后乘 scale（FP32，本轮不加新舍入） |
+| 两个文件的 golden 模型 | `init_hadamard` 改为未归一化，参考实现同步乘 scale |
+
+**依据**：原生 `models/deepseek_v4/indexer.py` 的 `rotate_activation` 是
+`F.linear(x, H)` → BF16 舍入 → `* dim**-0.5` → BF16 舍入。原先 opus55 把
+`1/sqrt(128)` 折进 BF16 权重，该值在 BF16 下不可精确表示，且少一次舍入，计算顺序与
+原生不同。
+
+**与第五批的区别**：第五批只在 kernel 里补乘 scale，绑定层的除法仍在，等于除了两次，
+`index_scale` 爆到 91%。本轮是成对改动——绑定层不再除，kernel 在原生位置乘。q 与 kv
+两条路共用同一份 `hadamard_idx`，必须同时改。
+
+**本机静态验证**
+- 阶段一 service_config CPU 合约：PASS
+- 阶段二 dtype 静态检查：PASS
+- 三个改动文件 `py_compile`：PASS
+
+**227 AB 任务**
+
+改了 kernel，提交前必须清空 build 目录强制重编：
+
+```bash
+ssh pto227 "rm -rf /data/pyptouser/yejia/vllm-cann92-dsv4-tnd-opus55-20260924/logs/opus55-ab/build-*"
+```
+
+```bash
+task-submit --ptoas 0.63 --device auto --device-num 1 --max-time 1800 \
+  --env AB_RUN=uniform-b4 --env AB_LENGTHS=6,6,6,6 --env AB_ITERATIONS=200 \
+  'bash /data/pyptouser/yejia/vllm-cann92-dsv4-tnd-opus55-20260924/bin/opus55-ab/run.sh'
+```
+
+**关注指标**：`index_key` 应从 0.633% / 0.753% 下降；`index_scale` 必须仍在 0.3%
+量级，若再次出现 90% 量级即说明缩放被重复施加。
+
+- uniform-b4 task ID：待填
+- varlen-b4 task ID：待填
+- 结果：待填

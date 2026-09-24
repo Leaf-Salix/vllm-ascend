@@ -41,6 +41,10 @@ EPS = M.rms_norm_eps
 D = M.hidden_size
 HEAD_DIM = M.index_head_dim
 HEAD_DIM_INV = 1.0 / HEAD_DIM
+# Native rotate_activation scales the Hadamard product by dim**-0.5 *after* the
+# matmul, not by folding it into the matrix. The kernel consumes the native
+# (unscaled) matrix and reproduces that ordering.
+HADAMARD_SCALE = HEAD_DIM ** -0.5
 ROPE_HEAD_DIM = M.qk_rope_head_dim
 NOPE_HEAD_DIM = M.index_nope_head_dim
 MAX_SEQ_LEN = M.max_position_embeddings
@@ -385,8 +389,13 @@ def indexer_compressor_write(
         # C8 per-row INT8 cache quantization.
         wr_b0 = wr_blk * RMS_PAD_TILE
         wr_blk_rows = pl.min(RMS_PAD_TILE, compact_rows - wr_b0)
-        kv_blk_f32 = pl.cast(
+        # Native rotate_activation: round the linear output to BF16, scale by
+        # dim**-0.5, round again.
+        kv_blk_linear = pl.cast(
             pl.cast(kv_final[wr_b0 : wr_b0 + RMS_PAD_TILE, 0 : HEAD_DIM], target_type=pl.BF16, mode="rint"),
+            target_type=pl.FP32)
+        kv_blk_f32 = pl.cast(
+            pl.cast(pl.mul(kv_blk_linear, HADAMARD_SCALE), target_type=pl.BF16, mode="rint"),
             target_type=pl.FP32)
         # Per-row absolute maximum.
         kv_amax = pl.reshape(pl.row_max(pl.abs(kv_blk_f32)), [1, RMS_PAD_TILE])
@@ -410,7 +419,10 @@ def indexer_compressor_write(
             cache_row_i64 = pl.read(idx_slot_mapping, [token])
             if cache_row_i64 >= 0:
                 cache_row = pl.cast(cache_row_i64, pl.INDEX)
-                kv_flat[token : token + 1, :] = kv_final[compact_token : compact_token + 1, 0 : HEAD_DIM]
+                kv_flat[token : token + 1, :] = pl.mul(
+                    kv_final[compact_token : compact_token + 1, 0 : HEAD_DIM],
+                    HADAMARD_SCALE,
+                )
                 idx_kv_cache_flat[cache_row : cache_row + 1, :] = kv_i8_blk[inner : inner + 1, :]
 
     # Serialized indexer-cache scale commit.
@@ -824,13 +836,23 @@ def indexer_compressor_write_vllm(
         for token_block in pl.range(worker, token_blocks, key_workers):
             token_begin = token_block * RMS_PAD_TILE
             token_rows = pl.min(RMS_PAD_TILE, tokens - token_begin)
-            row_fp32 = pl.cast(
+            # Native rotate_activation rounds the linear output to BF16, scales
+            # it by dim**-0.5, then rounds again. Both roundings are kept.
+            row_linear = pl.cast(
                 pl.cast(
                     pl.slice(
                         kv_final,
                         [RMS_PAD_TILE, HEAD_DIM],
                         [token_begin, 0],
                     ),
+                    target_type=pl.BF16,
+                    mode="rint",
+                ),
+                target_type=pl.FP32,
+            )
+            row_fp32 = pl.cast(
+                pl.cast(
+                    pl.mul(row_linear, HADAMARD_SCALE),
                     target_type=pl.BF16,
                     mode="rint",
                 ),
@@ -1187,11 +1209,13 @@ def golden_compressor(tensors):
             cache_row = int(idx_slot_mapping[b, s].item())
             if cache_row < 0:
                 continue
-            tensors["kv"][token : token + 1, :] = kv_b
+            tensors["kv"][token : token + 1, :] = kv_b * HADAMARD_SCALE
             blk_id = cache_row // BLOCK_SIZE
             intra = cache_row % BLOCK_SIZE
-            # C8 quant-on-write: quantize the bf16-rounded compressed row to int8 + per-position scale
-            row_bf16 = kv_b[0].to(torch.bfloat16).float()
+            # C8 quant-on-write: native rotate_activation rounds the linear
+            # output to BF16, scales it, and rounds again before quantizing.
+            row_linear = kv_b[0].to(torch.bfloat16).float()
+            row_bf16 = (row_linear * HADAMARD_SCALE).to(torch.bfloat16).float()
             amax = row_bf16.abs().amax().clamp_min(INT8_AMAX_EPS)
             scale_q = INT8_SCALE_MAX / amax
             idx_kv_cache[blk_id, intra, 0] = torch.round(row_bf16 * scale_q).to(torch.int32).to(torch.float16).to(torch.int8)
@@ -1290,7 +1314,8 @@ def build_tensor_specs(start_pos=None, batch=B):
     def init_sin():
         return rope_sin.clone()
     def init_hadamard():
-        return torch.rand(HEAD_DIM, HEAD_DIM) * (HEAD_DIM ** -0.5)
+        # Unscaled, like the native matrix the kernel now consumes.
+        return torch.rand(HEAD_DIM, HEAD_DIM)
     def init_idx_kv_cache():
         return torch.zeros(IDX_CACHE_BLOCK_NUM, BLOCK_SIZE, 1, HEAD_DIM, dtype=torch.int8)
     def init_idx_kv_scale():
