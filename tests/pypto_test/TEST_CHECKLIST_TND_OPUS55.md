@@ -547,7 +547,91 @@ attention heads 上。
 | `vs_native_output` ≈ 1.44% | 误差在进输出投影之前就存在于 attention heads |
 | `vs_native_output` ≈ 0 | 误差出在输出投影（`o_a` / `o_b`）这一段 |
 
-**任务**：`task_20260924_211549_125137811104`（uniform-b4，`PROBE_LENGTHS=6,6,6,6`）
+**任务**：`task_20260924_211549_125137811104`（uniform-b4，exit=0）
+
+**结果：误差全部来自上游，输出投影已对齐**
+
+探针自身有效性：`probe_vs_csa_output` = 0.0000%，诊断副本未改变任何数学。
+
+| 对比项 | rel_l2 | 判读 |
+|--------|--------|------|
+| `native_o_proj_on_probe_heads/vs_probe_output` | **0.0027%** | 输出投影**已对齐**，不是问题 |
+| `native_o_proj_on_probe_heads/o_a_vs_native` | 0.0000% | o_a 逐位一致 |
+| `native_o_proj_on_probe_heads/vs_native_output` | 1.4353% | 换上原生输出投影仍是 1.44% → 误差在上游 |
+
+逐 stage 误差链：
+
+| stage | rel_l2 |
+|-------|--------|
+| **`qr_int8`（query LoRA 的 INT8 量化）** | **0.6574%** |
+| `qr_scale` | 0.1842% |
+| `q`（主 attention query） | 0.6727% |
+| `kv_after_rope` | 0.2861% |
+| `heads_after_inverse_rope` | 0.9014% |
+| `output` | 1.4353% |
+
+误差从 `qr` 起，经 q（0.67%）被 attention 放大到 heads（0.90%），再到 output（1.44%）。
+
+### 2026-09-24 根因反推：投影少了一次 BF16 舍入
+
+**这一步完全不占卡**，用探针存下的 `csa_stages.pt` / `native_stages.pt` 完成。
+
+**1. qr 的差异形态**
+
+| 指标 | 值 |
+|------|-----|
+| INT8 码字完全相同 | 94.32% |
+| 恰好差 1 个 LSB | 5.68% |
+| 差 ≥2 个 LSB | 0.00% |
+| `qr_scale` native/csa 比值范围 | 0.99691 ~ 1.00328（最大差 0.33%）|
+
+纯粹的量化边界翻转，驱动因素是 scale 差了 0.33%。
+
+**2. 排除「乘法结合顺序」**
+
+从 checkpoint 取出 `layers.2.attn.q_norm.weight`，用原生存盘的 `q_a` 试三种顺序：
+
+| 候选 | vs native | vs csa |
+|------|-----------|--------|
+| A `amax｜(x·inv)·γ｜` | 0.000011% | 0.327612% |
+| B `amax｜(x·γ)·inv｜` | 0.000013% | 0.327612% |
+| C `inv·amax｜x·γ｜`（kernel 现写法）| 0.000013% | 0.327612% |
+| D 归一化后先舍入 BF16 再取 amax | 0.332285% | 0.513934% |
+
+三种顺序**都能复现原生**（误差 1e-5 量级），说明结合顺序无关；D 被否决，原生并未在
+取 amax 前舍入。**用原生的 `q_a` 喂我们的算法得到的是原生答案，所以错在输入。**
+
+**3. 根因**
+
+原生 `dsa_v1.py:1858` 与 `:1899` 两处都是
+`npu_quant_matmul(..., output_dtype=hidden_states.dtype)`，即 **q_a 和 kv 投影都落成
+BF16**，然后才进 `npu_rms_norm_dynamic_quant` / `kv_norm`。
+kernel 的 `qr_fp32` / `kv_fp32` 是 FP32 矩阵乘累加器，**直接喂进 RMS norm，少了这次舍入**。
+
+**KV 侧逐位验证**：`bf16(rms_norm(native kv_projected, gamma_kv))` 复现原生
+`kv_normed` 的 rel_l2 = **0.000000%**，原生这条链完全确定。
+
+**量级核对**：本机模拟「FP32 输入 vs BF16 输入」对 amax 的影响，max 0.3938% /
+mean 0.1539%，实测 scale 最大差 0.3276%，吻合。
+
+**修复**（commit `89c2b1754`）：在**消费端**舍入，矩阵乘累加器保持 FP32。
+`qkv_proj_rope.py` 中 q 路径 2 处、kv 路径 6 处（主路径 3 + 尾部路径 3），
+共 8 个读取点全部改为先 `cast(BF16, rint)` 再回 FP32；golden 模型经 `project_bf16` 同步。
+
+**注**：`pto_kernels/dspark/` 在 `.pre-commit-config.yaml:16` 中被排除在 ruff 之外，
+该文件原有 3 个 import 排序告警（HEAD 版本同样存在），本轮未做无关修改。
+
+### 2026-09-24 第八批：验证投影舍入修复（进行中）
+
+- AB uniform-b4：`task_20260924_213353_15367726056`
+- AB varlen-b4：`task_20260924_213353_15368392816`
+- 探针 uniform-b4：`task_20260924_213353_153642931193`
+
+**归因方式**：q 路径与 kv 路径虽同源，但指标独立——q 路径看 `qr_scale` / `qr_int8` / `q`，
+kv 路径看 `raw` / `kv_after_rope`，任一回退都可单独归因。
+
+**预期**：`qr_scale`、`qr_int8`、`q` 收敛；`raw`、`kv_after_rope` 收敛；
+`index_key` / `index_scale` 保持 0.000%（不得回退）。
 
 - 结果：待填
 
