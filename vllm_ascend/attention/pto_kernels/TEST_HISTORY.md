@@ -116,6 +116,43 @@ B4 六轮 CSA 均慢 0.92%～3.35%；B16 六轮均慢 9.47%～11.38%。
 重复的 B4 短测与修复前 eager 输出指标一致，但跨任务仍有波动，不能仅凭
 作用域改动宣布逐元素输出不变。单层测量也不能外推到整模型吞吐。
 
+### 确定性精度探针：`9243a5f5e` 的 B4/T18
+
+2026-09-24 在与该提交相同的 TND kernel 工作树上，用真实第 2 层权重、
+seed=62 的合成 hidden/history，测试请求长度 `[3,4,5,6]`、T18、
+历史起点 8186、TP1 和 128 槽页。Native 开启
+`torch_npu.npu.set_deterministic_level(1)` 与
+`HCCL_DETERMINISTIC=true`。这次仅测 eager 精度，没有测 Graph 延迟。
+一次性探针的 SHA256 为
+`399ff61c9450eaff39c88271777cb43fae01bd7a1f78daf43c3e5b816ffa958d`。
+
+| 任务 | 诊断 | 结果 |
+| --- | --- | --- |
+| `task_20260924_152756_49096928374` | 未过滤 Native scatter，逐次核对负槽和 indexer WqB 权重 | 4 次 scatter 中后三次各有 3 个 `[-1,127]` 槽；所核对权重始终未变。 |
+| `task_20260924_152925_5860015193` | 只在诊断进程过滤负槽，再做 Native/CSA 对拍 | 最终输出 relative L2 为 1.494277%，`allclose(1e-2,1e-2)=false`。 |
+| `task_20260924_153040_61598129924` | 不过滤负槽，使用相同输入做 Native/CSA 对拍 | 所有下列对拍指标与过滤组完全相同。 |
+
+两次完整对拍的 Native Q、KV 投影、index 投影、TopK、attention
+输出、O-proj 输出等 13 个已捕获阶段逐元素相同；过滤负槽没有改变这组
+输入的 Native 结果。CSA 入口均实际执行，Native 的 indexer WqB 权重
+没有变化。因此先前另一个分支上发现的负槽写坏权重问题，**不能解释本组**
+约 1.49% 的差异；这不代表原生 scatter 在其他输入或内存布局下安全。
+
+| 实际写入区域或输出 | CSA 对 Native relative L2 | 逐元素 1e-2 验收 |
+| --- | ---: | --- |
+| compressed KV | 0 | 通过 |
+| raw KV | 0.285536% | 通过 |
+| main state | 约 3.04e-7 | 通过 |
+| inner state | 约 2.16e-7 | 通过 |
+| index key | 0.753399% | 未通过 |
+| index scale | 0.403080% | 通过 |
+| 最终输出 | 1.494277% | 未通过 |
+
+原始 JSON 和 Native 阶段张量保存在 227 独立实验目录的
+`logs/tnd-precision/{filtered-b4-t18,unfiltered-compare-b4-t18}/`。
+当前探针尚未导出 PyPTO 内部 Q、KV、TopK、attention 和 O-proj 阶段张量，
+所以这些缓存差异不能单独证明最终输出的首个误差来源。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的提交或实验后，先保存原始 JSON/日志，再在本文**追加**一节。
