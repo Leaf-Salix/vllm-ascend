@@ -403,15 +403,19 @@ def q_proj_qr(
                 qr_root_bits = pl.create_tensor([1, T_TILE], dtype=pl.INT32)
                 qr_wide = pl.create_tensor([1, 2], dtype=pl.INT64)
                 for qr_row in pl.range(T_TILE):
+                    # The parser offers + - * / // % << >> and no bitwise ops,
+                    # so split the float with arithmetic. Both values are
+                    # positive normals, so the sign bit is zero and >> 23 already
+                    # isolates the biased exponent without a mask.
                     v_bits = pl.read(qr_var_bits, [0, qr_row])
-                    v_sig = (v_bits & 0x7FFFFF) | 0x800000
-                    v_exp = ((v_bits >> 23) & 0xFF) - 127
+                    v_sig = (v_bits % 0x800000) + 0x800000
+                    v_exp = (v_bits >> 23) - 127
                     cand_bits = pl.read(qr_cand_bits, [0, qr_row])
                     pl.write(qr_root_bits, [0, qr_row], cand_bits + 1)
                     for qr_step in (0, -1):
                         step_bits = cand_bits + qr_step
-                        step_sig = (step_bits & 0x7FFFFF) | 0x800000
-                        step_exp = ((step_bits >> 23) & 0xFF) - 127
+                        step_sig = (step_bits % 0x800000) + 0x800000
+                        step_exp = (step_bits >> 23) - 127
                         pl.write(qr_wide, [0, 0], 2 * step_sig + 1)
                         mid_hi = pl.read(qr_wide, [0, 0])
                         pl.write(qr_wide, [0, 1], v_sig)
