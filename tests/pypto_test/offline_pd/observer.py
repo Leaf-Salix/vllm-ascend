@@ -914,7 +914,20 @@ class OfflineCSAObserver:
                         # 用 torch.save 而不是 np.savez——numpy 不认 bfloat16。
                         payload[name] = value.detach().cpu().contiguous().clone()
                     torch.save(payload, target / "csa_args.pt")
+                    # 记录 indexer 的 key/scale 原始视图元数据：页跨度到底是 4096
+                    # （键整段连续）还是 4160（逐页与 scale 交错），静态读代码读不出来。
+                    key_view, scale_view = call.views["indexer"]
+                    storage_meta = {
+                        name: {"shape": list(t.shape), "strides": list(t.stride()),
+                               "storage_offset": t.storage_offset(), "dtype": str(t.dtype),
+                               "data_ptr": t.data_ptr(),
+                               "storage_data_ptr": t.untyped_storage().data_ptr(),
+                               "storage_nbytes": t.untyped_storage().nbytes(),
+                               "is_contiguous": bool(t.is_contiguous())}
+                        for name, t in (("indexer_key", key_view), ("indexer_scale", scale_view))
+                    }
                     meta = {"layer_index": layer_index, "layer_name": wanted.layer_name,
+                            "indexer_storage": storage_meta,
                             "tokens": int(hidden.shape[0]), "param_names": names,
                             "dtypes": {k: str(call.args[k].dtype) for k in names},
                             "shapes": {k: list(call.args[k].shape) for k in names}}
