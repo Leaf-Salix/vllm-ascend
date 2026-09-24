@@ -987,7 +987,26 @@ def indexer_qr_rope(
                 # on that BF16 tensor, so both halves read a rounded dequant.
                 qr_dequant = pl.cast(
                     pl.cast(
-                        pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale),
+                        # Native merges the two dequant scales before applying
+                        # them. Comparing exact integer dot products against the
+                        # captured native projection, (acc*act)*weight leaves 7
+                        # BF16 differences and the reverse order 3, while
+                        # acc*(act*weight) leaves none. Build the rank-1 scale
+                        # product first, then multiply once.
+                        pl.mul(
+                            acc_fp32,
+                            pl.row_expand_mul(
+                                pl.col_expand_mul(
+                                    pl.full(
+                                        [DEQUANT_T_TILE, IDX_HEAD_DIM],
+                                        dtype=pl.FP32,
+                                        value=1.0,
+                                    ),
+                                    wq_scale,
+                                ),
+                                qr_scale_tile,
+                            ),
+                        ),
                         target_type=pl.BF16,
                         mode="rint",
                     ),
