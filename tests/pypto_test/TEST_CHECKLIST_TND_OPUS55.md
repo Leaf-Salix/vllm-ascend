@@ -690,3 +690,73 @@ per-head 相对误差跨度看似很大（0.200% ~ 8.425%，27 倍），但：
 
 当前 `heads` 的 0.88% 中有多少是从 `q` 的 0.67% 继承来的、多少是 attention 自身产生的，
 需要等 q 对齐后才能分离。批次 8 的探针会直接给出这个数。
+
+### 2026-09-24 批次 8–13：系统性对齐"原生落 BF16、kernel 留 FP32"边界
+
+**方法**：原生在算子边界处会把中间结果物化成 BF16（`npu_quant_matmul` 带
+`output_dtype=hidden_states.dtype`、`inplace_partial_rotary_mul` 原地作用在 BF16 张量、
+BF16 Linear 的输出），而 kernel 把 FP32 累加器直接传给下游。逐个边界对齐。
+
+| 批次 | 改动 | output |
+|------|------|--------|
+| 7（基线）| — | 1.4353% |
+| 8 | q_a / kv 投影进 RMS norm 前舍入 | 1.2546% |
+| 9 | q 投影进 `apply_dsa_q_rms` 前、两处 RoPE 输入舍入 | 1.2034% |
+| 10 | indexer q 的 dequant 与 rotate_activation 舍入 | 0.9734% |
+| 11 | （无效，改到了不被调用的 `indexer_weights_score`）| 0.9734% |
+| 12 | `indexer_weights_score_vllm` 的 weights 舍入 | 0.7332% |
+| 13 | inverse RoPE 读舍入后的 attention 输出 | **0.5825%** |
+
+**逐 stage 演进**
+
+| stage | 批次 7 | 批次 13 |
+|-------|--------|---------|
+| `qr_scale` | 0.1842% | **0.000012%** |
+| `qr_int8` | 0.6574% | **0.017588%** |
+| `q` | 0.6727% | **0.037894%** |
+| `raw` / `kv_after_rope` | 0.2861% | **0.007072%** |
+| `index_key` / `index_scale` | 0.000000% | **0.000000%**（全程无回退）|
+| `heads` | 0.9014% | 0.238843% |
+| heads 逐位相同元素 | 3.57% | **48.65%** |
+| topk 每 query 差异 | 2.8 / 512 | **0.33 / 512** |
+
+### 结论一：topk 是唯一的剩余瓶颈，attention 核心已基本对齐
+
+按 token 分组（批次 13）：
+
+| 分组 | token 数 | heads 平均误差 | 逐位相同 |
+|------|---------|---------------|---------|
+| topk 完全一致 | 19 | **0.0301%** | ~59% |
+| topk 有分歧 | 5 | **0.4734%** | ~6% |
+
+**topk 分歧是 16 倍的误差放大器。** 只要 topk 一致，attention 核心本身只产生
+0.03% 误差、近 6 成元素逐位相同。**之前"误差在 attention 核心"的判断需要修正：
+attention 核心没有问题，问题在选择环节。**
+
+### 结论二：原生量化约定已被精确建模，残差是矩阵乘累加顺序
+
+从原生存盘的 `q_a`（BF16）出发，按
+`inv = rsqrt(mean(x²) + 1e-6)` → `normed = (x·inv)·γ` → `amax = max|normed|` →
+`round(normed · 127/amax)` 计算，**24576 个 INT8 码字 100% 复现原生**，最大差值 0。
+
+我们的 `qr` 与原生 **99.9959%** 相同——整个张量仅约 1 个码字不同。
+
+这说明 kernel 从 `q_a` 往后的实现已完全正确。残差来自 `wq_a` / `idx_wq_b` /
+Hadamard 等矩阵乘的 **FP32 累加顺序**与原生融合算子不同，使个别值落在 BF16 舍入
+边界两侧。**这不是能靠读代码对齐的边界，除非能控制 tiling 与原生逐位一致。**
+
+### 踩坑：`_vllm` 双胞胎
+
+批次 11 的结果与批次 10 **八位有效数字完全相同**，说明改动根本没执行。
+原因是 `decode_indexer.py` 里 `indexer_weights_score` 与
+`indexer_weights_score_vllm` 并存，vLLM 路径只走后者。这与批次 4 的
+`indexer_compressor_write` 是同一个陷阱。
+
+**有 `_vllm` 双胞胎**（改动前必须确认）：`indexer_topk_query_merge`、
+`indexer_topk_single_leaf_publish`、`indexer_score_topk_forest`、
+`indexer_weights_score`、`indexer`。
+**无双胞胎、两条路径共用**：`indexer_qr_rope`、`indexer_qr_hadamard_mm`、
+`indexer_qr_hadamard`；`qkv_proj_rope.py` 与 `decode_sparse_attn_csa.py` 全文件无双胞胎。
+
+**判据**：结果与上一批次逐位相同 = 改动未执行，属于构建或死代码问题，
+不能当成"改动无效果"。真正的数值改动几乎不可能保持八位有效数字不变。
