@@ -971,7 +971,17 @@ def indexer_qr_rope(
                 acc_fp32 = pl.cast(
                     qr_acc_pad[dq_t0 : dq_t0 + DEQUANT_T_TILE, h0 : h0 + IDX_HEAD_DIM],
                     target_type=pl.FP32, mode="none")
-                qr_dequant = pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale)
+                # Native's indexer wq_b matmul carries
+                # output_dtype=hidden_states.dtype and the rotary runs in place
+                # on that BF16 tensor, so both halves read a rounded dequant.
+                qr_dequant = pl.cast(
+                    pl.cast(
+                        pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale),
+                        target_type=pl.BF16,
+                        mode="rint",
+                    ),
+                    target_type=pl.FP32,
+                )
                 qr_nope_bf16 = pl.cast(qr_dequant[:, 0 : IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
                 qr_rope_slice = qr_dequant[:, IDX_NOPE_HEAD_DIM : IDX_HEAD_DIM]
                 qr_swapped = pl.gather(qr_rope_slice, dim=-1, index=rope_swap_idx)
@@ -1009,10 +1019,20 @@ def indexer_qr_hadamard_mm(
         for idx in pl.range(qh_worker, bs_heads // QH_MM_TILE, QH_WORKERS):
             o0 = idx * QH_MM_TILE
             qh_acc = pl.matmul(qr_bf16[o0 : o0 + QH_MM_TILE, :], qh_hadamard, out_dtype=pl.FP32)
-            # The matrix is now the native (unscaled) one, so apply dim**-0.5
-            # here. Native additionally rounds to BF16 before and after this
-            # scale; that boundary is still open and measured separately.
-            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = pl.mul(qh_acc, HADAMARD_SCALE)
+            # Native rotate_activation on the query: F.linear rounds to BF16,
+            # then the dim**-0.5 scale rounds to BF16 again.
+            qh_linear = pl.cast(
+                pl.cast(qh_acc, target_type=pl.BF16, mode="rint"),
+                target_type=pl.FP32,
+            )
+            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = pl.cast(
+                pl.cast(
+                    pl.mul(qh_linear, HADAMARD_SCALE),
+                    target_type=pl.BF16,
+                    mode="rint",
+                ),
+                target_type=pl.FP32,
+            )
 
     with pl.spmd(
         QH_QUANT_WORKERS,
@@ -1487,7 +1507,11 @@ def golden_indexer(tensors, inner_full=None):
     ratio, rd = COMPRESS_RATIO, ROPE_HEAD_DIM
 
     q_i32 = qr.to(torch.int32) @ wq_b.to(torch.int32)
-    q = (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).view(
+    # Native's indexer wq_b matmul emits BF16 and the rotary runs in place on
+    # that tensor, so the dequant is rounded before the RoPE.
+    q = (
+        (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).to(torch.bfloat16).float()
+    ).view(
         tokens, IDX_N_HEADS, IDX_HEAD_DIM
     )
     q_rope = q[..., -rd:]
@@ -1495,8 +1519,10 @@ def golden_indexer(tensors, inner_full=None):
     q_rope = q_rope * cos[:, None, :] + q_rope_swapped * sin[:, None, :]
     q = torch.cat([q[..., :-rd], q_rope], dim=-1)
 
-    # Native applies dim**-0.5 after the matmul, not folded into the matrix.
-    q = (q.to(torch.bfloat16).float() @ hadamard) * HADAMARD_SCALE
+    # Native rotate_activation: F.linear rounds to BF16, then the dim**-0.5
+    # scale rounds to BF16 again.
+    q_linear = (q.to(torch.bfloat16).float() @ hadamard).to(torch.bfloat16).float()
+    q = (q_linear * HADAMARD_SCALE).to(torch.bfloat16).float()
     # W8A8C16: q and Indexer Cache are quantized per row to INT8 for score matmul,
     # then dequantized with q_scale * kv_scale.
     # flash: fp4_act_quant on q (FP4 simulation).
