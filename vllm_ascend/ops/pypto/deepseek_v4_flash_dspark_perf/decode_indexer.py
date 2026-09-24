@@ -465,6 +465,23 @@ def indexer_score_topk_forest(
                     # each AIV lane, then hand the assembled rows to Cube in
                     # L1. This avoids 32 small GM DMAs per page and needs no
                     # GM staging allocation or additional root arguments.
+                    #
+                    # 这条 UB 中转是被 Native 的页布局逼出来的，不是疏忽。上游把整块
+                    # cache 视作 [blocks*BLOCK_SIZE, 128] 后用 create_l1 直接整页搬进
+                    # L1；我们做不到，因为页跨度实测 4160（键 4096 + 32 个 FP16
+                    # scale），4160 % 128 = 64，键行在页与页之间根本不连续，
+                    # [blocks*32, 128] 这个二维视图不存在。2026-09-25 试过的两条路都被
+                    # 编译器挡住：
+                    #   ① create_l1([SCORE_TILE//BLOCK_SIZE, INDEXER_KEY_BYTES]) 按页搬
+                    #      字节再 reshape —— L1 是 16x32 分形，行数必须是 16 的倍数，
+                    #      [12, 4096] 直接被拒；
+                    #   ② create_l1([IDX_HEAD_DIM, SCORE_TILE], transpose=True) 逐行
+                    #      DN2ZN 装填 —— INT8 的 ZN 分形内形状是 32，落点列号必须是 32
+                    #      的倍数，逐行（key_row 0..31）报
+                    #      'pto.subview' op boxed layout subview offsets must be
+                    #      multiples of inner shape。
+                    # 要去掉这次中转，得在存储合同层面把键与 scale 拆成两块分配，
+                    # 那是 Native 侧的改动，超出本算子范围。
                     for key_aiv in pl.split_aiv(2, mode=pl.SplitMode.UP_DOWN):
                         key_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * IDX_HEAD_DIM], dtype=pl.INT8)
                         for page in pl.unroll(SCORE_LANE_ROWS // BLOCK_SIZE):
