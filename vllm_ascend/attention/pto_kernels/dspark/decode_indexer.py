@@ -43,6 +43,11 @@ MAX_SEQ_LEN = M.max_position_embeddings
 # Native hadamard_scale applies dim**-0.5 after the matmul; the kernel consumes
 # the native (unscaled) matrix and keeps that ordering.
 HADAMARD_SCALE = IDX_HEAD_DIM ** -0.5
+# SetFixpipePreQuantFlag(0x3a800000) in the native indexer: the FP32 bit
+# pattern of 2^-10, the dequantisation the cube applies to the INT8 dot
+# product on its way to FP16. Every score below carries this factor, exactly
+# as native's do; nothing downstream reads the score magnitude.
+SCORE_DEQUANT_SCALE = 2.0 ** -10
 
 # kernel constants
 COMPRESS_RATIO = 4   # the indexer only runs on ratio-4 layers
@@ -735,21 +740,42 @@ def indexer_score_topk_forest_vllm(
                             ),
                             0,
                         )
-                        score_shard = pl.maximum(
+                        # Native does not keep the INT8 dot product in FP32.
+                        # FixpSToL1 copies L0C to L1 with reluPre = 1 and
+                        # quantPre = DEQF16 under
+                        # SetFixpipePreQuantFlag(0x3a800000), i.e. it applies
+                        # ReLU on the INT32 accumulator, scales by the FP32
+                        # constant 2^-10 and lands the result in L1 as FP16
+                        # (quant_lightning_indexer_service_cube.h:533-548).
+                        # The weighted head sum then reads that FP16 tensor as
+                        # the cube's B operand. The scale keeps the product --
+                        # up to 128 * 127 * 127 -- inside FP16 range, and being
+                        # a power of two it is exact, so only the FP16 mantissa
+                        # matters: scores above 2048 land on a grid of whole
+                        # integers. Carrying full FP32 here was making our
+                        # ranking finer than the operator's, which is what
+                        # decided the last top-512 slot differently.
+                        score_shard = pl.cast(
                             pl.cast(
-                                pl.aiv_shard(score_i32),
-                                target_type=pl.FP32,
-                                mode="none",
+                                pl.mul(
+                                    pl.maximum(
+                                        pl.cast(
+                                            pl.aiv_shard(score_i32),
+                                            target_type=pl.FP32,
+                                            mode="none",
+                                        ),
+                                        0.0,
+                                    ),
+                                    SCORE_DEQUANT_SCALE,
+                                ),
+                                target_type=pl.FP16,
+                                mode="rint",
                             ),
-                            0.0,
+                            target_type=pl.FP32,
                         )
-                        # Native hands the operator FP16 weights and query
-                        # scale, but rounding this term to FP16 was measured and
-                        # did not converge: the topk divergence stayed at four
-                        # keys and merely moved to a different set of tokens,
-                        # which is what a perturbation of the right magnitude
-                        # does to near-ties. Keep the plain FP32 product until
-                        # there is evidence for the operator's actual accumulator.
+                        # FP16 x FP16 is exact in FP32 (11 + 11 mantissa bits),
+                        # so this multiply matches the cube's MAC, which keeps
+                        # the product unrounded and accumulates in FP32.
                         score_shard = pl.row_expand_mul(
                             score_shard, head_coefficient,
                         )
