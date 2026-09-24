@@ -1147,7 +1147,21 @@ def indexer_weights_score(
         for kb in pl.unroll(1, WEIGHTS_OK):
             partial_r0 = kb * T_PAD + w_r0
             w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
-        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.mul(w_sum, WEIGHTS_SCALE)
+        # Native's weights_proj is a BF16 Linear and the softmax_scale *
+        # n_heads**-0.5 factor is applied to that BF16 tensor, so both the
+        # projection and the scaled result are rounded.
+        w_proj_bf16 = pl.cast(
+            pl.cast(w_sum, target_type=pl.BF16, mode="rint"),
+            target_type=pl.FP32,
+        )
+        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.cast(
+            pl.cast(
+                pl.mul(w_proj_bf16, WEIGHTS_SCALE),
+                target_type=pl.BF16,
+                mode="rint",
+            ),
+            target_type=pl.FP32,
+        )
 
     topk_scores, topk_idxs, leaf_tid = indexer_score_topk_forest(
         qr_hadamard_i8, qr_hadamard_scale_dq, weights,
@@ -1548,7 +1562,10 @@ def golden_indexer(tensors, inner_full=None):
     }
     golden_compressor(inner_tensors)
 
-    weights = (x @ weights_proj) * WEIGHTS_SCALE
+    # Native's weights_proj is a BF16 Linear and the scale is applied to that
+    # BF16 tensor.
+    weights = (x @ weights_proj).to(torch.bfloat16).float()
+    weights = (weights * WEIGHTS_SCALE).to(torch.bfloat16).float()
 
     # C8 cache: pre-quantized INT8 KV + per-position dequant scale (no score-time re-quant)
     idx_kv_cache_i8 = tensors["idx_kv_cache"]
