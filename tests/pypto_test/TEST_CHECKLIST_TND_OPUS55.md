@@ -522,3 +522,48 @@ BF16 的值都是二进制小数，差值自然也是 2 的幂，`max_abs` 是 2
 **下一步**：误差集中在 q 投影、attention 打分/softmax、输出投影这三段。
 需要做 kernel 诊断副本暴露 `probe_q` 和 `probe_heads`（输出投影前的
 attention 结果），把 1.44% 拆到具体哪一段。
+
+### 2026-09-24 第七批：stage 探针拆分 output 误差（进行中）
+
+**目的**：批次 6 已确认 indexer cache 与原生逐位一致、topk 选择也一致，但 output
+仍有 1.44%。本批用 kernel 诊断副本把这 1.44% 拆到具体哪一段。
+
+**探针机制**：`decode_csa_stage_probe.py` 是 `decode_csa.py` 的诊断副本，把内部
+`pl.create_tensor` 的中间量换成 `pl.Out` 输出张量（`probe_q` / `probe_kv` /
+`probe_qr` / `probe_topk` / `probe_heads`）暴露出来，**不改动任何 stage 的数学**。
+native 侧由 `precision_probe_hybrid.py` 用 `unittest.mock.patch` 打在 torch_npu 算子上
+并配合 `register_forward_hook` 抓取，同样不修改仓库代码。
+
+**与 opus55 的兼容性**：`decode_csa.py` 在 opus55 与 tnd-main 之间**逐字节相同**
+（本分支的改动都在 `decode_indexer.py` / `decode_indexer_compressor.py`），
+所以 tnd-main 的探针副本对本分支同样有效。已复制到 `bin/opus55-ab/` 并把
+其中的实验根路径全部改指向 opus55，已确认无残留的他人路径引用。
+
+**关键判读项** `native_o_proj_on_probe_heads`：用原生的输出投影作用在探针抓到的
+attention heads 上。
+
+| 结果 | 含义 |
+|------|------|
+| `vs_native_output` ≈ 1.44% | 误差在进输出投影之前就存在于 attention heads |
+| `vs_native_output` ≈ 0 | 误差出在输出投影（`o_a` / `o_b`）这一段 |
+
+**任务**：`task_20260924_211549_125137811104`（uniform-b4，`PROBE_LENGTHS=6,6,6,6`）
+
+- 结果：待填
+
+**结构性前提（影响可达目标）**：原生的稀疏 attention 走
+`kv_plan.get_dsa_sparse_attn_op()`，是一个**融合算子**，内部的累加顺序与中间精度
+在 Python 层不可见。这与 `index_key` 的情形本质不同——那里两侧都是显式的 Python 级
+运算，所以对齐后能做到逐位相同。attention 核心**无法靠读原生代码对齐**，只能逐个
+边界做实验去试。
+
+kernel 侧我们能控制的边界（`decode_sparse_attn_csa.py`）：
+
+| 位置 | 当前做法 |
+|------|---------|
+| 355 行 | 概率矩阵在 PV 矩阵乘前 `cast(qk_exp, BF16, rint)` |
+| 379-391 行 | flash 式 running max 重缩放（`alpha` / `beta`） |
+| 470 行 | 归一化后 `cast(n_full, BF16, rint)` |
+| 478 行 | inverse RoPE 后 `cast(m_rot, BF16, rint)` |
+
+先等探针把误差落到具体哪一段，再决定动哪个边界，不预先猜。
