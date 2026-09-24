@@ -805,10 +805,13 @@ def kv_proj_rope(
     """KV LoRA, RMSNorm, and RoPE over bounded dense tiles."""
     t_dim = pl.tensor.dim(x, 0)
     # Scalar-unit staging for the tail row coefficients. Declared at function
-    # level so they are genuine tensors: a create_tensor inside the tail scope
-    # comes back as a tile and pl.load then refuses it.
-    kv_rms_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
-    kv_inv_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
+    # level so they are genuine tensors -- a create_tensor inside the tail
+    # scope comes back as a tile and pl.load then refuses it -- and given one
+    # row per kv_rms_norm_rope tile, because those tiles run concurrently and
+    # a single shared row lets them overwrite each other.
+    kv_tail_slots = (QPROJ_T_PAD + KV_RMS_T_TILE - 1) // KV_RMS_T_TILE
+    kv_rms_store_tail = pl.create_tensor([kv_tail_slots, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
+    kv_inv_store_tail = pl.create_tensor([kv_tail_slots, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
@@ -984,20 +987,20 @@ def kv_proj_rope(
                     # it with pl.store rather than a subscript write.
                     pl.store(
                         pl.sqrt(pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)),
-                        [0, 0],
+                        [tg_idx, 0],
                         kv_rms_store_tail,
                     )
                     for kv_row_tail in pl.range(KV_RMS_T_TILE):
                         pl.write(
                             kv_inv_store_tail,
-                            [0, kv_row_tail],
-                            1.0 / pl.read(kv_rms_store_tail, [0, kv_row_tail]),
+                            [tg_idx, kv_row_tail],
+                            1.0 / pl.read(kv_rms_store_tail, [tg_idx, kv_row_tail]),
                         )
                     # The tail computes in tiles, so read the scalar results
                     # back as a tile rather than a tensor slice.
                     kv_inv_rms_tail = pl.load(
                         kv_inv_store_tail,
-                        [0, 0],
+                        [tg_idx, 0],
                         [1, KV_RMS_T_TILE],
                         target_memory=pl.MemorySpace.Vec,
                     )
