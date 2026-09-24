@@ -1128,7 +1128,7 @@ def indexer_weights_score_vllm(
         name_hint="weights_proj_vllm",
         deps=[weights_gate_dep],
         allow_early_resolve=True,
-    ):
+    ) as weights_partial_tid:
         worker = pl.tile.get_block_idx()
         for unit in pl.range(
             worker, WEIGHTS_OK * row_blocks, weights_workers,
@@ -1163,6 +1163,7 @@ def indexer_weights_score_vllm(
     with pl.spmd(
         row_blocks,
         name_hint="weights_proj_reduce_vllm",
+        deps=[weights_partial_tid],
         allow_early_resolve=True,
     ) as weights_tid:
         row_block = pl.tile.get_block_idx()

@@ -473,11 +473,12 @@ def q_proj_q_dequant(
     """Dequantize, normalize, and rotate one projected Q tile."""
     t_dim = pl.tensor.dim(q, 0)
     q_flat = pl.reshape(q, [t_dim, H * HEAD_DIM])
-    for dq_worker in pl.spmd(
+    with pl.spmd(
         Q_DEQUANT_WORKERS, name_hint="qproj_dequant_rms_nope_rope",
         deps=[qproj_tid],
         allow_early_resolve=True,
-    ):
+    ) as q_dequant_tid:
+        dq_worker = pl.tile.get_block_idx()
         for dq_work in pl.range(
             dq_worker, ((tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE) * (H // Q_ROPE_H_TILE), Q_DEQUANT_WORKERS,
         ):
@@ -610,7 +611,7 @@ def q_proj_q_dequant(
                     q_rope_bf16_tail = pl.cast(q_rope_rot_tail, target_type=pl.BF16, mode="rint")
                     q_rope_valid = pl.set_validshape(q_rope_bf16_tail, valid_tail_rows, ROPE_DIM)
                     pl.store(q_rope_valid, [out_tg, h0_tail + NOPE_DIM], q_flat)
-    return q
+    return q_dequant_tid
 
 
 @pl.jit.inline(auto_scope=False)
@@ -628,6 +629,7 @@ def q_proj_q(
 ):
     """Q projection and its dequant + RMSNorm + RoPE over bounded tiles."""
     t_dim = pl.tensor.dim(x, 0)
+    completion = pl.array.create(1, pl.TASK_ID)
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
@@ -636,12 +638,14 @@ def q_proj_q(
             q_proj_i32, _qproj_tid = q_proj_q_matmul(
                 wq_b, qr_i8_matmul, q_proj_i32, tile_rows, qproj_dep,
             )
-            q_proj_q_dequant(
+            q_done = q_proj_q_dequant(
                 wq_b_scale, rope_cos_il, rope_sin_signed, rope_swap_idx, q,
                 qr_scale_pad_store, q_proj_i32, tile_base, tile_rows,
                 _qproj_tid,
             )
-    return q
+            completion[0] = q_done
+    completion_tid = completion[0]
+    return completion_tid
 
 
 @pl.jit.inline(auto_scope=False)
@@ -675,10 +679,11 @@ def q_proj_rope(
         q_seq_deps,
     )
     q_seq_dep = pl.system.task_dummy(deps=[q_seq_deps[0], rope_ready_dep])
-    q_proj_q(
+    q_done = q_proj_q(
         x, wq_b, wq_b_scale, rope_cos_il, rope_sin_signed, rope_swap_idx, q,
         qr_i8_matmul, qr_scale_pad_store, q_seq_dep,
     )
+    return q_done
 
 
 
@@ -696,6 +701,7 @@ def kv_proj_rope(
 ):
     """KV LoRA, RMSNorm, and RoPE over bounded dense tiles."""
     t_dim = pl.tensor.dim(x, 0)
+    completion = pl.array.create(1, pl.TASK_ID)
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
@@ -761,7 +767,7 @@ def kv_proj_rope(
                 name_hint="kv_rms_norm_rope",
                 deps=[_kv_tid],
                 sync_start=True,
-            ):
+            ) as kv_done:
                 tg_idx = pl.tile.get_block_idx()
                 tg = tg_idx * KV_RMS_T_TILE
                 valid_rows = pl.min(KV_RMS_T_TILE, tile_rows - tg)
@@ -906,6 +912,9 @@ def kv_proj_rope(
                     kv_rope_i16_tail = pl.cast(kv_rope_rot_tail, target_type=pl.BF16, mode="rint")
                     kv_rope_valid = pl.set_validshape(kv_rope_i16_tail, valid_rows, ROPE_DIM)
                     pl.store(kv_rope_valid, [out_tg, NOPE_DIM], kv_view)
+            completion[0] = kv_done
+    completion_tid = completion[0]
+    return completion_tid
 
 
 @pl.jit.inline(auto_scope=False)
@@ -1266,6 +1275,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("-d", "--device", type=int, default=0)
     parser.add_argument(
+        "-b", "--batch", type=int, default=None,
+        help="override the decode fixture batch without changing its S=6 specialization",
+    )
+    parser.add_argument(
         "--mode",
         choices=["decode", "prefill", "split", "all"],
         default="all",
@@ -1285,6 +1298,9 @@ if __name__ == "__main__":
     parser.add_argument("--dump-passes", action="store_true", default=False)
     args = parser.parse_args()
 
+    if args.batch is not None and not 1 <= args.batch <= DECODE_BATCH // TP:
+        parser.error(f"--batch must be in [1, {DECODE_BATCH // TP}], got {args.batch}")
+
     modes_to_run = list(MODES.keys()) + ["split"] if args.mode == "all" else [args.mode]
 
     for mode_name in modes_to_run:
@@ -1293,6 +1309,8 @@ if __name__ == "__main__":
             print(f"--- qkv_proj_rope split: q rows={SPLIT_T_LOCAL}, kv rows={SPLIT_T_FULL} ---")
         else:
             B, S = MODES[mode_name]
+            if mode_name == "decode" and args.batch is not None:
+                B = args.batch
             fn, specs, golden = qkv_proj_rope_test, build_tensor_specs(B, S), golden_qkv_proj_rope
             print(f"--- qkv_proj_rope {mode_name}: B={B}, S={S} ---")
         result = run(

@@ -78,6 +78,9 @@ VLLM_INNER_INDEX_PAGE_NUM_DYN = pl.dynamic(
     "VLLM_INNER_INDEX_PAGE_NUM_DYN"
 )
 VLLM_INDEX_TABLE_WIDTH_DYN = pl.dynamic("VLLM_INDEX_TABLE_WIDTH_DYN")
+VLLM_QUERY_START_ROWS_DYN = pl.dynamic("VLLM_QUERY_START_ROWS_DYN")
+VLLM_CMP_SLOT_ROWS_DYN = pl.dynamic("VLLM_CMP_SLOT_ROWS_DYN")
+VLLM_INDEX_SLOT_ROWS_DYN = pl.dynamic("VLLM_INDEX_SLOT_ROWS_DYN")
 
 # model config
 B = DECODE_BATCH // TP_SIZE
@@ -192,7 +195,14 @@ def _decode_csa_attn_tp1(
         [B_DYN, VLLM_INDEX_TABLE_WIDTH_DYN], pl.INT32
     ],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
-    token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    query_start_loc: pl.Tensor[[VLLM_QUERY_START_ROWS_DYN], pl.INT32],
+    ori_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+    cmp_slot_mapping: pl.Tensor[
+        [VLLM_CMP_SLOT_ROWS_DYN, 2], pl.INT32
+    ],
+    index_slot_mapping: pl.Tensor[
+        [VLLM_INDEX_SLOT_ROWS_DYN, 2], pl.INT32
+    ],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16],
@@ -211,7 +221,10 @@ def _decode_csa_attn_tp1(
     cmp_freqs_cos.bind_dynamic(0, CMP_ROPE_ROWS_DYN)
     cmp_freqs_sin.bind_dynamic(0, CMP_ROPE_ROWS_DYN)
     position_ids.bind_dynamic(0, T_DYN)
-    token_valid.bind_dynamic(0, T_DYN)
+    query_start_loc.bind_dynamic(0, VLLM_QUERY_START_ROWS_DYN)
+    ori_slot_mapping.bind_dynamic(0, T_DYN)
+    cmp_slot_mapping.bind_dynamic(0, VLLM_CMP_SLOT_ROWS_DYN)
+    index_slot_mapping.bind_dynamic(0, VLLM_INDEX_SLOT_ROWS_DYN)
     attn_out.bind_dynamic(0, T_DYN)
     kv_seq_lens.bind_dynamic(0, B_DYN)
     compress_state_pages.bind_dynamic(0, VLLM_COMPRESS_STATE_PAGE_NUM_DYN)
@@ -237,6 +250,9 @@ def _decode_csa_attn_tp1(
     b_dim = pl.tensor.dim(kv_seq_lens, 0)
     s_dim = t_dim // b_dim
     positions_i32 = pl.create_tensor([t_dim], dtype=pl.INT32)
+    token_valid = pl.create_tensor([t_dim], dtype=pl.INT32)
+    cmp_slot_by_token = pl.create_tensor([t_dim, 2], dtype=pl.INT32)
+    index_slot_by_token = pl.create_tensor([t_dim, 2], dtype=pl.INT32)
     rope_swap_idx = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.INT32)
     idx_cos_il = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
     idx_sin_signed = pl.create_tensor(
@@ -268,12 +284,55 @@ def _decode_csa_attn_tp1(
         swap = pl.cast(
             pl.sub(pl.add(columns, 1.0), pl.mul(lane, 2.0)), pl.INT32,
         )
+        compact_index = 0
         for token in pl.range(t_dim):
+            request = token // s_dim
+            step = token % s_dim
+            query_begin = pl.read(query_start_loc, [request])
+            query_end = pl.read(query_start_loc, [request + 1])
             position = pl.cast(pl.read(position_ids, [token]), pl.INDEX)
             active_position = -1
-            if pl.read(token_valid, [token]) != 0:
+            raw_page = pl.read(ori_slot_mapping, [token, 0])
+            valid = pl.cast(0, pl.INT32)
+            if (
+                query_end - query_begin == s_dim
+                and step < query_end - query_begin
+                and position >= 0
+                and position < pl.read(kv_seq_lens, [request])
+                and position < pl.tensor.dim(freqs_cos, 0)
+                and raw_page >= 0
+            ):
+                valid = pl.cast(1, pl.INT32)
                 active_position = position
+            pl.write(token_valid, [token], valid)
             pl.write(positions_i32, [token], pl.cast(active_position, pl.INT32))
+            invalid_slot = pl.cast(-1, pl.INT32)
+            pl.write(cmp_slot_by_token, [token, 0], invalid_slot)
+            pl.write(cmp_slot_by_token, [token, 1], invalid_slot)
+            pl.write(index_slot_by_token, [token, 0], invalid_slot)
+            pl.write(index_slot_by_token, [token, 1], invalid_slot)
+            if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
+                pl.write(
+                    cmp_slot_by_token,
+                    [token, 0],
+                    pl.read(cmp_slot_mapping, [compact_index, 0]),
+                )
+                pl.write(
+                    cmp_slot_by_token,
+                    [token, 1],
+                    pl.read(cmp_slot_mapping, [compact_index, 1]),
+                )
+                pl.write(
+                    index_slot_by_token,
+                    [token, 0],
+                    pl.read(index_slot_mapping, [compact_index, 0]),
+                )
+                pl.write(
+                    index_slot_by_token,
+                    [token, 1],
+                    pl.read(index_slot_mapping, [compact_index, 1]),
+                )
+                compact_index = compact_index + 1
             # Inactive rows only read table row zero and never publish state.
             rope_row = pl.max(active_position, 0)
             cmp_row = pl.max(active_position + 1 - COMPRESS_RATIO, 0)
@@ -295,7 +354,7 @@ def _decode_csa_attn_tp1(
     topk_indices = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.INT32)
     position_ids_2d = pl.reshape(positions_i32, [t_dim, 1])
     late_dep = pl.system.task_dummy(deps=[rope_tid])
-    q_proj_rope(
+    q_ready_tid = q_proj_rope(
         x_normed,
         wq_a,
         wq_b,
@@ -309,26 +368,27 @@ def _decode_csa_attn_tp1(
         qr_scale,
         late_dep,
     )
-    kv_proj_rope(
+    kv_ready_tid = kv_proj_rope(
         x_normed, wkv, gamma_ckv, idx_cos_il, idx_sin_signed,
         rope_swap_idx, kv, late_dep,
     )
 
     with pl.spmd(
-        TP1_CSA_WB_WORKERS, name_hint="csa_vllm_raw_cache_write",
+        TP1_CSA_WB_WORKERS,
+        name_hint="csa_vllm_raw_cache_write",
+        deps=[kv_ready_tid],
     ) as raw_cache_tid:
         worker = pl.tile.get_block_idx()
         for token in pl.range(worker, t_dim, TP1_CSA_WB_WORKERS):
             if pl.read(token_valid, [token]) != 0:
-                request = token // s_dim
-                position = pl.cast(pl.read(positions_i32, [token]), pl.INDEX)
-                logical_page = position // VLLM_KV_PAGE_ROWS
                 physical_page_i32 = pl.read(
-                    ori_block_table, [request, logical_page],
+                    ori_slot_mapping, [token, 0],
                 )
-                if physical_page_i32 > 0:
+                if physical_page_i32 >= 0:
                     physical_page = pl.cast(physical_page_i32, pl.INDEX)
-                    intra = position % VLLM_KV_PAGE_ROWS
+                    intra = pl.cast(
+                        pl.read(ori_slot_mapping, [token, 1]), pl.INDEX,
+                    )
                     kv_cache_pages[
                         physical_page : physical_page + 1,
                         intra : intra + 1,
@@ -352,7 +412,7 @@ def _decode_csa_attn_tp1(
         cmp_norm_w,
         cmp_cos_il,
         cmp_sin_signed,
-        cmp_block_table,
+        cmp_slot_by_token,
         positions_i32,
         token_valid,
         late_dep,
@@ -371,7 +431,7 @@ def _decode_csa_attn_tp1(
         cmp_cos_il,
         cmp_sin_signed,
         hadamard_idx,
-        index_block_table,
+        index_slot_by_token,
         positions_i32,
         token_valid,
         late_dep,
@@ -395,9 +455,8 @@ def _decode_csa_attn_tp1(
         kv_seq_lens,
         idx_cache_tid,
     )
-
     attention_ready = pl.system.task_dummy(
-        deps=[raw_cache_tid, cmp_cache_tid, topk_tid],
+        deps=[q_ready_tid, kv_ready_tid, raw_cache_tid, cmp_cache_tid, topk_tid],
     )
     o_packed_heads = pl.create_tensor(
         [O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16,

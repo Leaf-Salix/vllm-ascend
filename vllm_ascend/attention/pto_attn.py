@@ -18,9 +18,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+
 
 # --- kernel import -----------------------------------------------------------
 # decode_csa fixes its TP specialization at import time from sys.argv, which a
@@ -63,10 +66,58 @@ def kernel():
 VLLM_PAGE = 128          # swa / compressed / indexer KV page, in slots
 VLLM_STATE_PAGE = 8
 COMPRESS_RATIO = 4
+# The CSA orchestration's live temporaries are allocated from scope-depth ring
+# 1. Fix its capacity before the process Worker is published; launch/replay must
+# never resize the runtime. Other rings keep Simpler's defaults.
+TMR_RING_HEAP = (0, 512 * 1024 * 1024, 0, 0)
 
 
 class NativeLayoutError(ValueError):
     """The live vLLM allocation does not satisfy the native CSA ABI."""
+
+
+@dataclass(frozen=True)
+class NativeCsaMetadata:
+    """The five native cache groups consumed by a ratio-4 DSA layer."""
+
+    compressed: object
+    compressor_state: object
+    indexer_state: object
+    indexer_cache: object
+    raw_cache: object
+
+    def values(self) -> tuple[object, ...]:
+        return (
+            self.compressed,
+            self.compressor_state,
+            self.indexer_state,
+            self.indexer_cache,
+            self.raw_cache,
+        )
+
+
+def resolve_native_metadata(
+    prefix: str,
+    metadata_by_name: Mapping[str, object],
+) -> NativeCsaMetadata:
+    """Resolve cache groups by their native names, never by list position."""
+    names = {
+        "compressed": f"{prefix}.attn",
+        "compressor_state": f"{prefix}.compressor.state_cache",
+        "indexer_state": f"{prefix}.indexer.compressor.state_cache",
+        "indexer_cache": f"{prefix}.indexer.k_cache",
+        "raw_cache": f"{prefix}.swa_cache",
+    }
+    missing = [name for name in names.values() if name not in metadata_by_name]
+    unexpected = sorted(set(metadata_by_name) - set(names.values()))
+    if missing or unexpected:
+        raise NativeLayoutError(
+            "ratio-4 CSA metadata groups differ from the native contract: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    return NativeCsaMetadata(
+        **{field: metadata_by_name[name] for field, name in names.items()},
+    )
 
 
 # --- weights: one-time, cached on the impl -----------------------------------
@@ -305,7 +356,9 @@ ARG_ORDER = (
     "inner_index_pages", "inner_compress_state_block_table",
     "ori_block_table", "cmp_block_table",
     "index_block_table",
-    "position_ids", "token_valid", "kv_seq_lens", "attn_sink",
+    "position_ids", "query_start_loc",
+    "ori_slot_mapping", "cmp_slot_mapping", "index_slot_mapping",
+    "kv_seq_lens", "attn_sink",
     "wo_a", "wo_b", "wo_b_scale",
     "attn_out",
 )
@@ -341,12 +394,19 @@ def _full_page_view(cache: torch.Tensor, rows: int, row_shape: tuple[int, ...]):
     return view
 
 
-def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: str, output=None):
+def build_args(
+    impl,
+    hidden_states,
+    kv_cache,
+    metadata: NativeCsaMetadata,
+    layer: str,
+    output=None,
+):
     """Bind one decode step to the kernel's native-layout arguments.
 
-    ``metadata_list`` is what ``filter_metadata`` returns for a ratio-4 layer:
-    five per-cache metadata objects sorted by key -- attn, compressor state,
-    indexer-compressor state, indexer k, sliding window.
+    Historical reads use each native block table. Current writes use the
+    corresponding native slot mapping. No per-step page-table or validity
+    tensor is synthesized by this adapter.
     """
     if not isinstance(layer, str):
         # RopeDataProxy takes a non-string key as a slice and hands back another
@@ -354,61 +414,91 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
         raise NativeLayoutError(
             f"layer must be the layer's name, got {type(layer).__name__}"
         )
-    if len(metadata_list) != 5 or len(kv_cache) != 6:
+    metadata_groups = metadata.values()
+    if len(kv_cache) != 6:
         raise NativeLayoutError(
-            f"ratio-4 CSA requires 5 metadata groups and 6 cache views, got "
-            f"{len(metadata_list)} and {len(kv_cache)}"
+            f"ratio-4 CSA requires 6 native cache views, got {len(kv_cache)}"
         )
-    if any(m.decode is None for m in metadata_list):
+    if any(group.decode is None for group in metadata_groups):
         raise NativeLayoutError("native CSA only accepts decode metadata")
     kcsa, _ = kernel()
-    if not 1 <= seq <= kcsa.S:
-        raise NativeLayoutError(f"native CSA requires 1..{kcsa.S} tokens per request, got seq={seq}")
-    cmp_md, cst_md, ist_md, idx_md, swa_md = (m.decode for m in metadata_list)
-    cmp_kv_c, swa_kv_c, state_c, ist_c, idx_k_c, idx_s_c = kv_cache
+    seq = kcsa.S
+    cmp_md, cst_md, inner_state_md, idx_md, swa_md = (
+        group.decode for group in metadata_groups
+    )
+    cmp_kv_c, swa_kv_c, state_c, inner_state_c, idx_k_c, idx_s_c = kv_cache
 
-    host_pos = metadata_list[0].decode.input_positions
+    host_pos = cmp_md.input_positions
     if host_pos.dtype != torch.int64 or host_pos.ndim != 1 or not host_pos.is_contiguous():
         raise NativeLayoutError("input_positions must be contiguous INT64 token rows")
     if host_pos.shape[0] % seq:
         raise NativeLayoutError(
             f"position rows {host_pos.shape[0]} are not divisible by seq={seq}"
         )
-    n_real = host_pos.shape[0] // seq            # graph descriptor request rows
-    if not 1 <= n_real <= kcsa.B:
+    batch = host_pos.shape[0] // seq
+    if not 1 <= batch <= kcsa.B:
         raise NativeLayoutError(
-            f"{n_real} requests exceed the kernel's B={kcsa.B}"
+            f"{batch} requests exceed the kernel's B={kcsa.B}"
         )
+    query_start_loc = cmp_md.query_start_loc
+    query_start_loc_cpu = cmp_md.query_start_loc_cpu
+    if (
+        query_start_loc.dtype != torch.int32
+        or query_start_loc.ndim != 1
+        or not query_start_loc.is_contiguous()
+        or query_start_loc.shape[0] != batch + 1
+    ):
+        raise NativeLayoutError(
+            f"query_start_loc must be contiguous INT32 [{batch + 1}]"
+        )
+    if (
+        not isinstance(query_start_loc_cpu, torch.Tensor)
+        or query_start_loc_cpu.device.type != "cpu"
+        or query_start_loc_cpu.dtype != torch.int32
+        or query_start_loc_cpu.ndim != 1
+        or not query_start_loc_cpu.is_contiguous()
+        or query_start_loc_cpu.shape[0] != batch + 1
+    ):
+        raise NativeLayoutError(
+            "query_start_loc_cpu must be a contiguous CPU INT32 tensor with "
+            f"{batch + 1} rows"
+        )
+    query_lens = (
+        query_start_loc_cpu[1:] - query_start_loc_cpu[:-1]
+    ).tolist()
+    if any(length != seq for length in query_lens):
+        raise NativeLayoutError(
+            f"native CSA specialization requires uniform S={seq}, got {query_lens}"
+        )
+    for group in metadata_groups:
+        if group.num_prefills != 0 or group.num_decode_tokens != host_pos.shape[0]:
+            raise NativeLayoutError(
+                "native CSA requires a decode-only descriptor with exact token rows"
+            )
+        other = group.decode
+        if (
+            not isinstance(other.query_start_loc_cpu, torch.Tensor)
+            or other.query_start_loc_cpu.device.type != "cpu"
+            or other.query_start_loc_cpu.dtype != query_start_loc_cpu.dtype
+            or other.query_start_loc_cpu.shape != query_start_loc_cpu.shape
+        ):
+            raise NativeLayoutError(
+                "cache groups expose incompatible query_start_loc_cpu tensors"
+            )
+        if not torch.equal(other.query_start_loc_cpu, query_start_loc_cpu):
+            raise NativeLayoutError("cache groups disagree on query_start_loc")
     if hidden_states.shape[0] < host_pos.shape[0]:
         raise NativeLayoutError(
             f"hidden_states has {hidden_states.shape[0]} rows, expected at least "
             f"{host_pos.shape[0]}"
         )
 
-    b, t = n_real, host_pos.shape[0]
+    b, t = batch, host_pos.shape[0]
     pos = host_pos
-    host_positions = pos.view(b, seq)
-    raw_logical_page = torch.div(
-        host_positions, VLLM_PAGE, rounding_mode="floor",
-    )
-    raw_page_in_range = (raw_logical_page >= 0) & (
-        raw_logical_page < swa_md.block_table.shape[1]
-    )
-    raw_logical_page = raw_logical_page.clamp(
-        min=0, max=swa_md.block_table.shape[1] - 1,
-    )
-    raw_pages = swa_md.block_table[:b].gather(
-        1, raw_logical_page,
-    )
     rope_cos, rope_sin = _native_rope_tables(layer)
     if cmp_md.seq_lens.dtype != torch.int32 or not cmp_md.seq_lens.is_contiguous():
         raise NativeLayoutError("seq_lens must be contiguous INT32 request rows")
     seq_lens = cmp_md.seq_lens[:b]
-    token_valid = (
-        raw_page_in_range & (raw_pages > 0)
-        & (host_positions < rope_cos.shape[0])
-        & (host_positions < seq_lens.view(b, 1))
-    ).reshape(t)
 
     def native_table(name: str, table: torch.Tensor) -> torch.Tensor:
         if table.dtype != torch.int32:
@@ -421,9 +511,29 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
             raise NativeLayoutError(f"{name} must be contiguous; no per-step copy is made")
         return table[:b]
 
+    def native_slots(
+        name: str,
+        slots: torch.Tensor,
+        minimum_rows: int,
+    ) -> torch.Tensor:
+        if (
+            slots.dtype != torch.int32
+            or slots.ndim != 2
+            or slots.shape[1] != 2
+            or not slots.is_contiguous()
+        ):
+            raise NativeLayoutError(
+                f"{name} must be contiguous INT32 [N, 2]"
+            )
+        if slots.shape[0] < minimum_rows:
+            raise NativeLayoutError(
+                f"{name} has {slots.shape[0]} rows, expected at least {minimum_rows}"
+            )
+        return slots
+
     expected_dtypes = {
         "main state": (state_c, torch.float32),
-        "inner state": (ist_c, torch.float32),
+        "inner state": (inner_state_c, torch.float32),
         "raw KV": (swa_kv_c, torch.bfloat16),
         "compressed KV": (cmp_kv_c, torch.bfloat16),
         "index key page": (idx_k_c, torch.int8),
@@ -475,7 +585,7 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
         "main state block table", cst_md.block_table,
     )
     a["inner_compress_state_block_table"] = native_table(
-        "inner state block table", ist_md.block_table,
+        "inner state block table", inner_state_md.block_table,
     )
     a["ori_block_table"] = native_table(
         "raw KV block table", swa_md.block_table,
@@ -484,17 +594,17 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
         "compressed KV block table", cmp_md.block_table,
     )
     shared_storage = idx_k_c.untyped_storage().data_ptr()
-    if ist_c.untyped_storage().data_ptr() != shared_storage:
+    if inner_state_c.untyped_storage().data_ptr() != shared_storage:
         raise NativeLayoutError(
             "inner state and index key do not share one vLLM allocation"
         )
-    if ist_c.data_ptr() != idx_k_c.data_ptr():
+    if inner_state_c.data_ptr() != idx_k_c.data_ptr():
         raise NativeLayoutError(
             "inner state and index key do not start at the same physical page"
         )
-    if ist_c.stride(0) != 4160:
+    if inner_state_c.stride(0) != 4160:
         raise NativeLayoutError(
-            f"inner state page stride is {ist_c.stride(0)}, expected 4160 FP32"
+            f"inner state page stride is {inner_state_c.stride(0)}, expected 4160 FP32"
         )
     if idx_s_c.untyped_storage().data_ptr() != shared_storage:
         raise NativeLayoutError("index key and scale do not share one vLLM page")
@@ -513,10 +623,23 @@ def build_args(impl, hidden_states, kv_cache, metadata_list, seq: int, layer: st
         "index block table", idx_md.block_table,
     )
     a["position_ids"] = pos
-    a["token_valid"] = token_valid.to(torch.int32)
+    a["query_start_loc"] = query_start_loc
+    a["ori_slot_mapping"] = native_slots(
+        "raw KV slot mapping", swa_md.slot_mapping, t,
+    )[:t]
+    a["cmp_slot_mapping"] = native_slots(
+        "compressed KV slot mapping", cmp_md.slot_mapping, b,
+    )
+    a["index_slot_mapping"] = native_slots(
+        "index slot mapping", idx_md.slot_mapping, b,
+    )
+    if a["cmp_slot_mapping"].shape[0] != a["index_slot_mapping"].shape[0]:
+        raise NativeLayoutError(
+            "compressed KV and index slot mappings have different row counts"
+        )
     a["kv_seq_lens"] = seq_lens
 
-    return [a[name] for name in ARG_ORDER], (pos, seq, n_real)
+    return [a[name] for name in ARG_ORDER], (pos, seq, batch)
 
 
 # --- one-shot comparison -----------------------------------------------------
@@ -531,7 +654,7 @@ def _registered():
         from pypto.torch import init, register
 
         kcsa, _ = kernel()
-        init()
+        init(ring_heap=TMR_RING_HEAP)
         _OP = register(kcsa.decode_csa_attn_tp1_test, "pypto_csa::attention_csa")
     return _OP
 
@@ -542,20 +665,20 @@ _OWNERSHIP_AUDITS = [0]
 
 
 def audit_shared_pool_ownership(
-    metadata_list, kv_cache, n_real: int, seq: int,
+    metadata: NativeCsaMetadata, kv_cache, n_real: int, seq: int,
 ) -> None:
     """Verify groups sharing each physical allocation own disjoint blocks.
 
     This intentionally reads a scalar back to the host and therefore runs only
     on eager/warm-up calls, never while ACLGraph capture is active.
     """
-    cmp_md, cst_md, ist_md, idx_md, swa_md = (
-        m.decode for m in metadata_list
+    cmp_md, cst_md, inner_state_md, idx_md, swa_md = (
+        group.decode for group in metadata.values()
     )
     host_rows = torch.arange(
-        n_real, device=ist_md.input_positions.device,
+        n_real, device=inner_state_md.input_positions.device,
     ) * seq
-    positions = ist_md.input_positions.index_select(0, host_rows).long()
+    positions = inner_state_md.input_positions.index_select(0, host_rows).long()
     raw_current_column = torch.div(
         positions, VLLM_PAGE, rounding_mode="floor",
     )
@@ -579,8 +702,8 @@ def audit_shared_pool_ownership(
     state_valid &= history < cmp_md.seq_lens[:n_real].reshape(-1, 1)
     state_columns = torch.div(
         history.clamp_min(0), VLLM_STATE_PAGE, rounding_mode="floor",
-    ).clamp(max=ist_md.block_table.shape[1] - 1)
-    inner_ids = ist_md.block_table[:n_real].gather(1, state_columns)
+    ).clamp(max=inner_state_md.block_table.shape[1] - 1)
+    inner_ids = inner_state_md.block_table[:n_real].gather(1, state_columns)
     inner_ids = inner_ids.masked_select(state_valid & (inner_ids > 0))
 
     last_positions = torch.minimum(positions + seq - 1, cmp_md.seq_lens[:n_real] - 1)
@@ -655,7 +778,7 @@ def audit_shared_pool_ownership(
     _OWNERSHIP_AUDITS[0] += 1
 
 
-def audit_inputs(metadata_list, n_real: int) -> None:
+def audit_inputs(metadata: NativeCsaMetadata, n_real: int) -> None:
     """Check that vLLM hands us the same buffers each step, on the first two.
 
     Capture bakes the address of every tensor read here into the recorded pass, so
@@ -667,12 +790,18 @@ def audit_inputs(metadata_list, n_real: int) -> None:
     """
     _AUDITS[0] += 1
     names = []
-    for i, m in enumerate(metadata_list):
-        d = m.decode
-        for attr in ("block_table", "slot_mapping", "seq_lens", "input_positions"):
+    for name, group in zip(
+        ("compressed", "compressor_state", "indexer_state", "indexer_cache", "raw_cache"),
+        metadata.values(),
+    ):
+        d = group.decode
+        for attr in (
+            "block_table", "slot_mapping", "seq_lens", "input_positions",
+            "query_start_loc",
+        ):
             t = getattr(d, attr, None)
             if isinstance(t, torch.Tensor):
-                names.append((f"md{i}.{attr}", t))
+                names.append((f"{name}.{attr}", t))
 
     moved = [n for n, t in names
              if n in _SEEN_ADDRS and _SEEN_ADDRS[n] != t.data_ptr()]
@@ -680,18 +809,29 @@ def audit_inputs(metadata_list, n_real: int) -> None:
         _SEEN_ADDRS[n] = t.data_ptr()
 
     if _AUDITS[0] == 1:
-        print("[pto-attn-audit] tensors=%d requests=%d" % (len(names), n_real),
-              flush=True)
+        print(
+            f"[pto-attn-audit] tensors={len(names)} requests={n_real}",
+            flush=True,
+        )
         return
 
-    print("[pto-attn-audit] moved_between_steps=%s"
-          % (",".join(moved) or "none"), flush=True)
+    print(
+        f"[pto-attn-audit] moved_between_steps={','.join(moved) or 'none'}",
+        flush=True,
+    )
     if moved:
         print("[pto-attn-audit] WARNING: those buffers are reallocated per step; "
               "an ACLGraph replay would read stale addresses", flush=True)
 
 
-def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_dir: str) -> bool:
+def compare_once(
+    self,
+    hidden_states,
+    kv_cache,
+    metadata_by_name,
+    native_out,
+    out_dir: str,
+) -> bool:
     """Run the kernel on this step's real tensors and record how it compares.
 
     The kernel writes six caches, so this runs after the native path and reads
@@ -704,7 +844,11 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
     if getattr(impl, "compress_ratio", 0) != COMPRESS_RATIO:
         # Only the ratio-4 layers carry the five cache groups this kernel needs.
         return False
-    if metadata_list[0].decode is None:
+    try:
+        metadata = resolve_native_metadata(self.prefix, metadata_by_name)
+    except NativeLayoutError:
+        return False
+    if metadata.compressed.decode is None:
         # A prefill step: this kernel is the decode path only. Returning False
         # leaves the caller's once-per-layer bookkeeping untouched, so the first
         # decode step still gets its turn.
@@ -717,11 +861,13 @@ def compare_once(self, hidden_states, kv_cache, metadata_list, native_out, out_d
         path.write_text(json.dumps(rec, indent=2, default=str), encoding="utf-8")
 
     try:
-        seq = _env_int("PTO_ATTN_SEQ", 1)
+        seq = kernel()[0].S
         rec["seq"] = seq
         rec["stage"] = "build_args"
         save()
-        args, plan = build_args(impl, hidden_states, kv_cache, metadata_list, seq, layer)
+        args, plan = build_args(
+            impl, hidden_states, kv_cache, metadata, layer,
+        )
         rec["arg_shapes"] = {
             n: [list(a.shape), str(a.dtype), bool(a.is_contiguous())]
             for n, a in zip(ARG_ORDER, args)
@@ -767,14 +913,23 @@ def _tally(layer: str, ratio, has_decode: bool) -> None:
     k = (layer, int(ratio or 0), bool(has_decode))
     _TALLY[k] = _TALLY.get(k, 0) + 1
     if _TALLY[k] <= 3 or _TALLY[k] % 25 == 0:
-        print("[pto-attn-offer] %s ratio=%s decode=%s n=%d"
-              % (layer, ratio, has_decode, _TALLY[k]), flush=True)
+        print(
+            f"[pto-attn-offer] {layer} ratio={ratio} decode={has_decode} n={_TALLY[k]}",
+            flush=True,
+        )
 
 
 # --- replacement -------------------------------------------------------------
 
 
-def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
+def substitute(
+    self,
+    hidden_states,
+    kv_cache,
+    metadata_by_name,
+    output,
+    need_gather_q_kv: bool,
+) -> bool:
     """Run the kernel in place of the native attention and publish its result.
 
     Unlike :func:`compare_once` this owns the step: the kernel directly updates
@@ -782,18 +937,41 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     """
     impl = self.dsa_attn.impl
     ratio = getattr(impl, "compress_ratio", 0)
-    decode = metadata_list[0].decode
-    _tally(self.dsa_attn.layer_name, ratio, decode is not None)
-    if ratio != COMPRESS_RATIO or decode is None:
+    if ratio != COMPRESS_RATIO:
+        _tally(self.dsa_attn.layer_name, ratio, False)
         return False
-    seq = _env_int("PTO_ATTN_SEQ", 1)
+    try:
+        metadata = resolve_native_metadata(self.prefix, metadata_by_name)
+    except NativeLayoutError as error:
+        key = f"metadata:{error}"
+        if key not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add(key)
+            print(f"[pto-attn] declined native metadata: {error}", flush=True)
+        return False
+    decode = metadata.compressed.decode
+    _tally(self.dsa_attn.layer_name, ratio, decode is not None)
+    if decode is None:
+        return False
     kcsa, _ = kernel()
-    if not 1 <= seq <= kcsa.S:
-        if "seq" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("seq")
+    seq = kcsa.S
+    unsupported = []
+    if need_gather_q_kv:
+        unsupported.append("FlashComm gather")
+    if impl.__class__.__module__.endswith(".dsa_cp"):
+        unsupported.append("DSA context parallel")
+    if getattr(impl, "multistream_dsa_preprocess", False):
+        unsupported.append("multistream DSA preprocess")
+    if getattr(impl, "multistream_dsv4_dsa_overlap", False):
+        unsupported.append("multistream DSV4 overlap")
+    if getattr(impl, "skip_topk", False) or getattr(impl, "use_index_cache", False):
+        unsupported.append("IndexCache")
+    if unsupported:
+        key = "features:" + ",".join(unsupported)
+        if key not in _DEBUG_REFUSED:
+            _DEBUG_REFUSED.add(key)
             print(
-                f"[pto-attn] declined host seq={seq}: native CSA currently "
-                f"supports 1..{kcsa.S} tokens per request",
+                "[pto-attn] declined unsupported native features: "
+                + ", ".join(unsupported),
                 flush=True,
             )
         return False
@@ -820,19 +998,22 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
             impl,
             hidden_states,
             kv_cache,
-            metadata_list,
-            seq,
+            metadata,
             self.dsa_attn.layer_name,
             output=output,
         )
         _pos, _, n_real = plan
-        if not capture_active():
+        debug_audit = bool(
+            os.environ.get("PTO_ATTN_PROBE", "").strip()
+            or os.environ.get("PTO_ATTN_COMPARE", "").strip()
+        )
+        if debug_audit and not capture_active():
             if _OWNERSHIP_AUDITS[0] < 2:
                 audit_shared_pool_ownership(
-                    metadata_list, kv_cache, n_real, seq,
+                    metadata, kv_cache, n_real, seq,
                 )
             if _AUDITS[0] < 2:
-                audit_inputs(metadata_list, n_real)
+                audit_inputs(metadata, n_real)
     except NativeLayoutError as error:
         key = f"layout:{error}"
         if key not in _DEBUG_REFUSED:
@@ -848,6 +1029,8 @@ def substitute(self, hidden_states, kv_cache, metadata_list, output) -> bool:
     # to tell a recorded pass from the warm-up that precedes it.
     cap = capture_active()
     if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0:
-        print("[pto-attn-ran] n=%d tokens=%d capturing=%s"
-              % (_RAN[0], n_real * seq, cap), flush=True)
+        print(
+            f"[pto-attn-ran] n={_RAN[0]} tokens={n_real * seq} capturing={cap}",
+            flush=True,
+        )
     return True

@@ -175,21 +175,35 @@ def sparse_attn_csa(
                 valid_shape=[bias_rows, WIN],
             ), pad_value=pl.PadValue.min), target_type=pl.FP32)
             v_win_valid = pl.minimum(pl.maximum(pl.add(v_win_f, 1.0), 0.0), 1.0)
-            # Scalar writes, but VALID_BLOCK_MASK_COLS gives every token row its own
-            # whole 64-byte line, and a lane owns BIAS_T_TILE entire rows, so no two
-            # lanes can land in the same line. The compiler still reports
-            # ScalarWriteLineShared because the row index is computed at runtime and
-            # it cannot prove that; the golden replay is what checks it.
+            # Assemble the padded mask in task-local storage, then publish whole
+            # cache-line-aligned rows. Direct scalar writes to the shared tensor
+            # become 64-byte DDR read-modify-writes that alias analysis cannot prove
+            # disjoint across the SPMD lanes.
             raw_block_valid = pl.row_max(v_win_valid)
             for c_t0 in pl.range(BIAS_T_TILE):
-                c_valid = pl.cast(pl.read(raw_block_valid, [c_t0, 0]), target_type=pl.INT32)
-                pl.write(valid_block_mask, [bias_t0 + c_t0, 0], c_valid)
-            for c_sb in pl.range(1, SPARSE_BLOCKS):
-                c_s0 = (c_sb - 1) * ATTN_K_TILE
-                c_blk_valid = pl.row_max(c_mask[:, c_s0 : c_s0 + ATTN_K_TILE])
-                for c_dt in pl.range(BIAS_T_TILE):
-                    c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), target_type=pl.INT32)
-                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
+                valid_mask_row = pl.create_tensor(
+                    [1, VALID_BLOCK_MASK_COLS], dtype=pl.INT32,
+                )
+                valid_mask_row[:, :] = pl.full(
+                    [1, VALID_BLOCK_MASK_COLS], dtype=pl.INT32, value=0,
+                )
+                raw_valid = pl.cast(
+                    pl.read(raw_block_valid, [c_t0, 0]), target_type=pl.INT32,
+                )
+                pl.write(valid_mask_row, [0, 0], raw_valid)
+                for c_sb in pl.range(1, SPARSE_BLOCKS):
+                    c_s0 = (c_sb - 1) * ATTN_K_TILE
+                    c_blk_valid = pl.row_max(
+                        c_mask[:, c_s0 : c_s0 + ATTN_K_TILE]
+                    )
+                    c_valid = pl.cast(
+                        pl.read(c_blk_valid, [c_t0, 0]), target_type=pl.INT32,
+                    )
+                    pl.write(valid_mask_row, [0, c_sb], c_valid)
+                valid_block_mask[
+                    bias_t0 + c_t0 : bias_t0 + c_t0 + 1,
+                    0:VALID_BLOCK_MASK_COLS,
+                ] = valid_mask_row
 
             # Additive sparse softmax bias.
             sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, 0:WIN] = pl.mul(pl.sub(v_win_valid, 1.0), -NEG_INF)
@@ -519,10 +533,11 @@ def sparse_attn_csa_tp1(
             cos_il[token : token + 1, :] = pl.gather(cos, dim=-1, index=half)
             sin_signed[token : token + 1, :] = pl.mul(pl.gather(sin, dim=-1, index=half), sign)
     ready = pl.system.task_dummy(deps=[plan_dep, rope_tid])
-    return _sparse_attn_csa_tp1_prepared(
+    output, completion = _sparse_attn_csa_tp1_prepared(
         q, ori_kv, window_swa_indices, cmp_kv, cmp_block_table, idx_topk,
         position_ids, attn_sink, cos_il, sin_signed, o_packed_heads, ready, page_rows,
     )
+    return output, completion
 
 
 @pl.jit.inline
@@ -569,8 +584,11 @@ def sparse_attn_csa_tp1_vllm(
             valid = pl.read(token_valid, [token])
             window_len = pl.min(position + 1, WIN)
             window_begin = position - window_len + 1
+            index_row = pl.create_tensor([1, WIN], dtype=pl.INT32)
+            index_row[:, :] = pl.full(
+                [1, WIN], dtype=pl.INT32, value=-1,
+            )
             for column in pl.range(WIN):
-                physical_row = -1
                 if valid > 0 and column < window_len:
                     logical_row = window_begin + column
                     logical_page = logical_row // VLLM_PAGE_ROWS
@@ -583,11 +601,12 @@ def sparse_attn_csa_tp1_vllm(
                             page * VLLM_PAGE_ROWS
                             + logical_row % VLLM_PAGE_ROWS
                         )
-                pl.write(
-                    window_indices,
-                    [token, column],
-                    pl.cast(physical_row, pl.INT32),
-                )
+                        pl.write(
+                            index_row,
+                            [0, column],
+                            pl.cast(physical_row, pl.INT32),
+                        )
+            window_indices[token : token + 1, :] = index_row
 
     output, completion = _sparse_attn_csa_tp1_prepared(
         q,

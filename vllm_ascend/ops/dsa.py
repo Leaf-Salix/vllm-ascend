@@ -19,9 +19,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
-
 import os as _os
+from dataclasses import dataclass
 
 import torch
 from torch import nn
@@ -195,8 +194,10 @@ def dsa_forward(
     forward_context: ForwardContext = get_forward_context()
     self = forward_context.no_compile_layers[layer_name]
     if forward_context.attn_metadata:
-        attn_metadata = filter_metadata(forward_context.attn_metadata, self.prefix)
+        attn_metadata_items = filter_metadata_items(forward_context.attn_metadata, self.prefix)
+        attn_metadata = [value for _, value in attn_metadata_items]
     else:
+        attn_metadata_items = []
         attn_metadata = forward_context.attn_metadata
 
     if attn_metadata is None:
@@ -224,7 +225,14 @@ def dsa_forward(
         # The kernel owns the six caches when it runs, so this is a choice
         # between the two paths, never both. It declines prefill and the
         # layers whose compression ratio it does not implement.
-        if pto_attn.substitute(self, hidden_states, kv_cache, attn_metadata, output):
+        if pto_attn.substitute(
+            self,
+            hidden_states,
+            kv_cache,
+            dict(attn_metadata_items),
+            output,
+            need_gather_q_kv,
+        ):
             return
 
     self.dsa_attn.impl.forward(
@@ -238,7 +246,7 @@ def dsa_forward(
         # layers decline, and marking those would spend the single turn. The
         # comparison synchronizes and reads scalars, so capture declines it.
         if pto_attn.debug_allowed("PTO_ATTN_COMPARE") and pto_attn.compare_once(
-                self, hidden_states, kv_cache, attn_metadata, output, _cmp):
+                self, hidden_states, kv_cache, dict(attn_metadata_items), output, _cmp):
             _COMPARED.add(layer_name)
     return
 
@@ -263,7 +271,17 @@ direct_register_custom_op(
 
 def filter_metadata(metadata, prefix):
     # filter using prefix, sort by key for deterministic order
-    return [v for k, v in sorted(metadata.items()) if k.startswith(prefix)]
+    return [value for _, value in filter_metadata_items(metadata, prefix)]
+
+
+def filter_metadata_items(metadata, prefix):
+    """Return native cache metadata with its authoritative cache-group name."""
+    namespace = f"{prefix}."
+    return [
+        (key, value)
+        for key, value in sorted(metadata.items())
+        if key == prefix or key.startswith(namespace)
+    ]
 
 
 def _build_kv_cache(self, forward_context):

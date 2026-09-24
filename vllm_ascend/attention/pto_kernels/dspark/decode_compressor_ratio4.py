@@ -547,9 +547,7 @@ def compressor_ratio4_cache_write_vllm(
     cmp_kv_pages: pl.Tensor[
         [VLLM_CMP_KV_PAGE_NUM_DYN, VLLM_KV_PAGE_ROWS, 1, HEAD_DIM], pl.BF16
     ],
-    cmp_block_table: pl.Tensor[
-        [B_DYN, VLLM_CMP_TABLE_BLOCKS_DYN], pl.INT32
-    ],
+    cmp_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     compress_state_block_table: pl.Tensor[
         [B_DYN, VLLM_STATE_TABLE_BLOCKS_DYN], pl.INT32
     ],
@@ -561,7 +559,7 @@ def compressor_ratio4_cache_write_vllm(
     pool_tid: pl.Scalar[pl.TASK_ID],
     late_write_dep: pl.Scalar[pl.TASK_ID],
 ):
-    """Commit vLLM-native state and compressed KV without private slot maps."""
+    """Commit state through its table and compressed KV through native slots."""
     b_dim = pl.tensor.dim(compress_state_block_table, 0)
     tokens = pl.tensor.dim(position_ids, 0)
     s_dim = tokens // b_dim
@@ -698,15 +696,14 @@ def compressor_ratio4_cache_write_vllm(
             valid = pl.read(token_valid, [token])
             position = pl.read(position_ids, [token])
             if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
-                request = token // s_dim
-                compressed_row = (position + 1) // COMPRESS_RATIO - 1
-                logical_page = compressed_row // VLLM_KV_PAGE_ROWS
                 physical_page_i32 = pl.read(
-                    cmp_block_table, [request, logical_page],
+                    cmp_slot_mapping, [token, 0],
                 )
-                if physical_page_i32 > 0:
+                if physical_page_i32 >= 0:
                     physical_page = pl.cast(physical_page_i32, pl.INDEX)
-                    intra = compressed_row % VLLM_KV_PAGE_ROWS
+                    intra = pl.cast(
+                        pl.read(cmp_slot_mapping, [token, 1]), pl.INDEX,
+                    )
                     row = normed_kv[
                         token : token + 1, 0:HEAD_DIM
                     ]
@@ -748,9 +745,7 @@ def compressor_ratio4_vllm(
     norm_w: pl.Tensor[[HEAD_DIM], pl.BF16],
     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
-    cmp_block_table: pl.Tensor[
-        [B_DYN, VLLM_CMP_TABLE_BLOCKS_DYN], pl.INT32
-    ],
+    cmp_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
@@ -783,7 +778,7 @@ def compressor_ratio4_vllm(
         sin,
         compress_state_pages,
         cmp_kv_pages,
-        cmp_block_table,
+        cmp_slot_mapping,
         compress_state_block_table,
         ape,
         kv_proj_pad,

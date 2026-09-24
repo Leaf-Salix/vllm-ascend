@@ -768,9 +768,7 @@ def indexer_compressor_write_vllm(
     shared_pages: pl.Tensor[
         [VLLM_SHARED_PAGE_NUM_DYN, VLLM_INDEX_PAGE_ROWS, HEAD_DIM], pl.INT8
     ],
-    index_block_table: pl.Tensor[
-        [B_DYN, VLLM_INDEX_TABLE_BLOCKS_DYN], pl.INT32
-    ],
+    index_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
     rms_tid: pl.Scalar[pl.TASK_ID],
@@ -778,9 +776,7 @@ def indexer_compressor_write_vllm(
     state_commit_tid: pl.Scalar[pl.TASK_ID],
 ):
     """Write key and FP16 scale into one packed vLLM index page."""
-    b_dim = pl.tensor.dim(index_block_table, 0)
     tokens = pl.tensor.dim(position_ids, 0)
-    s_dim = tokens // b_dim
     page_count = pl.tensor.dim(shared_pages, 0)
     shared_pages_flat = pl.reshape(
         shared_pages, [page_count * VLLM_INDEX_PAGE_ROWS, HEAD_DIM],
@@ -872,18 +868,17 @@ def indexer_compressor_write_vllm(
             )
             for inner in pl.range(token_rows):
                 token = token_begin + inner
-                request = token // s_dim
                 valid = pl.read(token_valid, [token])
                 position = pl.read(position_ids, [token])
                 if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
-                    compressed_row = (position + 1) // COMPRESS_RATIO - 1
-                    logical_page = compressed_row // VLLM_INDEX_KEY_ROWS
                     physical_page_i32 = pl.read(
-                        index_block_table, [request, logical_page],
+                        index_slot_mapping, [token, 0],
                     )
-                    if physical_page_i32 > 0:
+                    if physical_page_i32 >= 0:
                         physical_page = pl.cast(physical_page_i32, pl.INDEX)
-                        intra = compressed_row % VLLM_INDEX_KEY_ROWS
+                        intra = pl.cast(
+                            pl.read(index_slot_mapping, [token, 1]), pl.INDEX,
+                        )
                         physical_row = (
                             physical_page * VLLM_INDEX_PAGE_ROWS + intra
                         )
@@ -900,18 +895,17 @@ def indexer_compressor_write_vllm(
         deps=[key_write_tid],
     ) as scale_write_tid:
         for token in pl.range(tokens):
-            request = token // s_dim
             valid = pl.read(token_valid, [token])
             position = pl.read(position_ids, [token])
             if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
-                compressed_row = (position + 1) // COMPRESS_RATIO - 1
-                logical_page = compressed_row // VLLM_INDEX_KEY_ROWS
                 physical_page_i32 = pl.read(
-                    index_block_table, [request, logical_page],
+                    index_slot_mapping, [token, 0],
                 )
-                if physical_page_i32 > 0:
+                if physical_page_i32 >= 0:
                     physical_page = pl.cast(physical_page_i32, pl.INDEX)
-                    intra = compressed_row % VLLM_INDEX_KEY_ROWS
+                    intra = pl.cast(
+                        pl.read(index_slot_mapping, [token, 1]), pl.INDEX,
+                    )
                     tail_row = (
                         physical_page * VLLM_INDEX_PAGE_ROWS
                         + VLLM_INDEX_KEY_ROWS
@@ -951,9 +945,7 @@ def indexer_compressor_vllm(
     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
-    index_block_table: pl.Tensor[
-        [B_DYN, VLLM_INDEX_TABLE_BLOCKS_DYN], pl.INT32
-    ],
+    index_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
@@ -991,7 +983,7 @@ def indexer_compressor_vllm(
         normed_kv,
         hadamard,
         shared_pages,
-        index_block_table,
+        index_slot_mapping,
         position_ids,
         token_valid,
         rms_tid,

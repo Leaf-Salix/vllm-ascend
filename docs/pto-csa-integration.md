@@ -1,23 +1,42 @@
 # PyPTO CSA 算子接入 vLLM 的对接说明
 
-> **Run 062 更新（2026-09-22）**：本文第 2～8 节记录的是旧 46 参数转换层及其性能，
-> 仅作为问题背景保留，不再描述当前工作树。当前实现已切换为 lib 提供的 40 参数
-> vLLM-native attention-only ABI：主 state、raw KV、compressed KV 分别直接绑定
+> **原生接口对齐更新（2026-09-23）**：当前工作树的 attention-only kernel
+> 使用 43 个 Tensor 参数。`dsa_forward` 的替换边界、输入 `hidden_states`、输出
+> `output`、六份 cache view 及五份 block table 均沿用 vLLM-Ascend 原生对象；
+> 当前步的 raw/compressed/index cache 写入分别直接消费原生 `slot_mapping`。
+> adapter 不再按排序位置猜 metadata，不再生成私有 block table、slot mapping 或
+> `token_valid`，也不再由 `PTO_ATTN_SEQ` 猜测每请求 token 数。kernel 固定校验
+> DSpark out-5/verify-6 的均匀 S6 descriptor，并在 kernel 内根据原生
+> `query_start_loc`、position、seq_lens 和 slot mapping 判定有效行。
+>
+> main-state 与 compressed-KV 是 vLLM 同一物理页池的 FP32/BF16 视图。PyPTO
+> `54957491e`（#2867）允许相同 `(data_ptr, nbytes)` 的跨 dtype writable exact alias，
+> 因此当前 ABI 直接保留原生 FP32 state view 和 BF16 compressed-KV view，不在 kernel
+> 内 reinterpret 或改写 vLLM 的视图契约。第 2～9 节仍记录旧 46 参数转换层，仅作为
+> 历史问题背景，不代表当前接口。
+> 不要复制其中的参数表、环境变量或旧性能数字作为当前复现说明。
+
+> **Run 062 背景**：实现曾切换为直接绑定 vLLM-native cache：主 state、raw KV、
+> compressed KV 分别绑定
 > `[N,16,2048] FP32`、`[N,128,1,512] BF16`、`[N,128,1,512] BF16`
 > 三个连续 view；主 state 与 compressed KV 共用物理 allocation，raw KV 独立；
 > inner state/index key/FP16 scale 直接绑定同一份
-> `[N,130,128] INT8` 物理页；adapter 不再构造私有 state ring、repage cache 或五类
-> slot mapping。本文将在真实 eager/ACLGraph/performance A/B 完成后整体改写；在此之前不要复制下文的
-> 46 参数 `ARG_ORDER` 或旧性能数字作为新接口说明。
+> `[N,130,128] INT8` 物理页；adapter 不再构造私有 state ring 或 repage cache。
 
-### 当前工作树：直接绑定真实 token 与常驻 RoPE
+### 当前工作树：与 vLLM 原生 attention 边界对齐
 
-- 40 个参数的数量和顺序不变；原 compiled cache 必须重建。
+- kernel Tensor ABI 为 43 项；旧 compiled cache 必须重建。
 - TP1 的容量为 B=64、S=6；实际输入按 request-major 排列，`T = runtime_batch * runtime_seq`。
-  S=1 不再扩成六份；S=6 提交六个真实 token。请求之间使用相同的 `runtime_seq`，
-  padding/无效尾行由 `token_valid` 表达，不支持无映射的变长 query 拼接。
+  S=6 提交六个真实 token。入口显式校验原生 `query_start_loc` 的每段长度均为 6，
+  不支持用 Host 环境变量伪造序列长度，也不接受无映射的变长 query 拼接。
 - `x_normed` 和 `attn_out` 为实际 `[T,4096] BF16` 连续 view；直接写调用方 output，
   不再在返回后 index-select。
+- 历史 cache 读取直接使用 vLLM 的 raw/compressed/index/state block table；
+  当前 K/V、compressed KV、index key/scale 写入直接使用 vLLM 的 raw/compressed/index
+  `slot_mapping`。KV 页分配、页所有权、回收和 block table 生成仍由 vLLM 管理。
+- raw `slot_mapping` 是逐 token `[T,2]`；compressed/index `slot_mapping` 是原生
+  ratio-4 边界行紧凑表。kernel 在单个 metadata task 内按 position 顺序展开到 token 行，
+  Host 不执行 gather、H2D/D2H 或另起 Torch 算子。
 - `position_ids` 为原生连续 `[T] INT64`，入口的既有 RoPE task 内转换为内部 INT32。
 - `freqs_cos/sin`、`cmp_freqs_cos/sin` 改为常驻 `[rope_rows,64] FP32` 的 interleaved 全表，
   直接 view vLLM `_ROPE_STATE.static_cache`，不新建全表。RoPE 行轴与 T 独立。
@@ -25,7 +44,8 @@
   adapter 不再进行 BF16 转换、半频率 concat、boundary Cumsum 或 compact-row gather。
 - 原有 `csa_vllm_rope_interleave` task 一次生成消费者共用的 token-local 行；
   QKV 和 sparse inverse RoPE 不再各自启动一次转换 task。
-- 仍有动态 `token_valid` 的构造。这里只移除了重复数据/形状转换，不声称所有准备开销归零。
+- `token_valid` 只在 PyPTO kernel 内部产生，不是 vLLM 接线参数；Host hot path 不构造
+  新 Tensor。`as_strided` 和切片仅创建别名 view，不复制 cache 内容。
 - 验证覆盖 PyPTO 算子、host payload、kernel numerical golden，以及下文的单层
   `impl.forward()` A/B；不代表完整 vLLM serving 已验收。
 - 当前 host payload、S1 回归，以及 TP1/S6/128K 的 B=4/8/16/24/32/40 单卡矩阵
