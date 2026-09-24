@@ -662,20 +662,17 @@ def indexer_score_topk_forest_vllm(
                     query_weight = weights[
                         query : query + 1, 0:IDX_N_HEADS
                     ]
-                    # Native carries the head coefficient as FP16: the weighted
-                    # head sum is a cube matmul whose A operand is
-                    # GlobalTensor<half> weightGm_. Rounding the coefficient
-                    # measures better than rounding the scaled score -- topk
-                    # 3 differing keys against 4, elementwise 87.71% against
-                    # 79.42%, heads 0.144230% against 0.173913% -- so the
-                    # operator does merge the two factors before the cast.
+                    # The weighted head sum is a cube matmul with two FP16
+                    # operands: A is the weights (GlobalTensor<half> weightGm_)
+                    # and B is the per-head score. The raw INT32 dot product
+                    # reaches ~2e6 and would overflow FP16, so the query scale
+                    # has to be folded into B before the cast. Keep the two
+                    # factors apart: a product of two FP16 values is exact in
+                    # FP32, so only the operands round.
+                    query_scale_col = pl.reshape(query_scale, [IDX_N_HEADS, 1])
                     head_coefficient = pl.reshape(
                         pl.cast(
-                            pl.cast(
-                                pl.mul(query_scale, query_weight),
-                                target_type=pl.FP16,
-                                mode="rint",
-                            ),
+                            pl.cast(query_weight, target_type=pl.FP16, mode="rint"),
                             target_type=pl.FP32,
                         ),
                         [IDX_N_HEADS, 1],
@@ -747,6 +744,16 @@ def indexer_score_topk_forest_vllm(
                         # which is what a perturbation of the right magnitude
                         # does to near-ties. Keep the plain FP32 product until
                         # there is evidence for the operator's actual accumulator.
+                        # B operand: the score carrying the query scale, in FP16.
+                        score_shard = pl.cast(
+                            pl.cast(
+                                pl.row_expand_mul(score_shard, query_scale_col),
+                                target_type=pl.FP16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
+                        )
+                        # A operand: the FP16 weights. FP16 x FP16 is exact here.
                         score_shard = pl.row_expand_mul(
                             score_shard, head_coefficient,
                         )
