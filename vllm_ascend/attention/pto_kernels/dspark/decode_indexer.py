@@ -1054,6 +1054,13 @@ def indexer_qr_hadamard_mm(
             qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
             qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
             qh_scale_recip = pl.recip(qh_scale_quant_row)
+            # indexer_quantize_query returns npu_dynamic_quant's scale cast to
+            # float16 (device_op.py), so the scoring dequant sees an FP16 value.
+            # The INT8 codes below keep the FP32 scale, matching the operator.
+            qh_scale_recip = pl.cast(
+                pl.cast(qh_scale_recip, target_type=pl.FP16, mode="rint"),
+                target_type=pl.FP32,
+            )
             qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
             qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = qh_scale_dq
             qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
@@ -1593,7 +1600,9 @@ def golden_indexer(tensors, inner_full=None):
         q.reshape(tokens * IDX_N_HEADS, IDX_HEAD_DIM)
     )
     q_i8 = q_i8.view(tokens, IDX_N_HEADS, IDX_HEAD_DIM)
-    q_scale = q_scale.view(tokens, IDX_N_HEADS, 1)
+    # indexer_quantize_query casts npu_dynamic_quant's scale to float16, so the
+    # scoring dequant reads an FP16 value while the codes keep the FP32 scale.
+    q_scale = q_scale.to(torch.float16).float().view(tokens, IDX_N_HEADS, 1)
     flat_cache = idx_kv_cache_i8.reshape(-1, IDX_HEAD_DIM)
     flat_scale = idx_kv_scale.reshape(-1, 1)
 
