@@ -44,6 +44,10 @@ HEAD_DIM_INV = 1.0 / HEAD_DIM
 ROPE_HEAD_DIM = M.qk_rope_head_dim
 NOPE_HEAD_DIM = M.index_nope_head_dim
 MAX_SEQ_LEN = M.max_position_embeddings
+# Native rotate_activation normalises the Hadamard output by 1/sqrt(HEAD_DIM).
+# Matching that BF16 rounding step keeps per-row amax and INT8 scale boundaries
+# aligned with the native path (nalinaly confirmed this closes the index_key gap).
+HADAMARD_SCALE = HEAD_DIM ** -0.5
 
 # kernel constants
 COMPRESS_RATIO = 4
@@ -387,6 +391,12 @@ def indexer_compressor_write(
         wr_blk_rows = pl.min(RMS_PAD_TILE, compact_rows - wr_b0)
         kv_blk_f32 = pl.cast(
             pl.cast(kv_final[wr_b0 : wr_b0 + RMS_PAD_TILE, 0 : HEAD_DIM], target_type=pl.BF16, mode="rint"),
+            target_type=pl.FP32)
+        # Native rotate_activation applies 1/sqrt(HEAD_DIM) after its BF16 Hadamard
+        # and rounds back to BF16 before computing amax.  Matching that step keeps
+        # per-row scale boundaries aligned with the native quantization path.
+        kv_blk_f32 = pl.cast(
+            pl.cast(pl.mul(kv_blk_f32, HADAMARD_SCALE), target_type=pl.BF16, mode="rint"),
             target_type=pl.FP32)
         # Per-row absolute maximum.
         kv_amax = pl.reshape(pl.row_max(pl.abs(kv_blk_f32)), [1, RMS_PAD_TILE])
