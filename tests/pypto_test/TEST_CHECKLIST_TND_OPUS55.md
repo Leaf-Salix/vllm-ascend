@@ -1217,3 +1217,28 @@ pl 的限制已记入 `reports/mistakes/ut_test.md`：解析器只认 `+ - * / /
 
 **残余**：`qr_scale` 22/24 行、`q` 0.002095%、`raw` 0.006335%、topk 3 个 key、
 `heads` 0.144230%、`output` **0.497366%**（会话起点 1.4353%）。
+
+## 2026-09-25 精度攻坚（uniform-b4, 24 token）
+
+三处改动：running-max softmax（`d80e06dad`）、indexer 打分 FP16 量化
+（`0350613f7`）、压缩 key 单 chunk 归一化（`2d5dd7392`）。
+
+| 指标 | 改前 | 改后 |
+|------|------|------|
+| topk 集合差异 | 3 个 key | **0** |
+| `heads_after_inverse_rope` | 0.144230% | **0.009413%**（逐位 99.64%） |
+| `output` | 0.497366% | **0.094718%**（逐位 95.56%） |
+| `index_key` / `index_scale` / `qr_int8` | 0 | 0（保持） |
+
+复现：
+
+```bash
+bash bin/opus55-ab/setup_probe.sh
+task-submit --ptoas 0.63 --device auto --device-num 1 --max-time 1800 \
+  --env PROBE_RUN=uniform-b4 --env PROBE_LENGTHS=6,6,6,6 \
+  'bash /data/pyptouser/yejia/vllm-cann92-dsv4-tnd-opus55-20260924/bin/opus55-ab/probe.sh'
+```
+
+AB（graph 模式）：CSA 0.6156 ms vs native 0.5792 ms，`accuracy_pass=True`。
+剩余误差已归因到 wkv 投影矩阵乘的 K 块顺序，见
+`reports/dsv4-tnd-opus55-20260924/handoff.md` 第十二节。
