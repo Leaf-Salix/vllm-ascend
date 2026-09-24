@@ -348,7 +348,18 @@ def q_proj_qr(
                 qr_sq_sum = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
                 qr_amax_g = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
                 for qr_rms_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
-                    qr_rms_chunk = qr_fp32[tg : tg + T_TILE, qr_rms_col0 : qr_rms_col0 + Q_LORA_TILE]
+                    # Native materializes q_a as BF16 (npu_quant_matmul with
+                    # output_dtype=hidden_states.dtype) before handing it to
+                    # npu_rms_norm_dynamic_quant, so the norm, the amax and the
+                    # quantized values all see the rounded projection.
+                    qr_rms_chunk = pl.cast(
+                        pl.cast(
+                            qr_fp32[tg : tg + T_TILE, qr_rms_col0 : qr_rms_col0 + Q_LORA_TILE],
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                     qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
@@ -381,7 +392,15 @@ def q_proj_qr(
                     pl.store(qr_scale_tail, [out_tg, 0], qr_scale_view)
 
                 for qa in pl.pipeline(0, Q_LORA, QUANT_TILE, stage=2):
-                    qr_chunk = qr_fp32[tg : tg + T_TILE, qa : qa + QUANT_TILE]
+                    # Same BF16 projection as the norm and amax pass above.
+                    qr_chunk = pl.cast(
+                        pl.cast(
+                            qr_fp32[tg : tg + T_TILE, qa : qa + QUANT_TILE],
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     gamma_q_cast = pl.cast(gamma_cq[qa : qa + QUANT_TILE], target_type=pl.FP32)
                     gamma_q_chunk = pl.reshape(gamma_q_cast, [1, QUANT_TILE])
                     qr_q_normed = pl.col_expand_mul(pl.row_expand_mul(qr_chunk, qr_inv_rms_t), gamma_q_chunk)
@@ -769,7 +788,16 @@ def kv_proj_rope(
                 if valid_rows == KV_RMS_T_TILE:
                     kv_sq_sum = pl.full([1, KV_RMS_T_TILE], dtype=pl.FP32, value=0.0)
                     for kv_sq_col0 in pl.pipeline(0, HEAD_DIM, KV_TILE, stage=2):
-                        kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, kv_sq_col0 : kv_sq_col0 + KV_TILE]
+                        # Native materializes the wkv projection as BF16 before
+                        # kv_norm, so the norm reads the rounded projection.
+                        kv_chunk = pl.cast(
+                            pl.cast(
+                                kv_fp32[tg : tg + KV_RMS_T_TILE, kv_sq_col0 : kv_sq_col0 + KV_TILE],
+                                target_type=pl.BF16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
+                        )
                         kv_sq = pl.mul(kv_chunk, kv_chunk)
                         kv_row_sum = pl.reshape(pl.row_sum(kv_sq), [1, KV_RMS_T_TILE])
                         kv_sq_sum = pl.add(kv_sq_sum, kv_row_sum)
@@ -777,7 +805,14 @@ def kv_proj_rope(
                     kv_inv_rms_t = pl.reshape(kv_inv_rms, [KV_RMS_T_TILE, 1])
 
                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
-                        kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, n0 : n0 + KV_TILE]
+                        kv_chunk = pl.cast(
+                            pl.cast(
+                                kv_fp32[tg : tg + KV_RMS_T_TILE, n0 : n0 + KV_TILE],
+                                target_type=pl.BF16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
+                        )
                         gamma_kv_cast = pl.cast(gamma_ckv[n0 : n0 + KV_TILE], target_type=pl.FP32)
                         gamma_kv_chunk = pl.reshape(gamma_kv_cast, [1, KV_TILE])
                         kv_normed = pl.col_expand_mul(pl.row_expand_mul(kv_chunk, kv_inv_rms_t), gamma_kv_chunk)
@@ -786,7 +821,14 @@ def kv_proj_rope(
 
                     gamma_rope_cast = pl.cast(gamma_ckv[NOPE_DIM : NOPE_DIM + ROPE_DIM], target_type=pl.FP32)
                     gamma_rope = pl.reshape(gamma_rope_cast, [1, ROPE_DIM])
-                    kv_rope_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, NOPE_DIM : NOPE_DIM + ROPE_DIM]
+                    kv_rope_chunk = pl.cast(
+                        pl.cast(
+                            kv_fp32[tg : tg + KV_RMS_T_TILE, NOPE_DIM : NOPE_DIM + ROPE_DIM],
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     kv_rope_norm_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope)
                     kv_cos_il_full = rope_cos_il[out_tg : out_tg + KV_RMS_T_TILE, :]
                     kv_sin_signed_full = rope_sin_signed[out_tg : out_tg + KV_RMS_T_TILE, :]
@@ -804,12 +846,19 @@ def kv_proj_rope(
                     )
                     kv_sq_sum_tail = pl.tile.full([1, KV_RMS_T_TILE], dtype=pl.FP32, value=0.0)
                     for kv_sq_col0_tail in pl.pipeline(0, HEAD_DIM, KV_TILE, stage=2):
-                        kv_chunk_tail = pl.load(
-                            kv_fp32,
-                            [tg, kv_sq_col0_tail],
-                            [KV_RMS_T_TILE, KV_TILE],
-                            valid_shape=[valid_rows, KV_TILE],
-                            target_memory=pl.MemorySpace.Vec,
+                        kv_chunk_tail = pl.cast(
+                            pl.cast(
+                                pl.load(
+                                    kv_fp32,
+                                    [tg, kv_sq_col0_tail],
+                                    [KV_RMS_T_TILE, KV_TILE],
+                                    valid_shape=[valid_rows, KV_TILE],
+                                    target_memory=pl.MemorySpace.Vec,
+                                ),
+                                target_type=pl.BF16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
                         )
                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
@@ -818,12 +867,19 @@ def kv_proj_rope(
                     kv_inv_rms_t_tail = pl.reshape(kv_inv_rms_tail, [KV_RMS_T_TILE, 1])
 
                     for n0_tail in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
-                        kv_chunk_tail = pl.load(
-                            kv_fp32,
-                            [tg, n0_tail],
-                            [KV_RMS_T_TILE, KV_TILE],
-                            valid_shape=[valid_rows, KV_TILE],
-                            target_memory=pl.MemorySpace.Vec,
+                        kv_chunk_tail = pl.cast(
+                            pl.cast(
+                                pl.load(
+                                    kv_fp32,
+                                    [tg, n0_tail],
+                                    [KV_RMS_T_TILE, KV_TILE],
+                                    valid_shape=[valid_rows, KV_TILE],
+                                    target_memory=pl.MemorySpace.Vec,
+                                ),
+                                target_type=pl.BF16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
                         )
                         gamma_kv_input_tail = pl.load(
                             gamma_ckv,
@@ -849,12 +905,19 @@ def kv_proj_rope(
                     )
                     gamma_rope_cast_tail = pl.cast(gamma_rope_input_tail, target_type=pl.FP32)
                     gamma_rope_tail = pl.reshape(gamma_rope_cast_tail, [1, ROPE_DIM])
-                    kv_rope_chunk_tail = pl.load(
-                        kv_fp32,
-                        [tg, NOPE_DIM],
-                        [KV_RMS_T_TILE, ROPE_DIM],
-                        valid_shape=[valid_rows, ROPE_DIM],
-                        target_memory=pl.MemorySpace.Vec,
+                    kv_rope_chunk_tail = pl.cast(
+                        pl.cast(
+                            pl.load(
+                                kv_fp32,
+                                [tg, NOPE_DIM],
+                                [KV_RMS_T_TILE, ROPE_DIM],
+                                valid_shape=[valid_rows, ROPE_DIM],
+                                target_memory=pl.MemorySpace.Vec,
+                            ),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
                     )
                     kv_rope_norm_tail = pl.col_expand_mul(
                         pl.row_expand_mul(kv_rope_chunk_tail, kv_inv_rms_t_tail),
@@ -1144,6 +1207,15 @@ def golden_qkv_proj_rope(tensors):
         inv = torch.rsqrt(x.square().mean(-1, keepdim=True) + eps)
         return x * inv * gamma
 
+    def project_bf16(a, b):
+        """Projection as native materializes it: FP32 matmul, BF16 result.
+
+        Native runs wq_a / wkv through npu_quant_matmul with
+        output_dtype=hidden_states.dtype, so the RMS norm downstream reads a
+        BF16 projection rather than the raw FP32 accumulator.
+        """
+        return matmul_bf16_input_fp32(a, b).to(torch.bfloat16).float()
+
     def matmul_bf16_input_fp32(a, b):
         a_fp32 = a.to(torch.bfloat16).float()
         b_fp32 = b.to(torch.bfloat16).float()
@@ -1166,7 +1238,7 @@ def golden_qkv_proj_rope(tensors):
     token_x = x.view(t_dim, D)
 
     # Q path
-    qr_out = rms_norm(matmul_bf16_input_fp32(token_x, wq_a), gamma_cq)  # [T, Q_LORA]
+    qr_out = rms_norm(project_bf16(token_x, wq_a), gamma_cq)  # [T, Q_LORA]
     # W8A8C16: wq_b W8 per-output-channel int8; qr_out A8 per-token int8.
     # flash: also quantizes wq_a/wkv to fp8 (default Linear dtype).
     qr_i8, qr_scale = int8_quant_per_row(qr_out.float())
@@ -1179,7 +1251,7 @@ def golden_qkv_proj_rope(tensors):
     q_out = torch.cat([q_nope, q_rope], dim=-1)
 
     # KV path
-    kv_full = rms_norm(matmul_bf16_input_fp32(token_x, wkv), gamma_ckv)  # [T, HEAD_DIM]
+    kv_full = rms_norm(project_bf16(token_x, wkv), gamma_ckv)  # [T, HEAD_DIM]
     kv_nope = kv_full[..., :NOPE_DIM]
     kv_rope_in = kv_full[..., NOPE_DIM:].unsqueeze(1)  # add a pseudo head dim
     kv_rope = apply_rope(kv_rope_in, rope_cos, rope_sin).squeeze(1)
