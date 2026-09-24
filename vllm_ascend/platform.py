@@ -1182,6 +1182,48 @@ def _setup_compile_backend(
             compilation_config.cudagraph_capture_sizes = sp_aclgraph_sizes
             update_cudagraph_capture_sizes(vllm_config, sp_aclgraph_sizes)
 
+    # Align ACLGraph capture sizes to multiples of QUERY_TOKENS (6) for DSpark CSA.
+    # DSpark uses 5 speculative tokens + 1 draft = 6 tokens per request.  The
+    # BSH-layout CSA kernel requires T = B * 6, so every capture bucket must be
+    # divisible by 6.  Non-aligned buckets cause the kernel to see a token axis it
+    # cannot cleanly divide.  This block is a no-op when PYPTO_DSV4_CSA is off,
+    # because the kernel is never invoked; aligning in that case is harmless but we
+    # skip it to keep the default capture list unmodified.
+    _ascend_cc = (additional_config or {}).get("ascend_compilation_config", {})
+    _align_enabled = _ascend_cc.get("align_decode_capture_sizes", True)
+    _spec_cfg = getattr(vllm_config, "speculative_config", None)
+    if (
+        _align_enabled
+        and _spec_cfg is not None
+        and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        and not vllm_config.model_config.enforce_eager
+        and compilation_config.cudagraph_capture_sizes
+    ):
+        from vllm_ascend.attention.pto_kernels.dspark.service_config import QUERY_TOKENS as _QT
+
+        _scheduler = getattr(vllm_config, "scheduler_config", None)
+        _max_seqs = getattr(_scheduler, "max_num_seqs", None)
+        _max_batched = getattr(_scheduler, "max_num_batched_tokens", None)
+        _ceil = _max_seqs * _QT if _max_seqs is not None else None
+        if _max_batched is not None and _ceil is not None:
+            _ceil = min(_ceil, _max_batched)
+
+        def _round_up(n, step):
+            r = n % step
+            return n if r == 0 else n + step - r
+
+        _raw = compilation_config.cudagraph_capture_sizes
+        _aligned = sorted({_round_up(s, _QT) for s in _raw})
+        if _ceil is not None:
+            _aligned = [s for s in _aligned if s <= _ceil]
+            _ceil_aligned = _round_up(_ceil, _QT)
+            if not _aligned or _aligned[-1] < _ceil_aligned:
+                _aligned = sorted(set(_aligned) | {_ceil_aligned})
+        if _aligned:
+            compilation_config.max_cudagraph_capture_size = _aligned[-1]
+            compilation_config.cudagraph_capture_sizes = _aligned
+            update_cudagraph_capture_sizes(vllm_config, _aligned)
+
     # Get custom compile backend for graph fusion
     compilation_config.oot_compiler = compile_backend
     compilation_config.use_inductor = False

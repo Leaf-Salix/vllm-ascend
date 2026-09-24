@@ -3407,6 +3407,35 @@ class NPUModelRunner(GPUModelRunner):
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded, use_cascade_attn or has_encoder_output)
         num_tokens_padded = batch_descriptor.num_tokens
+
+        # CSA graph replay gate: a padded bucket that is a multiple of 6 was
+        # captured for DSpark uniform-decode, but a non-uniform batch (e.g. a
+        # new request joining a partially-filled bucket) must not replay it.
+        # Dummy padding rows are silenced inside the kernel by seq_lens == 0,
+        # so the guard here is purely about the live-request shape being valid.
+        if cudagraph_mode == CUDAGraphMode.FULL and getattr(
+            self.vllm_config, "speculative_config", None
+        ) is not None:
+            from vllm_ascend import envs as _ascend_envs
+            if _ascend_envs.VLLM_ASCEND_PYPTO_DSV4_CSA:
+                from vllm_ascend.attention.pto_kernels.dspark.service_config import (
+                    can_replay_csa_graph,
+                )
+                _max_seqs = getattr(
+                    getattr(self.vllm_config, "scheduler_config", None),
+                    "max_num_seqs",
+                    num_reqs,
+                )
+                if not can_replay_csa_graph(
+                    padded_tokens=num_tokens_padded,
+                    num_tokens=num_tokens,
+                    num_reqs=num_reqs,
+                    uniform_decode=uniform_decode,
+                    max_batch_size=_max_seqs,
+                ):
+                    cudagraph_mode = CUDAGraphMode.NONE
+                    batch_descriptor = BatchDescriptor(num_tokens)
+
         if enable_sp(self.vllm_config):
             assert batch_descriptor.num_tokens % self.vllm_config.parallel_config.tensor_parallel_size == 0, (
                 "Sequence parallelism requires num_tokens to be a multiple of tensor parallel size"
@@ -4357,6 +4386,21 @@ class NPUModelRunner(GPUModelRunner):
                 if "sink" in name:
                     self._has_sinks = True
                     break
+
+            # vllm-ascend main does not call process_weights_after_loading
+            # automatically via a model-level hook.  The CSA kernel requires
+            # Hadamard matrix conversion, INT8 scale binding, and page-layout
+            # validation to complete before the first forward pass (including
+            # ACLGraph capture warmup), because lazy init would trigger
+            # device-to-host reads inside the capture stream.  Call it here,
+            # once, immediately after weights are resident on device.
+            from vllm_ascend import envs as _ascend_envs
+            if _ascend_envs.VLLM_ASCEND_PYPTO_DSV4_CSA:
+                _process_fn = getattr(self.get_model(), "process_weights_after_loading", None)
+                if _process_fn is not None:
+                    logger.info("CSA: calling process_weights_after_loading before capture")
+                    _process_fn()
+
             if self.drafter:
                 logger.info("Loading drafter model...")
                 with get_tp_context(self.drafter):
