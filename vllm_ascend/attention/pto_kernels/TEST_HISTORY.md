@@ -42,15 +42,16 @@
 | `e0e81f51e` | 写入确定性 Native 的负槽 scatter 排查结果；不改运行代码。 | B4/T18 约 1.4943% 的输出差异不能由该组负槽解释；见下文。 |
 | `8b9d430aa` | 写入单层 Q/KV、Indexer 和 attention heads 的阶段探针结果；不改运行代码。 | 诊断副本最低输出 relative L2 为 0.7028%，不是此提交正式 kernel 的结果。 |
 | `b39b2b4d3` | 仅将 Q/KV 的 14 处原生 BF16 舍入边界加入正式 TND kernel；与已测 Q/KV 诊断副本 AST 一致，本地相关合约 29 项通过。 | 尚未在该正式提交上重跑 NPU 精度、Graph 延迟或整模型；不能把包含 Indexer 修改的 0.7028% 记作此提交结果。 |
+| `67ef8afa7` | 正式 sparse attention 在 inverse RoPE 前把归一化 heads 舍入 BF16，CPU golden 同步该边界；Python 编译与增量 pre-commit 通过。 | 独立诊断副本曾将 BF16 边界后的最终输出代理差异从 0.594030% 降至 0.376710%；该值不属于正式提交的 NPU 结果。正式提交的 227 精度和 Graph 延迟待测。 |
 
 `6c9d552a1` 至 `3b45322e7` 的条目如实区分“有测试代码/静态检查”和
 “有可核实的测试执行结果”。请勿将后续提交的 NPU 结果反向标记为早期提交通过。
 
-截至 `b39b2b4d3`，最近完成正式分支 NPU 性能对拍的**运行代码快照**仍是
+截至 `67ef8afa7`，最近完成正式分支 NPU 性能对拍的**运行代码快照**仍是
 `9243a5f5e`：B4/T18 和 B16/T60 的 Graph 长测分别慢 2.52% 和 9.68%。
-`882405b33`、`e0e81f51e`、`8b9d430aa` 只改文档；`b39b2b4d3` 已改
-正式 kernel，但还没有该提交自己的 NPU A/B。因此下文的诊断改善不能直接
-替代正式分支的精度或性能结论。
+`882405b33`、`e0e81f51e`、`8b9d430aa` 只改文档；`b39b2b4d3` 与
+`67ef8afa7` 已改正式 kernel，但还没有对应提交自己的 NPU A/B。因此下文的
+诊断改善不能直接替代正式分支的精度或性能结论。
 
 ### 原生 metadata 接入后的 B4/S6 记录
 
@@ -246,8 +247,9 @@ sparse attention 计算中同时导出 inverse RoPE 前 BF16 heads、原 FP32
 正式 CSA 内运行第二次 PyPTO O-proj。两版本的 NoPE 448 维逐元素相同；
 RoPE 64 维对 Native 的 relative L2 从 0.276496% 降到 0.045079%。
 本次 0.29 原生 `npu_sparse_attn_sharedkv` 返回 BF16 heads 后才调用 inverse RoPE；
-本分支 `decode_sparse_attn_csa.py` 在构造 BF16 值后，仍用舍入前的 FP32
-值做 inverse RoPE。此次实验确认该数值边界是主要放大点之一。
+当时的 `decode_sparse_attn_csa.py` 在构造 BF16 值后，仍用舍入前的 FP32
+值做 inverse RoPE。此次实验确认该数值边界是主要放大点之一；之后由
+`67ef8afa7` 修正正式源码，但该提交仍待独立 NPU 复测。
 
 边界修正后，inverse RoPE 前 heads 仍有 0.031252% 差异，仅 58.89%
 逐元素相同；最终输出也未达到逐位一致。本次没有测 Graph、B16 或整模型，
@@ -291,6 +293,28 @@ softmax、PV 及归一化的数值边界与归约顺序。当前不能把剩余�
 `4ce7eebc46ee5db321b20f459bcf78fbec6a0c4ec8bc52e52e427ba9e87a6ca1`、
 `cf9d7ccad1fe6da80249b5718852d81a747d043dff8114fb78af878c8722cd73`。
 本次未测 Graph、B16 或整模型。
+
+### Native compressed KV 读取：单因素诊断
+
+`task_20260924_191051_288095615984` 在与上节相同的 B4/T18、位置 8186、
+确定性 Native、真实第 2 层权重和单卡环境下完成，退出码 0。独立诊断副本在
+已注入 Native Q、TopK、raw KV 的基础上，仅让 sparse attention 再读取
+Native compressed KV；PyPTO 的全部 cache 写入仍执行。此任务没有修改正式源码。
+
+与上一任务逐张量比较，保存的 13 个 Native 阶段和 10 个 PyPTO 阶段
+**全部逐元素相同**。inverse RoPE 前 heads relative L2 仍为 `0.030104%`，
+BF16 边界后 heads 仍为 `0.030771%`，送入原生 O-proj 的输出仍为
+`0.366880%`；压缩 KV 读取不是这组输入剩余误差的来源。实际写入的
+compressed KV 行也逐元素一致。整块 cache 中未初始化的历史/空页不能直接
+比较；本任务的整块比较出现不等和 NaN，不作为有效行差异证据。
+
+本地原始结果在
+`reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/native-both-b4-t18/`。
+下一步对照 227 实际加载的 `npu_sparse_attn_sharedkv` 源码，单独验证
+sink、softmax 及 PV 归并顺序。该源码的
+`sparse_attn_sharedkv_scfa_block_vector.h` 与本 checkout 文件 SHA256 同为
+`e0580ca8c6f84ac25875532c25412120b06001d692d002af2522f2852f65bcd9`；
+源码一致不等于最终加载二进制已被完全证明，后续还需核对 OPP 构建产物。
 
 ## 后续每次测试的记录方式
 
