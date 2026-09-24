@@ -12,6 +12,10 @@ block 之间都不连续。PTO 的 `pl.gather_row` 要求「源偏移按源视�
 只能先落 UB 再 `aic_gather` 跨核回传。该 kernel 因此比 Native 慢 **2.2 倍**，
 是我们与上游参考实现之间剩余性能差距的 **88%**。
 
+**补充（第九节）：存在一条不改 PTO 的便宜解**——页跨度不整除只是因为
+indexer 用了全局 block_size=32；它自己的后端声明的是 128，而框架已有按后端声明
+取块大小的机制，只是 indexer 的分配分支没走。B=64 或 128 时页跨度即整除 128。
+
 硬件层面这件事是做得到的：MTE 的源与目的是两个独立描述符，可以「读 4096 个连续字节、
 写成 L1 的 32×128 分形块」；而我们每页的 32 行键**本来就是 4096 个连续字节**，
 连跨度都不需要。卡住的纯粹是 PTO 这层 API 的形状校验。
@@ -164,7 +168,46 @@ Ascend 的 MTE 搬运指令，源与目的是两个独立描述符：
    即使不放宽能力，也建议把「reshape 必须是缓冲的连续前缀」「根入参必须连续」
    这两条在 `lower()` 阶段就报出来。
 
-## 九、若 PTO 不改，我们这侧的备选与代价
+## 九、最便宜的一条：让页跨度整除，PTO 一行不用改
+
+第六节的封闭证明里，「无解」只取决于一件事：**页跨度不是分量行宽的整数倍**。
+
+```
+page_size_bytes = block_size × (head_size × 1 + scale_dim × 2) = 130 × block_size
+需要 130·B ≡ 0 (mod 128)  ⟺  2B ≡ 0 (mod 128)  ⟺  B ≡ 0 (mod 64)
+
+B = 32（当前实际值）  → 4160    mod 128 = 64   ✗
+B = 64               → 8320  = 65 × 128       ✓
+B = 128              → 16640 = 130 × 128      ✓
+```
+
+B 取 64 或 128 时，`[blocks × (page_bytes/128), 128]` 就是合法的零拷贝视图：
+第 p 页的键正好落在第 `p × page_rows` 起的连续若干行上，scale 在其后。
+第四节里上游那段代码可以**原样照搬**，PTO 侧一行不用改。
+
+更关键的是：**框架里这条路已经存在，只是 indexer 分支没走。**
+`vllm_ascend/worker/model_runner_v1.py:4204` 的通用 `AttentionSpec` 分支里有
+
+```python
+if hasattr(attn_backend, "get_supported_kernel_block_sizes") and self.use_hybrid_blocks:
+    block_size = attn_backend.get_supported_kernel_block_sizes()[0]
+    block_size_chunk = current_kv_cache_spec.block_size // block_size
+    kv_cache_shape = attn_backend.get_kv_cache_shape(num_blocks * block_size_chunk, block_size, ...)
+```
+
+而 `AscendSFAIndexerCache.get_supported_kernel_block_sizes()` 返回的正是 **`[128]`**。
+但 `AscendSFAIndexerCacheSpec` 的分配分支（同文件 4082 起）没有这段，
+直接用了全局的 `current_kv_cache_spec.block_size`（=32），于是页跨度成了 4160。
+
+**建议优先评估这条**：让 indexer 分支也尊重后端声明的 kernel block size。
+它不改 PTO、不改 cache spec 结构、不拆分配、不增加 KV transfer 的注册段数，
+用的是框架自己已有且已在别处生效的机制。
+
+需要连带核对的：indexer block table 的列宽与 `IDX_MAX_BLOCKS` 推导、
+PTO 侧 `config.py` 里 indexer 路径用的 `BLOCK_SIZE` 常量（当前与主 KV 共用 32）、
+以及 Native `npu_vllm_quant_lightning_indexer` 在 block 128 下的行为。
+
+## 十、退一步：改存储契约（代价更大，不优先）
 
 把 indexer 的 scale 提成**独立的 cache spec**，使 key 的页内只有 key（4096 字节/页），
 key 即跨 block 连续，`[blocks*32, 128]` 视图成立。vLLM 本来就支持多个 cache group
@@ -178,9 +221,10 @@ UniformType group 内共享 block id）。
 - 所有假设 key/scale 相邻的代码要复核，包括 Native 的 `indexer_quant_scatter` 写入路径。
 
 即：为了让**一个** PTO 算子能用上整页直搬，要改动框架侧的分页存储契约，
-并让 Native 路径一起承担代价。这个取舍是本文档希望 PTO 一方一并评估的。
+并让 Native 路径一起承担代价。这个取舍是本文档希望 PTO 一方一并评估的。**但这条应排在第九节之后**——
+若 block size 一条即可解，就不必动存储契约。
 
-## 十、复现与证据
+## 十一、复现与证据
 
 - 存储布局实测：`offline_pd/run.py argdump`，产物 `csa_args_meta.json` 的 `indexer_storage` 字段；
 - 单算子单卡回放与泳道：`tests/pypto_test/dsv4_csa_single_card_bench.py --swimlane 4`，
