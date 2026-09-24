@@ -662,8 +662,22 @@ def indexer_score_topk_forest_vllm(
                     query_weight = weights[
                         query : query + 1, 0:IDX_N_HEADS
                     ]
+                    # Native carries the head coefficient as FP16: the weighted
+                    # head sum is a cube matmul whose A operand is
+                    # GlobalTensor<half> weightGm_, loaded through
+                    # LoadWeightToL0a as half. Both factors already arrive as
+                    # FP16 (prepare_dsa_indexer_weights and
+                    # indexer_quantize_query), so round their product back to
+                    # FP16 rather than keeping the FP32 product.
                     head_coefficient = pl.reshape(
-                        pl.mul(query_scale, query_weight),
+                        pl.cast(
+                            pl.cast(
+                                pl.mul(query_scale, query_weight),
+                                target_type=pl.FP16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
+                        ),
                         [IDX_N_HEADS, 1],
                     )
                 for score_begin in pl.pipeline(
