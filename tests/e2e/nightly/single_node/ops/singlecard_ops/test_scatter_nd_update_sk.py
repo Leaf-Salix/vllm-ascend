@@ -115,3 +115,48 @@ def test_scatter_nd_update_sk_duplicate_indices(var_dtype, idx_dtype, contiguous
     gc.collect()
     torch.npu.empty_cache()
     torch.npu.reset_peak_memory_stats()
+
+
+@pytest.mark.parametrize("idx_dtype", [torch.int32, torch.int64])
+@pytest.mark.parametrize("contiguous", [True, False])
+@pytest.mark.parametrize("all_padding", [False, True])
+@pytest.mark.parametrize(
+    "var_dtype, width",
+    [
+        (torch.bfloat16, 1),
+        (torch.bfloat16, 7),
+        (torch.bfloat16, 512),
+        (torch.bfloat16, 131072),
+        (torch.int8, 128),
+    ],
+)
+def test_scatter_nd_update_sk_negative_slots(idx_dtype, contiguous, all_padding, var_dtype, width):
+    """Padding must preserve surrounding storage in eager and graph replay."""
+    # Allocate on NPU first: clone().npu() on a CPU view would lose its strides.
+    # Include full guard pages on either side so a -1 linear write is observable.
+    page_rows = 8 if contiguous else 16
+    backing = torch.full((4, page_rows, width), -11, dtype=var_dtype, device="npu")
+    cache = backing[1:3, :8, :]
+    slots = [[-1, 7], [0, 0], [-1, 7], [1, 7], [0, 3], [-1, 7]]
+    if all_padding:
+        slots = [[-1, 7]] * len(slots)
+    indices = torch.tensor(slots, dtype=idx_dtype, device="npu")
+    updates_cpu = torch.arange(1, len(slots) + 1).to(var_dtype)[:, None].expand(-1, width).contiguous()
+    updates = updates_cpu.npu()
+    expected = backing.cpu()
+    for i, (page, offset) in enumerate(slots):
+        if page >= 0:
+            expected[page + 1, offset, :width] = updates_cpu[i]
+
+    def scatter():
+        torch.ops._C_ascend.npu_scatter_nd_update_sk(cache, indices, updates)
+
+    scatter()
+    assert torch.equal(backing.cpu(), expected)
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        scatter()
+    for _ in range(3):
+        backing.fill_(-11)
+        graph.replay()
+        assert torch.equal(backing.cpu(), expected)

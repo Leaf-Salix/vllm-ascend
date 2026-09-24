@@ -8,7 +8,7 @@
 
 - 正式代码最后一个已提交的算法版本为 `39993cd43`；后续数值对齐是未提交实验副本。
 - 已确认原生 forward 中 indexer 权重发生变化，导致若干整层比较不满足同权重条件；这些精度数字仅保留作诊断。
-- scatter 未过滤路径的 CPU 快照将变化定位到主 compressor scatter 内部。首轮过滤对照包装将 indices/updates 含义写反，结果作废；修正版尚待结果，不能宣布负 slot 根因已完成因果确认。
+- scatter 修正签名后的确定性对照已完成：主 compressor scatter 前权重差异0，后509；过滤负 slot 后全程0，确认本次权重污染与负 slot 写入有因果关系。首轮过滤包装的结果仍作废。
 - 历史性能组未显式开启确定性。后续强制 level=1、HCCL 确定性，并检查权重不变性。
 - 固定 B4/S6 的手工 Graph 不覆盖生产选档、padding、空 rank 或 dummy capture。
 
@@ -612,3 +612,87 @@ CPU INT32参考：CSA输出与当前绑定权重精确参考逐元素一致；�
 - 后者仅隔离固定形状微测，不是负slot kernel修复，也不是生产padding或capture档位验证；新platform选项尚未部署。
 - 截至14:46均pending，16卡被CI占用，前面还有16卡任务。
 
+
+## 2026-09-24：负 scatter slot 因果确认与 kernel 修复
+
+### 修正包装后的确定性对照
+
+两组均回读 `deterministic_level=1`、`HCCL_DETERMINISTIC=true`。输入为上述第2层真实权重，固定B4/S6。
+
+|检查点|原生未过滤|仅过滤负slot更新行|
+|---|---:|---:|
+|主compressor scatter前，indexer权重不同元素数|0|0|
+|主compressor scatter后|509|0|
+|forward完成后|509|0|
+
+主compressor更新为 `[10,512]`，两个slot为 `[-1,127]`，在128槽页布局下线性索引为-1。
+index key/scale scatter也含相同两个无效slot，但其前后被监控的indexer权重没有变化；这不证明其他allocation未受影响。
+本对照确认本次权重污染的scatter原因，与nalinaly的db6f3e1负索引修复一致；不代表整层数值误差全部消除。
+
+### 原生metadata契约更正
+
+尝试将compact行数从10缩到实际闭合边界数8，导致 `aclnnCompressor` 在8K首次warmup失败：
+`ropeSin shape dim 0 ... should be ... 10, but got 8`。128K未执行，没有新有效精度或延迟。
+原生要求保留10行容量，其中8行有效、2行sentinel；应修复scatter跳过sentinel，不能缩减metadata容量。
+
+### 最小kernel修复及待验收项目
+
+在 `scatter_nd_update_hp.h` 的批量复制和长行分片两条路径中，于输出地址计算前检查signed线性索引。
+批量路径跳过写入仍推进源偏移；分片路径在事件等待及ping-pong切换之前跳过，保留同步协议。
+适用范围是负线性索引padding，未扩大为任意非法多维坐标或正向越界保护。
+
+16个scatter编译变体已单独生成，复用现有host tiling、Torch扩展、vLLM、PyPTO和Simpler。
+测试使用独立完整OPP目录，原安装产物保留。静态独立审查通过。
+新增40组NPU回归：混合/全padding，INT32/INT64索引，对齐/非对齐/长行，连续/真实stride0 view，
+每组检查eager及3次Graph replay后的整个backing，包括前后guard页。
+上述40项回归全部通过；无Python过滤器的真实层writer中indexer权重全程不变。后续Graph对拍也已完成，结果如下。
+
+### G6：修复scatter后的确定性Graph对拍
+
+所有三路共用修复后的scatter；正式CSA算法仍取39993，最新候选仍为未提交数值对齐实验，
+包含Q/KV/Indexer的BF16、FP16舍入与Hadamard边界调整。此表不代表这些实验已合并到正式分支。
+
+同卡串行，真实第2层权重，TP1/B4/S6/block128；每路径12轮×100次Graph replay，
+轮换计时次序，编译、warmup、cache恢复、CPU权重检查均在计时外。
+native开启level1及HCCL确定性，QA/QB/indexerQB/KV/OA/OB六组权重在各路径输出后及计时后均未变化。
+8K与128K均保留原生compact容量10，结果JSON的compact_rows=8仅表示有效闭合边界数。
+
+|结束长度|原生ms|正式CSA 39993 ms|对齐候选ms|候选比原生|候选比正式CSA|
+|---|---:|---:|---:|---:|---:|
+|8K|0.576343|0.614856|0.619637|慢7.51%|慢0.78%|
+|128K|0.795113|0.846685|0.871587|慢9.62%|慢2.94%|
+
+|结束长度|正式CSA relative L2|候选relative L2|候选max abs|正式CSA allclose|候选allclose|
+|---|---:|---:|---:|---|---|
+|8K|1.4350%|0.4447%|0.00988770|false|true|
+|128K|1.6919%|0.3780%|0.00439453|false|true|
+
+allclose阈值为 `rtol=atol=1e-2`。通过这个阈值不等于逐元素一致，也不等于整模型精度验收。
+候选最终输出仍有约0.38%～0.44% relative L2残差，性能仍慢于共同原生基线。
+两组输出finite、输出guard通过，权重不变性通过。旧受权重污染的数据继续保留为诊断历史。
+
+### QLI共享metadata的原生接口修复
+
+独立审查确认 `_build_qli_metadata` 在共享cache hit时未更新当前builder独有的
+`qli_seqused_k` / `qli_cmp_residual_k`。将这两组buffer的div/remainder刷新移到缓存判断外，
+仍复用metadata生成结果，保留持久buffer地址和原接口，不增加CSA参数或适配包装。
+
+CPU回归覆盖两builder共享cache、下一步长度及请求数变化、INT32/INT64输入、buffer地址不变；
+本机Torch2.12与目标环境Torch2.10均2项通过。该测试执行真实方法，mock硬件metadata算子，
+不等价于整模型多builder/生产Graph验证；G6直接构造metadata，不覆盖该builder缓存命中路径。
+
+scatter修复与QLI刷新已部署到私有overlay，原二进制及源码已备份。
+尚待验证：同一捕获桶内请求数变化、padding/空rank、不同请求起始位置余数、跨步compact行数变化。
+默认6倍数capture选项仍是独立工作区修改，尚未部署，本次数据不能替它提供生产验证。
+
+### 本轮静态检查
+
+Ruff、format、codespell、typos与diff whitespace检查通过。Gitleaks因环境缺少gitleaks及wget未运行，
+应视为工具缺失，而非扫描通过。
+
+### G6证据指纹
+
+- `graph-baseline` Python文件SHA256清单的规范JSON摘要：`f9326ca9da9b32467b00e2597f29479890fe8d44d78e2c6434bdc2811b9cc2b8`。
+- `graph-candidate` Python文件SHA256清单的规范JSON摘要：`7df6108a34bad0a7446572962f963d9ed203c4cbffa2073a2c1aebd841284c27`。
+- `131066/result.json` SHA256：`6ca16fdb78c48a0096d89c8abdda70f7120136d95c8689447115d1835bd64d73`。
+- `8186/result.json` SHA256：`2a3455eabe21d088374524f2fee081e7546ba1a2d950bd950c9ecbc29f02a7f7`。
