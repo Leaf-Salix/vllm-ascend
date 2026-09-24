@@ -1085,3 +1085,68 @@ ReLU 位置）构成一个较大的搜索空间，**每次尝试都是一轮卡�
 **从 Python 层能对齐的 dtype 边界已全部对齐。** 再进一步需要算子内部实现，
 或对矩阵乘分块的控制权。不建议继续盲试排列组合——每次一轮卡时，
 且样本只有 4 个 key，无法区分改善与噪声。
+
+## 2026-09-25 根因推翻：不是累加顺序，是向量除法 TDIV
+
+此前把 `qr_scale` / `raw` / `q` 的残差归为"矩阵乘累加顺序的底噪"是**错误结论**。
+真正原因是 PyPTO 的 `pl.div` / `pl.recip` 下降到**向量除法 TDIV**，而该指令在 A3 上
+与正确舍入的 FP32 差 1 个 ULP，且 **`high_precision=True` 参数在 A3 后端被直接忽略**。
+
+### 证据
+
+nalinaly 分支 `dsv4-flash-pto-v0.25.1rc1` 的
+`tests/pypto_test/PTO_ISA_A3_TDIV_HIGH_PRECISION_REPRO.md` 有实测对照：
+
+| 路径 | 结果 |
+|------|------|
+| 原生 QR：设备端**标量** C++ 除法 | 正确舍入 |
+| `pl.div(Tensor, Tensor)` → `TDIV` → `vdiv` | **差 1 个 ULP** |
+| `pl.div(..., high_precision=True)` | **与默认逐 bit 相同**（A3 的 `TDIV_IMPL` 不分支 PrecisionType）|
+| PyPTO 设备端标量 `a / b` → `arith.divf` | 4096 个输入全部与正确舍入一致 |
+
+原生 `csrc/attention/rms_norm_dynamic_quant/.../rms_norm_dynamic_quant_normal_kernel.h`：
+
+```cpp
+float rstdLocalTemp = 1 / sqrt(squareSumTemp * this->aveNum + this->eps);  // 标量
+scaleTemp = this->quantMaxVal / maxTemp;                                    // 标量
+scaleTensor.SetValue(rid, 1 / scaleTemp);                                   // 标量
+Muls(srcSlice, srcSlice, scaleTemp, this->numLastDim);                      // 向量乘
+```
+
+**每行一个系数在标量单元上算，再用向量乘法施加。**
+
+### 这解释了三件此前想不通的事
+
+1. **改归约分块（批次 17）、改 `rsqrt`→`recip(sqrt)`（批次 18）、改 K 分块，
+   结果全都逐位不变**——归约从来不是问题，除法才是。
+2. **`index_scale` 一直是 bit-exact**——indexer 的 key scale 要转 FP16 存进 cache，
+   FP16 的 10 位尾数把 FP32 的 1 个 ULP 吸收了；而 `qr_scale` 全程 FP32 直接进
+   `npu_quant_matmul` 的 `pertoken_scale`，ULP 活了下来。
+3. `high_precision=True` 写了等于没写，A3 上是无效参数。
+
+### 实测效果
+
+把 q 路径的三个除法改成逐行标量除法（`pl.read` → `/` → `pl.write`，落到 `arith.divf`）：
+
+| 指标 | 改前 | 改后 |
+|------|------|------|
+| `qr_scale` 逐位一致行 | 17/24 | **21/24** |
+| `q` | 0.002143% | 0.002095% |
+
+另：去掉 split-K 的 FP32 原子加也有效（`qr_scale` 0.000011% → 0.000005%，
+`kv` 0.007072% → 0.006335%）。K 分块设为整个 K 不可行——
+`Mat buffer usage (1572864 bytes) exceeds platform limit (524288 bytes)`。
+
+### 剩余 3 行：VSQRT 的舍入
+
+nalinaly 的验证日志把这一步也定位了：「PTO VSQRT 与 CPU sqrt 有 25 个 FP32 末位差，
+设备 scalar 倒数与同输入 CPU 倒数 0 差异。归约及设备标量除法均已排除，
+**剩余 scale 差异由 VSQRT 的舍入引起**」。
+
+他的修法：**对 VSQRT 候选值做整数中点比较**——比较输入与相邻 FP32 平方根中点的平方，
+24 位有效数字对应的比较整数小于 2^52，**全部用设备 INT64 运算**避免再引入浮点误差，
+并保留 round-to-even 边界。修完「240 行 QR INT8 与 scale 逐 bit 一致」。
+
+**pl 没有暴露标量 sqrt**，只有张量/tile 版。待试顺序：
+1. 标量 `x ** 0.5`（映射到 `pow`），若 libm 对 0.5 特判为 `sqrtf` 则可能直接正确舍入
+2. 不行则自行实现整数中点修正
