@@ -1150,3 +1150,70 @@ nalinaly 的验证日志把这一步也定位了：「PTO VSQRT 与 CPU sqrt 有
 **pl 没有暴露标量 sqrt**，只有张量/tile 版。待试顺序：
 1. 标量 `x ** 0.5`（映射到 `pow`），若 libm 对 0.5 特判为 `sqrtf` 则可能直接正确舍入
 2. 不行则自行实现整数中点修正
+
+## 2026-09-25 参照 nalinaly 分支后的突破
+
+用户指出 nalinaly 的 `dsv4-flash-pto-v0.25.1rc1` 已做到 bit 级，证明可达。按项目规则
+只读其实现逻辑与验证记录，不使用其代码。以下每一条都在本分支独立实现并单独实测。
+
+### 根因推翻：向量除法 TDIV，不是累加顺序
+
+`PTO_ISA_A3_TDIV_HIGH_PRECISION_REPRO.md` 的实测对照：
+
+| 路径 | 结果 |
+|------|------|
+| 原生 QR：设备端**标量** C++ 除法 | 正确舍入 |
+| `pl.div` / `pl.recip` → 向量 `TDIV` → `vdiv` | **差 1 个 ULP** |
+| `high_precision=True` | **与默认逐 bit 相同**（A3 后端忽略该参数）|
+| PyPTO 设备端标量 `a / b` → `arith.divf` | 4096 输入全部正确舍入 |
+
+原生 `rms_norm_dynamic_quant_normal_kernel.h` 在标量单元算每行系数
+（`1/sqrt(..)`、`quantMaxVal/maxTemp`、`1/scaleTemp`），再用向量乘施加。
+
+这解释了此前三次无效尝试：改归约分块、改 `rsqrt` 写法、改 K 分块——归约从来不是问题。
+
+### 逐项实测结果
+
+| 改动 | 效果 | 结论 |
+|------|------|------|
+| 去掉 split-K 的 FP32 原子加 | `qr_scale` 0.000011%→0.000005%，`kv` 0.007072%→0.006335% | 保留 |
+| K 分块设为整个 K | `Mat buffer usage 1572864 > 524288` | 不可行 |
+| **QR 路径改标量除法** | `qr_scale` 16/24 → **21/24** | **保留** |
+| **VSQRT 整数中点精确舍入** | 21/24 → **22/24** | **保留** |
+| 推广标量除法到 indexer 量化 | indexer q INT8 **100% → 99.9644%** | **回退** |
+| 推广标量除法到 o_proj | o_proj **0% → 0.080884%** | **回退** |
+| 照搬反量化 scale 合并顺序 | indexer q INT8 **100% → 99.9644%** | **回退** |
+| **merge 操作数改为新块在前** | topk 逐位置 ~15% → **75.92%** | **保留** |
+| **softmax 概率 cast 改 `round`** | topk 一致 token 的 heads 0.0299%→0.0292% | **保留** |
+| **head 系数舍入到 FP16** | topk **4→3 个 key**，逐位置→**87.71%**，heads→**0.144230%** | **保留** |
+| FP16 改到分数侧 | topk 3→4，逐位置→79.42% | **回退** |
+
+### 关键教训
+
+**在一个算子上找到的根因不能推广到邻居。** 标量除法只对 `rms_norm_dynamic_quant`
+成立；`npu_dynamic_quant` 是向量化算子，其 scale 本就出自向量除法。同理，参考分支
+关于反量化顺序的结论对它的 kernel 结构成立，对我们不成立——照搬后 indexer q 掉出
+bit 级。**每次只改一处、单独看指标**，否则回退会被埋没。
+
+**实测压过代码推理。** `prepare_dsa_indexer_weights` 只 cast 权重，据此推断 q_scale
+在分数侧、FP16 应落在那里——实测更差，回退。
+
+### 工具：`bin/opus55-ab/pl_check.sh`
+
+`pl.jit` 的 `lower()` 在 signature mode 下从注解特化并跑完 pass 流水线，
+**不做代码生成、不调 ptoas、不上设备**，登录节点一两分钟出结果。
+抓得到解析错误与 pass 错误（含 Mat buffer 超限），抓不到 ptoas 的 codegen 错误
+（tile 字节对齐、i64/index 统一）。
+
+此前一个数值改动花了 10 轮排队，其中 9 轮是 pl 语言规则问题；启用后再无编译往返。
+pl 的限制已记入 `reports/mistakes/ut_test.md`：解析器只认 `+ - * / // % << >>`
+（无位运算）、只认自己的循环构造、标量写入需 `pl.cast`、tile 与 tensor 的读写方式
+不可混用、SPMD 并发下共享缓冲会互相覆盖。
+
+### 当前状态
+
+**已达 bit 级**：`index_key`、`index_scale`、`qr_int8`、indexer q 的 INT8 码字
+（196608 个）、indexer q 的 FP16 scale（1536 个）、`o_a`、o_proj（给定相同输入）。
+
+**残余**：`qr_scale` 22/24 行、`q` 0.002095%、`raw` 0.006335%、topk 3 个 key、
+`heads` 0.144230%、`output` **0.497366%**（会话起点 1.4353%）。
