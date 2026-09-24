@@ -225,6 +225,37 @@ O-proj 前的输出；两列差异均为相对 Native 的 relative L2。
 为 1.248881%，但正式提交尚未直接跑该对拍，也没有包含后续 Indexer
 诊断修改。因此 0.702845% 与 0.594030% 均不能作为此提交的精度指标。
 
+### Inverse RoPE 前 BF16 边界：单因素诊断
+
+`task_20260924_174025_54771919064` 在同一单卡 B4/T18、确定性 Native、
+相同权重/输入/cache 下完成，退出码为 0。独立诊断副本在一次 PyPTO
+sparse attention 计算中同时导出 inverse RoPE 前 BF16 heads、原 FP32
+输入的 inverse RoPE heads、以及先将归一化结果舍入 BF16 再做 inverse RoPE
+的 heads。正式源码没有因此修改。原路径的 Q、KV、QR、TopK、heads、输出，
+以及 Native 所有保存阶段，与上一次 Native TopK＋Q 注入任务逐元素一致；
+因此新导出缓冲没有改变对照结果。
+
+| 与 Native 对拍的阶段 | 原路径 relative L2 | BF16 边界版本 relative L2 | 逐元素相同占比：原路径 → 边界版本 |
+| --- | ---: | ---: | ---: |
+| inverse RoPE 前 heads | 0.031252% | 0.031252% | 58.89% → 58.89% |
+| inverse RoPE 后 heads | 0.084897% | 0.032232% | 57.92% → 59.03% |
+| 最终输出 | 0.594030% | 0.376710% | 29.46% → 42.58% |
+
+边界版本最终输出是将该版本 heads 送入**原生 O-proj**得到的诊断值；
+此前同一组 heads 的原生 O-proj 与 PyPTO O-proj 已逐元素一致，但本次未在
+正式 CSA 内运行第二次 PyPTO O-proj。两版本的 NoPE 448 维逐元素相同；
+RoPE 64 维对 Native 的 relative L2 从 0.276496% 降到 0.045079%。
+原生 `npu_sparse_flash_mla` 返回 BF16 heads 后才调用 inverse RoPE；
+本分支 `decode_sparse_attn_csa.py` 在构造 BF16 值后，仍用舍入前的 FP32
+值做 inverse RoPE。此次实验确认该数值边界是主要放大点之一。
+
+边界修正后，inverse RoPE 前 heads 仍有 0.031252% 差异，仅 58.89%
+逐元素相同；最终输出也未达到逐位一致。本次没有测 Graph、B16 或整模型，
+不能将 0.376710% 归属正式源码提交。接下来应先在 attention 归一化前后
+比较 Native 与 PyPTO，并分别排除 raw KV 读值、稀疏索引/mask、softmax
+和 QK/PV 归约顺序。原始 JSON 与阶段张量保存在工作区
+`reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/rope-boundary-b4-t18/`。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文
