@@ -466,6 +466,11 @@ python tests/pypto_test/offline_pd/run.py profile \
 | T2.3 | 稳态性能测量（原 A1） | **已完成**（`results/release_csa_steady_8k_20260924/`）。两侧各 16 rank、每 rank 62～63 个采样步、`sufficient=True`。中位对照：单步 p50 **55.77ms → 66.69ms（1.20×）**、p95 57.10 → 67.59ms（1.18×）、每 rank **1635.07 → 1382.10 token/s（0.85×）**、峰值显存 50.93 → 49.81GiB。即 **PTO 端到端慢 20%、吞吐为 Native 的 85%**，比按设备侧 kernel 算的差距小，因为端到端含 MoE 与通信等两侧共有部分。口径：窗口内不加额外同步，总和与吞吐可用、单步分位数为近似 | T2.1 | 16 | **已完成** |
 | T2.4 | 汇总真实 DSpark 与 EP 执行（原 A5） | **已完成**。走 `llm.get_metrics()` 公开出口。Native 与 PTO 同场景**逐个计数完全相同**：`num_drafts=1310`、`num_draft_tokens=6550`、`num_accepted_tokens=6400` → 自然接受长度 **4.885**、每步实际推进 **5.885 token**、接受率 **97.7%**。这比输出逐 token 相同更强——连 DSpark 每步接受几个草稿都一致。按 T4.4 要求不注入任何假定值 | T2.3 | 16 | **已完成** |
 | T2.5 | 决定 PyPTO `_resolve_compiled` 重复遍历 AST 的处置 | 该路径在 PyPTO 内，按约束不自行修改。需用户决定走上游还是本地方案；在此之前只记录，不改 | T2.1 | 否 | **待用户决定** |
+| T2.6 | 性能版：确立不占卡的分流水线归因手段 | **已完成**。用户 2026-09-24 指出 pypto-lib 的 `.claude/skills/incore-profiling`。已打通全链：主机侧 `JITFunction.warmup(RunConfig(platform="a2a3"))` 编出设备二进制（不初始化 NPU、不占卡）→ `msprof op simulator`（SoC Ascend910B1、`dav-c220`）→ `pypto.tools.clean_sim_trace`。skill 自带的兜底生成器兜不住计算型维度（`qk_pv`、`proj_a_mm` 报 `cannot safely bound computed PTO dimension`），改用 PTOAS 源码仓的 `test/npu_validation/scripts/generate_testcase.py` 后通过；两个源码仓按用户指示克隆在 `pto-eager/ptoas-src`、`pto-eager/pto-isa-src`。**并发化**：每片自带 `--output-root`，5～6 片同时跑，一轮 12 个 kernel。产物 `/data/pyptouser/qinchuanyu/pto-eager/incore_profiling_20260924/`（不入库） | T2.1 | 否 | **已完成** |
+| T2.7 | 关键路径定位（不占卡） | **已完成**。`python -m simpler_setup.tools.critical_path` 直接吃已有的 level-4 泳道。makespan 1.194ms，**compute 92.8%、stall 仅 7.2%**（data-wait 6.9%、core-wait 0.4%），确认瓶颈在 kernel 自身而非调度，推翻了此前"损耗集中在任务下发与同步"的方向。关键路径 25 个任务，`indexer_score_topk_leaf_aic` 265.8µs(22.3%) + `qk_pv_aic` 256.3µs(21.5%) 占 43.7% | T2.6 | 否 | **已完成** |
+| T2.8 | 性能版：解搬运受限的 matmul | **两项已验证**。in-core 全量清单显示我们慢的三个 matmul 全是搬运受限（Cube 占比均 <30%），而已追平的 `idx_qr_proj_matmul`(0.84×) Cube 占 31.8% 为全场最高。① `weights_proj`：N 块 16→整行 `IDX_N_HEADS`、K 块 256→`D_TILE=512`、按 K 切 4 份并行、去掉 `k_order` 重排与 BF16/FP16 往返 → **191,984→37,550 cycles（0.20×）**，与泳道 5.16× 相符。② `qr_proj_matmul`：`QR_N_TILE` 32→128、`QR_OK` 1→2、去掉 `QR_NATIVE_*` 的 K 块乱序 → **408,606→227,442（0.56×）**，与泳道 1.82× 相符；生成 IR 原为 `partition_tensor_view<256x32xbf16>`，每行只读 64 字节 | T2.6 | 否 | **已完成（待设备复核）** |
+| T2.9 | 性能版：补齐权重读的 L2 BYPASS | **代码已完成，收益待设备验证**。上游在 9 处权重读上都有 `pl.set_cache_policy(w, pl.CachePolicy.BYPASS)`（`qkv_proj_rope.py:301/412/698`、`decode_indexer.py:642/810`、`decode_compressor_ratio4.py:98/99`、`decode_indexer_compressor.py:104/105`、`decode_o_proj.py:595/649`），我们一处都没有。性能版已补 11 处（另含上游只在 TP 路径有、TP1 的 `proj_a_mm`/`proj_b_mm` 两处属超出上游）。生成 IR 确认落地：9 个 kernel、28 条 `pto.tload` 带 `cache_policy = #pto.load_cache_policy<l2_bypass>`。**但 in-core 测不出差异（0.99×～1.02×）——单核模拟器不建模 L2 争用**，这条只能靠设备泳道验 | T2.6 | 16 | **待设备验证** |
+| T2.10 | 性能版：`qk_pv` 软件流水 | **代码已完成，收益待设备验证**。按上游重写：`QK_PRE_LAUNCH=2`/`QK_TRANSFER_SLOTS=3` 的 tick 流水（AIC 第 k 拍算第 k 块 QK、第 k-2 块 PV），KV 单次进 L1 供 QK 转置视图与 PV 行切片共用（原先 QK/PV 各从 GM 搬一遍），softmax 整条 `H//2` 一次做完（原 `SOFTMAX_HEAD_TILE=8` 是 `ATTN_K_TILE=512` 时 UB 放不下的遗留），块内取局部 max、跨块重标定挪到归并侧，`merge_norm` 相应把 sink 项补进分母并去掉逆 RoPE 前的 BF16 往返。主机侧完整编译通过。**in-core 测不了**：auto golden 把 `valid_block_mask` 清零导致 0 次迭代的退化 trace | T2.7 | 16 | **待设备验证** |
 
 ### T3.2 已出三点的完整分析（B=1／8／16）
 
@@ -665,6 +670,14 @@ PTO kernel 内部各流水线（MTE／Vector／Cube／Scalar）的占用，属�
 
 结论方向与 T2.1 一致：**PTO 的计算核效率没问题，损耗集中在任务下发与同步**，
 对应 T2.1 里 AI_CPU 从 1,270µs 涨到 81,318µs 的观测。
+
+**⚠ 这条结论已被 T2.7 推翻（2026-09-24 晚）。** 上面按 Exec/Latency 比值得出的
+"损耗在下发与同步"是**口径错误**：DFX 窗口自带的边界同步开销被算进了 Latency，
+而这些开销在 eager 下尤其大。用 `simpler_setup.tools.critical_path` 在**同一份**
+level-4 泳道上重算：makespan 1.194ms 里 **compute 占 92.8%、stall 只占 7.2%**
+（data-wait 6.9%、core-wait 0.4%），且 compute+stall 与 makespan 逐 tick 精确对齐。
+即**瓶颈就在 kernel 自身的执行时间**，不在任务下发。后续优化据此改按单核
+分流水线（MTE2/MTE1/CUBE/VECTOR）归因，见 T2.6/T2.8。
 
 两条限定必须随数据一起说明：其一，DFX 窗口自带边界同步开销，这些绝对耗时不能当稳态性能；
 其二，本轮在 eager 下采集，主机下发路径与图模式不同，head／tail OH 的**绝对值**偏大，

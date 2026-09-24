@@ -79,23 +79,20 @@ QR_M_TILE = MATMUL_T_TILE  # qr_proj token (M) tile; cube rows must be a 16-row 
 
 QR_DENSE_M_TILE = 64
 
-QR_N_TILE = 32  # Divide Native's 96-column groups without crossing K-order boundaries.
+QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul；上游值。取 32 是为了对齐 Native 的
+# 96 列分组且不跨 K 序边界，代价是每行只读 32 列 BF16 = 64 字节，
+# in-core 实测 MTE2 占 55.6%、Cube 只有 28.4%。
 
 QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
 
-QR_OK = 1  # One FP32 accumulator; split-K changes Native QR rounding.
+QR_OK = 2  # qr_proj split-K factor；上游值。取 1 是因为 split-K 会改变 Native 的 QR 舍入。
 
 QR_SPLIT_K_TILE = D // QR_OK
 
 # CANN 9.0 MatMulV2 NT at M96/144/192/240: paired forward/reverse K256 traversals.
 # Sources: tests/pypto_test/results/cann90_20260921/qa_native_codegen_six/.
-QR_NATIVE_N_GROUP = 96
-QR_NATIVE_SHIFT_MIN_ROWS = 96
-QR_NATIVE_SHIFT_MAX_ROWS = 240
-QR_NATIVE_SHIFT_ROW_STEP = 48
-QR_NATIVE_SHIFT_GROUPS = 9
-QR_NATIVE_PAIR_SHIFT = 3
-QR_NATIVE_K_BLOCKS = D // QR_K_TILE
+# 性能版去掉 QR_NATIVE_* 的 K 块乱序：那是为复刻 Native 的 K 累加次序，
+# 乱序读会打掉硬件预取，正是 MTE2 居高不下的另一半原因。
 
 KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
 
@@ -125,6 +122,8 @@ QPROJ_M_TILE = 64  # dense qproj token tile; fills the 128 KiB L0C accumulator
 
 QPROJ_WORKERS = 24
 
+# 取 16 不是 64：尾部用的是 matmul_acc，valid_shape 小于物理行数时累加器不 compact，
+# 编译器直接报 AccCompactValid。上游尾部走的是 pl.matmul，所以它能取 64。
 QPROJ_TAIL_M_TILE = MATMUL_T_TILE  # partial-M path validated by decode/small physical T
 
 QPROJ_T_PAD = ((PREFILL_DENSE_TILE + QPROJ_TAIL_M_TILE - 1) // QPROJ_TAIL_M_TILE) * QPROJ_TAIL_M_TILE
@@ -244,27 +243,15 @@ def q_proj_qa(
                 qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
 
     for qbg_idx in pl.spmd((Q_LORA // QR_N_TILE) * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
+        # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
+        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
-        qr_native_group = q_a_col0 // QR_NATIVE_N_GROUP
         for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
             dense_x0 = tile_base + dense_t0
             dense_acc = pl.create_tensor([QR_DENSE_M_TILE, QR_N_TILE], dtype=pl.FP32)
             for dense_k in pl.pipeline(0, QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
-                dense_k_order = dense_k
-                if (
-                    tile_rows >= QR_NATIVE_SHIFT_MIN_ROWS
-                    and tile_rows <= QR_NATIVE_SHIFT_MAX_ROWS
-                    and tile_rows % QR_NATIVE_SHIFT_ROW_STEP == 0
-                    and qr_native_group < QR_NATIVE_SHIFT_GROUPS
-                ):
-                    dense_k_direction = dense_k
-                    if qr_native_group % 2 == 1:
-                        dense_k_direction = QR_NATIVE_K_BLOCKS - 1 - dense_k
-                    dense_k_order = (
-                        qr_native_group // 2 * QR_NATIVE_PAIR_SHIFT + dense_k_direction
-                    ) % QR_NATIVE_K_BLOCKS
-                dense_d0 = qr_k_base + dense_k_order * QR_K_TILE
+                dense_d0 = qr_k_base + dense_k * QR_K_TILE
                 dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_w = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
                 dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
@@ -272,18 +259,7 @@ def q_proj_qa(
         for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
             q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
             for db in pl.pipeline(QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
-                qr_k_order = db
-                if (
-                    tile_rows >= QR_NATIVE_SHIFT_MIN_ROWS
-                    and tile_rows <= QR_NATIVE_SHIFT_MAX_ROWS
-                    and tile_rows % QR_NATIVE_SHIFT_ROW_STEP == 0
-                    and qr_native_group < QR_NATIVE_SHIFT_GROUPS
-                ):
-                    qr_k_direction = db
-                    if qr_native_group % 2 == 1:
-                        qr_k_direction = QR_NATIVE_K_BLOCKS - 1 - db
-                    qr_k_order = (qr_native_group // 2 * QR_NATIVE_PAIR_SHIFT + qr_k_direction) % QR_NATIVE_K_BLOCKS
-                qr_d0 = qr_k_base + qr_k_order * QR_K_TILE
+                qr_d0 = qr_k_base + db * QR_K_TILE
                 qr_rows = pl.min(QR_M_TILE, tile_rows - t0)
                 x_t0 = tile_base + t0
                 q_x_chunk_bf16 = pl.slice(
@@ -483,6 +459,8 @@ def q_proj_q_matmul(
         name_hint="qproj_matmul",
         deps=[qproj_dep],
     ) as qproj_tid:
+        # 权重读绕过 L2：wq_b 每层只读一遍，占着 L2 会挤掉真正复用的数据。
+        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qproj_worker = pl.tile.get_block_idx()
         for qproj_n_idx in pl.range(
             qproj_worker,
@@ -490,6 +468,16 @@ def q_proj_q_matmul(
             QPROJ_WORKERS,
         ):
             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+            # 整条 K 的权重块提到 M 循环外，一次进 L1 后按 K 块切片复用。原先在 M
+            # 循环内按 Q_PROJ_TILE 反复从 GM 取，同一块权重被重复搬
+            # qproj_full_rows/QPROJ_M_TILE 遍，in-core 实测 MTE2 占 36.4%。
+            # 保留分块 matmul_acc 不改成整条 K 的单次 matmul：后者实测让编译器
+            # 拆出三倍 FIXP 回写、Cube 近翻倍（629k vs 529k cycles）。
+            # 权重块提到 M 循环外一次进 L1 试过两版，都更差，已撤回按 K 块从 GM 取：
+            #   ① 整条 K 的单次 pl.matmul：529k -> 629k cycles，FIXP 三倍、Cube 近翻倍；
+            #   ② 整段 tile 级 + pl.tile.slice 复用 L1：522k -> 632k，MTE2 虽从 36% 降到
+            #      27%，但 256KiB 权重常驻 L1 把 MTE1 顶了上去。
+            # 该项的 2.36x 差距改走设备侧复核（BYPASS 已加，in-core 测不出 L2 收益）。
             for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
                 col_acc = pl.create_tensor([QPROJ_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
                 for qr_proj_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
@@ -544,20 +532,31 @@ def q_proj_q_dequant(
         name_hint="qproj_dequant_rms_nope_rope",
         allow_early_resolve=True,
     ):
+        # 按本档位的 token 数自适应放大 head 块（上游写法）。恒用 Q_ROPE_H_TILE=4 时
+        # Vector 块太小、指令条数多，in-core 实测 VECTOR 占 82%。生产档位 tile_rows=96
+        # 正好命中下面第二个分支，head 块 4 -> 16。
+        dq_head_tile = Q_ROPE_H_TILE
+        if tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE) == 0:
+            dq_head_tile = H
+        elif (
+            tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H
+            and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H) == 0
+        ):
+            dq_head_tile = 16
         for dq_work in pl.range(
             dq_worker,
-            ((tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE) * (H // Q_ROPE_H_TILE),
+            ((tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE) * (H // dq_head_tile),
             Q_DEQUANT_WORKERS,
         ):
-            hg = (dq_work % (H // Q_ROPE_H_TILE)) * Q_ROPE_H_TILE
-            tg = (dq_work // (H // Q_ROPE_H_TILE)) * Q_ROPE_T_TILE
+            hg = (dq_work % (H // dq_head_tile)) * dq_head_tile
+            tg = (dq_work // (H // dq_head_tile)) * Q_ROPE_T_TILE
             out_tg = tile_base + tg
             if tg + Q_ROPE_T_TILE <= tile_rows:
                 qr_scale_dq_t = qr_scale_pad_store[tg : tg + Q_ROPE_T_TILE, :]
                 q_cos_il = rope_cos_il[out_tg : out_tg + Q_ROPE_T_TILE, :]
                 q_sin_signed = rope_sin_signed[out_tg : out_tg + Q_ROPE_T_TILE, :]
                 q_swap_idx = rope_swap_idx[out_tg : out_tg + Q_ROPE_T_TILE, :]
-                for h_inner in pl.pipeline(Q_ROPE_H_TILE, stage=2):
+                for h_inner in pl.pipeline(dq_head_tile, stage=2):
                     h = hg + h_inner
                     h0 = h * HEAD_DIM
                     q_head_acc = q_proj_i32[tg : tg + Q_ROPE_T_TILE, h0 : h0 + HEAD_DIM]
@@ -854,6 +853,8 @@ def kv_proj_rope(
                     name_hint="kv_proj_matmul",
                     deps=[late_dep],
                 ) as _kv_tid:
+                    # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
+                    pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
                     kbg = pl.tile.get_block_idx()
                     kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
                     kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE

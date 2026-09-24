@@ -197,6 +197,8 @@ def decode_o_proj_tp1(
                 deps=[heads_dep],
                 allow_early_resolve=True,
             ) as pa_tid:
+                # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
+                pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
                 pa_unit = pl.tile.get_block_idx()
                 pa_rb = pa_unit // (O_LORA // PROJ_A_MM_N_TILE)  # row block outermost
                 nf = pa_unit - pa_rb * (O_LORA // PROJ_A_MM_N_TILE)
@@ -278,6 +280,8 @@ def decode_o_proj_tp1(
             with pl.spmd(
                 proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
             ) as pb_tid:
+                # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
+                pl.set_cache_policy(wo_b, pl.CachePolicy.BYPASS)
                 pb_unit = pl.tile.get_block_idx()
                 tb = pb_unit // (D // PROJ_B_D_TILE)
                 dc = pb_unit - tb * (D // PROJ_B_D_TILE)

@@ -83,6 +83,13 @@ H_TILE = 16
 
 MERGE_WORKERS = 48
 
+# QK/PV 软件流水：AIC 在第 k 拍算第 k 块的 QK、第 k-QK_PRE_LAUNCH 块的 PV，
+# AIV 同拍采第 k 块 KV、做第 k-1 块 softmax、归并第 k-QK_PRE_LAUNCH-1 块。
+# 槽数取 QK_PRE_LAUNCH+1，保证在飞的三块各有自己的 KV/score/prob 缓冲。
+QK_PRE_LAUNCH = 2
+
+QK_TRANSFER_SLOTS = QK_PRE_LAUNCH + 1
+
 QK_KV_READY_EVENT = 0
 
 QK_SCORE_READY_EVENT = 1
@@ -93,15 +100,10 @@ QK_PV_READY_EVENT = 3
 
 # 性能版取 128，与上游一致。精度版取 512 是为了复刻 Native A3 每 512 个候选更新一次
 # softmax 的舍入节奏，块内再用一个常驻 FP32 累加器把四个 128 子块串起来；本版本放弃
-# 该性质。取 128 后 ATTN_K_TILE // ATTN_CUBE_KV_TILE 退化为 1，那些子块循环自然变成
-# 单次迭代，matmul_acc 的 init_cond 恒真，等价于上游的普通 matmul。
+# 该性质。
 # 派生量与上游对齐：SPARSE_BLOCKS = 1 + ceil(512/128) = 5、PADDED_TOPK = 640，
 # 与上游 max(2, ceil((WIN+CMP_TOPK)/128)) = 5 得到的 640 完全一致。
 ATTN_K_TILE = 128
-
-ATTN_CUBE_KV_TILE = 128
-
-SOFTMAX_HEAD_TILE = 8
 
 NUM_QK_CORES = 24  # qk_pv dispatch lanes
 
@@ -138,7 +140,7 @@ PADDED_TOPK = SPARSE_BLOCKS * ATTN_K_TILE
 
 SWA_TILE_WIN_ROWS = min(ATTN_K_TILE, WIN)
 
-SWA_RUNS = (min(ATTN_CUBE_KV_TILE, WIN) + 2 * (BLOCK_SIZE - 1)) // BLOCK_SIZE
+SWA_RUNS = (SWA_TILE_WIN_ROWS + 2 * (BLOCK_SIZE - 1)) // BLOCK_SIZE
 
 BIAS_T_TILE = min(T, 8)
 
@@ -270,101 +272,111 @@ def sparse_attn_csa(
     attn_li = pl.create_tensor([t_heads, 1], dtype=pl.FP32)
     attn_oi = pl.create_tensor([t_heads, HEAD_DIM], dtype=pl.FP32)
 
-    transfer_heads = NUM_QK_CORES * H
-    transfer_kv_rows = NUM_QK_CORES * ATTN_K_TILE
+    # 每核 QK_TRANSFER_SLOTS 个轮转槽：AIV 采下一块 KV 的同时，AIC 还能算本块 QK
+    # 与更早一块的 PV。单槽时三者只能首尾相接，泳道上就是 qk_pv 单次 246.8us
+    # 对上游 140.2us 的来源。
+    transfer_slots = NUM_QK_CORES * QK_TRANSFER_SLOTS
+    transfer_heads = transfer_slots * H
+    transfer_kv_rows = transfer_slots * ATTN_K_TILE
     kv_transfer = pl.create_tensor([transfer_kv_rows, HEAD_DIM], dtype=pl.BF16)
     score_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.FP32)
     probability_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.BF16)
     pv_transfer = pl.create_tensor([transfer_heads, HEAD_DIM], dtype=pl.FP32)
     mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
     li_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
-    alpha_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
     ffts_workspace = pl.create_tensor([256], dtype=pl.INT64)
     with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
         qk_core = pl.tile.get_block_idx()
-        qk_kv_base = qk_core * ATTN_K_TILE
-        qk_head_base = qk_core * H
         pl.system.set_ffts(ffts_workspace)
         for qk_t in pl.range(qk_core, t_dim, NUM_QK_CORES):
             qk_b = qk_t // S
             qk_q = pl.load(q_flat, [qk_t * H, 0], [H, HEAD_DIM], target_memory=pl.MemorySpace.Mat)
-            for qk_sb in pl.range(SPARSE_BLOCKS):
-                if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
-                    pl.system.sync_wait(QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                    for qk_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                        qk_col = qk_part * ATTN_CUBE_KV_TILE
-                        qk_kv = pl.load(
-                            kv_transfer, [qk_kv_base + qk_col, 0], [ATTN_CUBE_KV_TILE, HEAD_DIM],
-                            target_memory=pl.MemorySpace.Mat,
+            # KV 只进一次 L1：QK 用它的转置视图，PV 用同一份的行切片。
+            # 原先 QK 与 PV 各自从 GM 搬一遍，同一块 KV 过两次 GM->L1。
+            qk_l1 = pl.create_tile(
+                [QK_TRANSFER_SLOTS * ATTN_K_TILE, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat
+            )
+            for qk_tick in pl.range(SPARSE_BLOCKS + QK_PRE_LAUNCH):
+                if qk_tick < SPARSE_BLOCKS:
+                    qk_sb = qk_tick
+                    if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+                        qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_sb % QK_TRANSFER_SLOTS
+                        qk_kv_row = qk_slot * ATTN_K_TILE
+                        qk_transfer_row = qk_slot * H
+                        pl.system.sync_wait(QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                        qk_l1_row = (qk_sb % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+                        qk_l1 = pl.gather_row(
+                            qk_l1, kv_transfer, [qk_l1_row, 0], [qk_kv_row, 0], [ATTN_K_TILE, HEAD_DIM]
                         )
-                        qk_scores = pl.matmul(qk_q, pl.tile.transpose_view(qk_kv), out_dtype=pl.FP32)
-                        pl.store(qk_scores, [qk_head_base, qk_col], score_transfer)
-                    pl.system.sync_set(
-                        QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
-                    )
-                    pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                    # Keep a single FP32 PV accumulator across the Native 512-candidate block.
-                    pv_acc = pl.create_tile([H, HEAD_DIM], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
-                    for pv_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                        pv_col = pv_part * ATTN_CUBE_KV_TILE
+                        qk_l1_t = pl.tile.transpose_view(qk_l1)
+                        qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_K_TILE], [0, qk_l1_row])
+                        qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
+                        pl.store(qk_scores, [qk_transfer_row, 0], score_transfer)
+                        pl.system.sync_set(
+                            QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                        )
+                if qk_tick >= QK_PRE_LAUNCH:
+                    pv_sb = qk_tick - QK_PRE_LAUNCH
+                    if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:
+                        pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_sb % QK_TRANSFER_SLOTS
+                        pv_transfer_row = pv_slot * H
+                        pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                         pv_probability = pl.load(
-                            probability_transfer, [qk_head_base, pv_col], [H, ATTN_CUBE_KV_TILE],
+                            probability_transfer, [pv_transfer_row, 0], [H, ATTN_K_TILE],
                             target_memory=pl.MemorySpace.Mat,
                         )
-                        pv_kv = pl.load(
-                            kv_transfer, [qk_kv_base + pv_col, 0], [ATTN_CUBE_KV_TILE, HEAD_DIM],
-                            target_memory=pl.MemorySpace.Mat,
+                        pv_l1_row = (pv_sb % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+                        pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
+                        pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
+                        pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
+                        pl.system.sync_set(
+                            QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
                         )
-                        pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
-                    pl.store(pv_acc, [qk_head_base, 0], pv_transfer)
-                    pl.system.sync_set(
-                        QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
-                    )
 
             for qk_aiv in pl.split_aiv(2, mode=pl.SplitMode.NONE):
                 pl.system.set_ffts(ffts_workspace)
                 qk_lane_head = qk_aiv * (H // 2)
-                qk_lane_kv = qk_aiv * (ATTN_CUBE_KV_TILE // 2)
-                qk_reduce_tmp = pl.create_tile(
-                    [SOFTMAX_HEAD_TILE, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec
-                )
+                qk_lane_kv = qk_aiv * (ATTN_K_TILE // 2)
+                qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
                 running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
-                running_l = pl.tile.adds(pl.tile.muls(running_m, 0.0), 1.0)
+                # 上游口径：l 从 0 起算，sink 的那一项留到 merge_norm 的分母里补。
+                running_l = pl.tile.muls(running_m, 0.0)
                 running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
-                # Publish row statistics so each head group reads its explicit GM row.
-                pl.store(running_m, [qk_head_base + qk_lane_head, 0], mi_transfer)
-                pl.store(running_l, [qk_head_base + qk_lane_head, 0], li_transfer)
-                for qk_sb, (m_iter, l_iter, left_iter, right_iter) in pl.range(
-                    SPARSE_BLOCKS, init_values=(running_m, running_l, running_left, running_right)
+                for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
+                    SPARSE_BLOCKS + QK_PRE_LAUNCH + 1,
+                    init_values=(running_m, running_l, running_left, running_right),
                 ):
-                    if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
-                        # Gather in 64-row pieces per AIV; a whole 512x512 KV tile would exceed UB.
-                        for qk_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                            qk_part_row = qk_part * ATTN_CUBE_KV_TILE + qk_lane_kv
-                            qk_kv_half = pl.tile.full([ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
+                    if qk_tick < SPARSE_BLOCKS:
+                        qk_sb = qk_tick
+                        if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+                            qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_sb % QK_TRANSFER_SLOTS
+                            qk_kv_row = qk_slot * ATTN_K_TILE
+                            qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
                             if qk_sb == 0:
                                 qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
                                 qk_win_len = pl.min(qk_pos + 1, WIN)
                                 qk_win_start = qk_pos - qk_win_len + 1
                                 qk_head = qk_win_start % BLOCK_SIZE
-                                qk_rows = pl.min(pl.max(qk_win_len - qk_part_row, 0), ATTN_CUBE_KV_TILE // 2)
+                                qk_rows = pl.min(pl.max(qk_win_len - qk_lane_kv, 0), ATTN_K_TILE // 2)
                                 for qk_run in pl.unroll(SWA_RUNS):
-                                    qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_part_row, 0)
-                                    qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_part_row, qk_rows)
+                                    qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_lane_kv, 0)
+                                    qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_lane_kv, qk_rows)
                                     if qk_hi > qk_lo:
-                                        qk_absolute = qk_win_start + qk_part_row + qk_lo
+                                        qk_absolute = qk_win_start + qk_lane_kv + qk_lo
                                         qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
                                         if qk_raw_page >= 0:
-                                            qk_raw_row = pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
+                                            qk_raw_row = (
+                                                pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
+                                            )
                                             qk_kv_half = pl.gather_row(
                                                 qk_kv_half, ori_kv_flat, [qk_lo, 0], [qk_raw_row, 0],
-                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
+                                                [ATTN_K_TILE // 2, HEAD_DIM],
                                                 valid_shape=[qk_hi - qk_lo, HEAD_DIM],
                                             )
                             else:
-                                for qk_row in pl.range(ATTN_CUBE_KV_TILE // 2):
-                                    qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_part_row + qk_row
+                                for qk_row in pl.range(ATTN_K_TILE // 2):
+                                    qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
                                     if qk_cmp_k < CMP_TOPK:
                                         qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
                                         if qk_ridx >= 0:
@@ -375,44 +387,73 @@ def sparse_attn_csa(
                                             qk_kv_half = pl.gather_row(
                                                 qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
                                             )
-                            pl.store(qk_kv_half, [qk_kv_base + qk_part_row, 0], kv_transfer)
-                        pl.system.sync_set(
-                            QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
-                        )
-                        pl.system.sync_wait(QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                        for sm_part in pl.range((H // 2) // SOFTMAX_HEAD_TILE):
-                            sm_h = sm_part * SOFTMAX_HEAD_TILE
-                            sm_row = qk_head_base + qk_lane_head + sm_h
-                            sm_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, ATTN_K_TILE])
-                            sm_bias = pl.load(sparse_bias, [qk_t, qk_sb * ATTN_K_TILE], [1, ATTN_K_TILE])
-                            sm_masked = pl.col_expand_add(pl.mul(sm_scores, SOFTMAX_SCALE), sm_bias)
-                            sm_block_max = pl.row_max(sm_masked, qk_reduce_tmp)
-                            sm_old_m = pl.load(mi_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, 1])
-                            sm_old_l = pl.load(li_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, 1])
-                            sm_max = pl.maximum(sm_old_m, sm_block_max)
-                            sm_alpha = pl.exp(pl.sub(sm_old_m, sm_max))
-                            sm_exp = pl.exp(pl.row_expand_sub(sm_masked, sm_max))
-                            sm_sum = pl.add(pl.mul(sm_old_l, sm_alpha), pl.row_sum(sm_exp, qk_reduce_tmp))
+                            pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
+                    if qk_tick > 0 and qk_tick <= SPARSE_BLOCKS:
+                        softmax_sb = qk_tick - 1
+                        if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
+                            qk_slot = qk_core * QK_TRANSFER_SLOTS + softmax_sb % QK_TRANSFER_SLOTS
+                            qk_transfer_row = qk_slot * H
+                            qk_s0 = softmax_sb * ATTN_K_TILE
+                            pl.system.sync_wait(
+                                QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
+                            )
+                            # 整条 H//2 一次做完：原先按 SOFTMAX_HEAD_TILE=8 切成四段，
+                            # 是 ATTN_K_TILE=512 时 UB 放不下留下的，现在 128 宽已无必要。
+                            qk_scores_half = pl.load(
+                                score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE]
+                            )
+                            qk_bias = pl.load(sparse_bias, [qk_t, qk_s0], [1, ATTN_K_TILE])
+                            qk_masked = pl.col_expand_add(pl.mul(qk_scores_half, SOFTMAX_SCALE), qk_bias)
+                            # 块内取局部最大值，跨块的重标定挪到下面的归并里；
+                            # 这样每块 softmax 互不依赖，流水才排得开。
+                            qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
+                            qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
+                            qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
                             # 性能版用 rint（就近偶数），与上游一致。精度版用 round
                             # 是为了复刻 Native SAS 的 CAST_ROUND——半数远离零。
-                            sm_probability = pl.cast(sm_exp, target_type=pl.BF16, mode="rint")
-                            pl.store(sm_probability, [sm_row, 0], probability_transfer)
-                            pl.store(sm_max, [sm_row, 0], mi_transfer)
-                            pl.store(sm_sum, [sm_row, 0], li_transfer)
-                            pl.store(sm_alpha, [sm_row, 0], alpha_transfer)
-                        pl.system.sync_set(
-                            QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                            qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
+                            pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
+                            pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
+                            pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                            pl.system.sync_set(
+                                QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                            )
+                    # KV-ready 必须等上一块 softmax 的落盘之后再发，槽位才不会被提前覆盖。
+                    if qk_tick < SPARSE_BLOCKS:
+                        if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
+                            pl.system.sync_set(
+                                QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                            )
+                    if qk_tick >= QK_PRE_LAUNCH + 1:
+                        pv_sb = qk_tick - QK_PRE_LAUNCH - 1
+                        if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:
+                            pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_sb % QK_TRANSFER_SLOTS
+                            pv_transfer_row = pv_slot * H
+                            pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                            pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                            pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                            next_m = pl.maximum(m_iter, pv_m)
+                            alpha = pl.exp(pl.sub(m_iter, next_m))
+                            beta = pl.exp(pl.sub(pv_m, next_m))
+                            next_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
+                            pv_left = pl.load(
+                                pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2]
+                            )
+                            next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pl.row_expand_mul(pv_left, beta))
+                            pv_right = pl.load(
+                                pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2]
+                            )
+                            next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pl.row_expand_mul(pv_right, beta))
+                            m_valid, l_valid, left_valid, right_valid = pl.yield_(
+                                next_m, next_l, next_left, next_right
+                            )
+                        else:
+                            m_valid, l_valid, left_valid, right_valid = pl.yield_(
+                                m_iter, l_iter, left_iter, right_iter
+                            )
+                        m_after, l_after, left_after, right_after = pl.yield_(
+                            m_valid, l_valid, left_valid, right_valid
                         )
-                        pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                        pv_row = qk_head_base + qk_lane_head
-                        next_m = pl.load(mi_transfer, [pv_row, 0], [H // 2, 1])
-                        next_l = pl.load(li_transfer, [pv_row, 0], [H // 2, 1])
-                        alpha = pl.load(alpha_transfer, [pv_row, 0], [H // 2, 1])
-                        pv_left = pl.load(pv_transfer, [pv_row, 0], [H // 2, HEAD_DIM // 2])
-                        next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pv_left)
-                        pv_right = pl.load(pv_transfer, [pv_row, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2])
-                        next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pv_right)
-                        m_after, l_after, left_after, right_after = pl.yield_(next_m, next_l, next_left, next_right)
                     else:
                         m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
                     running_m, running_l, running_left, running_right = pl.yield_(
@@ -516,6 +557,7 @@ def sparse_attn_csa_tp1(
         freqs_sin,
     )
     t_dim = pl.tensor.dim(q, 0)
+    merge_sink = pl.reshape(attn_sink, [H, 1])
 
     with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
         m_worker = pl.tile.get_block_idx()
@@ -534,20 +576,23 @@ def sparse_attn_csa_tp1(
             m_h_idx = m_idx - m_t * (H // H_TILE)
             m_h0 = m_h_idx * H_TILE
             m_row = m_idx * H_TILE
+            m_mi = pl.load(attn_mi, [m_row, 0], [H_TILE, 1])
             m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
             m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
 
-            # The online sum already includes the sink's unit initial weight.
-            n_full = pl.row_expand_div(m_oi, m_li)
+            # qk_pv 的 l 从 0 起算，sink 那一项在这里按当前最大值补进分母。
+            n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
+            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
+            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
+            n_full = pl.row_expand_div(m_oi, n_denom)
             n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
-            # Native sparse attention publishes BF16 before inverse RoPE.
-            n_rounded = pl.cast(n_bf16, target_type=pl.FP32)
 
-            # Inverse-RoPE head tile.
-            m_rope = n_rounded[0:H_TILE, NOPE_DIM:HEAD_DIM]
+            # Inverse-RoPE head tile. 性能版直接用 FP32 结果做逆 RoPE；精度版先过一次
+            # BF16 再回 FP32，是为了复刻 Native 在逆 RoPE 前先发布 BF16 的次序。
+            m_rope = n_full[0:H_TILE, NOPE_DIM:HEAD_DIM]
             m_cos_il = pl.load(rope_cos_il, [m_t, 0], [1, ROPE_DIM])
             m_sin_signed = pl.load(rope_sin_signed, [m_t, 0], [1, ROPE_DIM])
-            m_swapped = pl.tile.gather(n_rounded, m_swap_idx, m_gather_tmp)
+            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
             m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed))
             n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
             n_full_bf16 = pl.concat(n_bf16[0:H_TILE, 0:NOPE_DIM], n_rope_bf16)

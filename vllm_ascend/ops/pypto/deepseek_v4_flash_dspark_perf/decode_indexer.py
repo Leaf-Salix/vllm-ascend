@@ -104,8 +104,10 @@ DEQUANT_T_TILE = min(T, 8)
 
 HEAD_DIM_TILE = 32
 
-WEIGHTS_PROJECTION_N_TILE = 16
-WEIGHTS_PROJECTION_K_TILE = 256
+# 上游口径：按 K 切 4 份并行、N 一次吃满 IDX_N_HEADS。
+WEIGHTS_OK = 4  # Weights-projection K tile count
+WEIGHTS_K_TILE = D // WEIGHTS_OK
+D_TILE = 512
 
 QH_QUANT_TILE = 64
 
@@ -585,6 +587,8 @@ def indexer_qr_rope(
         name_hint="idx_qr_proj_matmul",
         allow_early_resolve=True,
     ) as idx_qr_mm_tid:
+        # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
+        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qr_proj_worker = pl.tile.get_block_idx()
         for qr_col in pl.range(qr_proj_worker, IDX_N_HEADS * IDX_HEAD_DIM // QR_MM_N_TILE, QR_PROJ_WORKERS):
             o_base = qr_col * QR_MM_N_TILE
@@ -782,60 +786,31 @@ def indexer_weights_project(
 
     x_flat = x
     weights = pl.create_tensor([T_PAD, IDX_N_HEADS], dtype=pl.FP32)
-    weights_partial = pl.create_tensor([T_PAD, IDX_N_HEADS], dtype=pl.FP32)
+    weights_partial = pl.create_tensor([WEIGHTS_OK * T_PAD, IDX_N_HEADS], dtype=pl.FP32)
     # Caller-ordered weights projection.
     with pl.spmd(
         weights_workers, name_hint="weights_proj", deps=[weights_gate_dep], allow_early_resolve=True
     ) as _weights_tid:
+        # 权重读绕过 L2：这块权重每层只读一遍，占着 L2 只会挤掉真正复用的数据。
+        pl.set_cache_policy(weights_proj, pl.CachePolicy.BYPASS)
         w_worker = pl.tile.get_block_idx()
-        for w_unit in pl.range(w_worker, row_blocks * (IDX_N_HEADS // WEIGHTS_PROJECTION_N_TILE), weights_workers):
-            w_rb = w_unit // (IDX_N_HEADS // WEIGHTS_PROJECTION_N_TILE)
-            w_ng = w_unit % (IDX_N_HEADS // WEIGHTS_PROJECTION_N_TILE)
-            w_n0 = w_ng * WEIGHTS_PROJECTION_N_TILE
+        for w_unit in pl.range(w_worker, WEIGHTS_OK * row_blocks, weights_workers):
+            w_rb = w_unit // WEIGHTS_OK  # row block outermost
+            kb = w_unit - w_rb * WEIGHTS_OK
             w_r0 = w_rb * MM_ROW_TILE
             w_rows = pl.min(MM_ROW_TILE, bs - w_r0)
-            weights_acc = pl.create_tensor([MM_ROW_TILE, WEIGHTS_PROJECTION_N_TILE], dtype=pl.FP32)
-            for db in pl.range(D // WEIGHTS_PROJECTION_K_TILE):
-                # Installed CANN9.0 A3 MatMulV2 traverses K in a shape-specific
-                # order. Keep each FP32 accumulator live across that sequence;
-                # M24 reverses 512-block order while retaining each block's
-                # internal order. Larger formal shapes use 256-block order.
-                # Evidence: weights_native_codegen_{v1,remaining_v1}.
-                k_order = db
-                if bs == 24:
-                    k_direction = db // 2
-                    if w_ng % 2 == 1:
-                        k_direction = 7 - db // 2
-                    k_order = ((w_ng // 2 * 4 + k_direction) % 8) * 2 + db % 2
-                elif bs == 48:
-                    k_direction = db
-                    if w_ng % 2 == 1:
-                        k_direction = 15 - db
-                    k_order = (w_ng // 2 * 8 + k_direction) % 16
-                elif bs == 96 or bs == 144 or bs == 192 or bs == 240:
-                    k_direction = db
-                    if w_rb % 2 == 1:
-                        k_direction = 15 - db
-                    k_shift = w_rb // 2 * 5
-                    if bs == 144:
-                        k_shift = (w_rb % 8) // 2 * 4
-                    elif bs == 192:
-                        k_shift = w_rb // 2 * 2
-                    elif bs == 240:
-                        k_shift = (w_rb % 14) // 2 * 2
-                    k_order = (k_shift + k_direction) % 16
-                d0 = k_order * WEIGHTS_PROJECTION_K_TILE
-                x_tile = pl.slice(
-                    x_flat,
-                    [MM_ROW_TILE, WEIGHTS_PROJECTION_K_TILE],
-                    [w_r0, d0],
-                    valid_shape=[w_rows, WEIGHTS_PROJECTION_K_TILE],
-                )
-                weights_proj_tile = weights_proj[
-                    d0 : d0 + WEIGHTS_PROJECTION_K_TILE, w_n0 : w_n0 + WEIGHTS_PROJECTION_N_TILE
-                ]
+            k_base = kb * WEIGHTS_K_TILE
+            weights_acc = pl.create_tensor([MM_ROW_TILE, IDX_N_HEADS], dtype=pl.FP32)
+            # 性能版不再按 Native 的 K 遍历序重排（原 k_order 分支）：那是为了复刻
+            # CANN9.0 A3 MatMulV2 的累加次序，代价是 K 块必须切到 256、N 块切到 16，
+            # 读 weights_proj 变成 256 次 32 字节跨步读。in-core 实测 MTE2 占 60%、
+            # Cube 只占 13.4%，改回整行 [D_TILE, IDX_N_HEADS] 后是一段连续 64KiB。
+            for db in pl.range(WEIGHTS_K_TILE // D_TILE):
+                d0 = k_base + db * D_TILE
+                x_tile = pl.slice(x_flat, [MM_ROW_TILE, D_TILE], [w_r0, d0], valid_shape=[w_rows, D_TILE])
+                weights_proj_tile = weights_proj[d0 : d0 + D_TILE, :]
                 weights_acc = pl.matmul_acc(weights_acc, x_tile, weights_proj_tile, init_cond=(db == 0))
-            weights_partial[w_r0 : w_r0 + MM_ROW_TILE, w_n0 : w_n0 + WEIGHTS_PROJECTION_N_TILE] = weights_acc
+            weights_partial[kb * T_PAD + w_r0 : kb * T_PAD + w_r0 + MM_ROW_TILE, :] = weights_acc
 
     with pl.spmd(
         row_blocks,
@@ -845,11 +820,12 @@ def indexer_weights_project(
         w_rb = pl.tile.get_block_idx()
         w_r0 = w_rb * MM_ROW_TILE
         w_sum = weights_partial[w_r0 : w_r0 + MM_ROW_TILE, :]
-        # Native weights_proj and its scale multiplication each materialize
-        # BF16, then A3 QLI consumes FP16 weights.
-        w_sum = pl.cast(pl.cast(w_sum, pl.BF16, mode="rint"), pl.FP32)
-        w_scaled = pl.cast(pl.mul(w_sum, WEIGHTS_SCALE), pl.BF16, mode="rint")
-        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.cast(pl.cast(w_scaled, pl.FP16), pl.FP32)
+        for kb in pl.unroll(1, WEIGHTS_OK):
+            partial_r0 = kb * T_PAD + w_r0
+            w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
+        # 性能版不做 BF16/FP16 往返：那是为了复刻 Native 先落 BF16、A3 QLI 再吃
+        # FP16 权重的次序，而性能版 leaf 已改走 Vector col_sum，没有 FP16 权重行。
+        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.mul(w_sum, WEIGHTS_SCALE)
 
     return weights, weights_tid
 
