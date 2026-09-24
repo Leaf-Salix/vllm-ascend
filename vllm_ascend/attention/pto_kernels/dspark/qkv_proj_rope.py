@@ -771,6 +771,11 @@ def q_proj_rope(
     qr_i8_matmul = pl.create_tensor([QPROJ_T_PAD, Q_LORA], dtype=pl.INT8)
     # The quant scale rides the qr_i8 -> qproj_matmul -> dequant chain.
     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
+    # Scalar-unit staging for the kv tail row coefficients. Declared here so
+    # they are genuine tensors: a create_tensor inside the tail scope comes
+    # back as a tile and pl.load then refuses it.
+    kv_rms_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
+    kv_inv_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
     q_seq_deps = pl.array.create(1, pl.TASK_ID)
     q_proj_qr(
         x,
@@ -975,7 +980,6 @@ def kv_proj_rope(
                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
                         kv_sq_sum_tail = pl.add(kv_sq_sum_tail, kv_row_sum_tail)
-                    kv_rms_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
                     # The tail keeps its reduction in an explicit tile, so publish
                     # it with pl.store rather than a subscript write.
                     pl.store(
@@ -983,7 +987,6 @@ def kv_proj_rope(
                         [0, 0],
                         kv_rms_store_tail,
                     )
-                    kv_inv_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
                     for kv_row_tail in pl.range(KV_RMS_T_TILE):
                         pl.write(
                             kv_inv_store_tail,
