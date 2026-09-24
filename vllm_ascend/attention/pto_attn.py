@@ -167,10 +167,10 @@ def prepare_weights(impl, hadamard):
         "cmp_wkv": _dense(compressor.wkv, (kcsa.MAIN_OUT_DIM, D)),
         "cmp_wgate": _dense(compressor.wgate, (kcsa.MAIN_OUT_DIM, D)),
         "cmp_ape": _native_tensor("cmp_ape", compressor.ape.detach(), torch.float32),
-        # compressor.norm.weight is loaded BF16 but vllm-ascend's
-        # process_weights_after_loading may widen it to FP32.  The kernel's
-        # RMS path expects BF16 tiles; cast explicitly rather than validating.
-        "cmp_norm_w": compressor.norm.weight.detach().to(torch.bfloat16).contiguous(),
+        # Kernel ABI requires FP32 for the RMS norm weight (PyPTO signature is
+        # float32); vllm-ascend's process_weights_after_loading widens this from
+        # BF16 to FP32, which matches.
+        "cmp_norm_w": _native_tensor("cmp_norm_w", compressor.norm.weight.detach(), torch.float32),
         "idx_wq_b": idx_wq_b,
         "idx_wq_b_scale": idx_wq_b_scale,
         "weights_proj": _dense(indexer.weights_proj, (D, IH)),
@@ -180,8 +180,8 @@ def prepare_weights(impl, hadamard):
         "inner_wkv": _dense(indexer.compressor.wkv, (kcsa.INNER_OUT_DIM, D)),
         "inner_wgate": _dense(indexer.compressor.wgate, (kcsa.INNER_OUT_DIM, D)),
         "inner_ape": _native_tensor("inner_ape", indexer.compressor.ape.detach(), torch.float32),
-        # Same widening applies to the inner compressor norm; cast to BF16.
-        "inner_norm_w": indexer.compressor.norm.weight.detach().to(torch.bfloat16).contiguous(),
+        # Same: kernel ABI is FP32.
+        "inner_norm_w": _native_tensor("inner_norm_w", indexer.compressor.norm.weight.detach(), torch.float32),
         "attn_sink": _native_tensor("attn_sink", impl.attn_sink.detach(), torch.float32),
         # vLLM keeps [G, O_GROUP_IN, O_LORA]; the kernel wants the transpose.
         "wo_a": _native_tensor("wo_a", impl.wo_a.weight.detach(), torch.bfloat16).transpose(1, 2).contiguous(),
