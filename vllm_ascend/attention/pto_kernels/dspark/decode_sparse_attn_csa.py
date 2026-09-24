@@ -352,7 +352,13 @@ def sparse_attn_csa(
                             qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
                             qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
                             qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
-                            qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
+                            # Native publishes the BF16 probability with
+                            # CAST_ROUND -- midpoint away from zero -- at
+                            # sparse_attn_sharedkv_scfa_block_vector.h:482,
+                            # while rint takes midpoints to even. The final
+                            # BF16 output in the same file uses CAST_RINT, so
+                            # only this cast changes.
+                            qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="round")
                             pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
                             pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
                             pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
