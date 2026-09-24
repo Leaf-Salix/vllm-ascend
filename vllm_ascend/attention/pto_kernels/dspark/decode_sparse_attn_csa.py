@@ -276,9 +276,18 @@ def sparse_attn_csa(
                 running_l = pl.tile.muls(running_m, 0.0)
                 running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
-                for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
+                # The merge stage runs QK_PRE_LAUNCH ticks behind the softmax
+                # stage, so m_iter is too stale to normalise with. Carry a
+                # second running maximum that advances one block per tick in
+                # the softmax stage itself; it visits the same blocks in the
+                # same order, so it is always equal to the maximum the merge
+                # stage will hold once it catches up.
+                running_smax = pl.load(
+                    attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
+                )
+                for qk_tick, (m_iter, l_iter, left_iter, right_iter, smax_iter) in pl.range(
                     SPARSE_BLOCKS + QK_PRE_LAUNCH + 1,
-                    init_values=(running_m, running_l, running_left, running_right),
+                    init_values=(running_m, running_l, running_left, running_right, running_smax),
                 ):
                     if qk_tick < SPARSE_BLOCKS:
                         qk_sb = qk_tick
@@ -349,7 +358,15 @@ def sparse_attn_csa(
                             )
                             qk_scaled = pl.mul(qk_scores_half, SOFTMAX_SCALE)
                             qk_masked = pl.col_expand_add(qk_scaled, qk_bias)
-                            qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
+                            # Native's SoftmaxFlashV2 normalises each block
+                            # by the running maximum and takes the exponential
+                            # once. Normalising by the block maximum and
+                            # rescaling at the merge takes it twice, and the
+                            # second rounding is what showed up as attention
+                            # residual.
+                            qk_mi = pl.maximum(
+                                smax_iter, pl.row_max(qk_masked, qk_reduce_tmp),
+                            )
                             qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
                             qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
                             # Native publishes the BF16 probability with
@@ -366,6 +383,12 @@ def sparse_attn_csa(
                                 QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
                                 ffts_mode=2, core_type=pl.KernelType.AIV,
                             )
+                            smax_valid = pl.yield_(qk_mi)
+                        else:
+                            smax_valid = pl.yield_(smax_iter)
+                        smax_after = pl.yield_(smax_valid)
+                    else:
+                        smax_after = pl.yield_(smax_iter)
                     # Publish the next KV-ready event after the preceding softmax stores.
                     if qk_tick < SPARSE_BLOCKS:
                         if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
@@ -381,27 +404,32 @@ def sparse_attn_csa(
                             pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                             pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
                             pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
-                            next_m = pl.maximum(m_iter, pv_m)
+                            # pv_m is already the running maximum through
+                            # this block, so next_m == pv_m and beta == 1: the
+                            # incoming block needs no rescaling, which is
+                            # exactly SoftmaxFlashV2's update.
+                            next_m = pv_m
                             alpha = pl.exp(pl.sub(m_iter, next_m))
-                            beta = pl.exp(pl.sub(pv_m, next_m))
-                            next_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
+                            next_l = pl.add(pl.mul(alpha, l_iter), pv_l)
                             pv_left = pl.load(
                                 pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2],
                                 target_memory=pl.MemorySpace.Vec,
                             )
-                            next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pl.row_expand_mul(pv_left, beta))
+                            next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pv_left)
                             pv_right = pl.load(
                                 pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2],
                                 target_memory=pl.MemorySpace.Vec,
                             )
-                            next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pl.row_expand_mul(pv_right, beta))
+                            next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pv_right)
                             m_valid, l_valid, left_valid, right_valid = pl.yield_(next_m, next_l, next_left, next_right)
                         else:
                             m_valid, l_valid, left_valid, right_valid = pl.yield_(m_iter, l_iter, left_iter, right_iter)
                         m_after, l_after, left_after, right_after = pl.yield_(m_valid, l_valid, left_valid, right_valid)
                     else:
                         m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-                    running_m, running_l, running_left, running_right = pl.yield_(m_after, l_after, left_after, right_after)
+                    running_m, running_l, running_left, running_right, running_smax = pl.yield_(
+                        m_after, l_after, left_after, right_after, smax_after,
+                    )
                 qk_output_row = qk_t * H + qk_lane_head
                 pl.store(running_m, [qk_output_row, 0], attn_mi)
                 pl.store(running_l, [qk_output_row, 0], attn_li)
