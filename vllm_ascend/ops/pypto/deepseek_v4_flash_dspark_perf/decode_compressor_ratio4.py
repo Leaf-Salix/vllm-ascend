@@ -131,7 +131,10 @@ def compressor_ratio4_project(
             kv_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
             score_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
             for kb in pl.pipeline(0, D // K_TILE, stage=2):
-                k0 = (kb * K_TILE + (o0 % HEAD_DIM // NATIVE_PROJECTION_N_GROUP) * NATIVE_PROJECTION_K_SHIFT) % D
+                # 性能版按上游取平凡的 K 序。原式用 NATIVE_PROJECTION_* 把 K 块按
+                # 输出列组轮转，是为复刻 Native 的累加次序。实测该项收益在噪声内，
+                # 保留是因为与上游一致、少一处精度锁。
+                k0 = kb * K_TILE
                 x_tile = pl.slice(x_flat, [MM_B_TILE, K_TILE], [global_row0, k0], valid_shape=[x_rows, K_TILE])
                 # Transposed [OUT_DIM, D] projection weights.
                 wkv_tile = wkv[o0 : o0 + OUT_TILE, k0 : k0 + K_TILE]

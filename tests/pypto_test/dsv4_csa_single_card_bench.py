@@ -68,6 +68,9 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--swimlane", type=int, default=0, choices=range(5),
                         help="非 0 时开 DFX 芯片泳道；4 才有逐任务 kernel 时长")
+    parser.add_argument("--pmu", type=int, default=0,
+                        help="AICore PMU 事件：2=PIPE_UTILIZATION、4=MEMORY。走编译程序路径，"
+                             "与 pypto.torch.init 互斥，所以开了它就不采泳道")
     args = parser.parse_args()
     activate()
 
@@ -75,6 +78,7 @@ def main() -> None:
     import torch_npu  # noqa: F401  加载 NPU 后端
 
     import pypto.torch
+    from pypto.runtime import RunConfig
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     package = variant_package()
@@ -92,11 +96,19 @@ def main() -> None:
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
-    # 执行目标一次性定在进程上：JIT 调用本身不接 RunConfig。
-    pypto.torch.init(device=args.device, platform="a2a3",
-                     enable_chip_swimlane=args.swimlane,
-                     enable_dep_gen=args.swimlane >= 4,
-                     output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None)
+    if args.pmu:
+        # PMU 只能从 RunConfig 走编译程序路径；它与 pypto.torch.init 在同一进程里互斥。
+        compiled = kernel.compile(*call_args, config=RunConfig(
+            platform="a2a3", device_id=args.device, enable_pmu=args.pmu,
+            save_kernels=True, save_kernels_dir=str((args.output / "pmu").resolve())))
+        run = lambda: compiled(*call_args)  # noqa: E731
+    else:
+        # 执行目标一次性定在进程上：JIT 调用本身不接 RunConfig。
+        pypto.torch.init(device=args.device, platform="a2a3",
+                         enable_chip_swimlane=args.swimlane,
+                         enable_dep_gen=args.swimlane >= 4,
+                         output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None)
+        run = lambda: kernel(*call_args)  # noqa: E731
 
     report = {"variant": selected_variant(), "package": package, "device": args.device,
               "layer_index": meta["layer_index"], "tokens": meta["tokens"],
@@ -104,14 +116,14 @@ def main() -> None:
               "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"}
     try:
         for _ in range(args.warmup):
-            kernel(*call_args)
+            run()
         torch.npu.synchronize()
 
         samples = []
         for _ in range(args.iters):
             torch.npu.synchronize()
             start = time.perf_counter()
-            kernel(*call_args)
+            run()
             torch.npu.synchronize()
             samples.append((time.perf_counter() - start) * 1e6)
         samples.sort()
@@ -122,7 +134,7 @@ def main() -> None:
             torch.npu.synchronize()
             pypto.torch.begin_dfx()
             try:
-                kernel(*call_args)
+                run()
             finally:
                 pypto.torch.end_dfx()
             torch.npu.synchronize()
@@ -132,7 +144,7 @@ def main() -> None:
                       samples_us=samples,
                       wallclock_scope="墙钟含 eager 主机侧派发开销，不是 kernel 时间；"
                                       "逐任务 kernel 时长看 --swimlane 4 的产物")
-        if args.swimlane >= 4:
+        if args.swimlane >= 4 and not args.pmu:
             report["swimlane"] = _export_swimlane(args.output / "dfx")
         out = tensors["attn_out"].detach().float().cpu()
         report["attn_out"] = {"finite": bool(torch.isfinite(out).all()),

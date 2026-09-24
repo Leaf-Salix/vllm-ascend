@@ -58,7 +58,10 @@ Q_PROJ_TILE = 256  # qproj K-tile (Q_LORA reduction)
 # 16 核跑 3 块、8 核跑 2 块，不均衡比 1.5；256 时 128 块，变成 8 核跑 6、16 核跑 5，
 # 不均衡比降到 1.2。另外 L0C 占用从 512*64*4=128KiB 降到 64KiB，不再顶满累加器上限，
 # 给双缓冲留出空间。泳道实测该任务 1653us 对上游 875us（1.9x）。
-QPROJ_MM_N_TILE = 256  # qproj output-column tile
+# 取 512 不是上游的 256：单卡实测 qproj_matmul 由 2.10x 降到 1.57x（该项 -466us）。
+# 上游每个 M 块对整条 K 做一次 matmul，N 块小一些无妨；我们按 Q_PROJ_TILE 分块
+# 累加，N 块越大越能摊薄每块的权重搬运。L0C 上限 512*64*4 = 128KiB 正好吃满。
+QPROJ_MM_N_TILE = 512  # qproj output-column tile
 
 Q_LORA_TILE = 256  # qr rms-norm / quant N granularity
 
