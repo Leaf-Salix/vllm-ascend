@@ -425,7 +425,7 @@ def q_proj_qr(
                     pl.write(qr_wide, [0, 0], pl.cast(2 * same_sig + 1, pl.INT64))
                     same_hi = pl.read(qr_wide, [0, 0])
                     same_shift = (v_exp - 23) - (2 * same_exp - 48)
-                    if (v_wide << same_shift) < same_hi * same_hi:
+                    if (v_wide << pl.cast(same_shift, pl.INT64)) < same_hi * same_hi:
                         pl.write(qr_root_bits, [0, qr_row], pl.cast(cand_bits, pl.INT32))
                     down_bits = cand_bits - 1
                     down_sig = (down_bits % 0x800000) + 0x800000
@@ -433,7 +433,7 @@ def q_proj_qr(
                     pl.write(qr_wide, [0, 0], pl.cast(2 * down_sig + 1, pl.INT64))
                     down_hi = pl.read(qr_wide, [0, 0])
                     down_shift = (v_exp - 23) - (2 * down_exp - 48)
-                    if (v_wide << down_shift) < down_hi * down_hi:
+                    if (v_wide << pl.cast(down_shift, pl.INT64)) < down_hi * down_hi:
                         pl.write(qr_root_bits, [0, qr_row], pl.cast(down_bits, pl.INT32))
                 qr_root_store = pl.reinterpret_view(qr_root_bits, pl.FP32, shape=[1, T_TILE])
                 qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
