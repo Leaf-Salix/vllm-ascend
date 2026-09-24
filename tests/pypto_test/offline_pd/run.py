@@ -421,6 +421,20 @@ def diagnose(args, llm, cases):
             "output_token_ids": measured["output_token_ids"],
             "scope": "只读取metadata并多调一次Native自己的compact生产器量形状，不改变本步计算结果",
         })
+    elif args.command == "argdump":
+        # 把一次真实 CSA 调用的根入参落盘，之后单卡 bench 反复回放，
+        # 不必为每次 kernel 改动再起一次 16 卡整模型。
+        target = (args.output / "csa_args").resolve()
+        started = llm.collective_rpc("offline_begin_argdump",
+                                     args=(args.swimlane_layer, str(target), expected_tokens))
+        measured = generate_round(llm, args, case, args.warmup_tokens)
+        window = llm.collective_rpc("offline_end_argdump")
+        common.update({
+            "decode_tokens": args.warmup_tokens, "layer_index": args.swimlane_layer,
+            "started": started, "window": window, "argdump_dir": str(target),
+            "measured_elapsed_seconds": measured["elapsed_seconds"],
+            "scope": "只落盘入参，不改变本步计算结果",
+        })
     else:
         started = llm.collective_rpc("offline_begin_swimlane",
                                      args=(args.swimlane_layer, expected_tokens))
@@ -702,7 +716,8 @@ def worker(args):
                    llm.collective_rpc("offline_cache_layout"))
         llm.llm_engine.engine_core.shutdown()
         return
-    if args.command in ("profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare"):
+    if args.command in ("profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
+                        "argdump"):
         diagnose(args, llm, cases)
         llm.llm_engine.engine_core.shutdown()
         return
@@ -765,7 +780,8 @@ def launch(args):
     devices = os.environ.get("TASK_DEVICE", "").split(",")
     if len(devices) != 16 or any(not d.isdigit() for d in devices) or len(set(devices)) != 16:
         raise RuntimeError("Run through task-submit --device auto --device-num 16")
-    if args.command in ("decode", "profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare"):
+    if args.command in ("decode", "profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
+                        "argdump"):
         report = json.loads((args.bank / "audit.json").read_text())
         if report["status"] != "PASS":
             raise ValueError("P cache bank must pass audit before D loads it")
@@ -902,7 +918,7 @@ def main():
     parser.add_argument("command", choices=["plan", "audit", "prefill", "decode", "profile", "hostprofile",
                                             "profile-export", "profile-compare",
                                             "swimlane", "swimlane-export",
-                                            "padding-capture", "steady", "bitcompare"])
+                                            "padding-capture", "steady", "bitcompare", "argdump"])
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--histories", default="255,4095,32767,131071,131072,131073")

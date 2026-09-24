@@ -123,9 +123,6 @@ def compressor_ratio4_project(
         name_hint="kv_score_proj",
         deps=[late_dep],
     ) as _kv_score_tid:
-        # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-        pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
-        pl.set_cache_policy(wgate, pl.CachePolicy.BYPASS)
         kv_worker = pl.tile.get_block_idx()
         for idx in pl.range(kv_worker, t_matmul * OUT_DIM // (MM_B_TILE * OUT_TILE), KV_SCORE_WORKERS):
             global_row0 = (idx // (OUT_DIM // OUT_TILE)) * MM_B_TILE

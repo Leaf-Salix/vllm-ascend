@@ -243,8 +243,6 @@ def q_proj_qa(
                 qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
 
     for qbg_idx in pl.spmd((Q_LORA // QR_N_TILE) * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
-        # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
         for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
@@ -459,8 +457,6 @@ def q_proj_q_matmul(
         name_hint="qproj_matmul",
         deps=[qproj_dep],
     ) as qproj_tid:
-        # 权重读绕过 L2：wq_b 每层只读一遍，占着 L2 会挤掉真正复用的数据。
-        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qproj_worker = pl.tile.get_block_idx()
         for qproj_n_idx in pl.range(
             qproj_worker,
@@ -853,8 +849,6 @@ def kv_proj_rope(
                     name_hint="kv_proj_matmul",
                     deps=[late_dep],
                 ) as _kv_tid:
-                    # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-                    pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
                     kbg = pl.tile.get_block_idx()
                     kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
                     kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE

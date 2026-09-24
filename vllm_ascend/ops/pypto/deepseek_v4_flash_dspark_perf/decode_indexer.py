@@ -587,8 +587,6 @@ def indexer_qr_rope(
         name_hint="idx_qr_proj_matmul",
         allow_early_resolve=True,
     ) as idx_qr_mm_tid:
-        # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qr_proj_worker = pl.tile.get_block_idx()
         for qr_col in pl.range(qr_proj_worker, IDX_N_HEADS * IDX_HEAD_DIM // QR_MM_N_TILE, QR_PROJ_WORKERS):
             o_base = qr_col * QR_MM_N_TILE
@@ -791,8 +789,6 @@ def indexer_weights_project(
     with pl.spmd(
         weights_workers, name_hint="weights_proj", deps=[weights_gate_dep], allow_early_resolve=True
     ) as _weights_tid:
-        # 权重读绕过 L2：这块权重每层只读一遍，占着 L2 只会挤掉真正复用的数据。
-        pl.set_cache_policy(weights_proj, pl.CachePolicy.BYPASS)
         w_worker = pl.tile.get_block_idx()
         for w_unit in pl.range(w_worker, WEIGHTS_OK * row_blocks, weights_workers):
             w_rb = w_unit // WEIGHTS_OK  # row block outermost

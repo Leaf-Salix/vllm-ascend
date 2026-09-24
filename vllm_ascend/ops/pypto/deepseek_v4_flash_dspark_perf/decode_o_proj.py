@@ -193,12 +193,15 @@ def decode_o_proj_tp1(
 
             with pl.spmd(
                 proj_a_rows * (O_LORA // PROJ_A_MM_N_TILE),
+                # 注意：wo_a / wo_b 不加 set_cache_policy(BYPASS)。上游 56e879c 给所有
+                # decode 权重都加了 BYPASS，唯独把 o 投影这一对列为例外——它们在投影
+                # 运行前被 SDMA 预取进 L2，绕过读等于把这次预热扔掉；而且"缓存写 +
+                # 绕过读同一段字节"正是 set_cache_policy 文档点名的、编译器检测不到的
+                # 一致性 bug。
                 name_hint="proj_a_mm",
                 deps=[heads_dep],
                 allow_early_resolve=True,
             ) as pa_tid:
-                # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-                pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
                 pa_unit = pl.tile.get_block_idx()
                 pa_rb = pa_unit // (O_LORA // PROJ_A_MM_N_TILE)  # row block outermost
                 nf = pa_unit - pa_rb * (O_LORA // PROJ_A_MM_N_TILE)
@@ -280,8 +283,6 @@ def decode_o_proj_tp1(
             with pl.spmd(
                 proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
             ) as pb_tid:
-                # 权重读绕过 L2：每层只读一遍，占着 L2 只会挤掉真正复用的数据（对齐上游）。
-                pl.set_cache_policy(wo_b, pl.CachePolicy.BYPASS)
                 pb_unit = pl.tile.get_block_idx()
                 tb = pb_unit // (D // PROJ_B_D_TILE)
                 dc = pb_unit - tb * (D // PROJ_B_D_TILE)

@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Control-only worker extension for D integration evidence, not timing."""
 
+import json
 import os
 import time
 from collections import Counter
+from pathlib import Path
 
 
 def _monotonic_ulp(actual, expected, torch, floor=0.0):
@@ -858,6 +860,82 @@ class OfflineCSAObserver:
         records = state.pop("records")
         if records:
             self._offline_padding_write(directory, rank, records)
+        return dict(state)
+
+    def offline_begin_argdump(self, layer_index, out_dir, expected_tokens):
+        """把一次真实 CSA 调用的全部根入参落盘，供单卡回放。
+
+        目的是把"改一次 kernel 就要起 16 卡整模型"这条链切断：dump 一次之后，
+        `dsv4_csa_single_card_bench.py` 就能在单卡上反复回放同一组真实输入，
+        既能立刻暴露 aicore 故障，也能采泳道量单次耗时。
+        """
+        from vllm_ascend.ops.pypto.variant import variant_package
+        package = variant_package()
+        CSAServiceRuntime = __import__(f"{package}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+        native_adapter = __import__(f"{package}.native_adapter", fromlist=["NativeCSACall"])
+        NativeCSACall = native_adapter.NativeCSACall
+
+        if getattr(self, "_offline_argdump", None) is not None:
+            raise RuntimeError("Argument dump is already active")
+        rank = self.vllm_config.parallel_config.data_parallel_rank
+        attention = self.model_runner.get_model().model.layers[layer_index].self_attn
+        wanted = getattr(attention.dsa_attn, "_pto_csa_runtime", None)
+        if wanted is None:
+            raise ValueError(f"Layer {layer_index} has no PTO CSA runtime")
+        state = {"dp_rank": rank, "layer_index": layer_index, "layer_name": wanted.layer_name,
+                 "expected_tokens": expected_tokens, "dumped": 0, "path": None}
+        # 只 dump rank0：16 个 rank 的输入形状一致，多存只是浪费磁盘。
+        state["enabled"] = rank == 0
+        original_call = CSAServiceRuntime.__call__
+        original_init = NativeCSACall.__init__
+        latest = {}
+
+        def traced_init(call, *args, **kwargs):
+            original_init(call, *args, **kwargs)
+            latest["call"] = call
+
+        def traced(runtime, context, hidden, *args, **kwargs):
+            result = original_call(runtime, context, hidden, *args, **kwargs)
+            if (state["enabled"] and runtime is wanted and not state["dumped"]
+                    and hidden.shape[0] == expected_tokens):
+                call = latest.get("call")
+                if call is not None:
+                    import numpy as np
+                    import torch
+                    target = Path(out_dir)
+                    target.mkdir(parents=True, exist_ok=True)
+                    kernel = __import__(f"{package}.decode_csa", fromlist=["decode_csa_tp1_attention_test"]).decode_csa_tp1_attention_test
+                    names = list(kernel.param_names)
+                    payload = {}
+                    for name in names:
+                        value = call.args[name]
+                        if not isinstance(value, torch.Tensor):
+                            raise TypeError(f"CSA argument {name} is not a tensor: {type(value)}")
+                        # 输出缓冲也一并存：回放要的是完全相同的形状与 dtype。
+                        payload[name] = value.detach().cpu().contiguous().numpy()
+                    np.savez(target / "csa_args.npz", **payload)
+                    meta = {"layer_index": layer_index, "layer_name": wanted.layer_name,
+                            "tokens": int(hidden.shape[0]), "param_names": names,
+                            "dtypes": {k: str(call.args[k].dtype) for k in names},
+                            "shapes": {k: list(call.args[k].shape) for k in names}}
+                    (target / "csa_args_meta.json").write_text(json.dumps(meta, indent=2))
+                    state["dumped"] += 1
+                    state["path"] = str(target / "csa_args.npz")
+            return result
+
+        CSAServiceRuntime.__call__ = traced
+        NativeCSACall.__init__ = traced_init
+        self._offline_argdump = (state, original_call, original_init, CSAServiceRuntime, NativeCSACall)
+        return dict(state)
+
+    def offline_end_argdump(self):
+        entry = getattr(self, "_offline_argdump", None)
+        if entry is None:
+            raise RuntimeError("Argument dump was not started")
+        state, original_call, original_init, CSAServiceRuntime, NativeCSACall = entry
+        CSAServiceRuntime.__call__ = original_call
+        NativeCSACall.__init__ = original_init
+        self._offline_argdump = None
         return dict(state)
 
     def offline_begin_swimlane(self, layer_index, expected_tokens):
