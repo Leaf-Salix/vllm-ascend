@@ -1,0 +1,68 @@
+{
+  "qa": [
+    {
+      "anchor": "                    qr_rms_chunk = qr_fp32[tg : tg + T_TILE, qr_rms_col0 : qr_rms_col0 + Q_LORA_TILE]\n",
+      "insert": "                    qr_rms_chunk = pl.cast(pl.cast(qr_rms_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                    qr_chunk = qr_fp32[tg : tg + T_TILE, qa : qa + QUANT_TILE]\n",
+      "insert": "                    qr_chunk = pl.cast(pl.cast(qr_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    }
+  ],
+  "q_mm": [
+    {
+      "anchor": "                    q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)\n",
+      "insert": "                    q_head_dq = pl.cast(pl.cast(q_head_dq, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                    q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)\n",
+      "insert": "                    q_head_dq_tail = pl.cast(pl.cast(q_head_dq_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    }
+  ],
+  "q_rms": [
+    {
+      "anchor": "                    q_rope_chunk = pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t)\n",
+      "insert": "                    q_rope_chunk = pl.cast(pl.cast(q_rope_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                    q_rope_chunk_tail = pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail)\n",
+      "insert": "                    q_rope_chunk_tail = pl.cast(pl.cast(q_rope_chunk_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    }
+  ],
+  "kv_mm": [
+    {
+      "anchor": "                        kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, kv_sq_col0 : kv_sq_col0 + KV_TILE]\n",
+      "insert": "                        kv_chunk = pl.cast(pl.cast(kv_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                        kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, n0 : n0 + KV_TILE]\n",
+      "insert": "                        kv_chunk = pl.cast(pl.cast(kv_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                    kv_rope_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, NOPE_DIM : NOPE_DIM + ROPE_DIM]\n",
+      "insert": "                    kv_rope_chunk = pl.cast(pl.cast(kv_rope_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                            [tg, kv_sq_col0_tail],\n                            [KV_RMS_T_TILE, KV_TILE],\n                            valid_shape=[valid_rows, KV_TILE],\n                            target_memory=pl.MemorySpace.Vec,\n                        )\n",
+      "insert": "                        kv_chunk_tail = pl.cast(pl.cast(kv_chunk_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                            [tg, n0_tail],\n                            [KV_RMS_T_TILE, KV_TILE],\n                            valid_shape=[valid_rows, KV_TILE],\n                            target_memory=pl.MemorySpace.Vec,\n                        )\n",
+      "insert": "                        kv_chunk_tail = pl.cast(pl.cast(kv_chunk_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                        [tg, NOPE_DIM],\n                        [KV_RMS_T_TILE, ROPE_DIM],\n                        valid_shape=[valid_rows, ROPE_DIM],\n                        target_memory=pl.MemorySpace.Vec,\n                    )\n",
+      "insert": "                    kv_rope_chunk_tail = pl.cast(pl.cast(kv_rope_chunk_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    }
+  ],
+  "kv_rms": [
+    {
+      "anchor": "                    kv_rope_norm_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope)\n",
+      "insert": "                    kv_rope_norm_chunk = pl.cast(pl.cast(kv_rope_norm_chunk, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    },
+    {
+      "anchor": "                        gamma_rope_tail,\n                    )\n",
+      "insert": "                    kv_rope_norm_tail = pl.cast(pl.cast(kv_rope_norm_tail, target_type=pl.BF16, mode=\"rint\"), target_type=pl.FP32)\n"
+    }
+  ]
+}

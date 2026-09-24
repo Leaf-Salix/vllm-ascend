@@ -205,7 +205,6 @@ exit0表示测试流程完成，不表示数值通过；JSON里accuracy_pass均�
 早期8k-v7.json开启磁盘缓存导致反复编译，其eager计时作废，正式结果使用进程内缓存。
 环境问题和处理方法同步到 myskill/pto227-vllm-cann92/references/native-direct-ab-20260923.md。
 
-
 ### 归档 2：dsv4-adapter-graph-20260923
 
 > 历史报告；如与最新更正冲突，以本文结论与证据分级为准。
@@ -257,7 +256,6 @@ TP1、B4、S6、128槽物理页，8K与128K历史。固定seed62的合成hidden/
 - 只编译各CSA kernel，未重编译或重装vLLM/PyPTO/Simpler。
 - 任务[调度标识省略]，设备2，completed exit0。
 - 脚本ab.py/run.sh；完整结果results/<version>-<start>/result.json。
-
 
 ### 归档 3：dsv4-precision-hooks-20260924
 
@@ -325,7 +323,6 @@ CSA decode_o_proj按8组分别处理1024维OA结果、计算各组scale再汇总
 
 当前结果是误差定位证据，不是精度通过证明。不能要求融合内核所有FP32归约逐位等同原生，
 但必须先对齐显式dtype、量化范围、scale和cache等语义边界，再制定可接受误差阈值。
-
 
 ### 归档 4：dsv4-oproj-global-20260924
 
@@ -410,7 +407,6 @@ Graph与普通单次输出均检查，guard均通过。单模块延迟增加约2
 性能优化必须维持共享scale与BF16边界，可优化padding块写和全局归约调度；
 不能恢复按组独立量化来换速度，否则会重新引入已确认的语义差异。
 
-
 ### 归档 5：dsv4-oproj-commit-20260924
 
 > 历史报告；如与最新更正冲突，以本文结论与证据分级为准。
@@ -475,7 +471,6 @@ DeepSeek-V4-Flash-0731-w8a8真实第2层C4权重，B4/S6，TP1，block128；
 - 远端结果：同ROOT下`logs/oproj-commit-39993`。
 
 查询期间SSH曾返回Exceeded MaxStartups；退避后恢复连接，任务不受查询断开影响并正常完成。
-
 
 ### 归档 6：dsv4-qkv-align-20260924
 
@@ -612,7 +607,6 @@ CPU INT32参考：CSA输出与当前绑定权重精确参考逐元素一致；�
 - 后者仅隔离固定形状微测，不是负slot kernel修复，也不是生产padding或capture档位验证；新platform选项尚未部署。
 - 截至14:46均pending，16卡被CI占用，前面还有16卡任务。
 
-
 ## 2026-09-24：负 scatter slot 因果确认与 kernel 修复
 
 ### 修正包装后的确定性对照
@@ -696,3 +690,19 @@ Ruff、format、codespell、typos与diff whitespace检查通过。Gitleaks因环
 - `graph-candidate` Python文件SHA256清单的规范JSON摘要：`7df6108a34bad0a7446572962f963d9ed203c4cbffa2073a2c1aebd841284c27`。
 - `131066/result.json` SHA256：`6ca16fdb78c48a0096d89c8abdda70f7120136d95c8689447115d1835bd64d73`。
 - `8186/result.json` SHA256：`2a3455eabe21d088374524f2fee081e7546ba1a2d950bd950c9ecbc29f02a7f7`。
+
+## G7：单因素舍入与固定heads的O-proj归因（2026-09-24）
+
+基线为 `6c4236be9ca9bc6b86c86ea76aaf265474b237bb`，未将实验数值修改合入正式CSA。
+26组NPU Graph对拍完成，TP1/B4/S6/block128、8K/128K、真实C4权重和合成输入，原生确定性开启。
+完整设计、每组QR/Q/raw KV/heads/output/cache指标及证据hash见
+[单因素报告](DSV4_CSA_SINGLE_FACTOR_20260924.md) 与 [完整JSON](DSV4_CSA_SINGLE_FACTOR_20260924.json)。
+
+- Q-A BF16令QR不同元素数从1397/1355降至1/0。
+- 相同QR输入下，Q-B与Q RMS两个舍入边界对齐后，Q relative L2为0.000986%/0.004372%。
+- KV projection与KV RMS边界对齐后，raw KV relative L2为0.007072%/0.009388%。
+- 固定heads的O-A BF16+8192量化，其OA/INT8/scale与原生逐元素一致；最终输出仍保留报告中的小残差。
+- 跨组输入与原生输出hash、无关分支逐元素不变、全部权重不变断言通过。
+
+这些是分模块因果对照，不能宣称所有因素合并后的整层精度已通过。本轮没有正式延迟结果，
+插桩实验kernel不能与G6性能相混；Indexer仍有差异，动态padding/生产metadata刷新仍未验证。
