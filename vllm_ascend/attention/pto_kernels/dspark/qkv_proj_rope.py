@@ -414,17 +414,27 @@ def q_proj_qr(
                     # Scalar arithmetic yields an index-typed value; the write
                     # needs it cast to the tensor dtype.
                     pl.write(qr_root_bits, [0, qr_row], pl.cast(cand_bits + 1, pl.INT32))
-                    for qr_step in (0, -1):
-                        step_bits = cand_bits + qr_step
-                        step_sig = (step_bits % 0x800000) + 0x800000
-                        step_exp = (step_bits >> 23) - 127
-                        pl.write(qr_wide, [0, 0], pl.cast(2 * step_sig + 1, pl.INT64))
-                        mid_hi = pl.read(qr_wide, [0, 0])
-                        pl.write(qr_wide, [0, 1], pl.cast(v_sig, pl.INT64))
-                        v_wide = pl.read(qr_wide, [0, 1])
-                        shift = (v_exp - 23) - (2 * step_exp - 48)
-                        if (v_wide << shift) < mid_hi * mid_hi:
-                            pl.write(qr_root_bits, [0, qr_row], pl.cast(step_bits, pl.INT32))
+                    # Candidates are tested in increasing order and the last
+                    # match wins, so the smallest one that satisfies the bound is
+                    # what lands. Written out because the parser only accepts its
+                    # own loop constructs, not a Python-level unroll.
+                    pl.write(qr_wide, [0, 1], pl.cast(v_sig, pl.INT64))
+                    v_wide = pl.read(qr_wide, [0, 1])
+                    same_sig = (cand_bits % 0x800000) + 0x800000
+                    same_exp = (cand_bits >> 23) - 127
+                    pl.write(qr_wide, [0, 0], pl.cast(2 * same_sig + 1, pl.INT64))
+                    same_hi = pl.read(qr_wide, [0, 0])
+                    same_shift = (v_exp - 23) - (2 * same_exp - 48)
+                    if (v_wide << same_shift) < same_hi * same_hi:
+                        pl.write(qr_root_bits, [0, qr_row], pl.cast(cand_bits, pl.INT32))
+                    down_bits = cand_bits - 1
+                    down_sig = (down_bits % 0x800000) + 0x800000
+                    down_exp = (down_bits >> 23) - 127
+                    pl.write(qr_wide, [0, 0], pl.cast(2 * down_sig + 1, pl.INT64))
+                    down_hi = pl.read(qr_wide, [0, 0])
+                    down_shift = (v_exp - 23) - (2 * down_exp - 48)
+                    if (v_wide << down_shift) < down_hi * down_hi:
+                        pl.write(qr_root_bits, [0, qr_row], pl.cast(down_bits, pl.INT32))
                 qr_root_store = pl.reinterpret_view(qr_root_bits, pl.FP32, shape=[1, T_TILE])
                 qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
                 for qr_inv_row in pl.range(T_TILE):
