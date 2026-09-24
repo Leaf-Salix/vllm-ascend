@@ -417,3 +417,11 @@ Before merging, verify:
 - [vLLM Hardware Plugin RFC](https://github.com/vllm-project/vllm/issues/11162)
 - [Documentation](https://docs.vllm.ai/projects/ascend/en/latest/)
 - [Contributors Guide](https://docs.vllm.ai/projects/ascend/en/latest/community/contributors.html)
+
+## DSV4 CSA Test History
+
+For this CSA integration branch, append meaningful accuracy, performance, and regression results to
+`docs/source/developer_guide/DSV4_CSA_TEST_HISTORY.md` (or a linked dated report) with the corresponding change.
+Record exact commit/dirty-source identity, workload, deterministic/graph settings, paired native baseline,
+measurement method, evidence, and limitations. Preserve superseded results with explicit corrections.
+Never claim numerical acceptance from exit status alone or compare performance across incompatible configurations.
