@@ -273,12 +273,13 @@ def sparse_attn_csa(
                 qk_lane_kv = qk_aiv * (ATTN_K_TILE // 2)
                 qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
                 running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
-                running_l = pl.tile.muls(running_m, 0.0)
+                running_l = pl.tile.adds(pl.tile.muls(running_m, 0.0), 1.0)
                 running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
-                for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
+                producer_init = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
+                for qk_tick, (m_iter, l_iter, left_iter, right_iter, producer_iter) in pl.range(
                     SPARSE_BLOCKS + QK_PRE_LAUNCH + 1,
-                    init_values=(running_m, running_l, running_left, running_right),
+                    init_values=(running_m, running_l, running_left, running_right, producer_init),
                 ):
                     if qk_tick < SPARSE_BLOCKS:
                         qk_sb = qk_tick
@@ -349,7 +350,7 @@ def sparse_attn_csa(
                             )
                             qk_scaled = pl.mul(qk_scores_half, SOFTMAX_SCALE)
                             qk_masked = pl.col_expand_add(qk_scaled, qk_bias)
-                            qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
+                            qk_mi = pl.maximum(producer_iter, pl.row_max(qk_masked, qk_reduce_tmp))
                             qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
                             qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
                             qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
@@ -360,6 +361,12 @@ def sparse_attn_csa(
                                 QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
                                 ffts_mode=2, core_type=pl.KernelType.AIV,
                             )
+                            producer_valid = pl.yield_(qk_mi)
+                        else:
+                            producer_valid = pl.yield_(producer_iter)
+                        producer_after = pl.yield_(producer_valid)
+                    else:
+                        producer_after = pl.yield_(producer_iter)
                     # Publish the next KV-ready event after the preceding softmax stores.
                     if qk_tick < SPARSE_BLOCKS:
                         if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
@@ -395,7 +402,7 @@ def sparse_attn_csa(
                         m_after, l_after, left_after, right_after = pl.yield_(m_valid, l_valid, left_valid, right_valid)
                     else:
                         m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-                    running_m, running_l, running_left, running_right = pl.yield_(m_after, l_after, left_after, right_after)
+                    running_m, running_l, running_left, running_right, producer_m = pl.yield_(m_after, l_after, left_after, right_after, producer_after)
                 qk_output_row = qk_t * H + qk_lane_head
                 pl.store(running_m, [qk_output_row, 0], attn_mi)
                 pl.store(running_l, [qk_output_row, 0], attn_li)
@@ -438,7 +445,6 @@ def _sparse_attn_csa_tp1_prepared(
     )
     t_dim = pl.tensor.dim(q, 0)
 
-    merge_sink = pl.reshape(attn_sink, [H, 1])
     with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, plan_dep]) as merge_tid:
         m_worker = pl.tile.get_block_idx()
         m_columns = pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
@@ -459,14 +465,10 @@ def _sparse_attn_csa_tp1_prepared(
             m_h_idx = m_idx - m_t * (H // H_TILE)
             m_h0 = m_h_idx * H_TILE
             m_row = m_idx * H_TILE
-            m_mi = pl.load(attn_mi, [m_row, 0], [H_TILE, 1])
             m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
             m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
 
-            n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
-            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
-            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
-            n_full = pl.row_expand_div(m_oi, n_denom)
+            n_full = pl.row_expand_div(m_oi, m_li)
             n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
 
             # Inverse-RoPE head tile.
@@ -711,35 +713,22 @@ def golden_sparse_attn(tensors):
         valid_b = torch.tensor(valid, dtype=torch.bool)
         q_t = q[t]
 
-        block_mi = []
-        block_li = []
-        block_oi = []
+        score_max = attn_sink.unsqueeze(-1)
+        li = torch.ones_like(score_max)
+        oi_num = torch.zeros_like(q_t, dtype=torch.float32)
         for tile_start in range(0, PADDED_TOPK, ATTN_K_TILE):
             kv_tile = kv_b[tile_start:tile_start + ATTN_K_TILE]
             valid_tile = valid_b[tile_start:tile_start + ATTN_K_TILE]
             scores = (q_t @ kv_tile.T) * SOFTMAX_SCALE
             scores = scores.masked_fill(~valid_tile.unsqueeze(0), NEG_INF)
-            mi = scores.max(dim=-1, keepdim=True).values
-            exp_scores = torch.exp(scores - mi).masked_fill(~valid_tile.unsqueeze(0), 0.0)
-            li = exp_scores.sum(dim=-1, keepdim=True)
-            oi = exp_scores.to(torch.bfloat16).float() @ kv_tile.to(torch.bfloat16).float()
-            block_mi.append(mi)
-            block_li.append(li)
-            block_oi.append(oi)
-
-        score_max = block_mi[0]
-        li = block_li[0]
-        oi_num = block_oi[0]
-        for mi_cur, li_cur, oi_cur in zip(block_mi[1:], block_li[1:], block_oi[1:]):
-            score_max_new = torch.maximum(score_max, mi_cur)
+            score_max_new = torch.maximum(score_max, scores.max(dim=-1, keepdim=True).values)
+            exp_scores = torch.exp(scores - score_max_new).masked_fill(~valid_tile.unsqueeze(0), 0.0)
             alpha = torch.exp(score_max - score_max_new)
-            beta = torch.exp(mi_cur - score_max_new)
-            li = alpha * li + beta * li_cur
-            oi_num = alpha * oi_num + beta * oi_cur
+            li = alpha * li + exp_scores.sum(dim=-1, keepdim=True)
+            oi_num = alpha * oi_num + exp_scores.to(torch.bfloat16).float() @ kv_tile.to(torch.bfloat16).float()
             score_max = score_max_new
 
-        denom = li + torch.exp(attn_sink.unsqueeze(-1) - score_max)
-        o[t] = oi_num / denom
+        o[t] = oi_num / li
 
     o = o.to(torch.bfloat16).float()
     rope_pair = o[..., NOPE_DIM:].unflatten(-1, (-1, 2))
