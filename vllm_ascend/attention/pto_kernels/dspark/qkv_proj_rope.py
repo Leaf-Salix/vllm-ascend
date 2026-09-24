@@ -379,16 +379,53 @@ def q_proj_qr(
                 # FP32. The scalar path is exact. Keep the vector sqrt, which is
                 # a different instruction, and take the reciprocal per row as a
                 # scalar so the coefficient matches the operator bit for bit.
-                qr_rms_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
-                qr_rms_store[0:1, 0:T_TILE] = pl.sqrt(
-                    pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS)
+                qr_var_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_var_store[0:1, 0:T_TILE] = pl.add(
+                    pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS
                 )
-                qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_rms_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_rms_store[0:1, 0:T_TILE] = pl.sqrt(qr_var_store[0:1, 0:T_TILE])
+                # VSQRT is the other half of the gap: it sits up to a ULP off the
+                # correctly-rounded FP32 square root that native's scalar sqrt()
+                # returns. Round the candidate exactly by asking which FP32 the
+                # true root belongs to -- r is the smallest candidate whose upper
+                # rounding midpoint already exceeds v:
+                #   mid_hi(d) = (2*M + 1) * 2^(e - 24),  d = M * 2^(e - 23)
+                #   pick the least d with  v < mid_hi(d)^2
+                # The predicate is monotone in d, so three conditional writes with
+                # the most negative applied last select it without a branch. The
+                # comparison is exact: (2M+1) is 25 bits and its square 50, and Mv
+                # shifted stays under 2^52, so INT64 holds both sides outright --
+                # no float enters the decision. Positive normals only, which EPS
+                # guarantees.
+                qr_var_bits = pl.reinterpret_view(qr_var_store, pl.INT32, shape=[1, T_TILE])
+                qr_cand_bits = pl.reinterpret_view(qr_rms_store, pl.INT32, shape=[1, T_TILE])
+                qr_root_bits = pl.create_tensor([1, T_TILE], dtype=pl.INT32)
+                qr_wide = pl.create_tensor([1, 2], dtype=pl.INT64)
                 for qr_row in pl.range(T_TILE):
+                    v_bits = pl.read(qr_var_bits, [0, qr_row])
+                    v_sig = (v_bits & 0x7FFFFF) | 0x800000
+                    v_exp = ((v_bits >> 23) & 0xFF) - 127
+                    cand_bits = pl.read(qr_cand_bits, [0, qr_row])
+                    pl.write(qr_root_bits, [0, qr_row], cand_bits + 1)
+                    for qr_step in (0, -1):
+                        step_bits = cand_bits + qr_step
+                        step_sig = (step_bits & 0x7FFFFF) | 0x800000
+                        step_exp = ((step_bits >> 23) & 0xFF) - 127
+                        pl.write(qr_wide, [0, 0], 2 * step_sig + 1)
+                        mid_hi = pl.read(qr_wide, [0, 0])
+                        pl.write(qr_wide, [0, 1], v_sig)
+                        v_wide = pl.read(qr_wide, [0, 1])
+                        shift = (v_exp - 23) - (2 * step_exp - 48)
+                        if (v_wide << shift) < mid_hi * mid_hi:
+                            pl.write(qr_root_bits, [0, qr_row], step_bits)
+                qr_root_store = pl.reinterpret_view(qr_root_bits, pl.FP32, shape=[1, T_TILE])
+                qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                for qr_inv_row in pl.range(T_TILE):
                     pl.write(
                         qr_inv_store,
-                        [0, qr_row],
-                        1.0 / pl.read(qr_rms_store, [0, qr_row]),
+                        [0, qr_inv_row],
+                        1.0 / pl.read(qr_root_store, [0, qr_inv_row]),
                     )
                 qr_inv_rms = qr_inv_store[0:1, 0:T_TILE]
                 qr_inv_rms_t = pl.reshape(qr_inv_rms, [T_TILE, 1])
