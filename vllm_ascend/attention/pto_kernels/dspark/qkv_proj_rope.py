@@ -976,8 +976,12 @@ def kv_proj_rope(
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
                         kv_sq_sum_tail = pl.add(kv_sq_sum_tail, kv_row_sum_tail)
                     kv_rms_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
-                    kv_rms_store_tail[0:1, 0:KV_RMS_T_TILE] = pl.sqrt(
-                        pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)
+                    # The tail keeps its reduction in an explicit tile, so publish
+                    # it with pl.store rather than a subscript write.
+                    pl.store(
+                        pl.sqrt(pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)),
+                        [0, 0],
+                        kv_rms_store_tail,
                     )
                     kv_inv_store_tail = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
                     for kv_row_tail in pl.range(KV_RMS_T_TILE):
