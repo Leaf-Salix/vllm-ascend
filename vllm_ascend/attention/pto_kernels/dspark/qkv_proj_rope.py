@@ -349,6 +349,7 @@ def q_proj_qr(
                 qr_amax_g = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
                 for qr_rms_col0 in pl.pipeline(0, Q_LORA, Q_LORA_TILE, stage=2):
                     qr_rms_chunk = qr_fp32[tg : tg + T_TILE, qr_rms_col0 : qr_rms_col0 + Q_LORA_TILE]
+                    qr_rms_chunk = pl.cast(pl.cast(qr_rms_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                     qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
@@ -382,6 +383,7 @@ def q_proj_qr(
 
                 for qa in pl.pipeline(0, Q_LORA, QUANT_TILE, stage=2):
                     qr_chunk = qr_fp32[tg : tg + T_TILE, qa : qa + QUANT_TILE]
+                    qr_chunk = pl.cast(pl.cast(qr_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                     gamma_q_cast = pl.cast(gamma_cq[qa : qa + QUANT_TILE], target_type=pl.FP32)
                     gamma_q_chunk = pl.reshape(gamma_q_cast, [1, QUANT_TILE])
                     qr_q_normed = pl.col_expand_mul(pl.row_expand_mul(qr_chunk, qr_inv_rms_t), gamma_q_chunk)
@@ -497,6 +499,7 @@ def q_proj_q_dequant(
                     q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
                     q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
                     q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)
+                    q_head_dq = pl.cast(pl.cast(q_head_dq, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                     q_head_sq = pl.mul(q_head_dq, q_head_dq)
                     q_head_sq_row = pl.row_sum(q_head_sq)
                     q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
@@ -511,6 +514,7 @@ def q_proj_q_dequant(
 
                     q_rope_chunk_raw = q_head_dq[:, NOPE_DIM:HEAD_DIM]
                     q_rope_chunk = pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t)
+                    q_rope_chunk = pl.cast(pl.cast(q_rope_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                     q_rope_swapped = pl.gather(q_rope_chunk, dim=-1, index=q_swap_idx)
                     q_rope_base = pl.mul(q_rope_chunk, q_cos_il)
                     q_rope_delta = pl.mul(q_rope_swapped, q_sin_signed)
@@ -589,6 +593,9 @@ def q_proj_q_dequant(
                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
                     q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
                     q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)
+                    q_head_dq_tail = pl.cast(
+                        pl.cast(q_head_dq_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                    )
 
                     q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
                     q_head_sq_sum_tail = pl.row_sum(q_head_sq_tail, q_head_reduce_tmp)
@@ -603,6 +610,9 @@ def q_proj_q_dequant(
 
                     q_rope_chunk_raw_tail = q_head_dq_tail[:, NOPE_DIM:HEAD_DIM]
                     q_rope_chunk_tail = pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail)
+                    q_rope_chunk_tail = pl.cast(
+                        pl.cast(q_rope_chunk_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                    )
                     q_rope_swapped_tail = pl.tile.gather(q_rope_chunk_tail, q_swap_idx_tail, q_gather_tmp)
                     q_rope_base_tail = pl.mul(q_rope_chunk_tail, q_cos_il_tail)
                     q_rope_delta_tail = pl.mul(q_rope_swapped_tail, q_sin_signed_tail)
@@ -770,6 +780,7 @@ def kv_proj_rope(
                     kv_sq_sum = pl.full([1, KV_RMS_T_TILE], dtype=pl.FP32, value=0.0)
                     for kv_sq_col0 in pl.pipeline(0, HEAD_DIM, KV_TILE, stage=2):
                         kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, kv_sq_col0 : kv_sq_col0 + KV_TILE]
+                        kv_chunk = pl.cast(pl.cast(kv_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                         kv_sq = pl.mul(kv_chunk, kv_chunk)
                         kv_row_sum = pl.reshape(pl.row_sum(kv_sq), [1, KV_RMS_T_TILE])
                         kv_sq_sum = pl.add(kv_sq_sum, kv_row_sum)
@@ -778,6 +789,7 @@ def kv_proj_rope(
 
                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
                         kv_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, n0 : n0 + KV_TILE]
+                        kv_chunk = pl.cast(pl.cast(kv_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32)
                         gamma_kv_cast = pl.cast(gamma_ckv[n0 : n0 + KV_TILE], target_type=pl.FP32)
                         gamma_kv_chunk = pl.reshape(gamma_kv_cast, [1, KV_TILE])
                         kv_normed = pl.col_expand_mul(pl.row_expand_mul(kv_chunk, kv_inv_rms_t), gamma_kv_chunk)
@@ -787,7 +799,13 @@ def kv_proj_rope(
                     gamma_rope_cast = pl.cast(gamma_ckv[NOPE_DIM : NOPE_DIM + ROPE_DIM], target_type=pl.FP32)
                     gamma_rope = pl.reshape(gamma_rope_cast, [1, ROPE_DIM])
                     kv_rope_chunk = kv_fp32[tg : tg + KV_RMS_T_TILE, NOPE_DIM : NOPE_DIM + ROPE_DIM]
+                    kv_rope_chunk = pl.cast(
+                        pl.cast(kv_rope_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                    )
                     kv_rope_norm_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope)
+                    kv_rope_norm_chunk = pl.cast(
+                        pl.cast(kv_rope_norm_chunk, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                    )
                     kv_cos_il_full = rope_cos_il[out_tg : out_tg + KV_RMS_T_TILE, :]
                     kv_sin_signed_full = rope_sin_signed[out_tg : out_tg + KV_RMS_T_TILE, :]
                     kv_swap_idx_full = rope_swap_idx[out_tg : out_tg + KV_RMS_T_TILE, :]
@@ -811,6 +829,9 @@ def kv_proj_rope(
                             valid_shape=[valid_rows, KV_TILE],
                             target_memory=pl.MemorySpace.Vec,
                         )
+                        kv_chunk_tail = pl.cast(
+                            pl.cast(kv_chunk_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                        )
                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
                         kv_sq_sum_tail = pl.add(kv_sq_sum_tail, kv_row_sum_tail)
@@ -824,6 +845,9 @@ def kv_proj_rope(
                             [KV_RMS_T_TILE, KV_TILE],
                             valid_shape=[valid_rows, KV_TILE],
                             target_memory=pl.MemorySpace.Vec,
+                        )
+                        kv_chunk_tail = pl.cast(
+                            pl.cast(kv_chunk_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
                         )
                         gamma_kv_input_tail = pl.load(
                             gamma_ckv,
@@ -856,9 +880,15 @@ def kv_proj_rope(
                         valid_shape=[valid_rows, ROPE_DIM],
                         target_memory=pl.MemorySpace.Vec,
                     )
+                    kv_rope_chunk_tail = pl.cast(
+                        pl.cast(kv_rope_chunk_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
+                    )
                     kv_rope_norm_tail = pl.col_expand_mul(
                         pl.row_expand_mul(kv_rope_chunk_tail, kv_inv_rms_t_tail),
                         gamma_rope_tail,
+                    )
+                    kv_rope_norm_tail = pl.cast(
+                        pl.cast(kv_rope_norm_tail, target_type=pl.BF16, mode="rint"), target_type=pl.FP32
                     )
                     kv_cos_il_tail = pl.load(
                         rope_cos_il,
