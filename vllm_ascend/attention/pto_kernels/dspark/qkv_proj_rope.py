@@ -515,7 +515,17 @@ def q_proj_q_dequant(
                     q_head_scale = pl.reshape(wq_b_scale[h0 : h0 + HEAD_DIM], [1, HEAD_DIM])
                     q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
                     q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
-                    q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)
+                    # Native's wq_b npu_quant_matmul carries
+                    # output_dtype=hidden_states.dtype, so apply_dsa_q_rms and
+                    # the RoPE downstream both read a BF16 q projection.
+                    q_head_dq = pl.cast(
+                        pl.cast(
+                            pl.col_expand_mul(q_head_row_scaled, q_head_scale),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     q_head_sq = pl.mul(q_head_dq, q_head_dq)
                     q_head_sq_row = pl.row_sum(q_head_sq)
                     q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
@@ -529,7 +539,16 @@ def q_proj_q_dequant(
                     q_flat[out_tg : out_tg + Q_ROPE_T_TILE, h0 : h0 + NOPE_DIM] = q_nope_bf16
 
                     q_rope_chunk_raw = q_head_dq[:, NOPE_DIM:HEAD_DIM]
-                    q_rope_chunk = pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t)
+                    # Native's apply_dsa_q_rms writes BF16, so the RoPE reads
+                    # the rounded normalized q, not the FP32 one.
+                    q_rope_chunk = pl.cast(
+                        pl.cast(
+                            pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     q_rope_swapped = pl.gather(q_rope_chunk, dim=-1, index=q_swap_idx)
                     q_rope_base = pl.mul(q_rope_chunk, q_cos_il)
                     q_rope_delta = pl.mul(q_rope_swapped, q_sin_signed)
@@ -607,7 +626,14 @@ def q_proj_q_dequant(
                     q_head_scale_tail = pl.reshape(q_head_scale_input_tail, [1, HEAD_DIM])
                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
                     q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
-                    q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)
+                    q_head_dq_tail = pl.cast(
+                        pl.cast(
+                            pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
 
                     q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
                     q_head_sq_sum_tail = pl.row_sum(q_head_sq_tail, q_head_reduce_tmp)
@@ -621,7 +647,14 @@ def q_proj_q_dequant(
                     pl.store(q_nope_valid, [out_tg, h0_tail], q_flat)
 
                     q_rope_chunk_raw_tail = q_head_dq_tail[:, NOPE_DIM:HEAD_DIM]
-                    q_rope_chunk_tail = pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail)
+                    q_rope_chunk_tail = pl.cast(
+                        pl.cast(
+                            pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     q_rope_swapped_tail = pl.tile.gather(q_rope_chunk_tail, q_swap_idx_tail, q_gather_tmp)
                     q_rope_base_tail = pl.mul(q_rope_chunk_tail, q_cos_il_tail)
                     q_rope_delta_tail = pl.mul(q_rope_swapped_tail, q_sin_signed_tail)
@@ -829,7 +862,16 @@ def kv_proj_rope(
                         ),
                         target_type=pl.FP32,
                     )
-                    kv_rope_norm_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope)
+                    # Native applies the rotary in place on the BF16 kv_norm
+                    # output, so round before rotating.
+                    kv_rope_norm_chunk = pl.cast(
+                        pl.cast(
+                            pl.col_expand_mul(pl.row_expand_mul(kv_rope_chunk, kv_inv_rms_t), gamma_rope),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
+                    )
                     kv_cos_il_full = rope_cos_il[out_tg : out_tg + KV_RMS_T_TILE, :]
                     kv_sin_signed_full = rope_sin_signed[out_tg : out_tg + KV_RMS_T_TILE, :]
                     kv_swap_idx_full = rope_swap_idx[out_tg : out_tg + KV_RMS_T_TILE, :]
@@ -919,9 +961,16 @@ def kv_proj_rope(
                         ),
                         target_type=pl.FP32,
                     )
-                    kv_rope_norm_tail = pl.col_expand_mul(
+                    kv_rope_norm_tail = pl.cast(
+                        pl.cast(
+                            pl.col_expand_mul(
                         pl.row_expand_mul(kv_rope_chunk_tail, kv_inv_rms_t_tail),
                         gamma_rope_tail,
+                    ),
+                            target_type=pl.BF16,
+                            mode="rint",
+                        ),
+                        target_type=pl.FP32,
                     )
                     kv_cos_il_tail = pl.load(
                         rope_cos_il,
@@ -1243,15 +1292,24 @@ def golden_qkv_proj_rope(tensors):
     # flash: also quantizes wq_a/wkv to fp8 (default Linear dtype).
     qr_i8, qr_scale = int8_quant_per_row(qr_out.float())
     q_i32 = torch.matmul(qr_i8.to(torch.int32), wq_b.to(torch.int32))
-    q_full = (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).view(t_dim, H, HEAD_DIM)
+    # Native's wq_b matmul emits BF16, so the q RMS norm reads a rounded
+    # projection rather than the FP32 dequant.
+    q_full = (
+        (q_i32.float() * qr_scale * wq_b_scale.view(1, -1))
+        .to(torch.bfloat16)
+        .float()
+        .view(t_dim, H, HEAD_DIM)
+    )
     inv = torch.rsqrt(q_full.square().mean(-1, keepdim=True) + EPS)
-    q_full = q_full * inv  # per-head RMSNorm (no gamma)
+    # apply_dsa_q_rms writes BF16, so the RoPE reads a rounded normalized q.
+    q_full = (q_full * inv).to(torch.bfloat16).float()  # per-head RMSNorm (no gamma)
     q_nope = q_full[..., :NOPE_DIM]
     q_rope = apply_rope(q_full[..., NOPE_DIM:], rope_cos, rope_sin)
     q_out = torch.cat([q_nope, q_rope], dim=-1)
 
     # KV path
-    kv_full = rms_norm(project_bf16(token_x, wkv), gamma_ckv)  # [T, HEAD_DIM]
+    # Native rotates in place on the BF16 kv_norm output.
+    kv_full = rms_norm(project_bf16(token_x, wkv), gamma_ckv).to(torch.bfloat16).float()
     kv_nope = kv_full[..., :NOPE_DIM]
     kv_rope_in = kv_full[..., NOPE_DIM:].unsqueeze(1)  # add a pseudo head dim
     kv_rope = apply_rope(kv_rope_in, rope_cos, rope_sin).squeeze(1)
