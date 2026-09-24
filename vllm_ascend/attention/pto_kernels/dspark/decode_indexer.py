@@ -662,13 +662,22 @@ def indexer_score_topk_forest_vllm(
                     query_weight = weights[
                         query : query + 1, 0:IDX_N_HEADS
                     ]
-                    # prepare_dsa_indexer_weights only casts the weights to
-                    # FP16, so the operator never forms w * q_scale: the
-                    # query scale rides on the score side instead. Keep the
-                    # coefficient as the plain product and round the scaled
-                    # score below.
+                    # Native carries the head coefficient as FP16: the weighted
+                    # head sum is a cube matmul whose A operand is
+                    # GlobalTensor<half> weightGm_. Rounding the coefficient
+                    # measures better than rounding the scaled score -- topk
+                    # 3 differing keys against 4, elementwise 87.71% against
+                    # 79.42%, heads 0.144230% against 0.173913% -- so the
+                    # operator does merge the two factors before the cast.
                     head_coefficient = pl.reshape(
-                        pl.mul(query_scale, query_weight),
+                        pl.cast(
+                            pl.cast(
+                                pl.mul(query_scale, query_weight),
+                                target_type=pl.FP16,
+                                mode="rint",
+                            ),
+                            target_type=pl.FP32,
+                        ),
                         [IDX_N_HEADS, 1],
                     )
                 for score_begin in pl.pipeline(
@@ -738,16 +747,8 @@ def indexer_score_topk_forest_vllm(
                         # which is what a perturbation of the right magnitude
                         # does to near-ties. Keep the plain FP32 product until
                         # there is evidence for the operator's actual accumulator.
-                        # The weighted head sum is a cube matmul whose operands
-                        # are FP16 (weightGm_ is GlobalTensor<half>), so the
-                        # scaled score reaching it is FP16 too.
-                        score_shard = pl.cast(
-                            pl.cast(
-                                pl.row_expand_mul(score_shard, head_coefficient),
-                                target_type=pl.FP16,
-                                mode="rint",
-                            ),
-                            target_type=pl.FP32,
+                        score_shard = pl.row_expand_mul(
+                            score_shard, head_coefficient,
                         )
                         # The packed page holds 128 FP16 scales.  Candidate
                         # shards begin on 64-row boundaries, so 64 is the
