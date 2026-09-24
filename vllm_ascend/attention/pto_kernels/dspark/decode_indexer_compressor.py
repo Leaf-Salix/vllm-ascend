@@ -478,7 +478,7 @@ def indexer_compressor_pool_projected_vllm(
         for request in pl.range(worker, b_dim, pool_workers):
             request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
             request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
-            first_position = 0
+            first_position = pl.cast(0, pl.INT32)
             if request_begin < request_end:
                 first_position = pl.read(position_ids, [request_begin])
             for token in pl.range(request_begin, request_end):
@@ -574,7 +574,7 @@ def indexer_compressor_pool_projected_vllm(
                                     + logical_position
                                     - first_position
                                 )
-                                overlay_valid = 0
+                                overlay_valid = pl.cast(0, pl.INT32)
                                 if overlay_token < request_end:
                                     overlay_valid = pl.read(token_valid, [overlay_token])
                                 if overlay_valid != 0:
