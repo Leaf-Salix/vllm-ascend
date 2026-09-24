@@ -40,6 +40,9 @@ IDX_HEAD_DIM = M.index_head_dim
 IDX_NOPE_HEAD_DIM = M.index_nope_head_dim
 WEIGHTS_SCALE = M.index_weights_scale
 MAX_SEQ_LEN = M.max_position_embeddings
+# Native hadamard_scale applies dim**-0.5 after the matmul; the kernel consumes
+# the native (unscaled) matrix and keeps that ordering.
+HADAMARD_SCALE = IDX_HEAD_DIM ** -0.5
 
 # kernel constants
 COMPRESS_RATIO = 4   # the indexer only runs on ratio-4 layers
@@ -1006,7 +1009,10 @@ def indexer_qr_hadamard_mm(
         for idx in pl.range(qh_worker, bs_heads // QH_MM_TILE, QH_WORKERS):
             o0 = idx * QH_MM_TILE
             qh_acc = pl.matmul(qr_bf16[o0 : o0 + QH_MM_TILE, :], qh_hadamard, out_dtype=pl.FP32)
-            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = qh_acc
+            # The matrix is now the native (unscaled) one, so apply dim**-0.5
+            # here. Native additionally rounds to BF16 before and after this
+            # scale; that boundary is still open and measured separately.
+            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = pl.mul(qh_acc, HADAMARD_SCALE)
 
     with pl.spmd(
         QH_QUANT_WORKERS,
@@ -1489,7 +1495,8 @@ def golden_indexer(tensors, inner_full=None):
     q_rope = q_rope * cos[:, None, :] + q_rope_swapped * sin[:, None, :]
     q = torch.cat([q[..., :-rd], q_rope], dim=-1)
 
-    q = q.to(torch.bfloat16).float() @ hadamard
+    # Native applies dim**-0.5 after the matmul, not folded into the matrix.
+    q = (q.to(torch.bfloat16).float() @ hadamard) * HADAMARD_SCALE
     # W8A8C16: q and Indexer Cache are quantized per row to INT8 for score matmul,
     # then dequantized with q_scale * kv_scale.
     # flash: fp4_act_quant on q (FP4 simulation).
@@ -1708,7 +1715,8 @@ def build_tensor_specs(start_pos=None, batch=B):
     def init_cmp_sin():
         return cmp_rope_sin.clone()
     def init_hadamard():
-        return torch.rand(IDX_HEAD_DIM, IDX_HEAD_DIM) * (IDX_HEAD_DIM ** -0.5)
+        # Unscaled, like the native matrix the kernel now consumes.
+        return torch.rand(IDX_HEAD_DIM, IDX_HEAD_DIM)
     def init_inner_compress_state():
         return torch.randn(
             state_block_num,

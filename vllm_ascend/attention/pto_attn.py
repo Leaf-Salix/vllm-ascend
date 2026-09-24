@@ -171,9 +171,11 @@ def prepare_weights(impl, hadamard):
         "idx_wq_b": idx_wq_b,
         "idx_wq_b_scale": idx_wq_b_scale,
         "weights_proj": _dense(indexer.weights_proj, (D, IH)),
-        # The current kernel folds rotate_activation's scale into its RHS.
-        # Retain that computation, but consume the native matrix itself.
-        "hadamard_idx": (_native_tensor("hadamard", hadamard, torch.bfloat16, (ID, ID)).T / (ID**0.5)).contiguous(),
+        # Native rotate_activation keeps the matrix unscaled and applies
+        # dim**-0.5 after the matmul. Folding the scale in here would round it
+        # into BF16 ahead of the product, so pass the native matrix untouched
+        # and let the kernel scale at the native position.
+        "hadamard_idx": _native_tensor("hadamard", hadamard, torch.bfloat16, (ID, ID)).T.contiguous(),
         "inner_wkv": _dense(indexer.compressor.wkv, (kcsa.INNER_OUT_DIM, D)),
         "inner_wgate": _dense(indexer.compressor.wgate, (kcsa.INNER_OUT_DIM, D)),
         "inner_ape": _native_tensor("inner_ape", indexer.compressor.ape.detach(), torch.float32),
