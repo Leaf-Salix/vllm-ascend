@@ -32,6 +32,7 @@ from .config import (
 B_DYN = pl.dynamic("DECODE_IDX_C4_B_DYN")
 S_DYN = pl.dynamic("DECODE_IDX_C4_S_DYN")
 T_DYN = pl.dynamic("DECODE_IDX_C4_T_DYN")  # T = B * S
+QUERY_BOUNDS_DYN = pl.dynamic("VLLM_QUERY_BOUNDS_DYN")
 
 # model config
 B = DECODE_BATCH // TP
@@ -451,6 +452,8 @@ def indexer_compressor_pool_projected_vllm(
     sin: pl.Tensor[[NATIVE_COMPACT_ROWS, ROPE_HEAD_DIM], pl.FP32],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
@@ -460,7 +463,6 @@ def indexer_compressor_pool_projected_vllm(
     """Pool and commit inner state through vLLM's shared byte pages."""
     b_dim = pl.tensor.dim(compress_state_block_table, 0)
     tokens = pl.tensor.dim(position_ids, 0)
-    s_dim = tokens // b_dim
     page_count = pl.tensor.dim(shared_pages, 0)
     shared_pages_flat = pl.reshape(
         shared_pages, [page_count * VLLM_INDEX_PAGE_ROWS, HEAD_DIM],
@@ -474,10 +476,12 @@ def indexer_compressor_pool_projected_vllm(
     ) as pool_tid:
         worker = pl.tile.get_block_idx()
         for request in pl.range(worker, b_dim, pool_workers):
-            request_begin = request * s_dim
-            first_position = pl.read(position_ids, [request_begin])
-            for step in pl.range(s_dim):
-                token = request_begin + step
+            request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+            first_position = 0
+            if request_begin < request_end:
+                first_position = pl.read(position_ids, [request_begin])
+            for token in pl.range(request_begin, request_end):
                 pooled_kv[token : token + 1, :] = pl.full(
                     [1, HEAD_DIM], dtype=pl.FP32, value=0.0,
                 )
@@ -570,7 +574,9 @@ def indexer_compressor_pool_projected_vllm(
                                     + logical_position
                                     - first_position
                                 )
-                                overlay_valid = pl.read(token_valid, [overlay_token])
+                                overlay_valid = 0
+                                if overlay_token < request_end:
+                                    overlay_valid = pl.read(token_valid, [overlay_token])
                                 if overlay_valid != 0:
                                     ape_row = pl.cast(
                                         logical_position % COMPRESS_RATIO,
@@ -633,8 +639,9 @@ def indexer_compressor_pool_projected_vllm(
     ) as state_commit_tid:
         worker = pl.tile.get_block_idx()
         for request in pl.range(worker, b_dim, commit_workers):
-            for step in pl.range(s_dim):
-                token = request * s_dim + step
+            request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+            for token in pl.range(request_begin, request_end):
                 valid = pl.read(token_valid, [token])
                 if valid != 0:
                     position = pl.read(position_ids, [token])
@@ -707,7 +714,8 @@ def indexer_compressor_pool_projected_vllm(
         pooled_block = pl.load(pooled_kv, [row_begin, 0], [RMS_PAD_TILE, HEAD_DIM],
                                valid_shape=[rows, HEAD_DIM])
         cos_block, sin_block = load_compact_rope(
-            cos, sin, position_ids, token_valid, compact_offsets, row_begin, rows,
+            cos, sin, position_ids, token_valid, token_request,
+            compact_offsets, row_begin, rows,
         )
         reduce_tmp = pl.create_tile([RMS_PAD_TILE, HEAD_TILE], dtype=pl.FP32,
                                     target_memory=pl.MemorySpace.Vec)
@@ -765,6 +773,7 @@ def indexer_compressor_write_vllm(
     ],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
@@ -773,9 +782,7 @@ def indexer_compressor_write_vllm(
     state_commit_tid: pl.Scalar[pl.TASK_ID],
 ):
     """Write key and FP16 scale into one packed vLLM index page."""
-    b_dim = pl.tensor.dim(index_block_table, 0)
     tokens = pl.tensor.dim(position_ids, 0)
-    s_dim = tokens // b_dim
     page_count = pl.tensor.dim(shared_pages, 0)
     shared_pages_flat = pl.reshape(
         shared_pages, [page_count * VLLM_INDEX_PAGE_ROWS, HEAD_DIM],
@@ -867,7 +874,7 @@ def indexer_compressor_write_vllm(
             )
             for inner in pl.range(token_rows):
                 token = token_begin + inner
-                request = token // s_dim
+                request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
                 valid = pl.read(token_valid, [token])
                 position = pl.read(position_ids, [token])
                 if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
@@ -889,7 +896,7 @@ def indexer_compressor_write_vllm(
         deps=[key_write_tid],
     ) as scale_write_tid:
         for token in pl.range(tokens):
-            request = token // s_dim
+            request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
             valid = pl.read(token_valid, [token])
             position = pl.read(position_ids, [token])
             if valid != 0 and (position + 1) % COMPRESS_RATIO == 0:
@@ -941,6 +948,8 @@ def indexer_compressor_vllm(
     ],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     idx_slot_mapping: pl.Tensor[[NATIVE_COMPACT_ROWS, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
@@ -971,6 +980,8 @@ def indexer_compressor_vllm(
         sin,
         position_ids,
         token_valid,
+        token_request,
+        query_start_loc,
         state_slot_mapping,
         idx_slot_mapping,
         compact_offsets,
@@ -984,6 +995,7 @@ def indexer_compressor_vllm(
         index_block_table,
         position_ids,
         token_valid,
+        token_request,
         state_slot_mapping,
         idx_slot_mapping,
         compact_offsets,

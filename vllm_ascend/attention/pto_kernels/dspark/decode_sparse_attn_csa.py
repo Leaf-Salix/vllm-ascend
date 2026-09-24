@@ -116,6 +116,7 @@ def sparse_attn_csa(
     cmp_block_table: pl.Tensor,
     idx_topk: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
     position_ids: pl.Tensor[[T_DYN, 1], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     plan_dep: pl.Scalar[pl.TASK_ID],
     page_rows: pl.constexpr,
@@ -125,7 +126,6 @@ def sparse_attn_csa(
     ori_block_num = pl.tensor.dim(ori_kv, 0)
     t_dim = pl.tensor.dim(q, 0)
     t_heads = t_dim * H
-    s_dim = t_dim // pl.tensor.dim(cmp_block_table, 0)
     plan_rows = ((t_dim + BIAS_T_TILE - 1) // BIAS_T_TILE) * BIAS_T_TILE
     positions_row = pl.reshape(position_ids, [1, t_dim])
     ori_kv_flat = pl.reshape(
@@ -223,7 +223,7 @@ def sparse_attn_csa(
         qk_core = pl.tile.get_block_idx()
         pl.system.set_ffts(ffts_workspace)
         for qk_t in pl.range(qk_core, t_dim, NUM_QK_CORES):
-            qk_b = qk_t // s_dim
+            qk_b = pl.cast(pl.read(token_request, [qk_t]), pl.INDEX)
             qk_q = pl.load(
                 q_flat, [qk_t * H, 0], [H, HEAD_DIM], target_memory=pl.MemorySpace.Mat,
             )
@@ -414,6 +414,7 @@ def _sparse_attn_csa_tp1_prepared(
     cmp_block_table: pl.Tensor[[B_DYN, CMP_MAX_BLOCKS], pl.INT32],
     idx_topk: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
     position_ids: pl.Tensor[[T_DYN, 1], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -432,7 +433,7 @@ def _sparse_attn_csa_tp1_prepared(
     attn_mi, attn_li, attn_oi, qk_tid = sparse_attn_csa(
         q, ori_kv, window_swa_indices,
         cmp_kv, cmp_block_table, idx_topk,
-        position_ids, attn_sink,
+        position_ids, token_request, attn_sink,
         plan_dep, page_rows,
     )
     t_dim = pl.tensor.dim(q, 0)
@@ -506,6 +507,8 @@ def sparse_attn_csa_tp1(
 ):
     """Standalone BF16 half-frequency entry; native CSA already prepares RoPE."""
     t_dim = pl.tensor.dim(q, 0)
+    s_dim = t_dim // pl.tensor.dim(cmp_block_table, 0)
+    token_request = pl.create_tensor([t_dim], dtype=pl.INT32)
     cos_il = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
     sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
     with pl.at(level=pl.Level.CORE_GROUP, name_hint="rope_cs") as rope_tid:
@@ -514,6 +517,7 @@ def sparse_attn_csa_tp1(
         lane = pl.sub(columns, pl.mul(pl.cast(half, target_type=pl.FP32), 2.0))
         sign = pl.sub(pl.mul(lane, 2.0), 1.0)
         for token in pl.range(t_dim):
+            pl.write(token_request, [token], pl.cast(token // s_dim, pl.INT32))
             cos = pl.cast(freqs_cos[token : token + 1, :], target_type=pl.FP32)
             sin = pl.cast(freqs_sin[token : token + 1, :], target_type=pl.FP32)
             cos_il[token : token + 1, :] = pl.gather(cos, dim=-1, index=half)
@@ -521,7 +525,8 @@ def sparse_attn_csa_tp1(
     ready = pl.system.task_dummy(deps=[plan_dep, rope_tid])
     return _sparse_attn_csa_tp1_prepared(
         q, ori_kv, window_swa_indices, cmp_kv, cmp_block_table, idx_topk,
-        position_ids, attn_sink, cos_il, sin_signed, o_packed_heads, ready, page_rows,
+        position_ids, token_request, attn_sink, cos_il, sin_signed,
+        o_packed_heads, ready, page_rows,
     )
 
 
@@ -543,6 +548,7 @@ def sparse_attn_csa_tp1_vllm(
     idx_topk: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
     position_ids: pl.Tensor[[T_DYN, 1], pl.INT32],
     token_valid: pl.Tensor[[T_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -554,7 +560,6 @@ def sparse_attn_csa_tp1_vllm(
 ]:
     """Run CSA on raw and compressed blocks from separate vLLM page pools."""
     t_dim = pl.tensor.dim(q, 0)
-    s_dim = t_dim // pl.tensor.dim(ori_block_table, 0)
     window_indices = pl.create_tensor([t_dim, WIN], dtype=pl.INT32)
     with pl.spmd(
         CSA_PLAN_WORKERS,
@@ -564,7 +569,7 @@ def sparse_attn_csa_tp1_vllm(
     ) as window_plan_tid:
         worker = pl.tile.get_block_idx()
         for token in pl.range(worker, t_dim, CSA_PLAN_WORKERS):
-            request = token // s_dim
+            request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
             position = pl.cast(pl.read(position_ids, [token, 0]), pl.INDEX)
             valid = pl.read(token_valid, [token])
             window_len = pl.min(position + 1, WIN)
@@ -597,6 +602,7 @@ def sparse_attn_csa_tp1_vllm(
         cmp_block_table,
         idx_topk,
         position_ids,
+        token_request,
         attn_sink,
         freqs_cos,
         freqs_sin,

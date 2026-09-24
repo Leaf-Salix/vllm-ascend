@@ -4,7 +4,7 @@
 
 import pypto.language as pl
 
-from .config import DECODE_SEQ, FLASH
+from .config import FLASH
 
 COMPACT_ROWS = pl.dynamic("NATIVE_ROPE_COMPACT_ROWS")
 TOKENS = pl.dynamic("NATIVE_ROPE_TOKENS")
@@ -19,6 +19,7 @@ def load_compact_rope(
     sin: pl.Tensor[[COMPACT_ROWS, ROPE_DIM], pl.FP32],
     positions: pl.Tensor[[TOKENS], pl.INT32],
     valid: pl.Tensor[[TOKENS], pl.INT32],
+    token_request: pl.Tensor[[TOKENS], pl.INT32],
     offsets: pl.Tensor[[REQUESTS], pl.INT32],
     begin: pl.Scalar[pl.INDEX],
     rows: pl.Scalar[pl.INDEX],
@@ -35,7 +36,8 @@ def load_compact_rope(
         token = begin + row
         position = pl.read(positions, [token])
         if pl.read(valid, [token]) != 0 and (position + 1) % 4 == 0:
-            compact = pl.cast(pl.read(offsets, [token // DECODE_SEQ]), pl.INDEX) + (position + 1) // 4
+            request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+            compact = pl.cast(pl.read(offsets, [request]), pl.INDEX) + (position + 1) // 4
             cosine = pl.gather_row(cosine, cos, [row, 0], [compact, 0], [1, ROPE_DIM])
             sine = pl.gather_row(sine, sin, [row, 0], [compact, 0], [1, ROPE_DIM])
     return cosine, sine

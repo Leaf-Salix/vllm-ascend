@@ -57,6 +57,7 @@ def case(monkeypatch):
     k = NS(
         S=6,
         B=64,
+        T=384,
         D=4,
         ROPE_HEAD_DIM=64,
         MAIN_STATE_DIM=2048,
@@ -108,6 +109,7 @@ def test_direct_native_metadata_and_compact_producer(case):
         ("idx_slot_mapping", inner[2]),
         ("cmp_start_pos", md.compressor.cache.req_metadata.start_pos),
         ("idx_start_pos", md.indexer.compressor.cache.req_metadata.start_pos),
+        ("query_start_loc", md.swa.req_metadata.query_start_loc),
         ("freqs_cos", md.attention.req_metadata.cos["layer"]),
         ("cmp_freqs_cos", compact[0]),
         ("inner_freqs_cos", inner[0]),
@@ -116,6 +118,25 @@ def test_direct_native_metadata_and_compact_producer(case):
     assert "token_valid" not in bound
     assert bound["cmp_norm_w"].numel() == 0  # Fixture replaces only weight preparation.
     assert bound["compress_state_pages"].data_ptr() == caches[2].data_ptr()
+
+
+def test_binding_accepts_native_nonuniform_tnd_bounds(case):
+    impl, md, caches, hidden, *_ = case
+    bounds = torch.tensor([0, 2, 8], dtype=torch.int32)
+    for req in a._requests(md):
+        req.input_positions = torch.arange(8, dtype=torch.int64)
+        req.seq_lens = torch.tensor([2, 6], dtype=torch.int32)
+        req.query_start_loc = bounds
+        req.slot_mapping = torch.zeros((8, 2), dtype=torch.int32)
+        req.cos["layer"] = torch.ones((8, 64), dtype=torch.float32)
+        req.sin["layer"] = torch.zeros((8, 64), dtype=torch.float32)
+    md.attention.num_decode_tokens = 8
+    args, plan = a.build_args(impl, hidden, caches, md, 6, "layer", output=hidden)
+    bound = dict(zip(a.ARG_ORDER, args))
+    assert plan[1] == 2
+    assert bound["position_ids"].shape == (8,)
+    assert bound["query_start_loc"].data_ptr() == bounds.data_ptr()
+    assert torch.equal(bound["query_start_loc"], bounds)
 
 
 def test_page_descriptors_reused_and_invalidated(case):
@@ -169,6 +190,26 @@ def test_declines_prepared_cache(case):
     assert not a.substitute(impl, "layer", hidden, caches, md, hidden, cache_is_prepared=True)
 
 
+def test_substitute_accepts_adaptive_tnd_graph_padding(case, monkeypatch):
+    impl, md, caches, hidden, *_ = case
+    impl.vllm_config.speculative_config.enable_adaptive_verification = True
+    md.attention.num_decode_tokens = 6  # Native actual rows exclude six graph-padding rows.
+    md.swa.req_metadata.slot_mapping[6:] = -1
+    calls = []
+    monkeypatch.setattr(a, "_registered", lambda: lambda *args: calls.append(args))
+    assert a.substitute(impl, "layer", hidden, caches, md, hidden)
+    assert len(calls) == 1
+
+
+def test_substitute_declines_token_rows_above_static_capacity(case, monkeypatch):
+    impl, md, caches, hidden, *_ = case
+    kernel, config = a.kernel()
+    kernel.T = 11
+    monkeypatch.setattr(a, "kernel", lambda: (kernel, config))
+    monkeypatch.setattr(a, "_registered", lambda: pytest.fail("over-capacity input reached the kernel"))
+    assert not a.substitute(impl, "layer", hidden, caches, md, hidden)
+
+
 @pytest.mark.parametrize("field,value", [("ori_win_left", 128), ("ori_win_right", 1), ("dspark_swa_indices", object())])
 def test_declines_changed_window(case, field, value):
     impl, md, caches, hidden, *_ = case
@@ -204,15 +245,18 @@ def test_kernel_compact_rows_and_padding(starts):
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_decode_csa_attn_tp1")
     block = next(n for n in fn.body if isinstance(n, ast.With) and n.items[0].optional_vars.id == "rope_tid")
     code = compile(ast.Module(body=block.body, type_ignores=[]), "kernel_metadata_cpu", "exec")
-    t, b, d = 18, 3, 64  # two real requests, then a padded request
-    pos = torch.tensor([s + i for s in starts for i in range(6)] + [0] * 6)
-    bounds = torch.tensor([0, 6, 12, 12], dtype=torch.int32)
-    slots = torch.tensor([[3, i] for i in range(12)] + [[-1, -1]] * 6, dtype=torch.int32)
+    lengths = (2, 4, 6)
+    t, b, d = sum(lengths), len(lengths), 64
+    pos = torch.tensor(
+        [starts[0] + i for i in range(lengths[0])] + [starts[1] + i for i in range(lengths[1])] + [0] * lengths[2]
+    )
+    bounds = torch.tensor([0, 2, 6, 12], dtype=torch.int32)
+    slots = torch.tensor([[3, i] for i in range(6)] + [[-1, -1]] * 6, dtype=torch.int32)
     expected_rows = {}
     for request, start in enumerate(starts):
-        for step in range(6):
+        for step in range(lengths[request]):
             if (start + step + 1) % 4 == 0:
-                expected_rows[request * 6 + step] = len(expected_rows)
+                expected_rows[int(bounds[request]) + step] = len(expected_rows)
     n = len(expected_rows)
     compact = torch.arange(1, n + 1).float()[:, None].expand(n, d).contiguous()
 
@@ -243,7 +287,6 @@ def test_kernel_compact_rows_and_padding(starts):
         COMPRESS_RATIO=4,
         t_dim=t,
         b_dim=b,
-        s_dim=6,
         position_ids=pos,
         ori_slot_mapping=slots,
         cmp_query_start_loc=bounds,
@@ -253,6 +296,8 @@ def test_kernel_compact_rows_and_padding(starts):
         cmp_row_offsets=torch.empty(b, dtype=torch.int32),
         idx_row_offsets=torch.empty(b, dtype=torch.int32),
         token_valid=torch.empty(t, dtype=torch.int32),
+        token_request=torch.empty(t, dtype=torch.int32),
+        query_start_loc=bounds,
         positions_i32=torch.empty(t, dtype=torch.int32),
         freqs_cos=torch.full((t, d), 2.0),
         freqs_sin=torch.full((t, d), 3.0),
@@ -272,8 +317,9 @@ def test_kernel_compact_rows_and_padding(starts):
     ]:
         env[name] = torch.empty((t, d))
     exec(code, env)
-    assert env["token_valid"].tolist() == [1] * 12 + [0] * 6
-    assert env["positions_i32"][12:].tolist() == [-1] * 6
+    assert env["token_valid"].tolist() == [1] * 6 + [0] * 6
+    assert env["positions_i32"][6:].tolist() == [-1] * 6
+    assert env["token_request"].tolist() == [0] * 2 + [1] * 4 + [2] * 6
     # Execute the actual consumer helper body, with CPU equivalents of tile IO.
     helper_tree = ast.parse((SOURCE.parent / "pto_kernels/dspark/native_rope.py").read_text())
     helper = next(n for n in helper_tree.body if isinstance(n, ast.FunctionDef))
@@ -291,16 +337,30 @@ def test_kernel_compact_rows_and_padding(starts):
 
     fake.tile = NS(full=fake.full)
     fake.gather_row = gather_row
-    helper_env = dict(pl=fake, TILE_ROWS=16, ROPE_DIM=d, DECODE_SEQ=6)
+    helper_env = dict(pl=fake, TILE_ROWS=16, ROPE_DIM=d)
     exec(compile(ast.Module(body=[helper], type_ignores=[]), "native_consumer_cpu", "exec"), helper_env)
     load = helper_env["load_compact_rope"]
     for begin in range(0, t, 16):
         rows = min(16, t - begin)
         cosine, sine = load(
-            compact, compact + 10, env["positions_i32"], env["token_valid"], env["cmp_row_offsets"], begin, rows
+            compact,
+            compact + 10,
+            env["positions_i32"],
+            env["token_valid"],
+            env["token_request"],
+            env["cmp_row_offsets"],
+            begin,
+            rows,
         )
         inner_cos, _ = load(
-            compact + 100, compact + 110, env["positions_i32"], env["token_valid"], env["idx_row_offsets"], begin, rows
+            compact + 100,
+            compact + 110,
+            env["positions_i32"],
+            env["token_valid"],
+            env["token_request"],
+            env["idx_row_offsets"],
+            begin,
+            rows,
         )
         for local in range(16):
             token = begin + local
@@ -322,6 +382,33 @@ def test_removed_gm_adapters_are_not_recreated():
     assert names.isdisjoint(
         {"idx_cos_il", "cmp_cos_il", "cmp_sin_signed", "inner_cos_il", "inner_sin_signed", "cmp_out", "idx_out"}
     )
+
+
+def test_vllm_kernel_path_does_not_reconstruct_uniform_request_rows():
+    kernel_dir = SOURCE.parent / "pto_kernels/dspark"
+    functions = {
+        "decode_compressor_ratio4.py": (
+            "compressor_ratio4_pool_projected_vllm",
+            "compressor_ratio4_cache_write_vllm",
+        ),
+        "decode_indexer_compressor.py": (
+            "indexer_compressor_pool_projected_vllm",
+            "indexer_compressor_write_vllm",
+        ),
+        "decode_indexer.py": (
+            "indexer_score_topk_forest_vllm",
+            "indexer_topk_query_merge_vllm",
+            "indexer_topk_single_leaf_publish_vllm",
+        ),
+        "decode_sparse_attn_csa.py": ("sparse_attn_csa_tp1_vllm",),
+    }
+    for filename, names in functions.items():
+        tree = ast.parse((kernel_dir / filename).read_text())
+        definitions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+        for name in names:
+            loaded_names = {node.id for node in ast.walk(definitions[name]) if isinstance(node, ast.Name)}
+            assert "s_dim" not in loaded_names, f"{filename}:{name} rebuilt a uniform request length"
+    assert "DECODE_SEQ" not in (kernel_dir / "native_rope.py").read_text()
 
 
 def test_int8_rejects_asymmetric_offset_before_format_conversion():
@@ -467,7 +554,7 @@ def test_native_consumer_rms_rope_math_and_tail(inner):
         gather=lambda src, indices, tmp: torch.take(src, indices.long()),
     )
 
-    def compact_loader(cos, sin, pos, valid, offsets, begin, rows):
+    def compact_loader(cos, sin, pos, valid, request, offsets, begin, rows):
         return load(cos, [begin, 0], [16, 64], [rows, 64]), load(sin, [begin, 0], [16, 64], [rows, 64])
 
     env = dict(
@@ -487,6 +574,7 @@ def test_native_consumer_rms_rope_math_and_tail(inner):
         sin=sine,
         position_ids=None,
         token_valid=None,
+        token_request=None,
         compact_offsets=None,
         load_compact_rope=compact_loader,
     )

@@ -194,6 +194,7 @@ def _decode_csa_attn_tp1(
     ],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     ori_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
@@ -220,6 +221,7 @@ def _decode_csa_attn_tp1(
     position_ids.bind_dynamic(0, T_DYN)
     attn_out.bind_dynamic(0, T_DYN)
     kv_seq_lens.bind_dynamic(0, B_DYN)
+    query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
     compress_state_pages.bind_dynamic(0, VLLM_COMPRESS_STATE_PAGE_NUM_DYN)
     kv_cache_pages.bind_dynamic(0, VLLM_KV_CACHE_PAGE_NUM_DYN)
     cmp_kv_pages.bind_dynamic(0, VLLM_CMP_KV_PAGE_NUM_DYN)
@@ -254,6 +256,7 @@ def _decode_csa_attn_tp1(
     t_dim = pl.tensor.dim(x_normed, 0)
     b_dim = pl.tensor.dim(kv_seq_lens, 0)
     token_valid = pl.create_tensor([t_dim], dtype=pl.INT32)
+    token_request = pl.create_tensor([t_dim], dtype=pl.INT32)
     cmp_row_offsets = pl.create_tensor([b_dim], dtype=pl.INT32)
     idx_row_offsets = pl.create_tensor([b_dim], dtype=pl.INT32)
     positions_i32 = pl.create_tensor([t_dim], dtype=pl.INT32)
@@ -298,6 +301,10 @@ def _decode_csa_attn_tp1(
             cmp_prefix = cmp_prefix + cmp_end // COMPRESS_RATIO - cmp_start // COMPRESS_RATIO
             idx_prefix = idx_prefix + idx_end // COMPRESS_RATIO - idx_start // COMPRESS_RATIO
         for token in pl.range(t_dim):
+            # A safe request zero keeps uncovered invalid graph-padding rows
+            # from ever indexing a table with -1. Native bounds overwrite all
+            # represented TND rows below.
+            pl.write(token_request, [token], pl.cast(0, pl.INT32))
             position = pl.cast(pl.read(position_ids, [token]), pl.INDEX)
             active_position = -1
             valid = 0
@@ -309,6 +316,13 @@ def _decode_csa_attn_tp1(
             pl.write(positions_i32, [token], pl.cast(active_position, pl.INT32))
             idx_sin_signed[token : token + 1, :] = pl.mul(freqs_sin[token : token + 1, :], sign)
             rope_swap_idx[token : token + 1, :] = swap
+        # TND request ownership comes from vLLM's native cumulative query
+        # bounds. Empty padded requests naturally write no rows.
+        for request in pl.range(b_dim):
+            request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+            for token in pl.range(request_begin, request_end):
+                pl.write(token_request, [token], pl.cast(request, pl.INT32))
 
     q = pl.create_tensor([t_dim, H, HEAD_DIM], dtype=pl.BF16)
     kv = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.BF16)
@@ -370,6 +384,8 @@ def _decode_csa_attn_tp1(
         cmp_block_table,
         positions_i32,
         token_valid,
+        token_request,
+        query_start_loc,
         state_slot_mapping,
         cmp_slot_mapping,
         cmp_row_offsets,
@@ -390,6 +406,8 @@ def _decode_csa_attn_tp1(
         index_block_table,
         positions_i32,
         token_valid,
+        token_request,
+        query_start_loc,
         inner_state_slot_mapping,
         idx_slot_mapping,
         idx_row_offsets,
@@ -412,6 +430,7 @@ def _decode_csa_attn_tp1(
         topk_indices,
         positions_i32,
         kv_seq_lens,
+        token_request,
         idx_cache_tid,
     )
 
@@ -430,6 +449,7 @@ def _decode_csa_attn_tp1(
         topk_indices,
         position_ids_2d,
         token_valid,
+        token_request,
         attn_sink,
         freqs_cos,
         idx_sin_signed,

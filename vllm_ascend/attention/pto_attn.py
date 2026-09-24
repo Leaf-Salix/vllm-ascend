@@ -262,6 +262,7 @@ ARG_ORDER = (
     "index_block_table",
     "position_ids",
     "kv_seq_lens",
+    "query_start_loc",
     "attn_sink",
     "ori_slot_mapping",
     "state_slot_mapping",
@@ -338,17 +339,13 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
     if len(kv_cache) != 6:
         raise NativeLayoutError("ratio-4 CSA requires 6 native cache views")
     kcsa, _ = kernel()
-    if seq != kcsa.S:
-        raise NativeLayoutError(f"native CSA requires exactly {kcsa.S} tokens per request, got seq={seq}")
     cmp_md, cst_md, inner_state_md, idx_md, swa_md, comp_md = _requests(layer_metadata)
     cmp_kv_c, swa_kv_c, state_c, inner_state_c, idx_k_c, idx_s_c = kv_cache
 
     host_pos = cmp_md.input_positions
     if host_pos.dtype != torch.int64 or host_pos.ndim != 1 or not host_pos.is_contiguous():
         raise NativeLayoutError("input_positions must be contiguous INT64 token rows")
-    if host_pos.shape[0] % seq:
-        raise NativeLayoutError(f"position rows {host_pos.shape[0]} are not divisible by seq={seq}")
-    n_real = host_pos.shape[0] // seq  # graph descriptor request rows
+    n_real = layer_metadata.attention.num_decodes
     if not 1 <= n_real <= kcsa.B:
         raise NativeLayoutError(f"{n_real} requests exceed the kernel's B={kcsa.B}")
     if hidden_states.shape[0] < host_pos.shape[0]:
@@ -357,6 +354,8 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
         )
 
     b, t = n_real, host_pos.shape[0]
+    if t > kcsa.T:
+        raise NativeLayoutError(f"{t} token rows exceed the kernel's T={kcsa.T}")
     pos = host_pos
     seq_lens = _native_tensor("seq_lens", cmp_md.seq_lens, torch.int32)[:b]
     for name, md, expected in (
@@ -514,8 +513,15 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
     )
     a["position_ids"] = pos
     a["kv_seq_lens"] = seq_lens
+    a["query_start_loc"] = _native_tensor(
+        "query_start_loc",
+        swa_md.query_start_loc,
+        torch.int32,
+    )[: b + 1]
+    if a["query_start_loc"].shape != (b + 1,):
+        raise NativeLayoutError("native query bounds do not cover the batch")
 
-    return [a[name] for name in ARG_ORDER], (pos, seq, n_real)
+    return [a[name] for name in ARG_ORDER], (pos, n_real)
 
 
 # --- kernel registration -----------------------------------------------------
@@ -563,22 +569,8 @@ def substitute(impl, layer, hidden_states, kv_cache, layer_metadata, output, *, 
     speculative_config = impl.vllm_config.speculative_config
     if speculative_config is None or speculative_config.method != "dspark":
         return False
-    if getattr(speculative_config, "enable_adaptive_verification", False):
-        if "adaptive" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("adaptive")
-            print("[pto-attn] declined adaptive DSpark verification", flush=True)
-        return False
     seq = _decode_seq(impl)
     kcsa, _ = kernel()
-    if seq != kcsa.S:
-        if "seq" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("seq")
-            print(
-                f"[pto-attn] declined host seq={seq}: native CSA currently "
-                f"requires exactly {kcsa.S} tokens per request",
-                flush=True,
-            )
-        return False
     try:
         reqs = _requests(layer_metadata)
     except NativeLayoutError as error:
@@ -604,19 +596,11 @@ def substitute(impl, layer, hidden_states, kv_cache, layer_metadata, output, *, 
     ):
         return _decline("attention TP/CP must be one")
     position_rows = 0 if decode.input_positions is None else decode.input_positions.shape[0]
-    if (
-        position_rows % seq
-        or attention_metadata.num_decode_tokens != position_rows
-        or attention_metadata.num_decodes * seq != position_rows
-    ):
-        if "position_rows" not in _DEBUG_REFUSED:
-            _DEBUG_REFUSED.add("position_rows")
-            print(
-                "[pto-attn] declined: position rows are not divisible by host seq",
-                flush=True,
-            )
-        return False
-    n_offered = decode.input_positions.shape[0] // seq
+    if position_rows == 0:
+        return _decline("decode metadata contains no token rows")
+    if position_rows > kcsa.T:
+        return _decline(f"token rows {position_rows} exceed the kernel capacity T={kcsa.T}")
+    n_offered = attention_metadata.num_decodes
     if n_offered > kcsa.B:
         # Under capture this is the padded graph batch, not the live request
         # count, and raising here would abort capture_model with a half-recorded
@@ -635,7 +619,7 @@ def substitute(impl, layer, hidden_states, kv_cache, layer_metadata, output, *, 
             layer,
             output=output,
         )
-        _pos, _, n_real = plan
+        _pos, n_real = plan
     except NativeLayoutError as error:
         key = f"layout:{error}"
         if key not in _DEBUG_REFUSED:
@@ -653,5 +637,5 @@ def substitute(impl, layer, hidden_states, kv_cache, layer_metadata, output, *, 
     # to tell a recorded pass from the warm-up that precedes it.
     cap = capture_active()
     if cap or _RAN[0] <= 5 or _RAN[0] % 10 == 0:
-        print(f"[pto-attn-ran] n={_RAN[0]} tokens={n_real * seq} capturing={cap}", flush=True)
+        print(f"[pto-attn-ran] n={_RAN[0]} tokens={position_rows} requests={n_real} capturing={cap}", flush=True)
     return True

@@ -190,6 +190,7 @@ def indexer_topk_half_leaf(
 @pl.jit.inline
 def indexer_topk_query_merge_one(
     query: pl.Scalar[pl.INDEX],
+    batch_idx: pl.Scalar[pl.INDEX],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
@@ -197,8 +198,6 @@ def indexer_topk_query_merge_one(
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
 ):
     """Merge half-leaf roots and materialize one query's Top-512."""
-    s_dim = pl.tensor.dim(position_ids, 0) // pl.tensor.dim(kv_seq_lens, 0)
-    batch_idx = query // s_dim
     position = pl.read(position_ids, [query])
     cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
     cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -241,6 +240,30 @@ def indexer_topk_query_merge(
     for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
         indexer_topk_query_merge_one(
             query,
+            query // (query_count // pl.tensor.dim(kv_seq_lens, 0)),
+            position_ids,
+            kv_seq_lens,
+            pair_arena,
+            topk_scores,
+            topk_indices,
+        )
+
+
+@pl.jit.incore
+def indexer_topk_query_merge_vllm(
+    position_ids: pl.Tensor[[T_DYN], pl.INT32],
+    kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
+    pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
+    topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+    topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+):
+    worker = pl.tile.get_block_idx()
+    query_count = pl.tensor.dim(position_ids, 0)
+    for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
+        indexer_topk_query_merge_one(
+            query,
+            pl.cast(pl.read(token_request, [query]), pl.INDEX),
             position_ids,
             kv_seq_lens,
             pair_arena,
@@ -329,6 +352,29 @@ def indexer_topk_single_leaf_publish(
     for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
         position = pl.read(position_ids, [query])
         cache_len = pl.read(kv_seq_lens, [query // s_dim]) // COMPRESS_RATIO
+        visible_count = pl.max(pl.min(cache_len, (position + 1) // COMPRESS_RATIO), 0)
+        if visible_count > 0:
+            indexer_topk_leaf_publish(score_arena, query, visible_count, topk_scores, topk_indices)
+        else:
+            pl.store(pl.tile.full([1, IDX_TOPK], dtype=pl.FP32, value=FP32_NEG_INF), [query, 0], topk_scores)
+            pl.store(pl.tile.full([1, IDX_TOPK], dtype=pl.INT32, value=-1), [query, 0], topk_indices)
+
+
+@pl.jit.incore
+def indexer_topk_single_leaf_publish_vllm(
+    position_ids: pl.Tensor[[T_DYN], pl.INT32],
+    kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
+    score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+    topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+    topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+):
+    worker = pl.tile.get_block_idx()
+    query_count = pl.tensor.dim(position_ids, 0)
+    for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
+        position = pl.read(position_ids, [query])
+        batch_idx = pl.cast(pl.read(token_request, [query]), pl.INDEX)
+        cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
         visible_count = pl.max(pl.min(cache_len, (position + 1) // COMPRESS_RATIO), 0)
         if visible_count > 0:
             indexer_topk_leaf_publish(score_arena, query, visible_count, topk_scores, topk_indices)
@@ -523,6 +569,7 @@ def indexer_score_topk_forest_vllm(
     ],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -551,7 +598,6 @@ def indexer_score_topk_forest_vllm(
     ) as score_tid:
         worker = pl.tile.get_block_idx()
         query_count = pl.tensor.dim(position_ids, 0)
-        s_dim = query_count // b_dim
         max_cache_len = 0
         for batch in pl.range(b_dim):
             batch_cache_len = pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO
@@ -571,7 +617,7 @@ def indexer_score_topk_forest_vllm(
         ):
             query = item // max_leaves
             leaf = item % max_leaves
-            batch_idx = query // s_dim
+            batch_idx = pl.cast(pl.read(token_request, [query]), pl.INDEX)
             position = pl.read(position_ids, [query])
             cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
             cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -825,9 +871,10 @@ def indexer_score_topk_forest_vllm(
                 deps=[score_tid],
                 allow_early_resolve=True,
             ) as publish_tid:
-                indexer_topk_single_leaf_publish(
+                indexer_topk_single_leaf_publish_vllm(
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     score_arena,
                     topk_scores,
                     topk_idxs,
@@ -840,9 +887,10 @@ def indexer_score_topk_forest_vllm(
                 deps=[score_tid],
                 allow_early_resolve=True,
             ) as merge_tid:
-                indexer_topk_query_merge(
+                indexer_topk_query_merge_vllm(
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     pair_arena,
                     topk_scores,
                     topk_idxs,
@@ -1106,6 +1154,7 @@ def indexer_weights_score_vllm(
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
     weights_gate_dep: pl.Scalar[pl.TASK_ID],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1191,6 +1240,7 @@ def indexer_weights_score_vllm(
         index_block_table,
         position_ids,
         kv_seq_lens,
+        token_request,
         topk_scores,
         topk_idxs,
         qh_quant_tid,
@@ -1259,6 +1309,7 @@ def indexer_vllm(
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     position_ids: pl.Tensor[[T_DYN], pl.INT32],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
 ):
     """Run the indexer directly on vLLM's packed key/scale pages."""
@@ -1292,6 +1343,7 @@ def indexer_vllm(
         topk_idxs,
         position_ids,
         kv_seq_lens,
+        token_request,
         cache_write_dep,
         weights_gate_dep,
         qh_quant_tid,
