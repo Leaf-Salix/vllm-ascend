@@ -990,7 +990,14 @@ def kv_proj_rope(
                             [0, kv_row_tail],
                             1.0 / pl.read(kv_rms_store_tail, [0, kv_row_tail]),
                         )
-                    kv_inv_rms_tail = kv_inv_store_tail[0:1, 0:KV_RMS_T_TILE]
+                    # The tail computes in tiles, so read the scalar results
+                    # back as a tile rather than a tensor slice.
+                    kv_inv_rms_tail = pl.load(
+                        kv_inv_store_tail,
+                        [0, 0],
+                        [1, KV_RMS_T_TILE],
+                        target_memory=pl.MemorySpace.Vec,
+                    )
                     kv_inv_rms_t_tail = pl.reshape(kv_inv_rms_tail, [KV_RMS_T_TILE, 1])
 
                     for n0_tail in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
