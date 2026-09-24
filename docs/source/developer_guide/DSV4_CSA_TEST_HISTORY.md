@@ -707,13 +707,14 @@ Ruff、format、codespell、typos与diff whitespace检查通过。Gitleaks因环
 这些是分模块因果对照，不能宣称所有因素合并后的整层精度已通过。本轮没有正式延迟结果，
 插桩实验kernel不能与G6性能相混；Indexer仍有差异，动态padding/生产metadata刷新仍未验证。
 
-## G8：五类QKV边界合并后的无插桩Graph复测（2026-09-24，待结果）
+## G8：五类QKV边界合并后的无插桩Graph复测（2026-09-24，已完成）
 
 基线`4a83f66d5`。`generate_graph.py`生成正式baseline和aligned；aligned只合并G7验证的
 Q-A、Q-B、Q RMS、KV projection、KV RMS五类BF16边界，O-proj/Indexer/Hadamard保持正式版。
 没有改动正式服务算法。生成器CPU回归2项通过；独立审查通过；目标环境无设备import与ATB预检通过。
 
-已提交8K/128K同卡三路Graph测试，等待NPU调度，**尚无新的精度或性能结果**。
+8K/128K三路Graph已完成，确定性/权重/guard检查通过。最终误差1.4350%→1.2036%、1.6919%→1.4274%，仍未通过allclose。
+延迟与完整证据见[复测报告](DSV4_CSA_GRAPH_ROUNDING_20260924.md)。
 脚本与复现说明见[测试README](../../../benchmarks/scripts/dsv4_csa_precision/README.md)。
 TP1/B4/S6/block128，真实C4层权重、seed62合成hidden/history，原生level1/HCCL确定性。
 精度取reset后的单次Graph replay，记录输出及六类cache有效写槽。
