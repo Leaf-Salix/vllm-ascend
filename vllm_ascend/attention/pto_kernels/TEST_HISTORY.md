@@ -256,6 +256,42 @@ RoPE 64 维对 Native 的 relative L2 从 0.276496% 降到 0.045079%。
 和 QK/PV 归约顺序。原始 JSON 与阶段张量保存在工作区
 `reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/rope-boundary-b4-t18/`。
 
+### Native raw KV 读取：单因素诊断
+
+`task_20260924_181846_19423658778` 在相同单卡 B4/T18、位置 8186、
+确定性 Native 和真实 C4 第 2 层权重下完成，退出码为 0。独立诊断副本仅让
+PyPTO sparse attention 读取同次 Native 的 raw KV cache；PyPTO 自身的 raw
+cache 写入仍执行并用于对拍。Native Q、TopK 注入及 inverse RoPE 前 BF16
+舍入双版本与上节一致；正式源码没有修改。
+
+两次任务的 13 个 Native 阶段张量逐元素相同。PyPTO 的 Q、KV、QR、TopK
+阶段张量也逐元素相同，六类 cache/state 写入对拍指标完全相同；因此下面的
+变化可归于 sparse attention 读取的 raw KV。
+
+| 与 Native 对拍 | 原 raw KV 读取 | 注入 Native raw KV | 变化 |
+| --- | ---: | ---: | ---: |
+| inverse RoPE 前 heads relative L2 | 0.031248% | 0.030104% | 降 0.001144 个百分点 |
+| BF16 边界后的 heads relative L2 | 0.032232% | 0.030771% | 降 0.001461 个百分点 |
+| BF16 边界 heads 经原生 O-proj 的输出 relative L2 | 0.376710% | 0.366880% | 降 0.009830 个百分点 |
+
+最后一行仍是把诊断 heads 送入**原生 O-proj**的代理值，并非正式 CSA
+源码的第二次 O-proj。注入后，inverse RoPE 前绝对值至少 0.01 的 BF16
+元素全部在 Native 的 1 ULP 内；最终输出这一范围内只有约 79.67% 在
+1 ULP 内，约 5.03% 超过 4 ULP。raw KV 写入本身相对 Native 的
+relative L2 仍为 0.008113%，说明注入的是读取输入，不是修复了写入。
+
+结论：raw KV 差异只解释了剩余 heads 误差的一小部分。Native Q、TopK、
+raw KV 已固定，compressed KV 的实际写入行逐元素相同；接下来应核实
+attention 实际访问的 compressed KV 行、稀疏索引和 mask，再比较 QK、
+softmax、PV 及归一化的数值边界与归约顺序。当前不能把剩余误差直接归因于
+某一个乘法或 softmax。原始 JSON 与阶段张量保存在工作区
+`reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/native-raw-b4-t18/`；
+实验脚本 `decode_csa_stage_probe_native_raw.py` 和
+`precision_probe_native_raw.py` 的 SHA256 分别为
+`4ce7eebc46ee5db321b20f459bcf78fbec6a0c4ec8bc52e52e427ba9e87a6ca1`、
+`cf9d7ccad1fe6da80249b5718852d81a747d043dff8114fb78af878c8722cd73`。
+本次未测 Graph、B16 或整模型。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文
