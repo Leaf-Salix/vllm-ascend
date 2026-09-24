@@ -330,6 +330,7 @@ def _decode_csa_attn_tp1(
     qr_scale = pl.create_tensor([t_dim, 1], dtype=pl.FP32)
     topk_scores = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.FP32)
     topk_indices = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.INT32)
+    indexer_topk_indices_out = pl.reshape(topk_indices, [t_dim, IDX_TOPK])
     position_ids_2d = pl.reshape(positions_i32, [t_dim, 1])
     late_dep = pl.system.task_dummy(deps=[rope_tid])
     q_proj_rope(
@@ -414,58 +415,60 @@ def _decode_csa_attn_tp1(
         late_dep,
         cmp_projection_tid,
     )
-    topk_scores, topk_indices, topk_tid = indexer_vllm(
-        x_normed,
-        qr,
-        qr_scale,
-        idx_wq_b,
-        idx_wq_b_scale,
-        weights_proj,
-        freqs_cos,
-        idx_sin_signed,
-        hadamard_idx,
-        inner_index_pages,
-        index_block_table,
-        topk_scores,
-        topk_indices,
-        positions_i32,
-        kv_seq_lens,
-        token_request,
-        idx_cache_tid,
-    )
+    with pl.scope():
+        _inner_topk_scores, _inner_topk_indices, _topk_tid = indexer_vllm(
+            x_normed,
+            qr,
+            qr_scale,
+            idx_wq_b,
+            idx_wq_b_scale,
+            weights_proj,
+            freqs_cos,
+            idx_sin_signed,
+            hadamard_idx,
+            inner_index_pages,
+            index_block_table,
+            topk_scores,
+            indexer_topk_indices_out,
+            positions_i32,
+            kv_seq_lens,
+            token_request,
+            idx_cache_tid,
+        )
 
     attention_ready = pl.system.task_dummy(
-        deps=[raw_cache_tid, cmp_cache_tid, topk_tid],
+        deps=[raw_cache_tid, cmp_cache_tid],
     )
-    o_packed_heads = pl.create_tensor(
-        [O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16,
-    )
-    o_packed_heads, heads_dep = sparse_attn_csa_tp1_vllm(
-        q,
-        kv_cache_pages,
-        ori_block_table,
-        cmp_kv_pages,
-        cmp_block_table,
-        topk_indices,
-        position_ids_2d,
-        token_valid,
-        token_request,
-        attn_sink,
-        freqs_cos,
-        idx_sin_signed,
-        o_packed_heads,
-        attention_ready,
-    )
-    decode_o_proj_tp1(
-        o_packed_heads,
-        wo_a,
-        wo_b,
-        wo_b_scale,
-        attn_out,
-        heads_dep,
-    )
+    with pl.scope():
+        o_packed_heads = pl.create_tensor(
+            [O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16,
+        )
+        o_packed_heads, heads_dep = sparse_attn_csa_tp1_vllm(
+            q,
+            kv_cache_pages,
+            ori_block_table,
+            cmp_kv_pages,
+            cmp_block_table,
+            topk_indices,
+            position_ids_2d,
+            token_valid,
+            token_request,
+            attn_sink,
+            freqs_cos,
+            idx_sin_signed,
+            o_packed_heads,
+            attention_ready,
+        )
+        decode_o_proj_tp1(
+            o_packed_heads,
+            wo_a,
+            wo_b,
+            wo_b_scale,
+            attn_out,
+            heads_dep,
+        )
     return attn_out
 
 
-decode_csa_attn_tp1 = pl.jit.inline(_decode_csa_attn_tp1)
-decode_csa_attn_tp1_test = pl.jit(_decode_csa_attn_tp1)
+decode_csa_attn_tp1 = pl.jit.inline(_decode_csa_attn_tp1, auto_scope=False)
+decode_csa_attn_tp1_test = pl.jit(_decode_csa_attn_tp1, auto_scope=False)
