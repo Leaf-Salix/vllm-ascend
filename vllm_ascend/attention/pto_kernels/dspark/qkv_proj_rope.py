@@ -804,14 +804,6 @@ def kv_proj_rope(
 ):
     """KV LoRA, RMSNorm, and RoPE over bounded dense tiles."""
     t_dim = pl.tensor.dim(x, 0)
-    # Scalar-unit staging for the tail row coefficients. Declared at function
-    # level so they are genuine tensors -- a create_tensor inside the tail
-    # scope comes back as a tile and pl.load then refuses it -- and given one
-    # row per kv_rms_norm_rope tile, because those tiles run concurrently and
-    # a single shared row lets them overwrite each other.
-    kv_tail_slots = (QPROJ_T_PAD + KV_RMS_T_TILE - 1) // KV_RMS_T_TILE
-    kv_rms_store_tail = pl.create_tensor([kv_tail_slots, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
-    kv_inv_store_tail = pl.create_tensor([kv_tail_slots, KV_RMS_T_TILE], dtype=pl.FP32, manual_dep=True)
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
@@ -898,21 +890,7 @@ def kv_proj_rope(
                         kv_sq = pl.mul(kv_chunk, kv_chunk)
                         kv_row_sum = pl.reshape(pl.row_sum(kv_sq), [1, KV_RMS_T_TILE])
                         kv_sq_sum = pl.add(kv_sq_sum, kv_row_sum)
-                    # Same scalar reciprocal as the q path: native derives the
-                    # row coefficient on the scalar unit, and the vector TDIV
-                    # lands a ULP off on A3.
-                    kv_rms_store = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
-                    kv_rms_store[0:1, 0:KV_RMS_T_TILE] = pl.sqrt(
-                        pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS)
-                    )
-                    kv_inv_store = pl.create_tensor([1, KV_RMS_T_TILE], dtype=pl.FP32)
-                    for kv_row in pl.range(KV_RMS_T_TILE):
-                        pl.write(
-                            kv_inv_store,
-                            [0, kv_row],
-                            1.0 / pl.read(kv_rms_store, [0, kv_row]),
-                        )
-                    kv_inv_rms = kv_inv_store[0:1, 0:KV_RMS_T_TILE]
+                    kv_inv_rms = pl.recip(pl.sqrt(pl.add(pl.mul(kv_sq_sum, 1.0 / HEAD_DIM), EPS)))
                     kv_inv_rms_t = pl.reshape(kv_inv_rms, [KV_RMS_T_TILE, 1])
 
                     for n0 in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
@@ -983,27 +961,7 @@ def kv_proj_rope(
                         kv_sq_tail = pl.mul(kv_chunk_tail, kv_chunk_tail)
                         kv_row_sum_tail = pl.reshape(pl.row_sum(kv_sq_tail, kv_reduce_tmp), [1, KV_RMS_T_TILE])
                         kv_sq_sum_tail = pl.add(kv_sq_sum_tail, kv_row_sum_tail)
-                    # The tail keeps its reduction in an explicit tile, so publish
-                    # it with pl.store rather than a subscript write.
-                    pl.store(
-                        pl.sqrt(pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)),
-                        [tg_idx, 0],
-                        kv_rms_store_tail,
-                    )
-                    for kv_row_tail in pl.range(KV_RMS_T_TILE):
-                        pl.write(
-                            kv_inv_store_tail,
-                            [tg_idx, kv_row_tail],
-                            1.0 / pl.read(kv_rms_store_tail, [tg_idx, kv_row_tail]),
-                        )
-                    # The tail computes in tiles, so read the scalar results
-                    # back as a tile rather than a tensor slice.
-                    kv_inv_rms_tail = pl.load(
-                        kv_inv_store_tail,
-                        [tg_idx, 0],
-                        [1, KV_RMS_T_TILE],
-                        target_memory=pl.MemorySpace.Vec,
-                    )
+                    kv_inv_rms_tail = pl.recip(pl.sqrt(pl.add(pl.mul(kv_sq_sum_tail, 1.0 / HEAD_DIM), EPS)))
                     kv_inv_rms_t_tail = pl.reshape(kv_inv_rms_tail, [KV_RMS_T_TILE, 1])
 
                     for n0_tail in pl.pipeline(0, NOPE_DIM, KV_TILE, stage=2):
