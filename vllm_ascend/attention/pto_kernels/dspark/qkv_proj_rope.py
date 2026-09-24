@@ -60,10 +60,9 @@ MATMUL_T_TILE = 16
 QR_M_TILE = MATMUL_T_TILE  # qr_proj token (M) tile; cube rows must be a 16-row boxed tile
 QR_DENSE_M_TILE = 64
 QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul
-# Issue the whole K in one matmul so the cube tiles it internally, the way
-# native's single F.linear does. Chunking K ourselves imposes an accumulation
-# order the operator never uses.
-QR_K_TILE = D  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
+# A full-K tile overruns the 512 KiB Mat buffer (measured: 1572864 bytes), so
+# the cube tile stays at 256.
+QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
 # Split-K combines its partials with an FP32 atomic add, an accumulation order
 # native's single F.linear never performs. Keep one chain over the whole K so
 # the projection is reproducible against it; costs parallelism, and precision
@@ -73,7 +72,7 @@ QR_SPLIT_K_TILE = D // QR_OK  # qr_proj K per split (=2048)
 KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
 KV_DENSE_M_TILE = 64
 KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
-KV_K_TILE = D  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
+KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
 KV_OK = 1  # kv_proj split-K factor         | D//KV_OK cores share each N-group
 KV_OM = 3  # maximum kv_proj split-M factor
 KV_SPLIT_K_TILE = D // KV_OK  # kv_proj K per split (=2048)
@@ -372,10 +371,26 @@ def q_proj_qr(
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
                     qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
-                # decode_indexer_compressor.py derives the inverse RMS as
-                # recip(sqrt(..)) and that path reaches bit-exact index_key, while
-                # rsqrt lands a ULP away. Use the form that is already proven here.
-                qr_inv_rms = pl.recip(pl.sqrt(pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS)))
+                # Native's rms_norm_dynamic_quant kernel computes the row
+                # coefficient with a device-side SCALAR division:
+                #   rstd = 1 / sqrt(squareSum * aveNum + eps)
+                # PyPTO's recip/div lower to the vector TDIV, whose A3 backend
+                # ignores high_precision and lands a ULP off correctly-rounded
+                # FP32. The scalar path is exact. Keep the vector sqrt, which is
+                # a different instruction, and take the reciprocal per row as a
+                # scalar so the coefficient matches the operator bit for bit.
+                qr_rms_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_rms_store[0:1, 0:T_TILE] = pl.sqrt(
+                    pl.add(pl.mul(qr_sq_sum, 1.0 / Q_LORA), EPS)
+                )
+                qr_inv_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                for qr_row in pl.range(T_TILE):
+                    pl.write(
+                        qr_inv_store,
+                        [0, qr_row],
+                        1.0 / pl.read(qr_rms_store, [0, qr_row]),
+                    )
+                qr_inv_rms = qr_inv_store[0:1, 0:T_TILE]
                 qr_inv_rms_t = pl.reshape(qr_inv_rms, [T_TILE, 1])
                 # npu_rms_norm_dynamic_quant takes the amax over the normalized
                 # values themselves -- the same expression it then quantizes.
@@ -402,12 +417,23 @@ def q_proj_qr(
                 qr_amax_floor = pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
                 qr_tile_amax = pl.maximum(qr_amax_floor, qr_amax_acc)
 
-                qr_scale_quant_row = pl.div(pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), qr_tile_amax)
+                # Native, same kernel, again with scalar divisions:
+                #   scaleTemp = quantMaxVal / maxTemp
+                #   scaleTensor[rid] = 1 / scaleTemp
+                # Both are per-row scalars, so do them on the scalar unit rather
+                # than through TDIV. The double rounding is native's own and was
+                # measured to reproduce 20 of 24 rows against 16 for amax / 127.
+                qr_amax_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_amax_store[0:1, 0:T_TILE] = qr_tile_amax
+                qr_quant_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                qr_dq_store = pl.create_tensor([1, T_TILE], dtype=pl.FP32)
+                for qr_srow in pl.range(T_TILE):
+                    qr_q_scalar = INT8_SCALE_MAX / pl.read(qr_amax_store, [0, qr_srow])
+                    pl.write(qr_quant_store, [0, qr_srow], qr_q_scalar)
+                    pl.write(qr_dq_store, [0, qr_srow], 1.0 / qr_q_scalar)
+                qr_scale_quant_row = qr_quant_store[0:1, 0:T_TILE]
                 qr_scale_quant_t = pl.reshape(qr_scale_quant_row, [T_TILE, 1])
-                # Measured against native's own qr_scale, recip(127 / amax)
-                # reproduces 20 of 24 rows bitwise while amax / 127 reproduces
-                # only 16, so the operator carries the double rounding. Keep it.
-                qr_tile_scale_dq = pl.reshape(pl.recip(qr_scale_quant_row), [T_TILE, 1])
+                qr_tile_scale_dq = pl.reshape(qr_dq_store[0:1, 0:T_TILE], [T_TILE, 1])
                 qr_scale_pad_store = pl.assemble(qr_scale_pad_store, qr_tile_scale_dq, [tg, 0])
                 if valid_rows == T_TILE:
                     qr_scale_view[out_tg : out_tg + T_TILE, :] = qr_tile_scale_dq
