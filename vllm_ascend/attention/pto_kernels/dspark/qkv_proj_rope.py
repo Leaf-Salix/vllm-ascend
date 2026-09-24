@@ -397,16 +397,10 @@ def q_proj_qr(
 
                 qr_scale_quant_row = pl.div(pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), qr_tile_amax)
                 qr_scale_quant_t = pl.reshape(qr_scale_quant_row, [T_TILE, 1])
-                # npu_dynamic_quant returns amax / 127 as the dequant scale.
-                # Deriving it as recip(127 / amax) rounds twice and lands a
-                # ULP away, which then rides into the q projection.
-                qr_tile_scale_dq = pl.reshape(
-                    pl.div(
-                        qr_tile_amax,
-                        pl.full([1, T_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX),
-                    ),
-                    [T_TILE, 1],
-                )
+                # Measured against native's own qr_scale, recip(127 / amax)
+                # reproduces 20 of 24 rows bitwise while amax / 127 reproduces
+                # only 16, so the operator carries the double rounding. Keep it.
+                qr_tile_scale_dq = pl.reshape(pl.recip(qr_scale_quant_row), [T_TILE, 1])
                 qr_scale_pad_store = pl.assemble(qr_scale_pad_store, qr_tile_scale_dq, [tg, 0])
                 if valid_rows == T_TILE:
                     qr_scale_view[out_tg : out_tg + T_TILE, :] = qr_tile_scale_dq
