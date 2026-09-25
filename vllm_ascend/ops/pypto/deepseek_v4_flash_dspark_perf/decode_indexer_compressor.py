@@ -74,11 +74,11 @@ IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
 
 COMPRESS_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
 
-K_TILE = 256
+K_TILE = 512
 
 OUT_TILE = 64
 
-PROJ_OUT_TILE = 16
+PROJ_OUT_TILE = 32
 
 # Native A3 CompressorKernelPerf uses eight 16-column groups for the
 # supported uniform S=6, head-dim128 decode shapes. Each group starts its
@@ -180,8 +180,6 @@ def indexer_compressor_pool_projected(
     _kv_score_tid = late_dep
 
     # Ratio-4 pooling reads Native historical state and current projections.
-    window_values = pl.create_tensor([POOL_WORKERS * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
-    window_scores = pl.create_tensor([POOL_WORKERS * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
     pool_workers = pl.min(b_dim, POOL_WORKERS)
     with pl.spmd(pool_workers, name_hint="scatter_softmax_pool", deps=[_kv_score_tid]) as pool_tid:
         pool_worker = pl.tile.get_block_idx()
@@ -194,8 +192,17 @@ def indexer_compressor_pool_projected(
                 if (token_pos + 1) % COMPRESS_RATIO == 0:
                     window_start = token_pos - STATE_LEN + 1
                     for h0 in pl.range(0, HEAD_DIM, HEAD_TILE):
-                        window_row = pool_worker * STATE_LEN
-                        for state_idx in pl.range(STATE_LEN):
+                        # 在线 softmax（上游写法）：以本 token 自己这一格起步，再把其余
+                        # STATE_LEN-1 格逐个并入。精度版先把 8 格按 Native 的交错次序写进
+                        # GM 暂存、读回后先归一化概率再做 8->4->2->1 规约，只为复刻 Native 的舍入次序。
+                        last_ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
+                        mi = pl.add(
+                            score_proj_pad[token : token + 1, HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE],
+                            ape[last_ape_row : last_ape_row + 1, HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE],
+                        )
+                        li = pl.exp(pl.sub(mi, mi))
+                        oi = kv_proj_pad[token : token + 1, HEAD_DIM + h0 : HEAD_DIM + h0 + HEAD_TILE]
+                        for state_idx in pl.range(STATE_LEN - 1):
                             logical_pos = window_start + state_idx
                             value = pl.full([1, HEAD_TILE], dtype=pl.FP32, value=0.0)
                             score = pl.full([1, HEAD_TILE], dtype=pl.FP32, value=FP32_NEG_INF)
@@ -240,31 +247,13 @@ def indexer_compressor_pool_projected(
                                             state_half + h0 : state_half + h0 + HEAD_TILE,
                                         ],
                                     )
-                            # Native overlap storage interleaves the previous
-                            # and current ratio-4 groups before column reductions.
-                            native_row = state_idx % COMPRESS_RATIO * COFF + state_idx // COMPRESS_RATIO
-                            dst_row = window_row + native_row
-                            window_values[dst_row : dst_row + 1, h0 : h0 + HEAD_TILE] = value
-                            window_scores[dst_row : dst_row + 1, h0 : h0 + HEAD_TILE] = score
-
-                        score_rows = window_scores[window_row : window_row + STATE_LEN, h0 : h0 + HEAD_TILE]
-                        max4 = pl.maximum(score_rows[0:4, :], score_rows[4:8, :])
-                        max2 = pl.maximum(max4[0:2, :], max4[2:4, :])
-                        maximum = pl.maximum(max2[0:1, :], max2[1:2, :])
-                        probability = pl.exp(pl.col_expand_sub(score_rows, maximum))
-                        sum4 = pl.add(probability[0:4, :], probability[4:8, :])
-                        sum2 = pl.add(sum4[0:2, :], sum4[2:4, :])
-                        total = pl.add(sum2[0:1, :], sum2[1:2, :])
-                        # Match Native: normalize probabilities before the
-                        # value product, then use the same 8 -> 4 -> 2 -> 1 tree.
-                        probability = pl.col_expand_div(probability, total)
-                        value_rows = window_values[window_row : window_row + STATE_LEN, h0 : h0 + HEAD_TILE]
-                        weighted = pl.mul(value_rows, probability)
-                        weighted4 = pl.add(weighted[0:4, :], weighted[4:8, :])
-                        weighted2 = pl.add(weighted4[0:2, :], weighted4[2:4, :])
-                        pooled_kv[token : token + 1, h0 : h0 + HEAD_TILE] = pl.add(
-                            weighted2[0:1, :], weighted2[1:2, :]
-                        )
+                            mi_next = pl.maximum(mi, score)
+                            alpha = pl.exp(pl.sub(mi, mi_next))
+                            beta = pl.exp(pl.sub(score, mi_next))
+                            li = pl.add(pl.mul(alpha, li), beta)
+                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
+                            mi = mi_next
+                        pooled_kv[token : token + 1, h0 : h0 + HEAD_TILE] = pl.div(oi, li)
 
     # Direct Native state commit, after all history reads in this pool task.
     commit_workers = pl.min(b_dim, COMMIT_WORKERS)
@@ -317,26 +306,22 @@ def indexer_compressor_pool_projected(
             b0 = rms_blk * RMS_PAD_TILE
             rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
             cos_b, sin_b = load_compact_rope_rows(cos, sin, position_ids, compact_offsets, b0, rms_blk_rows)
-            # Native arch32 RowSum folds the two 64-column square vectors
-            # before WholeReduceSum. Preserve its FP32 rounding order.
+            # 平方和先把两段 64 列折到一起再做一次 row_sum。
             kv_rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0:HEAD_TILE]
             kv_rms_high = pooled_kv[b0 : b0 + RMS_PAD_TILE, HEAD_TILE:HEAD_DIM]
             folded_sq = pl.add(pl.mul(kv_rms_low, kv_rms_low), pl.mul(kv_rms_high, kv_rms_high))
             square_sum = pl.row_sum(folded_sq)
             variance = pl.add(pl.mul(square_sum, HEAD_DIM_INV), EPS)
-            rms = pl.sqrt(variance)
+            inv_rms = pl.recip(pl.sqrt(variance))
             kv_norm_chunk = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0:NOPE_HEAD_DIM]
-            # Native A3 widens BF16 gamma inside the RMS computation.
             gamma = pl.cast(norm_w_2d[:, 0:NOPE_HEAD_DIM], target_type=pl.FP32)
-            # Native RowDivs uses vector division, followed by gamma; a
-            # reciprocal and multiplication has a different BF16 boundary.
-            normed_chunk = pl.col_expand_mul(pl.row_expand_div(kv_norm_chunk, rms), gamma)
+            normed_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_norm_chunk, inv_rms), gamma)
             normed_nope = pl.cast(normed_chunk, target_type=pl.BF16, mode="rint")
 
             kv_rope_norm = pooled_kv[b0 : b0 + RMS_PAD_TILE, NOPE_HEAD_DIM:HEAD_DIM]
             gamma_rope = pl.cast(norm_w_2d[:, NOPE_HEAD_DIM:HEAD_DIM], target_type=pl.FP32)
             # Interleaved RMSNorm and inverse-RoPE rotation.
-            rope_normed = pl.col_expand_mul(pl.row_expand_div(kv_rope_norm, rms), gamma_rope)
+            rope_normed = pl.col_expand_mul(pl.row_expand_mul(kv_rope_norm, inv_rms), gamma_rope)
             swapped = pl.gather(rope_normed, dim=-1, index=rope_swap_idx)
             sin_signed = pl.mul(sin_b, pl.sub(pl.mul(rope_lane, 2.0), 1.0))
             rope_rot = pl.add(pl.mul(rope_normed, cos_b), pl.mul(swapped, sin_signed))
@@ -462,7 +447,7 @@ def indexer_compressor_write(
             target_type=pl.FP32,
         )
         # Native rotate_activation scales after its BF16 Hadamard matmul.
-        kv_blk_f32 = pl.cast(pl.cast(pl.mul(kv_blk_f32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
+        kv_blk_f32 = pl.mul(kv_blk_f32, HADAMARD_SCALE)
         # Per-row absolute maximum.
         kv_amax = pl.reshape(pl.row_max(pl.abs(kv_blk_f32)), [1, RMS_PAD_TILE])
         kv_amax = pl.maximum(kv_amax, pl.full([1, RMS_PAD_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS))

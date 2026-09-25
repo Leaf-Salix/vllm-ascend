@@ -231,26 +231,54 @@ def sparse_attn_csa(
                 for c_dt in pl.range(bias_rows):
                     c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
                     pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
+            # ---- 滑窗有效位：常见路径整块算 -------------------------------
+            # 每 token 的窗口长度 v_length = min(position+1, WIN)，补位请求压到 0。
+            # 有效位的主体就是 j < v_length[t]，与页表无关，可以一次算出
+            # [BIAS_T_TILE, WIN]。原来逐 token 再逐 SWA_RUNS 做 [1, WIN]，
+            # 一个 tile 要 BIAS_T_TILE * SWA_RUNS = 40 组窄向量运算。
+            v_columns = pl.cast(pl.arange(0, [1, WIN], dtype=pl.INT32), pl.FP32)
+            v_len_col = pl.create_tensor([BIAS_T_TILE, 1], dtype=pl.FP32)
+            for bias_len_dt in pl.range(BIAS_T_TILE):
+                v_len_t = bias_t0 + pl.min(bias_len_dt, bias_rows - 1)
+                v_len_request = v_len_t // S
+                v_len_position = pl.cast(pl.read(position_ids, [v_len_t, 0]), pl.INDEX)
+                v_len_value = pl.min(v_len_position + 1, WIN)
+                # 补位请求的 position 是上一步残留，用它推出的页表列号可能越界。
+                # Native 把补位请求的 seq_lens 清零，真实 decode 请求恒 >= S。
+                # 窗口长度压到 0 后该 token 的 SWA 偏置全是 NEG_INF，
+                # attention 退化为只剩 sink，输出有限且与真实请求无关。
+                if pl.read(seq_lens, [v_len_request]) <= 0:
+                    v_len_value = pl.cast(0, pl.INDEX)
+                pl.write(v_len_col, [bias_len_dt, 0], pl.cast(pl.cast(v_len_value, pl.INT32), pl.FP32))
+            v_col_tile = pl.col_expand_mul(
+                pl.full([BIAS_T_TILE, WIN], dtype=pl.FP32, value=1.0), v_columns
+            )
+            # clamp(v_length[t] - j, 0, 1)：j < v_length[t] 时为 1
+            v_valid_tile = pl.minimum(
+                pl.maximum(pl.neg(pl.row_expand_sub(v_col_tile, v_len_col)), 0.0), 1.0
+            )
+            sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, 0:WIN] = pl.mul(
+                pl.sub(v_valid_tile, 1.0), -NEG_INF
+            )
+            if WIN < ATTN_K_TILE:
+                sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, WIN:ATTN_K_TILE] = pl.full(
+                    [BIAS_T_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF
+                )
+
             for bias_dt in pl.range(bias_rows):
                 bias_t = bias_t0 + bias_dt
                 bias_request = bias_t // S
                 c_position = pl.cast(pl.read(position_ids, [bias_t, 0]), pl.INDEX)
-
-                # Match the Native page-valid window, including short histories
-                # and negative page entries. Intervals from distinct pages do not overlap.
                 v_length = pl.min(c_position + 1, WIN)
-                # 补位请求的 position 是上一步残留，用它推出的页表列号可能超出本请求
-                # 的页表宽度。Native 把补位请求的 seq_lens 清零，真实 decode 请求恒 >= S。
-                # 把窗口长度压到 0 后，下面的 v_hi > v_lo 恒不成立，既不读页表，
-                # v_block_valid 与 v_valid 也保持为 0，该 token 的 SWA 偏置全为 NEG_INF，
-                # attention 退化为只剩 sink，输出有限且与真实请求无关。
                 if pl.read(seq_lens, [bias_request]) <= 0:
                     v_length = pl.cast(0, pl.INDEX)
                 v_start = c_position - v_length + 1
                 v_head = v_start % BLOCK_SIZE
-                v_columns = pl.cast(pl.arange(0, [1, WIN], dtype=pl.INT32), pl.FP32)
-                v_valid = pl.full([1, WIN], dtype=pl.FP32, value=0.0)
+                # 逐页只做两件事：本 token 有没有任何有效页，以及有没有空洞。
+                # Match the Native page-valid window, including short histories
+                # and negative page entries. Intervals from distinct pages do not overlap.
                 v_block_valid = pl.cast(0, pl.INT32)
+                v_has_hole = pl.cast(0, pl.INT32)
                 for v_run in pl.range(SWA_RUNS):
                     v_lo = pl.max(v_run * BLOCK_SIZE - v_head, 0)
                     v_hi = pl.min((v_run + 1) * BLOCK_SIZE - v_head, v_length)
@@ -258,19 +286,32 @@ def sparse_attn_csa(
                         v_page = pl.read(ori_block_table, [bias_request, (v_start + v_lo) // BLOCK_SIZE])
                         if v_page >= 0:
                             v_block_valid = pl.cast(1, pl.INT32)
-                            v_lo_fp32 = pl.cast(pl.cast(v_lo, pl.INT32), pl.FP32)
-                            v_hi_fp32 = pl.cast(pl.cast(v_hi, pl.INT32), pl.FP32)
-                            v_ge = pl.minimum(pl.maximum(pl.add(pl.sub(v_columns, v_lo_fp32), 1.0), 0.0), 1.0)
-                            v_lt = pl.minimum(pl.maximum(pl.add(pl.neg(v_columns), v_hi_fp32), 0.0), 1.0)
-                            v_valid = pl.add(v_valid, pl.mul(v_ge, v_lt))
+                        else:
+                            v_has_hole = pl.cast(1, pl.INT32)
                 pl.write(valid_block_mask, [bias_t, 0], v_block_valid)
 
-                sparse_bias[bias_t : bias_t + 1, 0:WIN] = pl.mul(pl.sub(v_valid, 1.0), -NEG_INF)
-                # WIN == ATTN_K_TILE 时滑窗块没有尾巴要补，空切片在 DSL 里不合法。
-                if WIN < ATTN_K_TILE:
-                    sparse_bias[bias_t : bias_t + 1, WIN:ATTN_K_TILE] = pl.full(
-                        [1, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF
-                    )
+                # 只有页表真有空洞时才逐 run 精算这一行，覆盖整块算出的结果。
+                if v_has_hole == 1:
+                    v_columns_row = pl.cast(pl.arange(0, [1, WIN], dtype=pl.INT32), pl.FP32)
+                    v_valid = pl.full([1, WIN], dtype=pl.FP32, value=0.0)
+                    for v_hole_run in pl.range(SWA_RUNS):
+                        v_hole_lo = pl.max(v_hole_run * BLOCK_SIZE - v_head, 0)
+                        v_hole_hi = pl.min((v_hole_run + 1) * BLOCK_SIZE - v_head, v_length)
+                        if v_hole_hi > v_hole_lo:
+                            v_hole_page = pl.read(
+                                ori_block_table, [bias_request, (v_start + v_hole_lo) // BLOCK_SIZE]
+                            )
+                            if v_hole_page >= 0:
+                                v_lo_fp32 = pl.cast(pl.cast(v_hole_lo, pl.INT32), pl.FP32)
+                                v_hi_fp32 = pl.cast(pl.cast(v_hole_hi, pl.INT32), pl.FP32)
+                                v_ge = pl.minimum(
+                                    pl.maximum(pl.add(pl.sub(v_columns_row, v_lo_fp32), 1.0), 0.0), 1.0
+                                )
+                                v_lt = pl.minimum(
+                                    pl.maximum(pl.add(pl.neg(v_columns_row), v_hi_fp32), 0.0), 1.0
+                                )
+                                v_valid = pl.add(v_valid, pl.mul(v_ge, v_lt))
+                    sparse_bias[bias_t : bias_t + 1, 0:WIN] = pl.mul(pl.sub(v_valid, 1.0), -NEG_INF)
 
     # QK/PV scratch tensors.
     cmp_block_num = pl.tensor.dim(cmp_kv, 0)

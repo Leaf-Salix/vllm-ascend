@@ -145,6 +145,8 @@ TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
 
+REPACK_WORKERS = 48  # indexer 键重排的 AIV 通道数
+
 SCORE_TILE = 384
 
 SCORE_LANE_ROWS = SCORE_TILE // 2
@@ -412,12 +414,70 @@ def indexer_score_topk_forest(
     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+    # ---- 键/scale 重排 ----------------------------------------------------
+    # Native 把一页的 32 个 INT8 键（4096 字节）和 32 个 FP16 scale（64 字节）放在
+    # 同一块分配里，页跨度 4160。4160 % 128 = 64，所以 [blocks*32, 128] 这个二维
+    # 视图不存在，打分侧没法像上游那样用 gather_row 把整页直搬进 L1（L1 是 16x32
+    # 分形，落点行号必须是 16 的倍数、列号是 32 的倍数；按页搬字节再 reshape 会
+    # 被拒，逐行转置装填也会被拒）。原先的办法是先搬进 UB 再 aic_gather 进 L1，
+    # 多一跳，而且每页一次 DMA。
+    #
+    # 这里改为每步先做一次重排：把本步可见的页按逻辑页序拷成紧凑的
+    # [b_dim * repack_pages * BLOCK_SIZE, IDX_HEAD_DIM]，scale 拷成
+    # [b_dim, repack_pages * BLOCK_SIZE]。之后打分侧读的是连续行，
+    # 既能整块直搬 L1，也能把一个 lane 的 6 页并成一次 DMA。
+    # 重排本身只读一遍可见 cache（每请求一次），而打分侧原来每个 query 都要读一遍
+    # （同一请求的 S 个 query 读的是同一段历史），所以多出来的搬运是小头。
+    repack_max_len = 0
+    for repack_batch in pl.range(b_dim):
+        repack_max_len = pl.max(repack_max_len, pl.read(kv_seq_lens, [repack_batch]) // COMPRESS_RATIO)
+    repack_max_len = pl.max(pl.min(repack_max_len, TOPK_MAX_CANDIDATES), 1)
+    # 末尾多留一个 SCORE_TILE 的余量：打分侧的最后一个 tile 总是读满
+    # SCORE_LANE_ROWS 行（超出 lane_valid_rows 的列随后被丢掉），留足余量就不必把
+    # 读起点往回夹——往回夹会让 tile 内的行与候选列号错位。余量页由下面的
+    # repack_safe 用最后一个有效页填上，不留未初始化数据。
+    repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + SCORE_TILE // BLOCK_SIZE
+    repack_rows = repack_pages * BLOCK_SIZE
+    key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
+    scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
+    with pl.spmd(
+        REPACK_WORKERS, name_hint="indexer_key_repack", deps=[cache_write_tid], allow_early_resolve=True
+    ) as repack_tid:
+        repack_worker = pl.tile.get_block_idx()
+        for repack_unit in pl.range(repack_worker, b_dim * repack_pages, REPACK_WORKERS):
+            repack_b = repack_unit // repack_pages
+            repack_page = repack_unit - repack_b * repack_pages
+            repack_len = pl.read(kv_seq_lens, [repack_b]) // COMPRESS_RATIO
+            repack_valid = pl.max(pl.min(repack_len, TOPK_MAX_CANDIDATES), 0)
+            # 超出本请求可见范围的页钳到最后一页：紧凑缓冲里对应的行不会被读到
+            # （打分侧按 valid_count 截断），只是不留未初始化数据。
+            repack_safe = pl.min(repack_page, pl.max((repack_valid - 1) // BLOCK_SIZE, 0))
+            repack_block = pl.cast(
+                pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
+            )
+            repack_bytes = pl.create_tensor([1, INDEXER_KEY_BYTES], dtype=pl.INT8)
+            repack_bytes = pl.gather_row(
+                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_KEY_BYTES]
+            )
+            repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
+            key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
+                repack_bytes, [BLOCK_SIZE, IDX_HEAD_DIM]
+            )
+            repack_scale_bytes = pl.create_tensor([1, BLOCK_SIZE * 2], dtype=pl.INT8)
+            repack_scale_bytes = pl.gather_row(
+                repack_scale_bytes, idx_kv_cache, [0, 0], [repack_block, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
+            )
+            repack_scale_col = repack_page * BLOCK_SIZE
+            scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
+                pl.reinterpret_view(repack_scale_bytes, pl.FP16)
+            )
+
     # 性能版不外提 head 系数：上游在 leaf 内按 query 现算，省掉一个独占关键路径
     # 约 40.7us 的任务；精度版保留外提是为了配合 Cube 规约的 FP16 权重行布局。
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_leaf",
-        deps=[qh_quant_tid, weights_tid, cache_write_tid],
+        deps=[qh_quant_tid, weights_tid, repack_tid],
         allow_early_resolve=True,
         optimizations=[pl.cross_core_slot(slot_num=1)],
     ) as score_tid:
@@ -435,6 +495,7 @@ def indexer_score_topk_forest(
             query = item // max_leaves
             leaf = item % max_leaves
             batch_idx = query // S
+            repack_base = batch_idx * repack_rows
             position = pl.read(position_ids, [query])
             cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
             cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -460,49 +521,20 @@ def indexer_score_topk_forest(
                     head_coefficient = pl.reshape(pl.mul(query_scale, query_weight), [IDX_N_HEADS, 1])
                 for score_begin in pl.pipeline(0, lane_span, SCORE_LANE_ROWS, stage=2):
                     read_begin = score_begin * (1 + single_leaf)
-                    # Native packs 4096 contiguous key bytes before the FP16
-                    # scales in each page. Load that region once per page in
-                    # each AIV lane, then hand the assembled rows to Cube in
-                    # L1. This avoids 32 small GM DMAs per page and needs no
-                    # GM staging allocation or additional root arguments.
-                    #
-                    # 这条 UB 中转是被 Native 的页布局逼出来的，不是疏忽。上游把整块
-                    # cache 视作 [blocks*BLOCK_SIZE, 128] 后用 create_l1 直接整页搬进
-                    # L1；我们做不到，因为页跨度实测 4160（键 4096 + 32 个 FP16
-                    # scale），4160 % 128 = 64，键行在页与页之间根本不连续，
-                    # [blocks*32, 128] 这个二维视图不存在。2026-09-25 试过的两条路都被
-                    # 编译器挡住：
-                    #   ① create_l1([SCORE_TILE//BLOCK_SIZE, INDEXER_KEY_BYTES]) 按页搬
-                    #      字节再 reshape —— L1 是 16x32 分形，行数必须是 16 的倍数，
-                    #      [12, 4096] 直接被拒；
-                    #   ② create_l1([IDX_HEAD_DIM, SCORE_TILE], transpose=True) 逐行
-                    #      DN2ZN 装填 —— INT8 的 ZN 分形内形状是 32，落点列号必须是 32
-                    #      的倍数，逐行（key_row 0..31）报
-                    #      'pto.subview' op boxed layout subview offsets must be
-                    #      multiples of inner shape。
-                    # 要去掉这次中转，得在存储合同层面把键与 scale 拆成两块分配，
-                    # 那是 Native 侧的改动，超出本算子范围。
-                    for key_aiv in pl.split_aiv(2, mode=pl.SplitMode.UP_DOWN):
-                        key_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * IDX_HEAD_DIM], dtype=pl.INT8)
-                        for page in pl.unroll(SCORE_LANE_ROWS // BLOCK_SIZE):
-                            page_begin = page * BLOCK_SIZE
-                            lane_page = key_aiv * lane_stride + page_begin
-                            safe_page_begin = pl.min(
-                                read_begin + lane_page, ((valid_count - 1) // BLOCK_SIZE) * BLOCK_SIZE
-                            )
-                            logical_page = (logical_begin + safe_page_begin) // BLOCK_SIZE
-                            physical_block = pl.cast(
-                                pl.read(idx_block_table_flat, [batch_idx * table_columns + logical_page]), pl.INDEX
-                            )
-                            key_bytes = pl.gather_row(
-                                key_bytes,
-                                idx_kv_cache,
-                                [0, page_begin * IDX_HEAD_DIM],
-                                [physical_block, 0],
-                                [1, INDEXER_KEY_BYTES],
-                            )
-                        key_rows = pl.reshape(key_bytes, [SCORE_LANE_ROWS, IDX_HEAD_DIM])
-                        kv_i8 = pl.aic_gather(key_rows)
+                    # 紧凑缓冲里同一请求的逻辑页是连续行，一个 lane 的整段候选
+                    # （SCORE_LANE_ROWS 行）一次 gather_row 就能直搬进 L1，
+                    # 不再需要 UB 中转，也不再是每页一次 DMA。
+                    # 用 create_l1 而不是 tile.create：query_vector 是 Tensor，
+                    # pl.matmul 不允许 Tensor 与 Tile 混用。
+                    kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8)
+                    for key_lane in pl.unroll(2):
+                        kv_i8 = pl.gather_row(
+                            kv_i8,
+                            key_compact,
+                            [key_lane * SCORE_LANE_ROWS, 0],
+                            [repack_base + logical_begin + read_begin + key_lane * lane_stride, 0],
+                            [SCORE_LANE_ROWS, IDX_HEAD_DIM],
+                        )
                     # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
                     # 每个 score tile 一次 FP32->FP16 转换和一次 Cube matmul。
                     # 精度版那条链（NATIVE_QLI_QK_SCALE + FP16 rint + Cube）是为了
@@ -512,26 +544,11 @@ def indexer_score_topk_forest(
                     for aiv_id in pl.split_aiv(2, mode=pl.SplitMode.LEFT_RIGHT):
                         lane_begin = aiv_id * lane_stride
                         lane_valid_rows = pl.max(pl.min(valid_count - read_begin - lane_begin, SCORE_LANE_ROWS), 0)
-                        kv_scale_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * 2], dtype=pl.INT8)
-                        for scale_page in pl.unroll(SCORE_TILE // (2 * BLOCK_SIZE)):
-                            scale_page_begin = scale_page * BLOCK_SIZE
-                            safe_scale_begin = pl.min(
-                                read_begin + lane_begin + scale_page_begin,
-                                ((valid_count - 1) // BLOCK_SIZE) * BLOCK_SIZE,
-                            )
-                            scale_logical_page = (logical_begin + safe_scale_begin) // BLOCK_SIZE
-                            scale_block = pl.cast(
-                                pl.read(idx_block_table_flat, [batch_idx * table_columns + scale_logical_page]),
-                                pl.INDEX,
-                            )
-                            kv_scale_bytes = pl.gather_row(
-                                kv_scale_bytes,
-                                idx_kv_cache,
-                                [0, scale_page_begin * 2],
-                                [scale_block, INDEXER_KEY_BYTES],
-                                [1, BLOCK_SIZE * 2],
-                            )
-                        kv_scale = pl.reinterpret_view(kv_scale_bytes, pl.FP16)
+                        # scale 同样已按逻辑页序排好，一个 lane 一次读完。
+                        scale_col0 = logical_begin + read_begin + lane_begin
+                        kv_scale = scale_compact[
+                            batch_idx : batch_idx + 1, scale_col0 : scale_col0 + SCORE_LANE_ROWS
+                        ]
                         score_shard = pl.aiv_shard(score_i32)
                         score_fp32 = pl.cast(score_shard, target_type=pl.FP32, mode="none")
                         score_fp32 = pl.maximum(score_fp32, 0.0)
@@ -639,15 +656,7 @@ def indexer_qr_rope(
                     acc_fp32 = pl.cast(
                         qr_acc_pad[dq_t0 : dq_t0 + DEQUANT_T_TILE, h0 : h0 + IDX_HEAD_DIM], target_type=pl.FP32, mode="none"
                     )
-                    # Native combines the activation and weight scales before
-                    # multiplying the INT32 accumulator converted to FP32.
-                    qr_dequant_scale = pl.col_expand_mul(
-                        pl.row_expand_mul(pl.full([DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0), qr_scale_tile),
-                        wq_scale,
-                    )
-                    qr_dequant = pl.mul(acc_fp32, qr_dequant_scale)
-                    # Native quantized projection rounds to BF16 before RoPE.
-                    qr_dequant = pl.cast(pl.cast(qr_dequant, pl.BF16, mode="rint"), pl.FP32)
+                    qr_dequant = pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale)
                     qr_nope_bf16 = pl.cast(qr_dequant[:, 0:IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
                     qr_rope_slice = qr_dequant[:, IDX_NOPE_HEAD_DIM:IDX_HEAD_DIM]
                     qr_swapped = pl.gather(qr_rope_slice, dim=-1, index=rope_swap_idx)
@@ -669,12 +678,7 @@ def indexer_qr_rope(
                         tail_acc_fp32 = pl.cast(
                             qr_acc_pad[tail_t0 : tail_t0 + 1, tail_h0 : tail_h0 + IDX_HEAD_DIM], target_type=pl.FP32, mode="none"
                         )
-                        # Native combines the activation and weight scales before
-                        # multiplying the INT32 accumulator converted to FP32.
-                        tail_qr_dequant_scale = pl.mul(tail_wq_scale, tail_qr_scale_value)
-                        tail_qr_dequant = pl.mul(tail_acc_fp32, tail_qr_dequant_scale)
-                        # Native quantized projection rounds to BF16 before RoPE.
-                        tail_qr_dequant = pl.cast(pl.cast(tail_qr_dequant, pl.BF16, mode="rint"), pl.FP32)
+                        tail_qr_dequant = pl.col_expand_mul(pl.mul(tail_acc_fp32, tail_qr_scale_value), tail_wq_scale)
                         tail_qr_nope_bf16 = pl.cast(tail_qr_dequant[:, 0:IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
                         tail_qr_rope_slice = tail_qr_dequant[:, IDX_NOPE_HEAD_DIM:IDX_HEAD_DIM]
                         tail_qr_swapped = pl.gather(tail_qr_rope_slice, dim=-1, index=tail_swap_idx)
@@ -724,9 +728,7 @@ def indexer_qr_hadamard_mm(
         for idx in pl.range(qh_quant_worker, bs_heads // QH_QUANT_TILE, QH_QUANT_WORKERS):
             o0 = idx * QH_QUANT_TILE
             qh_full_f32 = qh_acc_gm[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM]
-            # Native Hadamard: unscaled BF16 matmul, then BF16 scaling.
-            qh_full_f32 = pl.cast(pl.cast(qh_full_f32, pl.BF16, mode="rint"), pl.FP32)
-            qh_full_f32 = pl.cast(pl.cast(pl.mul(qh_full_f32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
+            qh_full_f32 = pl.mul(qh_full_f32, HADAMARD_SCALE)
             qh_amax = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
             for h0 in pl.range(0, IDX_HEAD_DIM, QH_HEAD_DIM_TILE):
                 qh_a_f32 = qh_full_f32[:, h0 : h0 + QH_HEAD_DIM_TILE]
@@ -739,9 +741,7 @@ def indexer_qr_hadamard_mm(
             qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
             qh_scale_recip = pl.recip(qh_scale_quant_row)
             qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
-            qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = pl.cast(
-                pl.cast(qh_scale_dq, pl.FP16, mode="rint"), pl.FP32
-            )
+            qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = qh_scale_dq
             qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
             qh_q_scaled = pl.row_expand_mul(qh_full_f32, qh_scale_quant)
             qh_q_i32 = pl.cast(qh_q_scaled, target_type=pl.INT32, mode="rint")

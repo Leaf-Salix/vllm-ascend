@@ -68,6 +68,9 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--swimlane", type=int, default=0, choices=range(5),
                         help="非 0 时开 DFX 芯片泳道；4 才有逐任务 kernel 时长")
+    parser.add_argument("--windows", type=int, default=1,
+                        help="采几个泳道窗口。单次调用的 makespan 受设备侧调度次序影响，"
+                             "run 与 run 之间能差出几十 us；看改动效果要取多窗口的中位数")
     parser.add_argument("--pmu", type=int, default=0,
                         help="AICore PMU 事件：2=PIPE_UTILIZATION、4=MEMORY。走编译程序路径，"
                              "与 pypto.torch.init 互斥，所以开了它就不采泳道")
@@ -128,16 +131,18 @@ def main() -> None:
             samples.append((time.perf_counter() - start) * 1e6)
         samples.sort()
         if args.swimlane:
-            # 只给一次调用开窗口：不然每轮都记一遍，产物没法逐任务对照。
+            # 每个窗口只包一次调用：不然一个窗口里记好几遍，产物没法逐任务对照。
             # 墙钟里绝大部分是 eager 下的主机侧派发开销（PyPTO 的 _resolve_compiled
             # 按调用次数计费），要量 kernel 本身必须看泳道的 kernel-duration。
-            torch.npu.synchronize()
-            pypto.torch.begin_dfx()
-            try:
-                run()
-            finally:
-                pypto.torch.end_dfx()
-            torch.npu.synchronize()
+            # 第一个窗口写进 dfx/，之后的依次写进 dfx/window_1、dfx/window_2 ……
+            for _ in range(max(1, args.windows)):
+                torch.npu.synchronize()
+                pypto.torch.begin_dfx()
+                try:
+                    run()
+                finally:
+                    pypto.torch.end_dfx()
+                torch.npu.synchronize()
         report.update(status="PASS",
                       us_min=samples[0], us_p50=statistics.median(samples),
                       us_p90=samples[int(len(samples) * 0.9) - 1], us_max=samples[-1],
@@ -146,6 +151,10 @@ def main() -> None:
                                       "逐任务 kernel 时长看 --swimlane 4 的产物")
         if args.swimlane >= 4 and not args.pmu:
             report["swimlane"] = _export_swimlane(args.output / "dfx")
+            report["swimlane_windows"] = [
+                _export_swimlane(args.output / "dfx" / f"window_{index}")
+                for index in range(1, max(1, args.windows))
+            ]
         out = tensors["attn_out"].detach().float().cpu()
         report["attn_out"] = {"finite": bool(torch.isfinite(out).all()),
                               "absmax": float(out.abs().max()), "mean": float(out.mean())}

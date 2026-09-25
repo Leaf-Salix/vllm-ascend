@@ -72,9 +72,9 @@ CMP_BLOCK_NUM = KV_CMP_BLOCK_NUM
 
 CMP_BLOCK_NUM_DYN = pl.dynamic("CMP_BLOCK_NUM_DYN")
 
-K_TILE = 128  # Native compressor's L0 Mmad K extent.
+K_TILE = 512
 
-OUT_TILE = 32
+OUT_TILE = 64
 
 # Native uniform-S6 overlap compressor uses 16 column groups per head.
 # Each group starts its K traversal one L1 block later, independently per half.
@@ -201,12 +201,17 @@ def compressor_ratio4_pool_projected(
                 if c_len > 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
                     window_start = token_pos - STATE_LEN + 1
                     for h0 in pl.range(0, HEAD_DIM, POOL_HEAD_TILE):
-                        # Native normalizes all eight probabilities before
-                        # weighting values, using its interleaved 8->4->2->1 tree.
-                        # These are local vector tiles; Native state stays in place.
-                        window_values = pl.tile.full([STATE_LEN, POOL_HEAD_TILE], dtype=pl.FP32, value=0.0)
-                        window_scores = pl.tile.full([STATE_LEN, POOL_HEAD_TILE], dtype=pl.FP32, value=FP32_NEG_INF)
-                        for state_idx in pl.range(STATE_LEN):
+                        # 在线 softmax（上游写法）：以本 token 自己这一格起步，再把窗口里其余
+                        # STATE_LEN-1 格逐个并入。精度版把 8 格按 Native 的交错次序拼成
+                        # [8, tile]、先归一化概率再按 8->4->2->1 规约，只为复刻 Native 的舍入次序。
+                        last_ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
+                        mi = pl.add(
+                            pl.load(cmp4_score_proj_pad, [token, HEAD_DIM + h0], [1, POOL_HEAD_TILE]),
+                            pl.load(ape, [last_ape_row, HEAD_DIM + h0], [1, POOL_HEAD_TILE]),
+                        )
+                        li = pl.exp(pl.sub(mi, mi))
+                        oi = pl.load(cmp4_kv_proj_pad, [token, HEAD_DIM + h0], [1, POOL_HEAD_TILE])
+                        for state_idx in pl.range(STATE_LEN - 1):
                             logical_pos = window_start + state_idx
                             value = pl.tile.full([1, POOL_HEAD_TILE], dtype=pl.FP32, value=0.0)
                             score = pl.tile.full([1, POOL_HEAD_TILE], dtype=pl.FP32, value=FP32_NEG_INF)
@@ -234,22 +239,13 @@ def compressor_ratio4_pool_projected(
                                         pl.load(cmp4_score_proj_pad, [overlay_token, state_half + h0], [1, POOL_HEAD_TILE]),
                                         pl.load(ape, [ape_row, state_half + h0], [1, POOL_HEAD_TILE]),
                                     )
-                            native_row = state_idx % COMPRESS_RATIO * COFF + state_idx // COMPRESS_RATIO
-                            window_values = pl.tile.assemble(window_values, value, [native_row, 0])
-                            window_scores = pl.tile.assemble(window_scores, score, [native_row, 0])
-                        max4 = pl.maximum(window_scores[0:4, :], window_scores[4:8, :])
-                        max2 = pl.maximum(max4[0:2, :], max4[2:4, :])
-                        maximum = pl.maximum(max2[0:1, :], max2[1:2, :])
-                        probability = pl.exp(pl.col_expand_sub(window_scores, maximum))
-                        sum4 = pl.add(probability[0:4, :], probability[4:8, :])
-                        sum2 = pl.add(sum4[0:2, :], sum4[2:4, :])
-                        total = pl.add(sum2[0:1, :], sum2[1:2, :])
-                        probability = pl.col_expand_div(probability, total)
-                        weighted = pl.mul(window_values, probability)
-                        weighted4 = pl.add(weighted[0:4, :], weighted[4:8, :])
-                        weighted2 = pl.add(weighted4[0:2, :], weighted4[2:4, :])
-                        pooled_row = pl.add(weighted2[0:1, :], weighted2[1:2, :])
-                        pl.store(pooled_row, [token, h0], pooled_kv)
+                            mi_next = pl.maximum(mi, score)
+                            alpha = pl.exp(pl.sub(mi, mi_next))
+                            beta = pl.exp(pl.sub(score, mi_next))
+                            li = pl.add(pl.mul(alpha, li), beta)
+                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
+                            mi = mi_next
+                        pl.store(pl.div(oi, li), [token, h0], pooled_kv)
 
     return pool_tid, _kv_score_tid
 
@@ -362,8 +358,7 @@ def compressor_ratio4_cache_write(
         b0 = rms_blk * RMS_PAD_TILE
         rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
         cos_b, sin_b = load_compact_rope_rows(cos, sin, position_ids, compact_offsets, b0, rms_blk_rows)
-        # Native RowSum first folds eight 64-column square vectors,
-        # then performs WholeReduceSum on the final 64 columns.
+        # 平方和先折半到 64 列再做一次 row_sum，比逐 64 列各做一次 row_sum 指令更少。
         rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0 : HEAD_DIM // 2]
         rms_high = pooled_kv[b0 : b0 + RMS_PAD_TILE, HEAD_DIM // 2 : HEAD_DIM]
         folded4 = pl.add(pl.mul(rms_low, rms_low), pl.mul(rms_high, rms_high))
@@ -371,18 +366,17 @@ def compressor_ratio4_cache_write(
         folded1 = pl.add(folded2[:, 0:HEAD_TILE], folded2[:, HEAD_TILE : 2 * HEAD_TILE])
         square_sum = pl.row_sum(folded1)
         variance = pl.add(pl.mul(square_sum, HEAD_DIM_INV), EPS)
-        rms = pl.sqrt(variance)
+        inv_rms = pl.recip(pl.sqrt(variance))
         for k0 in pl.range(0, NOPE_HEAD_DIM, HEAD_TILE):
             kv_norm_chunk = pooled_kv[b0 : b0 + RMS_PAD_TILE, k0 : k0 + HEAD_TILE]
-            # Native A3 widens BF16 gamma inside the RMS computation.
             gamma = pl.cast(norm_w_2d[:, k0 : k0 + HEAD_TILE], target_type=pl.FP32)
-            normed_chunk = pl.col_expand_mul(pl.row_expand_div(kv_norm_chunk, rms), gamma)
+            normed_chunk = pl.col_expand_mul(pl.row_expand_mul(kv_norm_chunk, inv_rms), gamma)
             normed_kv[b0 : b0 + RMS_PAD_TILE, k0 : k0 + HEAD_TILE] = normed_chunk
 
         kv_rope_norm = pooled_kv[b0 : b0 + RMS_PAD_TILE, NOPE_HEAD_DIM:HEAD_DIM]
         gamma_rope = pl.cast(norm_w_2d[:, NOPE_HEAD_DIM:HEAD_DIM], target_type=pl.FP32)
         # Interleaved RMSNorm and inverse-RoPE rotation.
-        rope_normed = pl.col_expand_mul(pl.row_expand_div(kv_rope_norm, rms), gamma_rope)
+        rope_normed = pl.col_expand_mul(pl.row_expand_mul(kv_rope_norm, inv_rms), gamma_rope)
         rope_ones = pl.full([RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
         rope_index = pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32)
         rope_index_f = pl.cast(rope_index, target_type=pl.FP32)
