@@ -239,6 +239,7 @@ ARG_ORDER = (
     "wq_b",
     "wq_b_scale",
     "wkv",
+    "kv_projected",
     "gamma_cq",
     "gamma_ckv",
     "freqs_cos",
@@ -398,10 +399,22 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
     a = dict(prepare_weights(impl, layer_metadata.indexer.compressor.cache.hadamard))
     a["x_normed"] = hidden_states[:t]
     a["attn_out"] = output[:t] if output is not None else torch.empty_like(a["x_normed"])
+    # The kv LoRA stays on native's own linear: its accumulation order is not
+    # reproducible from the DSL, so computing it here is what keeps the
+    # projection bit-identical.
+    kv_projected = impl.wkv(a["x_normed"])
+    if isinstance(kv_projected, tuple):
+        kv_projected = kv_projected[0]
+    a["kv_projected"] = kv_projected.contiguous()
     for name in ("x_normed", "attn_out"):
         tensor = a[name]
         if tensor.dtype != torch.bfloat16 or not tensor.is_contiguous() or tensor.shape != (t, kcsa.D):
             raise NativeLayoutError(f"{name} must be contiguous BF16 [{t}, {kcsa.D}]")
+    if a["kv_projected"].dtype != torch.bfloat16 or a["kv_projected"].shape != (t, kcsa.HEAD_DIM):
+        raise NativeLayoutError(
+            f"kv_projected must be BF16 [{t}, {kcsa.HEAD_DIM}], got "
+            f"{a['kv_projected'].dtype} {tuple(a['kv_projected'].shape)}"
+        )
 
     def rope(name, value):
         _native_tensor(name, value, torch.float32)

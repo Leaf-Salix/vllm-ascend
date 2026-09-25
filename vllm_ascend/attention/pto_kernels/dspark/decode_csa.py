@@ -45,7 +45,7 @@ from .config import (
 from .decode_compressor_ratio4 import compressor_ratio4_vllm
 from .decode_indexer import indexer_vllm
 from .decode_indexer_compressor import indexer_compressor_vllm
-from .qkv_proj_rope import kv_proj_rope, q_proj_rope
+from .qkv_proj_rope import kv_norm_rope, q_proj_rope
 from .decode_o_proj import (
     LOCAL_T,
     LOCAL_T_PAD,
@@ -123,6 +123,7 @@ def _decode_csa_attn_tp1(
     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+    kv_projected: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
     gamma_ckv: pl.Tensor[[HEAD_DIM], pl.BF16],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
@@ -214,6 +215,7 @@ def _decode_csa_attn_tp1(
 ):
     """Consume native token RoPE, compact compressor rows, and write slots."""
     x_normed.bind_dynamic(0, T_DYN)
+    kv_projected.bind_dynamic(0, T_DYN)
     freqs_cos.bind_dynamic(0, T_DYN)
     freqs_sin.bind_dynamic(0, T_DYN)
     cmp_freqs_cos.bind_dynamic(0, CMP_ROPE_ROWS_DYN)
@@ -347,8 +349,13 @@ def _decode_csa_attn_tp1(
         qr_scale,
         late_dep,
     )
-    kv_proj_rope(
-        x_normed, wkv, gamma_ckv, freqs_cos, idx_sin_signed,
+    # The wkv LoRA runs outside: it is a plain BF16 GEMM, and no accumulation
+    # order we can express reproduces CANN's output bit for bit -- even a
+    # float64-exact dot product still lands on the other side of a BF16
+    # rounding boundary on one element in 12288. Taking native's own result
+    # makes the projection bit-identical by construction.
+    kv_norm_rope(
+        kv_projected, gamma_ckv, freqs_cos, idx_sin_signed,
         rope_swap_idx, kv, late_dep,
     )
 
