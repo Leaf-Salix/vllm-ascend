@@ -7,6 +7,9 @@
 状态口径：`未开始` / `进行中` / `已完成` / `暂停`（暂停项不得自行恢复）。
 截至 2026-09-24，已完成 T1.1～T1.9、T2.1、T2.2、T3.1 与 T5.1～T5.4（共 18 项）；T1.10 低优先级、T2.5 待用户拍板。**T1 的 padding 主线至此全部走通。**
 
+**2026-09-25 起的当前主线是 T6：把整层跨度从 865.1 µs 收敛到 725 µs 以下。**
+四条目标由用户当日口述给定，逐条落在 T6.1～T6.5，详见第 6 节。
+
 相关文档：[padding 开发计划](DSV4_FLASH_CSA_PADDING_PLAN.md)、
 [跨会话交接](DSV4_FLASH_CSA_NEXT_SESSION_HANDOFF.md)、
 [验证计划](DSV4_FLASH_CSA_VALIDATION_PLAN.md)、
@@ -31,8 +34,11 @@
 - 大权重、`.pt`/`.safetensors`、`.bin`/`.so`/`.o`、安装包和重复编译产物留本地不提交；
   不要 `git add .`（`build_output/` 约 114MB 未提交）。
 - 模型测试一律使用正式 W8A8，不再使用 48 分片 cann_recipe 参考权重。
-- **NZ 当前一定不能开**：`weight_nz_mode=0`、`enable_kv_nz=false`、`VLLM_ASCEND_ENABLE_NZ=0`，
-  Native 侧也一样；上线脚本里的 `VLLM_ASCEND_ENABLE_NZ=2` 不要照搬。
+- **NZ 口径已在 2026-09-25 反转**（原文是"NZ 当前一定不能开"，现作废）。用户说明：
+  当初退回 ND 只是一次精度问题的临时规避，精度问题消失后要继续做 NZ 拿性能。
+  现在的口径是：**Native 与 PTO 都用默认 NZ 模式**（`VLLM_ASCEND_ENABLE_NZ` 默认 1，
+  见 `AGENTS.md` 的 `env_variables`），PTO 侧把 NZ 该补的补上；
+  **ND 分支必须长期保留成独立函数**，供随时切回来做对照测试。见 T6。
 - **decode 性能测试一律用 ACL Graph `FULL_DECODE_ONLY`**，不用 eager；
   eager 只用于定位问题，其结论不代表上线表现。
 - 不过度测试：失败先定位，只重跑受影响项。
@@ -996,7 +1002,188 @@ lowering 产出的 CCE 或逐处比对 PH001 类性能提示。**该方向需用
 | T5.3 | 更正 padding 计划里的 S0 描述 | 原文写"把四处改成显式报错"不可实现——PTO device 代码抛不出 Python 异常，越界读只会读到无关数据。已改为 CPU 复算索引公式，计划正文同步更正并补入 predict 结果 | **已完成** |
 | T5.4 | 决定 `dsv4_perf_accuracy_20260827/` 的去留 | **用户 2026-09-24 裁定：不入库，永久保持本地。** 该目录含内网地址 `172.21.100.73`～`76`（`config.sh`、`docker_run.sh`、`start_decode.sh`、`start_proxy.sh`），而本仓库推送到公开 fork `github.com/nalinaly/vllm-ascend`。已加入 `.gitignore` 防止误 `git add`；用户未选择"脱敏后入库"，所以也不要改写地址后再提交 | **已完成** |
 
-## 6. 保持暂停，不得自行恢复
+## 6. T6　性能收敛到 725 µs（2026-09-25 用户定，当前主线）
+
+四条目标由用户当日口述给定，原话如下，逐条落在 T6.1～T6.5：
+
+1. 所有的性能差距，NZ 该补的就补上，但是与 ND 用函数区分开。
+2. 与上游泳道图做时序差异分析，优化性能到 725 µs 以下。
+3. 把精度版 CSA 与性能版 CSA 再仔细审核一下，不影响精度的性能优化都覆盖一下。
+4. 测试完整完备的泛化场景的与 Native 的对比，Native 采用默认的 NZ 模式。
+
+### 基线与对比口径（先看这一段，之前的对比数字有过两次口径错误）
+
+**泳道只取 `pid == 4`（Worker View）。** 我们导出的 `merged_swimlane.json` 含 5 个
+视图：`pid 4 = Worker View`、`pid 3 = Scheduler View`、`pid 1/2 = AICPU
+Orchestrator/Scheduler`、`pid 7 = Kernel Launches`；上游给的
+`shangyou-merged_swimlane_20260924_005402.json` **只导出了 pid 4**。不筛 pid 直接
+求和，我们这边会算出 86522 核·µs 对上游 31128，逐 task 块数还会整齐地翻倍
+（proj_a_mm 128 vs 64、merge_norm 96 vs 48），看着像 tiling 差异，其实是同一批块
+被记了两遍。交叉验证：`args['event-hint']` 里有 `CoreId`，同一个 spmd 若每核出现
+两次而核数不变，就是视图重复；另外 `pl.spmd(N)` 的 N 是写死常量
+（如 `MERGE_WORKERS = 48`），泳道里出现 96 块就一定有问题。
+
+**取最新一次采样。** 我曾拿 09-24 22:10 那份（mHC 整层融合**之前**）去比，结论作废。
+最新的在 `results/perf_variant_20260924/<tag>/swimlane/swimlane/`，按时间戳挑，
+并在结论里写明它对应哪个代码状态。
+
+筛过 pid 4 之后，两边块数完全一致，基线是：
+
+| | 上游 | 我们（sw_base） | 目标 |
+| --- | --- | --- | --- |
+| 跨度 | 728.0 µs | 865.1 µs | **≤ 725 µs** |
+| 核·µs 合计 | 31128.4 | 33281.8（+6.9%） | — |
+| 并发度（核·µs/跨度） | 42.8 | 38.5 | — |
+
+需要砍掉 **140.1 µs** 跨度。
+
+**一处前提差异要记住**：上游 mHC 残差流是端到端 FP32，我们是 BF16，入口的
+`hc_widen`（12.5 µs/层）是这个前提带来的固有开销，Native 内部同样付
+（`run_hc_pre_composite` 里明写 `x.to(at::kFloat)`）。这笔钱砍不掉，所以 725 要从
+别处省出来。详见记忆 `upstream-numbers-carry-their-own-premises`。
+
+### 逐 task 差距（Worker View，单块耗时 µs）
+
+我们更慢的：
+
+| task | 上游 | 我们 | 倍数 | 归因 |
+| --- | --- | --- | --- | --- |
+| merge_norm | 17.12 | 34.77 | **2.03×** | AIV，无权重，与 NZ 无关 → T6.4 |
+| proj_a_mm | 20.67 | 35.38 | **1.71×** | `wo_a` ND vs NZ → T6.1 |
+| quant | 38.20 | 61.67 | 1.61× | AIV → T6.4 |
+| qproj_matmul | 36.95 | 56.08 | **1.52×** | `wq_b` ND vs NZ → T6.1 |
+| indexer_topk_single_leaf_publish | 24.11 | 31.30 | 1.30× | 待查 |
+| proj_b_mm | 17.78 | 20.21 | 1.14× | `wo_b` ND vs NZ → T6.1 |
+| indexer_key_repack | 上游无 | 17.12 | — | vllm-ascend 页跨度 4160（4160%128=64）导致无法直搬 L1 的固有代价，非冗余 |
+
+我们更快的（不要动）：`qr_rms_norm_quant` 0.26×、`kv_proj_matmul` 0.33×、
+`qr_proj_matmul` 0.38×、`weights_proj_reduce` 0.54×、`hc_pre_linear` 0.55×、
+`qr_hadamard_quant` 0.60×、`hc_pre_rms` 0.60×、`idx_qr_proj_matmul` 0.66×、
+`kv_score_proj` 0.72×、`indexer_score_topk_leaf_aiv` 0.81×。
+
+### T6.1　NZ 补齐（目标 1）
+
+**上游 `decode_csa_tp1` 入口只有 4 个权重是 NZ**，其余（`wkv`、`cmp_wkv`、
+`cmp_wgate`、`idx_wq_b`、`weights_proj`、`hadamard_idx`、`inner_wkv`、`inner_wgate`）
+**上游也是 ND，不要动**。范围就是这 4 个：
+
+| 权重 | dtype | 形状 | 落点 task | 当前差距 | 现状 |
+| --- | --- | --- | --- | --- | --- |
+| `wo_a` | BF16 | `[O_GROUPS, O_LORA, O_GROUP_IN]` | `proj_a_mm` | 1.71× | **NZ 实现已在 `3dd0b35d`，开关未开** |
+| `wq_b` | INT8 | `[Q_LORA, H*HEAD_DIM]` | `qproj_matmul` | 1.52× | ND，待拆 |
+| `wo_b` | INT8 | `[D, O_GROUPS*O_LORA]` | `proj_b_mm` | 1.14× | ND，待拆 |
+| `wq_a` | BF16 | `[D, Q_LORA]` | `qr_proj_matmul` | 0.38×（我们已更快） | ND，最后做、收益存疑 |
+
+**收益已实测**（`proj_a_mm`，同一份代码、同一工具链，只改布局，in-core）：
+
+| | ND | NZ | 变化 |
+| --- | --- | --- | --- |
+| 跨度 | 21.10 µs | 9.62 µs | **−54.4%** |
+| MMAD | 1.472 ×32 | 1.472 ×32 | 不变（计算量相同） |
+| **MTE1** | 8.833 | **0.000** | ND 要靠 MTE1 做 L1→L0B 分形重排 |
+| MTE2 | 57.239 | 30.654 | −26.6 |
+| WAIT | 39.986 ×195 | 14.494 ×141 | −64% |
+
+| ID | 目标 | 完成判据 | 状态 |
+| --- | --- | --- | --- |
+| T6.1.1 | `wq_b` → `qproj_matmul` 拆 NZ/ND 双函数 | `qkv_proj_rope.py` 出现 `_q_proj_q_matmul_nz` 与 `_q_proj_q_matmul_nd` 两个独立函数、末尾 `q_proj_q_matmul = _nz if QUANT_WEIGHT_NZ else _nd`；两种开关下都能编过；NZ 下 `qproj_matmul` 单块 ≤ 40 µs | 未开始 |
+| T6.1.2 | `wo_b` → `proj_b_mm` 拆 NZ/ND 双函数 | 同上形态；NZ 下 `proj_b_mm` 单块 ≤ 18 µs | 未开始 |
+| T6.1.3 | 打开 `wo_a` 的 NZ 并验证 | 默认开关下 `proj_a_mm` 单块 ≤ 22 µs，且 256/256 token 与 Native 一致 | 未开始 |
+| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 先测 NZ 是否真更快（我们当前 0.38× 已远快于上游）；若不更快则记录结论并保持 ND，**不强行改** | 未开始 |
+| T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
+| T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
+
+**两档开关的分工（已核实，决定了做事顺序）**：`nz_mode.py` 里
+`QUANT_WEIGHT_NZ = mode >= 1`、`BF16_WEIGHT_NZ = mode >= 2`，而
+`deepseek_v4_flash_dspark/service_config.py:65` 的闸门是
+`weight_nz_mode not in (0, 1) or enable_kv_nz` 就报错。于是：
+
+- **INT8 权重（`wq_b`、`wo_b`）在默认 `mode=1` 下就能开，闸门不挡** ——
+  T6.1.1/T6.1.2 不依赖 T6.1.6，可以先做，且做完即是默认口径的收益。
+- **BF16 权重（`wo_a`、`wq_a`）需要 `mode=2`，会被闸门拒掉** ——
+  T6.1.3/T6.1.4 必须先做 T6.1.6。
+- `enable_kv_nz` 保持拒绝：它改的是 KV cache 的页布局，PTO 的 cache 读取路径按
+  ND 页算偏移，与 NZ 权重是两回事，不在本轮范围内。
+
+当初挡住 `mode=2` 的理由写在 `service_config.py` 的注释里：「2 会连 BF16 权重一起转，
+那会多出一批本可避免的格式往返」。这个理由在本轮要重新权衡——放开后的往返是
+Native 转 FRACTAL_NZ → `prepare_weights` 转回 ND → `_pack_nz` 按 pto-isa 分形序重排，
+确实多一跳，但它发生在 `process_weights_after_loading` 阶段、每层只做一次，
+不在 decode 路径上，换来的是 `proj_a_mm` 单块 35.38→约 20 µs。放开时要把这段
+权衡写进注释，替换掉原来的「先不放开」。
+
+开关仍沿用 vllm-ascend 既有的 `weight_nz_mode`，**不要另造 PTO 私有开关**
+（记忆 `keep-both-nz-and-nd-branches`）——即便我们要的「kernel 内部用 NZ 分形序」
+与 Native 的「张量 npu format」语义并不完全重合。
+
+**实现约束（踩过的坑）**：
+
+- **不要**写成同一个函数里的 `if BF16_WEIGHT_NZ`——`@pl.jit` 读源文件做 AST 分析，
+  两个分支会一起被 trace，冲突报 `Error Code: 6`。必须是两个独立函数 + 末尾择一。
+- NZ 切片偏移要能**被证明非负**：合格的形式是非负常量、SPMD block index、start 与
+  step 均非负的循环变量，以及由它们构成的和与积；**差永远不合格**。上游那种
+  `nf = pa_unit % (O_LORA // A_COL_TILE)` 的取模形式在本地这版 PyPTO 上证不过
+  （实测报 `IsProvableNonNegative` 失败），`_proj_a_mm_nz` 正是为此改成按 N 分块、
+  行块进块内循环。
+- 对齐要求：行偏移是 16 的倍数、列偏移是整条 C0 线的倍数（INT8 c0=32、BF16 c0=16）。
+  已核：`qproj` 行步进 `Q_PROJ_TILE=128`、列步进 `QPROJ_MM_N_TILE=512`，整形
+  `[1024, 32768]`；`proj_b` 行步进 `PROJ_B_MM_N_TILE=128`、列步进 `B_K_TILE=512`，
+  整形 `[4096, 8192]`——**两处全部合规**。`wq_a` 的 `QR_K_TILE`/`QR_N_TILE` 尚未核。
+- `pl.NZ` 是对「GM 里字节已是分形序」的**断言**，不是转换请求。主机侧必须用
+  `_pack_nz` 把字节摆好，且 kernel 标注与主机打包**必须由同一个开关驱动**，
+  否则不报错、只算错。
+- Native 在 `weight_nz_mode>=1` 时会把量化权重转成 `FRACTAL_NZ`(30)，而 PyPTO 根入参
+  只收 NCHW(0)/ND(2)，`prepare_weights` 里已有 `npu_format_cast` 转回 ND。两个 NZ
+  不是一回事，即便我们也走 NZ，仍要先回到 ND 再用 `_pack_nz` 按 pto-isa 分形序重排。
+
+### T6.2　与上游泳道的时序差异分析（目标 2）
+
+| ID | 目标 | 完成判据 | 状态 |
+| --- | --- | --- | --- |
+| T6.2.1 | 逐 task 差距归因表 | 上表中每个 >1.1× 的 task 都有明确归因（布局／分块／依赖／前提差异之一），不留"待查" | 进行中 |
+| T6.2.2 | 关键路径比对 | 用 `fanin-hint`/`fanout-hint` 还原两边关键路径，指出我们多出来的串行段 | 未开始 |
+| T6.2.3 | 跨度收敛 | 同口径（eager、Worker View、最新采样）跨度 **≤ 725 µs** | 未开始 |
+
+注意 `indexer_key_repack` 不是冗余：vllm-ascend 的 indexer 页把 INT8 键(4096B)与
+FP16 scale(64B)放同一分配，页跨度 4160，`4160 % 128 = 64` 使 `[blocks*32, 128]`
+二维视图不存在，打分侧无法像上游那样 `gather_row` 直搬 L1。它换掉了打分侧每个
+query 重复读同一段历史的开销，是净收益项，要连着 `indexer_score_topk_leaf_*`
+一起记账，不能单看它 +822 核·µs 就想删。
+
+### T6.3　精度版与性能版审核（目标 3）
+
+| ID | 目标 | 完成判据 | 状态 |
+| --- | --- | --- | --- |
+| T6.3.1 | 逐文件 diff 两版 CSA | 产出差异清单，每条标注「为精度必需」或「可同步的数值中性优化」 | 未开始 |
+| T6.3.2 | 同步数值中性优化 | 所有标为数值中性的改动（纯调度、分块、搬运路径、NZ 布局）落到精度版；精度版与 Native 的比对结果不劣化 | 未开始 |
+
+判据沿用记忆 `port-numeric-neutral-perf-wins-to-precision`：只搬不改变数值的改动；
+改变数值的（如省掉全量 amax 扫描、省掉 BF16 往返）留在性能版，并在精度版注明原因。
+
+### T6.4　非 NZ 的差距（并入目标 2）
+
+| ID | 目标 | 完成判据 | 状态 |
+| --- | --- | --- | --- |
+| T6.4.1 | `merge_norm` 2.03× | 找到 AIV 侧慢一倍的原因并收敛到 ≤1.2×，或给出不可收敛的实证结论 | 未开始 |
+| T6.4.2 | `quant` 1.61× | 同上 | 未开始 |
+| T6.4.3 | `indexer_topk_single_leaf_publish` 1.30× | 同上 | 未开始 |
+
+`merge_norm` 两边 `MERGE_WORKERS` 都是 48、块数都是 48，纯粹是单块慢一倍，
+与 NZ 无关，优先用 in-core 剖析定位。
+
+### T6.5　泛化场景与 Native 对比（目标 4）
+
+| ID | 目标 | 完成判据 | 状态 |
+| --- | --- | --- | --- |
+| T6.5.1 | Native 基线改用默认 NZ 重采 | Native 侧 `VLLM_ASCEND_ENABLE_NZ` 用默认值（1）跑出新的 decode 基线，旧的 `NZ=0` 基线作废并注明 | 未开始 |
+| T6.5.2 | 泛化档位覆盖 | 覆盖 `cudagraph_capture_sizes` 的全部档位（6 的倍数，B=1～40 对应的 T），每档 PTO 与 Native 输出一致 | 未开始 |
+| T6.5.3 | 长序列与边界 | 8k 之外再覆盖短序列与接近容量上限的场景，含补位请求混档 | 未开始 |
+| T6.5.4 | 性能对比表 | 同配置（ACL Graph `FULL_DECODE_ONLY`、默认 NZ）下 PTO decode step 不慢于 Native | 未开始 |
+
+**口径**：decode 性能一律 ACL Graph `FULL_DECODE_ONLY`；泳道与 bitcompare 用 eager。
+两侧都开默认 NZ——这是本轮相对以往最大的口径变化，旧的 `NZ=0` 对比数字不能直接沿用。
+
+## 7. 保持暂停，不得自行恢复
 
 以下项目用户此前明确叫停，**恢复需要用户重新指派**；
 性能工作与 padding 工作本身都不代表解除暂停。
@@ -1014,7 +1201,7 @@ lowering 产出的 CCE 或逐处比对 PH001 类性能提示。**该方向需用
 如果推进过程中遇到必须依赖这些行为的新阻塞：先提供具体失败证据、说明影响，再和用户讨论方案，
 不要为了让测试通过自行新增冗余缓冲或改变 Native padding 协议。
 
-## 7. 建议执行顺序
+## 8. 建议执行顺序
 
 ```
 T1.2 ✅ → T1.3 ✅代码 → T1.4 ⏳验收中 → T1.5 ⏸待定落点 ┐
@@ -1029,5 +1216,26 @@ T5.1～T5.4 ✅ 全部完成
 关键路径是 T1.4 到 T1.9。T2 和 T4 的多数项都压在 T1.9 之后，
 因为在 PTO 拿不到图模式之前，性能数字和 graph 相关验收都没有意义。
 
-**当前唯二需要你拍板的**：T1.5 的落点（见上），以及 T2.5 的 PyPTO
-`_resolve_compiled` 处置。其余条目要么在跑、要么依赖关系明确。
+**T1 主线已走通，2026-09-25 起的当前主线是 T6：**
+
+```
+T6.1.5 开关与打包链路 ──┬→ T6.1.3 wo_a 开 NZ（实现已在 3dd0b35d，最快见效）
+                        ├→ T6.1.1 wq_b/qproj_matmul  ┐
+                        ├→ T6.1.2 wo_b/proj_b_mm     ├→ T6.2.3 跨度 ≤725 µs → T6.5 泛化验收
+                        └→ T6.1.4 wq_a（收益存疑，最后做，可能不做）
+T6.4 merge_norm / quant / topk_publish ─────────────┘
+T6.3 精度版同步  ← 每完成一项数值中性优化就跟一次，不要攒到最后
+T6.2.1/T6.2.2 归因与关键路径  ← 贯穿全程，为 T6.2.3 提供依据
+```
+
+执行原则：
+
+- **先 T6.1.5 再动任何 kernel**。开关和打包链路没统一就改 kernel，会出现标注说 NZ
+  而字节还是 ND 的情况，不报错只算错，极难定位。
+- 每改完一项先用**单卡回放**验证（记忆 `perf-iterate-on-single-card-bench`），
+  不要为看一次 kernel 改动就起 16 卡整模型。
+- 每项都要留 ND 分支可用，并在提交说明里写清两种开关下各自验过什么。
+- 排队任务运行期间不要编辑它会加载的 kernel 源文件（`@pl.jit` 编译时重读源文件）。
+
+**当前需要你拍板的**：T1.5 的落点（见上）、T2.5 的 PyPTO `_resolve_compiled` 处置，
+以及 T6.1.4（`wq_a` 我们已比上游快 2.6 倍，是否仍要为它做 NZ 双函数）。
