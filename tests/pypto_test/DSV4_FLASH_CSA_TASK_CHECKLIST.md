@@ -1132,7 +1132,33 @@ Orchestrator/Scheduler`、`pid 7 = Kernel Launches`；上游给的
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
 | T6.1.3 | **放宽闸门到 mode=2 并启用 `wo_a` 的 NZ** | 实现已在 `f95c503b`；本项只需闸门放行 + 整模型验证。判据：默认口径下 `proj_a_mm` 单块 ≤ 24 µs，256/256 token 与 Native 一致，显存不回退 | 未开始（**优先，唯一确定可得**） |
-| T6.1.1 | `wq_b` → `qproj_matmul` 拆 NZ/ND 双函数 | 双函数形态齐备、两种开关都能编过、数值与 ND 一致；量**墙钟**收益（不以单块为准）并记录显存增量 | 未开始 |
+| T6.1.1 | `wq_b` → `qproj_matmul` 拆 NZ/ND 双函数 | 双函数形态齐备、两种开关都能编过、数值与 ND 一致；**grid 保持 24**（方案见下）；量墙钟收益并记录显存增量 | 未开始（**方案已定**） |
+
+**T6.1.1 的方案：保持 grid=24，别像 T2.28 那样改成 64。** 当年的做法为了让 N 索引
+可证，把 `pl.range(block_idx, 64, WORKERS)` 的循环变量换成块索引直乘，grid 于是从
+24 变成 64。算一下就知道收益为什么被吃掉：
+
+- N 块数 = `H * HEAD_DIM / QPROJ_MM_N_TILE` = 32768 / 512 = **64**，`QPROJ_WORKERS = 24`
+- grid=64 时单块只做 1 个 N 块，确实从 55.70 降到 17.86 µs（快 3.1×）
+- 但 AIC 只有 24 核，64 块要跑 **3 轮**：17.86 × 3 = **53.6 µs**，对原来的 55.70
+  几乎没动——与 T2.28 实测的"墙钟 55.7 → 53.6"完全吻合
+
+保持 grid=24 也能让偏移可证，只要把 N 索引写成 **`block_idx + i * WORKERS`**：
+
+```python
+for i in pl.range(0, 3):                       # 上界 ceil(64/24) = 3
+    n_idx = qproj_worker + i * QPROJ_WORKERS   # block_idx + loop_var*const → 可证
+    if n_idx < (H * HEAD_DIM) // QPROJ_MM_N_TILE:   # 运行期守卫，与 padding 守卫同写法
+        w_col0 = n_idx * QPROJ_MM_N_TILE       # 乘常量后仍可证
+```
+
+`w_col0 = block_idx * 512 + i * 24 * 512`，**和与积都由可证量构成**（block index、
+start/step 非负的循环变量），符合 `IsProvableNonNegative` 的要求。分工是 worker
+0～15 各 3 块、16～23 各 2 块（例：worker 0 → n_idx 0/24/48，worker 23 → 23/47）。
+
+这样单块仍处理 2～3 个 N 块、grid 仍是 24 只跑 1 轮，NZ 省下的搬运直接落到墙钟上。
+按 `proj_a_mm` 实测的 −11.2% 折算，预期 55.70 → 约 49.5 µs，24 块约 150 核·µs。
+**验收仍以实测墙钟为准**，不拿这个折算数当结论。
 | T6.1.2 | `wo_b` → `proj_b_mm` 拆 NZ/ND 双函数 | 同上形态。T2.28 时改 grid 曾报「`proj_a_mm` 标量被 hoist 出 scope」，而本轮 `proj_a_mm` 已拆成独立函数、scope 结构已变，先看是否还复现 | 未开始（**方案已定，见下**） |
 
 **T6.1.2 的方案**：不可证的根因是 grid 拆包里的**减法**——
