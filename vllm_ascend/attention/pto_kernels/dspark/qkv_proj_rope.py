@@ -369,7 +369,21 @@ def q_proj_qr(
                         target_type=pl.FP32,
                     )
                     qr_rms_sq = pl.mul(qr_rms_chunk, qr_rms_chunk)
-                    qr_rms_row_sum = pl.reshape(pl.row_sum(qr_rms_sq), [1, T_TILE])
+                    # Native reduces this row with ReduceSumHalfInterval
+                    # (reduce_common.h:106-134): while the remaining length is
+                    # above one vector repeat -- ELEM_PER_REP_FP32, 64 FP32
+                    # lanes -- it halves the interval and adds the upper half
+                    # onto the lower one, then issues a single WholeReduceSum
+                    # over the last 64. A flat reduction over the whole row is a
+                    # different summation tree, and the ULP it costs lands in
+                    # the RMS coefficient, then in the dynamic-quant amax, and
+                    # finally in the scale, where it was leaving two of
+                    # twenty-four rows off native.
+                    qr_fold512 = pl.add(qr_rms_sq[:, 0:512], qr_rms_sq[:, 512:1024])
+                    qr_fold256 = pl.add(qr_fold512[:, 0:256], qr_fold512[:, 256:512])
+                    qr_fold128 = pl.add(qr_fold256[:, 0:128], qr_fold256[:, 128:256])
+                    qr_fold64 = pl.add(qr_fold128[:, 0:64], qr_fold128[:, 64:128])
+                    qr_rms_row_sum = pl.reshape(pl.row_sum(qr_fold64), [1, T_TILE])
                     qr_sq_sum = pl.add(qr_sq_sum, qr_rms_row_sum)
                 # Native's rms_norm_dynamic_quant kernel computes the row
                 # coefficient with a device-side SCALAR division:
