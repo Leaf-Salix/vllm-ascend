@@ -517,23 +517,10 @@ def sparse_attn_csa(
 
     # Native cosine rows already have the consumer's interleaved layout.
     rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
-    # Inverse-RoPE lane-swap index.
-    rope_swap_idx = pl.create_tensor([H_TILE, ROPE_DIM], dtype=pl.INT32)
-    # 换算索引与逐块 RoPE 拆成两个任务：前者是与 t_dim 无关的一次性小表，后者逐块可并行。
-    # 合在一个 CORE_GROUP 任务里时整段串行，泳道实测 rope_cs count=1、Exec 9.24us 却占满
-    # 一个串行窗口。拆开后 rope_cs 走 SPMD，通过 deps 保证换算表先建好。
-    with pl.at(level=pl.Level.CORE_GROUP, name_hint="rope_swap") as swap_tid:
-        sw_ones = pl.full([H_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
-        sw_idx_f = pl.cast(pl.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
-        sw_col = pl.col_expand_mul(sw_ones, sw_idx_f)
-        sw_dup_i32 = pl.cast(pl.mul(sw_col, 0.5), target_type=pl.INT32, mode="trunc")
-        sw_dup_f = pl.cast(sw_dup_i32, target_type=pl.FP32)
-        sw_lane = pl.sub(sw_col, pl.mul(sw_dup_f, 2.0))
-        sw_swap_f = pl.sub(pl.add(sw_col, 1.0), pl.mul(sw_lane, 2.0))
-        rope_swap_idx[0:H_TILE, 0:ROPE_DIM] = pl.cast(sw_swap_f, target_type=pl.INT32)
-
+    # 不再依赖 rope_swap：本任务自己重算符号表（见下面的 cs_lane / cs_sign），
+    # 从不读那张 GM 索引表，原来的 deps 是一条假依赖。
     with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
-                 deps=[swap_tid], allow_early_resolve=True) as rope_tid:
+                 allow_early_resolve=True) as rope_tid:
         for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
                               pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
             cs_t0 = cs_rb * ROPE_CS_T_TILE
@@ -558,7 +545,6 @@ def sparse_attn_csa(
         attn_oi,
         freqs_cos,
         rope_sin_signed,
-        rope_swap_idx,
         qk_tid,
         rope_tid,
     )
@@ -590,7 +576,6 @@ def sparse_attn_csa_tp1(
         attn_oi,
         rope_cos_il,
         rope_sin_signed,
-        rope_swap_idx,
         qk_tid,
         rope_tid,
     ) = sparse_attn_csa(
@@ -611,8 +596,17 @@ def sparse_attn_csa_tp1(
 
     with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
         m_worker = pl.tile.get_block_idx()
-        m_swap = pl.load(rope_swap_idx, [0, 0], [H_TILE, ROPE_DIM])
-        m_swap_f = pl.cast(m_swap, target_type=pl.FP32)
+        # 换算索引（j^1 的 lane swap）就地算：它与 t_dim 无关，是纯常量表。
+        # 原先由一个 CORE_GROUP 的 rope_swap 任务算好写进 GM，本任务再读回来——
+        # 关键路径实测那个任务 compute 只有 1.7us 却要 core-wait 72.1us（占 makespan
+        # 8.95%），因为它独占一个核、要等核空出来。本任务是 SPMD，每个 worker 自己
+        # 算这几条向量指令即可，与 rope_cs 里的做法一致。算式与原来逐字相同。
+        m_ones = pl.tile.full([H_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
+        m_idx_f = pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
+        m_col = pl.col_expand_mul(m_ones, m_idx_f)
+        m_dup_f = pl.cast(pl.cast(pl.mul(m_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32)
+        m_lane = pl.sub(m_col, pl.mul(m_dup_f, 2.0))
+        m_swap_f = pl.sub(pl.add(m_col, 1.0), pl.mul(m_lane, 2.0))
         m_swap_source = pl.add(m_swap_f, NOPE_DIM)
         m_row_ids = pl.tile.arange(0, [1, H_TILE], dtype=pl.INT32)
         m_row_ids_f = pl.cast(m_row_ids, target_type=pl.FP32)
