@@ -116,6 +116,15 @@ def main() -> None:
         tensors = pack_args(tensors)
         # 开关关闭时 pack_args 原样返回，打印"已应用"会误导；这里报出实际重排了哪几张。
         repacked = [k for k, v in tensors.items() if before.get(k) != v.data_ptr()]
+        # 重排会在原张量之外新建一份（wo_a 是 [8,1024,4096] BF16，64MiB），而整模型
+        # 路径的 prepare_weights 是就地替换那个本来就存在的 transpose 副本、不多占显存。
+        # 不把旧的那份还给分配器，单卡回放就会比整模型多占一块、改变 HBM 分配布局，
+        # 进而让**与本次重排无关**的 matmul（qproj_matmul 读 wq_b、proj_b_mm 读 wo_b）
+        # 一起变慢——实测 mode=2 下这两项稳定 +7.4 / +1.7 µs，纯属口径假象。
+        if repacked:
+            import gc
+            gc.collect()
+            torch.npu.empty_cache()
         print(f"nz_args.pack_args: 重排 {len(repacked)} 张 {repacked}", flush=True)
     call_args = tuple(tensors[name] for name in names)
 
