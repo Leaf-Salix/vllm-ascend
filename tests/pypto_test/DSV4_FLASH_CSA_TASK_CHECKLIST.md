@@ -1521,6 +1521,35 @@ mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果�
 | --- | --- | --- | --- |
 | T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把就地算索引改成纯 INT32 的 9 步版本（方案见下）；判据是 `local_setup_us` p50 明显下降、数值按上文判据一致（absmax 相同、mean 差 ≤1e-7）、不新增独占核的 device 任务、且不改 kernel ABI | 未开始（**方案已定**） |
 
+**T6.4.1 实现记录（2026-09-26）**：最终落地的是**取模**而不是异或，因为两条更短的
+路都被硬件挡了——
+
+- `pl.tile.xors` 一步到位，但 A2/A3 的 `pto.txors` **只接受 i8/i16 元素类型**，
+  i32 被 ptoas 拒（`expects A2/A3 txors src and dst element type to be i8/i16`）；
+- 退成 i16 做异或再 cast 回 i32 也不行，`LegalizeTileCast` 说 a2a3 上
+  **int16→int32 没有原生路径**（`pto.tcvt does not support this conversion`）。
+
+于是改用 `j + 1 - 2*(j % 2)`（与 `j ^ 1` 等值），靠 `pl.tile.rems` 在 INT32 域内完成，
+仍是零 cast。另外 `rems` 与 `xors` 一样，第三个参数是硬件要求的临时 tile，不能省。
+
+in-core 对照（同一份 kernel，只改这一段）：
+
+| | 改前（13 步 FP32） | 改后（INT32 取模） |
+| --- | --- | --- |
+| `MOV` | 504 | **375** |
+| `VCONV` | 84 / 1.3 µs | **40 / 0.9 µs** |
+| `VECTOR` | 128（82.6%） | **78（63.8%）** |
+| `CACHEMISS` | 868（193.3%） | **658（185.4%）** |
+| 跨度 | 3.30 µs | 3.23 µs |
+
+指令数降幅远大于跨度降幅，符合前面记的「in-core 假设访存无限快」——真正要看的是
+设备侧 `local_setup_us` 能否从 8.15 降下来。
+
+**精度版的情况不同**：它和上游一样是 `pl.load(rope_swap_idx, ...)` 从 GM 读表，
+所以带着 `rope_swap` 那个独占一核的任务。把这版 INT32 就地算搬过去能一举两得
+（既消掉 `rope_swap`、又不引入 setup 开销），但会**少一个入参、改 kernel ABI**，
+成本要在 T6.3.2 里单独评估。
+
 **T6.4.1 的方案：用整数位运算，不加 kernel 入参。** 原先想把索引表做成主机侧算好
 的入参，但那会改 kernel ABI，argdump 随之失效、要重跑一次 16 卡——代价不值。
 
