@@ -31,53 +31,8 @@ class CSAOperators:
         )
 
 
-_NZ_C0_BYTES = 32
-_NZ_FRACTAL_ROWS = 16
-
-
-def _pack_nz(value: "torch.Tensor") -> "torch.Tensor":
-    """把逻辑行主序的最后两维重排成 pto-isa 的 NZ 分形序，形状不变。
-
-    NZ 是「列块在外、行分形在内」：c0 个连续元素构成一条 C0 线，16 行构成一个
-    16 x c0 的分形，行轴上走 R/16 个分形，列轴上跨 C/c0 个列块——也就是
-    BlockNzTensorViews 给 GM 视图的分块形状 [C/c0, R/16, 16, c0]。
-    重排后仍按逻辑形状返回，只有字节次序变了，元素个数不变。
-    `pl.NZ` 是对「GM 里的字节已经是这个次序」的断言，不是一个转换请求，
-    所以必须由主机侧把字节摆好。
-    """
-    rows, cols = value.shape[-2], value.shape[-1]
-    c0 = _NZ_C0_BYTES // value.element_size()
-    if rows % _NZ_FRACTAL_ROWS or cols % c0:
-        raise ValueError(f"NZ 需要 {_NZ_FRACTAL_ROWS} 行分形与整条 {c0} 元素的 C0 线，实到 {rows}x{cols}")
-    lead = tuple(value.shape[:-2])
-    device = value.device
-    # 重排必须在 CPU 上做：在 NPU 上 reshape/permute 会让 torch_npu 把张量的 npu
-    # format 推断成 FRACTAL_NZ(30)，而 PyPTO 的根入参只接受 NCHW(0) 或 ND(2)——
-    # 实测报 "Parameter 'wo_a' requires base format NCHW (0) or ND (2), got 30"。
-    # 我们要的只是「字节按 NZ 次序摆好、format 仍是 ND」，CPU 往返正好给出这个。
-    host = value.detach().cpu()
-    packed = (
-        host.reshape(*lead, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, cols // c0, c0)
-        .permute(*range(len(lead)), len(lead) + 2, len(lead), len(lead) + 1, len(lead) + 3)
-        .contiguous()
-        .reshape(*lead, rows, cols)
-    )
-    return packed.to(device)
-
-
-def _maybe_pack_nz(value: "torch.Tensor", dtype) -> "torch.Tensor":
-    """按 vllm-ascend 的 weight_nz_mode 决定要不要把这张权重排成 NZ 分形序。
-
-    必须和 kernel 侧的类型标注用同一个开关（nz_mode），否则标注说 NZ 而字节还是
-    ND（或反过来），读到的就是错位的分形，而且不会报错、只会算错。
-    """
-    from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
-
-    import torch
-
-    enabled = BF16_WEIGHT_NZ if dtype in (torch.bfloat16, torch.float16) else QUANT_WEIGHT_NZ
-    return _pack_nz(value) if enabled else value
-
+# NZ 的字节重排实现在精度版，这里只引用，保证两版用的是同一份。
+from ..deepseek_v4_flash_dspark.native_adapter import _maybe_pack_nz, _pack_nz  # noqa: F401
 
 # torch_npu 的 acl format 取值：0=NCHW、2=ND，二者都是 PyPTO 根入参接受的基础格式。
 _ACL_FORMAT_NCHW = 0
