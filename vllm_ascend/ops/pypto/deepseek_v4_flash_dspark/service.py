@@ -6,6 +6,16 @@ import torch
 from .native_adapter import NativeCSACall, prepare_weights
 from .service_config import MAX_BATCH_SIZE, QUERY_TOKENS
 
+# 同一个 decode step 里，compressor_metadata 的入参只跟 KV cache group 有关、与层无关：
+# vLLM 让同一个 attn group 的所有层共用同一个 metadata 对象（`vllm_ascend/worker/
+# model_runner_v1.py` 里 `attn_metadata_dict[layer_name] = attn_metadata_i`），所以各层
+# 拿到的 cos / sin / slot_mapping 完全相同，这个算子被按层数重算了同样多遍。
+# Native 路径每算一次就紧跟一个 compressor 把它消费掉，开销摊在 70us 量级的算子里；
+# PTO 把 compressor 融进了自己的 kernel，这两次调用就裸露成 kernel 正前方的串行开销
+# （16 卡 eager 实测每层约 30us，21 层合计 600us 级）。按 decode metadata 的对象身份
+# 缓存，一个 step 只算一次。
+_COMPACT_METADATA_CACHE = "pto_csa_compact_compressor_metadata"
+
 
 class CSAServiceRuntime:
     def __init__(self, attention, operators, max_num_seqs):
@@ -68,6 +78,23 @@ class CSAServiceRuntime:
         swa = metadata[self.prefixes["swa"]].decode
         return swa.ori_win_left in (None, 127)
 
+    def _compact_metadata(self, context, req):
+        """取这一步该 KV cache group 的 (cos, sin, slot_mapping)，同 step 内跨层复用。
+
+        缓存挂在 forward context 的 additional_kwargs 上：它每次前向都由
+        `vllm_ascend/platform.py` 的 set_additional_forward_context 新建，
+        所以不会跨 step 残留。aclgraph 下被捕获进图的同样只有第一层那一次调用，
+        重放时后面各层读的是同一块固定地址的输出，语义与逐层重算完全一致。
+        """
+        cache = context.additional_kwargs.setdefault(_COMPACT_METADATA_CACHE, {})
+        # id() 在对象回收后可能被复用，所以连同对象本身一起存下来比对。
+        cached = cache.get(id(req))
+        if cached is not None and cached[0] is req:
+            return cached[1]
+        value = self.wrapper.dsa_attn.impl._compute_compressor_metadata(req)
+        cache[id(req)] = (req, value)
+        return value
+
     def __call__(self, context, hidden, positions, output, kv_cache):
         from vllm_ascend.attention.utils import (
             maybe_save_kv_layer_to_connector, notify_kv_cache_written, wait_for_kv_layer_from_connector,
@@ -91,7 +118,7 @@ class CSAServiceRuntime:
         # Pass those exact device tensors to CSA, without expanding them or
         # introducing the main-branch DeviceMetadataExecutor API.
         compact = {
-            name: self.wrapper.dsa_attn.impl._compute_compressor_metadata(metadata[name].decode)
+            name: self._compact_metadata(context, metadata[name].decode)
             for name in ("compressed", "indexer")
         }
         compressed, swa, state, indexer_state, indexer_key, indexer_scale = kv_cache
