@@ -12,7 +12,7 @@ from .native_adapter import _pack_nz
 from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
 
 BF16_NZ_PARAMS = ("wo_a",)
-QUANT_NZ_PARAMS = ("wo_b",)
+QUANT_NZ_PARAMS = ()
 
 
 def pack_args(tensors: dict) -> dict:

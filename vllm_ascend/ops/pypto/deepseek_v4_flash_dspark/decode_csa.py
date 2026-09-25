@@ -11,6 +11,8 @@
 
 import pypto.language as pl
 
+from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
+
 from .config import (
     BLOCK_SIZE,
     C4A_COMPRESSOR_BLOCK_SIZE,
@@ -171,7 +173,14 @@ def _decode_csa_tp1_layer(
     cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
-    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
+    # wo_b 保持 ND：它在我们这边是二维展平的 [D, O_GROUPS*O_LORA]，group 索引进了
+    # **列维**，于是列偏移 col_g = g * O_LORA 要过 c0=32 的整除性证明，而 g 是
+    # pl.parallel 的索引、不在可证集合里（可证形式只认常量、start 与 step 均为 c0
+    # 倍数的循环变量，及由它们构成的和差与常数倍）。上游的 wo_b 是三维
+    # [O_GROUPS, D, O_LORA]，group 在 batch 维、不做对齐检查，所以它能走 NZ。
+    # 要跟上就得把这张权重改成三维，连带改 prepare_weights 的形状与 kernel 里的索引，
+    # 而 proj_b_mm 本来只有 1.12x 上游、是四张权重里差距最小的，先不动。见 T6.1.2。
     wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],

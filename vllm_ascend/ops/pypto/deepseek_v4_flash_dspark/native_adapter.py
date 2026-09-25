@@ -160,7 +160,8 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         # 否则标注说 NZ 而字节还是 ND——不会报错、只会算错。这一份本来就是 transpose
         # 出来的独立副本，NZ 化不额外占显存。
         "wo_a": _maybe_pack_nz(weight(attention.wo_a, (8, 4096, 1024), bf16, True), bf16),
-        "wo_b": _maybe_pack_nz(weight(attention.wo_b, (8192, 4096), int8, True), int8),
+        # wo_b 保持 ND，见 decode_csa.py 里它的签名说明。
+        "wo_b": weight(attention.wo_b, (8192, 4096), int8, True),
         "wo_b_scale": scale(attention.wo_b, 4096),
     }
 

@@ -261,7 +261,7 @@ proj_a_mm = _proj_a_mm_nz if BF16_WEIGHT_NZ else _proj_a_mm_nd
 @pl.jit.inline
 def _proj_b_mm_nd(
     o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
-    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
     g: pl.Scalar[pl.INDEX],
     col_g: pl.Scalar[pl.INDEX],
@@ -292,7 +292,7 @@ def _proj_b_mm_nd(
 @pl.jit.inline
 def _proj_b_mm_nz(
     o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
-    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
     g: pl.Scalar[pl.INDEX],
     col_g: pl.Scalar[pl.INDEX],
@@ -328,14 +328,16 @@ def _proj_b_mm_nz(
     return partials, pb_tid
 
 
-proj_b_mm = _proj_b_mm_nz if QUANT_WEIGHT_NZ else _proj_b_mm_nd
+# **暂时锁定 ND**：wo_b 是二维展平的，group 索引落在列维、过不了 c0 对齐证明，
+# 详见 decode_csa.py 里 wo_b 签名上方的说明。NZ 版保留备用。
+proj_b_mm = _proj_b_mm_nd
 
 
 @pl.jit.inline
 def decode_o_proj_tp1(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
-    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
     heads_dep: pl.Scalar[pl.TASK_ID],
