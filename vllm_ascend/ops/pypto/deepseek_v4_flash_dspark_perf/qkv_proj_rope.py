@@ -11,6 +11,8 @@
 
 import pypto.language as pl
 
+from .nz_mode import QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
+
 from .config import (
     FLASH as M,
 )
@@ -397,15 +399,23 @@ def q_proj_qr_normalize(
                     pl.store(qr_q_tail, [out_tg, qa], qr_view)
 
 
+# NZ 与 ND 拆成两个独立函数，不写成一个函数里的 `if QUANT_WEIGHT_NZ`——@pl.jit 读源
+# 文件做 AST 分析，两个分支会一起被 trace 而冲突。末尾择一。
+QPROJ_N_BLOCKS = (H * HEAD_DIM) // QPROJ_MM_N_TILE
+
+
 @pl.jit.inline(auto_scope=False)
-def q_proj_q_matmul(
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+def _q_proj_q_matmul_nd(
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
     tile_rows: pl.Scalar[pl.INDEX],
     qproj_dep: pl.Scalar[pl.TASK_ID],
 ):
-    """Project one bounded Q tile and expose its cube task ID."""
+    """ND 版：N 索引直接用 `pl.range` 的循环变量，与上游同形。
+
+    Project one bounded Q tile and expose its cube task ID.
+    """
     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
     qproj_full_rows = qproj_t_matmul  # 调用方已按 QPROJ_M_TILE 取整
     with pl.spmd(
@@ -416,7 +426,7 @@ def q_proj_q_matmul(
         qproj_worker = pl.tile.get_block_idx()
         for qproj_n_idx in pl.range(
             qproj_worker,
-            (H * HEAD_DIM) // QPROJ_MM_N_TILE,
+            QPROJ_N_BLOCKS,
             QPROJ_WORKERS,
         ):
             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
@@ -442,6 +452,68 @@ def q_proj_q_matmul(
                 q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
 
     return q_proj_i32, qproj_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def _q_proj_q_matmul_nz(
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
+    q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
+    tile_rows: pl.Scalar[pl.INDEX],
+    qproj_dep: pl.Scalar[pl.TASK_ID],
+):
+    """NZ 版：切片偏移必须可证非负，所以 N 索引写成 `block_idx + i * WORKERS`。
+
+    `pl.range(block_idx, N, WORKERS)` 的循环变量是 IterArg，`IsProvableNonNegative`
+    明确不追它，于是 `w_col0` 不可证、NZ 切片被拒。改成「block 索引 + 循环变量乘
+    常量」之后，和与积都由可证非负量构成。
+
+    **grid 仍保持 QPROJ_WORKERS（24），不要改成 QPROJ_N_BLOCKS（64）。** 后者虽然让
+    每块只做一个 N 块、单块从 55.70 降到 17.86µs，但 AIC 只有 24 核，64 块要跑 3 趟，
+    17.86 x 3 = 53.6µs，对原来的 55.70 几乎没动（清单 T2.28 实测墙钟 55.7 -> 53.6）。
+    保持 24 则仍是一趟，NZ 省下的搬运才真正落到墙钟上。
+
+    64 不是 24 的整数倍，各 worker 趟数不同（0~15 三趟、16~23 两趟）。差异放进
+    **循环上界**而不是用 `if` 守卫：上界只决定跑几趟、不参与切片偏移，含减法也无妨；
+    而 `if` 里对 q_proj_i32 赋值会让两支给出不同的 SSA 定义，直接报
+    `SSAForm` 验证失败（Error Code: 6，实测过）。
+    """
+    qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+    qproj_full_rows = qproj_t_matmul  # 调用方已按 QPROJ_M_TILE 取整
+    with pl.spmd(
+        QPROJ_WORKERS,
+        name_hint="qproj_matmul",
+        deps=[qproj_dep],
+    ) as qproj_tid:
+        qproj_worker = pl.tile.get_block_idx()
+        for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
+            qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
+            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+            # 整条 K 的权重块提到 M 循环外，一次进 L1 后按 K 块切片复用。原先在 M
+            # 循环内按 Q_PROJ_TILE 反复从 GM 取，同一块权重被重复搬
+            # qproj_full_rows/QPROJ_M_TILE 遍，in-core 实测 MTE2 占 36.4%。
+            # 保留分块 matmul_acc 不改成整条 K 的单次 matmul：后者实测让编译器
+            # 拆出三倍 FIXP 回写、Cube 近翻倍（629k vs 529k cycles）。
+            # 权重块提到 M 循环外一次进 L1 试过两版，都更差，已撤回按 K 块从 GM 取：
+            #   ① 整条 K 的单次 pl.matmul：529k -> 629k cycles，FIXP 三倍、Cube 近翻倍；
+            #   ② 整段 tile 级 + pl.tile.slice 复用 L1：522k -> 632k，MTE2 虽从 36% 降到
+            #      27%，但 256KiB 权重常驻 L1 把 MTE1 顶了上去。
+            # 该项的 2.36x 差距改走设备侧复核（BYPASS 已加，in-core 测不出 L2 收益）。
+            for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
+                col_acc = pl.create_tensor([QPROJ_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
+                for qr_proj_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
+                    qr_i8_chunk = qr_i8_matmul[
+                        t0 : t0 + QPROJ_M_TILE,
+                        qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE,
+                    ]
+                    wq_chunk = wq_b[qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+                    col_acc = pl.matmul_acc(col_acc, qr_i8_chunk, wq_chunk, init_cond=(qr_proj_col0 == 0))
+                q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+
+    return q_proj_i32, qproj_tid
+
+
+q_proj_q_matmul = _q_proj_q_matmul_nz if QUANT_WEIGHT_NZ else _q_proj_q_matmul_nd
 
 
 @pl.jit.inline(auto_scope=False)
@@ -618,7 +690,7 @@ def q_proj_q_dequant(
 @pl.jit.inline(auto_scope=False)
 def q_proj_q(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -664,7 +736,7 @@ def q_proj_q(
 def q_proj_rope(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
     rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -973,7 +1045,7 @@ def kv_proj_rope(
 def qkv_proj_rope(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
     rope_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],

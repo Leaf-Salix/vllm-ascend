@@ -23,9 +23,11 @@ WEIGHT_NZ_MODE = int(os.getenv("VLLM_ASCEND_ENABLE_NZ", "1"))
 
 # BF16/FP16 权重是否按 NZ 分形序存放
 BF16_WEIGHT_NZ = WEIGHT_NZ_MODE >= 2
-# INT8 量化权重是否按 NZ 分形序存放（目前没有 kernel 用到，留作后续）
+# INT8 量化权重是否按 NZ 分形序存放。注意这一档在 vllm-ascend 的默认值（1）下就是
+# 开的——也就是说 wq_b / wo_b 走 NZ 不需要把 mode 调到 2，与 BF16 权重不同。
 QUANT_WEIGHT_NZ = WEIGHT_NZ_MODE >= 1
 
 # 直接放进 pl.Tensor 的第三个槽：None 等价于不声明 layout（即 ND）。
 # PyPTO 支持把 layout 放在闭包变量里，见 pypto/python/pypto/jit/cache.py 的说明。
 BF16_WEIGHT_LAYOUT = pl.NZ if BF16_WEIGHT_NZ else None
+QUANT_WEIGHT_LAYOUT = pl.NZ if QUANT_WEIGHT_NZ else None

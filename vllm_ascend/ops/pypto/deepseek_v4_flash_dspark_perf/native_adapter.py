@@ -138,7 +138,10 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
     return {
         **hc,
         "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
-        "wq_b": weight(attention.wq_b, (1024, 32768), int8),
+        # NZ 序存放（mode>=1 即开）：Native 在 mode>=1 下已把它转成 FRACTAL_NZ，
+        # weight() 里先 npu_format_cast 回 ND，这里再按 pto-isa 的分形序重排。
+        # 两个 NZ 不是一回事，见 _pack_nz 的说明。
+        "wq_b": _maybe_pack_nz(weight(attention.wq_b, (1024, 32768), int8), int8),
         "wq_b_scale": scale(attention.wq_b, 32768),
         "wkv": weight(attention.wkv, (512, 4096), bf16, True),
         "gamma_cq": weight(attention.q_norm, (1024,), bf16),

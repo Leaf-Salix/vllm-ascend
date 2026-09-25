@@ -6,17 +6,21 @@
 """
 
 from .native_adapter import _pack_nz
-from .nz_mode import BF16_WEIGHT_NZ
+from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
 
-# 参数名 -> 该参数在 NZ 开启时需要重排（只列 kernel 签名里用了 NZ layout 的）
+# 只列 kernel 签名里真的用了 NZ layout 的权重。两张表分开是因为两档开关不同：
+# BF16 权重要 weight_nz_mode>=2，INT8 量化权重 mode>=1 就开（也就是默认档）。
 BF16_NZ_PARAMS = ("wo_a",)
+QUANT_NZ_PARAMS = ("wq_b",)
 
 
 def pack_args(tensors: dict) -> dict:
-    if not BF16_WEIGHT_NZ:
-        return tensors
     result = dict(tensors)
-    for name in BF16_NZ_PARAMS:
-        if name in result:
-            result[name] = _pack_nz(result[name])
+    groups = ((BF16_NZ_PARAMS, BF16_WEIGHT_NZ), (QUANT_NZ_PARAMS, QUANT_WEIGHT_NZ))
+    for names, enabled in groups:
+        if not enabled:
+            continue
+        for name in names:
+            if name in result:
+                result[name] = _pack_nz(result[name])
     return result
