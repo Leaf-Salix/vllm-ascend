@@ -639,13 +639,26 @@ def q_proj_q_dequant(
                     q_head_acc = q_proj_i32[tg : tg + Q_ROPE_T_TILE, h0 : h0 + HEAD_DIM]
                     q_head_scale = pl.reshape(wq_b_scale[h0 : h0 + HEAD_DIM], [1, HEAD_DIM])
                     q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
-                    q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
+                    # npu_quant_matmul folds its per-channel scale and its
+                    # pertoken_scale into one dequant factor before touching the
+                    # accumulator. Multiplying the accumulator by them one after
+                    # the other is algebraically equal and rounds differently:
+                    # against native, forming the product first was measured at
+                    # three mismatching q elements where either sequential order
+                    # gives seven. The ones tile only broadcasts the two scales
+                    # into a full tile; multiplying by 1.0 is exact.
+                    q_head_ones = pl.full(
+                        [Q_ROPE_T_TILE, HEAD_DIM], dtype=pl.FP32, value=1.0,
+                    )
+                    q_head_combined = pl.col_expand_mul(
+                        pl.row_expand_mul(q_head_ones, qr_scale_dq_t), q_head_scale,
+                    )
                     # Native's wq_b npu_quant_matmul carries
                     # output_dtype=hidden_states.dtype, so apply_dsa_q_rms and
                     # the RoPE downstream both read a BF16 q projection.
                     q_head_dq = pl.cast(
                         pl.cast(
-                            pl.col_expand_mul(q_head_row_scaled, q_head_scale),
+                            pl.mul(q_head_acc_fp32, q_head_combined),
                             target_type=pl.BF16,
                             mode="rint",
                         ),
@@ -750,10 +763,16 @@ def q_proj_q_dequant(
                     )
                     q_head_scale_tail = pl.reshape(q_head_scale_input_tail, [1, HEAD_DIM])
                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
-                    q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
+                    # Same merged dequant factor as the main path.
+                    q_head_ones_tail = pl.tile.full(
+                        [Q_ROPE_T_TILE, HEAD_DIM], dtype=pl.FP32, value=1.0,
+                    )
+                    q_head_combined_tail = pl.col_expand_mul(
+                        pl.row_expand_mul(q_head_ones_tail, qr_scale_dq_tail), q_head_scale_tail,
+                    )
                     q_head_dq_tail = pl.cast(
                         pl.cast(
-                            pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail),
+                            pl.mul(q_head_acc_fp32_tail, q_head_combined_tail),
                             target_type=pl.BF16,
                             mode="rint",
                         ),
