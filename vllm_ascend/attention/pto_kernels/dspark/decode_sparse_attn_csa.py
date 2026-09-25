@@ -69,7 +69,7 @@ QK_PRE_LAUNCH = 2
 # counts are no longer the same: the softmax needs every block's scores
 # before it can exponentiate the compressed chunk, which is further ahead
 # than L1 can keep KV tiles alive.
-QK_L1_SLOTS = QK_PRE_LAUNCH + 1
+QK_L1_SLOTS = 1  # measured bitwise-equal to QK_PRE_LAUNCH + 1
 QK_KV_READY_EVENT = 0
 QK_SCORE_READY_EVENT = 1
 QK_PROB_READY_EVENT = 2
@@ -219,8 +219,10 @@ def sparse_attn_csa(
     transfer_heads = transfer_slots * H
     transfer_kv_rows = transfer_slots * ATTN_K_TILE
     kv_transfer = pl.create_tensor([transfer_kv_rows, HEAD_DIM], dtype=pl.BF16)
-    score_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.FP32)
-    probability_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.BF16)
+    # Scores and probabilities are laid out contiguous in K, so a whole flash
+    # chunk is addressable as one operand rather than as four separate slots.
+    score_transfer = pl.create_tensor([NUM_QK_CORES * H, PADDED_TOPK], dtype=pl.FP32)
+    probability_transfer = pl.create_tensor([NUM_QK_CORES * H, PADDED_TOPK], dtype=pl.BF16)
     pv_transfer = pl.create_tensor([transfer_heads, HEAD_DIM], dtype=pl.FP32)
     mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
     li_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
@@ -255,7 +257,7 @@ def sparse_attn_csa(
                         qk_l1_t = pl.tile.transpose_view(qk_l1)
                         qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_K_TILE], [0, qk_l1_row])
                         qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
-                        pl.store(qk_scores, [qk_transfer_row, 0], score_transfer)
+                        pl.store(qk_scores, [qk_core * H, qk_sb * ATTN_K_TILE], score_transfer)
                         pl.system.sync_set(
                             QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX,
                             ffts_mode=2, core_type=pl.KernelType.AIC,
@@ -272,7 +274,7 @@ def sparse_attn_csa(
                             qk_l1, kv_transfer, [pv_l1_row, 0], [pv_kv_row, 0], [ATTN_K_TILE, HEAD_DIM],
                         )
                         pv_probability = pl.load(
-                            probability_transfer, [pv_transfer_row, 0], [H, ATTN_K_TILE],
+                            probability_transfer, [qk_core * H, pv_sb * ATTN_K_TILE], [H, ATTN_K_TILE],
                             target_memory=pl.MemorySpace.Mat,
                         )
                         pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
@@ -374,7 +376,7 @@ def sparse_attn_csa(
                         max_s0 = max_tick * ATTN_K_TILE
                         pl.system.sync_wait(QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                         max_scores = pl.load(
-                            score_transfer, [max_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE],
+                            score_transfer, [qk_core * H + qk_lane_head, max_s0], [H // 2, ATTN_K_TILE],
                             target_memory=pl.MemorySpace.Vec,
                         )
                         max_bias = pl.load(
@@ -425,7 +427,7 @@ def sparse_attn_csa(
                         qk_transfer_row = qk_slot * H
                         qk_s0 = softmax_sb * ATTN_K_TILE
                         qk_scores_half = pl.load(
-                            score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE],
+                            score_transfer, [qk_core * H + qk_lane_head, qk_s0], [H // 2, ATTN_K_TILE],
                             target_memory=pl.MemorySpace.Vec,
                         )
                         qk_bias = pl.load(
@@ -446,7 +448,7 @@ def sparse_attn_csa(
                         # BF16 output in the same file uses CAST_RINT, so
                         # only this cast changes.
                         qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="round")
-                        pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
+                        pl.store(qk_probability, [qk_core * H + qk_lane_head, qk_s0], probability_transfer)
                         pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
                         pl.system.sync_set(
                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
