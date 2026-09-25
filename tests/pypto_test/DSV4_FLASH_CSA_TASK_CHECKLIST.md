@@ -8,7 +8,7 @@
 截至 2026-09-24，已完成 T1.1～T1.9、T2.1、T2.2、T3.1 与 T5.1～T5.4（共 18 项）；T1.10 低优先级、T2.5 待用户拍板。**T1 的 padding 主线至此全部走通。**
 
 **2026-09-25 起的当前主线是 T6：把整层跨度从 865.1 µs 收敛到 725 µs 以下。**
-四条目标由用户当日口述给定，逐条落在 T6.1～T6.5，详见第 6 节。
+五条目标由用户当日口述给定，逐条落在 T6.1～T6.5，详见第 6 节。
 
 相关文档：[padding 开发计划](DSV4_FLASH_CSA_PADDING_PLAN.md)、
 [跨会话交接](DSV4_FLASH_CSA_NEXT_SESSION_HANDOFF.md)、
@@ -506,7 +506,7 @@ python tests/pypto_test/offline_pd/run.py profile \
 | T2.25 | 核实 PTO 的 NZ 现状 | **已完成，结论：基本能力可用，但不能照搬上游写法**。① pypto 自带的 NZ 系统测试 `tests/st/runtime/ops/test_matmul_nz.py` 在本环境（pypto 0.1.0 / PTOAS 源码 0.66 / CANN 9.0.0）**4 passed**，且比对容差是 `rtol=atol=0`，覆盖整张量、N 方向切片（行分形偏移 `n0//16`）、K 方向切片（C0 列块偏移 `k0//c0`）三种寻址；NZ 要求 PTOAS ≥ 0.61，实际 0.66。② **但上游 `qkv_proj_rope.py` 单体在本环境编译失败**，报的正是 NZ 非负性：`w_col0 = qproj_n_idx * QPROJ_MM_N_TILE` 里 `qproj_n_idx` 是 `pl.range(worker, N, WORKERS)` 的循环变量，而 `IsProvableNonNegative` 对 `IterArg` 不做推导。③ 上游 `decode_csa.py` 整体编译也失败（`store() got an unexpected keyword argument 'pre_quant'`），说明**上游 pypto-lib 的 main 依赖比本环境更新的 pypto**，不能拿「上游能跑」当本环境可用的依据。④ 落点只有 4 张权重：上游自己注释了 indexer 的 `wq_b`、`weights_proj`、压缩器的 `wkv`/`wgate` 都**不能** NZ（它们的 spmd 索引含减法，而差永远不可证）。⑤ 显存：`wq_a`/`wo_a`/`wo_b` 在 `prepare_weights` 里本就 `transpose().contiguous()` 过独立副本，NZ 化零额外开销；`wq_b` 共享 Native 权重，NZ 化需 +32MiB/层 × 21 层 = 0.66GiB | T2.21 | 1 | **已完成** |
 | T2.26 | 解锁 NZ：框架侧修 entry ABI 校验 | **已完成**。`pl.NZ` 用在带编排的 `@pl.jit` 根入参上会被 `finish_kernel_artifact` 拒掉（`Lowering changed the kernel entry parameter ABI`）。加了参数级诊断后看清：`#46 'wo_a': bfloat16/In/(8,1024,4096) -> 'wo_a__ssa_v0': bfloat16/In/(8,256,64,16,16)`——`BlockNzTensorViews` 把 GM 视图改写成 rank-5 的 `[C/c0, R/16, 16, c0]`（BF16 的 c0=16），**元素数 33,554,432 完全相同**，是同一块内存、同一个池位、同样的 dtype 与方向，只有 shape 的表述变了。而那条校验的注释写明意图是防 lowering「引入或重排」外部池。据此把外部池的身份判据从「逐维 shape 相同」改成「dtype + 方向 + 元素总数」（含动态维时退回逐维比较），并让报错说清是哪个参数怎么变的。改动在 `pypto/python/pypto/ir/_kernel_compile.py`。**注意 `warmup(RunConfig)` 路径不触发这条校验**（`_kernel_abi is None` 时不调用 `finish_kernel_artifact`），只有 `pypto.torch.init` 的 eager kernel-mode 才会，所以主机侧编译「通过」是假通过 | T2.25 | 1 | **已完成（框架侧）** |
 | T2.27 | NZ 与 ND 双分支，由 weight_nz_mode 控制 | **已完成**。按用户要求两条分支都保留、由 vllm-ascend 统一开关择一，不做单向替换。新增 `nz_mode.py` 读 `VLLM_ASCEND_ENABLE_NZ`（语义同 `ascend_config.py`：0 关闭／1 只量化权重／2 BF16 也开；`wo_a` 是 BF16 对应 mode≥2）。读环境变量而非 `AscendConfig.weight_nz_mode`，因为 kernel 的参数布局是**模块加载时**由类型注解定下来的，而 AscendConfig 要等 vllm 初始化完才有。三处由同一开关驱动：kernel 签名的 layout 槽放闭包变量 `BF16_WEIGHT_LAYOUT`（`pl.NZ` 或 `None`，后者等价于不声明 layout）、主机侧 `_maybe_pack_nz`、单卡 bench 的 `nz_args.pack_args`——三者必须一致，否则标注说 NZ 而字节还是 ND，不会报错、只会算错。`_pack_nz` 在 **CPU** 上做重排：在 NPU 上 reshape/permute 会让 torch_npu 把 npu format 推断成 `FRACTAL_NZ(30)`，而 PyPTO 根入参只收 NCHW(0)/ND(2)。实测两模式输出完全一致，`proj_a_mm` 单块 ND 29.73µs → NZ **23.22µs**，墙钟 87.0 → **69.7µs（1.45× → 1.20× 上游、0.79× → 0.63× Native）** | T2.26 | 2 | **已完成** |
-| T2.28 | 其余三张权重的 NZ：均不采纳 | **⚠️ 本条已于 2026-09-25 由用户裁定作废，不得再作为不做 NZ 的依据**（原话「之前的都不作数」；当时看到的数值错是那个阶段其他未解决的精度问题在 NZ 路径上显形，根因已消除）。原结论留档：。① `wq_b`（qproj）：偏移可证性要求把 N 索引从 `pl.range(block_idx, N, WORKERS)` 的循环变量换成块索引直乘（循环变量是 IterArg，非负性推导明确不追它，上游同样写法在本环境也编不过）。改完能跑且数值正确，但单块 55.70 → 17.86µs 而块数 24 → 64，**墙钟只从 55.7 降到 53.6µs**（qproj 在 N=512 下 ND 已有 512B 连续段，瓶颈不在搬运连续性），却要多一份 32MiB/层、21 层约 0.66GiB（它不像另外三张那样本来就有独立副本）。② `wo_b`：为消掉偏移里的减法而改 grid 后，编译报 `proj_a_mm` 的标量被 hoist 到 scope 外；且它本来已是 1.02× 上游。③ `wq_a`（qr_proj）：K 分片放 `pl.parallel` 索引再用作行偏移，报 `offset on shape[-2] must be a multiple of 16, cannot be proven`——可证形式只认常量和 start/step 均为 16 倍数的循环变量（`wo_a` 没踩到是因为它的 parallel 索引用在 batch 维，batch 维不做 16 对齐检查）。改成三维 `[QR_OK, D//QR_OK, Q_LORA]` 把 K 分片挪到 batch 维后能编过，但**数值错**（absmax 4.19 对 6.28），且 ND 模式下同样错、两次运行的 mean 还不同：`pl.parallel` 的多个分支要 atomic add 到同一块输出，这个累加保证在 `manual_scope` 下不成立（o_proj 里每个 parallel 分支写的是各自独立的列区间）。收益（qr_proj 1.24× → ~1.0×，约 +90µs）不值这个正确性风险 | T2.27 | 4 | **⚠️ 本条已于 2026-09-25 由用户裁定作废，不得再作为不做 NZ 的依据**（原话「之前的都不作数」；当时看到的数值错是那个阶段其他未解决的精度问题在 NZ 路径上显形，根因已消除）。原结论留档： |
+| T2.28 | 其余三张权重的 NZ（原结论**已作废**） | **⚠️ 本条已于 2026-09-25 由用户裁定作废，不得再作为不做 NZ 的依据。** 原话「以前的 NZ 有精度问题，现在其他的精度问题解决了之后，专心好好用 NZ 做性能提升优化，但是保留独立的 ND 函数分支，之前的都不作数」——当时看到的数值错是那个阶段其他未解决的精度问题在 NZ 路径上显形，根因已消除。重做落在 T6.1。以下为原结论留档，只用于判断重做时是否复现同一现象：① `wq_b`（qproj）：偏移可证性要求把 N 索引从 `pl.range(block_idx, N, WORKERS)` 的循环变量换成块索引直乘（循环变量是 IterArg，非负性推导明确不追它，上游同样写法在本环境也编不过）。改完能跑且数值正确，但单块 55.70 → 17.86µs 而块数 24 → 64，**墙钟只从 55.7 降到 53.6µs**（qproj 在 N=512 下 ND 已有 512B 连续段，瓶颈不在搬运连续性），却要多一份 32MiB/层、21 层约 0.66GiB（它不像另外三张那样本来就有独立副本）。② `wo_b`：为消掉偏移里的减法而改 grid 后，编译报 `proj_a_mm` 的标量被 hoist 到 scope 外；且它本来已是 1.02× 上游。③ `wq_a`（qr_proj）：K 分片放 `pl.parallel` 索引再用作行偏移，报 `offset on shape[-2] must be a multiple of 16, cannot be proven`——可证形式只认常量和 start/step 均为 16 倍数的循环变量（`wo_a` 没踩到是因为它的 parallel 索引用在 batch 维，batch 维不做 16 对齐检查）。改成三维 `[QR_OK, D//QR_OK, Q_LORA]` 把 K 分片挪到 batch 维后能编过，但**数值错**（absmax 4.19 对 6.28），且 ND 模式下同样错、两次运行的 mean 还不同：`pl.parallel` 的多个分支要 atomic add 到同一块输出，这个累加保证在 `manual_scope` 下不成立（o_proj 里每个 parallel 分支写的是各自独立的列区间）。收益（qr_proj 1.24× → ~1.0×，约 +90µs）不值这个正确性风险 | T2.27 | 4 | **已作废（2026-09-25）** |
 | T2.29 | 升级 pypto / simpler 到最新分支 | **已完成**。pypto `5495749` → **`879602d`**（`fix(runtime): adopt device-only HBG kernel contract` #2894），simpler `166852bf` → **`dd32e1cc`**（#2433），pypto 的 `runtime` submodule 同步到 `dd32e1cc`。踩到的三点：① 运行时用的 simpler 是**独立 checkout** `/data/pyptouser/qinchuanyu/pto-eager/simpler`（editable install），不是 pypto 的 submodule，两份都要升；② 只 merge 源码不够，两个库的 C++ 扩展都要重编，revision 校验会逐级报错（先 `Kernel ABI requires Simpler <rev>; native binding is <旧>`，重编 simpler 后再 `The PyPTO torch_npu adapter uses a different Simpler revision`），各跑一次 `pip install -e . --no-build-isolation --no-deps`；③ 本地必须保留两处修改——`torch/shutdown.py` 放宽 torch_npu 版本校验（上游只验证 2.6.0.post2，本环境是 2.10.0.post2），以及 T2.26 的 ABI 修复。`_kernel_abi.py` 里那份对齐 simpler commit 的临时修补由上游自己 pin，不必保留。升级后回归：输出逐位不变，共有任务合计与升级前在噪声内（27,114 vs 27,361） | T2.25 | 3 | **已完成** |
 | T2.30 | 量 simpler `58180f78` 对整模型窗口跨度的影响 | **进行中**。`58180f78`（*reduce kernel admission and A2/A3 retirement overhead*）改两处运行时路径：CPU role 准入改为「已发布槽位的连续前缀含齐所有请求的 role 就立即接纳」，以及把所有已确认的 AICore window CLOSE 写排到 per-window 回读之前、drain 后才发布 return gate。后者关系设备侧任务退役，理论上会动任务间隙。**第一次对比不可用于归因**：升级前 827.5µs / 27,712.5µs 对升级后 864.2µs / 28,571.6µs，看似退化 4.4%，但 ① 两次泳道之间还混了 `proj_a_mm` 的 grid 改动（`final_swimlane` 跑在 `72c4e6cc`，之后才有 grid 改动）；② **kernel 合计也涨了 3.1%**，而设备侧计算时间不该受准入/退役影响，说明落在运行波动里（单卡实测合计波动 ±2～4%）。正在做的：同配置重复采样量波动幅度，再用干净对照组（同一份算子代码、只 `git revert 58180f78`，已验证能干净应用）对比。单卡口径的同代码对照已有：墙钟 93.2 → 92.8ms、共有合计 27,114 → 27,361，都在噪声内——但单卡只有 1 个 rank，准入/退役压力小，本来就测不出这条改动 | T2.29 | 16 | **进行中** |
 | T2.31 | 支持 vllm-ascend 默认的 `weight_nz_mode=1` | **代码已完成，整模型验证中**。此前闸门硬性要求 `weight_nz_mode=0`，而 **1 才是 vllm-ascend 的默认值**——也就是说 PTO CSA 一直在拒绝框架的默认配置，能跑是因为运行口径显式设了 0。查实的链路：CSA 的权重用 vLLM 标准的 `ReplicatedLinear`/`ColumnParallelLinear`/`RowParallelLinear`（`models/deepseek_v4.py:746-783`），而 vllm-ascend 接管了它们的 `process_weights_after_loading`——BF16 走 `AscendUnquantizedLinearMethod`（`ops/linear.py:98`，`_should_trans_nz` 要求 mode==2 才转），INT8 走 `W8A8DynamicLinearMethod`（`w8a8_dynamic.py:148`，mode>=1 就转）。所以 **mode=1 只转 `wq_b`/`wo_b` 两张**。改动：① 闸门放宽到 `weight_nz_mode in (0, 1)`，`enable_kv_nz` 仍拒绝（它改的是 KV cache 页布局，PTO 的 cache 读取按 Native 的 ND 页布局写死）；② 两个包的 `prepare_weights` 把 format 非 0/2 的权重 `npu_format_cast` 回 ND；③ `offline_pd/run.py` 加 `--weight-nz-mode`。**整模型已验证**：mode=1 下 16 卡起得来，权重加载与 `prepare_weights` 无报错，decode 正常、DSpark 投机接受率 100%（平均接受长度 6.00）。**对 replay 无影响**：`prepare_weights` 挂在 `PyptoCSADeepseekV4ForCausalLM.process_weights_after_loading` 上，每层一次、发生在权重加载后 aclgraph capture 前，不在 decode 路径。**代价**：`wq_b` 在 mode=0 下只做 `.contiguous()`（已连续则返回自身、与 Native 共享），mode=1 下必然产生新副本，**+32MiB/层 × 21 层 = 0.66GiB**，而 Native 那份 NZ 权重在 PTO 路径下不再被用到却仍占显存。所以 mode=1 相对 mode=0 是纯亏（多显存、多一次加载期转换、性能相同），价值只在于让 PTO 能在框架默认配置下直接起来。注意**单卡 bench 验证不到这条路径**——它从 argdump 读张量、不走 `prepare_weights`，入参本来就是 ND，压根不会触发 `npu_format_cast` | T2.27 | 16 | **已完成** |
@@ -1226,7 +1226,25 @@ query 重复读同一段历史的开销，是净收益项，要连着 `indexer_s
 | T6.5.4 | 性能对比表 | 同配置（ACL Graph `FULL_DECODE_ONLY`、默认 NZ）下 PTO decode step 不慢于 Native | 未开始 |
 
 **口径**：decode 性能一律 ACL Graph `FULL_DECODE_ONLY`；泳道与 bitcompare 用 eager。
-两侧都开默认 NZ——这是本轮相对以往最大的口径变化，旧的 `NZ=0` 对比数字不能直接沿用。
+不再用 `NZ=0`——这是本轮相对以往最大的口径变化，旧的 `NZ=0` 对比数字不能直接沿用。
+
+> ⚠️ **一个待确认的口径细节**：用户说「Native 采用默认的 NZ 模式」，默认是
+> `weight_nz_mode=1`；而 PTO 要让 BF16 权重（`wo_a`、`wq_a`）走 NZ **需要 mode=2**。
+> `weight_nz_mode` 是全局配置，一次运行里两侧不可能取不同值，但 Native 与 PTO 本来
+> 就是两次独立运行，所以技术上可以 Native 跑 mode=1、PTO 跑 mode=2。
+>
+> 三种口径各自的含义：
+>
+> | 口径 | Native | PTO | 说明 |
+> | --- | --- | --- | --- |
+> | A | mode=1 | mode=2 | 各自最优／默认，但两边 mode 不同，严格说不是同配置 |
+> | B | mode=2 | mode=2 | 同配置；mode=2 下 Native 的 BF16 权重也转 NZ，对 Native 可能也更快 |
+> | C | mode=1 | mode=1 | 同配置，但 PTO 的 BF16 NZ 拿不到，等于放弃 `wo_a` 的收益 |
+>
+> 建议主口径取 **B**（同配置最干净），并补一组 A 作为「各自最优」的参照；
+> 报告里必须写明每组数字用的是哪个 mode。**这一项请用户确认后再开跑**，
+> 不要自行决定——T2.31 已记过 mode=1 相对 mode=0 对 PTO 是纯亏
+> （多 0.66GiB 显存、多一次加载期转换、性能相同），mode 的选择会直接影响结论。
 
 ## 7. 保持暂停，不得自行恢复
 
@@ -1264,13 +1282,17 @@ T5.1～T5.4 ✅ 全部完成
 **T1 主线已走通，2026-09-25 起的当前主线是 T6：**
 
 ```
-T6.1.5 开关与打包链路 ──┬→ T6.1.3 wo_a 开 NZ（实现已在 3dd0b35d，最快见效）
-                        ├→ T6.1.1 wq_b/qproj_matmul  ┐
-                        ├→ T6.1.2 wo_b/proj_b_mm     ├→ T6.2.3 跨度 ≤725 µs → T6.5 泛化验收
-                        └→ T6.1.4 wq_a（收益存疑，最后做，可能不做）
-T6.4 merge_norm / quant / topk_publish ─────────────┘
-T6.3 精度版同步  ← 每完成一项数值中性优化就跟一次，不要攒到最后
-T6.2.1/T6.2.2 归因与关键路径  ← 贯穿全程，为 T6.2.3 提供依据
+T6.1.6 闸门放宽 mode=2 ──→ T6.1.3 wo_a 开 NZ（实现已在 f95c503b，最快见效）──┐
+                                                                            │
+T6.1.5 开关与打包链路 ──┬→ T6.1.1 wq_b / qproj_matmul                        │
+                        ├→ T6.1.2 wo_b / proj_b_mm                          ├→ T6.2.3
+                        └→ T6.1.4 wq_a / qr_proj_matmul                     │  跨度
+                           （数值错不再预设为阻塞，但要实测数值一致）        │  ≤725µs
+                                                                            │    │
+T6.4 merge_norm 2.03× / quant 1.61× / topk_publish 1.30× ───────────────────┘    │
+                                                                                 ↓
+T6.2.1 逐 task 归因 + T6.2.2 关键路径比对（贯穿全程，为 T6.2.3 提供依据）    T6.5 泛化验收
+T6.3 精度版同步（每完成一项数值中性优化就跟一次，不要攒到最后）
 ```
 
 执行原则：
