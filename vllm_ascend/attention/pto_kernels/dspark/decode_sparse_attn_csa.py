@@ -453,7 +453,16 @@ def sparse_attn_csa(
                 cmp_max = pl.maximum(cmp_max, window_max)
                 # Stage three: exponentiate against the chunk maximum and merge.
                 running_m = sink_m
-                running_l = pl.tile.muls(sink_m, 0.0)
+                # native 把 sink 当 flash softmax 的种子而不是最后补一项：
+                # m_0 = sinks[h]、l_0 = 1.0（R0 = 1.0f，
+                # sparse_attn_sharedkv_scfa_block_vector.h:141,368 和 :430-433）。
+                # 于是 l1 = rowsum(p_win) + 1.0*exp(sink-m1)，再被后面的 chunk
+                # 一起重缩放成 l2 = rowsum(p_cmp) + l1*exp(m1-m2)。
+                # 初值不能从 sink_m 派生，单独 load 一次拿自己的缓冲。
+                l_one_seed = pl.load(
+                    attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
+                )
+                running_l = pl.tile.adds(pl.tile.muls(l_one_seed, 0.0), 1.0)
                 running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 # Softmax pass first, merge pass after. The merge folds the
@@ -648,9 +657,11 @@ def _sparse_attn_csa_tp1_prepared(
             m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
             m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
 
-            n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
-            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
-            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
+            # sink 已经在 flash 种子里，这里不再补项。乘 0 的 m_mi 是刻意留的：
+            # 写成 n_denom = m_li 会让 m_mi 变成死值、且把 load 回来的 tile 直接
+            # 当除数，实测出现 16 行 x 16 维的片上缓冲损坏（见 handoff 12.57）。
+            # m_mi 有限，所以 m_mi*0 是精确的 +0.0，m_li + 0.0 精确等于 m_li。
+            n_denom = pl.add(m_li, pl.mul(m_mi, 0.0))
             n_full = pl.row_expand_div(m_oi, n_denom)
             n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
 
