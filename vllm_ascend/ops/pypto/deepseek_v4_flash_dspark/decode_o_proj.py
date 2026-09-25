@@ -77,11 +77,14 @@ PROJ_A_MM_N_TILE = 128
 
 PROJ_A_ROW_TILE = 128  # proj_a token block; one block covers T_PAD, 8 tasks/group
 
-B_K_TILE = 256
+# proj_b 的 K 分块 256->512、N 分块 256->128：b_trans 下连续字节沿 k，K 翻倍把
+# ND 的连续段从 256B 拉到 512B，L0C 也从满格的 128KiB 降到 64KiB 留出双缓冲。
+# 同样是 INT8xINT8->INT32，整数累加精确，分块不影响与 Native 的一致性。
+B_K_TILE = 512
 
 PROJ_B_MM_T_TILE = 128
 
-PROJ_B_MM_N_TILE = 256
+PROJ_B_MM_N_TILE = 128
 
 PROJ_B_ACT_N_TILE = 512
 

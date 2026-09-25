@@ -49,7 +49,10 @@ EPS = M.rms_norm_eps
 
 MAX_SEQ_LEN = M.max_position_embeddings
 
-Q_PROJ_TILE = 256  # qproj K-tile (Q_LORA reduction)
+# K 分块取 128：B 操作数进 L0B 是 K*N 字节（INT8），N=512 时 K=256 要 128KiB，
+# 超了 L0B 的 64KiB 上限，编译器只能再拆一层。qproj 是 INT8xINT8->INT32，
+# 整数累加精确且与分块无关，改 K/N 分块不影响与 Native 的逐 token 一致。
+Q_PROJ_TILE = 128  # qproj K-tile (Q_LORA reduction)
 
 # qproj 输出列分块。由 512 降到 256，对标上游 e68e091。
 # 数值上完全中性：qproj 是 INT8xINT8->INT32 累加，整数累加精确，且 N 维切分
@@ -58,7 +61,7 @@ Q_PROJ_TILE = 256  # qproj K-tile (Q_LORA reduction)
 # 16 核跑 3 块、8 核跑 2 块，不均衡比 1.5；256 时 128 块，变成 8 核跑 6、16 核跑 5，
 # 不均衡比降到 1.2。另外 L0C 占用从 512*64*4=128KiB 降到 64KiB，不再顶满累加器上限，
 # 给双缓冲留出空间。泳道实测该任务 1653us 对上游 875us（1.9x）。
-QPROJ_MM_N_TILE = 256  # qproj output-column tile
+QPROJ_MM_N_TILE = 512  # qproj output-column tile
 
 Q_LORA_TILE = 256  # qr rms-norm / quant N granularity
 
@@ -477,7 +480,7 @@ def q_proj_q_matmul(
 ):
     """Project one bounded Q tile and expose its cube task ID."""
     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
-    qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+    qproj_full_rows = qproj_t_matmul  # 调用方已按 QPROJ_M_TILE 取整
     with pl.spmd(
         QPROJ_WORKERS,
         name_hint="qproj_matmul",
@@ -501,26 +504,6 @@ def q_proj_q_matmul(
                     col_acc = pl.matmul_acc(col_acc, qr_i8_chunk, wq_chunk, init_cond=(qr_proj_col0 == 0))
                 q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
 
-            tail_w_col0 = w_col0
-            for tail_t0 in pl.range(qproj_full_rows, qproj_t_matmul, QPROJ_TAIL_M_TILE):
-                qproj_tail_rows = pl.min(QPROJ_TAIL_M_TILE, tile_rows - tail_t0)
-                tail_acc = pl.create_tensor([QPROJ_TAIL_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
-                for tail_qr_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
-                    qr_i8_tail = pl.slice(
-                        qr_i8_matmul,
-                        [QPROJ_TAIL_M_TILE, Q_PROJ_TILE],
-                        [tail_t0, tail_qr_col0],
-                        valid_shape=[qproj_tail_rows, Q_PROJ_TILE],
-                    )
-                    wq_tail = wq_b[
-                        tail_qr_col0 : tail_qr_col0 + Q_PROJ_TILE,
-                        tail_w_col0 : tail_w_col0 + QPROJ_MM_N_TILE,
-                    ]
-                    tail_acc = pl.matmul_acc(tail_acc, qr_i8_tail, wq_tail, init_cond=(tail_qr_col0 == 0))
-                q_proj_i32[
-                    tail_t0 : tail_t0 + QPROJ_TAIL_M_TILE,
-                    tail_w_col0 : tail_w_col0 + QPROJ_MM_N_TILE,
-                ] = tail_acc
     return q_proj_i32, qproj_tid
 
 
@@ -714,7 +697,11 @@ def q_proj_q(
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
-            qproj_t_matmul = ((tile_rows + QPROJ_TAIL_M_TILE - 1) // QPROJ_TAIL_M_TILE) * QPROJ_TAIL_M_TILE
+            # 按 QPROJ_M_TILE 向上取整，qproj 只跑整块：尾部那几行若按 16 行小块补算，
+            # 每个小块都要把整块 [Q_LORA, N] 权重再读一遍。多出来的行读的是
+            # qr_i8_matmul 的补位行，INT8 乘加不产生非有限值，结果落在补位行里，
+            # 反量化只读前 tile_rows 行，与 Native 的逐 token 结果无关。
+            qproj_t_matmul = ((tile_rows + QPROJ_M_TILE - 1) // QPROJ_M_TILE) * QPROJ_M_TILE
             q_proj_i32 = pl.create_tensor([qproj_t_matmul, H * HEAD_DIM], dtype=pl.INT32)
             q_proj_i32, _qproj_tid = q_proj_q_matmul(
                 wq_b,

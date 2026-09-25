@@ -24,7 +24,12 @@ from .config import (
 from .config import (
     FLASH as M,
 )
-from .layout import INDEXER_KEY_BYTES, INDEXER_PAGE_BYTES_DYN, INDEXER_TABLE_COLUMNS_DYN
+from .layout import (
+    INDEXER_KEY_BYTES,
+    INDEXER_MIN_PAGE_BYTES,
+    INDEXER_PAGE_BYTES_DYN,
+    INDEXER_TABLE_COLUMNS_DYN,
+)
 
 B_DYN = pl.dynamic("B_DYN")
 
@@ -146,6 +151,8 @@ TOPK_QUERY_WORKERS = 48  # Top-K query-merge workers
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
+
+REPACK_WORKERS = 48  # indexer 键重排的 AIV 通道数
 
 SCORE_TILE = 384
 
@@ -457,10 +464,59 @@ def indexer_score_topk_forest(
     coefficients, coefficients_tid = indexer_head_coefficients(
         qr_hadamard_scale_dq, weights, position_ids, qh_quant_tid, weights_tid
     )
+    # ---- 键/scale 重排 ----------------------------------------------------
+    # Native 把一页的 32 个 INT8 键（4096 字节）和 32 个 FP16 scale（64 字节）放在
+    # 同一块分配里，页跨度 4160。4160 % 128 = 64，所以 [blocks*32, 128] 这个二维
+    # 视图不存在，打分侧没法直接把整页搬进 L1（L1 是 16x32 分形，落点行号必须是 16
+    # 的倍数、列号是 32 的倍数）。原先的办法是先搬进 UB 再 aic_gather 进 L1，多一跳。
+    #
+    # 这里每步先做一次重排：把本步可见的页按逻辑页序拷成紧凑的
+    # [b_dim * repack_pages * BLOCK_SIZE, IDX_HEAD_DIM]，scale 拷成
+    # [b_dim, repack_pages * BLOCK_SIZE]。之后打分侧读的是连续行，既能整块直搬 L1，
+    # 也能把一个 lane 的多页并成一次 DMA。**搬运的字节完全相同**，不改变任何计算或
+    # 累加顺序，因此与 Native 的逐 token 一致性不受影响。
+    repack_max_len = 0
+    for repack_batch in pl.range(b_dim):
+        repack_max_len = pl.max(repack_max_len, pl.read(kv_seq_lens, [repack_batch]) // COMPRESS_RATIO)
+    repack_max_len = pl.max(pl.min(repack_max_len, TOPK_MAX_CANDIDATES), 1)
+    # 末尾多留一个 lane 的余量：打分侧最后一个 tile 总是读满 SCORE_LANE_ROWS 行
+    # （超出 lane_valid_rows 的列随后被丢掉），留足余量就不必把读起点往回夹——
+    # 往回夹会让 tile 内的行与候选列号错位。余量页由 repack_safe 用最后一个有效页填上。
+    repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + (SCORE_LANE_ROWS // BLOCK_SIZE + 1)
+    repack_rows = repack_pages * BLOCK_SIZE
+    key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
+    scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
+    with pl.spmd(
+        REPACK_WORKERS, name_hint="indexer_key_repack", deps=[cache_write_tid], allow_early_resolve=True
+    ) as repack_tid:
+        repack_worker = pl.tile.get_block_idx()
+        for repack_unit in pl.range(repack_worker, b_dim * repack_pages, REPACK_WORKERS):
+            repack_b = repack_unit // repack_pages
+            repack_page = repack_unit - repack_b * repack_pages
+            repack_len = pl.read(kv_seq_lens, [repack_b]) // COMPRESS_RATIO
+            repack_valid = pl.max(pl.min(repack_len, TOPK_MAX_CANDIDATES), 0)
+            repack_safe = pl.min(repack_page, pl.max((repack_valid - 1) // BLOCK_SIZE, 0))
+            repack_block = pl.cast(
+                pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
+            )
+            # 键与 scale 在页内连续（4096 + 32*2 = INDEXER_MIN_PAGE_BYTES），一次读完。
+            repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
+            repack_bytes = pl.gather_row(
+                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
+            )
+            repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
+            key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
+                repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
+            )
+            repack_scale_col = repack_page * BLOCK_SIZE
+            scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
+                pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
+            )
+
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_leaf",
-        deps=[coefficients_tid, cache_write_tid],
+        deps=[coefficients_tid, repack_tid],
         allow_early_resolve=True,
         optimizations=[pl.cross_core_slot(slot_num=1)],
     ) as score_tid:
@@ -478,6 +534,7 @@ def indexer_score_topk_forest(
             query = item // max_leaves
             leaf = item % max_leaves
             batch_idx = query // S
+            repack_base = batch_idx * repack_rows
             position = pl.read(position_ids, [query])
             cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
             cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -499,32 +556,19 @@ def indexer_score_topk_forest(
                 ]
                 for score_begin in pl.pipeline(0, lane_span, SCORE_LANE_ROWS, stage=2):
                     read_begin = score_begin * (1 + single_leaf)
-                    # Native packs 4096 contiguous key bytes before the FP16
-                    # scales in each page. Load that region once per page in
-                    # each AIV lane, then hand the assembled rows to Cube in
-                    # L1. This avoids 32 small GM DMAs per page and needs no
-                    # GM staging allocation or additional root arguments.
-                    for key_aiv in pl.split_aiv(2, mode=pl.SplitMode.UP_DOWN):
-                        key_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * IDX_HEAD_DIM], dtype=pl.INT8)
-                        for page in pl.unroll(SCORE_LANE_ROWS // BLOCK_SIZE):
-                            page_begin = page * BLOCK_SIZE
-                            lane_page = key_aiv * lane_stride + page_begin
-                            safe_page_begin = pl.min(
-                                read_begin + lane_page, ((valid_count - 1) // BLOCK_SIZE) * BLOCK_SIZE
-                            )
-                            logical_page = (logical_begin + safe_page_begin) // BLOCK_SIZE
-                            physical_block = pl.cast(
-                                pl.read(idx_block_table_flat, [batch_idx * table_columns + logical_page]), pl.INDEX
-                            )
-                            key_bytes = pl.gather_row(
-                                key_bytes,
-                                idx_kv_cache,
-                                [0, page_begin * IDX_HEAD_DIM],
-                                [physical_block, 0],
-                                [1, INDEXER_KEY_BYTES],
-                            )
-                        key_rows = pl.reshape(key_bytes, [SCORE_LANE_ROWS, IDX_HEAD_DIM])
-                        kv_i8 = pl.aic_gather(key_rows)
+                    # 紧凑缓冲里同一请求的逻辑页是连续行，一个 lane 的整段候选
+                    # 一次 gather_row 就能直搬进 L1，不再需要 UB 中转，也不再是每页一次 DMA。
+                    # 用 create_l1 而不是 tile.create：query_vector 是 Tensor，
+                    # pl.matmul 不允许 Tensor 与 Tile 混用。
+                    kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8)
+                    for key_lane in pl.unroll(2):
+                        kv_i8 = pl.gather_row(
+                            kv_i8,
+                            key_compact,
+                            [key_lane * SCORE_LANE_ROWS, 0],
+                            [repack_base + logical_begin + read_begin + key_lane * lane_stride, 0],
+                            [SCORE_LANE_ROWS, IDX_HEAD_DIM],
+                        )
                     score_i32 = pl.matmul(query_vector, kv_i8, out_dtype=pl.INT32, b_trans=True)
                     # Match Native's FP16 QK tile and FP32 Cube reduction.
                     for score_aiv in pl.split_aiv(2, mode=pl.SplitMode.LEFT_RIGHT):
@@ -537,26 +581,11 @@ def indexer_score_topk_forest(
                     for aiv_id in pl.split_aiv(2, mode=pl.SplitMode.LEFT_RIGHT):
                         lane_begin = aiv_id * lane_stride
                         lane_valid_rows = pl.max(pl.min(valid_count - read_begin - lane_begin, SCORE_LANE_ROWS), 0)
-                        kv_scale_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * 2], dtype=pl.INT8)
-                        for scale_page in pl.unroll(SCORE_TILE // (2 * BLOCK_SIZE)):
-                            scale_page_begin = scale_page * BLOCK_SIZE
-                            safe_scale_begin = pl.min(
-                                read_begin + lane_begin + scale_page_begin,
-                                ((valid_count - 1) // BLOCK_SIZE) * BLOCK_SIZE,
-                            )
-                            scale_logical_page = (logical_begin + safe_scale_begin) // BLOCK_SIZE
-                            scale_block = pl.cast(
-                                pl.read(idx_block_table_flat, [batch_idx * table_columns + scale_logical_page]),
-                                pl.INDEX,
-                            )
-                            kv_scale_bytes = pl.gather_row(
-                                kv_scale_bytes,
-                                idx_kv_cache,
-                                [0, scale_page_begin * 2],
-                                [scale_block, INDEXER_KEY_BYTES],
-                                [1, BLOCK_SIZE * 2],
-                            )
-                        kv_scale = pl.reinterpret_view(kv_scale_bytes, pl.FP16)
+                        # scale 同样已按逻辑页序排好，一个 lane 一次读完。
+                        scale_col0 = logical_begin + read_begin + lane_begin
+                        kv_scale = scale_compact[
+                            batch_idx : batch_idx + 1, scale_col0 : scale_col0 + SCORE_LANE_ROWS
+                        ]
                         weighted_shard = pl.aiv_shard(weighted_scores)
                         score_row = weighted_shard[0:1, :]
                         score_row = pl.mul(score_row, pl.cast(kv_scale, pl.FP32))
