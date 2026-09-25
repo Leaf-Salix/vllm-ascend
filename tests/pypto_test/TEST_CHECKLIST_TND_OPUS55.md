@@ -1260,3 +1260,16 @@ CSA 0.5719 ms vs native 0.5702 ms，两种形状 `accuracy_pass=True`。
 | varlen graph | +0.3% | **−2.0%** |
 
 两形状 `accuracy_pass=True`。回滚：`git revert 7fcd54a22`。
+
+### qr 平方和 half-interval 折叠（`838d61a69`）后的最终状态
+
+| 指标 | uniform-b4 | varlen-b4 |
+|---|---|---|
+| topk 集合差异 | 0 | 0 |
+| `index_key` / `index_scale` / `qr_int8` / **`qr_scale`** / **`raw`** | **全 0（逐位）** | **全 0（逐位）** |
+| `q` | 0.000993%（4/786432） | 0.001146% |
+| `heads` | **0.000410%**（逐位 99.976%） | 0.000733% |
+| `output` | **0.034383%**（逐位 99.098%） | 0.043074% |
+| graph CSA vs native | 0.6127 vs 0.5938 ms（+3.2%） | 0.5729 vs 0.5862 ms（**−2.3%**） |
+
+两形状 `accuracy_pass=True` / `guard_unchanged=True`。
