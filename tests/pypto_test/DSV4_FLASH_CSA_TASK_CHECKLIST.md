@@ -1220,10 +1220,10 @@ query 重复读同一段历史的开销，是净收益项，要连着 `indexer_s
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.5.1 | Native 基线改用默认 NZ 重采 | Native 侧 `VLLM_ASCEND_ENABLE_NZ` 用默认值（1）跑出新的 decode 基线，旧的 `NZ=0` 基线作废并注明 | 未开始 |
+| T6.5.1 | Native 基线改用 NZ 重采 | 按下方口径表确认的 mode 跑出新的 Native decode 基线（用户已明确不再用 `NZ=0`，旧基线作废并注明）；每组数字都标明所用 mode | 未开始 |
 | T6.5.2 | 泛化档位覆盖 | 覆盖 `cudagraph_capture_sizes` 的全部档位（6 的倍数，B=1～40 对应的 T），每档 PTO 与 Native 输出一致 | 未开始 |
 | T6.5.3 | 长序列与边界 | 8k 之外再覆盖短序列与接近容量上限的场景，含补位请求混档 | 未开始 |
-| T6.5.4 | 性能对比表 | 同配置（ACL Graph `FULL_DECODE_ONLY`、默认 NZ）下 PTO decode step 不慢于 Native | 未开始 |
+| T6.5.4 | 性能对比表 | 按下方口径表（建议主口径两侧都 mode=2）下 PTO decode step 不慢于 Native，且注明每组的 mode | 未开始 |
 
 **口径**：decode 性能一律 ACL Graph `FULL_DECODE_ONLY`；泳道与 bitcompare 用 eager。
 不再用 `NZ=0`——这是本轮相对以往最大的口径变化，旧的 `NZ=0` 对比数字不能直接沿用。
