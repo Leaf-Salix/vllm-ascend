@@ -1174,7 +1174,7 @@ start/step 非负的循环变量），符合 `IsProvableNonNegative` 的要求�
 对齐也已核：`n0` 是 128 的倍数（满足行 16 对齐），
 `k0 = col_g + kb * B_K_TILE` 里 `col_g = g * O_LORA`（`g` 来自 `pl.parallel`，可证）、
 `B_K_TILE = 512`，都是 INT8 的 C0 线 32 的倍数；`wo_b` 整形 `[4096, 8192]` 行列均合规。
-| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 同上形态。T2.28 时出现的数值错按用户裁定不再预设为阻塞；但仍要**实测数值一致**（含两次运行 mean 稳定）才算完成，若复现则定位当次根因 | 未开始 |
+| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 同上形态。T2.28 时出现的数值错按用户裁定不再预设为阻塞；但仍要**实测数值一致**（按上文判据）才算完成，若复现则定位当次根因 | 未开始 |
 | T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
 | T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
 
@@ -1220,6 +1220,27 @@ Native 转 FRACTAL_NZ → `prepare_weights` 转回 ND → `_pack_nz` 按 pto-isa
 - Native 在 `weight_nz_mode>=1` 时会把量化权重转成 `FRACTAL_NZ`(30)，而 PyPTO 根入参
   只收 NCHW(0)/ND(2)，`prepare_weights` 里已有 `npu_format_cast` 转回 ND。两个 NZ
   不是一回事，即便我们也走 NZ，仍要先回到 ND 再用 `_pack_nz` 按 pto-isa 分形序重排。
+
+#### 数值验收判据：不能用「逐位相同」（2026-09-26 查明）
+
+**当前 kernel 的输出本质上是非确定的**，同一份代码、同一配置连跑三轮，`x_out` 的
+mean 各不相同（mode=1 三轮：`0.021321749314665794` / `0.021321764215826988` /
+`0.02132178284227848`），而 `absmax` 稳定在 46.5。
+
+根因不是整层融合，而是 `qkv_proj_rope.py` 里 **4 处 `atomic=pl.AtomicType.Add`**
+（`qr_proj_matmul` 与 `kv_proj_matmul` 的 split-K 规约，**两个包都有**）。
+`pl.store` 的文档明写：atomic-add 的跨核累加顺序不固定，浮点结果因此**非确定**。
+这是拿确定性换并行度的有意设计，不是 bug。
+
+**所以本轮所有 NZ 改动的数值判据统一为**：
+
+- `x_out` 的 `absmax` **完全相同**（布局改变不该动到极值）；
+- `mean` 的差异 ≤ 1e-7（同配置多轮的自然波动量级就是 1e-8）；
+- `finite` 为真；
+- 整模型侧仍以 256/256 token 与 Native 一致为准。
+
+不要再写「逐位相同」——T2.24 里那句「改前改后输出逐位相同」是在 split-K 的 atomic
+恰好同序时测到的，不可复现，别当判据。
 
 #### 测量口径：两条必须守的纪律（2026-09-26 各踩一次）
 
@@ -1387,7 +1408,7 @@ query 重复读同一段历史的开销，是净收益项，要连着 `indexer_s
 | --- | --- | --- | --- |
 | T6.3.1 | 逐文件 diff 两版 CSA | 产出差异清单，每条标注「为精度必需」或「可同步的数值中性优化」 | **进行中**（文件级已出，见下） |
 | T6.3.2 | 同步数值中性优化 | 所有标为数值中性的改动（纯调度、分块、搬运路径、NZ 布局）落到精度版；精度版与 Native 的比对结果不劣化 | 未开始 |
-| T6.3.3 | 把 NZ 支持带到精度版 | 精度版目前**完全没有** NZ：`nz_mode.py` / `nz_args.py` 是性能版独有，`decode_o_proj` 等处的权重也没有 layout 槽。判据是精度版同样做成 NZ/ND 双函数、由同一个 `weight_nz_mode` 驱动，且开关关闭时与改前逐位相同 | 未开始 |
+| T6.3.3 | 把 NZ 支持带到精度版 | 精度版目前**完全没有** NZ：`nz_mode.py` / `nz_args.py` 是性能版独有，`decode_o_proj` 等处的权重也没有 layout 槽。判据是精度版同样做成 NZ/ND 双函数、由同一个 `weight_nz_mode` 驱动，且开关关闭时数值与改前一致（按上文判据） | 未开始 |
 
 #### 文件级 diff 结果（2026-09-26）
 
@@ -1418,7 +1439,7 @@ mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果�
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把就地算索引改成纯 INT32 的 9 步版本（方案见下）；判据是 `local_setup_us` p50 明显下降、数值与改前**逐位相同**、不新增独占核的 device 任务、且不改 kernel ABI | 未开始（**方案已定**） |
+| T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把就地算索引改成纯 INT32 的 9 步版本（方案见下）；判据是 `local_setup_us` p50 明显下降、数值按上文判据一致（absmax 相同、mean 差 ≤1e-7）、不新增独占核的 device 任务、且不改 kernel ABI | 未开始（**方案已定**） |
 
 **T6.4.1 的方案：用整数位运算，不加 kernel 入参。** 原先想把索引表做成主机侧算好
 的入参，但那会改 kernel ABI，argdump 随之失效、要重跑一次 16 卡——代价不值。
@@ -1443,7 +1464,7 @@ m_swap_idx = pl.row_expand_add(m_swap_b, pl.reshape(m_row, [H_TILE, 1]))
 不能省。
 
 `j ^ 1` 与原式 `j + 1 - 2*(j % 2)` 在 `j ∈ [0, ROPE_DIM)` 上逐值相等（偶数 +1、
-奇数 −1），所以是**数值恒等改写**，验收要求逐位相同。
+奇数 −1），所以是**数值恒等改写**；验收按上文判据（absmax 相同、mean 差 ≤1e-7）。
 | T6.4.2 | `quant` 的长尾 | **不是提速项**：180 块合计与上游相同（3765.6 vs 3765.5），p50 我们还略快。只需核实 p90/max 的长尾（53.34/79.40 对上游 38.26/46.50）是否落在关键路径上；若不在，记录结论并关闭 | 未开始 |
 | T6.4.3 | `indexer_topk_single_leaf_publish` 1.30× | 同上 | 未开始 |
 | T6.4.4 | `idx_qr_dequant_rope` 1.33× 与 `qr_hadamard_quant` 1.38× | 两项合计 +376 核·µs 且都在关键路径上。先按 T6.2.1 的办法拆 `kernel-duration` 与 `local_setup`，再与上游同名 task 逐行对比代码，给出归因与收敛方案 | 未开始 |
