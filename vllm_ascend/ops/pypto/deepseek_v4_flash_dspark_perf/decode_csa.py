@@ -11,6 +11,8 @@
 
 import pypto.language as pl
 
+from .nz_mode import BF16_WEIGHT_LAYOUT
+
 from .config import (
     BLOCK_SIZE,
     C4A_COMPRESSOR_BLOCK_SIZE,
@@ -162,7 +164,7 @@ def _decode_csa_tp1_attention(
     cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
-    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, pl.NZ],
+    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
     wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],

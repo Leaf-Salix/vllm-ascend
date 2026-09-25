@@ -11,6 +11,8 @@
 
 import pypto.language as pl
 
+from .nz_mode import BF16_WEIGHT_LAYOUT
+
 from .config import (
     DECODE_TOKENS,
     INT8_AMAX_EPS,
@@ -163,7 +165,7 @@ if T_PAD % PROJ_B_MM_T_TILE != 0:
 @pl.jit.inline
 def decode_o_proj_tp1(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, pl.NZ],
+    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
     wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],

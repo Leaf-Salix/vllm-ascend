@@ -65,6 +65,20 @@ def _pack_nz(value: "torch.Tensor") -> "torch.Tensor":
     return packed.to(device)
 
 
+def _maybe_pack_nz(value: "torch.Tensor", dtype) -> "torch.Tensor":
+    """按 vllm-ascend 的 weight_nz_mode 决定要不要把这张权重排成 NZ 分形序。
+
+    必须和 kernel 侧的类型标注用同一个开关（nz_mode），否则标注说 NZ 而字节还是
+    ND（或反过来），读到的就是错位的分形，而且不会报错、只会算错。
+    """
+    from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
+
+    import torch
+
+    enabled = BF16_WEIGHT_NZ if dtype in (torch.bfloat16, torch.float16) else QUANT_WEIGHT_NZ
+    return _pack_nz(value) if enabled else value
+
+
 def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch.Tensor]:
     """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
     import torch_npu
@@ -116,7 +130,7 @@ def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch
         "inner_norm_w": weight(inner.norm, (128,), bf16),
         "attn_sink": attention.attn_sink.detach().contiguous(),
         # NZ 序存放：这一份本来就是 transpose 出来的独立副本，不额外占显存。
-        "wo_a": _pack_nz(weight(attention.wo_a, (8, 4096, 1024), bf16, True)),
+        "wo_a": _maybe_pack_nz(weight(attention.wo_a, (8, 4096, 1024), bf16, True), bf16),
         "wo_b": weight(attention.wo_b, (8192, 4096), int8, True),
         "wo_b_scale": scale(attention.wo_b, 4096),
     }
