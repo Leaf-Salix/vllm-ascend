@@ -24,7 +24,12 @@ from .config import (
 from .config import (
     FLASH as M,
 )
-from .layout import INDEXER_KEY_BYTES, INDEXER_PAGE_BYTES_DYN, INDEXER_TABLE_COLUMNS_DYN
+from .layout import (
+    INDEXER_KEY_BYTES,
+    INDEXER_MIN_PAGE_BYTES,
+    INDEXER_PAGE_BYTES_DYN,
+    INDEXER_TABLE_COLUMNS_DYN,
+)
 
 B_DYN = pl.dynamic("B_DYN")
 
@@ -436,7 +441,7 @@ def indexer_score_topk_forest(
     # SCORE_LANE_ROWS 行（超出 lane_valid_rows 的列随后被丢掉），留足余量就不必把
     # 读起点往回夹——往回夹会让 tile 内的行与候选列号错位。余量页由下面的
     # repack_safe 用最后一个有效页填上，不留未初始化数据。
-    repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + SCORE_TILE // BLOCK_SIZE
+    repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + (SCORE_LANE_ROWS // BLOCK_SIZE + 1)
     repack_rows = repack_pages * BLOCK_SIZE
     key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
     scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
@@ -455,21 +460,19 @@ def indexer_score_topk_forest(
             repack_block = pl.cast(
                 pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
             )
-            repack_bytes = pl.create_tensor([1, INDEXER_KEY_BYTES], dtype=pl.INT8)
+            # 键与 scale 在页内连续（4096 + 32*2 = INDEXER_MIN_PAGE_BYTES），一次读完。
+            # 分两次读会让 DMA 次数翻倍，而 repack 的开销就是次数乘以启动开销。
+            repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
             repack_bytes = pl.gather_row(
-                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_KEY_BYTES]
+                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
             )
             repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
             key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
-                repack_bytes, [BLOCK_SIZE, IDX_HEAD_DIM]
-            )
-            repack_scale_bytes = pl.create_tensor([1, BLOCK_SIZE * 2], dtype=pl.INT8)
-            repack_scale_bytes = pl.gather_row(
-                repack_scale_bytes, idx_kv_cache, [0, 0], [repack_block, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
+                repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
             )
             repack_scale_col = repack_page * BLOCK_SIZE
             scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
-                pl.reinterpret_view(repack_scale_bytes, pl.FP16)
+                pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
             )
 
     # 性能版不外提 head 系数：上游在 leaf 内按 query 现算，省掉一个独占关键路径

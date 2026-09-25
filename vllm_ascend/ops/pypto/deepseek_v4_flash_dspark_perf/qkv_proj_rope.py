@@ -87,7 +87,12 @@ QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul；上游值。取 32 是为了�
 
 QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
 
-QR_OK = 2  # qr_proj split-K factor；上游值。取 1 是因为 split-K 会改变 Native 的 QR 舍入。
+# qr_proj 的 split-K 取 8 而不是上游的 2：grid = (Q_LORA//QR_N_TILE) * QR_OK，
+# 取 2 时只有 16 块，而 AIC 有 24 核，8 个核全程闲置（利用率 66.7%）。
+# 取 8 后 64 块跑 3 波、每块 K 从 2048 降到 512，墙钟 33.5 -> 24.1us。
+# split-K 靠 qr_proj_seed 置零 + assemble(atomic=Add) 规约，已是现成机制；
+# QR_N_TILE 保持 128：改成 64 会改变 atomic 的累加顺序，实测输出就变了。
+QR_OK = 8  # qr_proj split-K factor
 
 QR_SPLIT_K_TILE = D // QR_OK
 
@@ -104,7 +109,11 @@ KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
 KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
 
-KV_OK = 2  # kv_proj split-K factor         | D//KV_OK cores share each N-group
+# kv_proj 的 split-K 取 8：grid = (HEAD_DIM//KV_N_TILE) * KV_OK * kv_m_groups，
+# 取 2 时只有 8 块，AIC 24 核只用了三分之一。取 8 后 32 块跑 2 波、每块 K 从
+# 2048 降到 512，墙钟 25.6 -> 15.0us。split-K 的置零与规约由 kv_proj_seed 和
+# assemble(atomic=Add) 承担，已是现成机制。
+KV_OK = 8  # kv_proj split-K factor         | D//KV_OK cores share each N-group
 
 KV_OM = 3  # maximum kv_proj split-M factor
 
