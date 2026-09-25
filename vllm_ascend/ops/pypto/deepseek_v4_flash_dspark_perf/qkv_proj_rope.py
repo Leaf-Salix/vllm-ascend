@@ -11,7 +11,7 @@
 
 import pypto.language as pl
 
-from .nz_mode import QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
+from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
 
 from .config import (
     FLASH as M,
@@ -238,15 +238,22 @@ def rope_prepare(
                 )
 
 
+# NZ 与 ND 拆成两个独立函数；末尾择一。见 _q_proj_qa_nz 的说明。
+QR_N_BLOCKS = Q_LORA // QR_N_TILE
+
+
 @pl.jit.inline(auto_scope=False)
-def q_proj_qa(
+def _q_proj_qa_nd(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
     qr_fp32: pl.Out[pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32]],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
 ):
-    """Reference QA matmul, shared by the production QR and its diagnostic."""
+    """ND 版：K 分片用取模、N 分块用整除，与上游同形。
+
+    Reference QA matmul, shared by the production QR and its diagnostic.
+    """
     qa_tokens = pl.tensor.dim(x, 0)
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
@@ -257,7 +264,7 @@ def q_proj_qa(
                 qr_seed = pl.full([QR_M_TILE, QR_N_TILE], dtype=pl.FP32, value=0.0)
                 qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
 
-    for qbg_idx in pl.spmd((Q_LORA // QR_N_TILE) * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
+    for qbg_idx in pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
         for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
@@ -284,6 +291,94 @@ def q_proj_qa(
                 w_chunk = wq_a[qr_d0 : qr_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
                 q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, init_cond=(db == 0))
             qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=pl.AtomicType.Add)
+
+
+@pl.jit.inline(auto_scope=False)
+def _q_proj_qa_nz(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
+    qr_fp32: pl.Out[pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32]],
+    tile_base: pl.Scalar[pl.INDEX],
+    tile_rows: pl.Scalar[pl.INDEX],
+):
+    """NZ 版：把整除用到 K（行）维、取模留给 N（列）维。
+
+    `wq_a` 的切片是 `wq_a[dense_d0 : ..., q_a_col0 : ...]`，行偏移 `dense_d0` 由
+    `qr_k_base` 导出。ND 版的 `qr_k_base` 用**取模**算，而取模会展开成减法、
+    `IsProvableNonNegative` 永不接受，于是行偏移不可证——T2.28 报的
+    `offset on shape[-2] must be a multiple of 16, cannot be proven` 正是这个。
+
+    这里把两个分量互换：K 用整除（`QR_SPLIT_K_TILE = 512`，`512 % 16 == 0` 满足
+    行 16 对齐），N 用取模（落到列维，`QR_N_TILE = 128` 是 BF16 C0 线 16 的倍数）。
+    巧的是 `QR_N_BLOCKS == QR_OK == 8`，所以 grid 总数不变、仍是 64 块，只是 block
+    到 (k 分片, n 分块) 的映射换了个次序；每个组合仍恰好被覆盖一次，**数值等价**。
+
+    不要改成三维 `[QR_OK, D//QR_OK, Q_LORA]`：T2.28 试过，虽然编得过但数值错
+    （absmax 4.19 对 6.28），而且它自己也记了「ND 模式下同样错」，说明错在改三维
+    shape 本身、与 NZ 无关。
+    """
+    qa_tokens = pl.tensor.dim(x, 0)
+    x_view = pl.reshape(x, [qa_tokens, D])
+    qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
+    qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qr_proj_seed"):
+        for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
+            for nseed0 in pl.range(0, Q_LORA, QR_N_TILE):
+                qr_seed = pl.full([QR_M_TILE, QR_N_TILE], dtype=pl.FP32, value=0.0)
+                qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
+
+    # 用 `with pl.spmd(...)` + `get_block_idx()` 而不是 `for ... in pl.spmd(...)`：
+    # 后者给出的是 IterArg，`IsProvableNonNegative` 不追它，于是由它导出的行偏移
+    # 不可证（实测报 `slice offset on shape[-2] to be non-negative cannot be proven`）。
+    # `get_block_idx()` 是明确的 SPMD block 索引，属于可证形式。
+    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
+        qbg_idx = pl.tile.get_block_idx()
+        qr_k_base = (qbg_idx // QR_N_BLOCKS) * QR_SPLIT_K_TILE
+        q_a_col0 = (qbg_idx % QR_N_BLOCKS) * QR_N_TILE
+        for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
+            dense_x0 = tile_base + dense_t0
+            dense_acc = pl.create_tensor([QR_DENSE_M_TILE, QR_N_TILE], dtype=pl.FP32)
+            for dense_k in pl.pipeline(0, QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
+                dense_d0 = qr_k_base + dense_k * QR_K_TILE
+                dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
+                dense_w = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
+                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
+            qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=pl.AtomicType.Add)
+        for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
+            q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
+            for db in pl.pipeline(QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
+                qr_d0 = qr_k_base + db * QR_K_TILE
+                qr_rows = pl.min(QR_M_TILE, tile_rows - t0)
+                x_t0 = tile_base + t0
+                q_x_chunk_bf16 = pl.slice(
+                    x_view,
+                    [QR_M_TILE, QR_K_TILE],
+                    [x_t0, qr_d0],
+                    valid_shape=[qr_rows, QR_K_TILE],
+                )
+                w_chunk = wq_a[qr_d0 : qr_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
+                q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, init_cond=(db == 0))
+            qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=pl.AtomicType.Add)
+
+
+# **暂时锁定 ND**：`_q_proj_qa_nz` 在当前 PyPTO 版本上编不过，原因是
+# `IsProvableNonNegative` 的可证形式只有「非负常量 / SPMD block 索引 / start 与 step
+# 均非负的循环变量」以及由它们构成的**和与积**——**没有商**。而 qr 的 grid 是
+# (N 分块 x K 分片) 的一维展开，要拿到行偏移的 K 分量就必须做一次除法或取模，
+# 两者都不可证。上游 pypto-lib 用的是同样的一维展开写法，它能编过是因为其 pypto
+# 更新（T2.25 已记：上游 qkv_proj_rope.py 单体在本环境编译失败，报的正是 NZ 非负性），
+# 而本机只用 feat/kernel-mode-integration-test 这一个版本，不升级。
+#
+# 唯一能让行偏移可证的替代是把 grid 降成一维（只按 K 或只按 N），但那会让 grid 从
+# 64 掉到 8、并行度只用到 24 个 AIC 核里的 8 个：单块从 7.84 涨到约 62.7 µs，墙钟
+# 从约 20.9 µs 涨到约 62.7 µs，**比现状慢 3 倍、比上游的 19.61 µs 慢 3.2 倍**，净亏。
+#
+# 所以这里保留 NZ 版备用但不启用。将来若 PyPTO 的可证判据支持整除，把 wq_a 的
+# 签名改回 `BF16_WEIGHT_LAYOUT`、把下面这行换成按 BF16_WEIGHT_NZ 择一即可。
+# 注意：启用时必须同步恢复 `native_adapter` 里 wq_a 的 `_maybe_pack_nz` 与
+# `nz_args.BF16_NZ_PARAMS` 里的 "wq_a"——主机侧打包与 kernel 标注必须同时开或同时关，
+# 只开一侧不会报错、只会算错。
+q_proj_qa = _q_proj_qa_nd
 
 
 @pl.jit.inline(auto_scope=False)

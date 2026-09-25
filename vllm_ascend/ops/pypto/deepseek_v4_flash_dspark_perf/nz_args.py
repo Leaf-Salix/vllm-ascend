@@ -10,6 +10,7 @@ from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
 
 # 只列 kernel 签名里真的用了 NZ layout 的权重。两张表分开是因为两档开关不同：
 # BF16 权重要 weight_nz_mode>=2，INT8 量化权重 mode>=1 就开（也就是默认档）。
+# wq_a 暂不列入：它的 NZ kernel 版在当前 PyPTO 上编不过，见 qkv_proj_rope.q_proj_qa
 BF16_NZ_PARAMS = ("wo_a",)
 QUANT_NZ_PARAMS = ("wq_b",)
 

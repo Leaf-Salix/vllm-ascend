@@ -1208,7 +1208,7 @@ start/step 非负的循环变量），符合 `IsProvableNonNegative` 的要求�
 对齐也已核：`n0` 是 128 的倍数（满足行 16 对齐），
 `k0 = col_g + kb * B_K_TILE` 里 `col_g = g * O_LORA`（`g` 来自 `pl.parallel`，可证）、
 `B_K_TILE = 512`，都是 INT8 的 C0 线 32 的倍数；`wo_b` 整形 `[4096, 8192]` 行列均合规。
-| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 同上形态。T2.28 时出现的数值错按用户裁定不再预设为阻塞；但仍要**实测数值一致**（按上文判据）才算完成，若复现则定位当次根因 | 未开始 |
+| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | — | **实现已备好但不启用**：NZ 版在当前 PyPTO 上编不过（可证判据不支持整除），降维替代方案比现状慢 3 倍。详见下方 |
 | T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
 | T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
 
@@ -1353,6 +1353,42 @@ INT8 cache，**与 `wo_a` 的布局毫无关系**；`indexer_topk_single_leaf_pu
 所以：**判断一项改动，只认直接因果项 + 同卡交替多轮的中位数**。
 `proj_a_mm` 的 −2.59 µs/块（−174 核·µs）属于直接因果，可信；整体跨度要等
 同卡交替的结果。
+
+**T6.1.4 的结论（2026-09-26 实测）：当前 PyPTO 版本下做不了，`wq_a` 锁在 ND。**
+
+先按方案把整除换到行维、取模落到列维——**仍然编不过**，报错从「must be a multiple
+of 16」变成「to be non-negative」。错误消息把可证形式列得很清楚：
+
+> Provable forms are a non-negative constant, the SPMD block index, a loop variable
+> whose start and step are both non-negative, and **any sum or product** built from
+> those — note that a difference never qualifies.
+
+**只有「和」与「积」，没有「商」。** 而 qr 的 grid 是 (N 分块 × K 分片) 的一维展开，
+要从 `block_idx` 拿到行偏移的 K 分量，无论用 `//` 还是 `%` 都不可证。顺便确认了另
+一件事：`for x in pl.spmd(N)` 给出的是 IterArg（不可证），必须写成
+`with pl.spmd(N)` + `pl.tile.get_block_idx()` 才是可证形式——但即便如此，除法这一步
+仍然挡住。
+
+上游用的是同样的一维展开写法，它能编过是因为其 PyPTO 更新（T2.25 已记：上游
+`qkv_proj_rope.py` 单体在本环境编译失败，报的正是 NZ 非负性）。本机只用
+`feat/kernel-mode-integration-test` 一个版本、不升级，所以这条路封着。
+
+唯一能让行偏移可证的替代是**把 grid 降成一维**（只按 K 或只按 N），代价实测算过：
+
+| | grid | 单块 | 并行度 | 墙钟 |
+| --- | --- | --- | --- | --- |
+| 现状（ND，二维展开） | 64 | 7.84 µs | 64/24 核 = 2.7 轮 | **约 20.9 µs** |
+| 降维（可证，能走 NZ） | 8 | 约 62.7 µs | 8/24 核 | **约 62.7 µs** |
+| 上游同口径 | — | — | — | 19.61 µs |
+
+比现状慢 3 倍、比上游慢 3.2 倍，净亏。
+
+**所以 NZ 版（`_q_proj_qa_nz`）保留在代码里备用但不启用**，`q_proj_qa = _q_proj_qa_nd`
+写死，并在注释里写明将来 PyPTO 支持整除后怎么打开。**同时撤回了主机侧的打包**
+（`native_adapter` 的 `_maybe_pack_nz` 与 `nz_args.BF16_NZ_PARAMS` 里的 `wq_a`）——
+主机侧打包与 kernel 标注必须同开同关，只开一侧不会报错、只会算错。
+
+这一项是「按上游为准该做、但被当前工具链挡住」，不是「判断收益不划算而不做」。
 
 **T6.1.4 的方案（`wq_a` / `qr_proj_matmul`）**：不可证点在**行偏移用了取模**——
 

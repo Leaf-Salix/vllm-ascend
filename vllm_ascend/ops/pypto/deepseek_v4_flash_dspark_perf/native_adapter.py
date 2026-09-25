@@ -137,6 +137,9 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         }
     return {
         **hc,
+        # wq_a 保持 ND：它的 NZ kernel 版在当前 PyPTO 上编不过（可证判据不支持整除），
+        # 见 qkv_proj_rope.q_proj_qa 的说明。主机侧打包必须与 kernel 标注同步，所以这里
+        # 也不能提前打包——只开一侧不报错、只算错。
         "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
         # NZ 序存放（mode>=1 即开）：Native 在 mode>=1 下已把它转成 FRACTAL_NZ，
         # weight() 里先 npu_format_cast 回 ND，这里再按 pto-isa 的分形序重排。
