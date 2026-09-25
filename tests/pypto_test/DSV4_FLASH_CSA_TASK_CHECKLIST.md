@@ -1334,7 +1334,32 @@ mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果�
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把 lane-swap 索引表改成主机侧算好的 kernel 入参，kernel 内退回一次 `pl.load`；判据是 `local_setup_us` p50 ≤ 1.0 µs、数值与改前逐位相同、且不新增独占核的 device 任务 | 未开始（**已定位，见 T6.2.1**） |
+| T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把就地算索引改成纯 INT32 的 9 步版本（方案见下）；判据是 `local_setup_us` p50 明显下降、数值与改前**逐位相同**、不新增独占核的 device 任务、且不改 kernel ABI | 未开始（**方案已定**） |
+
+**T6.4.1 的方案：用整数位运算，不加 kernel 入参。** 原先想把索引表做成主机侧算好
+的入参，但那会改 kernel ABI，argdump 随之失效、要重跑一次 16 卡——代价不值。
+
+查 PyPTO 的 `tile_ops` 发现它**有完整的整数与位运算**：`xors`/`ands`/`ors`、
+`shls`/`shrs`、`rems`/`fmods`、`adds`/`muls`、`col_expand`、`ci`（即 `arange`）。
+lane swap 就是 `j ^ 1`，一条 `pl.xors` 即可，于是整段可以写成纯 INT32：
+
+```python
+m_idx     = pl.ci(0, [1, ROPE_DIM], dtype=pl.INT32)                 # j
+m_xor_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)           # xors 需要 tmp
+m_swap    = pl.adds(pl.xors(m_idx, 1, m_xor_tmp), NOPE_DIM)         # (j^1) + NOPE_DIM
+m_base    = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+m_swap_b  = pl.col_expand(m_base, m_swap)                           # 广播到 [H_TILE, ROPE_DIM]
+m_row     = pl.muls(pl.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
+m_swap_idx = pl.row_expand_add(m_swap_b, pl.reshape(m_row, [H_TILE, 1]))
+```
+
+对比现状：**13 步 FP32 + 5 次 `pl.cast`** → **9 步、零 cast**。in-core 已量到
+现状比读表版多出 `VMUL`×48/0.7 µs、`VCONV` 66→84、`MOV` 414→504，这些正是要消掉的。
+注意 `pl.xors` 的签名是 `xors(lhs, rhs, tmp)`，第三个参数是硬件要求的临时 tile，
+不能省。
+
+`j ^ 1` 与原式 `j + 1 - 2*(j % 2)` 在 `j ∈ [0, ROPE_DIM)` 上逐值相等（偶数 +1、
+奇数 −1），所以是**数值恒等改写**，验收要求逐位相同。
 | T6.4.2 | `quant` 的长尾 | **不是提速项**：180 块合计与上游相同（3765.6 vs 3765.5），p50 我们还略快。只需核实 p90/max 的长尾（53.34/79.40 对上游 38.26/46.50）是否落在关键路径上；若不在，记录结论并关闭 | 未开始 |
 | T6.4.3 | `indexer_topk_single_leaf_publish` 1.30× | 同上 | 未开始 |
 
