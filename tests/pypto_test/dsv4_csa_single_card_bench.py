@@ -109,8 +109,11 @@ def main() -> None:
     except ModuleNotFoundError:
         pack_args = None
     if pack_args is not None:
+        before = {k: v.data_ptr() for k, v in tensors.items()}
         tensors = pack_args(tensors)
-        print("nz_args.pack_args 已应用", flush=True)
+        # 开关关闭时 pack_args 原样返回，打印"已应用"会误导；这里报出实际重排了哪几张。
+        repacked = [k for k, v in tensors.items() if before.get(k) != v.data_ptr()]
+        print(f"nz_args.pack_args: 重排 {len(repacked)} 张 {repacked}", flush=True)
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -170,8 +173,10 @@ def main() -> None:
                 _export_swimlane(args.output / "dfx" / f"window_{index}")
                 for index in range(1, max(1, args.windows))
             ]
-        out = tensors["attn_out"].detach().float().cpu()
-        report["attn_out"] = {"finite": bool(torch.isfinite(out).all()),
+        # 整层入口（1dcadd85 之后）的输出是 x_out（mHC 残差流）；融合前叫 attn_out。
+        out_name = "x_out" if "x_out" in tensors else "attn_out"
+        out = tensors[out_name].detach().float().cpu()
+        report[out_name] = {"finite": bool(torch.isfinite(out).all()),
                               "absmax": float(out.abs().max()), "mean": float(out.mean())}
     except BaseException as exc:  # 故障也要留证据
         report.update(status="FAIL", error=repr(exc))
