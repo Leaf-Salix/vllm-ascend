@@ -1255,6 +1255,26 @@ Native 转 FRACTAL_NZ → `prepare_weights` 转回 ND → `_pack_nz` 按 pto-isa
   只收 NCHW(0)/ND(2)，`prepare_weights` 里已有 `npu_format_cast` 转回 ND。两个 NZ
   不是一回事，即便我们也走 NZ，仍要先回到 ND 再用 `_pack_nz` 按 pto-isa 分形序重排。
 
+#### 更正：`local_setup_us` 不是 kernel 代码的开销，改代码消不掉
+
+T6.2.1 里我把 `merge_norm` 那 7.6 µs 的 `local_setup` 归因成「就地算 lane-swap 索引、
+SPMD 下每个 block 重算一遍」。**这个归因是错的**。把那 13 步 FP32 改成 INT32 取模
+（in-core 已证实指令数大降：MOV 504→375、VCONV 84→40、VECTOR 128→78）之后，设备侧的
+`local_setup` 只从 **8.830 降到 8.590**——几乎没动。
+
+反例其实早就在数据里：上游的 `qr_hadamard_quant` setup 高达 **8.07**，而我们同一个
+task 只有 **0.86**；上游 `indexer_topk_single_leaf_publish` 是 9.31、我们 10.47。
+可见 setup 的高低与 task 在**依赖图里的位置**相关，而不是与它内部算了多少条指令
+相关——更像是 SPMD 的 block 陆续启动时等前序依赖就绪的时间（`merge_norm` 等的是
+`qk_pv` 这个 149 µs 的大任务，它的 48 个 block 陆续完成）。
+
+**今后的做法**：把 `local_setup_us` 当调度信号读，不要当成能靠改 kernel 代码优化掉
+的开销；要压它得动依赖关系或任务切分。逐 task 归因时，**只有 `kernel-duration` 的
+差值才对应「这段代码本身的快慢」**。
+
+这一项的改动仍然保留：`kernel-duration` 真实降了 7.0%（24.55→22.83），跨度 −0.8%，
+数值一致，而且顺带去掉了 FP32 往返、代码更直白。
+
 #### 数值验收判据：不能用「逐位相同」（2026-09-26 查明）
 
 **当前 kernel 的输出本质上是非确定的**，同一份代码、同一配置连跑三轮，`x_out` 的
@@ -1519,7 +1539,7 @@ mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果�
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.4.1 | `merge_norm`：消掉 7.6 µs/块的 setup | 把就地算索引改成纯 INT32 的 9 步版本（方案见下）；判据是 `local_setup_us` p50 明显下降、数值按上文判据一致（absmax 相同、mean 差 ≤1e-7）、不新增独占核的 device 任务、且不改 kernel ABI | 未开始（**方案已定**） |
+| T6.4.1 | `merge_norm`：索引计算改整数运算 | — | **已完成**：kernel-duration 24.55→22.83（−7.0%）、跨度 840.3→833.6（−0.8%）、数值一致。但**原定判据「local_setup 明显下降」没达成**（8.83→8.59），见下方更正 |
 
 **T6.4.1 实现记录（2026-09-26）**：最终落地的是**取模**而不是异或，因为两条更短的
 路都被硬件挡了——
