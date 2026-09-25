@@ -77,9 +77,16 @@ VLLM_STATE_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_MAIN_STATE_TABLE_DYN")
 VLLM_CMP_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_CMP_TABLE_DYN")
 
 # tiling
-K_TILE = 512
-OUT_TILE = 64
-MM_B_TILE = 64
+# native 的 mm1 走 NORMAL 模板（compressor_block_cube_perf.h），K_L1_BASE = 256，
+# 每个输出列块从不同的 K 块起步并绕回：hIdx = (h + k + hIdxStart) % hSize，
+# hIdxStart = (aiCoreIdx % dBasicBlockNum) * K_L1_BASE。K_TILE 必须等于 256，
+# OUT_TILE 必须等于 dBaseSize，否则一个 tile 里的列会共用错误的移位量。
+K_TILE = 256
+CMP_DBASE = 32  # native 的 dBaseSize：等长 batch 走 32
+OUT_TILE = CMP_DBASE
+# OUT_TILE 降到 32 之后工作单元翻倍，每个单元都要重读整块 x；把 M 也降到 32
+# 让 x 的流量回到原来的 8 MB，同时 24 个有效 token 的 padding 浪费从 62% 降到 25%。
+MM_B_TILE = 32
 KV_SCORE_WORKERS = 24  # KV-score projection workers
 POOL_WORKERS = 48  # Pool workers
 COMMIT_WORKERS = 48
@@ -118,8 +125,13 @@ def compressor_ratio4_project(
             x_rows = pl.min(MM_B_TILE, bs - global_row0)
             kv_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
             score_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
+            # 输出列块 o0 的 K 遍历从第 rot 个块起步、绕回，复刻 native 的
+            # hIdxStart 循环移位。rot 和输出列绑定：rot = (c mod headDim) / dBaseSize。
+            cmp_rot = (o0 % HEAD_DIM) // CMP_DBASE
             for kb in pl.pipeline(0, D // K_TILE, stage=2):
-                k0 = kb * K_TILE
+                kr = kb + cmp_rot
+                kr = kr - (D // K_TILE) * (kr // (D // K_TILE))
+                k0 = kr * K_TILE
                 x_tile = pl.slice(x_flat, [MM_B_TILE, K_TILE], [global_row0, k0], valid_shape=[x_rows, K_TILE])
                 # Transposed [OUT_DIM, D] projection weights.
                 wkv_tile = wkv[o0 : o0 + OUT_TILE, k0 : k0 + K_TILE]
@@ -129,7 +141,7 @@ def compressor_ratio4_project(
                 # mad writes at pitch ceil(validRow/16)*16 while a create_tensor
                 # accumulator is read back at 64. Only pl.matmul stamps the
                 # accumulator compact, so dropping it fails AccCompactValid.
-                if k0 == 0:
+                if kb == 0:  # 移位后第一次迭代不再是 k0 == 0
                     kv_acc = pl.matmul(x_tile, wkv_tile, out_dtype=pl.FP32, b_trans=True)
                     score_acc = pl.matmul(x_tile, wgate_tile, out_dtype=pl.FP32, b_trans=True)
                 else:
