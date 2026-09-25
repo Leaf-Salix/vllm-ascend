@@ -34,7 +34,10 @@ def _export_swimlane(directory: Path) -> dict:
     if not records.is_file() or not deps.is_file():
         return {"exported": False, "reason": "DFX 未产出记录或依赖"}
     # 单卡进程只编一份 kernel，按 mtime 取最新的即可，不像多 rank 那样有歧义。
-    builds = sorted(Path("build_output").glob("_jit__decode_csa_tp1_attention_*/kernel_config.py"),
+    # 整层融合（1dcadd85）后 JIT 目录从 _jit__decode_csa_tp1_attention_* 变成
+    # _jit__decode_csa_tp1_layer_*，写死旧前缀会让泳道静默导不出来（reason 只说
+    # 「未找到 kernel_config.py」，很容易被当成 DFX 没开）。这里同时认两种。
+    builds = sorted(Path("build_output").glob("_jit__decode_csa_tp1_*/kernel_config.py"),
                     key=lambda p: p.stat().st_mtime)
     if not builds:
         return {"exported": False, "reason": "未找到 kernel_config.py"}
