@@ -272,12 +272,18 @@ def sparse_attn_csa(
                     # exactly as they are. Blocks 2..4 publish a zero PV so the
                     # five-iteration merge folds them as no-ops.
                     pv_sb = qk_tick - SPARSE_BLOCKS
+                    # The window matmul needs one probability, the compressed
+                    # one needs the other four, so the waits split that way and
+                    # the window PV overlaps the tail of the softmax. The AIV
+                    # publishes all five unconditionally, so neither count
+                    # depends on the plan.
                     if pv_sb == 0:
-                        # Every probability is needed before the compressed
-                        # matmul, so all five waits happen at the first PV tick.
-                        # The AIV publishes five unconditionally, so this count
-                        # does not depend on the plan.
-                        for _pv_wait in pl.unroll(SPARSE_BLOCKS):
+                        pl.system.sync_wait(
+                            QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2,
+                            core_type=pl.KernelType.AIC,
+                        )
+                    if pv_sb == WIN_BLOCKS:
+                        for _pv_wait in pl.unroll(SPARSE_BLOCKS - WIN_BLOCKS):
                             pl.system.sync_wait(
                                 QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2,
                                 core_type=pl.KernelType.AIC,
@@ -300,12 +306,14 @@ def sparse_attn_csa(
                             pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
                         else:
                             if pv_sb == WIN_BLOCKS:
+                                # The probability is the same operand for every
+                                # column pass, so it is staged once.
+                                pv_cmp_prob = pl.load(
+                                    probability_transfer, [qk_core * H, WIN], [H, CMP_TOPK],
+                                    target_memory=pl.MemorySpace.Mat,
+                                )
                                 for pv_pass in pl.unroll(PV_PASSES):
                                     pv_col = pv_pass * PV_N_TILE
-                                    pv_cmp_prob = pl.load(
-                                        probability_transfer, [qk_core * H, WIN], [H, CMP_TOPK],
-                                        target_memory=pl.MemorySpace.Mat,
-                                    )
                                     pv_cmp_kv = pl.load(
                                         kv_transfer,
                                         [qk_core * SPARSE_BLOCKS * ATTN_K_TILE + WIN, pv_col],
