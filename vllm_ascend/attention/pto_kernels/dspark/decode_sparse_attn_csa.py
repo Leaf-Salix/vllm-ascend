@@ -86,6 +86,8 @@ ATTENTION_WINDOW_ROWS = LOCAL_O_GROUPS * GROUP_T_PAD
 PUBLISH_GROUPS = H_TILE // HEADS_PER_GROUP
 TOPK = WIN + CMP_TOPK
 SPARSE_BLOCKS = max(2, (TOPK + ATTN_K_TILE - 1) // ATTN_K_TILE)  # Sparse-K block floor
+# Blocks of the sliding-window chunk; the rest are the compressed chunk.
+WIN_BLOCKS = WIN // ATTN_K_TILE
 # One whole 64-byte DDR line per token row of valid_block_mask: the plan lanes
 # write it with scalar pl.write, and a scalar write lands a full line, so two
 # lanes sharing a line would silently drop each other's stores.
@@ -397,81 +399,116 @@ def sparse_attn_csa(
                 running_l = pl.tile.muls(sink_m, 0.0)
                 running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
                 running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
+                # Softmax pass first, merge pass after. The merge folds the
+                # compressed chunk's sum in at its first block, so that sum has
+                # to be complete before any merging starts -- it cannot be
+                # interleaved the way the per-block version was.
+                # Native's l for a chunk is one sum over that chunk's keys,
+                # rescaled once when the next chunk arrives:
+                # l = exp(window_max - cmp_max) * l_win + l_cmp. Folding a
+                # per-block li block by block is a different association of the
+                # same terms.
+                l_win_seed = pl.load(
+                    attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
+                )
+                l_cmp_seed = pl.load(
+                    attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
+                )
+                running_l_win = pl.tile.muls(l_win_seed, 0.0)
+                running_l_cmp = pl.tile.muls(l_cmp_seed, 0.0)
+                for exp_tick, (ex_w, ex_c) in pl.range(
+                    SPARSE_BLOCKS, init_values=(running_l_win, running_l_cmp),
+                ):
+                    softmax_sb = exp_tick
+                    if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
+                        qk_slot = qk_core * SPARSE_BLOCKS + softmax_sb
+                        qk_transfer_row = qk_slot * H
+                        qk_s0 = softmax_sb * ATTN_K_TILE
+                        qk_scores_half = pl.load(
+                            score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE],
+                            target_memory=pl.MemorySpace.Vec,
+                        )
+                        qk_bias = pl.load(
+                            sparse_bias, [qk_t, qk_s0], [1, ATTN_K_TILE], target_memory=pl.MemorySpace.Vec,
+                        )
+                        qk_scaled = pl.mul(qk_scores_half, SOFTMAX_SCALE)
+                        qk_masked = pl.col_expand_add(qk_scaled, qk_bias)
+                        if qk_s0 < WIN:
+                            qk_mi = window_max
+                        else:
+                            qk_mi = cmp_max
+                        qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
+                        qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
+                        # Native publishes the BF16 probability with
+                        # CAST_ROUND -- midpoint away from zero -- at
+                        # sparse_attn_sharedkv_scfa_block_vector.h:482,
+                        # while rint takes midpoints to even. The final
+                        # BF16 output in the same file uses CAST_RINT, so
+                        # only this cast changes.
+                        qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="round")
+                        pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
+                        pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
+                        pl.system.sync_set(
+                            QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
+                            ffts_mode=2, core_type=pl.KernelType.AIV,
+                        )
+                        if qk_s0 < WIN:
+                            ex_wv, ex_cv = pl.yield_(pl.add(ex_w, qk_li), ex_c)
+                        else:
+                            ex_wv, ex_cv = pl.yield_(ex_w, pl.add(ex_c, qk_li))
+                        ex_wa, ex_ca = pl.yield_(ex_wv, ex_cv)
+                    else:
+                        ex_wa, ex_ca = pl.yield_(ex_w, ex_c)
+                    running_l_win, running_l_cmp = pl.yield_(ex_wa, ex_ca)
+                # Publish the chunk sums where the merge reads them: the window
+                # chunk in block 0's slot, the compressed chunk in block
+                # WIN_BLOCKS's, zero for the rest so folding them is a no-op.
+                li_zero = pl.tile.muls(running_l_win, 0.0)
+                for li_tick in pl.range(SPARSE_BLOCKS):
+                    li_row = (qk_core * SPARSE_BLOCKS + li_tick) * H + qk_lane_head
+                    if li_tick == 0:
+                        pl.store(running_l_win, [li_row, 0], li_transfer)
+                    else:
+                        if li_tick == WIN_BLOCKS:
+                            pl.store(running_l_cmp, [li_row, 0], li_transfer)
+                        else:
+                            pl.store(li_zero, [li_row, 0], li_transfer)
                 for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
-                    SPARSE_BLOCKS + QK_PRE_LAUNCH,
+                    SPARSE_BLOCKS,
                     init_values=(running_m, running_l, running_left, running_right),
                 ):
-                    if qk_tick < SPARSE_BLOCKS:
-                        softmax_sb = qk_tick
-                        if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
-                            qk_slot = qk_core * SPARSE_BLOCKS + softmax_sb
-                            qk_transfer_row = qk_slot * H
-                            qk_s0 = softmax_sb * ATTN_K_TILE
-                            qk_scores_half = pl.load(
-                                score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE],
-                                target_memory=pl.MemorySpace.Vec,
-                            )
-                            qk_bias = pl.load(
-                                sparse_bias, [qk_t, qk_s0], [1, ATTN_K_TILE], target_memory=pl.MemorySpace.Vec,
-                            )
-                            qk_scaled = pl.mul(qk_scores_half, SOFTMAX_SCALE)
-                            qk_masked = pl.col_expand_add(qk_scaled, qk_bias)
-                            if qk_s0 < WIN:
-                                qk_mi = window_max
-                            else:
-                                qk_mi = cmp_max
-                            qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
-                            qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
-                            # Native publishes the BF16 probability with
-                            # CAST_ROUND -- midpoint away from zero -- at
-                            # sparse_attn_sharedkv_scfa_block_vector.h:482,
-                            # while rint takes midpoints to even. The final
-                            # BF16 output in the same file uses CAST_RINT, so
-                            # only this cast changes.
-                            qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="round")
-                            pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
-                            pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
-                            pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
-                            pl.system.sync_set(
-                                QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
-                                ffts_mode=2, core_type=pl.KernelType.AIV,
-                            )
-                    if qk_tick >= QK_PRE_LAUNCH:
-                        pv_sb = qk_tick - QK_PRE_LAUNCH
-                        if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:
-                            pv_slot = qk_core * SPARSE_BLOCKS + pv_sb
-                            pv_transfer_row = pv_slot * H
-                            pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                            pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
-                            pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
-                            # pv_m is already the running maximum through this
-                            # chunk, so next_m == pv_m and beta == 1: the
-                            # incoming block needs no rescaling, which is
-                            # exactly SoftmaxFlashV2's update. Inside the
-                            # compressed chunk pv_m does not move either, so
-                            # alpha is exp(0) and those four blocks accumulate
-                            # as a plain FP32 sum.
-                            next_m = pv_m
-                            alpha = pl.exp(pl.sub(m_iter, next_m))
-                            next_l = pl.add(pl.mul(alpha, l_iter), pv_l)
-                            pv_left = pl.load(
-                                pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2],
-                                target_memory=pl.MemorySpace.Vec,
-                            )
-                            next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pv_left)
-                            pv_right = pl.load(
-                                pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2],
-                                target_memory=pl.MemorySpace.Vec,
-                            )
-                            next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pv_right)
-                            m_valid, l_valid, left_valid, right_valid = pl.yield_(next_m, next_l, next_left, next_right)
-                        else:
-                            m_valid, l_valid, left_valid, right_valid = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-                        m_after, l_after, left_after, right_after = pl.yield_(m_valid, l_valid, left_valid, right_valid)
+                    pv_sb = qk_tick
+                    if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:
+                        pv_slot = qk_core * SPARSE_BLOCKS + pv_sb
+                        pv_transfer_row = pv_slot * H
+                        pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                        pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
+                        pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
+                        # pv_m is already the running maximum through this
+                        # chunk, so next_m == pv_m and beta == 1: the
+                        # incoming block needs no rescaling, which is
+                        # exactly SoftmaxFlashV2's update. Inside the
+                        # compressed chunk pv_m does not move either, so
+                        # alpha is exp(0) and those four blocks accumulate
+                        # as a plain FP32 sum.
+                        next_m = pv_m
+                        alpha = pl.exp(pl.sub(m_iter, next_m))
+                        next_l = pl.add(pl.mul(alpha, l_iter), pv_l)
+                        pv_left = pl.load(
+                            pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2],
+                            target_memory=pl.MemorySpace.Vec,
+                        )
+                        next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pv_left)
+                        pv_right = pl.load(
+                            pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2],
+                            target_memory=pl.MemorySpace.Vec,
+                        )
+                        next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pv_right)
+                        m_valid, l_valid, left_valid, right_valid = pl.yield_(next_m, next_l, next_left, next_right)
                     else:
-                        m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
+                        m_valid, l_valid, left_valid, right_valid = pl.yield_(m_iter, l_iter, left_iter, right_iter)
                     running_m, running_l, running_left, running_right = pl.yield_(
-                        m_after, l_after, left_after, right_after,
+                        m_valid, l_valid, left_valid, right_valid,
                     )
                 qk_output_row = qk_t * H + qk_lane_head
                 pl.store(running_m, [qk_output_row, 0], attn_mi)
