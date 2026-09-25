@@ -378,28 +378,12 @@ def _decode_csa_attn_tp1(
                     [1, 1, 1, HEAD_DIM],
                 )
 
-    cmp_cache_tid, cmp_projection_tid = compressor_ratio4_vllm(
-        x_normed,
-        compress_state_pages,
-        cmp_kv_pages,
-        compress_state_block_table,
-        cmp_wkv,
-        cmp_wgate,
-        cmp_ape,
-        cmp_norm_w,
-        cmp_freqs_cos,
-        cmp_freqs_sin,
-        cmp_block_table,
-        positions_i32,
-        token_valid,
-        token_request,
-        query_start_loc,
-        state_slot_mapping,
-        cmp_slot_mapping,
-        cmp_row_offsets,
-        late_dep,
-        raw_cache_tid,
-    )
+    # The compressor stays on native's own fused operator, called from
+    # pto_attn.build_args before this kernel launches. Its projection is an
+    # FP32 accumulation inside the CANN kernel that is never exposed, so no
+    # accumulation order the DSL can express reproduces it -- the same reason
+    # 7fcd54a22 left the kv LoRA on native's linear. The compressed KV and
+    # main state pages are therefore already written when we get here.
     idx_cache_tid = indexer_compressor_vllm(
         x_normed,
         inner_index_pages,
@@ -420,7 +404,7 @@ def _decode_csa_attn_tp1(
         idx_slot_mapping,
         idx_row_offsets,
         late_dep,
-        cmp_projection_tid,
+        late_dep,
     )
     with pl.scope():
         _inner_topk_scores, _inner_topk_indices, _topk_tid = indexer_vllm(
@@ -444,7 +428,7 @@ def _decode_csa_attn_tp1(
         )
 
     attention_ready = pl.system.task_dummy(
-        deps=[raw_cache_tid, cmp_cache_tid],
+        deps=[raw_cache_tid],
     )
     with pl.scope():
         o_packed_heads = pl.create_tensor(

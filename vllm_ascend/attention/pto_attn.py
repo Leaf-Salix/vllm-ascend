@@ -406,6 +406,22 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
     if isinstance(kv_projected, tuple):
         kv_projected = kv_projected[0]
     a["kv_projected"] = kv_projected.contiguous()
+    # Same reasoning for the compressor: torch.ops._C_ascend.compressor is a
+    # fused operator whose projection is accumulated in FP32 inside the CANN
+    # kernel and never exposed, so it cannot be reproduced from the DSL. Call
+    # it here, before the kernel launches, and the compressed KV and main state
+    # pages are bit-identical to native's by construction.
+    compressed_kv, compress_slot_mapping = impl.compressor(
+        hidden_states=a["x_normed"],
+        state_cache=state_c,
+        metadata=layer_metadata.compressor,
+    )
+    if compressed_kv.shape[0] > 0:
+        from vllm_ascend.attention.dsa_v1 import get_dsa_attn_kv_plan
+
+        get_dsa_attn_kv_plan(impl.vllm_config).dsa_kv_compress_scatter(
+            cmp_kv_c, compressed_kv, compress_slot_mapping,
+        )
     for name in ("x_normed", "attn_out"):
         tensor = a[name]
         if tensor.dtype != torch.bfloat16 or not tensor.is_contiguous() or tensor.shape != (t, kcsa.D):
