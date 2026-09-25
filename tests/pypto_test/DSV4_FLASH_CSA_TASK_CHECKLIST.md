@@ -1072,7 +1072,13 @@ Orchestrator/Scheduler`、`pid 7 = Kernel Launches`；上游给的
 | `wo_a` | BF16 | `[O_GROUPS, O_LORA, O_GROUP_IN]` | `proj_a_mm` | 1.71× | **NZ 实现已在 `3dd0b35d`，开关未开** |
 | `wq_b` | INT8 | `[Q_LORA, H*HEAD_DIM]` | `qproj_matmul` | 1.52× | ND，待拆 |
 | `wo_b` | INT8 | `[D, O_GROUPS*O_LORA]` | `proj_b_mm` | 1.14× | ND，待拆 |
-| `wq_a` | BF16 | `[D, Q_LORA]` | `qr_proj_matmul` | 0.38×（我们已更快） | ND，最后做、收益存疑 |
+| `wq_a` | BF16 | `[D, Q_LORA]` | `qr_proj_matmul` | 0.38×（我们已更快） | ND，待拆；**仍然要做**，见下方判据 |
+
+**是否启用 NZ 的判据（2026-09-25 用户定）：以上游 pypto-lib 的实现为准。**
+上游该参数标了 `pl.NZ` 就做，**即便我们当前那个 task 已经比上游快**；上游是 ND 就
+保持 ND，不自行加。所以 `wq_a` 虽然 `qr_proj_matmul` 我们已快 2.6 倍，仍要做 NZ 双函数。
+注意同名参数在不同入口可能不同（`idx_weights_proj` 在别的入口是 NZ，而
+`decode_csa_tp1` 里的 `weights_proj` 是 ND），**要对照我们实际替换的那个入口**。
 
 **收益已实测**（`proj_a_mm`，同一份代码、同一工具链，只改布局，in-core）：
 
@@ -1089,7 +1095,7 @@ Orchestrator/Scheduler`、`pid 7 = Kernel Launches`；上游给的
 | T6.1.1 | `wq_b` → `qproj_matmul` 拆 NZ/ND 双函数 | `qkv_proj_rope.py` 出现 `_q_proj_q_matmul_nz` 与 `_q_proj_q_matmul_nd` 两个独立函数、末尾 `q_proj_q_matmul = _nz if QUANT_WEIGHT_NZ else _nd`；两种开关下都能编过；NZ 下 `qproj_matmul` 单块 ≤ 40 µs | 未开始 |
 | T6.1.2 | `wo_b` → `proj_b_mm` 拆 NZ/ND 双函数 | 同上形态；NZ 下 `proj_b_mm` 单块 ≤ 18 µs | 未开始 |
 | T6.1.3 | 打开 `wo_a` 的 NZ 并验证 | 默认开关下 `proj_a_mm` 单块 ≤ 22 µs，且 256/256 token 与 Native 一致 | 未开始 |
-| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 先测 NZ 是否真更快（我们当前 0.38× 已远快于上游）；若不更快则记录结论并保持 ND，**不强行改** | 未开始 |
+| T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 上游此处为 `pl.NZ`，按判据必须做；完成判据同 T6.1.1 的形态，且 NZ 下 `qr_proj_matmul` 不慢于当前的 7.82 µs | 未开始 |
 | T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
 | T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
 
@@ -1237,5 +1243,5 @@ T6.2.1/T6.2.2 归因与关键路径  ← 贯穿全程，为 T6.2.3 提供依据
 - 每项都要留 ND 分支可用，并在提交说明里写清两种开关下各自验过什么。
 - 排队任务运行期间不要编辑它会加载的 kernel 源文件（`@pl.jit` 编译时重读源文件）。
 
-**当前需要你拍板的**：T1.5 的落点（见上）、T2.5 的 PyPTO `_resolve_compiled` 处置，
-以及 T6.1.4（`wq_a` 我们已比上游快 2.6 倍，是否仍要为它做 NZ 双函数）。
+**当前需要你拍板的**：T1.5 的落点（见上）、T2.5 的 PyPTO `_resolve_compiled` 处置。
+（T6.1.4 已由「以上游为准」这条判据定下：做。）
