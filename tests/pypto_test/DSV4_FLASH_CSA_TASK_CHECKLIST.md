@@ -1306,8 +1306,8 @@ start/step 非负的循环变量），符合 `IsProvableNonNegative` 的要求�
 `k0 = col_g + kb * B_K_TILE` 里 `col_g = g * O_LORA`（`g` 来自 `pl.parallel`，可证）、
 `B_K_TILE = 512`，都是 INT8 的 C0 线 32 的倍数；`wo_b` 整形 `[4096, 8192]` 行列均合规。
 | T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | — | **实现已备好但不启用**：NZ 版在当前 PyPTO 上编不过（可证判据不支持整除），降维替代方案比现状慢 3 倍。详见下方 |
-| T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
-| T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
+| T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | **已完成**：`nz_mode` 增 `QUANT_WEIGHT_LAYOUT`；两版的根入参标注、`native_adapter` 打包、`nz_args` 表三处对齐（这一条是硬要求，见上方 layout 说明） |
+| T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | **已完成**：`service_config` 放宽到 `weight_nz_mode in (0,1,2)`，`run.py` 的 `--weight-nz-mode` 同步放开；`enable_kv_nz` 仍拒绝 |
 
 **两档开关的分工（已核实，决定了做事顺序）**：`nz_mode.py` 里
 `QUANT_WEIGHT_NZ = mode >= 1`、`BF16_WEIGHT_NZ = mode >= 2`，而
@@ -1521,7 +1521,7 @@ proven`——`shape[-2]` 就是行维。
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.2.1 | 逐 task 差距归因表 | 上表中每个 >1.1× 的 task 都有明确归因（布局／分块／依赖／前提差异之一），不留"待查" | **进行中**（见下方归因结果） |
+| T6.2.1 | 逐 task 差距归因表 | 上表中每个 >1.1× 的 task 都有明确归因（布局／分块／依赖／前提差异之一），不留"待查" | **已完成**：每个 >1.1× 的 task 都已归因（见下方归因结果与两处更正） |
 
 #### 归因结果（2026-09-26，已拆出 `local_setup_us`）
 
@@ -1694,7 +1694,7 @@ mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果�
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.4.1 | `merge_norm`：索引计算改整数运算 | — | **已完成**：kernel-duration 24.55→22.83（−7.0%）、跨度 840.3→833.6（−0.8%）、数值一致。但**原定判据「local_setup 明显下降」没达成**（8.83→8.59），见下方更正 |
+| T6.4.1 | `merge_norm`：索引计算改整数运算 | — | **已完成**：kernel-duration 24.55→22.83（−7.0%）、跨度 840.3→833.6、数值一致。原定的 `local_setup` 判据不成立，见下方更正 |
 
 **T6.4.1 实现记录（2026-09-26）**：最终落地的是**取模**而不是异或，因为两条更短的
 路都被硬件挡了——
