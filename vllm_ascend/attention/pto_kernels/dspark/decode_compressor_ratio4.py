@@ -501,6 +501,11 @@ def compressor_ratio4_pool_projected_vllm(
         compress_state_pages,
         [state_page_count * VLLM_COMPRESS_STATE_PAGE_ROWS, COMPRESS_STATE_DIM],
     )
+    # native 把 8 个窗口成员一起做 ColumnSoftMax -> Mul -> ColumnSum
+    # （compressor_block_vec_perf.h:932,944,947），不是逐个 state 地在线重缩放。
+    # 照它的指令序列走就得让 8 个成员同时在手，所以先落到 staging。
+    pool_score_buf = pl.create_tensor([BS_PAD * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
+    pool_value_buf = pl.create_tensor([BS_PAD * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
     pool_workers = pl.min(b_dim, POOL_WORKERS)
     with pl.spmd(
         pool_workers,
@@ -537,8 +542,15 @@ def compressor_ratio4_pool_projected_vllm(
                                 HEAD_DIM + h0 : HEAD_DIM + h0 + POOL_HEAD_TILE,
                             ],
                         )
-                        li = pl.exp(pl.sub(mi, mi))
-                        oi = kv_proj_pad[
+                        # 成员按窗口顺序编号：state_idx k -> window_start + k，
+                        # 种子是 window_start + STATE_LEN - 1（= position），落最后一行。
+                        pool_base = token * STATE_LEN
+                        pool_score_buf[
+                            pool_base + STATE_LEN - 1 : pool_base + STATE_LEN, :
+                        ] = mi
+                        pool_value_buf[
+                            pool_base + STATE_LEN - 1 : pool_base + STATE_LEN, :
+                        ] = kv_proj_pad[
                             token : token + 1,
                             HEAD_DIM + h0 : HEAD_DIM + h0 + POOL_HEAD_TILE,
                         ]
@@ -616,16 +628,45 @@ def compressor_ratio4_pool_projected_vllm(
                                             state_half + h0 : state_half + h0 + POOL_HEAD_TILE,
                                         ],
                                     )
-                            mi_next = pl.maximum(mi, score)
-                            alpha = pl.exp(pl.sub(mi, mi_next))
-                            beta = pl.exp(pl.sub(score, mi_next))
-                            li = pl.add(pl.mul(alpha, li), beta)
-                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
-                            mi = mi_next
+                            pool_score_buf[pool_base + state_idx : pool_base + state_idx + 1, :] = score
+                            pool_value_buf[pool_base + state_idx : pool_base + state_idx + 1, :] = value
+                        # ColumnMax / ColumnSum 是跨距 4 先配对的蝶形（compressor_vector_comm.h）：
+                        # ((r0+r4)+(r2+r6)) + ((r1+r5)+(r3+r7))。
+                        pool_ma0 = pl.maximum(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :])
+                        pool_ma1 = pl.maximum(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :])
+                        pool_ma2 = pl.maximum(pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :], pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :])
+                        pool_ma3 = pl.maximum(pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :], pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :])
+                        pool_max = pl.maximum(pl.maximum(pool_ma0, pool_ma2), pl.maximum(pool_ma1, pool_ma3))
+                        pool_e0 = pl.exp(pl.sub(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_max))
+                        pool_e1 = pl.exp(pl.sub(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_max))
+                        pool_e2 = pl.exp(pl.sub(pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :], pool_max))
+                        pool_e3 = pl.exp(pl.sub(pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :], pool_max))
+                        pool_e4 = pl.exp(pl.sub(pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :], pool_max))
+                        pool_e5 = pl.exp(pl.sub(pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :], pool_max))
+                        pool_e6 = pl.exp(pl.sub(pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :], pool_max))
+                        pool_e7 = pl.exp(pl.sub(pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :], pool_max))
+                        pool_la0 = pl.add(pool_e0, pool_e4)
+                        pool_la1 = pl.add(pool_e1, pool_e5)
+                        pool_la2 = pl.add(pool_e2, pool_e6)
+                        pool_la3 = pl.add(pool_e3, pool_e7)
+                        pool_l = pl.add(pl.add(pool_la0, pool_la2), pl.add(pool_la1, pool_la3))
+                        # native 先 MatDivVec 除出概率，再 Mul + ColumnSum
+                        pool_w0 = pl.mul(pool_value_buf[pool_base + 0 : pool_base + 0 + 1, :], pl.div(pool_e0, pool_l))
+                        pool_w1 = pl.mul(pool_value_buf[pool_base + 1 : pool_base + 1 + 1, :], pl.div(pool_e1, pool_l))
+                        pool_w2 = pl.mul(pool_value_buf[pool_base + 2 : pool_base + 2 + 1, :], pl.div(pool_e2, pool_l))
+                        pool_w3 = pl.mul(pool_value_buf[pool_base + 3 : pool_base + 3 + 1, :], pl.div(pool_e3, pool_l))
+                        pool_w4 = pl.mul(pool_value_buf[pool_base + 4 : pool_base + 4 + 1, :], pl.div(pool_e4, pool_l))
+                        pool_w5 = pl.mul(pool_value_buf[pool_base + 5 : pool_base + 5 + 1, :], pl.div(pool_e5, pool_l))
+                        pool_w6 = pl.mul(pool_value_buf[pool_base + 6 : pool_base + 6 + 1, :], pl.div(pool_e6, pool_l))
+                        pool_w7 = pl.mul(pool_value_buf[pool_base + 7 : pool_base + 7 + 1, :], pl.div(pool_e7, pool_l))
+                        pool_oa0 = pl.add(pool_w0, pool_w4)
+                        pool_oa1 = pl.add(pool_w1, pool_w5)
+                        pool_oa2 = pl.add(pool_w2, pool_w6)
+                        pool_oa3 = pl.add(pool_w3, pool_w7)
                         pooled_kv[
                             token : token + 1,
                             h0 : h0 + POOL_HEAD_TILE,
-                        ] = pl.div(oi, li)
+                        ] = pl.add(pl.add(pool_oa0, pool_oa2), pl.add(pool_oa1, pool_oa3))
     return pool_tid
 
 
