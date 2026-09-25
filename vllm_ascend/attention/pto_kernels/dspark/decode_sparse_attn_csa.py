@@ -88,6 +88,9 @@ TOPK = WIN + CMP_TOPK
 SPARSE_BLOCKS = max(2, (TOPK + ATTN_K_TILE - 1) // ATTN_K_TILE)  # Sparse-K block floor
 # Blocks of the sliding-window chunk; the rest are the compressed chunk.
 WIN_BLOCKS = WIN // ATTN_K_TILE
+# HEAD_DIM per PV pass: L1 holds the compressed chunk's whole KV at this width.
+PV_N_TILE = HEAD_DIM // 4
+PV_PASSES = HEAD_DIM // PV_N_TILE
 # One whole 64-byte DDR line per token row of valid_block_mask: the plan lanes
 # write it with scalar pl.write, and a scalar write lands a full line, so two
 # lanes sharing a line would silently drop each other's stores.
@@ -263,28 +266,60 @@ def sparse_attn_csa(
                             ffts_mode=2, core_type=pl.KernelType.AIC,
                         )
                 else:
+                    # DIAGNOSTIC: the compressed chunk becomes one K = CMP_TOPK
+                    # matmul, the way native's second s2 loop does it, while the
+                    # merge, the maxima, the chunk sums and every sync count stay
+                    # exactly as they are. Blocks 2..4 publish a zero PV so the
+                    # five-iteration merge folds them as no-ops.
                     pv_sb = qk_tick - SPARSE_BLOCKS
+                    if pv_sb == 0:
+                        # Every probability is needed before the compressed
+                        # matmul, so all five waits happen at the first PV tick.
+                        # The AIV publishes five unconditionally, so this count
+                        # does not depend on the plan.
+                        for _pv_wait in pl.unroll(SPARSE_BLOCKS):
+                            pl.system.sync_wait(
+                                QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2,
+                                core_type=pl.KernelType.AIC,
+                            )
                     if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:
                         pv_slot = qk_core * SPARSE_BLOCKS + pv_sb
                         pv_kv_row = pv_slot * ATTN_K_TILE
                         pv_transfer_row = pv_slot * H
-                        pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                        pv_l1_row = (pv_sb % QK_L1_SLOTS) * ATTN_K_TILE
-                        qk_l1 = pl.gather_row(
-                            qk_l1, kv_transfer, [pv_l1_row, 0], [pv_kv_row, 0], [ATTN_K_TILE, HEAD_DIM],
-                        )
-                        pv_probability = pl.load(
-                            probability_transfer, [qk_core * H, pv_sb * ATTN_K_TILE], [H, ATTN_K_TILE],
-                            target_memory=pl.MemorySpace.Mat,
-                        )
-                        pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
-                        pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
-                        pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
+                        if pv_sb == 0:
+                            pv_l1_row = (pv_sb % QK_L1_SLOTS) * ATTN_K_TILE
+                            qk_l1 = pl.gather_row(
+                                qk_l1, kv_transfer, [pv_l1_row, 0], [pv_kv_row, 0], [ATTN_K_TILE, HEAD_DIM],
+                            )
+                            pv_probability = pl.load(
+                                probability_transfer, [qk_core * H, 0], [H, ATTN_K_TILE],
+                                target_memory=pl.MemorySpace.Mat,
+                            )
+                            pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
+                            pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
+                            pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
+                        else:
+                            if pv_sb == WIN_BLOCKS:
+                                for pv_pass in pl.unroll(PV_PASSES):
+                                    pv_col = pv_pass * PV_N_TILE
+                                    pv_cmp_prob = pl.load(
+                                        probability_transfer, [qk_core * H, WIN], [H, CMP_TOPK],
+                                        target_memory=pl.MemorySpace.Mat,
+                                    )
+                                    pv_cmp_kv = pl.load(
+                                        kv_transfer,
+                                        [qk_core * SPARSE_BLOCKS * ATTN_K_TILE + WIN, pv_col],
+                                        [CMP_TOPK, PV_N_TILE],
+                                        target_memory=pl.MemorySpace.Mat,
+                                    )
+                                    pv_cmp_out = pl.matmul(pv_cmp_prob, pv_cmp_kv, out_dtype=pl.FP32)
+                                    pl.store(pv_cmp_out, [pv_transfer_row, pv_col], pv_transfer)
+                            # Blocks 2..4 contribute nothing; the AIV zeroed
+                            # their PV slots, so only the event is raised here.
                         pl.system.sync_set(
                             QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
                             ffts_mode=2, core_type=pl.KernelType.AIC,
                         )
-
             for qk_aiv in pl.split_aiv(2, mode=pl.SplitMode.NONE):
                 pl.system.set_ffts(ffts_workspace)
                 qk_lane_head = qk_aiv * (H // 2)
@@ -348,6 +383,18 @@ def sparse_attn_csa(
                         pl.system.sync_set(
                             QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3,
                             ffts_mode=2, core_type=pl.KernelType.AIV,
+                        )
+                    else:
+                        # The compressed chunk is one matmul over all four
+                        # blocks, so an invalid block's rows are read even
+                        # though its probability is zero: 0 * NaN is NaN.
+                        qk_kv_zero = pl.tile.full(
+                            [ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0,
+                        )
+                        pl.store(
+                            qk_kv_zero,
+                            [(qk_core * SPARSE_BLOCKS + qk_sb) * ATTN_K_TILE + qk_lane_kv, 0],
+                            kv_transfer,
                         )
                 # Stage two: the block maxima. Native runs this attention as two
                 # flash chunks -- the sliding window, then all CMP_TOPK
@@ -460,6 +507,18 @@ def sparse_attn_csa(
                             ex_wv, ex_cv = pl.yield_(ex_w, pl.add(ex_c, qk_li))
                         ex_wa, ex_ca = pl.yield_(ex_wv, ex_cv)
                     else:
+                        exp_zero = pl.tile.full(
+                            [H // 2, ATTN_K_TILE], dtype=pl.BF16, value=0.0,
+                        )
+                        pl.store(
+                            exp_zero,
+                            [qk_core * H + qk_lane_head, softmax_sb * ATTN_K_TILE],
+                            probability_transfer,
+                        )
+                        pl.system.sync_set(
+                            QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
+                            ffts_mode=2, core_type=pl.KernelType.AIV,
+                        )
                         ex_wa, ex_ca = pl.yield_(ex_w, ex_c)
                     running_l_win, running_l_cmp = pl.yield_(ex_wa, ex_ca)
                 # Publish the chunk sums where the merge reads them: the window
@@ -475,6 +534,8 @@ def sparse_attn_csa(
                             pl.store(running_l_cmp, [li_row, 0], li_transfer)
                         else:
                             pl.store(li_zero, [li_row, 0], li_transfer)
+                            pv_zero = pl.tile.full([H // 2, HEAD_DIM], dtype=pl.FP32, value=0.0)
+                            pl.store(pv_zero, [li_row, 0], pv_transfer)
                 for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
                     SPARSE_BLOCKS,
                     init_values=(running_m, running_l, running_left, running_right),
