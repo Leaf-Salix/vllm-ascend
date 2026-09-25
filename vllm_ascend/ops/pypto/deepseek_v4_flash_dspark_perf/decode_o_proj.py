@@ -163,7 +163,7 @@ if T_PAD % PROJ_B_MM_T_TILE != 0:
 @pl.jit.inline
 def decode_o_proj_tp1(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16],
+    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, pl.NZ],
     wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
@@ -192,38 +192,35 @@ def decode_o_proj_tp1(
             row_base_o = g * T_PAD
             out_col_g = g * O_LORA
 
+            # NZ 的切片偏移必须可证非负：原来把 (行块, N 块) 融进一个 spmd 索引，
+            # nf 里带减法，而差永远不可证。改成只按 N 分块开 spmd、行块放进块内循环，
+            # n0 = get_block_idx() * TILE 就是「非负变量乘正常量」，可证。
+            # 生产档位 T<=PROJ_A_ROW_TILE，proj_a_rows=1，并行度与原先完全相同。
             with pl.spmd(
-                proj_a_rows * (O_LORA // PROJ_A_MM_N_TILE),
-                # 注意：wo_a / wo_b 不加 set_cache_policy(BYPASS)。上游 56e879c 给所有
-                # decode 权重都加了 BYPASS，唯独把 o 投影这一对列为例外——它们在投影
-                # 运行前被 SDMA 预取进 L2，绕过读等于把这次预热扔掉；而且"缓存写 +
-                # 绕过读同一段字节"正是 set_cache_policy 文档点名的、编译器检测不到的
-                # 一致性 bug。
+                O_LORA // PROJ_A_MM_N_TILE,
                 name_hint="proj_a_mm",
                 deps=[heads_dep],
                 allow_early_resolve=True,
             ) as pa_tid:
-                pa_unit = pl.tile.get_block_idx()
-                pa_rb = pa_unit // (O_LORA // PROJ_A_MM_N_TILE)  # row block outermost
-                nf = pa_unit - pa_rb * (O_LORA // PROJ_A_MM_N_TILE)
-                pa_r0 = pa_rb * PROJ_A_ROW_TILE
-                pa_rows = pl.min(PROJ_A_ROW_TILE, t_dim - pa_r0)
-                pa_src0 = row_base_o + pa_r0
-                n0 = nf * PROJ_A_MM_N_TILE
-                xa_first = pl.slice(
-                    o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, 0], valid_shape=[pa_rows, A_K_TILE]
-                )
-                wa_first = wo_a[g : g + 1, n0 : n0 + PROJ_A_MM_N_TILE, 0:A_K_TILE]
-                acc_a = pl.matmul(xa_first, wa_first, out_dtype=pl.FP32, b_trans=True)
-                for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=2):
-                    k0 = kb * A_K_TILE
-                    xa_k_chunk = pl.slice(
-                        o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, k0], valid_shape=[pa_rows, A_K_TILE]
+                n0 = pl.tile.get_block_idx() * PROJ_A_MM_N_TILE
+                for pa_rb in pl.range(proj_a_rows):
+                    pa_r0 = pa_rb * PROJ_A_ROW_TILE
+                    pa_rows = pl.min(PROJ_A_ROW_TILE, t_dim - pa_r0)
+                    pa_src0 = row_base_o + pa_r0
+                    xa_first = pl.slice(
+                        o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, 0], valid_shape=[pa_rows, A_K_TILE]
                     )
-                    wa_k_chunk = wo_a[g : g + 1, n0 : n0 + PROJ_A_MM_N_TILE, k0 : k0 + A_K_TILE]
-                    acc_a = pl.matmul_acc(acc_a, xa_k_chunk, wa_k_chunk, b_trans=True)
-                # acc_a is 3D (wo_a keeps its group axis), which subscript-write cannot express.
-                o_r_pad = pl.assemble(o_r_pad, acc_a, [pa_r0, out_col_g + n0])
+                    wa_first = wo_a[g : g + 1, n0 : n0 + PROJ_A_MM_N_TILE, 0:A_K_TILE]
+                    acc_a = pl.matmul(xa_first, wa_first, out_dtype=pl.FP32, b_trans=True)
+                    for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=2):
+                        k0 = kb * A_K_TILE
+                        xa_k_chunk = pl.slice(
+                            o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, k0], valid_shape=[pa_rows, A_K_TILE]
+                        )
+                        wa_k_chunk = wo_a[g : g + 1, n0 : n0 + PROJ_A_MM_N_TILE, k0 : k0 + A_K_TILE]
+                        acc_a = pl.matmul_acc(acc_a, xa_k_chunk, wa_k_chunk, b_trans=True)
+                    # acc_a is 3D (wo_a keeps its group axis), which subscript-write cannot express.
+                    o_r_pad = pl.assemble(o_r_pad, acc_a, [pa_r0, out_col_g + n0])
 
             col_g = g * O_LORA
             # 性能版按上游把 amax 与量化融进同一个 SPMD，并让每个 group 用自己的标度。

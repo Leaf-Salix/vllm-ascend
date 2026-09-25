@@ -96,6 +96,16 @@ def main() -> None:
     device = f"npu:{args.device}"
     torch.npu.set_device(args.device)
     tensors = {name: blob[name].to(device) for name in names}
+    # 算子包可以提供 nz_args.pack_args 来预处理根入参（例如把某些权重改存成 NZ 分形序）。
+    # 整模型路径在 native_adapter.prepare_weights 里做同样的事；这里是单卡回放的等价钩子，
+    # 两边必须一致，否则单卡测出来的就不是整模型实际跑的布局。
+    try:
+        pack_args = __import__(f"{package}.nz_args", fromlist=["pack_args"]).pack_args
+    except ModuleNotFoundError:
+        pack_args = None
+    if pack_args is not None:
+        tensors = pack_args(tensors)
+        print("nz_args.pack_args 已应用", flush=True)
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
