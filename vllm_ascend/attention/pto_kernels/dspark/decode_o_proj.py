@@ -260,8 +260,20 @@ def decode_o_proj_tp1(
                 acc_i32 = pl.add(acc_i32, p_g)
             scale_row = act_scale_dq[0:1, b_tb:b_tb+PROJ_B_ACT_T_TILE]
             scale_col = pl.reshape(scale_row, [PROJ_B_ACT_T_TILE, 1])
-            acc = pl.row_expand_mul(pl.cast(acc_i32, target_type=pl.FP32), scale_col)
-            out_t = pl.col_expand_mul(acc, wb_scale_chunk)
+            # wo_b is an npu_quant_matmul, which folds its per-channel scale
+            # and its pertoken_scale into one dequant factor before touching
+            # the accumulator. Multiplying the accumulator by them one after
+            # the other is algebraically equal and rounds differently -- the
+            # same fix the q path took in 14632b83a, and the same native
+            # operator. The ones tile only broadcasts the two scales into a
+            # full tile; multiplying by 1.0 is exact.
+            ob_ones = pl.full(
+                [PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.FP32, value=1.0,
+            )
+            ob_combined = pl.col_expand_mul(
+                pl.row_expand_mul(ob_ones, scale_col), wb_scale_chunk,
+            )
+            out_t = pl.mul(pl.cast(acc_i32, target_type=pl.FP32), ob_combined)
             out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
             out_rows = pl.min(PROJ_B_ACT_T_TILE, t_dim - b_tb)
             attn_out[b_tb : b_tb + PROJ_B_ACT_T_TILE, ob_n0 : ob_n0 + PROJ_B_ACT_N_TILE] = pl.set_validshape(
