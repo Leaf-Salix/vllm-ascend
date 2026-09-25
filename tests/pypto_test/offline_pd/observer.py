@@ -322,7 +322,11 @@ class OfflineCSAObserver:
                 # kernel 内部的原子加。
                 original(runtime, context, hidden, positions, output, kv_cache, *args, **kwargs)
             else:
-                dsa_forward(hidden, context.flash_comm_v1_enabled, output, native_prefix)
+                # PTO 现在接管的是整个 attention 半边（mHC pre + input_layernorm +
+                # attention + mHC post），hidden 是层间的 [T, HC_MULT, D] 残差流，
+                # 不再是归一化后的 [T, D]，所以对照侧也必须走同样范围的 Native 链路。
+                from vllm_ascend.ops.dsv4_csa import _native_attention_half
+                _native_attention_half(attention.dsa_attn, hidden, positions, output)
             native = output.detach().clone()
             equal = bool(torch.equal(pto, native))
             record = {"step": state["seen"], "shape": list(pto.shape), "dtype": str(pto.dtype),

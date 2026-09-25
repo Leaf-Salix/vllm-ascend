@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 
-from .decode_csa import decode_csa_tp1_attention_test
+from .decode_csa import decode_csa_tp1_layer_test
 from .config import DECODE_BATCH
 from .native_storage import indexer_storage, physical_pages, table_storage
 
@@ -27,7 +27,7 @@ class CSAOperators:
             return pypto.torch.register(kernel, f"dsv4_csa::{name}")
 
         return cls(
-            register(decode_csa_tp1_attention_test, "attention"),
+            register(decode_csa_tp1_layer_test, "attention"),
         )
 
 
@@ -84,7 +84,7 @@ _ACL_FORMAT_NCHW = 0
 _ACL_FORMAT_ND = 2
 
 
-def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch.Tensor]:
+def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dict[str, torch.Tensor]:
     """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
     import torch_npu
 
@@ -125,7 +125,18 @@ def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch
     bf16, int8 = torch.bfloat16, torch.int8
     main, indexer = attention.compressor, attention.indexer
     inner = indexer.compressor
+    # mHC 的门控权重与 attention 的 input_layernorm 挂在 DeepseekV4DecoderLayer 上，
+    # 不在 self_attn 上，所以要由调用方把 layer 一并传进来。
+    hc = {}
+    if layer is not None:
+        hc = {
+            "hc_attn_fn": layer.hc_attn_fn.detach().float().contiguous(),
+            "hc_attn_scale": layer.hc_attn_scale.detach().float().contiguous(),
+            "hc_attn_base": layer.hc_attn_base.detach().float().contiguous(),
+            "attn_norm_w": layer.input_layernorm.weight.detach().to(bf16).contiguous(),
+        }
     return {
+        **hc,
         "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
         "wq_b": weight(attention.wq_b, (1024, 32768), int8),
         "wq_b_scale": scale(attention.wq_b, 32768),
@@ -174,8 +185,11 @@ class NativeCSACall:
         tokens = hidden.shape[0]
         if not 1 <= batch <= DECODE_BATCH or tokens != batch * 6:
             raise ValueError(f"CSA requires 1 <= batch <= {DECODE_BATCH} and six unpadded rows per request")
-        if hidden.shape[1] != 4096 or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
-            raise ValueError("CSA expects contiguous BF16 normalized hidden states [T, 4096]")
+        # kernel 现在从 mHC 的残差流进、也从它出（hc_pre + input_layernorm +
+        # attention + hc_post 都在算子内），入参因此是层间的 [T, HC_MULT, D]，
+        # 不再是归一化后的 [T, D]。
+        if tuple(hidden.shape[1:]) != (4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
+            raise ValueError("CSA expects a contiguous BF16 hc residual stream [T, 4, 4096]")
         if positions.dtype != torch.int64 or tuple(positions.shape) != (tokens,):
             raise ValueError("CSA expects the Native INT64 target position vector")
         for name, (metadata, _) in groups.items():
@@ -208,7 +222,7 @@ class NativeCSACall:
         self.tables = {name: table_storage(req.block_table) for name, req in self.req.items()}
         self.args = dict(weights)
         self.args.update(
-            x_normed_t=hidden,
+            x_hc=hidden,
             kv_cache=self.views["swa"][0],
             cmp_kv=self.views["compressed"][0],
             idx_kv_cache=indexer_storage(*self.views["indexer"]),
@@ -226,7 +240,7 @@ class NativeCSACall:
             inner_state_block_table=self.tables["indexer_state"],
             idx_topk_scores=empty("idx_topk_scores", (tokens, 512), torch.float32),
             idx_topk=empty("idx_topk", (tokens, 512), torch.int32),
-            attn_out=empty("attn_out", (tokens, 4096), torch.bfloat16),
+            x_out=empty("x_out", (tokens, 4, 4096), torch.bfloat16),
         )
         for name, slot_name, rope_name in (
             ("compressed", "cmp_slot_mapping", "cmp_freqs"),
@@ -257,8 +271,8 @@ class NativeCSACall:
         # Keep the Native buffers and their producer waits; no device conversion.
         self.args["freqs_cos"] = self.native_cos
         self.args["freqs_sin"] = self.native_sin
-        self.core_args = tuple(self.args[name] for name in decode_csa_tp1_attention_test.param_names)
+        self.core_args = tuple(self.args[name] for name in decode_csa_tp1_layer_test.param_names)
 
     def __call__(self):
         self.ops.attention(*self.core_args)
-        return self.args["attn_out"]
+        return self.args["x_out"]

@@ -18,11 +18,13 @@ _COMPACT_METADATA_CACHE = "pto_csa_compact_compressor_metadata"
 
 
 class CSAServiceRuntime:
-    def __init__(self, attention, operators, max_num_seqs):
+    def __init__(self, attention, operators, max_num_seqs, layer=None):
         self.wrapper = attention.dsa_attn
         self.layer_name = self.wrapper.dsa_attn.layer_name
         self.operators = operators
-        self.weights = prepare_weights(attention, None)
+        # layer 提供 mHC 的门控权重与 attention 的 input_layernorm：
+        # 这两段现在也在 PTO kernel 里，见 decode_csa._decode_csa_tp1_layer。
+        self.weights = prepare_weights(attention, None, layer)
         self.prefixes = {
             "swa": self.wrapper.swa_cache_layer.prefix,
             "compressed": self.layer_name,
@@ -43,7 +45,8 @@ class CSAServiceRuntime:
         metadata = context.attn_metadata
         if metadata is None or getattr(context, "is_draft_model", False):
             return False
-        if hidden.ndim != 2 or hidden.shape[1] != 4096 or hidden.dtype != torch.bfloat16:
+        # 整层入口：进出都是层间的 mHC 残差流 [T, HC_MULT, D]。
+        if hidden.ndim != 3 or tuple(hidden.shape[1:]) != (4, 4096) or hidden.dtype != torch.bfloat16:
             return False
         tokens = hidden.shape[0]
         if tokens % QUERY_TOKENS or not 1 <= tokens // QUERY_TOKENS <= self.batch_capacity:
@@ -133,7 +136,7 @@ class CSAServiceRuntime:
         call = NativeCSACall(
             self.operators, self.weights, hidden, positions, groups, layer_name=self.layer_name,
             compact_metadata=compact,
-            buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "attn_out": output},
+            buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "x_out": output},
         )
         # A single fused call publishes all KV writes. Notify the connector on
         # the same stream after that call; no global synchronization is needed.

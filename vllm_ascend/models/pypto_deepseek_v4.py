@@ -10,20 +10,46 @@ from vllm_ascend.models.deepseek_v4 import AscendDeepseekV4ForCausalLM
 from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.service_config import validate_configuration
 
 
-def csa_attention_forward(attention, positions, hidden_states, llama_4_scaling):
-    # The Native DSA wrapper owns the prefix and all six cache tensors. Keep
-    # positions explicit in the custom-op ABI, including during torch.compile.
-    output = torch.empty_like(hidden_states)
-    torch.ops.vllm.dsv4_csa_forward(hidden_states, positions, output, attention.dsa_attn.prefix)
-    return output
+def csa_layer_forward(layer, positions, hidden_states, residual, llama_4_scaling=None):
+    """接管 decoder layer 的 attention 半边，FFN 半边原样留给 Native。
+
+    PTO kernel 现在是整层入口（mHC pre + input_layernorm + attention + mHC post，
+    见 `decode_csa._decode_csa_tp1_layer`），所以替换点从 `self_attn.forward` 上移到
+    这里：`hidden_states` 进出都是层间的 mHC 残差流 [T, HC_MULT, D]。`self_attn`
+    本身保持 Native 不动，custom op 里回退时照常调用它。
+
+    The Native DSA wrapper owns the prefix and all six cache tensors. Keep
+    positions explicit in the custom-op ABI, including during torch.compile.
+    """
+    attn_out = torch.empty_like(hidden_states)
+    torch.ops.vllm.dsv4_csa_forward(
+        hidden_states, positions, attn_out, layer.self_attn.dsa_attn.prefix
+    )
+    hidden_states = attn_out
+
+    # FFN 半边：与 release 的 DeepseekV4DecoderLayer.forward 后半段逐行一致。
+    residual = hidden_states.clone()
+    hidden_states, post, comb = layer.hc_pre(
+        hidden_states, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base
+    )
+    hidden_states = layer.post_attention_layernorm(hidden_states)
+    hidden_states = layer.mlp(hidden_states)
+    hidden_states = layer.hc_post(hidden_states, residual, post, comb)
+    return hidden_states, residual
 
 
-def install_csa_forward(attention):
+def install_csa_forward(layer):
     import vllm_ascend.ops.dsv4_csa  # noqa: F401
 
+    attention = layer.self_attn
     if attention.compress_ratio == 4:
         attention.dsa_attn._pto_csa_runtime = None
-        attention.forward = MethodType(csa_attention_forward, attention)
+        # custom op 回退时要拿 mHC 的门控权重与 input_layernorm，它们挂在 layer 上。
+        # 必须用 tuple 包一层：直接赋一个 nn.Module 会被 nn.Module.__setattr__ 登记成
+        # dsa_attn 的子模块，于是 layer -> self_attn -> dsa_attn -> layer 成环，
+        # model.eval() 里 module.train() 的递归遍历会直接栈溢出。
+        attention.dsa_attn._pto_csa_layer = (layer,)
+        layer.forward = MethodType(csa_layer_forward, layer)
 
 
 def prepare_csa_model(model):
@@ -49,7 +75,9 @@ def prepare_csa_model(model):
     for layer in model.model.layers:
         attention = layer.self_attn
         if attention.compress_ratio == 4:
-            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(attention, operators, max_num_seqs)
+            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(
+                attention, operators, max_num_seqs, layer
+            )
             count += 1
     if not count:
         raise ValueError("No target C4 attention layers found for PTO CSA")
@@ -62,7 +90,7 @@ class PyptoCSADeepseekV4ForCausalLM(AscendDeepseekV4ForCausalLM):
         validate_configuration(vllm_config)
         super().__init__(vllm_config=vllm_config, prefix=prefix)
         for layer in self.model.layers:
-            install_csa_forward(layer.self_attn)
+            install_csa_forward(layer)
 
     def process_weights_after_loading(self):
         prepare_csa_model(self)

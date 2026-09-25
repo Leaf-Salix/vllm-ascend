@@ -30,6 +30,8 @@ from .decode_indexer import indexer
 from .decode_indexer_compressor import indexer_compressor
 from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
 from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
+from .hc_post import hc_post
+from .hc_pre import HC_DIM, HC_MULT, MIX_HC, hc_pre_norm
 from .layout import (
     COMPRESSED_ROWS_DYN,
     COMPRESSED_TABLE_COLUMNS_DYN,
@@ -104,6 +106,9 @@ CSA_PROJECTION_PACK_ROW_TILE = 8
 CSA_PROJECTION_PACK_WORKERS = 16
 CSA_ALL_VISIBLE_WORKERS = 16
 CSA_WB_TOKEN_TILE = 8
+HC_WIDEN_T_TILE = 8    # hc 残差流 BF16->FP32 的行块
+HC_WIDEN_D_TILE = 1024  # 同上，列块
+HC_WIDEN_WORKERS = 48   # 同上，AIV 通道数
 CSA_ROPE_SIGN_T_TILE = 4  # RoPE 符号行块，沿用上游 csa_rope_interleave 的 4 行
 CSA_ROPE_WORKERS = 16
 CSA_WB_WORKERS = 48  # CSA cache-write workers
@@ -115,8 +120,12 @@ if T_PAD != LOCAL_T_PAD:
     raise ValueError(f"CSA token capacity {T_PAD} must equal TP local token capacity {LOCAL_T_PAD}")
 
 
-def _decode_csa_tp1_attention(
-    x_normed_t: pl.Tensor[[T_DYN, D], pl.BF16],
+def _decode_csa_tp1_layer(
+    x_hc: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
+    hc_attn_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+    hc_attn_scale: pl.Tensor[[3], pl.FP32],
+    hc_attn_base: pl.Tensor[[MIX_HC], pl.FP32],
+    attn_norm_w: pl.Tensor[[D], pl.BF16],
     wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
@@ -167,10 +176,16 @@ def _decode_csa_tp1_attention(
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
-    attn_out: pl.Out[pl.Tensor[[T_DYN, D], pl.BF16]],
+    x_out: pl.Out[pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16]],
 ):
-    """TP1 attention with Native interleaved FP32 frequencies and no outer HC."""
-    x_normed_t.bind_dynamic(0, T_DYN)
+    """TP1 整层：mHC 的 pre 门 + input_layernorm + attention + mHC 的 post。
+
+    与性能版同一套结构，见 deepseek_v4_flash_dspark_perf/decode_csa.py 的说明。
+    hc_pre / hc_post / rmsnorm 三个模块两版共用一份（性能版是重导出），
+    所以这里只是把它们接进精度版的 attention 链路。
+    """
+    x_hc.bind_dynamic(0, T_DYN)
+    x_out.bind_dynamic(0, T_DYN)
     freqs_cos.bind_dynamic(0, T_DYN)
     freqs_sin.bind_dynamic(0, T_DYN)
     cmp_freqs_cos.bind_dynamic(0, COMPRESSED_ROWS_DYN)
@@ -205,10 +220,57 @@ def _decode_csa_tp1_attention(
     cmp_block_table.bind_dynamic(1, COMPRESSED_TABLE_COLUMNS_DYN)
     idx_block_table.bind_dynamic(0, B_DYN)
     idx_block_table.bind_dynamic(1, INDEXER_TABLE_COLUMNS_DYN)
-    attn_out.bind_dynamic(0, T_DYN)
+    # attn_out 现在是 kernel 内部张量，不再需要绑定外部动态维。
     idx_topk.bind_dynamic(0, T_DYN)
     idx_topk_scores.bind_dynamic(0, T_DYN)
-    t_dim = pl.tensor.dim(x_normed_t, 0)
+    t_dim = pl.tensor.dim(x_hc, 0)
+    post_t = pl.create_tensor([t_dim, HC_MULT], dtype=pl.FP32)
+    comb_t = pl.create_tensor([t_dim, HC_MULT * HC_MULT], dtype=pl.FP32)
+    x_normed_t = pl.create_tensor([t_dim, D], dtype=pl.BF16)
+    # row_recip=False：走 row_expand_div 的精确路径，与上游 CSA 口径一致。
+    # 必须单独开一个 runtime scope：scope 退出时才会等齐里面的任务，
+    # 否则 qkv_proj_rope / compressor / indexer 会和 hc_pre_norm 抢跑，
+    # 读到还没写完的 x_normed_t。上游 decode_csa.py 的 TP1 入口同样这么包。
+    # hc 残差流在 vllm-ascend 侧是 BF16（与 Native 的 npu_hc_pre_v2 / npu_hc_post 一致），
+    # 而上游 hc_pre 全程按 FP32 算。这里一次性加宽，不把 cast 下沉到 hc_pre 的每处
+    # tile 读取——下沉过的版本有两个后果：cast 丢掉 pl.slice 的 valid_shape 标记，
+    # padding 区的陈旧字节混进归约（T=60 实测 64 个非有限值）；而且 cast 是 AIV 操作，
+    # 会把纯 Cube 的 hc_pre_linear 编成 mix kernel（泳道里裂成 _aic + _aiv，24.2 -> 32.9us）。
+    x_hc32 = pl.create_tensor([t_dim, HC_MULT, D], dtype=pl.FP32)
+    x_hc_flat = pl.reshape(x_hc, [t_dim, HC_MULT * D])
+    x_hc32_flat = pl.reshape(x_hc32, [t_dim, HC_MULT * D])
+    widen_rows = (t_dim + HC_WIDEN_T_TILE - 1) // HC_WIDEN_T_TILE
+    widen_tail = pl.create_tensor([HC_WIDEN_T_TILE, HC_MULT * D], dtype=pl.FP32)
+    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen") as widen_tid:
+        for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows,
+                                  pl.min(widen_rows, HC_WIDEN_WORKERS)):
+            w_t0 = widen_blk * HC_WIDEN_T_TILE
+            w_rows = pl.min(HC_WIDEN_T_TILE, t_dim - w_t0)
+            for w_db in pl.range(HC_MULT * D // HC_WIDEN_D_TILE):
+                w_d0 = w_db * HC_WIDEN_D_TILE
+                w_src = pl.slice(x_hc_flat, [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE], [w_t0, w_d0],
+                                 valid_shape=[w_rows, HC_WIDEN_D_TILE])
+                w_val = pl.cast(w_src, pl.FP32)
+                if w_rows == HC_WIDEN_T_TILE:
+                    x_hc32_flat[w_t0:w_t0 + HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
+                else:
+                    widen_tail[0:HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
+                    w_out = pl.load(
+                        widen_tail, [0, w_d0], [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE],
+                        valid_shape=[w_rows, HC_WIDEN_D_TILE], target_memory=pl.MemorySpace.Vec,
+                    )
+                    pl.store(w_out, [w_t0, w_d0], x_hc32_flat)
+
+    # hc_pre_norm 必须整个包进一个 runtime scope：scope 退出时才等齐里面的任务。
+    # 试过改用 rms_tid 显式依赖（上游 TP 版 _decode_csa 的写法，好处是 post / comb
+    # 两个门能和投影并发），但整模型实测反而更差——256 个序列里崩掉的从 42 涨到 94。
+    # 原因是 rms_tid 只覆盖产出 x_normed 的 mix_x_rms_norm，写 post_t / comb_t 的
+    # split_pre_post 与 comb_sinkhorn 不在这条链上，末尾的 hc_post 就可能读到没写完的门。
+    with pl.scope():
+        hc_pre_norm(
+            x_hc32, hc_attn_fn, hc_attn_scale, hc_attn_base, attn_norm_w,
+            post_t, comb_t, x_normed_t, False,
+        )
     wb_blocks = (t_dim + CSA_WB_TOKEN_TILE - 1) // CSA_WB_TOKEN_TILE
 
     idx_sin_signed = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
@@ -248,6 +310,9 @@ def _decode_csa_tp1_attention(
     qr = pl.create_tensor([t_dim, Q_LORA], dtype=pl.INT8)
     qr_scale = pl.create_tensor([t_dim, 1], dtype=pl.FP32)
     position_ids_t1 = pl.reshape(position_ids, [t_dim, 1])
+    # attn_out 在大 scope 之外创建：它要跨到 scope 末尾喂 hc_post，在 scope 内
+    # 创建会被判成 scope 局部张量而参与内存复用。上游 _decode_csa_tp1 也在这里创建。
+    attn_out = pl.create_tensor([t_dim, D], dtype=pl.BF16)
     with pl.scope():
         # Projection-chain dependency marker.
         late_dep = pl.system.task_dummy(deps=[rope_tid])
@@ -363,9 +428,11 @@ def _decode_csa_tp1_attention(
             freqs_sin,
             o_packed_heads,
         )
-        attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
-    return attn_out
+        with pl.scope():
+            attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
+            hc_post(attn_out, x_hc, post_t, comb_t, x_out)
+    return x_out
 
 
-decode_csa_tp1_attention = pl.jit.inline(auto_scope=False)(_decode_csa_tp1_attention)
-decode_csa_tp1_attention_test = pl.jit(auto_scope=False)(_decode_csa_tp1_attention)
+decode_csa_tp1_layer = pl.jit.inline(auto_scope=False)(_decode_csa_tp1_layer)
+decode_csa_tp1_layer_test = pl.jit(auto_scope=False)(_decode_csa_tp1_layer)
