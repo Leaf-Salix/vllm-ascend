@@ -56,8 +56,14 @@ def validate_configuration(config):
     # NativeCSACall validates the actual key/scale dtype and shared storage.
     if config.cache_config.block_size != 32:
         raise ValueError("PTO CSA requires 32-token cache blocks")
-    if get_ascend_config().weight_nz_mode != 0 or get_ascend_config().enable_kv_nz:
-        raise ValueError("PTO CSA requires weight_nz_mode=0 and enable_kv_nz=false")
+    # weight_nz_mode 0/1 都可以：1 是 vllm-ascend 的默认值，它只让 Native 把量化权重
+    # （CSA 这边是 wq_b 与 wo_b）转成 FRACTAL_NZ，prepare_weights 会在每层初始化时把
+    # 它们转回 ND。2 会连 BF16 权重一起转，那会多出一批本可避免的格式往返，先不放开。
+    #
+    # enable_kv_nz 仍然拒绝：它改的是 KV cache 的页布局，而 PTO 的 cache 读取路径
+    # （尤其是 indexer 的整页搬运）是按 Native 的 ND 页布局写死的，不是换个格式就行。
+    if get_ascend_config().weight_nz_mode not in (0, 1) or get_ascend_config().enable_kv_nz:
+        raise ValueError("PTO CSA requires weight_nz_mode in (0, 1) and enable_kv_nz=false")
     if getattr(hf, "use_index_cache", False) or config.lora_config is not None:
         raise ValueError("PTO CSA does not support IndexCache reuse or LoRA")
     spec = config.speculative_config

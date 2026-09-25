@@ -676,7 +676,9 @@ def worker(args):
         # Release A3 Native chooses INT8 Indexer storage in its constructor;
         # the upstream release AttentionConfig does not accept an int8 Literal.
         speculative_config={"method": "dspark", "num_speculative_tokens": 5, "enforce_eager": True},
-        additional_config={"weight_nz_mode": 0, "enable_kv_nz": False, "enable_dsa_cp": False,
+        # weight_nz_mode 由 --weight-nz-mode 控制：0 全 ND，1 是 vllm-ascend 的默认值，
+        # Native 会把量化权重（CSA 的 wq_b/wo_b）转成 FRACTAL_NZ，由 prepare_weights 转回 ND。
+        additional_config={"weight_nz_mode": args.weight_nz_mode, "enable_kv_nz": False, "enable_dsa_cp": False,
                            # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
                            # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
                            # npu_add_rms_norm_bias，而 PyTorch 的 pattern matcher 用
@@ -942,6 +944,8 @@ def main():
                         help="steady命令丢弃的前N个decode step，用于排除首次编译与首个恢复步骤")
     parser.add_argument("--profile-start-step", type=int, default=8, help="从第几个稳态decode step开始采集")
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
+    parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1),
+                        help="vllm-ascend 的 weight_nz_mode；1 会让 Native 把量化权重转成 NZ")
     parser.add_argument("--swimlane-rank", type=int, default=0, help="采集PTO DFX泳道的DP rank")
     parser.add_argument("--swimlane-layer", type=int, default=FIRST_TARGET_CSA_LAYER,
                         help="采集泳道的target C4层序号")

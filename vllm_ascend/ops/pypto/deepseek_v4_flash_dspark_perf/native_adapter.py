@@ -79,6 +79,11 @@ def _maybe_pack_nz(value: "torch.Tensor", dtype) -> "torch.Tensor":
     return _pack_nz(value) if enabled else value
 
 
+# torch_npu 的 acl format 取值：0=NCHW、2=ND，二者都是 PyPTO 根入参接受的基础格式。
+_ACL_FORMAT_NCHW = 0
+_ACL_FORMAT_ND = 2
+
+
 def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch.Tensor]:
     """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
     import torch_npu
@@ -90,8 +95,20 @@ def prepare_weights(attention, hadamard: torch.Tensor | None) -> dict[str, torch
         value = module.weight.detach()
         if tuple(value.shape) != shape or value.dtype != dtype:
             raise ValueError(f"Unexpected loaded weight: {value.shape}/{value.dtype}; expected {shape}/{dtype}")
-        if torch_npu.get_npu_format(value) not in (0, 2):
-            raise ValueError("CSA weights must already be Native ND after loading")
+        if torch_npu.get_npu_format(value) not in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND):
+            # weight_nz_mode>=1 时 Native 会把量化权重转成 FRACTAL_NZ（见
+            # vllm_ascend/utils.py 的 maybe_trans_nz 与各 w8a8 method 的
+            # process_weights_after_loading），而 PyPTO 的根入参只接受
+            # NCHW(0) 或 ND(2)。这里转回 ND。
+            #
+            # 两个 NZ 不是一回事：Native 的是张量的 npu format，PTO 的 pl.NZ 要的是
+            # 「字节按 pto-isa 的分形序摆好、format 仍是 ND」。所以即便将来 PTO 这边
+            # 也想用 NZ，也不能直接拿 Native 转过的这份，仍要先回到 ND。
+            #
+            # 这一步在 process_weights_after_loading 里每层只做一次（见
+            # models/pypto_deepseek_v4.py 的 prepare_csa_model），发生在权重加载之后、
+            # aclgraph capture 之前，不在 decode 路径上，因此不影响 replay。
+            value = torch_npu.npu_format_cast(value, _ACL_FORMAT_ND)
         if transpose:
             value = value.transpose(-1, -2)
         return value.contiguous()
