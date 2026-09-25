@@ -56,14 +56,21 @@ def validate_configuration(config):
     # NativeCSACall validates the actual key/scale dtype and shared storage.
     if config.cache_config.block_size != 32:
         raise ValueError("PTO CSA requires 32-token cache blocks")
-    # weight_nz_mode 0/1 都可以：1 是 vllm-ascend 的默认值，它只让 Native 把量化权重
-    # （CSA 这边是 wq_b 与 wo_b）转成 FRACTAL_NZ，prepare_weights 会在每层初始化时把
-    # 它们转回 ND。2 会连 BF16 权重一起转，那会多出一批本可避免的格式往返，先不放开。
+    # weight_nz_mode 0/1/2 都可以。1 是 vllm-ascend 的默认值，只让 Native 把量化权重
+    # （CSA 这边是 wq_b 与 wo_b）转成 FRACTAL_NZ；2 会连 BF16 权重一起转。两种情况下
+    # prepare_weights 都会在每层初始化时先 npu_format_cast 回 ND，再按本包 nz_mode 的
+    # 开关决定要不要用 _pack_nz 排成 pto-isa 的分形序——Native 的 npu format 与 pl.NZ
+    # 要求的字节次序不是一回事，必须经这一道。
+    #
+    # mode=2 此前被拒，当时的理由是"会多出一批本可避免的格式往返"。2026-09-25 放开：
+    # PTO 侧 BF16 权重（wo_a、wq_a）走 NZ 需要 mode>=2，那笔往返换来的是 proj_a_mm
+    # 等任务的显著加速；而且它发生在 process_weights_after_loading、每层只做一次，
+    # 不在 decode 路径上，不影响 aclgraph replay。
     #
     # enable_kv_nz 仍然拒绝：它改的是 KV cache 的页布局，而 PTO 的 cache 读取路径
     # （尤其是 indexer 的整页搬运）是按 Native 的 ND 页布局写死的，不是换个格式就行。
-    if get_ascend_config().weight_nz_mode not in (0, 1) or get_ascend_config().enable_kv_nz:
-        raise ValueError("PTO CSA requires weight_nz_mode in (0, 1) and enable_kv_nz=false")
+    if get_ascend_config().weight_nz_mode not in (0, 1, 2) or get_ascend_config().enable_kv_nz:
+        raise ValueError("PTO CSA requires weight_nz_mode in (0, 1, 2) and enable_kv_nz=false")
     if getattr(hf, "use_index_cache", False) or config.lora_config is not None:
         raise ValueError("PTO CSA does not support IndexCache reuse or LoRA")
     spec = config.speculative_config

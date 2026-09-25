@@ -944,7 +944,7 @@ def main():
                         help="steady命令丢弃的前N个decode step，用于排除首次编译与首个恢复步骤")
     parser.add_argument("--profile-start-step", type=int, default=8, help="从第几个稳态decode step开始采集")
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
-    parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1),
+    parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
                         help="vllm-ascend 的 weight_nz_mode；1 会让 Native 把量化权重转成 NZ")
     parser.add_argument("--swimlane-rank", type=int, default=0, help="采集PTO DFX泳道的DP rank")
     parser.add_argument("--swimlane-layer", type=int, default=FIRST_TARGET_CSA_LAYER,

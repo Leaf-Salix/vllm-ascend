@@ -900,6 +900,11 @@ class OfflineCSAObserver:
 
         def traced(runtime, context, hidden, *args, **kwargs):
             result = original_call(runtime, context, hidden, *args, **kwargs)
+            # 诊断：落盘条件不满足时，这张直方图能说明到底差在哪一项
+            # （是 runtime 不匹配、还是 token 数对不上）。
+            seen = state.setdefault("seen", {})
+            key = f"shape={tuple(hidden.shape)} same_runtime={runtime is wanted}"
+            seen[key] = seen.get(key, 0) + 1
             if (state["enabled"] and runtime is wanted and not state["dumped"]
                     and hidden.shape[0] == expected_tokens):
                 call = latest.get("call")
@@ -907,7 +912,10 @@ class OfflineCSAObserver:
                     import torch
                     target = Path(out_dir)
                     target.mkdir(parents=True, exist_ok=True)
-                    kernel = __import__(f"{package}.decode_csa", fromlist=["decode_csa_tp1_attention_test"]).decode_csa_tp1_attention_test
+                    # 整层融合（1dcadd85）后入口改名，旧名保留成回退。
+                    _entry = "decode_csa_tp1_layer_test"
+                    _mod = __import__(f"{package}.decode_csa", fromlist=[_entry])
+                    kernel = getattr(_mod, _entry, None) or _mod.decode_csa_tp1_attention_test
                     names = list(kernel.param_names)
                     payload = {}
                     for name in names:

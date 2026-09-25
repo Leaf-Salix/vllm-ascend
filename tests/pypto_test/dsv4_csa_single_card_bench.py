@@ -85,7 +85,12 @@ def main() -> None:
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     package = variant_package()
-    kernel = __import__(f"{package}.decode_csa", fromlist=["decode_csa_tp1_attention_test"]).decode_csa_tp1_attention_test
+    # 整层融合（提交 1dcadd85）之后入口从 attention 改成 layer：它从 mHC 的残差流进、
+    # 也从残差流出（hc_pre + input_layernorm + attention + hc_post 都在算子内）。
+    # 旧名保留成回退，便于对着融合前的 argdump 跑老用例。
+    entry = "decode_csa_tp1_layer_test"
+    module = __import__(f"{package}.decode_csa", fromlist=[entry])
+    kernel = getattr(module, entry, None) or module.decode_csa_tp1_attention_test
 
     meta = json.loads((args.args_dir / "csa_args_meta.json").read_text())
     blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu")
