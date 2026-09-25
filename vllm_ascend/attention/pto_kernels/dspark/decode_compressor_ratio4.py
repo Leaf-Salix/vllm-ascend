@@ -630,26 +630,30 @@ def compressor_ratio4_pool_projected_vllm(
                                     )
                             pool_score_buf[pool_base + state_idx : pool_base + state_idx + 1, :] = score
                             pool_value_buf[pool_base + state_idx : pool_base + state_idx + 1, :] = value
-                        # ColumnMax / ColumnSum 是跨距 4 先配对的蝶形（compressor_vector_comm.h）：
-                        # ((r0+r4)+(r2+r6)) + ((r1+r5)+(r3+r7))。逐元素的三步（Exp、MatDivVec、
-                        # Mul）native 都是整块一次做的，这里照做：指令少，也更贴近它。
-                        pool_ma0 = pl.maximum(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :])
-                        pool_ma1 = pl.maximum(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :])
-                        pool_ma2 = pl.maximum(pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :], pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :])
-                        pool_ma3 = pl.maximum(pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :], pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :])
+                        # native 的 8 行是 seq 与半区交错的（PadAlign 的图示，
+                        # compressor_block_vec_perf.h:625-638）：它的第 2j 行是窗口第 j 位的
+                        # 左半、第 2k+1 行是第 4+k 位的右半，而这里的 staging 是先四个左半
+                        # 再四个右半。ColumnSum 的跨距 4 蝶形
+                        # ((r0+r4)+(r2+r6)) + ((r1+r5)+(r3+r7))（compressor_vector_comm.h:59,75,81）
+                        # 换算到这个行序就是下面的 (0,2)(4,6)(1,3)(5,7)。
+                        # 逐元素的三步（Exp、MatDivVec、Mul）native 都是整块一次做的，这里照做。
+                        pool_ma0 = pl.maximum(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :])
+                        pool_ma1 = pl.maximum(pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :], pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :])
+                        pool_ma2 = pl.maximum(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :])
+                        pool_ma3 = pl.maximum(pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :], pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :])
                         pool_max = pl.maximum(pl.maximum(pool_ma0, pool_ma2), pl.maximum(pool_ma1, pool_ma3))
                         pool_score_buf[pool_base : pool_base + STATE_LEN, :] = pl.exp(pl.col_expand_sub(pool_score_buf[pool_base : pool_base + STATE_LEN, :], pool_max))
-                        pool_la0 = pl.add(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :])
-                        pool_la1 = pl.add(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :])
-                        pool_la2 = pl.add(pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :], pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :])
-                        pool_la3 = pl.add(pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :], pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :])
+                        pool_la0 = pl.add(pool_score_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_score_buf[pool_base + 2 : pool_base + 2 + 1, :])
+                        pool_la1 = pl.add(pool_score_buf[pool_base + 4 : pool_base + 4 + 1, :], pool_score_buf[pool_base + 6 : pool_base + 6 + 1, :])
+                        pool_la2 = pl.add(pool_score_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_score_buf[pool_base + 3 : pool_base + 3 + 1, :])
+                        pool_la3 = pl.add(pool_score_buf[pool_base + 5 : pool_base + 5 + 1, :], pool_score_buf[pool_base + 7 : pool_base + 7 + 1, :])
                         pool_l = pl.add(pl.add(pool_la0, pool_la2), pl.add(pool_la1, pool_la3))
                         pool_score_buf[pool_base : pool_base + STATE_LEN, :] = pl.col_expand_div(pool_score_buf[pool_base : pool_base + STATE_LEN, :], pool_l)
                         pool_value_buf[pool_base : pool_base + STATE_LEN, :] = pl.mul(pool_value_buf[pool_base : pool_base + STATE_LEN, :], pool_score_buf[pool_base : pool_base + STATE_LEN, :])
-                        pool_oa0 = pl.add(pool_value_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_value_buf[pool_base + 4 : pool_base + 4 + 1, :])
-                        pool_oa1 = pl.add(pool_value_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_value_buf[pool_base + 5 : pool_base + 5 + 1, :])
-                        pool_oa2 = pl.add(pool_value_buf[pool_base + 2 : pool_base + 2 + 1, :], pool_value_buf[pool_base + 6 : pool_base + 6 + 1, :])
-                        pool_oa3 = pl.add(pool_value_buf[pool_base + 3 : pool_base + 3 + 1, :], pool_value_buf[pool_base + 7 : pool_base + 7 + 1, :])
+                        pool_oa0 = pl.add(pool_value_buf[pool_base + 0 : pool_base + 0 + 1, :], pool_value_buf[pool_base + 2 : pool_base + 2 + 1, :])
+                        pool_oa1 = pl.add(pool_value_buf[pool_base + 4 : pool_base + 4 + 1, :], pool_value_buf[pool_base + 6 : pool_base + 6 + 1, :])
+                        pool_oa2 = pl.add(pool_value_buf[pool_base + 1 : pool_base + 1 + 1, :], pool_value_buf[pool_base + 3 : pool_base + 3 + 1, :])
+                        pool_oa3 = pl.add(pool_value_buf[pool_base + 5 : pool_base + 5 + 1, :], pool_value_buf[pool_base + 7 : pool_base + 7 + 1, :])
                         pooled_kv[
                             token : token + 1,
                             h0 : h0 + POOL_HEAD_TILE,
