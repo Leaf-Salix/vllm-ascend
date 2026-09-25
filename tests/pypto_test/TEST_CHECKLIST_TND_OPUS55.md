@@ -1273,3 +1273,15 @@ CSA 0.5719 ms vs native 0.5702 ms，两种形状 `accuracy_pass=True`。
 | graph CSA vs native | 0.6127 vs 0.5938 ms（+3.2%） | 0.5729 vs 0.5862 ms（**−2.3%**） |
 
 两形状 `accuracy_pass=True` / `guard_unchanged=True`。
+
+### q dequant 因子先相乘（`14632b83a`）后
+
+| 指标 | uniform-b4 | varlen-b4 |
+|---|---|---|
+| **`output`** | 0.034383%（逐位 99.098%） | **0.000000000（整层逐位）** |
+| `q` / `kv` / `qr_int8` / `qr_scale` / `index_key` / `index_scale` | **全 0（逐位）** | **全 0（逐位）** |
+| `compressed` | 1.13e-06 | **0** |
+| `heads` | 0.000226%（47/786432） | 0.00000018% |
+| graph CSA vs native | 0.6143 vs 0.5932 ms（+3.6%） | **0.5641 vs 0.5877 ms（快 4.0%）** |
+
+两形状 `accuracy_pass=True` / `guard_unchanged=True`。
