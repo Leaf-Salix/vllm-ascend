@@ -1313,6 +1313,36 @@ INT8 cache，**与 `wo_a` 的布局毫无关系**；`indexer_topk_single_leaf_pu
 `proj_a_mm` 的 −2.59 µs/块（−174 核·µs）属于直接因果，可信；整体跨度要等
 同卡交替的结果。
 
+**T6.1.4 的方案（`wq_a` / `qr_proj_matmul`）**：不可证点在**行偏移用了取模**——
+
+```python
+for qbg_idx in pl.spmd((Q_LORA // QR_N_TILE) * QR_OK, name_hint="qr_proj_matmul"):
+    q_a_col0  = (qbg_idx // QR_OK) * QR_N_TILE        # 整除 → 列偏移
+    qr_k_base = (qbg_idx %  QR_OK) * QR_SPLIT_K_TILE  # 取模 → 行偏移，展开成减法，不可证
+    ...
+    dense_d0 = qr_k_base + dense_k * QR_K_TILE        # 跟着不可证
+    dense_w  = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
+```
+
+这与 T2.28 记的报错吻合：`offset on shape[-2] must be a multiple of 16, cannot be
+proven`——`shape[-2]` 就是行维。
+
+**先试最小改动：把整除那一项换到行维、取模那一项落到列维。** 巧的是
+`Q_LORA // QR_N_TILE = 8` 恰好等于 `QR_OK = 8`，所以 grid 总数不变（64 块），只是
+两个分量互换语义：
+
+- 行：`qr_k_base = (qbg_idx // 8) * QR_SPLIT_K_TILE`，`QR_SPLIT_K_TILE = 512`，
+  `512 % 16 == 0` 满足行 16 对齐；
+- 列：`q_a_col0 = (qbg_idx % 8) * QR_N_TILE`，`128 % 16 == 0` 满足 BF16 的 C0 线要求。
+
+**不要照 T2.28 那样改成三维 `[QR_OK, D//QR_OK, Q_LORA]`**：那次虽然编过了，但
+**数值错**（absmax 4.19 对 6.28），而且 T2.28 自己记了「ND 模式下同样错」——说明
+错因是改三维 shape 本身，不是 NZ。若上述交换仍被拒，退路是把 grid 降维（只按 N 或
+只按 K），但并行度会从 64 掉到 8、丢掉 split-K 的意义，需实测权衡后再定。
+
+**这一项排在最后做**：`qr_proj_matmul` 我们已是上游的 0.40×（快 2.5 倍），NZ 的
+边际收益最小，而改 split-K 结构的风险最大。但按「以上游为准」的判据仍然要做。
+
 ### T6.2　与上游泳道的时序差异分析（目标 2）
 
 | ID | 目标 | 完成判据 | 状态 |
