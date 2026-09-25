@@ -11,7 +11,7 @@
 
 import pypto.language as pl
 
-from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ
+from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
 
 from .config import (
     DECODE_TOKENS,
@@ -259,10 +259,83 @@ proj_a_mm = _proj_a_mm_nz if BF16_WEIGHT_NZ else _proj_a_mm_nd
 
 
 @pl.jit.inline
+def _proj_b_mm_nd(
+    o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
+    g: pl.Scalar[pl.INDEX],
+    col_g: pl.Scalar[pl.INDEX],
+    proj_b_t_rows: pl.Scalar[pl.INDEX],
+    q_tid: pl.Scalar[pl.TASK_ID],
+):
+    """ND 版：(token 块 x D 块) 二维展开，与上游同形。"""
+    with pl.spmd(
+        proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
+    ) as pb_tid:
+        pb_unit = pl.tile.get_block_idx()
+        tb = pb_unit // (D // PROJ_B_D_TILE)
+        dc = pb_unit - tb * (D // PROJ_B_D_TILE)
+        t0 = tb * PROJ_B_MM_T_TILE
+        d0 = dc * PROJ_B_D_TILE
+        for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+            n0 = d0 + nf * PROJ_B_MM_N_TILE
+            acc_b = pl.create_tensor([PROJ_B_MM_T_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+            for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+                k0 = col_g + kb * B_K_TILE
+                b_act = o_r_i8_pad[t0 : t0 + PROJ_B_MM_T_TILE, k0 : k0 + B_K_TILE]
+                b_weight = wo_b[n0 : n0 + PROJ_B_MM_N_TILE, k0 : k0 + B_K_TILE]
+                acc_b = pl.matmul_acc(acc_b, b_act, b_weight, b_trans=True, init_cond=(kb == 0))
+            partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+    return partials, pb_tid
+
+
+@pl.jit.inline
+def _proj_b_mm_nz(
+    o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
+    g: pl.Scalar[pl.INDEX],
+    col_g: pl.Scalar[pl.INDEX],
+    proj_b_t_rows: pl.Scalar[pl.INDEX],
+    q_tid: pl.Scalar[pl.TASK_ID],
+):
+    """NZ 版：grid 只按 D 一维分块，token 块进块内循环。
+
+    ND 版用 `dc = pb_unit - tb * (D // PROJ_B_D_TILE)` 从一维 block 索引里拆出 D 分量，
+    那是**减法**，`IsProvableNonNegative` 永不接受，于是 `d0`、`n0` 都不可证、NZ 切片
+    被拒（清单 T2.28 当年就卡在这里）。只按 D 分块之后
+    `d0 = get_block_idx() * PROJ_B_D_TILE` 直接可证。
+
+    **这个改法不损失并行度**：生产档位 t_dim=96、PROJ_B_MM_T_TILE=128，所以
+    proj_b_t_rows == 1，原 grid 本来就等于 D // PROJ_B_D_TILE（泳道实测 proj_b_mm
+    64 块 ÷ 8 组 = 8 块/组，与此一致）。t_dim 超过 128 时块内多跑几趟，仍然正确。
+    """
+    with pl.spmd(
+        D // PROJ_B_D_TILE, name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
+    ) as pb_tid:
+        d0 = pl.tile.get_block_idx() * PROJ_B_D_TILE
+        for tb in pl.range(proj_b_t_rows):
+            t0 = tb * PROJ_B_MM_T_TILE
+            for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+                n0 = d0 + nf * PROJ_B_MM_N_TILE
+                acc_b = pl.create_tensor([PROJ_B_MM_T_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+                for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+                    k0 = col_g + kb * B_K_TILE
+                    b_act = o_r_i8_pad[t0 : t0 + PROJ_B_MM_T_TILE, k0 : k0 + B_K_TILE]
+                    b_weight = wo_b[n0 : n0 + PROJ_B_MM_N_TILE, k0 : k0 + B_K_TILE]
+                    acc_b = pl.matmul_acc(acc_b, b_act, b_weight, b_trans=True, init_cond=(kb == 0))
+                partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+    return partials, pb_tid
+
+
+proj_b_mm = _proj_b_mm_nz if QUANT_WEIGHT_NZ else _proj_b_mm_nd
+
+
+@pl.jit.inline
 def decode_o_proj_tp1(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
     wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
-    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
+    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
     heads_dep: pl.Scalar[pl.TASK_ID],
@@ -332,23 +405,9 @@ def decode_o_proj_tp1(
                         zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
                         o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
 
-            with pl.spmd(
-                proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
-            ) as pb_tid:
-                pb_unit = pl.tile.get_block_idx()
-                tb = pb_unit // (D // PROJ_B_D_TILE)
-                dc = pb_unit - tb * (D // PROJ_B_D_TILE)
-                t0 = tb * PROJ_B_MM_T_TILE
-                d0 = dc * PROJ_B_D_TILE
-                for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
-                    n0 = d0 + nf * PROJ_B_MM_N_TILE
-                    acc_b = pl.create_tensor([PROJ_B_MM_T_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
-                    for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
-                        k0 = col_g + kb * B_K_TILE
-                        b_act = o_r_i8_pad[t0 : t0 + PROJ_B_MM_T_TILE, k0 : k0 + B_K_TILE]
-                        b_weight = wo_b[n0 : n0 + PROJ_B_MM_N_TILE, k0 : k0 + B_K_TILE]
-                        acc_b = pl.matmul_acc(acc_b, b_act, b_weight, b_trans=True, init_cond=(kb == 0))
-                    partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+            partials, pb_tid = proj_b_mm(
+                o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid,
+            )
             proj_b_tids[g] = pb_tid
 
     # Sum INT32 group partials before dequantizing by the common token scale,
