@@ -1133,7 +1133,21 @@ Orchestrator/Scheduler`、`pid 7 = Kernel Launches`；上游给的
 | --- | --- | --- | --- |
 | T6.1.3 | **放宽闸门到 mode=2 并启用 `wo_a` 的 NZ** | 实现已在 `f95c503b`；本项只需闸门放行 + 整模型验证。判据：默认口径下 `proj_a_mm` 单块 ≤ 24 µs，256/256 token 与 Native 一致，显存不回退 | 未开始（**优先，唯一确定可得**） |
 | T6.1.1 | `wq_b` → `qproj_matmul` 拆 NZ/ND 双函数 | 双函数形态齐备、两种开关都能编过、数值与 ND 一致；量**墙钟**收益（不以单块为准）并记录显存增量 | 未开始 |
-| T6.1.2 | `wo_b` → `proj_b_mm` 拆 NZ/ND 双函数 | 同上形态。T2.28 时改 grid 曾报「`proj_a_mm` 标量被 hoist 出 scope」，而本轮 `proj_a_mm` 已拆成独立函数、scope 结构已变，先看是否还复现 | 未开始 |
+| T6.1.2 | `wo_b` → `proj_b_mm` 拆 NZ/ND 双函数 | 同上形态。T2.28 时改 grid 曾报「`proj_a_mm` 标量被 hoist 出 scope」，而本轮 `proj_a_mm` 已拆成独立函数、scope 结构已变，先看是否还复现 | 未开始（**方案已定，见下**） |
+
+**T6.1.2 的方案**：不可证的根因是 grid 拆包里的**减法**——
+`dc = pb_unit - tb * (D // PROJ_B_D_TILE)`，`d0 = dc * PROJ_B_D_TILE` 于是不可证非负，
+`n0 = d0 + nf * PROJ_B_MM_N_TILE` 跟着不可证。与 `_proj_a_mm_nz` 当初遇到的是同一类问题，
+解法也一样：**grid 改成只按 D 一维分块，t 块进块内循环**，这样
+`d0 = pl.tile.get_block_idx() * PROJ_B_D_TILE` 直接可证。
+
+关键是**这个改法不损失并行度**：生产档位 `t_dim=96`、`PROJ_B_MM_T_TILE=128`，
+所以 `proj_b_t_rows = 1`，现有 grid 本来就等于 `D // PROJ_B_D_TILE = 8`
+（泳道实测 proj_b_mm 64 块 ÷ 8 组 = 8 块/组，与此一致）。改成一维后仍是 8 块。
+
+对齐也已核：`n0` 是 128 的倍数（满足行 16 对齐），
+`k0 = col_g + kb * B_K_TILE` 里 `col_g = g * O_LORA`（`g` 来自 `pl.parallel`，可证）、
+`B_K_TILE = 512`，都是 INT8 的 C0 线 32 的倍数；`wo_b` 整形 `[4096, 8192]` 行列均合规。
 | T6.1.4 | `wq_a` → `qr_proj_matmul` 拆双函数 | 同上形态。T2.28 时出现的数值错按用户裁定不再预设为阻塞；但仍要**实测数值一致**（含两次运行 mean 稳定）才算完成，若复现则定位当次根因 | 未开始 |
 | T6.1.5 | 开关与打包链路统一 | `nz_mode.py` 增 `QUANT_WEIGHT_LAYOUT`；`native_adapter.prepare_weights` 对这 4 个权重走 `_maybe_pack_nz`；`nz_args.BF16_NZ_PARAMS` 同步扩充为按 dtype 分组的两张表；开关关闭时逐字节等于当前 ND 产物 | 未开始 |
 | T6.1.6 | 放宽 `service_config` 的 NZ 闸门 | `weight_nz_mode=2` 不再被拒（BF16 权重走 NZ 需要它）；`enable_kv_nz` 仍然拒绝 | 未开始 |
@@ -1180,6 +1194,32 @@ Native 转 FRACTAL_NZ → `prepare_weights` 转回 ND → `_pack_nz` 按 pto-isa
 - Native 在 `weight_nz_mode>=1` 时会把量化权重转成 `FRACTAL_NZ`(30)，而 PyPTO 根入参
   只收 NCHW(0)/ND(2)，`prepare_weights` 里已有 `npu_format_cast` 转回 ND。两个 NZ
   不是一回事，即便我们也走 NZ，仍要先回到 ND 再用 `_pack_nz` 按 pto-isa 分形序重排。
+
+#### 测量口径：两条必须守的纪律（2026-09-26 各踩一次）
+
+**一、in-core 的收益预估要大幅打折，不能外推到设备侧。** `proj_a_mm` 的 ND→NZ：
+
+| 口径 | ND | NZ | 变化 |
+| --- | --- | --- | --- |
+| in-core 模拟器（跨度） | 21.10 µs | 9.62 µs | **−54.4%** |
+| 设备侧泳道（kernel-duration p50） | 30.38 µs | 27.79 µs | **−8.5%** |
+
+差了 6 倍。原因是 in-core 模拟器假设访存无限快，于是「ND 要靠 MTE1 做 L1→L0B
+分形重排」这件事看起来省掉一大截；而设备侧受 HBM 带宽约束，那段 MTE1 本来就与
+MTE2 大量重叠，消掉它露出来的收益小得多。**in-core 适合定位瓶颈在哪条流水线上，
+不适合预估能省多少**。
+
+**二、单次泳道采样判不了改动好坏，必须同卡交替多轮。** 首轮 mode1/mode2 对照
+（跑在 device 1 与 device 2）给出的是「mode=2 整体更慢」：跨度 868.0→887.4 µs
+（+2.23%）、核·µs 32767→35726（+9.03%）。但逐 task 一看就知道这结论不成立——
+`indexer_key_repack` 的 kernel-duration 从 14.17 跳到 30.76（2.2×），而它只搬
+INT8 cache，**与 `wo_a` 的布局毫无关系**；`indexer_topk_single_leaf_publish`
++1502 核·µs、`qk_pv_aiv` +338 同理。这些都是抖动（与先前记录的「未改动的
+`merge_norm` 从 1668.8 跳到 2182.2」是同一现象），叠加了两组跑在不同卡上的差异。
+
+所以：**判断一项改动，只认直接因果项 + 同卡交替多轮的中位数**。
+`proj_a_mm` 的 −2.59 µs/块（−174 核·µs）属于直接因果，可信；整体跨度要等
+同卡交替的结果。
 
 ### T6.2　与上游泳道的时序差异分析（目标 2）
 
@@ -1229,7 +1269,26 @@ p90 53.34 vs 38.26、max 79.40 vs 46.50。总量既然相同，长尾只影响�
 **根本不回到 Python 层**，钩子永远拦不到：任务 rc=0、`dumped` 始终 0、诊断直方图
 为空。argdump 要显式加 `--graph-mode eager`。这与 `泳道图必须在 eager 下采`
 是同一个道理，都是"要让 Python 层可见"。
-| T6.2.2 | 关键路径比对 | 用 `fanin-hint`/`fanout-hint` 还原两边关键路径，指出我们多出来的串行段 | 未开始 |
+| T6.2.2 | 关键路径比对 | 用 `fanin-hint`/`fanout-hint` 还原两边关键路径，指出我们多出来的串行段 | **已完成**（见下） |
+
+#### 关键路径比对结果（2026-09-26）
+
+两边关键路径都是 20 段，但**中段走法完全不同**：
+
+| | 上游 728.0 µs | 我们 819.7 µs |
+| --- | --- | --- |
+| 路径占用 | 637.0 µs | **792.4 µs**（+155.4） |
+| 段间空隙 | 181.1 µs（24.9%） | 171.5 µs（20.9%） |
+| 中段 | `kv_score_proj`→`scatter_softmax_pool`→`rmsnorm_rope`→`kv_hadamard`→`kv_and_cache_write`→`idx_kv_scale_commit`，块数 24/16/2/1/2/1，墙钟合计仅 90.9 µs 而空隙 114.5 µs → **等待驱动** | `qr_proj_matmul`→`qr_rms_norm_quant`→`idx_qr_proj_matmul`→`idx_qr_dequant_rope`→`qr_hadamard_matmul`→`qr_hadamard_quant`，块数 64/12/24/48/24/48，墙钟合计 182.0 µs → **计算驱动** |
+
+**结论：差距不在空隙，而在路径上的计算量。** 我们的空隙反而比上游少 9.6 µs，
+但路径占用多 155.4 µs，与跨度差 91.7 µs 同向。所以收敛 725 要靠缩短路径上各段
+本身（T6.1 的 NZ + T6.4.1 的 setup），而不是靠调度重排。
+
+**一个要避免的误读**：`proj_a_mm` 段前面那 81.64 µs（上游 45.04 µs）**不是空闲等待**。
+关键路径落在 8 个 O_GROUP 里**最后一个** proj_a_mm 组上，其余 7 组正在这段"空隙"里跑
+（我们每组约 43 µs、上游约 25 µs）。两边结构相同，这个数字只是 proj_a_mm 单组耗时的
+另一种体现，不是独立的调度问题。我第一次看这张表时把它误读成"在等依赖"。
 | T6.2.3 | 跨度收敛 | 同口径（eager、Worker View、最新采样）跨度 **≤ 725 µs** | 未开始 |
 
 注意 `indexer_key_repack` 不是冗余：vllm-ascend 的 indexer 页把 INT8 键(4096B)与
@@ -1242,8 +1301,31 @@ query 重复读同一段历史的开销，是净收益项，要连着 `indexer_s
 
 | ID | 目标 | 完成判据 | 状态 |
 | --- | --- | --- | --- |
-| T6.3.1 | 逐文件 diff 两版 CSA | 产出差异清单，每条标注「为精度必需」或「可同步的数值中性优化」 | 未开始 |
+| T6.3.1 | 逐文件 diff 两版 CSA | 产出差异清单，每条标注「为精度必需」或「可同步的数值中性优化」 | **进行中**（文件级已出，见下） |
 | T6.3.2 | 同步数值中性优化 | 所有标为数值中性的改动（纯调度、分块、搬运路径、NZ 布局）落到精度版；精度版与 Native 的比对结果不劣化 | 未开始 |
+| T6.3.3 | 把 NZ 支持带到精度版 | 精度版目前**完全没有** NZ：`nz_mode.py` / `nz_args.py` 是性能版独有，`decode_o_proj` 等处的权重也没有 layout 槽。判据是精度版同样做成 NZ/ND 双函数、由同一个 `weight_nz_mode` 驱动，且开关关闭时与改前逐位相同 | 未开始 |
+
+#### 文件级 diff 结果（2026-09-26）
+
+| 文件 | 差异行 | 性质 |
+| --- | --- | --- |
+| `decode_sparse_attn_csa.py` | 426 | 需逐条审（含 merge_norm、qk_pv 的数值写法差异） |
+| `qkv_proj_rope.py` | 312 | 需逐条审 |
+| `decode_o_proj.py` | 218 | 需逐条审（含 proj_a/proj_b 的 tile 与 NZ 双函数） |
+| `decode_indexer.py` | 209 | 需逐条审 |
+| `decode_indexer_compressor.py` | 69 | 需逐条审 |
+| `decode_compressor_ratio4.py` | 59 | 需逐条审 |
+| `decode_csa.py` | 17 | 小差异 |
+| `__init__.py` | 13 | 小差异 |
+| `native_adapter.py` | 48 | 性能版多 `_pack_nz` / `_maybe_pack_nz` |
+| `hc_pre.py` / `hc_post.py` / `rmsnorm.py` / `layout.py` / `native_storage.py` / `service_config.py` | — | **性能版是重导出**（12 行），两版共用同一份实现，不存在同步问题 |
+| `compact_metadata.py` / `config.py` / `service.py` | **0** | 已完全一致 |
+| `nz_mode.py` / `nz_args.py` | — | **性能版独有** → T6.3.3 |
+
+mHC 那一段（`hc_pre`/`hc_post`）是重导出，所以整层融合的成果两版自动共享，
+不必再同步。真正要逐条过的是上面 6 个有实体差异的 kernel 文件；T2.24 已经搬过
+三项（qproj 的 `QPROJ_MM_N_TILE`/`Q_PROJ_TILE`、proj_b 的 `B_K_TILE`/
+`PROJ_B_MM_N_TILE`、`indexer_key_repack`），本轮新增的是 NZ 布局。
 
 判据沿用记忆 `port-numeric-neutral-perf-wins-to-precision`：只搬不改变数值的改动；
 改变数值的（如省掉全量 amax 扫描、省掉 BF16 往返）留在性能版，并在精度版注明原因。
