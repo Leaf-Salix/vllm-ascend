@@ -1247,3 +1247,16 @@ AB（graph 模式）：uniform-b4 CSA 0.6156 ms vs native 0.5792 ms，varlen-b4
 CSA 0.5719 ms vs native 0.5702 ms，两种形状 `accuracy_pass=True`。
 剩余误差已归因到 wkv 投影矩阵乘的 K 块顺序，见
 `reports/dsv4-tnd-opus55-20260924/handoff.md` 第十二节。
+
+### kv 投影拆到 native linear（`7fcd54a22`）
+
+| | 融合版 | 拆出版 |
+|---|---|---|
+| uniform `raw` | 0.006335% | **0** |
+| uniform `heads` / `output` | 0.009413% / 0.094718% | **0.000527% / 0.034383%** |
+| uniform graph（CSA vs native） | +6.3% | +4.4% |
+| varlen `raw` | 0.008113% | **0** |
+| varlen `heads` / `output` | 0.010409% / 0.131426% | **0.000733% / 0.043074%** |
+| varlen graph | +0.3% | **−2.0%** |
+
+两形状 `accuracy_pass=True`。回滚：`git revert 7fcd54a22`。
