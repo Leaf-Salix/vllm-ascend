@@ -601,19 +601,28 @@ def sparse_attn_csa_tp1(
         # 关键路径实测那个任务 compute 只有 1.7us 却要 core-wait 72.1us（占 makespan
         # 8.95%），因为它独占一个核、要等核空出来。本任务是 SPMD，每个 worker 自己
         # 算这几条向量指令即可，与 rope_cs 里的做法一致。算式与原来逐字相同。
-        m_ones = pl.tile.full([H_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
-        m_idx_f = pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
-        m_col = pl.col_expand_mul(m_ones, m_idx_f)
-        m_dup_f = pl.cast(pl.cast(pl.mul(m_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32)
-        m_lane = pl.sub(m_col, pl.mul(m_dup_f, 2.0))
-        m_swap_f = pl.sub(pl.add(m_col, 1.0), pl.mul(m_lane, 2.0))
-        m_swap_source = pl.add(m_swap_f, NOPE_DIM)
-        m_row_ids = pl.tile.arange(0, [1, H_TILE], dtype=pl.INT32)
-        m_row_ids_f = pl.cast(m_row_ids, target_type=pl.FP32)
-        m_row_offsets = pl.mul(m_row_ids_f, HEAD_DIM)
-        m_row_offsets_col = pl.reshape(m_row_offsets, [H_TILE, 1])
-        m_swap_flat = pl.row_expand_add(m_swap_source, m_row_offsets_col)
-        m_swap_idx = pl.cast(m_swap_flat, target_type=pl.INT32)
+        # lane swap 的索引就是 `j ^ 1`（偶数 +1、奇数 -1），一条 xors 即可，不必绕 FP32。
+        # 原先用 13 步 FP32（含 5 次 cast）算同一张表，SPMD 下**每个 block 都要重算
+        # 一遍**，于是整段进了 `local_setup_us`：实测 8.15µs/块，而上游从 GM 读表只要
+        # 0.54µs，48 块合计多 365 核·µs。in-core 也印证过这些指令本身很便宜
+        # （读表版 3.31µs vs 就地算 3.30µs，纯计算几乎不变），贵在落进了启动路径。
+        # 改成纯 INT32 之后 9 步、零 cast，且仍然不需要 rope_swap 那个独占一核的任务。
+        # 用整数取模算 `j + 1 - 2*(j % 2)`，与 `j ^ 1` 等值（偶数 +1、奇数 -1），全程
+        # INT32、零 cast。
+        # 试过两条更短的路都被硬件挡了，记下来免得再走：① `pl.tile.xors` 一步到位，
+        # 但 A2/A3 的 `pto.txors` 只接受 i8/i16 元素类型，i32 被 ptoas 拒；② 退成 i16
+        # 做异或再 cast 回 i32，而 `LegalizeTileCast` 说 a2a3 上 int16→int32 没有原生
+        # 路径（`pto.tcvt` 不支持）。取模这条虽然多两步，但仍是 INT32 域内、无 cast。
+        m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
+        m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
+        m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
+        m_swap_row = pl.tile.adds(
+            pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
+        )
+        m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+        m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
+        m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
+        m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
         m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
         for m_idx in pl.range(m_worker, t_dim * (H // H_TILE), MERGE_WORKERS):
             m_t = m_idx // (H // H_TILE)
