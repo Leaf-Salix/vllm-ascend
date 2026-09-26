@@ -5636,3 +5636,40 @@ buffer 挡，320/256 实测更慢）、K=128（头维）。配合 §151 的两�
 （中位 215），score 的落在 660–736（中位 707），窗口分别是 [294,518] 与 [534,1908]。
 repack 结束到 score 开始之间没有空隙、各实例 dur 离散度很小，说明这两个阶段的 dur
 是真实工作量（与 §150 里 merge 那种 dur 几乎等于整跨度的情况形成对照）。
+
+## 154. 片上容量的完整清单：每个维度都已撞墙（2026-09-27）
+
+接 §153 继续把剩下的维度试完，结果是每一个都被具体的片上容量报错挡住。把报错原文
+连同限额一起记下来，后续不必重试。
+
+| 想改的维度 | 具体改动 | 报错 / 实测 |
+| --- | --- | --- |
+| score 的 Cube M | 两 query 合批，M=128、N=256、stage=2 | `Vec buffer usage (197632 bytes) exceeds platform limit (188416 bytes)` |
+| 同上，减一层流水 | M=128、N=256、**stage=1** | `Vec buffer usage (197376 bytes)`——降 stage 只省 256 B，说明 Vec 占用不是流水双缓冲主导 |
+| 同上，再减 N | M=128、**N=192**、stage=2 | **编译通过**（详见下） |
+| score 的 N 上界 | `SCORE_TILE` 448 / 512（M=64） | Vec 197888 / 204800，均超 188416 |
+| score 的 N 下界 | `SCORE_TILE` 320 / 256（M=64） | 编译通过但实测 +19.5% / +7.6%（后者在 rw192 基线上复测） |
+| leaf 上界 | `TOPK_CANDIDATES_PER_LEAF` 16384 | `Vec buffer usage (262144 bytes) exceeds platform limit (188416 bytes)` |
+| leaf 下界 | `TOPK_CANDIDATES_PER_LEAF` 4096 | `exceeds the source extent 8192`（该数在别处写死） |
+| qk_pv 预取深度 | `QK_PRE_LAUNCH` 2→3 | `Mat buffer usage (606208 bytes) exceeds platform limit (524288 bytes)`（L1 512 KiB） |
+
+三个硬限额：**Vec buffer 188416 B**、**Mat buffer / L1 524288 B**、**L0C 131072 B**。
+
+### M=128、N=192 编译通过，但收益理据不足，没有继续
+
+这个组合过了编译（跑到 Top-K 校验才失败，那是探针数值上故意错的必然结果——它丢掉了
+`weights` 并把两个 query 的 head 求和塌进同一行）。要拿到计时必须让校验通过，而
+`dsv4_csa_single_layer.py` 第 428 行与第 696 行的两处 Top-K 检查都是无条件 raise、
+没有跳过开关，所以得先做出数值正确的实现。
+
+算了一下理据后判断不值得：M=128/N=192 与现有 M=64/N=384 的 16³ 块数完全相同
+（8×12×8 = 4×24×8 = 768）、L0C 占用也相同（96 KB），只是把同一份工作换了个形状；
+而"Cube 效率只有 14% 所以 M 太小"这个动机本身已被 §153 的方法学更正推翻
+（泳道 eager 与计时 aclgraph 不能换算）。所以在没有新证据之前不投入。
+
+顺便记下一个可复用的技巧：如果将来要做数值正确的两 query 合批，不必去切
+`pl.aiv_shard` 返回的 tile（那是 API 上的不确定点）。可以让向量链跑两遍、每遍用一个
+把另一个 query 的 64 个 head 系数置零的 `head_coefficient`，这样
+`col_sum(row_expand_mul(...))` 直接得到该 query 的正确结果。代价是向量工作量翻倍，
+而 §151 已实测**向量工作量对整体没有影响**（去掉 60% 的向量算子无变化），所以这个
+代价是可接受的。
