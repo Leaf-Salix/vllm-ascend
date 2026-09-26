@@ -5588,3 +5588,51 @@ tile 循环内层，需要把 `SCORE_ARENA_ROWS` 扩成 `TOPK_SCORE_WORKERS * 2 
 因此按现有算子结构，目标不可达。要守住 ≤0.700 需要改变分工，例如让 CSA 复用
 Native 的融合 indexer（`npu_vllm_quant_lightning_indexer`）、PTO 只接管其余部分，
 这超出"只优化算子"的范围，需要先定方向。
+
+## 153. score 的矩阵形状被 Vec buffer 钉死；IndexCache 不是差距来源（2026-09-27）
+
+### 先排除一个怀疑：Native 没有靠 IndexCache 少干活
+
+`dsa_v1.py` 第 1553 行起有 IndexCache 机制：`skip_topk` 标记该层复用前面某层算出的
+top-k，命中时走 `_get_indexcache_topk_indices()` 直接读缓存下标，**整个 indexer
+计算都跳过**。PTO 侧则在 `service_config.py:71` 见到 `use_index_cache` 就
+`raise ValueError("PTO CSA does not support IndexCache reuse or LoRA")`。
+
+如果生产里 Native 开着 IndexCache 而 PTO 每层全算，那对比就不对等。核对
+`/data/model/DeepSeek-V4-Flash-0731-w8a8/config.json`：**没有 `use_index_cache` 这个
+键**，默认 False。所以两侧都是每层全算，PTO 的闸门也不会被触发（否则 PTO 根本不会
+接管）。这条排除。
+
+### 合批两个 query 抬高 Cube 的 M：被 Vec buffer 挡死
+
+score 的矩阵乘是 `M=IDX_N_HEADS=64`、`N=SCORE_TILE=384`、`K=IDX_HEAD_DIM=128`。
+M=64 对 Cube 偏小。L0C 是 128 KiB、要求 `M×N×4 ≤ 131072` 即 `M×N ≤ 32768`，
+所以 **M=128 配 N=256 恰好等于 32768、L0C 是放得下的**，此前我说"M 最大只能 85"
+只对 N=384 成立。
+
+实测把两个 query 合批（M=128、SCORE_TILE=256）**编译失败**：
+`Vec buffer usage (197632 bytes) exceeds platform limit (188416 bytes)`。
+原因是向量后处理的 FP32 tile 行数就是头数，128 行加上流水缓冲放不进 188416 B。
+
+所以限制 M 的是 **Vec buffer 而不是 L0C**。结论：`M=64` 被硬件强制，不可能靠合批
+query 提高 Cube 的 M 维利用率。
+
+同时补了纯减 N 的对照（M=64、N=256）：PTO 1905.5 µs，比 rw192 基线 1771.0 差
+**+7.6%**，再次确认 N=384 是最优。
+
+至此 score 的矩阵形状三个维度全部钉死：M=64（Vec buffer）、N=384（512/448 被 Vec
+buffer 挡，320/256 实测更慢）、K=128（头维）。配合 §151 的两个探针（去掉 60% 向量
+算子无影响、减半 KV gather 更慢），score 没有任何可动的余地。
+
+### 一条方法学更正
+
+§151、§152 里我曾把泳道的"score 占跨度 58%"乘到 aclgraph 的 1771 µs 上，推出
+"score ≈ 1032 µs、Cube 效率约 14%"。这个换算不严谨：**泳道必须在 eager 下采集，
+而 1771 µs 是 aclgraph 重放，两者是不同的运行，dur 单位不能换算成 µs**。
+泳道只能用来看同一次 eager 运行内部的相对结构。上面的 M=128 结论不依赖那个推算，
+它是直接实测（编译失败）得到的。
+
+顺带一个在此过程中确认的事实：128K/B16 上 repack 的 24 个实例 dur 紧密落在 211–225
+（中位 215），score 的落在 660–736（中位 707），窗口分别是 [294,518] 与 [534,1908]。
+repack 结束到 score 开始之间没有空隙、各实例 dur 离散度很小，说明这两个阶段的 dur
+是真实工作量（与 §150 里 merge 那种 dur 几乎等于整跨度的情况形成对照）。
