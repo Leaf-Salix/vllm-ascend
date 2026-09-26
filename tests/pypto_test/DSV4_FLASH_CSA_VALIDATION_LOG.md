@@ -3453,3 +3453,41 @@ A3 TDIV 原始复现证据。TDIV 旧证据对应当时工具链，不能说已�
   计划先用 Native 确定性与 PTO atomic=0 检查逐 token/DSpark，再按差异补最小诊断。
 - 部署性能配置、mode=1/2 的主口径选择、完整设备区间和整模型加速均未验收；
   当前没有本轮 <750 μs 的证据。后续继续按清单依赖推进，每个阶段在本日志追加结果与限制。
+
+## 104. 2026-09-26：完成当前 mode=1 固定规约的正式权重 16 卡 token/DSpark 基线
+
+第 100 节 B16 单卡先完成后，提交任务 `task_20260926_124315_37151566340`；
+该任务顺序运行 Native、PTO，最终 exit=0。实现源码固定为 `c7d08cf0`，
+PyPTO/Simpler/PTOAS/ISA 与第 99 节一致。任务期间未修改其 JIT 读取的源码。
+
+两侧使用同一正式 H8192 bank，B16/TP1/DP-EP16、FULL_DECODE_ONLY、capture size=96、
+每请求生成 96 token，关闭 KV NZ；PTO 为性能版、atomic=0、QR/KV split-K=1。
+两侧开启 Native level=1 确定性与 `HCCL_DETERMINISTIC=true`，保留 HCCL AIV；
+受当前 CANN 算子能力限制，`fuse_norm_quant=False`，draft 保持 eager。
+这是正确性诊断配置，不作为部署性能数字。
+
+新增纯 CPU 入口 `offline_pd/compare.py`，按 bank 预期 case 和显式 rank/batch/token 数检查完整性，
+逐 token 比较，并检查 DSpark 草稿数、草稿 token 数、接受总数和逐位置接受计数。
+缺文件、缺统计、长度不符或任何差异都失败；PASS 的范围明确不含层级误差、保护区和性能。
+4 项针对性 CPU 回归通过（0.03 秒）：token 换位、接受总数相同但逐位置分布不同、
+缺 rank、缺 DSpark 计数；新文件 Ruff 检查通过。
+
+| 项目 | 本轮实际结果 |
+| --- | --- |
+| 覆盖 | 16 个 rank × 16 个请求 × 96 token，共 24576 token；bank 的 4 个输入变体均覆盖 |
+| 逐 token 对照 | 0 个差异 |
+| DSpark 对照 | 16/16 rank 完整且一致；每 rank 为 drafts=271、draft tokens=1355、accepted=1280，逐位置均为 `[256,256,256,256,256]` |
+| 配置贯通 | 全部 rank 的 mode 请求值/环境值为 1，记录 level=1 与 FULL_DECODE_ONLY；PTO 固定规约日志完整 |
+| PTO 选择 | 每 rank 的 21 个目标 CSA 层均有捕获期 `pto_tokens96` 命中；PTO 根布局为 ND/NZ/ND/ND |
+| 验收边界 | 本轮 token/DSpark PASS；未采逐层误差或稳态设备区间，不能外推 mode=2 或默认 atomic 路径 |
+
+证据目录为 `results/csa_baseline_20260926/model_b16h8192_nz1_fixed/`：
+[manifest](results/csa_baseline_20260926/model_b16h8192_nz1_fixed/manifest.json)、
+[逐 token/DSpark 比较](results/csa_baseline_20260926/model_b16h8192_nz1_fixed/comparison.json)、
+[配置与捕获期层选择](results/csa_baseline_20260926/model_b16h8192_nz1_fixed/execution_checks.json)，
+同目录保留两侧 `rank*.json`、运行命令和本地原始日志，不提交重复编译目录与二进制。
+
+下一步继续 C 的四张 NZ：上游 PyPTO `8a944cf2` 已补充 NZ 偏移的除法/取模非负证明、
+leading-axis slice 和 dispatch 支持，`1d7890e9` 修正 NZ 参数的逻辑 stride 标注。
+只读检查发现整提交回移有上下文冲突，尚未将其应用到当前调试分支；后续按需要移植、
+先 CPU 编译与针对性回归，再单卡验证。A5 的层级误差和部署性能仍未完成。

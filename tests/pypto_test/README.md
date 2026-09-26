@@ -20,6 +20,7 @@ NPU 任务统一通过 `task-submit`，用 `--status` 查询，不用 `--wait`�
 | `dsv4_csa_replay.py` / `dsv4_csa_validation.py` | 共用快照、布局/别名/初态恢复与逐元素门禁 |
 | `dsv4_csa_reference_lower.py` | 当前所选精度版或性能版完整层的 CPU lowering，不执行设备，也不代表数值验收 |
 | `offline_pd/run.py` | 正式权重 P 缓存、D16 生成对照、逐层诊断和 profiling，见 [离线 P/D 说明](DSV4_FLASH_CSA_OFFLINE_PD.md) |
+| `offline_pd/compare.py` | CPU 比较两侧 decode 的全部 rank/token 和 DSpark 总数、逐位置接受数；缺项或差异失败，不代替层误差/性能验收 |
 | `dsv4_csa_bank_replica_diff.py` | CPU 比较既有 P 缓存的 TP 副本，不做 hash |
 | `repro_tdiv_high_precision.py` / `run_tdiv_high_precision_repro.sh` | 独立 TDIV 能力复现，见 [问题与原始证据](PTO_ISA_A3_TDIV_HIGH_PRECISION_REPRO.md) |
 
@@ -59,6 +60,7 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 - `results/csa_baseline_20260926/native_b4h8192_precision_nz2/`：两侧 mode=2 的真实布局及固定规约图重放证据。
 - `results/csa_baseline_20260926/native_b4h8192_performance_nz1/`：性能版 mode=1 的真实布局及固定规约图重放证据。
 - `results/csa_baseline_20260926/native_b16h8192_performance_nz1/`：目标 B16 形状的单卡同初态和图内容更新检查；跨实现数值仍为 MEASURED。
+- `results/csa_baseline_20260926/model_b16h8192_nz1_fixed/`：同 mode=1、固定规约的正式权重 16 卡基线，24576 token 和 DSpark 统计一致；不包含层误差与部署性能验收。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。

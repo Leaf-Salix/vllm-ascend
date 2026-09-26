@@ -55,6 +55,20 @@ python tests/pypto_test/offline_pd/run.py --help
 精度诊断使用 `--deterministic`；性能按部署配置，完整记录两侧开关。
 通过 `PTO_CSA_VARIANT=precision/performance` 选择 PTO 入口，不能混用结果。
 
+两侧完成 `decode` 后，在 CPU 比较全部 rank 的逐 token 和 DSpark 计数：
+
+```bash
+comparison_root=tests/pypto_test/results/csa_baseline_20260926/model_b16h8192_nz1_fixed
+python tests/pypto_test/offline_pd/compare.py \
+  --native "$comparison_root/native" --pto "$comparison_root/pto" \
+  --bank tests/pypto_test/results/release_offline_pd_20260923/h8192_bank \
+  --batch 16 --decode-tokens 96 --ranks 16 --output "$comparison_root/comparison.json"
+```
+
+比较器要求 bank 声明的 case、全部 rank、请求数和 token 数完整；同时比较草稿数、
+草稿 token 数、接受总数及逐位置接受计数。缺少统计或任何差异均返回非零退出码。
+此处 PASS 仅指 token/DSpark 对照通过，层级误差、状态、保护区和性能仍独立验收。
+
 `--capture-sizes`、`--rank-batches` 和 `--rank-decode-tokens` 按待验证场景显式指定；
 当前仅声明 S=6 合法档位。EPLB 等暂停范围以清单末尾为准。
 

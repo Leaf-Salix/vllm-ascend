@@ -298,8 +298,17 @@ Top-K 仍有 24 行集合不同、116 个候选替换，结构/有限值/保护�
 两侧自身重复及 PTO A→B→A 图重放的 8 类输出/状态精确一致，metadata 和保护区通过。
 跨实现层输出 max_abs=0.03125，Top-K 96 行集合不同、470 个候选替换，无结构错误；
 仍为 **MEASURED**。证据：`results/csa_baseline_20260926/native_b16h8192_performance_nz1/`。
-下一步固定当前源码，使用 H8192 bank 建立真实权重 B16/16 卡、同 mode=1 的 token/DSpark 基线。
-本轮 16 卡任务尚未提交；本轮过程补记见 [验证日志第 99 节起](DSV4_FLASH_CSA_VALIDATION_LOG.md#log-20260926)。
+随后固定实现源码 `c7d08cf0`，任务 `task_20260926_124315_37151566340` 完成正式权重
+B16/TP1/DP-EP16、H8192 bank、同 mode=1、FULL_DECODE_ONLY 的 Native/PTO 对照。
+性能版 atomic=0，两侧开启确定性，capture size=96，每请求生成 96 token：
+**24576 个 token 逐一一致，全部 rank 的 DSpark 草稿数、接受总数和逐位置接受数一致**。
+每个 rank 的 21 个目标 CSA 层在捕获期均命中 PTO tokens96；模式传递、固定规约日志完整。
+CPU 比较入口 `offline_pd/compare.py` 拒绝缺 rank、缺 token/统计及任意对照差异，4 项针对性回归通过。
+证据：`results/csa_baseline_20260926/model_b16h8192_nz1_fixed/` 中的 manifest、两侧 rank JSON、
+`comparison.json` 和 `execution_checks.json`。该 PASS 仅覆盖 token/DSpark，
+不包括层级误差、mode=2、默认 atomic 部署路径或 <750 μs 性能验收。
+下一步推进当前四张 NZ 的编译限制，并补齐逐层数值证据与两种 mode 的部署性能基线。
+本轮过程见 [验证日志第 99 节起](DSV4_FLASH_CSA_VALIDATION_LOG.md#log-20260926)。
 
 ## 6. 后续开发目标
 
