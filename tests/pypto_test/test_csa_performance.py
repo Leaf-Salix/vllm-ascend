@@ -20,7 +20,10 @@ def scheduler(tokens, requests):
 def observer(monkeypatch):
     instance = OfflineCSAObserver()
     instance.vllm_config = SimpleNamespace(parallel_config=SimpleNamespace(data_parallel_rank=0))
-    instance.model_runner = SimpleNamespace(execute_model=Mock(return_value="output"))
+    instance.model_runner = SimpleNamespace(
+        execute_model=Mock(return_value="output"),
+        sample_tokens=Mock(return_value=SimpleNamespace(sampled_token_ids=[[1, 2] for _ in range(16)])),
+    )
     monkeypatch.setattr(torch.npu, "synchronize", Mock())
     return instance
 
@@ -41,7 +44,8 @@ def test_profile_requires_full_shape_and_contiguous_window(observer, monkeypatch
     profiler.stop.assert_called_once()
 
 
-def test_steady_uses_fresh_device_events_and_skips_partial_batch(observer, monkeypatch):
+@pytest.mark.parametrize("sample_complete, shape_gap", [(True, False), (False, False), (True, True)])
+def test_steady_covers_sampling_and_rejects_unfinished_cycles(observer, monkeypatch, sample_complete, shape_gap):
     class Event:
         clock = 0
 
@@ -63,14 +67,32 @@ def test_steady_uses_fresh_device_events_and_skips_partial_batch(observer, monke
     monkeypatch.setattr(torch.npu, "max_memory_allocated", Mock(return_value=10))
     monkeypatch.setattr(torch.npu, "max_memory_reserved", Mock(return_value=20))
     observer.offline_begin_steady(2, 96, 16)
-    for shape in [(16, 16), (84, 14)] + [(96, 16)] * 22:
+    shapes = [(16, 16), (84, 14)] + [(96, 16)] * 27
+    if shape_gap:
+        # 中途出现非满档步时，不能把它两侧的起点拼成一个满档周期。
+        shapes.insert(12, (84, 14))
+    for shape in shapes:
         observer.model_runner.execute_model(scheduler(*shape))
+        if sample_complete:
+            # 模拟 execute 之后的采样/草稿，旧计时不会覆盖这段时间。
+            Event.clock += 700
+            observer.model_runner.sample_tokens(None)
     result = observer.offline_end_steady()
-    assert result["sufficient"]
-    assert result["measured_steps"] == 20
-    assert result["step_tokens"] == [96] * 20
-    assert result["device"]["samples_us"] == [100] * 20
-    assert len(set(result["device"]["start_timestamps_raw"])) == 20
+    assert result["sufficient"] is (sample_complete and not shape_gap)
+    assert result["measured_steps"] == 21
+    assert result["step_tokens"] == [96] * 21
+    assert result["device"]["samples_us"] == [100] * 21
+    assert len(set(result["device"]["start_timestamps_raw"])) == 21
+    if sample_complete:
+        count = 19 if shape_gap else 20
+        assert result["decode_cycle"]["samples_us"] == [1000] * count
+        assert result["decode_cycle"]["actual_output_tokens"] == [32] * count
+        if not shape_gap:
+            assert result["decode_cycle"]["actual_output_tokens_per_second"] == 32000
+        assert result["execute_sample_device"]["samples_us"] == [900] * 21
+    else:
+        assert result["decode_cycle"]["samples_us"] == []
+        assert result["incomplete_sample_steps"] == 21
     assert "tokens_per_second" not in result
 
 

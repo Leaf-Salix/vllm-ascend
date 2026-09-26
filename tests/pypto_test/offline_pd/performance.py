@@ -144,7 +144,18 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps):
     steady = value["steady_window"][0]
     require(value.get("eplb_enabled") is False and value.get("dynamic_eplb_env") == "false" and
             value.get("expert_map_record_env") == "false", f"{path}: 所有 CSA 测试必须关闭 EPLB")
+    worker_config = value["worker_runtime_config"]
+    require(len(worker_config) == 1 and worker_config[0]["deterministic_level"] == int(value["deterministic"]) and
+            not worker_config[0]["dynamic_eplb"], f"{path}: Worker 实际配置与声明不符")
     require(steady["dp_rank"] == rank and steady["sufficient"], f"{path}: 稳态设备采样不足")
+    require(steady.get("schema") == 2, f"{path}: 旧计时缺少采样/草稿完成证据")
+    cycle = steady["decode_cycle"]
+    require(cycle["sufficient"] and len(cycle["samples_us"]) >= 20 and
+            len(cycle["samples_us"]) == len(cycle["actual_output_tokens"]) == len(cycle["steady_step_indices"]),
+            f"{path}: 完整 decode 周期/实际输出 token 计数缺失")
+    require(all(type(n) is int and n > 0 for n in cycle["actual_output_tokens"]),
+            f"{path}: 实际输出 token 计数无效")
+    distribution(cycle["samples_us"])
     samples = steady["device"]["samples_us"]
     stamps = steady["device"]["start_timestamps_raw"]
     count = steady["measured_steps"]
@@ -173,21 +184,25 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps):
 
 
 def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
-    report = {"status": "FAIL", "mode": mode, "scope": "无 profiler 的 execute_model 设备区间不覆盖"
-              "随后 sample_tokens 中的草稿；完整 decode 周期单列。CSA 层区间独立取设备 trace 首末。",
-              "expected": {"ranks": ranks, "batch": batch, "tokens_per_round": tokens, "profile_steps": steps},
+    report = {"status": "FAIL", "mode": mode, "scope": "无 profiler 的完整 decode 周期包含采样、草稿和调度间隙；"
+              "execute_model 单列。CSA 层区间独立取设备 trace 首末。",
+              "expected": {"ranks": ranks, "batch": batch, "tokens_per_round": tokens,
+                           "profile_steps": steps},
               "errors": [], "token_mismatches": 0, "spec_decode_mismatched_ranks": 0,
               "compared_tokens": 0, "ranks": []}
     samples = {side: [] for side in ("native", "pto")}
     cycles = {side: [] for side in ("native", "pto")}
     layer_samples = {side: [] for side in ("native", "pto")}
+    cycle_rows = {side: {} for side in ("native", "pto")}
     for rank in range(ranks):
         try:
-            loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens, steps=steps)
+            loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens,
+                                     steps=steps)
                       for side in ("native", "pto")}
             native, pto = (loaded[side][0] for side in ("native", "pto"))
             for key in ("key", "history", "capture_sizes", "deterministic", "hccl_deterministic", "atomic_add",
-                        "eplb_enabled", "dynamic_eplb_env", "expert_map_record_env", "custom_opp_path"):
+                        "eplb_enabled", "dynamic_eplb_env", "expert_map_record_env", "custom_opp_path",
+                        "requested_steady_cycles", "worker_runtime_config"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧 {key} 不同")
             require(native["window"][0]["window"] == pto["window"][0]["window"],
                     f"rank{rank}: 两侧 trace 步序或形状不同")
@@ -210,6 +225,9 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
                 if cycle.get("sufficient"):
                     entry[side]["decode_cycle_device"] = distribution(cycle["samples_us"])
                     cycles[side].extend(cycle["samples_us"])
+                    entry[side]["actual_output_tokens_per_second"] = cycle["actual_output_tokens_per_second"]
+                    cycle_rows[side][rank] = dict(zip(cycle["steady_step_indices"],
+                                                     zip(cycle["samples_us"], cycle["actual_output_tokens"])))
                 layers = layer_intervals(device_tasks(root / side, rank), side, steps)
                 entry[side]["layers"] = layers
                 layer_samples[side].extend(layers["intervals"])
@@ -222,10 +240,22 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
                               for item in report["ranks"] for side in cycles)
         report["decode_cycle_device"] = ({side: distribution(values) for side, values in cycles.items()}
                                           if complete_cycles else None)
-        report["decode_cycle_note"] = (
-            "完整周期来自相邻起点的 elapsed_time，包含随后采样和草稿。" if complete_cycles else
-            "本次采集源码 334c4252 只记录 execute_model 首尾；没有保存完整周期，"
-            "不能从原始计数猜测时钟单位，也不能据此判定整模型吞吐/整步加速。")
+        report["decode_cycle_note"] = "相邻满档起点之间已完成采样与草稿，使用 elapsed_time，不猜测原始计数单位。"
+        report["global_decode"] = {}
+        for side, by_rank in cycle_rows.items():
+            common = set.intersection(*(set(rows) for rows in by_rank.values()))
+            if len(common) < 20:
+                report["errors"].append(f"{side}: 全 rank 的共同稳态周期不足 20 个")
+                continue
+            # EP 同步场景用各 rank 同一稳态步的最慢周期；只累加实际采样输出 token。
+            slowest = [max(rows[i][0] for rows in by_rank.values()) for i in sorted(common)]
+            emitted = [sum(rows[i][1] for rows in by_rank.values()) for i in sorted(common)]
+            report["global_decode"][side] = {
+                "cycle": distribution(slowest), "actual_output_tokens": sum(emitted),
+                "output_tokens_per_second": sum(emitted) / (sum(slowest) * 1e-6),
+                "steady_step_indices": sorted(common),
+                "scope": f"共同稳态样本序号按 {ranks} rank 最慢周期聚合，不累加并行耗时；"
+                         "这是同步周期吞吐的保守估计，各 rank 原始采样与吞吐另列"}
         report["csa"] = {}
         for side, values in layer_samples.items():
             report["csa"][side] = {
@@ -237,7 +267,10 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
             }
         report["csa_scope"] = ("独立 Level0 trace 的设备首末区间，包含内部间隙；PTO runtime/worker "
                                "取并集首末，不求和，首次根调用前的 compact metadata 单独列明并纳入。")
-        report["csa_pto_p50_below_750us"] = report["csa"]["pto"]["all"]["p50_us"] < 750
+        target_applies = batch == 16 and all(case["history"] == 8192 for case in plan["cases"])
+        report["csa_750us_target_applicable"] = target_applies
+        report["csa_pto_p50_below_750us"] = (report["csa"]["pto"]["all"]["p50_us"] < 750
+                                            if target_applies else None)
     if not report["errors"] and not report["token_mismatches"] and not report["spec_decode_mismatched_ranks"]:
         report["status"] = "MEASURED_TOKEN_PASS"
     return report
@@ -248,8 +281,12 @@ def main():
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--mode", type=int, choices=(1, 2), required=True)
+    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--decode-tokens", type=int, default=192)
+    parser.add_argument("--profile-steps", type=int, default=3)
     args = parser.parse_args()
-    report = compare(args.root, args.mode, json.loads((args.bank / "plan.json").read_text()))
+    report = compare(args.root, args.mode, json.loads((args.bank / "plan.json").read_text()),
+                     batch=args.batch, tokens=args.decode_tokens, steps=args.profile_steps)
     (args.root / "performance_comparison.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({k: v for k, v in report.items() if k != "ranks"}, ensure_ascii=False, indent=2))
     raise SystemExit(report["status"] == "FAIL")

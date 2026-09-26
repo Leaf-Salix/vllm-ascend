@@ -384,28 +384,30 @@ class OfflineCSAObserver:
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
-    def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests):
-        """图外事件测 execute_model 设备区间，另记录主机耗时与峰值显存。
-
-        只采约定档位，先丢弃 warmup_steps 个完整 decode 步；每步不额外同步，
-        结束后统一读事件。区间不覆盖随后 sample_tokens 中的草稿生成，
-        主机耗时不代替设备时间，调度 token 数也不当成实际输出吞吐。
-        """
+    def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests, cycles=20):
+        """记录 execute、采样/草稿完成点及连续步骤起点，不逐步增加同步。"""
         import torch
 
         if getattr(self, "_offline_steady", None) is not None:
             raise RuntimeError("Steady measurement is already active")
         rank = self.vllm_config.parallel_config.data_parallel_rank
         runner = self.model_runner
-        original = runner.execute_model
-        state = {"dp_rank": rank, "warmup_steps": warmup_steps, "seen_steps": 0,
+        original, original_sample = runner.execute_model, runner.sample_tokens
+        state = {"dp_rank": rank, "schema": 2, "warmup_steps": warmup_steps, "seen_steps": 0,
                  "expected_tokens": expected_tokens, "expected_requests": expected_requests,
-                 "observed": {}, "step_seconds": [], "step_tokens": [], "step_requests": []}
+                 "requested_cycles": cycles,
+                 "observed": {}, "step_seconds": [], "step_tokens": [], "step_requests": [],
+                 "all_execute_calls": 0, "incomplete_sample_steps": 0}
         events = []
-        # 峰值统计从窗口开始处重新计数，否则读到的是加载与预热留下的高水位。
+        pending = [None]
         torch.npu.reset_peak_memory_stats()
 
         def timed(scheduler_output, *args, **kwargs):
+            if pending[0] is not None:
+                state["incomplete_sample_steps"] += 1
+                pending[0] = None
+            call_index = state["all_execute_calls"]
+            state["all_execute_calls"] += 1
             tokens = scheduler_output.total_num_scheduled_tokens
             requests = len(scheduler_output.num_scheduled_tokens)
             key = f"{tokens}/{requests}"
@@ -414,23 +416,39 @@ class OfflineCSAObserver:
                 return original(scheduler_output, *args, **kwargs)
             index = state["seen_steps"]
             state["seen_steps"] += 1
-            if index < warmup_steps:
+            # 固定前部窗口，避开请求结束时引擎对 sampled_token_ids 的长度裁剪。
+            if index < warmup_steps or len(events) >= cycles + 1:
                 return original(scheduler_output, *args, **kwargs)
-            begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            begin, end, sample_end = (torch.npu.Event(enable_timing=True) for _ in range(3))
+            entry = {"begin": begin, "execute_end": end, "sample_end": sample_end,
+                     "call_index": call_index, "steady_index": index, "sample_complete": False}
             begin.record()
             start = time.perf_counter()
+            entry["host_start"] = start
+            pending[0] = entry
             try:
                 return original(scheduler_output, *args, **kwargs)
             finally:
                 end.record()
-                events.append((begin, end))
+                events.append(entry)
                 state["step_seconds"].append(time.perf_counter() - start)
                 state["step_tokens"].append(tokens)
                 state["step_requests"].append(requests)
 
-        runner.execute_model = timed
-        self._offline_steady = (state, original, events)
-        return {"dp_rank": rank, "warmup_steps": warmup_steps}
+        def sampled(*args, **kwargs):
+            result = original_sample(*args, **kwargs)
+            entry = pending[0]
+            if entry is not None:
+                entry["sample_end"].record()
+                entry["sample_complete"] = True
+                # 异步引擎随后填充同一个 CPU 输出对象；收尾时读，不在热路径等 D2H。
+                entry["output"] = getattr(result, "_model_runner_output", result)
+                pending[0] = None
+            return result
+
+        runner.execute_model, runner.sample_tokens = timed, sampled
+        self._offline_steady = (state, original, original_sample, events, pending)
+        return {"dp_rank": rank, "warmup_steps": warmup_steps, "schema": 2}
 
     def offline_end_steady(self):
         import math
@@ -438,37 +456,70 @@ class OfflineCSAObserver:
 
         import torch
 
-        state, original, events = self._offline_steady
-        self.model_runner.execute_model = original
+        state, original, original_sample, events, pending = self._offline_steady
+        self.model_runner.execute_model, self.model_runner.sample_tokens = original, original_sample
         self._offline_steady = None
-        samples = state["step_seconds"]
-        state["measured_steps"] = len(samples)
+        if pending[0] is not None:
+            state["incomplete_sample_steps"] += 1
+        state["measured_steps"] = len(events)
         state["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
         state["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
         torch.npu.synchronize()
-        stamps = [begin.recorded_time() for begin, _ in events]
-        device_us = [begin.elapsed_time(end) * 1000 for begin, end in events]
+        stamps = [e["begin"].recorded_time() for e in events]
+        device_us = [e["begin"].elapsed_time(e["execute_end"]) * 1000 for e in events]
         valid_events = bool(stamps) and all(b > a for a, b in zip(stamps, stamps[1:])) and all(
             math.isfinite(value) and value > 0 for value in device_us)
+
+        def distribution(values):
+            if not values:
+                return {}
+            ordered = sorted(values)
+            return {"p50_us": statistics.median(values),
+                    "p95_us": ordered[math.ceil(len(values) * 0.95) - 1]}
+
         state["device"] = {"samples_us": device_us, "start_timestamps_raw": stamps,
                            "valid_events": valid_events,
-                           "scope": "图外事件仅包围 execute_model，不覆盖随后 sample_tokens；无逐步额外同步"}
-        if valid_events:
-            ordered_device = sorted(device_us)
-            state["device"].update(p50_us=statistics.median(device_us),
-                                   p95_us=ordered_device[math.ceil(len(device_us) * 0.95) - 1])
+                           "scope": "execute_model 设备区间；完整周期见 decode_cycle",
+                           **distribution(device_us)}
+        complete = [e for e in events if e["sample_complete"]]
+        state["execute_sample_device"] = {
+            "samples_us": [e["begin"].elapsed_time(e["sample_end"]) * 1000 for e in complete],
+            "scope": "execute_model 起点至 sample_tokens 返回前，包含采样与 DSpark 草稿"}
+        cycles, host_cycles, output_counts, indices = [], [], [], []
+        for left, right in zip(events, events[1:]):
+            if not (left["sample_complete"] and right["sample_complete"] and
+                    right["call_index"] == left["call_index"] + 1):
+                continue
+            rows = getattr(left["output"], "sampled_token_ids", None)
+            count = None
+            if isinstance(rows, list) and len(rows) == state["expected_requests"] and all(
+                    isinstance(row, list) and row and all(type(t) is int and t >= 0 for t in row) for row in rows):
+                count = sum(map(len, rows))
+            cycles.append(left["begin"].elapsed_time(right["begin"]) * 1000)
+            host_cycles.append(right["host_start"] - left["host_start"])
+            output_counts.append(count)
+            indices.append(left["steady_index"])
+        valid_cycles = bool(cycles) and all(math.isfinite(v) and v > 0 for v in cycles)
+        cycle_sufficient = (len(cycles) == state["requested_cycles"] and valid_cycles and
+                            all(v is not None for v in output_counts))
+        state["decode_cycle"] = {
+            "samples_us": cycles, "host_samples_seconds": host_cycles, "steady_step_indices": indices,
+            "actual_output_tokens": output_counts, "sufficient": cycle_sufficient,
+            "scope": "连续满档 execute_model 起点间隔，已确认中间 sample_tokens 完成；"
+                     "含采样、DSpark 草稿与引擎调度间隙，不含加载/前缀恢复",
+            **distribution(cycles)}
+        if cycle_sufficient:
+            state["decode_cycle"]["actual_output_tokens_per_second"] = sum(output_counts) / (sum(cycles) * 1e-6)
+        samples = state["step_seconds"]
         if samples:
             ordered = sorted(samples)
-            def at(q):
-                # 取最近秩次，样本少时不做插值，免得报出没测到的数。
-                return ordered[min(len(ordered) - 1, max(0, round(q * (len(ordered) - 1))))]
-            state["p50_seconds"], state["p95_seconds"] = at(0.50), at(0.95)
+            state["p50_seconds"] = statistics.median(samples)
+            state["p95_seconds"] = ordered[math.ceil(len(samples) * 0.95) - 1]
             state["mean_seconds"] = sum(samples) / len(samples)
             state["total_seconds"] = sum(samples)
             state["total_tokens"] = sum(state["step_tokens"])
             state["scheduled_tokens_per_host_second"] = state["total_tokens"] / state["total_seconds"]
-        # 样本不足如实记录，由调用方判断可用性，不在 worker 里抛异常丢掉整份报告。
-        state["sufficient"] = state["measured_steps"] >= 20 and valid_events
+        state["sufficient"] = valid_events and cycle_sufficient and not state["incomplete_sample_steps"]
         return state
 
     def offline_begin_host_profile(self, directory, start_step, steps, expected_tokens, expected_requests):

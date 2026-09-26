@@ -4466,3 +4466,38 @@ valid_shape/clamp，索引/bias 写回及块有效位归约显式保留实际行
 [tail_fix.json](results/csa_baseline_20260926/precision_review/tail_fix.json)。
 这关闭了尾块越界功能缺陷，剩余零容差比较仍为 FAIL；不能据此宣布全部逐元素或整模型验收通过。
 下一步为迁移后精度版正式 16 卡 token/DSpark 看护，再执行性能版 128K 泛化对比。
+
+## 130. 精度版迁移后正式 16 卡看护（2026-09-26）
+
+任务 `task_20260926_214325_324503619485` completed/exit=0。生产源码 `d5ba31dc`，
+固定正式 75 分片权重及 h8192_bank，TP1/DP=EP16、B16/S6、mode=2、FULL_DECODE_ONLY，
+每请求 96 个 token。PTO 选择 precision、atomic=0；两侧 HCCL_DETERMINISTIC=true，
+EPLB 关闭。旧 CLI 请求 Native level=1 的传播限制见下一节，不能据父进程日志宣称 worker 已开启。
+
+两侧 16 个 rank 均完成，24576 个 token 逐个一致，DSpark 草稿数、草稿 token 数、
+接受总数和逐位置接受计数全部一致。此轮为整模型输出看护，不是完整层误差或性能验收。
+结果：[comparison.json](results/csa_baseline_20260926/model_precision_migration/comparison.json)。
+精度版迁移阶段完成，性能版稀疏计划尾块功能缺陷已单卡修复，转入 128K 性能泛化。
+
+## 131. 实际 worker 配置与完整 decode 计时（2026-09-26）
+
+CPU 复现确认 `torch_npu.npu.set_deterministic_level(1)` 只作用于调用进程：父进程为
+`True/1`，新 Python 子进程为 `False/0`。旧测试在外层 LLM 进程设置，使用 spawn 时
+不能据 `OFFLINE_DETERMINISTIC level=1` 日志断言模型 worker 的实际级别。第 130 节
+token/DSpark 一致事实保留；历史相关日志的“开关生效”结论限于当时实际观测的进程。
+
+新增仅用于测试的 `OfflineNPUWorker` 子类，从已有 additional_config 传递 0/1，
+在 Native worker 构造、模型加载和图捕获前设置，收尾 RPC 读取实际级别与 EPLB 状态。
+不新增生产环境变量，不改变算子。两档新进程 CPU 回归验证设置先于 Native 初始化，且未初始化 NPU。
+
+稳态计时改为 schema=2：保留 execute_model 首尾，增加 sample_tokens/草稿完成点，
+用相邻满档起点的 Event.elapsed_time 计算完整周期。无热路径同步或额外 D2H；
+异步引擎填充既有 CPU 输出对象后，在收尾读取真实采样 token 数。
+默认取预热后前 21 个满档起点形成 20 周期，给生成末尾留余量，避免终止请求时输出裁剪。
+缺少采样、变档间隙、缺失输出计数均拒绝放行。全局汇总按共同样本序号的最慢 rank 周期
+给出保守吞吐估计，各 rank 原始周期另列；750 μs 门槛只标记原 B16/H8192 场景。
+
+2 项进程配置回归及 12 项配置/计时 CPU 回归通过，包含未完成采样、途中变档、窗口截断、
+并发层区间不重复计时。ruff/diff 检查通过；完整计时与新 worker 的真机接入随首档 128K/B4 验证。
+未为配置传递单独重复加载 16 卡模型。已清理失效 O-A N192 候选、EPLB 专用 smoke、
+迁移前重复状态和重复编译目录；保留有效 bank、当前精度诊断输入与精简证据。

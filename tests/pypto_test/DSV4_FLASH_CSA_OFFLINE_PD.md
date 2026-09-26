@@ -42,7 +42,7 @@ python tests/pypto_test/offline_pd/run.py --help
 | `prefill` | 16 卡生成 Native P 缓存 |
 | `decode` | 16 卡生成输出，记录 token、DSpark、配置与入口命中 |
 | `steady` | 预热后采稳态 decode 指标 |
-| `performance` | 同一次加载先采无 profiler 的 execute_model 设备时间（不含随后 sample_tokens/草稿），再独立采 Level0 各层区间；同时保存两轮 token 与 DSpark 统计 |
+| `performance` | 同一次加载先采无 profiler 的完整 decode 周期、execute 和采样/草稿完成点，再独立采 Level0 各层区间；保存两轮 token 与 DSpark 统计 |
 | `bitcompare` | 从相同状态比较真实层输出；诊断不作为性能测量 |
 | `argdump` | 在 PTO 调用前保存 schema=2 输入/存储，调用后参考另存 |
 | `profile` / `profile-export` / `profile-compare` | 采设备窗口、CPU 解析及对照 |
@@ -56,6 +56,9 @@ python tests/pypto_test/offline_pd/run.py --help
 主场景参数为 `--batch 16 --graph-mode full_decode_only`，对应 H8192 bank。
 两侧显式传相同 `--weight-nz-mode`，分别评估 1/2，保留另一档结果与 ND 路径。
 精度诊断使用 `--deterministic`；性能按部署配置，完整记录两侧开关。
+确定性由 `offline_pd.worker.OfflineNPUWorker` 在真实 worker 构造时设置，图捕获前生效；
+结果中的 `worker_runtime_config` 保存实际读取的级别和 EPLB 状态。
+旧日志里的父进程 `OFFLINE_DETERMINISTIC level=1` 不能单独证明 spawn worker 已开启。
 通过 `PTO_CSA_VARIANT=precision/performance` 选择 PTO 入口，不能混用结果。
 
 两侧完成 `decode` 后，在 CPU 比较全部 rank 的逐 token 和 DSpark 计数：
@@ -80,9 +83,13 @@ python tests/pypto_test/offline_pd/compare.py \
 
 - 无 profile 的稳态 decode 指标用于整模型性能；`elapsed_including_io_seconds` 不作加速比。
 - `steady` / `performance` 的设备事件在图外记录，收尾统一读回，不逐步加同步；
-  当前事件只包围 execute_model，不覆盖随后 sample_tokens/DSpark 草稿，不当成完整 decode 周期；
-  主机时间单列，调度 token 数不冒充实际输出吞吐。仅计入请求数与 query token 数都匹配的步。
-  正式性能运行至少需要 20 个有效设备样本；B16/S6 可使用 `--decode-tokens 192 --warmup-steps 8`。
+  schema=2 同时记录 execute 首尾、采样/草稿完成点及连续满档步骤起点。
+  主机时间单列，完整周期使用 NPU Event 的 `elapsed_time`，不猜测原始计数单位。
+  默认 `--steady-cycles 20`，预热后取前 21 个满档起点形成 20 个周期；中途变档、
+  采样未完成或实际采样输出计数缺失时拒绝放行，不跨越不完整步拼接周期。
+  `--decode-tokens 192 --warmup-steps 8` 为窗口结束留余量，避开请求结束时的输出裁剪。
+  全局吞吐按共同样本序号取各 rank 最慢周期，是同步周期吞吐的保守估计；每 rank 原始周期和吞吐另列。
+  历史 schema=1 只有 execute_model 时间，不能追认为完整 decode 周期。
 - `performance` 的 Level0 trace 与无 profiler 窗口独立；层区间应从首末设备任务取差，
   按 rank/层报告并保留首次 metadata 生产成本，不能累加并发 kernel 时间。
   采集窗口中途发生档位变化时会保留原始观测并拒绝作为验收结果。

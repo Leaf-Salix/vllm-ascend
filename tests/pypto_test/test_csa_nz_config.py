@@ -69,6 +69,36 @@ def test_direct_worker_binds_mode_before_vllm_import(monkeypatch):
         run.worker(SimpleNamespace(weight_nz_mode=2, rank=0, backend="pto"))
 
 
+@pytest.mark.parametrize("level", [0, 1])
+def test_offline_worker_sets_determinism_before_native_init_in_fresh_process(level):
+    # 用真实 torch_npu 进程内设置验证 spawn 边界；替换 Native 构造，完全不初始化 NPU。
+    code = r'''
+import sys
+from types import ModuleType, SimpleNamespace
+import torch, torch_npu
+level = int(sys.argv[1])
+torch_npu.npu.set_deterministic_level(1 - level)
+module = ModuleType("vllm_ascend.worker.worker")
+class NativeWorker:
+    def __init__(self, config):
+        assert torch_npu.npu._get_deterministic_level() == level
+        assert torch.are_deterministic_algorithms_enabled() == bool(level)
+        self.model_runner = SimpleNamespace(dynamic_eplb=False)
+module.NPUWorker = NativeWorker
+sys.modules[module.__name__] = module
+from offline_pd.worker import OfflineNPUWorker
+worker = OfflineNPUWorker(SimpleNamespace(additional_config={"offline_deterministic_level": level}))
+actual = worker.offline_runtime_config()
+assert actual["deterministic_level"] == actual["requested_deterministic_level"] == level
+assert actual["dynamic_eplb"] is False
+assert not torch_npu.npu.is_initialized()
+'''
+    env = dict(os.environ, TORCH_DEVICE_BACKEND_AUTOLOAD="0")
+    result = subprocess.run([sys.executable, "-c", code, str(level)], env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mode", [0, 1, 2])
 def test_real_roots_match_native_shapes_layouts_and_reject_conflicts(mode):
     # 三个新进程分别导入真实根函数，覆盖模块加载时固定布局的语义；不初始化 NPU。

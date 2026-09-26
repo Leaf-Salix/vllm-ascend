@@ -339,6 +339,7 @@ def diagnose(args, llm, cases):
               "submitted": args.rank_batch if args.rank_batch is not None else args.batch,
               "key": case["key"], "history": case["history"],
               "warmup_rounds": args.warmup_rounds, "warmup_tokens": args.warmup_tokens,
+              "requested_steady_cycles": args.steady_cycles,
               "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens,
               "weight_nz_mode": args.weight_nz_mode, "graph_mode": args.graph_mode,
               "capture_sizes": args.capture_sizes,
@@ -349,12 +350,14 @@ def diagnose(args, llm, cases):
               "eplb_enabled": False,
               "dynamic_eplb_env": os.environ.get("DYNAMIC_EPLB", "false"),
               "expert_map_record_env": os.environ.get("EXPERT_MAP_RECORD", "false"),
+              "worker_runtime_config": args.worker_runtime_config,
               "custom_opp_path": os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")}
     if args.command == "performance":
-        # 同一次模型加载先测无 profiler 的 execute_model，再独立采设备层区间。
+        # 同一次模型加载先测无 profiler 的完整 decode 周期，再独立采设备层区间。
         # 不把 profiler 窗口、加载/前缀恢复或主机计时代替稳态设备结果。
         llm.collective_rpc("offline_begin_observation")
-        llm.collective_rpc("offline_begin_steady", args=(args.warmup_steps, expected_tokens, args.batch))
+        llm.collective_rpc("offline_begin_steady", args=(
+            args.warmup_steps, expected_tokens, args.batch, args.steady_cycles))
         common["stage"] = "measuring_steady"
         write_json(args.output / f"rank{args.rank}.performance.json", common)
         try:
@@ -387,7 +390,7 @@ def diagnose(args, llm, cases):
         if args.command == "performance":
             common["csa_observation"] = llm.collective_rpc("offline_end_observation")
             common["stage"] = "measured"
-            common["scope"] = ("steady_window 为无 profiler 的 execute_model 设备/主机采样，不覆盖 sample_tokens；"
+            common["scope"] = ("steady_window 同时记录 execute_model 和包含采样/草稿的连续完整 decode 周期；"
                                "独立 Level0 trace 用于 HC_pre→HC_post 设备首末区间，"
                                "须解析各 rank/层，不累加并发 kernel 时间。")
     elif args.command == "hostprofile":
@@ -419,10 +422,10 @@ def diagnose(args, llm, cases):
         })
     elif args.command == "steady":
         started = llm.collective_rpc("offline_begin_steady", args=(
-            args.warmup_steps, expected_tokens, args.batch))
+            args.warmup_steps, expected_tokens, args.batch, args.steady_cycles))
         common.update({"decode_tokens": args.decode_tokens, "warmup_steps": args.warmup_steps,
                        "started": started, "stage": "measuring",
-                       "scope": "约定档位的图外事件记录 execute_model 设备区间（不含 sample_tokens）；"
+                       "scope": "约定档位的图外事件同时记录 execute_model 和连续完整 decode 周期；"
                                 "主机时间另列，不把调度 token 速率当成输出吞吐"})
         # 先落一份带 stage 的记录：这一轮多次被外部信号在 decode 中途打断，
         # 而收尾才写盘导致什么都拿不到。哪怕只走到这里，也要留下证据。
@@ -679,14 +682,6 @@ def worker(args):
     # Match `vllm serve` model/config registration before constructing LLM.
     current_platform.pre_register_and_update()
 
-    if args.deterministic:
-        # 算子级确定性。level>=1 会同时把 torch.use_deterministic_algorithms 置 True，
-        # 所以不要再单独调它（torch_npu 的 set_deterministic_level 明确警告过）。
-        # 集合通信侧的 HCCL_DETERMINISTIC 由 launch() 写进子进程环境。
-        import torch_npu
-        torch_npu.npu.set_deterministic_level(1)
-        print(f"OFFLINE_DETERMINISTIC level=1 rank={args.rank}", flush=True)
-
     plan = read_plan(args.bank)
     prefill = args.command == "prefill"
     cases = [c for c in plan["cases"] if c["p_dp_rank"] == args.rank % 4]
@@ -700,6 +695,7 @@ def worker(args):
         overrides["architectures"] = ["PyptoCSADeepseekV4ForCausalLM"]
     llm = LLM(
         model=plan["model"], tokenizer_mode="deepseek_v4", trust_remote_code=True,
+        worker_cls="offline_pd.worker.OfflineNPUWorker",
         tensor_parallel_size=4 if prefill else 1, enable_expert_parallel=True,
         dtype="bfloat16", quantization="ascend", hf_overrides=overrides,
         max_model_len=max(c["history"] for c in cases) + args.decode_tokens + 32,
@@ -729,6 +725,7 @@ def worker(args):
         # weight_nz_mode 由 --weight-nz-mode 控制：0 全 ND，1 是 vllm-ascend 的默认值，
         # Native 会把量化权重转成 FRACTAL_NZ，PTO 按匹配的根签名直接借用存储。
         additional_config={"weight_nz_mode": args.weight_nz_mode, "enable_kv_nz": False, "enable_dsa_cp": False,
+                           "offline_deterministic_level": int(args.deterministic),
                            # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
                            # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
                            # npu_add_rms_norm_bias，而 PyTorch 的 pattern matcher 用
@@ -757,6 +754,12 @@ def worker(args):
         **({} if prefill else {"worker_extension_cls": "offline_pd.observer.OfflineCSAObserver"}),
     )
     print(f"OFFLINE_MODEL_READY role={args.command} dp={args.rank}", flush=True)
+    args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")
+    if not args.worker_runtime_config or any(
+        config["deterministic_level"] != int(args.deterministic) or config["dynamic_eplb"]
+        for config in args.worker_runtime_config
+    ):
+        raise RuntimeError(f"Worker 实际确定性/EPLB 配置不符：{args.worker_runtime_config}")
     if args.layout_only:
         write_json(args.output / f"rank{args.rank}.cache_layout.json",
                    llm.collective_rpc("offline_cache_layout"))
@@ -790,7 +793,8 @@ def worker(args):
                         "csa_observation": observation,
                         "spec_decode": None if prefill else spec_decode_metrics(llm)})
         write_json(args.output / f"rank{args.rank}.json", {"role": args.command, "backend": args.backend,
-                   "rank": args.rank, "batch": args.batch, "eplb_enabled": False, "cases": outputs})
+                   "rank": args.rank, "batch": args.batch, "eplb_enabled": False,
+                   "worker_runtime_config": args.worker_runtime_config, "cases": outputs})
         if observation is not None and args.backend == "pto":
             # 改读捕获期的 capture_time_selection：图重放不触发 forward hook，
             # 原先那版遍历 forward_hook_counts，而各层全是空字典时 any(...) 为假、
@@ -912,6 +916,7 @@ def launch(args):
                    "--profile-start-step", str(args.profile_start_step),
                    "--profile-steps", str(args.profile_steps),
                    "--warmup-steps", str(args.warmup_steps),
+                   "--steady-cycles", str(args.steady_cycles),
                    "--compare-samples", str(args.compare_samples),
                    "--compare-mode", args.compare_mode,
                    "--swimlane-layer", str(args.swimlane_layer),
@@ -981,6 +986,8 @@ def main():
                         help="bitcompare采集多少个被比对的step；每个样本都要多跑一次Native，代价不低")
     parser.add_argument("--warmup-steps", type=int, default=8,
                         help="steady命令丢弃的前N个decode step，用于排除首次编译与首个恢复步骤")
+    parser.add_argument("--steady-cycles", type=int, default=20,
+                        help="采集前部连续满档周期数，默认 20；避开请求完成和输出截断阶段")
     parser.add_argument("--profile-start-step", type=int, default=8, help="从第几个稳态decode step开始采集")
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
     parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
@@ -1020,6 +1027,11 @@ def main():
     parser.add_argument("--analyse-processes", type=int, default=16, help="离线解析使用的进程数上限")
     parser.add_argument("--compare-top", type=int, default=25, help="profile-compare列出的kernel差异条数")
     args = parser.parse_args()
+    if args.command in ("steady", "performance"):
+        query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
+        minimum = (args.warmup_steps + args.steady_cycles + 3) * query
+        if args.steady_cycles < 20 or args.warmup_steps < 0 or args.decode_tokens < minimum:
+            parser.error(f"稳态至少采 20 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")
     if args.layout_only and args.command != "decode":
         parser.error("--layout-only 仅适用于 decode")
     if args.command == "plan":
