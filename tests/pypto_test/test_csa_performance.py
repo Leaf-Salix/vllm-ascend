@@ -8,7 +8,18 @@ import pytest
 import torch
 import torch_npu
 from offline_pd.observer import OfflineCSAObserver
-from offline_pd.performance import layer_intervals
+from offline_pd.performance import compare_worker_configs, layer_intervals
+
+
+def test_worker_event_difference_is_reported_without_ignoring_other_configuration():
+    native = {"deterministic_level": 0, "dynamic_eplb": False, "cann_event_work_mode": 0,
+              "scheduler": {"max_num_batched_tokens": 256}}
+    pto = {**native, "cann_event_work_mode": 1}
+    assert compare_worker_configs(native, pto) == {"native": 0, "pto": 1}
+    with pytest.raises(ValueError, match="worker 配置不同"):
+        compare_worker_configs(native, {**pto, "scheduler": {"max_num_batched_tokens": 400}})
+    with pytest.raises(ValueError, match="观测覆盖不同"):
+        compare_worker_configs(native, {key: value for key, value in pto.items() if key != "cann_event_work_mode"})
 
 
 def scheduler(tokens, requests):

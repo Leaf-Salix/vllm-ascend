@@ -27,6 +27,16 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def compare_worker_configs(native, pto):
+    """PTO 初始化会改变进程 event 模式；显式报告实际差异，其余配置仍须相同。"""
+    native, pto = dict(native), dict(pto)
+    field = "cann_event_work_mode"
+    require((field in native) == (field in pto), "两侧 event 模式的观测覆盖不同")
+    modes = {"native": native.pop(field, None), "pto": pto.pop(field, None)}
+    require(native == pto, "两侧 worker 配置不同")
+    return modes
+
+
 def device_tasks(directory, rank):
     """保留设备原始时间、图/流/任务编号，去掉重复 CPU 栈与可再生分析产物。"""
     target = directory / "device_tasks" / f"rank{rank}.json.gz"
@@ -209,8 +219,9 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
             for key in ("key", "history", "capture_sizes", "max_num_seqs", "deterministic", "hccl_deterministic",
                         "atomic_add",
                         "eplb_enabled", "dynamic_eplb_env", "expert_map_record_env", "custom_opp_path",
-                        "requested_steady_cycles", "worker_runtime_config"):
+                        "requested_steady_cycles"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧 {key} 不同")
+            event_modes = compare_worker_configs(native["worker_runtime_config"][0], pto["worker_runtime_config"][0])
             require(native["window"][0]["window"] == pto["window"][0]["window"],
                     f"rank{rank}: 两侧 trace 步序或形状不同")
             mismatches = sum(a != b for name in ("steady_output_token_ids", "output_token_ids")
@@ -220,6 +231,7 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
             report["spec_decode_mismatched_ranks"] += not stats_equal
             report["compared_tokens"] += 2 * batch * tokens
             entry = {"rank": rank, "key": native["key"], "token_mismatches": mismatches,
+                     "cann_event_work_mode": event_modes,
                      "spec_decode_equal": stats_equal}
             for side, (data, stats) in loaded.items():
                 steady = data["steady_window"][0]

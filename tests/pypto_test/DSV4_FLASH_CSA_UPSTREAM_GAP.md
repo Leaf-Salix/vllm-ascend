@@ -6,7 +6,11 @@
 已完成性能版 TP1/DP=EP16、EPLB 关闭的泛化对比：128K 测 B4/8/16，8K 测 B24/32/40。
 主结果只看预热后10次纯 `_model_forward` 的设备耗时均值；六档数据及profiling/泳道见
 [统一结果目录](results/csa_six_case_profiles_20260926/README.md)。当前PTO尚未明确快于Native，
-B4回退的进程级event模式诊断另行记录，不能把未验证的猜测当成原因。
+B4专项已排除event模式差异为主因：同硬件模式trace约75%的增量在FFN/MoE，
+C4后跨rank到达不齐，GMM变慢的路由/分组原因尚待直接证据。诊断见
+[回退定位](results/csa_baseline_20260926/event_mode_diagnosis/README.md)。
+之前不同默认event模式的model trace不能用于外推CSA本体快慢；本页旧单卡泳道对比的
+具体范围仍按各自配置记录，不能混用新的整模型数据。
 后续全部功能与性能测试均关闭 EPLB。
 下文优化方向作为恢复性能调优后的依据；完整新口径见主清单。
 

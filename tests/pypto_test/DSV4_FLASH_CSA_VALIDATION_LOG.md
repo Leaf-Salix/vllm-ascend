@@ -4663,3 +4663,35 @@ B24/32/40均采齐每rank10步满档纯forward，以及独立3步Level0 trace；
 各自原始PyTorch JSON、PTO第二层泳道；另留DFX原始记录、依赖、函数名表和报告。
 共192份PyTorch trace、6份命名泳道，`summary.json`保存每rank原始10步、DSpark、显存和层分布，
 `files.json`记录来源与大小，不做hash扫描。完整压缩包约137MiB，可直接离线打开，不依赖外部软链接。
+
+## 139. B4 回退定位到 MoE 等齐与 GMM，排除 event 模式为主因（2026-09-26）
+
+Native硬件event对照任务 `task_20260926_232019_2246675419` completed/exit=0，源码 `ce7e6067`。
+16rank实读event模式1、容量40、预算256/可调度96，B4/H131072的满档10步和独立3步trace完整。
+无profiler均值47.952ms，旧Native默认48.483ms，PTO51.715ms；三组token/DSpark一致。
+Native切硬件模式后未出现回退，因此event配置差异不能解释6.67%的主计时回退。
+
+同为硬件模式的独立trace全16rank均值：C4半层16.912→17.337ms，其他attention9.167→9.502ms，
+FFN21.488→24.154ms，半层间隙0.142→0.281ms；主图47.709→51.274ms。
+诊断增量约74.8%位于FFN/MoE，主要kernel增量为dispatch+1.091ms、gate/up GMM+0.977ms、
+down GMM+0.453ms。kernel统计不替代包含内部间隙的半层区间，也不与无profiler窗口拼接归因。
+
+对齐同层dispatch完成时间匹配全16rank的同一全局轮次（Native3轮/PTO2轮交集），
+C4后各rank相对最后到达者的平均领先时间由19.008增至82.359μs，启动跨度35.933→113.293μs，
+最后到达后的剩余时间42.769→41.269μs。PTO前置CSA完成不齐会把延迟放大到后面的MoE内部，
+所以只看单卡CSA中位数不充分。各rank本地profile序号可能错开一步，不能机械按序号叠加；
+未匹配窗口被明确排除，未扩大NPU测试。
+
+0～2层hash路由的两次GMM合计431.580→435.439μs；第3层起router路由的GMM为
+5567.673→6994.313μs。数值路径导致路由/专家分组工作量变化是优先假设，尚未采到实际专家索引
+和group_list，不能定为已证实原因或精度bug；前置CSA引起的访存/调度影响也未排除。
+后续按这一缺口采最小必要证据，不重复六档整矩阵。
+
+撤回第132/136节由两种默认event模式的profile直接外推“B4 CSA本体更快”的判断：
+Native软件event的profiling扰动较大，硬件模式下C4合计已接近PTO且略快。原始trace数值保留，
+六档无profiler主forward结果仍有效，不因该校正而删改。详细因果边界和证据索引见
+`results/csa_baseline_20260926/event_mode_diagnosis/README.md`。
+
+补充同轮CSA结束时间核对：跨rank的CSA结束跨度平均31.280→112.821μs；CSA结束到dispatch启动的间隔平均87.894→89.653μs，PTO同一轮各rank的CSA结束与dispatch启动时间相关系数平均0.9916。这补充了前置CSA尾延迟传递到MoE的直接时间证据。
+对照器将真实event模式单独报告，其他worker预算/确定性/EPLB仍严格一致；1项CPU回归覆盖该边界，未新增NPU测试。
+最终下载包附加B4硬件event专项的16rank trace及诊断报告，约149MiB；六档主矩阵的192份trace和6份泳道保持独立。

@@ -1,0 +1,2230 @@
+{
+  "configuration": "H131072/B4, TP1/DP=EP16, capacity40, budget256, mode2, Level0三步独立于无profiler十步",
+  "variants": {
+    "native_default": {
+      "forward": {
+        "samples": 160,
+        "min_us": 46386.558532714844,
+        "mean_us": 48483.42266082764,
+        "p50_us": 48569.99969482422,
+        "p95_us": 49008.22067260742,
+        "max_us": 49237.14065551758
+      },
+      "rank0_profile": {
+        "main_graph_us": 52148.159999999996,
+        "c4_body_sum_us": 18963.433333333334,
+        "other_attention_sum_us": 10237.806666666665,
+        "ffn_sum_us": 22808.88666666667,
+        "outside_half_intervals_us": 138.033333333328
+      },
+      "rank0_task_kinds": {
+        "PCIE_DMA_SQE": 84,
+        "KERNEL_AIVEC": 4361,
+        "EVENT_RECORD": 106,
+        "KERNEL_MIX_AIV": 679,
+        "SDMA_SQE": 324,
+        "KERNEL_AICPU": 16,
+        "MODEL_EXECUTE": 3,
+        "CAPTURE_WAIT": 5145,
+        "KERNEL_MIX_AIC": 1415,
+        "NOTIFY_WAIT": 3,
+        "CAPTURE_RECORD": 1844,
+        "KERNEL_AICORE": 869,
+        "EVENT_WAIT": 40,
+        "MEM_WRITE_VALUE": 1860,
+        "NOTIFY_RECORD": 3
+      },
+      "root": "tests/pypto_test/results/csa_baseline_20260926/model_128k_performance/capacity40/b4"
+    },
+    "native_hardware": {
+      "forward": {
+        "samples": 160,
+        "min_us": 45873.199462890625,
+        "mean_us": 47952.02713012695,
+        "p50_us": 48023.83041381836,
+        "p95_us": 48697.021484375,
+        "max_us": 49047.760009765625
+      },
+      "rank0_profile": {
+        "main_graph_us": 47649.973333333335,
+        "c4_body_sum_us": 16887.566666666666,
+        "other_attention_sum_us": 9301.193333333333,
+        "ffn_sum_us": 21324.0,
+        "outside_half_intervals_us": 137.21333333332586
+      },
+      "rank0_task_kinds": {
+        "PCIE_DMA_SQE": 84,
+        "KERNEL_AIVEC": 4393,
+        "EVENT_RECORD": 1966,
+        "KERNEL_MIX_AIV": 695,
+        "SDMA_SQE": 324,
+        "KERNEL_AICPU": 16,
+        "MODEL_EXECUTE": 3,
+        "EVENT_WAIT": 1771,
+        "NOTIFY_WAIT": 3,
+        "KERNEL_MIX_AIC": 1415,
+        "KERNEL_AICORE": 869,
+        "EVENT_RESET": 1860,
+        "NOTIFY_RECORD": 3
+      },
+      "root": "tests/pypto_test/results/csa_baseline_20260926/event_mode_diagnosis/native_hardware/b4"
+    },
+    "pto_default": {
+      "forward": {
+        "samples": 160,
+        "min_us": 49310.44006347656,
+        "mean_us": 51715.497159957886,
+        "p50_us": 51788.089752197266,
+        "p95_us": 52603.42025756836,
+        "max_us": 52855.23986816406
+      },
+      "rank0_profile": {
+        "main_graph_us": 51521.99333333333,
+        "c4_body_sum_us": 17292.926666666666,
+        "other_attention_sum_us": 9491.386666666667,
+        "ffn_sum_us": 24453.77333333333,
+        "outside_half_intervals_us": 283.9066666666452
+      },
+      "rank0_task_kinds": {
+        "PCIE_DMA_SQE": 210,
+        "KERNEL_AIVEC": 3013,
+        "EVENT_RECORD": 1462,
+        "KERNEL_MIX_AIV": 443,
+        "SDMA_SQE": 261,
+        "KERNEL_AICPU": 79,
+        "MODEL_EXECUTE": 3,
+        "EVENT_WAIT": 1204,
+        "KERNEL_MIX_AIC": 974,
+        "NOTIFY_WAIT": 3,
+        "KERNEL_AICORE": 491,
+        "EVENT_RESET": 1356,
+        "NOTIFY_RECORD": 3
+      },
+      "root": "tests/pypto_test/results/csa_baseline_20260926/model_128k_performance/capacity40/b4"
+    }
+  },
+  "token_mismatches": {
+    "native_default": 0,
+    "native_hardware": 0,
+    "pto_default": 0
+  },
+  "spec_decode_mismatched_ranks": {
+    "native_default": 0,
+    "native_hardware": 0,
+    "pto_default": 0
+  },
+  "per_rank": [
+    {
+      "rank": 0,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48881.11877441406,
+            48904.06036376953,
+            48481.63986206055,
+            48510.81848144531,
+            48644.48165893555,
+            48990.379333496094,
+            48926.73873901367,
+            48504.23812866211,
+            48540.138244628906,
+            48400.020599365234
+          ],
+          "start_timestamps_raw": [
+            737211250822,
+            737211310132,
+            737211369625,
+            737211428610,
+            737211487827,
+            737211546908,
+            737211606289,
+            737211665768,
+            737211725122,
+            737211784351
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48678.3634185791,
+          "p50_us": 48592.30995178223,
+          "p95_us": 48990.379333496094
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48859.619140625,
+            48648.76174926758,
+            48475.7194519043,
+            48057.39974975586,
+            47365.020751953125,
+            48258.96072387695,
+            48182.59811401367,
+            47842.12112426758,
+            47173.14147949219,
+            47710.018157958984
+          ],
+          "start_timestamps_raw": [
+            739853502598,
+            739853561714,
+            739853620679,
+            739853679613,
+            739853738570,
+            739853796222,
+            739853855103,
+            739853913834,
+            739853973502,
+            739854032981
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48057.33604431152,
+          "p50_us": 48119.998931884766,
+          "p95_us": 48859.619140625
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52369.57931518555,
+            51390.91873168945,
+            51956.4208984375,
+            51701.141357421875,
+            51284.278869628906,
+            52394.40155029297,
+            51589.34020996094,
+            52125.640869140625,
+            52245.80001831055,
+            51877.30026245117
+          ],
+          "start_timestamps_raw": [
+            737890918240,
+            737890981112,
+            737891043055,
+            737891105588,
+            737891168173,
+            737891230176,
+            737891293190,
+            737891355336,
+            737891418330,
+            737891481184
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51893.48220825195,
+          "p50_us": 51916.860580444336,
+          "p95_us": 52394.40155029297
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 1,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48495.140075683594,
+            48802.70004272461,
+            48505.3596496582,
+            48570.32012939453,
+            48482.10144042969,
+            49008.22067260742,
+            48976.619720458984,
+            48469.42138671875,
+            48514.77813720703,
+            48349.281311035156
+          ],
+          "start_timestamps_raw": [
+            737211251199,
+            737211310230,
+            737211369593,
+            737211428543,
+            737211487982,
+            737211546886,
+            737211606236,
+            737211665799,
+            737211725145,
+            737211784396
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48617.3942565918,
+          "p50_us": 48510.06889343262,
+          "p95_us": 49008.22067260742
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48697.021484375,
+            48530.62057495117,
+            48559.5817565918,
+            47981.33850097656,
+            47934.36050415039,
+            48424.24011230469,
+            48413.58184814453,
+            47759.65881347656,
+            48095.680236816406,
+            47883.96072387695
+          ],
+          "start_timestamps_raw": [
+            739853502761,
+            739853561832,
+            739853620595,
+            739853679696,
+            739853738007,
+            739853796059,
+            739853854873,
+            739853913921,
+            739853972582,
+            739854032809
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48228.004455566406,
+          "p50_us": 48254.63104248047,
+          "p95_us": 48697.021484375
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52603.42025756836,
+            51441.898345947266,
+            51873.85940551758,
+            51802.520751953125,
+            51282.55844116211,
+            52650.85983276367,
+            51660.701751708984,
+            52151.13830566406,
+            52211.280822753906,
+            51773.658752441406
+          ],
+          "start_timestamps_raw": [
+            737890918006,
+            737890981068,
+            737891043135,
+            737891105493,
+            737891168174,
+            737891229918,
+            737891293124,
+            737891355310,
+            737891418368,
+            737891481292
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51945.18966674805,
+          "p50_us": 51838.19007873535,
+          "p95_us": 52650.85983276367
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 2,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48835.3385925293,
+            48713.279724121094,
+            48309.44061279297,
+            48534.38186645508,
+            48667.22106933594,
+            48790.85922241211,
+            48790.000915527344,
+            48426.94091796875,
+            48227.92053222656,
+            48164.29901123047
+          ],
+          "start_timestamps_raw": [
+            737201919638,
+            737201979092,
+            737202038565,
+            737202097362,
+            737202156579,
+            737202215880,
+            737202275194,
+            737202334619,
+            737202394209,
+            737202453359
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48545.96824645996,
+          "p50_us": 48600.80146789551,
+          "p95_us": 48835.3385925293
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48705.379486083984,
+            48506.53839111328,
+            48336.021423339844,
+            48028.99932861328,
+            47859.68017578125,
+            48203.880310058594,
+            48319.759368896484,
+            47820.38116455078,
+            48167.720794677734,
+            48020.91979980469
+          ],
+          "start_timestamps_raw": [
+            739844173191,
+            739844232293,
+            739844291260,
+            739844350082,
+            739844408516,
+            739844466713,
+            739844525400,
+            739844584296,
+            739844642949,
+            739844703112
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48196.92802429199,
+          "p50_us": 48185.800552368164,
+          "p95_us": 48705.379486083984
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52633.86154174805,
+            51432.72018432617,
+            51964.98107910156,
+            51926.761627197266,
+            51450.24108886719,
+            52581.581115722656,
+            51724.44152832031,
+            52269.2985534668,
+            52235.27908325195,
+            51875.701904296875
+          ],
+          "start_timestamps_raw": [
+            737881587159,
+            737881650263,
+            737881712226,
+            737881774548,
+            737881837190,
+            737881899165,
+            737881962245,
+            737882024381,
+            737882087527,
+            737882150370
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 52009.48677062988,
+          "p50_us": 51945.871353149414,
+          "p95_us": 52633.86154174805
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 3,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48743.80111694336,
+            48773.738861083984,
+            48484.48181152344,
+            48463.48190307617,
+            48596.01974487305,
+            48860.82077026367,
+            48787.78076171875,
+            48207.95822143555,
+            48197.6203918457,
+            47944.90051269531
+          ],
+          "start_timestamps_raw": [
+            737201919727,
+            737201979033,
+            737202038393,
+            737202097433,
+            737202156648,
+            737202215810,
+            737202275204,
+            737202334841,
+            737202394236,
+            737202453580
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48506.0604095459,
+          "p50_us": 48540.25077819824,
+          "p95_us": 48860.82077026367
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48566.05911254883,
+            48433.441162109375,
+            48246.700286865234,
+            47983.77990722656,
+            47867.59948730469,
+            47965.54183959961,
+            48330.97839355469,
+            47785.67886352539,
+            48142.71926879883,
+            47886.10076904297
+          ],
+          "start_timestamps_raw": [
+            739844173331,
+            739844232368,
+            739844291347,
+            739844350127,
+            739844408513,
+            739844466959,
+            739844525392,
+            739844584334,
+            739844642972,
+            739844703244
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48120.85990905762,
+          "p50_us": 48063.249588012695,
+          "p95_us": 48566.05911254883
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52647.701263427734,
+            51353.67965698242,
+            51878.15856933594,
+            51813.5986328125,
+            51373.741149902344,
+            52570.01876831055,
+            51715.999603271484,
+            52068.08090209961,
+            52292.56057739258,
+            51764.70184326172
+          ],
+          "start_timestamps_raw": [
+            737881587151,
+            737881650349,
+            737881712323,
+            737881774666,
+            737881837269,
+            737881899188,
+            737881962256,
+            737882024587,
+            737882087478,
+            737882150489
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51947.82409667969,
+          "p50_us": 51845.87860107422,
+          "p95_us": 52647.701263427734
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 4,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48933.76159667969,
+            48846.8017578125,
+            48625.67901611328,
+            48427.940368652344,
+            48587.440490722656,
+            48752.86102294922,
+            48670.4216003418,
+            48576.560974121094,
+            48552.84118652344,
+            48255.2604675293
+          ],
+          "start_timestamps_raw": [
+            737193020007,
+            737193079424,
+            737193138717,
+            737193197937,
+            737193257122,
+            737193316387,
+            737193375786,
+            737193434934,
+            737193494350,
+            737193553736
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48622.95684814453,
+          "p50_us": 48606.55975341797,
+          "p95_us": 48933.76159667969
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48682.098388671875,
+            48054.53872680664,
+            47968.8606262207,
+            47666.160583496094,
+            47637.37869262695,
+            47692.69943237305,
+            47878.719329833984,
+            47360.43930053711,
+            47981.60171508789,
+            47601.63879394531
+          ],
+          "start_timestamps_raw": [
+            739835277542,
+            739835337078,
+            739835395952,
+            739835454775,
+            739835513070,
+            739835571564,
+            739835630177,
+            739835689090,
+            739835747465,
+            739835807859
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 47852.41355895996,
+          "p50_us": 47785.709381103516,
+          "p95_us": 48682.098388671875
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52543.30062866211,
+            51492.98095703125,
+            51997.779846191406,
+            51723.28186035156,
+            51393.71871948242,
+            52494.41909790039,
+            51533.61892700195,
+            52106.178283691406,
+            52243.65997314453,
+            51726.219177246094
+          ],
+          "start_timestamps_raw": [
+            737872688717,
+            737872751674,
+            737872813666,
+            737872876229,
+            737872938724,
+            737873000731,
+            737873063901,
+            737873126010,
+            737873188986,
+            737873251990
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51925.51574707031,
+          "p50_us": 51861.99951171875,
+          "p95_us": 52543.30062866211
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 5,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48643.13888549805,
+            48622.76077270508,
+            48076.85852050781,
+            48442.24166870117,
+            48515.419006347656,
+            48864.78042602539,
+            48808.05969238281,
+            48550.23956298828,
+            48395.77865600586,
+            48244.49920654297
+          ],
+          "start_timestamps_raw": [
+            737193020289,
+            737193079645,
+            737193139257,
+            737193197913,
+            737193257189,
+            737193316266,
+            737193375642,
+            737193434959,
+            737193494504,
+            737193553743
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48516.37763977051,
+          "p50_us": 48532.82928466797,
+          "p95_us": 48864.78042602539
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48726.52053833008,
+            48250.74005126953,
+            47960.819244384766,
+            48123.56185913086,
+            47898.399353027344,
+            48066.959381103516,
+            48209.659576416016,
+            47801.47933959961,
+            48184.478759765625,
+            48020.7405090332
+          ],
+          "start_timestamps_raw": [
+            739835277502,
+            739835336880,
+            739835395967,
+            739835454319,
+            739835512813,
+            739835571183,
+            739835629847,
+            739835688648,
+            739835747264,
+            739835807442
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48124.335861206055,
+          "p50_us": 48095.26062011719,
+          "p95_us": 48726.52053833008
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            50122.00164794922,
+            49310.44006347656,
+            49857.04040527344,
+            49645.43914794922,
+            49566.10107421875,
+            50924.198150634766,
+            49544.36111450195,
+            50321.70104980469,
+            50177.44064331055,
+            49863.20114135742
+          ],
+          "start_timestamps_raw": [
+            737872691132,
+            737872753849,
+            737872815797,
+            737872878291,
+            737872940533,
+            737873002288,
+            737873065885,
+            737873127786,
+            737873191048,
+            737873253847
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 49933.192443847656,
+          "p50_us": 49860.12077331543,
+          "p95_us": 50924.198150634766
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 6,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48784.58023071289,
+            48460.67810058594,
+            48476.9401550293,
+            48412.46032714844,
+            48377.73895263672,
+            48690.63949584961,
+            48878.299713134766,
+            48472.16033935547,
+            48429.58068847656,
+            47967.60177612305
+          ],
+          "start_timestamps_raw": [
+            737181609815,
+            737181669472,
+            737181728535,
+            737181787612,
+            737181846998,
+            737181906107,
+            737181965242,
+            737182024702,
+            737182084136,
+            737182143689
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48495.06797790527,
+          "p50_us": 48466.4192199707,
+          "p95_us": 48878.299713134766
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48582.218170166016,
+            48200.260162353516,
+            48169.33822631836,
+            47854.66003417969,
+            47761.77978515625,
+            47879.42123413086,
+            48059.97848510742,
+            47857.31887817383,
+            48014.82009887695,
+            47919.73876953125
+          ],
+          "start_timestamps_raw": [
+            739823862237,
+            739823921519,
+            739823980348,
+            739824039179,
+            739824097546,
+            739824155966,
+            739824214589,
+            739824273183,
+            739824332025,
+            739824392132
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48029.953384399414,
+          "p50_us": 47967.2794342041,
+          "p95_us": 48582.218170166016
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52510.95962524414,
+            51355.78155517578,
+            51718.70040893555,
+            51450.199127197266,
+            51267.860412597656,
+            52339.03884887695,
+            51395.721435546875,
+            51957.1418762207,
+            52084.94186401367,
+            51563.86184692383
+          ],
+          "start_timestamps_raw": [
+            737861277100,
+            737861340159,
+            737861402300,
+            737861464846,
+            737861527196,
+            737861589234,
+            737861652397,
+            737861714509,
+            737861777502,
+            737861840502
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51764.42070007324,
+          "p50_us": 51641.28112792969,
+          "p95_us": 52510.95962524414
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 7,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48754.50134277344,
+            48421.34094238281,
+            48459.2399597168,
+            48470.52001953125,
+            48576.17950439453,
+            48583.38165283203,
+            48847.599029541016,
+            48464.599609375,
+            48544.960021972656,
+            48229.77828979492
+          ],
+          "start_timestamps_raw": [
+            737181609838,
+            737181669506,
+            737181728531,
+            737181787546,
+            737181846783,
+            737181906211,
+            737181965261,
+            737182024702,
+            737182084011,
+            737182143410
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48535.210037231445,
+          "p50_us": 48507.74002075195,
+          "p95_us": 48847.599029541016
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48617.24090576172,
+            48416.53823852539,
+            48264.56069946289,
+            48141.700744628906,
+            47787.79983520508,
+            48026.74102783203,
+            47887.50076293945,
+            47939.4416809082,
+            48063.819885253906,
+            47979.09927368164
+          ],
+          "start_timestamps_raw": [
+            739823862191,
+            739823921298,
+            739823980244,
+            739824038879,
+            739824097506,
+            739824155813,
+            739824214745,
+            739824273089,
+            739824331967,
+            739824392069
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48112.44430541992,
+          "p50_us": 48045.28045654297,
+          "p95_us": 48617.24090576172
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52578.96041870117,
+            51490.61965942383,
+            51914.90173339844,
+            51615.58151245117,
+            51104.51889038086,
+            52482.540130615234,
+            51529.15954589844,
+            52111.98043823242,
+            52195.640563964844,
+            51552.860260009766
+          ],
+          "start_timestamps_raw": [
+            737861277042,
+            737861340032,
+            737861402108,
+            737861464683,
+            737861527365,
+            737861589092,
+            737861652255,
+            737861714360,
+            737861777390,
+            737861840523
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51857.67631530762,
+          "p50_us": 51765.241622924805,
+          "p95_us": 52578.96041870117
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 8,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48610.43930053711,
+            48632.62176513672,
+            48209.259033203125,
+            48317.55828857422,
+            48494.781494140625,
+            48722.54180908203,
+            48755.53894042969,
+            48380.11932373047,
+            48441.42150878906,
+            48109.1194152832
+          ],
+          "start_timestamps_raw": [
+            737171652686,
+            737171711992,
+            737171771483,
+            737171830393,
+            737171889564,
+            737171948767,
+            737172008052,
+            737172067491,
+            737172126815,
+            737172186235
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48467.340087890625,
+          "p50_us": 48468.101501464844,
+          "p95_us": 48755.53894042969
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48322.479248046875,
+            48043.399810791016,
+            47983.44039916992,
+            47788.92135620117,
+            47444.339752197266,
+            47731.75811767578,
+            47942.45910644531,
+            47702.919006347656,
+            47789.26086425781,
+            47705.89828491211
+          ],
+          "start_timestamps_raw": [
+            739813905324,
+            739813964501,
+            739814023352,
+            739814082069,
+            739814140677,
+            739814198939,
+            739814257527,
+            739814316166,
+            739814375070,
+            739814435170
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 47845.48759460449,
+          "p50_us": 47789.09111022949,
+          "p95_us": 48322.479248046875
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52512.19940185547,
+            51320.579528808594,
+            51767.478942871094,
+            51467.899322509766,
+            51096.160888671875,
+            52400.53939819336,
+            51426.07879638672,
+            51986.64093017578,
+            52198.10104370117,
+            51512.87841796875
+          ],
+          "start_timestamps_raw": [
+            737851319842,
+            737851382937,
+            737851444990,
+            737851507568,
+            737851570108,
+            737851631913,
+            737851695099,
+            737851757228,
+            737851820128,
+            737851883296
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51768.85566711426,
+          "p50_us": 51640.17868041992,
+          "p95_us": 52512.19940185547
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 9,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            46982.28073120117,
+            46787.1208190918,
+            46592.31948852539,
+            46587.7799987793,
+            46386.558532714844,
+            46585.23941040039,
+            46773.96011352539,
+            46761.8408203125,
+            46628.318786621094,
+            46623.1803894043
+          ],
+          "start_timestamps_raw": [
+            737171654309,
+            737171713841,
+            737171773103,
+            737171832125,
+            737171891677,
+            737171950900,
+            737172010037,
+            737172069101,
+            737172128626,
+            737172187716
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 46670.85990905762,
+          "p50_us": 46625.749588012695,
+          "p95_us": 46982.28073120117
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            46614.158630371094,
+            46201.85852050781,
+            46088.71841430664,
+            46030.338287353516,
+            45873.199462890625,
+            46021.91925048828,
+            46233.77990722656,
+            46270.37811279297,
+            46120.9602355957,
+            46159.061431884766
+          ],
+          "start_timestamps_raw": [
+            739813907019,
+            739813966336,
+            739814025240,
+            739814083814,
+            739814142244,
+            739814200636,
+            739814259227,
+            739814317581,
+            739814376733,
+            739814436706
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 46161.4372253418,
+          "p50_us": 46140.010833740234,
+          "p95_us": 46614.158630371094
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52162.92190551758,
+            51128.60107421875,
+            51513.37814331055,
+            51225.57830810547,
+            49433.319091796875,
+            50636.619567871094,
+            49675.44174194336,
+            50069.698333740234,
+            50332.77893066406,
+            49954.86068725586
+          ],
+          "start_timestamps_raw": [
+            737851320194,
+            737851383128,
+            737851445244,
+            737851507809,
+            737851571774,
+            737851633677,
+            737851696850,
+            737851759137,
+            737851821989,
+            737851884853
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 50613.31977844238,
+          "p50_us": 50484.69924926758,
+          "p95_us": 52162.92190551758
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 10,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48803.77960205078,
+            48635.799407958984,
+            48653.46145629883,
+            48612.6594543457,
+            48710.62088012695,
+            48847.679138183594,
+            48896.72088623047,
+            48544.559478759766,
+            48615.718841552734,
+            48217.72003173828
+          ],
+          "start_timestamps_raw": [
+            737159887809,
+            737159947315,
+            737160006371,
+            737160065424,
+            737160124674,
+            737160183963,
+            737160243235,
+            737160302640,
+            737160361958,
+            737160421452
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48653.87191772461,
+          "p50_us": 48644.630432128906,
+          "p95_us": 48896.72088623047
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48531.620025634766,
+            48302.84118652344,
+            48182.220458984375,
+            48137.74108886719,
+            47882.118225097656,
+            48028.018951416016,
+            48110.08071899414,
+            47829.29992675781,
+            47951.93862915039,
+            47963.93966674805
+          ],
+          "start_timestamps_raw": [
+            739802133993,
+            739802193130,
+            739802252042,
+            739802310601,
+            739802369125,
+            739802427524,
+            739802486242,
+            739802544917,
+            739802603793,
+            739802663793
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48091.98188781738,
+          "p50_us": 48069.04983520508,
+          "p95_us": 48531.620025634766
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52463.279724121094,
+            51153.06091308594,
+            51716.51840209961,
+            51522.65930175781,
+            51211.10153198242,
+            52271.59881591797,
+            51500.74005126953,
+            51878.97872924805,
+            52087.459564208984,
+            51481.380462646484
+          ],
+          "start_timestamps_raw": [
+            737839553557,
+            737839616772,
+            737839678710,
+            737839741182,
+            737839803654,
+            737839865704,
+            737839928688,
+            737839990991,
+            737840053901,
+            737840116990
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51728.67774963379,
+          "p50_us": 51619.58885192871,
+          "p95_us": 52463.279724121094
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 11,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48667.43850708008,
+            48432.220458984375,
+            48479.3815612793,
+            48344.68078613281,
+            48569.679260253906,
+            48764.98031616211,
+            48634.559631347656,
+            48193.80187988281,
+            48322.959899902344,
+            48283.4587097168
+          ],
+          "start_timestamps_raw": [
+            737159887950,
+            737159947518,
+            737160006542,
+            737160065690,
+            737160124815,
+            737160184048,
+            737160243496,
+            737160302994,
+            737160362251,
+            737160421379
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48469.31610107422,
+          "p50_us": 48455.801010131836,
+          "p95_us": 48764.98031616211
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48781.158447265625,
+            48639.060974121094,
+            48388.35906982422,
+            46659.59930419922,
+            46321.60186767578,
+            46355.12161254883,
+            47801.700592041016,
+            47766.12091064453,
+            47590.08026123047,
+            47811.641693115234
+          ],
+          "start_timestamps_raw": [
+            739802133751,
+            739802192799,
+            739802251843,
+            739802312089,
+            739802370695,
+            739802429201,
+            739802486559,
+            739802544990,
+            739802604163,
+            739802663954
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 47611.4444732666,
+          "p50_us": 47783.91075134277,
+          "p95_us": 48781.158447265625
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52760.54000854492,
+            51461.360931396484,
+            52018.2991027832,
+            51913.818359375,
+            51470.52001953125,
+            52556.880950927734,
+            51744.22073364258,
+            52200.18005371094,
+            52322.818756103516,
+            51463.558197021484
+          ],
+          "start_timestamps_raw": [
+            737839553253,
+            737839616458,
+            737839678396,
+            737839740780,
+            737839803394,
+            737839865413,
+            737839928441,
+            737839990669,
+            737840053659,
+            737840117001
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51991.21971130371,
+          "p50_us": 51966.0587310791,
+          "p95_us": 52760.54000854492
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 12,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48886.478424072266,
+            48808.658599853516,
+            48746.158599853516,
+            48588.45901489258,
+            48885.20050048828,
+            49183.998107910156,
+            49081.539154052734,
+            48560.298919677734,
+            48731.658935546875,
+            48553.85971069336
+          ],
+          "start_timestamps_raw": [
+            737152354584,
+            737152413996,
+            737152473125,
+            737152532306,
+            737152591357,
+            737152650486,
+            737152709907,
+            737152769484,
+            737152828703,
+            737152887968
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48802.6309967041,
+          "p50_us": 48777.408599853516,
+          "p95_us": 49183.998107910156
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48721.01974487305,
+            48504.920959472656,
+            48367.881774902344,
+            48194.66018676758,
+            47821.62094116211,
+            48150.93994140625,
+            48144.779205322266,
+            47879.21905517578,
+            48016.700744628906,
+            47920.440673828125
+          ],
+          "start_timestamps_raw": [
+            739794609523,
+            739794668647,
+            739794727577,
+            739794786267,
+            739794844907,
+            739794903118,
+            739794961932,
+            739795020593,
+            739795079452,
+            739795139559
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48172.218322753906,
+          "p50_us": 48147.85957336426,
+          "p95_us": 48721.01974487305
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52830.26123046875,
+            51567.298889160156,
+            51987.86163330078,
+            51957.759857177734,
+            51351.680755615234,
+            52512.85934448242,
+            51686.920166015625,
+            52270.240783691406,
+            52356.33850097656,
+            51770.91979980469
+          ],
+          "start_timestamps_raw": [
+            737832022334,
+            737832085501,
+            737832147573,
+            737832209885,
+            737832272660,
+            737832334607,
+            737832397648,
+            737832459747,
+            737832522774,
+            737832585845
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 52029.214096069336,
+          "p50_us": 51972.81074523926,
+          "p95_us": 52830.26123046875
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 13,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48966.339111328125,
+            48995.31936645508,
+            48707.58056640625,
+            48444.30160522461,
+            49066.139221191406,
+            49131.919860839844,
+            49237.14065551758,
+            48491.661071777344,
+            48710.17837524414,
+            48443.641662597656
+          ],
+          "start_timestamps_raw": [
+            737152354506,
+            737152413812,
+            737152473171,
+            737152532453,
+            737152591179,
+            737152650539,
+            737152709759,
+            737152769559,
+            737152828729,
+            737152888086
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48819.4221496582,
+          "p50_us": 48838.25874328613,
+          "p95_us": 49237.14065551758
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48869.239807128906,
+            48638.641357421875,
+            48512.32147216797,
+            48187.41989135742,
+            47836.6584777832,
+            48159.99984741211,
+            48251.64031982422,
+            48080.501556396484,
+            48101.37939453125,
+            47866.981506347656
+          ],
+          "start_timestamps_raw": [
+            739794609368,
+            739794668504,
+            739794727425,
+            739794786267,
+            739794844889,
+            739794903103,
+            739794961818,
+            739795020380,
+            739795079359,
+            739795139606
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48250.47836303711,
+          "p50_us": 48173.709869384766,
+          "p95_us": 48869.239807128906
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52745.80001831055,
+            51488.89923095703,
+            52063.079833984375,
+            51861.59896850586,
+            51440.29998779297,
+            52329.76150512695,
+            51422.45864868164,
+            51815.921783447266,
+            52065.879821777344,
+            51536.30065917969
+          ],
+          "start_timestamps_raw": [
+            737832022420,
+            737832085582,
+            737832147506,
+            737832209981,
+            737832272570,
+            737832334791,
+            737832397917,
+            737832460203,
+            737832523064,
+            737832586083
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51877.00004577637,
+          "p50_us": 51838.76037597656,
+          "p95_us": 52745.80001831055
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 14,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            49006.019592285156,
+            49058.841705322266,
+            48693.4814453125,
+            48676.18179321289,
+            48988.059997558594,
+            49100.460052490234,
+            49085.30044555664,
+            48505.958557128906,
+            48650.53939819336,
+            48444.72122192383
+          ],
+          "start_timestamps_raw": [
+            737139567576,
+            737139626863,
+            737139686298,
+            737139745332,
+            737139804368,
+            737139863682,
+            737139923018,
+            737139982651,
+            737140041899,
+            737140101195
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48820.95642089844,
+          "p50_us": 48840.77072143555,
+          "p95_us": 49100.460052490234
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            49047.760009765625,
+            48884.88006591797,
+            48579.44107055664,
+            48186.19918823242,
+            47873.4016418457,
+            48294.84176635742,
+            48278.018951416016,
+            48084.40017700195,
+            47682.621002197266,
+            48052.520751953125
+          ],
+          "start_timestamps_raw": [
+            739781812204,
+            739781871268,
+            739781930365,
+            739781989270,
+            739782047855,
+            739782105971,
+            739782164793,
+            739782223377,
+            739782282785,
+            739782342428
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48296.408462524414,
+          "p50_us": 48232.10906982422,
+          "p95_us": 49047.760009765625
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52855.23986816406,
+            51608.79898071289,
+            52135.799407958984,
+            52004.44030761719,
+            51622.02072143555,
+            52760.658264160156,
+            51998.680114746094,
+            52501.64031982422,
+            52599.06005859375,
+            52106.441497802734
+          ],
+          "start_timestamps_raw": [
+            737819232805,
+            737819295957,
+            737819357929,
+            737819420337,
+            737819482886,
+            737819544856,
+            737819607831,
+            737819670012,
+            737819733031,
+            737819796011
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 52219.27795410156,
+          "p50_us": 52121.12045288086,
+          "p95_us": 52855.23986816406
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    },
+    {
+      "rank": 15,
+      "native_default": {
+        "forward": {
+          "samples_us": [
+            48738.521575927734,
+            48687.14141845703,
+            48407.47833251953,
+            48375.96130371094,
+            48666.160583496094,
+            48895.5192565918,
+            48806.49948120117,
+            47919.41833496094,
+            48417.22106933594,
+            48215.74020385742
+          ],
+          "start_timestamps_raw": [
+            737139567837,
+            737139627219,
+            737139686572,
+            737139745620,
+            737139804680,
+            737139863875,
+            737139923285,
+            737139983226,
+            737140042111,
+            737140101409
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48512.96615600586,
+          "p50_us": 48541.690826416016,
+          "p95_us": 48895.5192565918
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      },
+      "native_hardware": {
+        "forward": {
+          "samples_us": [
+            48599.44152832031,
+            48546.119689941406,
+            48281.620025634766,
+            47957.72171020508,
+            47602.5390625,
+            48141.719818115234,
+            48046.79870605469,
+            47857.200622558594,
+            47975.42190551758,
+            47798.439025878906
+          ],
+          "start_timestamps_raw": [
+            739781812618,
+            739781871573,
+            739781930642,
+            739781989479,
+            739782048101,
+            739782106104,
+            739782165001,
+            739782223580,
+            739782282452,
+            739782342653
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 48080.702209472656,
+          "p50_us": 48011.11030578613,
+          "p95_us": 48599.44152832031
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false,
+            "cann_event_work_mode": 1,
+            "scheduler": {
+              "max_num_seqs": 40,
+              "max_num_batched_tokens": 256,
+              "max_num_scheduled_tokens": 96
+            }
+          }
+        ]
+      },
+      "pto_default": {
+        "forward": {
+          "samples_us": [
+            52528.98025512695,
+            51404.46090698242,
+            51874.778747558594,
+            51742.679595947266,
+            51322.63946533203,
+            52472.82028198242,
+            51742.2981262207,
+            52158.98132324219,
+            52298.35891723633,
+            51890.018463134766
+          ],
+          "start_timestamps_raw": [
+            737819233135,
+            737819296153,
+            737819358186,
+            737819420598,
+            737819483186,
+            737819545143,
+            737819608090,
+            737819670352,
+            737819733321,
+            737819796221
+          ],
+          "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、DSpark 草稿或步间调度等待；不逐步同步",
+          "mean_us": 51943.60160827637,
+          "p50_us": 51882.39860534668,
+          "p95_us": 52528.98025512695
+        },
+        "worker_config": [
+          {
+            "requested_deterministic_level": 0,
+            "deterministic_level": 0,
+            "torch_deterministic": false,
+            "hccl_deterministic": "false",
+            "dynamic_eplb": false
+          }
+        ]
+      }
+    }
+  ]
+}

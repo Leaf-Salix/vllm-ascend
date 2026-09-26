@@ -114,6 +114,38 @@ def main():
         table.append(f"| {history} | {batch} | {native:.3f} | {pto:.3f} | "
                      f"{entry['pto_forward_change_pct']:+.2f}% | 一致 / 一致 |")
         summary["cases"].append(entry)
+    diagnosis = BASE / "event_mode_diagnosis"
+    diagnostic_note = ""
+    if (diagnosis / "comparison.json").is_file():
+        destination = OUTPUT / "b4_diagnosis"
+        destination.mkdir(exist_ok=True)
+        for filename in ("comparison.json", "dispatch_alignment.json", "ffn_kernel_totals.json",
+                         "rank0_ffn_by_layer.json", "probe_default.json", "probe_0.json"):
+            original, target = diagnosis / filename, destination / filename
+            include(original, target)
+            files.append({"file": str(target.relative_to(OUTPUT)), "bytes": target.stat().st_size,
+                          "source": str(original), "scope": "B4专项诊断"})
+        exports = read(diagnosis / "native_hardware/b4/native/profile_export.json")["exported"]
+        for item in exports:
+            original = Path(item["trace_view"])
+            target = destination / "native_hardware_ranks" / f"{item['rank']}_pytorch.json"
+            include(original, target)
+            files.append({"file": str(target.relative_to(OUTPUT)), "bytes": target.stat().st_size,
+                          "source": str(original), "scope": "B4专项诊断，Native硬件event"})
+        (destination / "README.md").write_text(
+            (diagnosis / "README.md").read_text().replace(
+                "native_hardware/b4/native/trace/", "native_hardware_ranks/").replace(
+                "../../csa_six_case_profiles_20260926/", "../"), encoding="utf-8")
+        summary["b4_diagnosis"] = {
+            "report": "b4_diagnosis/README.md", "native_hardware_forward_ms": 47.95202713012695,
+            "conclusion": "排除event差异为回退主因；诊断trace约75%增量在FFN/MoE，"
+                          "已见跨rank到达差，GMM增量的路由/分组原因待直接证据。",
+            "csa_trace_caution": "默认event模式不同造成profiling扰动差异，撤回据旧trace推断B4 CSA本体更快。",
+        }
+        diagnostic_note = (
+            "\nB4回退专项见 [诊断报告](b4_diagnosis/README.md)：event模式差异不是主因，"
+            "主要增量在FFN/MoE；附Native硬件模式的16rank trace。原默认event模式不同会影响"
+            "profiling扰动，因此旧CSA区间不能直接外推无profiler的本体快慢。\n")
     save(OUTPUT / "summary.json", summary)
     save(OUTPUT / "files.json", files)
     (OUTPUT / "README.md").write_text(
@@ -132,7 +164,8 @@ def main():
         "DFX/Level0 都独立于无 profiler 计时，不能把诊断耗时填入性能主表。\n\n"
         "两侧 mode=2、TP1/DP=EP16、DSpark 出5验6、EPLB关、Native实际level0、HCCL=false；"
         "PTO性能版atomic=1。容量40、捕获24/48/96/144/192/240；128K预算256、8K预算400。"
-        "本轮没有精度版性能数据，也不代替 H8192/B16 的750微秒目标或完整数值验收。\n",
+        "本轮没有精度版性能数据，也不代替 H8192/B16 的750微秒目标或完整数值验收。\n"
+        + diagnostic_note,
         encoding="utf-8",
     )
     print(OUTPUT)

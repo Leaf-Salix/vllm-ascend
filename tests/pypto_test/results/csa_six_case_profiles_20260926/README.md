@@ -22,3 +22,5 @@
 泳道采用正式第二层权重、合成输入/历史和 Native 页式 cache/state，复用前层 compact metadata；它与整模型 trace 的输入内容、物理页号及执行模式不同，只用于观察相同形状下的任务与调度。DFX/Level0 都独立于无 profiler 计时，不能把诊断耗时填入性能主表。
 
 两侧 mode=2、TP1/DP=EP16、DSpark 出5验6、EPLB关、Native实际level0、HCCL=false；PTO性能版atomic=1。容量40、捕获24/48/96/144/192/240；128K预算256、8K预算400。本轮没有精度版性能数据，也不代替 H8192/B16 的750微秒目标或完整数值验收。
+
+B4回退专项见 [诊断报告](b4_diagnosis/README.md)：event模式差异不是主因，主要增量在FFN/MoE；附Native硬件模式的16rank trace。原默认event模式不同会影响profiling扰动，因此旧CSA区间不能直接外推无profiler的本体快慢。

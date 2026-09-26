@@ -23,7 +23,9 @@ metadata准备、logits、采样、DSpark草稿、步间等待、加载与初始
 128K预算256、8K预算400，扣除DSpark预留160后分别可调度96/240。
 当前CANN缺少Native `TransposeBatchMatMulWeightNz`，Native wo_a保留ND，PTO加载期一次转换NZ。
 主矩阵保留两侧各自的进程级event默认行为；PyPTO初始化的全局模式切换另作专项诊断，
-见 `../event_mode_diagnosis/`，不能在未测完前把它当成回退原因。
+见 [B4回退定位](../event_mode_diagnosis/README.md)。专项已排除event模式为主因；
+同硬件模式trace约75%的增量在FFN/MoE。旧默认event模式的CSA trace有不同profiling扰动，
+不能据此宣称B4 CSA本体更快，完整定位与未确认的路由/分组假设均单列记录。
 
 ## 采集与复现
 
