@@ -4836,3 +4836,35 @@ score_i32 = pl.matmul(query_vector, kv_i8, out_dtype=pl.INT32, b_trans=True)  # 
 各 query 仍按自己的 `valid_count` 截断即可——这与现在 `lane_valid_rows` 的做法一致。
 
 以上都还是纸面推算。本节先记账与方案，实测结果另记。
+
+### 第 143 节的分组改造：实测更慢，已回退
+
+按上节方案把 `GROUP_Q = 2` 个同 batch 的 query 拼进 matmul 的 M 维（A 取
+`[GROUP_Q*IDX_N_HEADS, IDX_HEAD_DIM]`、N 由 384 同比例降到 192 以保持 L0C 占用），
+`SCORE_ARENA_ROWS` 扩到 `TOPK_SCORE_WORKERS * 2 * GROUP_Q`，规约按 query 切片、
+归并按 query 展开。编译通过，单卡两档实测：
+
+| 档位 | 基线 PTO p50 | 分组后 p50 | 变化 |
+| --- | ---: | ---: | ---: |
+| 128K/B16 | 1858.2 | 2399.6 | **+29.1%** |
+| 8K/B40 | 1511.4 | 1570.5 | **+3.9%** |
+
+**两档都更慢，改动已 `git checkout` 回退。**
+
+字节层面的推算本身没错：`GROUP_Q=2` 时 key 搬运从约 384 MiB 降到约 192 MiB，
+gather 次数从 8448 变 8256、几乎不变。但**性能瓶颈不在 key 搬运的字节数**——
+真正被翻倍的是**规约的固定开销**：每个 `(item, score_begin, aiv_id)` 原来做 1 次
+`[64, 192]` 的 `col_sum`，改后要做 GROUP_Q 次 `[64, 96]`，元素总数相同而调用次数翻倍，
+外加每个 query 各自的 `position_ids` 读取、`valid` 计算与 `set_validshape`。
+`gather_row` 的行数从 384 降到 192 也可能让每次 DMA 的有效带宽下降。
+
+**这条否定结论的价值**：它说明「Native 按 M256 复用 key」这个差异**不是**当前 PTO
+慢的主因，至少在 PyPTO 这套 Cube/Vector 分工下照搬它会亏。要再往这个方向走，得先
+让规约本身能一次处理多个 query（例如用一次 `col_sum` 配合分段掩码，而不是切片循环
+GROUP_Q 次），否则搬运省下来的会被规约的固定开销吃掉。
+
+**另一个测量口径要点**：`dsv4_csa_single_layer.py` 的 `pto_native.x_out` 用
+`atol=0 / rtol=0` 做逐位比对，**性能版基线本来就是 FAIL**（它刻意放弃了与 Native
+的逐位一致，见第 140 节前后关于精度版/性能版分工的记录）。所以这一项不能用来判断
+改动是否算错——判断 PTO 侧改动的数值影响要**对比改前改后的 PTO 自身输出**。
+本轮因为性能已经确定变差，没有再单独做这项比对。
