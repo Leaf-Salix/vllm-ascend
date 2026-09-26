@@ -1028,9 +1028,32 @@ def indexer_qr_rope(
                 # Native's indexer wq_b matmul carries
                 # output_dtype=hidden_states.dtype and the rotary runs in place
                 # on that BF16 tensor, so both halves read a rounded dequant.
+                #
+                # wq_b is an npu_quant_matmul: it folds the per-channel
+                # weight_scale and the pertoken_scale into one dequant factor
+                # before touching the accumulator. Applying them one after the
+                # other rounds twice. Against exact integer dot products on a
+                # captured native projection, (acc*pertoken)*perchannel leaves
+                # 7 BF16 differences and the reverse order 3, while
+                # acc*(pertoken*perchannel) leaves none. Same fix the main q
+                # path took in 14632b83a and o_proj in 1bf469717.
+                #
+                # This was tried once before (a772b37e7) and reverted in
+                # 855a9f526 for taking the query INT8 "from 100.0000% exact to
+                # 99.9644%" -- but that run also carried 4852211b0, whose own
+                # revert five minutes later cites the same number, and the
+                # 100.0000% was uniform-b4 only. The sequential order is
+                # bit-exact on uniform-b4 and off by 1..8 int8 elements on
+                # other window phases, which is what flips the top-k.
+                qr_ones = pl.full(
+                    [DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0,
+                )
+                qr_factor = pl.col_expand_mul(
+                    pl.row_expand_mul(qr_ones, qr_scale_tile), wq_scale,
+                )
                 qr_dequant = pl.cast(
                     pl.cast(
-                        pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale),
+                        pl.mul(acc_fp32, qr_factor),
                         target_type=pl.BF16,
                         mode="rint",
                     ),
@@ -1604,7 +1627,7 @@ def golden_indexer(tensors, inner_full=None):
     # Native's indexer wq_b matmul emits BF16 and the rotary runs in place on
     # that tensor, so the dequant is rounded before the RoPE.
     q = (
-        (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).to(torch.bfloat16).float()
+        (q_i32.float() * (qr_scale * wq_b_scale.view(1, -1))).to(torch.bfloat16).float()
     ).view(
         tokens, IDX_N_HEADS, IDX_HEAD_DIM
     )
