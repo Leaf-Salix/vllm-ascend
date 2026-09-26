@@ -1,0 +1,1439 @@
+{
+  "status": "MEASURED",
+  "fixture": {
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "batch": 16,
+    "history": 8192,
+    "seed": 1024,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "modes": {
+    "1": {
+      "native_weight_formats": {
+        "wq_a": 2,
+        "wq_b": 29,
+        "wo_a": 2,
+        "wo_b": 29
+      },
+      "root_layouts": {
+        "wq_a": "ND",
+        "wq_b": "NZ",
+        "wo_a": "ND",
+        "wo_b": "NZ"
+      },
+      "native_over_pto_p50": 1.0955393280609589,
+      "native": {
+        "us_min": 935.5199933052063,
+        "us_p50": 938.6799931526184,
+        "us_p95": 943.5999989509583,
+        "us_max": 946.120023727417,
+        "profile": {
+          "kernel_records": 43,
+          "first_to_last_device_us": 946.72,
+          "first_kernel": "aclnnInplaceCopy_TensorMoveAiCore_TensorMove",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "Compressor": {
+              "count": 2,
+              "sum_task_us": 123.82000000000001
+            },
+            "TransposeBatchMatMul": {
+              "count": 1,
+              "sum_task_us": 117.12
+            },
+            "SparseAttnSharedkv": {
+              "count": 1,
+              "sum_task_us": 111.9
+            },
+            "QuantBatchMatmulV3": {
+              "count": 3,
+              "sum_task_us": 102.38
+            },
+            "ScatterNdUpdateV2": {
+              "count": 4,
+              "sum_task_us": 96.67999999999999
+            },
+            "MatMulV2": {
+              "count": 5,
+              "sum_task_us": 94.28
+            },
+            "VllmQuantLightningIndexer": {
+              "count": 1,
+              "sum_task_us": 57.64
+            },
+            "InplacePartialRotaryMul": {
+              "count": 4,
+              "sum_task_us": 55.38
+            },
+            "HcPre": {
+              "count": 1,
+              "sum_task_us": 52.72
+            },
+            "DynamicQuant": {
+              "count": 3,
+              "sum_task_us": 46.67999999999999
+            },
+            "TensorMove": {
+              "count": 4,
+              "sum_task_us": 33.9
+            },
+            "RmsNorm": {
+              "count": 2,
+              "sum_task_us": 33.7
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 30.96
+            },
+            "HcPost": {
+              "count": 1,
+              "sum_task_us": 20.52
+            },
+            "RmsNormDynamicQuant": {
+              "count": 1,
+              "sum_task_us": 20.46
+            },
+            "triton_rms_kernel_0": {
+              "count": 1,
+              "sum_task_us": 19.96
+            },
+            "Muls": {
+              "count": 3,
+              "sum_task_us": 13.120000000000001
+            },
+            "Cast": {
+              "count": 3,
+              "sum_task_us": 6.04
+            },
+            "Neg": {
+              "count": 1,
+              "sum_task_us": 2.44
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto": {
+        "us_min": 824.3600130081177,
+        "us_p50": 856.8199872970581,
+        "us_p95": 874.180018901825,
+        "us_max": 878.5200119018555,
+        "profile": {
+          "kernel_records": 2,
+          "first_to_last_device_us": 859.68,
+          "first_kernel": "simpler_aicpu_kernel_exec_7faa170e72898cfd",
+          "compact_metadata_tasks": 0,
+          "kernels_by_task_time": {
+            "simpler_aicpu_kernel_exec_7faa170e72898cfd": {
+              "count": 1,
+              "sum_task_us": 859.68
+            },
+            "aicore_kernel_mode_0_mix_aic": {
+              "count": 1,
+              "sum_task_us": 850.36
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto_self_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.015625,
+        "rmse": 0.0001463539065204476,
+        "mismatches": 3979,
+        "first_mismatches": [
+          [
+            14,
+            0,
+            4
+          ],
+          [
+            14,
+            0,
+            34
+          ],
+          [
+            14,
+            0,
+            65
+          ],
+          [
+            14,
+            0,
+            86
+          ],
+          [
+            14,
+            0,
+            163
+          ],
+          [
+            14,
+            0,
+            197
+          ],
+          [
+            14,
+            0,
+            199
+          ],
+          [
+            14,
+            0,
+            227
+          ]
+        ]
+      },
+      "pto_native_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.03125,
+        "rmse": 0.0018667796701749926,
+        "mismatches": 380004,
+        "first_mismatches": [
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            14
+          ],
+          [
+            0,
+            0,
+            15
+          ],
+          [
+            0,
+            0,
+            17
+          ],
+          [
+            0,
+            0,
+            18
+          ],
+          [
+            0,
+            0,
+            21
+          ],
+          [
+            0,
+            0,
+            22
+          ]
+        ]
+      }
+    },
+    "2": {
+      "native_weight_formats": {
+        "wq_a": 29,
+        "wq_b": 29,
+        "wo_a": 2,
+        "wo_b": 29
+      },
+      "root_layouts": {
+        "wq_a": "NZ",
+        "wq_b": "NZ",
+        "wo_a": "NZ",
+        "wo_b": "NZ"
+      },
+      "native_over_pto_p50": 1.0823800167961117,
+      "native": {
+        "us_min": 909.820020198822,
+        "us_p50": 913.0200147628784,
+        "us_p95": 922.4600195884705,
+        "us_max": 927.5000095367432,
+        "profile": {
+          "kernel_records": 43,
+          "first_to_last_device_us": 919.22,
+          "first_kernel": "aclnnInplaceCopy_TensorMoveAiCore_TensorMove",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "Compressor": {
+              "count": 2,
+              "sum_task_us": 127.64000000000001
+            },
+            "SparseAttnSharedkv": {
+              "count": 1,
+              "sum_task_us": 111.62
+            },
+            "TransposeBatchMatMul": {
+              "count": 1,
+              "sum_task_us": 107.38
+            },
+            "QuantBatchMatmulV3": {
+              "count": 3,
+              "sum_task_us": 101.19999999999999
+            },
+            "ScatterNdUpdateV2": {
+              "count": 4,
+              "sum_task_us": 88.03999999999999
+            },
+            "MatMulV2": {
+              "count": 5,
+              "sum_task_us": 78.72
+            },
+            "HcPre": {
+              "count": 1,
+              "sum_task_us": 59.0
+            },
+            "VllmQuantLightningIndexer": {
+              "count": 1,
+              "sum_task_us": 53.72
+            },
+            "InplacePartialRotaryMul": {
+              "count": 4,
+              "sum_task_us": 53.519999999999996
+            },
+            "DynamicQuant": {
+              "count": 3,
+              "sum_task_us": 47.019999999999996
+            },
+            "TensorMove": {
+              "count": 4,
+              "sum_task_us": 34.96
+            },
+            "RmsNorm": {
+              "count": 2,
+              "sum_task_us": 34.28
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 29.64
+            },
+            "RmsNormDynamicQuant": {
+              "count": 1,
+              "sum_task_us": 20.6
+            },
+            "triton_rms_kernel_0": {
+              "count": 1,
+              "sum_task_us": 19.1
+            },
+            "HcPost": {
+              "count": 1,
+              "sum_task_us": 18.64
+            },
+            "Muls": {
+              "count": 3,
+              "sum_task_us": 13.2
+            },
+            "Cast": {
+              "count": 3,
+              "sum_task_us": 5.6000000000000005
+            },
+            "Neg": {
+              "count": 1,
+              "sum_task_us": 2.18
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto": {
+        "us_min": 827.4199962615967,
+        "us_p50": 843.529999256134,
+        "us_p95": 869.2200183868408,
+        "us_max": 905.8799743652344,
+        "profile": {
+          "kernel_records": 2,
+          "first_to_last_device_us": 843.52,
+          "first_kernel": "simpler_aicpu_kernel_exec_7faa170e72898cfd",
+          "compact_metadata_tasks": 0,
+          "kernels_by_task_time": {
+            "simpler_aicpu_kernel_exec_7faa170e72898cfd": {
+              "count": 1,
+              "sum_task_us": 843.52
+            },
+            "aicore_kernel_mode_0_mix_aic": {
+              "count": 1,
+              "sum_task_us": 832.76
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto_self_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.015625,
+        "rmse": 8.549995038410712e-05,
+        "mismatches": 1924,
+        "first_mismatches": [
+          [
+            14,
+            0,
+            4
+          ],
+          [
+            14,
+            0,
+            34
+          ],
+          [
+            14,
+            0,
+            65
+          ],
+          [
+            14,
+            0,
+            86
+          ],
+          [
+            14,
+            0,
+            163
+          ],
+          [
+            14,
+            0,
+            197
+          ],
+          [
+            14,
+            0,
+            199
+          ],
+          [
+            14,
+            0,
+            227
+          ]
+        ]
+      },
+      "pto_native_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.03125,
+        "rmse": 0.001867225030714905,
+        "mismatches": 380055,
+        "first_mismatches": [
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            14
+          ],
+          [
+            0,
+            0,
+            15
+          ],
+          [
+            0,
+            0,
+            17
+          ],
+          [
+            0,
+            0,
+            18
+          ],
+          [
+            0,
+            0,
+            21
+          ],
+          [
+            0,
+            0,
+            22
+          ]
+        ]
+      }
+    }
+  },
+  "compact_metadata_policy": "reuse",
+  "scope": "单卡 B16/S6/H8192、model.layers.2 正式权重和合成历史；按同一步第二个 CSA 层复用 metadata，Native 保留实际逐层生成；不是跨实现数值、整模型或 750 us 验收",
+  "first_layer_modes": {
+    "1": {
+      "native_weight_formats": {
+        "wq_a": 2,
+        "wq_b": 29,
+        "wo_a": 2,
+        "wo_b": 29
+      },
+      "root_layouts": {
+        "wq_a": "ND",
+        "wq_b": "NZ",
+        "wo_a": "ND",
+        "wo_b": "NZ"
+      },
+      "native_over_pto_p50": 1.0019995583676946,
+      "native": {
+        "us_min": 906.5399765968323,
+        "us_p50": 912.0199978351593,
+        "us_p95": 917.4799919128418,
+        "us_max": 922.7200150489807,
+        "profile": {
+          "kernel_records": 43,
+          "first_to_last_device_us": 909.72,
+          "first_kernel": "aclnnInplaceCopy_TensorMoveAiCore_TensorMove",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "Compressor": {
+              "count": 2,
+              "sum_task_us": 113.72
+            },
+            "TransposeBatchMatMul": {
+              "count": 1,
+              "sum_task_us": 112.78
+            },
+            "QuantBatchMatmulV3": {
+              "count": 3,
+              "sum_task_us": 107.66
+            },
+            "SparseAttnSharedkv": {
+              "count": 1,
+              "sum_task_us": 105.22
+            },
+            "ScatterNdUpdateV2": {
+              "count": 4,
+              "sum_task_us": 94.08
+            },
+            "MatMulV2": {
+              "count": 5,
+              "sum_task_us": 87.25999999999999
+            },
+            "VllmQuantLightningIndexer": {
+              "count": 1,
+              "sum_task_us": 55.0
+            },
+            "InplacePartialRotaryMul": {
+              "count": 4,
+              "sum_task_us": 52.68000000000001
+            },
+            "HcPre": {
+              "count": 1,
+              "sum_task_us": 51.14
+            },
+            "DynamicQuant": {
+              "count": 3,
+              "sum_task_us": 48.78
+            },
+            "RmsNorm": {
+              "count": 2,
+              "sum_task_us": 34.400000000000006
+            },
+            "TensorMove": {
+              "count": 4,
+              "sum_task_us": 34.24
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 29.32
+            },
+            "RmsNormDynamicQuant": {
+              "count": 1,
+              "sum_task_us": 19.64
+            },
+            "triton_rms_kernel_0": {
+              "count": 1,
+              "sum_task_us": 18.92
+            },
+            "HcPost": {
+              "count": 1,
+              "sum_task_us": 18.42
+            },
+            "Muls": {
+              "count": 3,
+              "sum_task_us": 12.759999999999998
+            },
+            "Cast": {
+              "count": 3,
+              "sum_task_us": 5.86
+            },
+            "Neg": {
+              "count": 1,
+              "sum_task_us": 2.08
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto": {
+        "us_min": 876.6800165176392,
+        "us_p50": 910.1999998092651,
+        "us_p95": 929.5799732208252,
+        "us_max": 939.5800232887268,
+        "profile": {
+          "kernel_records": 4,
+          "first_to_last_device_us": 954.6,
+          "first_kernel": "CompressorMetadata",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "simpler_aicpu_kernel_exec_7faa170e72898cfd": {
+              "count": 1,
+              "sum_task_us": 917.42
+            },
+            "aicore_kernel_mode_0_mix_aic": {
+              "count": 1,
+              "sum_task_us": 905.76
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 30.979999999999997
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto_self_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.015625,
+        "rmse": 8.302978594286238e-05,
+        "mismatches": 1917,
+        "first_mismatches": [
+          [
+            10,
+            0,
+            99
+          ],
+          [
+            10,
+            0,
+            251
+          ],
+          [
+            10,
+            0,
+            508
+          ],
+          [
+            10,
+            0,
+            603
+          ],
+          [
+            10,
+            0,
+            783
+          ],
+          [
+            10,
+            0,
+            822
+          ],
+          [
+            10,
+            0,
+            1173
+          ],
+          [
+            10,
+            0,
+            1245
+          ]
+        ]
+      },
+      "pto_native_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.03125,
+        "rmse": 0.0018667691889565675,
+        "mismatches": 379960,
+        "first_mismatches": [
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            14
+          ],
+          [
+            0,
+            0,
+            15
+          ],
+          [
+            0,
+            0,
+            17
+          ],
+          [
+            0,
+            0,
+            18
+          ],
+          [
+            0,
+            0,
+            21
+          ],
+          [
+            0,
+            0,
+            22
+          ]
+        ]
+      }
+    },
+    "2": {
+      "native_weight_formats": {
+        "wq_a": 29,
+        "wq_b": 29,
+        "wo_a": 2,
+        "wo_b": 29
+      },
+      "root_layouts": {
+        "wq_a": "NZ",
+        "wq_b": "NZ",
+        "wo_a": "NZ",
+        "wo_b": "NZ"
+      },
+      "native_over_pto_p50": 1.0654375546647723,
+      "native": {
+        "us_min": 916.9399738311768,
+        "us_p50": 925.7799983024597,
+        "us_p95": 931.2000274658203,
+        "us_max": 933.6000084877014,
+        "profile": {
+          "kernel_records": 43,
+          "first_to_last_device_us": 929.52,
+          "first_kernel": "aclnnInplaceCopy_TensorMoveAiCore_TensorMove",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "Compressor": {
+              "count": 2,
+              "sum_task_us": 130.34
+            },
+            "TransposeBatchMatMul": {
+              "count": 1,
+              "sum_task_us": 110.64
+            },
+            "SparseAttnSharedkv": {
+              "count": 1,
+              "sum_task_us": 105.18
+            },
+            "QuantBatchMatmulV3": {
+              "count": 3,
+              "sum_task_us": 101.96000000000001
+            },
+            "ScatterNdUpdateV2": {
+              "count": 4,
+              "sum_task_us": 90.94
+            },
+            "MatMulV2": {
+              "count": 5,
+              "sum_task_us": 82.02
+            },
+            "InplacePartialRotaryMul": {
+              "count": 4,
+              "sum_task_us": 60.18
+            },
+            "VllmQuantLightningIndexer": {
+              "count": 1,
+              "sum_task_us": 55.5
+            },
+            "HcPre": {
+              "count": 1,
+              "sum_task_us": 53.84
+            },
+            "DynamicQuant": {
+              "count": 3,
+              "sum_task_us": 51.64
+            },
+            "RmsNorm": {
+              "count": 2,
+              "sum_task_us": 35.3
+            },
+            "TensorMove": {
+              "count": 4,
+              "sum_task_us": 33.239999999999995
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 30.16
+            },
+            "RmsNormDynamicQuant": {
+              "count": 1,
+              "sum_task_us": 21.28
+            },
+            "HcPost": {
+              "count": 1,
+              "sum_task_us": 20.88
+            },
+            "triton_rms_kernel_0": {
+              "count": 1,
+              "sum_task_us": 19.12
+            },
+            "Muls": {
+              "count": 3,
+              "sum_task_us": 11.5
+            },
+            "Cast": {
+              "count": 3,
+              "sum_task_us": 5.36
+            },
+            "Neg": {
+              "count": 1,
+              "sum_task_us": 2.12
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto": {
+        "us_min": 842.1199917793274,
+        "us_p50": 868.9199984073639,
+        "us_p95": 903.760015964508,
+        "us_max": 920.7199811935425,
+        "profile": {
+          "kernel_records": 4,
+          "first_to_last_device_us": 915.86,
+          "first_kernel": "CompressorMetadata",
+          "compact_metadata_tasks": 2,
+          "kernels_by_task_time": {
+            "simpler_aicpu_kernel_exec_7faa170e72898cfd": {
+              "count": 1,
+              "sum_task_us": 879.2
+            },
+            "aicore_kernel_mode_0_mix_aic": {
+              "count": 1,
+              "sum_task_us": 873.42
+            },
+            "CompressorMetadata": {
+              "count": 2,
+              "sum_task_us": 30.119999999999997
+            }
+          },
+          "scope": "独立 profiler 窗口的首末设备任务区间；分项为任务时长，可能重叠，不能相加当层耗时"
+        }
+      },
+      "pto_self_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.015625,
+        "rmse": 6.285702316072346e-05,
+        "mismatches": 1113,
+        "first_mismatches": [
+          [
+            14,
+            0,
+            4
+          ],
+          [
+            14,
+            0,
+            34
+          ],
+          [
+            14,
+            0,
+            65
+          ],
+          [
+            14,
+            0,
+            86
+          ],
+          [
+            14,
+            0,
+            163
+          ],
+          [
+            14,
+            0,
+            197
+          ],
+          [
+            14,
+            0,
+            199
+          ],
+          [
+            14,
+            0,
+            227
+          ]
+        ]
+      },
+      "pto_native_x_out": {
+        "status": "FAIL",
+        "shape": [
+          96,
+          4,
+          4096
+        ],
+        "dtype": "torch.bfloat16",
+        "expected_shape": [
+          96,
+          4,
+          4096
+        ],
+        "expected_dtype": "torch.bfloat16",
+        "atol": 0,
+        "rtol": 0,
+        "elements": 1572864,
+        "comparison": "tolerance",
+        "nonfinite": 0,
+        "max_abs": 0.03125,
+        "rmse": 0.0018673808588938515,
+        "mismatches": 380053,
+        "first_mismatches": [
+          [
+            0,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            5
+          ],
+          [
+            0,
+            0,
+            14
+          ],
+          [
+            0,
+            0,
+            15
+          ],
+          [
+            0,
+            0,
+            17
+          ],
+          [
+            0,
+            0,
+            18
+          ],
+          [
+            0,
+            0,
+            21
+          ],
+          [
+            0,
+            0,
+            22
+          ]
+        ]
+      }
+    }
+  },
+  "first_layer_scope": "独立任务，PTO 每次在图区间内生成两组 metadata；受不同轮次波动影响，不与主结果相减当作 metadata 算子净成本",
+  "pto_mode2_swimlane": {
+    "dispatch_to_finish_us": 837.9,
+    "worker_records": 1131,
+    "scope": "独立 eager DFX 调用，输入与 mode=2 相同；阶段窗口相互重叠，不能相加或替代整模型计时",
+    "kernels": {
+      "hc_widen_spmd": {
+        "worker_records": 12,
+        "first_start_us": 29.42,
+        "last_finish_us": 39.64,
+        "first_to_last_us": 10.22,
+        "max_kernel_us": 8.48
+      },
+      "csa_row_offsets": {
+        "worker_records": 1,
+        "first_start_us": 40.54,
+        "last_finish_us": 43.92,
+        "first_to_last_us": 3.38,
+        "max_kernel_us": 2.28
+      },
+      "q_rope_prepare_spmd": {
+        "worker_records": 12,
+        "first_start_us": 49.74,
+        "last_finish_us": 55.22,
+        "first_to_last_us": 5.48,
+        "max_kernel_us": 2.8
+      },
+      "csa_rope_sign_spmd": {
+        "worker_records": 16,
+        "first_start_us": 50.76,
+        "last_finish_us": 57.0,
+        "first_to_last_us": 6.24,
+        "max_kernel_us": 3.52
+      },
+      "qr_proj_seed": {
+        "worker_records": 1,
+        "first_start_us": 51.1,
+        "last_finish_us": 64.12,
+        "first_to_last_us": 13.02,
+        "max_kernel_us": 10.18
+      },
+      "hc_pre_linear_spmd": {
+        "worker_records": 24,
+        "first_start_us": 56.08,
+        "last_finish_us": 75.74,
+        "first_to_last_us": 19.66,
+        "max_kernel_us": 8.64
+      },
+      "hc_pre_rms_spmd": {
+        "worker_records": 12,
+        "first_start_us": 60.08,
+        "last_finish_us": 70.6,
+        "first_to_last_us": 10.52,
+        "max_kernel_us": 9.98
+      },
+      "kv_proj_seed": {
+        "worker_records": 1,
+        "first_start_us": 61.72,
+        "last_finish_us": 68.26,
+        "first_to_last_us": 6.54,
+        "max_kernel_us": 5.26
+      },
+      "hc_pre_linear_reduce_spmd": {
+        "worker_records": 6,
+        "first_start_us": 70.42,
+        "last_finish_us": 85.84,
+        "first_to_last_us": 15.42,
+        "max_kernel_us": 2.1
+      },
+      "comb_sinkhorn_spmd": {
+        "worker_records": 12,
+        "first_start_us": 87.3,
+        "last_finish_us": 108.62,
+        "first_to_last_us": 21.32,
+        "max_kernel_us": 16.58
+      },
+      "split_pre_post_spmd": {
+        "worker_records": 12,
+        "first_start_us": 89.1,
+        "last_finish_us": 97.62,
+        "first_to_last_us": 8.52,
+        "max_kernel_us": 4.52
+      },
+      "mix_x_rms_norm_spmd": {
+        "worker_records": 12,
+        "first_start_us": 104.46,
+        "last_finish_us": 123.4,
+        "first_to_last_us": 18.94,
+        "max_kernel_us": 18.38
+      },
+      "rope_cs_spmd": {
+        "worker_records": 16,
+        "first_start_us": 125.76,
+        "last_finish_us": 130.88,
+        "first_to_last_us": 5.12,
+        "max_kernel_us": 4.48
+      },
+      "weights_proj_spmd": {
+        "worker_records": 8,
+        "first_start_us": 129.5,
+        "last_finish_us": 138.34,
+        "first_to_last_us": 8.84,
+        "max_kernel_us": 8.4
+      },
+      "kv_score_proj_spmd": {
+        "worker_records": 24,
+        "first_start_us": 130.82,
+        "last_finish_us": 170.12,
+        "first_to_last_us": 39.3,
+        "max_kernel_us": 38.46
+      },
+      "weights_proj_reduce_spmd": {
+        "worker_records": 6,
+        "first_start_us": 139.7,
+        "last_finish_us": 158.78,
+        "first_to_last_us": 19.08,
+        "max_kernel_us": 3.82
+      },
+      "kv_proj_matmul_spmd": {
+        "worker_records": 32,
+        "first_start_us": 157.04,
+        "last_finish_us": 232.38,
+        "first_to_last_us": 75.34,
+        "max_kernel_us": 12.22
+      },
+      "kv_score_proj_0_spmd": {
+        "worker_records": 24,
+        "first_start_us": 167.06,
+        "last_finish_us": 200.38,
+        "first_to_last_us": 33.32,
+        "max_kernel_us": 16.4
+      },
+      "qr_proj_matmul_spmd": {
+        "worker_records": 64,
+        "first_start_us": 168.88,
+        "last_finish_us": 215.88,
+        "first_to_last_us": 47.0,
+        "max_kernel_us": 6.88
+      },
+      "scatter_softmax_pool_spmd": {
+        "worker_records": 16,
+        "first_start_us": 183.98,
+        "last_finish_us": 192.96,
+        "first_to_last_us": 8.98,
+        "max_kernel_us": 8.32
+      },
+      "compress_state_commit_spmd": {
+        "worker_records": 16,
+        "first_start_us": 213.44,
+        "last_finish_us": 222.88,
+        "first_to_last_us": 9.44,
+        "max_kernel_us": 8.76
+      },
+      "rmsnorm_rope_cache_write_spmd": {
+        "worker_records": 6,
+        "first_start_us": 213.44,
+        "last_finish_us": 223.54,
+        "first_to_last_us": 10.1,
+        "max_kernel_us": 9.58
+      },
+      "scatter_softmax_pool_0_spmd": {
+        "worker_records": 16,
+        "first_start_us": 219.44,
+        "last_finish_us": 229.36,
+        "first_to_last_us": 9.92,
+        "max_kernel_us": 9.42
+      },
+      "qr_rms_norm_quant_spmd": {
+        "worker_records": 12,
+        "first_start_us": 223.36,
+        "last_finish_us": 235.14,
+        "first_to_last_us": 11.78,
+        "max_kernel_us": 6.88
+      },
+      "idx_qr_proj_matmul_spmd": {
+        "worker_records": 24,
+        "first_start_us": 229.6,
+        "last_finish_us": 273.24,
+        "first_to_last_us": 43.64,
+        "max_kernel_us": 31.14
+      },
+      "kv_rms_norm_rope_spmd": {
+        "worker_records": 3,
+        "first_start_us": 239.16,
+        "last_finish_us": 252.58,
+        "first_to_last_us": 13.42,
+        "max_kernel_us": 12.96
+      },
+      "indexer_boundary_init_spmd": {
+        "worker_records": 16,
+        "first_start_us": 242.7,
+        "last_finish_us": 247.68,
+        "first_to_last_us": 4.98,
+        "max_kernel_us": 4.32
+      },
+      "compress_state_commit_0_spmd": {
+        "worker_records": 16,
+        "first_start_us": 250.22,
+        "last_finish_us": 258.42,
+        "first_to_last_us": 8.2,
+        "max_kernel_us": 7.56
+      },
+      "qproj_matmul_spmd": {
+        "worker_records": 24,
+        "first_start_us": 257.9,
+        "last_finish_us": 327.98,
+        "first_to_last_us": 70.08,
+        "max_kernel_us": 57.98
+      },
+      "csa_cache_writeback_spmd": {
+        "worker_records": 8,
+        "first_start_us": 258.14,
+        "last_finish_us": 267.8,
+        "first_to_last_us": 9.66,
+        "max_kernel_us": 9.0
+      },
+      "rmsnorm_rope_spmd": {
+        "worker_records": 2,
+        "first_start_us": 262.52,
+        "last_finish_us": 277.44,
+        "first_to_last_us": 14.92,
+        "max_kernel_us": 14.26
+      },
+      "kv_touch": {
+        "worker_records": 1,
+        "first_start_us": 272.12,
+        "last_finish_us": 273.84,
+        "first_to_last_us": 1.72,
+        "max_kernel_us": 1.18
+      },
+      "idx_qr_dequant_rope_spmd": {
+        "worker_records": 48,
+        "first_start_us": 292.56,
+        "last_finish_us": 320.14,
+        "first_to_last_us": 27.58,
+        "max_kernel_us": 22.62
+      },
+      "kv_hadamard": {
+        "worker_records": 1,
+        "first_start_us": 303.58,
+        "last_finish_us": 310.1,
+        "first_to_last_us": 6.52,
+        "max_kernel_us": 5.72
+      },
+      "qr_hadamard_matmul_spmd": {
+        "worker_records": 24,
+        "first_start_us": 305.56,
+        "last_finish_us": 339.08,
+        "first_to_last_us": 33.52,
+        "max_kernel_us": 5.96
+      },
+      "kv_and_cache_write_spmd": {
+        "worker_records": 2,
+        "first_start_us": 321.56,
+        "last_finish_us": 325.34,
+        "first_to_last_us": 3.78,
+        "max_kernel_us": 3.32
+      },
+      "qproj_dequant_rms_nope_rope_spmd": {
+        "worker_records": 48,
+        "first_start_us": 338.18,
+        "last_finish_us": 383.12,
+        "first_to_last_us": 44.94,
+        "max_kernel_us": 29.56
+      },
+      "idx_kv_scale_commit": {
+        "worker_records": 1,
+        "first_start_us": 338.2,
+        "last_finish_us": 350.56,
+        "first_to_last_us": 12.36,
+        "max_kernel_us": 11.7
+      },
+      "qr_hadamard_quant_spmd": {
+        "worker_records": 48,
+        "first_start_us": 350.76,
+        "last_finish_us": 377.12,
+        "first_to_last_us": 26.36,
+        "max_kernel_us": 9.9
+      },
+      "indexer_key_repack_spmd": {
+        "worker_records": 48,
+        "first_start_us": 371.88,
+        "last_finish_us": 401.58,
+        "first_to_last_us": 29.7,
+        "max_kernel_us": 15.08
+      },
+      "indexer_score_topk_leaf_aic_spmd": {
+        "worker_records": 24,
+        "first_start_us": 394.9,
+        "last_finish_us": 466.16,
+        "first_to_last_us": 71.26,
+        "max_kernel_us": 56.66
+      },
+      "indexer_score_topk_leaf_aiv_spmd": {
+        "worker_records": 48,
+        "first_start_us": 394.94,
+        "last_finish_us": 467.26,
+        "first_to_last_us": 72.32,
+        "max_kernel_us": 57.4
+      },
+      "indexer_topk_single_leaf_publish_spmd": {
+        "worker_records": 48,
+        "first_start_us": 464.0,
+        "last_finish_us": 493.86,
+        "first_to_last_us": 29.86,
+        "max_kernel_us": 18.98
+      },
+      "csa_slots_build_valid_qk_plan_spmd": {
+        "worker_records": 16,
+        "first_start_us": 485.0,
+        "last_finish_us": 503.58,
+        "first_to_last_us": 18.58,
+        "max_kernel_us": 7.42
+      },
+      "qk_pv_aic_spmd": {
+        "worker_records": 24,
+        "first_start_us": 502.02,
+        "last_finish_us": 650.02,
+        "first_to_last_us": 148.0,
+        "max_kernel_us": 139.48
+      },
+      "qk_pv_aiv_spmd": {
+        "worker_records": 48,
+        "first_start_us": 502.02,
+        "last_finish_us": 652.2,
+        "first_to_last_us": 150.18,
+        "max_kernel_us": 141.32
+      },
+      "merge_norm_spmd": {
+        "worker_records": 48,
+        "first_start_us": 646.54,
+        "last_finish_us": 684.24,
+        "first_to_last_us": 37.7,
+        "max_kernel_us": 26.1
+      },
+      "proj_a_mm_spmd": {
+        "worker_records": 64,
+        "first_start_us": 691.14,
+        "last_finish_us": 778.6,
+        "first_to_last_us": 87.46,
+        "max_kernel_us": 29.12
+      },
+      "quant_spmd": {
+        "worker_records": 24,
+        "first_start_us": 697.54,
+        "last_finish_us": 797.12,
+        "first_to_last_us": 99.58,
+        "max_kernel_us": 11.96
+      },
+      "_proj_b_mm_nz_kernel_spmd": {
+        "worker_records": 64,
+        "first_start_us": 746.7,
+        "last_finish_us": 817.78,
+        "first_to_last_us": 71.08,
+        "max_kernel_us": 18.7
+      },
+      "proj_b_act_spmd": {
+        "worker_records": 24,
+        "first_start_us": 807.0,
+        "last_finish_us": 835.7,
+        "first_to_last_us": 28.7,
+        "max_kernel_us": 16.18
+      },
+      "hc_post_spmd": {
+        "worker_records": 24,
+        "first_start_us": 825.42,
+        "last_finish_us": 863.58,
+        "first_to_last_us": 38.16,
+        "max_kernel_us": 22.56
+      }
+    }
+  }
+}

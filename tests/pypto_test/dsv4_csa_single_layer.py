@@ -4,7 +4,9 @@
 import argparse
 import importlib
 import json
+import math
 import os
+import statistics
 from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
@@ -250,6 +252,92 @@ def check_graph_replay(fixture, call, eager_a, report):
         restore(fixture)
 
 
+def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
+                           profile_dir=None):
+    """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
+    import torch
+
+    initial = {
+        name: group["initial"].to(group["allocation"].device)
+        for name, group in fixture["groups"].items()
+    }
+
+    def reset():
+        for name, group in fixture["groups"].items():
+            group["allocation"].copy_(initial[name])
+        output.fill_(float("nan"))
+
+    start, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+    # 当前 torch_npu 图内 Event 不随重放更新时间戳，必须在图外显式 record。
+    start.record()
+    end.record()
+    reset()
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        run()
+    samples, timestamps = [], []
+    for iteration in range(warmup + iters):
+        reset()
+        start.record()
+        graph.replay()
+        end.record()
+        torch.npu.synchronize()
+        stamp = start.recorded_time()
+        if timestamps and stamp <= timestamps[-1]:
+            raise ValueError("图计时的开始事件时间戳未更新，不能采纳重复的旧时间")
+        timestamps.append(stamp)
+        if iteration >= warmup:
+            elapsed = start.elapsed_time(end) * 1000
+            if not math.isfinite(elapsed) or elapsed <= 0:
+                raise ValueError(f"图外设备事件没有产生有效时间戳：{elapsed}")
+            samples.append(elapsed)
+    state = collect_state(fixture, output, topk())
+    checks = {name: compare_tensor(value, reference[name], 0, 0) for name, value in state.items()}
+    guards = guard_checks(fixture)
+    if any(check["status"] != "PASS" for check in guards.values()):
+        raise ValueError("计时图重放改写了 metadata 或 slot 外存储")
+    if any(check.get("nonfinite") != 0 for check in checks.values()):
+        raise ValueError("计时图重放出现非有限值或不完整输出")
+    if require_exact and any(check["status"] != "PASS" for check in checks.values()):
+        raise ValueError("固定规约的计时图与同初态 eager 不一致")
+    selection = compare_topk(state["idx_topk"], reference["idx_topk"], (fixture["positions"].cpu() + 1) // 4)
+    if selection["status"] == "FAIL":
+        raise ValueError("计时图 Top-K 含越界、重复或缺失的索引")
+    profile = None
+    if profile_dir is not None:
+        import torch_npu
+
+        reset()
+        torch.npu.synchronize()
+        with torch_npu.profiler.profile(
+            activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
+            schedule=torch_npu.profiler.schedule(wait=0, warmup=0, active=1, repeat=1),
+            record_shapes=False, profile_memory=False, with_stack=False, with_modules=False,
+            experimental_config=torch_npu.profiler._ExperimentalConfig(
+                profiler_level=torch_npu.profiler.ProfilerLevel.Level1),
+            on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(profile_dir)),
+        ) as trace:
+            start.record()
+            graph.replay()
+            end.record()
+            torch.npu.synchronize()
+            trace.step()
+        profile = {"directory": str(profile_dir), "event_envelope_us": start.elapsed_time(end) * 1000,
+                   "scope": "独立一次图重放，核对设备区间和热点；不混入无 profiler 的采样"}
+    ordered = sorted(samples)
+    return {
+        "samples_us": samples,
+        # recorded_time 的原始计数只用于检查更新；耗时单位由 elapsed_time 给出。
+        "start_timestamps_raw": timestamps[warmup:],
+        "us_min": ordered[0], "us_p50": statistics.median(samples),
+        "us_p95": ordered[math.ceil(0.95 * len(ordered)) - 1], "us_max": ordered[-1],
+        "eager_comparison": checks, "exact_comparison_required": require_exact,
+        "topk_selection": selection, "guards": guards,
+        "profile": profile,
+    }
+
+
 def run(args, report):
     activate()
     import torch
@@ -270,7 +358,7 @@ def run(args, report):
 
     if not enable_custom_op():
         raise RuntimeError("Native 自定义算子未完成注册")
-    torch_npu.npu.set_deterministic_level(1)
+    torch_npu.npu.set_deterministic_level(args.deterministic_level)
     config = EngineArgs(
         model=str(args.checkpoint),
         tokenizer_mode="deepseek_v4",
@@ -459,6 +547,69 @@ def run(args, report):
             raise ValueError("Top-K 含越界、重复或缺失的候选索引")
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
+        if args.timing_iters:
+            timing = {
+                "status": "RUNNING", "iters": args.timing_iters, "warmup": args.timing_warmup,
+                "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；"
+                         "含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+                "method": "图外 NPU Event 包住一次重放，含图派发可能留下的设备间隙；"
+                          "每次在区间外恢复相同初态并毒化输出，无诊断拷贝；检查事件时间戳逐次更新",
+                "order": ["native", "pto"],
+                "compact_metadata_policy": args.timing_metadata,
+                "pto_compact_metadata": (
+                    "同一步第二个 CSA 层：复用首层已生成的两组 compact metadata，生成在区间外"
+                    if args.timing_metadata == "reuse" else
+                    "同一步首个 CSA 层：每次在图内生成两组 compact metadata"
+                ),
+                "native_compact_metadata": "Native 各层仍实际调用生产算子，计时保留原路径",
+                "device": os.environ.get("TASK_DEVICE", str(args.device)),
+            }
+            report["timing"] = timing
+
+            def timed_qli(*inputs, **kwargs):
+                value = original_qli(*inputs, **kwargs)
+                # 只保留图内 Top-K 的返回引用；不把 clone/CPU 拷贝计入 Native 区间。
+                captured["timed_topk"] = value[0]
+                return value
+
+            def native_call():
+                with set_ascend_forward_context(
+                    fixture["metadata"], config, num_tokens=fixture["tokens"], num_actual_tokens=fixture["tokens"]
+                ):
+                    _native_attention_half(layer.self_attn.dsa_attn, fixture["hidden"], fixture["positions"], output)
+
+            def pto_call():
+                # 对齐生产 service 的首层准备，不能提前生成 metadata 使 PTO 少计两个设备算子。
+                impl = layer.self_attn.dsa_attn.dsa_attn.impl
+                compact = {
+                    name: impl._compute_compressor_metadata(groups[name][0].decode)
+                    for name in ("compressed", "indexer")
+                }
+                prepared = adapter.NativeCSACall(
+                    call.ops, weights, fixture["hidden"], fixture["positions"], groups,
+                    layer_name=fixture["groups"]["compressed"]["prefix"], compact_metadata=compact,
+                    buffers={name: call.args[name] for name in ("x_out", "idx_topk", "idx_topk_scores")},
+                )
+                prepared()
+
+            torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = timed_qli
+            try:
+                timing["native"] = measure_graph_interval(
+                    fixture, native_call, output, lambda: captured["timed_topk"], native[0],
+                    iters=args.timing_iters, warmup=args.timing_warmup,
+                    require_exact=bool(args.deterministic_level),
+                    profile_dir=args.output / "profile/native" if args.profile else None,
+                )
+            finally:
+                torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
+            timing["pto"] = measure_graph_interval(
+                fixture, call if args.timing_metadata == "reuse" else pto_call,
+                call.args["x_out"], lambda: call.args["idx_topk"], pto[0],
+                iters=args.timing_iters, warmup=args.timing_warmup, require_exact=not ATOMIC_ADD,
+                profile_dir=args.output / "profile/pto" if args.profile else None,
+            )
+            timing["native_over_pto_p50"] = timing["native"]["us_p50"] / timing["pto"]["us_p50"]
+            timing["status"] = "MEASURED"
 
 
 def main():
@@ -475,14 +626,25 @@ def main():
     parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
+    parser.add_argument("--deterministic-level", type=int, choices=(0, 1), default=1,
+                        help="Native 确定性：默认 1 诊断，0 为性能部署；HCCL_DETERMINISTIC 同步设置")
+    parser.add_argument("--timing-iters", type=int, default=0, help="两侧完整图重放设备区间采样次数；0 不计时")
+    parser.add_argument("--timing-warmup", type=int, default=5, help="每侧计时图预热次数")
+    parser.add_argument("--timing-metadata", choices=("reuse", "produce"), default="reuse",
+                        help="默认 reuse 按同一步第二个 CSA 层复用 metadata；produce 单独测首层成本")
+    parser.add_argument("--profile", action="store_true", help="计时后每侧单独采一次设备 profiler 核对区间与热点")
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
+    if args.timing_iters < 0 or args.timing_warmup < 1:
+        parser.error("timing-iters 不得为负，timing-warmup 至少为 1")
+    if args.profile and not args.timing_iters:
+        parser.error("--profile 须配合正数 --timing-iters")
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
     os.environ["PTO_CSA_VARIANT"] = args.variant
     if args.atomic_add is not None:
         os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"] = str(args.atomic_add)
-    os.environ["HCCL_DETERMINISTIC"] = "true"
+    os.environ["HCCL_DETERMINISTIC"] = "true" if args.deterministic_level else "false"
     report = {
         "status": "RUNNING",
         "batch": args.batch,
@@ -491,14 +653,16 @@ def main():
         "weight_nz_mode": args.weight_nz_mode,
         "variant": args.variant,
         "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
-        "deterministic_level": 1,
-        "hccl_deterministic": True,
+        "deterministic_level": args.deterministic_level,
+        "hccl_deterministic": bool(args.deterministic_level),
         "checkpoint": str(args.checkpoint),
     }
     try:
         run(args, report)
     except BaseException as exc:
         report.update(status="FAIL", error=repr(exc))
+        if report.get("timing", {}).get("status") == "RUNNING":
+            report["timing"]["status"] = "FAIL"
         raise
     finally:
         write_json(args.output / "report.json", report)

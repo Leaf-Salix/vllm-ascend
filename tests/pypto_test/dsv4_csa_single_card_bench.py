@@ -1,20 +1,15 @@
-"""单卡回放一次真实 CSA 调用：验正确性、量单次耗时、可选采泳道。
+"""单卡 schema=2 快照回放与 PTO 泳道诊断。
 
-存在的理由：改一处 kernel 就起 16 卡整模型（75 个权重分片、约 4.5 分钟加载）去看
-它崩不崩、快不快，代价太高。本脚本吃 `offline_pd/run.py argdump` 落盘的真实根入参，
-在**一张卡**上直接调 `decode_csa_tp1_attention_test`，一轮几十秒。
-
-口径限制：
-- 只跑 CSA 这一个算子，不含 MoE 与通信，绝对耗时不能当端到端性能；
-  它衡量的是"这次 kernel 改动让该算子本身快了还是慢了"。
-- 输入是某一步、某一层的快照，不随步数变化；用于对照而非覆盖所有档位。
-- aicore 故障、越界这类问题会当场暴露，这是它相对 in-core 模拟器的价值。
+执行当前 HC_pre→norm→CSA→HC_post 根入口；输入可来自正式层权重的单卡 case，
+也可来自真实模型调用。这里的 eager 墙钟包含主机派发，只用于诊断；
+两侧完整设备区间使用 dsv4_csa_single_layer.py，最终以 16 卡整模型验收为准。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import statistics
 import sys
 import time
@@ -41,15 +36,13 @@ def _export_swimlane(directory: Path) -> dict:
     deps = directory / "deps.json"
     if not records.is_file() or not deps.is_file():
         return {"exported": False, "reason": "DFX 未产出记录或依赖"}
-    # 单卡进程只编一份 kernel，按 mtime 取最新的即可，不像多 rank 那样有歧义。
-    # 整层融合（1dcadd85）后 JIT 目录从 _jit__decode_csa_tp1_attention_* 变成
-    # _jit__decode_csa_tp1_layer_*，写死旧前缀会让泳道静默导不出来（reason 只说
-    # 「未找到 kernel_config.py」，很容易被当成 DFX 没开）。这里同时认两种。
-    builds = sorted(Path("build_output").glob("_jit__decode_csa_tp1_*/kernel_config.py"),
-                    key=lambda p: p.stat().st_mtime)
-    if not builds:
-        return {"exported": False, "reason": "未找到 kernel_config.py"}
-    table = builds[-1]
+    # 在新的输出目录执行，唯一完整层编译产物才可作为任务名称依据。
+    builds = list(Path("build_output").glob("_jit__decode_csa_tp1_layer_*/kernel_config.py"))
+    if len(builds) != 1:
+        return {"exported": False, "reason": f"需要唯一完整层 kernel_config.py，实到 {len(builds)} 份"}
+    table = builds[0]
+    recorded_table = directory / "kernel_config_source.py"
+    shutil.copyfile(table, recorded_table)
     tree = ast.parse(table.read_text())
     tables = [node.value for node in tree.body if isinstance(node, ast.Assign)
               and any(isinstance(t, ast.Name) and t.id == "KERNELS" for t in node.targets)]
@@ -66,7 +59,7 @@ def _export_swimlane(directory: Path) -> dict:
                            "--func-names", str(name_map), "-o", str(merged)],
                           capture_output=True, text=True)
     (directory / "converter_output.txt").write_text(proc.stdout + proc.stderr)
-    return {"exported": proc.returncode == 0, "kernel_config": str(table),
+    return {"exported": proc.returncode == 0, "kernel_config": str(recorded_table),
             "merged_swimlane": str(merged), "name_map": str(name_map)}
 
 
@@ -219,8 +212,7 @@ def _run_benchmark(args, report):
     report["final_finite_checks"] = validate_outputs(tensors, kernel.output_param_names)
     if report["final_finite_checks"]["status"] == "FAIL":
         raise ValueError(f"CSA 计时后输出检查失败：{report['final_finite_checks']['errors']}")
-    # 整层入口（1dcadd85 之后）的输出是 x_out（mHC 残差流）；融合前叫 attn_out。
-    out_name = "x_out" if "x_out" in tensors else "attn_out"
+    out_name = "x_out"
     out = tensors[out_name].detach().float().cpu()
     report[out_name] = {"finite": bool(torch.isfinite(out).all()),
                           "absmax": float(out.abs().max()), "mean": float(out.mean())}

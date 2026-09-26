@@ -15,7 +15,7 @@ NPU 任务统一通过 `task-submit`，用 `--status` 查询，不用 `--wait`�
 
 | 入口 | 用途与边界 |
 | --- | --- |
-| `dsv4_csa_single_layer.py` / `run_csa_single_layer.sh` | 正式第 2 层权重、合成输入/历史的 Native/PTO 整层对照；两次同初态执行、metadata 与完整分配保护区检查，可保存调用前 schema=2 快照 |
+| `dsv4_csa_single_layer.py` / `run_csa_single_layer.sh` | 正式第 2 层权重、合成输入/历史的 Native/PTO 整层对照；同初态、metadata/保护区检查，图重放设备计时和可选 profiler，可保存 schema=2 快照 |
 | `dsv4_csa_single_card_bench.py` | schema=2 快照回放与性能采样；无参考记为 MEASURED，逐元素验收必须提供全部声明输出/状态的参考和容差 |
 | `dsv4_csa_replay.py` / `dsv4_csa_validation.py` | 共用快照、布局/别名/初态恢复与逐元素门禁 |
 | `dsv4_csa_weight_layout_probe.py` | 单卡核对 Native 格式 29 原始字节、pypto-lib pack_nz、设备打包与 NZ 快照；不加载整模型 |
@@ -51,6 +51,27 @@ Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使�
 零容差差异用于诊断，算术差异本身不会让该诊断伪装成 PASS；保护区改写、
 metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSpark 一致仍须整模型验证。
 
+单卡性能候选对照，两侧使用相同 mode，分别运行 mode=1/2：
+
+```bash
+task-submit --device auto --max-time 1800 \
+  "bash $PWD/tests/pypto_test/run_csa_single_layer.sh $PWD/tests/pypto_test/results/timing_b16_mode2 --batch 16 --history 8192 --variant performance --weight-nz-mode 2 --atomic-add 1 --deterministic-level 0 --timing-iters 20 --profile"
+```
+
+`--deterministic-level` 默认 1，用于精度诊断，并同步设置 HCCL 确定性；性能配置显式传 0。
+`--timing-iters` 默认 0，不增加原有诊断的采样。启用后每侧先预热 5 次，再采完整图重放区间；
+默认 `--timing-metadata reuse` 按同一步第二个 CSA 层计时：PTO 复用前层生成的两组
+compact metadata，Native 保留其实际逐层生成路径。固定使用 `model.layers.2` 的正式权重和
+合成输入/历史，模拟 metadata 已准备好的状态；不宣称是整模型第二层激活快照。
+`--timing-metadata produce` 另测首层在区间内生成 metadata 的成本，不混入主结果。
+状态恢复、输出毒化与数值比较均不在区间内。图外 Event 包住一次 replay，
+包含可能的图派发间隙，并检查时间戳逐次更新；
+当前 torch_npu 的图内 Event 不随 replay 更新，不能用于这一测量。
+`--profile` 在计时之后每侧独立采一次，核对设备首末任务和热点，不混入无 profiler 的采样。
+结果在 `timing` 中列 p50/p95、全部样本和图相对 eager 的逐元素差异；默认 atomic 路径不要求
+跨运行逐 bit 一致，但 metadata/保护区、输出完整性和有限值仍严格检查。
+此单卡数据只筛选候选；16 卡完整模型的最终区间、token、DSpark 与层误差须另外验收。
+
 需要回放时先查看 `dsv4_csa_single_card_bench.py --help`；
 精度版/性能版、ND/NZ 和输入来源必须明确。格式 29 权重保存原始 NZ 字节，
 回放重建基础格式承载张量，不把 Tensor.cpu() 的逻辑解码当作原始快照。
@@ -67,6 +88,7 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 - `results/csa_baseline_20260926/model_b16h8192_nz1_fixed/`：同 mode=1、固定规约的正式权重 16 卡基线，24576 token 和 DSpark 统计一致；不包含层误差与部署性能验收。
 - `results/csa_baseline_20260926/nz_native_single_card/`：两版 B4/S6/H8192、atomic=0 的 ND/NZ 逐元素相同、图重放/保护区及 Native 权重地址复用证据；跨实现数值仍为 MEASURED。
 - `results/csa_baseline_20260926/nz_layout_contract/`：Native/pypto-lib 物理字节与快照合同、同一 Native NZ 存储的消费者对照。
+- `results/csa_baseline_20260926/nz_native_b16_timing/`：B16/S6/H8192、默认 atomic、Native 确定性关闭的两侧 mode=1/2 完整图区间；`following_mode1/2` 为第二层主口径，`mode1/2` 单独保留首层成本，另有 mode=2 PTO 泳道。单卡趋势，不是最终验收。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。

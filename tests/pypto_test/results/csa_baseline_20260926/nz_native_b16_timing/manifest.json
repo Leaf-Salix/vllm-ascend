@@ -1,0 +1,52 @@
+{
+  "status": "MEASURED",
+  "scope": "B16/S6/H8192 单卡完整 HC_pre→norm→CSA→HC_post 图设备计时；按第二个 CSA 层复用 compact metadata；不是精度或整模型验收",
+  "main_parent": "2228939a",
+  "source_note": "本提交增加计时与 profiling 工具，设备算术使用 2228939a；NPU 任务期间冻结源码；最终仅更正原始时间戳字段名、整理证据及文档",
+  "pypto": "88297437",
+  "simpler": "a54c05095",
+  "ptoas": "0.66",
+  "pto_isa": "327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "weight_layer": "model.layers.2",
+  "input": "固定 seed=1024 的合成 hidden 与历史 cache；Native builder 元数据；并非整模型第二层激活快照",
+  "batch": 16,
+  "query": 6,
+  "history": 8192,
+  "variant": "performance",
+  "atomic_add": true,
+  "native_deterministic_level": 0,
+  "hccl_deterministic": false,
+  "modes": [1, 2],
+  "device": 0,
+  "warmup": 5,
+  "samples_per_backend_and_mode": 20,
+  "main_measurement": {
+    "task_id": "task_20260926_145850_27076428841",
+    "task_status": "completed",
+    "exit_code": 0,
+    "compact_metadata_policy": "reuse",
+    "command": "task-submit --device auto --max-time 1800 'bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_baseline_20260926/nz_native_b16_timing/run_following.sh'",
+    "reports": ["following_mode1/report.json", "following_mode2/report.json"]
+  },
+  "first_layer_measurement": {
+    "task_id": "task_20260926_144823_21728414911",
+    "task_status": "completed",
+    "exit_code": 0,
+    "compact_metadata_policy": "produce",
+    "reproduce_script": "run.sh",
+    "reports": ["mode1/report.json", "mode2/report.json"],
+    "scope": "早于第二层口径确认的独立测量；不与主结果相减当作 metadata 净成本"
+  },
+  "swimlane": {
+    "task_id": "task_20260926_145058_2389942171",
+    "task_status": "completed",
+    "exit_code": 0,
+    "reproduce_script": "pto_mode2_swimlane/run.sh",
+    "report": "pto_mode2_swimlane/report.json",
+    "scope": "mode=2 同输入、metadata 作为已有入参，单次 eager DFX 窗口，仅定位调度/热点"
+  },
+  "evidence_processing": "保留全部报告字段/采样、设备 kernel CSV/trace、DFX 原始记录/依赖/名称表及转换输出；时间戳原误标 ns，统一改为 raw，数值未改变。首层报告早于策略参数，范围由报告说明及两项 CompressorMetadata 设备任务确认。清理重复编译、profiler 中间目录与冗余日志",
+  "local_input": "mode2/case/csa_args.pt 与 csa_args_meta.json 留本地供 DFX 复现，不提交张量文件；run.sh 缺快照时自动重建",
+  "conclusion": "mode=2 暂作优化候选，两档均未达 750 us；metadata/保护区与有限值通过，默认 atomic 的数值及少量 Top-K 波动仍待规则、容差和整模型验收"
+}

@@ -3656,3 +3656,104 @@ PyPTO 已独立提交 `88297437`（中文、Signed-off-by）。设备任务运�
 
 只保留上述最新报告、复现命令和必要输入。早先错误私有形状的编译目录、失败重试 dump、
 被替代的 device 重打包探针记录，以及本次完成对照后的重复 states.pt 不再保留。
+
+## 108. 2026-09-26：第二层 metadata 复用口径的单卡设备计时与热点基线
+
+本轮设备算术基于主仓 `2228939a`，PyPTO `88297437`、Simpler `a54c05095`、
+官方 PTOAS 0.66 / PTO-ISA `327cd586`。增加计时工具，没有改变算子的量化、规约或调度。
+本轮没有启动新的 16 卡任务。
+
+### 108.1 口径与测量修正
+
+用户确认“单卡计时按照第二层的信息来”。主入口默认 `--timing-metadata reuse`：
+模拟同一步第二个 CSA 层，PTO 使用前层已经生成的 compact metadata，
+Native 仍按当前生产代码逐层生成。继续固定正式 `model.layers.2` 权重与合成输入/历史；
+这表达 metadata 的复用状态，不宣称使用了整模型第二层的真实激活快照。
+`--timing-metadata produce` 单独记录每步首个 CSA 层的生成成本，不混入主结果。
+
+compact metadata 是新压缩 KV 行的 RoPE cos/sin 和 cache 页/行 slot 信息；
+主 Compressor 与 Indexer Compressor 各有一组。这些信息必需，但独立的生产 kernel
+不是不可替代的算法要求，后续可在不改变边界、padding 和索引规则的前提下评估融合。
+现有 production service 已在同一步跨 CSA 层共享它们，本轮计时按这个实际复用行为执行。
+
+完整区间仍是 HC_pre→norm→CSA→HC_post。每次重放前在区间外恢复 cache/state 初态并
+毒化输出；Native Top-K hook 只保留返回引用，不把诊断 clone 或 CPU 拷贝放入区间。
+每侧 5 次预热、20 次采样；默认 atomic 部署路径、Native deterministic level=0、
+HCCL_DETERMINISTIC=false。精度诊断默认 level=1 的入口保留。
+
+最初尝试在图内捕获计时事件，小探针未揭示问题；真实整层出现 Native 2.82 μs、
+PTO 29.90 μs 的固定旧值，确认当前 torch_npu 图内事件时间戳不随重放更新。
+这些数值全部作废，没有作为基线保留。改用图外 Event 包住 replay，检查开始时间戳
+逐次前进；使用 elapsed_time 的毫秒结果转 μs，recorded_time 仅存原始计数，不冒称纳秒。
+图外事件可能包含派发留下的设备间隙，因此另采 profiler 的首末设备任务窗口核对。
+profiler 自身的事件包络不作为无 profiler 性能样本。
+
+一次重试因重复 `--save-case` 触发已存在目录保护而退出，未进入后续 PTO 测量；
+复用有效输入快照后正常完成。首层测量发现 metadata 生产须明确区分，随后按用户要求
+另跑第二层主口径。失效计时、失败重试与被替代报告均删除，只在本日志记录原因。
+
+### 108.2 主结果：第二层复用 metadata
+
+任务 `task_20260926_145850_27076428841` completed/exit=0。
+单卡 B16/S6/H8192、seed=1024；两侧相同 mode，性能版 atomic=1。
+
+| mode | Native p50 / p95（μs） | PTO p50 / p95（μs） | Native/PTO p50 |
+| --- | --- | --- | --- |
+| 1 | 938.68 / 943.60 | 856.82 / 874.18 | 1.096 |
+| 2 | 913.02 / 922.46 | 843.53 / 869.22 | 1.082 |
+
+独立 profiler 中，Native 各有 43 个设备任务，包含两项 CompressorMetadata；
+PTO 各只有 runtime/worker 两项，未重复生产 metadata，二者有重叠不能相加。
+mode=1 首末设备窗口为 Native 946.72 μs、PTO 859.68 μs；
+mode=2 为 Native 919.22 μs、PTO 843.52 μs，与主采样量级一致。
+
+两档均通过 metadata、slot 外逻辑区、物理页 padding、首尾保护区及有限值检查。
+Native 此用例两轮同初态输出/状态精确一致；PTO atomic 同初态 x_out 的最大差为 0.015625，
+mode=1/2 分别有 3979/1924 个元素不相同。PTO 对 Native 的 x_out 最大差均为 0.03125，
+RMSE 约 0.001867。mode=1 计时图对 eager 的 Top-K 有 2 行集合不同、合计 3 个替换；
+mode=2 的 3 行差异仅为集合内顺序。结构检查无越界、重复或缺失。
+这些均是差异诊断，不是已声明规则/容差后的数值验收，报告保持 MEASURED。
+
+mode=2 暂作下一轮优化候选，mode=1 保留。两档之间的差距仍受运行波动影响，
+不能据此选定整模型最终主口径；当前也没有达到 750 μs。
+
+### 108.3 首层成本和独立泳道
+
+首层任务 `task_20260926_144823_21728414911` completed/exit=0，
+PTO 图内每次生成两组 metadata，设备 profiler 确认存在两项生产算子。
+
+| mode | Native p50 / p95（μs） | PTO p50 / p95（μs） |
+| --- | --- | --- |
+| 1 | 912.02 / 917.48 | 910.20 / 929.58 |
+| 2 | 925.78 / 931.20 | 868.92 / 903.76 |
+
+此表来自独立轮次，只保留首层诊断信息；不能与第二层表直接相减作为 metadata 的净成本。
+
+DFX 任务 `task_20260926_145058_2389942171` completed/exit=0，复用相同 mode=2 输入快照，
+metadata 已作为入参准备。一个完整窗口、1131 条 worker 记录，无丢失窗口；
+调度到完成 837.90 μs，是独立 eager 诊断，不能替代图或整模型性能。
+名称映射来自该完整层唯一 kernel_config.py，并保留源表；删除猜测最新构建和旧根入口的分支。
+
+| 设备阶段 | 最早开始到最晚结束（μs） | 解释边界 |
+| --- | --- | --- |
+| HC_pre 至混合 norm | 29.42～123.40 | 多个 Vector 子步骤 |
+| Indexer score | 394.90～467.26 | AIC/AIV 重叠；此前还有 QR、量化与 key 重排 |
+| 稀疏 QK/PV | 502.02～652.20 | AIC/AIV 重叠，最大单 worker kernel 约 141.32 μs |
+| O projection 至激活 | 691.14～835.70 | A/B 投影与分组量化流水重叠 |
+| HC_post | 825.42～863.58 | 与输出阶段尾部有重叠 |
+
+这些首末窗口不能相加；跨度与单 worker 时间的差也不能全部归为计算或某一种调度开销。
+稀疏注意力与输出投影是下一轮待评估重点，先补尾块、padding 和长短上下文受影响验证，
+再逐项改动、比较数值和完整第二层区间，不用局部核变快替代整模型验收。
+
+证据与复现：
+- [配置、任务及版本](results/csa_baseline_20260926/nz_native_b16_timing/manifest.json)
+- [主对照、首层分项与泳道汇总](results/csa_baseline_20260926/nz_native_b16_timing/comparison.json)
+- [第二层 mode=1 报告](results/csa_baseline_20260926/nz_native_b16_timing/following_mode1/report.json)
+- [第二层 mode=2 报告](results/csa_baseline_20260926/nz_native_b16_timing/following_mode2/report.json)
+- [单窗口完整泳道](results/csa_baseline_20260926/nz_native_b16_timing/pto_mode2_swimlane/dfx/merged_swimlane.json)
+
+CPU 汇总脚本从完整采样、CSV 及 DFX 原始记录重建对照，核对 metadata 任务数与两种口径。
+本轮保留必要原始设备证据、复现脚本和一份本地输入；删除重复编译、profiler 中间产物与
+冗余日志，不提交权重/张量大文件。最终字段名与文档整理不重复占卡。
+改动 Python 文件的 Ruff、语法编译，三个复现脚本的 bash 语法，以及 Git 空白检查通过。
