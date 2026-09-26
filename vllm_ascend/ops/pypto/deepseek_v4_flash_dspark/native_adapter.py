@@ -59,6 +59,33 @@ def _pack_nd_weights_for_root(weights: dict, root_function) -> dict:
     return result
 
 
+def _unpack_nz(value: "torch.Tensor") -> "torch.Tensor":
+    """把已知为 PTO NZ 分形序的权重还原为逻辑 ND，供跨 mode 回放。"""
+    rows, cols = value.shape[-2:]
+    c0 = _NZ_C0_BYTES // value.element_size()
+    if rows % _NZ_FRACTAL_ROWS or cols % c0:
+        raise ValueError(f"不合法的 NZ 权重形状：{rows}x{cols}")
+    lead = tuple(value.shape[:-2])
+    host = value.detach().cpu()
+    return (
+        host.reshape(*lead, cols // c0, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, c0)
+        .permute(*range(len(lead)), len(lead) + 1, len(lead) + 2, len(lead), len(lead) + 3)
+        .contiguous().reshape(*lead, rows, cols).to(value.device)
+    )
+
+
+def repack_weights(tensors: dict, source_layouts: dict, target_layouts: dict) -> dict:
+    """已知来源布局才允许转换；相同布局保持原存储，禁止无条件二次打包。"""
+    result = dict(tensors)
+    for name, target in target_layouts.items():
+        source = source_layouts.get(name)
+        if source not in ("ND", "NZ") or target not in ("ND", "NZ"):
+            raise ValueError(f"未知权重布局：{name} {source} -> {target}")
+        if source != target:
+            result[name] = (_pack_nz if target == "NZ" else _unpack_nz)(result[name])
+    return result
+
+
 @dataclass(frozen=True)
 class CSAOperators:
     attention: Any

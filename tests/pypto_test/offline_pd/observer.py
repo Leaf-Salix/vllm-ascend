@@ -274,19 +274,21 @@ class OfflineCSAObserver:
         DeviceMetadataExecutor，重建它等于复活旧接口；而这里比的是线上真实张量，
         权重、缓存、metadata 全都一致，不存在人造输入的偏差。
 
-        同一步里先跑 PTO 再跑 Native，两者都写同一批 cache 槽位。这是安全的：
-        compress_state 等状态是按计算出的行列直接赋值而非累加，重复写幂等；
-        Native 在读之前先写当前 token 的槽位，所以它的结果不受 PTO 先写的影响。
+        在真正调用 kernel 前保存 slot 声明会写的 cache/state 页和输出缓冲，
+        两次执行之间恢复初态，不假定重复写天然幂等。只备份触及页，避免复制整份 cache。
+        越界和保护区仍需独立验收，不能由这条数值诊断路径推出。
         比完把 output 留成 Native 的值，让本轮继续沿参考轨迹走，避免差异累积。
         """
         import torch
 
         from dsv4_csa_validation import compare_tensor
-        from vllm_ascend.ops.dsa import dsa_forward
+        from dsv4_csa_replay import capture_written_pages, restore_written_pages
         from vllm_ascend.ops.pypto.variant import variant_package
 
         CSAServiceRuntime = __import__(
             f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+        NativeCSACall = __import__(
+            f"{variant_package()}.native_adapter", fromlist=["NativeCSACall"]).NativeCSACall
 
         if getattr(self, "_offline_bitcompare", None) is not None:
             raise RuntimeError("Bit comparison is already active")
@@ -313,8 +315,22 @@ class OfflineCSAObserver:
             state["seen"] += 1
             if len(state["samples"]) >= max_samples:
                 return original(runtime, context, hidden, positions, output, kv_cache, *args, **kwargs)
-            result = original(runtime, context, hidden, positions, output, kv_cache, *args, **kwargs)
+            initial = []
+            original_core_call = NativeCSACall.__call__
+
+            def capture_initial(call):
+                initial.extend(capture_written_pages(call.args))
+                return original_core_call(call)
+
+            NativeCSACall.__call__ = capture_initial
+            try:
+                result = original(runtime, context, hidden, positions, output, kv_cache, *args, **kwargs)
+            finally:
+                NativeCSACall.__call__ = original_core_call
+            if not initial:
+                raise RuntimeError("数值诊断未捕获实际 PTO 调用初态")
             pto = output.detach().clone()
+            restore_written_pages(initial)
             if mode == "self":
                 # PTO 自比对：同一输入再跑一遍 PTO。这是跨实现比对的前提——kv_fp32 用
                 # atomic=pl.AtomicType.Add 且 KV_OK=2，同一输出位置由两个 K 分片的块
@@ -873,18 +889,20 @@ class OfflineCSAObserver:
         return dict(state)
 
     def offline_begin_argdump(self, layer_index, out_dir, expected_tokens):
-        """把一次真实 CSA 调用的全部根入参落盘，供单卡回放。
+        """保存调用前初态与调用后参考，供保留布局和别名的单卡回放。"""
+        import importlib
 
-        目的是把"改一次 kernel 就要起 16 卡整模型"这条链切断：dump 一次之后，
-        `dsv4_csa_single_card_bench.py` 就能在单卡上反复回放同一组真实输入，
-        既能立刻暴露 aicore 故障，也能采泳道量单次耗时。
-        """
-        from vllm_ascend.ops.pypto.variant import variant_package
+        from dsv4_csa_replay import argument_roles, capture_tensors, save_snapshot
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import WEIGHT_NZ_MODE, root_weight_layouts
+        from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
+
         package = variant_package()
-        CSAServiceRuntime = __import__(f"{package}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
-        native_adapter = __import__(f"{package}.native_adapter", fromlist=["NativeCSACall"])
-        NativeCSACall = native_adapter.NativeCSACall
-
+        adapter = importlib.import_module(f"{package}.native_adapter")
+        roots = importlib.import_module(f"{package}.decode_csa")
+        NativeCSACall = adapter.NativeCSACall
+        kernel = roots.decode_csa_tp1_layer_test
+        root = roots._decode_csa_tp1_layer
+        roles = argument_roles(root)
         if getattr(self, "_offline_argdump", None) is not None:
             raise RuntimeError("Argument dump is already active")
         rank = self.vllm_config.parallel_config.data_parallel_rank
@@ -893,79 +911,51 @@ class OfflineCSAObserver:
         if wanted is None:
             raise ValueError(f"Layer {layer_index} has no PTO CSA runtime")
         state = {"dp_rank": rank, "layer_index": layer_index, "layer_name": wanted.layer_name,
-                 "expected_tokens": expected_tokens, "dumped": 0, "path": None}
-        # 只 dump rank0：16 个 rank 的输入形状一致，多存只是浪费磁盘。
-        state["enabled"] = rank == 0
-        original_call = CSAServiceRuntime.__call__
-        original_init = NativeCSACall.__init__
-        latest = {}
+                 "expected_tokens": expected_tokens, "enabled": rank == 0, "dumped": 0, "path": None,
+                 "seen": {}}
+        original_init, original_call = NativeCSACall.__init__, NativeCSACall.__call__
+        selected = {}
 
         def traced_init(call, *args, **kwargs):
             original_init(call, *args, **kwargs)
-            latest["call"] = call
+            if not state["enabled"] or kwargs.get("layer_name") != wanted.layer_name:
+                return
+            tokens = call.args["x_hc"].shape[0]
+            state["seen"][str(tokens)] = state["seen"].get(str(tokens), 0) + 1
+            if selected or tokens != expected_tokens:
+                return
+            values = {name: call.args[name] for name in kernel.param_names}
+            source = {"variant": selected_variant(), "package": package, "weight_nz_mode": WEIGHT_NZ_MODE,
+                      "state_timing": "before_call", "root": kernel.__name__}
+            meta, payload = capture_tensors(values, roles, root_weight_layouts(root), source)
+            meta.update(layer_index=layer_index, layer_name=wanted.layer_name, tokens=tokens,
+                        reference={"file": "csa_reference.pt", "kind": "source_PTO_after_one_call",
+                                   "outputs": list(kernel.output_param_names)})
+            save_snapshot(out_dir, meta, payload)
+            selected["call"] = call
 
-        def traced(runtime, context, hidden, *args, **kwargs):
-            result = original_call(runtime, context, hidden, *args, **kwargs)
-            # 诊断：落盘条件不满足时，这张直方图能说明到底差在哪一项
-            # （是 runtime 不匹配、还是 token 数对不上）。
-            seen = state.setdefault("seen", {})
-            key = f"shape={tuple(hidden.shape)} same_runtime={runtime is wanted}"
-            seen[key] = seen.get(key, 0) + 1
-            if (state["enabled"] and runtime is wanted and not state["dumped"]
-                    and hidden.shape[0] == expected_tokens):
-                call = latest.get("call")
-                if call is not None:
-                    import torch
-                    target = Path(out_dir)
-                    target.mkdir(parents=True, exist_ok=True)
-                    # 整层融合（1dcadd85）后入口改名，旧名保留成回退。
-                    _entry = "decode_csa_tp1_layer_test"
-                    _mod = __import__(f"{package}.decode_csa", fromlist=[_entry])
-                    kernel = getattr(_mod, _entry, None) or _mod.decode_csa_tp1_attention_test
-                    names = list(kernel.param_names)
-                    payload = {}
-                    for name in names:
-                        value = call.args[name]
-                        if not isinstance(value, torch.Tensor):
-                            raise TypeError(f"CSA argument {name} is not a tensor: {type(value)}")
-                        # 输出缓冲也一并存：回放要的是完全相同的形状与 dtype。
-                        # 用 torch.save 而不是 np.savez——numpy 不认 bfloat16。
-                        payload[name] = value.detach().cpu().contiguous().clone()
-                    torch.save(payload, target / "csa_args.pt")
-                    # 记录 indexer 的 key/scale 原始视图元数据：页跨度到底是 4096
-                    # （键整段连续）还是 4160（逐页与 scale 交错），静态读代码读不出来。
-                    key_view, scale_view = call.views["indexer"]
-                    storage_meta = {
-                        name: {"shape": list(t.shape), "strides": list(t.stride()),
-                               "storage_offset": t.storage_offset(), "dtype": str(t.dtype),
-                               "data_ptr": t.data_ptr(),
-                               "storage_data_ptr": t.untyped_storage().data_ptr(),
-                               "storage_nbytes": t.untyped_storage().nbytes(),
-                               "is_contiguous": bool(t.is_contiguous())}
-                        for name, t in (("indexer_key", key_view), ("indexer_scale", scale_view))
-                    }
-                    meta = {"layer_index": layer_index, "layer_name": wanted.layer_name,
-                            "indexer_storage": storage_meta,
-                            "tokens": int(hidden.shape[0]), "param_names": names,
-                            "dtypes": {k: str(call.args[k].dtype) for k in names},
-                            "shapes": {k: list(call.args[k].shape) for k in names}}
-                    (target / "csa_args_meta.json").write_text(json.dumps(meta, indent=2))
-                    state["dumped"] += 1
-                    state["path"] = str(target / "csa_args.pt")
+        def traced_call(call):
+            result = original_call(call)
+            if call is selected.get("call") and not state["dumped"]:
+                import torch
+
+                # 参考值只用于逐元素对照；回放初态与别名来自独立的原始存储快照。
+                reference = {name: call.args[name].detach().to("cpu", copy=True)
+                             for name in kernel.output_param_names}
+                torch.save(reference, Path(out_dir) / "csa_reference.pt")
+                state.update(dumped=1, path=str(Path(out_dir) / "csa_args.pt"))
             return result
 
-        CSAServiceRuntime.__call__ = traced
-        NativeCSACall.__init__ = traced_init
-        self._offline_argdump = (state, original_call, original_init, CSAServiceRuntime, NativeCSACall)
+        NativeCSACall.__init__, NativeCSACall.__call__ = traced_init, traced_call
+        self._offline_argdump = (state, original_init, original_call, NativeCSACall)
         return dict(state)
 
     def offline_end_argdump(self):
         entry = getattr(self, "_offline_argdump", None)
         if entry is None:
             raise RuntimeError("Argument dump was not started")
-        state, original_call, original_init, CSAServiceRuntime, NativeCSACall = entry
-        CSAServiceRuntime.__call__ = original_call
-        NativeCSACall.__init__ = original_init
+        state, original_init, original_call, cls = entry
+        cls.__init__, cls.__call__ = original_init, original_call
         self._offline_argdump = None
         return dict(state)
 

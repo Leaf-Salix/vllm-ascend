@@ -22,6 +22,7 @@ from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
 from dsv4_csa_validation import validate_outputs
+from dsv4_csa_replay import SCHEMA_VERSION, argument_roles, convert_weight_layouts, materialize, restore_mutable_storages
 
 
 def _export_swimlane(directory: Path) -> dict:
@@ -116,36 +117,29 @@ def _run_benchmark(args, report):
     kernel = getattr(module, entry, None) or module.decode_csa_tp1_attention_test
 
     meta = json.loads((args.args_dir / "csa_args_meta.json").read_text())
-    blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu")
     names = list(kernel.param_names)
     if names != meta["param_names"]:
-        raise ValueError("落盘入参的参数表与当前 kernel 不一致，需重新 argdump")
+        raise ValueError("落盘入参的参数表与当前 kernel 不一致，需显式转换快照")
+    root = getattr(module, kernel.__name__)
+    roles = argument_roles(root)
+    if meta.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("旧快照缺少布局/初态/别名信息，必须先显式迁移后回放")
+    if any(meta["tensors"][name]["role"] != roles[name] for name in names):
+        raise ValueError("快照读写角色与当前根签名不一致")
+    blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu", weights_only=True)
 
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts
+    layouts = root_weight_layouts(root)
     device = f"npu:{args.device}"
     torch.npu.set_device(args.device)
-    tensors = {name: blob[name].to(device) for name in names}
-    # 算子包可以提供 nz_args.pack_args 来预处理根入参（例如把某些权重改存成 NZ 分形序）。
-    # 整模型路径在 native_adapter.prepare_weights 里做同样的事；这里是单卡回放的等价钩子，
-    # 两边必须一致，否则单卡测出来的就不是整模型实际跑的布局。
-    try:
-        pack_args = __import__(f"{package}.nz_args", fromlist=["pack_args"]).pack_args
-    except ModuleNotFoundError:
-        pack_args = None
-    if pack_args is not None:
-        before = {k: v.data_ptr() for k, v in tensors.items()}
-        tensors = pack_args(tensors)
-        # 开关关闭时 pack_args 原样返回，打印"已应用"会误导；这里报出实际重排了哪几张。
-        repacked = [k for k, v in tensors.items() if before.get(k) != v.data_ptr()]
-        # 重排会在原张量之外新建一份（wo_a 是 [8,1024,4096] BF16，64MiB），而整模型
-        # 路径的 prepare_weights 是就地替换那个本来就存在的 transpose 副本、不多占显存。
-        # 不把旧的那份还给分配器，单卡回放就会比整模型多占一块、改变 HBM 分配布局，
-        # 进而让**与本次重排无关**的 matmul（qproj_matmul 读 wq_b、proj_b_mm 读 wo_b）
-        # 一起变慢——实测 mode=2 下这两项稳定 +7.4 / +1.7 µs，纯属口径假象。
-        if repacked:
-            import gc
-            gc.collect()
-            torch.npu.empty_cache()
-        print(f"nz_args.pack_args: 重排 {len(repacked)} 张 {repacked}", flush=True)
+    tensors, backings = materialize(meta, blob, device)
+    tensors, converted = convert_weight_layouts(tensors, meta, layouts)
+    for name in converted:
+        # 转换仅允许独占的只读权重，释放已被新布局替换的设备存储。
+        sid = meta["tensors"][name]["storage"]
+        del backings[sid]
+    report.update(snapshot_source=meta["source"], root_layouts=layouts, converted_weights=converted,
+                  state_reset="每次调用前恢复相同初态；恢复与同步均在计时/DFX 窗口之外")
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -167,64 +161,63 @@ def _run_benchmark(args, report):
               "layer_index": meta["layer_index"], "tokens": meta["tokens"],
               "iters": args.iters, "warmup": args.warmup, "swimlane_level": args.swimlane,
               "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"})
-    try:
-        # 正确性检查单独执行，不把 CPU 比较、拷贝或同步开销混入计时。
-        reference = torch.load(args.reference, map_location="cpu", weights_only=True) if args.reference else None
-        tolerances = json.loads(args.tolerances.read_text()) if args.tolerances else None
+    # 正确性检查单独执行，不把 CPU 比较、拷贝或同步开销混入计时。
+    reference = torch.load(args.reference, map_location="cpu", weights_only=True) if args.reference else None
+    tolerances = json.loads(args.tolerances.read_text()) if args.tolerances else None
+    restore_mutable_storages(meta, blob, backings)
+    run()
+    torch.npu.synchronize()
+    report["validation"] = validate_outputs(tensors, kernel.output_param_names, reference, tolerances)
+    if report["validation"]["status"] == "FAIL":
+        raise ValueError(f"CSA 输出检查失败：{report['validation']['errors']}")
+    for _ in range(args.warmup):
+        restore_mutable_storages(meta, blob, backings)
+        run()
+    torch.npu.synchronize()
+
+    samples = []
+    for _ in range(args.iters):
+        restore_mutable_storages(meta, blob, backings)
+        torch.npu.synchronize()
+        start = time.perf_counter()
         run()
         torch.npu.synchronize()
-        report["validation"] = validate_outputs(tensors, kernel.output_param_names, reference, tolerances)
-        if report["validation"]["status"] == "FAIL":
-            raise ValueError(f"CSA 输出检查失败：{report['validation']['errors']}")
-        for _ in range(args.warmup):
-            run()
-        torch.npu.synchronize()
-
-        samples = []
-        for _ in range(args.iters):
+        samples.append((time.perf_counter() - start) * 1e6)
+    samples.sort()
+    if args.swimlane:
+        # 每个窗口只包一次调用：不然一个窗口里记好几遍，产物没法逐任务对照。
+        # 墙钟里绝大部分是 eager 下的主机侧派发开销（PyPTO 的 _resolve_compiled
+        # 按调用次数计费），要量 kernel 本身必须看泳道的 kernel-duration。
+        # 第一个窗口写进 dfx/，之后的依次写进 dfx/window_1、dfx/window_2 ……
+        for _ in range(max(1, args.windows)):
+            restore_mutable_storages(meta, blob, backings)
             torch.npu.synchronize()
-            start = time.perf_counter()
-            run()
+            pypto.torch.begin_dfx()
+            try:
+                run()
+            finally:
+                pypto.torch.end_dfx()
             torch.npu.synchronize()
-            samples.append((time.perf_counter() - start) * 1e6)
-        samples.sort()
-        if args.swimlane:
-            # 每个窗口只包一次调用：不然一个窗口里记好几遍，产物没法逐任务对照。
-            # 墙钟里绝大部分是 eager 下的主机侧派发开销（PyPTO 的 _resolve_compiled
-            # 按调用次数计费），要量 kernel 本身必须看泳道的 kernel-duration。
-            # 第一个窗口写进 dfx/，之后的依次写进 dfx/window_1、dfx/window_2 ……
-            for _ in range(max(1, args.windows)):
-                torch.npu.synchronize()
-                pypto.torch.begin_dfx()
-                try:
-                    run()
-                finally:
-                    pypto.torch.end_dfx()
-                torch.npu.synchronize()
-        report.update(status=report["validation"]["status"],
-                      us_min=samples[0], us_p50=statistics.median(samples),
-                      us_p90=samples[int(len(samples) * 0.9) - 1], us_max=samples[-1],
-                      samples_us=samples,
-                      wallclock_scope="墙钟含 eager 主机侧派发开销，不是 kernel 时间；"
-                                      "逐任务 kernel 时长看 --swimlane 4 的产物")
-        if args.swimlane >= 4 and not args.pmu:
-            report["swimlane"] = _export_swimlane(args.output / "dfx")
-            report["swimlane_windows"] = [
-                _export_swimlane(args.output / "dfx" / f"window_{index}")
-                for index in range(1, max(1, args.windows))
-            ]
-        report["final_finite_checks"] = validate_outputs(tensors, kernel.output_param_names)
-        if report["final_finite_checks"]["status"] == "FAIL":
-            raise ValueError(f"CSA 计时后输出检查失败：{report['final_finite_checks']['errors']}")
-        # 整层入口（1dcadd85 之后）的输出是 x_out（mHC 残差流）；融合前叫 attn_out。
-        out_name = "x_out" if "x_out" in tensors else "attn_out"
-        out = tensors[out_name].detach().float().cpu()
-        report[out_name] = {"finite": bool(torch.isfinite(out).all()),
-                              "absmax": float(out.abs().max()), "mean": float(out.mean())}
-    except BaseException as exc:  # 故障也要留证据
-        report.update(status="FAIL", error=repr(exc))
-        write_json(args.output / "report.json", report)
-        raise
+    report.update(status=report["validation"]["status"],
+                  us_min=samples[0], us_p50=statistics.median(samples),
+                  us_p90=samples[int(len(samples) * 0.9) - 1], us_max=samples[-1],
+                  samples_us=samples,
+                  wallclock_scope="墙钟含 eager 主机侧派发开销，不是 kernel 时间；"
+                                  "逐任务 kernel 时长看 --swimlane 4 的产物")
+    if args.swimlane >= 4 and not args.pmu:
+        report["swimlane"] = _export_swimlane(args.output / "dfx")
+        report["swimlane_windows"] = [
+            _export_swimlane(args.output / "dfx" / f"window_{index}")
+            for index in range(1, max(1, args.windows))
+        ]
+    report["final_finite_checks"] = validate_outputs(tensors, kernel.output_param_names)
+    if report["final_finite_checks"]["status"] == "FAIL":
+        raise ValueError(f"CSA 计时后输出检查失败：{report['final_finite_checks']['errors']}")
+    # 整层入口（1dcadd85 之后）的输出是 x_out（mHC 残差流）；融合前叫 attn_out。
+    out_name = "x_out" if "x_out" in tensors else "attn_out"
+    out = tensors[out_name].detach().float().cpu()
+    report[out_name] = {"finite": bool(torch.isfinite(out).all()),
+                          "absmax": float(out.abs().max()), "mean": float(out.mean())}
 
 
 if __name__ == "__main__":
