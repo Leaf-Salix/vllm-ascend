@@ -7,7 +7,23 @@ import sys
 import pytest
 import torch
 
-from dsv4_csa_validation import compare_tensor, validate_outputs
+from dsv4_csa_validation import compare_tensor, compare_topk, validate_outputs
+
+
+def test_topk_order_is_separate_from_candidate_selection():
+    expected = torch.tensor([[0, 1, 2], [0, 1, 2], [0, -1, -1]])
+    actual = torch.tensor([[2, 0, 1], [0, 1, 3], [0, -1, -1]])
+    report = compare_topk(actual, expected, torch.tensor([4, 4, 1]))
+    assert report["status"] == "MEASURED"
+    assert report["order_only_rows"] == 1 and report["different_set_rows"] == 1
+    assert report["replaced_indices"] == 1 and report["invalid_rows"] == 0
+
+
+def test_topk_rejects_duplicates_out_of_bounds_and_missing_candidates():
+    expected = torch.tensor([[0, 1, 2], [0, 1, 2], [0, 1, 2]])
+    actual = torch.tensor([[0, 0, 2], [0, 1, 3], [0, 1, -1]])
+    report = compare_topk(actual, expected, torch.tensor([3, 3, 3]))
+    assert report["status"] == "FAIL" and report["invalid_rows"] == 3
 
 
 def test_permutation_with_same_statistics_fails():

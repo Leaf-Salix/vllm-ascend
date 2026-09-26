@@ -4,6 +4,49 @@
 import math
 
 
+def compare_topk(actual, expected, visible_counts):
+    """检查索引有效性并区分排列/集合差异；不把集合差异自动认作允许的精度权衡。"""
+    import torch
+
+    result = {"status": "FAIL", "scope": "Top-K 结构与集合诊断，不代表选择规则或整模型验收"}
+    if (actual.ndim != 2 or actual.shape != expected.shape or actual.dtype != expected.dtype
+            or actual.dtype not in (torch.int32, torch.int64) or not actual.numel()):
+        return {**result, "reason": "Top-K 必须是同 shape/dtype 的非空二维整数张量"}
+    if (visible_counts.shape != (actual.shape[0],) or visible_counts.dtype not in (torch.int32, torch.int64)
+            or bool((visible_counts < 0).any())):
+        return {**result, "reason": "每行可见候选数必须是非负整数"}
+    a, b = actual.detach().cpu(), expected.detach().cpu()
+    failures, examples = [], []
+    order_only, different_sets, replaced = 0, 0, 0
+    for row, (left, right, limit) in enumerate(zip(a.tolist(), b.tolist(), visible_counts.cpu().tolist())):
+        selections = []
+        for name, indices in (("actual", left), ("expected", right)):
+            chosen = [index for index in indices if index >= 0]
+            invalid = [index for index in indices if index < -1 or index >= limit]
+            if invalid or len(set(chosen)) != len(chosen) or len(chosen) != min(a.shape[1], limit):
+                failures.append({"row": row, "side": name, "visible_count": limit,
+                                 "invalid": invalid[:8], "selected": len(chosen),
+                                 "unique": len(set(chosen))})
+            selections.append(set(chosen))
+        only_actual = sorted(selections[0] - selections[1])
+        only_expected = sorted(selections[1] - selections[0])
+        if only_actual or only_expected:
+            different_sets += 1
+            replaced += max(len(only_actual), len(only_expected))
+            if len(examples) < 8:
+                examples.append({"row": row, "only_actual_count": len(only_actual),
+                                 "only_expected_count": len(only_expected),
+                                 "only_actual": only_actual[:8], "only_expected": only_expected[:8]})
+        elif left != right:
+            order_only += 1
+    result.update(status="FAIL" if failures else "MEASURED", rows=a.shape[0],
+                  position_mismatches=int((a != b).sum()), order_only_rows=order_only,
+                  different_set_rows=different_sets, replaced_indices=replaced,
+                  invalid_rows=len({entry["row"] for entry in failures}),
+                  structural_errors=failures[:8], set_examples=examples)
+    return result
+
+
 def compare_tensor(actual, expected, atol, rtol):
     import torch
 

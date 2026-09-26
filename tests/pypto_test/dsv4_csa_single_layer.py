@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
-from dsv4_csa_validation import compare_tensor
+from dsv4_csa_validation import compare_tensor, compare_topk
 
 
 def writable_bytes(allocation, views, slots):
@@ -247,6 +247,13 @@ def run(args, report):
         report.update(details)
         fixture = make_fixture(config, layer.self_attn, args.batch, args.history, args.seed, device)
         report["layouts"] = {name: group["layout"] for name, group in fixture["groups"].items()}
+        from vllm_ascend.ascend_config import get_ascend_config
+
+        report["effective_weight_nz_mode"] = get_ascend_config().weight_nz_mode
+        report["native_weight_formats"] = {
+            name: torch_npu.get_npu_format(dict(layer.self_attn.named_parameters())[f"{name}.weight"])
+            for name in ("wq_a", "wq_b", "wo_a", "wo_b")
+        }
         output = torch.empty_like(fixture["hidden"])
         original_qli = torch.ops._C_ascend.npu_vllm_quant_lightning_indexer
         captured = {}
@@ -254,6 +261,12 @@ def run(args, report):
         def record_qli(*inputs, **kwargs):
             value = original_qli(*inputs, **kwargs)
             captured["topk"] = value[0].detach().clone()
+            if args.save_case and not native:
+                # Native 不返回 score；保留其真实 QLI 输入，后续可离线分析选择边界。
+                captured["indexer_inputs"] = {
+                    name: kwargs[name].detach().cpu()
+                    for name in ("query", "weights", "query_dequant_scale", "block_table")
+                }
             return value
 
         torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = record_qli
@@ -327,6 +340,17 @@ def run(args, report):
             report["pto_guards"].append(guard_checks(fixture))
         report["pto_self"] = {name: compare_tensor(pto[1][name], value, 0, 0) for name, value in pto[0].items()}
         report["pto_native"] = {name: compare_tensor(pto[0][name], value, 0, 0) for name, value in native[0].items()}
+        visible = (fixture["positions"].cpu() + 1) // 4
+        report["topk_selection"] = compare_topk(pto[0]["idx_topk"], native[0]["idx_topk"], visible)
+        if args.save_case:
+            torch.save({"state": native[0], "indexer_inputs": captured["indexer_inputs"]},
+                       args.output / "native_reference.pt")
+            torch.save({"idx_topk": pto[0]["idx_topk"], "idx_topk_scores": call.args["idx_topk_scores"].cpu()},
+                       args.output / "pto_topk.pt")
+            report["saved_reference"] = {
+                "native": "native_reference.pt", "pto_topk": "pto_topk.pt",
+                "scope": "逻辑 cache/state、层输出和 QLI 输入；不是单卡 bench 的根 ABI 参考",
+            }
         report["status"] = "MEASURED"
         # 零容差只用于诊断差异；保护区破坏和非有限值仍是功能失败。
         for path in ("native_guards", "pto_guards"):
@@ -335,6 +359,8 @@ def run(args, report):
         for path in ("native_self", "pto_self", "pto_native"):
             if any(check.get("nonfinite") != 0 for check in report[path].values()):
                 raise ValueError(f"{path}：输出/状态 shape、dtype 或有限值检查失败")
+        if report["topk_selection"]["status"] == "FAIL":
+            raise ValueError("Top-K 含越界、重复或缺失的候选索引")
 
 
 def main():
