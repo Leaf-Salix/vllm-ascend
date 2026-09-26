@@ -6229,3 +6229,80 @@ start[b] = same[b] * grew[b] * (old_len // BLOCK_SIZE)
 **结论：设计已经可落地，但代价是 1.32~5.25 GiB 显存（取决于部署的 `max_num_seqs`），
 且即使成功也只到 ratio 约 1.09、达不到 ≤0.700。这是显存换延迟的部署取舍，需要按部署
 口径决定，不由算子层面自行拍。**
+
+## 166. 增量 repack 的实现尝试：管道打通的三个具体障碍（2026-09-27）
+
+按 §165 的设计做了阶段一（只把紧凑缓冲改成宿主分配的持久根参数，不加增量逻辑，
+先验证管道）。改动做在实验包里，三次编译失败暴露出三个具体障碍，记下来免得重蹈。
+
+### 障碍一：repack 与 score 不在 `indexer()` 里
+
+`key_compact` / `scale_compact` 的创建与使用都在 **`indexer_score_topk_forest()`**
+（`decode_indexer.py` 第 407 行）里，不是在 `indexer()`（第 882 行）里。只给 `indexer()`
+加参数会报作用域错误：
+
+```
+error: Check if the variable is defined before using it or is available in the enclosing scope
+453 |     scale_compact = scale_compact_buf
+```
+
+所以要穿三层：`decode_csa.py` 的根签名 → `indexer()` → `indexer_score_topk_forest()`，
+两处签名加参数、两处调用加实参。
+
+### 障碍二：inline 函数的形参不能引入新的 `pl.dynamic` 符号
+
+最初把缓冲声明成 `[KEY_COMPACT_DYN, IDX_HEAD_DIM]`（新建一个动态符号，仿
+`IDX_CACHE_BLOCK_NUM_DYN` 的样子），报：
+
+```
+ValueError: @pl.jit: missing inferred tensor metadata for parameter 'key_compact_buf'
+  of 'indexer_score_topk_forest'   （pypto/jit/specializer.py:2368 _build_params）
+```
+
+改成用**已有的 `B_DYN` 作第一维、第二维取编译期常量**
+（`[B_DYN, MAX_REPACK_ROWS * IDX_HEAD_DIM]`），在 kernel 里再
+`pl.reshape(buf, [b_dim * MAX_REPACK_ROWS, IDX_HEAD_DIM])` 摊平成打分侧需要的行视图
+（现有代码对 `idx_block_table` 就是这么做的）。这一步是必要的，但**还不够**——同一个
+报错仍在，见障碍三。
+
+### 障碍三（决定性）：buffer 支撑的根参数由**共享的**适配器构造
+
+`buffers` 不是由性能包自己消费的。性能包的 `native_adapter.py` 只是子类化，真正的
+构造在**精度包**的 `deepseek_v4_flash_dspark/native_adapter.py`：
+
+```python
+def empty(name, shape, dtype):
+    if buffers is None: return torch.empty(shape, dtype=dtype, device=hidden.device)
+    value = buffers[name]
+    if tuple(value.shape) != shape or value.dtype != dtype or value.device != hidden.device:
+        raise ValueError(f"Invalid prepared CSA buffer {name}")
+    return value
+...
+    idx_topk_scores=empty("idx_topk_scores", (tokens, 512), torch.float32),
+    idx_topk=empty("idx_topk", (tokens, 512), torch.int32),
+    x_out=empty("x_out", (tokens, 4, 4096), torch.bfloat16),
+```
+
+kernel 实参是在这里**逐个显式列出**的，光在 `service.py` 的 `buffers` 字典里塞新键没有
+任何作用——适配器不会把它传给 kernel，于是 specializer 找不到该形参的张量元数据。
+
+**这意味着增量 repack 不是性能包内部的改动**：要加两个根参数，必须改共享适配器，
+而共享适配器同时服务精度版；精度版 kernel 没有这两个形参，`empty()` 的严格形状校验
+和实参列表都会对不上。所以**两版 kernel 必须同时加这两个参数、两版的 `service.py`
+必须同时分配缓冲**，改动面是两版共享路径，不是一个实验包能隔离验证的。
+
+### 结论：设计仍然成立，但代价要重新算
+
+§165 的算法设计（全批统一起始页、纯算术判据避开 SSA、块表前缀精确比较）没有问题，
+本节三个障碍都是工程管道问题，且都已给出解法。但要把它们做完，改动面是：
+
+- `decode_csa.py`（两版）：根签名 + `bind_dynamic` + 调用实参
+- `decode_indexer.py`（两版）：`indexer()` 与 `indexer_score_topk_forest()` 两处签名、
+  缓冲来源、`repack_rows` 改常量、score 侧索引、增量判据、状态写回
+- `native_adapter.py`（**共享**）：`empty()` 实参列表加两项
+- `service.py`（两版）：分配持久缓冲并放进 `buffers`
+- `config.py`（两版）：`MAX_INDEXER_HISTORY`；`service_config.py`：运行时闸门
+
+加上 1.32~5.25 GiB 显存、以及落地后需要重扫 `REPACK_WORKERS`（增量后每步只搬 2 页左右，
+192 块会大量空转），而收益上限只到 ratio 约 1.09。**这是一笔需要按部署口径拍的账，
+不该由算子层面自行决定，本轮到此为止。**
