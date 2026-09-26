@@ -19,6 +19,7 @@ class OfflineNPUWorker(NPUWorker):
         super().__init__(vllm_config, *args, **kwargs)
         self._offline_requested_deterministic_level = level
         self._offline_event_work_mode = vllm_config.additional_config.get("offline_event_work_mode")
+        self._offline_moe_routing_tokens = vllm_config.additional_config.get("offline_moe_routing_tokens")
         print(f"OFFLINE_WORKER_DETERMINISTIC pid={os.getpid()} level={level}", flush=True)
 
     def init_device(self):
@@ -26,7 +27,23 @@ class OfflineNPUWorker(NPUWorker):
         if self._offline_event_work_mode is not None:
             set_event_work_mode(self._offline_event_work_mode)
             print(f"OFFLINE_CANN_EVENT_MODE pid={os.getpid()} mode={get_event_work_mode()}", flush=True)
+        if self._offline_moe_routing_tokens is not None:
+            from offline_pd.moe_routing import RoutingCapture
+
+            self._offline_moe_routing = RoutingCapture(
+                self._offline_moe_routing_tokens, self.vllm_config.model_config.hf_config.num_hidden_layers)
+            self._offline_moe_routing.install()
         return result
+
+    def offline_begin_moe_routing(self, *args):
+        from offline_pd.moe_routing import begin
+
+        return begin(self, *args)
+
+    def offline_end_moe_routing(self):
+        from offline_pd.moe_routing import end
+
+        return end(self)
 
     def offline_runtime_config(self):
         return {

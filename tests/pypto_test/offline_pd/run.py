@@ -377,6 +377,8 @@ def diagnose(args, llm, cases):
     if args.rank_decode_token is not None:
         args.decode_tokens = args.rank_decode_token
     expected_tokens = args.batch * QUERY_TOKENS
+    if args.command == "moe-routing" and args.rank_batch is not None:
+        expected_tokens = args.rank_batch * QUERY_TOKENS
     stats_before = spec_decode_metrics(llm) if args.sweep_batches else None
     warmup = [generate_round(llm, args, case, args.warmup_tokens)["elapsed_seconds"]
               for _ in range(args.warmup_rounds)]
@@ -441,6 +443,13 @@ def diagnose(args, llm, cases):
             common["scope"] = ("steady_window 仅记录 warmup 后 _model_forward 的设备耗时；"
                                "独立 Level0 trace 用于 HC_pre→HC_post 设备首末区间，"
                                "须解析各 rank/层，不累加并发 kernel 时间。")
+    elif args.command == "moe-routing":
+        started = llm.collective_rpc("offline_begin_moe_routing", args=(
+            args.warmup_steps, expected_tokens, common["submitted"], args.compare_samples))
+        measured = generate_round(llm, args, case, args.decode_tokens)
+        window = llm.collective_rpc("offline_end_moe_routing")
+        common.update(started=started, window=window, output_token_ids=measured["output_token_ids"],
+                      scope="图内复制路由整数、图外同步读取的诊断；本轮不报告性能")
     elif args.command == "hostprofile":
         started = llm.collective_rpc("offline_begin_host_profile", args=(
             str((args.output / "host").resolve()), args.profile_start_step,
@@ -546,6 +555,10 @@ def diagnose(args, llm, cases):
         not common["window"] or any(item.get("status") == "FAIL" for item in common["window"])
     ):
         raise RuntimeError("CSA 数值诊断样本不足或包含无效张量；详见已落盘的 bitcompare 记录")
+    if args.command == "moe-routing" and (
+        not common["window"] or not all(item["sufficient"] for item in common["window"])
+    ):
+        raise RuntimeError("路由诊断未取得约定的满档 step 和完整主模型层")
 
 
 def profile_export(args):
@@ -779,6 +792,9 @@ def worker(args):
         additional_config={"weight_nz_mode": args.weight_nz_mode, "enable_kv_nz": False, "enable_dsa_cp": False,
                            "offline_deterministic_level": int(args.deterministic),
                            "offline_event_work_mode": args.event_work_mode,
+                           **({"offline_moe_routing_tokens": (args.rank_batch or args.batch)
+                               * (plan["decode"]["speculative_tokens"] + 1)}
+                              if args.command == "moe-routing" else {}),
                            # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
                            # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
                            # npu_add_rms_norm_bias，而 PyTorch 的 pattern matcher 用
@@ -829,7 +845,7 @@ def worker(args):
         llm.llm_engine.engine_core.shutdown()
         return
     if args.command in ("profile", "performance", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
-                        "argdump"):
+                        "argdump", "moe-routing"):
         try:
             for current in diagnostic_runs(args):
                 current.output.mkdir(parents=True, exist_ok=True)
@@ -901,7 +917,7 @@ def launch(args):
     if len(devices) != 16 or any(not d.isdigit() for d in devices) or len(set(devices)) != 16:
         raise RuntimeError("Run through task-submit --device auto --device-num 16")
     if args.command in ("decode", "profile", "performance", "hostprofile", "swimlane", "padding-capture",
-                        "steady", "bitcompare", "argdump"):
+                        "steady", "bitcompare", "argdump", "moe-routing"):
         report = json.loads((args.bank / "audit.json").read_text())
         if report["status"] != "PASS":
             raise ValueError("P cache bank must pass audit before D loads it")
@@ -1044,7 +1060,7 @@ def main():
                                             "hostprofile",
                                             "profile-export", "profile-compare",
                                             "swimlane", "swimlane-export",
-                                            "padding-capture", "steady", "bitcompare", "argdump"])
+                                            "padding-capture", "steady", "bitcompare", "argdump", "moe-routing"])
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--histories", default="255,4095,32767,131071,131072,131073")
@@ -1136,6 +1152,9 @@ def main():
             parser.error(f"稳态至少采 10 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")
     if args.layout_only and args.command != "decode":
         parser.error("--layout-only 仅适用于 decode")
+    if args.command == "moe-routing":
+        if args.graph_mode != "full_decode_only" or args.compare_samples < 1 or args.warmup_steps < 0:
+            parser.error("路由诊断须使用 full_decode_only、非负 warmup_steps 和正 compare_samples")
     if args.command == "plan":
         make_plan(args)
     elif args.command == "audit":
