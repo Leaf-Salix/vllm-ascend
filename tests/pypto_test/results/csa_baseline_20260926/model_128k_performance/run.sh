@@ -3,13 +3,15 @@
 set -eo pipefail
 : "${TASK_DEVICE:?通过 task-submit 分配 16 卡}"
 repo_root=/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1
-history="${1:-131072}"
+# 队列会追加 --device 参数；只消费本脚本的 history，设备由 TASK_DEVICE 传给 launcher。
+history=131072
+if [[ "${1:-}" != "--device" && -n "${1:-}" ]]; then history="$1"; fi
 case "$history" in
     131072) batches=(4 8 16); budget=256; group=model_128k_performance ;;
     8192) batches=(24 32 40); budget=400; group=model_8k_large_batch_performance ;;
     *) exit 2 ;;
 esac
-result_root="${2:-$repo_root/tests/pypto_test/results/csa_baseline_20260926/$group/capacity40}"
+result_root="$repo_root/tests/pypto_test/results/csa_baseline_20260926/$group/capacity40"
 cd "$repo_root"
 source ../env-dsv4-0251rc1.sh
 export PTO_CSA_VARIANT=performance
