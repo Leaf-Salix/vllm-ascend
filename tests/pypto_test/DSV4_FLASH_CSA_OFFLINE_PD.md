@@ -78,6 +78,12 @@ python tests/pypto_test/offline_pd/compare.py \
 `--capture-sizes`、`--rank-batches` 和 `--rank-decode-tokens` 按待验证场景显式指定；
 当前仅声明 S=6 合法档位。新泛化对比为 TP1/DP=EP16、131072 tokens、
 单卡 B4/8/16/24/32/40；两侧 EPLB 均关闭。
+本轮扫描固定 `max_num_seqs=40`，用
+`--batch 40 --sweep-batches 4 8 16 24 32 40 --capture-sizes 24 48 96 144 192 240`：
+每侧只加载一次正式权重，各档从同一 bank 恢复并独立预热、采样及采 trace。
+结果分别落在 `--output` 的父目录下 `b{B}/{backend}`；加载日志保留在原 `--output`。
+DSpark 按每档开始前快照作累计计数差分，报告 `batch` 和 `max_num_seqs`；
+对照器显式要求 `--max-num-seqs 40`。旧 B4/容量 4 的首轮方法验证单列，不混入容量 40 矩阵。
 
 ## 结果判读
 

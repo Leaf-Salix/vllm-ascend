@@ -124,12 +124,15 @@ def layer_intervals(rows, side, steps=3):
             "profiled_main_steps": model_steps}
 
 
-def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps):
+def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seqs):
     path = root / side / f"rank{rank}.performance.json"
     value = json.loads(path.read_text())
+    # 扫描功能加入前的入口固定 max_num_seqs=batch；新扫描结果必须显式保存容量。
+    value.setdefault("max_num_seqs", value["batch"])
     expected_tokens = batch * (plan["decode"]["speculative_tokens"] + 1)
     expected = {"command": "performance", "backend": side, "rank": rank, "batch": batch,
-                "expected_tokens": expected_tokens, "weight_nz_mode": mode, "decode_tokens": tokens,
+                "expected_tokens": expected_tokens, "max_num_seqs": max_num_seqs,
+                "weight_nz_mode": mode, "decode_tokens": tokens,
                 "graph_mode": "full_decode_only", "stage": "measured", "variant": "performance"}
     for key, item in expected.items():
         require(value.get(key) == item, f"{path}: {key} 与声明不符")
@@ -183,10 +186,12 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps):
     return value, stats
 
 
-def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
+def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16, max_num_seqs=None):
+    max_num_seqs = batch if max_num_seqs is None else max_num_seqs
     report = {"status": "FAIL", "mode": mode, "scope": "无 profiler 的完整 decode 周期包含采样、草稿和调度间隙；"
               "execute_model 单列。CSA 层区间独立取设备 trace 首末。",
-              "expected": {"ranks": ranks, "batch": batch, "tokens_per_round": tokens,
+              "expected": {"ranks": ranks, "batch": batch, "max_num_seqs": max_num_seqs,
+                           "tokens_per_round": tokens,
                            "profile_steps": steps},
               "errors": [], "token_mismatches": 0, "spec_decode_mismatched_ranks": 0,
               "compared_tokens": 0, "ranks": []}
@@ -197,10 +202,11 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
     for rank in range(ranks):
         try:
             loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens,
-                                     steps=steps)
+                                     steps=steps, max_num_seqs=max_num_seqs)
                       for side in ("native", "pto")}
             native, pto = (loaded[side][0] for side in ("native", "pto"))
-            for key in ("key", "history", "capture_sizes", "deterministic", "hccl_deterministic", "atomic_add",
+            for key in ("key", "history", "capture_sizes", "max_num_seqs", "deterministic", "hccl_deterministic",
+                        "atomic_add",
                         "eplb_enabled", "dynamic_eplb_env", "expert_map_record_env", "custom_opp_path",
                         "requested_steady_cycles", "worker_runtime_config"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧 {key} 不同")
@@ -282,11 +288,13 @@ def main():
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--mode", type=int, choices=(1, 2), required=True)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--max-num-seqs", type=int, help="模型容量；省略时要求容量等于实际 batch")
     parser.add_argument("--decode-tokens", type=int, default=192)
     parser.add_argument("--profile-steps", type=int, default=3)
     args = parser.parse_args()
     report = compare(args.root, args.mode, json.loads((args.bank / "plan.json").read_text()),
-                     batch=args.batch, tokens=args.decode_tokens, steps=args.profile_steps)
+                     batch=args.batch, tokens=args.decode_tokens, steps=args.profile_steps,
+                     max_num_seqs=args.max_num_seqs)
     (args.root / "performance_comparison.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({k: v for k, v in report.items() if k != "ranks"}, ensure_ascii=False, indent=2))
     raise SystemExit(report["status"] == "FAIL")

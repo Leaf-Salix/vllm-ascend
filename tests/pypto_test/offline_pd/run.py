@@ -8,6 +8,7 @@ The plan and audit commands are CPU only. Both execution commands require a
 import argparse
 import contextlib
 import json
+import math
 import os
 import re
 import signal
@@ -255,7 +256,7 @@ def stagger_limits(batch, limit):
     return [max(1, limit - index * step) for index in range(batch)]
 
 
-def spec_decode_metrics(llm):
+def spec_decode_metrics(llm, baseline=None):
     """从 Prometheus 快照取 DSpark 的真实接受统计（T2.4／T4.4）。
 
     走 llm.get_metrics() 这条公开出口，而不是钻 EngineCore：SpecDecodingStats 由
@@ -273,6 +274,29 @@ def spec_decode_metrics(llm):
             per_pos = list(getattr(metric, "values", []) or [])
         elif metric.name.startswith("vllm:spec_decode_"):
             counters[metric.name[len("vllm:spec_decode_"):]] = getattr(metric, "value", None)
+    if baseline is not None:
+        # 同一次加载扫描多个 batch 时，只统计本档预热和两轮采集的增量。
+        # 第一次生成前指标可能尚未注册；已有非零计数则不允许缺失逐位置快照。
+        before = baseline["counters"]
+        if before.keys() - counters.keys():
+            raise ValueError("DSpark 累计计数在扫描期间缺失")
+        for name, value in counters.items():
+            previous = before.get(name, 0)
+            if any(type(n) not in (int, float) or not math.isfinite(n) or n < 0 or n != int(n)
+                   for n in (value, previous)) or value < previous:
+                raise ValueError(f"DSpark 累计计数重置或无效：{name}")
+            counters[name] = value - previous
+        old_pos = baseline["num_accepted_tokens_per_pos"]
+        if old_pos is None and any(before.values()):
+            raise ValueError("已有 DSpark 计数，但缺少本档开始前的逐位置快照")
+        if per_pos is not None:
+            old_pos = [0] * len(per_pos) if old_pos is None else old_pos
+            if len(old_pos) != len(per_pos) or any(
+                type(n) not in (int, float) or not math.isfinite(n) or n < 0 or n != int(n)
+                for n in [*old_pos, *per_pos]
+            ) or any(new < old for new, old in zip(per_pos, old_pos)):
+                raise ValueError("DSpark 逐位置累计计数重置或无效")
+            per_pos = [new - old for new, old in zip(per_pos, old_pos)]
     drafts = counters.get("num_drafts") or 0
     draft_tokens = counters.get("num_draft_tokens") or 0
     accepted = counters.get("num_accepted_tokens") or 0
@@ -316,6 +340,17 @@ def generate_round(llm, args, case, limit, stagger=False):
             "output_token_ids": [list(r.outputs[0].token_ids) for r in result]}
 
 
+def diagnostic_runs(args):
+    """模型容量固定为 --batch；扫描时每档重新指定真实请求数及独立输出目录。"""
+    for batch in args.sweep_batches or [args.batch]:
+        current = argparse.Namespace(**vars(args))
+        current.max_num_seqs = args.batch
+        if args.sweep_batches:
+            current.batch = current.rank_batch = batch
+            current.output = args.output.parent / f"b{batch}" / args.backend
+        yield current
+
+
 def diagnose(args, llm, cases):
     """先预热掉首次编译和缓存冷读，再单独开一次诊断窗口。
 
@@ -332,10 +367,11 @@ def diagnose(args, llm, cases):
     if args.rank_decode_token is not None:
         args.decode_tokens = args.rank_decode_token
     expected_tokens = args.batch * QUERY_TOKENS
+    stats_before = spec_decode_metrics(llm) if args.sweep_batches else None
     warmup = [generate_round(llm, args, case, args.warmup_tokens)["elapsed_seconds"]
               for _ in range(args.warmup_rounds)]
     common = {"command": args.command, "backend": args.backend, "rank": args.rank,
-              "batch": args.batch,
+              "batch": args.batch, "max_num_seqs": args.max_num_seqs,
               "submitted": args.rank_batch if args.rank_batch is not None else args.batch,
               "key": case["key"], "history": case["history"],
               "warmup_rounds": args.warmup_rounds, "warmup_tokens": args.warmup_tokens,
@@ -485,7 +521,10 @@ def diagnose(args, llm, cases):
             "output_token_ids": measured["output_token_ids"],
             "scope": "DFX诊断窗口带边界同步开销，只用于查看任务依赖，不参与耗时对比",
         })
-    common["spec_decode"] = spec_decode_metrics(llm)
+    common["spec_decode"] = spec_decode_metrics(llm, baseline=stats_before)
+    common["spec_decode_scope"] = "本档预热和采集轮次"
+    if stats_before is not None:
+        common["spec_decode_baseline"] = stats_before
     write_json(args.output / f"rank{args.rank}.{args.command}.json", common)
     if args.command in ("profile", "performance") and (
         not common["window"] or not all(w["sufficient"] for w in common["window"])
@@ -767,8 +806,15 @@ def worker(args):
         return
     if args.command in ("profile", "performance", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
                         "argdump"):
-        diagnose(args, llm, cases)
-        llm.llm_engine.engine_core.shutdown()
+        try:
+            for current in diagnostic_runs(args):
+                current.output.mkdir(parents=True, exist_ok=True)
+                print(f"OFFLINE_BATCH_START batch={current.batch} capacity={current.max_num_seqs} "
+                      f"rank={args.rank}", flush=True)
+                diagnose(current, llm, cases)
+                print(f"OFFLINE_BATCH_DONE batch={current.batch} rank={args.rank}", flush=True)
+        finally:
+            llm.llm_engine.engine_core.shutdown()
         return
     outputs = []
     for case in cases:
@@ -856,6 +902,10 @@ def launch(args):
     args.output.mkdir(parents=True, exist_ok=True)
     if any(args.output.glob("rank*.log")):
         raise FileExistsError("Use a fresh --output directory to preserve prior run evidence")
+    if args.sweep_batches:
+        for current in diagnostic_runs(args):
+            if current.output.exists() and any(current.output.iterdir()):
+                raise FileExistsError(f"扫描目录已存在数据：{current.output}")
     prefill = args.command == "prefill"
     tp, dp = (4, 4) if prefill else (1, 16)
     rank_counts = rank_request_counts(args, dp)
@@ -931,6 +981,8 @@ def launch(args):
                 cmd.append("--stagger")
             if args.capture_sizes:
                 cmd += ["--capture-sizes", *[str(size) for size in args.capture_sizes]]
+            if args.sweep_batches:
+                cmd += ["--sweep-batches", *map(str, args.sweep_batches)]
             if args.layout_only:
                 cmd.append("--layout-only")
             file = (args.output / f"rank{rank}.log").open("w")
@@ -974,6 +1026,9 @@ def main():
     parser.add_argument("--rank", type=int, default=-1)
     parser.add_argument("--backend", choices=["native", "pto"], default="native")
     parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--sweep-batches", type=int, nargs="+",
+                        help="performance 在一次模型加载内扫描实际 batch，容量固定为 --batch；"
+                             "每档单独预热、采样和记录 DSpark 增量")
     parser.add_argument("--decode-tokens", type=int, default=128)
     parser.add_argument("--layout-only", action="store_true", help="加载D模型后仅采集缓存描述符")
     parser.add_argument("--warmup-rounds", type=int, default=1, help="诊断前的预热轮数，排除首次编译与缓存冷读")
@@ -1027,6 +1082,19 @@ def main():
     parser.add_argument("--analyse-processes", type=int, default=16, help="离线解析使用的进程数上限")
     parser.add_argument("--compare-top", type=int, default=25, help="profile-compare列出的kernel差异条数")
     args = parser.parse_args()
+    if args.sweep_batches:
+        batches = args.sweep_batches
+        if args.command != "performance" or args.rank_batches or args.rank_decode_tokens or args.stagger:
+            parser.error("--sweep-batches 仅用于均衡 performance，不能混用 rank 覆盖或 stagger")
+        if sorted(set(batches)) != batches or min(batches) < 1 or max(batches) > args.batch:
+            parser.error("扫描 batch 须严格递增，且在 1..--batch 范围内")
+        if args.rank_batch not in (None, args.batch) or args.rank_decode_token not in (None, args.decode_tokens):
+            parser.error("扫描不能覆盖单 rank 的请求数或生成长度")
+        query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
+        if args.graph_mode != "full_decode_only" or not set(
+            b * query for b in [*batches, args.batch]
+        ).issubset(args.capture_sizes or []):
+            parser.error("扫描须使用 full_decode_only，并显式捕获每个 batch 及容量的 S6 档位")
     if args.command in ("steady", "performance"):
         query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
         minimum = (args.warmup_steps + args.steady_cycles + 3) * query

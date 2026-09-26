@@ -4501,3 +4501,27 @@ token/DSpark 一致事实保留；历史相关日志的“开关生效”结论�
 并发层区间不重复计时。ruff/diff 检查通过；完整计时与新 worker 的真机接入随首档 128K/B4 验证。
 未为配置传递单独重复加载 16 卡模型。已清理失效 O-A N192 候选、EPLB 专用 smoke、
 迁移前重复状态和重复编译目录；保留有效 bank、当前精度诊断输入与精简证据。
+
+## 132. 128K 首档计时验证及统一容量扫描（2026-09-26）
+
+任务 `task_20260926_220130_34608999453` completed/exit=0，源码 `a2832896`。
+正式权重与 h131072_bank，TP1/DP=EP16、B4、max_num_seqs=4、mode=2，
+性能版 atomic=1，两侧实际 worker 的 Native level=0、HCCL=false、EPLB=false；
+FULL_DECODE_ONLY 捕获 24。无 profiler 窗口和独立 Level0 窗口各生成 192 token/请求。
+
+16 rank 的 24576 个 token 全部一致，DSpark 总数与逐位置统计全部一致。
+两侧每 rank 都采到 20 个完整周期、3 个指定档位 trace step；新计时与 worker 配置贯通。
+按各 rank 同序号最慢周期聚合，完整周期 p50 Native 59.416 ms、PTO 62.449 ms，
+保守全局吞吐 6453.38/6146.18 token/s；PTO 完整周期慢约 5.1%。
+CSA 全层区间 p50 897.529/818.056 μs，p95 943.800/859.557 μs。
+CSA 局部更快没有转成整模型提速；不得据局部数据宣布性能通过。
+本场景不适用原 H8192/B16 的 750 μs 判据。
+精简证据：[pilot_b4.json](results/csa_baseline_20260926/model_128k_performance/pilot_b4.json)。
+
+为避免六档反复加载 75 分片权重，后续矩阵采用统一容量 40、实际 B4/8/16/24/32/40。
+两侧捕获相同六档，分别加载一次，每档独立恢复同一 bank、预热、无 profiler 计时与采 trace。
+新增 `--sweep-batches`，保证真实请求数随档位变化；每档 DSpark 用开始前快照作差，
+不把前几档累计计数当成本档接受统计。报告保存实际 batch 与模型容量，对照器显式核验容量。
+原 B4/容量 4 只作方法验证单列，不填入容量 40 的主表。
+CPU 8 项定向回归通过，覆盖 16 rank 参数贯通、逐档请求数、累计计数差分及重置拒绝；
+定向 Ruff、shell 语法与 diff 检查通过，不改生产算子、不恢复性能优化。
