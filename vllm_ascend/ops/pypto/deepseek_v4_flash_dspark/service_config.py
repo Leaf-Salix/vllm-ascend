@@ -71,6 +71,9 @@ def validate_configuration(config):
     # （尤其是 indexer 的整页搬运）是按 Native 的 ND 页布局写死的，不是换个格式就行。
     if get_ascend_config().weight_nz_mode not in (0, 1, 2) or get_ascend_config().enable_kv_nz:
         raise ValueError("PTO CSA requires weight_nz_mode in (0, 1, 2) and enable_kv_nz=false")
+    from .nz_mode import validate_weight_nz_mode
+
+    validate_weight_nz_mode(get_ascend_config().weight_nz_mode)
     if getattr(hf, "use_index_cache", False) or config.lora_config is not None:
         raise ValueError("PTO CSA does not support IndexCache reuse or LoRA")
     spec = config.speculative_config

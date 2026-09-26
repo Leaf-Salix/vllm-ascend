@@ -59,14 +59,22 @@ def prepare_csa_model(model):
 
     import pypto.torch
     from vllm.config import get_current_vllm_config
+    from vllm_ascend.ascend_config import get_ascend_config
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import (
+        root_weight_layouts, validate_weight_nz_mode,
+    )
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
-    # 两套 CSA 算子并存，由 PTO_CSA_VARIANT 选择，默认性能版。只有算子与其适配层
+    # 两套 CSA 算子并存，由 PTO_CSA_VARIANT 选择，默认精度版。只有算子与其适配层
     # 按版本取；service_config 的档位与图重放闸门两套共用一份（性能版里是重导出），
     # 因为 model_runner_v1.py 直接从精度版导入那些闸门，各留一份就会在判据上分叉。
     package = variant_package()
+    effective_mode = get_ascend_config().weight_nz_mode
+    validate_weight_nz_mode(effective_mode)
     CSAOperators = importlib.import_module(f"{package}.native_adapter").CSAOperators
     CSAServiceRuntime = importlib.import_module(f"{package}.service").CSAServiceRuntime
+    root_function = importlib.import_module(f"{package}.decode_csa")._decode_csa_tp1_layer
+    layouts = root_weight_layouts(root_function)
 
     pypto.torch.init(device=torch.npu.current_device(), platform="a2a3", runtime="tensormap_and_ringbuffer")
     operators = CSAOperators.register()
@@ -81,6 +89,9 @@ def prepare_csa_model(model):
             count += 1
     if not count:
         raise ValueError("No target C4 attention layers found for PTO CSA")
+    logger.info("PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
+                selected_variant(), effective_mode, layouts,
+                [name for name, layout in layouts.items() if layout == "NZ"])
     logger.info("Prepared PTO CSA (%s variant) for %d target C4 layers; "
                 "prefill and unsupported decode batches use Native", selected_variant(), count)
 

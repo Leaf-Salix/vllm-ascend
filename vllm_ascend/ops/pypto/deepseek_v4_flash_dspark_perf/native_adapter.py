@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 
-from .decode_csa import decode_csa_tp1_layer_test
+from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
 from .config import DECODE_BATCH
 from .native_storage import indexer_storage, physical_pages, table_storage
 
@@ -32,7 +32,7 @@ class CSAOperators:
 
 
 # NZ 的字节重排实现在精度版，这里只引用，保证两版用的是同一份。
-from ..deepseek_v4_flash_dspark.native_adapter import _maybe_pack_nz, _pack_nz  # noqa: F401
+from ..deepseek_v4_flash_dspark.native_adapter import _pack_nd_weights_for_root, _pack_nz  # noqa: F401
 
 # torch_npu 的 acl format 取值：0=NCHW、2=ND，二者都是 PyPTO 根入参接受的基础格式。
 _ACL_FORMAT_NCHW = 0
@@ -90,16 +90,13 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
             "hc_attn_base": layer.hc_attn_base.detach().float().contiguous(),
             "attn_norm_w": layer.input_layernorm.weight.detach().to(bf16).contiguous(),
         }
-    return {
+    weights = {
         **hc,
         # wq_a 保持 ND：它的 NZ kernel 版在当前 PyPTO 上编不过（可证判据不支持整除），
         # 见 qkv_proj_rope.q_proj_qa 的说明。主机侧打包必须与 kernel 标注同步，所以这里
         # 也不能提前打包——只开一侧不报错、只算错。
         "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
-        # NZ 序存放（mode>=1 即开）：Native 在 mode>=1 下已把它转成 FRACTAL_NZ，
-        # weight() 里先 npu_format_cast 回 ND，这里再按 pto-isa 的分形序重排。
-        # 两个 NZ 不是一回事，见 _pack_nz 的说明。
-        "wq_b": _maybe_pack_nz(weight(attention.wq_b, (1024, 32768), int8), int8),
+        "wq_b": weight(attention.wq_b, (1024, 32768), int8),
         "wq_b_scale": scale(attention.wq_b, 32768),
         "wkv": weight(attention.wkv, (512, 4096), bf16, True),
         "gamma_cq": weight(attention.q_norm, (1024,), bf16),
@@ -118,12 +115,12 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         "inner_ape": inner.ape.detach().float().contiguous(),
         "inner_norm_w": weight(inner.norm, (128,), bf16),
         "attn_sink": attention.attn_sink.detach().contiguous(),
-        # NZ 序存放：这一份本来就是 transpose 出来的独立副本，不额外占显存。
-        "wo_a": _maybe_pack_nz(weight(attention.wo_a, (8, 4096, 1024), bf16, True), bf16),
+        "wo_a": weight(attention.wo_a, (8, 4096, 1024), bf16, True),
         # wo_b 保持 ND，见 decode_csa.py 里它的签名说明。
         "wo_b": weight(attention.wo_b, (8192, 4096), int8, True),
         "wo_b_scale": scale(attention.wo_b, 4096),
     }
+    return _pack_nd_weights_for_root(weights, _decode_csa_tp1_layer)
 
 
 class NativeCSACall:

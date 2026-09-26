@@ -10,9 +10,10 @@ from typing import Any
 
 import torch
 
-from .decode_csa import decode_csa_tp1_layer_test
+from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
 from .config import DECODE_BATCH
 from .native_storage import indexer_storage, physical_pages, table_storage
+from .nz_mode import root_weight_layouts
 
 
 _NZ_C0_BYTES = 32
@@ -49,18 +50,13 @@ def _pack_nz(value: "torch.Tensor") -> "torch.Tensor":
     return packed.to(device)
 
 
-def _maybe_pack_nz(value: "torch.Tensor", dtype) -> "torch.Tensor":
-    """按 vllm-ascend 的 weight_nz_mode 决定要不要把这张权重排成 NZ 分形序。
-
-    必须和 kernel 侧的类型标注用同一个开关（nz_mode），否则标注说 NZ 而字节还是
-    ND（或反过来），读到的就是错位的分形，而且不会报错、只会算错。
-    """
-    from .nz_mode import BF16_WEIGHT_NZ, QUANT_WEIGHT_NZ
-
-    import torch
-
-    enabled = BF16_WEIGHT_NZ if dtype in (torch.bfloat16, torch.float16) else QUANT_WEIGHT_NZ
-    return _pack_nz(value) if enabled else value
+def _pack_nd_weights_for_root(weights: dict, root_function) -> dict:
+    """输入必须是逻辑 ND 权重，按即将注册的根签名一次性打包。"""
+    result = dict(weights)
+    for name, layout in root_weight_layouts(root_function).items():
+        if layout == "NZ":
+            result[name] = _pack_nz(result[name])
+    return result
 
 
 @dataclass(frozen=True)
@@ -134,7 +130,7 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
             "hc_attn_base": layer.hc_attn_base.detach().float().contiguous(),
             "attn_norm_w": layer.input_layernorm.weight.detach().to(bf16).contiguous(),
         }
-    return {
+    weights = {
         **hc,
         "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
         "wq_b": weight(attention.wq_b, (1024, 32768), int8),
@@ -156,14 +152,12 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         "inner_ape": inner.ape.detach().float().contiguous(),
         "inner_norm_w": weight(inner.norm, (128,), bf16),
         "attn_sink": attention.attn_sink.detach().contiguous(),
-        # NZ 序存放：kernel 侧 wo_a 已按 BF16_WEIGHT_LAYOUT 标注，主机侧必须同步重排，
-        # 否则标注说 NZ 而字节还是 ND——不会报错、只会算错。这一份本来就是 transpose
-        # 出来的独立副本，NZ 化不额外占显存。
-        "wo_a": _maybe_pack_nz(weight(attention.wo_a, (8, 4096, 1024), bf16, True), bf16),
+        "wo_a": weight(attention.wo_a, (8, 4096, 1024), bf16, True),
         # wo_b 保持 ND，见 decode_csa.py 里它的签名说明。
         "wo_b": weight(attention.wo_b, (8192, 4096), int8, True),
         "wo_b_scale": scale(attention.wo_b, 4096),
     }
+    return _pack_nd_weights_for_root(weights, _decode_csa_tp1_layer)
 
 
 class NativeCSACall:

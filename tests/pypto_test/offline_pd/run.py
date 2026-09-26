@@ -615,6 +615,11 @@ def swimlane_export(args):
 
 
 def worker(args):
+    # 根布局在模块导入时固定，必须先把显式 CLI 同步到环境，再导入 vLLM/PTO。
+    os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
+    print(f"OFFLINE_WEIGHT_NZ requested={args.weight_nz_mode} "
+          f"environment={os.environ['VLLM_ASCEND_ENABLE_NZ']} rank={args.rank} "
+          f"backend={args.backend}", flush=True)
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
     from vllm.platforms import current_platform
@@ -659,7 +664,7 @@ def worker(args):
         gpu_memory_utilization=0.9, block_size=32,
         # D 侧上线口径是 FULL_DECODE_ONLY，见 dsv4_perf_accuracy_20260827/runtime；
         # eager 只用于定位问题，其每步重入 Python 派发路径，不代表上线表现。
-        # draft 与该参考配置一致保持 eager。NZ 当前一定不能开，两个后端都不开。
+        # draft 与该参考配置一致保持 eager。两侧 NZ mode 均由显式 CLI 控制。
         # 捕获档位默认由 vLLM 按 max_num_seqs*6 截断默认列表得到，最大档可能小于
         # potential_max_tokens（实测档位 [1,2,4,8,16,24] 而 potential 为 30）。
         # 那会让 mc2_tokens_capacity 小于 potential，A3 上 select_moe_comm_method
@@ -825,7 +830,8 @@ def launch(args):
                 "VLLM_DP_MASTER_IP": args.host, "VLLM_DP_MASTER_PORT": str(args.port),
                 "ASCEND_RT_VISIBLE_DEVICES": ",".join(devices[rank * tp:(rank + 1) * tp]),
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn", "VLLM_USE_V2_MODEL_RUNNER": "0",
-                "VLLM_ASCEND_ENABLE_NZ": "0", "OMP_NUM_THREADS": "4", "OMP_PROC_BIND": "false",
+                "VLLM_ASCEND_ENABLE_NZ": str(args.weight_nz_mode),
+                "OMP_NUM_THREADS": "4", "OMP_PROC_BIND": "false",
                 "HCCL_IF_IP": args.host, "HCCL_SOCKET_IFNAME": args.nic,
                 "GLOO_SOCKET_IFNAME": args.nic, "TP_SOCKET_IFNAME": args.nic,
                 # 采集窗口会在各 rank 上做同步和落盘，给集合通信留出等待余量。
@@ -865,6 +871,7 @@ def launch(args):
                    "--rank", str(rank), "--batch", str(args.batch),
                    "--rank-batch", str(rank_counts[rank]),
                    "--rank-decode-token", str(rank_tokens[rank]), "--backend", args.backend,
+                   "--weight-nz-mode", str(args.weight_nz_mode),
                    "--decode-tokens", str(args.decode_tokens),
                    "--warmup-rounds", str(args.warmup_rounds),
                    "--warmup-tokens", str(args.warmup_tokens),
