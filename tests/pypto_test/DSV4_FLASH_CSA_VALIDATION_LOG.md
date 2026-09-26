@@ -5724,3 +5724,70 @@ repack 结束到 score 开始之间没有空隙、各实例 dur 离散度很小�
   0.968——**这是一个真实且有意义的目标，但它是 0.97 不是 0.70**。
 - 后续汇报性能时应当按这两段分开给，而不是只给一个总 ratio：总 ratio 会把
   "固定部分已领先" 和 "历史部分落后 2.2 倍" 这两个相反的事实平均掉，掩盖真正的问题。
+
+## 156. Native 侧逐算子实测：融合 indexer 的真实成本（2026-09-27）
+
+`dsv4_csa_single_layer.py` 有 `--profile`，会在计时之后**给两侧各单独采一次设备
+profiler**（`torch_npu.profiler`，Level1，各自落在 `profile/native` 与 `profile/pto`）。
+输出里的 `ASCEND_PROFILER_OUTPUT/kernel_details.csv` 给出逐算子耗时。这把 §155 的
+推断换成了 Native 侧的硬数字。
+
+### 128K/B16（Native 19 个算子，合计 1432.5 µs）
+
+| 算子 | 耗时 | 次数 |
+| --- | ---: | ---: |
+| `VllmQuantLightningIndexer` | **366.4 µs** | 1 |
+| `SparseAttnSharedkv` | 172.3 µs | 1 |
+| `Compressor` | 141.4 µs | 2 |
+| `aclnnQuantMatmulWeightNz_QuantBatchMatmulV3` | 108.3 µs | 3 |
+| `aclnnTransposeBatchMatMul` | 102.6 µs | 1 |
+| `aclnnScatterNdUpdateV2` | 97.7 µs | 4 |
+| `aclnnMatmul_MatMulCommon_MatMulV2` | 92.8 µs | 5 |
+| `HcPre` | 65.1 µs | 1 |
+
+### 8K/B40（Native 19 个算子，合计 1571.9 µs）
+
+| 算子 | 耗时 | 次数 |
+| --- | ---: | ---: |
+| `SparseAttnSharedkv` | 282.7 µs | 1 |
+| `aclnnQuantMatmulWeightNz` | 190.5 µs | 3 |
+| `Compressor` | 166.0 µs | 2 |
+| `aclnnScatterNdUpdateV2` | 152.8 µs | 4 |
+| `aclnnTransposeBatchMatMul` | 134.9 µs | 1 |
+| `aclnnMatmul` | 101.9 µs | 5 |
+| `VllmQuantLightningIndexer` | **91.6 µs** | 1 |
+| `HcPre` | 88.0 µs | 1 |
+
+Native 的融合 indexer 从 8K 的 91.6 µs 长到 128K 的 366.4 µs，符合"随历史增长"的预期；
+在 8K 档它只占 Native 算子总量的 5.8%，几乎免费。
+
+### PTO 侧 profiler 只能看到一个融合 kernel
+
+PTO 那边只有两条记录：`aicore_kernel_mode_0_mix_aic` 1777.9 µs 与并发的
+`simpler_aicpu_kernel_exec_*` 1787.7 µs。两者几乎相等，说明 AICPU 调度线只是整个
+kernel 的包络、不是额外开销（AICore 在整段时间里都在忙）。因为整层是单个 `pl.jit`
+根入口（`decode_csa_tp1_layer_test`），profiler 无法给出 PTO 内部的逐 task 分解——
+那只能靠 eager 下的 DFX 泳道，而泳道的 dur 单位不能换算成 µs（§153）。
+**所以两侧的"逐 task 对照"只能做到"Native 逐算子 vs PTO 分段（固定/历史）"这个粒度。**
+
+### 把 §155 的算术用真实数字重算
+
+128K/B16 上 PTO 的历史部分 925.3 µs，Native 的融合 indexer 366.4 µs，
+即 PTO 在这段上是 Native 的 **2.5 倍**。若把 PTO 的 indexer 完全换成 Native 的：
+
+    880.8（PTO 固定部分）+ 366.4（Native indexer）≈ 1247 µs → ratio 0.93
+
+仍然到不了 0.700，与 §155 的结论一致。**0.93 就是这条路的上限。**
+
+### 结论与建议的目标口径
+
+六档实测 0.965 / 0.989 / 1.008 / 1.088 / 1.167 / 1.333，≤0.700 为 0/6，且已证明
+算术上不可达（目标预算的 94% 被已经优于 Native 的固定部分占满）。真实可争取的是：
+
+- **128K 三档**：把历史部分从 Native 的 2.2~2.5 倍压向 1 倍，可让 128K/B16 从 1.333
+  到约 0.93、128K/B8 与 B4 同步改善。这是有明确抓手的工作（对标 366.4 µs）。
+- **8K 三档**：成本以固定部分为主，而固定部分已比 Native 快 4.6%（h=8192/B16 的
+  0.954）。这里没有 30% 的水分。
+
+建议把验收口径从"六档统一 ≤0.700"改成"每档不劣于 Native，且 128K 档的历史部分对标
+Native 的 `VllmQuantLightningIndexer`"。
