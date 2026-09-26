@@ -6306,3 +6306,69 @@ kernel 实参是在这里**逐个显式列出**的，光在 `service.py` 的 `bu
 加上 1.32~5.25 GiB 显存、以及落地后需要重扫 `REPACK_WORKERS`（增量后每步只搬 2 页左右，
 192 块会大量空转），而收益上限只到 ratio 约 1.09。**这是一笔需要按部署口径拍的账，
 不该由算子层面自行决定，本轮到此为止。**
+
+## 167. 增量 repack 第二次尝试：四层穿参打通了，但持久缓冲改变了数值（2026-09-27）
+
+接 §166，这次把管道完整打通并在**生产路径**（两版）上跑了阶段一。改动面 9 个文件，
+全部语法通过、编译通过、跑到出报告——但**数值变了**，因此已全部回退。
+
+### 修正 §166 障碍三的诊断
+
+§166 说"missing inferred tensor metadata"是因为共享适配器没构造参数。这只是其中一半，
+真正的原因是**调用链有四层，我漏了中间一层**：
+
+```
+decode_csa 根 kernel → indexer() → indexer_weights_score() → indexer_score_topk_forest()
+```
+
+`indexer_weights_score()`（精度版第 930 行、性能版对应处）是中间层，它的签名里
+`topk_idxs` 后面跟的也是 `position_ids`，与 `indexer()` 的签名**文本完全相同**，所以
+"按锚点替换一处"会漏掉它，而漏掉中间层就会让最内层的形参失去元数据来源。
+正确做法是那个锚点出现 **2 次**、两处都要替换。
+
+完整改动面（两版各一份，另加共享文件）：
+
+| 文件 | 改什么 |
+| --- | --- |
+| `config.py` ×2 | `MAX_INDEXER_HISTORY = 131072` |
+| `decode_indexer.py` ×2 | `MAX_REPACK_PAGES`/`MAX_REPACK_ROWS`；**三处**签名（`indexer`、`indexer_weights_score`、`indexer_score_topk_forest`）；**两处**调用实参；缓冲来源与 `repack_rows` 改常量 |
+| `decode_csa.py` ×2 | 根签名两个 `pl.Out` 参数、两个 `bind_dynamic(0, B_DYN)`、`indexer()` 调用实参、导入 `MAX_REPACK_ROWS` |
+| `native_adapter.py`（**共享**） | `empty("idx_key_compact", (batch, MAX_REPACK_ROWS * IDX_HEAD_DIM), torch.int8)` 等两项 |
+| `service.py` ×2 | 分配持久缓冲、放进 `buffers` 字典 |
+
+### 障碍四：数值变了
+
+128K/B16 上，阶段一（仍每步全量重搬，理应完全数值中性）的失配数普遍上升：
+
+| 比较项 | 基线 | 阶段一 |
+| --- | ---: | ---: |
+| `x_out` | 594526 | **1088290** |
+| `idx_topk` | 38099 | **48843** |
+| `swa.0` | 2689 | **14272** |
+| `indexer.1` | 0 | **15** |
+| `state.0` | 195816 | 196196 |
+
+计时也判 `FAIL`（"固定规约的计时图与同初态 eager 不一致"）。
+
+注意在这一档 **布局本来是一致的**：`repack_pages = 32768/32 + 7 = 1031`、
+`repack_rows = 32992 = MAX_REPACK_ROWS`，动态值恰好等于编译期上限。所以问题不在行距，
+而在**缓冲的行数**。最可能的原因是 kernel 里的
+`b_dim = pl.tensor.dim(idx_block_table, 0)` 是 Native 块表的**补齐后容量**而不是实际
+batch，而宿主侧按 `tokens // QUERY_TOKENS` 分配了实际 batch 行；
+`pl.reshape(key_compact_buf, [b_dim * MAX_REPACK_ROWS, IDX_HEAD_DIM])` 于是把一块只有
+`batch` 行的缓冲摊成 `b_dim` 行，越界读到未初始化内容。适配器的 `empty()` 形状校验
+没有拦住，说明它用的 `batch`（`self.req["swa"].seq_lens.numel()`）与 kernel 的 `b_dim`
+不是同一个量——**这一点必须在下次动手前先核实清楚**。
+
+另一个可能叠加的因素：原来 `pl.create_tensor` 每次新建（内容可预期），现在是
+`torch.empty` 且跨步保留，任何没被写满的行都会留下上一步或未初始化的内容。补位请求
+（`seq_lens == 0`）的槽位尤其要检查是否被完整写过。
+
+### 下次动手前必须先确认的两件事
+
+1. **`b_dim` 与实际 batch 的关系**：读 `decode_csa.py` 里 `B_DYN` 的绑定来源，确认它绑的
+   是补齐后的块表行数还是实际请求数；宿主分配必须按同一个量。
+2. **补位槽位的初始化**：持久缓冲不再每次新建，所以 padding 请求对应的行必须显式写过
+   （或证明 score 侧永远不会读到）。这与既有的"补位请求守卫"是同一类问题。
+
+本轮到此回退，生产代码保持 `REPACK_WORKERS = 192` 的已验证状态。
