@@ -1,0 +1,395 @@
+{
+  "scope": "单卡 A3；mode=2；atomic=0；EPLB 关闭；正式第 2 层权重与合成 H255，固定 Native sparse 输入隔离功能缺陷",
+  "status": "TAIL_OVERFLOW_FIXED",
+  "root_cause": "plan 的固定 8 行读写未限制到实际 token 数；B1/S6 只有 6 行，越界污染相邻 scratch",
+  "implementation": "输入 slice 显式 valid_shape/clamp；索引与 bias assemble 显式有效行；分块有效位归约保留相同尾行范围",
+  "tasks": {
+    "native_capture": "task_20260926_210943_30096809347",
+    "before_sparse": "task_20260926_211638_304054825031",
+    "after_sparse": "task_20260926_213507_314761330354",
+    "regression": "task_20260926_213745_31652455645"
+  },
+  "fixed_native_sparse": {
+    "precision": {
+      "comparison": {
+        "status": "PASS",
+        "shape": [
+          6,
+          64,
+          512
+        ],
+        "dtype": "torch.bfloat16",
+        "elements": 196608,
+        "nonfinite": 0,
+        "max_abs": 0.0,
+        "rmse": 0.0,
+        "mismatches": 0
+      },
+      "per_token": [
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        },
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        },
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        },
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        },
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        },
+        {
+          "status": "PASS",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0
+        }
+      ]
+    },
+    "performance": {
+      "comparison": {
+        "status": "FAIL",
+        "shape": [
+          6,
+          64,
+          512
+        ],
+        "dtype": "torch.bfloat16",
+        "elements": 196608,
+        "nonfinite": 0,
+        "max_abs": 0.8356571197509766,
+        "rmse": 0.07195838530880018,
+        "mismatches": 122164
+      },
+      "per_token": [
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.8356571197509766,
+          "rmse": 0.17287415558508232,
+          "mismatches": 32734
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.101318359375,
+          "rmse": 0.024432627636048084,
+          "mismatches": 32515
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.1051025390625,
+          "rmse": 0.02419931346400312,
+          "mismatches": 32607
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.001953125,
+          "rmse": 8.742714798361503e-05,
+          "mismatches": 8803
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.001953125,
+          "rmse": 8.150582935692347e-05,
+          "mismatches": 7876
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 8.530067973328162e-05,
+          "mismatches": 7629
+        }
+      ]
+    },
+    "performance_tail": {
+      "comparison": {
+        "status": "FAIL",
+        "shape": [
+          6,
+          64,
+          512
+        ],
+        "dtype": "torch.bfloat16",
+        "elements": 196608,
+        "nonfinite": 0,
+        "max_abs": 0.00390625,
+        "rmse": 8.509675395169573e-05,
+        "mismatches": 49360
+      },
+      "per_token": [
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.0009765625,
+          "rmse": 8.209770712849391e-05,
+          "mismatches": 8753
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 8.770337981297871e-05,
+          "mismatches": 7788
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 8.63360670035899e-05,
+          "mismatches": 8511
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.001953125,
+          "rmse": 8.742714798361503e-05,
+          "mismatches": 8803
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.001953125,
+          "rmse": 8.150582935692347e-05,
+          "mismatches": 7876
+        },
+        {
+          "status": "FAIL",
+          "shape": [
+            64,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "elements": 32768,
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 8.530067973328162e-05,
+          "mismatches": 7629
+        }
+      ]
+    }
+  },
+  "uniform_regression": {
+    "1": {
+      "status": "PASS",
+      "shape": [
+        6,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "elements": 196608,
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0
+    },
+    "3": {
+      "status": "PASS",
+      "shape": [
+        18,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "elements": 589824,
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0
+    },
+    "4": {
+      "status": "PASS",
+      "shape": [
+        24,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "elements": 786432,
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0
+    }
+  },
+  "full_layer_x_out": {
+    "before": {
+      "status": "FAIL",
+      "shape": [
+        6,
+        4,
+        4096
+      ],
+      "dtype": "torch.bfloat16",
+      "elements": 98304,
+      "nonfinite": 0,
+      "max_abs": 0.38427734375,
+      "rmse": 0.026745614908713362,
+      "mismatches": 38748
+    },
+    "after": {
+      "status": "FAIL",
+      "shape": [
+        6,
+        4,
+        4096
+      ],
+      "dtype": "torch.bfloat16",
+      "elements": 98304,
+      "nonfinite": 0,
+      "max_abs": 0.015625,
+      "rmse": 0.001342114809573577,
+      "mismatches": 16451
+    }
+  },
+  "full_layer_graph": {
+    "status": "PASS",
+    "replays": 3
+  },
+  "full_layer_guards": {
+    "native": {
+      "checks": 62,
+      "all_pass": true
+    },
+    "pto": {
+      "checks": 62,
+      "all_pass": true
+    }
+  },
+  "before_after_state_equality": {
+    "native": "8/8 精确一致",
+    "pto": "除 x_out 修复外，Top-K 及 6 类 cache/state 均精确一致"
+  },
+  "limits": "关闭此尾块功能缺陷；剩余浮点差异零容差诊断仍为 FAIL，不宣称所有数值验收或整模型 token/DSpark 通过；没有新增性能调优"
+}

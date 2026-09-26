@@ -399,15 +399,19 @@ CPU 归约不宣称复刻 Cube 的逐 bit 累加序；分数比较将 Native 分
 此前性能筛选仅以真实模型 token 一致看护；本轮移植后恢复必要数值分析，
 不得把候选替换数量自动定义成允许阈值。
 
-短上下文新缺口：B1/S6/H255、mode=2、atomic=0 的同一正式层/合成输入，
-性能版 x_out 对 Native 为 max_abs=0.384277、RMSE=0.026746，主要在前三个 token；
-精度版为 max_abs=0.015625、RMSE=0.001000，两侧 Native 基线八类状态精确相同。
-性能版 ND/NZ 完全一致，Top-K 集合与 Native 相同，仅有排序差异。
-证据：[两版逐 token 差异](results/csa_baseline_20260926/nz_native_edges/short_precision_diagnostic.json)。
-当前只确认差异与两版不同实现有关，未判定是算术权衡还是功能问题，不作为可接受精度放行。
+短上下文大误差已定位为**性能版 sparse plan 尾块越界**：B1/S6 只有 6 行，旧实现按 8 行
+读写索引/bias，污染相邻 scratch。现已对输入、输出及块有效位归约显式传递有效行数。
+固定 Native Q/cache/Top-K，精度版 sparse 输出 196608 元素完全一致；性能版修复前后
+max_abs 0.835657→0.00390625、RMSE 0.0719584→0.00008510。
+B1/3/4 的均匀 attention 解析值回归均 bit 一致，覆盖尾块和整块。
 
-按用户最新优先级，此问题在精度版迁移之后恢复定位；先固定 Native query/cache/Top-K
-隔离 sparse attention，再按实际差异扩展到 QKV/O projection，不先铺开全部数值测试。
+B1/H255 正式层 x_out 对 Native：性能版 max_abs 0.384277→0.015625，
+RMSE 0.026746→0.001342；精度版既有 max_abs=0.015625、RMSE=0.001000。
+两侧 62 项 metadata/外部保护检查和性能版 A/B/A 图重放通过；修复前后 Native 八类状态、
+PTO 的 Top-K 及六类 cache/state 均不变。外部保护检查不能替代内部 scratch 边界检查。
+证据：[尾块修复及逐 token 诊断](results/csa_baseline_20260926/precision_review/tail_fix.json)。
+功能缺陷已关闭；剩余浮点误差仍为测量结果，不放宽容差或自动标数值验收通过。
+下一步做迁移后精度版整模型 token/DSpark 看护，再执行性能版 128K 泛化矩阵。
 
 ### C NZ 四张权重与 ND 保留
 

@@ -203,10 +203,17 @@ def sparse_attn_csa(
             # [1, IDX_TOPK]，向量操作条数是现在的 BIAS_T_TILE 倍、每条只有 1/8 宽，
             # 实测该任务 2.53x 上游。SWA 那段仍需逐 token，因为它要按 token 读
             # position_ids 与页表；这里只把能向量化的部分提出来。
+            # runtime token 数不保证整除 8（如 B1/S6）。切片不会自动截断，
+            # 显式限制读写行数，避免尾块覆盖相邻 scratch。
             c_raw_tile = pl.cast(
-                idx_topk[bias_t0 : bias_t0 + BIAS_T_TILE, 0:IDX_TOPK], target_type=pl.FP32
+                pl.slice(idx_topk, [BIAS_T_TILE, IDX_TOPK], [bias_t0, 0],
+                         valid_shape=[bias_rows, IDX_TOPK], clamp=True), target_type=pl.FP32
             )
-            c_pos = pl.cast(position_ids[bias_t0 : bias_t0 + BIAS_T_TILE, 0:1], target_type=pl.FP32)
+            c_pos = pl.cast(
+                pl.slice(position_ids, [BIAS_T_TILE, 1], [bias_t0, 0],
+                         valid_shape=[bias_rows, 1], clamp=True),
+                target_type=pl.FP32,
+            )
             c_pos_q = pl.cast(
                 pl.cast(pl.mul(pl.add(c_pos, 1.0), COMPRESS_RATIO_INV), target_type=pl.INT32, mode="trunc"),
                 target_type=pl.FP32,
@@ -218,16 +225,23 @@ def sparse_attn_csa(
             c_lt_tile = pl.minimum(pl.maximum(pl.sub(c_upper_b, c_raw_tile), 0.0), 1.0)
             c_mask_tile = pl.mul(c_ge_tile, c_lt_tile)
             c_out_tile = pl.sub(pl.mul(c_mask_tile, pl.add(c_raw_tile, 1.0)), 1.0)
-            cmp_sparse_indices[bias_t0 : bias_t0 + BIAS_T_TILE, 0:IDX_TOPK] = pl.cast(
-                c_out_tile, target_type=pl.INT32
+            cmp_sparse_indices = pl.assemble(
+                cmp_sparse_indices,
+                pl.set_validshape(pl.cast(c_out_tile, target_type=pl.INT32), bias_rows, IDX_TOPK),
+                [bias_t0, 0],
             )
-            sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, ATTN_K_TILE : ATTN_K_TILE + CMP_TOPK] = pl.mul(
-                pl.minimum(c_out_tile, 0.0), -NEG_INF
+            sparse_bias = pl.assemble(
+                sparse_bias,
+                pl.set_validshape(pl.mul(pl.minimum(c_out_tile, 0.0), -NEG_INF), bias_rows, CMP_TOPK),
+                [bias_t0, ATTN_K_TILE],
             )
             # 每块的有效位直接由 c_mask_tile 归约得到，不再回读 cmp_sparse_indices。
             for c_sb in pl.range(1, SPARSE_BLOCKS):
                 c_s0 = (c_sb - 1) * ATTN_K_TILE
-                c_blk_valid = pl.row_max(c_mask_tile[:, c_s0 : c_s0 + ATTN_K_TILE])
+                c_blk_valid = pl.row_max(pl.slice(
+                    c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
+                    valid_shape=[bias_rows, ATTN_K_TILE],
+                ))
                 for c_dt in pl.range(bias_rows):
                     c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
                     pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
@@ -257,12 +271,19 @@ def sparse_attn_csa(
             v_valid_tile = pl.minimum(
                 pl.maximum(pl.neg(pl.row_expand_sub(v_col_tile, v_len_col)), 0.0), 1.0
             )
-            sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, 0:WIN] = pl.mul(
-                pl.sub(v_valid_tile, 1.0), -NEG_INF
+            sparse_bias = pl.assemble(
+                sparse_bias,
+                pl.set_validshape(pl.mul(pl.sub(v_valid_tile, 1.0), -NEG_INF), bias_rows, WIN),
+                [bias_t0, 0],
             )
             if WIN < ATTN_K_TILE:
-                sparse_bias[bias_t0 : bias_t0 + BIAS_T_TILE, WIN:ATTN_K_TILE] = pl.full(
-                    [BIAS_T_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF
+                sparse_bias = pl.assemble(
+                    sparse_bias,
+                    pl.set_validshape(
+                        pl.full([BIAS_T_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF),
+                        bias_rows, ATTN_K_TILE - WIN,
+                    ),
+                    [bias_t0, WIN],
                 )
 
             for bias_dt in pl.range(bias_rows):

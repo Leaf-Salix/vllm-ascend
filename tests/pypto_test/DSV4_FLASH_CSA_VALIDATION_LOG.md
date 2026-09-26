@@ -4437,3 +4437,32 @@ H131072、S6 与 B4/8/16/24/32/40。本节覆盖第 126 节恢复 EPLB 的范围
 expert、分组累计长度 [0,6,18,24]、swiglu_limit=10，与 CPU 参考 INT8 最大差 1、scale 差 0。
 这仅证明 Native tensor-list 调用可用，不代表 EPLB 或整模型验收。公共环境脚本未加入该包，
 后续主对照沿用原环境，不继续 EPLB 测试或为此占用 16 卡。
+
+## 129. 性能版 sparse plan 尾块越界修复（2026-09-26）
+
+精度版数值中性迁移 `2de2baa6` 后恢复 B1/H255 大误差定位。用新的
+`dsv4_csa_single_layer.py --save-sparse-case` 保存 Native Q/cache/Top-K 及逆 RoPE 前输出；
+`dsv4_csa_sparse_diagnostic.py` 调用两版生产 sparse 实现，cos=1/sin=0 隔离 QK/softmax/PV。
+同一输入下精度版 196608 元素精确一致，性能版 max_abs=0.835657、RMSE=0.0719584，
+大误差集中于前 3 个 token。CPU 数学参考也贴近 Native，不能解释为合理的 BF16 策略差异。
+
+根因是性能版 plan 把 runtime T=B×6 按固定 8 行分块，却用完整块切片读写；
+B1 的 T=6 时，生成 C++ 的 TLOAD/TSTORE 仍为 8 行，越界触及相邻 scratch。
+原先只检查静态容量 T=384 整除 8，不能证明 runtime 安全。修复为输入 slice 显式
+valid_shape/clamp，索引/bias 写回及块有效位归约显式保留实际行数；不改算术或流水策略。
+
+单卡、mode=2、atomic=0、Native level=1、EPLB 关闭：
+
+- 固定 Native 输入 sparse 回放：max_abs=0.00390625、RMSE=0.00008510。
+- 无权重均匀 attention 解析值回归：B1/3/4 全部 bit 一致，覆盖首个尾块、多块末尾及整块。
+- 正式第 2 层 B1/H255：x_out max_abs 0.384277→0.015625，RMSE 0.026746→0.001342。
+  两侧各 62 项 metadata/外部保护检查通过、各自重复结果一致，性能版 A/B/A 图重放通过。
+  修复前后 Native 8 类状态精确一致；PTO 除 x_out 外，Top-K 和 6 类 cache/state 精确一致。
+- CPU 编译及定向 ruff/diff 检查通过。没有为本修复启动新的性能优化。
+
+任务：固定输入复查 `task_20260926_213507_314761330354`；解析值与整层回归
+`task_20260926_213745_31652455645`，均 completed/exit=0。
+配置、逐 token 差异和回归汇总见
+[tail_fix.json](results/csa_baseline_20260926/precision_review/tail_fix.json)。
+这关闭了尾块越界功能缺陷，剩余零容差比较仍为 FAIL；不能据此宣布全部逐元素或整模型验收通过。
+下一步为迁移后精度版正式 16 卡 token/DSpark 看护，再执行性能版 128K 泛化对比。

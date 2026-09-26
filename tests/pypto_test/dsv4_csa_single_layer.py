@@ -534,7 +534,23 @@ def run(args, report):
             raise ValueError("Native 融合 Compressor 的 wkv/wgate 必须遵循 ND 入参合同")
         output = torch.empty_like(fixture["hidden"])
         original_qli = torch.ops._C_ascend.npu_vllm_quant_lightning_indexer
+        original_sparse = torch.ops._C_ascend.npu_sparse_attn_sharedkv
         captured = {}
+
+        def record_sparse(q, **kwargs):
+            value = original_sparse(q, **kwargs)
+            if args.save_sparse_case and "sparse_case" not in captured:
+                # 在 Native 逆 RoPE 原地修改输出之前保存，用于隔离 QK/softmax/PV。
+                payload = {name: kwargs[name].detach().cpu() for name in (
+                    "ori_kv", "cmp_kv", "ori_block_table", "cmp_block_table",
+                    "cmp_sparse_indices", "seqused_kv", "sinks",
+                )}
+                payload.update(q=q.detach().cpu(), expected=value[0].detach().cpu(),
+                               position_ids=fixture["positions"].detach().cpu(),
+                               batch=args.batch, history=args.history)
+                torch.save(payload, args.output / "native_sparse.pt")
+                captured["sparse_case"] = True
+            return value
 
         def record_qli(*inputs, **kwargs):
             value = original_qli(*inputs, **kwargs)
@@ -548,6 +564,8 @@ def run(args, report):
             return value
 
         torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = record_qli
+        if args.save_sparse_case:
+            torch.ops._C_ascend.npu_sparse_attn_sharedkv = record_sparse
         native = []
         report["native_guards"] = []
         try:
@@ -562,6 +580,11 @@ def run(args, report):
                 report["native_guards"].append(guard_checks(fixture))
         finally:
             torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
+            torch.ops._C_ascend.npu_sparse_attn_sharedkv = original_sparse
+        if args.save_sparse_case:
+            if not captured.get("sparse_case"):
+                raise RuntimeError("未捕获到 Native sparse attention 调用")
+            report["saved_sparse_case"] = "native_sparse.pt"
         report["native_self"] = {
             name: compare_tensor(native[1][name], value, 0, 0) for name, value in native[0].items()
         }
@@ -756,6 +779,8 @@ def main():
     parser.add_argument("--variant", choices=("precision", "performance"), default="precision")
     parser.add_argument("--save-case", action="store_true")
     parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
+    parser.add_argument("--save-sparse-case", action="store_true",
+                        help="保存 Native 稀疏注意力的实际输入和逆 RoPE 前输出")
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
     parser.add_argument("--padding-graph", action="store_true",
