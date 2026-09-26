@@ -1,0 +1,22 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..e0ee3095 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -72,7 +72,7 @@ ATTENTION_WINDOW_ROWS = LOCAL_O_GROUPS * GROUP_T_PAD
+ 
+ O_WINDOW_ROWS = TP_SIZE * LOCAL_T_PAD
+ 
+-A_K_TILE = 256
++A_K_TILE = 128
+ 
+ PROJ_A_MM_N_TILE = 128
+ 
+@@ -199,7 +199,7 @@ def _proj_a_mm_nz(
+             )
+             wa_first = wo_a[g : g + 1, 0:A_K_TILE, n0 : n0 + PROJ_A_MM_N_TILE]
+             acc_a = pl.matmul(xa_first, wa_first, out_dtype=pl.FP32)
+-            for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=2):
++            for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=4):
+                 k0 = kb * A_K_TILE
+                 xa_k_chunk = pl.slice(
+                     o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, k0], valid_shape=[pa_rows, A_K_TILE]

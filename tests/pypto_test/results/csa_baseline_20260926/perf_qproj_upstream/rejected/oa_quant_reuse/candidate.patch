@@ -1,0 +1,15 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..73234d37 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -402,8 +402,8 @@ def decode_o_proj_tp1(
+                     g_sq_row = pl.div(g_scale_num, g_amax)
+                     act_scale_dq[g : g + 1, qt : qt + QUANT_TOKEN_TILE] = pl.mul(g_amax, 1.0 / INT8_SCALE_MAX)
+                     g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
+-                    oc_q = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
+-                    oq_scaled = pl.row_expand_mul(oc_q, g_sq_col)
++                    # Reuse the FP32 tile already loaded for amax.
++                    oq_scaled = pl.row_expand_mul(oc_amax, g_sq_col)
+                     oq_i32 = pl.cast(oq_scaled, target_type=pl.INT32, mode="rint")
+                     oq_half = pl.cast(oq_i32, target_type=pl.FP16, mode="round")
+                     oq_i8 = pl.cast(oq_half, target_type=pl.INT8, mode="trunc")

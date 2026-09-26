@@ -71,7 +71,8 @@ python tests/pypto_test/offline_pd/compare.py \
 此处 PASS 仅指 token/DSpark 对照通过，层级误差、状态、保护区和性能仍独立验收。
 
 `--capture-sizes`、`--rank-batches` 和 `--rank-decode-tokens` 按待验证场景显式指定；
-当前仅声明 S=6 合法档位。EPLB 等暂停范围以清单末尾为准。
+当前仅声明 S=6 合法档位。用户已恢复 EPLB，用于 TP1/DP=EP16、131072 tokens、
+单卡 B4/8/16/24/32/40 的新泛化对比；依赖与执行顺序见清单，其他暂停范围保持。
 
 ## 结果判读
 

@@ -1,0 +1,307 @@
+{
+  "base_commit": "e1c9c98e",
+  "baseline_task": "task_20260926_202453_27245477327",
+  "candidate_task": "task_20260926_203603_278895817747",
+  "task_status": "both completed/exit=0",
+  "change": "O-A 后量化复用求 amax 时加载的 FP32 tile，删除第二次相同切片；任务划分及算术不变。",
+  "upstream_difference": "上游及保留版都对相同块切片两次；候选额外消除重复读取。实际编译 TLOAD 静态位置6→3，数学指令位置数不变，UB分配上界163872→131104 bytes。",
+  "cpu_build": "PTOAS/CCE 全链 PASS。",
+  "decision": "REJECTED: p50仅834.11→833.38 μs，p95为848.16→859.84 μs，没有确认完整区间收益；恢复原实现，按用户要求结束性能版新增优化。",
+  "evidence_boundary": "无候选 DFX，不由 Event 总时长归因核内或调度变化；无边界/逐元素/16卡扩展。零容差 Native/PTO 浮点差异为诊断，不作精度 PASS。",
+  "runs": {
+    "baseline": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "device": "0",
+      "warmup": 5,
+      "iters": 20,
+      "timing": {
+        "native": {
+          "samples_us": [
+            910.7000231742859,
+            922.1799969673157,
+            918.4799790382385,
+            911.1999869346619,
+            913.1600260734558,
+            914.3199920654297,
+            913.4799838066101,
+            913.6599898338318,
+            911.9799733161926,
+            915.3599739074707,
+            915.93998670578,
+            910.3800058364868,
+            924.5799779891968,
+            913.2400155067444,
+            915.7599806785583,
+            916.5800213813782,
+            916.0199761390686,
+            915.2200222015381,
+            913.5000109672546,
+            911.6600155830383
+          ],
+          "us_min": 910.3800058364868,
+          "us_p50": 913.9899909496307,
+          "us_p95": 922.1799969673157,
+          "us_max": 924.5799779891968
+        },
+        "pto": {
+          "samples_us": [
+            830.6000232696533,
+            843.8799977302551,
+            844.0200090408325,
+            831.5200209617615,
+            838.919997215271,
+            832.360029220581,
+            848.1600284576416,
+            816.5599703788757,
+            862.1199727058411,
+            846.4999794960022,
+            826.2199759483337,
+            828.6799788475037,
+            833.8199853897095,
+            843.1800007820129,
+            841.97998046875,
+            831.8399786949158,
+            834.4799876213074,
+            834.3999981880188,
+            833.620011806488,
+            828.4199833869934
+          ],
+          "us_min": 816.5599703788757,
+          "us_p50": 834.1099917888641,
+          "us_p95": 848.1600284576416,
+          "us_max": 862.1199727058411
+        }
+      },
+      "guards": {
+        "native_guards": [
+          {
+            "checks": 31,
+            "failures": {}
+          },
+          {
+            "checks": 31,
+            "failures": {}
+          }
+        ],
+        "pto_guards": [
+          {
+            "checks": 31,
+            "failures": {}
+          },
+          {
+            "checks": 31,
+            "failures": {}
+          }
+        ]
+      },
+      "nonfinite": {
+        "native_self": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        },
+        "pto_self": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        },
+        "pto_native": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        }
+      }
+    },
+    "candidate": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "device": "0",
+      "warmup": 5,
+      "iters": 20,
+      "timing": {
+        "native": {
+          "samples_us": [
+            916.8199896812439,
+            919.7999835014343,
+            912.0000004768372,
+            920.9799766540527,
+            926.8800020217896,
+            916.1999821662903,
+            923.4200119972229,
+            921.5599894523621,
+            921.180009841919,
+            925.8800148963928,
+            915.0000214576721,
+            916.2200093269348,
+            946.1399912834167,
+            923.8399863243103,
+            923.2800006866455,
+            919.4999933242798,
+            923.9799976348877,
+            919.7199940681458,
+            931.1800003051758,
+            921.3200211524963
+          ],
+          "us_min": 912.0000004768372,
+          "us_p50": 921.2500154972076,
+          "us_p95": 931.1800003051758,
+          "us_max": 946.1399912834167
+        },
+        "pto": {
+          "samples_us": [
+            831.4399719238281,
+            826.2199759483337,
+            845.2200293540955,
+            859.8399758338928,
+            818.8199996948242,
+            813.6399984359741,
+            829.2199969291687,
+            815.1599764823914,
+            871.2800145149231,
+            847.6399779319763,
+            842.1599864959717,
+            831.3000202178955,
+            859.5799803733826,
+            838.1800055503845,
+            843.7600135803223,
+            812.8600120544434,
+            840.1399850845337,
+            831.3599824905396,
+            829.4600248336792,
+            835.319995880127
+          ],
+          "us_min": 812.8600120544434,
+          "us_p50": 833.3799839019775,
+          "us_p95": 859.8399758338928,
+          "us_max": 871.2800145149231
+        }
+      },
+      "guards": {
+        "native_guards": [
+          {
+            "checks": 31,
+            "failures": {}
+          },
+          {
+            "checks": 31,
+            "failures": {}
+          }
+        ],
+        "pto_guards": [
+          {
+            "checks": 31,
+            "failures": {}
+          },
+          {
+            "checks": 31,
+            "failures": {}
+          }
+        ]
+      },
+      "nonfinite": {
+        "native_self": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        },
+        "pto_self": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        },
+        "pto_native": {
+          "x_out": 0,
+          "idx_topk": 0,
+          "swa.0": 0,
+          "compressed.0": 0,
+          "state.0": 0,
+          "indexer.0": 0,
+          "indexer.1": 0,
+          "indexer_state.0": 0
+        }
+      }
+    }
+  },
+  "generated_code": {
+    "baseline": {
+      "source": "tests/pypto_test/results/csa_baseline_20260926/perf_oa_n192/baseline/build_output/_jit__decode_csa_tp1_layer_0d_gm28v/ptoas/quant.pto",
+      "tload_static_sites": 6,
+      "math_static_sites": {
+        "trowmax": 3,
+        "tdiv": 3,
+        "tcvt": 10,
+        "trowexpandmul": 3,
+        "tstore": 7
+      },
+      "ub_alloc_upper_byte_from_static_tiles": 163872
+    },
+    "candidate": {
+      "source": "tests/pypto_test/results/csa_baseline_20260926/perf_oa_n192/cpu_quant_reuse/ptoas/quant.pto",
+      "tload_static_sites": 3,
+      "math_static_sites": {
+        "trowmax": 3,
+        "tdiv": 3,
+        "tcvt": 10,
+        "trowexpandmul": 3,
+        "tstore": 7
+      },
+      "ub_alloc_upper_byte_from_static_tiles": 131104
+    }
+  }
+}
