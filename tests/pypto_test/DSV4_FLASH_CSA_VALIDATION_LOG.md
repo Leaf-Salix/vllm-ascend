@@ -6159,3 +6159,73 @@ tile 数 = `ceil(valid_count / SCORE_TILE)`，128K 时每 leaf 是 `ceil(8192/38
 附：`TOPK_MAX_CANDIDATES` 减半能让该档 ratio 到 0.977，但它改变了 indexer 的可见范围
 （16384 个压缩 key = 65536 token 历史），对 >64K 上下文会改变模型行为，**不是合法优化**，
 只能作为部署侧"长上下文下用精度换速度"的产品选项，不由算子自行决定。
+
+## 165. 增量 repack 的最终账与可落地设计（2026-09-27）
+
+### 显存：按部署的 `max_num_seqs` 算，上限 5.25 GiB
+
+§159 用 B=40 估的 3.30 GiB 不是上界。`config.py` 里 `DECODE_BATCH = 64`，`B = DECODE_BATCH
+// TP_SIZE`，所以编译期最大批是 **64**。持久缓冲的行距必须是编译期常量
+（`MAX_REPACK_ROWS`），但**第一维可以是动态的**——宿主侧按
+`batch_capacity = min(max_num_seqs, MAX_BATCH_SIZE)` 分配即可，`repack_base =
+batch_idx * MAX_REPACK_ROWS` 只要求行距是常量。
+
+按 `MAX_INDEXER_HISTORY = 131072` 定尺，每槽 32992 行 = 4.0 MiB（key）+ 0.06 MiB（scale）：
+
+| 部署 `max_num_seqs` | 每层 | 21 个 ratio-4 层合计 |
+| ---: | ---: | ---: |
+| 16 | 64 MiB | **1.32 GiB** |
+| 40 | 161 MiB | 3.30 GiB |
+| 64（编译期上限） | 256 MiB | **5.25 GiB** |
+
+### 一个能绕开 SSA 障碍、又不打散负载均衡的设计
+
+先前担心增量化会让迭代空间变锯齿（每个请求起始页不同），从而打散
+`REPACK_WORKERS = 192` 那 −8.5% 的负载均衡收益；而在 PyPTO 里用 `if` 包住带张量写入的
+分支会破坏 SSA（本轮早前撞过 `Error Code: 6`）。两个问题可以一起解决：
+
+**用全批统一的起始页。** 多搬页永远是安全的，所以取
+`uniform_start = min over b of start[b]`，扁平循环变成
+`pl.range(worker, b_dim * (repack_pages - uniform_start), REPACK_WORKERS)`，
+`page = uniform_start + unit % (repack_pages - uniform_start)`——**结构不变、负载均衡不变**。
+
+`start[b]` 用纯算术算，不需要 `if`：
+
+```
+same[b] = <当前 block table 前 repack_pages 项与持久副本逐元素相等的归约>   # 0 或 1
+grew[b] = <当前 seq_len >= 持久 seq_len 的比较>                            # 0 或 1
+start[b] = same[b] * grew[b] * (old_len // BLOCK_SIZE)
+```
+
+任一条件不满足则 `start[b] = 0`，即该槽全量重搬；`uniform_start` 取全批最小值，所以
+只要有一个请求是新序列，那一步就退化成全量重搬——保守但正确，且稳态 decode 下所有请求
+都在延续，`uniform_start` 会贴近各自真实起点。
+
+正确性依据：decode 期间历史 key 不会被改写，只有新追加的页会变。**block table 前缀整行
+一致且 `seq_len` 只增长 ⇒ 之前打包过的页仍然有效**；从 `old_len // BLOCK_SIZE` 那一页
+起重搬（那页当时可能只填了一半，必须重搬）。
+
+判据必须做在 device 上：decode 走 ACL Graph，重放不再进入 Python，`service.py` 的
+`__call__` 只在 capture 时执行一次。
+
+### 还需要的配套
+
+- `config.py` 新增显式常量 `MAX_INDEXER_HISTORY`（部署假设），`service_config.py` 加运行时
+  闸门拒绝 `max_model_len` 超出该值的配置。现在 `MAX_SEQ_LEN = M.max_position_embeddings`
+  取的是模型的 **1048576**，按它定尺是 10.5~26 GiB，不可用。
+- 持久缓冲经 `service.py` 的 `buffers` 机制传入（与 `idx_topk_scores` / `x_out` 同路），
+  kernel 侧改成 `pl.Out[...]` 根参数，并把 `repack_base = batch_idx * repack_rows`
+  改为按 `MAX_REPACK_ROWS` 索引（score 侧同步改）。
+- 另需一个持久的 `repack_state`（block table 副本 + 已打包长度），以及 repack 之后一个小
+  spmd 把当前状态写回。
+
+### 净值仍需实测
+
+收益上限是 §146 探针直测的 **−340.6 µs**（128K/B16，1789.7 → 约 1440、ratio 约 1.09）。
+但增量化会让每步实际搬运的页数从 258 降到 2 左右，`REPACK_WORKERS = 192` 在只有
+`b_dim × 2` 个工作单元时会大量空转——这正是 §146 里"探针下 rw24 显得有收益"那个假象的
+来源。所以落地时 `REPACK_WORKERS` 需要重新扫描，净值要实测，不能直接按 −340.6 µs 记账。
+
+**结论：设计已经可落地，但代价是 1.32~5.25 GiB 显存（取决于部署的 `max_num_seqs`），
+且即使成功也只到 ratio 约 1.09、达不到 ≤0.700。这是显存换延迟的部署取舍，需要按部署
+口径决定，不由算子层面自行拍。**
