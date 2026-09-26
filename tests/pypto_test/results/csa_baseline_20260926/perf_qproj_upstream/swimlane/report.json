@@ -1,0 +1,61 @@
+{
+  "status": "MEASURED",
+  "args_dir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_baseline_20260926/nz_native_b16_timing/mode2/case",
+  "reference": null,
+  "snapshot_source": {"state_timing":"before_call","variant":"performance","weight_nz_mode":2,"kind":"formal_layer_weights_synthetic_history","seed":1024},
+  "root_layouts": {"wq_a":"NZ","wq_b":"NZ","wo_a":"NZ","wo_b":"NZ"},
+  "converted_weights": [],
+  "state_reset": "每次调用前恢复相同初态；恢复与同步均在计时/DFX 窗口之外",
+  "variant": "performance",
+  "package": "vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf",
+  "device": 0,
+  "layer_index": 2,
+  "tokens": 96,
+  "iters": 1,
+  "warmup": 1,
+  "swimlane_level": 4,
+  "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能",
+  "validation": {
+    "status": "MEASURED",
+    "scope": "声明的输出与状态逐元素检查；不代表整模型、token 或保护区验收",
+    "required_names": ["compress_state","inner_compress_state","kv_cache","cmp_kv","idx_kv_cache","idx_topk_scores","idx_topk","x_out"],
+    "reference_provided": false,
+    "checks": {
+      "compress_state": {"finite":true,"shape":[145,8192],"dtype":"torch.float32"},
+      "inner_compress_state": {"finite":true,"shape":[145,1040],"dtype":"torch.float32"},
+      "kv_cache": {"finite":true,"shape":[145,32,1,512],"dtype":"torch.bfloat16"},
+      "cmp_kv": {"finite":true,"shape":[1057,32,1,512],"dtype":"torch.bfloat16"},
+      "idx_kv_cache": {"finite":true,"shape":[1057,4160],"dtype":"torch.int8"},
+      "idx_topk_scores": {"finite":true,"shape":[96,512],"dtype":"torch.float32"},
+      "idx_topk": {"finite":true,"shape":[96,512],"dtype":"torch.int32"},
+      "x_out": {"finite":true,"shape":[96,4,4096],"dtype":"torch.bfloat16"}
+    },
+    "errors": {}
+  },
+  "us_min": 120295.12994922698,
+  "us_p50": 120295.12994922698,
+  "us_p90": 120295.12994922698,
+  "us_max": 120295.12994922698,
+  "samples_us": [120295.12994922698],
+  "wallclock_scope": "墙钟含 eager 主机侧派发开销，不是 kernel 时间；逐任务 kernel 时长看 --swimlane 4 的产物",
+  "swimlane": {"exported":true,"kernel_config":"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_baseline_20260926/perf_qproj_upstream/swimlane/dfx/kernel_config_source.py","merged_swimlane":"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_baseline_20260926/perf_qproj_upstream/swimlane/dfx/merged_swimlane.json","name_map":"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_baseline_20260926/perf_qproj_upstream/swimlane/dfx/name_map.json"},
+  "swimlane_windows": [],
+  "final_finite_checks": {
+    "status": "MEASURED",
+    "scope": "声明的输出与状态逐元素检查；不代表整模型、token 或保护区验收",
+    "required_names": ["compress_state","inner_compress_state","kv_cache","cmp_kv","idx_kv_cache","idx_topk_scores","idx_topk","x_out"],
+    "reference_provided": false,
+    "checks": {
+      "compress_state": {"finite":true,"shape":[145,8192],"dtype":"torch.float32"},
+      "inner_compress_state": {"finite":true,"shape":[145,1040],"dtype":"torch.float32"},
+      "kv_cache": {"finite":true,"shape":[145,32,1,512],"dtype":"torch.bfloat16"},
+      "cmp_kv": {"finite":true,"shape":[1057,32,1,512],"dtype":"torch.bfloat16"},
+      "idx_kv_cache": {"finite":true,"shape":[1057,4160],"dtype":"torch.int8"},
+      "idx_topk_scores": {"finite":true,"shape":[96,512],"dtype":"torch.float32"},
+      "idx_topk": {"finite":true,"shape":[96,512],"dtype":"torch.int32"},
+      "x_out": {"finite":true,"shape":[96,4,4096],"dtype":"torch.bfloat16"}
+    },
+    "errors": {}
+  },
+  "x_out": {"finite":true,"absmax":5.0,"mean":-0.0003659242356661707}
+}

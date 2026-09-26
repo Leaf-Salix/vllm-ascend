@@ -1,0 +1,367 @@
+{
+  "status": "SINGLE_CARD_MEASURED",
+  "scope": "第二层完整图外事件区间，合成输入与正式层权重；尚未进行本候选整模型 token 验收",
+  "config": {
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "batch": 16,
+    "history": 8192,
+    "seed": 1024,
+    "variant": "performance",
+    "effective_weight_nz_mode": 2,
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    },
+    "deterministic_level": 0,
+    "hccl_deterministic": false
+  },
+  "selected_change": "性能版 Native NZ Q 展开：完整 K1024 权重常驻，N256，M64；尾块按有效行数直接 matmul。保留 QR/KV split=8/8 与默认缓存策略。",
+  "warmup": 5,
+  "samples": 20,
+  "baseline": {
+    "native": {
+      "us_min": 909.820020198822,
+      "us_p50": 913.0200147628784,
+      "us_p95": 922.4600195884705,
+      "us_max": 927.5000095367432
+    },
+    "pto": {
+      "us_min": 827.4199962615967,
+      "us_p50": 843.529999256134,
+      "us_p95": 869.2200183868408,
+      "us_max": 905.8799743652344
+    }
+  },
+  "selected": {
+    "native": {
+      "us_min": 916.920006275177,
+      "us_p50": 921.5700030326843,
+      "us_p95": 926.4799952507019,
+      "us_max": 926.7799854278564
+    },
+    "pto": {
+      "us_min": 798.3400225639343,
+      "us_p50": 817.220002412796,
+      "us_p95": 843.1199789047241,
+      "us_max": 848.3200073242188
+    }
+  },
+  "tails": {
+    "tail_b1": {
+      "status": "MEASURED",
+      "batch": 1,
+      "history": 255,
+      "variant": "performance",
+      "effective_weight_nz_mode": 2,
+      "pto_reduction": {
+        "atomic_add": 1,
+        "qr_split_k": 8,
+        "kv_split_k": 8
+      },
+      "scope": "metadata/保护区/有限值/Top-K 结构通过；不声明跨实现逐元素通过"
+    },
+    "tail_b40": {
+      "status": "MEASURED",
+      "batch": 40,
+      "history": 8192,
+      "variant": "performance",
+      "effective_weight_nz_mode": 2,
+      "pto_reduction": {
+        "atomic_add": 1,
+        "qr_split_k": 8,
+        "kv_split_k": 8
+      },
+      "scope": "metadata/保护区/有限值/Top-K 结构通过；不声明跨实现逐元素通过"
+    }
+  },
+  "rejected": {
+    "qkv_upstream_split": {
+      "change": "在 Q 展开优化上，QR/KV split=2/4，未确认额外收益",
+      "pto_p50_us": 817.249983549118,
+      "pto_p95_us": 845.8600044250488
+    },
+    "oproj_row_tiles": {
+      "change": "O-A/B：32/96/128 动态行块，未确认完整层收益",
+      "pto_p50_us": 850.4000008106232,
+      "pto_p95_us": 865.0000095367432
+    },
+    "qproj_bypass": {
+      "change": "在 Q 展开优化上启用 WqB BYPASS，未确认中位数收益",
+      "pto_p50_us": 823.0800032615662,
+      "pto_p95_us": 828.6600112915039
+    },
+    "oproj_nz_resident": {
+      "change": "O-B：128×256×1024 整段 K 权重常驻，未确认完整层收益",
+      "pto_p50_us": 857.230007648468,
+      "pto_p95_us": 877.3000240325928
+    }
+  },
+  "pto_p50_reduction_percent": 3.119035110374191,
+  "swimlane": {
+    "dispatch_to_finish_us": 810.0,
+    "worker_records": 1131,
+    "kernels": {
+      "hc_widen_spmd": {
+        "first_start_us": 28.56,
+        "last_finish_us": 38.56,
+        "max_kernel_us": 7.6
+      },
+      "csa_row_offsets": {
+        "first_start_us": 38.84,
+        "last_finish_us": 42.2,
+        "max_kernel_us": 2.24
+      },
+      "csa_rope_sign_spmd": {
+        "first_start_us": 48.46,
+        "last_finish_us": 53.96,
+        "max_kernel_us": 2.66
+      },
+      "hc_pre_rms_spmd": {
+        "first_start_us": 50.42,
+        "last_finish_us": 65.62,
+        "max_kernel_us": 9.72
+      },
+      "hc_pre_linear_spmd": {
+        "first_start_us": 51.84,
+        "last_finish_us": 71.46,
+        "max_kernel_us": 9.26
+      },
+      "hc_pre_linear_reduce_spmd": {
+        "first_start_us": 67.0,
+        "last_finish_us": 81.42,
+        "max_kernel_us": 3.12
+      },
+      "split_pre_post_spmd": {
+        "first_start_us": 83.46,
+        "last_finish_us": 90.6,
+        "max_kernel_us": 4.3
+      },
+      "comb_sinkhorn_spmd": {
+        "first_start_us": 81.7,
+        "last_finish_us": 102.22,
+        "max_kernel_us": 16.54
+      },
+      "mix_x_rms_norm_spmd": {
+        "first_start_us": 96.22,
+        "last_finish_us": 114.3,
+        "max_kernel_us": 17.6
+      },
+      "q_rope_prepare_spmd": {
+        "first_start_us": 48.08,
+        "last_finish_us": 52.48,
+        "max_kernel_us": 2.0
+      },
+      "csa_cache_writeback_spmd": {
+        "first_start_us": 277.9,
+        "last_finish_us": 297.24,
+        "max_kernel_us": 5.42
+      },
+      "kv_score_proj_spmd": {
+        "first_start_us": 168.04,
+        "last_finish_us": 215.32,
+        "max_kernel_us": 41.86
+      },
+      "scatter_softmax_pool_spmd": {
+        "first_start_us": 243.48,
+        "last_finish_us": 256.98,
+        "max_kernel_us": 12.04
+      },
+      "compress_state_commit_spmd": {
+        "first_start_us": 284.5,
+        "last_finish_us": 297.9,
+        "max_kernel_us": 6.28
+      },
+      "rmsnorm_rope_cache_write_spmd": {
+        "first_start_us": 284.5,
+        "last_finish_us": 294.12,
+        "max_kernel_us": 9.02
+      },
+      "kv_score_proj_0_spmd": {
+        "first_start_us": 121.58,
+        "last_finish_us": 176.84,
+        "max_kernel_us": 15.32
+      },
+      "scatter_softmax_pool_0_spmd": {
+        "first_start_us": 188.9,
+        "last_finish_us": 202.34,
+        "max_kernel_us": 12.64
+      },
+      "compress_state_commit_0_spmd": {
+        "first_start_us": 221.26,
+        "last_finish_us": 232.82,
+        "max_kernel_us": 10.6
+      },
+      "indexer_boundary_init_spmd": {
+        "first_start_us": 215.24,
+        "last_finish_us": 219.42,
+        "max_kernel_us": 3.6
+      },
+      "rmsnorm_rope_spmd": {
+        "first_start_us": 249.1,
+        "last_finish_us": 264.5,
+        "max_kernel_us": 14.38
+      },
+      "kv_hadamard": {
+        "first_start_us": 279.26,
+        "last_finish_us": 282.74,
+        "max_kernel_us": 2.94
+      },
+      "kv_and_cache_write_spmd": {
+        "first_start_us": 295.44,
+        "last_finish_us": 299.32,
+        "max_kernel_us": 3.26
+      },
+      "idx_kv_scale_commit": {
+        "first_start_us": 305.86,
+        "last_finish_us": 313.76,
+        "max_kernel_us": 7.36
+      },
+      "kv_touch": {
+        "first_start_us": 306.8,
+        "last_finish_us": 308.22,
+        "max_kernel_us": 0.94
+      },
+      "csa_slots_build_valid_qk_plan_spmd": {
+        "first_start_us": 442.14,
+        "last_finish_us": 465.48,
+        "max_kernel_us": 8.88
+      },
+      "qk_pv_aic_spmd": {
+        "first_start_us": 460.8,
+        "last_finish_us": 610.74,
+        "max_kernel_us": 134.98
+      },
+      "qk_pv_aiv_spmd": {
+        "first_start_us": 460.78,
+        "last_finish_us": 612.96,
+        "max_kernel_us": 137.08
+      },
+      "rope_cs_spmd": {
+        "first_start_us": 128.12,
+        "last_finish_us": 132.82,
+        "max_kernel_us": 3.92
+      },
+      "merge_norm_spmd": {
+        "first_start_us": 607.8,
+        "last_finish_us": 644.42,
+        "max_kernel_us": 24.06
+      },
+      "qr_proj_seed": {
+        "first_start_us": 50.42,
+        "last_finish_us": 61.12,
+        "max_kernel_us": 9.6
+      },
+      "qr_proj_matmul_spmd": {
+        "first_start_us": 122.74,
+        "last_finish_us": 176.04,
+        "max_kernel_us": 6.92
+      },
+      "qr_rms_norm_quant_spmd": {
+        "first_start_us": 179.76,
+        "last_finish_us": 194.02,
+        "max_kernel_us": 9.58
+      },
+      "qproj_matmul_spmd": {
+        "first_start_us": 214.46,
+        "last_finish_us": 302.5,
+        "max_kernel_us": 49.24
+      },
+      "qproj_dequant_rms_nope_rope_spmd": {
+        "first_start_us": 316.18,
+        "last_finish_us": 441.84,
+        "max_kernel_us": 25.26
+      },
+      "kv_proj_seed": {
+        "first_start_us": 63.62,
+        "last_finish_us": 69.2,
+        "max_kernel_us": 5.08
+      },
+      "kv_proj_matmul_spmd": {
+        "first_start_us": 147.24,
+        "last_finish_us": 220.44,
+        "max_kernel_us": 12.96
+      },
+      "kv_rms_norm_rope_spmd": {
+        "first_start_us": 233.56,
+        "last_finish_us": 248.38,
+        "max_kernel_us": 13.28
+      },
+      "idx_qr_proj_matmul_spmd": {
+        "first_start_us": 191.56,
+        "last_finish_us": 237.1,
+        "max_kernel_us": 24.92
+      },
+      "idx_qr_dequant_rope_spmd": {
+        "first_start_us": 254.88,
+        "last_finish_us": 301.94,
+        "max_kernel_us": 15.48
+      },
+      "qr_hadamard_matmul_spmd": {
+        "first_start_us": 294.36,
+        "last_finish_us": 311.48,
+        "max_kernel_us": 5.22
+      },
+      "qr_hadamard_quant_spmd": {
+        "first_start_us": 335.52,
+        "last_finish_us": 352.84,
+        "max_kernel_us": 11.96
+      },
+      "weights_proj_spmd": {
+        "first_start_us": 121.24,
+        "last_finish_us": 129.22,
+        "max_kernel_us": 7.44
+      },
+      "weights_proj_reduce_spmd": {
+        "first_start_us": 147.9,
+        "last_finish_us": 151.04,
+        "max_kernel_us": 2.52
+      },
+      "indexer_key_repack_spmd": {
+        "first_start_us": 310.54,
+        "last_finish_us": 353.74,
+        "max_kernel_us": 25.34
+      },
+      "indexer_score_topk_leaf_aic_spmd": {
+        "first_start_us": 361.72,
+        "last_finish_us": 426.02,
+        "max_kernel_us": 52.16
+      },
+      "indexer_score_topk_leaf_aiv_spmd": {
+        "first_start_us": 361.78,
+        "last_finish_us": 427.2,
+        "max_kernel_us": 52.34
+      },
+      "proj_b_act_spmd": {
+        "first_start_us": 774.02,
+        "last_finish_us": 807.52,
+        "max_kernel_us": 15.82
+      },
+      "hc_post_spmd": {
+        "first_start_us": 799.24,
+        "last_finish_us": 834.7,
+        "max_kernel_us": 22.08
+      },
+      "indexer_topk_single_leaf_publish_spmd": {
+        "first_start_us": 419.04,
+        "last_finish_us": 455.38,
+        "max_kernel_us": 20.64
+      },
+      "proj_a_mm_spmd": {
+        "first_start_us": 651.32,
+        "last_finish_us": 743.76,
+        "max_kernel_us": 31.62
+      },
+      "quant_spmd": {
+        "first_start_us": 656.72,
+        "last_finish_us": 761.42,
+        "max_kernel_us": 12.58
+      },
+      "_proj_b_mm_nz_kernel_spmd": {
+        "first_start_us": 712.32,
+        "last_finish_us": 790.12,
+        "max_kernel_us": 20.62
+      }
+    }
+  }
+}

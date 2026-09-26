@@ -1,0 +1,47 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..d661d703 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -87,6 +87,8 @@ PROJ_B_MM_T_TILE = 128
+ 
+ PROJ_B_MM_N_TILE = 128
+ 
++PROJ_B_NZ_MM_N_TILE = 256
++
+ PROJ_B_ACT_N_TILE = 512
+ 
+ QUANT_TOKEN_TILE = 8
+@@ -302,22 +304,17 @@ def _proj_b_mm_nz_kernel(
+ ):
+     # 保留函数边界：host Simplify 不能先按外层循环删去 max、再在 outlining 时丢失范围。
+     d0 = pl.tile.get_block_idx() * PROJ_B_D_TILE
+-    for tb in pl.range(proj_b_t_rows):
+-        t0 = tb * PROJ_B_MM_T_TILE
+-        for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+-            n0 = d0 + nf * PROJ_B_MM_N_TILE
+-            acc_b = pl.create_tensor([PROJ_B_MM_T_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+-            for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+-                k0 = col_g + kb * B_K_TILE
+-                b_act = o_r_i8_pad[t0 : t0 + PROJ_B_MM_T_TILE, k0 : k0 + B_K_TILE]
+-                # 独立核保留 g 的非负约束；调用方只传 0..O_GROUPS-1。
+-                wk0 = pl.max(g, 0) * O_LORA + kb * B_K_TILE
+-                b_weight = wo_b[
+-                    wk0 : wk0 + B_K_TILE,
+-                    n0 : n0 + PROJ_B_MM_N_TILE,
+-                ]
+-                acc_b = pl.matmul_acc(acc_b, b_act, b_weight, init_cond=(kb == 0))
+-            partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
++    for nf in pl.range(PROJ_B_D_TILE // PROJ_B_NZ_MM_N_TILE):
++        n0 = d0 + nf * PROJ_B_NZ_MM_N_TILE
++        # Follow pypto-lib 2164563's resident full-K weight load, retaining
++        # Native's two-dimensional [K, N] NZ storage and its group K offset.
++        wk0 = pl.max(g, 0) * O_LORA
++        b_weight_resident = wo_b[wk0 : wk0 + O_LORA, n0 : n0 + PROJ_B_NZ_MM_N_TILE]
++        for tb in pl.range(proj_b_t_rows):
++            t0 = tb * PROJ_B_MM_T_TILE
++            b_act_full = o_r_i8_pad[t0 : t0 + PROJ_B_MM_T_TILE, col_g : col_g + O_LORA]
++            acc_b = pl.matmul(b_act_full, b_weight_resident, out_dtype=pl.INT32)
++            partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_NZ_MM_N_TILE] = acc_b
+     return partials
+ 
+ 

@@ -51,22 +51,10 @@ EPS = M.rms_norm_eps
 
 MAX_SEQ_LEN = M.max_position_embeddings
 
-# qproj 的 K 分块取 128 而不是 256：B 操作数进 L0B 的大小是 K*N 字节（INT8），
-# N=512 时 K=256 要 128KiB，超了 L0B 的 64KiB 上限，编译器只能再拆一层——
-# in-core 实测 MTE1 占 34% 就是这么来的。K=128 时正好 64KiB 不超限。
-Q_PROJ_TILE = 128  # qproj K-tile (Q_LORA reduction)
-
-# qproj 输出列分块。由 512 降到 256，对标上游 e68e091。
-# 数值上完全中性：qproj 是 INT8xINT8->INT32 累加，整数累加精确，且 N 维切分
-# 不改变 K 的累加顺序，所以结果逐 bit 不变（这条路径也没有 Native 累加序对齐逻辑）。
-# 收益有两处：H*HEAD_DIM=32768，512 时只有 64 个 SPMD 块，摊到 24 个 AIC 上是
-# 16 核跑 3 块、8 核跑 2 块，不均衡比 1.5；256 时 128 块，变成 8 核跑 6、16 核跑 5，
-# 不均衡比降到 1.2。另外 L0C 占用从 512*64*4=128KiB 降到 64KiB，不再顶满累加器上限，
-# 给双缓冲留出空间。泳道实测该任务 1653us 对上游 875us（1.9x）。
-# 取 512 不是上游的 256：单卡实测 qproj_matmul 由 2.10x 降到 1.57x（该项 -466us）。
-# 上游每个 M 块对整条 K 做一次 matmul，N 块小一些无妨；我们按 Q_PROJ_TILE 分块
-# 累加，N 块越大越能摊薄每块的权重搬运。L0C 上限 512*64*4 = 128KiB 正好吃满。
-QPROJ_MM_N_TILE = 512  # qproj output-column tile
+# ND keeps the existing split-K matmul; Native NZ follows pypto-lib 2164563
+# with a full-K resident weight and a 256-column output tile.
+Q_PROJ_TILE = 128
+QPROJ_MM_N_TILE = 256 if QUANT_WEIGHT_NZ else 512
 
 Q_LORA_TILE = 256  # qr rms-norm / quant N granularity
 
@@ -89,11 +77,7 @@ QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul；上游值。取 32 是为了�
 
 QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
 
-# qr_proj 的 split-K 取 8 而不是上游的 2：grid = (Q_LORA//QR_N_TILE) * QR_OK，
-# 取 2 时只有 16 块，而 AIC 有 24 核，8 个核全程闲置（利用率 66.7%）。
-# 取 8 后 64 块跑 3 波、每块 K 从 2048 降到 512，墙钟 33.5 -> 24.1us。
-# split-K 靠 qr_proj_seed 置零 + assemble(atomic=Add) 规约，已是现成机制；
-# QR_N_TILE 保持 128：改成 64 会改变 atomic 的累加顺序，实测输出就变了。
+# Keep the deployment split counts; smaller upstream counts did not lower the full-layer interval.
 QR_OK = 8 if ATOMIC_ADD else 1  # 单分片按固定 K 顺序累加，避免跨核 atomic add。
 
 QR_SPLIT_K_TILE = D // QR_OK
@@ -111,15 +95,12 @@ KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
 KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
 
-# kv_proj 的 split-K 取 8：grid = (HEAD_DIM//KV_N_TILE) * KV_OK * kv_m_groups，
-# 取 2 时只有 8 块，AIC 24 核只用了三分之一。取 8 后 32 块跑 2 波、每块 K 从
-# 2048 降到 512，墙钟 25.6 -> 15.0us。split-K 的置零与规约由 kv_proj_seed 和
-# assemble(atomic=Add) 承担，已是现成机制。
+# A single split preserves the fixed-order diagnostic path.
 KV_OK = 8 if ATOMIC_ADD else 1
 
 KV_OM = 3  # maximum kv_proj split-M factor
 
-KV_SPLIT_K_TILE = D // KV_OK  # kv_proj K per split (=2048)
+KV_SPLIT_K_TILE = D // KV_OK
 
 # CANN 9.0 MatMulV2 NT, M240/N512/K4096. Keep the existing schedules
 # for other token counts; Native chooses different tilings for those shapes.
@@ -131,13 +112,12 @@ KV_NATIVE_N_GROUP = 96
 KV_NATIVE_SHIFT_GROUPS = 4
 KV_NATIVE_PAIR_SHIFT = 5
 
-QPROJ_M_TILE = 64  # dense qproj token tile; fills the 128 KiB L0C accumulator
+QPROJ_M_TILE = 64  # dense qproj token tile
 
 QPROJ_WORKERS = 24
 
-# 取 16 不是 64：尾部用的是 matmul_acc，valid_shape 小于物理行数时累加器不 compact，
-# 编译器直接报 AccCompactValid。上游尾部走的是 pl.matmul，所以它能取 64。
-QPROJ_TAIL_M_TILE = MATMUL_T_TILE  # partial-M path validated by decode/small physical T
+# Plain matmul supports a compact 64-row NZ tail; ND matmul_acc keeps 16.
+QPROJ_TAIL_M_TILE = QPROJ_M_TILE if QUANT_WEIGHT_NZ else MATMUL_T_TILE
 
 QPROJ_T_PAD = ((PREFILL_DENSE_TILE + QPROJ_TAIL_M_TILE - 1) // QPROJ_TAIL_M_TILE) * QPROJ_TAIL_M_TILE
 
@@ -497,16 +477,7 @@ def _q_proj_q_matmul_nd(
             QPROJ_WORKERS,
         ):
             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
-            # 整条 K 的权重块提到 M 循环外，一次进 L1 后按 K 块切片复用。原先在 M
-            # 循环内按 Q_PROJ_TILE 反复从 GM 取，同一块权重被重复搬
-            # qproj_full_rows/QPROJ_M_TILE 遍，in-core 实测 MTE2 占 36.4%。
-            # 保留分块 matmul_acc 不改成整条 K 的单次 matmul：后者实测让编译器
-            # 拆出三倍 FIXP 回写、Cube 近翻倍（629k vs 529k cycles）。
-            # 权重块提到 M 循环外一次进 L1 试过两版，都更差，已撤回按 K 块从 GM 取：
-            #   ① 整条 K 的单次 pl.matmul：529k -> 629k cycles，FIXP 三倍、Cube 近翻倍；
-            #   ② 整段 tile 级 + pl.tile.slice 复用 L1：522k -> 632k，MTE2 虽从 36% 降到
-            #      27%，但 256KiB 权重常驻 L1 把 MTE1 顶了上去。
-            # 该项的 2.36x 差距改走设备侧复核（BYPASS 已加，in-core 测不出 L2 收益）。
+            # ND retains the split-K pipeline and its existing padded row path.
             for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
                 col_acc = pl.create_tensor([QPROJ_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
                 for qr_proj_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
@@ -529,54 +500,27 @@ def _q_proj_q_matmul_nz(
     tile_rows: pl.Scalar[pl.INDEX],
     qproj_dep: pl.Scalar[pl.TASK_ID],
 ):
-    """NZ 版：切片偏移必须可证非负，所以 N 索引写成 `block_idx + i * WORKERS`。
-
-    `pl.range(block_idx, N, WORKERS)` 的循环变量是 IterArg，`IsProvableNonNegative`
-    明确不追它，于是 `w_col0` 不可证、NZ 切片被拒。改成「block 索引 + 循环变量乘
-    常量」之后，和与积都由可证非负量构成。
-
-    **grid 仍保持 QPROJ_WORKERS（24），不要改成 QPROJ_N_BLOCKS（64）。** 后者虽然让
-    每块只做一个 N 块、单块从 55.70 降到 17.86µs，但 AIC 只有 24 核，64 块要跑 3 趟，
-    17.86 x 3 = 53.6µs，对原来的 55.70 几乎没动（清单 T2.28 实测墙钟 55.7 -> 53.6）。
-    保持 24 则仍是一趟，NZ 省下的搬运才真正落到墙钟上。
-
-    64 不是 24 的整数倍，各 worker 趟数不同（0~15 三趟、16~23 两趟）。差异放进
-    **循环上界**而不是用 `if` 守卫：上界只决定跑几趟、不参与切片偏移，含减法也无妨；
-    而 `if` 里对 q_proj_i32 赋值会让两支给出不同的 SSA 定义，直接报
-    `SSAForm` 验证失败（Error Code: 6，实测过）。
-    """
+    """Use upstream's full-K resident weight and compact tail matmul on Native NZ."""
     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
-    qproj_full_rows = qproj_t_matmul  # 调用方已按 QPROJ_M_TILE 取整
-    with pl.spmd(
-        QPROJ_WORKERS,
-        name_hint="qproj_matmul",
-        deps=[qproj_dep],
-    ) as qproj_tid:
+    qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
         qproj_worker = pl.tile.get_block_idx()
+        # Keep the column offset provably nonnegative after NZ outlining.
         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
             qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
-            # 整条 K 的权重块提到 M 循环外，一次进 L1 后按 K 块切片复用。原先在 M
-            # 循环内按 Q_PROJ_TILE 反复从 GM 取，同一块权重被重复搬
-            # qproj_full_rows/QPROJ_M_TILE 遍，in-core 实测 MTE2 占 36.4%。
-            # 保留分块 matmul_acc 不改成整条 K 的单次 matmul：后者实测让编译器
-            # 拆出三倍 FIXP 回写、Cube 近翻倍（629k vs 529k cycles）。
-            # 权重块提到 M 循环外一次进 L1 试过两版，都更差，已撤回按 K 块从 GM 取：
-            #   ① 整条 K 的单次 pl.matmul：529k -> 629k cycles，FIXP 三倍、Cube 近翻倍；
-            #   ② 整段 tile 级 + pl.tile.slice 复用 L1：522k -> 632k，MTE2 虽从 36% 降到
-            #      27%，但 256KiB 权重常驻 L1 把 MTE1 顶了上去。
-            # 该项的 2.36x 差距改走设备侧复核（BYPASS 已加，in-core 测不出 L2 收益）。
+            wq_full = wq_b[0:Q_LORA, w_col0 : w_col0 + QPROJ_MM_N_TILE]
             for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
-                col_acc = pl.create_tensor([QPROJ_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
-                for qr_proj_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
-                    qr_i8_chunk = qr_i8_matmul[
-                        t0 : t0 + QPROJ_M_TILE,
-                        qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE,
-                    ]
-                    wq_chunk = wq_b[qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
-                    col_acc = pl.matmul_acc(col_acc, qr_i8_chunk, wq_chunk, init_cond=(qr_proj_col0 == 0))
+                qr_full = qr_i8_matmul[t0 : t0 + QPROJ_M_TILE, 0:Q_LORA]
+                col_acc = pl.matmul(qr_full, wq_full, out_dtype=pl.INT32)
                 q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
-
+            for tail_t0 in pl.range(qproj_full_rows, qproj_t_matmul, QPROJ_TAIL_M_TILE):
+                tail_rows = pl.min(QPROJ_TAIL_M_TILE, tile_rows - tail_t0)
+                qr_tail = pl.slice(qr_i8_matmul, [QPROJ_TAIL_M_TILE, Q_LORA], [tail_t0, 0],
+                                   valid_shape=[tail_rows, Q_LORA])
+                tail_acc = pl.matmul(qr_tail, wq_full, out_dtype=pl.INT32)
+                q_proj_i32[tail_t0 : tail_t0 + QPROJ_TAIL_M_TILE,
+                           w_col0 : w_col0 + QPROJ_MM_N_TILE] = tail_acc
     return q_proj_i32, qproj_tid
 
 
@@ -772,10 +716,8 @@ def q_proj_q(
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
-            # 按 QPROJ_M_TILE 向上取整，qproj 只跑整块：尾部那几行若按 16 行小块补算，
-            # 每个小块都要把整块 [Q_LORA, N] 权重再读一遍（T=96 时权重被读 3 遍，整块只读 2 遍）。
-            # 多出来的行读的是 qr_i8_matmul 的补位行，INT8 乘加不会产生非有限值，
-            # 结果落在 q_proj_i32 的补位行里，反量化只读前 tile_rows 行。
+            # Reserve full cube row tiles. NZ marks the tail's actual rows;
+            # ND computes the padded INT8 rows. Dequant reads tile_rows only.
             qproj_t_matmul = ((tile_rows + QPROJ_M_TILE - 1) // QPROJ_M_TILE) * QPROJ_M_TILE
             q_proj_i32 = pl.create_tensor([qproj_t_matmul, H * HEAD_DIM], dtype=pl.INT32)
             q_proj_i32, _qproj_tid = q_proj_q_matmul(
