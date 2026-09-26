@@ -1,0 +1,116 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 9cd7f1b8..21fd24c0 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -152,6 +152,8 @@ TOPK_SCORE_WORKERS = 24  # Top-K score workers
+ 
+ REPACK_WORKERS = 48  # indexer 键重排的 AIV 通道数
+ 
++REPACK_PAGE_TILE = 4  # Coalesce only pages confirmed contiguous by the Native table.
++
+ SCORE_TILE = 384
+ 
+ SCORE_LANE_ROWS = SCORE_TILE // 2
+@@ -436,37 +438,82 @@ def indexer_score_topk_forest(
+     # repack_safe 用最后一个有效页填上，不留未初始化数据。
+     repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + (SCORE_LANE_ROWS // BLOCK_SIZE + 1)
+     repack_rows = repack_pages * BLOCK_SIZE
++    repack_groups = (repack_pages + REPACK_PAGE_TILE - 1) // REPACK_PAGE_TILE
+     key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
+     scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
+     with pl.spmd(
+         REPACK_WORKERS, name_hint="indexer_key_repack", deps=[cache_write_tid], allow_early_resolve=True
+     ) as repack_tid:
+         repack_worker = pl.tile.get_block_idx()
+-        for repack_unit in pl.range(repack_worker, b_dim * repack_pages, REPACK_WORKERS):
+-            repack_b = repack_unit // repack_pages
+-            repack_page = repack_unit - repack_b * repack_pages
++        for repack_unit in pl.range(repack_worker, b_dim * repack_groups, REPACK_WORKERS):
++            repack_b = repack_unit // repack_groups
++            repack_page = (repack_unit - repack_b * repack_groups) * REPACK_PAGE_TILE
+             repack_len = pl.read(kv_seq_lens, [repack_b]) // COMPRESS_RATIO
+             repack_valid = pl.max(pl.min(repack_len, TOPK_MAX_CANDIDATES), 0)
+-            # 超出本请求可见范围的页钳到最后一页：紧凑缓冲里对应的行不会被读到
+-            # （打分侧按 valid_count 截断），只是不留未初始化数据。
+-            repack_safe = pl.min(repack_page, pl.max((repack_valid - 1) // BLOCK_SIZE, 0))
++            repack_valid_pages = pl.max((repack_valid + BLOCK_SIZE - 1) // BLOCK_SIZE, 1)
++            repack_safe = pl.min(repack_page, repack_valid_pages - 1)
+             repack_block = pl.cast(
+                 pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
+             )
+-            # 键与 scale 在页内连续（4096 + 32*2 = INDEXER_MIN_PAGE_BYTES），一次读完。
+-            # 分两次读会让 DMA 次数翻倍，而 repack 的开销就是次数乘以启动开销。
+-            repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
+-            repack_bytes = pl.gather_row(
+-                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
+-            )
+-            repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
+-            key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
+-                repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
+-            )
+-            repack_scale_col = repack_page * BLOCK_SIZE
+-            scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
+-                pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
+-            )
++            repack_direction = 0
++            if repack_page + REPACK_PAGE_TILE <= repack_valid_pages:
++                repack_second = pl.read(idx_block_table_flat, [repack_b * table_columns + repack_page + 1])
++                if repack_second == repack_block + 1:
++                    repack_direction = 1
++                elif repack_second == repack_block - 1:
++                    repack_direction = -1
++            for repack_probe in pl.range(2, REPACK_PAGE_TILE):
++                if repack_direction != 0:
++                    repack_next = pl.read(
++                        idx_block_table_flat, [repack_b * table_columns + repack_page + repack_probe]
++                    )
++                    if repack_next != repack_block + repack_probe * repack_direction:
++                        repack_direction = 0
++            if repack_direction != 0:
++                repack_first_physical = repack_block
++                if repack_direction < 0:
++                    repack_first_physical = repack_block - (REPACK_PAGE_TILE - 1)
++                repack_tile = pl.create_tensor([REPACK_PAGE_TILE, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
++                repack_tile = pl.gather_row(
++                    repack_tile, idx_kv_cache, [0, 0], [repack_first_physical, 0],
++                    [REPACK_PAGE_TILE, INDEXER_MIN_PAGE_BYTES],
++                )
++                for repack_copy in pl.range(REPACK_PAGE_TILE):
++                    repack_copy_row = repack_copy
++                    if repack_direction < 0:
++                        repack_copy_row = REPACK_PAGE_TILE - 1 - repack_copy
++                    repack_dst = (repack_b * repack_pages + repack_page + repack_copy) * BLOCK_SIZE
++                    key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
++                        repack_tile[repack_copy_row : repack_copy_row + 1, 0:INDEXER_KEY_BYTES],
++                        [BLOCK_SIZE, IDX_HEAD_DIM],
++                    )
++                    repack_scale_col = (repack_page + repack_copy) * BLOCK_SIZE
++                    scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
++                        pl.reinterpret_view(
++                            repack_tile[repack_copy_row : repack_copy_row + 1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES],
++                            pl.FP16,
++                        )
++                    )
++            else:
++                # Fragmented pages and padding retain the exact per-page clamp.
++                for repack_offset in pl.range(pl.min(REPACK_PAGE_TILE, repack_pages - repack_page)):
++                    repack_single_page = repack_page + repack_offset
++                    repack_single_safe = pl.min(repack_single_page, repack_valid_pages - 1)
++                    repack_single_block = pl.cast(
++                        pl.read(idx_block_table_flat, [repack_b * table_columns + repack_single_safe]), pl.INDEX
++                    )
++                    repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
++                    repack_bytes = pl.gather_row(
++                        repack_bytes, idx_kv_cache, [0, 0], [repack_single_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
++                    )
++                    repack_single_dst = (repack_b * repack_pages + repack_single_page) * BLOCK_SIZE
++                    key_compact[repack_single_dst : repack_single_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
++                        repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
++                    )
++                    repack_single_scale_col = repack_single_page * BLOCK_SIZE
++                    scale_compact[
++                        repack_b : repack_b + 1, repack_single_scale_col : repack_single_scale_col + BLOCK_SIZE
++                    ] = pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
+ 
+     # 性能版不外提 head 系数：上游在 leaf 内按 query 现算，省掉一个独占关键路径
+     # 约 40.7us 的任务；精度版保留外提是为了配合 Cube 规约的 FP16 权重行布局。

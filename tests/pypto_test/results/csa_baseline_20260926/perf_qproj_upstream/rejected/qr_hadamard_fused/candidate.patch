@@ -1,0 +1,69 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 9cd7f1b8..04f621ca 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -116,12 +116,12 @@ D_TILE = 512
+ 
+ QH_QUANT_TILE = 64
+ 
+-QH_QUANT_WORKERS = 48  # Query Hadamard quantization workers
+-
+ QR_PROJ_WORKERS = 24  # Query projection workers
+ 
+ QH_MM_TILE = 64  # Query Hadamard cube tile
+ 
++assert QH_MM_TILE == QH_QUANT_TILE
++
+ QH_WORKERS = 24  # Query Hadamard matmul workers
+ 
+ WEIGHTS_WORKERS = 24  # Weights-projection workers
+@@ -695,36 +695,23 @@ def indexer_qr_hadamard_mm(
+     qr_hadamard_scale_dq: pl.Out[pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32]],
+     qh_mm_dep: pl.Scalar[pl.TASK_ID],
+ ) -> tuple[pl.Scalar[pl.TASK_ID], pl.Scalar[pl.TASK_ID]]:
+-    """q @ hadamard and its INT8 quant, fenced behind the caller's cube ordering."""
++    """Fuse each Hadamard tile with its unchanged INT8 quantization epilogue."""
+     bs = pl.tensor.dim(x, 0)
+     bs_heads = bs * IDX_N_HEADS
+ 
+-    # Query Hadamard FP32 intermediate.
+-    qh_acc_gm = pl.create_tensor([bs_heads, IDX_HEAD_DIM], dtype=pl.FP32)
+     with pl.spmd(
+         QH_WORKERS,
+-        name_hint="qr_hadamard_matmul",
++        name_hint="qr_hadamard_quant_fused",
+         deps=[qh_mm_dep],
+         allow_early_resolve=True,
+-    ) as qh_mm_tid:
++    ) as qh_fused_tid:
+         qh_worker = pl.tile.get_block_idx()
+         # Shared Hadamard matrix.
+         qh_hadamard = hadamard[0:IDX_HEAD_DIM, 0:IDX_HEAD_DIM]
+         for idx in pl.range(qh_worker, bs_heads // QH_MM_TILE, QH_WORKERS):
+             o0 = idx * QH_MM_TILE
+             qh_acc = pl.matmul(qr_bf16[o0 : o0 + QH_MM_TILE, :], qh_hadamard, out_dtype=pl.FP32)
+-            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = qh_acc
+-
+-    with pl.spmd(
+-        QH_QUANT_WORKERS,
+-        name_hint="qr_hadamard_quant",
+-        allow_early_resolve=True,
+-    ) as qh_quant_tid:
+-        qh_quant_worker = pl.tile.get_block_idx()
+-        for idx in pl.range(qh_quant_worker, bs_heads // QH_QUANT_TILE, QH_QUANT_WORKERS):
+-            o0 = idx * QH_QUANT_TILE
+-            qh_full_f32 = qh_acc_gm[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM]
+-            qh_full_f32 = pl.mul(qh_full_f32, HADAMARD_SCALE)
++            qh_full_f32 = pl.mul(qh_acc, HADAMARD_SCALE)
+             qh_amax = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
+             for h0 in pl.range(0, IDX_HEAD_DIM, QH_HEAD_DIM_TILE):
+                 qh_a_f32 = qh_full_f32[:, h0 : h0 + QH_HEAD_DIM_TILE]
+@@ -745,7 +732,7 @@ def indexer_qr_hadamard_mm(
+             qh_i8 = pl.cast(qh_q_half, target_type=pl.INT8, mode="trunc")
+             qr_hadamard_i8[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM] = qh_i8
+ 
+-    return qh_mm_tid, qh_quant_tid
++    return qh_fused_tid, qh_fused_tid
+ 
+ 
+ @pl.jit.inline(auto_scope=False)

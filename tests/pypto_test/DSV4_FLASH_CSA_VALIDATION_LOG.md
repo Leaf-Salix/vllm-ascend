@@ -4244,3 +4244,91 @@ score 最早 receive 为 **361.72**。因此不能把提前 repack 的局部等�
 
 详细时间点见[已有泳道的提取证据](results/csa_baseline_20260926/upstream_gap/aiv_repack_scheduling.json)。
 下一步优化优先围绕这组可见的分支竞争提出候选，避免仅按任务数或单核执行次序判断好坏。
+
+## 123. QR 融合与连续页 repack 的必要单卡筛选（2026-09-26）
+
+本轮沿用正式第 2 层权重、合成历史，B16/S6/H8192、performance、mode=2、atomic=1、
+Native level=0、metadata 复用，5 次预热和 20 次图重放。以下任务均在物理 device 0
+completed/exit=0，工具链未变；先采保留源码基线，再按表顺序采候选，没有交错重复基线。
+
+| 实现 | PTO p50/p95（μs） | 同次 Native p50/p95（μs） | task-submit 任务 |
+| --- | --- | --- | --- |
+| 保留源码基线 | 820.90 / 842.16 | 936.53 / 945.68 | task_20260926_194137_2474829614 |
+| QR Hadamard + 量化 MIX，默认 lane | 834.68 / 858.26 | 923.76 / 929.96 | task_20260926_194418_24910912643 |
+| 同上，显式 UP_DOWN 两 lane | 852.65 / 881.72 | 918.06 / 925.60 | task_20260926_194852_251402617212 |
+| repack 连续四页，升序检测 | 833.87 / 855.18 | 929.28 / 933.56 | task_20260926_195531_25415999329 |
+| repack 连续四页，双向检测 | 860.53 / 870.10 | 930.21 / 936.06 | task_20260926_195923_25609216744 |
+
+四项均未测到完整区间收益，已恢复生产实现，没有追加候选 DFX、边界、逐元素或 16 卡测试。
+Native/PTO 的 31 项 metadata/保护区检查通过，mismatch 与越界写字节均为 0；
+这不是跨实现精度验收，也不由 Event 总时间归因 incore 或调度的各自变化。
+
+QR 候选把上游及保留版的 24 个 AIC Hadamard matmul、48 个独立 AIV quant 改成 24 个
+MIX block，保留逐行 Hadamard 缩放、两半 amax 归约与取整顺序。默认 split NONE 只有
+一个 lane 执行有效量化，另一 lane 的主体为空；仍会派发 72 个 worker，不能宣称数量减少。
+生成代码仍用 GM 上的 C2V pipe，也不能宣称消除了全部 GM 搬运。显式 UP_DOWN 版每个 lane
+处理 32 行；整区域自动 split 首次编译触发 tile.extract 类型推断限制，随后参照上游写法改为
+`split_aiv` + `aiv_shard`，算子侧解决并完成 PTOAS/CCE 编译，没有修改工具链。
+
+连续页候选仍读取 Native 4160B 页，在物理连续时合并四次读取，输出按原逻辑页序写出；
+碎片及 padding 回退原逐页路径。上游没有这项 cache 重排，它是本接入 score 接口的性能取舍。
+升序版计时后核对已有快照发现：fixture 页表为倒序，因此该次仅覆盖 fallback，
+**不能当作四页 fast path 的正确性或性能证据**。双向版补上降序连续页，CPU 分析为
+256 个四页组、128 次单页读取，预期读取次数 1152→384，输出写次数不变；
+这是既有合成快照的页表推算，不是设备分支计数或真实模型命中率。减少读请求仍未带来整层收益。
+
+最小补丁、配置及原始样本保留在
+[默认融合](results/csa_baseline_20260926/perf_qproj_upstream/rejected/qr_hadamard_fused/measurement.json)、
+[双 lane 融合](results/csa_baseline_20260926/perf_qproj_upstream/rejected/qr_hadamard_fused_lanes/measurement.json)、
+[升序四页](results/csa_baseline_20260926/perf_qproj_upstream/rejected/repack_contiguous_ascending/measurement.json)、
+[双向四页](results/csa_baseline_20260926/perf_qproj_upstream/rejected/repack_contiguous_bidirectional/measurement.json)。
+重复候选编译、输入和日志目录清理；用户下载包保留。
+
+## 124. 核内与调度优先级重估、PMU 单次诊断（2026-09-26）
+
+按用户要求重新权衡。已有同一份 Worker 对照中，AIC 核内合计 10520.64 对上游
+10690.92 核·μs（−1.6%），AIV 16292.06 对 16130.84（+1.0%），总量已接近；
+但单实例均值仍有 O-A 29.31 对 20.19 μs（+45.2%）、量化 9.80 对 7.23（+35.5%）、
+merge 21.65 对 16.57（+30.7%）。更快的 Indexer score 等任务抵消了热点，不能由合计宣布
+所有 incore 已对齐。QK/PV、Q/Indexer 反量化和 O-B 暂时后移。
+
+**下一轮先做 O-A→量化的核内搬运、复用与流水，再处理 merge；Q/Indexer 调度作为第二条线，
+只做有分支完成与资源占用证据的调整。** 多轮调序、worker 数、提前派发及本轮融合/减读请求
+均未取得整层收益，降低泛化调度试探的优先级；这并不否认已观察到的排队，也没有证明调度
+永远无收益。806.14 对 727.98 μs 的 Worker 墙钟差不能全部归于调度器代码或核内算术。
+上游仍是缺少完整采样配置的历史参考，没有升级为同配置验收。
+
+为收窄 O-A 的核内方向，修复现有 `--pmu` 入口：program 模式接受原始 CPU 快照，
+保留 Native NZ 字节、未做权重转换；在实际调用时显式传 RunConfig，不能只在 compile 时开启。
+PMU 仅采一次，不走宿主 eager 计时循环，也不报告该模式的墙钟性能。kernel/图模式不变。
+
+| 尝试 | 状态 | 结论 |
+| --- | --- | --- |
+| task_20260926_200234_25764944285 | exit=1 | program 模式错误传入 NPU tensor，未采到计数 |
+| task_20260926_200502_25876285661 | exit=0 | 只在 compile 配置启用，实际调用未启用，没有 CSV，不算采集成功 |
+| task_20260926_200756_2599362580 | exit=1 | 首次调用后，第二次调用在 PMU SHM `halHostRegister` 返回 8；不使用其 CSV 做性能结论 |
+| task_20260926_201418_26222942858 | exit=0 | 单次实际采集成功，1131 条非零计数，52 个 func_id，425 AIC + 706 AIV |
+
+最后一次使用同正式层权重/合成状态、mode=2、metadata 复用、atomic=1，物理 device 0。
+声明输出/状态有限值检查通过，未提供参考，报告为 MEASURED；没有把它写成精度 PASS。
+重复调用的注册失败不是设备算子死锁，尚未定位运行时注册生命周期根因；本轮未改依赖源码。
+
+| 任务 | 实例数 | Cube busy/total | Vector busy/total | MTE2 busy/total |
+| --- | ---: | ---: | ---: | ---: |
+| O-A `proj_a_mm` | 64 | 31.2% | 0.0% | 84.4% |
+| O-A 后量化 `quant` | 24 | 0.0% | 45.5% | 37.6% |
+| `merge_norm` | 48 | 0.0% | 29.9% | 29.4% |
+| Q 展开 `qproj_matmul` | 24 | 25.5% | 0.0% | 51.2% |
+
+比例按同类任务 `sum(busy_cycles) / sum(pmu_total_cycles)` 计算。通道可重叠，不能相加；
+MTE2 busy 不是带宽利用率，也不足以区分缓存未命中与内存系统竞争。该证据支持先查 O-A
+供数与搬运重叠，不能声称已解释全部差距或可节省某个固定 μs。
+Simpler 当前 a2a3 PMU 会强制 single-issue，且本次是 program 模式的一次调用，
+与普通 kernel 图重放、历史上游都不是相同调度条件。原始 CSV、实际编译名称映射与
+[聚合摘要](results/csa_baseline_20260926/upstream_gap/pmu_pipe/summary.json) 一并保留，
+PMU 数据不替换原有 Worker 时长表。
+
+同时纠正两版根入口的注释：`pl.scope` 退出释放生产者的 scope 引用，调度仍遵循 tensor/
+TaskId 依赖，并非等待全部设备 task 完成的屏障。这里只改注释，没有改变生产执行图；
+今后拆 scope 必须追踪消费者与生命周期，旧 token 差异不能直接当作缺依赖证据。
+清单和泳道差距文档已按上述优先级同步更新，<750 μs 与完整 decode 周期验收仍未完成。

@@ -230,9 +230,9 @@ def _decode_csa_tp1_layer(
     comb_t = pl.create_tensor([t_dim, HC_MULT * HC_MULT], dtype=pl.FP32)
     x_normed_t = pl.create_tensor([t_dim, D], dtype=pl.BF16)
     # row_recip=False：走 row_expand_div 的精确路径，与上游 CSA 口径一致。
-    # 必须单独开一个 runtime scope：scope 退出时才会等齐里面的任务，
-    # 否则 qkv_proj_rope / compressor / indexer 会和 hc_pre_norm 抢跑，
-    # 读到还没写完的 x_normed_t。上游 decode_csa.py 的 TP1 入口同样这么包。
+    # 保留已验证的 HC scope 边界以管理任务和临时张量的生命周期。
+    # scope 退出释放引用，并不是设备端等待所有任务完成的 barrier；
+    # 消费者的执行顺序由张量依赖和显式 TaskId 依赖保证。
     # hc 残差流在 vllm-ascend 侧是 BF16（与 Native 的 npu_hc_pre_v2 / npu_hc_post 一致），
     # 而上游 hc_pre 全程按 FP32 算。这里一次性加宽，不把 cast 下沉到 hc_pre 的每处
     # tile 读取——下沉过的版本有两个后果：cast 丢掉 pl.slice 的 valid_shape 标记，
@@ -263,11 +263,8 @@ def _decode_csa_tp1_layer(
                     )
                     pl.store(w_out, [w_t0, w_d0], x_hc32_flat)
 
-    # hc_pre_norm 必须整个包进一个 runtime scope：scope 退出时才等齐里面的任务。
-    # 试过改用 rms_tid 显式依赖（上游 TP 版 _decode_csa 的写法，好处是 post / comb
-    # 两个门能和投影并发），但整模型实测反而更差——256 个序列里崩掉的从 42 涨到 94。
-    # 原因是 rms_tid 只覆盖产出 x_normed 的 mix_x_rms_norm，写 post_t / comb_t 的
-    # split_pre_post 与 comb_sinkhorn 不在这条链上，末尾的 hc_post 就可能读到没写完的门。
+    # 后续若拆分此 scope，需分别核对 x_normed、post、comb 到各消费者的依赖。
+    # 仅持有 rms_tid 不能代替检查另外两项输出；不由历史 token 差异推断缺边成因。
     with pl.scope():
         hc_pre_norm(
             x_hc32, hc_attn_fn, hc_attn_scale, hc_attn_base, attn_norm_w,

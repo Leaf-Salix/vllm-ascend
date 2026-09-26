@@ -1,0 +1,234 @@
+{
+  "base_commit": "f0c9bb86",
+  "baseline_task": "task_20260926_194137_2474829614",
+  "candidate_task": "task_20260926_194852_251402617212",
+  "task_status": "both completed/exit=0",
+  "decision": "REJECTED: 未测到单卡完整区间收益，恢复原分离实现。",
+  "change": "将 QR Hadamard M64/N128/K128 与原 INT8 量化融合为 24 个 MIX block；默认模式单 AIV 承担有效量化，显式 UP_DOWN 版每个 AIV 处理 32 行。",
+  "upstream_difference": "上游和保留版使用 24 AIC matmul + 48 独立 AIV quant；融合修改任务边界，不改每行缩放、amax 分块和取整顺序。生成代码仍用 C2V GM pipe，不等于消除全部 GM 搬运。",
+  "evidence_boundary": "无候选 DFX，不由完整区间推断任务启动或 incore 改善；没有追加边界/逐元素/16 卡测试。",
+  "cpu_build": "全链 PTOAS/CCE PASS；performance、四张权重 NZ、atomic=1。",
+  "runs": {
+    "baseline": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "device": "0",
+      "warmup": 5,
+      "iters": 20,
+      "timing": {
+        "native": {
+          "samples_us": [
+            942.8799748420715,
+            934.4000220298767,
+            937.5799894332886,
+            940.1000142097473,
+            930.5599927902222,
+            938.2799863815308,
+            937.6800060272217,
+            945.6800222396851,
+            934.8400235176086,
+            934.0999722480774,
+            934.939980506897,
+            939.8199915885925,
+            932.4399828910828,
+            932.9800009727478,
+            937.0599985122681,
+            945.7799792289734,
+            932.5399994850159,
+            936.1799955368042,
+            936.8799924850464,
+            935.1000189781189
+          ],
+          "us_min": 930.5599927902222,
+          "us_p50": 936.5299940109253,
+          "us_p95": 945.6800222396851,
+          "us_max": 945.7799792289734
+        },
+        "pto": {
+          "samples_us": [
+            824.8400092124939,
+            813.1399750709534,
+            824.0399956703186,
+            831.6799998283386,
+            808.5600137710571,
+            828.1800150871277,
+            815.6800270080566,
+            813.6399984359741,
+            816.4799809455872,
+            830.0999999046326,
+            829.4199705123901,
+            817.7599906921387,
+            814.1000270843506,
+            842.1599864959717,
+            842.7000045776367,
+            816.1399960517883,
+            824.180006980896,
+            816.7799711227417,
+            806.9800138473511,
+            828.2600045204163
+          ],
+          "us_min": 806.9800138473511,
+          "us_p50": 820.8999931812286,
+          "us_p95": 842.1599864959717,
+          "us_max": 842.7000045776367
+        }
+      },
+      "guards": {
+        "native": [
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          },
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          }
+        ],
+        "pto": [
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          },
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          }
+        ]
+      }
+    },
+    "candidate": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "device": "0",
+      "warmup": 5,
+      "iters": 20,
+      "timing": {
+        "native": {
+          "samples_us": [
+            922.3200082778931,
+            921.8999743461609,
+            918.6199903488159,
+            918.3800220489502,
+            916.8800115585327,
+            915.6799912452698,
+            925.599992275238,
+            916.0799980163574,
+            918.179988861084,
+            920.2200174331665,
+            923.4200119972229,
+            917.9400205612183,
+            928.3000230789185,
+            910.8200073242188,
+            915.3599739074707,
+            917.3399806022644,
+            914.7999882698059,
+            913.8799905776978,
+            913.1600260734558,
+            924.4199991226196
+          ],
+          "us_min": 910.8200073242188,
+          "us_p50": 918.0600047111511,
+          "us_p95": 925.599992275238,
+          "us_max": 928.3000230789185
+        },
+        "pto": {
+          "samples_us": [
+            888.9200091362,
+            864.9600148200989,
+            861.8599772453308,
+            864.8800253868103,
+            852.6399731636047,
+            866.2199974060059,
+            863.4999990463257,
+            881.7200064659119,
+            852.6600003242493,
+            853.659987449646,
+            862.1399998664856,
+            846.6600179672241,
+            841.6000008583069,
+            831.499993801117,
+            836.6600275039673,
+            844.219982624054,
+            849.839985370636,
+            832.319974899292,
+            842.7799940109253,
+            843.4399962425232
+          ],
+          "us_min": 831.499993801117,
+          "us_p50": 852.649986743927,
+          "us_p95": 881.7200064659119,
+          "us_max": 888.9200091362
+        }
+      },
+      "guards": {
+        "native": [
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          },
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          }
+        ],
+        "pto": [
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          },
+          {
+            "count": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "mismatches": 0
+          }
+        ]
+      }
+    }
+  },
+  "compile_correction": "整体 pl.split(UP_DOWN) 在 tile.extract 下发失败（LowerAutoVectorSplit：结果类型无法与按行减半后的参数推导一致）。改成上游已有的显式 split_aiv(2, UP_DOWN) + aiv_shard，声明每 lane 32 行后编译通过；未改工具链。"
+}
