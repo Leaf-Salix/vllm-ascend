@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import shutil
 import statistics
@@ -79,10 +80,12 @@ def main() -> None:
                              "run 与 run 之间能差出几十 us；看改动效果要取多窗口的中位数")
     parser.add_argument("--pmu", type=int, default=0,
                         help="AICore PMU 事件：2=PIPE_UTILIZATION、4=MEMORY。走编译程序路径，"
-                             "与 pypto.torch.init 互斥，所以开了它就不采泳道")
+                             "与 pypto.torch.init 互斥；只采一次，不执行 --warmup/--iters")
     args = parser.parse_args()
     if args.iters < 1 or args.warmup < 0:
         parser.error("--iters 必须大于 0，--warmup 不得为负")
+    if args.pmu and args.swimlane:
+        parser.error("--pmu 使用 program 模式，不能与 kernel 模式的 --swimlane 同时开启")
     if (args.reference is None) != (args.tolerances is None):
         parser.error("--reference 与 --tolerances 必须同时提供")
     report = {"status": "RUNNING", "args_dir": str(args.args_dir),
@@ -131,23 +134,31 @@ def _run_benchmark(args, report):
     layouts = root_weight_layouts(root)
     device = f"npu:{args.device}"
     torch.npu.set_device(args.device)
-    tensors, backings = materialize(meta, blob, device)
+    # Program mode packs CPU arguments into its Worker; kernel mode borrows NPU
+    # storage. Start from the saved raw bytes so Native NZ is never decoded here.
+    input_device = "cpu" if args.pmu else device
+    tensors, backings = materialize(meta, blob, input_device)
     tensors, converted = convert_weight_layouts(tensors, meta, layouts, root_weight_shapes(root))
     for name in converted:
         # 转换仅允许独占的只读权重，释放已被新布局替换的设备存储。
         sid = meta["tensors"][name]["storage"]
         del backings[sid]
     report.update(snapshot_source=meta["source"], root_layouts=layouts, converted_weights=converted,
+                  execution_mode="program_cpu_inputs" if args.pmu else "kernel_npu_inputs",
                   state_reset="每次调用前恢复相同初态；恢复与同步均在计时/DFX 窗口之外")
     call_args = tuple(tensors[name] for name in names)
 
     args.output.mkdir(parents=True, exist_ok=True)
     if args.pmu:
         # PMU 只能从 RunConfig 走编译程序路径；它与 pypto.torch.init 在同一进程里互斥。
-        compiled = kernel.compile(*call_args, config=RunConfig(
+        pmu_config = RunConfig(
             platform="a2a3", device_id=args.device, enable_pmu=args.pmu,
-            save_kernels=True, save_kernels_dir=str((args.output / "pmu").resolve())))
-        run = lambda: compiled(*call_args)  # noqa: E731
+            save_kernels=True, save_kernels_dir=str((args.output / "pmu").resolve()))
+        compiled = kernel.compile(*call_args, config=pmu_config)
+        for previous_csv in (args.output / "pmu").rglob("pmu.csv"):
+            previous_csv.unlink()
+        # Compilation does not retain per-run profiling options.
+        run = lambda: compiled(*call_args, config=pmu_config)  # noqa: E731
     else:
         # 执行目标一次性定在进程上：JIT 调用本身不接 RunConfig。
         pypto.torch.init(device=args.device, platform="a2a3",
@@ -158,7 +169,8 @@ def _run_benchmark(args, report):
 
     report.update({"variant": selected_variant(), "package": package, "device": args.device,
               "layer_index": meta["layer_index"], "tokens": meta["tokens"],
-              "iters": args.iters, "warmup": args.warmup, "swimlane_level": args.swimlane,
+              "iters": 1 if args.pmu else args.iters,
+              "warmup": 0 if args.pmu else args.warmup, "swimlane_level": args.swimlane,
               "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"})
     # 正确性检查单独执行，不把 CPU 比较、拷贝或同步开销混入计时。
     reference = torch.load(args.reference, map_location="cpu", weights_only=True) if args.reference else None
@@ -169,6 +181,24 @@ def _run_benchmark(args, report):
     report["validation"] = validate_outputs(tensors, kernel.output_param_names, reference, tolerances)
     if report["validation"]["status"] == "FAIL":
         raise ValueError(f"CSA 输出检查失败：{report['validation']['errors']}")
+    if args.pmu:
+        # Capture exactly one invocation. PMU describes core activity, not host
+        # replay latency; repeating program runs also re-registers PMU buffers.
+        pmu_files = list((args.output / "pmu").rglob("pmu.csv"))
+        if len(pmu_files) != 1:
+            raise ValueError(f"PMU 采集需要一份本次 CSV，实到 {len(pmu_files)} 份")
+        with pmu_files[0].open(newline="") as stream:
+            records = list(csv.DictReader(stream))
+        if (not records or any(int(row["event_type"]) != args.pmu for row in records)
+                or not all(int(row["pmu_total_cycles"]) > 0 for row in records)):
+            raise ValueError("PMU CSV 为空、事件类型不符或存在零硬件计数")
+        report.update(status=report["validation"]["status"], pmu={
+            "event_type": args.pmu, "csv": str(pmu_files[0]), "records": len(records),
+            "captures": 1,
+            "scope": "program 模式单次快照回放的核内硬件计数；PMU 使用 single-issue，"
+                     "不作普通 kernel 图重放总耗时",
+        })
+        return
     for _ in range(args.warmup):
         restore_mutable_storages(meta, blob, backings)
         run()
