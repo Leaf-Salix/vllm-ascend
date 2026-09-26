@@ -294,6 +294,12 @@ def run(args, report):
         from vllm_ascend.ops.pypto.variant import variant_package
 
         package = variant_package()
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import ATOMIC_ADD
+
+        reduction = importlib.import_module(f"{package}.qkv_proj_rope")
+        report["pto_reduction"] = {
+            "atomic_add": ATOMIC_ADD, "qr_split_k": reduction.QR_OK, "kv_split_k": reduction.KV_OK,
+        }
         adapter = importlib.import_module(f"{package}.native_adapter")
         module = importlib.import_module(f"{package}.decode_csa")
         root = module._decode_csa_tp1_layer
@@ -374,11 +380,14 @@ def main():
     parser.add_argument("--weight-nz-mode", type=int, choices=(0, 1, 2), default=0)
     parser.add_argument("--variant", choices=("precision", "performance"), default="precision")
     parser.add_argument("--save-case", action="store_true")
+    parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
     os.environ["PTO_CSA_VARIANT"] = args.variant
+    if args.atomic_add is not None:
+        os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"] = str(args.atomic_add)
     os.environ["HCCL_DETERMINISTIC"] = "true"
     report = {
         "status": "RUNNING",

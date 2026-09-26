@@ -6,7 +6,6 @@ import sys
 
 import pytest
 import torch
-
 from dsv4_csa_validation import compare_tensor, compare_topk, validate_outputs
 
 

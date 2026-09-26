@@ -18,6 +18,7 @@ from .config import (
     INT8_AMAX_EPS,
     INT8_SCALE_MAX,
 )
+from .reduction import ATOMIC_ADD, STORE_ATOMIC
 
 T_DYN = pl.dynamic("QKV_Q_T_DYN")  # T = B * S
 
@@ -108,7 +109,7 @@ KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
 KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
 
-KV_OK = 2  # kv_proj split-K factor         | D//KV_OK cores share each N-group
+KV_OK = 2 if ATOMIC_ADD else 1  # 诊断时单 K 分片，输出区域各有唯一写入者。
 
 KV_OM = 3  # maximum kv_proj split-M factor
 
@@ -271,7 +272,7 @@ def q_proj_qa(
                 dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_w = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
                 dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
-            qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=pl.AtomicType.Add)
+            qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=STORE_ATOMIC)
         for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
             q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
             for db in pl.pipeline(QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
@@ -297,7 +298,7 @@ def q_proj_qa(
                 )
                 w_chunk = wq_a[qr_d0 : qr_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
                 q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, init_cond=(db == 0))
-            qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=pl.AtomicType.Add)
+            qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=STORE_ATOMIC)
 
 
 @pl.jit.inline(auto_scope=False)
@@ -853,7 +854,7 @@ def kv_proj_rope(
                             dense_x = x_view[dense_x0 : dense_x0 + KV_DENSE_M_TILE, dense_d0 : dense_d0 + KV_K_TILE]
                             dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
                             dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
-                        kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=pl.AtomicType.Add)
+                        kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
                     for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
                         kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
                         for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
@@ -868,7 +869,7 @@ def kv_proj_rope(
                             )
                             wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
                             kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
-                        kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=pl.AtomicType.Add)
+                        kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
 
             kv_view = pl.reshape(kv, [t_dim, HEAD_DIM])
 

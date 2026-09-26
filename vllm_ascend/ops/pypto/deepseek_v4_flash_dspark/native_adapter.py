@@ -94,6 +94,10 @@ class CSAOperators:
     def register(cls) -> "CSAOperators":
         import pypto.torch
 
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import validate_reduction_mode
+
+        validate_reduction_mode()
+
         def register(kernel, name):
             return pypto.torch.register(kernel, f"dsv4_csa::{name}")
 

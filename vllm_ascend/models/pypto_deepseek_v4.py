@@ -75,6 +75,13 @@ def prepare_csa_model(model):
     CSAServiceRuntime = importlib.import_module(f"{package}.service").CSAServiceRuntime
     root_function = importlib.import_module(f"{package}.decode_csa")._decode_csa_tp1_layer
     layouts = root_weight_layouts(root_function)
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import ATOMIC_ADD
+
+    reduction = importlib.import_module(f"{package}.qkv_proj_rope")
+    logger.info(
+        "PTO_CSA_REDUCTION atomic_add=%d qr_split_k=%d kv_split_k=%d",
+        ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
+    )
 
     pypto.torch.init(device=torch.npu.current_device(), platform="a2a3", runtime="tensormap_and_ringbuffer")
     operators = CSAOperators.register()

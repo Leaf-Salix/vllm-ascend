@@ -108,6 +108,9 @@ def _run_benchmark(args, report):
     from pypto.runtime import RunConfig
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import validate_reduction_mode
+
+    validate_reduction_mode()
     package = variant_package()
     # 当前入口覆盖 mHC 残差流之间的完整 HC_pre + norm + CSA + HC_post。
     entry = "decode_csa_tp1_layer_test"

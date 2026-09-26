@@ -82,6 +82,9 @@ env_variables: dict[str, Callable[[], Any]] = {
     # 1: only quant case enable nz;
     # 2: enable nz as long as possible.
     "VLLM_ASCEND_ENABLE_NZ": lambda: int(os.getenv("VLLM_ASCEND_ENABLE_NZ", 1)),
+    # PTO CSA 跨核累加：1（默认）保留 split-K atomic add；0 使用单 K 分片固定规约诊断。
+    # 仅接受 0/1，须在导入/编译算子前设置；不含敏感信息，不允许在 graph replay 期切换。
+    "VLLM_ASCEND_PTO_CSA_ATOMIC_ADD": lambda: int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1")),
     # Whether to anbale dynamic EPLB
     "DYNAMIC_EPLB": lambda: os.getenv("DYNAMIC_EPLB", "false").lower(),
     # Whether to enable fused MC2 (`dispatch_ffn_combine/mega_moe`).
