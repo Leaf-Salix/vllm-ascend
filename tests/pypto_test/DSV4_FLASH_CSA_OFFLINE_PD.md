@@ -2,6 +2,8 @@
 
 当前合同、阶段状态及测试顺序见 [任务清单](DSV4_FLASH_CSA_TASK_CHECKLIST.md)。
 先用单卡 case 完成定位与受影响验证，再进入正式权重 16 卡对照。
+后续所有功能与性能测试均关闭 EPLB。测试入口固定关闭动态重平衡和专家热度采集，
+不继承外部开启状态，已移除 `--eplb` / `--eplb-interval`；EP 并行配置保留。
 
 ## 数据与执行入口
 
@@ -71,8 +73,8 @@ python tests/pypto_test/offline_pd/compare.py \
 此处 PASS 仅指 token/DSpark 对照通过，层级误差、状态、保护区和性能仍独立验收。
 
 `--capture-sizes`、`--rank-batches` 和 `--rank-decode-tokens` 按待验证场景显式指定；
-当前仅声明 S=6 合法档位。用户已恢复 EPLB，用于 TP1/DP=EP16、131072 tokens、
-单卡 B4/8/16/24/32/40 的新泛化对比；依赖与执行顺序见清单，其他暂停范围保持。
+当前仅声明 S=6 合法档位。新泛化对比为 TP1/DP=EP16、131072 tokens、
+单卡 B4/8/16/24/32/40；两侧 EPLB 均关闭。
 
 ## 结果判读
 

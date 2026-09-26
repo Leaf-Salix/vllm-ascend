@@ -10,6 +10,9 @@ from pathlib import Path
 
 def activate() -> Path:
     """选择当前 release 的模型源码与指定调试分支的 editable 安装。"""
+    # 所有 CSA 功能/性能测试关闭 EPLB，不继承调用者的重平衡或热度采集开关。
+    os.environ["DYNAMIC_EPLB"] = "false"
+    os.environ["EXPERT_MAP_RECORD"] = "false"
     root_text = os.environ.get("PTO_EAGER_ROOT")
     if not root_text:
         raise RuntimeError("source ../env-dsv4-0251rc1.sh before running the CSA tests")

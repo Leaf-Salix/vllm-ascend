@@ -4418,3 +4418,22 @@ B16 有 93 行集合不同（替换 323 个索引），B40 为 229 行（759 个
 
 [精简证据及原始计时样本](results/csa_baseline_20260926/precision_port/migration.json)。
 接下来固定 Native Q/cache/Top-K 定位短上下文 sparse 误差，按缺口扩展，随后整模型看护。
+
+## 128. EPLB 依赖验证及用户取消后续全部测试的 EPLB 条件（2026-09-26）
+
+用户明确要求后续全部功能和性能测试关闭 EPLB，包括单卡定位及真实权重 16 卡验收：
+CSA 接入覆盖注意力半层，专家重平衡属于 Native MoE 路径。泛化矩阵仍为 TP1/DP=EP16、
+H131072、S6 与 B4/8/16/24/32/40。本节覆盖第 126 节恢复 EPLB 的范围，恢复须由用户指定。
+
+测试入口移除 `--eplb` / `--eplb-interval`，显式固定 `eplb_config.dynamic_eplb=false`、
+`DYNAMIC_EPLB=false`、`EXPERT_MAP_RECORD=false`，不继承父进程开启状态；EP 保留。
+配置传递的 CPU 回归 5 项通过，覆盖 16 个 rank 子进程及直接 worker 入口；ruff 与 diff 检查通过。
+不为此新增上卡测试。
+
+调整前已确认既有 custom CSA 库不导出 `aclnnGroupedMatmulSwigluQuantWeightNzTensorList`，
+用仓内 Native 源码单独构建 `csa_eplb_transformer` 包，安装于 `.cache/csa/eplb-native-install`。
+复用既有 protobuf 编译产物，没有改 CANN/PTOAS/PTO-ISA，也没有改生产算子源码。
+单卡任务 task_20260926_210322_298230419779 completed/exit=0：M24/K4096/N4096、4 个
+expert、分组累计长度 [0,6,18,24]、swiglu_limit=10，与 CPU 参考 INT8 最大差 1、scale 差 0。
+这仅证明 Native tensor-list 调用可用，不代表 EPLB 或整模型验收。公共环境脚本未加入该包，
+后续主对照沿用原环境，不继续 EPLB 测试或为此占用 16 卡。

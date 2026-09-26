@@ -19,6 +19,8 @@ def test_launcher_forwards_mode_to_every_rank(mode, monkeypatch, tmp_path):
     (bank / "audit.json").write_text('{"status": "PASS"}')
     monkeypatch.setenv("TASK_DEVICE", ",".join(map(str, range(16))))
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_NZ", "2" if mode != 2 else "0")
+    monkeypatch.setenv("DYNAMIC_EPLB", "true")
+    monkeypatch.setenv("EXPERT_MAP_RECORD", "true")
     monkeypatch.setattr(run.signal, "signal", Mock())
     monkeypatch.setattr(run.os, "killpg", Mock())
     children = []
@@ -39,6 +41,7 @@ def test_launcher_forwards_mode_to_every_rank(mode, monkeypatch, tmp_path):
     expected = mode if mode is not None else 0
     for rank, (cmd, env) in enumerate(children):
         assert env["VLLM_ASCEND_ENABLE_NZ"] == str(expected)
+        assert env["DYNAMIC_EPLB"] == env["EXPERT_MAP_RECORD"] == "false"
         monkeypatch.setattr(sys, "argv", cmd[1:])
         run.main()
         parsed = worker.call_args.args[0]
@@ -48,6 +51,8 @@ def test_launcher_forwards_mode_to_every_rank(mode, monkeypatch, tmp_path):
 def test_direct_worker_binds_mode_before_vllm_import(monkeypatch):
     original_import = builtins.__import__
     monkeypatch.setenv("VLLM_ASCEND_ENABLE_NZ", "0")
+    monkeypatch.setenv("DYNAMIC_EPLB", "true")
+    monkeypatch.setenv("EXPERT_MAP_RECORD", "true")
 
     class ReachedVllmImport(Exception):
         pass
@@ -55,6 +60,7 @@ def test_direct_worker_binds_mode_before_vllm_import(monkeypatch):
     def intercepted(name, *args, **kwargs):
         if name == "vllm":
             assert os.environ["VLLM_ASCEND_ENABLE_NZ"] == "2"
+            assert os.environ["DYNAMIC_EPLB"] == os.environ["EXPERT_MAP_RECORD"] == "false"
             raise ReachedVllmImport
         return original_import(name, *args, **kwargs)
 

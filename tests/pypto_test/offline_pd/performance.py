@@ -142,6 +142,8 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps):
             for row in rows), f"{path}: {name} 缺少请求/token")
     require(len(value["steady_window"]) == 1, f"{path}: TP1 只应返回一个 worker")
     steady = value["steady_window"][0]
+    require(value.get("eplb_enabled") is False and value.get("dynamic_eplb_env") == "false" and
+            value.get("expert_map_record_env") == "false", f"{path}: 所有 CSA 测试必须关闭 EPLB")
     require(steady["dp_rank"] == rank and steady["sufficient"], f"{path}: 稳态设备采样不足")
     samples = steady["device"]["samples_us"]
     stamps = steady["device"]["start_timestamps_raw"]
@@ -184,7 +186,8 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16):
             loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens, steps=steps)
                       for side in ("native", "pto")}
             native, pto = (loaded[side][0] for side in ("native", "pto"))
-            for key in ("key", "history", "capture_sizes", "deterministic", "hccl_deterministic", "atomic_add"):
+            for key in ("key", "history", "capture_sizes", "deterministic", "hccl_deterministic", "atomic_add",
+                        "eplb_enabled", "dynamic_eplb_env", "expert_map_record_env", "custom_opp_path"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧 {key} 不同")
             require(native["window"][0]["window"] == pto["window"][0]["window"],
                     f"rank{rank}: 两侧 trace 步序或形状不同")

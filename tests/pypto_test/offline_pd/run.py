@@ -345,7 +345,11 @@ def diagnose(args, llm, cases):
               "deterministic": args.deterministic,
               "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
               "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
-              "atomic_add": os.environ.get("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1")}
+              "atomic_add": os.environ.get("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1"),
+              "eplb_enabled": False,
+              "dynamic_eplb_env": os.environ.get("DYNAMIC_EPLB", "false"),
+              "expert_map_record_env": os.environ.get("EXPERT_MAP_RECORD", "false"),
+              "custom_opp_path": os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")}
     if args.command == "performance":
         # 同一次模型加载先测无 profiler 的 execute_model，再独立采设备层区间。
         # 不把 profiler 窗口、加载/前缀恢复或主机计时代替稳态设备结果。
@@ -656,6 +660,8 @@ def swimlane_export(args):
 def worker(args):
     # 根布局在模块导入时固定，必须先把显式 CLI 同步到环境，再导入 vLLM/PTO。
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
+    os.environ["DYNAMIC_EPLB"] = "false"
+    os.environ["EXPERT_MAP_RECORD"] = "false"
     print(f"OFFLINE_WEIGHT_NZ requested={args.weight_nz_mode} "
           f"environment={os.environ['VLLM_ASCEND_ENABLE_NZ']} rank={args.rank} "
           f"backend={args.backend}", flush=True)
@@ -744,14 +750,8 @@ def worker(args):
                            **({} if not args.embedding_tp
                               else {"finegrained_tp_config": {
                                   "embedding_tensor_parallel_size": args.embedding_tp}}),
-                           # T4.3：enable_expert_parallel 不等于 EPLB，动态重平衡要显式开。
-                           # algorithm_execution_interval 默认 50 步才执行一次算法，而一轮
-                           # decode 只有约 21 步（128 token / 每步 6 个），不调小就永远
-                           # 触发不到"运行中重平衡"。
-                           **({} if not args.eplb
-                              else {"eplb_config": {"dynamic_eplb": True,
-                                                    "algorithm_execution_interval": args.eplb_interval,
-                                                    "expert_heat_collection_interval": args.eplb_interval}})},
+                           # EP 保留；所有 CSA 功能/性能测试均关闭动态 EPLB。
+                           "eplb_config": {"dynamic_eplb": False}},
         model_loader_extra_config={"enable_multithread_load": True, "num_threads": 16},
         kv_transfer_config=connector, disable_log_stats=False,
         **({} if prefill else {"worker_extension_cls": "offline_pd.observer.OfflineCSAObserver"}),
@@ -790,7 +790,7 @@ def worker(args):
                         "csa_observation": observation,
                         "spec_decode": None if prefill else spec_decode_metrics(llm)})
         write_json(args.output / f"rank{args.rank}.json", {"role": args.command, "backend": args.backend,
-                   "rank": args.rank, "batch": args.batch, "cases": outputs})
+                   "rank": args.rank, "batch": args.batch, "eplb_enabled": False, "cases": outputs})
         if observation is not None and args.backend == "pto":
             # 改读捕获期的 capture_time_selection：图重放不触发 forward hook，
             # 原先那版遍历 forward_hook_counts，而各层全是空字典时 any(...) 为假、
@@ -890,13 +890,8 @@ def launch(args):
                 # 而这里保留 AIV 展开模式是用户明确要求的；若 HCCL 因此降级或告警，
                 # 日志里会有记录，按实测结果判断，不预先改 AIV。
                 **({"HCCL_DETERMINISTIC": "true"} if args.deterministic else {}),
-                # EPLB 除了 eplb_config.dynamic_eplb 这个配置项，还要求同时设这个
-                # 环境变量，否则 VllmConfig 构造时就被 pydantic 断言拦下：
-                # "The environment variable DYNAMIC_EPLB or EXPERT_MAP_RECORD of
-                #  the EPLB must be set to true"（ascend_config.py 里两者是 or 关系）。
-                # 该组的 HCCL 缓冲由 dynamic_eplb 组单独配（utils.py 的 100MB），
-                # 与 HCCL_BUFFSIZE 无关，不必同步调整。
-                **({"DYNAMIC_EPLB": "true"} if args.eplb else {}),
+                # 不继承父进程的 EPLB 配置，关闭重平衡和专家热度采集。
+                "DYNAMIC_EPLB": "false", "EXPERT_MAP_RECORD": "false",
                 "PYTORCH_NPU_ALLOC_CONF": "expandable_segments:True",
                 "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent) + os.pathsep + env.get("PYTHONPATH", ""),
@@ -927,8 +922,6 @@ def launch(args):
                 cmd += ["--embedding-tp", str(args.embedding_tp)]
             if args.deterministic:
                 cmd.append("--deterministic")
-            if args.eplb:
-                cmd += ["--eplb", "--eplb-interval", str(args.eplb_interval)]
             if args.stagger:
                 cmd.append("--stagger")
             if args.capture_sizes:
@@ -1015,11 +1008,6 @@ def main():
                         help="让各请求在不同步数结束，使活跃batch逐档下降，"
                              "覆盖G04档位切换与G06请求退出；默认所有请求同时结束，"
                              "活跃batch几乎不变，只有收尾几步才产生补位")
-    parser.add_argument("--eplb", action="store_true",
-                        help="显式开启动态EPLB（dynamic_eplb）。注意enable_expert_parallel不等于EPLB，\n"
-                             "默认dynamic_eplb为False，不开就只有EP没有重平衡")
-    parser.add_argument("--eplb-interval", type=int, default=5,
-                        help="EPLB算法执行与热度采集的步数间隔。默认50对一轮decode（约21步）太大，永远触发不到重平衡")
     parser.add_argument("--deterministic", action="store_true",
                         help="开启算子级确定性(set_deterministic_level(1))与HCCL_DETERMINISTIC=true；"
                              "用于排查同一DP组内四个TP副本的缓存差异，保留AIV展开模式不变")
