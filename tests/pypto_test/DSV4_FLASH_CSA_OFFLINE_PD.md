@@ -40,6 +40,7 @@ python tests/pypto_test/offline_pd/run.py --help
 | `prefill` | 16 卡生成 Native P 缓存 |
 | `decode` | 16 卡生成输出，记录 token、DSpark、配置与入口命中 |
 | `steady` | 预热后采稳态 decode 指标 |
+| `performance` | 同一次加载先采无 profiler 完整步设备时间，再独立采 Level0 各层区间；同时保存两轮 token 与 DSpark 统计 |
 | `bitcompare` | 从相同状态比较真实层输出；诊断不作为性能测量 |
 | `argdump` | 在 PTO 调用前保存 schema=2 输入/存储，调用后参考另存 |
 | `profile` / `profile-export` / `profile-compare` | 采设备窗口、CPU 解析及对照 |
@@ -75,6 +76,12 @@ python tests/pypto_test/offline_pd/compare.py \
 ## 结果判读
 
 - 无 profile 的稳态 decode 指标用于整模型性能；`elapsed_including_io_seconds` 不作加速比。
+- `steady` / `performance` 的设备事件在图外记录，收尾统一读回，不逐步加同步；
+  主机时间单列，调度 token 数不冒充实际输出吞吐。仅计入请求数与 query token 数都匹配的步。
+  正式性能运行至少需要 20 个有效设备样本；B16/S6 可使用 `--decode-tokens 192 --warmup-steps 8`。
+- `performance` 的 Level0 trace 与无 profiler 窗口独立；层区间应从首末设备任务取差，
+  按 rank/层报告并保留首次 metadata 生产成本，不能累加并发 kernel 时间。
+  采集窗口中途发生档位变化时会保留原始观测并拒绝作为验收结果。
 - profiler 使用同窗口、同实际配置；完整 HC_pre→norm→CSA→HC_post 区间包含内部间隙与适配。
 - DFX 用于定位，不能与正式性能数据混算，也不能重复累计 scheduler/worker 时间。
 - 诊断必须有有效样本；逐 token、DSpark、层级误差与状态按清单合同独立检查。

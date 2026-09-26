@@ -3916,3 +3916,24 @@ mode=1 相对旧单卡基线没有确认收益；不能用当前单卡模式差�
 
 证据：[两项撤回记录](results/csa_baseline_20260926/perf_qproj_upstream/comparison.json)、
 [mode=1 原始报告](results/csa_baseline_20260926/perf_qproj_upstream/mode1/report.json)。
+
+## 113. 为性能版补齐整模型设备计时与严格窗口，先验证测量工具（2026-09-26）
+
+审查发现旧 `offline_begin_profile` 无条件把每个调度步认作稳态，旧 `steady` 只读主机
+`perf_counter`，且把调度 query token 数称为吞吐。这些口径不足以验收 B16/S6 或各层 750 μs。
+
+本轮仅修改测量工具：按实际请求数与 query token 数筛选；profiler 启动后采连续窗口，
+中途变档则报告不足；完整步使用图外 NPU Event，窗口内不逐步同步，收尾统一读时间戳，
+检查时间戳确实更新。主机时间和调度 token 速率另列，不声称实际输出吞吐。
+新增 `performance` 命令，在同一次模型加载中依次预热、无 profiler 测完整步、独立 Level0
+采设备层区间，保留各轮 token、DSpark、实际档位与捕获路径。各层区间仍须解析首末任务，
+不将并发 runtime/worker 耗时相加，也不将 profiler 的整步时间混入主性能采样。
+
+CPU 回归 `test_csa_performance.py` 共 3 项通过，覆盖错误档位、窗口中途变档、独立设备事件。
+随后单卡任务 `task_20260926_163524_112529814290` completed/exit=0：真实矩阵乘 ACL Graph
+重放获得 20 个更新的设备时间戳，Level0 捕获 3 个完整步和 3 条设备任务，输出检查通过。
+这只证明测量工具能工作，不是 CSA 性能或整模型结果。
+
+证据：[单卡测量工具报告](results/csa_baseline_20260926/performance_measurement/report.json)、
+[复现脚本](results/csa_baseline_20260926/performance_measurement/run.sh)。
+下一步使用第 110/111 节保留且通过 token 看护的性能版，依次测两侧相同 mode=2/1。

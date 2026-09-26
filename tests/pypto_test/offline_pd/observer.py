@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Control-only worker extension for D integration evidence, not timing."""
+"""离线 D 的配置观测、数值诊断和显式性能测量窗口。"""
 
 import json
 import os
@@ -178,8 +178,8 @@ class OfflineCSAObserver:
                                            for layer, counts in _CSA_SELECTION.items()},
                 "note": "图重放不触发 forward hook，per-layer 命中看 capture_time_selection"}
 
-    def offline_begin_profile(self, directory, start_step, steps, expected_tokens, expected_requests):
-        """从指定 step 起采集整步 CPU+NPU 数据：Level1、带 device kernel、不采 Python stack。
+    def offline_begin_profile(self, directory, start_step, steps, expected_tokens, expected_requests, level=1):
+        """从指定稳态 step 起采集连续 CPU+NPU 数据，不采 Python stack。
 
         只统计达到稳态构成的 step，窗口两端各做一次同步，确保设备任务完整落在窗口内。
         窗口结束就地关闭，让各 rank 同时进入后处理，避免单 rank 落后拖住集合通信。
@@ -196,7 +196,8 @@ class OfflineCSAObserver:
                         torch_npu.profiler.ProfilerActivity.NPU],
             record_shapes=False, profile_memory=False, with_stack=False, with_modules=False,
             experimental_config=torch_npu.profiler._ExperimentalConfig(
-                profiler_level=torch_npu.profiler.ProfilerLevel.Level1),
+                profiler_level=(torch_npu.profiler.ProfilerLevel.Level0 if level == 0
+                                else torch_npu.profiler.ProfilerLevel.Level1)),
             on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(target),
         )
         runner = self.model_runner
@@ -204,7 +205,8 @@ class OfflineCSAObserver:
         state = {"dp_rank": rank, "trace_dir": target, "start_step": start_step,
                  "requested_steps": steps, "expected_tokens": expected_tokens,
                  "expected_requests": expected_requests, "seen_steady_steps": 0,
-                 "profiled_steps": 0, "closed": False, "window": [], "observed": {}}
+                 "profiled_steps": 0, "closed": False, "window": [], "observed": {},
+                 "profiler_level": level}
 
         def profiled(scheduler_output, *args, **kwargs):
             import torch
@@ -214,19 +216,14 @@ class OfflineCSAObserver:
             # 把看到的 (tokens, requests) 分布记下来：判定失败时不必重跑就能诊断。
             key = f"{tokens}/{requests}"
             state["observed"][key] = state["observed"].get(key, 0) + 1
-            # 不再用形状判定"稳态"，改为按 step 序号采样。
-            # 实测（native_v3／pto_v3 的 observed）：batch 32 下从来没有 32 个请求
-            # 同时在跑，而是 21 个请求 126 token 与 11 个请求 66 token 交替——
-            # 32 条被调度器拆成了两批。所以"所有请求都在跑"这个条件不成立，
-            # 上一版判据同样 0 次命中。
-            # 两个后端的 observed 分布完全一致（23/22/1），说明调度行为与后端无关，
-            # 因此按相同的 step 序号采样即可得到可比的窗口。每个被采样步的
-            # (tokens, requests) 都记进 window，读者可自行核对可比性。
-            steady = True
+            # 部分 batch 或 prefill 不能冒充约定档位。开始后采连续步，
+            # 若窗口中途形状变化，保留原始记录并在收尾判定为不可用于验收。
+            steady = tokens == expected_tokens and requests == expected_requests
             index = state["seen_steady_steps"]
             if steady:
                 state["seen_steady_steps"] += 1
-            active = steady and index >= start_step and state["profiled_steps"] < steps
+            active = (state["profiled_steps"] < steps and
+                      (state["profiled_steps"] > 0 or (steady and index >= start_step)))
             if active and state["profiled_steps"] == 0:
                 torch.npu.synchronize()
                 profiler.start()
@@ -260,7 +257,9 @@ class OfflineCSAObserver:
         # 连同 observed 里的诊断信息一起丢失——T2.1 前两轮就是这样，失败了却
         # 拿不到"实际每步调度了多少 token"，只能另想办法查。这里如实记进报告，
         # 由调用方按 profiled_steps 判断是否可用。
-        state["sufficient"] = state["profiled_steps"] == state["requested_steps"]
+        state["sufficient"] = state["profiled_steps"] == state["requested_steps"] and all(
+            item["scheduled_tokens"] == state["expected_tokens"] and
+            item["requests"] == state["expected_requests"] for item in state["window"])
         return state
 
     def offline_begin_bitcompare(self, layer_index, expected_tokens, max_samples, mode):
@@ -275,9 +274,9 @@ class OfflineCSAObserver:
         比完把 output 留成 Native 的值，让本轮继续沿参考轨迹走，避免差异累积。
         """
         import torch
-
-        from dsv4_csa_validation import compare_tensor
         from dsv4_csa_replay import capture_written_pages, restore_written_pages
+        from dsv4_csa_validation import compare_tensor
+
         from vllm_ascend.ops.pypto.variant import variant_package
 
         CSAServiceRuntime = __import__(
@@ -385,16 +384,12 @@ class OfflineCSAObserver:
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
-    def offline_begin_steady(self, warmup_steps):
-        """测稳态每步耗时与峰值显存，不加任何额外同步，避免测量本身改变被测对象。
+    def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests):
+        """图外事件测完整 execute_model 设备区间，另记录主机耗时与峰值显存。
 
-        与 profile 窗口的区别：profile 为了让设备任务完整落在窗口内，两端各做一次
-        synchronize，那对结构对照没问题，但会把同步开销算进耗时，不能用来报稳态性能。
-        这里只在 execute_model 两侧取 perf_counter，前 warmup_steps 步丢弃，用来排除
-        加载、首次编译与首个恢复步骤。
-
-        口径限制要随数据一起报：不加同步意味着某一步的耗时里可能含等待上一步设备任务
-        完成的时间。稳态下主机本就被设备拖住，总和与吞吐是准的，单步 p50/p95 只是近似。
+        只采约定档位，先丢弃 warmup_steps 个完整 decode 步；每步不额外同步，
+        结束后统一读事件。设备区间包含图派发间隙、DSpark 和通信等待，
+        主机耗时不代替设备时间，调度 token 数也不当成实际输出吞吐。
         """
         import torch
 
@@ -404,37 +399,64 @@ class OfflineCSAObserver:
         runner = self.model_runner
         original = runner.execute_model
         state = {"dp_rank": rank, "warmup_steps": warmup_steps, "seen_steps": 0,
-                 "step_seconds": [], "step_tokens": [], "step_requests": []}
+                 "expected_tokens": expected_tokens, "expected_requests": expected_requests,
+                 "observed": {}, "step_seconds": [], "step_tokens": [], "step_requests": []}
+        events = []
         # 峰值统计从窗口开始处重新计数，否则读到的是加载与预热留下的高水位。
         torch.npu.reset_peak_memory_stats()
 
         def timed(scheduler_output, *args, **kwargs):
+            tokens = scheduler_output.total_num_scheduled_tokens
+            requests = len(scheduler_output.num_scheduled_tokens)
+            key = f"{tokens}/{requests}"
+            state["observed"][key] = state["observed"].get(key, 0) + 1
+            if tokens != expected_tokens or requests != expected_requests:
+                return original(scheduler_output, *args, **kwargs)
             index = state["seen_steps"]
             state["seen_steps"] += 1
             if index < warmup_steps:
                 return original(scheduler_output, *args, **kwargs)
+            begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            begin.record()
             start = time.perf_counter()
             try:
                 return original(scheduler_output, *args, **kwargs)
             finally:
+                end.record()
+                events.append((begin, end))
                 state["step_seconds"].append(time.perf_counter() - start)
-                state["step_tokens"].append(scheduler_output.total_num_scheduled_tokens)
-                state["step_requests"].append(len(scheduler_output.num_scheduled_tokens))
+                state["step_tokens"].append(tokens)
+                state["step_requests"].append(requests)
 
         runner.execute_model = timed
-        self._offline_steady = (state, original)
+        self._offline_steady = (state, original, events)
         return {"dp_rank": rank, "warmup_steps": warmup_steps}
 
     def offline_end_steady(self):
+        import math
+        import statistics
+
         import torch
 
-        state, original = self._offline_steady
+        state, original, events = self._offline_steady
         self.model_runner.execute_model = original
         self._offline_steady = None
         samples = state["step_seconds"]
         state["measured_steps"] = len(samples)
         state["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
         state["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
+        torch.npu.synchronize()
+        stamps = [begin.recorded_time() for begin, _ in events]
+        device_us = [begin.elapsed_time(end) * 1000 for begin, end in events]
+        valid_events = bool(stamps) and all(b > a for a, b in zip(stamps, stamps[1:])) and all(
+            math.isfinite(value) and value > 0 for value in device_us)
+        state["device"] = {"samples_us": device_us, "start_timestamps_raw": stamps,
+                           "valid_events": valid_events,
+                           "scope": "图外事件包围 execute_model，含主模型、草稿和通信/派发间隙；无逐步额外同步"}
+        if valid_events:
+            ordered_device = sorted(device_us)
+            state["device"].update(p50_us=statistics.median(device_us),
+                                   p95_us=ordered_device[math.ceil(len(device_us) * 0.95) - 1])
         if samples:
             ordered = sorted(samples)
             def at(q):
@@ -444,9 +466,9 @@ class OfflineCSAObserver:
             state["mean_seconds"] = sum(samples) / len(samples)
             state["total_seconds"] = sum(samples)
             state["total_tokens"] = sum(state["step_tokens"])
-            state["tokens_per_second"] = state["total_tokens"] / state["total_seconds"]
+            state["scheduled_tokens_per_host_second"] = state["total_tokens"] / state["total_seconds"]
         # 样本不足如实记录，由调用方判断可用性，不在 worker 里抛异常丢掉整份报告。
-        state["sufficient"] = state["measured_steps"] >= 20
+        state["sufficient"] = state["measured_steps"] >= 20 and valid_events
         return state
 
     def offline_begin_host_profile(self, directory, start_step, steps, expected_tokens, expected_requests):
@@ -830,7 +852,6 @@ class OfflineCSAObserver:
 
 
     def _offline_padding_write(self, directory, rank, records):
-        import json
         import pathlib
 
         target = pathlib.Path(directory)
@@ -886,6 +907,7 @@ class OfflineCSAObserver:
         import importlib
 
         from dsv4_csa_replay import argument_roles, capture_tensors, save_snapshot
+
         from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import WEIGHT_NZ_MODE, root_weight_layouts
         from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 

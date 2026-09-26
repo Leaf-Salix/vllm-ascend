@@ -6,15 +6,15 @@ The plan and audit commands are CPU only. Both execution commands require a
 """
 
 import argparse
+import contextlib
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 FORMAL_MODEL = "/data/model/DeepSeek-V4-Flash-0731-w8a8"
 # release 正式配置里第一个 compress_ratio==4 的 target 层，泳道采集默认取它。
@@ -151,8 +151,8 @@ def replica_difference(name, reference, other):
 
 def audit(args):
     import torch
-    from safetensors.torch import load_file
     from prefix import cache_contract, prefix_tensor
+    from safetensors.torch import load_file
 
     plan = read_plan(args.bank)
     config = json.loads((Path(FORMAL_MODEL) / "config.json").read_text())
@@ -339,16 +339,40 @@ def diagnose(args, llm, cases):
               "submitted": args.rank_batch if args.rank_batch is not None else args.batch,
               "key": case["key"], "history": case["history"],
               "warmup_rounds": args.warmup_rounds, "warmup_tokens": args.warmup_tokens,
-              "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens}
-    if args.command == "profile":
+              "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens,
+              "weight_nz_mode": args.weight_nz_mode, "graph_mode": args.graph_mode,
+              "capture_sizes": args.capture_sizes,
+              "deterministic": args.deterministic,
+              "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
+              "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
+              "atomic_add": os.environ.get("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1")}
+    if args.command == "performance":
+        # 同一次模型加载先测无 profiler 的完整步，再独立采设备层区间。
+        # 不把 profiler 窗口、加载/前缀恢复或主机计时代替稳态设备结果。
+        llm.collective_rpc("offline_begin_observation")
+        llm.collective_rpc("offline_begin_steady", args=(args.warmup_steps, expected_tokens, args.batch))
+        common["stage"] = "measuring_steady"
+        write_json(args.output / f"rank{args.rank}.performance.json", common)
+        try:
+            steady_output = generate_round(llm, args, case, args.decode_tokens)
+        finally:
+            common["steady_window"] = llm.collective_rpc("offline_end_steady")
+            write_json(args.output / f"rank{args.rank}.performance.json", common)
+        common["steady_output_token_ids"] = steady_output["output_token_ids"]
+        common["stage"] = "measuring_layer_intervals"
+        if not common["steady_window"] or not all(w["sufficient"] for w in common["steady_window"]):
+            write_json(args.output / f"rank{args.rank}.performance.json", common)
+            raise RuntimeError("约定档位的稳态设备样本不足 20 个，或事件时间戳无效；不启动层区间采集")
+    if args.command in ("profile", "performance"):
+        level = 0 if args.command == "performance" else 1
         started = llm.collective_rpc("offline_begin_profile", args=(
             str((args.output / "trace").resolve()), args.profile_start_step,
-            args.profile_steps, expected_tokens, args.batch))
+            args.profile_steps, expected_tokens, args.batch, level))
         measured = generate_round(llm, args, case, args.decode_tokens)
         window = llm.collective_rpc("offline_end_profile")
         common.update({
             "decode_tokens": args.decode_tokens,
-            "profiler": {"activities": ["CPU", "NPU"], "profiler_level": "Level1",
+            "profiler": {"activities": ["CPU", "NPU"], "profiler_level": f"Level{level}",
                          "with_stack": False, "with_modules": False,
                          "record_shapes": False, "profile_memory": False},
             "started": started, "window": window,
@@ -356,6 +380,12 @@ def diagnose(args, llm, cases):
             "output_token_ids": measured["output_token_ids"],
             "scope": "窗口含采集与同步开销，仅用于Native/PTO结构对照，不是稳态性能结论",
         })
+        if args.command == "performance":
+            common["csa_observation"] = llm.collective_rpc("offline_end_observation")
+            common["stage"] = "measured"
+            common["scope"] = ("steady_window 为无 profiler 的完整步设备/主机采样；"
+                               "独立 Level0 trace 用于 HC_pre→HC_post 设备首末区间，"
+                               "须解析各 rank/层，不累加并发 kernel 时间。")
     elif args.command == "hostprofile":
         started = llm.collective_rpc("offline_begin_host_profile", args=(
             str((args.output / "host").resolve()), args.profile_start_step,
@@ -384,11 +414,12 @@ def diagnose(args, llm, cases):
                      "故本轮的token轨迹是Native的，不代表PTO独立运行的结果",
         })
     elif args.command == "steady":
-        started = llm.collective_rpc("offline_begin_steady", args=(args.warmup_steps,))
+        started = llm.collective_rpc("offline_begin_steady", args=(
+            args.warmup_steps, expected_tokens, args.batch))
         common.update({"decode_tokens": args.decode_tokens, "warmup_steps": args.warmup_steps,
                        "started": started, "stage": "measuring",
-                       "scope": "窗口内不加额外同步，单步耗时可能含等待上一步设备任务的时间，"
-                                "总和与吞吐可用，单步p50/p95为近似"})
+                       "scope": "约定档位的图外事件记录完整 execute_model 设备区间；"
+                                "主机时间另列，不把调度 token 速率当成输出吞吐"})
         # 先落一份带 stage 的记录：这一轮多次被外部信号在 decode 中途打断，
         # 而收尾才写盘导致什么都拿不到。哪怕只走到这里，也要留下证据。
         write_json(args.output / f"rank{args.rank}.{args.command}.json", common)
@@ -449,6 +480,10 @@ def diagnose(args, llm, cases):
         })
     common["spec_decode"] = spec_decode_metrics(llm)
     write_json(args.output / f"rank{args.rank}.{args.command}.json", common)
+    if args.command in ("profile", "performance") and (
+        not common["window"] or not all(w["sufficient"] for w in common["window"])
+    ):
+        raise RuntimeError("设备 trace 未覆盖指定档位的连续完整窗口；详见已落盘的观测分布")
     if args.command == "bitcompare" and (
         not common["window"] or any(item.get("status") == "FAIL" for item in common["window"])
     ):
@@ -686,7 +721,7 @@ def worker(args):
         # the upstream release AttentionConfig does not accept an int8 Literal.
         speculative_config={"method": "dspark", "num_speculative_tokens": 5, "enforce_eager": True},
         # weight_nz_mode 由 --weight-nz-mode 控制：0 全 ND，1 是 vllm-ascend 的默认值，
-        # Native 会把量化权重（CSA 的 wq_b/wo_b）转成 FRACTAL_NZ，由 prepare_weights 转回 ND。
+        # Native 会把量化权重转成 FRACTAL_NZ，PTO 按匹配的根签名直接借用存储。
         additional_config={"weight_nz_mode": args.weight_nz_mode, "enable_kv_nz": False, "enable_dsa_cp": False,
                            # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
                            # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
@@ -727,7 +762,7 @@ def worker(args):
                    llm.collective_rpc("offline_cache_layout"))
         llm.llm_engine.engine_core.shutdown()
         return
-    if args.command in ("profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
+    if args.command in ("profile", "performance", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
                         "argdump"):
         diagnose(args, llm, cases)
         llm.llm_engine.engine_core.shutdown()
@@ -791,8 +826,8 @@ def launch(args):
     devices = os.environ.get("TASK_DEVICE", "").split(",")
     if len(devices) != 16 or any(not d.isdigit() for d in devices) or len(set(devices)) != 16:
         raise RuntimeError("Run through task-submit --device auto --device-num 16")
-    if args.command in ("decode", "profile", "hostprofile", "swimlane", "padding-capture", "steady", "bitcompare",
-                        "argdump"):
+    if args.command in ("decode", "profile", "performance", "hostprofile", "swimlane", "padding-capture",
+                        "steady", "bitcompare", "argdump"):
         report = json.loads((args.bank / "audit.json").read_text())
         if report["status"] != "PASS":
             raise ValueError("P cache bank must pass audit before D loads it")
@@ -902,7 +937,8 @@ def launch(args):
                 cmd.append("--layout-only")
             file = (args.output / f"rank{rank}.log").open("w")
             files.append(file)
-            children.append(subprocess.Popen(cmd, env=env, stdout=file, stderr=subprocess.STDOUT, start_new_session=True))
+            children.append(subprocess.Popen(
+                cmd, env=env, stdout=file, stderr=subprocess.STDOUT, start_new_session=True))
         while any(child.poll() is None for child in children):
             failed = [(rank, p.returncode) for rank, p in enumerate(children) if p.poll() not in (None, 0)]
             if failed:
@@ -912,10 +948,8 @@ def launch(args):
             raise RuntimeError("An offline rank failed")
     finally:
         for child in children:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
         for child in children:
             try:
                 child.wait(timeout=15)
@@ -928,7 +962,8 @@ def launch(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["plan", "audit", "prefill", "decode", "profile", "hostprofile",
+    parser.add_argument("command", choices=["plan", "audit", "prefill", "decode", "profile", "performance",
+                                            "hostprofile",
                                             "profile-export", "profile-compare",
                                             "swimlane", "swimlane-export",
                                             "padding-capture", "steady", "bitcompare", "argdump"])
