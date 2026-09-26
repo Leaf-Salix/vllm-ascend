@@ -3757,3 +3757,52 @@ CPU 汇总脚本从完整采样、CSV 及 DFX 原始记录重建对照，核对 
 本轮保留必要原始设备证据、复现脚本和一份本地输入；删除重复编译、profiler 中间产物与
 冗余日志，不提交权重/张量大文件。最终字段名与文档整理不重复占卡。
 改动 Python 文件的 Ruff、语法编译，三个复现脚本的 bash 语法，以及 Git 空白检查通过。
+
+## 109. NZ 代表边界与动态补位图回放；后续集中优化性能版（2026-09-26）
+
+设备算术沿用 `6ac7b9c7`，PyPTO `88297437`、Simpler `a54c05095`、PTOAS 0.66、
+PTO-ISA `327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d`。
+本阶段均为单卡正式 `model.layers.2` 权重加固定 seed=1024 的合成输入/历史，S6、
+atomic=0、Native deterministic level=1、HCCL_DETERMINISTIC=true；没有新增 16 卡任务。
+
+### 109.1 边界与补位结果
+
+任务 `task_20260926_151547_3935961537` completed/exit=0：
+性能版 B1/H255 与精度版 B5/H32767，各自比较 mode=0/2。
+四组同初态重复、同址 A/B/A 图、metadata 与保护区通过；同实现两种布局的
+八类逻辑输出/状态精确相同。这证明所测边界的布局变化中性，不是跨实现精度通过。
+
+新增 `--padding-graph`：Native builder 在图外更新同址 metadata，图内捕获 Native compact
+producer 与完整 PTO 层；重放时 active B4→3→1→4，补位 seq_lens=0、slot=-1、页表=0，
+positions/尾部 RoPE 保留旧值。独立 Native producer 按实际有效请求生成 compact oracle，
+PTO 有效输出比较同实现满档前缀，非有效 cache/state 保持初态。
+任务 `task_20260926_152243_50530218300` completed/exit=0：两版 B4/H4095、mode=2
+全部重放的有效输出、全部 cache/state、compact 有效行、metadata 和保护区 PASS。
+builder 的捕获输入地址保持不变。此证据不覆盖 Native 完整图、空 rank、全部档位，
+也不替代真实模型逐步更新场景。
+
+### 109.2 已观察到的差异与最新执行优先级
+
+任务 `task_20260926_152534_53012716184` completed/exit=0，补测同输入 B1/H255 精度版。
+两版 Native 八类基线状态精确相同；性能版 x_out 对 Native 为 max_abs=0.384277、
+RMSE=0.026746，差异集中在前三个 token；精度版为 max_abs=0.015625、RMSE=0.001000。
+性能版 ND/NZ 精确相同，Top-K 集合与 Native 相同而顺序不同。
+目前没有判定该差异属于算术权衡还是功能问题，报告保持 MEASURED，未放行数值验收。
+
+按用户随后明确的优先级：**性能优化先集中在性能版，尽可能对齐上游 pypto-lib；
+形成稳定收益并完成输出 token 看护后，再回头补齐精度版性能**。
+精度版保留当前对齐 Native 的算术方式；不要求每个候选同时修改两版。
+当前精度暂时仅看护输出 token 一致，逐阶段、逐元素误差诊断后置，已有差异保留必要证据；
+越界、漏写等功能问题仍须修复。下一步从第二层完整区间的现有热点推进性能候选，
+不为每次参数调整启动 16 卡，也不重复展开本节差异诊断。
+
+证据：
+- [边界配置与任务](results/csa_baseline_20260926/nz_native_edges/manifest.json)
+- [ND/NZ 八类状态比较](results/csa_baseline_20260926/nz_native_edges/comparison.json)
+- [短上下文两版差异](results/csa_baseline_20260926/nz_native_edges/short_precision_diagnostic.json)
+- [补位图配置与任务](results/csa_baseline_20260926/nz_native_padding/manifest.json)
+
+保留报告全部字段、比较与复现脚本。已完成比较的重复张量、编译产物和冗余日志清理；
+仅保留两份 B1 mode=2 状态和一份输入快照供后续恢复诊断，张量不提交。
+改动 Python 的 Ruff、语法编译，三个 shell 脚本语法，以及 Git 空白检查通过；
+最终整理只重建 CPU 差异报告，没有重复占卡。

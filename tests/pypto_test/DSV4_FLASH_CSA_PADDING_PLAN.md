@@ -17,3 +17,11 @@
 
 旧 padding 试错记录已删除。当前版本的尾块、补位、空 rank 与图内容更新
 证据按 A5/E1/E2 收集，不把旧运行结果当成当前全部 graph 档位通过。
+
+当前单卡入口是 `dsv4_csa_single_layer.py --padding-graph --atomic-add 0`。
+两版 B4/S6/H4095、mode=2 已检查同一个捕获图的 4→3→1→4 个有效请求：
+Native builder 更新捕获输入的原地址，图内 Native compact producer 保持捕获时的容量和标量，
+随后调用当前 PTO 完整层。有效请求输出与该实现满档前缀精确相同，补位请求的 cache/state
+保持初态；有效 compact metadata、只读 metadata、slot 外存储和页/首尾保护区均通过。
+证据在 `results/csa_baseline_20260926/nz_native_padding/`。
+仍未覆盖 Native 完整图、空 rank、所有 bucket、多 leaf 和真实模型的逐步上下文变化。

@@ -47,7 +47,11 @@ Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使�
 关闭时 QR/KV 改为单 K 分片、单写入者；这也改变累加分组，不能视为默认路径的逐 bit 参考。
 配合 `--graph` 检查相同地址上的 A→B→A 输入更新；每次恢复 cache/state，
 图输出与对应 eager 输出逐元素精确比较，并检查 metadata 和保护区。
-当前图用例固定形状与 metadata，padding/档位切换仍须按清单继续验证。
+`--graph` 固定形状与 metadata，只检查输入内容更新。
+`--padding-graph` 另测同一个捕获图的满档→补位→满档，要求 batch 至少为 2、atomic=0；
+Native builder 在图外更新同址 metadata，Native compact producer 和 PTO 在图内执行。
+补位 `seq_lens=0`、slot 为负、页表为 0，保留旧 positions；检查有效请求输出、全部 cache/state、
+有效 compact 行及保护区。该检查不包含 Native 整图、空 rank 或跨档位切换。
 零容差差异用于诊断，算术差异本身不会让该诊断伪装成 PASS；保护区改写、
 metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSpark 一致仍须整模型验证。
 
@@ -89,6 +93,8 @@ compact metadata，Native 保留其实际逐层生成路径。固定使用 `mode
 - `results/csa_baseline_20260926/nz_native_single_card/`：两版 B4/S6/H8192、atomic=0 的 ND/NZ 逐元素相同、图重放/保护区及 Native 权重地址复用证据；跨实现数值仍为 MEASURED。
 - `results/csa_baseline_20260926/nz_layout_contract/`：Native/pypto-lib 物理字节与快照合同、同一 Native NZ 存储的消费者对照。
 - `results/csa_baseline_20260926/nz_native_b16_timing/`：B16/S6/H8192、默认 atomic、Native 确定性关闭的两侧 mode=1/2 完整图区间；`following_mode1/2` 为第二层主口径，`mode1/2` 单独保留首层成本，另有 mode=2 PTO 泳道。单卡趋势，不是最终验收。
+- `results/csa_baseline_20260926/nz_native_edges/`：性能版 B1/H255、精度版 B5/H32767 的 ND/NZ 与图边界检查；另保留 B1 短上下文两版数值差异，性能版较大误差尚待归因。
+- `results/csa_baseline_20260926/nz_native_padding/`：两版 mode=2、B4/H4095 固定规约图在 4→3→1→4 个有效请求下的输出、状态及保护区检查。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。

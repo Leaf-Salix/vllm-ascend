@@ -252,6 +252,129 @@ def check_graph_replay(fixture, call, eager_a, report):
         restore(fixture)
 
 
+def check_padding_graph(fixture, call, eager, make_call, impl, report):
+    """Native builder 更新同址输入；捕获的 metadata producer 和 PTO 图随有效请求数变化。"""
+    import torch
+
+    batch = fixture["tokens"] // 6
+    groups = fixture["groups"]
+    originals = {
+        name: {
+            "slots": group["common"].slot_mapping.clone(),
+            "table": group["common"].block_table_tensor.clone(),
+            "lengths": group["common"]._seq_lens_cpu.clone(),
+            "allowed": group["allowed"],
+        }
+        for name, group in groups.items()
+    }
+    original_readonly = fixture["readonly"]
+    result = {
+        "status": "RUNNING", "bucket_batch": batch,
+        "scope": "单卡 PTO 同一图的满档→补位→满档；Native builder 在图外更新、"
+                 "Native compact producer 在图内执行；不代表 Native 整图或空 rank 验收",
+        "padding": "seq_lens=0、slot=-1、页表=0；positions 与尾部 RoPE 保留旧值",
+        "replays": [],
+    }
+    report["padding_graph"] = result
+    captured = {}
+
+    def run():
+        # 与生产图一样，捕获时 num_reqs_actual/输出容量固定；device 输入在重放前更新。
+        compact = {
+            name: impl._compute_compressor_metadata(fixture["metadata"][groups[name]["prefix"]].decode)
+            for name in ("compressed", "indexer")
+        }
+        captured.update(compact)
+        make_call(compact)()
+
+    def update_metadata(active):
+        common_cache, prefill_cache, decode_cache, metadata = {}, {}, {}, {}
+        for name, group in groups.items():
+            common, original = group["common"], originals[name]
+            common._seq_lens_cpu.copy_(original["lengths"])
+            common._seq_lens_cpu[active:].zero_()
+            common.seq_lens.copy_(common._seq_lens_cpu)
+            common.num_actual_tokens = active * 6
+            common.slot_mapping.copy_(original["slots"])
+            common.slot_mapping[active * 6:].fill_(-1)
+            common.block_table_tensor.copy_(original["table"])
+            common.block_table_tensor[active:].zero_()
+            current = group["builder"].build(
+                0, common, num_reqs_actual=active, block_size=group["spec"].block_size,
+                common_ratio_to_sas_metadata=common_cache,
+                prefill_ratio_to_sas_metadata=prefill_cache,
+                decode_ratio_to_sas_metadata=decode_cache,
+            )
+            old = fixture["metadata"][group["prefix"]].decode
+            for field in ("query_start_loc", "seq_lens", "block_table", "slot_mapping", "start_pos"):
+                before, after = getattr(old, field), getattr(current.decode, field)
+                if before is not None and (after is None or before.data_ptr() != after.data_ptr()):
+                    raise ValueError(f"Native builder 替换了捕获输入地址：{name}.{field}")
+            metadata[name] = current
+        return metadata
+
+    try:
+        restore(fixture)
+        run()
+        torch.npu.synchronize()
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph):
+            run()
+        counts = [batch, *dict.fromkeys((batch - 1, 1)), batch]
+        for active in counts:
+            metadata = update_metadata(active)
+            # 按实际请求数生成独立的 Native oracle，只用其有效行规定写区与期望 metadata。
+            oracle = {name: impl._compute_compressor_metadata(metadata[name].decode)
+                      for name in ("compressed", "indexer")}
+            expected = {name: eager[name][:active * 6] for name in ("x_out", "idx_topk")}
+            compact_checks = {}
+            for name, group in groups.items():
+                slots = oracle[name][2] if name in oracle else metadata[name].decode.slot_mapping
+                slots_cpu = slots.cpu()
+                group["allowed"] = writable_bytes(group["allocation"], group["views"], slots)
+                for index, view in enumerate(group["views"]):
+                    key = f"{name}.{index}"
+                    initial = group["initial"].view(view.dtype).as_strided(
+                        view.shape, view.stride(), view.storage_offset()).clone()
+                    for page, row in slots_cpu.tolist():
+                        if page >= 0 and row >= 0:
+                            initial[page, row] = eager[key][page, row]
+                    expected[key] = initial
+            fixture["readonly"] = {name: (value, value.cpu()) for name, (value, _) in original_readonly.items()}
+            restore(fixture)
+            call.args["x_out"].fill_(float("nan"))
+            call.args["idx_topk"].fill_(-12345)
+            graph.replay()
+            torch.npu.synchronize()
+            actual = collect_state(fixture, call.args["x_out"], call.args["idx_topk"])
+            actual.update({name: actual[name][:active * 6] for name in ("x_out", "idx_topk")})
+            for name, values in oracle.items():
+                valid = (values[2].cpu() >= 0).all(dim=1)
+                rows = valid.nonzero().flatten()
+                for field, value, reference in zip(("cos", "sin", "slots"), captured[name], values):
+                    compact_checks[f"{name}.{field}"] = compare_tensor(
+                        value.cpu()[rows], reference.cpu()[rows], 0, 0)
+            checks = {key: compare_tensor(actual[key], value, 0, 0) for key, value in expected.items()}
+            guards = guard_checks(fixture)
+            result["replays"].append({
+                "active_batch": active, "reference": "同一实现满档有效请求前缀；补位 cache/state 保持初态",
+                "state_comparison": checks, "compact_metadata": compact_checks, "guards": guards,
+            })
+            all_checks = (*checks.values(), *compact_checks.values(), *guards.values())
+            if any(value["status"] != "PASS" for value in all_checks):
+                raise ValueError(f"有效请求数 {active}/{batch} 的图重放输出、metadata 或保护区失败")
+        result["status"] = "PASS"
+    except BaseException:
+        result["status"] = "FAIL"
+        raise
+    finally:
+        update_metadata(batch)
+        for name, group in groups.items():
+            group["allowed"] = originals[name]["allowed"]
+        fixture["readonly"] = original_readonly
+        restore(fixture)
+
+
 def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
                            profile_dir=None):
     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
@@ -455,8 +578,8 @@ def run(args, report):
         report["pto_reduction"] = {
             "atomic_add": ATOMIC_ADD, "qr_split_k": reduction.QR_OK, "kv_split_k": reduction.KV_OK,
         }
-        if args.graph and ATOMIC_ADD:
-            raise ValueError("--graph 使用逐元素精确比较，须设置 --atomic-add 0 排除跨核规约波动")
+        if (args.graph or args.padding_graph) and ATOMIC_ADD:
+            raise ValueError("图正确性检查使用逐元素精确比较，须设置 --atomic-add 0 排除跨核规约波动")
         adapter = importlib.import_module(f"{package}.native_adapter")
         module = importlib.import_module(f"{package}.decode_csa")
         root = module._decode_csa_tp1_layer
@@ -547,6 +670,15 @@ def run(args, report):
             raise ValueError("Top-K 含越界、重复或缺失的候选索引")
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
+        if args.padding_graph:
+            def make_call(compact):
+                return adapter.NativeCSACall(
+                    call.ops, weights, fixture["hidden"], fixture["positions"], groups,
+                    layer_name=fixture["groups"]["compressed"]["prefix"], compact_metadata=compact,
+                    buffers={name: call.args[name] for name in ("x_out", "idx_topk", "idx_topk_scores")},
+                )
+
+            check_padding_graph(fixture, call, pto[0], make_call, layer.self_attn.dsa_attn.dsa_attn.impl, report)
         if args.timing_iters:
             timing = {
                 "status": "RUNNING", "iters": args.timing_iters, "warmup": args.timing_warmup,
@@ -626,6 +758,8 @@ def main():
     parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
+    parser.add_argument("--padding-graph", action="store_true",
+                        help="固定规约下，Native metadata 更新同一个图的满档/补位请求；batch 至少为 2")
     parser.add_argument("--deterministic-level", type=int, choices=(0, 1), default=1,
                         help="Native 确定性：默认 1 诊断，0 为性能部署；HCCL_DETERMINISTIC 同步设置")
     parser.add_argument("--timing-iters", type=int, default=0, help="两侧完整图重放设备区间采样次数；0 不计时")
@@ -636,6 +770,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
+    if args.padding_graph and args.batch < 2:
+        parser.error("padding-graph 的 batch 至少为 2")
     if args.timing_iters < 0 or args.timing_warmup < 1:
         parser.error("timing-iters 不得为负，timing-warmup 至少为 1")
     if args.profile and not args.timing_iters:

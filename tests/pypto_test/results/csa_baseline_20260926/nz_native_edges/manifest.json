@@ -1,0 +1,40 @@
+{
+  "status": "MEASURED",
+  "main_parent": "6ac7b9c7",
+  "pypto": "88297437",
+  "simpler": "a54c05095",
+  "ptoas": "0.66",
+  "pto_isa": "327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "weight_layer": "model.layers.2",
+  "input": "seed=1024 的合成 hidden/历史，Native builder 元数据；单卡，S6",
+  "atomic_add": false,
+  "native_deterministic_level": 1,
+  "hccl_deterministic": true,
+  "source_note": "设备算术沿用父提交；本提交增加 padding 图检查。全部任务期间冻结源码。",
+  "evidence_processing": "保留报告全部字段、比较结果与复现脚本；清理重复构建、设备日志和已完成布局比较的张量。未提交张量大文件。",
+  "scope": "代表短/长上下文与尾块的同实现 ND/NZ、A/B/A 图、metadata/保护区检查；不代表跨实现精度通过或全档位验收",
+  "tasks": [
+    {
+      "id": "task_20260926_151547_3935961537",
+      "status": "completed",
+      "exit_code": 0,
+      "script": "run.sh"
+    },
+    {
+      "id": "task_20260926_152534_53012716184",
+      "status": "completed",
+      "exit_code": 0,
+      "script": "diagnose_short.sh"
+    }
+  ],
+  "reports": [
+    "short_b1_mode0/report.json",
+    "short_b1_mode2/report.json",
+    "long_b5_mode0/report.json",
+    "long_b5_mode2/report.json",
+    "short_b1_precision_mode2/report.json"
+  ],
+  "conclusion": "同实现 ND/NZ 八类状态精确相同；已有图/metadata/保护区通过。B1 性能版对 Native 误差明显大于精度版，尚未归因，未放行精度。按用户新优先级暂缓详细诊断，性能优化先行。",
+  "local_input": "仅保留 B1 mode2 两版 states.pt 和精度版一份 case 输入，供将来恢复诊断；mode0 与 B5 对照张量完成比较后删除，run.sh 可重建。"
+}
