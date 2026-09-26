@@ -347,7 +347,7 @@ def diagnose(args, llm, cases):
               "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
               "atomic_add": os.environ.get("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1")}
     if args.command == "performance":
-        # 同一次模型加载先测无 profiler 的完整步，再独立采设备层区间。
+        # 同一次模型加载先测无 profiler 的 execute_model，再独立采设备层区间。
         # 不把 profiler 窗口、加载/前缀恢复或主机计时代替稳态设备结果。
         llm.collective_rpc("offline_begin_observation")
         llm.collective_rpc("offline_begin_steady", args=(args.warmup_steps, expected_tokens, args.batch))
@@ -383,7 +383,7 @@ def diagnose(args, llm, cases):
         if args.command == "performance":
             common["csa_observation"] = llm.collective_rpc("offline_end_observation")
             common["stage"] = "measured"
-            common["scope"] = ("steady_window 为无 profiler 的完整步设备/主机采样；"
+            common["scope"] = ("steady_window 为无 profiler 的 execute_model 设备/主机采样，不覆盖 sample_tokens；"
                                "独立 Level0 trace 用于 HC_pre→HC_post 设备首末区间，"
                                "须解析各 rank/层，不累加并发 kernel 时间。")
     elif args.command == "hostprofile":
@@ -418,7 +418,7 @@ def diagnose(args, llm, cases):
             args.warmup_steps, expected_tokens, args.batch))
         common.update({"decode_tokens": args.decode_tokens, "warmup_steps": args.warmup_steps,
                        "started": started, "stage": "measuring",
-                       "scope": "约定档位的图外事件记录完整 execute_model 设备区间；"
+                       "scope": "约定档位的图外事件记录 execute_model 设备区间（不含 sample_tokens）；"
                                 "主机时间另列，不把调度 token 速率当成输出吞吐"})
         # 先落一份带 stage 的记录：这一轮多次被外部信号在 decode 中途打断，
         # 而收尾才写盘导致什么都拿不到。哪怕只走到这里，也要留下证据。

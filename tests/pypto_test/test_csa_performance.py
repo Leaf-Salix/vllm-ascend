@@ -8,6 +8,7 @@ import pytest
 import torch
 import torch_npu
 from offline_pd.observer import OfflineCSAObserver
+from offline_pd.performance import layer_intervals
 
 
 def scheduler(tokens, requests):
@@ -71,3 +72,38 @@ def test_steady_uses_fresh_device_events_and_skips_partial_batch(observer, monke
     assert result["device"]["samples_us"] == [100] * 20
     assert len(set(result["device"]["start_timestamps_raw"])) == 20
     assert "tokens_per_second" not in result
+
+
+@pytest.mark.parametrize("missing_worker", [False, True])
+def test_layer_mapping_counts_overlap_once_and_rejects_missing_tasks(missing_worker):
+    rows = []
+
+    def task(name, time, duration, model=49):
+        rows.append({"name": name, "start_ns": time * 1000, "duration_ns": duration * 1000,
+                     "model": model, "task": len(rows)})
+
+    for layer in range(43):
+        start = layer * 40
+        if layer >= 2 and layer % 2 == 0:
+            if layer == 2:
+                task("CompressorMetadata", start - 4, 2)
+                task("CompressorMetadata", start - 2, 2)
+            task("simpler_aicpu_kernel_exec_example", start, 10, None)
+            if not (missing_worker and layer == 4):
+                task("aicore_kernel_mode_0_mix_aic", start + 1, 8, None)
+        else:
+            task("HcPre", start, 2)
+            task("HcPost", start + 8, 2)
+        task("HcPre", start + 20, 2)
+        task("HcPost", start + 28, 2)
+    rows.sort(key=lambda row: row["start_ns"])
+    if missing_worker:
+        with pytest.raises(ValueError, match="runtime/worker 数量不符"):
+            layer_intervals(rows, "pto", steps=1)
+    else:
+        result = layer_intervals(rows, "pto", steps=1)["intervals"]
+        assert len(result) == 21
+        assert result[0]["us"] == 14
+        assert result[0]["leading_metadata_tasks"] == 2
+        assert all(row["body_us"] == 10 for row in result)
+        assert all(row["us"] == 10 for row in result[1:])

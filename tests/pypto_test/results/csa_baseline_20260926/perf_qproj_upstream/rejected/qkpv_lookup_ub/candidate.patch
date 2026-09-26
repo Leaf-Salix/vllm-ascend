@@ -1,0 +1,54 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index 94b08086..5ff212bb 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -107,6 +107,9 @@ ATTN_K_TILE = 128
+ 
+ NUM_QK_CORES = 24  # qk_pv dispatch lanes
+ 
++# 主档 H8192 的压缩页表可整段放入 UB；更长上下文超出部分仍直接读取页表。
++QK_PAGE_PREFETCH = 128
++
+ CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
+ 
+ T_PAD = ((T + 16 - 1) // 16) * 16  # Cube M floor
+@@ -315,6 +318,7 @@ def sparse_attn_csa(
+ 
+     # QK/PV scratch tensors.
+     cmp_block_num = pl.tensor.dim(cmp_kv, 0)
++    cmp_table_columns = pl.tensor.dim(cmp_block_table, 1)
+     cmp_kv_flat = pl.reshape(cmp_kv, [cmp_block_num * BLOCK_SIZE, HEAD_DIM])
+     q_flat = pl.reshape(q, [t_heads, HEAD_DIM])
+     attn_sink_col = pl.reshape(attn_sink, [H, 1])
+@@ -387,6 +391,12 @@ def sparse_attn_csa(
+                 pl.system.set_ffts(ffts_workspace)
+                 qk_lane_head = qk_aiv * (H // 2)
+                 qk_lane_kv = qk_aiv * (ATTN_K_TILE // 2)
++                # 避免逐 KV 行串行读取两个 GM 标量；索引和常用页表先搬入 UB。
++                qk_indices = pl.load(cmp_sparse_indices, [qk_t, 0], [1, CMP_TOPK])
++                qk_pages = pl.load(
++                    cmp_block_table, [qk_b, 0], [1, QK_PAGE_PREFETCH],
++                    valid_shape=[1, pl.min(cmp_table_columns, QK_PAGE_PREFETCH)],
++                )
+                 qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
+                 running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
+                 # 上游口径：l 从 0 起算，sink 的那一项留到 merge_norm 的分母里补。
+@@ -428,11 +438,14 @@ def sparse_attn_csa(
+                                 for qk_row in pl.range(ATTN_K_TILE // 2):
+                                     qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+                                     if qk_cmp_k < CMP_TOPK:
+-                                        qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
++                                        qk_ridx = pl.read(qk_indices, [0, qk_cmp_k])
+                                         if qk_ridx >= 0:
+-                                            qk_page = pl.cast(
+-                                                pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
+-                                            )
++                                            qk_page_index = qk_ridx // BLOCK_SIZE
++                                            if qk_page_index < QK_PAGE_PREFETCH:
++                                                qk_raw_page = pl.read(qk_pages, [0, qk_page_index])
++                                            else:
++                                                qk_raw_page = pl.read(cmp_block_table, [qk_b, qk_page_index])
++                                            qk_page = pl.cast(qk_raw_page, pl.INDEX)
+                                             qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                                             qk_kv_half = pl.gather_row(
+                                                 qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]

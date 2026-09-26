@@ -1,0 +1,210 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index bc26b64b..338c2acb 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -133,6 +133,8 @@ Q_ROPE_H_TILE = 4  # heads per fused qproj dequant/rms/rope task
+ 
+ Q_DEQUANT_WORKERS = 48
+ 
++Q_DEQUANT_HEAD_TILE = 16
++
+ assert QPROJ_MM_N_TILE * QPROJ_M_TILE * 4 <= 128 * 1024  # L0C Acc cap
+ 
+ assert QPROJ_M_TILE % QPROJ_TAIL_M_TILE == 0
+@@ -539,7 +541,7 @@ def q_proj_q_dequant(
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+ ):
+-    """Dequantize, normalize, and rotate one projected Q tile."""
++    """Process contiguous heads of one token, preserving per-head arithmetic."""
+     t_dim = pl.tensor.dim(q, 0)
+     q_flat = pl.reshape(q, [t_dim, H * HEAD_DIM])
+     for dq_worker in pl.spmd(
+@@ -547,154 +549,40 @@ def q_proj_q_dequant(
+         name_hint="qproj_dequant_rms_nope_rope",
+         allow_early_resolve=True,
+     ):
+-        # 按本档位的 token 数自适应放大 head 块（上游写法）。恒用 Q_ROPE_H_TILE=4 时
+-        # Vector 块太小、指令条数多，in-core 实测 VECTOR 占 82%。生产档位 tile_rows=96
+-        # 正好命中下面第二个分支，head 块 4 -> 16。
+-        dq_head_tile = Q_ROPE_H_TILE
+-        if tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE) == 0:
+-            dq_head_tile = H
+-        elif (
+-            tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H
+-            and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H) == 0
+-        ):
+-            dq_head_tile = 16
+-        for dq_work in pl.range(
+-            dq_worker,
+-            ((tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE) * (H // dq_head_tile),
+-            Q_DEQUANT_WORKERS,
+-        ):
+-            hg = (dq_work % (H // dq_head_tile)) * dq_head_tile
+-            tg = (dq_work // (H // dq_head_tile)) * Q_ROPE_T_TILE
++        # q_proj_i32 是 token/head/dim 顺序；按连续 16 个 head 读写，
++        # 避免旧实现每个 head 都跨 8 个 token 发起大 stride 的小块搬运。
++        swap_row = rope_swap_idx[tile_base : tile_base + 1, :]
++        swap_base = pl.full([Q_DEQUANT_HEAD_TILE, ROPE_DIM], dtype=pl.INT32, value=0)
++        swap = pl.col_expand(swap_base, swap_row)
++        for dq_work in pl.range(dq_worker, tile_rows * (H // Q_DEQUANT_HEAD_TILE), Q_DEQUANT_WORKERS):
++            tg = dq_work // (H // Q_DEQUANT_HEAD_TILE)
++            hg = (dq_work % (H // Q_DEQUANT_HEAD_TILE)) * Q_DEQUANT_HEAD_TILE
+             out_tg = tile_base + tg
+-            if tg + Q_ROPE_T_TILE <= tile_rows:
+-                qr_scale_dq_t = qr_scale_pad_store[tg : tg + Q_ROPE_T_TILE, :]
+-                q_cos_il = rope_cos_il[out_tg : out_tg + Q_ROPE_T_TILE, :]
+-                q_sin_signed = rope_sin_signed[out_tg : out_tg + Q_ROPE_T_TILE, :]
+-                q_swap_idx = rope_swap_idx[out_tg : out_tg + Q_ROPE_T_TILE, :]
+-                for h_inner in pl.pipeline(dq_head_tile, stage=2):
+-                    h = hg + h_inner
+-                    h0 = h * HEAD_DIM
+-                    q_head_acc = q_proj_i32[tg : tg + Q_ROPE_T_TILE, h0 : h0 + HEAD_DIM]
+-                    q_head_scale = pl.reshape(wq_b_scale[h0 : h0 + HEAD_DIM], [1, HEAD_DIM])
+-                    q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
+-                    q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
+-                    q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)
+-                    q_head_sq = pl.mul(q_head_dq, q_head_dq)
+-                    q_head_sq_row = pl.row_sum(q_head_sq)
+-                    q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
+-                    q_head_sq_mean = pl.mul(q_head_sq_sum, 1.0 / HEAD_DIM)
+-                    q_head_var = pl.add(q_head_sq_mean, EPS)
+-                    q_head_inv_rms = pl.rsqrt(q_head_var, high_precision=True)
+-                    q_head_inv_rms_t = pl.reshape(q_head_inv_rms, [Q_ROPE_T_TILE, 1])
+-
+-                    q_nope_normed = pl.row_expand_mul(q_head_dq[:, 0:NOPE_DIM], q_head_inv_rms_t)
+-                    q_nope_bf16 = pl.cast(q_nope_normed, target_type=pl.BF16, mode="rint")
+-                    q_flat[out_tg : out_tg + Q_ROPE_T_TILE, h0 : h0 + NOPE_DIM] = q_nope_bf16
+-
+-                    q_rope_chunk_raw = q_head_dq[:, NOPE_DIM:HEAD_DIM]
+-                    q_rope_chunk = pl.row_expand_mul(q_rope_chunk_raw, q_head_inv_rms_t)
+-                    q_rope_swapped = pl.gather(q_rope_chunk, dim=-1, index=q_swap_idx)
+-                    q_rope_base = pl.mul(q_rope_chunk, q_cos_il)
+-                    q_rope_delta = pl.mul(q_rope_swapped, q_sin_signed)
+-                    q_rope_rot = pl.add(q_rope_base, q_rope_delta)
+-                    q_rope_bf16 = pl.cast(q_rope_rot, target_type=pl.BF16, mode="rint")
+-                    q_flat[out_tg : out_tg + Q_ROPE_T_TILE, h0 + NOPE_DIM : h0 + HEAD_DIM] = q_rope_bf16
+-            else:
+-                valid_tail_rows = tile_rows - tg
+-                # q_proj and its dequant scale are padded to the cube boundary.
+-                # Keep the math on a static eight-row tile and crop public stores.
+-                qr_scale_dq_tail = pl.load(
+-                    qr_scale_pad_store,
+-                    [tg, 0],
+-                    [Q_ROPE_T_TILE, 1],
+-                    target_memory=pl.MemorySpace.Vec,
+-                )
+-                q_cos_il_tail = pl.load(
+-                    rope_cos_il,
+-                    [out_tg, 0],
+-                    [Q_ROPE_T_TILE, ROPE_DIM],
+-                    valid_shape=[valid_tail_rows, ROPE_DIM],
+-                    target_memory=pl.MemorySpace.Vec,
+-                )
+-                q_sin_signed_tail = pl.load(
+-                    rope_sin_signed,
+-                    [out_tg, 0],
+-                    [Q_ROPE_T_TILE, ROPE_DIM],
+-                    valid_shape=[valid_tail_rows, ROPE_DIM],
+-                    target_memory=pl.MemorySpace.Vec,
+-                )
+-                q_col = pl.col_expand_mul(
+-                    pl.tile.full([Q_ROPE_T_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0),
+-                    pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32),
+-                )
+-                q_dup_f = pl.cast(pl.cast(pl.mul(q_col, 0.5), target_type=pl.INT32, mode="trunc"), pl.FP32)
+-                q_lane = pl.sub(q_col, pl.mul(q_dup_f, 2.0))
+-                q_swap_f = pl.sub(pl.add(q_col, 1.0), pl.mul(q_lane, 2.0))
+-                # Row-major flattening offsets stay in fp32: col-expand is defined
+-                # for half / float only.
+-                q_row_seed = pl.mul(
+-                    pl.cast(pl.tile.arange(0, [1, Q_ROPE_T_TILE], dtype=pl.INT32), target_type=pl.FP32),
+-                    ROPE_DIM_SCALE,
+-                )
+-                q_row_grid = pl.col_expand_mul(
+-                    pl.tile.full([ROPE_DIM, Q_ROPE_T_TILE], dtype=pl.FP32, value=1.0),
+-                    q_row_seed,
+-                )
+-                q_row_offset = pl.transpose(q_row_grid, axis1=0, axis2=1)
+-                q_swap_idx_tail = pl.cast(pl.add(q_swap_f, q_row_offset), target_type=pl.INT32)
+-                q_head_reduce_tmp = pl.create_tile(
+-                    [Q_ROPE_T_TILE, HEAD_DIM],
+-                    dtype=pl.FP32,
+-                    target_memory=pl.MemorySpace.Vec,
+-                )
+-                q_gather_tmp = pl.create_tile(
+-                    [Q_ROPE_T_TILE, ROPE_DIM],
+-                    dtype=pl.INT32,
+-                    target_memory=pl.MemorySpace.Vec,
+-                )
+-                for h_inner_tail in pl.range(Q_ROPE_H_TILE):
+-                    h_tail = hg + h_inner_tail
+-                    h0_tail = h_tail * HEAD_DIM
+-                    q_head_acc_tail = pl.load(
+-                        q_proj_i32,
+-                        [tg, h0_tail],
+-                        [Q_ROPE_T_TILE, HEAD_DIM],
+-                        target_memory=pl.MemorySpace.Vec,
+-                    )
+-                    q_head_scale_input_tail = pl.load(
+-                        wq_b_scale,
+-                        [h0_tail],
+-                        [HEAD_DIM],
+-                        target_memory=pl.MemorySpace.Vec,
+-                    )
+-                    q_head_scale_tail = pl.reshape(q_head_scale_input_tail, [1, HEAD_DIM])
+-                    q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
+-                    q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
+-                    q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)
+-
+-                    q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
+-                    q_head_sq_sum_tail = pl.row_sum(q_head_sq_tail, q_head_reduce_tmp)
+-                    q_head_inv_rms_tail = pl.recip(
+-                        pl.sqrt(pl.add(pl.mul(q_head_sq_sum_tail, 1.0 / HEAD_DIM), EPS)),
+-                    )
+-
+-                    q_nope_normed_tail = pl.row_expand_mul(q_head_dq_tail[:, 0:NOPE_DIM], q_head_inv_rms_tail)
+-                    q_nope_bf16_tail = pl.cast(q_nope_normed_tail, target_type=pl.BF16, mode="rint")
+-                    q_nope_valid = pl.set_validshape(q_nope_bf16_tail, valid_tail_rows, NOPE_DIM)
+-                    pl.store(q_nope_valid, [out_tg, h0_tail], q_flat)
+-
+-                    q_rope_chunk_raw_tail = q_head_dq_tail[:, NOPE_DIM:HEAD_DIM]
+-                    q_rope_chunk_tail = pl.row_expand_mul(q_rope_chunk_raw_tail, q_head_inv_rms_tail)
+-                    q_rope_swapped_tail = pl.tile.gather(q_rope_chunk_tail, q_swap_idx_tail, q_gather_tmp)
+-                    # RoPE inputs contain only the live rows of this tail.
+-                    q_rope_chunk_tail = pl.set_validshape(q_rope_chunk_tail, valid_tail_rows, ROPE_DIM)
+-                    q_rope_swapped_tail = pl.set_validshape(q_rope_swapped_tail, valid_tail_rows, ROPE_DIM)
+-                    q_rope_base_tail = pl.mul(q_rope_chunk_tail, q_cos_il_tail)
+-                    q_rope_delta_tail = pl.mul(q_rope_swapped_tail, q_sin_signed_tail)
+-                    q_rope_rot_tail = pl.add(q_rope_base_tail, q_rope_delta_tail)
+-                    q_rope_bf16_tail = pl.cast(q_rope_rot_tail, target_type=pl.BF16, mode="rint")
+-                    q_rope_valid = pl.set_validshape(q_rope_bf16_tail, valid_tail_rows, ROPE_DIM)
+-                    pl.store(q_rope_valid, [out_tg, h0_tail + NOPE_DIM], q_flat)
++            h0 = hg * HEAD_DIM
++            q_acc = q_proj_i32[tg : tg + 1, h0 : h0 + Q_DEQUANT_HEAD_TILE * HEAD_DIM]
++            qr_dq = pl.read(qr_scale_pad_store, [tg, 0])
++            w_dq = pl.reshape(
++                wq_b_scale[h0 : h0 + Q_DEQUANT_HEAD_TILE * HEAD_DIM],
++                [1, Q_DEQUANT_HEAD_TILE * HEAD_DIM],
++            )
++            q_scaled = pl.mul(pl.cast(q_acc, target_type=pl.FP32, mode="none"), qr_dq)
++            q_heads = pl.reshape(pl.mul(q_scaled, w_dq), [Q_DEQUANT_HEAD_TILE, HEAD_DIM])
++            q_sq_sum = pl.row_sum(pl.mul(q_heads, q_heads))
++            q_var = pl.add(pl.mul(pl.reshape(q_sq_sum, [1, Q_DEQUANT_HEAD_TILE]), 1.0 / HEAD_DIM), EPS)
++            q_inv = pl.reshape(pl.rsqrt(q_var, high_precision=True), [Q_DEQUANT_HEAD_TILE, 1])
++            q_nope = pl.row_expand_mul(q_heads[:, 0:NOPE_DIM], q_inv)
++            q_rope = pl.row_expand_mul(q_heads[:, NOPE_DIM:HEAD_DIM], q_inv)
++            q_swapped = pl.gather(q_rope, dim=-1, index=swap)
++            q_cos = rope_cos_il[out_tg : out_tg + 1, :]
++            q_sin = rope_sin_signed[out_tg : out_tg + 1, :]
++            q_rot = pl.add(pl.col_expand_mul(q_rope, q_cos), pl.col_expand_mul(q_swapped, q_sin))
++            q_bf16 = pl.concat(
++                pl.cast(q_nope, target_type=pl.BF16, mode="rint"),
++                pl.cast(q_rot, target_type=pl.BF16, mode="rint"),
++            )
++            q_flat[out_tg : out_tg + 1, h0 : h0 + Q_DEQUANT_HEAD_TILE * HEAD_DIM] = pl.reshape(
++                q_bf16, [1, Q_DEQUANT_HEAD_TILE * HEAD_DIM]
++            )
+     return q
+ 
+ 

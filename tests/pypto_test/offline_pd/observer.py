@@ -385,10 +385,10 @@ class OfflineCSAObserver:
         return state
 
     def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests):
-        """图外事件测完整 execute_model 设备区间，另记录主机耗时与峰值显存。
+        """图外事件测 execute_model 设备区间，另记录主机耗时与峰值显存。
 
         只采约定档位，先丢弃 warmup_steps 个完整 decode 步；每步不额外同步，
-        结束后统一读事件。设备区间包含图派发间隙、DSpark 和通信等待，
+        结束后统一读事件。区间不覆盖随后 sample_tokens 中的草稿生成，
         主机耗时不代替设备时间，调度 token 数也不当成实际输出吞吐。
         """
         import torch
@@ -452,7 +452,7 @@ class OfflineCSAObserver:
             math.isfinite(value) and value > 0 for value in device_us)
         state["device"] = {"samples_us": device_us, "start_timestamps_raw": stamps,
                            "valid_events": valid_events,
-                           "scope": "图外事件包围 execute_model，含主模型、草稿和通信/派发间隙；无逐步额外同步"}
+                           "scope": "图外事件仅包围 execute_model，不覆盖随后 sample_tokens；无逐步额外同步"}
         if valid_events:
             ordered_device = sorted(device_us)
             state["device"].update(p50_us=statistics.median(device_us),

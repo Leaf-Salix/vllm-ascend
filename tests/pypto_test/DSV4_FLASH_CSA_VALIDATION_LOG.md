@@ -3937,3 +3937,60 @@ CPU 回归 `test_csa_performance.py` 共 3 项通过，覆盖错误档位、窗�
 证据：[单卡测量工具报告](results/csa_baseline_20260926/performance_measurement/report.json)、
 [复现脚本](results/csa_baseline_20260926/performance_measurement/run.sh)。
 下一步使用第 110/111 节保留且通过 token 看护的性能版，依次测两侧相同 mode=2/1。
+
+## 114. 正式模型两种 NZ 口径完成测量，澄清计时范围（2026-09-26）
+
+生产源码仍为第 110 节保留版本，测量工具 `334c4252`；mode=2/1 任务分别为
+`task_20260926_163909_113963832315`、`task_20260926_165132_12624293432`，均 completed/exit=0。
+固定正式权重、B16/S6/H8192、TP1/DP-EP16、FULL_DECODE_ONLY、capture=96；两侧同 mode，
+PTO performance/atomic=1、QR/KV split=8/8，Native level=0，HCCL=false/AIV。
+每次加载先预热 96 token，然后 192 token 无 profiler 窗口及独立 192 token Level0 窗口。
+各 rank 实际配置、PTO 21 个目标层捕获及图重放已核对。
+
+| mode | Native CSA p50/p95（μs） | PTO CSA p50/p95（μs） | token / DSpark |
+| --- | --- | --- | --- |
+| 1 | 989.85 / 1017.82 | 876.03 / 907.44 | 98,304 token 全同，统计全同 |
+| 2 | 984.70 / 1015.16 | 851.07 / 888.40 | 98,304 token 全同，统计全同 |
+
+每侧 16 rank × 21 层 × 3 步 = 1008 区间，按设备首末取差，PTO 并发 runtime/worker 只计一次。
+mode=2 首个 C4 层包含两项 compact metadata，PTO 中位 902.93 μs；后续复用层中位 850.21 μs。
+主优化口径继续 mode=2；最终 750 μs 和整模型优于 Native 的目标均未达成。
+
+**更正第 112/113 节的“完整步”表述**：实际 runner.execute_model 后，sample_tokens 才调用
+DSpark 草稿生成。本轮图外事件只覆盖 execute_model，不能把它称为完整 decode 周期。
+此区间 mode=2 Native/PTO 中位 67.750/68.113 ms，mode=1 为 68.859/69.541 ms；
+不据此计算完整输出吞吐，不用 profiler 窗口替代无 profiler 端到端采样。
+原始报告字段中的旧 scope 文案由比较报告明确纠正，原始数值不改动。
+完整周期测量等性能候选稳定后再补；按用户要求收住测试工具工作，继续直接改性能代码。
+
+证据：[mode=2](results/csa_baseline_20260926/model_performance/mode2/performance_comparison.json)、
+[mode=1](results/csa_baseline_20260926/model_performance/mode1/performance_comparison.json)。
+
+## 115. 当前与上游泳道逐项对照，撤回无收益候选（2026-09-26）
+
+按用户要求，先列当前与 pypto-lib 的 incore task、调度及额外工作差距，不新增 NPU 测试。
+从 Git `30795c69^` 读取原始 `shangyou-merged_swimlane_20260924_005402.json`，只保留这一份
+对照必需的 Worker View；不是恢复整套过时测试。上游原文件没有 Scheduler View 或完整环境，
+故明确作为历史参照，不当成同配置整模型验收。
+
+[完整差距清单](DSV4_FLASH_CSA_UPSTREAM_GAP.md)与[全任务表](results/csa_baseline_20260926/upstream_gap/tasks.md)
+已落盘，可由 CPU 脚本复算。两侧 Worker 首任务各归零，当前 806.14 μs、上游 727.98 μs，差 78.16 μs。
+当前 1131 对上游 983 个实例，净增 148 全部对应：HC 加宽 +12、compact 偏移 +1、
+Indexer 边界初始化 +16、key 重排 +48、QR/KV 拆分 +48/+24、去掉 rope_swap −1。
+Q 反量化平均核内 19.70 对上游 20.59 μs，但窗口 125.66 对 48.84 μs，优先查启动分散/资源竞争。
+O-A 平均核内 29.31 对 20.19 μs，是明确需继续缩小的核内差距；QK/PV 当前已略快于旧上游样本。
+每项后续优化均须记录与上游代码模式不同的原因，区分接口约束、保护语义及主动调优。
+
+本轮以下候选沿用主档单卡第二层口径，各完成一次计时后撤回，不追加边界或整模型验证：
+
+| 候选 | PTO p50/p95（μs） | 任务 |
+| --- | --- | --- |
+| Top-K/页表预取 UB | 838.03 / 860.54 | task_20260926_170723_139397719663 |
+| O-A N128→256 | 827.43 / 847.68 | task_20260926_171246_14177484496 |
+| O-A K256→512 | 843.09 / 858.08 | task_20260926_172124_145069116732 |
+| Q 反量化连续 16 heads | 861.06 / 873.60 | task_20260926_172807_15086503832 |
+
+全部计时任务 completed/exit=0；Q 连续 heads 首次因 1×1 scale Tile 的行字节对齐编译失败，
+改用 scalar read 后完成上述唯一计时。未把没有完整层收益的实现保留在生产文件中，精度版未改。
+只存可重建补丁、配置与样本，见 `perf_qproj_upstream/rejected/`。
+测量工具只修正 execute_model 的范围描述并添加既有结果的 CPU 解析，没有继续开发/测试完整周期采集。
