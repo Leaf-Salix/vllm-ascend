@@ -4609,3 +4609,23 @@ forward为每rank预热后连续10次无profiler事件，再对16rank等权汇�
 `task_20260926_230348_41308902775` 以 `5d42db04` 启动；此前
 `task_20260926_230256_41243392253` 在mkdir阶段因队列附加的 `--device` 参数被误认成路径而退出，
 未加载模型或生成性能数据，修正脚本后才提交当前任务。
+
+## 137. B4 forward 回退诊断：进程级 event 模式差异（2026-09-26）
+
+用户要求检查 B4 的6.7%回退。现有3步profiling拆解显示：21个C4区间合计Native/PTO为
+18.873/17.337ms，其他attention为10.170/9.502ms，FFN为22.832/24.154ms，层间隙为
+0.144/0.281ms；profiling主图总区间52.019/51.274ms，与无profiler的48.483/51.715ms
+快慢方向不同。两种窗口必须分开，不能把这些诊断差值相加解释主计时的3.232ms回退。
+拆解证据 `event_mode_diagnosis/existing_trace_breakdown.json`，同时保留B8/B16。
+
+源码和trace找到一个明确的全局配置差异：PyPTO runtime的
+`ensure_onboard_kernel_hardware_events()` 调用 `rtEventWorkModeSet(1)`，设置作用于整个进程。
+Native图中主要是CAPTURE_WAIT/CAPTURE_RECORD/MEM_WRITE_VALUE，PTO图中变为
+EVENT_WAIT/EVENT_RECORD/EVENT_RESET。它不仅影响PTO根内部，也影响模型其余图同步。
+
+单卡任务 `task_20260926_231800_1664387893` completed/exit=0，两个新进程仅查询模式和
+调用初始化：默认0→PyPTO初始化后1；显式软件0→PyPTO初始化后仍为0，并出现预期的保留软件模式诊断。
+没有修改PyPTO/Simpler。测试入口增加可选 `--event-work-mode 0/1`，模型worker初始化设备后、
+模型加载/捕获前设置，并在RPC中记录模型加载后的实际值。3项CPU参数/进程配置回归通过。
+下一步只补H131072/B4 Native硬件模式1对照，容量40、预算256、同图档位及10步窗口不变；
+当前只能确认模式差异存在，尚未确认它造成6.7%的回退，不提前更换六档主表或宣布修复。

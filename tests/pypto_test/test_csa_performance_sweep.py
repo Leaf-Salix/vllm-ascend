@@ -30,6 +30,7 @@ def test_sweep_forwarding_and_actual_batch(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", [
         "run.py", "performance", "--bank", str(bank), "--output", str(tmp_path / "pto"),
         "--backend", "pto", "--batch", "40", "--decode-tokens", "192", "--max-num-batched-tokens", "400",
+        "--event-work-mode", "1",
         "--sweep-batches", *map(str, batches), "--capture-sizes", *map(str, [b * 6 for b in batches])])
     run.main()
     assert len(commands) == 16
@@ -41,6 +42,7 @@ def test_sweep_forwarding_and_actual_batch(monkeypatch, tmp_path):
         parsed = worker.call_args.args[0]
         assert parsed.rank == rank
         assert parsed.max_num_batched_tokens == 400
+        assert parsed.event_work_mode == 1
         cases = list(run.diagnostic_runs(parsed))
         assert [item.batch for item in cases] == batches
         assert all(item.rank_batch == item.batch and item.max_num_seqs == 40 for item in cases)

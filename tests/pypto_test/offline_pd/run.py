@@ -778,6 +778,7 @@ def worker(args):
         # Native 会把量化权重转成 FRACTAL_NZ，PTO 按匹配的根签名直接借用存储。
         additional_config={"weight_nz_mode": args.weight_nz_mode, "enable_kv_nz": False, "enable_dsa_cp": False,
                            "offline_deterministic_level": int(args.deterministic),
+                           "offline_event_work_mode": args.event_work_mode,
                            # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
                            # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
                            # npu_add_rms_norm_bias，而 PyTorch 的 pattern matcher 用
@@ -812,6 +813,10 @@ def worker(args):
         for config in args.worker_runtime_config
     ):
         raise RuntimeError(f"Worker 实际确定性/EPLB 配置不符：{args.worker_runtime_config}")
+    if args.event_work_mode is not None and any(
+        config["cann_event_work_mode"] != args.event_work_mode for config in args.worker_runtime_config
+    ):
+        raise RuntimeError(f"模型加载后的 CANN event 模式与请求不符：{args.worker_runtime_config}")
     if args.command == "performance":
         required = max(args.sweep_batches or [args.batch]) * (plan["decode"]["speculative_tokens"] + 1)
         if any(config["scheduler"]["max_num_scheduled_tokens"] < required
@@ -996,6 +1001,8 @@ def launch(args):
                 cmd += ["--embedding-tp", str(args.embedding_tp)]
             if args.deterministic:
                 cmd.append("--deterministic")
+            if args.event_work_mode is not None:
+                cmd += ["--event-work-mode", str(args.event_work_mode)]
             if args.stagger:
                 cmd.append("--stagger")
             if args.capture_sizes:
@@ -1096,6 +1103,8 @@ def main():
     parser.add_argument("--deterministic", action="store_true",
                         help="开启算子级确定性(set_deterministic_level(1))与HCCL_DETERMINISTIC=true；"
                              "用于排查同一DP组内四个TP副本的缓存差异，保留AIV展开模式不变")
+    parser.add_argument("--event-work-mode", type=int, choices=(0, 1),
+                        help="仅用于因果诊断：显式设置进程级 CANN event 模式（0 软件 / 1 硬件）")
     parser.add_argument("--capture-sizes", type=int, nargs="+",
                         help="显式指定ACL Graph捕获档位。默认列表按max_num_seqs*6截断后，"
                              "最大档可能盖不住potential_max_tokens，导致MoE选ALLTOALL而非MC2、"

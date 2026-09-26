@@ -6,6 +6,7 @@ import os
 import torch
 import torch_npu
 
+from offline_pd.event_mode import get_event_work_mode, set_event_work_mode
 from vllm_ascend.worker.worker import NPUWorker
 
 
@@ -17,7 +18,15 @@ class OfflineNPUWorker(NPUWorker):
         torch_npu.npu.set_deterministic_level(level)
         super().__init__(vllm_config, *args, **kwargs)
         self._offline_requested_deterministic_level = level
+        self._offline_event_work_mode = vllm_config.additional_config.get("offline_event_work_mode")
         print(f"OFFLINE_WORKER_DETERMINISTIC pid={os.getpid()} level={level}", flush=True)
+
+    def init_device(self):
+        result = super().init_device()
+        if self._offline_event_work_mode is not None:
+            set_event_work_mode(self._offline_event_work_mode)
+            print(f"OFFLINE_CANN_EVENT_MODE pid={os.getpid()} mode={get_event_work_mode()}", flush=True)
+        return result
 
     def offline_runtime_config(self):
         return {
@@ -26,6 +35,7 @@ class OfflineNPUWorker(NPUWorker):
             "torch_deterministic": torch.are_deterministic_algorithms_enabled(),
             "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
             "dynamic_eplb": self.model_runner.dynamic_eplb,
+            "cann_event_work_mode": get_event_work_mode() if torch_npu.npu.is_initialized() else None,
             "scheduler": {
                 name: getattr(self.model_runner.scheduler_config, name)
                 for name in ("max_num_seqs", "max_num_batched_tokens", "max_num_scheduled_tokens")
