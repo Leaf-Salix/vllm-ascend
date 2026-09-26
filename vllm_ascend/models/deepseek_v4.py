@@ -43,6 +43,7 @@ from vllm.distributed import (
     get_tensor_model_parallel_world_size,
     tensor_model_parallel_all_gather,
 )
+from vllm.logger import logger
 from vllm.model_executor.layers.activation import SiluAndMul, SiluAndMulWithClamp
 from vllm.model_executor.layers.fused_moe import FusedMoE, fused_moe_make_expert_params_mapping
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -89,6 +90,7 @@ from vllm_ascend.utils import (
     extract_dsv4_layer_index,
     get_ascend_device_type,
     get_dsv4_compress_ratio,
+    is_builtin_aclnn_op_available,
 )
 
 
@@ -638,6 +640,9 @@ class Compressor(nn.Module):
             prefix=f"{prefix}.wgate",
             return_bias=False,
         )
+        # 融合 Compressor 直接读取这两张权重，算子合同只接受 ND；mode=2 也不能转成 NZ。
+        self.wkv.keep_weight_nd = True
+        self.wgate.keep_weight_nd = True
 
         # A5 compressor kernel needs float for norm_weight input
         norm_dtype = torch.float32 if get_ascend_device_type() == AscendDeviceType.A5 else None
@@ -780,6 +785,14 @@ class DeepseekV4Attention(nn.Module):
             prefix=f"{prefix}.wo_a",
             return_bias=False,
         )
+        if (
+            get_ascend_config().weight_nz_mode == 2
+            and get_ascend_device_type() != AscendDeviceType.A5
+            and not is_builtin_aclnn_op_available("aclnnTransposeBatchMatMulWeightNz")
+        ):
+            # 缺少 NZ 入口的 CANN 版本在加载期保留 ND；不在 decode 时反复做格式转换。
+            self.wo_a.keep_weight_nd = True
+            logger.warning_once("CANN 缺少 TransposeBatchMatMulWeightNz，Native wo_a 保留 ND；其余权重遵循 NZ mode")
         self.wo_b = RowParallelLinear(
             self.n_groups * config.o_lora_rank,
             self.dim,

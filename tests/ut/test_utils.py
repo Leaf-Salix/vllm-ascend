@@ -25,6 +25,20 @@ from vllm_ascend import utils
 from vllm_ascend.utils import REGISTERED_ASCEND_OPS
 
 
+@pytest.mark.parametrize("symbols,expected", [
+    (("aclnnTest", "aclnnTestGetWorkspaceSize"), True),
+    (("aclnnTest",), False),
+    ((), False),
+])
+def test_builtin_aclnn_requires_execution_and_workspace_symbols(monkeypatch, symbols, expected):
+    monkeypatch.setattr(utils.ctypes, "CDLL", lambda _: mock.Mock(spec=symbols))
+    utils.is_builtin_aclnn_op_available.cache_clear()
+    try:
+        assert utils.is_builtin_aclnn_op_available("aclnnTest") is expected
+    finally:
+        utils.is_builtin_aclnn_op_available.cache_clear()
+
+
 class TestUtils(TestBase):
     def setUp(self):
         import importlib

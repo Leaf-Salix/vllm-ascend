@@ -85,7 +85,7 @@ class AscendUnquantizedLinearMethod(UnquantizedLinearMethod):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
-        keep_nd_weight = _should_keep_nd_for_310p_weight(layer.weight.data)
+        keep_nd_weight = getattr(layer, "keep_weight_nd", False) or _should_keep_nd_for_310p_weight(layer.weight.data)
         # must use fp32 to avoid accuracy degradation in dsv4.
         if getattr(layer, "precast_fp32_weight", False):
             weight_fp32 = layer.weight.data.to(torch.float32)
