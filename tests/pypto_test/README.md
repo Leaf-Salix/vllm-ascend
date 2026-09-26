@@ -40,6 +40,9 @@ Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使�
 `--atomic-add 0` 选择固定规约诊断，`1` 保留默认 split-K atomic add；
 等价环境变量为 `VLLM_ASCEND_PTO_CSA_ATOMIC_ADD`，必须在进程导入/编译算子前设置。
 关闭时 QR/KV 改为单 K 分片、单写入者；这也改变累加分组，不能视为默认路径的逐 bit 参考。
+配合 `--graph` 检查相同地址上的 A→B→A 输入更新；每次恢复 cache/state，
+图输出与对应 eager 输出逐元素精确比较，并检查 metadata 和保护区。
+当前图用例固定形状与 metadata，padding/档位切换仍须按清单继续验证。
 零容差差异用于诊断，算术差异本身不会让该诊断伪装成 PASS；保护区改写、
 metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSpark 一致仍须整模型验证。
 
@@ -51,6 +54,8 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 
 - `results/csa_baseline_20260926/native_b4h8192_precision_nd_v2/`：当前单卡报告与调用前 schema=2 快照。
 - `results/csa_baseline_20260926/native_b4h8192_performance_nd/` 与 `native_b4h8192_performance_fixed/`：性能版默认/固定规约对照、Top-K 集合诊断及 Native QLI 输入；仍为 MEASURED。
+- `results/csa_baseline_20260926/native_b4h8192_precision_nz2/`：两侧 mode=2 的真实布局及固定规约图重放证据。
+- `results/csa_baseline_20260926/native_b4h8192_performance_nz1/`：性能版 mode=1 的真实布局及固定规约图重放证据。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。

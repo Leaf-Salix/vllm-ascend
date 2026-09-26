@@ -62,6 +62,10 @@
   PTOAS 0.66、官方 PTO-ISA `327cd586`。环境脚本已固定这套组合。
   PyPTO 移植主线标量读写适配，并同步 Simpler SDK/子模块版本；A4 记录验证范围。
 - 现有 Native 扩展和 custom OPP 已具备，除非具体失败指向它们，不重复编译。
+- 当前 CANN 9.0 的 Native 融合 Compressor 只接受 ND 的 `wkv/wgate`，加载期显式保留 ND。
+  `libopapi.so` 缺少 `TransposeBatchMatMulWeightNz` 时，Native `wo_a` 也在加载期保留 ND；
+  若官方包提供该能力则继续走 NZ，不在 decode 热路径反复转换。
+  两侧仍传相同 mode，并记录每张权重实际布局；此兼容限制不撤销 PTO 四张权重 NZ 目标。
 
 ### 2.2 不过度校验与测试
 
@@ -271,6 +275,22 @@ Top-K 有 10292 个位置不同，尚未分析集合/顺序与边界选择差异
 证据及调用前 schema=2 快照：`results/csa_baseline_20260926/native_b4h8192_precision_nd_v2/`。
 性能版 mode=0 的当前诊断见 B1；本项仍需 NZ/graph 受影响路径和正式 16 卡基线。
 
+精度版 mode=2、atomic=0 的任务 `task_20260926_122302_351515921990` 已完成：
+单卡用例在加载权重前启用与 Native runner 相同的 `allow_internal_format=True`，
+并检查实际格式，避免名义 mode=2 静默走 ND。Native 四张目标权重依次为 NZ/NZ/ND/NZ，
+PTO 为 ND/ND/NZ/ND，Native 必要的 ND 例外见 2.1。
+两次自身执行及同地址 A→B→A 图重放的 8 类输出/状态均精确一致，metadata 与保护区均通过。
+跨 Native/PTO 层输出 max_abs=0.015625；Top-K 有 23 行集合不同，共替换 82 个候选，
+另 1 行只有顺序差异，仍为 **MEASURED**。这是固定形状/metadata 的图检查，不覆盖 padding 或整模型。
+最新证据：`results/csa_baseline_20260926/native_b4h8192_precision_nz2/`。
+已证伪的名义 NZ 记录及修复过程中的失败重试已删除，不作为后续对照输入。
+
+性能版 mode=1、atomic=0 的任务 `task_20260926_122509_35294426490` 也已完成上述图检查。
+Native 四张目标权重为 ND/NZ/ND/NZ，PTO 为 ND/NZ/ND/ND，实际格式均符合各自根合同。
+Top-K 仍有 24 行集合不同、116 个候选替换，结构/有限值/保护区无功能错误；
+跨实现精度仍未验收。证据：`results/csa_baseline_20260926/native_b4h8192_performance_nz1/`。
+下一步固定当前源码，使用 H8192 bank 建立真实权重 B16/16 卡、同 mode=1 的 token/DSpark 基线。
+
 ## 6. 后续开发目标
 
 近期 A 阶段完成后，把即将执行的下一项展开到与 A 同样详细，
@@ -309,8 +329,19 @@ Native 的确定性开关是否影响 PTO 不能臆断，按实际实现和对�
   证据：`results/csa_baseline_20260926/native_b4h8192_performance_nd/report.json`、
   `results/csa_baseline_20260926/native_b4h8192_performance_fixed/report.json`。
   对应任务 `task_20260926_115108_32965273337`、`task_20260926_120105_333300523870`。
-- 下一步：分析已保存 QLI 输入的评分/量化边界；把精度版关闭开关、图内容更新和 NZ 的代表路径
-  合并到后续单卡验证。之后验证真实权重 16 卡的 token/DSpark 与层误差，不能由上述两次执行推断全局确定性。
+- 精度版关闭开关/mode=2 及性能版关闭开关/mode=1 的图内容更新已合并验证，见 A5。
+  真实权重 16 卡 token/DSpark 与层误差继续推进，不能由少量重复执行推断全局确定性。
+
+#### B2/B3 当前差异定位
+
+使用已保存的 Native QLI 输入，在 CPU 按 Native 的 QK/1024→FP16、FP16 head 系数、
+head 归约和 key scale 计算，24 行选中集合均与 Native 相同。
+保持 Native 输入，仅换成性能版 FP32 评分公式时共替换 9 个候选；整条性能版链替换 115 个。
+因此不能把剩余差异全部归于评分公式，仍须审查上游查询投影/量化与 weights 投影。
+CPU 归约不宣称复刻 Cube 的逐 bit 累加序；分数比较将 Native 分数乘 1024 统一量纲。
+分析记录：`results/csa_baseline_20260926/native_b4h8192_performance_nd/topk_boundary.json`。
+后续先用真实模型 token/DSpark 和层级误差判断影响，再只对受影响阶段补诊断，
+不得把候选替换数量自动定义成允许阈值。
 
 ### C NZ 四张权重与 ND 保留
 

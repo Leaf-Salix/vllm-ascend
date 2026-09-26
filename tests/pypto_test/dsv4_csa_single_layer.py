@@ -205,6 +205,51 @@ def restore(fixture):
         group["allocation"].copy_(group["initial"])
 
 
+def check_graph_replay(fixture, call, eager_a, report):
+    """同一组地址更新输入 A→B→A，检查图输出、状态及保护区；固定规约下精确比较。"""
+    import torch
+
+    hidden = fixture["hidden"]
+    input_a = hidden.clone()
+    input_b = -input_a
+    result = {"status": "RUNNING", "scope": "单卡固定形状/metadata 的输入内容更新；不代表 padding/整模型图验收"}
+    report["graph"] = result
+    try:
+        hidden.copy_(input_b)
+        restore(fixture)
+        call()
+        torch.npu.synchronize()
+        eager_b = collect_state(fixture, call.args["x_out"], call.args["idx_topk"])
+        if torch.equal(eager_a["x_out"], eager_b["x_out"]):
+            raise ValueError("图测试的 A/B 输出相同，不能验证输入更新")
+        hidden.copy_(input_a)
+        restore(fixture)
+        torch.npu.synchronize()
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph):
+            call()
+        torch.npu.synchronize()
+        result["replays"] = []
+        for name, value, reference in (("A", input_a, eager_a), ("B", input_b, eager_b), ("A", input_a, eager_a)):
+            hidden.copy_(value)
+            restore(fixture)
+            graph.replay()
+            torch.npu.synchronize()
+            actual = collect_state(fixture, call.args["x_out"], call.args["idx_topk"])
+            checks = {key: compare_tensor(actual[key], expected, 0, 0) for key, expected in reference.items()}
+            guards = guard_checks(fixture)
+            result["replays"].append({"input": name, "eager_comparison": checks, "guards": guards})
+            if any(check["status"] != "PASS" for check in (*checks.values(), *guards.values())):
+                raise ValueError(f"图重放 {name} 与相同输入的 eager 不一致，或改写保护区/metadata")
+        result["status"] = "PASS"
+    except BaseException:
+        result["status"] = "FAIL"
+        raise
+    finally:
+        hidden.copy_(input_a)
+        restore(fixture)
+
+
 def run(args, report):
     activate()
     import torch
@@ -219,6 +264,8 @@ def run(args, report):
 
     current_platform.pre_register_and_update()
     torch.npu.set_device(args.device)
+    # 与 Native NPUModelRunner 一致：必须在权重后处理前启用，否则 NZ 转换静默退回 ND。
+    torch.npu.config.allow_internal_format = True
     from vllm_ascend.utils import enable_custom_op
 
     if not enable_custom_op():
@@ -254,6 +301,26 @@ def run(args, report):
             name: torch_npu.get_npu_format(dict(layer.self_attn.named_parameters())[f"{name}.weight"])
             for name in ("wq_a", "wq_b", "wo_a", "wo_b")
         }
+        from vllm_ascend.utils import ACL_FORMAT_FRACTAL_NZ, _should_trans_nz
+
+        expected_formats = {
+            name: "NZ" if not getattr(getattr(layer.self_attn, name), "keep_weight_nd", False)
+            and _should_trans_nz(dict(layer.self_attn.named_parameters())[f"{name}.weight"]) else "ND"
+            for name in report["native_weight_formats"]
+        }
+        report["native_expected_layouts"] = expected_formats
+        for name, expected in expected_formats.items():
+            actual = report["native_weight_formats"][name]
+            if actual not in ((ACL_FORMAT_FRACTAL_NZ,) if expected == "NZ" else (0, 2)):
+                raise ValueError(f"Native 权重实际格式与 mode 不一致：{name} expected={expected}, actual={actual}")
+        report["native_compressor_weight_formats"] = {
+            f"{prefix}.{name}": torch_npu.get_npu_format(getattr(compressor, name).weight)
+            for prefix, compressor in (("compressor", layer.self_attn.compressor),
+                                       ("indexer.compressor", layer.self_attn.indexer.compressor))
+            for name in ("wkv", "wgate")
+        }
+        if any(value not in (0, 2) for value in report["native_compressor_weight_formats"].values()):
+            raise ValueError("Native 融合 Compressor 的 wkv/wgate 必须遵循 ND 入参合同")
         output = torch.empty_like(fixture["hidden"])
         original_qli = torch.ops._C_ascend.npu_vllm_quant_lightning_indexer
         captured = {}
@@ -300,6 +367,8 @@ def run(args, report):
         report["pto_reduction"] = {
             "atomic_add": ATOMIC_ADD, "qr_split_k": reduction.QR_OK, "kv_split_k": reduction.KV_OK,
         }
+        if args.graph and ATOMIC_ADD:
+            raise ValueError("--graph 使用逐元素精确比较，须设置 --atomic-add 0 排除跨核规约波动")
         adapter = importlib.import_module(f"{package}.native_adapter")
         module = importlib.import_module(f"{package}.decode_csa")
         root = module._decode_csa_tp1_layer
@@ -367,6 +436,8 @@ def run(args, report):
                 raise ValueError(f"{path}：输出/状态 shape、dtype 或有限值检查失败")
         if report["topk_selection"]["status"] == "FAIL":
             raise ValueError("Top-K 含越界、重复或缺失的候选索引")
+        if args.graph:
+            check_graph_replay(fixture, call, pto[0], report)
 
 
 def main():
@@ -381,6 +452,7 @@ def main():
     parser.add_argument("--variant", choices=("precision", "performance"), default="precision")
     parser.add_argument("--save-case", action="store_true")
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
+    parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
