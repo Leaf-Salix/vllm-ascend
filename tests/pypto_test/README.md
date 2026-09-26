@@ -1,6 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
 任务、约束和验收状态以 [任务清单](DSV4_FLASH_CSA_TASK_CHECKLIST.md) 为准。
+历史与当前执行过程持续记录在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，
+本轮从 [第 99 节](DSV4_FLASH_CSA_VALIDATION_LOG.md#log-20260926) 开始。
 当前基线为 vLLM 0.25.1 / vLLM-Ascend 0.25.1rc1、A3 / CANN 9.0，
 正式权重固定为 `/data/model/DeepSeek-V4-Flash-0731-w8a8`。
 环境、PyPTO/Simpler 分支及 PTOAS/ISA 版本见清单第 2 节与 A4。
@@ -56,9 +58,11 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 - `results/csa_baseline_20260926/native_b4h8192_performance_nd/` 与 `native_b4h8192_performance_fixed/`：性能版默认/固定规约对照、Top-K 集合诊断及 Native QLI 输入；仍为 MEASURED。
 - `results/csa_baseline_20260926/native_b4h8192_precision_nz2/`：两侧 mode=2 的真实布局及固定规约图重放证据。
 - `results/csa_baseline_20260926/native_b4h8192_performance_nz1/`：性能版 mode=1 的真实布局及固定规约图重放证据。
+- `results/csa_baseline_20260926/native_b16h8192_performance_nz1/`：目标 B16 形状的单卡同初态和图内容更新检查；跨实现数值仍为 MEASURED。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。
 
 冗余、过时用例、重复快照、旧 profile 与失败重试记录已删除。
 清理结果时同步删除失效引用；已提交的历史通过 Git 查看，不再维护旧交接目录或第二份操作说明。
+**验证日志长期保留并按阶段追加**，是上述清理规则的例外；旧结论只适用于当时的配置与验证范围。
