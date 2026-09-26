@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# 128K 泛化：容量固定 40，每侧加载一次，实际 batch 扫描六档；EPLB 关闭。
+# 泛化矩阵分两组历史：每组各侧加载一次；容量固定 40，EPLB 关闭。
 set -eo pipefail
 : "${TASK_DEVICE:?通过 task-submit 分配 16 卡}"
 repo_root=/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1
-result_root="$repo_root/tests/pypto_test/results/csa_baseline_20260926/model_128k_performance/capacity40"
+history="${1:-131072}"
+case "$history" in
+    131072) batches=(4 8 16); budget=256; group=model_128k_performance ;;
+    8192) batches=(24 32 40); budget=400; group=model_8k_large_batch_performance ;;
+    *) exit 2 ;;
+esac
+result_root="${2:-$repo_root/tests/pypto_test/results/csa_baseline_20260926/$group/capacity40}"
 cd "$repo_root"
 source ../env-dsv4-0251rc1.sh
 export PTO_CSA_VARIANT=performance
@@ -15,9 +21,10 @@ export ASCEND_PROCESS_LOG_PATH="$result_root/ascend"
 mkdir -p "$ASCEND_PROCESS_LOG_PATH"
 for backend in native pto; do
     python tests/pypto_test/offline_pd/run.py performance \
-        --bank tests/pypto_test/results/release_offline_pd_20260923/h131072_bank \
+        --bank "tests/pypto_test/results/release_offline_pd_20260923/h${history}_bank" \
         --output "$result_root/$backend" --backend "$backend" \
-        --batch 40 --sweep-batches 4 8 16 24 32 40 --decode-tokens 128 --weight-nz-mode 2 \
+        --batch 40 --sweep-batches "${batches[@]}" --max-num-batched-tokens "$budget" \
+        --decode-tokens 128 --weight-nz-mode 2 \
         --warmup-rounds 1 --warmup-tokens 96 --warmup-steps 8 --steady-cycles 10 \
         --profile-start-step 8 --profile-steps 3 \
         --graph-mode full_decode_only --capture-sizes 24 48 96 144 192 240

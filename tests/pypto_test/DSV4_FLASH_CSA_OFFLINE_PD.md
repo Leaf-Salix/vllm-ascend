@@ -76,14 +76,22 @@ python tests/pypto_test/offline_pd/compare.py \
 此处 PASS 仅指 token/DSpark 对照通过，层级误差、状态、保护区和性能仍独立验收。
 
 `--capture-sizes`、`--rank-batches` 和 `--rank-decode-tokens` 按待验证场景显式指定；
-当前仅声明 S=6 合法档位。新泛化对比为 TP1/DP=EP16、131072 tokens、
-单卡 B4/8/16/24/32/40；两侧 EPLB 均关闭。
-本轮扫描固定 `max_num_seqs=40`，用
-`--batch 40 --sweep-batches 4 8 16 24 32 40 --capture-sizes 24 48 96 144 192 240`：
-每侧只加载一次正式权重，各档从同一 bank 恢复并独立预热、采样及采 trace。
+当前仅声明 S=6 合法档位。新泛化对比为 TP1/DP=EP16，两侧 EPLB 均关闭：
+
+| 历史长度 | 扫描参数 | worker token 预算 | 扣除草稿预留后的可调度 token |
+| --- | --- | ---: | ---: |
+| 131072 | `--sweep-batches 4 8 16` | `--max-num-batched-tokens 256` | 96 |
+| 8192 | `--sweep-batches 24 32 40` | `--max-num-batched-tokens 400` | 240 |
+
+两组均用 `--batch 40 --capture-sizes 24 48 96 144 192 240`，固定 `max_num_seqs=40`。
+DSpark 并行出5的草稿预留为每请求4个 slot；总预算必须额外包含容量40所需的160个 slot。
+不显式给预算时默认覆盖整个容量的满档，实际 worker 预算随结果保存；满档预算不足直接拒绝。
+每组每侧只加载一次正式权重，各档从该组 bank 恢复并独立预热、采样及采 trace。
 结果分别落在 `--output` 的父目录下 `b{B}/{backend}`；加载日志保留在原 `--output`。
 DSpark 按每档开始前快照作累计计数差分，报告 `batch` 和 `max_num_seqs`；
 对照器显式要求 `--max-num-seqs 40`。旧 B4/容量 4 的首轮方法验证单列，不混入容量 40 矩阵。
+六档均保留两侧 PyTorch profiling JSON；PTO 单卡 DFX 另行采集并注明输入来源和层语义，
+最后按 history/batch 汇集，不能用 DFX 的带诊断开销时间替代整模型无 profiler 主计时。
 
 ## 结果判读
 

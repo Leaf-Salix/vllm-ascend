@@ -351,6 +351,16 @@ def diagnostic_runs(args):
         yield current
 
 
+def token_budget(args, plan):
+    """DSpark 并行出 n 验 n+1；容量内每条请求还须预留 n-1 个草稿槽位。"""
+    if args.max_num_batched_tokens is not None:
+        return args.max_num_batched_tokens
+    if args.command == "prefill":
+        return 2048
+    draft_tokens = plan["decode"]["speculative_tokens"]
+    return max(256, args.batch * ((draft_tokens + 1) + (draft_tokens - 1)))
+
+
 def diagnose(args, llm, cases):
     """先预热掉首次编译和缓存冷读，再单独开一次诊断窗口。
 
@@ -372,6 +382,7 @@ def diagnose(args, llm, cases):
               for _ in range(args.warmup_rounds)]
     common = {"command": args.command, "backend": args.backend, "rank": args.rank,
               "batch": args.batch, "max_num_seqs": args.max_num_seqs,
+              "max_num_batched_tokens": args.max_num_batched_tokens,
               "submitted": args.rank_batch if args.rank_batch is not None else args.batch,
               "key": case["key"], "history": case["history"],
               "warmup_rounds": args.warmup_rounds, "warmup_tokens": args.warmup_tokens,
@@ -724,6 +735,7 @@ def worker(args):
 
     plan = read_plan(args.bank)
     prefill = args.command == "prefill"
+    args.max_num_batched_tokens = token_budget(args, plan)
     cases = [c for c in plan["cases"] if c["p_dp_rank"] == args.rank % 4]
     connector = KVTransferConfig(
         kv_connector="OfflineDSV4Connector", kv_connector_module_path="offline_pd.connector",
@@ -740,7 +752,7 @@ def worker(args):
         dtype="bfloat16", quantization="ascend", hf_overrides=overrides,
         max_model_len=max(c["history"] for c in cases) + args.decode_tokens + 32,
         max_num_seqs=1 if prefill else args.batch,
-        max_num_batched_tokens=2048 if prefill else max(256, args.batch * 6),
+        max_num_batched_tokens=args.max_num_batched_tokens,
         enable_prefix_caching=False, enforce_eager=prefill or args.graph_mode == "eager", seed=1024,
         gpu_memory_utilization=0.9, block_size=32,
         # 清单约定的 D 侧上线口径为 FULL_DECODE_ONLY；
@@ -800,6 +812,12 @@ def worker(args):
         for config in args.worker_runtime_config
     ):
         raise RuntimeError(f"Worker 实际确定性/EPLB 配置不符：{args.worker_runtime_config}")
+    if args.command == "performance":
+        required = max(args.sweep_batches or [args.batch]) * (plan["decode"]["speculative_tokens"] + 1)
+        if any(config["scheduler"]["max_num_scheduled_tokens"] < required
+               for config in args.worker_runtime_config):
+            raise ValueError(f"扣除草稿预留后的调度预算不足 {required}，无法测量满档 forward："
+                             f"{args.worker_runtime_config}")
     if args.layout_only:
         write_json(args.output / f"rank{args.rank}.cache_layout.json",
                    llm.collective_rpc("offline_cache_layout"))
@@ -984,6 +1002,8 @@ def launch(args):
                 cmd += ["--capture-sizes", *[str(size) for size in args.capture_sizes]]
             if args.sweep_batches:
                 cmd += ["--sweep-batches", *map(str, args.sweep_batches)]
+            if args.max_num_batched_tokens is not None:
+                cmd += ["--max-num-batched-tokens", str(args.max_num_batched_tokens)]
             if args.layout_only:
                 cmd.append("--layout-only")
             file = (args.output / f"rank{rank}.log").open("w")
@@ -1027,6 +1047,8 @@ def main():
     parser.add_argument("--rank", type=int, default=-1)
     parser.add_argument("--backend", choices=["native", "pto"], default="native")
     parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--max-num-batched-tokens", type=int,
+                        help="worker token 总容量，包含 DSpark 草稿预留；默认覆盖 --batch 的出5验6满档")
     parser.add_argument("--sweep-batches", type=int, nargs="+",
                         help="performance 在一次模型加载内扫描实际 batch，容量固定为 --batch；"
                              "每档单独预热、采样和记录 DSpark 增量")
@@ -1083,6 +1105,8 @@ def main():
     parser.add_argument("--analyse-processes", type=int, default=16, help="离线解析使用的进程数上限")
     parser.add_argument("--compare-top", type=int, default=25, help="profile-compare列出的kernel差异条数")
     args = parser.parse_args()
+    if args.max_num_batched_tokens is not None and args.max_num_batched_tokens < 1:
+        parser.error("--max-num-batched-tokens 必须大于 0")
     if args.sweep_batches:
         batches = args.sweep_batches
         if args.command != "performance" or args.rank_batches or args.rank_decode_tokens or args.stagger:

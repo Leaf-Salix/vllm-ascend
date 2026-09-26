@@ -83,7 +83,8 @@ class NativeWorker:
     def __init__(self, config):
         assert torch_npu.npu._get_deterministic_level() == level
         assert torch.are_deterministic_algorithms_enabled() == bool(level)
-        self.model_runner = SimpleNamespace(dynamic_eplb=False)
+        self.model_runner = SimpleNamespace(dynamic_eplb=False, scheduler_config=SimpleNamespace(
+            max_num_seqs=40, max_num_batched_tokens=400, max_num_scheduled_tokens=240))
 module.NPUWorker = NativeWorker
 sys.modules[module.__name__] = module
 from offline_pd.worker import OfflineNPUWorker
@@ -91,6 +92,7 @@ worker = OfflineNPUWorker(SimpleNamespace(additional_config={"offline_determinis
 actual = worker.offline_runtime_config()
 assert actual["deterministic_level"] == actual["requested_deterministic_level"] == level
 assert actual["dynamic_eplb"] is False
+assert actual["scheduler"]["max_num_scheduled_tokens"] == 240
 assert not torch_npu.npu.is_initialized()
 '''
     env = dict(os.environ, TORCH_DEVICE_BACKEND_AUTOLOAD="0")

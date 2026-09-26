@@ -26,4 +26,8 @@ class OfflineNPUWorker(NPUWorker):
             "torch_deterministic": torch.are_deterministic_algorithms_enabled(),
             "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
             "dynamic_eplb": self.model_runner.dynamic_eplb,
+            "scheduler": {
+                name: getattr(self.model_runner.scheduler_config, name)
+                for name in ("max_num_seqs", "max_num_batched_tokens", "max_num_scheduled_tokens")
+            },
         }

@@ -4557,3 +4557,29 @@ schema=3 显式标记 model_forward；对照器拒绝旧 schema=2 的完整周�
 尚无性能样本；确认终止后修改源码，清理未产出结果的加载日志，再按新边界提交。
 3 项 CPU 回归通过：大幅增加 metadata/logits 模拟时间不影响 forward 计时，中途变档及
 缺少 forward 调用均拒绝放行；定向 Ruff 通过。真实验证并入首档正式扫描。
+
+## 135. 六档矩阵调整与 DSpark 调度预算修正（2026-09-26）
+
+用户明确将矩阵改为 H131072/B4、8、16 与 H8192/B24、32、40，并要求六档各保留
+Native/PTO PyTorch profiling JSON 和 PTO 泳道图。两组分别报告，EPLB 关闭；主结果仍为
+无 profiler、warmup 后连续 10 步纯 `_model_forward` 均值，不恢复新的性能优化。
+
+128K Native 任务 `task_20260926_223502_384103927457` 的 B4/8/16 全部采齐16 rank，
+随后 B24 未形成满档样本，正确拒绝，任务 exit=1。卡上 KV 容量约240.79万 token，
+最大128K并发约18.35，B24接近耗尽；用户已取消128K高三档，改用8K。
+同时发现测试配置漏算 DSpark 草稿预留：容量40、总预算256，实际
+`max_num_scheduled_tokens=256-40*4=96`，不能调度 B24 的144个验证 token。
+这是测试入口的容量设置问题，不是 Native CSA 算子错误。
+
+128K PTO 补采任务 `task_20260926_224652_39544812557` 已完成 exit=0，源码同为 `a7dc706e`；
+B4/8/16两侧均已完成10步无 profiler forward与独立3步Level0记录，开始CPU导出。
+两侧已有256预算记录继续保留，不为补字段重复测试。
+新增 `--max-num-batched-tokens`，8K高三档两侧取400，预留160后实际可调度240。
+默认预算按出5验6覆盖整个容量；RPC记录真实worker预算，performance开测前检查满档需求。
+复現脚本按history分两组，128K显式256、8K显式400，捕获档位和容量仍两侧相同。
+
+6项CPU定向回归通过：使用当前vLLM真实 `_set_max_num_scheduled_tokens` 及
+`SpeculativeConfig.max_num_new_slots_for_drafting` 验证旧256→96、新400→240，
+验证显式预算贯通16 rank、扫描请求数与DSpark增量，以及真实worker初始化前的确定性设置。
+定向Ruff、shell语法和diff检查通过。未修改生产算子，不单独启动16卡配置测试；
+预算真机验证并入8K正式矩阵。
