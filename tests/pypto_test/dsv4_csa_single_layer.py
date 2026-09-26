@@ -803,7 +803,8 @@ def main():
     parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--weight-nz-mode", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--variant", choices=("precision", "performance"), default="precision")
+    parser.add_argument("--variant", default="precision",
+                        help="precision / performance，或 pkg:<包名> 指定实验包")
     parser.add_argument("--save-case", action="store_true")
     parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
     parser.add_argument("--save-sparse-case", action="store_true",
