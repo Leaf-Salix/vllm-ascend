@@ -449,6 +449,10 @@ def diagnose(args, llm, cases):
         })
     common["spec_decode"] = spec_decode_metrics(llm)
     write_json(args.output / f"rank{args.rank}.{args.command}.json", common)
+    if args.command == "bitcompare" and (
+        not common["window"] or any(item.get("status") == "FAIL" for item in common["window"])
+    ):
+        raise RuntimeError("CSA 数值诊断样本不足或包含无效张量；详见已落盘的 bitcompare 记录")
 
 
 def profile_export(args):

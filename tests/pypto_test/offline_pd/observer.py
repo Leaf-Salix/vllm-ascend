@@ -281,6 +281,7 @@ class OfflineCSAObserver:
         """
         import torch
 
+        from dsv4_csa_validation import compare_tensor
         from vllm_ascend.ops.dsa import dsa_forward
         from vllm_ascend.ops.pypto.variant import variant_package
 
@@ -328,10 +329,11 @@ class OfflineCSAObserver:
                 from vllm_ascend.ops.dsv4_csa import _native_attention_half
                 _native_attention_half(attention.dsa_attn, hidden, positions, output)
             native = output.detach().clone()
-            equal = bool(torch.equal(pto, native))
+            comparison = compare_tensor(pto, native, 0, 0)
+            equal = bool(torch.equal(pto.contiguous().view(torch.uint8), native.contiguous().view(torch.uint8)))
             record = {"step": state["seen"], "shape": list(pto.shape), "dtype": str(pto.dtype),
-                      "mode": mode, "bit_equal": equal}
-            if not equal:
+                      "mode": mode, "bit_equal": equal, "elementwise": comparison}
+            if not equal and comparison.get("nonfinite") == 0:
                 diff = (pto.float() - native.float()).abs()
                 mismatch = pto.ne(native)
                 scale = float(native.float().abs().max())
@@ -365,7 +367,11 @@ class OfflineCSAObserver:
         state["compared"] = len(samples)
         state["all_bit_equal"] = bool(samples) and all(s["bit_equal"] for s in samples)
         # 样本为 0 要如实记录，不能让空集合的 all() 为真而误判通过。
-        state["sufficient"] = bool(samples)
+        state["sufficient"] = bool(samples) and len(samples) >= state["max_samples"]
+        state["status"] = "MEASURED" if state["sufficient"] and all(
+            s["elementwise"].get("nonfinite") == 0 for s in samples
+        ) else "FAIL"
+        state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
     def offline_begin_steady(self, warmup_steps):

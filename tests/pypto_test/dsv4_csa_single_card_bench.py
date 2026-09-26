@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
+from dsv4_csa_validation import validate_outputs
 
 
 def _export_swimlane(directory: Path) -> dict:
@@ -66,6 +67,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--args-dir", type=Path, required=True, help="run.py argdump 落盘目录")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reference", type=Path, help="同输入/初态的参考输出与状态张量字典 .pt")
+    parser.add_argument("--tolerances", type=Path, help="JSON：每个浮点输出分别声明 atol/rtol")
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--iters", type=int, default=20, help="计时轮数（另有 3 轮预热）")
     parser.add_argument("--warmup", type=int, default=3)
@@ -78,6 +81,23 @@ def main() -> None:
                         help="AICore PMU 事件：2=PIPE_UTILIZATION、4=MEMORY。走编译程序路径，"
                              "与 pypto.torch.init 互斥，所以开了它就不采泳道")
     args = parser.parse_args()
+    if args.iters < 1 or args.warmup < 0:
+        parser.error("--iters 必须大于 0，--warmup 不得为负")
+    if (args.reference is None) != (args.tolerances is None):
+        parser.error("--reference 与 --tolerances 必须同时提供")
+    report = {"status": "RUNNING", "args_dir": str(args.args_dir),
+              "reference": str(args.reference) if args.reference else None}
+    try:
+        _run_benchmark(args, report)
+    except BaseException as exc:
+        report.update(status="FAIL", error=repr(exc))
+        write_json(args.output / "report.json", report)
+        raise
+    write_json(args.output / "report.json", report)
+    print(json.dumps({k: v for k, v in report.items() if k != "samples_us"}, ensure_ascii=False, indent=2))
+
+
+def _run_benchmark(args, report):
     activate()
 
     import torch
@@ -143,11 +163,19 @@ def main() -> None:
                          output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None)
         run = lambda: kernel(*call_args)  # noqa: E731
 
-    report = {"variant": selected_variant(), "package": package, "device": args.device,
+    report.update({"variant": selected_variant(), "package": package, "device": args.device,
               "layer_index": meta["layer_index"], "tokens": meta["tokens"],
               "iters": args.iters, "warmup": args.warmup, "swimlane_level": args.swimlane,
-              "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"}
+              "scope": "单算子单卡回放，不含 MoE 与通信；绝对耗时不代表端到端性能"})
     try:
+        # 正确性检查单独执行，不把 CPU 比较、拷贝或同步开销混入计时。
+        reference = torch.load(args.reference, map_location="cpu", weights_only=True) if args.reference else None
+        tolerances = json.loads(args.tolerances.read_text()) if args.tolerances else None
+        run()
+        torch.npu.synchronize()
+        report["validation"] = validate_outputs(tensors, kernel.output_param_names, reference, tolerances)
+        if report["validation"]["status"] == "FAIL":
+            raise ValueError(f"CSA 输出检查失败：{report['validation']['errors']}")
         for _ in range(args.warmup):
             run()
         torch.npu.synchronize()
@@ -173,7 +201,7 @@ def main() -> None:
                 finally:
                     pypto.torch.end_dfx()
                 torch.npu.synchronize()
-        report.update(status="PASS",
+        report.update(status=report["validation"]["status"],
                       us_min=samples[0], us_p50=statistics.median(samples),
                       us_p90=samples[int(len(samples) * 0.9) - 1], us_max=samples[-1],
                       samples_us=samples,
@@ -185,6 +213,9 @@ def main() -> None:
                 _export_swimlane(args.output / "dfx" / f"window_{index}")
                 for index in range(1, max(1, args.windows))
             ]
+        report["final_finite_checks"] = validate_outputs(tensors, kernel.output_param_names)
+        if report["final_finite_checks"]["status"] == "FAIL":
+            raise ValueError(f"CSA 计时后输出检查失败：{report['final_finite_checks']['errors']}")
         # 整层入口（1dcadd85 之后）的输出是 x_out（mHC 残差流）；融合前叫 attn_out。
         out_name = "x_out" if "x_out" in tensors else "attn_out"
         out = tensors[out_name].detach().float().cpu()
@@ -194,8 +225,6 @@ def main() -> None:
         report.update(status="FAIL", error=repr(exc))
         write_json(args.output / "report.json", report)
         raise
-    write_json(args.output / "report.json", report)
-    print(json.dumps({k: v for k, v in report.items() if k != "samples_us"}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

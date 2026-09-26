@@ -7,30 +7,7 @@ import traceback
 from pathlib import Path
 
 from dsv4_csa_env import activate, load_native_extension, write_json
-
-
-def compare_tensor(actual, expected, atol, rtol):
-    import torch
-
-    a, b = actual.detach().cpu(), expected.detach().cpu()
-    af, bf = a.float(), b.float()
-    difference = (af - bf).abs()
-    finite = torch.isfinite(af) & torch.isfinite(bf)
-    mismatch = ~finite | (difference > atol + rtol * bf.abs())
-    count = int(mismatch.sum())
-    return {
-        "status": "PASS" if not count else "FAIL",
-        "shape": list(a.shape),
-        "dtype": str(a.dtype),
-        "atol": atol,
-        "rtol": rtol,
-        "max_abs": float(difference.max()),
-        "rmse": float((difference.square().mean()).sqrt()),
-        "mismatches": count,
-        "elements": a.numel(),
-        "nonfinite": int((~finite).sum()),
-        "first_mismatches": mismatch.nonzero()[:8].tolist() if count else [],
-    }
+from dsv4_csa_validation import compare_tensor
 
 
 def check_untouched(fixture, snapshots):
