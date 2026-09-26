@@ -7,9 +7,14 @@ from types import SimpleNamespace as NS
 
 import pytest
 import torch
-
-from dsv4_csa_replay import capture_tensors, convert_weight_layouts, materialize, restore_mutable_storages
-from dsv4_csa_replay import capture_written_pages, restore_written_pages
+from dsv4_csa_replay import (
+    capture_tensors,
+    capture_written_pages,
+    convert_weight_layouts,
+    materialize,
+    restore_mutable_storages,
+    restore_written_pages,
+)
 
 
 def test_mixed_dtype_alias_stride_offset_and_restore():
@@ -64,6 +69,34 @@ def test_unknown_layout_and_alias_breaking_conversion_are_rejected():
         convert_weight_layouts(tensors, meta, {"wo_a": "NZ"})
 
 
+@pytest.mark.parametrize("source_layout,target_layout", [("ND", "ND"), ("ND", "NZ"), ("NZ", "NZ")])
+def test_old_wo_b_orientation_migrates_without_changing_matmul(source_layout, target_layout):
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_adapter import _pack_nz, _unpack_nz
+
+    groups, rows, cols = 2, 32, 64
+    logical = (torch.arange(rows * groups * cols).reshape(rows, groups * cols) % 97).to(torch.int8)
+    tensors = {"wo_b": _pack_nz(logical) if source_layout == "NZ" else logical}
+    source = {"state_timing": "before_call"}
+    target_shapes = {"wo_b": (groups * cols, rows)}
+    meta, payload = capture_tensors(tensors, {"wo_b": "in"}, {"wo_b": source_layout}, source)
+    values, _ = materialize(meta, payload)
+    result, converted = convert_weight_layouts(values, meta, {"wo_b": target_layout}, target_shapes)
+    assert converted == ["wo_b"]
+    native = _unpack_nz(result["wo_b"]) if target_layout == "NZ" else result["wo_b"]
+    # 用旧 NK 权重的整数 matmul 对照 Native KN，检测切片或转置错误。
+    x = torch.arange(3 * groups * cols).reshape(3, groups * cols).to(torch.int32) % 13
+    actual = sum(x[:, g * cols:(g + 1) * cols] @ native[g * cols:(g + 1) * cols].int() for g in range(groups))
+    assert torch.equal(actual, x @ logical.int().T)
+    new_meta, new_payload = capture_tensors(result, {"wo_b": "in"}, {"wo_b": target_layout}, source)
+    restored, _ = materialize(new_meta, new_payload)
+    same, converted = convert_weight_layouts(restored, new_meta, {"wo_b": target_layout}, target_shapes)
+    assert converted == [] and same["wo_b"] is restored["wo_b"]
+    # 即使 ND -> ND，矩阵转置也不能破坏未声明的别名。
+    meta["storages"][meta["tensors"]["wo_b"]["storage"]]["parameters"].append("alias")
+    with pytest.raises(ValueError, match="共享存储"):
+        convert_weight_layouts(values, meta, {"wo_b": target_layout}, target_shapes)
+
+
 def test_online_comparison_restores_written_pages_and_outputs():
     pairs = {"kv_cache": "ori_slot_mapping", "cmp_kv": "cmp_slot_mapping",
              "idx_kv_cache": "idx_slot_mapping", "compress_state": "state_slot_mapping",
@@ -95,6 +128,7 @@ def _test_root(x_hc: int, state: _Direction.InOut[int], out: _Direction.Out[int]
 
 def test_argdump_captures_before_call_and_reference_after_call(monkeypatch, tmp_path):
     from offline_pd.observer import OfflineCSAObserver
+
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark import nz_mode
     from vllm_ascend.ops.pypto.variant import variant_package
 

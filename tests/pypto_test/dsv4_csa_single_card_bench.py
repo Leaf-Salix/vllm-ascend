@@ -21,8 +21,14 @@ import time
 from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
+from dsv4_csa_replay import (
+    SCHEMA_VERSION,
+    argument_roles,
+    convert_weight_layouts,
+    materialize,
+    restore_mutable_storages,
+)
 from dsv4_csa_validation import validate_outputs
-from dsv4_csa_replay import SCHEMA_VERSION, argument_roles, convert_weight_layouts, materialize, restore_mutable_storages
 
 
 def _export_swimlane(directory: Path) -> dict:
@@ -101,14 +107,13 @@ def main() -> None:
 def _run_benchmark(args, report):
     activate()
 
+    import pypto.torch
     import torch
     import torch_npu  # noqa: F401  加载 NPU 后端
-
-    import pypto.torch
     from pypto.runtime import RunConfig
-    from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import validate_reduction_mode
+    from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     validate_reduction_mode()
     package = variant_package()
@@ -129,12 +134,12 @@ def _run_benchmark(args, report):
         raise ValueError("快照读写角色与当前根签名不一致")
     blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu", weights_only=True)
 
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts, root_weight_shapes
     layouts = root_weight_layouts(root)
     device = f"npu:{args.device}"
     torch.npu.set_device(args.device)
     tensors, backings = materialize(meta, blob, device)
-    tensors, converted = convert_weight_layouts(tensors, meta, layouts)
+    tensors, converted = convert_weight_layouts(tensors, meta, layouts, root_weight_shapes(root))
     for name in converted:
         # 转换仅允许独占的只读权重，释放已被新布局替换的设备存储。
         sid = meta["tensors"][name]["storage"]

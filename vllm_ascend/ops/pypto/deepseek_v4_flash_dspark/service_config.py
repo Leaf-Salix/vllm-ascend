@@ -32,6 +32,7 @@ def can_replay_csa_graph(*, num_tokens, num_reqs, uniform_decode, padded_tokens)
 def validate_configuration(config):
     import torch
     from vllm.config import CUDAGraphMode
+
     from vllm_ascend.ascend_config import get_ascend_config
     from vllm_ascend.utils import enable_dsa_cp, oproj_tp_enable
 
@@ -56,16 +57,9 @@ def validate_configuration(config):
     # NativeCSACall validates the actual key/scale dtype and shared storage.
     if config.cache_config.block_size != 32:
         raise ValueError("PTO CSA requires 32-token cache blocks")
-    # weight_nz_mode 0/1/2 都可以。1 是 vllm-ascend 的默认值，只让 Native 把量化权重
-    # （CSA 这边是 wq_b 与 wo_b）转成 FRACTAL_NZ；2 会连 BF16 权重一起转。两种情况下
-    # prepare_weights 都会在每层初始化时先 npu_format_cast 回 ND，再按本包 nz_mode 的
-    # 开关决定要不要用 _pack_nz 排成 pto-isa 的分形序——Native 的 npu format 与 pl.NZ
-    # 要求的字节次序不是一回事，必须经这一道。
-    #
-    # mode=2 此前被拒，当时的理由是"会多出一批本可避免的格式往返"。2026-09-25 放开：
-    # PTO 侧 BF16 权重（wo_a、wq_a）走 NZ 需要 mode>=2，那笔往返换来的是 proj_a_mm
-    # 等任务的显著加速；而且它发生在 process_weights_after_loading、每层只做一次，
-    # 不在 decode 路径上，不影响 aclgraph replay。
+    # mode=1 使量化权重采用 NZ，mode=2 再启用 BF16 NZ。四张根矩阵方向与 Native
+    # 加载后保持一致，prepare_weights 直接借用已匹配的格式 29 存储；pl.NZ 声明相同字节。
+    # Native 因当前 CANN 算子能力保留 ND 的目标权重，只在初始化时转换一次所需格式。
     #
     # enable_kv_nz 仍然拒绝：它改的是 KV cache 的页布局，而 PTO 的 cache 读取路径
     # （尤其是 indexer 的整页搬运）是按 Native 的 ND 页布局写死的，不是换个格式就行。

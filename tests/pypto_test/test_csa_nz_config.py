@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU 回归：真实启动器传参、导入前绑定、根布局与实际打包一致。"""
+"""CPU 回归：真实启动器传参、导入前绑定、两版根布局及 Native 矩阵方向一致。"""
 
 import builtins
 import os
@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from offline_pd import run
 
 
@@ -65,41 +64,28 @@ def test_direct_worker_binds_mode_before_vllm_import(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", [0, 1, 2])
-def test_real_roots_pack_only_declared_nz_and_reject_conflicts(mode):
+def test_real_roots_match_native_shapes_layouts_and_reject_conflicts(mode):
     # 三个新进程分别导入真实根函数，覆盖模块加载时固定布局的语义；不初始化 NPU。
     code = r'''
 import importlib
 import os
 import torch
 from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark import nz_mode
-from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_adapter import _pack_nd_weights_for_root
 
 mode = int(os.environ["VLLM_ASCEND_ENABLE_NZ"])
 nz_mode.validate_weight_nz_mode(mode)
 for suffix in ("", "_perf"):
     module = importlib.import_module(f"vllm_ascend.ops.pypto.deepseek_v4_flash_dspark{suffix}.decode_csa")
     root = module._decode_csa_tp1_layer
-    expected_nz = ({"wo_a"} if mode == 2 else set())
-    if suffix and mode >= 1:
-        expected_nz.add("wq_b")
+    expected_nz = ({"wq_a", "wo_a"} if mode == 2 else set())
+    if mode >= 1:
+        expected_nz.update(("wq_b", "wo_b"))
     layouts = nz_mode.root_weight_layouts(root)
     assert {key for key, value in layouts.items() if value == "NZ"} == expected_nz
-    weights = {
-        key: (torch.arange(32 * 64).reshape(32, 64) % 97).to(
-            torch.int8 if key in ("wq_b", "wo_b") else torch.bfloat16
-        ) for key in layouts
+    assert nz_mode.root_weight_shapes(root) == {
+        "wq_a": (1024, 4096), "wq_b": (1024, 32768),
+        "wo_a": (8, 4096, 1024), "wo_b": (8192, 4096),
     }
-    packed = _pack_nd_weights_for_root(weights, root)
-    for key, value in weights.items():
-        if key not in expected_nz:
-            assert packed[key] is value
-            continue
-        # 按坐标公式检查真实字节位置，不能只比较 mean/absmax。
-        c0 = 32 // value.element_size()
-        rows = torch.arange(32)[:, None]
-        cols = torch.arange(64)[None, :]
-        offsets = ((cols // c0) * 2 + rows // 16) * 16 * c0 + (rows % 16) * c0 + cols % c0
-        assert torch.equal(packed[key].flatten()[offsets], value)
 
 try:
     nz_mode.validate_weight_nz_mode((mode + 1) % 3)

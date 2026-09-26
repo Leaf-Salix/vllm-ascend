@@ -10,14 +10,23 @@ from typing import Any
 
 import torch
 
-from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
 from .config import DECODE_BATCH
+from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
 from .native_storage import indexer_storage, physical_pages, table_storage
 from .nz_mode import root_weight_layouts
 
-
 _NZ_C0_BYTES = 32
 _NZ_FRACTAL_ROWS = 16
+
+
+def _base_weight_format(value: torch.Tensor) -> torch.Tensor:
+    """仅为 ND 参数或离线打包承载张量在原设备上归一化基础格式。"""
+    if value.device.type == "npu":
+        import torch_npu
+
+        if torch_npu.get_npu_format(value) not in (0, 2):
+            return torch_npu.npu_format_cast(value, 2)
+    return value
 
 
 def _pack_nz(value: "torch.Tensor") -> "torch.Tensor":
@@ -28,35 +37,22 @@ def _pack_nz(value: "torch.Tensor") -> "torch.Tensor":
     BlockNzTensorViews 给 GM 视图的分块形状 [C/c0, R/16, 16, c0]。
     重排后仍按逻辑形状返回，只有字节次序变了，元素个数不变。
     `pl.NZ` 是对「GM 里的字节已经是这个次序」的断言，不是一个转换请求，
-    所以必须由主机侧把字节摆好。
+    按 pypto-lib/deepseek_v4_flash_dspark/utils.py 的 pack_nz 规则，在原设备重排。
+    本 A3 对齐 BF16/INT8 权重的 Native 格式 29 与这里采用相同 fractal 规则；差异是描述符管理，
+    以及各算子期待的矩阵方向/分组。本函数仅供离线回放布局转换；生产接入直接借用格式 29。
     """
     rows, cols = value.shape[-2], value.shape[-1]
     c0 = _NZ_C0_BYTES // value.element_size()
     if rows % _NZ_FRACTAL_ROWS or cols % c0:
         raise ValueError(f"NZ 需要 {_NZ_FRACTAL_ROWS} 行分形与整条 {c0} 元素的 C0 线，实到 {rows}x{cols}")
-    lead = tuple(value.shape[:-2])
-    device = value.device
-    # 重排必须在 CPU 上做：在 NPU 上 reshape/permute 会让 torch_npu 把张量的 npu
-    # format 推断成 FRACTAL_NZ(30)，而 PyPTO 的根入参只接受 NCHW(0) 或 ND(2)——
-    # 实测报 "Parameter 'wo_a' requires base format NCHW (0) or ND (2), got 30"。
-    # 我们要的只是「字节按 NZ 次序摆好、format 仍是 ND」，CPU 往返正好给出这个。
-    host = value.detach().cpu()
+    logical = _base_weight_format(value.detach())
     packed = (
-        host.reshape(*lead, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, cols // c0, c0)
-        .permute(*range(len(lead)), len(lead) + 2, len(lead), len(lead) + 1, len(lead) + 3)
+        logical.reshape(-1, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, cols // c0, c0)
+        .permute(0, 3, 1, 2, 4)
         .contiguous()
-        .reshape(*lead, rows, cols)
+        .reshape(value.shape)
     )
-    return packed.to(device)
-
-
-def _pack_nd_weights_for_root(weights: dict, root_function) -> dict:
-    """输入必须是逻辑 ND 权重，按即将注册的根签名一次性打包。"""
-    result = dict(weights)
-    for name, layout in root_weight_layouts(root_function).items():
-        if layout == "NZ":
-            result[name] = _pack_nz(result[name])
-    return result
+    return _base_weight_format(packed)
 
 
 def _unpack_nz(value: "torch.Tensor") -> "torch.Tensor":
@@ -65,24 +61,35 @@ def _unpack_nz(value: "torch.Tensor") -> "torch.Tensor":
     c0 = _NZ_C0_BYTES // value.element_size()
     if rows % _NZ_FRACTAL_ROWS or cols % c0:
         raise ValueError(f"不合法的 NZ 权重形状：{rows}x{cols}")
-    lead = tuple(value.shape[:-2])
-    host = value.detach().cpu()
-    return (
-        host.reshape(*lead, cols // c0, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, c0)
-        .permute(*range(len(lead)), len(lead) + 1, len(lead) + 2, len(lead), len(lead) + 3)
-        .contiguous().reshape(*lead, rows, cols).to(value.device)
+    unpacked = (
+        value.reshape(-1, cols // c0, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, c0)
+        .permute(0, 2, 3, 1, 4)
+        .contiguous().reshape(value.shape)
     )
+    return _base_weight_format(unpacked)
 
 
-def repack_weights(tensors: dict, source_layouts: dict, target_layouts: dict) -> dict:
-    """已知来源布局才允许转换；相同布局保持原存储，禁止无条件二次打包。"""
+def repack_weights(tensors: dict, source_layouts: dict, target_layouts: dict, target_shapes=None) -> dict:
+    """离线快照显式转换：解包，迁移旧根矩阵方向，再按目标布局打包。"""
     result = dict(tensors)
     for name, target in target_layouts.items():
         source = source_layouts.get(name)
         if source not in ("ND", "NZ") or target not in ("ND", "NZ"):
             raise ValueError(f"未知权重布局：{name} {source} -> {target}")
-        if source != target:
-            result[name] = (_pack_nz if target == "NZ" else _unpack_nz)(result[name])
+        value = result[name]
+        target_shape = tuple(target_shapes[name]) if target_shapes else tuple(value.shape)
+        if source == target and tuple(value.shape) == target_shape:
+            continue
+        if source == "NZ":
+            value = _unpack_nz(value)
+        if tuple(value.shape) != target_shape:
+            # 2026-09-26 前的 schema=2 快照使用 pypto-lib 矩阵方向。
+            # 只迁移已知的三个转置矩阵，不能用 numel 相同猜测 reshape/分组。
+            swapped = (*value.shape[:-2], value.shape[-1], value.shape[-2])
+            if name not in ("wq_a", "wo_a", "wo_b") or swapped != target_shape:
+                raise ValueError(f"不支持权重形状转换：{name} {tuple(value.shape)} -> {target_shape}")
+            value = _base_weight_format(value.transpose(-1, -2).contiguous())
+        result[name] = _pack_nz(value) if target == "NZ" else value
     return result
 
 
@@ -91,7 +98,7 @@ class CSAOperators:
     attention: Any
 
     @classmethod
-    def register(cls) -> "CSAOperators":
+    def register(cls, kernel=decode_csa_tp1_layer_test) -> "CSAOperators":
         import pypto.torch
 
         from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import validate_reduction_mode
@@ -102,7 +109,7 @@ class CSAOperators:
             return pypto.torch.register(kernel, f"dsv4_csa::{name}")
 
         return cls(
-            register(decode_csa_tp1_layer_test, "attention"),
+            register(kernel, "attention"),
         )
 
 
@@ -111,34 +118,37 @@ _ACL_FORMAT_NCHW = 0
 _ACL_FORMAT_ND = 2
 
 
-def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dict[str, torch.Tensor]:
+def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
+                    root_function=_decode_csa_tp1_layer) -> dict[str, torch.Tensor]:
     """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
     import torch_npu
 
     if attention.compress_ratio != 4 or attention.n_local_heads != 64 or attention.n_local_groups != 8:
         raise ValueError("CSA specialization requires C4 and TP1 with 64 heads / 8 output groups")
 
+    layouts = root_weight_layouts(root_function)
+
+    def root_weight(name, shape, dtype):
+        # 根矩阵方向与 Native 相同。格式已匹配时借用原存储，禁止解包、转置或重新打包。
+        value = getattr(attention, name).weight.detach()
+        if tuple(value.shape) != shape or value.dtype != dtype or not value.is_contiguous():
+            raise ValueError(f"Unexpected Native {name} weight: {value.shape}/{value.dtype}")
+        current = int(torch_npu.get_npu_format(value))
+        if layouts[name] == "NZ":
+            return value if current == 29 else torch_npu.npu_format_cast(value, 29)
+        return value if current in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND) else torch_npu.npu_format_cast(value, 2)
+
     def weight(module, shape, dtype, transpose=False):
         value = module.weight.detach()
         if tuple(value.shape) != shape or value.dtype != dtype:
             raise ValueError(f"Unexpected loaded weight: {value.shape}/{value.dtype}; expected {shape}/{dtype}")
         if torch_npu.get_npu_format(value) not in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND):
-            # weight_nz_mode>=1 时 Native 会把量化权重转成 FRACTAL_NZ（见
-            # vllm_ascend/utils.py 的 maybe_trans_nz 与各 w8a8 method 的
-            # process_weights_after_loading），而 PyPTO 的根入参只接受
-            # NCHW(0) 或 ND(2)。这里转回 ND。
-            #
-            # 两个 NZ 不是一回事：Native 的是张量的 npu format，PTO 的 pl.NZ 要的是
-            # 「字节按 pto-isa 的分形序摆好、format 仍是 ND」。所以即便将来 PTO 这边
-            # 也想用 NZ，也不能直接拿 Native 转过的这份，仍要先回到 ND。
-            #
-            # 这一步在 process_weights_after_loading 里每层只做一次（见
-            # models/pypto_deepseek_v4.py 的 prepare_csa_model），发生在权重加载之后、
-            # aclgraph capture 之前，不在 decode 路径上，因此不影响 replay。
+            # 这些非目标权重仍由根签名声明 ND，按其数学方向在加载期准备一次。
+            # 四张目标权重由 root_weight 独立绑定，已有 NZ 存储直接复用。
             value = torch_npu.npu_format_cast(value, _ACL_FORMAT_ND)
         if transpose:
             value = value.transpose(-1, -2)
-        return value.contiguous()
+        return _base_weight_format(value.contiguous())
 
     def scale(module, width):
         result = module.weight_scale.detach().reshape(-1)
@@ -163,8 +173,8 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         }
     weights = {
         **hc,
-        "wq_a": weight(attention.wq_a, (1024, 4096), bf16, True),
-        "wq_b": weight(attention.wq_b, (1024, 32768), int8),
+        "wq_a": root_weight("wq_a", (1024, 4096), bf16),
+        "wq_b": root_weight("wq_b", (1024, 32768), int8),
         "wq_b_scale": scale(attention.wq_b, 32768),
         "wkv": weight(attention.wkv, (512, 4096), bf16, True),
         "gamma_cq": weight(attention.q_norm, (1024,), bf16),
@@ -183,12 +193,11 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None) -> dic
         "inner_ape": inner.ape.detach().float().contiguous(),
         "inner_norm_w": weight(inner.norm, (128,), bf16),
         "attn_sink": attention.attn_sink.detach().contiguous(),
-        "wo_a": weight(attention.wo_a, (8, 4096, 1024), bf16, True),
-        # wo_b 保持 ND，见 decode_csa.py 里它的签名说明。
-        "wo_b": weight(attention.wo_b, (8192, 4096), int8, True),
+        "wo_a": root_weight("wo_a", (8, 4096, 1024), bf16),
+        "wo_b": root_weight("wo_b", (8192, 4096), int8),
         "wo_b_scale": scale(attention.wo_b, 4096),
     }
-    return _pack_nd_weights_for_root(weights, _decode_csa_tp1_layer)
+    return weights
 
 
 class NativeCSACall:
@@ -200,7 +209,8 @@ class NativeCSACall:
     this descriptor binds them without materializing an expanded buffer.
     """
 
-    def __init__(self, ops, weights, hidden, positions, groups, *, layer_name: str, compact_metadata, buffers=None):
+    def __init__(self, ops, weights, hidden, positions, groups, *, layer_name: str, compact_metadata, buffers=None,
+                 kernel=decode_csa_tp1_layer_test):
         # Each entry contains its own metadata and Native cache views. No shared
         # synthetic page table can stand in for another cache group.
         self.ops = ops
@@ -296,7 +306,7 @@ class NativeCSACall:
         # Keep the Native buffers and their producer waits; no device conversion.
         self.args["freqs_cos"] = self.native_cos
         self.args["freqs_sin"] = self.native_sin
-        self.core_args = tuple(self.args[name] for name in decode_csa_tp1_layer_test.param_names)
+        self.core_args = tuple(self.args[name] for name in kernel.param_names)
 
     def __call__(self):
         self.ops.attention(*self.core_args)

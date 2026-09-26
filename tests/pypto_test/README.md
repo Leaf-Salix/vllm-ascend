@@ -18,7 +18,8 @@ NPU 任务统一通过 `task-submit`，用 `--status` 查询，不用 `--wait`�
 | `dsv4_csa_single_layer.py` / `run_csa_single_layer.sh` | 正式第 2 层权重、合成输入/历史的 Native/PTO 整层对照；两次同初态执行、metadata 与完整分配保护区检查，可保存调用前 schema=2 快照 |
 | `dsv4_csa_single_card_bench.py` | schema=2 快照回放与性能采样；无参考记为 MEASURED，逐元素验收必须提供全部声明输出/状态的参考和容差 |
 | `dsv4_csa_replay.py` / `dsv4_csa_validation.py` | 共用快照、布局/别名/初态恢复与逐元素门禁 |
-| `dsv4_csa_reference_lower.py` | 当前所选精度版或性能版完整层的 CPU lowering，不执行设备，也不代表数值验收 |
+| `dsv4_csa_weight_layout_probe.py` | 单卡核对 Native 格式 29 原始字节、pypto-lib pack_nz、设备打包与 NZ 快照；不加载整模型 |
+| `dsv4_csa_reference_lower.py` | 完整层 CPU lowering；`--build` 另做 PTOAS/CCE 编译，不执行设备或宣称数值验收 |
 | `offline_pd/run.py` | 正式权重 P 缓存、D16 生成对照、逐层诊断和 profiling，见 [离线 P/D 说明](DSV4_FLASH_CSA_OFFLINE_PD.md) |
 | `offline_pd/compare.py` | CPU 比较两侧 decode 的全部 rank/token 和 DSpark 总数、逐位置接受数；缺项或差异失败，不代替层误差/性能验收 |
 | `dsv4_csa_bank_replica_diff.py` | CPU 比较既有 P 缓存的 TP 副本，不做 hash |
@@ -37,7 +38,8 @@ task-submit --device auto --max-time 1800 \
   "bash $PWD/tests/pypto_test/run_csa_single_layer.sh $PWD/tests/pypto_test/results/single_layer_b4_h8192 --batch 4 --history 8192 --variant precision --weight-nz-mode 0 --save-case"
 ```
 
-结果为 `report.json`；`--save-case` 另存调用前快照到 `case/`。
+结果为 `report.json`，其中 `weight_storage_binding` 记录实际逻辑/物理形状、格式及原地址复用；`--save-case` 另存调用前快照到 `case/`。
+`--save-state` 单独保存两侧 8 类逻辑输出/状态到 `states.pt`，供 ND/NZ 逐元素比较。
 Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使用 mode=1/2；
 这些是可选配置，不表示每条路径已经验收。
 `--atomic-add 0` 选择固定规约诊断，`1` 保留默认 split-K atomic add；
@@ -50,7 +52,9 @@ Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使�
 metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSpark 一致仍须整模型验证。
 
 需要回放时先查看 `dsv4_csa_single_card_bench.py --help`；
-精度版/性能版、ND/NZ 和输入来源必须明确，不能混用旧快照与当前 schema。
+精度版/性能版、ND/NZ 和输入来源必须明确。格式 29 权重保存原始 NZ 字节，
+回放重建基础格式承载张量，不把 Tensor.cpu() 的逻辑解码当作原始快照。
+当前四张根几何对齐 Native；旧 schema=2 转置权重按明确形状迁移，未知形状直接拒绝。
 只运行受改动影响的测试；清单记录各项已完成的 CPU/设备证据，不为清理文件重复上卡。
 
 ## 保留的输入和证据
@@ -61,6 +65,8 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 - `results/csa_baseline_20260926/native_b4h8192_performance_nz1/`：性能版 mode=1 的真实布局及固定规约图重放证据。
 - `results/csa_baseline_20260926/native_b16h8192_performance_nz1/`：目标 B16 形状的单卡同初态和图内容更新检查；跨实现数值仍为 MEASURED。
 - `results/csa_baseline_20260926/model_b16h8192_nz1_fixed/`：同 mode=1、固定规约的正式权重 16 卡基线，24576 token 和 DSpark 统计一致；不包含层误差与部署性能验收。
+- `results/csa_baseline_20260926/nz_native_single_card/`：两版 B4/S6/H8192、atomic=0 的 ND/NZ 逐元素相同、图重放/保护区及 Native 权重地址复用证据；跨实现数值仍为 MEASURED。
+- `results/csa_baseline_20260926/nz_layout_contract/`：Native/pypto-lib 物理字节与快照合同、同一 Native NZ 存储的消费者对照。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。

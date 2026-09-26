@@ -8,11 +8,11 @@
 原因是 kernel 的参数布局是**模块加载时**由类型注解定下来的，而 AscendConfig 要等
 vllm 初始化完才拿得到。模型配置检查与算子注册前均校验环境、AscendConfig 和已导入的
 布局模式一致；导入后修改环境也会被拒绝。
-布局标注与主机侧打包必须由同一个开关驱动，否则 kernel 读到的字节次序就是错的。
+布局标注与 Native 存储绑定必须由同一个开关驱动，否则 kernel 读到的字节次序就是错的。
 
 注意 NZ 分支对 kernel 写法有额外要求：切片偏移必须能被证明非负、且行偏移是 16 的
-倍数、列偏移是一条 C0 线的倍数。精度版目前只有 `wo_a` 支持 NZ，性能版另有
-`wq_b`；真实布局读取各版根签名，不从 mode 推断所有权重都已支持。
+倍数、列偏移是一条 C0 线的倍数。两版四张目标权重均声明可选 NZ，
+真实布局读取根签名；四张根矩阵方向与 Native 加载后相同，wo_b 保留二维 [G*K, D]。
 """
 
 import inspect
@@ -52,7 +52,7 @@ def validate_weight_nz_mode(effective_mode: int) -> None:
 
 
 def root_weight_layouts(root_function) -> dict[str, str]:
-    """读取本仓根函数的实际注解；日志与主机打包共用，避免另维护一份 NZ 名单。"""
+    """读取本仓根函数的实际注解；日志与存储绑定共用，避免另维护一份 NZ 名单。"""
     params = inspect.signature(root_function).parameters
     result = {}
     for name in ("wq_a", "wq_b", "wo_a", "wo_b"):
@@ -64,3 +64,9 @@ def root_weight_layouts(root_function) -> dict[str, str]:
         else:
             raise ValueError(f"Unsupported PTO CSA weight layout: {name}={layout}")
     return result
+
+
+def root_weight_shapes(root_function) -> dict[str, tuple[int, ...]]:
+    """从根签名读取 Native 矩阵几何，回放按显式来源迁移旧转置权重。"""
+    params = inspect.signature(root_function).parameters
+    return {name: tuple(params[name].annotation.shape) for name in root_weight_layouts(root_function)}

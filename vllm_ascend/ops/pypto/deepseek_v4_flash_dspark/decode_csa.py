@@ -11,8 +11,7 @@
 
 import pypto.language as pl
 
-from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
-
+from .compact_metadata import build_compact_row_offsets
 from .config import (
     BLOCK_SIZE,
     C4A_COMPRESSOR_BLOCK_SIZE,
@@ -26,7 +25,6 @@ from .config import (
 from .config import (
     TP as TP_SIZE,
 )
-from .compact_metadata import build_compact_row_offsets
 from .decode_compressor_ratio4 import compressor_ratio4
 from .decode_indexer import indexer
 from .decode_indexer_compressor import indexer_compressor
@@ -40,13 +38,14 @@ from .layout import (
     INDEXER_PAGE_BYTES_DYN,
     INDEXER_ROWS_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
+    INNER_STATE_PAGE_ELEMENTS_DYN,
+    INNER_STATE_TABLE_COLUMNS_DYN,
     ORIGINAL_TABLE_COLUMNS_DYN,
     QUERY_BOUNDS_DYN,
     STATE_PAGE_ELEMENTS_DYN,
     STATE_TABLE_COLUMNS_DYN,
-    INNER_STATE_PAGE_ELEMENTS_DYN,
-    INNER_STATE_TABLE_COLUMNS_DYN,
 )
+from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
 from .qkv_proj_rope import qkv_proj_rope
 
 # Dynamic shape variables.
@@ -128,8 +127,8 @@ def _decode_csa_tp1_layer(
     hc_attn_scale: pl.Tensor[[3], pl.FP32],
     hc_attn_base: pl.Tensor[[MIX_HC], pl.FP32],
     attn_norm_w: pl.Tensor[[D], pl.BF16],
-    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
@@ -173,15 +172,9 @@ def _decode_csa_tp1_layer(
     cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
-    wo_a: pl.Tensor[[O_GROUPS, O_LORA, O_GROUP_IN], pl.BF16, BF16_WEIGHT_LAYOUT],
-    # wo_b 保持 ND：它在我们这边是二维展平的 [D, O_GROUPS*O_LORA]，group 索引进了
-    # **列维**，于是列偏移 col_g = g * O_LORA 要过 c0=32 的整除性证明，而 g 是
-    # pl.parallel 的索引、不在可证集合里（可证形式只认常量、start 与 step 均为 c0
-    # 倍数的循环变量，及由它们构成的和差与常数倍）。上游的 wo_b 是三维
-    # [O_GROUPS, D, O_LORA]，group 在 batch 维、不做对齐检查，所以它能走 NZ。
-    # 要跟上就得把这张权重改成三维，连带改 prepare_weights 的形状与 kernel 里的索引，
-    # 而 proj_b_mm 本来只有 1.12x 上游、是四张权重里差距最小的，先不动。见 T6.1.2。
-    wo_b: pl.Tensor[[D, O_GROUPS * O_LORA], pl.INT8],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, BF16_WEIGHT_LAYOUT],
+    # 保持 Native 加载后的 K×N 矩阵，分组仅体现为核内 K 偏移。
+    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
@@ -250,7 +243,7 @@ def _decode_csa_tp1_layer(
     x_hc32_flat = pl.reshape(x_hc32, [t_dim, HC_MULT * D])
     widen_rows = (t_dim + HC_WIDEN_T_TILE - 1) // HC_WIDEN_T_TILE
     widen_tail = pl.create_tensor([HC_WIDEN_T_TILE, HC_MULT * D], dtype=pl.FP32)
-    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen") as widen_tid:
+    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen") as _widen_tid:
         for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows,
                                   pl.min(widen_rows, HC_WIDEN_WORKERS)):
             w_t0 = widen_blk * HC_WIDEN_T_TILE

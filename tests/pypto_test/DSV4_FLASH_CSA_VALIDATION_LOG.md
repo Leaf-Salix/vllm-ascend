@@ -3491,3 +3491,168 @@ PyPTO/Simpler/PTOAS/ISA 与第 99 节一致。任务期间未修改其 JIT 读�
 leading-axis slice 和 dispatch 支持，`1d7890e9` 修正 NZ 参数的逻辑 stride 标注。
 只读检查发现整提交回移有上下文冲突，尚未将其应用到当前调试分支；后续按需要移植、
 先 CPU 编译与针对性回归，再单卡验证。A5 的层级误差和部署性能仍未完成。
+
+## 105. 2026-09-26：移植主线 NZ 能力，接通四张根权重并共用适配
+
+本节继续第 104 节的 NZ 工作，不修改其旧版本 16 卡结论。PyPTO 调试分支提交
+`712adef8` 移植 `8a944cf2`、`1d7890e9`、`0c8a2753`，补齐其依赖的 slice 布局传播、
+错误类型及绑定；保留本分支的 schema=3 kernel ABI 和 formal Out 约束。
+Simpler 仍为 `a54c05095`，官方 PTOAS 0.66、PTO-ISA `327cd586` 均未加实现补丁。
+
+移植验证中先发现 CMake build 不会更新环境里已安装的 extension，改为当前工作树 editable
+重装；随后发现少了一项上游 slice 布局传播前置改动并补齐。最终 114 项 NZ/layout/dispatch
+及 formal Out CPU 回归通过（6.18 秒），仅运行受影响筛选项。
+命令与最新输出记录在 `results/csa_baseline_20260926/nz_upstream_port/`，不保留重复失败副本。
+
+算子侧改动：
+
+1. 精度版补全 `wq_a/wq_b` NZ 注解，性能版启用已有的 QR NZ 子函数。
+   精度版原先的反向 K 索引在条件分支合流后无法证明非负；单纯等价的正数取模表达仍无法
+   消除该合流限制。最终保留原 K 顺序，只在已知属于 `[0,N)` 的块索引上写 `max(index,0)`，
+   这是有效输入域内的恒等式，不调整累加树。
+2. `wo_b` 从 `[D,G*K]` 改为 PTO 私有 `[G,D,K]`，主机只在加载/回放准备期重排；
+   编排侧取 `wo_b[g]` 完整平面，核内只处理矩阵块索引。ND/NZ 子函数均保留，
+   INT32 group partials 及两版各自量化/反量化策略不变。
+3. 性能版适配改为精度版共用实现的薄入口，显式传入性能版根函数和 kernel。
+   权重准备、metadata/cache 绑定、参数表生成不再维护两份；算术差异继续留在各自算子中。
+4. schema=2 回放读取目标根形状：旧二维权重先按来源 ND/NZ 解包，再转分组视图，最后按目标
+   根布局打包；相同布局且相同形状保留原存储，共享存储或非只读转换仍拒绝。
+   新增 3 个分组回放回归，以原二维 INT32 matmul 对照转换后分组 matmul；配置/回放共 17 项通过。
+
+当前两版布局一致：mode=0 全 ND，mode=1 仅 `wq_b/wo_b` NZ，mode=2 四张全 NZ。
+两版 mode=2、atomic=1 的完整层均完成 CPU lowering、PTOAS 0.66 与 CCE 编译，
+生成设备二进制，未初始化 NPU：
+当时两版的临时编译报告已由第 107 节 Native 存储方案替代并清理。
+改动文件 Ruff 与 Git 空白检查通过。单卡增加可选 `--save-state`，便于逐元素比较布局变化。
+
+本节提交时设备验证尚未运行。下一步先 B16/S6/H8192、atomic=0 的 mode=0/2 单卡对照，
+检查两版各自全部 8 类逻辑状态、保护区与图内容更新；随后量部署路径和 mode=1/2 收益。
+不能用编译 PASS 宣称数值通过、四张 NZ 已验收或已达到 <750 μs。
+
+## 106. 2026-09-26：按用户反馈核对 Native / pypto-lib NZ，撤回“必须 CPU 重排”
+
+用户指出第 105 节实现沿用 CPU 重排不符合 Native 接入预期。本轮停止该方案的提交与整层上卡，
+先读当前 Native、pypto-lib `2164563`、PyPTO torch 桥接及 CANN 头文件，再用最小单卡核对。
+这是一项实现判断的更正，不把原错误说法继续保留为当前指导。
+
+源码依据：Native `utils.py:maybe_trans_nz` 调用 `torch_npu.npu_format_cast(weight,29)`；
+`w8a8_dynamic.py:process_weights_after_loading` 先转为量化 matmul 需要的 K×N 逻辑矩阵。
+pypto-lib `models/deepseek_v4_flash_dspark/utils.py:pack_nz` 将最后两维按
+`[C/c0,R/16,16,c0]` 排列，c0=32/element_size；其 `TensorSpec` 是 host 初始数据用法，
+不能推导出已在 NPU 的生产权重必须搬回 CPU。
+PyPTO `torch/interop.py:_describe_tensor` 当前只接受格式 0/2，不支持直接传格式 29；
+而 `pl.NZ` 是现有 GM 字节布局声明，不负责格式转换。
+
+先前注释把格式 30 错写成 FRACTAL_NZ，现已删除：当前 CANN/torch_npu 的
+FRACTAL_NZ=29、NCDHW=30。格式 30 被桥接拒绝不能证明 NPU 上无法完成打包。
+不能笼统说 Native NZ 和 PTO NZ 的物理规则不同：对于本 A3 对齐 BF16/INT8 小用例，
+两者物理字节已实测相同；必须分清张量描述符、矩阵方向/分组和物理排列。
+
+四张权重在当前 TP1 接入中的逻辑合同：
+
+| 权重 | Native 加载后逻辑形状 | PTO / pypto-lib 根逻辑形状 | 加载期处理 |
+| --- | --- | --- | --- |
+| wq_a | `[1024,4096]` | `[4096,1024]` | 转置后按根布局准备 |
+| wq_b | `[1024,32768]` | `[1024,32768]` | 方向相同；当前桥接不直接接收格式 29 |
+| wo_a | `[8,4096,1024]` | `[8,1024,4096]` | 转置最后两维后准备 |
+| wo_b | `[8192,4096]` | `[8,4096,1024]` | 转置、按 8 组重排后准备 |
+
+最小任务 `task_20260926_133140_401449515104` completed/exit=0：BF16/INT8 ×
+`[32,64]` / `[2,32,64]`，共 4 档。在同一 NPU 上执行 Native 格式 29 转换及
+原版 pypto-lib pack_nz；使用 ACL D2H 只读原始物理字节（不用会自动解码格式的 Tensor.cpu()
+代替物理比较）。Native 原始 NZ 字节与 CPU golden 精确一致，NPU 打包也精确一致。
+
+随后修正共同适配：pack/unpack/group 在输入所在设备完成，按 pypto-lib 的公式重排；
+使用 Native 同一 `npu_format_cast` API 在 NPU 上明确转换基础格式，不再拷贝权重到 CPU。
+仍仅在加载/回放准备期执行，不进 decode/graph replay 热路径。
+任务 `task_20260926_133444_402672016789` completed/exit=0，4 档实际调用修正后的适配，
+Native→PTO 打包、解包往返、转置、wo_b 分组均与 pypto-lib 精确一致，最终格式均为 2。
+修正后只重跑受影响的打包/分组回放 CPU 5 项（10.27 秒），通过；相关 Ruff 通过。
+
+证据：[基础合同](results/csa_baseline_20260926/nz_layout_contract/report.json)、
+第 107 节已替代并清理该 device 重打包实验记录；当前只保留最终方案的命令。验证范围是本 A3 的对齐 BF16/INT8 小张量；整层输出、收益仍待下一步。
+可复用 Native NZ 存储是后续优化候选，须同时满足根矩阵方向及 PyPTO 桥接合同，
+不能直接用相同的“NZ”名称推导任意权重可零拷贝。
+
+
+## 107. 2026-09-26：复用 Native NZ 原始存储，核对两侧消费语义
+
+用户进一步指出：相同逻辑矩阵的 Native 格式 29 与 pypto-lib pack_nz 字节相同，
+因此接入不应为已有 NZ 权重额外重排。第 105/106 节的私有转置/分组与 device 重打包方案
+被本节替代；其临时编译目录和适配实验产物清理，不作为当前实现指导。
+
+### 107.1 消费端核对与实现选择
+
+Native `w8a8_dynamic.py:process_weights_after_loading` 先把量化权重变成连续 `[K,N]`，
+再调用格式 29；`apply` 直接把它交给 npu_quant_matmul。当前 CANN 9.0 的
+`quant_batch_matmul_v3_bf16.h` 按 `bTrans` 区分 NZ 的 `[k1,n1,n0,k0]` 与
+`[n1,k1,k0,n0]` 读取，调用 `SetTensorB(..., bTrans)`；并不是另一种 NZ 打包规则。
+Native `wo_a` 加载为 `[G,K,N]`，消费端 transpose_batchmatmul 使用 `perm_x2=(0,1,2)`。
+
+pypto-lib `2164563` 的 `wo_b` 准备则先把 `[N,G*K]` 权重 reshape/permute/contiguous
+成 `[G,N,K]`，再逐组 pack_nz；算子切片为 `wo_b[g:g+1,n0:n0+NT,kb*KT:(kb+1)*KT]`，
+配合 `b_trans=True`。NZ 的物理规则相同，送去打包的矩阵方向和分组不同。
+不能把 Native `[8192,4096]` 的 NZ 直接改标签为 `[8,4096,1024]` 而复用原切片。
+当前 Native wo_b 实测 storage shape 为 `[128,512,16,32]`；生成 PTO GlobalTensor
+使用等价 `[1,128,512,16,32]`，在原矩阵 K 轴选择组，权重地址不变。
+
+当前四张 PTO 根几何全部匹配 Native：
+
+| 权重 | Native 与 PTO 的逻辑形状 | PTO matmul 读取方式 |
+| --- | --- | --- |
+| wq_a | `[1024,4096]` | N×K，b_trans=True |
+| wq_b | `[1024,32768]` | K×N，b_trans=False |
+| wo_a | `[8,4096,1024]` | 取 group 后 K×N，b_trans=False |
+| wo_b | `[8192,4096]` | K×N，按 g*1024 选择输入通道组，b_trans=False |
+
+wo_b 证明失败的确切原因：Simplify 在 host 外层循环内知道 g∈[0,7]，先删掉 max(g,0)；
+随后 outlining 把 g 变成核函数普通标量参数，范围信息没有随参数传入，后续 NZ 检查失败。
+算子侧把 NZ matmul 定义为独立 incore 函数，在其参数边界保留非负表达式，
+没有放宽 NZ 校验、修改 PTOAS/ISA 或增加权重重排。两版 mode=2、atomic=1 全链编译通过。
+
+生产适配共用精度版 Native 绑定逻辑，性能版仅传入自己的算术 kernel。
+已匹配格式的四张权重直接 detach 借用存储；当前 Native wo_a 因 CANN 能力限制仍为 ND，
+PTO mode=2 对这一张仅调用一次 npu_format_cast(...,29)。ND 分支保留原 Native 地址。
+离线 schema=2 旧快照仅对已知的三个转置矩阵做显式迁移，不再维护私有三维 wo_b。
+Native NZ 快照改为 ACL D2H 读取原始物理字节；Tensor.cpu()/storage.cpu() 会解码，不能替代。
+
+### 107.2 PyPTO 桥接与单卡证据
+
+kernel ABI 保留参数布局并纳入编译产物身份；ND 默认描述不变。
+torch 桥接仅为显式 pl.NZ、A2/A3 只读 FP16/BF16/INT8 接收格式 29，
+校验完整物理形状、零 offset、无 padding 和精确容量，直接借用原 Tensor/storage/data_ptr。
+实际物理形状从 torch_npu C++ get_npu_storage_sizes 查询；初版误把 Python
+get_storage_size（返回元素数）当成形状，首次小任务立即失败，已修正。
+203 项 ABI/桥接 CPU 回归通过；修正真实 descriptor 查询后，仅重跑受影响的 10 项并通过。
+
+任务 `task_20260926_140857_308912571` completed/exit=0，27.35 秒：
+BF16 N×K Native F.linear、INT8 K×N Native npu_quant_matmul 与 PTO 消费同一格式 29 张量，
+各自与独立 CPU 数学参考精确一致；PTO 直接 JIT、注册算子、A/B/A 图重放均通过，
+权重地址保持原值，测试调用阶段禁止 Python format_cast。
+用例在 PyPTO `tests/st/runtime/kernel/test_native_nz.py`，本仓保存运行命令和 JUnit 结果。
+
+两版配置/回放 CPU 回归 17 项通过（33.72 秒）。
+任务 `task_20260926_141441_5833126495` 先检查 BF16/INT8、2D/3D 的 Native 原始 NZ 字节、
+pypto-lib pack_nz、设备打包与新快照还原，4 档全部精确一致；随后使用正式第 2 层权重，
+B4/S6/H8192、atomic=0、Native 确定性开启，执行两版各自 mode=0/2 整层与图对照。
+
+该任务 completed/exit=0。两版各自 mode=0/2 的同初态稳定性、A/B/A 图重放、metadata
+及全部保护区通过；两版分别进行 ND/NZ 对照，Native 和 PTO 的 8 类逻辑输出/状态均逐 bit 相同。
+mode=0 四张原地址全部复用；mode=2 的 wq_a/wq_b/wo_b 仍是 Native 格式 29 且 data_ptr 不变，
+wo_a 从 Native ND 一次性转为 29。各单层跨实现报告仍标 MEASURED，不将 Native/PTO 原有
+量化/Top-K 差异算作本次 NZ 对照 PASS，更不外推整模型 token/DSpark 或 <750 μs。
+
+PyPTO 已独立提交 `88297437`（中文、Signed-off-by）。设备任务运行的是同一份桥接及算子
+工作区代码，提交仅固化已验证内容；本轮之前的 `57aa9430` 16 卡基线仍只适用于当时配置。
+本轮未启动新的 16 卡任务。下一步按 C 清单补 B16/尾块/padding/长短上下文受影响项，
+量默认 atomic 与 mode=1/2 的完整区间，再进入正式整模型验收。
+
+证据：
+- [物理布局与快照](results/csa_baseline_20260926/nz_layout_contract/report.json)
+- [性能版 ND/NZ 逐元素对照](results/csa_baseline_20260926/nz_native_single_card/performance_nd_nz_comparison.json)
+- [精度版 ND/NZ 逐元素对照](results/csa_baseline_20260926/nz_native_single_card/precision_nd_nz_comparison.json)
+- [性能版实际 Native 存储绑定](results/csa_baseline_20260926/nz_native_single_card/performance_mode2/report.json)
+- [精度版实际 Native 存储绑定](results/csa_baseline_20260926/nz_native_single_card/precision_mode2/report.json)
+
+只保留上述最新报告、复现命令和必要输入。早先错误私有形状的编译目录、失败重试 dump、
+被替代的 device 重打包探针记录，以及本次完成对照后的重复 states.pt 不再保留。

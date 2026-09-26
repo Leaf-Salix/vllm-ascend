@@ -18,6 +18,7 @@ from .config import (
     INT8_AMAX_EPS,
     INT8_SCALE_MAX,
 )
+from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
 from .reduction import ATOMIC_ADD, STORE_ATOMIC
 
 T_DYN = pl.dynamic("QKV_Q_T_DYN")  # T = B * S
@@ -231,7 +232,7 @@ def rope_prepare(
 @pl.jit.inline(auto_scope=False)
 def q_proj_qa(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     qr_fp32: pl.Out[pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32]],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
@@ -268,10 +269,11 @@ def q_proj_qa(
                     dense_k_order = (
                         qr_native_group // 2 * QR_NATIVE_PAIR_SHIFT + dense_k_direction
                     ) % QR_NATIVE_K_BLOCKS
-                dense_d0 = qr_k_base + dense_k_order * QR_K_TILE
+                # K 顺序的两条分支均在 [0, N)；max 是恒等式，供 NZ 证明跨分支的非负性。
+                dense_d0 = qr_k_base + pl.max(dense_k_order, 0) * QR_K_TILE
                 dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
-                dense_w = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
-                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
+                dense_w = wq_a[q_a_col0 : q_a_col0 + QR_N_TILE, dense_d0 : dense_d0 + QR_K_TILE]
+                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, b_trans=True, init_cond=(dense_k == 0))
             qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=STORE_ATOMIC)
         for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
             q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
@@ -287,7 +289,7 @@ def q_proj_qa(
                     if qr_native_group % 2 == 1:
                         qr_k_direction = QR_NATIVE_K_BLOCKS - 1 - db
                     qr_k_order = (qr_native_group // 2 * QR_NATIVE_PAIR_SHIFT + qr_k_direction) % QR_NATIVE_K_BLOCKS
-                qr_d0 = qr_k_base + qr_k_order * QR_K_TILE
+                qr_d0 = qr_k_base + pl.max(qr_k_order, 0) * QR_K_TILE
                 qr_rows = pl.min(QR_M_TILE, tile_rows - t0)
                 x_t0 = tile_base + t0
                 q_x_chunk_bf16 = pl.slice(
@@ -296,15 +298,15 @@ def q_proj_qa(
                     [x_t0, qr_d0],
                     valid_shape=[qr_rows, QR_K_TILE],
                 )
-                w_chunk = wq_a[qr_d0 : qr_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
-                q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, init_cond=(db == 0))
+                w_chunk = wq_a[q_a_col0 : q_a_col0 + QR_N_TILE, qr_d0 : qr_d0 + QR_K_TILE]
+                q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, b_trans=True, init_cond=(db == 0))
             qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=STORE_ATOMIC)
 
 
 @pl.jit.inline(auto_scope=False)
 def q_proj_qr(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
@@ -473,7 +475,7 @@ def q_proj_qr_normalize(
 
 @pl.jit.inline(auto_scope=False)
 def q_proj_q_matmul(
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
     tile_rows: pl.Scalar[pl.INDEX],
@@ -647,7 +649,9 @@ def q_proj_q_dequant(
                     q_head_scale_tail = pl.reshape(q_head_scale_input_tail, [1, HEAD_DIM])
                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
                     q_head_scale_combined_tail = pl.col_expand_mul(
-                        pl.row_expand_mul(pl.tile.full([Q_ROPE_T_TILE, HEAD_DIM], dtype=pl.FP32, value=1.0), qr_scale_dq_tail),
+                        pl.row_expand_mul(
+                            pl.tile.full([Q_ROPE_T_TILE, HEAD_DIM], dtype=pl.FP32, value=1.0), qr_scale_dq_tail
+                        ),
                         q_head_scale_tail,
                     )
                     q_head_dq_tail = pl.mul(q_head_acc_fp32_tail, q_head_scale_combined_tail)
@@ -683,7 +687,7 @@ def q_proj_q_dequant(
 @pl.jit.inline(auto_scope=False)
 def q_proj_q(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -728,8 +732,8 @@ def q_proj_q(
 @pl.jit.inline(auto_scope=False)
 def q_proj_rope(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
     rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -794,7 +798,8 @@ def kv_project_native_240(
                     if group % 2 == 1:
                         direction_tail = D // KV_NATIVE_K_BLOCK - 1 - block_tail
                     block_tail = (group // 2 * KV_NATIVE_PAIR_SHIFT + direction_tail) % (D // KV_NATIVE_K_BLOCK)
-                offset_tail = block_tail * KV_NATIVE_K_BLOCK + step_tail % (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE) * KV_NATIVE_K_TILE
+                offset_tail = (block_tail * KV_NATIVE_K_BLOCK
+                               + step_tail % (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE) * KV_NATIVE_K_TILE)
                 a_tail = x[tile_base + row : tile_base + row + KV_M_TILE, offset_tail : offset_tail + KV_NATIVE_K_TILE]
                 b_tail = wkv[offset_tail : offset_tail + KV_NATIVE_K_TILE, column : column + KV_NATIVE_N_TILE]
                 accumulator_tail = pl.matmul_acc(accumulator_tail, a_tail, b_tail, init_cond=(step_tail == 0))
@@ -1047,8 +1052,8 @@ def kv_proj_rope(
 @pl.jit.inline(auto_scope=False)
 def qkv_proj_rope(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
-    wq_a: pl.Tensor[[D, Q_LORA], pl.BF16],
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
     rope_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],

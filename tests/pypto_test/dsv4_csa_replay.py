@@ -2,11 +2,11 @@
 """CSA 快照与回放：显式物理布局、共享存储和每次调用前的初态。"""
 
 import ast
+import ctypes
 import inspect
 import json
 import textwrap
 from pathlib import Path
-
 
 SCHEMA_VERSION = 2
 
@@ -37,6 +37,18 @@ def capture_tensors(tensors, roles, weight_layouts, source):
     for index, names in enumerate(groups.values()):
         sid = str(index)
         first = tensors[names[0]]
+        source_format = 2
+        if first.device.type == "npu":
+            import torch_npu
+
+            source_format = int(torch_npu.get_npu_format(first))
+        if source_format not in (0, 2, 29):
+            raise ValueError(f"快照尚不支持 Native 格式 {source_format}：{names}")
+        if source_format == 29:
+            if (len(names) != 1 or roles[names[0]] != "in" or weight_layouts.get(names[0]) != "NZ"
+                    or first.storage_offset() != 0 or not first.is_contiguous()
+                    or first.untyped_storage().nbytes() != first.numel() * first.element_size()):
+                raise ValueError(f"NZ 快照要求完整、只读、无 padding 的独占权重：{names}")
         ranges = []
         for name in names:
             value = tensors[name]
@@ -46,9 +58,22 @@ def capture_tensors(tensors, roles, weight_layouts, source):
         # 保持入参相对 64 字节边界的偏移；不复制整个模型共享池中与本调用无关的两端。
         start = min(left for left, _ in ranges) // 64 * 64
         stop = min((max(right for _, right in ranges) + 63) // 64 * 64, first.untyped_storage().nbytes())
-        raw = first.as_strided((1,), (1,), 0).view(torch.uint8).as_strided(
-            (first.untyped_storage().nbytes(),), (1,), 0)
-        payload[sid] = raw[start:stop].to("cpu", copy=True)
+        if source_format == 29:
+            # Tensor.cpu()/storage.cpu() 会解码 Native NZ；快照需要保存原始物理字节。
+            torch.npu.synchronize(first.device)
+            raw = torch.empty(stop - start, dtype=torch.uint8)
+            acl = ctypes.CDLL("libascendcl.so")
+            copy = acl.aclrtMemcpy
+            copy.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+            copy.restype = ctypes.c_int
+            code = copy(raw.data_ptr(), raw.numel(), first.data_ptr() + start, raw.numel(), 2)
+            if code:
+                raise RuntimeError(f"Native NZ 快照 D2H 失败：{code}")
+            payload[sid] = raw
+        else:
+            raw = first.as_strided((1,), (1,), 0).view(torch.uint8).as_strided(
+                (first.untyped_storage().nbytes(),), (1,), 0)
+            payload[sid] = raw[start:stop].to("cpu", copy=True)
         stores[sid] = {"source_byte_offset": start, "source_nbytes": first.untyped_storage().nbytes(),
                        "nbytes": stop - start, "parameters": names}
         for name in names:
@@ -56,6 +81,7 @@ def capture_tensors(tensors, roles, weight_layouts, source):
             specs[name] = {"storage": sid, "shape": list(value.shape), "stride": list(value.stride()),
                            "dtype": str(value.dtype), "role": roles[name],
                            "layout": weight_layouts.get(name, "ND"),
+                           "source_format": source_format,
                            "source_storage_offset": value.storage_offset(),
                            "storage_offset": value.storage_offset() - start // value.element_size()}
     meta = {"schema_version": SCHEMA_VERSION, "source": dict(source), "param_names": list(tensors),
@@ -98,8 +124,8 @@ def materialize(meta, payload, device="cpu"):
     return tensors, backings
 
 
-def convert_weight_layouts(tensors, meta, target_layouts):
-    """来源与目标相同则不动字节；只对明确的 ND/NZ 转换做一次重排。"""
+def convert_weight_layouts(tensors, meta, target_layouts, target_shapes=None):
+    """来源布局/形状相同则不动字节；只转换独占的只读权重。"""
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_adapter import repack_weights
 
     converted = []
@@ -107,7 +133,8 @@ def convert_weight_layouts(tensors, meta, target_layouts):
         source = meta["weight_layouts"].get(name)
         if source not in ("ND", "NZ") or target not in ("ND", "NZ"):
             raise ValueError(f"未知权重布局：{name} {source} -> {target}")
-        if source == target:
+        shape_matches = target_shapes is None or tuple(tensors[name].shape) == tuple(target_shapes[name])
+        if source == target and shape_matches:
             continue
         spec = meta["tensors"][name]
         if spec["role"] != "in":
@@ -115,7 +142,7 @@ def convert_weight_layouts(tensors, meta, target_layouts):
         if len(meta["storages"][spec["storage"]]["parameters"]) != 1:
             raise ValueError(f"布局转换会破坏共享存储：{name}，需先明确整组别名的转换方式")
         converted.append(name)
-    return repack_weights(tensors, meta["weight_layouts"], target_layouts), converted
+    return repack_weights(tensors, meta["weight_layouts"], target_layouts, target_shapes), converted
 
 
 def restore_mutable_storages(meta, initial, backings):

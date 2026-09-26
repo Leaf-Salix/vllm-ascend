@@ -375,6 +375,24 @@ def run(args, report):
         layouts = root_weight_layouts(root)
         hadamard = fixture["metadata"][fixture["groups"]["indexer"]["prefix"]].hadamard
         weights = adapter.prepare_weights(layer.self_attn, hadamard, layer)
+        from pypto._torch_npu import storage_shape
+
+        report["weight_storage_binding"] = {}
+        for name, layout in layouts.items():
+            original = getattr(layer.self_attn, name).weight
+            prepared = weights[name]
+            source_format = int(torch_npu.get_npu_format(original))
+            reused = prepared.data_ptr() == original.data_ptr()
+            report["weight_storage_binding"][name] = {
+                "shape": list(prepared.shape), "native_format": source_format,
+                "native_shape": list(original.shape), "native_stride": list(original.stride()),
+                "native_storage_shape": storage_shape(original),
+                "pto_format": int(torch_npu.get_npu_format(prepared)),
+                "same_data_ptr": reused, "root_layout": layout,
+            }
+            already_matches = source_format == 29 if layout == "NZ" else source_format in (0, 2)
+            if already_matches and not reused:
+                raise ValueError(f"已匹配根布局的 {name} 没有复用 Native 存储")
         groups = {
             name: (fixture["metadata"][group["prefix"]], group["views"]) for name, group in fixture["groups"].items()
         }
@@ -417,6 +435,9 @@ def run(args, report):
         report["pto_native"] = {name: compare_tensor(pto[0][name], value, 0, 0) for name, value in native[0].items()}
         visible = (fixture["positions"].cpu() + 1) // 4
         report["topk_selection"] = compare_topk(pto[0]["idx_topk"], native[0]["idx_topk"], visible)
+        if args.save_state:
+            torch.save({"native": native[0], "pto": pto[0]}, args.output / "states.pt")
+            report["saved_states"] = "states.pt"
         if args.save_case:
             torch.save({"state": native[0], "indexer_inputs": captured["indexer_inputs"]},
                        args.output / "native_reference.pt")
@@ -451,6 +472,7 @@ def main():
     parser.add_argument("--weight-nz-mode", type=int, choices=(0, 1, 2), default=0)
     parser.add_argument("--variant", choices=("precision", "performance"), default="precision")
     parser.add_argument("--save-case", action="store_true")
+    parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
     args = parser.parse_args()
