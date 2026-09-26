@@ -6372,3 +6372,43 @@ batch，而宿主侧按 `tokens // QUERY_TOKENS` 分配了实际 batch 行；
    （或证明 score 侧永远不会读到）。这与既有的"补位请求守卫"是同一类问题。
 
 本轮到此回退，生产代码保持 `REPACK_WORKERS = 192` 的已验证状态。
+
+## 168. §167 数值变化的根因已确认：定尺漏了当前步的 6 个 token（2026-09-27）
+
+§167 里我把嫌疑指向 `b_dim` 与实际 batch 不一致。**这个猜测是错的**，已排除：
+`decode_csa.py` 里 `B_DYN` 是从 `kv_seq_lens`、`state_block_table`、`cmp_block_table` 等
+一组张量的第一维绑定的，而共享适配器校验过 `req.seq_lens.numel() == batch`，
+所以 **`B_DYN` 就是实际 batch**，宿主按 `tokens // QUERY_TOKENS` 分配是对的。
+
+真正的根因是**缓冲定尺少了一页**，算术如下：
+
+- 用例第 97 行：`lengths_cpu = torch.full((batch,), history + 6, dtype=torch.int32)`，
+  所以 `--history 131072` 时 `kv_seq_lens = 131078`（多出当前步的 6 个 token）。
+- kernel 运行期：`repack_max_len = 131078 // 4 = 32769`，
+  `repack_pages = (32769 + 31) // 32 + 7 = 1025 + 7 = **1032**`。
+- 我的编译期常量：`MAX_REPACK_PAGES = (131072 // 4 + 31) // 32 + 7 = 1024 + 7 = **1031**`。
+
+**1032 > 1031，溢出恰好一页 = 32 行。** 持久缓冲按 `MAX_REPACK_ROWS = 1031 * 32` 做行距，
+repack 写第 1032 页时就越过本槽边界写进**下一个槽位**的开头，于是每个请求的紧凑数据都被
+后一个请求污染——这精确解释了 §167 观察到的"失配在所有比较项上普遍放大"
+（`x_out` 594526→1088290、`swa.0` 2689→14272、`indexer.1` 0→15）。
+
+原来的 `pl.create_tensor([b_dim * repack_rows, ...])` 不会暴露这个错误，因为它的行距就是
+运行期算出的 `repack_rows`，与 `repack_pages` 天然一致；一旦行距改成编译期常量，两者就
+必须显式对齐。
+
+### 下次动手的两处修正
+
+1. **定尺加余量**：`MAX_INDEXER_HISTORY` 必须覆盖 `max_model_len + QUERY_TOKENS`
+   （当前步的 6 个 token），否则最长上下文那一档必然溢出。更稳的写法是直接在
+   `MAX_REPACK_PAGES` 上多加一页。
+2. **加钳位兜底**：`repack_pages = pl.min(repack_pages, MAX_REPACK_PAGES)`。
+   这样即使部署的 `max_model_len` 超过定尺假设，也只是退化成"只重排前
+   `MAX_REPACK_PAGES` 页"（配合 `service_config.py` 的闸门拒绝该配置），
+   而不是静默踩坏邻居槽位的内存。
+
+这两条加在 §166/§167 已经打通的 9 文件改动之上，阶段一应当能通过数值校验。
+§167 里另一个怀疑（补位请求槽位未初始化）仍需单独核实——`seq_lens == 0` 的槽位在
+持久缓冲下不会被写过，要确认 score 侧永远读不到，或显式清零。
+
+本节只是诊断，代码仍保持回退后的状态（生产路径 `REPACK_WORKERS = 192`）。
