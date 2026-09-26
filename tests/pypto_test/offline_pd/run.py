@@ -389,17 +389,17 @@ def diagnose(args, llm, cases):
               "worker_runtime_config": args.worker_runtime_config,
               "custom_opp_path": os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")}
     if args.command == "performance":
-        # 同一次模型加载先测无 profiler 的完整 decode 周期，再独立采设备层区间。
-        # 不把 profiler 窗口、加载/前缀恢复或主机计时代替稳态设备结果。
+        # 当前主口径仅测 decode forward；完整周期由独立 steady 诊断入口保留。
+        # _model_forward 之外的 metadata/logits/采样/草稿不计入本轮性能判断。
         llm.collective_rpc("offline_begin_observation")
-        llm.collective_rpc("offline_begin_steady", args=(
+        llm.collective_rpc("offline_begin_forward", args=(
             args.warmup_steps, expected_tokens, args.batch, args.steady_cycles))
-        common["stage"] = "measuring_steady"
+        common["stage"] = "measuring_forward"
         write_json(args.output / f"rank{args.rank}.performance.json", common)
         try:
             steady_output = generate_round(llm, args, case, args.decode_tokens)
         finally:
-            common["steady_window"] = llm.collective_rpc("offline_end_steady")
+            common["steady_window"] = llm.collective_rpc("offline_end_forward")
             write_json(args.output / f"rank{args.rank}.performance.json", common)
         common["steady_output_token_ids"] = steady_output["output_token_ids"]
         common["stage"] = "measuring_layer_intervals"
@@ -427,7 +427,7 @@ def diagnose(args, llm, cases):
         if args.command == "performance":
             common["csa_observation"] = llm.collective_rpc("offline_end_observation")
             common["stage"] = "measured"
-            common["scope"] = ("steady_window 同时记录 execute_model 和包含采样/草稿的连续完整 decode 周期；"
+            common["scope"] = ("steady_window 仅记录 warmup 后 _model_forward 的设备耗时；"
                                "独立 Level0 trace 用于 HC_pre→HC_post 设备首末区间，"
                                "须解析各 rank/层，不累加并发 kernel 时间。")
     elif args.command == "hostprofile":

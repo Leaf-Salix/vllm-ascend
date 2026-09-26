@@ -4541,3 +4541,19 @@ token、DSpark 与独立 CSA trace 结果不变，`pilot_b4.json` 已换成 10 �
 容量 40 的旧扫描任务 `task_20260926_222049_373184727929` 尚在 pending，已取消后修改源码，
 没有中止已加载模型，也没有在排队任务使用的目录中边跑边改。下一轮用新口径执行六档。
 CPU 6 项定向回归通过；已有 B4 原始记录经新分析器完整通过，定向 Ruff 和 shell 语法检查通过。
+
+## 134. 主计时边界收紧到 decode forward（2026-09-26）
+
+用户要求只看 decode forward，其他异常耗时暂不看。核对 Native `model_runner_v1.py`：
+`execute_model` 还包含 metadata 准备和 `compute_logits`，不能把其旧 Event 区间改名为纯 forward。
+新增测试观测入口，在实际 `_model_forward` 调用前后记录设备 Event；外层 execute 只识别满档
+decode 及预热位置，不进入主计时。默认记录预热后连续 10 次，均值为主，收尾只同步一次。
+schema=3 显式标记 model_forward；对照器拒绝旧 schema=2 的完整周期作为 forward 输入。
+
+原 B4/容量 4 的 token/DSpark 与 CSA trace 事实保留，59.4265/62.3269 ms 是完整周期，
+不是纯 forward；54.1734/57.0490 ms 也是含前后处理的 execute_model，不能代替新结果。
+不再按这些值判断本轮 forward 快慢，也不继续归因窗口外的耗时。
+容量 40 任务 `task_20260926_222529_378326327989` 在草稿模型加载阶段终止，exit=130，
+尚无性能样本；确认终止后修改源码，清理未产出结果的加载日志，再按新边界提交。
+3 项 CPU 回归通过：大幅增加 metadata/logits 模拟时间不影响 forward 计时，中途变档及
+缺少 forward 调用均拒绝放行；定向 Ruff 通过。真实验证并入首档正式扫描。

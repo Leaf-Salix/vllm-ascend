@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""离线核对 performance 命令的完整步设备样本、token 与 DSpark。"""
+"""离线核对 performance 命令的纯 forward 设备样本、token 与 DSpark。"""
 
 import argparse
 import gzip
@@ -152,21 +152,15 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
     require(len(worker_config) == 1 and worker_config[0]["deterministic_level"] == int(value["deterministic"]) and
             not worker_config[0]["dynamic_eplb"], f"{path}: Worker 实际配置与声明不符")
     require(steady["dp_rank"] == rank and steady["sufficient"], f"{path}: 稳态设备采样不足")
-    require(steady.get("schema") == 2, f"{path}: 旧计时缺少采样/草稿完成证据")
-    cycle = steady["decode_cycle"]
-    require(cycle["sufficient"] and len(cycle["samples_us"]) >= steady_cycles and
-            len(cycle["samples_us"]) == len(cycle["actual_output_tokens"]) == len(cycle["steady_step_indices"]),
-            f"{path}: 完整 decode 周期/实际输出 token 计数缺失")
-    require(cycle["steady_step_indices"][:steady_cycles] == list(range(
+    require(steady.get("schema") == 3 and steady.get("kind") == "model_forward",
+            f"{path}: execute_model 或完整周期不能当成纯 forward")
+    require(steady["steady_step_indices"] == list(range(
         steady["warmup_steps"], steady["warmup_steps"] + steady_cycles)),
-        f"{path}: 须取 warmup 后紧接的连续 {steady_cycles} 个周期，不能挑选样本")
-    require(all(type(n) is int and n > 0 for n in cycle["actual_output_tokens"]),
-            f"{path}: 实际输出 token 计数无效")
-    distribution(cycle["samples_us"])
-    samples = steady["device"]["samples_us"]
-    stamps = steady["device"]["start_timestamps_raw"]
+        f"{path}: 须取 warmup 后紧接的连续 {steady_cycles} 个 forward，不能挑选样本")
+    samples = steady["forward"]["samples_us"]
+    stamps = steady["forward"]["start_timestamps_raw"]
     count = steady["measured_steps"]
-    require(len(samples) == len(stamps) == count and count >= steady_cycles + 1 and all(
+    require(len(samples) == len(stamps) == count == steady_cycles and all(
         b > a for a, b in zip(stamps, stamps[1:])), f"{path}: 设备事件未更新或数量不符")
     require(steady["step_tokens"] == [expected_tokens] * count and
             steady["step_requests"] == [batch] * count, f"{path}: 设备样本混入其他档位")
@@ -192,17 +186,16 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
 
 def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_num_seqs=None, steady_cycles=10):
     max_num_seqs = batch if max_num_seqs is None else max_num_seqs
-    report = {"status": "FAIL", "mode": mode, "scope": "无 profiler 的完整 decode 周期包含采样、草稿和调度间隙；"
-              "execute_model 单列。CSA 层区间独立取设备 trace 首末。",
+    report = {"status": "FAIL", "mode": mode, "scope": "主结果仅比较无 profiler 的 _model_forward 设备耗时均值；"
+              "metadata/logits/采样/草稿/步间等待不计入。CSA 层区间独立取设备 trace 首末。",
               "expected": {"ranks": ranks, "batch": batch, "max_num_seqs": max_num_seqs,
-                           "tokens_per_round": tokens, "steady_cycles_per_rank": steady_cycles,
+                           "tokens_per_round": tokens, "forward_steps_per_rank": steady_cycles,
                            "profile_steps": steps},
               "errors": [], "token_mismatches": 0, "spec_decode_mismatched_ranks": 0,
               "compared_tokens": 0, "ranks": []}
     samples = {side: [] for side in ("native", "pto")}
-    cycles = {side: [] for side in ("native", "pto")}
     layer_samples = {side: [] for side in ("native", "pto")}
-    cycle_rows = {side: {} for side in ("native", "pto")}
+    forward_rows = {side: {} for side in ("native", "pto")}
     for rank in range(ranks):
         try:
             loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens,
@@ -226,21 +219,13 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
                      "spec_decode_equal": stats_equal}
             for side, (data, stats) in loaded.items():
                 steady = data["steady_window"][0]
-                device = steady["device"]["samples_us"][:steady_cycles]
+                device = steady["forward"]["samples_us"]
                 samples[side].extend(device)
-                entry[side] = {"execute_model_device": distribution(device), "spec_decode": stats,
+                entry[side] = {"forward_device": distribution(device), "spec_decode": stats,
+                               "steady_step_indices": steady["steady_step_indices"],
                                "peak_allocated_bytes": steady["peak_allocated_bytes"],
                                "peak_reserved_bytes": steady["peak_reserved_bytes"]}
-                cycle = steady.get("decode_cycle", {})
-                if cycle.get("sufficient"):
-                    selected = cycle["samples_us"][:steady_cycles]
-                    emitted = cycle["actual_output_tokens"][:steady_cycles]
-                    indices = cycle["steady_step_indices"][:steady_cycles]
-                    entry[side]["decode_cycle_device"] = distribution(selected)
-                    entry[side]["steady_step_indices"] = indices
-                    cycles[side].extend(selected)
-                    entry[side]["actual_output_tokens_per_second"] = sum(emitted) / (sum(selected) * 1e-6)
-                    cycle_rows[side][rank] = dict(zip(indices, zip(selected, emitted)))
+                forward_rows[side][rank] = dict(zip(steady["steady_step_indices"], device))
                 layers = layer_intervals(device_tasks(root / side, rank), side, steps)
                 entry[side]["layers"] = layers
                 layer_samples[side].extend(layers["intervals"])
@@ -248,28 +233,16 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
         except (OSError, ValueError, KeyError, TypeError) as exc:
             report["errors"].append(f"rank{rank}: {exc}")
     if len(report["ranks"]) == ranks:
-        report["execute_model_device"] = {side: distribution(values) for side, values in samples.items()}
-        complete_cycles = all("decode_cycle_device" in item[side]
-                              for item in report["ranks"] for side in cycles)
-        report["decode_cycle_device"] = ({side: distribution(values) for side, values in cycles.items()}
-                                          if complete_cycles else None)
-        report["decode_cycle_note"] = (f"主结果为 warmup 后连续 {steady_cycles} 个完整周期的均值；"
-                                       "相邻满档起点之间已完成采样与草稿，使用 elapsed_time。")
-        report["global_decode"] = {}
-        for side, by_rank in cycle_rows.items():
+        report["forward_device"] = {side: distribution(values) for side, values in samples.items()}
+        report["forward_note"] = f"主结果为每 rank warmup 后连续 {steady_cycles} 个 _model_forward 的均值。"
+        report["slowest_rank_forward_device"] = {}
+        for side, by_rank in forward_rows.items():
             common = set.intersection(*(set(rows) for rows in by_rank.values()))
             if len(common) != steady_cycles:
-                report["errors"].append(f"{side}: 全 rank 的共同稳态周期不足 {steady_cycles} 个")
+                report["errors"].append(f"{side}: 全 rank 的共同 forward 样本不足 {steady_cycles} 个")
                 continue
-            # EP 同步场景用各 rank 同一稳态步的最慢周期；只累加实际采样输出 token。
-            slowest = [max(rows[i][0] for rows in by_rank.values()) for i in sorted(common)]
-            emitted = [sum(rows[i][1] for rows in by_rank.values()) for i in sorted(common)]
-            report["global_decode"][side] = {
-                "cycle": distribution(slowest), "actual_output_tokens": sum(emitted),
-                "output_tokens_per_second": sum(emitted) / (sum(slowest) * 1e-6),
-                "steady_step_indices": sorted(common),
-                "scope": f"共同稳态样本序号按 {ranks} rank 最慢周期聚合，不累加并行耗时；"
-                         "这是同步周期吞吐的保守估计，各 rank 原始采样与吞吐另列"}
+            slowest = [max(rows[i] for rows in by_rank.values()) for i in sorted(common)]
+            report["slowest_rank_forward_device"][side] = distribution(slowest)
         report["csa"] = {}
         for side, values in layer_samples.items():
             report["csa"][side] = {

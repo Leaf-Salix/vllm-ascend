@@ -42,7 +42,7 @@ python tests/pypto_test/offline_pd/run.py --help
 | `prefill` | 16 卡生成 Native P 缓存 |
 | `decode` | 16 卡生成输出，记录 token、DSpark、配置与入口命中 |
 | `steady` | 预热后采稳态 decode 指标 |
-| `performance` | 同一次加载先采无 profiler 的完整 decode 周期、execute 和采样/草稿完成点，再独立采 Level0 各层区间；保存两轮 token 与 DSpark 统计 |
+| `performance` | 同一次加载先采无 profiler 的纯 _model_forward 10 步均值，再独立采 Level0 各层区间；保存两轮 token 与 DSpark 统计 |
 | `bitcompare` | 从相同状态比较真实层输出；诊断不作为性能测量 |
 | `argdump` | 在 PTO 调用前保存 schema=2 输入/存储，调用后参考另存 |
 | `profile` / `profile-export` / `profile-compare` | 采设备窗口、CPU 解析及对照 |
@@ -87,18 +87,15 @@ DSpark 按每档开始前快照作累计计数差分，报告 `batch` 和 `max_n
 
 ## 结果判读
 
-- 无 profile 的稳态 decode 指标用于整模型性能；`elapsed_including_io_seconds` 不作加速比。
-- `steady` / `performance` 的设备事件在图外记录，收尾统一读回，不逐步加同步；
-  schema=2 同时记录 execute 首尾、采样/草稿完成点及连续满档步骤起点。
-  主机时间单列，完整周期使用 NPU Event 的 `elapsed_time`，不猜测原始计数单位。
-  主结果为 warmup 后连续 10 个完整 step 的均值。默认 `--steady-cycles 10`，
-  预热后取前 11 个满档起点形成 10 个周期；中途变档、
-  采样未完成或实际采样输出计数缺失时拒绝放行，不跨越不完整步拼接周期。
+- 当前只比较无 profiler 的 decode forward；其他耗时暂不展开。
+- `performance` 使用 schema=3：设备事件包围 Native `_model_forward`，收尾统一读回，
+  不逐步加同步。记录 warmup 后连续 10 次 forward 的算术均值；metadata 准备、logits、
+  采样、DSpark 草稿、步间调度均在边界之外。中途变档或缺少 forward 调用时拒绝放行。
   各档先生成 96 token/请求预热，再用 `--decode-tokens 128 --warmup-steps 8` 测量，
   为窗口结束留余量，避开请求结束时的输出裁剪。初始化编译和图捕获不进入计时窗口。
-  既有 20 周期记录可直接取前 10 个重算；不重跑模型、不挑选样本。
-  全局吞吐按共同样本序号取各 rank 最慢周期，是同步周期吞吐的保守估计；每 rank 原始周期和吞吐另列。
-  历史 schema=1 只有 execute_model 时间，不能追认为完整 decode 周期。
+  报告每 rank 均值及共同样本序号最慢 rank 的均值；不由 forward 时间推算生成吞吐。
+  `steady` 仍提供完整周期诊断，schema=2；旧 execute_model/完整周期不能追认为纯 forward，
+  也不用于本轮快慢判断。
 - `performance` 的 Level0 trace 与无 profiler 窗口独立；层区间应从首末设备任务取差，
   按 rank/层报告并保留首次 metadata 生产成本，不能累加并发 kernel 时间。
   采集窗口中途发生档位变化时会保留原始观测并拒绝作为验收结果。

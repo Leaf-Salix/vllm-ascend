@@ -28,6 +28,57 @@ def observer(monkeypatch):
     return instance
 
 
+@pytest.mark.parametrize("failure", [None, "shape_gap", "missing_forward"])
+def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure):
+    class Event:
+        clock = 0
+
+        def __init__(self, **kwargs):
+            self.stamp = None
+
+        def record(self):
+            self.stamp = Event.clock
+
+        def recorded_time(self):
+            return self.stamp
+
+        def elapsed_time(self, end):
+            return (end.stamp - self.stamp) / 1000
+
+    def forward():
+        Event.clock += 100
+        return "hidden"
+
+    def execute(*_):
+        Event.clock += 10000  # metadata 等前置操作不属于 forward。
+        if failure != "missing_forward":
+            assert observer.model_runner._model_forward() == "hidden"
+        Event.clock += 20000  # logits 等后置操作不属于 forward。
+        return "output"
+
+    observer.model_runner.execute_model = execute
+    observer.model_runner._model_forward = forward
+    monkeypatch.setattr(torch.npu, "Event", Event)
+    monkeypatch.setattr(torch.npu, "reset_peak_memory_stats", Mock())
+    monkeypatch.setattr(torch.npu, "max_memory_allocated", Mock(return_value=10))
+    monkeypatch.setattr(torch.npu, "max_memory_reserved", Mock(return_value=20))
+    observer.offline_begin_forward(2, 24, 4, 10)
+    shapes = [(4, 4)] + [(24, 4)] * 15
+    if failure == "shape_gap":
+        shapes.insert(6, (18, 3))
+    for shape in shapes:
+        observer.model_runner.execute_model(scheduler(*shape))
+    result = observer.offline_end_forward()
+    assert result["sufficient"] is (failure is None)
+    assert result["measured_steps"] == 10
+    assert result["steady_step_indices"] == list(range(2, 12))
+    if failure != "missing_forward":
+        assert result["forward"]["samples_us"] == [100] * 10
+        assert result["forward"]["mean_us"] == 100
+    assert observer.model_runner.execute_model is execute
+    assert observer.model_runner._model_forward is forward
+
+
 @pytest.mark.parametrize("last_shape, sufficient", [((96, 16), True), ((84, 14), False)])
 def test_profile_requires_full_shape_and_contiguous_window(observer, monkeypatch, tmp_path, last_shape, sufficient):
     profiler = Mock()

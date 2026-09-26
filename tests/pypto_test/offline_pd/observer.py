@@ -384,6 +384,90 @@ class OfflineCSAObserver:
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
+    def offline_begin_forward(self, warmup_steps, expected_tokens, expected_requests, steps=10):
+        """只包围 Native _model_forward；execute_model 仅用于辨认实际 decode 档位。"""
+        import torch
+
+        if getattr(self, "_offline_forward", None) is not None or getattr(self, "_offline_steady", None) is not None:
+            raise RuntimeError("Forward/steady measurement is already active")
+        runner = self.model_runner
+        original_execute, original_forward = runner.execute_model, runner._model_forward
+        state = {"schema": 3, "kind": "model_forward",
+                 "dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
+                 "warmup_steps": warmup_steps, "requested_steps": steps, "seen_steps": 0,
+                 "all_execute_calls": 0, "observed": {}}
+        events, active = [], [None]
+        torch.npu.reset_peak_memory_stats()
+
+        def forward(*args, **kwargs):
+            entry = active[0]
+            if entry is None:
+                return original_forward(*args, **kwargs)
+            entry["forward_calls"] += 1
+            begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            entry["begin"], entry["end"] = begin, end
+            begin.record()
+            try:
+                return original_forward(*args, **kwargs)
+            finally:
+                end.record()
+
+        def execute(scheduler_output, *args, **kwargs):
+            call = state["all_execute_calls"]
+            state["all_execute_calls"] += 1
+            tokens = scheduler_output.total_num_scheduled_tokens
+            requests = len(scheduler_output.num_scheduled_tokens)
+            key = f"{tokens}/{requests}"
+            state["observed"][key] = state["observed"].get(key, 0) + 1
+            if tokens != expected_tokens or requests != expected_requests:
+                return original_execute(scheduler_output, *args, **kwargs)
+            index = state["seen_steps"]
+            state["seen_steps"] += 1
+            if index < warmup_steps or len(events) >= steps:
+                return original_execute(scheduler_output, *args, **kwargs)
+            entry = {"call": call, "index": index, "tokens": tokens, "requests": requests, "forward_calls": 0}
+            active[0] = entry
+            try:
+                return original_execute(scheduler_output, *args, **kwargs)
+            finally:
+                active[0] = None
+                events.append(entry)
+
+        runner.execute_model, runner._model_forward = execute, forward
+        self._offline_forward = (state, events, original_execute, original_forward)
+        return {"dp_rank": state["dp_rank"], "kind": state["kind"], "warmup_steps": warmup_steps}
+
+    def offline_end_forward(self):
+        import math
+        import statistics
+
+        import torch
+
+        state, events, original_execute, original_forward = self._offline_forward
+        self.model_runner.execute_model, self.model_runner._model_forward = original_execute, original_forward
+        self._offline_forward = None
+        state["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
+        state["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
+        torch.npu.synchronize()
+        valid = [entry for entry in events if entry["forward_calls"] == 1]
+        values = [entry["begin"].elapsed_time(entry["end"]) * 1000 for entry in valid]
+        stamps = [entry["begin"].recorded_time() for entry in valid]
+        state.update(measured_steps=len(events), step_tokens=[entry["tokens"] for entry in events],
+                     step_requests=[entry["requests"] for entry in events],
+                     steady_step_indices=[entry["index"] for entry in events])
+        state["forward"] = {"samples_us": values, "start_timestamps_raw": stamps,
+                            "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
+                                     "DSpark 草稿或步间调度等待；不逐步同步"}
+        if values:
+            state["forward"].update(mean_us=statistics.mean(values), p50_us=statistics.median(values),
+                                     p95_us=sorted(values)[math.ceil(len(values) * .95) - 1])
+        state["sufficient"] = (
+            len(valid) == len(events) == state["requested_steps"]
+            and all(math.isfinite(v) and v > 0 for v in values)
+            and all(b > a for a, b in zip(stamps, stamps[1:]))
+            and all(b["call"] == a["call"] + 1 for a, b in zip(events, events[1:])))
+        return state
+
     def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests, cycles=10):
         """记录 execute、采样/草稿完成点及连续步骤起点，不逐步增加同步。"""
         import torch
