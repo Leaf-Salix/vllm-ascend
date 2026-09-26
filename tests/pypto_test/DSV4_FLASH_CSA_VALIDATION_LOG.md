@@ -3864,3 +3864,28 @@ Q 展开最大单 worker 时间 57.98→49.24 μs，但其首末窗口受并发�
 第 109 节及本节报告将叶子记录压成单行，字段与数值不变，减少无效篇幅。
 源码 Ruff、语法、shell 语法和 Git 空白检查通过。当前仍未达到 750 μs，
 也没有宣称整模型性能通过；下一步只对保留候选进行正式 16 卡 token 看护。
+
+## 111. 性能候选的 mode=2、默认 atomic 整模型 token 看护通过（2026-09-26）
+
+性能源码固定为 `7eba45a3`，任务 `task_20260926_160622_9424198623`。
+正式 75 分片权重、既有 H8192 bank、B16/TP1/DP-EP16、每请求输出 96 token，
+两侧 mode=2、FULL_DECODE_ONLY、capture size=96；PTO performance、atomic=1、QR/KV split=8/8。
+新进程不启用 `--deterministic`，Native 使用 level=0 默认值；明确设置 HCCL_DETERMINISTIC=false，
+HCCL_OP_EXPANSION_MODE=AIV。任务期间冻结生产源码。
+
+单卡先行：第 110 节完整区间收益，以及 B1/B40 的受影响功能检查均已完成。
+当前只做逐 token 看护，同时保留运行自然产出的 DSpark 统计；不启动逐层或逐元素诊断。
+任务 completed/exit=0。两侧 16 个 rank 均完整落盘，CPU 比较结果 PASS：
+**24,576 个输出 token 完全一致，DSpark 总计与逐位置接受数一致，缺项和差异均为 0**。
+各 rank 实际 mode=2；PTO 日志确认 performance、atomic=1、QR/KV split=8/8，
+wq_a/wq_b/wo_a/wo_b 根布局全部 NZ。每个 rank 的 21 个目标 C4 层均捕获
+`pto_tokens96` 路径，并观察到实际 aclgraph replay，避免把 Native 回退误当成 PTO 通过。
+
+仅对这组配置声明 token/DSpark 看护通过；未追加逐元素或层误差诊断。
+本轮 decode 的含加载/IO 总时长不作为整模型性能结论，750 μs 目标仍未完成。
+后续继续集中优化性能版，精度版性能仍后置。
+
+证据：[配置与任务](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/manifest.json)、
+[全部 token 与 DSpark 对照](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/comparison.json)、
+[实际配置、捕获和重放核对](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/execution_checks.json)。
+保留两侧全部 rank 的 token/统计原始字段及精简执行证据，删除成功任务的重复进程/设备日志。

@@ -95,6 +95,8 @@ compact metadata，Native 保留其实际逐层生成路径。固定使用 `mode
 - `results/csa_baseline_20260926/nz_native_b16_timing/`：B16/S6/H8192、默认 atomic、Native 确定性关闭的两侧 mode=1/2 完整图区间；`following_mode1/2` 为第二层主口径，`mode1/2` 单独保留首层成本，另有 mode=2 PTO 泳道。单卡趋势，不是最终验收。
 - `results/csa_baseline_20260926/nz_native_edges/`：性能版 B1/H255、精度版 B5/H32767 的 ND/NZ 与图边界检查；另保留 B1 短上下文两版数值差异，性能版较大误差尚待归因。
 - `results/csa_baseline_20260926/nz_native_padding/`：两版 mode=2、B4/H4095 固定规约图在 4→3→1→4 个有效请求下的输出、状态及保护区检查。
+- `results/csa_baseline_20260926/perf_qproj_upstream/`：性能版 NZ Q 展开优化，第二层完整区间 p50 843.53→817.22 μs；保留单卡尾块检查、泳道及未保留候选的精简记录。
+- `results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/`：上述候选同 mode=2、atomic=1 的正式 16 卡看护，24576 token 与 DSpark 统计一致，含实际配置和 PTO 图路径证据；不是整模型性能验收。
 - `results/csa_baseline_20260926/toolchain/`：当前版本记录、最终编译及 11 项标量 API 回归日志。
 - `results/release_offline_pd_20260923/`：7 组正式权重 bank，供后续整模型复用，见离线 P/D 说明。
 - `results/cann90_20260921/tdiv_high_precision_repro_v1/`：未关闭的 A3 TDIV 能力问题证据；版本范围见复现说明。
