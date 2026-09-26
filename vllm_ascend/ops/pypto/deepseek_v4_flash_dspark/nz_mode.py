@@ -25,8 +25,18 @@ WEIGHT_NZ_MODE = envs.VLLM_ASCEND_ENABLE_NZ
 if WEIGHT_NZ_MODE not in (0, 1, 2):
     raise ValueError(f"VLLM_ASCEND_ENABLE_NZ must be 0, 1 or 2, got {WEIGHT_NZ_MODE}")
 
-# BF16/FP16 权重是否按 NZ 分形序存放
-BF16_WEIGHT_NZ = WEIGHT_NZ_MODE >= 2
+# BF16/FP16 权重是否按 NZ 分形序存放。
+#
+# 这里用 >=1 而不是 >=2，因为 `weight_nz_mode` 实际控制的是两件**独立**的事：
+#   ① Native 侧张量的 npu format 转换——`ops/linear.py` 的 `_should_trans_nz` 对 BF16
+#      权重要求 mode==2，对 INT8（`w8a8_dynamic.py`）mode>=1 就转；
+#   ② PTO 侧 `prepare_weights` 里对**自己那份 transpose 副本**做的 `_pack_nz`。
+# 两者机制不同：PTO 不消费 Native 转过的 FRACTAL_NZ（`weight()` 里还会
+# `npu_format_cast` 回 ND），而是自己按 pto-isa 的分形序重排一份私有副本。所以在
+# 同一个 mode 值下让 PTO 的 BF16 权重也走 NZ，不改变与 Native 的对比口径——两侧
+# 拿到的是同一份原始权重、同一个配置值，只是 PTO 内部多摆了一次字节。
+# 这一份副本本来就存在（`transpose().contiguous()`），NZ 化不额外占显存。
+BF16_WEIGHT_NZ = WEIGHT_NZ_MODE >= 1
 # INT8 量化权重是否按 NZ 分形序存放。注意这一档在 vllm-ascend 的默认值（1）下就是
 # 开的——也就是说 wq_b / wo_b 走 NZ 不需要把 mode 调到 2，与 BF16 权重不同。
 QUANT_WEIGHT_NZ = WEIGHT_NZ_MODE >= 1
