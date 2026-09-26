@@ -4764,3 +4764,75 @@ score调度候选已撤回，生产性能算子保持之前版本；仅保存本
 六档无profiler decode forward仍全部未优于Native，PTO分别慢6.67%、14.62%、27.93%、
 0.09%、1.03%、3.92%（依次为128K/B4、8、16及8K/B24、32、40）。
 逐token/DSpark看护通过，但PTO明确快于Native及750μs目标均未完成。后续工作暂停，等待用户恢复。
+
+## 143. 恢复：六档要全部快于 Native 30%，先算清 indexer score 的搬运账（2026-09-27）
+
+用户要求把六档优化到**全部比 Native 好 30% 以上，只看 CSA 的性能**。以第 142 节的
+无 profiler 口径为起点，PTO 现在分别慢 6.67% / 14.62% / 27.93% / 0.09% / 1.03% /
+3.92%（128K 的 B4、B8、B16 与 8K 的 B24、B32、B40），所以目标等价于把
+`PTO / Native` 从 1.067～1.279 压到 **≤ 0.700**，最差档要改善约 45 个百分点。
+
+迭代用 `tests/pypto_test/dsv4_csa_single_layer.py`：单卡、正式 layer4 权重、合成历史、
+**同一进程内先后测 Native 与 PTO**、5 次预热后 20 次完整图重放。它给出的
+`report.json` 里 `timing.native/pto.samples_us` 可直接算比值，比 16 卡整模型快得多，
+适合做改动的 A/B。第 141 节的既有基线（mode2、atomic1、level0）是：
+
+| 档位 | Native p50 | PTO p50 | PTO/Native |
+| --- | ---: | ---: | ---: |
+| 128K/B16 | 1310.15 | 1792.34 | **1.368** |
+| 8K/B40 | 1413.16 | 1501.15 | 1.062 |
+
+### indexer score 的搬运账：同一段 key 被每个 query 各搬一遍
+
+第 141 节末尾指出的方向（Native 按 M256 对多个 query 复用 key）可以算成具体数字。
+`decode_indexer.py` 的 `indexer_score_topk_leaf` 现在是**逐 query** 展开：
+
+```python
+for item in pl.range(worker, query_count * max_leaves, TOPK_SCORE_WORKERS):
+    query = item // max_leaves
+    leaf = item % max_leaves
+```
+
+128K/B16 下 `max_leaves = 32768 / TOPK_CANDIDATES_PER_LEAF(8192) = 4`、
+`query_count = B*S = 96`，于是 **384 个 item 在 24 个 worker 上跑 16 轮**。
+核心的 matmul 是
+
+```python
+query_vector = qr_hadamard_i8[query*IDX_N_HEADS : ..., 0:IDX_HEAD_DIM]   # [64, 128]
+score_i32 = pl.matmul(query_vector, kv_i8, out_dtype=pl.INT32, b_trans=True)  # [64, 384]
+```
+
+即 **M = IDX_N_HEADS = 64（单个 query 的 64 个 head）、N = SCORE_TILE = 384（候选）**。
+每个 item 要把自己那 8192 个候选的 key 全搬一遍：
+`384 items × (8192/384≈21 次 gather_row) × (384×128 INT8 = 48 KiB)` ≈ **384 MiB**。
+而 key 本身每个 batch 只有 `32768 × 128 = 4 MiB`、16 个 batch 共 64 MiB——
+**多搬了 6 倍，正好是每个 batch 的 S = 6 个 query 各搬一遍。**
+
+### 待验证的改法：把同一 batch 的 6 个 query 拼进 M
+
+同 batch 的 6 个 query 在 `qr_hadamard_i8` 里本来就是连续的
+（行号 `query * IDX_N_HEADS`、`query = batch * S + s`），所以可以一次取
+`[S * IDX_N_HEADS, IDX_HEAD_DIM] = [384, 128]` 作为 A，把 N 降到 64：
+
+| | 现在 | 改后 |
+| --- | --- | --- |
+| matmul | `[64,128] × [384,128]ᵀ → [64,384]` | `[384,128] × [64,128]ᵀ → [384,64]` |
+| L0A | 8 KiB | 48 KiB（≤64 KiB ✓） |
+| L0B | 48 KiB | 8 KiB |
+| L0C | 64×384×4 = 98 KiB | 384×64×4 = 98 KiB（不变 ✓） |
+| grid | 96 query × 4 leaf = 384 | 16 batch × 4 leaf = **64** |
+| key 搬运 | 384 × 21 × 48 KiB ≈ **384 MiB** | 64 × 128 × 8 KiB ≈ **64 MiB** |
+| gather 次数 | 8064 | 8192（几乎不变） |
+
+**字节降 6 倍、DMA 次数不变、matmul 的乘累加总量不变。**
+
+规约要按 query 分组：现在是 `pl.col_sum` 对 `[64, 384]` 的 64 行一次求和；改后要对
+`[384, 64]` 按 64 行一组求和成 `[6, 64]`。`pl.part_add` 是两个 tile 的逐元素加、
+不是分段求和，所以走切片——`for q in pl.unroll(S)` 取 `score_i32[q*64:(q+1)*64, :]`
+再各自 `col_sum`，偏移是「循环变量 × 常量」可证，规约的总算术量不变。
+
+同 batch 的 6 个 query 的 `visible_count` 不同（position 依次递增），但
+`COMPRESS_RATIO = 4`、6 个位置最多跨 2 个压缩块，所以取该 batch 的最大值做搬运、
+各 query 仍按自己的 `valid_count` 截断即可——这与现在 `lane_valid_rows` 的做法一致。
+
+以上都还是纸面推算。本节先记账与方案，实测结果另记。
