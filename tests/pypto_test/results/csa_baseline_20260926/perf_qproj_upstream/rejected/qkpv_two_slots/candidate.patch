@@ -1,0 +1,15 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index 94b08086..b268a132 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -85,8 +85,8 @@ MERGE_WORKERS = 48
+ 
+ # QK/PV 软件流水：AIC 在第 k 拍算第 k 块的 QK、第 k-QK_PRE_LAUNCH 块的 PV，
+ # AIV 同拍采第 k 块 KV、做第 k-1 块 softmax、归并第 k-QK_PRE_LAUNCH-1 块。
+-# 槽数取 QK_PRE_LAUNCH+1，保证在飞的三块各有自己的 KV/score/prob 缓冲。
+-QK_PRE_LAUNCH = 2
++# 槽数取 QK_PRE_LAUNCH+1，给在飞的块分别保留 KV/score/prob 缓冲。
++QK_PRE_LAUNCH = 1
+ 
+ QK_TRANSFER_SLOTS = QK_PRE_LAUNCH + 1
+ 

@@ -1,0 +1,19 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index bc26b64b..3fb39a79 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -112,11 +112,12 @@ KV_NATIVE_N_GROUP = 96
+ KV_NATIVE_SHIFT_GROUPS = 4
+ KV_NATIVE_PAIR_SHIFT = 5
+ 
+-QPROJ_M_TILE = 64  # dense qproj token tile
++# NZ 主档 B16×S6 一次处理 96 行；ND 保留原来的行块。
++QPROJ_M_TILE = 96 if QUANT_WEIGHT_NZ else 64
+ 
+ QPROJ_WORKERS = 24
+ 
+-# Plain matmul supports a compact 64-row NZ tail; ND matmul_acc keeps 16.
++# NZ 尾块沿用主行块并限制有效行；ND matmul_acc 保留 16 行尾块。
+ QPROJ_TAIL_M_TILE = QPROJ_M_TILE if QUANT_WEIGHT_NZ else MATMUL_T_TILE
+ 
+ QPROJ_T_PAD = ((PREFILL_DENSE_TILE + QPROJ_TAIL_M_TILE - 1) // QPROJ_TAIL_M_TILE) * QPROJ_TAIL_M_TILE

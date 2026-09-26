@@ -3889,3 +3889,30 @@ wq_a/wq_b/wo_a/wo_b 根布局全部 NZ。每个 rank 的 21 个目标 C4 层均�
 [全部 token 与 DSpark 对照](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/comparison.json)、
 [实际配置、捕获和重放核对](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/execution_checks.json)。
 保留两侧全部 rank 的 token/统计原始字段及精简执行证据，删除成功任务的重复进程/设备日志。
+
+## 112. 性能版两项分块/流水候选撤回，补齐 mode=1 单卡测量（2026-09-26）
+
+承接 `1c0517d9`，严格按性能版优先推进，精度版未改。沿用第 110 节的正式单层权重、
+合成输入、B16/S6/H8192、atomic=1、level=0、HCCL=false；主计时复用第二个 CSA 层的
+compact metadata，5 次预热、20 次图外事件采样。工具链保持 PyPTO `88297437`、
+Simpler `a54c05095`、PTOAS 0.66、PTO-ISA `327cd586`。
+
+| 单卡候选 | Native p50（μs） | PTO p50/p95（μs） | 决定 |
+| --- | --- | --- | --- |
+| mode=2，QK/PV 预发 2→1、槽 3→2 | 934.18 | 833.21 / 870.86 | 未测到收益，撤回 |
+| mode=2，NZ Q 展开 M64→M96，N256/完整 K 不变 | 914.77 | 833.21 / 854.24 | 未测到收益，撤回 |
+| 原保留版本，mode=1 | 939.49 | 872.30 / 906.92 | 保留另一档测量，主优化仍优先 mode=2 |
+
+任务分别为 `task_20260926_162130_10627429948`、
+`task_20260926_162631_108463729858`、`task_20260926_162949_110198329368`，
+均 completed/exit=0，必要有限值、索引结构和保护区检查通过；不声明跨实现逐元素通过。
+被撤回候选不再做尾块或 16 卡验证，仅保留实际样本、配置和相对 `1c0517d9` 的补丁，
+其重复构建、输入快照和运行日志已删除。
+
+仍保留第 110 节 mode=2 的 817.22 μs 版本及第 111 节 token/DSpark 通过结论。
+mode=1 相对旧单卡基线没有确认收益；不能用当前单卡模式差异直接定最终整模型主口径。
+下一步补齐真实模型测量，分别采无 profiler 完整步设备时间和各层 HC_pre→HC_post
+设备首末区间，再按真实关键路径继续性能版优化。750 μs 目标仍未完成。
+
+证据：[两项撤回记录](results/csa_baseline_20260926/perf_qproj_upstream/comparison.json)、
+[mode=1 原始报告](results/csa_baseline_20260926/perf_qproj_upstream/mode1/report.json)。
