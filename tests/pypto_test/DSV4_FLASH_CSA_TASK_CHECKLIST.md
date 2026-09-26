@@ -266,7 +266,18 @@ Simpler `a54c05095` 更新 ISA pin，重建 Python 扩展与 A2/A3 两套 runtim
 **出口**：baseline 含配置、版本、逐元素结果、状态、样本和测量范围，
 能够支撑后续同输入 A/B；尚未达到最终性能目标不妨碍基线成立。
 **产物**：`results/<本轮目录>/baseline/`。
-**依赖**：A1～A4。**占卡**：单卡优先，整模型 16 卡。**状态**：待做。
+**依赖**：A1～A4。**占卡**：单卡优先，整模型 16 卡。**状态**：进行中。
+
+2026-09-26：新入口 `dsv4_csa_single_layer.py` 使用当前 release 的正式第 2 层权重、
+Native builder 和真实物理页布局，构造单卡输入/历史，不加载 MoE。
+任务 `task_20260926_111536_305102231717` 完成 B4/S6/H8192、精度版 mode=0 对照：
+Native/PTO 各自两次同初态执行的输出、Top-K、全部 cache/state 均精确一致；
+metadata、slot 外逻辑行、页 padding 和首尾保护区检查通过，无非有限值。
+两侧层输出 max_abs=0.015625；Indexer INT8 cache 有 2 个元素不同、scale 精确一致；
+Top-K 有 10292 个位置不同，尚未分析集合/顺序与边界选择差异，不能据此判定精度通过。
+报告为 **MEASURED**，合成历史不代表真实模型验收。
+证据及调用前 schema=2 快照：`results/csa_baseline_20260926/native_b4h8192_precision_nd_v2/`。
+本项仍需性能版、NZ/graph 受影响路径和正式 16 卡基线；只补这些缺口。
 
 ## 6. 后续开发目标
 

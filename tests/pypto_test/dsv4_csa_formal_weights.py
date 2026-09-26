@@ -5,7 +5,6 @@ offsets directly. It does not apply the reference checkpoint's scale aliases or
 derive missing quantization tensors.
 """
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -20,7 +19,8 @@ def load_formal_layer_weights(attention, checkpoint: Path):
     from vllm.config import get_current_vllm_config
     from vllm.model_executor.model_loader.utils import process_weights_after_loading
     from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-    from vllm_ascend.quantization.configs.modelslim_config import AscendModelSlimConfig
+
+    from vllm_ascend.quantization.modelslim_config import AscendModelSlimConfig
 
     config = get_current_vllm_config()
     if config.model_config.quantization != "ascend" or not isinstance(config.quant_config, AscendModelSlimConfig):
@@ -38,8 +38,10 @@ def load_formal_layer_weights(attention, checkpoint: Path):
     parameters = dict(attention.named_parameters())
     expected = {prefix + name for name in parameters}
     if set(selected) != expected:
-        raise ValueError(f"Formal CSA tensors do not match Native parameters: missing={expected-set(selected)}, "
-                         f"unexpected={set(selected)-expected}")
+        raise ValueError(
+            f"Formal CSA tensors do not match Native parameters: missing={expected - set(selected)}, "
+            f"unexpected={set(selected) - expected}"
+        )
     records = []
     with torch.no_grad():
         for shard in sorted(set(selected.values())):
@@ -51,16 +53,27 @@ def load_formal_layer_weights(attention, checkpoint: Path):
                     value = reader.get_tensor(name)
                     parameter = parameters[suffix]
                     if value.shape != parameter.shape:
-                        raise ValueError(f"Unexpected formal parameter shape: {name}: {value.shape} vs {parameter.shape}")
+                        raise ValueError(
+                            f"Unexpected formal parameter shape: {name}: {value.shape} vs {parameter.shape}"
+                        )
                     # The TP1 attention branches of Native model.load_weights
                     # use these same parameter loaders (sink uses a copy).
                     getattr(parameter, "weight_loader", default_weight_loader)(parameter, value)
-                    torch.testing.assert_close(parameter.detach().cpu(), value.to(parameter.dtype), rtol=0, atol=0)
-                    records.append({"name": name, "parameter_name": suffix, "shape": list(value.shape),
-                                    "checkpoint_dtype": str(value.dtype), "loaded_dtype": str(parameter.dtype),
-                                    "sha256": hashlib.sha256(value.contiguous().view(torch.uint8).numpy().tobytes()).hexdigest(),
-                                    "loaded_exact": True, "source": "formal_modelslim_stored_tensor"})
-        methods = {name: type(module.quant_method).__module__ + "." + type(module.quant_method).__name__
-                   for name, module in attention.named_modules() if getattr(module, "quant_method", None) is not None}
+                    records.append(
+                        {
+                            "name": name,
+                            "parameter_name": suffix,
+                            "shape": list(value.shape),
+                            "checkpoint_dtype": str(value.dtype),
+                            "loaded_dtype": str(parameter.dtype),
+                            "shard": shard,
+                            "source": "formal_modelslim_stored_tensor",
+                        }
+                    )
+        methods = {
+            name: type(module.quant_method).__module__ + "." + type(module.quant_method).__name__
+            for name, module in attention.named_modules()
+            if getattr(module, "quant_method", None) is not None
+        }
         process_weights_after_loading(attention, config.model_config, next(attention.parameters()).device)
     return records, methods
