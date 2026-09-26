@@ -60,15 +60,19 @@ def device_tasks(directory, rank):
 
 def layer_intervals(rows, side, steps=3):
     """按主图及固定模型的 attention/FFN 次序映射，计数或次序不符即拒绝。"""
+    def is_op(row, name):
+        # CANN 同一图可导出算子名或带编译后缀的 kernel 名；保留原始名称，只统一识别边界。
+        return row["name"] == name or row["name"].startswith(name + "_")
+
     targets = set(range(2, 43, 2))
     native_per_step = 86 - (len(targets) if side == "pto" else 0)
-    counts = Counter(row["model"] for row in rows if row["name"] == "HcPre")
+    counts = Counter(row["model"] for row in rows if is_op(row, "HcPre"))
     models = [model for model, count in counts.items()
               if model not in (None, 4294967295) and count == steps * native_per_step]
     require(len(models) == 1, f"{side}: 不能唯一识别 43 层主图，HcPre 图计数={dict(counts)}")
     model = models[0]
-    pre = [row for row in rows if row["model"] == model and row["name"] == "HcPre"]
-    post = [row for row in rows if row["model"] == model and row["name"] == "HcPost"]
+    pre = [row for row in rows if row["model"] == model and is_op(row, "HcPre")]
+    post = [row for row in rows if row["model"] == model and is_op(row, "HcPost")]
     require(len(pre) == len(post), f"{side}: HC_pre/post 不配对")
 
     def end(row):
@@ -112,7 +116,7 @@ def layer_intervals(rows, side, steps=3):
             item = segment[index]
             start = item["start_ns"]
             # 首次 compact metadata 可能在 PTO 根 kernel 前生产；复用层不得重复计费。
-            leading = [row for row in in_step if row["name"] == "CompressorMetadata" and
+            leading = [row for row in in_step if is_op(row, "CompressorMetadata") and
                        segment[index - 1]["end_ns"] <= row["start_ns"] and end(row) <= start]
             if side == "pto" and leading:
                 start = min(row["start_ns"] for row in leading)

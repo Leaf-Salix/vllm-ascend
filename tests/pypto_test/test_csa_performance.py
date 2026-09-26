@@ -149,10 +149,13 @@ def test_steady_covers_sampling_and_rejects_unfinished_cycles(observer, monkeypa
 
 
 @pytest.mark.parametrize("missing_worker", [False, True])
-def test_layer_mapping_counts_overlap_once_and_rejects_missing_tasks(missing_worker):
+@pytest.mark.parametrize("kernel_names", [False, True])
+def test_layer_mapping_counts_overlap_once_and_rejects_missing_tasks(missing_worker, kernel_names):
     rows = []
 
     def task(name, time, duration, model=49):
+        if kernel_names and name in ("HcPre", "HcPost", "CompressorMetadata"):
+            name += "_c12a9d608e5abdbd1728e849208025ff_0"
         rows.append({"name": name, "start_ns": time * 1000, "duration_ns": duration * 1000,
                      "model": model, "task": len(rows)})
 
