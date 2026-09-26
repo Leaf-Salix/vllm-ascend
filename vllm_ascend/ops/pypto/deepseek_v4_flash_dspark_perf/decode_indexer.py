@@ -150,7 +150,9 @@ TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
 
-REPACK_WORKERS = 48  # indexer 键重排的 AIV 通道数
+REPACK_WORKERS = 192  # indexer 键重排的 AIV 通道数；repack 是 DMA 启动延迟受限，
+# 块数多才能把各页不齐的耗时摊平并让更多 DMA 在飞。实测 128K/B16 上 48→192 让 PTO
+# 从 1935.0 降到 1770.1（-8.5%），96 起就有 -6%，144/192 饱和（见验证日志 §147）。
 
 SCORE_TILE = 384
 
