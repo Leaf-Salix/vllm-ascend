@@ -419,20 +419,13 @@ def indexer_score_topk_forest(
     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
-    # ---- 键/scale 重排 ----------------------------------------------------
-    # Native 把一页的 32 个 INT8 键（4096 字节）和 32 个 FP16 scale（64 字节）放在
-    # 同一块分配里，页跨度 4160。4160 % 128 = 64，所以 [blocks*32, 128] 这个二维
-    # 视图不存在，打分侧没法像上游那样用 gather_row 把整页直搬进 L1（L1 是 16x32
-    # 分形，落点行号必须是 16 的倍数、列号是 32 的倍数；按页搬字节再 reshape 会
-    # 被拒，逐行转置装填也会被拒）。原先的办法是先搬进 UB 再 aic_gather 进 L1，
-    # 多一跳，而且每页一次 DMA。
-    #
-    # 这里改为每步先做一次重排：把本步可见的页按逻辑页序拷成紧凑的
-    # [b_dim * repack_pages * BLOCK_SIZE, IDX_HEAD_DIM]，scale 拷成
-    # [b_dim, repack_pages * BLOCK_SIZE]。之后打分侧读的是连续行，
-    # 既能整块直搬 L1，也能把一个 lane 的 6 页并成一次 DMA。
-    # 重排本身只读一遍可见 cache（每请求一次），而打分侧原来每个 query 都要读一遍
-    # （同一请求的 S 个 query 读的是同一段历史），所以多出来的搬运是小头。
+    # Native 每页含 4096B INT8 key 和 64B FP16 scale，上游两者分开存储。
+    # 4160B 页跨度不整除 128，不能直接视为紧凑 [blocks*32,128]；但 0/64B
+    # 两个 GM 别名可以按页直读 L1，并不必然需要重排。该直读候选主档完整区间
+    # 为 837.36us，未优于保留版 817.22us（验证日志第 116 节），因此仍用重排。
+    # 每请求每步只读一次可见页，key/scale 按逻辑页序紧凑化；随后 S 个 query
+    # 都能将一个 lane 的 6 页合并为一次读取，减少评分侧重复发起 DMA。
+    # 这是一项性能取舍；应比较 repack→score→publish 全链，不能只比较任务数。
     repack_max_len = 0
     for repack_batch in pl.range(b_dim):
         repack_max_len = pl.max(repack_max_len, pl.read(kv_seq_lens, [repack_batch]) // COMPRESS_RATIO)

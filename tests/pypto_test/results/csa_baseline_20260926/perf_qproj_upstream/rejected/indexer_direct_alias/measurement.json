@@ -1,0 +1,169 @@
+{
+  "task_id": "task_20260926_175726_172806611153",
+  "base_commit": "12f23c56",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "decision": "REJECTED: no full-interval performance gain; retained repack implementation restored",
+  "implementation": "Native cache zero-copy GM aliases at offsets 0/64B; per-page key load straight into L1; FP16 scales stay in the Native page; removes 48 repack workers",
+  "upstream_difference": "pypto-lib uses a separate contiguous key pool and FP32 scale pool; Native has a 64B-aligned page stride with INT8 keys and FP16 scales in one allocation. Key address remainder selects the GM alias. Score arithmetic unchanged.",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "warmup": 5,
+  "iters": 20,
+  "timing": {
+    "native": {
+      "samples_us": [
+        928.9000034332275,
+        934.0199828147888,
+        928.8600087165833,
+        927.1000027656555,
+        930.5400252342224,
+        923.9400029182434,
+        931.7600131034851,
+        933.7199926376343,
+        934.6200227737427,
+        930.3799867630005,
+        928.6400079727173,
+        934.9200129508972,
+        931.5599799156189,
+        924.780011177063,
+        927.4799823760986,
+        926.7600178718567,
+        931.0399889945984,
+        933.7000250816345,
+        924.8200058937073,
+        932.7999949455261
+      ],
+      "us_min": 923.9400029182434,
+      "us_p50": 930.4600059986115,
+      "us_p95": 934.6200227737427,
+      "us_max": 934.9200129508972
+    },
+    "pto": {
+      "samples_us": [
+        854.9799919128418,
+        804.5600056648254,
+        836.8600010871887,
+        825.1399993896484,
+        857.5599789619446,
+        834.0399861335754,
+        816.1600232124329,
+        848.9000201225281,
+        808.3800077438354,
+        843.9000248908997,
+        803.380012512207,
+        800.1400232315063,
+        818.4599876403809,
+        843.3399796485901,
+        826.740026473999,
+        847.6999998092651,
+        839.9400115013123,
+        841.480016708374,
+        837.8599882125854,
+        854.0400266647339
+      ],
+      "us_min": 800.1400232315063,
+      "us_p50": 837.3599946498871,
+      "us_p95": 854.9799919128418,
+      "us_max": 857.5599789619446
+    }
+  },
+  "guard_status": {
+    "swa": "PASS",
+    "compressed": "PASS",
+    "state": "PASS",
+    "indexer": "PASS",
+    "indexer_state": "PASS",
+    "metadata.positions": "PASS",
+    "metadata.swa.query_start_loc": "PASS",
+    "metadata.swa.seq_lens": "PASS",
+    "metadata.swa.block_table": "PASS",
+    "metadata.swa.slot_mapping": "PASS",
+    "metadata.swa.start_pos": "PASS",
+    "metadata.compressed.query_start_loc": "PASS",
+    "metadata.compressed.seq_lens": "PASS",
+    "metadata.compressed.block_table": "PASS",
+    "metadata.compressed.start_pos": "PASS",
+    "metadata.state.query_start_loc": "PASS",
+    "metadata.state.seq_lens": "PASS",
+    "metadata.state.block_table": "PASS",
+    "metadata.state.slot_mapping": "PASS",
+    "metadata.state.start_pos": "PASS",
+    "metadata.indexer.query_start_loc": "PASS",
+    "metadata.indexer.seq_lens": "PASS",
+    "metadata.indexer.block_table": "PASS",
+    "metadata.indexer.start_pos": "PASS",
+    "metadata.indexer_state.query_start_loc": "PASS",
+    "metadata.indexer_state.seq_lens": "PASS",
+    "metadata.indexer_state.block_table": "PASS",
+    "metadata.indexer_state.slot_mapping": "PASS",
+    "metadata.indexer_state.start_pos": "PASS",
+    "metadata.compressed.compact_slots": "PASS",
+    "metadata.indexer.compact_slots": "PASS"
+  },
+  "eager_vs_graph": {
+    "x_out": {
+      "status": "FAIL",
+      "nonfinite": 0,
+      "max_abs": 0.015625,
+      "mismatches": 2989
+    },
+    "idx_topk": {
+      "status": "FAIL",
+      "nonfinite": 0,
+      "max_abs": null,
+      "mismatches": 280
+    },
+    "swa.0": {
+      "status": "FAIL",
+      "nonfinite": 0,
+      "max_abs": 1.9073486328125e-06,
+      "mismatches": 2
+    },
+    "compressed.0": {
+      "status": "PASS",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "mismatches": 0
+    },
+    "state.0": {
+      "status": "PASS",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "mismatches": 0
+    },
+    "indexer.0": {
+      "status": "PASS",
+      "nonfinite": 0,
+      "max_abs": null,
+      "mismatches": 0
+    },
+    "indexer.1": {
+      "status": "PASS",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "mismatches": 0
+    },
+    "indexer_state.0": {
+      "status": "PASS",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "mismatches": 0
+    }
+  },
+  "numerical_note": "atomic=1 replay/eager are not bit identical; this performance-rejected candidate has no independent numerical or model acceptance.",
+  "incore_and_scheduler": "not measured for this rejected candidate; the timing above is full-interval event timing, not a new Worker trace",
+  "reproduce_after_applying_patch": "bash tests/pypto_test/run_csa_single_layer.sh <output-dir> --batch 16 --history 8192 --weight-nz-mode 2 --variant performance --atomic-add 1 --deterministic-level 0 --timing-iters 20 --timing-warmup 5 --timing-metadata reuse; submit through task-submit --device auto"
+}

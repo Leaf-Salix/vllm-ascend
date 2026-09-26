@@ -1,0 +1,82 @@
+{
+  "task_id": "task_20260926_180807_18378152574",
+  "base_commit": "12f23c56",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "decision": "REJECTED: no full-interval gain; revised to 12 history workers gated behind weights projection for a separate candidate",
+  "implementation": "48 history repack workers without data-producer dependency; 16 tail repack workers wait for cache write; score waits for both via a TaskId array",
+  "upstream_difference": "Upstream reads separate key/scale pages in leaf and has no repack. Integration preserves Native allocation and existing compact consumer; moves read-only history ahead of cache writes. Arithmetic unchanged.",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "timing": {
+    "native": {
+      "samples_us": [
+        917.5000190734863,
+        918.1600213050842,
+        916.920006275177,
+        918.2800054550171,
+        916.1400198936462,
+        909.3199968338013,
+        912.7799868583679,
+        916.3200259208679,
+        913.9999747276306,
+        913.9800071716309,
+        916.0799980163574,
+        913.9599800109863,
+        915.1999950408936,
+        917.680025100708,
+        914.7999882698059,
+        923.2400059700012,
+        913.7399792671204,
+        916.379988193512,
+        918.8399910926819,
+        908.29998254776
+      ],
+      "us_min": 908.29998254776,
+      "us_p50": 916.1100089550018,
+      "us_p95": 918.8399910926819,
+      "us_max": 923.2400059700012
+    },
+    "pto": {
+      "samples_us": [
+        856.000006198883,
+        816.5000081062317,
+        847.5800156593323,
+        877.240002155304,
+        871.2199926376343,
+        844.3800210952759,
+        882.4800252914429,
+        854.5200228691101,
+        837.0599746704102,
+        864.0199899673462,
+        844.219982624054,
+        841.4199948310852,
+        846.8000292778015,
+        863.2400035858154,
+        860.260009765625,
+        830.7200074195862,
+        850.6399989128113,
+        863.6999726295471,
+        852.400004863739,
+        830.6999802589417
+      ],
+      "us_min": 816.5000081062317,
+      "us_p50": 851.5200018882751,
+      "us_p95": 877.240002155304,
+      "us_max": 882.4800252914429
+    }
+  },
+  "incore_and_scheduler": "Not separately measured. Early 48-worker AIV contention is a hypothesis, not a measured cause."
+}

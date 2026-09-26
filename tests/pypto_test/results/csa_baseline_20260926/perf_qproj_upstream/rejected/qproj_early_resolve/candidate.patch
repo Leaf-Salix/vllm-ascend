@@ -1,0 +1,15 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index bc26b64b..4cb0222b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -503,7 +503,9 @@ def _q_proj_q_matmul_nz(
+     """Use upstream's full-K resident weight and compact tail matmul on Native NZ."""
+     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+     qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+-    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
++    with pl.spmd(
++        QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep], allow_early_resolve=True
++    ) as qproj_tid:
+         qproj_worker = pl.tile.get_block_idx()
+         # Keep the column offset provably nonnegative after NZ outlining.
+         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):

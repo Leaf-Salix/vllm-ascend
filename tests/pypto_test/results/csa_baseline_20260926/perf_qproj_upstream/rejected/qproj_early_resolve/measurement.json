@@ -1,0 +1,84 @@
+{
+  "task_id": "task_20260926_180024_17437314346",
+  "base_commit": "12f23c56",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "decision": "REJECTED: full-interval regression; producer flag restored to False",
+  "upstream_difference": "Upstream and retained integration both leave Q expansion allow_early_resolve disabled; candidate enables it only on performance NZ to permit pre-staging dependent AIV work. Runtime gates preserve all dependencies.",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "warmup": 5,
+  "iters": 20,
+  "timing": {
+    "native": {
+      "samples_us": [
+        920.740008354187,
+        920.0800061225891,
+        919.9600219726562,
+        912.5999808311462,
+        923.6400127410889,
+        919.8600053787231,
+        918.2999730110168,
+        921.0799932479858,
+        921.2999939918518,
+        913.7799739837646,
+        918.8200235366821,
+        919.5399880409241,
+        920.6399917602539,
+        919.2399978637695,
+        918.6199903488159,
+        919.439971446991,
+        915.3800010681152,
+        920.6399917602539,
+        921.239972114563,
+        923.0599999427795
+      ],
+      "us_min": 912.5999808311462,
+      "us_p50": 919.9100136756897,
+      "us_p95": 923.0599999427795,
+      "us_max": 923.6400127410889
+    },
+    "pto": {
+      "samples_us": [
+        845.8799719810486,
+        867.9400086402893,
+        868.3599829673767,
+        849.7400283813477,
+        834.119975566864,
+        851.8999814987183,
+        853.1799912452698,
+        846.6200232505798,
+        858.2199811935425,
+        858.6400151252747,
+        878.3000111579895,
+        859.3999743461609,
+        891.5799856185913,
+        865.8999800682068,
+        853.7399768829346,
+        874.3399977684021,
+        858.9400053024292,
+        864.2200231552124,
+        875.7799863815308,
+        841.2399888038635
+      ],
+      "us_min": 834.119975566864,
+      "us_p50": 858.7900102138519,
+      "us_p95": 878.3000111579895,
+      "us_max": 891.5799856185913
+    }
+  },
+  "incore_and_scheduler": "Not separately measured for this rejected candidate; no new Worker trace.",
+  "reproduce_after_applying_patch": "bash tests/pypto_test/run_csa_single_layer.sh <output-dir> --batch 16 --history 8192 --weight-nz-mode 2 --variant performance --atomic-add 1 --deterministic-level 0 --timing-iters 20 --timing-warmup 5 --timing-metadata reuse; submit through task-submit --device auto"
+}

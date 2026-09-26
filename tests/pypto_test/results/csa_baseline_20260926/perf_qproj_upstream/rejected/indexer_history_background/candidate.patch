@@ -1,0 +1,151 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 99e938bd..bf3c88f2 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -150,7 +150,9 @@ TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
+ 
+ TOPK_SCORE_WORKERS = 24  # Top-K score workers
+ 
+-REPACK_WORKERS = 48  # indexer 键重排的 AIV 通道数
++REPACK_WORKERS = 12  # 历史页在投影阶段后台重排，避免占满 48 个 AIV
++REPACK_TAIL_WORKERS = 16
++REPACK_NEW_ROWS = (S + COMPRESS_RATIO - 1) // COMPRESS_RATIO
+ 
+ SCORE_TILE = 384
+ 
+@@ -419,20 +421,9 @@ def indexer_score_topk_forest(
+     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
+     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
+     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+-    # ---- 键/scale 重排 ----------------------------------------------------
+-    # Native 把一页的 32 个 INT8 键（4096 字节）和 32 个 FP16 scale（64 字节）放在
+-    # 同一块分配里，页跨度 4160。4160 % 128 = 64，所以 [blocks*32, 128] 这个二维
+-    # 视图不存在，打分侧没法像上游那样用 gather_row 把整页直搬进 L1（L1 是 16x32
+-    # 分形，落点行号必须是 16 的倍数、列号是 32 的倍数；按页搬字节再 reshape 会
+-    # 被拒，逐行转置装填也会被拒）。原先的办法是先搬进 UB 再 aic_gather 进 L1，
+-    # 多一跳，而且每页一次 DMA。
+-    #
+-    # 这里改为每步先做一次重排：把本步可见的页按逻辑页序拷成紧凑的
+-    # [b_dim * repack_pages * BLOCK_SIZE, IDX_HEAD_DIM]，scale 拷成
+-    # [b_dim, repack_pages * BLOCK_SIZE]。之后打分侧读的是连续行，
+-    # 既能整块直搬 L1，也能把一个 lane 的 6 页并成一次 DMA。
+-    # 重排本身只读一遍可见 cache（每请求一次），而打分侧原来每个 query 都要读一遍
+-    # （同一请求的 S 个 query 读的是同一段历史），所以多出来的搬运是小头。
++    # Native 每页包含 4096B INT8 key 和 64B FP16 scale，上游两者分开存储。
++    # 先按逻辑页序紧凑化，评分侧每个 lane 可合并读 6 页，避免每个 query 重复页 DMA。
++    # 0/64B 两个 GM 别名也能直接读取 Native 页，但主档完整区间实测没有收益。
+     repack_max_len = 0
+     for repack_batch in pl.range(b_dim):
+         repack_max_len = pl.max(repack_max_len, pl.read(kv_seq_lens, [repack_batch]) // COMPRESS_RATIO)
+@@ -445,42 +436,81 @@ def indexer_score_topk_forest(
+     repack_rows = repack_pages * BLOCK_SIZE
+     key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
+     scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
+-    with pl.spmd(
+-        REPACK_WORKERS, name_hint="indexer_key_repack", deps=[cache_write_tid], allow_early_resolve=True
+-    ) as repack_tid:
+-        repack_worker = pl.tile.get_block_idx()
+-        for repack_unit in pl.range(repack_worker, b_dim * repack_pages, REPACK_WORKERS):
+-            repack_b = repack_unit // repack_pages
+-            repack_page = repack_unit - repack_b * repack_pages
+-            repack_len = pl.read(kv_seq_lens, [repack_b]) // COMPRESS_RATIO
+-            repack_valid = pl.max(pl.min(repack_len, TOPK_MAX_CANDIDATES), 0)
+-            # 超出本请求可见范围的页钳到最后一页：紧凑缓冲里对应的行不会被读到
+-            # （打分侧按 valid_count 截断），只是不留未初始化数据。
+-            repack_safe = pl.min(repack_page, pl.max((repack_valid - 1) // BLOCK_SIZE, 0))
+-            repack_block = pl.cast(
+-                pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
+-            )
+-            # 键与 scale 在页内连续（4096 + 32*2 = INDEXER_MIN_PAGE_BYTES），一次读完。
+-            # 分两次读会让 DMA 次数翻倍，而 repack 的开销就是次数乘以启动开销。
+-            repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
+-            repack_bytes = pl.gather_row(
+-                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
+-            )
+-            repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
+-            key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
+-                repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
+-            )
+-            repack_scale_col = repack_page * BLOCK_SIZE
+-            scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
+-                pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
+-            )
++    repack_tids = pl.array.create(2, pl.TASK_ID)
++    # S=6 最多新增 2 个压缩行，因此只可能改动末尾 2 个逻辑页。
++    # 更早的历史页不与本步 cache 写回重叠，可提前重排。manual_scope 只取消
++    # 整块 cache/compact 描述符导致的假依赖；末尾页仍显式等待写回完成。
++    with pl.manual_scope():
++        with pl.spmd(
++            REPACK_WORKERS, name_hint="indexer_history_repack",
++            deps=[weights_tid], allow_early_resolve=True
++        ) as history_repack_tid:
++            history_worker = pl.tile.get_block_idx()
++            for history_unit in pl.range(history_worker, b_dim * repack_pages, REPACK_WORKERS):
++                history_b = history_unit // repack_pages
++                history_page = history_unit - history_b * repack_pages
++                history_len = pl.read(kv_seq_lens, [history_b]) // COMPRESS_RATIO
++                history_valid = pl.max(pl.min(history_len, TOPK_MAX_CANDIDATES), 0)
++                history_pages = pl.max(
++                    (history_valid + BLOCK_SIZE - 1) // BLOCK_SIZE - REPACK_NEW_ROWS, 0
++                )
++                if history_page < history_pages:
++                    history_block = pl.cast(
++                        pl.read(idx_block_table_flat, [history_b * table_columns + history_page]), pl.INDEX
++                    )
++                    history_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
++                    history_bytes = pl.gather_row(
++                        history_bytes, idx_kv_cache, [0, 0], [history_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
++                    )
++                    history_dst = (history_b * repack_pages + history_page) * BLOCK_SIZE
++                    key_compact[history_dst : history_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
++                        history_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
++                    )
++                    history_scale_col = history_page * BLOCK_SIZE
++                    scale_compact[
++                        history_b : history_b + 1, history_scale_col : history_scale_col + BLOCK_SIZE
++                    ] = pl.reinterpret_view(
++                        history_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16
++                    )
++
++        repack_tids[0] = history_repack_tid
++        with pl.spmd(
++            pl.min(b_dim, REPACK_TAIL_WORKERS), name_hint="indexer_tail_repack",
++            deps=[cache_write_tid], allow_early_resolve=True,
++        ) as tail_repack_tid:
++            tail_worker = pl.tile.get_block_idx()
++            for tail_b in pl.range(tail_worker, b_dim, pl.min(b_dim, REPACK_TAIL_WORKERS)):
++                tail_len = pl.read(kv_seq_lens, [tail_b]) // COMPRESS_RATIO
++                tail_valid = pl.max(pl.min(tail_len, TOPK_MAX_CANDIDATES), 0)
++                tail_begin = pl.max(
++                    (tail_valid + BLOCK_SIZE - 1) // BLOCK_SIZE - REPACK_NEW_ROWS, 0
++                )
++                for tail_page in pl.range(tail_begin, repack_pages):
++                    tail_safe = pl.min(tail_page, pl.max((tail_valid - 1) // BLOCK_SIZE, 0))
++                    tail_block = pl.cast(
++                        pl.read(idx_block_table_flat, [tail_b * table_columns + tail_safe]), pl.INDEX
++                    )
++                    tail_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
++                    tail_bytes = pl.gather_row(
++                        tail_bytes, idx_kv_cache, [0, 0], [tail_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
++                    )
++                    tail_dst = (tail_b * repack_pages + tail_page) * BLOCK_SIZE
++                    key_compact[tail_dst : tail_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
++                        tail_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
++                    )
++                    tail_scale_col = tail_page * BLOCK_SIZE
++                    scale_compact[tail_b : tail_b + 1, tail_scale_col : tail_scale_col + BLOCK_SIZE] = (
++                        pl.reinterpret_view(tail_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
++                    )
++
++        repack_tids[1] = tail_repack_tid
+ 
+     # 性能版不外提 head 系数：上游在 leaf 内按 query 现算，省掉一个独占关键路径
+     # 约 40.7us 的任务；精度版保留外提是为了配合 Cube 规约的 FP16 权重行布局。
+     with pl.spmd(
+         TOPK_SCORE_WORKERS,
+         name_hint="indexer_score_topk_leaf",
+-        deps=[qh_quant_tid, weights_tid, repack_tid],
++        deps=[qh_quant_tid, weights_tid, repack_tids],
+         allow_early_resolve=True,
+         optimizations=[pl.cross_core_slot(slot_num=1)],
+     ) as score_tid:

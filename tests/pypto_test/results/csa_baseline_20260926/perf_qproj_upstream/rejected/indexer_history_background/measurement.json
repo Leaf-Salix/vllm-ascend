@@ -1,0 +1,105 @@
+{
+  "task_id": "task_20260926_181042_18506708100",
+  "swimlane_task_id": "task_20260926_181242_1861901285",
+  "base_commit": "12f23c56",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "decision": "REJECTED: no full-interval performance gain; original 48-worker repack restored",
+  "implementation": "12 history workers wait for weights projection; 16 tail workers wait for cache write. Score waits for both via a TaskId array. Excludes the last ceil(S/compress_ratio) logical pages from early reads.",
+  "upstream_difference": "Upstream has separate key/scale pools and loads pages in score. Candidate retains the Native cache allocation and existing per-request compact buffer; changes scheduling without changing score arithmetic.",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "timing": {
+    "native": {
+      "samples_us": [
+        926.9400238990784,
+        924.4999885559082,
+        925.7000088691711,
+        928.3199906349182,
+        923.30002784729,
+        925.5599975585938,
+        922.9999780654907,
+        930.4400086402893,
+        925.5200028419495,
+        922.9999780654907,
+        924.7000217437744,
+        919.8399782180786,
+        925.1800179481506,
+        928.3000230789185,
+        927.6599884033203,
+        925.279974937439,
+        934.0000152587891,
+        928.600013256073,
+        920.4999804496765,
+        925.7000088691711
+      ],
+      "us_min": 919.8399782180786,
+      "us_p50": 925.5400002002716,
+      "us_p95": 930.4400086402893,
+      "us_max": 934.0000152587891
+    },
+    "pto": {
+      "samples_us": [
+        836.9799852371216,
+        834.9400162696838,
+        819.6600079536438,
+        832.859992980957,
+        827.9600143432617,
+        848.9199876785278,
+        839.8200273513794,
+        844.4399833679199,
+        835.7399702072144,
+        820.6599950790405,
+        839.0200138092041,
+        843.7600135803223,
+        868.3599829673767,
+        837.3000025749207,
+        837.4599814414978,
+        830.6000232696533,
+        849.7599959373474,
+        871.2199926376343,
+        886.4200115203857,
+        870.8000183105469
+      ],
+      "us_min": 819.6600079536438,
+      "us_p50": 838.239997625351,
+      "us_p95": 871.2199926376343,
+      "us_max": 886.4200115203857
+    }
+  },
+  "swimlane_observations": {
+    "baseline_and_candidate_worker_span_us": [
+      806.14,
+      829.16
+    ],
+    "baseline_and_candidate_worker_count": [
+      1131,
+      1111
+    ],
+    "q_dequant_span_us": [
+      125.66,
+      36.72
+    ],
+    "qr_projection_first_us": [
+      94.18,
+      151.12
+    ],
+    "topk_publish_last_us": [
+      426.82,
+      454.22
+    ]
+  },
+  "causal_limit": "Trace proves that earlier history reads and a narrower Q-dequant window did not shorten the full chain; why QR dispatch moved later has not been isolated."
+}
