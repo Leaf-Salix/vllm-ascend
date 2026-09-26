@@ -1,0 +1,13 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index bc26b64b..fb6a707f 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -131,7 +131,7 @@ QR_NORM_WORKERS = 16  # qr_rms_norm_quant 的 worker 上限，上游值
+ 
+ Q_ROPE_H_TILE = 4  # heads per fused qproj dequant/rms/rope task
+ 
+-Q_DEQUANT_WORKERS = 48
++Q_DEQUANT_WORKERS = 24  # 分两块处理，给并发的 Indexer 分支留出 AIV。
+ 
+ assert QPROJ_MM_N_TILE * QPROJ_M_TILE * 4 <= 128 * 1024  # L0C Acc cap
+ 

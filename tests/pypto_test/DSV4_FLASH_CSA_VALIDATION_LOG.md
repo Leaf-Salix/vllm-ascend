@@ -4065,3 +4065,60 @@ Top-K 发布晚约 27 μs，注意力随之晚约 29 μs，整层 Worker 区间�
 [核内/调度汇总](results/csa_baseline_20260926/perf_qproj_upstream/rejected/indexer_history_background/swimlane_summary.json)、
 [计时与决策](results/csa_baseline_20260926/perf_qproj_upstream/rejected/indexer_history_background/measurement.json)。
 仅保留补丁、样本与这一份定位必需的原始泳道；已删除本轮候选编译产物和重复日志。
+
+## 118. 投影依赖顺序的两个反例（2026-09-26）
+
+针对“任务差异是否导致调度差距”，继续固定第 116 节单卡第二层口径；
+核内函数、Native 权重/cache/state 接口及 HC 前处理的完整 scope 均保留，
+仅在性能版根入口拆开已有阶段函数，尝试显式安排 Cube 投影。
+每项仍是 5 次预热、20 次图重放设备采样，没有扩大正确性矩阵或启动 16 卡。
+
+| 编排候选 | PTO p50/p95（μs） | 同次 Native p50（μs） | 任务 |
+| --- | --- | --- | --- |
+| QR→Indexer Q→Indexer Compressor→Q 展开→主 Compressor→Query Hadamard→KV Hadamard | 907.18 / 929.38 | 923.55 | task_20260926_182756_198198416773 |
+| 仅两个 Compressor 等 Indexer Q，Q 展开与 Query Hadamard 恢复并发 | 880.88 / 893.18 | 933.88 | task_20260926_182956_199480212332 |
+
+第一项借鉴 pypto-lib `216456332c2a74d89cca23b7824dab264ce34bff` 的 **TP 入口**；
+上游 TP1 入口本身没有这条完整显式链。没有移植 TP 通信、projection payload 打包、
+短上下文跳过评分或 post-leaf 主 cache fence，不把参考的编排说成完全相同的上游实现。
+初次 CPU 编译纠正了 Native RoPE helper 的参数：Native 已有交错 cos，无需上游的 cos 展开。
+修正后全链 CPU 编译通过；两项设备任务 completed/exit=0，功能保护通过。
+
+两项都明显劣于保留版 817.22/843.12 μs，生产源码已撤回。
+这些结果否定了“直接复制上游 TP 的顺序即可改善当前 TP1”的猜测。
+根入口拆分也改变了临时张量的 scope；没有另采泳道，故不能定量拆出
+显式依赖、scope 与并发资源竞争各自贡献，也不声称已证明 QR 更早启动。
+atomic=1 的功能保护和计时不等于逐元素/整模型验收。
+
+证据：`perf_qproj_upstream/rejected/cube_projection_chain/` 与
+`perf_qproj_upstream/rejected/qr_projection_priority/` 的可重建补丁和原始计时样本。
+下一项恢复原编排，仅调 Q 反量化的 worker 数量，检验局部并发度；
+不再把“任务数量更少”或“局部窗口更窄”当作整层收益。
+
+## 119. 单独调整 Q 反量化并发度与整组准入（2026-09-26）
+
+根入口恢复保留版后，再做两个单变量候选；固定配置、第二层 metadata 复用、
+5 次预热/20 次采样均同第 118 节。PyPTO `88297437`、Simpler `a54c05095` 工作树干净，
+本轮没有修改或更新工具链。
+
+| 候选 | PTO p50/p95（μs） | 同次 Native p50（μs） | 任务 |
+| --- | --- | --- | --- |
+| Q 反量化 48→24 个 worker，主档每个 worker 处理 2 块 | 835.89 / 853.48 | 925.43 | task_20260926_183347_205799310129 |
+| 保留 48 个 worker，仅设置 sync_start=True | 854.24 / 886.56 | 902.78 | task_20260926_183635_207152716987 |
+
+两项均 completed/exit=0，功能保护通过，但未优于保留版 817.22/843.12 μs，均撤回。
+第一项在 B16 下保持原 token/head tile、每块算术与依赖，仅改变一个 worker 承担的块数。
+第二项连任务数也不改，只要求整组资源准入；上游与保留版均无这条要求。
+核对 Simpler 当前 `RUNTIME_LOGIC.md`：normal ready 优先于 early，
+同一来源内 sync_start 优先于 MIX、再到独立 AIC/AIV；整组启动同时增加资源齐备条件。
+这说明派发窗口取决于队列类别、生产者释放与资源占用，不能从任务数直接推算。
+
+没有为这两项补采泳道，因此只报告完整 Event 区间，**不声称已观测到候选的启动窗口缩短**，
+也不由它们的总时间估算调度器自身开销。没有扩大边界、精度或 16 卡测试。
+最小证据保留在 `perf_qproj_upstream/rejected/q_dequant_24_workers/` 与
+`perf_qproj_upstream/rejected/q_dequant_sync_start/`，每项只有补丁和配置/原始样本。
+本轮四个候选的重复编译、输入快照和运行日志均已清理；生产代码恢复原保留版。
+
+下一步转向 O-A 的明确核内差距（当前平均 29.31、历史上游 20.19 μs），先核对
+Native `[G,K,N]` 与上游 `[G,N,K]` 的 L1/L0 搬运和分块实现，保持 Native 存储复用约束。
+任务图仍保留为优化方向，但不再重复已否定的完整投影链、24-worker 或整组启动候选。

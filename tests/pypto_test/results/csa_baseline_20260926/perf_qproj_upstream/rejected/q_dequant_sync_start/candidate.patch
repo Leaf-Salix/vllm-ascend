@@ -1,0 +1,12 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index bc26b64b..f45d27fc 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -545,6 +545,7 @@ def q_proj_q_dequant(
+     for dq_worker in pl.spmd(
+         Q_DEQUANT_WORKERS,
+         name_hint="qproj_dequant_rms_nope_rope",
++        sync_start=True,
+         allow_early_resolve=True,
+     ):
+         # 按本档位的 token 数自适应放大 head 块（上游写法）。恒用 Q_ROPE_H_TILE=4 时

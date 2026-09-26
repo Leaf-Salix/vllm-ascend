@@ -1,0 +1,180 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+index 1291e4f1..095f4a15 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -26,8 +26,19 @@ from .config import (
+     TP as TP_SIZE,
+ )
+ from .decode_compressor_ratio4 import compressor_ratio4
+-from .decode_indexer import indexer
+-from .decode_indexer_compressor import indexer_compressor
++from .decode_indexer import (
++    T_PAD as IDX_T_PAD,
++    TP1_WEIGHTS_WORKERS,
++    indexer_qr_hadamard_mm,
++    indexer_qr_rope,
++    indexer_weights_score,
++)
++from .decode_indexer_compressor import (
++    BS_PAD as IDX_CMP_BS_PAD,
++    indexer_compressor_pool_projected,
++    indexer_compressor_project,
++    indexer_compressor_write,
++)
+ from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
+ from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
+ from .hc_post import hc_post
+@@ -46,7 +57,15 @@ from .layout import (
+     STATE_TABLE_COLUMNS_DYN,
+ )
+ from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
+-from .qkv_proj_rope import qkv_proj_rope
++from .qkv_proj_rope import (
++    QPROJ_M_TILE,
++    QPROJ_T_PAD,
++    kv_proj_rope,
++    q_proj_q_dequant,
++    q_proj_q_matmul,
++    q_proj_qr,
++    rope_prepare,
++)
+ 
+ # Dynamic shape variables.
+ B_DYN = pl.dynamic("B_DYN")  # per-request axis
+@@ -323,23 +342,42 @@ def _decode_csa_tp1_layer(
+     # 创建会被判成 scope 局部张量而参与内存复用。上游 _decode_csa_tp1 也在这里创建。
+     attn_out = pl.create_tensor([t_dim, D], dtype=pl.BF16)
+     with pl.scope():
+-        # Projection-chain dependency marker.
++        # 上游 TP 入口用完整 Cube 依赖链；TP1 仅让两个 Compressor 等待
++        # Indexer Q 投影，优先完成 QR 分支。Q 展开和 Hadamard 继续并发，
++        # 避免把互不依赖的全部投影串行化；Native 页与核内算术保持不变。
+         late_dep = pl.system.task_dummy(deps=[rope_tid])
+-        qkv_proj_rope(
+-            x_normed_t,
+-            wq_a,
+-            wq_b,
+-            wq_b_scale,
+-            wkv,
+-            freqs_cos,
+-            freqs_sin,
+-            gamma_cq,
+-            gamma_ckv,
+-            q,
+-            kv,
+-            qr,
+-            qr_scale,
+-            late_dep,
++        q_sin_signed = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
++        q_swap_idx = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.INT32)
++        rope_prepare(freqs_sin, q_sin_signed, q_swap_idx)
++        qr_i8_matmul = pl.create_tensor([QPROJ_T_PAD, Q_LORA], dtype=pl.INT8)
++        # scale 与 qr_i8 同时产出，通过 Q matmul 的数据链传给反量化。
++        qr_scale_pad = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
++        q_proj_qr(
++            x_normed_t, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad,
++        )
++        qr_bf16 = pl.create_tensor([IDX_T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], dtype=pl.BF16)
++        qr_hadamard_i8 = pl.create_tensor([IDX_T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], dtype=pl.INT8)
++        qr_hadamard_scale_dq = pl.create_tensor([IDX_T_PAD * IDX_N_HEADS, 1], dtype=pl.FP32)
++        idx_qr_mm_tid = indexer_qr_rope(
++            x_normed_t, qr, qr_scale, idx_wq_b, idx_wq_b_scale,
++            freqs_cos, idx_sin_signed, qr_bf16,
++        )
++        idx_values = pl.create_tensor([IDX_CMP_BS_PAD, INNER_OUT_DIM], dtype=pl.FP32)
++        idx_scores = pl.create_tensor([IDX_CMP_BS_PAD, INNER_OUT_DIM], dtype=pl.FP32)
++        idx_pooled_kv = pl.create_tensor([IDX_CMP_BS_PAD, IDX_HEAD_DIM], dtype=pl.FP32)
++        idx_normed_kv = pl.create_tensor([IDX_CMP_BS_PAD, IDX_HEAD_DIM], dtype=pl.BF16)
++        idx_projection_tid = indexer_compressor_project(
++            x_normed_t, inner_wkv, inner_wgate, idx_values, idx_scores,
++            late_dep, idx_qr_mm_tid,
++        )
++        qproj_t_matmul = ((t_dim + QPROJ_M_TILE - 1) // QPROJ_M_TILE) * QPROJ_M_TILE
++        q_proj_i32 = pl.create_tensor([qproj_t_matmul, H * HEAD_DIM], dtype=pl.INT32)
++        q_proj_i32, qproj_tid = q_proj_q_matmul(
++            wq_b, qr_i8_matmul, q_proj_i32, t_dim, late_dep,
++        )
++        kv_proj_rope(
++            x_normed_t, wkv, gamma_ckv, freqs_cos, q_sin_signed, q_swap_idx,
++            kv, late_dep,
+         )
+ 
+         ori_block_num = pl.tensor.dim(kv_cache, 0)
+@@ -374,51 +412,35 @@ def _decode_csa_tp1_layer(
+             cmp_seq_lens,
+             cmp_slot_mapping,
+             state_slot_mapping,
+-            late_dep,
++            idx_qr_mm_tid,
++        )
++        _idx_projection_tid, idx_rms_tid = indexer_compressor_pool_projected(
++            idx_values, idx_scores, inner_compress_state, inner_state_block_table,
++            inner_ape, inner_norm_w, inner_freqs_cos, inner_freqs_sin,
++            idx_row_offsets, position_ids, inner_state_slot_mapping,
++            idx_pooled_kv, idx_normed_kv, idx_projection_tid, idx_qr_mm_tid,
++        )
++        qh_mm_tid, qh_quant_tid = indexer_qr_hadamard_mm(
++            x_normed_t, qr_bf16, hadamard_idx, qr_hadamard_i8,
++            qr_hadamard_scale_dq, late_dep,
+         )
+         idx_kv_unused = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
+-        idx_cache_write_tid = indexer_compressor(
+-            x_normed_t,
+-            idx_kv_unused,
+-            inner_compress_state,
+-            inner_state_block_table,
+-            inner_wkv,
+-            inner_wgate,
+-            inner_ape,
+-            inner_norm_w,
+-            inner_freqs_cos,
+-            inner_freqs_sin,
+-            idx_row_offsets,
+-            hadamard_idx,
+-            idx_kv_cache,
+-            position_ids,
+-            kv_seq_lens,
+-            idx_slot_mapping,
+-            inner_state_slot_mapping,
+-            late_dep,
+-            cmp_kv_score_tid,
++        _idx_hadamard_tid, idx_cache_write_tid = indexer_compressor_write(
++            idx_kv_unused, idx_normed_kv, hadamard_idx, idx_kv_cache,
++            idx_slot_mapping, idx_row_offsets, position_ids, kv_seq_lens,
++            idx_rms_tid, cmp_kv_score_tid,
++        )
++        q_proj_q_dequant(
++            wq_b_scale, freqs_cos, q_sin_signed, q_swap_idx, q,
++            qr_scale_pad, q_proj_i32, 0, t_dim,
++        )
++        weights_gate_dep = pl.system.task_dummy(deps=[])
++        idx_topk_scores, idx_topk, _leaf_tid = indexer_weights_score(
++            x_normed_t, weights_proj, qr_hadamard_i8, qr_hadamard_scale_dq,
++            idx_kv_cache, idx_block_table, idx_topk_scores, idx_topk,
++            position_ids, kv_seq_lens, idx_cache_write_tid, weights_gate_dep,
++            qh_quant_tid, TP1_WEIGHTS_WORKERS,
+         )
+-        # Bound indexer scratch to its own runtime scope.
+-        with pl.scope():
+-            idx_topk_scores, idx_topk = indexer(
+-                x_normed_t,
+-                qr,
+-                qr_scale,
+-                idx_wq_b,
+-                idx_wq_b_scale,
+-                weights_proj,
+-                freqs_cos,
+-                idx_sin_signed,
+-                hadamard_idx,
+-                idx_kv_cache,
+-                idx_block_table,
+-                idx_topk_scores,
+-                idx_topk,
+-                position_ids,
+-                kv_seq_lens,
+-                late_dep,
+-                idx_cache_write_tid,
+-            )
+ 
+         # sparse_attn_csa folds the compressed-slot masking + valid-block flags in from the
+         # raw indexer topk + position.

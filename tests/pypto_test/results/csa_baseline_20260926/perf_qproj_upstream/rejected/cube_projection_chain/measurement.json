@@ -1,0 +1,116 @@
+{
+  "task_id": "task_20260926_182756_198198416773",
+  "base_commit": "5da68f23",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "implementation": "仅性能版根编排复用现有分阶段函数；借鉴上游 TP 链 QR→Indexer Q→Indexer Compressor→Q 展开→主 Compressor→Query Hadamard→KV Hadamard；保留 Native 页接口、HC scope 和所有核内算术。",
+  "upstream_difference": "参考 pypto-lib 216456332c2a74d89cca23b7824dab264ce34bff 的 TP 入口，不是 TP1 入口；没有复制 TP 通信、payload packing、短上下文跳过评分或 post-leaf 主 cache fence。",
+  "decision": "REJECTED: 单卡整层 p50/p95 907.18/929.38 μs，劣于保留版 817.22/843.12；不扩展边界或 16 卡测试。",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "timing": {
+    "native": {
+      "samples_us": [
+        923.4200119972229,
+        920.8599925041199,
+        920.2399849891663,
+        927.8600215911865,
+        927.1199703216553,
+        917.6200032234192,
+        923.6800074577332,
+        924.0000247955322,
+        921.94002866745,
+        926.4600276947021,
+        927.1199703216553,
+        924.7000217437744,
+        920.2799797058105,
+        918.8200235366821,
+        925.4199862480164,
+        920.0400114059448,
+        920.3799962997437,
+        915.7599806785583,
+        930.7600259780884,
+        925.9999990463257
+      ],
+      "us_min": 915.7599806785583,
+      "us_p50": 923.550009727478,
+      "us_p95": 927.8600215911865,
+      "us_max": 930.7600259780884
+    },
+    "pto": {
+      "samples_us": [
+        907.5199961662292,
+        900.38001537323,
+        891.3800120353699,
+        935.5199933052063,
+        902.1400213241577,
+        915.4000282287598,
+        899.1199731826782,
+        902.0199775695801,
+        911.0000133514404,
+        903.1400084495544,
+        913.1600260734558,
+        906.8400263786316,
+        929.3799996376038,
+        897.4400162696838,
+        912.060022354126,
+        913.1199717521667,
+        900.8399844169617,
+        917.140007019043,
+        926.9400238990784,
+        905.9600234031677
+      ],
+      "us_min": 891.3800120353699,
+      "us_p50": 907.1800112724304,
+      "us_p95": 929.3799996376038,
+      "us_max": 935.5199933052063
+    }
+  },
+  "guards": {
+    "native_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ],
+    "pto_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ]
+  },
+  "numeric_boundary": "atomic=1，只记录功能保护和计时；未声明逐元素或整模型通过。",
+  "causal_limit": "未采候选泳道。新增串行依赖与 scope 改动导致整层退化，不能据 Event 总时间分摊核内与调度代价。",
+  "timing_iters": 20,
+  "timing_warmup": 5,
+  "reproduce_command": "bash tests/pypto_test/run_csa_single_layer.sh <新的输出目录> --batch 16 --history 8192 --weight-nz-mode 2 --variant performance --atomic-add 1 --deterministic-level 0 --timing-iters 20 --timing-warmup 5 --timing-metadata reuse（通过 task-submit 提交）"
+}

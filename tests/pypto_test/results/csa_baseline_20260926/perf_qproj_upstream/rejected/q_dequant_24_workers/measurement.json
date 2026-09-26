@@ -1,0 +1,116 @@
+{
+  "task_id": "task_20260926_183347_205799310129",
+  "base_commit": "5da68f23",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "implementation": "恢复原根入口，仅把 Q_DEQUANT_WORKERS 从 48 改为 24。B16 的 token/head tile 均不变，每 worker 从一块变为两块。",
+  "upstream_difference": "上游/保留版均用 48 worker；24 是本轮并发度实验。核内每块算术与依赖不变。",
+  "decision": "REJECTED: 单卡整层 p50/p95 835.89/853.48 μs，未优于保留版 817.22/843.12；不扩展边界或 16 卡测试。",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "timing": {
+    "native": {
+      "samples_us": [
+        928.3400177955627,
+        923.3400225639343,
+        922.1799969673157,
+        925.4800081253052,
+        931.5800070762634,
+        934.1999888420105,
+        924.4999885559082,
+        925.3799915313721,
+        928.2400012016296,
+        923.9799976348877,
+        927.2599816322327,
+        928.9799928665161,
+        925.3799915313721,
+        925.6200194358826,
+        921.8199849128723,
+        924.019992351532,
+        932.6000213623047,
+        924.4999885559082,
+        926.5599846839905,
+        922.2000241279602
+      ],
+      "us_min": 921.8199849128723,
+      "us_p50": 925.4299998283386,
+      "us_p95": 932.6000213623047,
+      "us_max": 934.1999888420105
+    },
+    "pto": {
+      "samples_us": [
+        837.4800086021423,
+        838.6800289154053,
+        846.6399908065796,
+        833.5000276565552,
+        833.7399959564209,
+        820.2000260353088,
+        812.1600151062012,
+        813.5600090026855,
+        828.1599879264832,
+        860.80002784729,
+        853.4799814224243,
+        830.0600051879883,
+        842.6799774169922,
+        845.740020275116,
+        836.0599875450134,
+        828.000009059906,
+        836.9799852371216,
+        835.7200026512146,
+        826.9199728965759,
+        837.7799987792969
+      ],
+      "us_min": 812.1600151062012,
+      "us_p50": 835.889995098114,
+      "us_p95": 853.4799814224243,
+      "us_max": 860.80002784729
+    }
+  },
+  "guards": {
+    "native_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ],
+    "pto_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ]
+  },
+  "numeric_boundary": "atomic=1，只记录功能保护和计时；未声明逐元素或整模型通过。",
+  "causal_limit": "未采候选泳道；worker 减少未带来 Event 整层收益，不从此结果推算各核内和调度窗口。",
+  "timing_iters": 20,
+  "timing_warmup": 5,
+  "reproduce_command": "bash tests/pypto_test/run_csa_single_layer.sh <新的输出目录> --batch 16 --history 8192 --weight-nz-mode 2 --variant performance --atomic-add 1 --deterministic-level 0 --timing-iters 20 --timing-warmup 5 --timing-metadata reuse（通过 task-submit 提交）"
+}
