@@ -5950,3 +5950,65 @@ Native 侧的实现在整个优化周期里不变，所以它在每个档位上�
 （并给出 n 与 σ），分子用本次的 PTO 中位数。判断一个 PTO 改动有没有效果时，仍然直接
 比较 **PTO 的绝对时间**（同档位、同口径），不要比较 ratio——那样会引入分母的噪声。
 本轮所有"相对基线 ±x%"的判断都已经是按 PTO 绝对时间做的，这一点是对的。
+
+## 161. 与 pypto-lib 参考实现的对照：repack 设计正确，缺一条短序列快路径（2026-09-27）
+
+按"评估能否改进某段逻辑前先查 pypto-lib 有没有现成实现"这条既有约束，把参考实现
+（`pypto-lib/models/deepseek_v4_flash_dspark/decode_csa.py` 与 `decode_indexer.py`）
+和我们的 indexer 做了逐段对照。这是本轮我漏掉的一步。
+
+### 上游没有 repack，直接按页取数
+
+上游 `indexer_weights_score` 的取数循环（`decode_indexer.py` 第 546 行起）是：
+
+```python
+kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], pl.INT8)
+for page in pl.unroll(SCORE_TILE // BLOCK_SIZE):        # 12 次
+    physical_block = pl.cast(pl.read(idx_block_table_flat, [batch_idx * IDX_MAX_BLOCKS + logical_page]), pl.INDEX)
+    kv_i8 = pl.gather_row(kv_i8, kv_cache_i8_flat, [page_begin, 0], [physical_block * BLOCK_SIZE, 0],
+                          [BLOCK_SIZE, IDX_HEAD_DIM])
+score_i32 = pl.matmul(query_vector, kv_i8, out_dtype=pl.INT32, b_trans=True)
+```
+
+scale 同样按页 gather（每 lane `SCORE_TILE // (2 * BLOCK_SIZE)` = 6 次）。
+**每个 tile 24 次 gather，而我们从紧凑缓冲只需 4 次。**
+
+上游能这么做是因为它把 key 与 scale 存成**两个独立张量**，key cache 的页跨度正好
+`BLOCK_SIZE * IDX_HEAD_DIM = 4096`、整除 128，所以存在扁平的 `[blocks*32, 128]` 视图
+（`kv_cache_i8_flat`）。而 vllm-ascend 把 scale 交错在页内（`native_storage.py` 强制
+`scale.storage_offset()*2 == key.storage_offset() + 4096`，页跨度 4160），扁平视图不存在
+——**这才是我们需要 repack 的根本原因，不是设计冗余。**
+
+### 结论：在 vllm-ascend 的布局下，我们的 repack 优于上游的直读
+
+repack 把"每页读一次"的成本摊给了后续所有 query 与 tile；直读要在每个
+(query, leaf, tile) 重复取页。而 tile 数随历史增长——8K 时每 (query, leaf) 6 个 tile，
+128K 时 21 个 tile × 4 leaves = 84 个，**14 倍**。所以直读的额外 gather 成本比 repack
+的节省涨得更快。§116 在 H8192 下实测直读 837.36 µs vs 保留版 817.22 µs（慢 2.5%），
+按上面的尺度分析，到 128K 只会更差，不会像我先前猜测的那样反转。
+
+**所以"删掉 repack 改直读"这条路可以彻底关闭**，不需要再花代价重写一遍去验证。
+先前 §147 把它列为"优先级最高的待验证候选"是基于错误的尺度直觉，本节更正。
+
+### 真正缺的一条：候选 ≤ IDX_TOPK 时完全跳过打分
+
+上游 `decode_csa.py` 第 485 行有一条我们没有的快路径：
+
+```python
+if max_indexer_cache_len <= IDX_TOPK:
+    with pl.spmd(CSA_ALL_VISIBLE_WORKERS, name_hint="csa_indexer_all_visible", ...):
+        # 直接产出 0..visible-1 加 -1 补位，纯向量算术，不读 KV、不做矩阵乘
+```
+
+道理是：要取 top-512 而候选总数不足 512 时，**全选即可**，打分没有意义。上游因此在
+这种批次上完全跳过 repack、score、merge 三个阶段。
+
+我们的实现只有 `max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF`（8192）这个 single-leaf
+分支，以及 merge/publish 内部的 `visible_count >= IDX_TOPK` 判断，**没有"整批跳过打分"
+这条**。对本轮六档没有影响（候选数是 2048 与 32768，都远超 512），但在真实混合负载里
+短请求（历史 < 2048 token，即压缩后 < 512 个 key）会白跑整个 indexer。
+
+补这条前要确认一件事：上游的 all-visible 路径输出的是**按下标升序**的候选，而正常
+Top-K 输出的是按分数排序的下标。要确认下游稀疏注意力只依赖候选**集合**、不依赖顺序。
+上游自己这么做说明它的下游不依赖顺序，但我们的 `decode_sparse_attn_csa.py` 需要独立核对，
+不能照搬。
