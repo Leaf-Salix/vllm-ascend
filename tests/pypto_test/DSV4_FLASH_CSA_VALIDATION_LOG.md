@@ -6597,3 +6597,43 @@ Error: The tile 'chk_cur_t_...' lives in a Orchestration function,
 代码已全部回退，生产路径保持 `REPACK_WORKERS = 192`。增量 repack 的收益上限仍是
 §146 探针直测的约 340 µs（128K/B16 → ratio 约 1.09），显存代价 1.32~5.25 GiB，
 两者都不变；阻塞点从"工程管道"变成了"编排层与 device 层的数据流方向"这一个明确问题。
+
+## 172. 增量 repack 阶段二续：绕开编排层限制，累计七条 PyPTO 约束（2026-09-27）
+
+§171 的架构阻塞（编排层没有片上内存、不能有 Tile）**已找到绕法**并实现：把块表比对整体
+放进一个 `pl.spmd(1, name_hint="indexer_repack_plan")`，算出的统一起始页写进一个 1×1 的
+小 GM 张量；repack 的 spmd 通过 `deps=[cache_write_tid, repack_plan_tid]` 依赖它，
+并在**自己内部**把那个标量读回来当循环上界。这样编排层完全不接触 Tile。
+
+沿这条路又清掉三条约束，第八轮撞到不透明的编译器失败，代码已回退。
+
+### 累计七条 PyPTO 约束（本轮实测得到，下次不必重踩）
+
+| # | 报错 | 约束与解法 |
+| --- | --- | --- |
+| 1 | `missing inferred tensor metadata for parameter` | 新的 `pl.Out` 参数必须在**调用链每一层**都加。本 kernel 是四层：根 → `indexer` → `indexer_weights_score` → `indexer_score_topk_forest`。漏掉中间层就报这个 |
+| 2 | 同上 | inline 形参**不能引入新的 `pl.dynamic` 符号**。复用已有的 `B_DYN` 做第一维、第二维取编译期常量，用时 `pl.reshape` |
+| 3 | `pl.row_sum: Tile inputs require tmp_tile with the same dtype and rank...` | `pl.row_sum` / `pl.row_max` 对 Tile 输入必须传第二个 `tmp_tile`：`pl.create_tile([1, N], FP32, target_memory=pl.MemorySpace.Vec)` |
+| 4 | `Subscript-write source must also be a tensor, got TileType` | Tile 写回 GM 不能用下标赋值，要 `pl.store(tile, [row, col], dest_tensor)` |
+| 5 | `tile.write requires value dtype to match tile dtype, but got value dtype index and tile dtype int32` | `pl.read` 返回 INDEX 标量，写入 INT32 tile 要 `pl.cast(x, pl.INT32)` |
+| 6 | `The tile '...' lives in a Orchestration function, which has no on-chip memory` | 编排层（函数顶层，跑在 AICPU 调度上）不能有 Tile，只能做标量运算与 `pl.read`。需要向量化的逻辑必须放进 `pl.spmd`，结果经小 GM 张量传递 |
+| 7 | `with pl.spmd(...) body neither reads the per-block index via pl.tile.get_block_idx() nor dispatches a self.<kernel>(...) call` | 每个 spmd 的 body 必须读一次 `pl.tile.get_block_idx()`，即使只有一个块 |
+| 8 | `InitMemRef requires static shape for variable '...__tile', but shape element 0 is dynamic` | **spmd 内部的形状必须静态**。不能 `pl.reshape(t, [b_dim])`；取标量用 `pl.tile.read(pl.load(t, [i, 0], [1, 1]), [0, 0])` |
+
+### 第八轮的阻塞：`Failed to parse MLIR`
+
+改用静态形状取标量后，编译器只给出 `Error: Failed to parse MLIR.`，没有定位信息。
+这不再是可跟着走的 API 规则，而是生成的 IR 不合法。可疑点（未逐一排除）：
+
+- 从 `[B_DYN, 1]` 形状的张量 `pl.load(..., [chk_b, 0], [1, 1])`——第二维只有 1 列，
+  可能与 tile 的最小对齐要求冲突（其它地方的 tile 宽度都是 32 的倍数）。
+  **下次先把 `repack_len_buf` 的宽度从 1 改成 32**（只用第 0 列），绕开这种可能。
+- `pl.store(plan_t, [0, 0], repack_plan)` 写一个 `[1, 1]` 的 GM 张量，同理。
+- `pl.spmd(1, ...)` 单块任务本身是否受支持（其它 spmd 的块数都 ≥ b_dim）。
+
+### 现状
+
+代码全部回退，生产路径保持 `REPACK_WORKERS = 192`（唯一已落地的优化，128K/B16 −8.5%）。
+增量 repack 的算法设计（§165）、持久缓冲管道（§170 已验证数值等价）、以及本节的绕法
+都已就位，剩下的是上面那个 IR 层面的问题。收益上限与显存代价不变：约 340 µs /
+ratio 约 1.09，1.32~5.25 GiB。
