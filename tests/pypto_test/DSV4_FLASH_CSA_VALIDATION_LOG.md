@@ -4168,3 +4168,79 @@ Worker 均值差距直接归因于 Native NZ 方向**；仍需真实并发、缓
 下一步仍按完整层性能推进：检查 O-A/量化的实际流水，以及 merge 等明确核内差距。
 任务图、生产者完成时刻与物理核竞争继续记录；不能把“任务数量更少”当作调度或整层更快的证明。
 后续候选在必要对照中带上同轮基线，避免长期只对比一次较早的最优采样。
+
+## 121. 同轮基线与两项 merge 候选（2026-09-26）
+
+继续使用正式层权重、合成历史的单卡第二层口径：B16/S6/H8192、mode=2、
+performance、atomic=1、Native level=0，metadata 复用，5 次预热、20 次图重放。
+三次任务均在物理 device 0 完成，completed/exit=0；工具链和权重未变。
+
+| 实现 | PTO p50/p95（μs） | 同次 Native p50/p95（μs） | task-submit 任务 |
+| --- | --- | --- | --- |
+| 保留源码的同轮基线 | 842.57 / 860.34 | 919.28 / 923.86 | task_20260926_191058_23459453210 |
+| merge 交换索引复用 | 854.67 / 873.96 | 910.91 / 920.42 | task_20260926_191513_237244515373 |
+| merge 分组发布给 O-A | 855.54 / 871.24 | 933.99 / 948.40 | task_20260926_192457_241396718340 |
+
+同一保留源码这次为 842.57 μs，较早采样为 817.22 μs；两份样本均保留，
+不能继续仅用旧最优值评价新候选。本轮先测 baseline，再依次测候选，没有交错复测，
+因此结论限于**两项均未测到完整区间收益，均撤回**，不把全部差值归因于源码变化。
+
+第一项把每个 merge worker 重复生成的 INT32 gather 偏移，移到已有 `rope_cs` 的
+第 0 个 worker 生成一次，再由 48 个 merge worker 读取 4 KiB GM 表；任务数和依赖不变。
+上游 pypto-lib 使用独立 `rope_swap` 生成列交换表，候选借已有任务生成完整扁平偏移，
+与上游的任务边界不同。首次 CPU 命令误用了无效的 variant/NZ 环境变量名，
+已删除错误产物，按 `PTO_CSA_VARIANT=performance`、`VLLM_ASCEND_ENABLE_NZ=2`
+重新完成全链编译，并核对实际根布局后才提交设备计时。
+
+第二项保持 merge 的 48 个 worker 和 token/head 工作量，把一个 48-block SPMD task
+拆成四个 12-block task；每个 O-A 组只等待对应的 merge 完成标记，编排 task 数增加 3。
+上游与保留版都等待整段 merge，候选改变发布粒度和 scope，浮点算术与 Native NZ 根布局不变。
+CPU 编译限制在算子侧处理：先将动态数组索引绑定为标量 TaskId，再使用调用方创建的
+TaskId 数组传出完成标记，避免 inline SSA 与 ArrayType 返回别名问题，未修改工具链。
+最终 performance、四张权重 NZ、atomic=1 的 PTOAS/CCE 全链编译通过。
+
+两项 Native/PTO 每次调用的 31 项 metadata/保护区检查均通过，越界写字节和 metadata
+mismatch 均为 0；这不代表逐元素或整模型精度验收。没有追加 DFX、边界或 16 卡测试，
+也不由 Event 总时间推断 merge 核内是否变快、O-A 是否提前。
+生产源码已恢复。只保留可重建补丁、配置及原始样本：
+[交换索引复用](results/csa_baseline_20260926/perf_qproj_upstream/rejected/merge_swap_shared/measurement.json)、
+[分组发布](results/csa_baseline_20260926/perf_qproj_upstream/rejected/merge_group_pipeline/measurement.json)。
+
+## 122. 用户指出的 AIV_24/25/28 repack 分配与顺序（2026-09-26）
+
+直接分析交付下载包中的 `mode2_pto_single_card_dfx_swimlane.json`，并核对原始
+`chip_swimlane_records.json`，没有重新跑 NPU。该文件仍对应保留版 DFX，
+不是第 121 节两项已撤回候选的泳道。以下时间沿用文件原始轴，单位 μs；
+Worker 区间是 receive→kernel end，包含少量 setup，不能与 Scheduler View 相加。
+
+| 物理核 | Worker 执行顺序与区间 | repack 条数 |
+| --- | --- | --- |
+| AIV_24 | Q 反量化 316.18–341.90 → repack 342.08–353.74 | 1 |
+| AIV_25 | repack 311.34–335.92 → repack 336.12–351.42 | 2 |
+| AIV_28 | Indexer scale 提交 305.86–313.76 → Q 反量化 320.14–339.92 → QR 量化 340.18–349.88 | 0 |
+
+全图有 **48 条 repack Worker 记录，分布在 47 个物理核**；另外 48 条是 Scheduler View，
+不可重复计数。原始记录中 AIV_25 的两条 `reg_task_id` 分别为 8、9，
+确认是两次独立派发，不是图表转换重复绘制。原始记录没有 `block_idx`，
+所以不能仅凭该文件指出它们分别处理哪个逻辑 block，也不把条数齐全当成独立的内容正确性验证。
+
+Simpler `a54c05095` 的普通 SPMD 派发通过 `claim_block_range()` 原子领取逻辑块范围，
+再从可用物理核集合选择核心，将逻辑编号写入 `local_context.block_idx`。
+存在 running/pending 两个槽位，48 个逻辑 block 不表示与 48 个物理核一一绑定。
+算子使用 `pl.tile.get_block_idx()` 划分页，而非物理 CoreId。
+因此这份分配符合动态 SPMD 的机制，不能由 AIV_28 没有该任务直接推断漏执行。
+
+Q 反量化 `r2t6` 与 repack `r2t22` 处在不同依赖分支：前者最终供 QK/PV 使用，
+后者等待 Indexer cache/scale 写回，再供 score/Top-K 使用；两者没有相互依赖。
+所以 AIV_24 先执行 Q 并不违反数据依赖。该核 repack 在 **324.96** 派发、
+**342.08** 接收，dispatch→receive **17.12 μs**；期间 Q 占用该核，
+repack 在 **353.74** 最后结束，是本组 Worker 拖尾。这是具体的排队/资源竞争证据，
+不是“调度器执行代码花了 17.12 μs”的测量。
+
+同时 score 还等待 `qr_hadamard_quant`：QR 量化最后 kernel end 为 **352.84**，
+Scheduler 最后 finish 为 **358.72**；repack 对应值为 **353.74/356.62**。
+score 最早 receive 为 **361.72**。因此不能把提前 repack 的局部等待直接换算为整层收益，
+必须同时追踪 QR 分支完成、完成回收及后续评分核的资源可用性。
+
+详细时间点见[已有泳道的提取证据](results/csa_baseline_20260926/upstream_gap/aiv_repack_scheduling.json)。
+下一步优化优先围绕这组可见的分支竞争提出候选，避免仅按任务数或单核执行次序判断好坏。

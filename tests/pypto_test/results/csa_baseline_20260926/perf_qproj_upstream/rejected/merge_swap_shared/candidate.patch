@@ -1,0 +1,81 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index 94b08086..35c0ae7b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -517,10 +517,23 @@ def sparse_attn_csa(
+ 
+     # Native cosine rows already have the consumer's interleaved layout.
+     rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
+-    # 不再依赖 rope_swap：本任务自己重算符号表（见下面的 cs_lane / cs_sign），
+-    # 从不读那张 GM 索引表，原来的 deps 是一条假依赖。
++    merge_swap_idx = pl.create_tensor([H_TILE, ROPE_DIM], dtype=pl.INT32)
+     with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
+                  allow_early_resolve=True) as rope_tid:
++        # 借已有 RoPE 任务一次生成完整 gather 偏移，merge 的 48 个 worker 共用。
++        # merge 原本就等待 rope_tid；无需上游独立的 rope_swap 任务或新增依赖边。
++        if pl.tile.get_block_idx() == 0:
++            cs_swap_col = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
++            cs_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
++            cs_swap_lane = pl.tile.rems(cs_swap_col, 2, cs_rem_tmp)
++            cs_swap_row = pl.tile.adds(
++                pl.tile.sub(cs_swap_col, pl.tile.muls(cs_swap_lane, 2)), NOPE_DIM + 1
++            )
++            cs_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
++            cs_swap_source = pl.col_expand(cs_swap_base, cs_swap_row)
++            cs_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
++            cs_merge_swap = pl.row_expand_add(cs_swap_source, pl.reshape(cs_row_offsets, [H_TILE, 1]))
++            pl.store(cs_merge_swap, [0, 0], merge_swap_idx)
+         for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
+                               pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
+             cs_t0 = cs_rb * ROPE_CS_T_TILE
+@@ -545,6 +558,7 @@ def sparse_attn_csa(
+         attn_oi,
+         freqs_cos,
+         rope_sin_signed,
++        merge_swap_idx,
+         qk_tid,
+         rope_tid,
+     )
+@@ -576,6 +590,7 @@ def sparse_attn_csa_tp1(
+         attn_oi,
+         rope_cos_il,
+         rope_sin_signed,
++        merge_swap_idx,
+         qk_tid,
+         rope_tid,
+     ) = sparse_attn_csa(
+@@ -596,33 +611,7 @@ def sparse_attn_csa_tp1(
+ 
+     with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
+         m_worker = pl.tile.get_block_idx()
+-        # 换算索引（j^1 的 lane swap）就地算：它与 t_dim 无关，是纯常量表。
+-        # 原先由一个 CORE_GROUP 的 rope_swap 任务算好写进 GM，本任务再读回来——
+-        # 关键路径实测那个任务 compute 只有 1.7us 却要 core-wait 72.1us（占 makespan
+-        # 8.95%），因为它独占一个核、要等核空出来。本任务是 SPMD，每个 worker 自己
+-        # 算这几条向量指令即可，与 rope_cs 里的做法一致。算式与原来逐字相同。
+-        # lane swap 的索引就是 `j ^ 1`（偶数 +1、奇数 -1），一条 xors 即可，不必绕 FP32。
+-        # 原先用 13 步 FP32（含 5 次 cast）算同一张表，SPMD 下**每个 block 都要重算
+-        # 一遍**，于是整段进了 `local_setup_us`：实测 8.15µs/块，而上游从 GM 读表只要
+-        # 0.54µs，48 块合计多 365 核·µs。in-core 也印证过这些指令本身很便宜
+-        # （读表版 3.31µs vs 就地算 3.30µs，纯计算几乎不变），贵在落进了启动路径。
+-        # 改成纯 INT32 之后 9 步、零 cast，且仍然不需要 rope_swap 那个独占一核的任务。
+-        # 用整数取模算 `j + 1 - 2*(j % 2)`，与 `j ^ 1` 等值（偶数 +1、奇数 -1），全程
+-        # INT32、零 cast。
+-        # 试过两条更短的路都被硬件挡了，记下来免得再走：① `pl.tile.xors` 一步到位，
+-        # 但 A2/A3 的 `pto.txors` 只接受 i8/i16 元素类型，i32 被 ptoas 拒；② 退成 i16
+-        # 做异或再 cast 回 i32，而 `LegalizeTileCast` 说 a2a3 上 int16→int32 没有原生
+-        # 路径（`pto.tcvt` 不支持）。取模这条虽然多两步，但仍是 INT32 域内、无 cast。
+-        m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
+-        m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
+-        m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
+-        m_swap_row = pl.tile.adds(
+-            pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
+-        )
+-        m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+-        m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
+-        m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
+-        m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
++        m_swap_idx = pl.load(merge_swap_idx, [0, 0], [H_TILE, ROPE_DIM])
+         m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+         for m_idx in pl.range(m_worker, t_dim * (H // H_TILE), MERGE_WORKERS):
+             m_t = m_idx // (H // H_TILE)

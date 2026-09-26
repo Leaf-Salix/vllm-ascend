@@ -62,6 +62,17 @@
 `indexer_score_topk_leaf_aiv`；后 7 个到 380 μs 之后才接到任务。物理同核先后关系支持资源竞争，
 不等同于已经证明一条额外数据依赖。上游缺 dispatch/finish，不能定量宣布“调度器自身慢了多少”。
 
+用户进一步指出 repack 的物理分配不均：48 条 Worker 记录覆盖 47 个 AIV，
+AIV_25 执行两次、AIV_28 没有，原始记录也有两个独立派发序号。
+SPMD 逻辑 block 动态分配到物理核，没有一核一块的绑定；记录没有 `block_idx`，
+不能据此还原两个具体块编号。AIV_24 上 Q 反量化 316.18–341.90 先于 repack
+342.08–353.74，两者无相互依赖；repack 324.96 已派发，等待接收 17.12 μs，
+并成为 repack 组的最后结束项。这是具体的核占用与排队证据。
+score 同时等待 QR 量化，其 Scheduler 最后 finish 358.72 晚于 repack 的 356.62，
+故 17.12 μs 不是可以直接从整层扣除的收益。这里沿用泳道文件原始时间轴。
+详见[提取证据](results/csa_baseline_20260926/upstream_gap/aiv_repack_scheduling.json)
+及验证日志第 122 节；仅复算已有文件，未追加设备采样。
+
 当前可测的平均 dispatch→receive / kernel end→scheduler finish 分别为：
 Q 展开 **9.54/7.77 μs**，Q 反量化 **4.99/8.67 μs**，Indexer Q 反量化 **0.51/5.59 μs**。
 这是单实例传播/门控/完成回收区间，会互相重叠；上游缺测，也不能从层耗时直接扣掉。
@@ -150,3 +161,9 @@ Worker 均值差距归因于权重方向。CANN 9 的 Ascend910B1 camodel 与真
 未采候选泳道，也未交错重测基线，不由该总时长反推 O-A 或 runtime 各自退化多少。
 
 CPU 复算：`python tests/pypto_test/results/csa_baseline_20260926/upstream_gap/compare.py`。
+
+同轮 merge 对照（日志 121）：保留源码重新采样为 **842.57/860.34 μs**；
+共享交换索引为 **854.67/873.96 μs**，分四组发布给 O-A 为 **855.54/871.24 μs**。
+两项均撤回，不把较早的 817.22 μs 作为唯一基线。前者维持任务数、增加 4 KiB GM 表，
+后者保持 48 个 worker、增加 3 个编排 task；与上游的边界差异均有记录。
+未采候选泳道，不能宣称已经缩短 merge 核内或提前 O-A，也未扩展正确性和整模型测试。

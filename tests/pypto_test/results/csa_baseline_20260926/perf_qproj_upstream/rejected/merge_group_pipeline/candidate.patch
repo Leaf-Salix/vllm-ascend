@@ -1,0 +1,229 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+index 1291e4f1..e86e6c9e 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -29,7 +29,7 @@ from .decode_compressor_ratio4 import compressor_ratio4
+ from .decode_indexer import indexer
+ from .decode_indexer_compressor import indexer_compressor
+ from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
+-from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
++from .decode_sparse_attn_csa import MERGE_GROUPS, T_PAD, sparse_attn_csa_tp1
+ from .hc_post import hc_post
+ from .hc_pre import HC_DIM, HC_MULT, MIX_HC, hc_pre_norm
+ from .layout import (
+@@ -423,7 +423,8 @@ def _decode_csa_tp1_layer(
+         # sparse_attn_csa folds the compressed-slot masking + valid-block flags in from the
+         # raw indexer topk + position.
+         o_packed_heads = pl.create_tensor([O_GROUPS * T_PAD, O_GROUP_IN], dtype=pl.BF16)
+-        o_packed_heads, heads_dep = sparse_attn_csa_tp1(
++        heads_deps = pl.array.create(MERGE_GROUPS, pl.TASK_ID)
++        o_packed_heads = sparse_attn_csa_tp1(
+             q,
+             kv_cache,
+             ori_block_table,
+@@ -436,9 +437,10 @@ def _decode_csa_tp1_layer(
+             freqs_cos,
+             freqs_sin,
+             o_packed_heads,
++            heads_deps,
+         )
+         with pl.scope():
+-            attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
++            attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_deps)
+             hc_post(attn_out, x_hc, post_t, comb_t, x_out)
+     return x_out
+ 
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..80b4bec2 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -22,6 +22,7 @@ from .config import (
+ from .config import (
+     TP as TP_SIZE,
+ )
++from .decode_sparse_attn_csa import MERGE_GROUPS, PUBLISH_GROUPS
+ from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
+ 
+ D = M.hidden_size
+@@ -349,7 +350,7 @@ def decode_o_proj_tp1(
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     wo_b_scale: pl.Tensor[[D], pl.FP32],
+     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
+-    heads_dep: pl.Scalar[pl.TASK_ID],
++    heads_deps: pl.Array[MERGE_GROUPS, pl.TASK_ID],
+ ):
+     """Project local-token, full-group attention heads into BF16 hidden rows."""
+     t_dim = pl.tensor.dim(attn_out, 0)
+@@ -373,10 +374,11 @@ def decode_o_proj_tp1(
+         for g in pl.parallel(O_GROUPS):
+             row_base_o = g * T_PAD
+             out_col_g = g * O_LORA
++            group_heads_dep = heads_deps[g // PUBLISH_GROUPS]
+ 
+             o_r_pad, pa_tid = proj_a_mm(
+                 o_packed, wo_a, o_r_pad, g, row_base_o, out_col_g,
+-                t_dim, proj_a_rows, heads_dep,
++                t_dim, proj_a_rows, group_heads_dep,
+             )
+ 
+             col_g = g * O_LORA
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index 94b08086..8d4c6202 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -123,6 +123,10 @@ ATTENTION_WINDOW_ROWS = LOCAL_O_GROUPS * GROUP_T_PAD
+ 
+ PUBLISH_GROUPS = H_TILE // HEADS_PER_GROUP
+ 
++MERGE_GROUPS = O_GROUPS // PUBLISH_GROUPS
++
++MERGE_GROUP_WORKERS = MERGE_WORKERS // MERGE_GROUPS
++
+ # 每块正好一个请求：上游 e68e091 把 RoPE 行块绑定到 S，S=6 时 t_dim=batch*S 整除，
+ # 不再有尾块。原值 8 与 S 无关，batch*6 常不是 8 的倍数，每轮都要处理残块。
+ ROPE_CS_T_TILE = S
+@@ -150,6 +154,9 @@ if T % BIAS_T_TILE != 0:
+ if H_TILE % HEADS_PER_GROUP != 0:
+     raise ValueError(f"CSA head tile {H_TILE} must contain complete output groups")
+ 
++if MERGE_WORKERS % MERGE_GROUPS != 0:
++    raise ValueError("merge workers must divide evenly across head groups")
++
+ if PUBLISH_GROUPS != 2:
+     raise ValueError("CSA TP1 merge requires exactly two output groups per head tile")
+ 
+@@ -564,11 +571,12 @@ def sparse_attn_csa_tp1(
+     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+     o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+-) -> tuple[pl.Tensor, pl.Scalar[pl.TASK_ID]]:
++    merge_tids: pl.Array[MERGE_GROUPS, pl.TASK_ID],
++):
+     """Write CSA heads as ``[group, T_PAD, O_GROUP_IN]`` slabs.
+ 
+     Only the first runtime ``t_dim`` rows in each group are valid. The
+-    returned task ID covers every write to the packed output tensor.
++    Each completion slot covers one pair of packed output groups.
+     """
+     (
+         attn_mi,
+@@ -594,68 +602,54 @@ def sparse_attn_csa_tp1(
+     t_dim = pl.tensor.dim(q, 0)
+     merge_sink = pl.reshape(attn_sink, [H, 1])
+ 
+-    with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
+-        m_worker = pl.tile.get_block_idx()
+-        # 换算索引（j^1 的 lane swap）就地算：它与 t_dim 无关，是纯常量表。
+-        # 原先由一个 CORE_GROUP 的 rope_swap 任务算好写进 GM，本任务再读回来——
+-        # 关键路径实测那个任务 compute 只有 1.7us 却要 core-wait 72.1us（占 makespan
+-        # 8.95%），因为它独占一个核、要等核空出来。本任务是 SPMD，每个 worker 自己
+-        # 算这几条向量指令即可，与 rope_cs 里的做法一致。算式与原来逐字相同。
+-        # lane swap 的索引就是 `j ^ 1`（偶数 +1、奇数 -1），一条 xors 即可，不必绕 FP32。
+-        # 原先用 13 步 FP32（含 5 次 cast）算同一张表，SPMD 下**每个 block 都要重算
+-        # 一遍**，于是整段进了 `local_setup_us`：实测 8.15µs/块，而上游从 GM 读表只要
+-        # 0.54µs，48 块合计多 365 核·µs。in-core 也印证过这些指令本身很便宜
+-        # （读表版 3.31µs vs 就地算 3.30µs，纯计算几乎不变），贵在落进了启动路径。
+-        # 改成纯 INT32 之后 9 步、零 cast，且仍然不需要 rope_swap 那个独占一核的任务。
+-        # 用整数取模算 `j + 1 - 2*(j % 2)`，与 `j ^ 1` 等值（偶数 +1、奇数 -1），全程
+-        # INT32、零 cast。
+-        # 试过两条更短的路都被硬件挡了，记下来免得再走：① `pl.tile.xors` 一步到位，
+-        # 但 A2/A3 的 `pto.txors` 只接受 i8/i16 元素类型，i32 被 ptoas 拒；② 退成 i16
+-        # 做异或再 cast 回 i32，而 `LegalizeTileCast` 说 a2a3 上 int16→int32 没有原生
+-        # 路径（`pto.tcvt` 不支持）。取模这条虽然多两步，但仍是 INT32 域内、无 cast。
+-        m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
+-        m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
+-        m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
+-        m_swap_row = pl.tile.adds(
+-            pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
+-        )
+-        m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+-        m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
+-        m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
+-        m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
+-        m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+-        for m_idx in pl.range(m_worker, t_dim * (H // H_TILE), MERGE_WORKERS):
+-            m_t = m_idx // (H // H_TILE)
+-            m_h_idx = m_idx - m_t * (H // H_TILE)
+-            m_h0 = m_h_idx * H_TILE
+-            m_row = m_idx * H_TILE
+-            m_mi = pl.load(attn_mi, [m_row, 0], [H_TILE, 1])
+-            m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
+-            m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
+-
+-            # qk_pv 的 l 从 0 起算，sink 那一项在这里按当前最大值补进分母。
+-            n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
+-            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
+-            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
+-            n_full = pl.row_expand_div(m_oi, n_denom)
+-            n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
+-
+-            # Inverse-RoPE head tile. 性能版直接用 FP32 结果做逆 RoPE；精度版先过一次
+-            # BF16 再回 FP32，是为了复刻 Native 在逆 RoPE 前先发布 BF16 的次序。
+-            m_rope = n_full[0:H_TILE, NOPE_DIM:HEAD_DIM]
+-            m_cos_il = pl.load(rope_cos_il, [m_t, 0], [1, ROPE_DIM])
+-            m_sin_signed = pl.load(rope_sin_signed, [m_t, 0], [1, ROPE_DIM])
+-            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
+-            m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed))
+-            n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
+-            n_full_bf16 = pl.concat(n_bf16[0:H_TILE, 0:NOPE_DIM], n_rope_bf16)
+-
+-            n_group_bf16 = pl.reshape(n_full_bf16, [PUBLISH_GROUPS, O_GROUP_IN])
+-            n_pack_first = n_group_bf16[0:1, 0:O_GROUP_IN]
+-            n_pack_second = n_group_bf16[1:2, 0:O_GROUP_IN]
+-            n_pack_row = (m_h0 // HEADS_PER_GROUP) * T_PAD + m_t
+-            n_pack_row_second = n_pack_row + T_PAD
+-            pl.store(n_pack_first, [n_pack_row, 0], o_packed_heads)
+-            pl.store(n_pack_second, [n_pack_row_second, 0], o_packed_heads)
+-
+-    return o_packed_heads, merge_tid
++    # 总 worker 数仍为 48，四个独立完成事件让 O-A 按组进入流水。
++    with pl.manual_scope():
++        for merge_group in pl.parallel(MERGE_GROUPS):
++            with pl.spmd(MERGE_GROUP_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
++                m_worker = pl.tile.get_block_idx()
++                # 保留原 INT32 索引和浮点计算；每组负责固定的两个 O projection 组。
++                m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
++                m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
++                m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
++                m_swap_row = pl.tile.adds(
++                    pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
++                )
++                m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
++                m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
++                m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
++                m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
++                m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
++                m_h0 = merge_group * H_TILE
++                for m_t in pl.range(m_worker, t_dim, MERGE_GROUP_WORKERS):
++                    m_row = m_t * H + m_h0
++                    m_mi = pl.load(attn_mi, [m_row, 0], [H_TILE, 1])
++                    m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
++                    m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
++
++                    # qk_pv 的 l 从 0 起算，sink 那一项在这里按当前最大值补进分母。
++                    n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
++                    n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
++                    n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
++                    n_full = pl.row_expand_div(m_oi, n_denom)
++                    n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
++
++                    # Inverse-RoPE head tile. 性能版直接用 FP32 结果做逆 RoPE；精度版先过一次
++                    # BF16 再回 FP32，是为了复刻 Native 在逆 RoPE 前先发布 BF16 的次序。
++                    m_rope = n_full[0:H_TILE, NOPE_DIM:HEAD_DIM]
++                    m_cos_il = pl.load(rope_cos_il, [m_t, 0], [1, ROPE_DIM])
++                    m_sin_signed = pl.load(rope_sin_signed, [m_t, 0], [1, ROPE_DIM])
++                    m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
++                    m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed))
++                    n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
++                    n_full_bf16 = pl.concat(n_bf16[0:H_TILE, 0:NOPE_DIM], n_rope_bf16)
++
++                    n_group_bf16 = pl.reshape(n_full_bf16, [PUBLISH_GROUPS, O_GROUP_IN])
++                    n_pack_first = n_group_bf16[0:1, 0:O_GROUP_IN]
++                    n_pack_second = n_group_bf16[1:2, 0:O_GROUP_IN]
++                    n_pack_row = (m_h0 // HEADS_PER_GROUP) * T_PAD + m_t
++                    n_pack_row_second = n_pack_row + T_PAD
++                    pl.store(n_pack_first, [n_pack_row, 0], o_packed_heads)
++                    pl.store(n_pack_second, [n_pack_row_second, 0], o_packed_heads)
++            merge_tids[merge_group] = merge_tid
++
++    return o_packed_heads

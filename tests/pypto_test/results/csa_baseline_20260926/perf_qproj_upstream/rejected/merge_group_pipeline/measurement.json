@@ -1,0 +1,247 @@
+{
+  "base_commit": "288af0cd",
+  "candidate_task": "task_20260926_192457_241396718340",
+  "baseline_task": "task_20260926_191058_23459453210",
+  "task_status": "both completed/exit=0",
+  "decision": "REJECTED: 同轮同卡候选未测到完整区间收益，恢复生产源码。",
+  "change": "保持 48 个 merge worker 及其 token/head 工作量，将一个 48-block SPMD task 拆成四个 12-block task；每个 O-A 组仅等待对应 merge task，编排 task 数增加 3。",
+  "upstream_difference": "上游与保留版都在完整 merge 后启动 O-A；候选提前分组发布，不照搬上游 task 边界，不修改 Native NZ 根布局或浮点算术。",
+  "evidence_boundary": "同轮 baseline 先测，未做交错重测；候选没有 DFX，因此不能断言 O-A 已提前，不能从总时间分解 task 数或 scope 的贡献；未追加边界、逐元素或整模型测试。",
+  "cpu_build": {
+    "variant": "performance",
+    "root_layouts": {
+      "wq_a": "NZ",
+      "wq_b": "NZ",
+      "wo_a": "NZ",
+      "wo_b": "NZ"
+    },
+    "atomic_add": 1,
+    "status": "PASS",
+    "tp": 1,
+    "query": 6,
+    "argv_unchanged": true
+  },
+  "compile_correction": "算子侧将动态数组索引先绑定为标量 TaskId，并使用调用方创建的 TaskId 数组传出四个完成标记，避开 inline SSA 和 ArrayType 返回别名的编译限制；未改工具链。",
+  "runs": {
+    "baseline": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "physical_device": "0",
+      "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "timing_iters": 20,
+      "timing_warmup": 5,
+      "timing": {
+        "native": {
+          "samples_us": [
+            915.440022945404,
+            913.7399792671204,
+            912.559986114502,
+            920.3600287437439,
+            922.0399856567383,
+            918.2800054550171,
+            922.0600128173828,
+            923.8600134849548,
+            917.8400039672852,
+            916.0400032997131,
+            934.0800046920776,
+            918.500006198883,
+            915.1600003242493,
+            922.4399924278259,
+            923.5000014305115,
+            919.0599918365479,
+            911.8599891662598,
+            919.8200106620789,
+            919.4999933242798,
+            922.3799705505371
+          ],
+          "us_min": 911.8599891662598,
+          "us_p50": 919.2799925804138,
+          "us_p95": 923.8600134849548,
+          "us_max": 934.0800046920776
+        },
+        "pto": {
+          "samples_us": [
+            853.2999753952026,
+            837.6799821853638,
+            825.4600167274475,
+            831.5799832344055,
+            852.0399928092957,
+            835.2000117301941,
+            836.5600109100342,
+            845.0000286102295,
+            849.7999906539917,
+            865.3600215911865,
+            834.9800109863281,
+            851.2200117111206,
+            860.3399991989136,
+            835.3599905967712,
+            856.6200137138367,
+            847.0799922943115,
+            840.1399850845337,
+            811.9800090789795,
+            839.1600251197815,
+            846.0999727249146
+          ],
+          "us_min": 811.9800090789795,
+          "us_p50": 842.5700068473816,
+          "us_p95": 860.3399991989136,
+          "us_max": 865.3600215911865
+        }
+      },
+      "guards": {
+        "native": [
+          {
+            "status": "PASS",
+            "checks": 31,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          },
+          {
+            "status": "PASS",
+            "checks": 31,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          }
+        ],
+        "pto": [
+          {
+            "status": "PASS",
+            "checks": 31,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          },
+          {
+            "status": "PASS",
+            "checks": 31,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          }
+        ]
+      }
+    },
+    "candidate": {
+      "configuration": {
+        "batch": 16,
+        "history": 8192,
+        "seed": 1024,
+        "weight_nz_mode": 2,
+        "variant": "performance",
+        "deterministic_level": 0,
+        "hccl_deterministic": false,
+        "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+        "pto_reduction": {
+          "atomic_add": 1,
+          "qr_split_k": 8,
+          "kv_split_k": 8
+        }
+      },
+      "physical_device": "0",
+      "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+      "metadata_policy": "reuse",
+      "timing_iters": 20,
+      "timing_warmup": 5,
+      "timing": {
+        "native": {
+          "samples_us": [
+            930.0199747085571,
+            938.9600157737732,
+            937.1799826622009,
+            943.0999755859375,
+            948.8400220870972,
+            948.4000205993652,
+            926.6800284385681,
+            937.6599788665771,
+            931.0200214385986,
+            937.2199773788452,
+            939.5999908447266,
+            931.0200214385986,
+            930.679976940155,
+            929.8999905586243,
+            930.7199716567993,
+            935.1199865341187,
+            927.2400140762329,
+            932.8600168228149,
+            928.2199740409851,
+            945.6800222396851
+          ],
+          "us_min": 926.6800284385681,
+          "us_p50": 933.9900016784668,
+          "us_p95": 948.4000205993652,
+          "us_max": 948.8400220870972
+        },
+        "pto": {
+          "samples_us": [
+            861.6200089454651,
+            843.0799841880798,
+            866.9000267982483,
+            857.0600152015686,
+            858.5799932479858,
+            828.0400037765503,
+            849.0800261497498,
+            844.1799879074097,
+            826.8200159072876,
+            840.3800129890442,
+            848.3999967575073,
+            861.8599772453308,
+            871.2400197982788,
+            863.9600276947021,
+            859.0999841690063,
+            872.7200031280518,
+            845.6799983978271,
+            854.0199995040894,
+            844.0200090408325,
+            857.7600121498108
+          ],
+          "us_min": 826.8200159072876,
+          "us_p50": 855.540007352829,
+          "us_p95": 871.2400197982788,
+          "us_max": 872.7200031280518
+        }
+      },
+      "guards": {
+        "native": [
+          {
+            "checks": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          },
+          {
+            "checks": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          }
+        ],
+        "pto": [
+          {
+            "checks": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          },
+          {
+            "checks": 31,
+            "all_pass": true,
+            "outside_slot_bytes": 0,
+            "metadata_mismatches": 0
+          }
+        ]
+      }
+    }
+  }
+}
