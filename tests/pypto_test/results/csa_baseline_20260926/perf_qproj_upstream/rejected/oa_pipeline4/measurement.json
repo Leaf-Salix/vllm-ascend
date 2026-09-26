@@ -1,0 +1,147 @@
+{
+  "task_id": "task_20260926_185032_213586911890",
+  "base_commit": "25227f9c",
+  "configuration": {
+    "batch": 16,
+    "history": 8192,
+    "weight_nz_mode": 2,
+    "variant": "performance",
+    "deterministic_level": 0,
+    "hccl_deterministic": false,
+    "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+    "pto_reduction": {
+      "atomic_add": 1,
+      "qr_split_k": 8,
+      "kv_split_k": 8
+    }
+  },
+  "implementation": "NZ O-A 的 K256 循环 pipeline stage=2→4；M128/N128/K256、累加顺序、64 个任务和 Native [G,K,N] 权重存储不变。",
+  "upstream_difference": "上游 [G,N,K]、b_trans=True、stage=2；候选保留 Native 消费方向，只改变 GM→L1 预取深度。",
+  "decision": "REJECTED: 单卡完整区间 p50/p95=849.78/866.94 μs，未优于保留版 817.22/843.12；恢复 stage=2。",
+  "timing_scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+  "metadata_policy": "reuse",
+  "timing_iters": 20,
+  "timing_warmup": 5,
+  "timing": {
+    "native": {
+      "samples_us": [
+        943.3799982070923,
+        935.9999895095825,
+        936.9000196456909,
+        940.0799870491028,
+        947.4400281906128,
+        942.6199793815613,
+        956.820011138916,
+        939.3399953842163,
+        937.2199773788452,
+        936.0600113868713,
+        940.9999847412109,
+        936.519980430603,
+        941.6199922561646,
+        938.7000203132629,
+        940.3799772262573,
+        939.9200081825256,
+        939.1599893569946,
+        937.8799796104431,
+        944.4199800491333,
+        947.3999738693237
+      ],
+      "us_min": 935.9999895095825,
+      "us_p50": 939.9999976158142,
+      "us_p95": 947.4400281906128,
+      "us_max": 956.820011138916
+    },
+    "pto": {
+      "samples_us": [
+        847.6999998092651,
+        866.9400215148926,
+        841.480016708374,
+        857.2400212287903,
+        844.6199893951416,
+        852.3799777030945,
+        850.9799838066101,
+        863.4399771690369,
+        828.220009803772,
+        841.5600061416626,
+        895.579993724823,
+        857.7399849891663,
+        860.9200119972229,
+        866.6800260543823,
+        835.6800079345703,
+        845.3800082206726,
+        846.8199968338013,
+        848.580002784729,
+        840.399980545044,
+        853.600025177002
+      ],
+      "us_min": 828.220009803772,
+      "us_p50": 849.7799932956696,
+      "us_p95": 866.9400215148926,
+      "us_max": 895.579993724823
+    }
+  },
+  "guards": {
+    "native_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ],
+    "pto_guards": [
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      },
+      {
+        "status": "PASS",
+        "checks": 31,
+        "outside_slot_bytes": 0,
+        "metadata_mismatches": 0
+      }
+    ]
+  },
+  "numeric_boundary": "atomic=1；功能保护通过，未声明逐元素或整模型通过。",
+  "on_chip_allocation_bytes": {
+    "baseline": {
+      "Mat": 262144,
+      "Acc": 65536,
+      "Left": 65536,
+      "Right": 65536
+    },
+    "candidate": {
+      "Mat": 524288,
+      "Acc": 65536,
+      "Left": 65536,
+      "Right": 65536
+    }
+  },
+  "allocation_evidence": "读取各自 proj_a_mm.pto 的实际 alloc_tile 常量地址与静态形状；不是估算 L1/L0 大小。",
+  "simulator": {
+    "soc": "Ascend910B1 camodel",
+    "CANN": "9.0.0",
+    "PTO_ISA": "327cd586",
+    "M": 96,
+    "N_tile": 128,
+    "K": 4096,
+    "group": 0,
+    "n_block": 0,
+    "baseline_instruction_window_us": 13.459,
+    "candidate_instruction_window_us": 16.425,
+    "CUBE_instructions": 32,
+    "warning": "首个到末个清理后的 pipe 指令区间，不是 Worker 时间；包含合成输入，不能直接外推 A3 真机整层。"
+  },
+  "candidate_swimlane": "not collected",
+  "command": "bash tests/pypto_test/run_csa_single_layer.sh <new-output> --batch 16 --history 8192 --weight-nz-mode 2 --variant performance --atomic-add 1 --deterministic-level 0 --timing-iters 20 --timing-warmup 5 --timing-metadata reuse",
+  "execution_policy": "NPU 仅通过 task-submit 分配 TASK_DEVICE；禁止直接在登录进程执行。",
+  "decision_boundary": "与已保留历史基线比较，本轮没有交错重测 baseline；记录为未确认收益并撤回，不把差值全部宣称为候选的因果退化。"
+}

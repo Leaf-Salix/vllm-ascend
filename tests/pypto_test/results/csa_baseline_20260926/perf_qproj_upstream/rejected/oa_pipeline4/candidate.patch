@@ -1,0 +1,14 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..7f199273 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -199,7 +199,8 @@ def _proj_a_mm_nz(
+             )
+             wa_first = wo_a[g : g + 1, 0:A_K_TILE, n0 : n0 + PROJ_A_MM_N_TILE]
+             acc_a = pl.matmul(xa_first, wa_first, out_dtype=pl.FP32)
+-            for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=2):
++            # Native NZ 的 K×N 方向保持不变，加深流水以提前搬入后续 K 块。
++            for kb in pl.pipeline(1, O_GROUP_IN // A_K_TILE, stage=4):
+                 k0 = kb * A_K_TILE
+                 xa_k_chunk = pl.slice(
+                     o_packed, [PROJ_A_ROW_TILE, A_K_TILE], [pa_src0, k0], valid_shape=[pa_rows, A_K_TILE]

@@ -1,0 +1,301 @@
+{
+  "base_commit": "25227f9c",
+  "upstream_source_reference": "pypto-lib 216456332c2a74d89cca23b7824dab264ce34bff/models/deepseek_v4_flash_dspark/decode_o_proj.py",
+  "scope": "单核合成输入、仅 O-A proj_a_mm；上游方向为独立诊断核，不是历史上游 Worker 泳道重放。",
+  "target": {
+    "platform": "a2a3",
+    "architecture": "dav-c220",
+    "camodel_soc": "Ascend910B1",
+    "CANN": "9.0.0",
+    "PTOAS": "0.66",
+    "PTO_ISA": "327cd586",
+    "PyPTO": "88297437",
+    "Simpler": "a54c05095"
+  },
+  "workload": {
+    "M_valid": 96,
+    "M_tile": 128,
+    "N_tile": 128,
+    "K": 4096,
+    "K_tile": 256,
+    "group": 0,
+    "n_block": 0,
+    "scalar_args": {
+      "v4": 1,
+      "v5": 96,
+      "v6": 0,
+      "v7": 0,
+      "v8": 0,
+      "v9": 0,
+      "v10": 8
+    },
+    "scalar_meaning": {
+      "v4": "row tiles",
+      "v5": "valid token rows",
+      "v6": "input group row base",
+      "v7": "group index",
+      "v8": "output group column base",
+      "v9": "block index",
+      "v10": "block count"
+    },
+    "GM_static_shapes": {
+      "v1_output": [
+        384,
+        8192
+      ],
+      "v2_input": [
+        3072,
+        4096
+      ]
+    },
+    "input_values": "generated synthetic values; no numerical comparison claimed"
+  },
+  "measurement_definition": {
+    "instruction_window_us": "cleaned core0.cubecore0 first instruction start to last instruction end; not Worker or full kernel latency",
+    "busy_union_us": "union of intervals within one pipe, including all channel suffixes; pipes overlap",
+    "instruction_cycles_sum": "API_INSTR cycles grouped by pipe after excluding SET_FLAG/WAIT_FLAG/BAR; these sums may overlap or include queue latency and are NOT wall time/busy cycles"
+  },
+  "compatibility": {
+    "generated_case_only": "PTO-ISA 327cd586 already defines MrgSortExecutedNumList; removed duplicate compatibility declaration only from generated standalone C++",
+    "cleaner_input": "manifest_export.csv visualize_data_bin, not its outer export_dir",
+    "cleaner_warning": "22 sync flags could not be re-anchored per trace; skipped by cleaner",
+    "worker_provisioning": false
+  },
+  "variants": {
+    "native_stage2": {
+      "weight_shape": "[8,4096,1024]",
+      "b_trans": false,
+      "pipeline_stage": 2,
+      "manifest_status": "exported",
+      "generated_pto": "build_output/_jit__decode_csa_tp1_layer_k_0ugv8n/ptoas/proj_a_mm.pto",
+      "raw_local_run": "build_output/oa_incore_experiment/baseline_20260926_184544",
+      "allocation_high_water_bytes": {
+        "mat": 262144,
+        "acc": 65536,
+        "left": 65536,
+        "right": 65536
+      },
+      "clean_metrics": {
+        "instruction_window_us": 13.459000021219254,
+        "pipes": {
+          "MTE2": {
+            "instruction_count": 32,
+            "busy_union_us": 11.762999951839447,
+            "start_us": 2.5250000953674316,
+            "end_us": 15.02599972486496
+          },
+          "MTE1": {
+            "instruction_count": 128,
+            "busy_union_us": 8.03700140863657,
+            "start_us": 3.0160000324249268,
+            "end_us": 15.39399966597557
+          },
+          "CUBE": {
+            "instruction_count": 32,
+            "busy_union_us": 7.007999897003174,
+            "start_us": 3.565000057220459,
+            "end_us": 15.628999844193459
+          },
+          "FIXP": {
+            "instruction_count": 2,
+            "busy_union_us": 0.3540000021457672,
+            "start_us": 15.630000114440918,
+            "end_us": 15.984000116586685
+          }
+        }
+      },
+      "api_pipe_instruction_sums": {
+        "MTE2": {
+          "sum_instruction_cycles": 50417,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MOV_OUT_TO_L1",
+            "MOV_OUT_TO_L1_MULTI_ND2NZ"
+          ]
+        },
+        "MTE1": {
+          "sum_instruction_cycles": 38054,
+          "instructions_executed": 128,
+          "opcodes": [
+            "LOAD_L1_TO_DST_3DV2",
+            "MOV_SPR_XN"
+          ]
+        },
+        "CUBE": {
+          "sum_instruction_cycles": 12960,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MMAD"
+          ]
+        },
+        "FIXP": {
+          "sum_instruction_cycles": 658,
+          "instructions_executed": 2,
+          "opcodes": [
+            "FIX_L0C_TO_DST",
+            "MOV_SPR_XN"
+          ]
+        }
+      }
+    },
+    "native_stage4": {
+      "weight_shape": "[8,4096,1024]",
+      "b_trans": false,
+      "pipeline_stage": 4,
+      "manifest_status": "exported",
+      "generated_pto": "build_output/oa_incore_experiment/pipeline4_source/ptoas/proj_a_mm.pto",
+      "raw_local_run": "build_output/oa_incore_experiment/pipeline4_20260926_185035",
+      "allocation_high_water_bytes": {
+        "mat": 524288,
+        "acc": 65536,
+        "left": 65536,
+        "right": 65536
+      },
+      "clean_metrics": {
+        "instruction_window_us": 16.42499914765358,
+        "pipes": {
+          "MTE2": {
+            "instruction_count": 32,
+            "busy_union_us": 12.963998645544052,
+            "start_us": 2.190999984741211,
+            "end_us": 17.656999111175537
+          },
+          "MTE1": {
+            "instruction_count": 128,
+            "busy_union_us": 7.500998876988888,
+            "start_us": 2.683000087738037,
+            "end_us": 18.02600058913231
+          },
+          "CUBE": {
+            "instruction_count": 32,
+            "busy_union_us": 7.007999762892723,
+            "start_us": 3.2279999256134033,
+            "end_us": 18.26099981367588
+          },
+          "FIXP": {
+            "instruction_count": 2,
+            "busy_union_us": 0.3540000021457672,
+            "start_us": 18.261999130249023,
+            "end_us": 18.61599913239479
+          }
+        }
+      },
+      "api_pipe_instruction_sums": {
+        "MTE2": {
+          "sum_instruction_cycles": 60033,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MOV_OUT_TO_L1",
+            "MOV_OUT_TO_L1_MULTI_ND2NZ"
+          ]
+        },
+        "MTE1": {
+          "sum_instruction_cycles": 31009,
+          "instructions_executed": 128,
+          "opcodes": [
+            "LOAD_L1_TO_DST_3DV2",
+            "MOV_SPR_XN"
+          ]
+        },
+        "CUBE": {
+          "sum_instruction_cycles": 12960,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MMAD"
+          ]
+        },
+        "FIXP": {
+          "sum_instruction_cycles": 658,
+          "instructions_executed": 2,
+          "opcodes": [
+            "FIX_L0C_TO_DST",
+            "MOV_SPR_XN"
+          ]
+        }
+      }
+    },
+    "upstream_direction_stage2": {
+      "weight_shape": "[8,1024,4096]",
+      "b_trans": true,
+      "pipeline_stage": 2,
+      "manifest_status": "exported",
+      "generated_pto": "build_output/oa_incore_experiment/upstream_layout_build/ptoas/proj_a_mm.pto",
+      "raw_local_run": "build_output/oa_incore_experiment/upstream_layout_20260926_185521",
+      "allocation_high_water_bytes": {
+        "mat": 262144,
+        "acc": 65536,
+        "left": 65536,
+        "right": 65536
+      },
+      "clean_metrics": {
+        "instruction_window_us": 13.416999965906143,
+        "pipes": {
+          "MTE2": {
+            "instruction_count": 32,
+            "busy_union_us": 11.766999006271362,
+            "start_us": 2.7320001125335693,
+            "end_us": 15.199999809265137
+          },
+          "MTE1": {
+            "instruction_count": 320,
+            "busy_union_us": 7.799998357892036,
+            "start_us": 3.2219998836517334,
+            "end_us": 15.548999778926373
+          },
+          "CUBE": {
+            "instruction_count": 32,
+            "busy_union_us": 7.007999897003174,
+            "start_us": 3.759000062942505,
+            "end_us": 15.793999806046486
+          },
+          "FIXP": {
+            "instruction_count": 2,
+            "busy_union_us": 0.3540000021457672,
+            "start_us": 15.795000076293945,
+            "end_us": 16.149000078439713
+          }
+        }
+      },
+      "api_pipe_instruction_sums": {
+        "MTE2": {
+          "sum_instruction_cycles": 50496,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MOV_OUT_TO_L1",
+            "MOV_OUT_TO_L1_MULTI_ND2NZ"
+          ]
+        },
+        "MTE1": {
+          "sum_instruction_cycles": 58322,
+          "instructions_executed": 320,
+          "opcodes": [
+            "LOAD_2D",
+            "LOAD_L1_TO_DST_3DV2",
+            "MOV_SPR_XN"
+          ]
+        },
+        "CUBE": {
+          "sum_instruction_cycles": 12960,
+          "instructions_executed": 32,
+          "opcodes": [
+            "MMAD"
+          ]
+        },
+        "FIXP": {
+          "sum_instruction_cycles": 658,
+          "instructions_executed": 2,
+          "opcodes": [
+            "FIX_L0C_TO_DST",
+            "MOV_SPR_XN"
+          ]
+        }
+      }
+    }
+  },
+  "conclusions": [
+    "Native 与上游权重方向的单核窗口 13.459/13.417 μs，未显示足以解释历史真机约 9.12 μs 核内均值差距的差异；不能外推两者在多核和真实缓存状态下必然相同。",
+    "stage=4 将 L1 从 256 KiB 增至 512 KiB，单核窗口 16.425 μs；同候选单卡完整区间 849.78/866.94 μs，没有确认收益，已撤回。",
+    "Native NZ 的物理打包规则与上游相同，逻辑方向不同；未修改权重存储或增加设备重排。",
+    "历史上游泳道缺完整配置与 Scheduler View；仍不能量化任务图、资源竞争和 runtime 实现各自贡献。"
+  ]
+}
