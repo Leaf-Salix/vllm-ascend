@@ -32,7 +32,7 @@ def writable_bytes(allocation, views, slots):
     return allowed
 
 
-def make_layer(config, checkpoint, device):
+def make_layer(config, checkpoint, device, layer_index=2):
     import torch
     from dsv4_csa_formal_weights import load_formal_layer_weights
     from safetensors import safe_open
@@ -56,7 +56,7 @@ def make_layer(config, checkpoint, device):
                 max_position_embeddings=hf.rope_parameters["original_max_position_embeddings"],
                 cache_config=config.cache_config,
                 quant_config=config.quant_config,
-                prefix="model.layers.2.self_attn",
+                prefix=f"model.layers.{layer_index}.self_attn",
             )
             self.input_layernorm = RMSNorm(hf.hidden_size, eps=hf.rms_norm_eps)
 
@@ -67,10 +67,10 @@ def make_layer(config, checkpoint, device):
             layer = AttentionHalf()
     finally:
         torch.set_default_dtype(old_dtype)
-    records, methods = load_formal_layer_weights(layer.self_attn, checkpoint)
+    records, methods = load_formal_layer_weights(layer.self_attn, checkpoint, layer_index)
     index = json.loads((checkpoint / "quant_model_weights.safetensors.index.json").read_text())["weight_map"]
     for name in ("hc_attn_fn", "hc_attn_scale", "hc_attn_base", "attn_norm.weight"):
-        key = f"layers.2.{name}"
+        key = f"layers.{layer_index}.{name}"
         with safe_open(checkpoint / index[key], framework="pt", device="cpu") as reader:
             value = reader.get_tensor(key)
         if name == "attn_norm.weight":
@@ -501,7 +501,7 @@ def run(args, report):
     ).create_engine_config()
     device = torch.device(f"npu:{args.device}")
     with native_session(config, args.device), torch.inference_mode():
-        layer, details = make_layer(config, args.checkpoint, device)
+        layer, details = make_layer(config, args.checkpoint, device, args.layer_index)
         report.update(details)
         fixture = make_fixture(config, layer.self_attn, args.batch, args.history, args.seed, device)
         report["layouts"] = {name: group["layout"] for name, group in fixture["groups"].items()}
@@ -654,9 +654,13 @@ def run(args, report):
                     "seed": args.seed,
                 },
             )
-            meta.update(layer_index=2, tokens=fixture["tokens"])
+            meta.update(layer_index=args.layer_index, tokens=fixture["tokens"])
             save_snapshot(args.output / "case", meta, payload)
-        pypto.torch.init(device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        pypto.torch.init(
+            device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer",
+            **({"enable_chip_swimlane": 4, "enable_dep_gen": True,
+                "output_dir": str((args.output / "dfx").resolve())} if args.swimlane else {}),
+        )
         pto = []
         report.update(pto_guards=[], root_layouts=layouts)
         for _ in range(2):
@@ -691,6 +695,27 @@ def run(args, report):
                 raise ValueError(f"{path}：输出/状态 shape、dtype 或有限值检查失败")
         if report["topk_selection"]["status"] == "FAIL":
             raise ValueError("Top-K 含越界、重复或缺失的候选索引")
+        if args.swimlane:
+            from dsv4_csa_single_card_bench import _export_swimlane
+
+            # 两次预热已完成；只包围一次完整根调用，恢复初态与 compact metadata 均在窗口外。
+            restore(fixture)
+            torch.npu.synchronize()
+            pypto.torch.begin_dfx()
+            try:
+                call()
+            finally:
+                pypto.torch.end_dfx()
+            torch.npu.synchronize()
+            exported = _export_swimlane(args.output / "dfx")
+            exported.update(
+                layer_index=args.layer_index, compact_metadata_policy="reuse",
+                input_source="formal_layer_weights_synthetic_history",
+                scope="单卡合成输入，同一步第二个 CSA 层复用 metadata；DFX 不作整模型 forward 计时",
+            )
+            report["swimlane"] = exported
+            if not exported["exported"]:
+                raise RuntimeError(f"泳道导出失败：{exported}")
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
         if args.padding_graph:
@@ -773,6 +798,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--history", type=int, default=8192)
+    parser.add_argument("--layer-index", type=int, default=2, choices=range(2, 43, 2),
+                        help="正式 C4 层权重序号；4 对应模型第二个 CSA 层")
     parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--weight-nz-mode", type=int, choices=(0, 1, 2), default=0)
@@ -792,6 +819,8 @@ def main():
     parser.add_argument("--timing-metadata", choices=("reuse", "produce"), default="reuse",
                         help="默认 reuse 按同一步第二个 CSA 层复用 metadata；produce 单独测首层成本")
     parser.add_argument("--profile", action="store_true", help="计时后每侧单独采一次设备 profiler 核对区间与热点")
+    parser.add_argument("--swimlane", action="store_true",
+                        help="单独采一次完整 PTO 根的 DFX 泳道，复用前层 metadata；在新的工作目录执行")
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
@@ -801,6 +830,8 @@ def main():
         parser.error("timing-iters 不得为负，timing-warmup 至少为 1")
     if args.profile and not args.timing_iters:
         parser.error("--profile 须配合正数 --timing-iters")
+    if args.swimlane and (args.timing_iters or args.profile or args.graph or args.padding_graph):
+        parser.error("--swimlane 单独采集，不与图计时或图正确性窗口混用")
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
     os.environ["PTO_CSA_VARIANT"] = args.variant
     if args.atomic_add is not None:
@@ -810,6 +841,7 @@ def main():
         "status": "RUNNING",
         "batch": args.batch,
         "history": args.history,
+        "layer_index": args.layer_index,
         "seed": args.seed,
         "weight_nz_mode": args.weight_nz_mode,
         "variant": args.variant,

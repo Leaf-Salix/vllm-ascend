@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 
-def load_formal_layer_weights(attention, checkpoint: Path):
+def load_formal_layer_weights(attention, checkpoint: Path, layer_index=2):
     import torch
     from safetensors import safe_open
     from vllm.config import get_current_vllm_config
@@ -25,9 +25,9 @@ def load_formal_layer_weights(attention, checkpoint: Path):
     if description["model_quant_type"] != "W8A8_DYNAMIC":
         raise ValueError("This CSA validation expects a W8A8_DYNAMIC ModelSlim checkpoint")
     for suffix in ("wq_b", "wo_b", "indexer.wq_b"):
-        if description[f"layers.2.attn.{suffix}.weight"] != "W8A8_DYNAMIC":
+        if description[f"layers.{layer_index}.attn.{suffix}.weight"] != "W8A8_DYNAMIC":
             raise ValueError(f"Unexpected formal CSA quantization for {suffix}")
-    prefix = "layers.2.attn."
+    prefix = f"layers.{layer_index}.attn."
     index = checkpoint / "quant_model_weights.safetensors.index.json"
     weight_map = json.loads(index.read_text())["weight_map"]
     selected = {name: shard for name, shard in weight_map.items() if name.startswith(prefix)}
