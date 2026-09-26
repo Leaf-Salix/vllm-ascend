@@ -405,7 +405,8 @@ def diagnose(args, llm, cases):
         common["stage"] = "measuring_layer_intervals"
         if not common["steady_window"] or not all(w["sufficient"] for w in common["steady_window"]):
             write_json(args.output / f"rank{args.rank}.performance.json", common)
-            raise RuntimeError("约定档位的稳态设备样本不足 20 个，或事件时间戳无效；不启动层区间采集")
+            raise RuntimeError(f"约定档位的稳态设备样本不足 {args.steady_cycles} 个，"
+                               "或事件时间戳无效；不启动层区间采集")
     if args.command in ("profile", "performance"):
         level = 0 if args.command == "performance" else 1
         started = llm.collective_rpc("offline_begin_profile", args=(
@@ -1041,8 +1042,8 @@ def main():
                         help="bitcompare采集多少个被比对的step；每个样本都要多跑一次Native，代价不低")
     parser.add_argument("--warmup-steps", type=int, default=8,
                         help="steady命令丢弃的前N个decode step，用于排除首次编译与首个恢复步骤")
-    parser.add_argument("--steady-cycles", type=int, default=20,
-                        help="采集前部连续满档周期数，默认 20；避开请求完成和输出截断阶段")
+    parser.add_argument("--steady-cycles", type=int, default=10,
+                        help="采集 warmup 后连续满档周期数，默认 10，主结果取均值")
     parser.add_argument("--profile-start-step", type=int, default=8, help="从第几个稳态decode step开始采集")
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
     parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
@@ -1098,8 +1099,8 @@ def main():
     if args.command in ("steady", "performance"):
         query = read_plan(args.bank)["decode"]["speculative_tokens"] + 1
         minimum = (args.warmup_steps + args.steady_cycles + 3) * query
-        if args.steady_cycles < 20 or args.warmup_steps < 0 or args.decode_tokens < minimum:
-            parser.error(f"稳态至少采 20 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")
+        if args.steady_cycles < 10 or args.warmup_steps < 0 or args.decode_tokens < minimum:
+            parser.error(f"稳态至少采 10 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")
     if args.layout_only and args.command != "decode":
         parser.error("--layout-only 仅适用于 decode")
     if args.command == "plan":

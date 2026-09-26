@@ -91,9 +91,12 @@ DSpark 按每档开始前快照作累计计数差分，报告 `batch` 和 `max_n
 - `steady` / `performance` 的设备事件在图外记录，收尾统一读回，不逐步加同步；
   schema=2 同时记录 execute 首尾、采样/草稿完成点及连续满档步骤起点。
   主机时间单列，完整周期使用 NPU Event 的 `elapsed_time`，不猜测原始计数单位。
-  默认 `--steady-cycles 20`，预热后取前 21 个满档起点形成 20 个周期；中途变档、
+  主结果为 warmup 后连续 10 个完整 step 的均值。默认 `--steady-cycles 10`，
+  预热后取前 11 个满档起点形成 10 个周期；中途变档、
   采样未完成或实际采样输出计数缺失时拒绝放行，不跨越不完整步拼接周期。
-  `--decode-tokens 192 --warmup-steps 8` 为窗口结束留余量，避开请求结束时的输出裁剪。
+  各档先生成 96 token/请求预热，再用 `--decode-tokens 128 --warmup-steps 8` 测量，
+  为窗口结束留余量，避开请求结束时的输出裁剪。初始化编译和图捕获不进入计时窗口。
+  既有 20 周期记录可直接取前 10 个重算；不重跑模型、不挑选样本。
   全局吞吐按共同样本序号取各 rank 最慢周期，是同步周期吞吐的保守估计；每 rank 原始周期和吞吐另列。
   历史 schema=1 只有 execute_model 时间，不能追认为完整 decode 周期。
 - `performance` 的 Level0 trace 与无 profiler 窗口独立；层区间应从首末设备任务取差，

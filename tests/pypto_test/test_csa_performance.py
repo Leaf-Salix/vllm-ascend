@@ -79,20 +79,21 @@ def test_steady_covers_sampling_and_rejects_unfinished_cycles(observer, monkeypa
             observer.model_runner.sample_tokens(None)
     result = observer.offline_end_steady()
     assert result["sufficient"] is (sample_complete and not shape_gap)
-    assert result["measured_steps"] == 21
-    assert result["step_tokens"] == [96] * 21
-    assert result["device"]["samples_us"] == [100] * 21
-    assert len(set(result["device"]["start_timestamps_raw"])) == 21
+    assert result["measured_steps"] == 11
+    assert result["step_tokens"] == [96] * 11
+    assert result["device"]["samples_us"] == [100] * 11
+    assert len(set(result["device"]["start_timestamps_raw"])) == 11
     if sample_complete:
-        count = 19 if shape_gap else 20
+        count = 9 if shape_gap else 10
         assert result["decode_cycle"]["samples_us"] == [1000] * count
         assert result["decode_cycle"]["actual_output_tokens"] == [32] * count
         if not shape_gap:
             assert result["decode_cycle"]["actual_output_tokens_per_second"] == 32000
-        assert result["execute_sample_device"]["samples_us"] == [900] * 21
+        assert result["decode_cycle"]["mean_us"] == 1000
+        assert result["execute_sample_device"]["samples_us"] == [900] * 11
     else:
         assert result["decode_cycle"]["samples_us"] == []
-        assert result["incomplete_sample_steps"] == 21
+        assert result["incomplete_sample_steps"] == 11
     assert "tokens_per_second" not in result
 
 

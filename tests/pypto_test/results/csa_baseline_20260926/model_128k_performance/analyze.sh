@@ -16,4 +16,4 @@ for backend in native pto; do
 done
 python tests/pypto_test/offline_pd/performance.py --root "$result_root" \
     --bank tests/pypto_test/results/release_offline_pd_20260923/h131072_bank \
-    --mode 2 --batch "$batch" --max-num-seqs 40 --decode-tokens 192 --profile-steps 3
+    --mode 2 --batch "$batch" --max-num-seqs 40 --decode-tokens 128 --steady-cycles 10 --profile-steps 3

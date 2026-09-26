@@ -384,7 +384,7 @@ class OfflineCSAObserver:
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
-    def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests, cycles=20):
+    def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests, cycles=10):
         """记录 execute、采样/草稿完成点及连续步骤起点，不逐步增加同步。"""
         import torch
 
@@ -474,7 +474,7 @@ class OfflineCSAObserver:
             if not values:
                 return {}
             ordered = sorted(values)
-            return {"p50_us": statistics.median(values),
+            return {"mean_us": statistics.mean(values), "p50_us": statistics.median(values),
                     "p95_us": ordered[math.ceil(len(values) * 0.95) - 1]}
 
         state["device"] = {"samples_us": device_us, "start_timestamps_raw": stamps,

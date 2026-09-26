@@ -17,7 +17,8 @@ def distribution(values):
     if not values or any(not math.isfinite(v) or v <= 0 for v in values):
         raise ValueError("设备耗时缺失或含非正/非有限数")
     ordered = sorted(values)
-    return {"samples": len(values), "min_us": ordered[0], "p50_us": statistics.median(values),
+    return {"samples": len(values), "min_us": ordered[0], "mean_us": statistics.mean(values),
+            "p50_us": statistics.median(values),
             "p95_us": ordered[math.ceil(len(values) * 0.95) - 1], "max_us": ordered[-1]}
 
 
@@ -124,7 +125,7 @@ def layer_intervals(rows, side, steps=3):
             "profiled_main_steps": model_steps}
 
 
-def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seqs):
+def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seqs, steady_cycles):
     path = root / side / f"rank{rank}.performance.json"
     value = json.loads(path.read_text())
     # 扫描功能加入前的入口固定 max_num_seqs=batch；新扫描结果必须显式保存容量。
@@ -153,16 +154,19 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
     require(steady["dp_rank"] == rank and steady["sufficient"], f"{path}: 稳态设备采样不足")
     require(steady.get("schema") == 2, f"{path}: 旧计时缺少采样/草稿完成证据")
     cycle = steady["decode_cycle"]
-    require(cycle["sufficient"] and len(cycle["samples_us"]) >= 20 and
+    require(cycle["sufficient"] and len(cycle["samples_us"]) >= steady_cycles and
             len(cycle["samples_us"]) == len(cycle["actual_output_tokens"]) == len(cycle["steady_step_indices"]),
             f"{path}: 完整 decode 周期/实际输出 token 计数缺失")
+    require(cycle["steady_step_indices"][:steady_cycles] == list(range(
+        steady["warmup_steps"], steady["warmup_steps"] + steady_cycles)),
+        f"{path}: 须取 warmup 后紧接的连续 {steady_cycles} 个周期，不能挑选样本")
     require(all(type(n) is int and n > 0 for n in cycle["actual_output_tokens"]),
             f"{path}: 实际输出 token 计数无效")
     distribution(cycle["samples_us"])
     samples = steady["device"]["samples_us"]
     stamps = steady["device"]["start_timestamps_raw"]
     count = steady["measured_steps"]
-    require(len(samples) == len(stamps) == count and count >= 20 and all(
+    require(len(samples) == len(stamps) == count and count >= steady_cycles + 1 and all(
         b > a for a, b in zip(stamps, stamps[1:])), f"{path}: 设备事件未更新或数量不符")
     require(steady["step_tokens"] == [expected_tokens] * count and
             steady["step_requests"] == [batch] * count, f"{path}: 设备样本混入其他档位")
@@ -186,12 +190,12 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
     return value, stats
 
 
-def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16, max_num_seqs=None):
+def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_num_seqs=None, steady_cycles=10):
     max_num_seqs = batch if max_num_seqs is None else max_num_seqs
     report = {"status": "FAIL", "mode": mode, "scope": "无 profiler 的完整 decode 周期包含采样、草稿和调度间隙；"
               "execute_model 单列。CSA 层区间独立取设备 trace 首末。",
               "expected": {"ranks": ranks, "batch": batch, "max_num_seqs": max_num_seqs,
-                           "tokens_per_round": tokens,
+                           "tokens_per_round": tokens, "steady_cycles_per_rank": steady_cycles,
                            "profile_steps": steps},
               "errors": [], "token_mismatches": 0, "spec_decode_mismatched_ranks": 0,
               "compared_tokens": 0, "ranks": []}
@@ -202,7 +206,7 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16, max_nu
     for rank in range(ranks):
         try:
             loaded = {side: load_rank(root, side, rank, mode, plan, batch=batch, tokens=tokens,
-                                     steps=steps, max_num_seqs=max_num_seqs)
+                                     steps=steps, max_num_seqs=max_num_seqs, steady_cycles=steady_cycles)
                       for side in ("native", "pto")}
             native, pto = (loaded[side][0] for side in ("native", "pto"))
             for key in ("key", "history", "capture_sizes", "max_num_seqs", "deterministic", "hccl_deterministic",
@@ -222,18 +226,21 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16, max_nu
                      "spec_decode_equal": stats_equal}
             for side, (data, stats) in loaded.items():
                 steady = data["steady_window"][0]
-                device = steady["device"]["samples_us"]
+                device = steady["device"]["samples_us"][:steady_cycles]
                 samples[side].extend(device)
                 entry[side] = {"execute_model_device": distribution(device), "spec_decode": stats,
                                "peak_allocated_bytes": steady["peak_allocated_bytes"],
                                "peak_reserved_bytes": steady["peak_reserved_bytes"]}
                 cycle = steady.get("decode_cycle", {})
                 if cycle.get("sufficient"):
-                    entry[side]["decode_cycle_device"] = distribution(cycle["samples_us"])
-                    cycles[side].extend(cycle["samples_us"])
-                    entry[side]["actual_output_tokens_per_second"] = cycle["actual_output_tokens_per_second"]
-                    cycle_rows[side][rank] = dict(zip(cycle["steady_step_indices"],
-                                                     zip(cycle["samples_us"], cycle["actual_output_tokens"])))
+                    selected = cycle["samples_us"][:steady_cycles]
+                    emitted = cycle["actual_output_tokens"][:steady_cycles]
+                    indices = cycle["steady_step_indices"][:steady_cycles]
+                    entry[side]["decode_cycle_device"] = distribution(selected)
+                    entry[side]["steady_step_indices"] = indices
+                    cycles[side].extend(selected)
+                    entry[side]["actual_output_tokens_per_second"] = sum(emitted) / (sum(selected) * 1e-6)
+                    cycle_rows[side][rank] = dict(zip(indices, zip(selected, emitted)))
                 layers = layer_intervals(device_tasks(root / side, rank), side, steps)
                 entry[side]["layers"] = layers
                 layer_samples[side].extend(layers["intervals"])
@@ -246,12 +253,13 @@ def compare(root, mode, plan, *, batch=16, tokens=192, steps=3, ranks=16, max_nu
                               for item in report["ranks"] for side in cycles)
         report["decode_cycle_device"] = ({side: distribution(values) for side, values in cycles.items()}
                                           if complete_cycles else None)
-        report["decode_cycle_note"] = "相邻满档起点之间已完成采样与草稿，使用 elapsed_time，不猜测原始计数单位。"
+        report["decode_cycle_note"] = (f"主结果为 warmup 后连续 {steady_cycles} 个完整周期的均值；"
+                                       "相邻满档起点之间已完成采样与草稿，使用 elapsed_time。")
         report["global_decode"] = {}
         for side, by_rank in cycle_rows.items():
             common = set.intersection(*(set(rows) for rows in by_rank.values()))
-            if len(common) < 20:
-                report["errors"].append(f"{side}: 全 rank 的共同稳态周期不足 20 个")
+            if len(common) != steady_cycles:
+                report["errors"].append(f"{side}: 全 rank 的共同稳态周期不足 {steady_cycles} 个")
                 continue
             # EP 同步场景用各 rank 同一稳态步的最慢周期；只累加实际采样输出 token。
             slowest = [max(rows[i][0] for rows in by_rank.values()) for i in sorted(common)]
@@ -289,12 +297,13 @@ def main():
     parser.add_argument("--mode", type=int, choices=(1, 2), required=True)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--max-num-seqs", type=int, help="模型容量；省略时要求容量等于实际 batch")
-    parser.add_argument("--decode-tokens", type=int, default=192)
+    parser.add_argument("--decode-tokens", type=int, default=128)
+    parser.add_argument("--steady-cycles", type=int, default=10)
     parser.add_argument("--profile-steps", type=int, default=3)
     args = parser.parse_args()
     report = compare(args.root, args.mode, json.loads((args.bank / "plan.json").read_text()),
                      batch=args.batch, tokens=args.decode_tokens, steps=args.profile_steps,
-                     max_num_seqs=args.max_num_seqs)
+                     max_num_seqs=args.max_num_seqs, steady_cycles=args.steady_cycles)
     (args.root / "performance_comparison.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({k: v for k, v in report.items() if k != "ranks"}, ensure_ascii=False, indent=2))
     raise SystemExit(report["status"] == "FAIL")

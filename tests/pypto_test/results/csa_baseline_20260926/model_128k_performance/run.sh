@@ -17,8 +17,8 @@ for backend in native pto; do
     python tests/pypto_test/offline_pd/run.py performance \
         --bank tests/pypto_test/results/release_offline_pd_20260923/h131072_bank \
         --output "$result_root/$backend" --backend "$backend" \
-        --batch 40 --sweep-batches 4 8 16 24 32 40 --decode-tokens 192 --weight-nz-mode 2 \
-        --warmup-rounds 1 --warmup-tokens 96 --warmup-steps 8 \
+        --batch 40 --sweep-batches 4 8 16 24 32 40 --decode-tokens 128 --weight-nz-mode 2 \
+        --warmup-rounds 1 --warmup-tokens 96 --warmup-steps 8 --steady-cycles 10 \
         --profile-start-step 8 --profile-steps 3 \
         --graph-mode full_decode_only --capture-sizes 24 48 96 144 192 240
 done
