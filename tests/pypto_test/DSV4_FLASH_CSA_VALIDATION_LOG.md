@@ -6539,3 +6539,61 @@ max((repack_valid - 1) // BLOCK_SIZE, 0))` 把表下标钳到 1024 < 1026。
 另外比对必须向量化：按每槽 258~1024 项做标量 `pl.read` 的话，GM 标量读每次上百周期、
 总计可能吃掉 200+ µs，把 350 µs 的收益抵掉大半。做法是静态宽度（例如 64 列）分块 +
 动态循环次数，配合上面的钳位保证不越界。
+
+## 171. 增量 repack 阶段二：五个 PyPTO API 约束与一个架构性阻塞（2026-09-27）
+
+在 §170 验证过的持久缓冲之上实现了完整的增量判据（块表前缀持久化 + 向量化分块比对 +
+全批统一起始页 + 状态写回），四次编译失败逐个清掉 API 约束，第五次撞到架构性阻塞。
+代码已回退，约束记录如下。
+
+### 逐个清掉的四个 API 约束
+
+| 报错 | 约束 | 解法 |
+| --- | --- | --- |
+| `missing inferred tensor metadata for parameter` | inline 形参不能引入新的 `pl.dynamic` 符号；且调用链每一层都要加参数（四层：根 kernel → `indexer` → `indexer_weights_score` → `indexer_score_topk_forest`） | 复用已有的 `B_DYN`，第二维取编译期常量，用时 `pl.reshape` |
+| `pl.row_sum: Tile inputs require tmp_tile with the same dtype and rank...` | `pl.row_sum` / `pl.row_max` 对 Tile 输入必须传第二个 `tmp_tile` | `pl.create_tile([1, N], FP32, target_memory=pl.MemorySpace.Vec)` 传进去（参照 `decode_sparse_attn_csa.py` 的 `qk_reduce_tmp`） |
+| `Subscript-write source must also be a tensor, got TileType` | Tile 写回 GM 不能用下标赋值 | 用 `pl.store(tile, [row, col], dest_tensor)` |
+| `tile.write requires value dtype to match tile dtype, but got value dtype index and tile dtype int32` | `pl.read` 返回 INDEX 标量，写入 INT32 tile 要显式转换 | `pl.cast(scalar, pl.INT32)` |
+
+### 架构性阻塞：编排层没有片上内存
+
+```
+Error: The tile 'chk_cur_t_...' lives in a Orchestration function,
+       which has no on-chip memory to place it in.
+```
+
+`indexer_score_topk_forest` 的顶层是**编排（Orchestration）代码**，跑在 AICPU 调度上，
+**不能存在 Tile**——那里只能做标量运算和 `pl.read`。而增量判据需要向量化的块表比对
+（§170 已算过：按标量逐项读 GM，16 槽 × 1025 页 ≈ 16400 次读、每次上百周期，
+会吃掉大半收益），向量化就必须有 Tile，Tile 就必须在 spmd 里。
+
+于是形成循环依赖：
+
+- `repack_start` 要当**编排层** repack 循环的上界；
+- 但它必须由 **device 侧**（spmd 内）的向量比对算出。
+
+绕开这个循环需要"spmd 把 `start[b]` 写进一个小 GM 张量 → 编排层用
+`pl.read` 读回来算 `uniform_start`"这种两段式模式（编排层读 b_dim 个标量很便宜）。
+**但我没有确认 PyPTO 是否支持编排层读取同一 kernel 内前序任务写入的值**——现有代码在
+编排层读的都是 kernel 的输入张量（`kv_seq_lens`、`idx_block_table`），没有先例。
+这是下次动手前必须先查清的一件事（查 `pl.system.task_dummy` / 任务依赖与编排层读取的
+语义，或在 pypto 仓库里找同类用法）。
+
+### 备选方案
+
+如果编排层读不回 device 写的值，可考虑：
+
+1. **把 repack 拆成两个 spmd**：第一个算 `start[b]` 并写 GM，第二个做搬运且**在 spmd 内部**
+   用 `pl.read` 取 `start[b]` 决定自己这一份工作的页范围。这样循环上界仍是编排层的
+   `MAX_REPACK_PAGES`（不变），但每个工作单元内部判断"这一页要不要搬"——问题回到
+   "`if` 包住张量写入破坏 SSA"，除非用"把源页钳到同一页、让 DMA 变成重复搬同一页"
+   的办法，那样省不下 DMA 次数。
+2. **让判据只用标量**：把比对粒度从"每页"放粗到"每 128 页取一个代表"，编排层只读
+   b_dim × 8 ≈ 128 个标量。**但这不是可证明正确的判据**——槽位被新请求复用时，
+   若采样到的 8 个块号恰好都相同就会误判。作为取证手段可以，作为生产实现不行。
+
+### 当前状态
+
+代码已全部回退，生产路径保持 `REPACK_WORKERS = 192`。增量 repack 的收益上限仍是
+§146 探针直测的约 340 µs（128K/B16 → ratio 约 1.09），显存代价 1.32~5.25 GiB，
+两者都不变；阻塞点从"工程管道"变成了"编排层与 device 层的数据流方向"这一个明确问题。
