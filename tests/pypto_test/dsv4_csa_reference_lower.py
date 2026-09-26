@@ -27,11 +27,11 @@ def main() -> None:
 
         assert tuple(sys.argv) == argv_before, "kernel import changed service argv"
         assert config.TP == 1 and config.DECODE_SEQ == 6
-        decode_csa_tp1_attention_test = __import__(
-            f"{package}.decode_csa", fromlist=["decode_csa_tp1_attention_test"]
-        ).decode_csa_tp1_attention_test
+        decode_csa_tp1_layer_test = __import__(
+            f"{package}.decode_csa", fromlist=["decode_csa_tp1_layer_test"]
+        ).decode_csa_tp1_layer_test
 
-        kernels = [decode_csa_tp1_attention_test]
+        kernels = [decode_csa_tp1_layer_test]
         report["kernels"] = []
         for kernel in kernels:
             program = kernel.lower(config=RunConfig(platform="a2a3"))

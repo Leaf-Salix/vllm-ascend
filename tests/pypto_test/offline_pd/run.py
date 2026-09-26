@@ -666,9 +666,9 @@ def worker(args):
         max_num_batched_tokens=2048 if prefill else max(256, args.batch * 6),
         enable_prefix_caching=False, enforce_eager=prefill or args.graph_mode == "eager", seed=1024,
         gpu_memory_utilization=0.9, block_size=32,
-        # D 侧上线口径是 FULL_DECODE_ONLY，见 dsv4_perf_accuracy_20260827/runtime；
+        # 清单约定的 D 侧上线口径为 FULL_DECODE_ONLY；
         # eager 只用于定位问题，其每步重入 Python 派发路径，不代表上线表现。
-        # draft 与该参考配置一致保持 eager。两侧 NZ mode 均由显式 CLI 控制。
+        # draft 保持 eager。两侧 NZ mode 均由显式 CLI 控制。
         # 捕获档位默认由 vLLM 按 max_num_seqs*6 截断默认列表得到，最大档可能小于
         # potential_max_tokens（实测档位 [1,2,4,8,16,24] 而 potential 为 30）。
         # 那会让 mc2_tokens_capacity 小于 potential，A3 上 select_moe_comm_method
@@ -841,7 +841,7 @@ def launch(args):
                 # 采集窗口会在各 rank 上做同步和落盘，给集合通信留出等待余量。
                 "HCCL_CONNECT_TIMEOUT": "120",
                 "HCCL_EXEC_TIMEOUT": "1800" if args.command != "decode" else "204",
-                # 上线口径 decode 侧为 1800（dsv4_perf_accuracy_20260827/runtime/decode/run_dp_template.sh），
+                # decode 侧 HCCL buffer 固定为 1800 MB，
                 # prefill 侧为 1024。1024 在 max_num_seqs=40 时不够：算子按
                 # ((maxBs*tokenNeedSizeDispatch*epWorldSize*localMoeExpertNum)
                 #  + (maxBs*tokenNeedSizeCombine*(k+sharedExpertNum))) * 2 计算，

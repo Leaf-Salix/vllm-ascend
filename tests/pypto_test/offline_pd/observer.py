@@ -52,10 +52,7 @@ _enable_swimlane_init()
 
 
 # 捕获期 PTO/Native 选择计数。图模式下这个选择由 eligible() 在**捕获时**定下，
-# 之后每次重放都沿用；而 forward hook 在图重放时根本不触发——
-# offline_begin_observation 用 register_forward_hook 采到的 21 个层全是空字典
-# （release_csa_batch_sweep_20260924 的 b1/b4/b8 即如此），且它静默返回空，
-# 看起来像有数据，比没有更糟。
+# 之后每次重放都沿用；普通 forward hook 在图重放时不触发，不能用空字典表示有效观测。
 _CSA_SELECTION = {}
 
 
@@ -269,10 +266,8 @@ class OfflineCSAObserver:
     def offline_begin_bitcompare(self, layer_index, expected_tokens, max_samples, mode):
         """在真实生产路径上逐 bit 比对 PTO 与 Native 的 CSA 层输出张量。
 
-        挂点选 CSAServiceRuntime.__call__ 而不是离线 fixture：那套 fixture
-        （dsv4_csa_native_forward.py）依赖当前 release 已删除的
-        DeviceMetadataExecutor，重建它等于复活旧接口；而这里比的是线上真实张量，
-        权重、缓存、metadata 全都一致，不存在人造输入的偏差。
+        在 CSAServiceRuntime.__call__ 上捕获真实模型的权重、输入、缓存和 metadata，
+        补充单卡合成用例之外的层级数值证据。
 
         在真正调用 kernel 前保存 slot 声明会写的 cache/state 页和输出缓冲，
         两次执行之间恢复初态，不假定重复写天然幂等。只备份触及页，避免复制整份 cache。
@@ -621,9 +616,7 @@ class OfflineCSAObserver:
         侧读不到，但算子是纯 metadata 生产者（只产出 cos/sin/slots，不碰 KV cache），
         用同一份 metadata 复算一次即可得到与图内一致的结果。
 
-        必须取**同一层**的 impl：compress_ratio 不匹配会直接报错
-        （task_20260924_000518 即因此失败）。这里按 builder 的 compressor_ratio
-        找到对应层。
+        必须取同一 compress_ratio 的 impl，按 builder 的 compressor_ratio 找到对应层。
         """
         pending = state.pop("pending_compact", None)
         if pending is None or state["compact_samples"] >= self._OFFLINE_COMPACT_SAMPLES:

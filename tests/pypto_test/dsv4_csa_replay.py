@@ -78,7 +78,7 @@ def materialize(meta, payload, device="cpu"):
     import torch
 
     if meta.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("旧快照缺少布局/初态/别名信息；必须先显式迁移，不能猜测或自动二次打包")
+        raise ValueError("旧快照缺少布局/初态/别名信息；必须重新采集 schema=2，不能猜测或自动二次打包")
     if meta.get("source", {}).get("state_timing") not in ("before_call", "constructed_initial"):
         raise ValueError("快照未声明可回放的调用前初态")
     backings = {}

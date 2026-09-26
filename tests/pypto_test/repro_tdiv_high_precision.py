@@ -1,7 +1,6 @@
 """Standalone A3 TDIV precision observation; no model, weights or vLLM imports."""
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -86,8 +85,6 @@ def main():
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve()
-    if source.parent != out:
-        shutil.copyfile(source, out / source.name)
     os.chdir(out)  # Keep generated PTO IR and C++ beside the numerical report.
 
     import pypto
@@ -156,7 +153,7 @@ def main():
             line.strip() for line in path.read_text().splitlines() if "tdiv" in line.lower() or "division_mode" in line
         ]
         evidence[str(path.relative_to(out))] = {
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "size_bytes": path.stat().st_size,
             "division_lines": lines,
         }
     isa = git_state(args.isa_root)
@@ -166,7 +163,7 @@ def main():
             if path.exists():
                 target = out / ("isa_" + path.name)
                 shutil.copyfile(path, target)
-                isa[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+                isa[relative] = {"evidence": target.name, "size_bytes": path.stat().st_size}
     ptoas = shutil.which("ptoas")
     report = {
         "status": "REPRODUCED"
@@ -174,6 +171,7 @@ def main():
         and comparisons["high_vs_exact_fp32"]["different_elements"] > 0
         else "NOT_REPRODUCED",
         "scope": "A3 FP32 tensor/tensor TDIV; not a full CSA accuracy or performance test",
+        "source": git_state(source.parent),
         "shape": [ROWS, COLS],
         "seed": 20260922,
         "exact_rational_checked": ROWS * COLS,

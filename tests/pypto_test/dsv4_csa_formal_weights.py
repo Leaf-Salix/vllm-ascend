@@ -9,10 +9,6 @@ import json
 from pathlib import Path
 
 
-def is_modelslim_checkpoint(checkpoint: Path) -> bool:
-    return (checkpoint / "quant_model_description.json").is_file()
-
-
 def load_formal_layer_weights(attention, checkpoint: Path):
     import torch
     from safetensors import safe_open

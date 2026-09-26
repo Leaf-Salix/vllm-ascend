@@ -109,21 +109,19 @@ def _run_benchmark(args, report):
     from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
 
     package = variant_package()
-    # 整层融合（提交 1dcadd85）之后入口从 attention 改成 layer：它从 mHC 的残差流进、
-    # 也从残差流出（hc_pre + input_layernorm + attention + hc_post 都在算子内）。
-    # 旧名保留成回退，便于对着融合前的 argdump 跑老用例。
+    # 当前入口覆盖 mHC 残差流之间的完整 HC_pre + norm + CSA + HC_post。
     entry = "decode_csa_tp1_layer_test"
     module = __import__(f"{package}.decode_csa", fromlist=[entry])
-    kernel = getattr(module, entry, None) or module.decode_csa_tp1_attention_test
+    kernel = getattr(module, entry)
 
     meta = json.loads((args.args_dir / "csa_args_meta.json").read_text())
     names = list(kernel.param_names)
     if names != meta["param_names"]:
-        raise ValueError("落盘入参的参数表与当前 kernel 不一致，需显式转换快照")
+        raise ValueError("落盘入参的参数表与当前 kernel 不一致，需重新采集快照")
     root = getattr(module, kernel.__name__)
     roles = argument_roles(root)
     if meta.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("旧快照缺少布局/初态/别名信息，必须先显式迁移后回放")
+        raise ValueError("旧快照缺少布局/初态/别名信息，必须重新采集 schema=2 快照")
     if any(meta["tensors"][name]["role"] != roles[name] for name in names):
         raise ValueError("快照读写角色与当前根签名不一致")
     blob = torch.load(args.args_dir / "csa_args.pt", map_location="cpu", weights_only=True)

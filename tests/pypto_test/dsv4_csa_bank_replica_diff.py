@@ -1,30 +1,11 @@
-"""T3.1：量化离线 P 缓存 bank 四个 TP 副本之间的差异分布。
+"""CPU 比较既有 Native P bank 的 TP 副本有效前缀。
 
-背景：`offline_pd/run.py` 的 audit 要求同一个 case 的 tp0～tp3 在"有效前缀"上
-逐 bit 相同，tp0 为基准。smoke bank（H255）通过，H4095 不通过，错误全部出现在
-tp1／tp2／tp3。
+P 始终使用 Native，DSA KV 跨 TP 复制；D TP1 使用 tp0 副本。
+此工具只定位输入数据差异，不将结果当作 PTO 或整模型验收，也不写回 bank 或计算 hash。
+H4095 已有确定性 bank；是否复查按当前问题决定，不自动重扫全部 bank。
 
-需要先弄清楚的是差异**落在哪里**，再决定这条比较该修、该降级为报告、
-还是该换成对 tp0 自身的直接校验。在拿到分布之前不放宽任何判据。
-
-几点必须先讲清楚，免得把结论安错地方：
-
-  * P 侧永远是 Native。`run.py` 只在 `not prefill and --backend pto` 时才注入
-    `PyptoCSADeepseekV4ForCausalLM`，prefill 从不注入；而 PTO CSA 本身要求
-    TP=1（`service_config.py`）。所以这里的 tp0～tp3 是 Native 的四个 TP rank，
-    与 PTO 无关。
-  * DSA 的 KV 是 MLA 压缩潜变量，跨 TP **复制**而非切分（`attn__0` 形状
-    `[32, 1, 512]`，512 即 head_dim）。因此每个副本都是完整一份，
-    D 侧 TP1 只读 tp0（`connector.py` 里 tp 固定为 0）是成立的。
-
-本脚本只读 bank，不写回、不跑设备、不做 hash 校验，只做数值比较。
-
-用法（CPU-only，不占卡，但需要 venv 里的 torch/safetensors）：
-
-    source /data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh
-    python tests/pypto_test/dsv4_csa_bank_replica_diff.py \
-        --bank tests/pypto_test/results/release_offline_pd_20260923/h4095_bank \
-        --output <结果目录>
+用法：加载 env-dsv4-0251rc1.sh 后，指定 --bank 与 --output。
+可复用 bank 的路径见 DSV4_FLASH_CSA_OFFLINE_PD.md。
 """
 import argparse
 import json
