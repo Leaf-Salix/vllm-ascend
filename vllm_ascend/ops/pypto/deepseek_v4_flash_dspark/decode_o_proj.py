@@ -414,10 +414,14 @@ def decode_o_proj_tp1(
     with pl.manual_scope():
         for g in pl.parallel(O_GROUPS):
             col_g = g * O_LORA
-            with pl.at(
-                level=pl.Level.CORE_GROUP, name_hint="quant", deps=[scale_tid], allow_early_resolve=True
+            # 每个 token 块独立量化，仍读取跨全部 O 组计算的 Native 统一标度。
+            with pl.spmd(
+                scale_blocks, name_hint="quant", deps=[scale_tid], allow_early_resolve=True
             ) as q_tid:
-                for qt in pl.pipeline(0, t_dim, QUANT_TOKEN_TILE, stage=2):
+                quant_start = pl.tile.get_block_idx() * QUANT_TASK_T_TILE
+                for qt in pl.pipeline(
+                    quant_start, pl.min(quant_start + QUANT_TASK_T_TILE, t_dim), QUANT_TOKEN_TILE, stage=2
+                ):
                     token_multiplier = act_scale_q[0:1, qt : qt + QUANT_TOKEN_TILE]
                     g_sq_col = pl.reshape(token_multiplier, [QUANT_TOKEN_TILE, 1])
                     oc_q = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
@@ -427,12 +431,13 @@ def decode_o_proj_tp1(
                     oq_half = pl.cast(oq_i32, target_type=pl.FP16, mode="round")
                     oq_i8 = pl.cast(oq_half, target_type=pl.INT8, mode="trunc")
                     o_r_i8_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA] = oq_i8
-                # Zero the tail of the final active proj_b_mm row tile.
-                for zt in pl.range(t_dim, proj_b_padded_rows, QUANT_TOKEN_TILE):
-                    zero_half = pl.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
-                    zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
-                    zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
-                    o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
+                # 尾部补零仅由最后一个 token 块负责，避免多 worker 重复写。
+                if quant_start + QUANT_TASK_T_TILE >= t_dim:
+                    for zt in pl.range(t_dim, proj_b_padded_rows, QUANT_TOKEN_TILE):
+                        zero_half = pl.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
+                        zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
+                        zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
+                        o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
 
             partials, pb_tid = proj_b_mm(
                 o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid,

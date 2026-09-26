@@ -482,15 +482,21 @@ mode=2 暂作后续优化候选，mode=1 原始结果保留；两档之间的差
 | --- | --- | --- | --- | --- |
 | D1 | 同源码、同配置重新定位关键路径 | Worker/Scheduler 不重复计数；计算、内部等待、资源竞争分别解释；只列有当前证据的热点 | A5、随 C 更新 | 进行中 |
 | D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 必要功能检查通过，单卡完整区间有稳定收益，再做整模型 token 看护；不以核·μs、单块 p50 或模拟器代替最终指标 | C、D1 | 按用户要求暂停新增候选，<750 μs 未完成 |
-| D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 进行中 |
+| D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 数值中性迁移已单卡验证；整模型看护待做 |
 | D4 | 精度复查后做性能版 128K 泛化对比 | TP1/DP=EP16、EPLB 开、S6，B4/8/16/24/32/40 两侧同配置；完整 decode 与层区间均有证据 | D3、B 必要复查、EPLB 环境核实 | 待做 |
 
-D3 当前迁移顺序：先将 INT8 Q 投影的 NZ 整段 K 加载、N256 和紧凑尾块提取为两版共享实现，
-再移植 Q 反量化的独立 head 分组。Indexer 整页读取、O 投影分块以及已有共享适配先核对是否
-已经相同，避免重复搬代码；QR/KV split-K、Native K 遍历、累积最大值/BF16 量化顺序、
-Q/KV/O 的舍入边界保留在精度版。其他变化须先说明其是否数值中性再迁移。
-用 B16/H8192、B1/H255、B40/H8192 的 mode=2、atomic=0、Native level=1 前后状态对照，
-B16 同时测完整区间；移植后补必要图内容更新。只补受影响项，不重跑旧全部矩阵。
+D3 已移植/共享：INT8 Q 投影的 NZ 整段 K 加载、N256 和有效尾行；Q 反量化独立 head
+分组；QR 归一化最多 16 worker 轮转独立 token 块；O 量化按 token 块 SPMD；整数生成
+RoPE 换位索引并移除独立 `rope_swap` 任务。Indexer 整页读取、O-A/O-B 分块原已相同。
+保留精度版 QR/KV 的 K 遍历/规约、Compressor 运算次序、累计 softmax、Q/KV/O 舍入，
+以及 O 投影跨全部组的统一量化尺度，未复制性能版分组量化与浮点组规约。
+
+B16/H8192、B1/H255、B40/H8192：mode=2、atomic=0、Native level=1，迁移前后两侧
+各 8 类完整输出/状态均逐元素一致，metadata/保护区无异常，B16 A/B/A 图重放通过。
+完整区间 p50 1119.06→1114.02 μs，p95 1155.24→1145.50 μs；Native 同轮 p50
+926.79→929.33 μs。尚不能确认稳定性能收益，不将共享/迁移完成写成精度版已快于 Native。
+详见[迁移证据](results/csa_baseline_20260926/precision_port/migration.json)与验证日志第 127 节。
+下一步只补 B 的差异定位及整模型 token/DSpark 看护，再进入 D4。
 
 当前设备 profiler 与 DFX：第二层 PTO 图内只有 runtime/worker 两项，没有重复生成 compact
 metadata；Native 仍有两项生产算子。mode=2 独立 profiler 的首末设备任务区间为
@@ -513,7 +519,7 @@ O-B 整段权重、O projection 动态行块、较小 split-K、WqB BYPASS 均�
 该候选 mode=2、atomic=1 的正式 16 卡看护已通过：24,576 token 和 DSpark 统计全部一致；
 每个 rank 的 21 个目标 C4 层均捕获 PTO 路径并实际图重放。
 证据：[本候选整模型看护](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/comparison.json)。
-当前仍高于 750 μs，继续集中推进性能版。保留候选补测 mode=1：Native p50 939.49 μs，
+当前仍高于 750 μs；新增性能候选已按用户要求暂停。保留候选补测 mode=1：Native p50 939.49 μs，
 PTO p50/p95 872.30/906.92 μs，未确认该模式相对旧版有收益；单卡继续优先 mode=2。
 另一档结果保留在 [mode=1 报告](results/csa_baseline_20260926/perf_qproj_upstream/mode1/report.json)，
 最终主口径仍由整模型的同 mode 对照决定。

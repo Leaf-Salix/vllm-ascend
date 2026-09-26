@@ -11,6 +11,15 @@
 
 import pypto.language as pl
 
+from ..deepseek_v4_flash_dspark.q_projection import (
+    PREFILL_DENSE_TILE,
+    QPROJ_M_TILE,
+    QPROJ_MM_N_TILE,
+    QPROJ_MM_T_DYN,
+    QPROJ_T_PAD,
+    QPROJ_TAIL_M_TILE,
+    q_proj_q_matmul,
+)
 from ..deepseek_v4_flash_dspark.reduction import ATOMIC_ADD, STORE_ATOMIC
 from .config import (
     FLASH as M,
@@ -19,7 +28,7 @@ from .config import (
     INT8_AMAX_EPS,
     INT8_SCALE_MAX,
 )
-from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
+from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT
 
 T_DYN = pl.dynamic("QKV_Q_T_DYN")  # T = B * S
 
@@ -27,9 +36,6 @@ KV_T_DYN = pl.dynamic("QKV_KV_T_DYN")
 
 ROPE_T_DYN = pl.dynamic("QKV_ROPE_T_DYN")
 
-QPROJ_MM_T_DYN = pl.dynamic("QKV_QPROJ_MM_T_DYN")
-
-PREFILL_DENSE_TILE = 512
 
 D = M.hidden_size
 
@@ -50,11 +56,6 @@ Q_LORA = M.q_lora_rank
 EPS = M.rms_norm_eps
 
 MAX_SEQ_LEN = M.max_position_embeddings
-
-# ND keeps the existing split-K matmul; Native NZ follows pypto-lib 2164563
-# with a full-K resident weight and a 256-column output tile.
-Q_PROJ_TILE = 128
-QPROJ_MM_N_TILE = 256 if QUANT_WEIGHT_NZ else 512
 
 Q_LORA_TILE = 256  # qr rms-norm / quant N granularity
 
@@ -111,15 +112,6 @@ KV_NATIVE_K_BLOCK = 256
 KV_NATIVE_N_GROUP = 96
 KV_NATIVE_SHIFT_GROUPS = 4
 KV_NATIVE_PAIR_SHIFT = 5
-
-QPROJ_M_TILE = 64  # dense qproj token tile
-
-QPROJ_WORKERS = 24
-
-# Plain matmul supports a compact 64-row NZ tail; ND matmul_acc keeps 16.
-QPROJ_TAIL_M_TILE = QPROJ_M_TILE if QUANT_WEIGHT_NZ else MATMUL_T_TILE
-
-QPROJ_T_PAD = ((PREFILL_DENSE_TILE + QPROJ_TAIL_M_TILE - 1) // QPROJ_TAIL_M_TILE) * QPROJ_TAIL_M_TILE
 
 KV_RMS_T_TILE = 32  # kv rms-norm + rope fused token (T) tile
 
@@ -448,83 +440,6 @@ def q_proj_qr_normalize(
 
 # NZ 与 ND 拆成两个独立函数，不写成一个函数里的 `if QUANT_WEIGHT_NZ`——@pl.jit 读源
 # 文件做 AST 分析，两个分支会一起被 trace 而冲突。末尾择一。
-QPROJ_N_BLOCKS = (H * HEAD_DIM) // QPROJ_MM_N_TILE
-
-
-@pl.jit.inline(auto_scope=False)
-def _q_proj_q_matmul_nd(
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
-    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
-    q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
-    tile_rows: pl.Scalar[pl.INDEX],
-    qproj_dep: pl.Scalar[pl.TASK_ID],
-):
-    """ND 版：N 索引直接用 `pl.range` 的循环变量，与上游同形。
-
-    Project one bounded Q tile and expose its cube task ID.
-    """
-    qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
-    qproj_full_rows = qproj_t_matmul  # 调用方已按 QPROJ_M_TILE 取整
-    with pl.spmd(
-        QPROJ_WORKERS,
-        name_hint="qproj_matmul",
-        deps=[qproj_dep],
-    ) as qproj_tid:
-        qproj_worker = pl.tile.get_block_idx()
-        for qproj_n_idx in pl.range(
-            qproj_worker,
-            QPROJ_N_BLOCKS,
-            QPROJ_WORKERS,
-        ):
-            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
-            # ND retains the split-K pipeline and its existing padded row path.
-            for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
-                col_acc = pl.create_tensor([QPROJ_M_TILE, QPROJ_MM_N_TILE], dtype=pl.INT32)
-                for qr_proj_col0 in pl.pipeline(0, Q_LORA, Q_PROJ_TILE, stage=2):
-                    qr_i8_chunk = qr_i8_matmul[
-                        t0 : t0 + QPROJ_M_TILE,
-                        qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE,
-                    ]
-                    wq_chunk = wq_b[qr_proj_col0 : qr_proj_col0 + Q_PROJ_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
-                    col_acc = pl.matmul_acc(col_acc, qr_i8_chunk, wq_chunk, init_cond=(qr_proj_col0 == 0))
-                q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
-
-    return q_proj_i32, qproj_tid
-
-
-@pl.jit.inline(auto_scope=False)
-def _q_proj_q_matmul_nz(
-    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
-    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
-    q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
-    tile_rows: pl.Scalar[pl.INDEX],
-    qproj_dep: pl.Scalar[pl.TASK_ID],
-):
-    """Use upstream's full-K resident weight and compact tail matmul on Native NZ."""
-    qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
-    qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
-    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
-        qproj_worker = pl.tile.get_block_idx()
-        # Keep the column offset provably nonnegative after NZ outlining.
-        for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
-            qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
-            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
-            wq_full = wq_b[0:Q_LORA, w_col0 : w_col0 + QPROJ_MM_N_TILE]
-            for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
-                qr_full = qr_i8_matmul[t0 : t0 + QPROJ_M_TILE, 0:Q_LORA]
-                col_acc = pl.matmul(qr_full, wq_full, out_dtype=pl.INT32)
-                q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
-            for tail_t0 in pl.range(qproj_full_rows, qproj_t_matmul, QPROJ_TAIL_M_TILE):
-                tail_rows = pl.min(QPROJ_TAIL_M_TILE, tile_rows - tail_t0)
-                qr_tail = pl.slice(qr_i8_matmul, [QPROJ_TAIL_M_TILE, Q_LORA], [tail_t0, 0],
-                                   valid_shape=[tail_rows, Q_LORA])
-                tail_acc = pl.matmul(qr_tail, wq_full, out_dtype=pl.INT32)
-                q_proj_i32[tail_t0 : tail_t0 + QPROJ_TAIL_M_TILE,
-                           w_col0 : w_col0 + QPROJ_MM_N_TILE] = tail_acc
-    return q_proj_i32, qproj_tid
-
-
-q_proj_q_matmul = _q_proj_q_matmul_nz if QUANT_WEIGHT_NZ else _q_proj_q_matmul_nd
 
 
 @pl.jit.inline(auto_scope=False)

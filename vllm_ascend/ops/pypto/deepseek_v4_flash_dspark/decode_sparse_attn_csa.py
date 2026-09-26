@@ -350,7 +350,9 @@ def sparse_attn_csa(
                                         qk_absolute = qk_win_start + qk_part_row + qk_lo
                                         qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
                                         if qk_raw_page >= 0:
-                                            qk_raw_row = pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
+                                            qk_raw_row = (
+                                            pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
+                                        )
                                             qk_kv_half = pl.gather_row(
                                                 qk_kv_half, ori_kv_flat, [qk_lo, 0], [qk_raw_row, 0],
                                                 [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
@@ -420,23 +422,9 @@ def sparse_attn_csa(
 
     # Native cosine rows already have the consumer's interleaved layout.
     rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
-    # Inverse-RoPE lane-swap index.
-    rope_swap_idx = pl.create_tensor([H_TILE, ROPE_DIM], dtype=pl.INT32)
-    # 换算索引与逐块 RoPE 拆成两个任务：前者是与 t_dim 无关的一次性小表，后者逐块可并行。
-    # 合在一个 CORE_GROUP 任务里时整段串行，泳道实测 rope_cs count=1、Exec 9.24us 却占满
-    # 一个串行窗口。拆开后 rope_cs 走 SPMD，通过 deps 保证换算表先建好。
-    with pl.at(level=pl.Level.CORE_GROUP, name_hint="rope_swap") as swap_tid:
-        sw_ones = pl.full([H_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
-        sw_idx_f = pl.cast(pl.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
-        sw_col = pl.col_expand_mul(sw_ones, sw_idx_f)
-        sw_dup_i32 = pl.cast(pl.mul(sw_col, 0.5), target_type=pl.INT32, mode="trunc")
-        sw_dup_f = pl.cast(sw_dup_i32, target_type=pl.FP32)
-        sw_lane = pl.sub(sw_col, pl.mul(sw_dup_f, 2.0))
-        sw_swap_f = pl.sub(pl.add(sw_col, 1.0), pl.mul(sw_lane, 2.0))
-        rope_swap_idx[0:H_TILE, 0:ROPE_DIM] = pl.cast(sw_swap_f, target_type=pl.INT32)
-
+    # 符号表由 rope_cs 自行生成，无需等待独立的换位索引任务。
     with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
-                 deps=[swap_tid], allow_early_resolve=True) as rope_tid:
+                 allow_early_resolve=True) as rope_tid:
         for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
                               pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
             cs_t0 = cs_rb * ROPE_CS_T_TILE
@@ -461,7 +449,6 @@ def sparse_attn_csa(
         attn_oi,
         freqs_cos,
         rope_sin_signed,
-        rope_swap_idx,
         qk_tid,
         rope_tid,
     )
@@ -493,7 +480,6 @@ def sparse_attn_csa_tp1(
         attn_oi,
         rope_cos_il,
         rope_sin_signed,
-        rope_swap_idx,
         qk_tid,
         rope_tid,
     ) = sparse_attn_csa(
@@ -513,15 +499,18 @@ def sparse_attn_csa_tp1(
 
     with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
         m_worker = pl.tile.get_block_idx()
-        m_swap = pl.load(rope_swap_idx, [0, 0], [H_TILE, ROPE_DIM])
-        m_swap_f = pl.cast(m_swap, target_type=pl.FP32)
-        m_swap_source = pl.add(m_swap_f, NOPE_DIM)
-        m_row_ids = pl.tile.arange(0, [1, H_TILE], dtype=pl.INT32)
-        m_row_ids_f = pl.cast(m_row_ids, target_type=pl.FP32)
-        m_row_offsets = pl.mul(m_row_ids_f, HEAD_DIM)
-        m_row_offsets_col = pl.reshape(m_row_offsets, [H_TILE, 1])
-        m_swap_flat = pl.row_expand_add(m_swap_source, m_row_offsets_col)
-        m_swap_idx = pl.cast(m_swap_flat, target_type=pl.INT32)
+        # 复用性能版的整数换位索引：j + 1 - 2*(j % 2)，逐元素等于原表。
+        # 只改变索引生成与依赖，保留累计 softmax、BF16 输出及逆 RoPE 的算术。
+        m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
+        m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
+        m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
+        m_swap_row = pl.tile.adds(
+            pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
+        )
+        m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
+        m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
+        m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
+        m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
         m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
         for m_idx in pl.range(m_worker, t_dim * (H // H_TILE), MERGE_WORKERS):
             m_t = m_idx // (H // H_TILE)
