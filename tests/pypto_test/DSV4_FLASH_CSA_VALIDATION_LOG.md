@@ -5817,3 +5817,52 @@ Native 的 `VllmQuantLightningIndexer`"。
 
 这条与既有的判据一致：性能优化的对象是逐 task 的执行时长，不是泳道里的调度关系；
 本节只是用实测数据确认"这里确实没有调度水分"，而不是又一次靠类比下结论。
+
+## 158. 更正：增量 repack 的显存代价被我高估，这条路仍然可行（2026-09-27）
+
+§147 与 §152 里我判定"增量 repack 不可行"，依据是"缓冲每层私有，`batch_capacity=40`
+下 128K 需 169 MB/层，**61 层**约 10.5 GB"。这个依据有两处错。
+
+### 错一：带 indexer 的层只有 21 个，不是 61 个
+
+`decode_indexer.py` 开头就写着 `COMPRESS_RATIO = 4  # the indexer only runs on
+ratio-4 layers`。生产 config 里 `compress_ratios` 是逐层列表，实际分布是
+`{0: 5, 4: 21, 128: 20}`（共 46 项，`num_hidden_layers = 43`）。**只有 21 层是
+ratio-4、需要这份缓冲。** 按我原来的算法重算是 161 MiB × 21 = **3.31 GiB**，
+不是 10.5 GB。
+
+### 错二：上界不该按 `max_num_seqs × max_model_len` 算
+
+161 MiB/层这个数要求"40 个请求同时各有 128K 历史"，但这受 **indexer KV cache 总容量**
+限制，通常根本不成立——能同时驻留的压缩 key 总数就是那个 cache 的容量。
+
+按容量算才对：紧凑副本是 **128 B/key**，而 Native 原 cache 每 32 个 key 占 4160 B，
+即 **130 B/key**。所以增量缓冲的大小 ≈ indexer KV cache 的 0.985 倍，也就是
+**把 indexer 的 KV cache 占用翻一倍**（21 个 ratio-4 层各一份）。这是一个有界、
+可评估的部署取舍，而不是我先前断言的"显然不可行"。
+
+### 为什么这条路值得做
+
+§155 已经证明差距**全部**在随历史增长的部分（128K/B16：PTO 925.3 µs vs Native
+419.4 µs），而 §146 用探针直接测出 repack 在该档约 **350 µs**，是这段里最大的一块。
+增量化的收益上限就是这 350 µs：128K/B16 的 PTO 1806 → 约 1466，ratio 1.345 → 约 1.09。
+达不到 0.700（§155 的算术仍然成立），但这是当前唯一一个有量级、有明确抓手的改进。
+
+它也符合既有的约束"靠新增处理追平，不改 KV cache 规格、块大小、页布局"——加的是
+PTO 私有的紧凑缓冲，Native 侧的 cache 规格和页布局一个字节都不动。
+
+### 实现上的关键约束：判据必须做在 device 上
+
+decode 性能测试走 ACL Graph（FULL_DECODE_ONLY），**重放时不再进入 Python**，所以
+"这个槽位是否是同一序列的延续"不能在宿主侧用 `req_id` 之类判断——`service.py`
+的 `__call__` 只在 capture 时跑一次。判据必须由 kernel 从张量算出来。
+
+可证明正确的判据：把每个槽位的 **block table 整行**持久化一份，每步与当前行逐元素
+比较；**该行完全一致且 `seq_len` 只增长** ⇒ 之前打包过的页仍然有效（decode 期间历史
+key 不会被改写，只有新追加的页会变）。此时从 `old_len // BLOCK_SIZE` 那一页开始重搬
+即可（那一页当时可能只填了一半，必须重搬）。不满足则整槽全量重搬。
+持久化 block table 的代价是 `b_dim × max_pages × 4 B`，40 × 258 × 4 ≈ 41 KB，可忽略。
+
+另需注意：持久缓冲的行距必须用编译期的最大值，所以 score 侧的
+`repack_base = batch_idx * repack_rows`（当前按每步动态的 `repack_rows`）要改成按
+该最大值索引。
