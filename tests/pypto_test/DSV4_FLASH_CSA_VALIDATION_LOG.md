@@ -5043,3 +5043,47 @@ per-request 的水位标记，并处理 aclgraph capture 期 dummy run 把水位
 **即便做成，1.256 仍远高于 0.700 的目标线。** 六档全部快 30% 这个目标，按本轮取得的
 证据，需要的是算法层面（Top-K 的候选数/head 数）或 PyPTO 代码生成效率的改进，
 而不是 kernel 内的分块与缓冲调整。
+
+### 定位到真正的瓶颈：score 的时间几乎全在 gather_row 的调用次数上
+
+`allow_early_resolve=False` 也试过：128K/B16 +3.3%、8K/B40 +0.2%，已回退。至此
+调度侧三种手段（`sync_start`、加深 ring、关提前派发）全部无效，说明那 670 µs 不是
+派发策略能解的。
+
+把 score 的核内时间拆开算，结论很清楚：
+
+| | 每 worker |
+| --- | ---: |
+| AIC（22 tile × 16 item，每 tile `[64,128]×[128,192]` = 1.57M MAC） | 约 75 µs |
+| AIV（每 lane 每 tile 6144 元素 × 约 4 遍） | 约 38 µs |
+| **计算侧合计** | **约 113 µs（占实测 703 µs 的 16%）** |
+| `gather_row` 调用 | **704 次**（22 tile × 16 item × 2 lane） |
+
+**703 µs ÷ 704 次 = 999 ns/次**——几乎正好 1 µs，与 L1 gather 的固定延迟量级一致。
+也就是说 **score 的时间几乎全花在 gather 的调用次数上，不是带宽、也不是算力**。
+这同时解释了为什么把 N 从 384 降到 192 会退 26%：tile 数翻倍则 gather 次数翻倍。
+
+### 明确的下一步：把每个 tile 的两次 gather 合成一次
+
+现在每个 tile 做 2 次 gather，因为两个 AIV lane 的候选区间由
+`lane_stride = single_leaf * SCORE_LANE_ROWS + (1 - single_leaf) * lane_span` 决定：
+
+- **单叶路径（8K 档）**：`lane_stride = SCORE_LANE_ROWS = 192`，两次 gather 的
+  **src 与 dst 都连续**——本来就可以合并成一次 `[SCORE_TILE, IDX_HEAD_DIM]`，
+  这是**无需改动语义**的纯收益；
+- **多叶路径（128K 档）**：`lane_stride = lane_span = 4096`，lane 0 取 `[0,192)`、
+  lane 1 取 `[4096,4288)`，不连续，必须分两次。
+
+多叶要合并就得把两个 lane 的分工从「各占连续的一半候选」改成「交错占偶/奇 192-块」。
+代价在 `indexer_topk_half_leaf`：它的索引是
+`pl.add(pl.tile.arange(0, [1, N]), logical_begin)`，**假设 arena 里第 i 个分数对应候选
+`logical_begin + i`**。交错后要改成 `logical_begin + (i // 192) * 384 + (i % 192)`，
+用 `pl.tile.divs` / `pl.tile.rems`（后者需要一个硬件要求的 tmp tile）构造，
+三个 `valid_count` 分支（512 / 1024 / 更大）都要改。索引构造的额外开销可忽略：
+768 次调用 × 4096 元素，分摊到 24 worker 约 0.6 µs。
+
+**预期收益**：gather 次数 704 → 352，score 核内 703 → 约 352 µs，
+128K/B16 的 PTO 1858 → 约 1506，ratio **1.416 → 1.148**。
+
+**执行顺序建议**：先做单叶路径的合并（8K 三档受益、不动语义、风险最低），
+验证 gather 次数与耗时的线性关系确实成立；再做多叶路径的交错划分与索引改写。
