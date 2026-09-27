@@ -61,3 +61,21 @@ P95 57.408→58.533、max57.639→58.850；每步最慢rank均值57.219→58.099
 事件边界核对支持继续调查下游专家工作量，未支持更改计时边界来制造优势。
 [边界证据](model/h131072/b8/boundary.json)、[CSA/FFN任务](model/model_gap_rank0.json)。
 下一项仅对当前原cache源码执行atomic0干预，先单卡成本、后受影响的两档EP16，保留token/DSpark失败门禁。
+
+## 既有16卡trace：当前B8未复现旧版严重CSA到达拖尾
+
+[分析器](analyze_ep.py)只解析已有三步trace，按同层dispatch结束时间100μs内唯一匹配全16rank；
+双方129个FFN窗口均匹配，没有丢弃窗口，其中63个紧接C4。完整逐rank样本见[ep_alignment.json](model/h131072/b8/ep_alignment.json)。
+
+| μs，63窗口均值 | Native | PTO |
+| --- | ---: | ---: |
+| CSA各rank结束时间跨度 | 85.126 | 53.288 |
+| MoE dispatch各rank开始时间跨度 | 88.300 | 56.068 |
+| 相对最后rank到达的平均等待 | 48.389 | 27.577 |
+| 最后rank到达后剩余dispatch时间 | 50.420 | 53.351 |
+| 单窗口CSA最大值减16rank均值 | 45.423 | 24.987 |
+
+PTO的CSA结束跨度P95/max为69.225/94.204μs，到达跨度P95/max为76.805/98.827μs。
+本profile中不支持“旧版百微秒级CSA拖尾仍是当前B8主要增量”的解释，不继续盲目加sync_start。
+双方实际event模式0/1，Native profile扰动不同；这些是诊断窗口关系，不能推导正式10步中等待必然相同，
+也不能把约20μs的等待差直接乘21宣称整网收益。
