@@ -15,6 +15,8 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 [代表档证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
 用户限定：本轮只再做三项核内候选——Indexer合并规约/片上复用、Q_A/KV连续清零、量化投影写回。
 每项必要代表档验证后按核内收益决定保留，三项收尾即开始调度优化，不扩展核内候选清单。
+第二项连续清零已保留：B40 Q_A seed6.94–8.50 μs、KV seed4.96–5.20 μs，小档padding检查通过；
+[独立证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：
 128K重点为Indexer复用与Top-K；8K优先处理Sparse Attention的KV搬运和核内流水衔接。
 Indexer已有[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
