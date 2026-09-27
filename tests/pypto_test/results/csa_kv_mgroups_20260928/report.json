@@ -1,0 +1,476 @@
+{
+  "operator": "45412ba3 + candidate.patch",
+  "task": "task_20260928_060059_4594592998",
+  "scope": "两档同配置20次无profiler图计时、各4个独立DFX窗口；layer4真实权重、合成历史。",
+  "limits": "核内时间包含DMA和等待，总核时间不是完整跨度；本体/Native控制与核内分别报告。逐元素比较8类状态，不含idx_topk_scores；不是EP16验收。",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "state_check": "PASS",
+      "measurements": {
+        "baseline": {
+          "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h131072_b16/baseline/report.json",
+          "swimlane_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h131072_b16/swimlane/baseline/report.json",
+          "timing": {
+            "native": {
+              "samples_us": [
+                1322.7399587631226,
+                1324.9200582504272,
+                1331.1400413513184,
+                1320.7199573516846,
+                1326.9599676132202,
+                1324.5999813079834,
+                1324.180006980896,
+                1328.6999464035034,
+                1324.23996925354,
+                1331.2400579452515,
+                1328.5399675369263,
+                1320.080041885376,
+                1320.4599618911743,
+                1321.9599723815918,
+                1326.14004611969,
+                1323.8799571990967,
+                1322.0000267028809,
+                1328.4800052642822,
+                1320.080041885376,
+                1327.2000551223755
+              ],
+              "mean_us": 1324.9130010604858,
+              "p95_us": 1331.1400413513184,
+              "max_us": 1331.2400579452515
+            },
+            "pto": {
+              "samples_us": [
+                1121.500015258789,
+                1107.6200008392334,
+                1141.6599750518799,
+                1120.1000213623047,
+                1121.8199729919434,
+                1106.4399480819702,
+                1132.4800252914429,
+                1119.1400289535522,
+                1120.4400062561035,
+                1127.9200315475464,
+                1116.7999505996704,
+                1128.8800239562988,
+                1139.7199630737305,
+                1116.0600185394287,
+                1105.739951133728,
+                1121.1199760437012,
+                1109.6199750900269,
+                1105.299949645996,
+                1107.1200370788574,
+                1113.2400035858154
+              ],
+              "mean_us": 1119.135993719101,
+              "p95_us": 1139.7199630737305,
+              "max_us": 1141.6599750518799
+            }
+          },
+          "kv_windows": [
+            {
+              "blocks": 4,
+              "first_receive_us": 115.94,
+              "first_start_us": 116.36000000000001,
+              "last_start_us": 117.38,
+              "last_end_us": 171.66,
+              "start_spread_us": 1.0199999999999818,
+              "worker_envelope_us": 55.72,
+              "kernel_mean_us": 54.58,
+              "setup_mean_us": 0.4649999999999963,
+              "summed_kernel_us": 218.32
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 110.06000000000002,
+              "first_start_us": 110.48,
+              "last_start_us": 112.08,
+              "last_end_us": 166.17999999999998,
+              "start_spread_us": 1.5999999999999943,
+              "worker_envelope_us": 56.11999999999996,
+              "kernel_mean_us": 54.51499999999999,
+              "setup_mean_us": 0.4549999999999983,
+              "summed_kernel_us": 218.05999999999997
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 119.56,
+              "first_start_us": 120.0,
+              "last_start_us": 120.10000000000002,
+              "last_end_us": 173.9,
+              "start_spread_us": 0.10000000000002274,
+              "worker_envelope_us": 54.34,
+              "kernel_mean_us": 53.01499999999999,
+              "setup_mean_us": 0.45000000000000284,
+              "summed_kernel_us": 212.05999999999997
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 107.03999999999999,
+              "first_start_us": 107.53999999999999,
+              "last_start_us": 109.62,
+              "last_end_us": 164.46,
+              "start_spread_us": 2.0800000000000125,
+              "worker_envelope_us": 57.420000000000016,
+              "kernel_mean_us": 54.685,
+              "setup_mean_us": 0.490000000000002,
+              "summed_kernel_us": 218.74
+            }
+          ]
+        },
+        "candidate": {
+          "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h131072_b16/candidate/report.json",
+          "swimlane_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h131072_b16/swimlane/candidate/report.json",
+          "timing": {
+            "native": {
+              "samples_us": [
+                1331.9799900054932,
+                1329.5400142669678,
+                1341.5199518203735,
+                1337.980031967163,
+                1338.5200500488281,
+                1339.5400047302246,
+                1335.0199460983276,
+                1336.1400365829468,
+                1328.160047531128,
+                1330.24001121521,
+                1332.6400518417358,
+                1329.5999765396118,
+                1340.7200574874878,
+                1338.479995727539,
+                1339.5600318908691,
+                1333.240032196045,
+                1333.6800336837769,
+                1342.2399759292603,
+                1341.0799503326416,
+                1347.6799726486206
+              ],
+              "mean_us": 1336.3780081272125,
+              "p95_us": 1342.2399759292603,
+              "max_us": 1347.6799726486206
+            },
+            "pto": {
+              "samples_us": [
+                1108.1600189208984,
+                1111.6199493408203,
+                1107.5600385665894,
+                1112.4999523162842,
+                1120.5600500106812,
+                1101.7600297927856,
+                1112.1599674224854,
+                1109.279990196228,
+                1110.4799509048462,
+                1113.0800247192383,
+                1119.339942932129,
+                1123.479962348938,
+                1140.5800580978394,
+                1115.5400276184082,
+                1117.8799867630005,
+                1135.4000568389893,
+                1117.7599430084229,
+                1108.2799434661865,
+                1116.320013999939,
+                1107.1799993515015
+              ],
+              "mean_us": 1115.4459953308105,
+              "p95_us": 1135.4000568389893,
+              "max_us": 1140.5800580978394
+            }
+          },
+          "kv_windows": [
+            {
+              "blocks": 12,
+              "first_receive_us": 108.16,
+              "first_start_us": 108.64000000000001,
+              "last_start_us": 115.6,
+              "last_end_us": 139.96,
+              "start_spread_us": 6.9599999999999795,
+              "worker_envelope_us": 31.80000000000001,
+              "kernel_mean_us": 24.925,
+              "setup_mean_us": 0.5200000000000008,
+              "summed_kernel_us": 299.1
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 94.60000000000001,
+              "first_start_us": 95.10000000000001,
+              "last_start_us": 102.34,
+              "last_end_us": 124.32,
+              "start_spread_us": 7.239999999999995,
+              "worker_envelope_us": 29.719999999999985,
+              "kernel_mean_us": 26.393333333333327,
+              "setup_mean_us": 0.5400000000000004,
+              "summed_kernel_us": 316.7199999999999
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 109.60000000000001,
+              "first_start_us": 110.04,
+              "last_start_us": 112.08,
+              "last_end_us": 137.22,
+              "start_spread_us": 2.039999999999992,
+              "worker_envelope_us": 27.61999999999999,
+              "kernel_mean_us": 24.898333333333337,
+              "setup_mean_us": 0.44166666666666526,
+              "summed_kernel_us": 298.78000000000003
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 86.82000000000001,
+              "first_start_us": 87.22,
+              "last_start_us": 103.3,
+              "last_end_us": 116.5,
+              "start_spread_us": 16.08,
+              "worker_envelope_us": 29.679999999999993,
+              "kernel_mean_us": 23.52,
+              "setup_mean_us": 0.4766666666666654,
+              "summed_kernel_us": 282.24
+            }
+          ]
+        }
+      },
+      "change_pct": {
+        "native": 0.8653403700884521,
+        "pto": -0.3297184979305201,
+        "kernel_mean_us": -53.99494145775194,
+        "summed_kernel_us": 38.01517562674417,
+        "worker_envelope_us": -46.86046511627907
+      }
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "state_check": "PASS",
+      "measurements": {
+        "baseline": {
+          "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h8192_b16/baseline/report.json",
+          "swimlane_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h8192_b16/swimlane/baseline/report.json",
+          "timing": {
+            "native": {
+              "samples_us": [
+                949.1199851036072,
+                948.1199979782104,
+                947.4999904632568,
+                948.9200115203857,
+                941.6599869728088,
+                946.7800259590149,
+                948.2399821281433,
+                945.9599852561951,
+                944.3600177764893,
+                939.9200081825256,
+                945.0799822807312,
+                945.0600147247314,
+                952.3199796676636,
+                950.3800272941589,
+                946.1399912834167,
+                952.7999758720398,
+                946.399986743927,
+                943.6399936676025,
+                945.7399845123291,
+                946.8399882316589
+              ],
+              "mean_us": 946.7489957809448,
+              "p95_us": 952.3199796676636,
+              "max_us": 952.7999758720398
+            },
+            "pto": {
+              "samples_us": [
+                794.0999865531921,
+                800.0800013542175,
+                796.0399985313416,
+                787.5800132751465,
+                791.9999957084656,
+                791.3600206375122,
+                798.3599901199341,
+                789.6599769592285,
+                802.9400110244751,
+                794.3000197410583,
+                776.6199707984924,
+                800.9799718856812,
+                796.6600060462952,
+                793.6800122261047,
+                788.8399958610535,
+                794.7999835014343,
+                816.6199922561646,
+                788.1399989128113,
+                801.9400238990784,
+                819.3399906158447
+              ],
+              "mean_us": 796.2019979953766,
+              "p95_us": 816.6199922561646,
+              "max_us": 819.3399906158447
+            }
+          },
+          "kv_windows": [
+            {
+              "blocks": 4,
+              "first_receive_us": 115.48,
+              "first_start_us": 116.10000000000001,
+              "last_start_us": 117.64,
+              "last_end_us": 168.96,
+              "start_spread_us": 1.539999999999992,
+              "worker_envelope_us": 53.480000000000004,
+              "kernel_mean_us": 51.65,
+              "setup_mean_us": 0.5150000000000006,
+              "summed_kernel_us": 206.6
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 101.72,
+              "first_start_us": 102.22,
+              "last_start_us": 103.25999999999999,
+              "last_end_us": 152.14000000000001,
+              "start_spread_us": 1.039999999999992,
+              "worker_envelope_us": 50.420000000000016,
+              "kernel_mean_us": 49.019999999999996,
+              "setup_mean_us": 0.504999999999999,
+              "summed_kernel_us": 196.07999999999998
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 96.47999999999999,
+              "first_start_us": 96.86000000000001,
+              "last_start_us": 97.02000000000001,
+              "last_end_us": 149.96,
+              "start_spread_us": 0.1599999999999966,
+              "worker_envelope_us": 53.48000000000002,
+              "kernel_mean_us": 52.44499999999999,
+              "setup_mean_us": 0.41500000000000625,
+              "summed_kernel_us": 209.77999999999997
+            },
+            {
+              "blocks": 4,
+              "first_receive_us": 115.96000000000001,
+              "first_start_us": 116.64000000000001,
+              "last_start_us": 117.18,
+              "last_end_us": 168.22,
+              "start_spread_us": 0.539999999999992,
+              "worker_envelope_us": 52.25999999999999,
+              "kernel_mean_us": 49.934999999999995,
+              "setup_mean_us": 0.5150000000000077,
+              "summed_kernel_us": 199.73999999999998
+            }
+          ]
+        },
+        "candidate": {
+          "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h8192_b16/candidate/report.json",
+          "swimlane_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_kv_mgroups_20260928/h8192_b16/swimlane/candidate/report.json",
+          "timing": {
+            "native": {
+              "samples_us": [
+                916.6799783706665,
+                915.5399799346924,
+                917.140007019043,
+                916.9399738311768,
+                917.680025100708,
+                915.0999784469604,
+                917.2800183296204,
+                917.4799919128418,
+                914.7999882698059,
+                916.8000221252441,
+                911.8599891662598,
+                913.8000011444092,
+                918.9599752426147,
+                913.1399989128113,
+                912.8599762916565,
+                917.2400236129761,
+                924.3000149726868,
+                911.3799929618835,
+                913.8399958610535,
+                917.4399971961975
+              ],
+              "mean_us": 916.0129964351654,
+              "p95_us": 918.9599752426147,
+              "max_us": 924.3000149726868
+            },
+            "pto": {
+              "samples_us": [
+                780.2199721336365,
+                766.8799757957458,
+                791.6399836540222,
+                786.5599989891052,
+                757.9799890518188,
+                787.9599928855896,
+                802.3399710655212,
+                756.3999891281128,
+                780.1399827003479,
+                765.9599781036377,
+                773.8400101661682,
+                789.6599769592285,
+                781.8800210952759,
+                810.479998588562,
+                772.9600071907043,
+                775.879979133606,
+                776.8999934196472,
+                809.3600273132324,
+                784.2599749565125,
+                770.9599733352661
+              ],
+              "mean_us": 781.112989783287,
+              "p95_us": 809.3600273132324,
+              "max_us": 810.479998588562
+            }
+          },
+          "kv_windows": [
+            {
+              "blocks": 12,
+              "first_receive_us": 95.84,
+              "first_start_us": 96.22,
+              "last_start_us": 96.7,
+              "last_end_us": 124.08,
+              "start_spread_us": 0.480000000000004,
+              "worker_envelope_us": 28.239999999999995,
+              "kernel_mean_us": 26.740000000000002,
+              "setup_mean_us": 0.46666666666666384,
+              "summed_kernel_us": 320.88
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 108.72,
+              "first_start_us": 109.1,
+              "last_start_us": 136.22,
+              "last_end_us": 147.4,
+              "start_spread_us": 27.120000000000005,
+              "worker_envelope_us": 38.68000000000001,
+              "kernel_mean_us": 20.82333333333333,
+              "setup_mean_us": 0.46333333333333115,
+              "summed_kernel_us": 249.87999999999997
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 103.89999999999999,
+              "first_start_us": 104.25999999999999,
+              "last_start_us": 111.32,
+              "last_end_us": 130.9,
+              "start_spread_us": 7.060000000000002,
+              "worker_envelope_us": 27.000000000000014,
+              "kernel_mean_us": 23.631666666666668,
+              "setup_mean_us": 0.49833333333333246,
+              "summed_kernel_us": 283.58000000000004
+            },
+            {
+              "blocks": 12,
+              "first_receive_us": 93.28,
+              "first_start_us": 93.64,
+              "last_start_us": 101.02000000000001,
+              "last_end_us": 121.82000000000001,
+              "start_spread_us": 7.38000000000001,
+              "worker_envelope_us": 28.540000000000006,
+              "kernel_mean_us": 25.279999999999998,
+              "setup_mean_us": 0.4599999999999997,
+              "summed_kernel_us": 303.35999999999996
+            }
+          ]
+        }
+      },
+      "change_pct": {
+        "native": -3.246478156591681,
+        "pto": -1.8951231283116154,
+        "kernel_mean_us": -52.487072149716816,
+        "summed_kernel_us": 42.538783550849566,
+        "worker_envelope_us": -41.58557527189468
+      }
+    }
+  ]
+}

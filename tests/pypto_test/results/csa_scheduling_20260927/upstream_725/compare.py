@@ -21,7 +21,8 @@ def canonical(name):
         return "indexer_score_topk_native_pair_" + score.group(1)
     if re.fullmatch(r"indexer_head_coefficients(?:_\d+)?", name):
         return "indexer_head_coefficients"
-    for prefix, alias in (("_proj_b_mm_nz_kernel", "proj_b_mm"), ("proj_a_mm", "proj_a_mm"),
+    for prefix, alias in (("kv_proj_matmul", "kv_proj_matmul"),
+                          ("_proj_b_mm_nz_kernel", "proj_b_mm"), ("proj_a_mm", "proj_a_mm"),
                           ("proj_b_mm", "proj_b_mm"), ("proj_b_act", "proj_b_act"), ("quant", "quant")):
         if name == prefix or re.fullmatch(re.escape(prefix) + r"_+\d+", name):
             return alias
@@ -85,15 +86,17 @@ def main():
     current = [summarize(Path(w["merged_swimlane"])) for w in report["swimlane_windows"]]
     out = {
         "scope": "Historical 727.98 us Worker reference versus c7a52af5 8K/B16/S6/TP1, four DFX windows.",
-        "limits": "Historical source/configuration and Scheduler View are missing; not same-input A/B. Kernel time includes in-core waits. Worker setup is not pure scheduler overhead.",
-        "source_reference": "Latest pypto-lib upstream/main; record fetched revision in README separately from historical trace.",
+        "limits": ("Historical source/configuration and Scheduler View are missing; not same-input A/B. "
+                   "Kernel time includes in-core waits. Worker setup is not pure scheduler overhead."),
+        "source_reference": ("Latest pypto-lib upstream/main; record fetched revision in README "
+                             "separately from historical trace."),
         "current_source": "c7a52af5", "upstream": up, "current": current, "timing": load_timing(),
     }
     (ROOT / "report.json").write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n")
     lines = ["# 727.98 μs 上游 Worker 泳道与当前 8K/B16 对照", "",
              "当前为 c7a52af5、4个独立DFX窗口；各自首个Worker receive归零。上游配置不完整，不能视为同输入A/B。",
-             "无profiler本体均值 %.2f μs，p50 %.2f μs；与DFX首尾窗口分开。" %
-             (out["timing"]["body"]["mean_us"], out["timing"]["body"]["p50_us"]), "",
+             f"无profiler本体均值 {out['timing']['body']['mean_us']:.2f} μs，"
+             f"p50 {out['timing']['body']['p50_us']:.2f} μs；与DFX首尾窗口分开。", "",
              "## 不重叠分段", "", "分段可以相加为单个窗口的Worker首尾耗时；各列范围端点来自不同窗口，不能再相加。", "",
              "| 区间 μs | 历史上游 | 当前4窗口 |", "| --- | ---: | ---: |"]
     labels = ("首Worker→norm结束", "norm结束→Sparse首receive", "Sparse首receive→merge结束", "merge结束→末Worker")
@@ -101,7 +104,8 @@ def main():
         lines.append(f"| {label} | {up['phases_us'][key]:.2f} | {span([c['phases_us'][key] for c in current])} |")
     lines += [f"| 总Worker窗口 | {up['worker_span_us']:.2f} | {span([c['worker_span_us'] for c in current])} |", "",
               "## 逐任务对照", "", "单元格均为上游 → 当前范围，—表示该实现无同名任务。任务间窗口有重叠，不可求和。", "",
-              "| Task | Worker数量 | 核内均值 μs | kernel启动分散 μs | 平均setup μs | 首次kernel开始 μs | 最晚kernel结束 μs |",
+              "| Task | Worker数量 | 核内均值 μs | kernel启动分散 μs | 平均setup μs | "
+              "首次kernel开始 μs | 最晚kernel结束 μs |",
               "| --- | --- | --- | --- | --- | --- | --- |"]
     keys = dict.fromkeys([*up["tasks"], *(k for c in current for k in c["tasks"])])
     fields = ("blocks", "kernel_mean_us", "start_spread_us", "setup_mean_us", "first_start_us", "last_end_us")

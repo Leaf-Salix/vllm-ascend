@@ -34,6 +34,8 @@ T_DYN = pl.dynamic("QKV_Q_T_DYN")  # T = B * S
 
 KV_T_DYN = pl.dynamic("QKV_KV_T_DYN")
 
+KV_MM_T_DYN = pl.dynamic("QKV_KV_MM_T_DYN")
+
 ROPE_T_DYN = pl.dynamic("QKV_ROPE_T_DYN")
 
 
@@ -91,6 +93,10 @@ QR_SPLIT_K_TILE = D // QR_OK
 KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
 
 KV_DENSE_M_TILE = 64
+
+KV_FIXED_SMALL_M_TILE = 32
+
+KV_FIXED_SMALL_ROWS = 128
 
 KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
@@ -702,6 +708,60 @@ def q_proj_rope(
 
 
 @pl.jit.inline(auto_scope=False)
+def _kv_project(
+    x: pl.Tensor[[KV_T_DYN, D], pl.BF16],
+    wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+    kv_fp32: pl.Tensor[[KV_MM_T_DYN, HEAD_DIM], pl.FP32],
+    tile_base: pl.Scalar[pl.INDEX],
+    tile_rows: pl.Scalar[pl.INDEX],
+    t_matmul: pl.Scalar[pl.INDEX],
+    late_dep: pl.Scalar[pl.TASK_ID],
+    DENSE_M: pl.constexpr,
+    GROUP_ROWS: pl.constexpr,
+):
+    """Partition M/N independently; every block preserves its complete K traversal."""
+    t_dim = pl.tensor.dim(x, 0)
+    x_view = pl.reshape(x, [t_dim, D])
+    kv_full_rows = (tile_rows // DENSE_M) * DENSE_M
+    kv_m_groups = pl.min(KV_OM, pl.max(1, tile_rows // GROUP_ROWS))
+    with pl.spmd(
+        (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
+        name_hint="kv_proj_matmul",
+        deps=[late_dep],
+    ) as _kv_tid:
+        pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
+        kbg = pl.tile.get_block_idx()
+        kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
+        kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
+        kv_m_group = kbg % kv_m_groups
+        for dense_t0 in pl.range(kv_m_group * DENSE_M, kv_full_rows, kv_m_groups * DENSE_M):
+            dense_x0 = tile_base + dense_t0
+            dense_acc = pl.create_tensor([DENSE_M, KV_N_TILE], dtype=pl.FP32)
+            for dense_k in pl.pipeline(0, KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
+                dense_d0 = kv_k_base + dense_k * KV_K_TILE
+                dense_x = x_view[dense_x0 : dense_x0 + DENSE_M, dense_d0 : dense_d0 + KV_K_TILE]
+                dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
+                dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
+            kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
+        for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
+            kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
+            for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
+                d0 = kv_k_base + db * KV_K_TILE
+                kv_rows = pl.min(KV_M_TILE, tile_rows - t0)
+                x_t0 = tile_base + t0
+                kv_x_chunk_bf16 = pl.slice(
+                    x_view,
+                    [KV_M_TILE, KV_K_TILE],
+                    [x_t0, d0],
+                    valid_shape=[kv_rows, KV_K_TILE],
+                )
+                wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
+                kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
+            kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
+    return kv_fp32
+
+
+@pl.jit.inline(auto_scope=False)
 def kv_proj_rope(
     x: pl.Tensor[[KV_T_DYN, D], pl.BF16],
     wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
@@ -717,13 +777,10 @@ def kv_proj_rope(
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
-            x_view = pl.reshape(x, [t_dim, D])
             t_matmul = ((tile_rows + MATMUL_T_TILE - 1) // MATMUL_T_TILE) * MATMUL_T_TILE
-            kv_full_rows = (tile_rows // KV_DENSE_M_TILE) * KV_DENSE_M_TILE
-            kv_m_groups = pl.min(KV_OM, pl.max(1, tile_rows // (2 * KV_DENSE_M_TILE)))
 
-            # Split-K kv_proj: KV_N_TILE N-groups expanded KV_OK-fold into cube blocks that
-            # atomic-add their K partials into a zero-seeded output.
+            # Fixed-K blocks own disjoint M/N outputs. Split-K blocks instead
+            # atomic-add partial sums, which requires a zero-seeded output.
             kv_fp32 = pl.create_tensor([t_matmul, HEAD_DIM], dtype=pl.FP32)
             # With KV_OK=1, disjoint M/N blocks overwrite every output tile.
             if ATOMIC_ADD == 1:
@@ -732,42 +789,21 @@ def kv_proj_rope(
                     for kts0 in pl.range(0, t_matmul, KV_M_TILE):
                         kv_fp32[kts0 : kts0 + KV_M_TILE, :] = kv_seed
 
-            # 性能版所有token数共用宽tile/split-K；240行的Native K遍历仅留在精度版。
-            # atomic关闭时KV_OK=1，按固定K顺序累加并普通写回。
-            with pl.spmd(
-                (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
-                name_hint="kv_proj_matmul",
-                deps=[late_dep],
-            ) as _kv_tid:
-                pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
-                kbg = pl.tile.get_block_idx()
-                kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
-                kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
-                kv_m_group = kbg % kv_m_groups
-                for dense_t0 in pl.range(kv_m_group * KV_DENSE_M_TILE, kv_full_rows, kv_m_groups * KV_DENSE_M_TILE):
-                    dense_x0 = tile_base + dense_t0
-                    dense_acc = pl.create_tensor([KV_DENSE_M_TILE, KV_N_TILE], dtype=pl.FP32)
-                    for dense_k in pl.pipeline(0, KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
-                        dense_d0 = kv_k_base + dense_k * KV_K_TILE
-                        dense_x = x_view[dense_x0 : dense_x0 + KV_DENSE_M_TILE, dense_d0 : dense_d0 + KV_K_TILE]
-                        dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                        dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
-                    kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
-                for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
-                    kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
-                    for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
-                        d0 = kv_k_base + db * KV_K_TILE
-                        kv_rows = pl.min(KV_M_TILE, tile_rows - t0)
-                        x_t0 = tile_base + t0
-                        kv_x_chunk_bf16 = pl.slice(
-                            x_view,
-                            [KV_M_TILE, KV_K_TILE],
-                            [x_t0, d0],
-                            valid_shape=[kv_rows, KV_K_TILE],
-                        )
-                        wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                        kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
-                    kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
+            if ATOMIC_ADD == 1:
+                kv_fp32 = _kv_project(
+                    x, wkv, kv_fp32, tile_base, tile_rows, t_matmul, late_dep,
+                    KV_DENSE_M_TILE, 2 * KV_DENSE_M_TILE,
+                )
+            elif tile_rows < KV_FIXED_SMALL_ROWS:
+                kv_fp32 = _kv_project(
+                    x, wkv, kv_fp32, tile_base, tile_rows, t_matmul, late_dep,
+                    KV_FIXED_SMALL_M_TILE, KV_FIXED_SMALL_M_TILE,
+                )
+            else:
+                kv_fp32 = _kv_project(
+                    x, wkv, kv_fp32, tile_base, tile_rows, t_matmul, late_dep,
+                    KV_DENSE_M_TILE, KV_DENSE_M_TILE,
+                )
 
             kv_view = pl.reshape(kv, [t_dim, HEAD_DIM])
 
