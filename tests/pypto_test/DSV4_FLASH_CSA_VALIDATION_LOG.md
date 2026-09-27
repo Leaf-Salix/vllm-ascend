@@ -8311,3 +8311,18 @@ L0C QK96 KiB＋WS8 KiB分别地址0/98304。编译容量通过不代表流水性
 先看Score核内时间、完整CSA及P95，明确Key读取减少与最忙核计算增量的取舍；有核内收益再做短档回归和调度。
 当前没有设备结果；不与正在执行的QKV EP16任务叠加或混测，不因CPU编译通过而宣称优化成功。
 [完整编译日志和单卡命令](results/csa_indexer_triple_20260928/README.md)。
+
+## 269. 整请求S6复用候选通过CPU编译；multi-ND边界已核对（2026-09-28）
+
+三query单卡仍在队列中，未改其冻结源码。独立2a740c1f工作树准备S6/M384/N64，
+只在压缩历史超过8192且query数至少96时选择；小长档及8K仍为双query/M128/N128。
+Score/Top-K和完整CSA lowering、PTOAS、CCE及链接均通过，未执行设备、未合入。
+生成代码L0A48＋12 KiB，L0B8＋48 KiB，L0C96＋4 KiB；QK/head累加地址0/98304。
+128K/B16逻辑Key页次50176→16896，但最忙核计算工作量132→150，仍有配平代价。
+先等三query核内结果决定后续占卡；不把CPU容量通过或页次推导当作收益。
+
+只读核对ISA327cd58的multi-ND ND2NZ：能表达4160字节页间stride，但只能正向矩阵stride。
+当前PyPTO3e87a843与depth=1核对的main f997db72仍压平自然Mat load源窗口，
+原cache的非连续3D加载不能直接通过该路径；生产倒序页还需处理逻辑顺序。
+没有修改PTO-ISA/PTOAS或当前工具链。模型正式计时前已完成上述CPU编译，未并发重编译。
+[候选补丁、片上容量、工作量代价与能力边界](results/csa_indexer_six_20260928/README.md)。
