@@ -8760,3 +8760,24 @@ CPU6项通过，验证原设备边界不变、错误窗口/缺失forward不通�
 顺带修复观测器缺失forward时读取不存在request_positions导致KeyError，使其明确返回insufficient。
 [命令与CPU验证](results/csa_forward_entry_20260928/README.md)。
 模型诊断task_20260928_074528_18466049204排队，算子未改；没有启动新七档或擅自关闭GC。
+
+
+## 300. QR/KV统一七档真实EP16均值领先，但两档入场尾部仍未通过（2026-09-28）
+
+任务task_20260928_072337_13373713806退出0，算子30f2b228，mode2/atomic0/det0/EPLB关。
+预热8步后连续10步forward：128K/B4、B8、B16比Native低1.04%、4.22%、1.81%；
+8K/B16、B24、B32、B40低7.11%、5.39%、3.34%、2.05%。
+573440token零差异、112组rank DSpark和位置一致，七档慢卡均值下降，67/70步更快。
+[正式七档](results/csa_qa_matrix_20260928/model/RESULTS.md)。不以功能PASS冒充性能与尾部全通过。
+
+128K/B8和B16的P95高于Native，B16为83.143ms对72.637ms；保留异常原始值。
+相对入场偏移证据见§299，本轮8K/B16另有rank7晚约2.537ms进入，其他rank平均增加1.645ms。
+[同次正式事件分析](results/csa_qa_matrix_20260928/ARRIVAL.md)。只追加128K/B16主机/GC观测，未改生产策略。
+
+14份rank0 PyTorch JSON已离线解析，其他rank原始profile保留。
+独立3步profile的七档CSA均值低9.45%～23.30%，短B16均值790.25μs/P50 786.30μs，750μs未完成。
+GMM任务增量−0.709～+0.169ms，当前没有旧atomic1普遍增加1ms以上的模式；不将其当正式10步因果分账。
+[CSA与其余模型区间](results/csa_qa_matrix_20260928/model/MODEL_GAP.md)。
+同源码七档DFX task_20260928_074745_190439310251已退出0；21份JSON已汇集约153MiB，
+[下载与完整来源](results/csa_qa_matrix_20260928/download/README.md)。入场诊断仍等待16张卡全部空闲。
+清单删除过时的暂停/旧六档失败状态，保留仍有效约束、精度版新增迁移待办和历史证据链接；完整验证日志保留。

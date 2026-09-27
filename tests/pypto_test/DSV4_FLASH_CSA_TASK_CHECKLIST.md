@@ -2,81 +2,58 @@
 
 更新：2026-09-28。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
 
-当前性能版保留 **71153bb3** 的分组/调度、**45412ba3** 的默认固定规约，并新增atomic0免Q/KV清零种子与QR/KV的M32/M64自适应分组；
-Native cache分配与流程不变，PTO内部直接读写物理页；没有入口历史复制或外部Torch写回。
-长历史按query数选择双query、三query/M192或S6/M384；短历史按最忙核工作量选择S6或双query。
-只有长档Score整组准入并禁止提前释放；精度版原算术保持。
-**固定规约基线71153bb3＋atomic0已通过统一源码七档真实EP16对照**，正式forward快1.35%～4.45%，
-573440输出token零差异、112组rank DSpark及10步位置一致；每档P95、max和每步最慢rank均下降。
-本轮先PTO后Native，代表档上一轮先Native后PTO也通过；单次十步仍不代表罕见尾部已永久消失。
-性能版默认改为atomic0，精度版默认1与原算术保持；显式0/1仍可覆盖，配置在导入前固定。
-[七档正式结果](results/csa_atomic_matrix_20260928/model/RESULTS.md)、
-[代表档反向顺序与单卡代价](results/csa_atomic_current_20260928/README.md)。
-atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当前默认配置的结果。
-免seed两档更新已通过：128K/B8正式比Native快1.77%、8K/B16快7.31%，98304token零差异、DSpark一致，
-P95/max/慢卡均下降。该两档不能与其余旧五档拼成新的七档表，也不把全部收益归因于删除seed。
-[免seed单卡精确状态与两档EP16](results/csa_projection_no_seed_20260928/README.md)。
+当前性能算子为 **30f2b228**：保留长短Indexer分组，默认atomic0固定规约，删除冗余QR/KV清零种子，
+QR/KV按行数选择M32/M64和最多3个M组。精度版保持原算术及默认atomic1，显式0/1均可覆盖。
+Native cache分配和流程不变，PTO内部直接读写原物理页，没有入口历史复制或外部Torch写回。
+
+**本版统一七档真实EP16的forward均值全部优于Native，但尾部尚未通过。**
+TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步无profiler forward。
+128K/B4、B8、B16分别快1.04%、4.22%、1.81%；8K/B16、B24、B32、B40分别快7.11%、5.39%、3.34%、2.05%。
+573440输出token零差异、112组rank DSpark一致、正式位置一致；七档逐步最慢rank均值更低，67/70步更快。
+其中128K/B8和B16的P95高于Native；B16为83.143ms对72.637ms，不能以均值优势覆盖尾部失败。
+[正式七档与全部rank样本](results/csa_qa_matrix_20260928/model/RESULTS.md)、
+[原始尾部及相对入场证据](results/csa_qa_matrix_20260928/ARRIVAL.md)、
+[同源码采集状态](results/csa_qa_matrix_20260928/README.md)。旧版本结果不拼入本表。
 
 当前判断依据：
 
-- 旧atomic1配置下，七档profile的CSA区间均缩短，但专家GMM任务duration均增加约1.01～1.68ms。
-  不同event模式会影响profile，且它与正式10步是独立请求轮，不能用该表精确分账正式forward。
-- B8同轮事件与完整图核对已完成：两侧图外差额约192/195μs，未见PTO独有的毫秒级额外间隙。
-  16rank已有trace全部配对，PTO的CSA结束跨度平均53μs，未复现旧版严重到达拖尾，不盲目加sync_start。
-  [边界与EP到达证据](results/csa_forward_boundary_20260928/README.md)。
-- 当前atomic0的B8 profile中专家GMM增量收窄至0.187ms，上次atomic1为1.523ms。
-  与固定归约减少下游工作差异相符，但本轮未直接采专家索引；该开关也改变split-K分片，不能单独归因于硬件atomic抖动。
-- 保留分组优化的依据：长档S6 Score AIC相对三query下降18.39%，小长档三query下降20.62%，
-  短档S6下降51.32%；两条新增分支的固定规约输出/状态与图重放精确一致。
-  [当前分组证据](results/csa_indexer_adaptive_20260928/README.md)。
-- 原cache改造前后8类输出/状态固定规约逐元素一致、图重放通过，使用随物理行变化的scale检出错页。
-  [cache精度证据](results/csa_cache_accuracy_20260927/README.md)。这不等于Native/PTO全部浮点状态逐bit一致。
-- 旧f76b3ad4单卡七档、42份JSON和模型历史仅作参考；不是71153bb3的新七档泳道交付。
-  [旧版单卡档案](results/csa_incore_20260927/final_f76b3ad4/README.md)。
+- B8 step11的rank4相对平时晚约3.980ms进入forward，B16 step16的rank6晚约14.060ms；
+  晚进入rank自身forward接近平时，其余rank相应增加3.631/13.892ms，支持EP等待放大的解释。
+  尚未区分CPU调度、GC、前序草稿或设备队列，不把原因直接归为CSA核内，不剔除异常样本。
+- 旧atomic1七档虽CSA更快，但专家GMM任务时间普遍增加；固定K干预后正式EP16取得共同收益。
+  该开关同时改变归约次序和split-K分片，本轮缺实际专家索引，不能单独归因为硬件atomic。
+  [固定规约干预](results/csa_atomic_current_20260928/README.md)、
+  [旧七档基线](results/csa_atomic_matrix_20260928/README.md)。
+- QR三档核内均值下降47%～52%，组跨度缩短26%～35%，累计核时间增加43%～58%；按用户核内规则保留。
+  不能把核内降幅当整层收益；QR自身已较整齐，Indexer query仍有40～64μs启动分散。
+  [QR证据](results/csa_qa_adaptive_20260928/README.md)、[KV自适应证据](results/csa_kv_adaptive_20260928/README.md)。
+- KV整组启动虽减少分散，却使核内变慢，长短本体无共同收益，未采用；Top-K UB候选没有明确核内收益也未采用。
+  [已排除的KV调度](results/csa_kv_sync_20260928/README.md)、[Top-K候选](results/csa_topk_register_20260928/README.md)。
+- cache改造前后8类状态固定规约精确一致、图重放通过，随物理行变化的scale可检出错页。
+  这不等于Native/PTO全部浮点状态逐bit一致。[cache证据](results/csa_cache_accuracy_20260927/README.md)。
 
 近期待办按依赖执行：
 
-1. **固定规约已成为性能版默认，本轮证据已齐。** 两档干预和七档反序对照均通过，Native流程未改。
-   14份模型PyTorch JSON和7份同版本PTO泳道已[汇集下载](results/csa_atomic_matrix_20260928/download/README.md)。
-   [本轮CSA/FFN/GMM](results/csa_atomic_matrix_20260928/model/MODEL_GAP.md)与
-   [核内/调度和上游参考](results/csa_atomic_matrix_20260928/WORKER_GAP.md)已记录；本轮未采实际专家索引，不把相关性当唯一因果。
-2. **Top-K UB根候选暂不合入。** 完整CSA状态/图重放精确一致，本体均值改善1.89%，但merge核内四窗口未见明确收益。
-   保留补丁与证据，不把GM搬运量推导或未改任务的调度变化当核内收益；不掺入固定规约七档。
-   [候选、编译边界及单卡实测](results/csa_topk_register_20260928/README.md)。
-3. **统一71153bb3＋atomic0七档已通过，后续按受影响项验证。** task_20260928_051900_412378912384已退出0，先PTO后Native。
-   128K/B4/B8/B16、8K/B16/B24/B32/B40；双方相同weight NZ mode2，TP1/DP=EP16、出5验6、EPLB关。
-   验收只用预热后连续10步无profiler decode forward；初始化和完整周期不计。
-   [运行入口与结果](results/csa_atomic_matrix_20260928/README.md)。
-   保存各档PyTorch JSON及PTO泳道，并给出当前版本相对Native和pypto-lib的核内、调度、额外工作差异。
-   已有同版本证据复用，只补缺口或受影响项，不做hash扫描或重复无关测试。
-   atomic0性能版免QR/KV清零种子已保留；两档单卡状态/图重放精确一致，
-   task_20260928_054914_3094321594两档真实EP16也通过。其余档位在后续阶段出口补齐，不混用版本。
-   [范围与单卡/模型证据](results/csa_projection_no_seed_20260928/README.md)。
-   固定K的KV并行度仅4个N块，独立M32/最多3组已通过长短B16状态/图重放，核内下降52%～54%，
-   累计核时间增加38%～43%、本体变化小；保留核内方向，不能声称同幅度整层收益。
-   自适应M32/M64已通过CPU编译及B16/B40/B4状态、图重放，核内改动保留。
-   B40核内下降57.14%、总核时间增加28.58%，本体+0.35%，有窗口启动分散53.82μs，需继续查调度。
-   task_20260928_063233_77503215845两档真实EP16已通过：128K/B16比Native低4.79%、8K/B40低2.31%。
-   229376token零差异，DSpark及位置一致；每档10/10步最慢rank更快，P95/max下降。
-   生产为88d0744f；不能将降幅全部归因于KV分组，也不能与旧五档混成统一矩阵。
-   KV sync_start两档已完成：长档+0.90%、短档−1.35%，核内均变慢、DFX完整窗口未改善，不采用。
-   QR分组已完成三档核内对照、四档状态/图重放，核内降低47%～52%、组跨度降低26%～35%，按约定保留。
-   累计核时间增加43%～58%，本体短B16/短B40/长B16变化+0.63%/−0.38%/+1.02%，不能宣称共同整层收益。
-   新统一七档EP16待补；调度下一步针对Indexer query的40～64μs启动分散，QR本身启动已较整齐。
-   [QR核内与状态证据](results/csa_qa_adaptive_20260928/README.md)。
-   [整网结果](results/csa_kv_adaptive_20260928/model/RESULTS.md)、
-   [忙核预派发证据与候选](results/csa_kv_sync_20260928/README.md)。
-   阶段出口统一源码七档；源头cache与精度版不改。
-   [Native七档投影差距](results/csa_atomic_matrix_20260928/NATIVE_PROJECTION.md)、
-   [M32核内证据](results/csa_kv_mgroups_20260928/README.md)、
-   [自适应分支](results/csa_kv_adaptive_20260928/README.md)。
-4. **cache策略继续按真实整模型性能决定。** 源头key/scale分离及连续四页候选已测，模型未取得共同收益且长档DSpark失败，暂不采用。
-   物理key/scale连续不等于请求历史连续；真实allocator正式轮和profile轮页序不同，不能用人工连续页代替生产验收。
-   保留原布局PTO内部读取，除非新证据支持其他方案。[旧分离干预与失败边界](results/csa_source_split_ab_20260927/ordered/README.md)。
-5. **性能稳定后补精度版。** 仅共用数值中性的适配和实现，算术策略明确隔离，精度版独立验收。
-   性能版七档基线已经整网领先；B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍未达成。
-   免seed整模型独立profile的rank0中位数797.58μs；自适应KV单卡均值762.68μs（det1、可变scale人工历史）。
-   两者输入/统计范围不同，均不能写成整模型750μs验收已通过。
+1. **先定位实际EP16入场尾部。** 仅补128K/B16，两侧相同开启默认关闭的主机时钟/线程CPU时间与GC观测。
+   不扫描GC对象、不改GC策略、不加设备同步，不从正式forward中扣除等待。
+   task_20260928_074528_18466049204已提交，CPU6项验证通过；按证据决定修复点。
+   [独立诊断](results/csa_forward_entry_20260928/README.md)。
+2. **独立验证Indexer query整组准入。** 只改一个sync_start标记，长短B16各20次本体计时和两窗口DFX；
+   核对Score/Sparse及竞争任务，不能只看启动整齐。task_20260928_074745_19051001890进行中，生产未采用。
+   [候选范围](results/csa_query_sync_20260928/README.md)。
+3. **本版泳道与模型分项已交付，按新修改补受影响项。** 主矩阵task_20260928_072337_13373713806退出0；
+   14份rank0 PyTorch JSON离线导出、7份同源码det0单层泳道汇集，正式原始16rank数据保留。
+   DFX任务task_20260928_074745_190439310251退出0；[21份JSON汇集](results/csa_qa_matrix_20260928/download/README.md)，
+   与pypto-lib的核内/调度/额外工作分开说明。
+   不做hash扫描，不重跑已有有效模型样本。
+4. **继续以完整区间与整网验收优化。** B16/H8192的HC_pre→norm→CSA→HC_post <750μs仍未达成。
+   调度与核内轮流推进，保留已验证核内收益，同时检查累计核工作、完整span和P95，不重复无依据扫描。
+5. **性能稳定后补精度版新增迁移。** 共用数值中性适配，实现专有算术明确隔离；原生规约/量化次序不改。
+   新QR/KV策略尚未移植，旧D3通过不能覆盖新增代码；独立补状态、尾块、token/DSpark及性能。
+
+cache方案只以实际整网性能及正确性决定：已测源头key/scale分离没有共同模型收益，且长档DSpark失败，暂不采用。
+物理key/scale连续不等于请求历史连续，不能用人工连续页替代真实allocator；Native流程不改。
+[源头分离的有效证据与边界](results/csa_source_split_ab_20260927/ordered/README.md)。
 
 测试统一使用整批入队后DP同步启动，核对每个正式step的CPU位置；设备计时内不增加复制、hash或逐步同步。
 CPU位置相同不证明设备草稿token相同，严格路由归因使用独立诊断的实际设备输入。
@@ -300,31 +277,13 @@ A1 配置贯通 → A2 数值门禁 → A3 回放合同 → A4 工具链核对 �
 CPU 可独立完成的项目可穿插，设备依赖按顺序执行。
 所有阶段的测试均遵循 2.2 的单卡优先顺序，再进入真实权重 16 卡验证。
 A 阶段完成后必须继续 B/C/D，不能只修工具就结束整个目标。
-D3 迁移及整模型 token/DSpark 看护已完成，必要精度复查已修复性能版 sparse 尾块越界；
-当前 D4 的 128K/8K 六档泛化对比及 profiling/泳道采集完成，主计时为预热后10步纯forward均值。
-PTO 尚未明确快于 Native。用户指出六档优化结果不合格后，当前优先定位128K/B16的CSA自身退化，
-不把B4的MoE解释推广到其他五档；暂停无依据的调序/参数扫描。
-数据与下载入口：[六档结果](results/csa_six_case_profiles_20260926/README.md)。
-近期先处理Indexer：当前PTO内部按Native物理页直接加载key，两个query复用；压缩历史≥2048采用FP16/Cube规约。
-入口复制及外部写回均已删除。长档整组准入100次确认尾部获益并保留；旧撤回结论的配置和数据保存在验证日志。
-Native4+2 query复用已经配平和L0驻留试验，仍退化，不能将它当作未测试的新方向直接重跑。
-B4的同轮CSA结束→MoE启动时间证据已取得；进一步核内/调度归因和实际专家索引、
-group_list/tile工作量证据仍待做。图内整数采样完成单卡机制验证，16卡任务未提交、优先级下调。
-后续仍优先单卡可复现部分，
-通信到达差使用已有16rank trace；不重跑六档矩阵，不把当前假设定为精度或Native算子bug。
-不为已证明核内退化的候选重复测试，也不重复已有有效证据的精度检查。
-核内阶段按incore任务收益保留改动，完整span只单独记录；不能再用本体未改善否定核内收益。
+此前精度版迁移与六档对照属于旧版本，证据保留在验证日志；当前版本状态以上方摘要为准。
+固定规约基线已在七档真实EP16取得forward优势，不能继续沿用“PTO尚未快于Native”的旧结论。
+新增QR/KV自适应分组和免seed已有同源码七档均值优势；尾部未通过，不与旧版本最优值拼表。
+核内阶段按任务收益保留改动，同时记录完整span与总核时间；调度候选须检查等待是否转移。
 
-当前下一步（保持Native布局、兼顾核内与尾部）：
-
-1. f76b3ad4同源码七档已齐，B16复用同源码20次/四窗口，其余五档和两档profile已补。
-   继续报告均值、p50、p95、max及完整样本；128K/B4新max742.22，B8 p95/p50增幅1.54%。当前先收齐cache精度与模型看护。
-2. 根据生成代码与Native比较N128页加载、L1/L0驻留和scale逐页加载；只有实际核内收益才保留新候选。
-   四query配平/驻留和Score留UB的旧失败先查日志，不盲目重复；Native分配、页表及缓存生命周期保持原样。
-3. 保留长短策略在同一PTO算子内选择。单列纯CSA及完整路径，不能用取消复制隐瞒核内代价，
-   不能用均值压低掩盖p95/max；当前单卡尾部保护不是EP16验收。
-4. 新算术路径后续单卡必要误差/状态复查，再真实权重16卡逐token/DSpark及尾部验收；精度版不采用FP16 Score策略。
-   已有零容差差异不能标成精度通过，旧整模型结果不能覆盖当前路径。
+当前下一步以上方近期待办为准：先查EP16晚进入forward的尾部，再按两档实测决定Indexer query调度取舍；
+补齐本版七档图表，继续750μs目标，最后移植新增数值中性策略到精度版。
 
 | 阶段 | 出口 | 状态 |
 | --- | --- | --- |
@@ -639,73 +598,32 @@ mode=2 暂作后续优化候选，mode=1 原始结果保留；两档之间的差
 | ID | 目标 | 完成判据 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | D1 | 同源码、同配置重新定位关键路径 | Worker/Scheduler 不重复计数；计算、内部等待、资源竞争分别解释；只列有当前证据的热点 | A5、随 C 更新 | 进行中 |
-| D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 保留已验证核内收益；调度以无profiler本体及关键链共同判断。最终仍验收完整区间和整模型token/DSpark | C、D1 | 15轮调度结束，恢复核内；新增P95保护及同源码七档完成，cache精度/模型看护中；<750 μs 未完成 |
-| D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 迁移单卡验证、16 卡 token/DSpark 看护通过；worker 级确定性配置修正见日志 131 |
-| D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 已验证矩阵采集及token/DSpark看护；PTO性能未达标，B4已定位MoE等齐和GMM增量，原因缺口另列 |
+| D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 保留已验证核内收益；调度以无profiler本体及关键链共同判断。最终仍验收完整区间和整模型token/DSpark | C、D1 | QR/KV核内分组已保留；七档EP16均值领先但入场尾部待解；Indexer query调度候选进行中；<750 μs 未完成 |
+| D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 旧迁移单卡/16卡看护通过；本轮新增QR/KV策略尚未移植，worker确定性修正见日志131 |
+| D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B16/24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 固定规约七档已有整网优势；最新QR/KV七档均值领先，长档两档P95未通过；实际专家索引因果证据仍缺 |
 
 D2 近期工作按§4执行；15轮调度已结束，不沿用旧“再加十轮”的待办。
 当前P95定向保护来自用户新增要求，保留长档sync_start/禁止提前释放；核内优化继续以Native和最新版pypto-lib为参考。
 历史727.98μs图只对照时序，配置与源码不齐，不能冒认为同输入A/B；具体已保留项与失败方向见验证日志。
 新阶段完整收益、核内收益、尾部与精度验收分别记录，不混用不同源码七档最优值。
 
-D3 已移植/共享：INT8 Q 投影的 NZ 整段 K 加载、N256 和有效尾行；Q 反量化独立 head
-分组；QR 归一化最多 16 worker 轮转独立 token 块；O 量化按 token 块 SPMD；整数生成
-RoPE 换位索引并移除独立 `rope_swap` 任务。Indexer 整页读取、O-A/O-B 分块原已相同。
-保留精度版 QR/KV 的 K 遍历/规约、Compressor 运算次序、累计 softmax、Q/KV/O 舍入，
-以及 O 投影跨全部组的统一量化尺度，未复制性能版分组量化与浮点组规约。
+D3旧阶段已移植INT8 Q的NZ整段K加载、N256/尾行、反量化head分组、QR归一化worker轮转、
+O量化SPMD和RoPE索引生成。保留精度版QR/KV规约、Compressor运算次序、累计softmax、Q/KV/O舍入，
+以及O投影跨全部组的统一量化尺度；不复制性能版FP16 Score与分组量化。
+旧B16/B1/B40状态、图重放和整模型token/DSpark证据见
+[迁移记录](results/csa_baseline_20260926/precision_port/migration.json)、
+[模型看护](results/csa_baseline_20260926/model_precision_migration/comparison.json)及验证日志§127～131。
+旧Native level=1只在父进程设置的记录不证明worker配置；当前必须记录worker实际读取值。
 
-B16/H8192、B1/H255、B40/H8192：mode=2、atomic=0、Native level=1，迁移前后两侧
-各 8 类完整输出/状态均逐元素一致，metadata/保护区无异常，B16 A/B/A 图重放通过。
-完整区间 p50 1119.06→1114.02 μs，p95 1155.24→1145.50 μs；Native 同轮 p50
-926.79→929.33 μs。尚不能确认稳定性能收益，不将共享/迁移完成写成精度版已快于 Native。
-正式模型 TP1/DP=EP16、B16/H8192、mode=2、PTO atomic=0、HCCL 确定性开启、EPLB 关闭：
-24576 个 token 全部一致，各 rank 的 DSpark 总计数和逐位置计数一致。
-该轮旧 CLI 的 Native level=1 仅在父进程设置，不能证明 worker level=1；
-现已修复到真实 worker 构造阶段并记录实际读取值，不把旧日志当作确定性生效证据。
-证据：[整模型看护](results/csa_baseline_20260926/model_precision_migration/comparison.json)。
-详见[迁移证据](results/csa_baseline_20260926/precision_port/migration.json)与验证日志第 127 节。
-必要的短上下文差异定位与整模型输出看护已完成；剩余数值合同独立保留待办，当前进入 D4。
+新D3待办：先识别本轮QR/KV的分组、免seed和调度中真正数值中性的部分；
+按精度版原归约/舍入实现移植，补单卡必要状态和边界，再补真实EP16看护。
+不得把旧迁移完成标记覆盖新增代码，也不得因性能版已领先就宣称精度版领先。
 
-当前设备 profiler 与 DFX：第二层 PTO 图内只有 runtime/worker 两项，没有重复生成 compact
-metadata；Native 仍有两项生产算子。mode=2 独立 profiler 的首末设备任务区间为
-Native 919.22 μs、PTO 843.52 μs，与无 profiler 主采样量级一致。
-DFX 单窗口保留 1131 条 worker 记录，完整调度区间 837.90 μs，仅作定位。
-稀疏注意力 QK/PV 的 worker 首末窗口约 150 μs，O projection 从 A 投影到激活完成约 145 μs；
-两者含并发、排队及分组流水，不能当单核计算量，也不能与其他阶段求和当层耗时。
-
-代表性的尾块、padding 与长短上下文检查已补。本轮性能候选已封版，开始复用适用的
-数值中性改动到精度版，保持 Native 算术方式；之后复查现有精度缺口并执行新泛化矩阵。
-
-首个保留候选：性能版 NZ Q 展开采用 pypto-lib `2164563` 的完整 K 权重常驻、N256、
-M64 与有效尾行 matmul，直接读取 Native `[K,N]` NZ。QR/KV 的 split=8/8 保留，
-未改变精度版。mode=2 同一第二层口径，PTO p50 **843.53→817.22 μs**，
-p95 **869.22→843.12 μs**；独立 DFX **837.90→810.00 μs**。
-B1/H255 与 B40/H8192 的有限值、Top-K 结构、metadata 和保护区检查通过。
-O-B 整段权重、O projection 动态行块、较小 split-K、WqB BYPASS 均未确认完整区间额外收益，
-已撤回，不继续为这些候选铺开验证。
-证据：[Q 展开候选与被撤回项](results/csa_baseline_20260926/perf_qproj_upstream/comparison.json)。
-该候选 mode=2、atomic=1 的正式 16 卡看护已通过：24,576 token 和 DSpark 统计全部一致；
-每个 rank 的 21 个目标 C4 层均捕获 PTO 路径并实际图重放。
-证据：[本候选整模型看护](results/csa_baseline_20260926/model_b16h8192_nz2_perf_qproj/comparison.json)。
-当前仍高于 750 μs；新增性能候选已按用户要求暂停。保留候选补测 mode=1：Native p50 939.49 μs，
-PTO p50/p95 872.30/906.92 μs，未确认该模式相对旧版有收益；单卡继续优先 mode=2。
-另一档结果保留在 [mode=1 报告](results/csa_baseline_20260926/perf_qproj_upstream/mode1/report.json)，
-最终主口径仍由整模型的同 mode 对照决定。
-
-后续两项单卡候选均已撤回：QK/PV 预发 1 拍/2 槽为 833.21/870.86 μs，
-Q 展开 M96 为 833.21/854.24 μs（p50/p95），未测到相对 817.22 μs 保留版本的收益。
-只保存测量和可重建补丁，不为这些候选追加边界或整模型测试；精度版未改。
-
-当前正式模型 mode=1/2 均已测量，每侧 16 rank × 21 层 × 3 步，共 1008 个 CSA 区间。
-mode=2 Native/PTO p50 为 **984.70/851.07 μs**；mode=1 为 **989.85/876.03 μs**。
-两档各比较 98,304 个输出 token，token 与 DSpark 统计完全一致。继续以 mode=2 优化性能版，
-保留 mode=1 结果；当前未达到 750 μs，也不声明整模型性能验收通过。
-无 profiler 事件仅覆盖 execute_model，遗漏随后 sample_tokens 的草稿生成；该项不能称完整步，
-最终端到端性能仍待候选稳定后补测。详见验证日志第 114 节。
-
-此前阶段的候选与撤回原因见验证日志§114～124，已完成D3/B/D4的当时验收。
-这些历史结果不能替代当前连续缓存/片上Score路径的验收；本轮待办统一按上方D2执行。
-不重复已否定且无新证据的tile/worker/重排候选；PMU单次计数只作方向诊断，不当普通图重放耗时。
+mode选择依据仍保留两档同mode结果：
+[旧mode1补测](results/csa_baseline_20260926/perf_qproj_upstream/mode1/report.json)、验证日志§114。
+当前继续使用mode2，保留ND和mode1；本轮新源码未做mode1设备性能确认，不引用旧数字为新版本成绩。
+旧QK/PV预发、Q展开M96、O-B整段权重等未保留候选及撤回原因见日志§114～124，
+不重复没有新依据的tile/worker/重排扫描，PMU单次计数不当普通图重放耗时。
 
 后续每项优化必须对照 pypto-lib：记录上游版本/配置、核内任务耗时、调度与关键路径差距、
 本接入多出的工作，以及代码模式不同的具体原因。区分 Native 接口约束、布局适配、算术策略
