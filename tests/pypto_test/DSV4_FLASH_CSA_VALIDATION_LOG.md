@@ -8234,3 +8234,16 @@ B3/atomic0/det1的固定形状A→B→A图重放通过，覆盖18 token尾块，
 但该候选能否减少它仍是假设。必须由正式forward收益补回CSA成本，未通过则不保留、不扩大七档。
 task_20260928_015726_18185222732已提交，PTO保持ordered布局、atomic1，其余配置和Native控制见§261。
 [局部代价、原始样本、图结果和运行命令](results/csa_oproj_token_20260928/README.md)。
+
+## 263. 等待EP16期间准备WO-B整数合并候选，仅有CPU编译证据（2026-09-28）
+
+不修改正在排队的量化版。独立`.cache/csa-oproj-accum2-2a740c1f`在共同token scale的基础上，
+WO-B从8份INT32中间结果改为K4096×2份，N128/K512，维持64个AIC工作块。
+两块M128行数据共用权重panel；WO-A、BF16、quant及反量化规则不变，最终仍先整数求和再channel→token反量化。
+中间结果分配逻辑大小48→12 MiB；B16有效写回12→3 MiB，不将字节量当作实测流量或收益。
+
+NZ mode2、ND mode0完整CPU lowering/PTOAS/CCE/链接通过，三个M分支生成；Ruff通过。
+M128双累加器生成地址0/65536，各64 KiB；Left/Right部分流水因缓冲共存降到单槽，性能未知。
+编译入口最初两次SPMD占位/常量类型问题已修正，不是设备失败；未运行NPU、不合入生产。
+该优化不能直接用于上游每组不同scale的算术；等§262模型结果后再决定是否做单卡验证。
+[补丁、编译命令、已知成本与边界](results/csa_oproj_accum2_20260928/README.md)。

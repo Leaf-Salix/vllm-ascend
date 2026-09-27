@@ -1,0 +1,238 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -22,7 +22,7 @@
+ from .config import (
+     TP as TP_SIZE,
+ )
+-from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
++from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT
+ 
+ D = M.hidden_size
+ 
+@@ -79,20 +79,20 @@
+ 
+ PROJ_A_ROW_TILE = 128  # Parallel row tile; the last block may contain fewer valid rows.
+ 
+-# Match upstream's adaptive row tiles and N256; INT8 accumulation is exact.
+-B_K_TILE = 256
++# Retain adaptive M tiles; a common token scale enables two exact K partitions.
++B_K_TILE = 512
+ PROJ_B_SMALL_T_TILE = 32
+ PROJ_B_MEDIUM_T_TILE = 96
+ PROJ_B_MM_T_TILE = 128
+-PROJ_B_MM_N_TILE = 256
++PROJ_B_MM_N_TILE = 128
++PROJ_B_PARTITIONS = 2
++PROJ_B_PART_K = O_GROUPS * O_LORA // PROJ_B_PARTITIONS
+ 
+ PROJ_B_ACT_N_TILE = 512
+ 
+ QUANT_TOKEN_TILE = 8
+ QUANT_TASK_T_TILE = 32  # 每个量化任务负责的 token 跨度，沿用上游 e68e091 的调优值
+ 
+-PROJ_B_D_TILE = 512  # proj_b_mm D chunk per task; coarser starves the 24 AIC cores
+-
+ PROJ_B_ACT_T_TILE = 8
+ 
+ PROJ_B_ACT_TASK_T_TILE = 32  # proj_b_act token block per task
+@@ -109,7 +109,7 @@
+ 
+ O_B_T_TILE = 128
+ 
+-O_B_K_TILE = 256
++O_B_K_TILE = 512
+ 
+ O_B_N_TILE = 256
+ 
+@@ -257,98 +257,48 @@
+ proj_a_mm = _proj_a_mm_nz if BF16_WEIGHT_NZ else _proj_a_mm_nd
+ 
+ 
+-@pl.jit.inline
+-def _proj_b_mm_nd(
++@pl.jit.incore
++def _proj_b_mm_token_kernel(
+     o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
+-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8],
+-    partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
+-    g: pl.Scalar[pl.INDEX],
+-    col_g: pl.Scalar[pl.INDEX],
+-    proj_b_t_rows: pl.Scalar[pl.INDEX],
+-    q_tid: pl.Scalar[pl.TASK_ID],
+-    ROW_TILE: pl.constexpr,
+-):
+-    """ND 版：(token 块 x D 块) 二维展开，与上游同形。"""
+-    with pl.spmd(
+-        proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
+-    ) as pb_tid:
+-        pl.set_cache_policy(wo_b, pl.CachePolicy.BYPASS)
+-        pb_unit = pl.tile.get_block_idx()
+-        tb = pb_unit // (D // PROJ_B_D_TILE)
+-        dc = pb_unit - tb * (D // PROJ_B_D_TILE)
+-        t0 = tb * ROW_TILE
+-        d0 = dc * PROJ_B_D_TILE
+-        for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+-            n0 = d0 + nf * PROJ_B_MM_N_TILE
+-            acc_b = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+-            for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+-                k0 = col_g + kb * B_K_TILE
+-                b_act = o_r_i8_pad[t0 : t0 + ROW_TILE, k0 : k0 + B_K_TILE]
+-                b_weight = wo_b[
+-                    k0 : k0 + B_K_TILE,
+-                    n0 : n0 + PROJ_B_MM_N_TILE,
+-                ]
+-                acc_b = pl.matmul_acc(acc_b, b_act, b_weight, init_cond=(kb == 0))
+-            partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+-    return partials, pb_tid
+-
+-
+-@pl.jit.incore
+-def _proj_b_mm_nz_kernel(
+-    o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
+-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, pl.NZ],
+-    partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
+-    g: pl.Scalar[pl.INDEX],
+-    col_g: pl.Scalar[pl.INDEX],
++    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
++    partials: pl.Tensor[[T_PAD, PROJ_B_PARTITIONS * D], pl.INT32],
+     proj_b_t_rows: pl.Scalar[pl.INDEX],
+     ROW_TILE: pl.constexpr,
+ ):
+-    # Keep Native [G*K,N] NZ storage; all group offsets remain inside this kernel.
+-    d0 = pl.tile.get_block_idx() * PROJ_B_D_TILE
+-    for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+-        n0 = d0 + nf * PROJ_B_MM_N_TILE
+-        if ROW_TILE > PROJ_B_MEDIUM_T_TILE:
+-            weight_k0 = pl.max(g, 0) * O_LORA
+-            weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
+-            for tb in pl.range(proj_b_t_rows):
+-                t0 = tb * ROW_TILE
+-                b_act_full = o_r_i8_pad[t0 : t0 + ROW_TILE, col_g : col_g + O_LORA]
+-                full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
+-                partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = full_acc
+-        else:
+-            for tb in pl.range(proj_b_t_rows):
+-                t0 = tb * ROW_TILE
+-                acc_b = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+-                for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+-                    k0 = col_g + kb * B_K_TILE
+-                    b_act = o_r_i8_pad[t0 : t0 + ROW_TILE, k0 : k0 + B_K_TILE]
+-                    wk0 = pl.max(g, 0) * O_LORA + kb * B_K_TILE
+-                    b_weight = wo_b[wk0 : wk0 + B_K_TILE, n0 : n0 + PROJ_B_MM_N_TILE]
+-                    acc_b = pl.matmul_acc(acc_b, b_act, b_weight, init_cond=(kb == 0))
+-                partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
++    # A common token scale permits exact INT32 accumulation across O groups.
++    # Two K4096 partitions retain 64 independent N128 blocks while reducing
++    # intermediate publication from eight output planes to two.
++    unit = pl.tile.get_block_idx()
++    partition = unit // (D // PROJ_B_MM_N_TILE)
++    column = unit % (D // PROJ_B_MM_N_TILE)
++    n0 = pl.max(column, 0) * PROJ_B_MM_N_TILE
++    part_k0 = pl.max(partition, 0) * PROJ_B_PART_K
++    out_n0 = partition * D + n0
++    if ROW_TILE == PROJ_B_MM_T_TILE and proj_b_t_rows == 2:
++        # B24/32/40: share each weight panel across both M128 row tiles.
++        # Two 128x128 INT32 accumulators exactly occupy the 128 KiB L0C.
++        acc_first = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
++        acc_second = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
++        for kb in pl.pipeline(PROJ_B_PART_K // B_K_TILE, stage=2):
++            k0 = part_k0 + kb * B_K_TILE
++            weight_panel = wo_b[k0 : k0 + B_K_TILE, n0 : n0 + PROJ_B_MM_N_TILE]
++            first_rows = o_r_i8_pad[0:ROW_TILE, k0 : k0 + B_K_TILE]
++            second_rows = o_r_i8_pad[ROW_TILE : 2 * ROW_TILE, k0 : k0 + B_K_TILE]
++            acc_first = pl.matmul_acc(acc_first, first_rows, weight_panel, init_cond=(kb == 0))
++            acc_second = pl.matmul_acc(acc_second, second_rows, weight_panel, init_cond=(kb == 0))
++        partials[0:ROW_TILE, out_n0 : out_n0 + PROJ_B_MM_N_TILE] = acc_first
++        partials[ROW_TILE : 2 * ROW_TILE, out_n0 : out_n0 + PROJ_B_MM_N_TILE] = acc_second
++    else:
++        for tb in pl.range(proj_b_t_rows):
++            t0 = tb * ROW_TILE
++            acc = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
++            for kb in pl.pipeline(PROJ_B_PART_K // B_K_TILE, stage=2):
++                k0 = part_k0 + kb * B_K_TILE
++                activation = o_r_i8_pad[t0 : t0 + ROW_TILE, k0 : k0 + B_K_TILE]
++                weight = wo_b[k0 : k0 + B_K_TILE, n0 : n0 + PROJ_B_MM_N_TILE]
++                acc = pl.matmul_acc(acc, activation, weight, init_cond=(kb == 0))
++            partials[t0 : t0 + ROW_TILE, out_n0 : out_n0 + PROJ_B_MM_N_TILE] = acc
+     return partials
+-
+-
+-@pl.jit.inline
+-def _proj_b_mm_nz(
+-    o_r_i8_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.INT8],
+-    wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, pl.NZ],
+-    partials: pl.Tensor[[T_PAD, O_GROUPS * D], pl.INT32],
+-    g: pl.Scalar[pl.INDEX],
+-    col_g: pl.Scalar[pl.INDEX],
+-    proj_b_t_rows: pl.Scalar[pl.INDEX],
+-    q_tid: pl.Scalar[pl.TASK_ID],
+-    ROW_TILE: pl.constexpr,
+-):
+-    """复用 Native 二维 NZ 权重，组号仅改变核内 K 偏移。"""
+-    with pl.spmd(
+-        D // PROJ_B_D_TILE, name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
+-    ) as pb_tid:
+-        partials = _proj_b_mm_nz_kernel(o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, ROW_TILE)
+-    return partials, pb_tid
+-
+-
+-proj_b_mm = _proj_b_mm_nz if QUANT_WEIGHT_NZ else _proj_b_mm_nd
+ 
+ 
+ @pl.jit.inline
+@@ -377,11 +327,11 @@
+     o_r_i8_pad = pl.create_tensor([T_PAD, O_GROUPS * O_LORA], dtype=pl.INT8)
+     act_scale_dq = pl.create_tensor([1, T_PAD], dtype=pl.FP32)
+     act_scale_q = pl.create_tensor([1, T_PAD], dtype=pl.FP32)
+-    # Per-group INT32 partials: proj_b_mm writes group g's contribution to output
+-    # channel n at partials[:, g*D + n]. No atomic-add -> no zero-seed.
+-    partials = pl.create_tensor([T_PAD, O_GROUPS * D], dtype=pl.INT32)
++    # Quantized group contributions share one scale and can be accumulated
++    # in two integer partitions without changing the dequantization result.
++    partials = pl.create_tensor([T_PAD, PROJ_B_PARTITIONS * D], dtype=pl.INT32)
+     proj_a_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
+-    proj_b_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
++    quant_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
+ 
+     with pl.manual_scope():
+         for g in pl.parallel(O_GROUPS):
+@@ -451,17 +401,22 @@
+                         zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
+                         o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
+ 
+-            partials, pb_tid = proj_b_mm(
+-                o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, ROW_TILE,
+-            )
+-            proj_b_tids[g] = pb_tid
+-
+-    # Sum INT32 group partials before dequantizing by the common token scale,
+-    # matching Native's single quantized WO-B matmul.
++            quant_tids[g] = q_tid
++
++    with pl.spmd(
++        PROJ_B_PARTITIONS * (D // PROJ_B_MM_N_TILE),
++        name_hint="proj_b_mm",
++        deps=[quant_tids[i] for i in range(O_GROUPS)],
++        allow_early_resolve=True,
++    ) as pb_tid:
++        partials = _proj_b_mm_token_kernel(o_r_i8_pad, wo_b, partials, proj_b_t_rows, ROW_TILE)
++
++    # Sum the two INT32 K partitions before dequantizing by the common token
++    # scale, matching Native's single quantized WO-B matmul.
+     with pl.spmd(
+         act_t_blks * (D // PROJ_B_ACT_N_TILE),
+         name_hint="proj_b_act",
+-        deps=[proj_b_tids[i] for i in range(O_GROUPS)],
++        deps=[pb_tid],
+         allow_early_resolve=True,
+     ) as _act_tid:
+         act_idx = pl.tile.get_block_idx()
+@@ -473,7 +428,7 @@
+         wb_scale_chunk = pl.reshape(wb_scale, [1, PROJ_B_ACT_N_TILE])
+         for b_tb in pl.range(t0, pl.min(t0 + PROJ_B_ACT_TASK_T_TILE, t_dim), PROJ_B_ACT_T_TILE):
+             acc_i32 = pl.full([PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.INT32, value=0)
+-            for act_g in pl.pipeline(O_GROUPS, stage=2):
++            for act_g in pl.pipeline(PROJ_B_PARTITIONS, stage=2):
+                 p_col0 = act_g * D + ob_n0
+                 p_g = partials[b_tb : b_tb + PROJ_B_ACT_T_TILE, p_col0 : p_col0 + PROJ_B_ACT_N_TILE]
+                 acc_i32 = pl.add(acc_i32, p_g)

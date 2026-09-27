@@ -71,6 +71,9 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    B3固定形状图/尾块与保护区通过。两档EP16干预已排队，验证是否减少后续MoE工作并补回CSA成本；
    当前没有局部收益、不合入，也不因更像Native而宣称成功。保留性能版NZ与分块；
    [差异依据及代价边界](results/csa_oproj_token_20260928/README.md)。
+   等待期间独立准备WO-B两份INT32中间结果候选：NZ/ND完整CPU编译通过，尚无设备正确性或收益；
+   依赖共同token scale，待EP16量化干预结果后再决定单卡验证，不加入当前排队版本。
+   [补丁与编译边界](results/csa_oproj_accum2_20260928/README.md)。
 2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
    继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
    Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。
