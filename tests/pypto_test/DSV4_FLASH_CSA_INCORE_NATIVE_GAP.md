@@ -157,7 +157,9 @@ PV N128逐块写回、PV N128两块同时存活、Top-K索引/页表预读三个
 Native满128窗口＋512 compressed候选时为两段PV结果，PTO128分块为五段。
 每段64×512 FP32写回，逻辑中间结果分别约256/640 KiB/query；这比单纯N分块更值得联合流水分析，
 但目前没有设备收益证据，不能按逻辑字节差推算加速比。
-Indexer的4＋2 query Key复用候选已通过CPU编译，下一步测128K/B16。
+Indexer的4＋2 query Key复用已做128K/B16先导：工作量配平版和进一步L0驻留版均退化，已撤回。
+[候选结果与限制](results/csa_incore_20260927/indexer_group4_balanced/README.md)保留实际证据；
+不能把逻辑Key读取量减少当成性能收益。后续保持双query分组，尝试合并两次head加权Cube规约。
 
 仍缺：128K/B16 Native 分算子 trace、各项策略独立收益、完整其他 CSA 任务的等范围映射，
 以及新策略的整模型验收。阶段目标保持有效，尚未完成。
