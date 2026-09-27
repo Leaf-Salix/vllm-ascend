@@ -1,0 +1,336 @@
+diff --git a/tests/pypto_test/dsv4_csa_native_case.py b/tests/pypto_test/dsv4_csa_native_case.py
+index 3157971e..4279397a 100644
+--- a/tests/pypto_test/dsv4_csa_native_case.py
++++ b/tests/pypto_test/dsv4_csa_native_case.py
+@@ -73,7 +73,14 @@ def allocate_native_cache(group, pages, device):
+     guard_bytes = 128
+     allocation = torch.full((pages * spec.page_size_bytes + 2 * guard_bytes,), 37, dtype=torch.int8, device=device)
+     raw = allocation[guard_bytes:-guard_bytes]
+-    views = NPUModelRunner._adjust_kv_layout(None, raw, shapes, dtypes, spec.page_size_bytes)
++    from vllm_ascend.ops.pypto.variant import selected_variant
++
++    if getattr(spec, "scale_dim", 0) and selected_variant() == "performance":
++        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.split_storage import split_indexer_views
++
++        views = split_indexer_views(raw, shapes[0], shapes[1])
++    else:
++        views = NPUModelRunner._adjust_kv_layout(None, raw, shapes, dtypes, spec.page_size_bytes)
+     group.update(allocation=allocation, raw=raw, views=views, page_size=page_size, pages=pages)
+     return {
+         "spec": repr(spec),
+diff --git a/tests/pypto_test/dsv4_csa_single_layer.py b/tests/pypto_test/dsv4_csa_single_layer.py
+index d04bf72b..38ebf045 100644
+--- a/tests/pypto_test/dsv4_csa_single_layer.py
++++ b/tests/pypto_test/dsv4_csa_single_layer.py
+@@ -376,7 +376,7 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
+ 
+ 
+ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
+-                           profile_dir=None):
++                           profile_dir=None, before_timing=None):
+     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
+     import torch
+ 
+@@ -402,6 +402,8 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
+     samples, timestamps = [], []
+     for iteration in range(warmup + iters):
+         reset()
++        if before_timing is not None:
++            before_timing()
+         start.record()
+         graph.replay()
+         end.record()
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index e1352c42..a6b9d80c 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -462,17 +462,13 @@ def indexer_score_topk_native_cube(
+     score_early_resolve: pl.constexpr,
+ ):
+     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
+-    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+-    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+-    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    # One owner, two planar regions, established before graph capture.
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
+     cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+-    key_rows = cache_bytes // IDX_HEAD_DIM
+-    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+-    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+-    idx_kv_cache_shift64 = pl.reshape(
+-        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+-    )
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    idx_kv_cache = pl.reshape(cache_flat[0:key_bytes], [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
++    idx_scale_cache = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     coefficients, coefficients_tid = indexer_head_coefficients(
+         qr_hadamard_scale_dq,
+         weights,
+@@ -549,28 +545,45 @@ def indexer_score_topk_native_cube(
+                             [NATIVE_QLI_QK_COLS, IDX_HEAD_DIM], dtype=pl.INT8,
+                             target_memory=pl.MemorySpace.Mat,
+                         )
+-                        for buf_key_page in pl.unroll(NATIVE_QLI_QK_COLS // BLOCK_SIZE):
+-                            buf_key_row = (
+-                                buf_logical_begin + buf_score_begin
+-                                + (buf_panel_col // (score_tile // 2)) * buf_lane_span
+-                                + buf_panel_col % (score_tile // 2) + buf_key_page * BLOCK_SIZE
+-                            )
+-                            buf_safe_page = pl.min(
+-                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                        buf_first_key_row = (
++                            buf_logical_begin + buf_score_begin
++                            + (buf_panel_col // (score_tile // 2)) * buf_lane_span
++                            + buf_panel_col % (score_tile // 2)
++                        )
++                        buf_last_valid_page = pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                        buf_first_key_page = buf_first_key_row // BLOCK_SIZE
++                        buf_first_physical_page = pl.max(pl.cast(pl.read(
++                            idx_block_table, [buf_batch_idx, pl.min(buf_first_key_page, buf_last_valid_page)]
++                        ), pl.INDEX), 0)
++                        buf_contiguous_panel = buf_first_key_page + NATIVE_QLI_QK_COLS // BLOCK_SIZE - 1 <= buf_last_valid_page
++                        for buf_check_page in pl.unroll(1, NATIVE_QLI_QK_COLS // BLOCK_SIZE):
++                            buf_check_physical = pl.read(idx_block_table, [
++                                buf_batch_idx, pl.min(buf_first_key_page + buf_check_page, buf_last_valid_page)
++                            ])
++                            buf_contiguous_panel = buf_contiguous_panel and (
++                                buf_check_physical == buf_first_physical_page + buf_check_page
+                             )
+-                            buf_physical_page = pl.max(
+-                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
++                        if buf_contiguous_panel:
++                            buf_panel_keys = pl.gather_row(
++                                buf_panel_keys, idx_kv_cache, [0, 0],
++                                [buf_first_physical_page * BLOCK_SIZE, 0], [NATIVE_QLI_QK_COLS, IDX_HEAD_DIM],
+                             )
+-                            buf_native_byte = buf_physical_page * native_page_bytes
+-                            if buf_native_byte % IDX_HEAD_DIM == 0:
+-                                buf_panel_keys = pl.gather_row(
+-                                    buf_panel_keys, idx_kv_cache, [buf_key_page * BLOCK_SIZE, 0],
+-                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                        else:
++                            for buf_key_page in pl.unroll(NATIVE_QLI_QK_COLS // BLOCK_SIZE):
++                                buf_key_row = (
++                                    buf_logical_begin + buf_score_begin
++                                    + (buf_panel_col // (score_tile // 2)) * buf_lane_span
++                                    + buf_panel_col % (score_tile // 2) + buf_key_page * BLOCK_SIZE
++                                )
++                                buf_safe_page = pl.min(
++                                    buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                                )
++                                buf_physical_page = pl.max(
++                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                                 )
+-                            else:
+                                 buf_panel_keys = pl.gather_row(
+-                                    buf_panel_keys, idx_kv_cache_shift64, [buf_key_page * BLOCK_SIZE, 0],
+-                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                    buf_panel_keys, idx_kv_cache, [buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_physical_page * BLOCK_SIZE, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                 )
+                         buf_key_panel = pl.tile.move(
+                             pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right,
+@@ -654,8 +667,8 @@ def indexer_score_topk_native_cube(
+                                 pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
+                             )
+                             buf_scale_bytes = pl.gather_row(
+-                                buf_scale_bytes, idx_native_kv_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
+-                                [buf_scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                                buf_scale_bytes, idx_scale_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
++                                [buf_scale_physical_page, 0], [1, BLOCK_SIZE * 2],
+                             )
+                         buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
+                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
+@@ -743,17 +756,13 @@ def indexer_score_topk_forest(
+ ):
+     """Score and select half-leaves, then merge their exact Top-K rows."""
+     b_dim = pl.tensor.dim(idx_block_table, 0)
+-    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+-    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+-    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    # One owner, two planar regions, established before graph capture.
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
+     cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+-    key_rows = cache_bytes // IDX_HEAD_DIM
+-    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+-    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+-    idx_kv_cache_shift64 = pl.reshape(
+-        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+-    )
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    idx_kv_cache = pl.reshape(cache_flat[0:key_bytes], [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
++    idx_scale_cache = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
+     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
+     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+@@ -858,19 +867,11 @@ def indexer_score_topk_forest(
+                                 physical_page = pl.max(
+                                     pl.cast(pl.read(idx_block_table, [batch_idx, safe_page]), pl.INDEX), 0
+                                 )
+-                                native_byte = physical_page * native_page_bytes
+-                                if native_byte % IDX_HEAD_DIM == 0:
+-                                    kv_i8 = pl.gather_row(
+-                                        kv_i8, idx_kv_cache,
+-                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+-                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+-                                    )
+-                                else:
+-                                    kv_i8 = pl.gather_row(
+-                                        kv_i8, idx_kv_cache_shift64,
+-                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+-                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+-                                    )
++                                kv_i8 = pl.gather_row(
++                                    kv_i8, idx_kv_cache,
++                                    [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
++                                    [physical_page * BLOCK_SIZE, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
+                         # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
+                         # 每个 score tile 一次 FP32->FP16 转换和一次 Cube matmul。
+                         # 精度版那条链（NATIVE_QLI_QK_SCALE + FP16 rint + Cube）是为了
+@@ -889,8 +890,8 @@ def indexer_score_topk_forest(
+                                     pl.cast(pl.read(idx_block_table, [batch_idx, scale_logical_page]), pl.INDEX), 0
+                                 )
+                                 scale_bytes = pl.gather_row(
+-                                    scale_bytes, idx_native_kv_cache, [0, scale_page * BLOCK_SIZE * 2],
+-                                    [scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                                    scale_bytes, idx_scale_cache, [0, scale_page * BLOCK_SIZE * 2],
++                                    [scale_physical_page, 0], [1, BLOCK_SIZE * 2],
+                                 )
+                             kv_scale = pl.reinterpret_view(scale_bytes, pl.FP16)
+                             score_shard = pl.aiv_shard(score_i32)
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+index 6270eb5d..5e09b5ed 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+@@ -412,6 +412,12 @@ def indexer_compressor_write(
+     hadamard_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Rotate compact boundary rows and write their quantized indexer KV cache."""
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
++    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    indexer_key_pages = pl.reshape(cache_flat[0:key_bytes], [cache_pages, INDEXER_KEY_BYTES])
++    indexer_scale_pages = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     bs = pl.tensor.dim(position_ids, 0)
+     compact_rows = (bs // S) * BOUNDARY_ROWS_PER_REQUEST
+     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
+@@ -498,7 +504,7 @@ def indexer_compressor_write(
+                     # Update the canonical Native slot directly.
+                     native_cache_page = pl.cast(native_page, pl.INDEX)
+                     native_key_begin = pl.cast(native_offset, pl.INDEX) * HEAD_DIM
+-                    idx_native_kv_cache[
++                    indexer_key_pages[
+                         native_cache_page : native_cache_page + 1,
+                         native_key_begin : native_key_begin + HEAD_DIM,
+                     ] = kv_i8_blk[inner : inner + 1, :]
+@@ -541,12 +547,12 @@ def indexer_compressor_write(
+                     # neighboring history slots, just as the precision path.
+                     native_scale_page = pl.cast(native_page, pl.INDEX)
+                     native_scale_bytes = pl.tile.load(
+-                        idx_native_kv_cache, [native_scale_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
++                        indexer_scale_pages, [native_scale_page, 0], [1, BLOCK_SIZE * 2]
+                     )
+                     native_scale_half = pl.tile.reinterpret_view(native_scale_bytes, pl.FP16)
+                     pl.tile.write(native_scale_half, [0, native_offset], scale_value)
+                     native_updated_bytes = pl.tile.reinterpret_view(native_scale_half, pl.INT8)
+-                    pl.tile.store(native_updated_bytes, [native_scale_page, INDEXER_KEY_BYTES], idx_native_kv_cache)
++                    pl.tile.store(native_updated_bytes, [native_scale_page, 0], indexer_scale_pages)
+ 
+     return hadamard_tid, scale_commit_tid
+ 
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+index d403947b..2440420d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+@@ -4,8 +4,8 @@
+ from ..deepseek_v4_flash_dspark.native_adapter import CSAOperators as _CSAOperators
+ from ..deepseek_v4_flash_dspark.native_adapter import NativeCSACall as _NativeCSACall
+ from ..deepseek_v4_flash_dspark.native_adapter import prepare_weights as _prepare_weights
+-from ..deepseek_v4_flash_dspark.native_storage import indexer_storage
+ from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
++from .split_storage import indexer_storage
+ 
+ 
+ class CSAOperators(_CSAOperators):
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py
+new file mode 100644
+index 00000000..08b67a4c
+--- /dev/null
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py
+@@ -0,0 +1,35 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Experimental planar Indexer allocation; no device copy or new owner."""
++
++import torch
++
++KEY_BYTES = 32 * 128
++SCALE_BYTES = 32 * 2
++PAGE_BYTES = KEY_BYTES + SCALE_BYTES
++
++
++def split_indexer_views(raw, key_shape, scale_shape):
++    pages = key_shape[0]
++    if (tuple(key_shape) != (pages, 32, 1, 128)
++            or tuple(scale_shape) != (pages, 32, 1, 1)
++            or raw.dtype != torch.int8 or not raw.is_contiguous()
++            or raw.numel() != pages * PAGE_BYTES):
++        raise ValueError("Planar Indexer requires A3 C4 INT8 keys and FP16 scales")
++    flat = raw.view(-1)
++    return [flat[:pages * KEY_BYTES].view(key_shape),
++            flat[pages * KEY_BYTES:].view(torch.float16).view(scale_shape)]
++
++
++def indexer_storage(key, scale):
++    pages = key.shape[0]
++    if (key.dtype != torch.int8 or tuple(key.shape) != (pages, 32, 1, 128)
++            or scale.dtype != torch.float16 or tuple(scale.shape) != (pages, 32, 1, 1)
++            or not key.is_contiguous() or not scale.is_contiguous()):
++        raise ValueError("Experimental PTO requires planar Indexer key/scale views")
++    if (key.untyped_storage().data_ptr() != scale.untyped_storage().data_ptr()
++            or scale.storage_offset() * 2 != key.storage_offset() + pages * KEY_BYTES
++            or key.storage_offset() + pages * PAGE_BYTES > key.untyped_storage().nbytes()):
++        raise ValueError("Planar key/scale must cover disjoint regions of one allocation")
++    # Root tensor transports bytes, not interleaved pages. All subviews are
++    # derived inside PTO, keeping the graph ABI to one writable owner.
++    return key.as_strided((pages, PAGE_BYTES), (PAGE_BYTES, 1), key.storage_offset())
+diff --git a/vllm_ascend/worker/model_runner_v1.py b/vllm_ascend/worker/model_runner_v1.py
+index 6db102d2..23464170 100644
+--- a/vllm_ascend/worker/model_runner_v1.py
++++ b/vllm_ascend/worker/model_runner_v1.py
+@@ -127,6 +127,7 @@ from vllm_ascend.eplb.core.eplb_worker import EplbProcess
+ from vllm_ascend.eplb.eplb_updator import EplbUpdator
+ from vllm_ascend.model_executor.offloader import create_offloader
+ from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.service_config import can_replay_csa_graph, is_csa_model
++from vllm_ascend.ops.pypto.variant import selected_variant
+ from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
+ from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
+ from vllm_ascend.quantization.utils import enable_fa_quant
+@@ -4071,6 +4072,22 @@ class NPUModelRunner(GPUModelRunner):
+                             ]
+                             overlap_full_kv_cache = False
+ 
++                    # Experimental PTO-only Indexer allocation. Native models,
++                    # precision PTO, other caches and their lifecycle stay on
++                    # the existing layout. Native prefill/fallback use strides.
++                    if (is_csa_model(self.vllm_config)
++                            and selected_variant() == "performance"
++                            and get_ascend_device_type() == AscendDeviceType.A3
++                            and getattr(current_kv_cache_spec, "scale_dim", 0) == 1
++                            and current_kv_cache_spec.dtype == torch.int8
++                            and current_kv_cache_spec.scale_dtype == torch.float16
++                            and getattr(current_kv_cache_spec, "compress_ratio", 0) == 4):
++                        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.split_storage import split_indexer_views
++
++                        kv_caches[layer_name] = split_indexer_views(
++                            kv_tensor, indexer_k_shape, indexer_scale_shape)
++                        continue
++
+                     kv_cache = self._adjust_kv_layout(kv_tensor,
+                                            kv_cache_shape_list,
+                                            kv_cache_dtype_list,

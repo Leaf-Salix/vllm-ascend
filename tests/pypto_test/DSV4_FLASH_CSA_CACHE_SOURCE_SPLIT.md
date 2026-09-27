@@ -1,147 +1,79 @@
-# Indexer cache 源头分离与 Native 兼容性评估
+# Indexer cache：源头分离与原布局的性能对照
 
-2026-09-27，基于当前保留算子 3d1f0f65。这里只讨论 A3 的 C4 Indexer INT8 key / FP16 scale；
-不改变 SWA、压缩 attention cache、两个 Compressor state 的格式或算术。
+更新：2026-09-27。范围仅为A3 C4 Indexer的INT8 key / FP16 scale。
+SWA、压缩Attention cache、Compressor state和算术保持不变；历史尝试见验证日志与Git。
 
-## 结论
+用户要求重新实测源头分离，并按性能选择分离策略；与原布局完整CSA差异在5%以内，优先保留原布局由PTO内部处理。
+比较完整CSA均值、P95及缓存受扰动时的表现，最终仍以整模型forward验收；不能只比较若干核内任务之和。
 
-当前保留PTO内部0/64B GM视图＋N128 key加载交错QK/WS，已消除入口历史复制和外部写回。
-Native原交错布局、分配、页表、生命周期及默认流程全部不改；源头分离仅保留为历史评估备选。
-用户接受有限的纯CSA代价来避免改Native；七档须分别报告本体增量和完整路径收益。
+## 当前基线与实验范围
 
+正式保留源码2a740c1f：Native原交错布局，PTO内部0/64B GM视图，N128加载交错QK/WS，等待Cube前加载scale。
+不含入口历史复制或外部写回；仅长档Score整组准入并禁止提前释放。
+2a740c1f单卡8K/128K B16均值776.94/1242.22μs；七档模型数据仍属于f76b3ad4。
+[scale提前读取](results/csa_incore_20260927/indexer_scale_prefetch/README.md)。
 
-**key/scale 在初始化时分成连续的两个视图，可以做成局部修改；但这不等于每个请求的历史连续。**
-现有桥接还按 block table 重排历史页，所以不能只修改分配布局就删除 load/commit 并保持当前 Score 寻址。
-此前“确认本体收益后，分配时分离即可完全去掉适配成本”的说法缺少这个前提，应撤回该简化结论。
+新的初始化分离实验在独立工作树`.cache/csa-source-split-2a740c1f`：
 
-Native 的 QLI 和 scatter 原本就分别接收 key/scale，并使用各自 stride；源码没有要求二者在每页内相邻。
-分离本身不要求重写 Native 算术内核。生产兼容还包括 Native prefill/回退、PTO 精度版适配、
-图捕获前的地址绑定、共享缓存视图和 connector 注册，不能仅凭 QLI 接口就声称全主流程已通过。
+- 仍使用同一块raw allocation，前`pages×4096`字节为key，后`pages×64`字节为scale。
+- `model_runner_v1._reshape_kv_cache_tensors`仅在PTO模型、performance、A3、C4 Indexer时选择两个连续view。
+  Native模型、precision及其他cache继续原分支；没有全局修改`_adjust_kv_layout`。
+- PTO继续使用一个可写根描述符，内部派生不重叠key/scale区域；无需每步copy或commit桥接。
+  Score去掉交错页的0/64B相位判断，Compressor原地更新相同物理slot。
+- 页数、总字节、页表、请求生命周期不变。Native prefill/回退消费同一组带stride的key/scale view。
+  Native完整prefill链和16卡模型还未验证，不能把单卡通过称作全主流程通过。
 
-## 1. 两种连续性及实际代码
+CPU完整PTOAS/AICPU编译已通过。CPU直接调用runner初始化函数确认：Native模型和PTO precision页stride仍为4160/2080；
+PTO performance为4096/32；共享所有权、偏移和保护区检查通过，实验ABI拒收旧交错布局。
+[实验补丁、编译及检查](results/csa_source_split_ab_20260927/)。
 
-当前 Native 每个物理页共 4160 B：32×128 INT8 key（4096 B）＋32 FP16 scale（64 B）。
+## 必须区分两种连续性
 
 ```text
-当前物理布局：[K页0 S页0][K页1 S页1][K页2 S页2]...
-源头分离布局：[K页0 K页1 K页2 ...][S页0 S页1 S页2 ...]
-某请求页表：  [9, 2, 17, ...]    ← 分离布局不会改变这些物理页号
-当前PTO桥接：[请求0逻辑页0、1、2 ...][请求1逻辑页0、1、2 ...]
+Native交错物理页：[K0 S0][K1 S1][K2 S2]...
+源头key/scale分离：[K0 K1 K2 ...][S0 S1 S2 ...]
+请求逻辑页表：   [9, 2, 17, ...]    ← 仅分离key/scale不会改变这些页号
+旧入口重排结果： [请求0逻辑页0、1、2 ...][请求1逻辑页0、1、2 ...]
 ```
 
-- [runner `_adjust_kv_layout`](../../vllm_ascend/worker/model_runner_v1.py) 用 `as_strided` 创建每页交错的两个 view。
-  当前 key 的页 stride=4160 INT8 元素，scale 的页 stride=2080 FP16 元素。
-- 3d1f0f65的 `SplitIndexerCache.load`（已删除，历史代码见Git）
-  先用页表取得物理页号，再用两次 `index_select` 搬成按请求连续的历史；额外复制尾部保护页。
-- [Score](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)
-  直接用 `request * request_rows + logical_row`，一次取384/512等连续行。
-  它不能把任意物理页池误当作这种按请求排列的输入。
-- [Compressor写入](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py)
-  当前也写请求逻辑行；桥接再根据 Native slot 取出新增行并 scatter 回物理页。
-- [CompressAttentionManager](../../vllm_ascend/core/single_type_kv_cache_manager.py)
-  从 block pool 增量取页，也支持已计算块复用；请求换位、释放再分配和前缀共享均不能假设物理页连续。
+旧`SplitIndexerCache.load`不仅分离key/scale，还通过`index_select`按页表重排到请求连续的临时缓存。
+因此“分配时拆开便自然得到旧连续请求输入”不成立。本次最小分离实验仍按物理页读取，不能冒称完全取消页表寻址。
 
-## 2. Native 的影响范围
+若要合并连续读取，可在算子确认相邻逻辑页映射到连续物理页后合并DMA；非连续页需要回退。
+若要无条件取消PTO内部分页，则须从分配策略保证请求历史连续，覆盖增量扩容、请求换位、释放与复用；
+前缀共享和connector还要遵守相同映射，不能只让单卡fixture连续而声称生产方案完成。
+用户已允许按性能收益选择策略，不把“改动最少”作为拒绝更高收益方案的理由。
 
-| 位置 | 源码行为 | 源头分离的影响 |
+## Native兼容依据
+
+| 位置 | 实际契约 | 分离后的处理 |
 | --- | --- | --- |
-| QLI Python/C++入口 | `key`、`key_dequant_scale` 两个入参；绑定读取各自 `stride(0)` | 可描述分离布局；连续 key页stride=4096，scale页stride=32 |
-| QLI AIC读key | `block_table[b,p] * stride + offset * 128` | 数学及页号不变，按新stride寻址 |
-| QLI AIV读scale | `block_id * scaleStride + offset` | 同上，不要求与key共用页内偏移 |
-| Native量化更新 | 对key/scale各调用一次scatter；binding传入目标的完整strides | 可原地更新新视图，不需要额外拼回 |
-| Native prefill / decode回退 | 消费相同的key/scale tuple、页表、slot | 调用接口可保留，仍需串联验证 |
-| PTO精度版 | `indexer_storage()` 强制同storage、scale偏移4096及交错页stride | **不能直接复用新布局**；需要适配或先保持该入口使用旧布局 |
-| PTO性能版 | 同样调用旧布局校验，且Score/Compressor使用请求连续布局 | **必须修改**校验、读取及更新寻址；不能只删除桥接 |
-| KV管理 | 按spec的page_size_bytes、block ID管理，不直接消费浮点数据 | 保持页数、每页总字节、共享关系可避免改调度器 |
-| Mooncake当前实现 | 分tensor记录base、block_len和block_stride；部分注册分支依赖整块raw allocation | 优先保留同一底层分配的两个大区间；需验证实际部署分支，不能扩大为所有connector兼容 |
-| ACL Graph | 捕获tensor地址和描述符 | 在初始化/捕获前定布局，不在已有图重放中切换地址 |
+| QLI Python/C++入口 | key/scale独立入参，绑定读取各自stride(0) | 传4096/32的新stride |
+| QLI AIC | `block_table * key_stride + row * head_dim` | 页号不变，无须相邻scale |
+| QLI AIV | `block_id * scaleStride + row` | 直接读连续scale池 |
+| Native量化写入 | key/scale各一次scatter，binding传入目标strides | 原地更新，无需拼回 |
+| PTO精度版 | 仍强制同storage、scale偏移4096、交错页stride | 初始化保留原布局 |
+| KV管理 | 依赖spec页数/总字节与block ID | 最小分离实验保持全部不变 |
+| ACL Graph | 捕获固定地址/描述符 | 初始化定布局，重放期间不切换 |
+| connector | 按tensor登记步长，但有分支假设原raw布局 | 当前只分析已使用的逻辑bank恢复；不外推所有connector |
 
-证据：
-[C++ QLI/scatter binding](../../csrc/torch_binding.cpp)，
-[Native QLI AIC](../../csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_cube.h)，
-[Native QLI AIV](../../csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_vector.h)，
-[Native量化/更新入口](../../vllm_ascend/device/device_op.py)，
-[PTO旧布局合同](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/native_storage.py)，
-[Mooncake注册和步长](../../vllm_ascend/distributed/kv_transfer/kv_p2p/mooncake_connector.py)。
+源码依据：[runner](../../vllm_ascend/worker/model_runner_v1.py)、[QLI/scatter绑定](../../csrc/torch_binding.cpp)、
+[QLI AIC](../../csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_cube.h)、
+[QLI AIV](../../csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_vector.h)、
+[Native更新](../../vllm_ascend/device/device_op.py)。实验补丁单独保存，不用主工作树源码链接假冒已合入的新实现。
 
-## 3. 局部落地方案
+既有Native-only任务task_20260927_204637_408988615371：B2/S6，8K/4K混合、非连续页，scatter＋QLI、eager＋两次修改值后的图重放，
+key/scale位模式与Top-K精确一致、保护区通过。[已有结果](results/csa_cache_source_split_20260927/native_check.json)。不重复这一项。
 
-**用户最新限定：只针对PTO改造vllm-ascend，粒度最小，不改Native流程。**
-当前采用原Native分配与视图，先在PTO内部直接写物理slot，再评估PTO按页读取；
-下面源头分离方式是兼容性评估备选，不作为当前生产修改方案。
+## 当前验收和待办
 
-若采用源头分离，优先保持现有的一块 raw allocation，把前 `num_pages×4096` 字节视为 key，
-后 `num_pages×64` 字节视为 FP16 scale。总字节和物理页数不变，两者共享一份所有权和释放周期。
-不必新增两块独立内存分配，也不必新增 cache group。实现需只命中 A3 C4 Indexer，
-不能全局更改 `_adjust_kv_layout`，也不能套用 A5 的 full-cache ABI。
-仅开启性能版时选择新布局，可让默认 Native 和精度版继续原布局；同一性能实例里的 Native回退应消费新布局。
-若以后两版统一布局，共用数值中性适配，精度版算术保持原样。
+1. 原布局与初始化分离固定相同基底2a740c1f，同一任务、同一张卡对照。
+2. 单卡B4的8K/128K，固定规约、逐物理行变化的251种scale；8类逻辑输出/cache/state及A→B→A图重放。
+3. 两档通过后，B16各5预热20次计时；另在开始事件前写入384MiB独立缓冲，压力时间不计入CSA，报告P95/max。
+4. 分别呈现纯物理分离、可合并连续页、请求历史连续的适用条件和收益，避免把不同修改混为一个结果。
+5. 只有候选收益值得保留时，再补Native→PTO→Native状态交接及真实权重16卡token/DSpark和forward；先不重跑七档模型。
 
-**要消除每步完整桥接，PTO必须直接消费物理页表并按物理slot写入。**
-Score保留现有Cube/FP16规约/双query/1024或768策略，加载时按32行页分段，
-连续物理页可以合并DMA，非连续页必须按页定位，不能依赖单卡合成页表的排列。
-这会将部分加载开销移回核内；需要比较完整CSA收益，不能承诺仍保持当前请求连续输入的本体时间。
-新路径不再越过有效物理页做整块读取，因此现有尾部padding读法也必须同步调整。
-
-不建议为维持请求连续读取强制每请求预留整段物理cache：它会扩大到调度、扩容、前缀复用和显存利用率，
-不符合“简单且不影响其他主流程”的要求。
-
-近期顺序：
-
-1. 用无PyPTO的小型Native case验证交错与分离布局的scatter、QLI、图重放；结果见下面的证据目录。
-2. 先让CSA内部将新增key/scale直接写入Native物理slot，消除外部Torch的取行、定位及scatter链；
-   可以先保留原交错分配和入口load，独立验证并取得完整区间收益，不必等待源头分离。
-3. 独立评估PTO按页直接加载；复用当前已保留的算术及incore优化，8K/B16与128K/B16共同判断。
-   源头分离可以与这一项结合，不能把“key/scale已分离”误报为“请求历史已连续”。
-4. 定向覆盖页不连续、页边界、padding和Native→PTO→Native状态交接；通过后再扩到真实权重16卡。
-   不重跑已无关的精度/性能矩阵；前缀缓存和connector仅在涉及其部署路径时补对应验证。
-
-## 4. 当前开销与验收边界
-
-当前3d1f0f65、B16、同一套正式第4层权重及合成历史、第二CSA metadata复用，单位μs：
-
-| 上下文 | 入口load | CSA本体 | 出口commit | 完整PTO | Native |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 8K | 91.77 | 790.78 | 216.26 | 1079.16 | 927.07 |
-| 128K | 187.52 | 1234.06 | 220.43 | 1645.76 | 1310.21 |
-
-阶段值来自独立捕获/计时，不能强求它们之和严格等于完整PTO，也不能直接按加减预测改造后耗时。
-但外部commit约216～220μs是明确的优化对象；它只写新增少量行，大部分成本不能解释成全历史写回带宽。
-[当前数据](results/csa_incore_20260927/indexer_score_panel1024/README.md)。
-
-Native定向验证的脚本、命令及结果目录：
-[cache源头分离验证](results/csa_cache_source_split_20260927/)。
-任务task_20260927_204637_408988615371退出0：B2/S6、8K/4K混合历史、非连续物理页，
-eager及两次修改更新值后的图重放，key、scale位模式、Top-K均精确一致，保护区完整。
-[Native-only结果](results/csa_cache_source_split_20260927/native_check.json)。
-本次不修改生产分配器，不把单算子通过等同于完整prefill/回退链或整模型已验收。
-
-## 5. 已完成的最小改动：PTO内直接提交slot
-
-仅修改4个PTO性能版文件，复用原Native物理页；新增一个InOut描述符，
-在已有key和串行scale任务中写回相同量化结果，删除外部Torch定位/取行/scatter链。
-Native分配、算子、页表、slot与调度代码均未修改，precision入口未修改。
-两档完整PTO分别降到888.64/1382.39μs，比改造前快17.65%/16.00%；长档仍慢于Native6.23%。
-入口完整历史复制仍存在（98.35/184.49μs），下一项继续只在PTO侧处理。
-[完整性能、核内变化、保护区和补位图验证](results/csa_cache_direct_commit_20260927/README.md)。
-
-## 6. 内部GM视图直读：可保留Native布局，长档收益尚未取得
-
-历史§116已经通过0/64B两个GM视图直接读L1；旧8K性能差而撤回，不是布局无法表达。
-§161无128K实测便关闭路线的外推已更正。本轮复用该方法，一个可写Native根入参，
-视图在Score调度函数内派生，避免外部部分重叠alias被PyPTO拒绝；没有修改工具链或Native流程。
-
-8K/B16完整PTO888.64→807.47μs，128K/B16 1382.39→1396.31μs；
-长档Score AIC从312.97～323.83增至537.43～565.10μs，完整均值未改善、p95变差。
-两档保护区/索引结构/有限值、B4/H4095同图4→3→1→4通过；数值及整模型边界未放宽。
-已保存候选补丁并恢复bad985a9，入口复制仍在。下一步优先在PTO内部改善分页DMA/流水，
-或短档直读、长档内部紧凑化，继续共用原Native分配；不把分配布局改造作为必要前提。
-[本轮结果与全部泳道](results/csa_cache_direct_read_20260927/README.md)。
-
-## 7. 当前保留：N128分页加载流水，完全取消外部桥接
-
-继续借鉴Native按128列加载key并交错QK/WS；保持原页布局，PTO内部0/64B GM视图直接读取并提交物理slot。
-8K/B16完整888.64→797.04，128K/B16 1382.39→1343.44μs；纯CSA分别−4.51/+82.34μs。
-长档本体增加6.53%，完整路径减少2.82%，用户接受这一有限代价以避免改变vllm-ascend缓存流程。
-两档保护区/索引检查和B4/H32767同图4→3→1→4通过，Native零容差差异仍在；当前补齐七档。
-[完整区间、本体、核内、测试边界及全部泳道](results/csa_cache_panel_read_20260927/README.md)。
+模型差距的现有证据：f76b3ad4在128K/B16单层CSA快3.34%，模型rank0独立trace中的CSA反慢3.50%；
+缓存压力使PTO增加40.96μs、Native仅增加1.50μs，消除了约3%的局部优势。
+这支持内存访问状态敏感，尚未闭合正式forward全部差距，也未测得硬件缓存命中率。
+[证据与边界](results/csa_model_forward_f76b3ad4_20260927/MODEL_GAP.md)。
