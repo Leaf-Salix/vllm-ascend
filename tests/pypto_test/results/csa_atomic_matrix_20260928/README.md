@@ -29,6 +29,14 @@ Native cache分配和流程保持，PTO内部消化分页读取，不需外部�
 ## Profile交付
 
 [CPU导出](export_profiles.sh)、[七档PTO DFX采集](run_swimlanes.sh)、[汇集脚本](bundle_profiles.py)。
-DFX任务`task_20260928_054335_24490514569`已启动，同71153bb3/atomic0，第二CSA层的真实权重与合成历史。
-每档只补一个窗口，不重复正式模型计时。14份模型rank0 PyTorch JSON与7份单卡DFX将汇集到`download/`，
+DFX任务`task_20260928_054335_24490514569`已完成退出0，同71153bb3/atomic0，第二CSA层的真实权重与合成历史。
+每档只补一个窗口，不重复正式模型计时。14份模型rank0 PyTorch JSON与7份单卡DFX已汇集到[download/](download/README.md)，
 输入和计时范围单列；其他rank原始profile仍保留，不把DFX当整模型耗时。
+
+[模型CSA/FFN/GMM差距](model/MODEL_GAP.md)、[当前核内/调度与上游参考](WORKER_GAP.md)，
+由[只读汇总脚本](summarize_profiles.py)生成。模型CSA完整区间均下降7.88%～20.85%；
+专家GMM每step增量为−0.749～+0.135ms，旧atomic1七档为+1.01～+1.68ms。
+这与固定规约方向一致，但未采本轮实际路由索引，且profile与正式轮独立，不能宣称唯一因果或精确分账。
+
+当前8K/B16 DFX Worker窗口784.30μs，历史上游727.98μs；分段差距主要在norm前与norm到Sparse启动之间。
+该历史图缺完整配置，只是调度参照，不等于等输入算法差额，也不代替750μs整模型验收。

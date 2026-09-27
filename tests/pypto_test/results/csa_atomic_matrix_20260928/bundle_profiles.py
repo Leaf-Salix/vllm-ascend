@@ -33,11 +33,17 @@ def main():
     for entry in entries:
         if not Path(entry["source"]).is_file():
             raise FileNotFoundError(entry["source"])
+    summaries = [ROOT / "model" / name for name in (
+        "RESULTS.md", "forward.json", "MODEL_GAP.md", "model_gap_rank0.json")]
+    summaries += [ROOT / name for name in ("WORKER_GAP.md", "worker_gap.json")]
+    for source in summaries:
+        if not source.is_file():
+            raise FileNotFoundError(source)
     output.mkdir(exist_ok=True)
     for entry in entries:
         shutil.copyfile(entry["source"], output / entry["file"])
-    for name in ("RESULTS.md", "forward.json", "MODEL_GAP.md", "model_gap_rank0.json"):
-        shutil.copyfile(ROOT / "model" / name, output / name)
+    for source in summaries:
+        shutil.copyfile(source, output / source.name)
     manifest = {"operator": "71153bb3", "atomic_add": 0, "weight_nz_mode": 2,
                 "deterministic_level": 0, "hccl_deterministic": False, "eplb": False,
                 "cache": "原 Native 物理页，PTO 内部直接读取", "files": entries}

@@ -8587,3 +8587,32 @@ task_20260928_051900_412378912384退出0。128K/B4、B8、B16正式forward变化
 task_20260928_054335_24490514569补同71153bb3/atomic0七档单卡DFX，每档一个窗口；
 模型trace用已采原始profile离线导出，不重新跑正式计时。免seed候选独立在device0运行，DFX在device1。
 两者均未混入上述已结束的正式16卡计时，候选单卡性能仍保留Native控制和并发采集条件。
+
+## 289. 免Q/KV清零单卡状态精确一致，保留控制漂移后补两档EP16（2026-09-28）
+
+task_20260928_053518_14737829545退出0。128K/B4（尾部padding）和8K/B16（dense+tail）
+8类输出/状态精确一致，A→B→A、metadata和保护区通过；不包含idx_topk_scores，Native零容差仍FAIL。
+PTO本体724.377→711.037μs（−1.84%）、797.020→767.674（−3.68%），P95/max均下降；
+Native控制同时−0.84%/−2.42%，部分期间另一卡运行DFX，不将全部下降归因于候选。
+数学K遍历未改、编译任务表消除两类清零任务，但整网影响仍要实际验证。
+
+task_20260928_054914_3094321594排队，只补128K/B8和8K/B16，双方新Native控制，
+其余配置与固定规约主口径相同。生产45412ba3仅改变已验证的默认选择，未混入免seed候选。
+[单卡完整样本、补丁与EP16命令](results/csa_projection_no_seed_20260928/README.md)。
+
+## 290. 本轮七档21份JSON齐备，下游GMM额外开销收窄（2026-09-28）
+
+七档模型既有profile离线导出rank0，DFX任务task_20260928_054335_24490514569退出0。
+14份模型PyTorch JSON＋7份单卡PTO泳道已[汇集到download](results/csa_atomic_matrix_20260928/download/README.md)，
+各自输入、版本、配置和计时范围明确，其他15rank原始模型profile继续保留；未重跑正式计时。
+
+rank0三步模型CSA完整区间均下降7.88%～20.85%；专家GMM每step的PTO增量−0.749～+0.135ms，
+旧atomic1七档为+1.01～+1.68ms。收益方向与正式forward一致，但没有本轮实际路由索引，
+且event模式0/1影响profile，不做唯一因果或正式时间精确分账。
+[模型细分](results/csa_atomic_matrix_20260928/model/MODEL_GAP.md)。
+
+同版本8K/B16单卡Worker窗口784.30μs，上游历史727.98μs；首Worker→norm为87.66/66.62，
+norm→Sparse首receive为341.00/317.14，Sparse→merge为182.38/184.90，末段173.26/159.32。
+上游图缺完整源码/config，不把分段差额冒充等输入归因；源码参考main2164563的QA/KV split-K2/4仍用atomic。
+当前1/1固定规约由真实EP16选择，下一步免seed有明确适用前提，不能盲目照搬上游atomic策略。
+[全部任务核内、启动分散和额外工作](results/csa_atomic_matrix_20260928/WORKER_GAP.md)。

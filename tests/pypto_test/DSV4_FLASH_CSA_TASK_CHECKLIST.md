@@ -32,9 +32,10 @@ atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当�
 
 近期待办按依赖执行：
 
-1. **固定规约已成为性能版默认，完成本轮证据交付。** 两档干预和七档反序对照均通过，Native流程未改。
-   保存各档模型PyTorch JSON及同版本PTO泳道，汇集到一个可下载目录；profile不替代正式无profiler计时。
-   继续检查CSA/FFN/GMM差距；本轮未采实际专家索引，不把相关性当唯一因果。
+1. **固定规约已成为性能版默认，本轮证据已齐。** 两档干预和七档反序对照均通过，Native流程未改。
+   14份模型PyTorch JSON和7份同版本PTO泳道已[汇集下载](results/csa_atomic_matrix_20260928/download/README.md)。
+   [本轮CSA/FFN/GMM](results/csa_atomic_matrix_20260928/model/MODEL_GAP.md)与
+   [核内/调度和上游参考](results/csa_atomic_matrix_20260928/WORKER_GAP.md)已记录；本轮未采实际专家索引，不把相关性当唯一因果。
 2. **Top-K UB根候选暂不合入。** 完整CSA状态/图重放精确一致，本体均值改善1.89%，但merge核内四窗口未见明确收益。
    保留补丁与证据，不把GM搬运量推导或未改任务的调度变化当核内收益；不掺入固定规约七档。
    [候选、编译边界及单卡实测](results/csa_topk_register_20260928/README.md)。
@@ -44,8 +45,9 @@ atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当�
    [运行入口与结果](results/csa_atomic_matrix_20260928/README.md)。
    保存各档PyTorch JSON及PTO泳道，并给出当前版本相对Native和pypto-lib的核内、调度、额外工作差异。
    已有同版本证据复用，只补缺口或受影响项，不做hash扫描或重复无关测试。
-   独立免QR/KV清零种子候选仅改变atomic0性能版，CPU编译通过；两档单卡状态/图重放与计时运行中。
-   在证明安全和收益前不合入。[候选范围](results/csa_projection_no_seed_20260928/README.md)。
+   独立免QR/KV清零种子候选仅改变atomic0性能版；两档单卡状态/图重放精确一致、本体下降，Native控制也变快。
+   task_20260928_054914_3094321594仅补128K/B8与8K/B16真实EP16，在确认前不合入。
+   [候选范围与单卡证据](results/csa_projection_no_seed_20260928/README.md)。
 4. **cache策略继续按真实整模型性能决定。** 源头key/scale分离及连续四页候选已测，模型未取得共同收益且长档DSpark失败，暂不采用。
    物理key/scale连续不等于请求历史连续；真实allocator正式轮和profile轮页序不同，不能用人工连续页代替生产验收。
    保留原布局PTO内部读取，除非新证据支持其他方案。[旧分离干预与失败边界](results/csa_source_split_ab_20260927/ordered/README.md)。
