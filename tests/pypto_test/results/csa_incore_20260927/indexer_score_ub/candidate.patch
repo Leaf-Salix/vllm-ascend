@@ -1,0 +1,125 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -152,6 +152,11 @@
+ 
+ BUFFERED_SCORE_TILE = 768
+ BUFFERED_SCORE_LANE_TILE = BUFFERED_SCORE_TILE // 2
++# 为最后一个不足384列的panel也预留完整物理空间。
++BUFFERED_SCORE_UB_COLS = (
++    (TOPK_CANDIDATES_PER_LEAF // 2 + BUFFERED_SCORE_LANE_TILE - 1)
++    // BUFFERED_SCORE_LANE_TILE * BUFFERED_SCORE_LANE_TILE
++)
+ BUFFERED_SCORE_SCALE = 1024.0
+ NATIVE_QLI_WEIGHT_ROWS = 16
+ NATIVE_QLI_QK_COLS = 128
+@@ -616,6 +621,8 @@
+                     buf_lane_span = pl.min(buf_tile_count * BUFFERED_SCORE_LANE_TILE, TOPK_CANDIDATES_PER_LEAF // 2)
+                     buf_score_iters = (buf_lane_span + BUFFERED_SCORE_LANE_TILE - 1) // BUFFERED_SCORE_LANE_TILE
+                     buf_lane_begin = buf_score_lane * buf_lane_span
++                    # 有效分数全部写完后才排序；padding沿用GM路径的规则。
++                    buf_score_ub = pl.create_tile([2, BUFFERED_SCORE_UB_COLS], dtype=pl.FP32)
+                     for buf_score_step in pl.range(buf_score_iters):
+                         buf_score_begin = buf_score_step * BUFFERED_SCORE_LANE_TILE
+                         buf_transfer_row = buf_worker * 4 + buf_score_step % 2 * 2
+@@ -623,12 +630,12 @@
+                         buf_score_sum0 = pl.load(
+                             buf_score_transfer,
+                             [buf_transfer_row, buf_score_lane * BUFFERED_SCORE_LANE_TILE],
+-                            [1, BUFFERED_SCORE_LANE_TILE],
++                            [2, BUFFERED_SCORE_UB_COLS], valid_shape=[1, BUFFERED_SCORE_LANE_TILE],
+                         )
+                         buf_score_sum1 = pl.load(
+                             buf_score_transfer,
+                             [buf_transfer_row + 1, buf_score_lane * BUFFERED_SCORE_LANE_TILE],
+-                            [1, BUFFERED_SCORE_LANE_TILE],
++                            [2, BUFFERED_SCORE_UB_COLS], valid_shape=[1, BUFFERED_SCORE_LANE_TILE],
+                         )
+                         pl.system.sync_set(
+                             SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+@@ -636,7 +643,7 @@
+                         buf_scale_half = pl.load(
+                             kv_scale_rows,
+                             [buf_batch_idx, buf_logical_begin + buf_score_begin + buf_lane_begin],
+-                            [1, BUFFERED_SCORE_LANE_TILE],
++                            [2, BUFFERED_SCORE_UB_COLS], valid_shape=[1, BUFFERED_SCORE_LANE_TILE],
+                         )
+                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
+                         for buf_query_lane in pl.unroll(2):
+@@ -659,10 +666,9 @@
+                             else:
+                                 buf_score_row = pl.mul(buf_score_sum1, buf_kv_scale)
+                             if buf_lane_valid_rows > 0:
+-                                pl.store(
+-                                    pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+-                                    [buf_worker * 4 + buf_query_lane * 2 + buf_score_lane, buf_score_begin],
+-                                    score_arena,
++                                buf_score_ub = pl.tile.assemble(
++                                    buf_score_ub, pl.tile.slice(buf_score_row, [1, BUFFERED_SCORE_LANE_TILE], [0, 0]),
++                                    [buf_query_lane, buf_score_begin]
+                                 )
+                     for buf_query_lane in pl.unroll(2):
+                         buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+@@ -675,14 +681,55 @@
+                             (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
+                         )
+                         if buf_half_valid > 0:
+-                            indexer_topk_half_leaf(
+-                                score_arena,
+-                                pair_arena,
+-                                buf_worker * 4 + buf_query_lane * 2 + buf_score_lane,
+-                                buf_half_begin,
+-                                buf_half_valid,
+-                                buf_half_slot,
+-                            )
++                            logical_begin_i32 = pl.cast(buf_half_begin, pl.INT32)
++                            if buf_half_valid <= 512:
++                                short_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_begin_i32)
++                                short_raw = pl.set_validshape(pl.tile.gather(buf_score_ub, pl.tile.adds(pl.tile.arange(0, [1, 512], dtype=pl.INT32), pl.cast(buf_query_lane * BUFFERED_SCORE_UB_COLS, pl.INT32)), pl.create_tile([1, 512], dtype=pl.INT32)), 1, buf_half_valid)
++                                short_scores = pl.tile.fillpad(short_raw, pad_value=pl.PadValue.min)
++                                short_scores = pl.maximum(short_scores, FP32_NEG_INF)
++                                short_pairs = pl.sort32(short_scores, pl.reinterpret_view(short_indices, pl.UINT32))
++                                short_pairs = pl.mrgsort(short_pairs, block_len=64)
++                                short_pairs = pl.mrgsort(short_pairs, block_len=256)
++                                pl.store(short_pairs, [buf_half_slot, 0], pair_arena)
++                            elif buf_half_valid <= 1024:
++                                small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_begin_i32)
++                                small_raw = pl.set_validshape(pl.tile.gather(buf_score_ub, pl.tile.adds(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), pl.cast(buf_query_lane * BUFFERED_SCORE_UB_COLS, pl.INT32)), pl.create_tile([1, 1024], dtype=pl.INT32)), 1, buf_half_valid)
++                                small_scores = pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min)
++                                small_scores = pl.maximum(small_scores, FP32_NEG_INF)
++                                small_pairs = pl.sort32(small_scores, pl.reinterpret_view(small_indices, pl.UINT32))
++                                small_pairs = pl.mrgsort(small_pairs, block_len=64)
++                                small_pairs = pl.mrgsort(small_pairs, block_len=256)
++                                small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++                                small_right = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 1024])
++                                small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                                small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
++                                small_top = pl.tile.slice(small_merged, [1, TOPK_PAIR_WIDTH], [0, 0])
++                                pl.store(small_top, [buf_half_slot, 0], pair_arena)
++                            elif buf_half_valid <= 2048:
++                                leaf_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_begin_i32)
++                                leaf_scores_raw = pl.set_validshape(pl.tile.gather(buf_score_ub, pl.tile.adds(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), pl.cast(buf_query_lane * BUFFERED_SCORE_UB_COLS, pl.INT32)), pl.create_tile([1, 2048], dtype=pl.INT32)), 1, buf_half_valid)
++                                leaf_scores = pl.tile.fillpad(leaf_scores_raw, pad_value=pl.PadValue.min)
++                                leaf_scores = pl.maximum(leaf_scores, FP32_NEG_INF)
++                                pairs = pl.sort32(leaf_scores, pl.reinterpret_view(leaf_indices, pl.UINT32))
++                                pairs = pl.mrgsort(pairs, block_len=64)
++                                pairs = pl.mrgsort(pairs, block_len=256)
++                                pairs = pl.mrgsort(pairs, block_len=1024)
++                                pl.store(pl.tile.slice(pairs, [1, TOPK_PAIR_WIDTH], [0, 0]), [buf_half_slot, 0], pair_arena)
++                            elif buf_half_valid <= 4096:
++                                medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
++                                medium_scores_raw = pl.set_validshape(pl.tile.gather(buf_score_ub, pl.tile.adds(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), pl.cast(buf_query_lane * BUFFERED_SCORE_UB_COLS, pl.INT32)), pl.create_tile([1, 4096], dtype=pl.INT32)), 1, buf_half_valid)
++                                medium_scores = pl.tile.fillpad(medium_scores_raw, pad_value=pl.PadValue.min)
++                                medium_scores = pl.maximum(medium_scores, FP32_NEG_INF)
++                                medium_pairs = pl.sort32(medium_scores, pl.reinterpret_view(medium_indices, pl.UINT32))
++                                medium_pairs = pl.mrgsort(medium_pairs, block_len=64)
++                                medium_pairs = pl.mrgsort(medium_pairs, block_len=256)
++                                medium_pairs = pl.mrgsort(medium_pairs, block_len=1024)
++                                medium_left = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++                                medium_right = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++                                medium_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                                # Native sorts 2048 candidates at a time, then merges the new chunk first.
++                                medium_merged = pl.tile.mrgsort(medium_right, medium_left, tmp=medium_tmp)
++                                pl.store(pl.tile.slice(medium_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [buf_half_slot, 0], pair_arena)
+                         else:
+                             pl.store(
+                                 pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
