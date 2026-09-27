@@ -1,0 +1,46 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -104,6 +104,8 @@
+ # 派生量与上游对齐：SPARSE_BLOCKS = 1 + ceil(512/128) = 5、PADDED_TOPK = 640，
+ # 与上游 max(2, ceil((WIN+CMP_TOPK)/128)) = 5 得到的 640 完全一致。
+ ATTN_K_TILE = 128
++
++KV_PAGE_PREFETCH_COLS = 128  # 前 16K 原始上下文对应的压缩页表
+ 
+ NUM_QK_CORES = 24  # qk_pv dispatch lanes
+ 
+@@ -408,6 +410,12 @@
+                 pl.system.set_ffts(ffts_workspace)
+                 qk_lane_head = qk_aiv * (H // 2)
+                 qk_lane_kv = qk_aiv * (ATTN_K_TILE // 2)
++                # 每个 query 一次把 Top-K 索引读入 UB，避免逐行 GM 标量读取。
++                qk_cmp_index_row = pl.load(cmp_sparse_indices, [qk_t, 0], [1, CMP_TOPK])
++                qk_cmp_page_row = pl.load(
++                    cmp_block_table, [qk_b, 0], [1, KV_PAGE_PREFETCH_COLS],
++                    valid_shape=[1, pl.min(pl.tensor.dim(cmp_block_table, 1), KV_PAGE_PREFETCH_COLS)],
++                )
+                 qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
+                 running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
+                 # 上游口径：l 从 0 起算，sink 的那一项留到 merge_norm 的分母里补。
+@@ -449,11 +457,17 @@
+                                 for qk_row in pl.range(ATTN_K_TILE // 2):
+                                     qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+                                     if qk_cmp_k < CMP_TOPK:
+-                                        qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
++                                        qk_ridx = pl.tile.read(qk_cmp_index_row, [0, qk_cmp_k])
+                                         if qk_ridx >= 0:
+-                                            qk_page = pl.cast(
+-                                                pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
+-                                            )
++                                            qk_page_index = qk_ridx // BLOCK_SIZE
++                                            if qk_page_index < KV_PAGE_PREFETCH_COLS:
++                                                qk_page = pl.cast(
++                                                    pl.tile.read(qk_cmp_page_row, [0, qk_page_index]), pl.INDEX
++                                                )
++                                            else:
++                                                qk_page = pl.cast(
++                                                    pl.read(cmp_block_table, [qk_b, qk_page_index]), pl.INDEX
++                                                )
+                                             qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                                             qk_kv_half = pl.gather_row(
+                                                 qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]

@@ -1,0 +1,36 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index d7b25e79..0fabf800 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -105,6 +105,10 @@ QK_PV_READY_EVENT = 3
+ # 与上游 max(2, ceil((WIN+CMP_TOPK)/128)) = 5 得到的 640 完全一致。
+ ATTN_K_TILE = 128
+ 
++# Native SAS 按输出 N128 分块。整块 [64, 512] FP32 累加占满 128 KiB L0C，
++# 同时 N512 使 L0B 的 K 分块降至 32。只切输出列，保持 softmax 和稀疏归约顺序。
++PV_N_TILE = 128
++
+ NUM_QK_CORES = 24  # qk_pv dispatch lanes
+ 
+ CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
+@@ -397,9 +401,17 @@ def sparse_attn_csa(
+                             target_memory=pl.MemorySpace.Mat,
+                         )
+                         pv_l1_row = (pv_sb % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+-                        pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
+-                        pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
+-                        pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
++                        for pv_d0 in pl.unroll(0, HEAD_DIM, 2 * PV_N_TILE):
++                            pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, PV_N_TILE], [pv_l1_row, pv_d0])
++                            pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
++                            pv_kv_next = pl.tile.slice(
++                                qk_l1, [ATTN_K_TILE, PV_N_TILE], [pv_l1_row, pv_d0 + PV_N_TILE]
++                            )
++                            # 两块累加结果同时存活，避免编译器复用单一 L0C 地址，
++                            # 让前一块 FIXPIPE 写回能与后一块 Cube 计算重叠。
++                            pv_output_next = pl.matmul(pv_probability, pv_kv_next, out_dtype=pl.FP32)
++                            pl.store(pv_output, [pv_transfer_row, pv_d0], pv_transfer)
++                            pl.store(pv_output_next, [pv_transfer_row, pv_d0 + PV_N_TILE], pv_transfer)
+                         pl.system.sync_set(
+                             QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                         )
