@@ -9,8 +9,26 @@
 128K/B4/8/16预算256，8K/B16/24/32/40预算400；固定容量40，capture24/48/96/144/192/240。
 各侧每种history只初始化一次模型，按batch扫描。8步warmup后连续10步无profilerforward，
 独立3步profile保留所有rank原始数据；token、DSpark、位置、P95/max和逐步慢卡一起检查。
-当前不提前修改生产默认，也不把代表档通过当成全矩阵通过。
+此次先完成全部七档才调整默认，没有把代表档通过当成全矩阵通过。
 
 [运行命令](run_model.sh)、[严格收集器](collect_model.py)。
 
-任务：`task_20260928_051900_412378912384`，运行中。
+任务：`task_20260928_051900_412378912384`，完成，退出0。
+
+## 七档正式结果与采用策略
+
+七档全部通过，正式forward快1.35%～4.45%；573440输出token零差异、112组rank的DSpark和10步请求位置一致。
+P95、最大值和逐步最慢rank均下降；8K四档PTO P95/P50为1.014、1.012、1.017、1.020。
+[完整均值、P95、最慢rank表](model/RESULTS.md)、[全部rank样本和实际配置](model/forward.json)。
+
+性能版采用默认atomic0，精度版保持默认atomic1；显式环境变量0/1可覆盖，须在导入/编译前设置。
+默认变更仅选择本轮已实测策略，不改变核内实现；9项CPU配置回归通过。
+Native cache分配和流程保持，PTO内部消化分页读取，不需外部拆分或写回。
+750μs目标、精度版后续性能迁移和逐层误差分析仍未关闭。
+
+## Profile交付
+
+[CPU导出](export_profiles.sh)、[七档PTO DFX采集](run_swimlanes.sh)、[汇集脚本](bundle_profiles.py)。
+DFX任务`task_20260928_054335_24490514569`已启动，同71153bb3/atomic0，第二CSA层的真实权重与合成历史。
+每档只补一个窗口，不重复正式模型计时。14份模型rank0 PyTorch JSON与7份单卡DFX将汇集到`download/`，
+输入和计时范围单列；其他rank原始profile仍保留，不把DFX当整模型耗时。

@@ -42,9 +42,12 @@ task-submit --device auto --max-time 1800 \
 `--save-state` 单独保存两侧 8 类逻辑输出/状态到 `states.pt`，供 ND/NZ 逐元素比较。
 Native/PTO 使用同一 mode。性能版使用 `--variant performance`，NZ 使用 mode=1/2；
 这些是可选配置，不表示每条路径已经验收。
-`--atomic-add 0` 选择固定规约诊断，`1` 保留默认 split-K atomic add；
+`--atomic-add 0` 选择固定规约，`1` 选择 split-K atomic add；
+未显式设置时，性能版默认 0，精度版保持默认 1。
+性能版固定规约已通过[七档真实EP16对照](results/csa_atomic_matrix_20260928/model/RESULTS.md)，
+正式forward、P95和每步最慢rank均优于Native，token/DSpark一致。
 等价环境变量为 `VLLM_ASCEND_PTO_CSA_ATOMIC_ADD`，必须在进程导入/编译算子前设置。
-关闭时 QR/KV 改为单 K 分片、单写入者；这也改变累加分组，不能视为默认路径的逐 bit 参考。
+关闭时 QR/KV 改为单 K 分片、单写入者；这也改变累加分组，不能视为 atomic1 路径的逐 bit 参考。
 配合 `--graph` 检查相同地址上的 A→B→A 输入更新；每次恢复 cache/state，
 图输出与对应 eager 输出逐元素精确比较，并检查 metadata 和保护区。
 `--graph` 固定形状与 metadata，只检查输入内容更新。
@@ -59,7 +62,7 @@ metadata 改写、shape/dtype 错误和非有限值会失败。逐 token 与 DSp
 
 ```bash
 task-submit --device auto --max-time 1800 \
-  "bash $PWD/tests/pypto_test/run_csa_single_layer.sh $PWD/tests/pypto_test/results/timing_b16_mode2 --batch 16 --history 8192 --variant performance --weight-nz-mode 2 --atomic-add 1 --deterministic-level 0 --timing-iters 20 --profile"
+  "bash $PWD/tests/pypto_test/run_csa_single_layer.sh $PWD/tests/pypto_test/results/timing_b16_mode2 --batch 16 --history 8192 --variant performance --weight-nz-mode 2 --atomic-add 0 --deterministic-level 0 --timing-iters 20 --profile"
 ```
 
 `--deterministic-level` 默认 1，用于精度诊断，并同步设置 HCCL 确定性；性能配置显式传 0。

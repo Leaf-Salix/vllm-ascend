@@ -2,7 +2,8 @@
 """在 CSA 的精度版与性能版之间选择实现。
 
 两套算子并存：性能版（`deepseek_v4_flash_dspark_perf`）改用 pypto-lib 上游的数值
-写法以追平其性能，精度版（`deepseek_v4_flash_dspark`）与 Native 逐 bit 一致。
+写法以追平其性能，精度版（`deepseek_v4_flash_dspark`）以 Native 的规约、量化次序为准。
+逐元素差异以验证记录为准，不承诺所有浮点状态逐 bit 一致。
 
 选择走环境变量而不是 `additional_config`：切换的用途是对照实验，环境变量最不侵入
 生产配置结构，测试驱动也便于按轮次切换。

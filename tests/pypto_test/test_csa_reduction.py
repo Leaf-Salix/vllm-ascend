@@ -9,8 +9,23 @@ import pytest
 POLICY = Path(__file__).resolve().parents[2] / "vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/reduction.py"
 
 
+@pytest.mark.parametrize(
+    "variant, expected", [(None, 1), ("precision", 1), ("prec", 1), ("performance", 0), (" PERF ", 0), ("pkg:probe", 0)]
+)
+def test_variant_default_preserves_precision_and_selects_fixed_performance(monkeypatch, variant, expected):
+    monkeypatch.delenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", raising=False)
+    if variant is None:
+        monkeypatch.delenv("PTO_CSA_VARIANT", raising=False)
+    else:
+        monkeypatch.setenv("PTO_CSA_VARIANT", variant)
+    policy = runpy.run_path(str(POLICY))
+    assert policy["ATOMIC_ADD"] == expected
+    policy["validate_reduction_mode"]()
+
+
 @pytest.mark.parametrize("mode", [0, 1])
 def test_reduction_mode_is_frozen_after_import(monkeypatch, mode):
+    monkeypatch.setenv("PTO_CSA_VARIANT", "performance")
     monkeypatch.setenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", str(mode))
     policy = runpy.run_path(str(POLICY))
     assert policy["ATOMIC_ADD"] == mode

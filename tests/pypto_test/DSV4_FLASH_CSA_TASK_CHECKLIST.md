@@ -4,19 +4,18 @@
 
 当前生产算子为 **71153bb3**，Native cache分配与流程不变，PTO内部直接读写物理页；没有入口历史复制或外部Torch写回。
 长历史按query数选择双query、三query/M192或S6/M384；短历史按最忙核工作量选择S6或双query。
-只有长档Score整组准入并禁止提前释放；精度版原算术保持。默认atomic1的真实EP16七档**未通过验收**：
-128K/B8慢4.77%，8K/B16两rank各少接受一个草稿；其余五档快0.35%～2.37%。
-[统一源码七档正式结果](results/csa_indexer_adaptive_20260928/model/RESULTS.md)、
-[模型CSA/FFN/GMM差距](results/csa_indexer_adaptive_20260928/model/MODEL_GAP.md)。
-
-最新独立干预为相同算子关闭atomic：128K/B8正式forward Native56.307→PTO55.830ms（−0.85%），
-8K/B16为64.680→61.608ms（−4.75%）。两档P95与最慢rank也下降，token/DSpark通过；
-短档P95/P50为1.039、两个共同偏慢step保留。生产默认尚未修改，未宣布七档稳定优势。
-[当前atomic诊断、单卡代价和模型结果](results/csa_atomic_current_20260928/README.md)。
+只有长档Score整组准入并禁止提前释放；精度版原算术保持。
+**性能版固定规约atomic0已通过统一源码七档真实EP16对照**，正式forward快1.35%～4.45%，
+573440输出token零差异、112组rank DSpark及10步位置一致；每档P95、max和每步最慢rank均下降。
+本轮先PTO后Native，代表档上一轮先Native后PTO也通过；单次十步仍不代表罕见尾部已永久消失。
+性能版默认改为atomic0，精度版默认1与原算术保持；显式0/1仍可覆盖，配置在导入前固定。
+[七档正式结果](results/csa_atomic_matrix_20260928/model/RESULTS.md)、
+[代表档反向顺序与单卡代价](results/csa_atomic_current_20260928/README.md)。
+atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当前默认配置的结果。
 
 当前判断依据：
 
-- 默认atomic1下，七档profile的CSA区间均缩短，但专家GMM任务duration均增加约1.01～1.68ms。
+- 旧atomic1配置下，七档profile的CSA区间均缩短，但专家GMM任务duration均增加约1.01～1.68ms。
   不同event模式会影响profile，且它与正式10步是独立请求轮，不能用该表精确分账正式forward。
 - B8同轮事件与完整图核对已完成：两侧图外差额约192/195μs，未见PTO独有的毫秒级额外间隙。
   16rank已有trace全部配对，PTO的CSA结束跨度平均53μs，未复现旧版严重到达拖尾，不盲目加sync_start。
@@ -33,19 +32,20 @@
 
 近期待办按依赖执行：
 
-1. **代表档atomic0干预已通过，完成统一配置验收后决定默认。** task_20260928_045503_382273916328已完成128K/B8、8K/B16，双方新的Native控制。
-   严格检查10步位置、逐token与逐位置DSpark统计，保留P95/max及每步最慢rank。
-   本轮短档接受差异未复现；后续若失败仍需定位，不得丢弃失败rank或放宽门禁。
-   两档共同支持固定规约方向；七档已启动，不能把不到1%的单次领先当稳定优势。
+1. **固定规约已成为性能版默认，完成本轮证据交付。** 两档干预和七档反序对照均通过，Native流程未改。
+   保存各档模型PyTorch JSON及同版本PTO泳道，汇集到一个可下载目录；profile不替代正式无profiler计时。
+   继续检查CSA/FFN/GMM差距；本轮未采实际专家索引，不把相关性当唯一因果。
 2. **Top-K UB根候选暂不合入。** 完整CSA状态/图重放精确一致，本体均值改善1.89%，但merge核内四窗口未见明确收益。
    保留补丁与证据，不把GM搬运量推导或未改任务的调度变化当核内收益；不掺入固定规约七档。
    [候选、编译边界及单卡实测](results/csa_topk_register_20260928/README.md)。
-3. **统一71153bb3＋atomic0七档验收运行中。** task_20260928_051900_412378912384，先PTO后Native。
+3. **统一71153bb3＋atomic0七档已通过，后续按受影响项验证。** task_20260928_051900_412378912384已退出0，先PTO后Native。
    128K/B4/B8/B16、8K/B16/B24/B32/B40；双方相同weight NZ mode2，TP1/DP=EP16、出5验6、EPLB关。
    验收只用预热后连续10步无profiler decode forward；初始化和完整周期不计。
-   [运行入口与进度](results/csa_atomic_matrix_20260928/README.md)。通过后再决定默认归约配置。
+   [运行入口与结果](results/csa_atomic_matrix_20260928/README.md)。
    保存各档PyTorch JSON及PTO泳道，并给出当前版本相对Native和pypto-lib的核内、调度、额外工作差异。
    已有同版本证据复用，只补缺口或受影响项，不做hash扫描或重复无关测试。
+   独立免QR/KV清零种子候选仅改变atomic0性能版，CPU编译通过；两档单卡状态/图重放与计时运行中。
+   在证明安全和收益前不合入。[候选范围](results/csa_projection_no_seed_20260928/README.md)。
 4. **cache策略继续按真实整模型性能决定。** 源头key/scale分离及连续四页候选已测，模型未取得共同收益且长档DSpark失败，暂不采用。
    物理key/scale连续不等于请求历史连续；真实allocator正式轮和profile轮页序不同，不能用人工连续页代替生产验收。
    保留原布局PTO内部读取，除非新证据支持其他方案。[旧分离干预与失败边界](results/csa_source_split_ab_20260927/ordered/README.md)。
@@ -492,12 +492,12 @@ Native 的确定性开关是否影响 PTO 不能臆断，按实际实现和对�
 #### B1 当前实现与剩余验证
 
 - 共用 `reduction.py`，环境变量 `VLLM_ASCEND_PTO_CSA_ATOMIC_ADD=0/1` 在导入/编译前固定，
-  初始化拒绝导入后切换。默认 1 保持现有路径；0 使 QR/KV 各输出块仅有一个 K 分片写入，
+  初始化拒绝导入后切换。性能版默认0，精度版默认1；0使 QR/KV 各输出块仅有一个 K 分片写入，
   按固定 K 块顺序累加并使用非 atomic store，不改变根 ABI。
 - 控制点：精度版 QR 2 处、KV 2 处；性能版 QR ND 2 处、QR NZ 2 处、KV 2 处。
-  默认分片精度版 QR=1/KV=2、性能版 QR=8/KV=8；诊断均为 1。
-  关闭开关改变累加分组，仅用于确定性/误差定位，不承诺与默认路径逐 bit 相同或同速。
-- 3 项 CPU 配置回归通过；性能版整层 CPU lowering 通过，关闭时无 atomic store。
+  atomic1分片为精度版QR=1/KV=2、性能版QR=8/KV=8；atomic0均为1。
+  关闭开关改变累加分组，不承诺与atomic1逐bit相同或同速；当前性能版整网验收使用atomic0。
+- 9项CPU配置回归通过，覆盖两版默认、显式覆盖和导入后冻结；性能版整层CPU lowering通过，关闭时无atomic store。
   B4/S6/H8192、mode=0、正式层权重和同一合成历史的单卡结果：
 
   | 性能版路径 | 自身重复的层输出差异 | 自身重复的其余状态 | Native/PTO Top-K 集合 |

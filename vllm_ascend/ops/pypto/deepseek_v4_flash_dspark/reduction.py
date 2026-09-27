@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""两版 CSA 共用的编译期规约配置；诊断路径用单 K 分片消除跨核累加。"""
+"""两版 CSA 共用的编译期规约配置；固定规约用单 K 分片消除跨核累加。"""
 
 import pypto.language as pl
 

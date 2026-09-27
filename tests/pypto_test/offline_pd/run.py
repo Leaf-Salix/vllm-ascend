@@ -375,6 +375,7 @@ def diagnose(args, llm, cases):
     也不作为稳态延迟或吞吐结论。
     """
     # 稳态构成直接取生产入口的 S，不在测试里另写一份常量。
+    from vllm_ascend import envs as ascend_envs
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.service_config import QUERY_TOKENS
 
     case = cases[0]
@@ -403,7 +404,7 @@ def diagnose(args, llm, cases):
               "deterministic": args.deterministic,
               "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
               "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
-              "atomic_add": os.environ.get("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1"),
+              "atomic_add": str(ascend_envs.VLLM_ASCEND_PTO_CSA_ATOMIC_ADD),
               "eplb_enabled": False,
               "dynamic_eplb_env": os.environ.get("DYNAMIC_EPLB", "false"),
               "expert_map_record_env": os.environ.get("EXPERT_MAP_RECORD", "false"),
