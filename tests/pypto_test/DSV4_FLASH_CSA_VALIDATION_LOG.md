@@ -6803,3 +6803,62 @@ v3 对应 RMSE=0.0041791；Top-K 被替换索引数由 673 变为 675。这些�
 - [新泳道 window 0](results/csa_split_optimization_20260927/v4_buffered_score/h131072_b16/swimlane/dfx/merged_swimlane.json)，
   同目录 `window_1` / `window_3` 为长尾窗口。
 - [v1/v4 四窗口任务聚合](results/csa_split_optimization_20260927/v4_buffered_score/swimlane_comparison.json)。
+
+## 176. Native A3 QLI 与上游 FIXPIPE 路径的源码对照（2026-09-27）
+
+用户要求继续比较 Native 策略。本次沿 `dsa_v1.py::_indexer_qli`、torch binding、
+`VllmQuantLightningIndexer` 的 A3 `arch32` 实现核对源码；没有新增 NPU 测试。
+固定环境的 custom OPP 安装/构建记录对应本仓 `vllm_quant_lightning_indexer`、ascend910_93。
+
+Native 数据流：
+
+1. INT8 Q×K → INT32 accumulator。
+2. `FixpSToL1` 使用 `DEQF16`、`reluPre=1`、`SetFixpipePreQuantFlag(0x3a800000)`，
+   将 `FP16(max(score,0)/1024)` 直接写入 L1 双缓冲。
+3. `ProcessVec0` 将 FP16 query scale × FP16 weights 的乘积保存为 FP16 系数。
+4. `ComputeWs` 在 Cube 以 FP16 系数和 FP16 score 为输入、FP32 累加，对 head 轴规约。
+5. `FixpResToGm` 只写每 query/候选一个 FP32 分数；Vector 将 FP16 key scale 转 FP32、相乘、做 Top-K。
+6. Q/key/score/权重的片上缓冲及最终结果 GM 使用交替缓冲，外层 `ProcessBaseBlock`
+   让 Cube 处理当前块时，Vector 处理上一块的输出，不是逐块完全串行。
+
+与当前 pypto-lib/v4 的区别：后者 FIXPIPE 写到 GM，仍保留64个head的FP16 score，
+Vector 将其转FP32、乘FP32系数、`col_sum`，再乘key scale。
+同一 query/候选的 Cube→Vector score 逻辑载荷，PTO为64×2=128 B、Native为4 B；
+此32倍只指该中间张量，不包括权重系数、Top-K工作区、缓存命中或其他流量，不是速度预测。
+Native `M_BASE_SIZE=256` 配合64个head最多处理4个query（S6为4+2），复用key块；
+当前上游及PTO逐query读取。它是另外一项数据复用差别。
+
+更正表述：v4增加FP16舍入是相对旧PTO性能版而言，**Native自身已有相同QK缩放/FP16舍入**。
+Native系数额外经过FP16乘法、head规约用Cube，性能版系数/规约为FP32 Vector，故仍不能声称两者数值等价。
+Native保留公共的1/1024，当前上游/v4的head系数乘回1024；公共正比例本身不影响理想Top-K排序。
+当前调用 `return_value=False`，只消费索引。
+
+当前PyPTO移植支持 `store(acc, ..., pre_quant=..., pre_relu=True)` 的Acc→GM路径。
+其 `verify_fixpipe_epilogue.cpp` 明确拒绝Acc→Mat带缩放，指向PTOAS#1570的scale错误绑定问题；
+不能把“GM缩放写回可用”扩写成“Native Acc→L1直连也可用”。精度版目前采用
+Vector执行缩放/FP16转换、`aic_gather`回Cube规约，数学策略更接近Native，搬运路径仍不同。
+这项限制仍需后续官方能力核对或算子侧处理，不是阶段完成理由。
+
+源码位置（仓库内路径）：
+
+- `vllm_ascend/attention/dsa_v1.py:2732`：实际Native调用、PA_BSND、return_value=False。
+- `csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_cube.h:533`：FIXPIPE到L1；
+  同文件495行：Cube head规约；552行：最终FP32分数写GM；200行：key块复用。
+- `csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_service_vector.h:251`：FP16系数；
+  同文件354行：FP32最终分数×key scale。
+- `csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_kernel.h:628`：跨块Cube/Vector流水。
+- `vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py:477`：GM FP16传递；
+  同文件499行：FP32系数和Vector规约。
+- `../pypto/python/pypto/language/op/tile_ops.py:574`、`../pypto/src/ir/verifier/verify_fixpipe_epilogue.cpp:138`：
+  当前Acc→Mat带缩放限制。
+
+第二次 Cube 的具体形状：以一个 query、64 head、128候选为例，首次 INT8 MMAD 为
+`Q[64,128] × Kᵀ[128,128] → A[64,128] INT32`，沿head_dim=128规约；
+FIXPIPE生成 `S[64,128] FP16` 留在L1。第二次逻辑计算为
+`c[1,64] × S[64,128] → z[1,128] FP32`，沿head=64规约。
+Native `ProcessVec0::Brcb` 将每个系数复制16次，再由 `LoadWeightToL0a` 转置装载，
+形成16行相同的系数矩阵。`ComputeWs` 实际设置 `M=16, N=候选块长度, K=64`，
+得到16行重复结果；`FixpResToGm` 设置 `mSize=1`，只提取每query的一行。
+16行复制用于它的Cube分块映射，不代表16个不同query；多query外层另行循环。
+两次MMAD都在同一Native QLI kernel内部，第二次是用矩阵乘承载加权求和，额外的矩阵计算
+换取64-head中间矩阵留片上、Vector只接收规约后的单行。

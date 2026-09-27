@@ -67,6 +67,27 @@ B1/S6 的 runtime T=6 不满足 8 行分块，不能照搬完整块读写。
 
 ## 历史数据与口径
 
+本轮补充 Native 对照（2026-09-27）：当前 A3 实际调用
+`npu_vllm_quant_lightning_indexer` 的 `arch32` 实现。
+Native 同样使用 `FIXPIPE ReLU + 1/1024 + FP16`，但 `FixpSToL1` 直接写入片上 L1；
+随后 `ComputeWs` 用第二次 FP16 输入、FP32 累加的 Cube MMAD 规约 64 个 head，
+只把每 query/候选一个 FP32 分数写入 GM。Vector 乘 key scale 并做 Top-K。
+当前上游及 v4 则把每个 head 的 FP16 分数写到 GM，再由 Vector 做 FP32 加权/规约。
+这一段 Cube→Vector score 逻辑载荷是 64×2=128 B 对 4 B，差 32 倍；
+只比较该中间张量，不是总带宽、DRAM 实际流量或总耗时的倍数。
+
+Native 的 `M_BASE_SIZE=256`、`gSize=64` 对应最多四个 query 共用 key 块；S6 分成4+2，
+当前 PTO/上游逐 query 处理。Native query scale、weights 及其乘积均有 FP16 舍入，
+当前性能版 head 系数保持 FP32；Native 不补偿公共的1/1024，当前上游/v4系数乘1024，
+正的公共比例本身不改变理想 Top-K 排序，其他舍入及规约顺序仍可能改变选择。
+
+所以 v4 的 FP16 舍入是相对旧性能路径新增，不能说 Native 没有这层舍入。
+FIXPIPE 能力也须区分目的存储：本地 PyPTO `2a4e09ff` 允许 Acc→GM 带缩放，
+但明确拒绝 Acc→Mat/L1 的 `pre_quant`（移植的 verifier 标注 PTOAS#1570）。
+精度版当前通过 Vector 转换再 `aic_gather` 回 Cube 来表达 Native 算术，仍不是 Native 直接片上数据流。
+需核对后续官方 PTOAS/ISA 修复或寻找算子侧方案，不能把该限制写成优化完成。
+逐项源码依据见 [验证日志 §176](DSV4_FLASH_CSA_VALIDATION_LOG.md#176-native-a3-qli-与上游fixpipe路径的源码对照2026-09-27)。
+
 - 当前：保留的 `7eba45a3` 性能实现；B16/S6/H8192、mode=2、atomic=1，第二个 CSA 层复用 metadata。
   正式第 2 层权重及合成历史，PyPTO `88297437`、Simpler `a54c05095`、PTOAS 0.66。
   [原始泳道](results/csa_baseline_20260926/perf_qproj_upstream/swimlane/dfx/merged_swimlane.json)。
