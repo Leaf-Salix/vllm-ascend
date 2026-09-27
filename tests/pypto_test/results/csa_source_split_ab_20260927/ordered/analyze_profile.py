@@ -45,13 +45,20 @@ def ffn_tasks(rows, side, model):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent / "model")
+    parser.add_argument("--cases", nargs="+", default=["131072:16", "8192:40"],
+                        help="history:batch列表；只读取这些档位的既有profile")
+    parser.add_argument("--per-batch", action="store_true", help="同一history多档时将FFN分解写到各batch目录")
     args = parser.parse_args()
+    cases = [tuple(map(int, case.split(":"))) for case in args.cases]
+    require(all(len(case) == 2 for case in cases), "--cases格式必须为history:batch")
+    require(args.per_batch or len({history for history, _ in cases}) == len(cases),
+            "同一history有多档时必须加--per-batch，避免覆盖分解结果")
     result = {
         "scope": "rank0独立3步Level0，不分摊正式10步forward；两轮重新分配请求cache。",
         "limits": "Native/PTO实际event模式0/1；FFN task busy可能重叠，不是critical span。首层通信包含跨rank到达等待。",
         "cases": [],
     }
-    for history, batch in ((131072, 16), (8192, 40)):
+    for history, batch in cases:
         case = {"history": history, "batch": batch}
         breakdown = {"scope": result["scope"] + result["limits"]}
         for side in ("native", "pto"):
@@ -67,13 +74,32 @@ def main():
             case[side] = {
                 "source": str(folder),
                 "csa": distribution([x["us"] for x in layers["intervals"]]),
+                "csa_body": distribution([x["body_us"] for x in layers["intervals"]]),
                 "phases": {key: statistics.mean(x[key] for x in layers["profiled_main_steps"])
                            for key in PHASES},
                 "first_ffn_mean_us": statistics.mean(x["span_us"] for x in ffn["layers"] if x["layer"] == 0),
+                "ffn_task_busy_us_per_step": ffn["busy_us_per_step"],
                 **layers,
             }
+            if side == "native":
+                hotspots = {name: [] for name in ("VllmQuantLightningIndexer", "SparseAttnSharedkv")}
+                for interval in layers["intervals"]:
+                    for name, samples in hotspots.items():
+                        matches = [r for r in rows if r["name"].split("_")[0] == name
+                                   and interval["start_ns"] <= r["start_ns"]
+                                   and r["start_ns"] + r["duration_ns"] <= interval["end_ns"]]
+                        require(len(matches) == 1, f"{history}/B{batch}/{interval['layer']}: {name}不唯一")
+                        samples.append(matches[0]["duration_ns"] / 1000)
+                case[side]["csa_hotspot_kernels"] = {
+                    name: {"samples_us": values, "distribution": distribution(values)}
+                    for name, values in hotspots.items()
+                }
             print(history, side, case[side]["phases"], "first FFN", case[side]["first_ffn_mean_us"])
-        (args.root / f"h{history}/ffn_breakdown_rank0.json").write_text(
+        # Different batches of one history must not overwrite each other.
+        target = args.root / f"h{history}"
+        if args.per_batch:
+            target = target / f"b{batch}"
+        (target / "ffn_breakdown_rank0.json").write_text(
             json.dumps(breakdown, ensure_ascii=False, indent=2) + "\n")
         result["cases"].append(case)
     (args.root / "model_gap_rank0.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

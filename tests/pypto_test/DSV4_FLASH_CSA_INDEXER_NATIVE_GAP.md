@@ -1,6 +1,8 @@
 # CSA Indexer：Native 与 PTO 实现差距
 
-更新：2026-09-28。当前性能版新增S6/M384/N64，先取得长档单卡收益，真实EP16仍待验收。
+更新：2026-09-28。当前性能版71153bb3在长档S6/M384/N64基础上增加B8范围的三query、
+以及短档按工作量选择S6。两条新分支核内收益和固定规约状态检查已通过，统一源码七档EP16仍待验收。
+[当前分派、实测与边界](results/csa_indexer_adaptive_20260928/README.md)。
 下文v7/v10章节是历史分析，不能当作当前cache布局、query分组或长尾状态。
 历史基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
 v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/README.md)，

@@ -31,8 +31,12 @@ def collect_case(history, batch):
             require(native.get("batch_admission") == pto.get("batch_admission") ==
                     "pause_enqueue_dp_barrier_resume", f"rank{rank}: 批次入场未统一")
             native_positions = native["steady_window"][0]["step_positions_cpu"]
-            require(native_positions == pto["steady_window"][0]["step_positions_cpu"],
-                    f"rank{rank}: 两侧10步CPU请求位置不同，不能把差异仅归因于CSA")
+            pto_positions = pto["steady_window"][0]["step_positions_cpu"]
+            positions_equal = native_positions == pto_positions
+            if not positions_equal:
+                # Keep token/DSpark evidence from rejected pairs. A position
+                # mismatch still forbids computing a comparable forward mean.
+                row["errors"].append(f"rank{rank}: 两侧10步CPU请求位置不同，不能把差异仅归因于CSA")
             for key in ("key", "history", "capture_sizes", "max_num_seqs", "deterministic",
                         "hccl_deterministic", "atomic_add", "eplb_enabled", "dynamic_eplb_env",
                         "expert_map_record_env", "custom_opp_path", "requested_steady_cycles"):
@@ -47,7 +51,10 @@ def collect_case(history, batch):
             row["dspark_mismatched_ranks"] += not stats_equal
             row["compared_tokens"] += 2 * batch * 128
             detail = {"rank": rank, "token_mismatches": mismatch, "dspark_equal": stats_equal,
-                      "cann_event_work_mode": event_modes, "step_positions_cpu": native_positions}
+                      "cann_event_work_mode": event_modes, "step_positions_cpu": native_positions,
+                      "positions_equal": positions_equal}
+            if not positions_equal:
+                detail["step_positions_cpu_pto"] = pto_positions
             for side, (value, _) in values.items():
                 steady = value["steady_window"][0]
                 require(steady["warmup_steps"] == 8, f"rank{rank}: warmup与本轮声明不同")
@@ -85,6 +92,7 @@ def main():
                 continue
         rows.append(collect_case(history, batch))
     result = {"operator_revision": OPERATOR_REVISION, "complete": len(rows) == len(CASES),
+              "all_cases_pass": len(rows) == len(CASES) and all(r["status"] == "MEASURED_TOKEN_PASS" for r in rows),
               "scope": "每rank前8步后连续10步纯decode _model_forward；16rank等权均值；无profiler。",
               "limits": ("P95由16rank×10步的160个相关样本计算，最慢rank分布另列；"
                          "不是CSA时间、完整decode周期或初始化耗时。10步不能证明罕见长尾已消失。"
@@ -97,7 +105,7 @@ def main():
              "| --- | ---: | ---: | ---: | ---: | ---: | --- |"]
     for row in rows:
         if "forward" not in row:
-            lines.append(f"| {row['history']//1024}K/B{row['batch']} | 数据不全 | — | — | — | — | FAIL |")
+            lines.append(f"| {row['history']//1024}K/B{row['batch']} | 未通过对照检查 | — | — | — | — | FAIL |")
             continue
         n, p = (row["forward"][s] for s in ("native", "pto"))
         lines.append(f"| {row['history']//1024}K/B{row['batch']} | {n['mean_us']/1000:.3f} | {p['mean_us']/1000:.3f} | "

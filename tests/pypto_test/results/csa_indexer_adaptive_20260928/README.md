@@ -35,4 +35,19 @@ task_20260928_041310_3365315916，冻结本候选源码；没有叠加其他算�
 重新采集Native控制。两侧mode2、TP1、DP=EP16、DSpark出5验6、EPLB关、atomic1/det0/HCCL=false。
 预热后10步无profiler decode forward为主，另留3步PyTorch profile；报告P95/max、每步慢卡，
 逐token和DSpark统计门禁保持不变，CPU位置只作为入场对齐证据。
-不将候选单卡分项百分比外推为整模型性能优势。当前尚无本合并版本的模型成绩。
+不将候选单卡分项百分比外推为整模型性能优势。
+
+task已退出0，七档采集齐，但验收未通过。[正式结果和全部样本](model/RESULTS.md)。
+128K/B4/B8/B16依次快0.36%、慢4.77%、快1.72%；8K/B24/B32/B40快2.37%/0.86%/0.35%。
+所有573440输出token零差异；8K/B16的rank8和rank12各少接受1个第5位置草稿，
+总接受数76800→76798，正式第17个满档step的末请求S6位置少1。
+该档不提供通过可比性检查的forward百分比，不能把收集齐七档标为验收通过。
+[失败记录、完整DSpark计数和位置差异](model/h8192/b16/acceptance_mismatch.json)。
+
+B8独立三步profile仍快：CSA合计21.137→18.565ms，但正式forward55.390→58.035ms。
+完整主流图边界核对只在HC首尾之外增加约307/268μs，不能解释两个独立轮次的胜负反转；
+图本体、事件计时之外的发射间隙和不同轮请求/cache状态尚未分离。
+已准备[同轮事件/trace诊断](../csa_forward_boundary_20260928/README.md)，只补B8，生产算子不改。
+[CPU离线导出及七档分解命令](export_profiles.sh)；profile与正式计时严格分开。
+
+七档已有 rank0 profile 均完成 CPU 导出；[CSA/FFN/GMM 差距分解](model/MODEL_GAP.md)。
