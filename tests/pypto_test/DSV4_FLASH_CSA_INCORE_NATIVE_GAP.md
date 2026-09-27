@@ -468,7 +468,11 @@ O_A、HC_post当前核内分别83.37–84.41 / 23.29–27.06 μs，Native为138.
 
 1. **已保留：Indexer 合并 WS 与 Q/系数 L0A 驻留。** 当前128K/B16 Score AIC由354.44–363.56降到335.59–346.15 μs，AIV同步降低；系数准备略增。B40范围重叠，不能宣称全档稳定获益。
 2. **已保留：Q_A/KV整行清零写入。** B40 Q_A seed24.54–28.04→6.94–8.50 μs、KV seed11.96–13.14→4.96–5.20 μs；B4 padding检查通过。保持原有单任务和atomic归约规则。[证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
-3. **待核对/先导：量化投影写回。** 参考Native反量化与输出转换融合，先确认PyPTO表达与数值边界，只做必要代表档。
+3. **已试验并撤回：量化投影FP16紧凑写回。** B40 Q_B matmul69.74–75.02→75.19–77.19 μs，dequant/RMS/RoPE53.38–57.44→57.77–63.18 μs，核内退化。[证据](results/csa_incore_20260927/qproj_compact_writeback/README.md)。
 
 第一项当前组合仅两档DFX和现有单层诊断，非新的七档或本体计时；Native零容差仍FAIL，最终整模型验收未完成。
 [第一项完整结果、误差与原始泳道](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
+
+三项已结束：保留Indexer合并规约、连续清零；撤回FP16紧凑写回。当前转入调度阶段，停止追加核内候选。
+首项调度目标是Q_A上游链派发：B40四窗口每block核内8.41–9.49 μs，整组启动分散47.76–108.88 μs。
+先验证normal/early准入策略对关键链和无profiler本体的影响；上述分散包含资源占用，不全部等同调度器软件开销。

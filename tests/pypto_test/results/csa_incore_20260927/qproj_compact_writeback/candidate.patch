@@ -1,0 +1,116 @@
+--- /dev/null
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/q_projection.py
+@@ -0,0 +1,55 @@
++"""Performance-only compact Q_B output; ND retains the shared integer path.
++
++Native fuses row/channel scales and BF16 conversion. The current PyPTO FIXPIPE
++API carries only a constant scalar, so this pilot instead scales Acc by 2^-10
++and stores FP16. Vector restores that power of two before the existing scales.
++This introduces FP16 rounding before dequantization; it is not Native-equivalent.
++K1024 full-range INT8 accumulation divided by 1024 fits finite FP16.
++"""
++
++import pypto.language as pl
++
++from ..deepseek_v4_flash_dspark.q_projection import (
++    H, HEAD_DIM, Q_LORA, QPROJ_MM_T_DYN, QPROJ_MM_N_TILE, QPROJ_M_TILE,
++    QPROJ_WORKERS, QPROJ_TAIL_M_TILE, QPROJ_T_PAD, QPROJ_N_BLOCKS,
++    _q_proj_q_matmul_nd,
++)
++from .nz_mode import QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
++
++QPROJ_RESULT_DTYPE = pl.FP16 if QUANT_WEIGHT_NZ else pl.INT32
++QPROJ_RESULT_RESTORE = 1024.0 if QUANT_WEIGHT_NZ else 1.0
++
++@pl.jit.inline(auto_scope=False)
++def _q_proj_q_matmul_nz(
++    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
++    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
++    q_proj_compact: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.FP16],
++    tile_rows: pl.Scalar[pl.INDEX],
++    qproj_dep: pl.Scalar[pl.TASK_ID],
++):
++    """Keep NZ tiling, drain INT32 Acc through scalar FIXPIPE into FP16."""
++    qproj_t_matmul = pl.tensor.dim(q_proj_compact, 0)
++    qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
++    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
++        # Match upstream weight streaming; arithmetic is unchanged.
++        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
++        qproj_worker = pl.tile.get_block_idx()
++        # Keep the column offset provably nonnegative after NZ outlining.
++        for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
++            qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
++            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
++            wq_full = pl.load(wq_b, [0, w_col0], [Q_LORA, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat)
++            for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
++                qr_full = pl.load(qr_i8_matmul, [t0, 0], [QPROJ_M_TILE, Q_LORA], target_memory=pl.MemorySpace.Mat)
++                col_acc = pl.tile.matmul(qr_full, wq_full)
++                pl.store(col_acc, [t0, w_col0], q_proj_compact, pre_quant=1.0 / QPROJ_RESULT_RESTORE)
++            for tail_t0 in pl.range(qproj_full_rows, qproj_t_matmul, QPROJ_TAIL_M_TILE):
++                tail_rows = pl.min(QPROJ_TAIL_M_TILE, tile_rows - tail_t0)
++                qr_tail = pl.load(qr_i8_matmul, [tail_t0, 0], [QPROJ_TAIL_M_TILE, Q_LORA],
++                                  valid_shape=[tail_rows, Q_LORA], target_memory=pl.MemorySpace.Mat)
++                tail_acc = pl.tile.matmul(qr_tail, wq_full)
++                pl.store(tail_acc, [tail_t0, w_col0], q_proj_compact, pre_quant=1.0 / QPROJ_RESULT_RESTORE)
++    return q_proj_compact, qproj_tid
++
++
++q_proj_q_matmul = _q_proj_q_matmul_nz if QUANT_WEIGHT_NZ else _q_proj_q_matmul_nd
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -18,7 +18,6 @@
+     QPROJ_MM_T_DYN,
+     QPROJ_T_PAD,
+     QPROJ_TAIL_M_TILE,
+-    q_proj_q_matmul,
+ )
+ from ..deepseek_v4_flash_dspark.reduction import ATOMIC_ADD, STORE_ATOMIC
+ from .config import (
+@@ -28,7 +27,8 @@
+     INT8_AMAX_EPS,
+     INT8_SCALE_MAX,
+ )
+-from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT
++from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
++from .q_projection import QPROJ_RESULT_DTYPE, QPROJ_RESULT_RESTORE, q_proj_q_matmul
+ 
+ T_DYN = pl.dynamic("QKV_Q_T_DYN")  # T = B * S
+ 
+@@ -444,7 +444,7 @@
+     rope_swap_idx: pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32],
+     q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
+     qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
+-    q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
++    q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], QPROJ_RESULT_DTYPE],
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+ ):
+@@ -486,7 +486,8 @@
+                     q_head_acc = q_proj_i32[tg : tg + Q_ROPE_T_TILE, h0 : h0 + HEAD_DIM]
+                     q_head_scale = pl.reshape(wq_b_scale[h0 : h0 + HEAD_DIM], [1, HEAD_DIM])
+                     q_head_acc_fp32 = pl.cast(q_head_acc, target_type=pl.FP32, mode="none")
+-                    q_head_row_scaled = pl.row_expand_mul(q_head_acc_fp32, qr_scale_dq_t)
++                    q_head_acc_restored = pl.mul(q_head_acc_fp32, QPROJ_RESULT_RESTORE)
++                    q_head_row_scaled = pl.row_expand_mul(q_head_acc_restored, qr_scale_dq_t)
+                     q_head_dq = pl.col_expand_mul(q_head_row_scaled, q_head_scale)
+                     q_head_sq = pl.mul(q_head_dq, q_head_dq)
+                     q_head_sq_row = pl.row_sum(q_head_sq)
+@@ -578,7 +579,8 @@
+                     )
+                     q_head_scale_tail = pl.reshape(q_head_scale_input_tail, [1, HEAD_DIM])
+                     q_head_acc_fp32_tail = pl.cast(q_head_acc_tail, target_type=pl.FP32, mode="none")
+-                    q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_fp32_tail, qr_scale_dq_tail)
++                    q_head_acc_restored_tail = pl.mul(q_head_acc_fp32_tail, QPROJ_RESULT_RESTORE)
++                    q_head_row_scaled_tail = pl.row_expand_mul(q_head_acc_restored_tail, qr_scale_dq_tail)
+                     q_head_dq_tail = pl.col_expand_mul(q_head_row_scaled_tail, q_head_scale_tail)
+ 
+                     q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
+@@ -628,7 +630,7 @@
+             # Reserve full cube row tiles. NZ marks the tail's actual rows;
+             # ND computes the padded INT8 rows. Dequant reads tile_rows only.
+             qproj_t_matmul = ((tile_rows + QPROJ_M_TILE - 1) // QPROJ_M_TILE) * QPROJ_M_TILE
+-            q_proj_i32 = pl.create_tensor([qproj_t_matmul, H * HEAD_DIM], dtype=pl.INT32)
++            q_proj_i32 = pl.create_tensor([qproj_t_matmul, H * HEAD_DIM], dtype=pl.FP16)
+             q_proj_i32, _qproj_tid = q_proj_q_matmul(
+                 wq_b,
+                 qr_i8_matmul,
