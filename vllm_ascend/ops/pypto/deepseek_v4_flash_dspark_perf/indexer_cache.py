@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Torch bridge from Native pages to request-major contiguous key/scale rows.
 
-Copies execute on the caller's stream and are captured in ACL Graph. Only the
-current compact slots are committed back; history is never copied back in full.
+Copies execute on the caller's stream and are captured in ACL Graph. The PTO
+Compressor writes current compact slots directly to the original Native cache.
 FP16 scales retain the Native rounding contract. Score tiles widen to FP32.
 """
 
@@ -63,8 +63,9 @@ class SplitIndexerCache:
         torch.index_select(self.native_scale, 0, physical_pages, out=scale)
 
     def slot_updates(self, slots: torch.Tensor, seq_lens: torch.Tensor, query_bounds: torch.Tensor):
+        """Diagnostic view of updated rows; production publishes them inside CSA."""
         # Reproduce Native compact-row ownership, including zero-token padding
-        # requests. Preserve Native physical slots for the final scatter.
+        # requests. Match the Native slot order for comparison after the call.
         starts = seq_lens - (query_bounds[1:] - query_bounds[:-1])
         counts = seq_lens // 4 - starts // 4
         ends = counts.cumsum(0)
@@ -77,8 +78,3 @@ class SplitIndexerCache:
         keys = torch.index_select(self.key.view(-1, 128), 0, rows).view(-1, 1, 128)
         scales = torch.index_select(self.scale.view(-1, 1), 0, rows).view(-1, 1, 1)
         return keys, scales
-
-    def commit(self, slots: torch.Tensor, seq_lens: torch.Tensor, query_bounds: torch.Tensor):
-        keys, scales = self.slot_updates(slots, seq_lens, query_bounds)
-        torch.ops._C_ascend.npu_scatter_nd_update_v2(self.native_key, slots, keys)
-        torch.ops._C_ascend.npu_scatter_nd_update_v2(self.native_scale, slots, scales)

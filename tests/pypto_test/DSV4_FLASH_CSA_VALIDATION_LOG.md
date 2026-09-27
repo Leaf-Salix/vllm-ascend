@@ -7775,3 +7775,18 @@ Native binding和A3内核支持独立key/scale stride。Native-only小case任务
 用户进一步限定不改Native流程，仅针对PTO改造vllm-ascend且粒度最小。当前不改分配器；
 先在PTO Compressor内部提交Native slot，消除约216～220 μs的外部Torch写回，再评估直接页读取。
 [完整评估、证据与限制](DSV4_FLASH_CSA_CACHE_SOURCE_SPLIT.md)。
+
+## 240. 保留PTO内直接提交Indexer slot，删除外部Torch写回（2026-09-27）
+
+只修改PTO性能版4个源码文件：adapter传入原Native物理页，Compressor已有key/串行scale任务双写，
+删除外部slot定位、取行与两次scatter。未改Native分配、算子、页表、调度、精度版，不新增task或改变Score算术。
+CPU完整PTOAS/AICPU编译和修改文件ruff检查通过。task_20260927_205352_412770127178两档计时/各四泳道退出0。
+8K/B16完整PTO1079.16→888.64μs（−17.65%，Native926.94，比其快4.13%）；
+128K/B16完整1645.76→1382.39（−16.00%，Native1301.29，仍慢6.23%）。
+本体已含直接写回，分别801.55/1261.10，p95 818.04/1466.68；入口复制98.35/184.49仍在。
+原外部写回216.26/220.43已删除；不将零开销表示为测空图，不把独立分段相加代替完整路径。
+物理slot与逻辑连续缓存更新精确一致，保护区/metadata/索引结构/有限值通过；Native零容差FAIL，Top-K替换366/670。
+补位图任务task_20260927_205353_412802212678退出0，B4/H4095/atomic0/deterministic1同图4→3→1→4全通过。
+[源码方法、全部数值与泳道路径](results/csa_cache_direct_commit_20260927/README.md)。
+保留依据为两档完整路径收益；长档Score核内未进一步改善、长尾及750μs目标未完成，非新七档/16卡验收。
+后续只在PTO评估直接按物理页表加载，移除入口复制，继续复用Native生命周期。

@@ -15,6 +15,10 @@ def read_json(path):
 
 
 def stats(value):
+    if value.get("eliminated"):
+        # No independent operation remains; do not present zero placeholders
+        # from older diagnostic writers as measured empty-graph samples.
+        return {"mean_us": 0.0, "p50_us": 0.0, "p95_us": 0.0, "samples": 0, "eliminated": True}
     return {
         "mean_us": statistics.mean(value["samples_us"]),
         "p50_us": value["us_p50"],

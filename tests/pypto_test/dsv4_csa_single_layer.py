@@ -376,11 +376,11 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
 
 
 def measure_split_graph_phases(fixture, call, *, iters, warmup):
-    """独立图诊断入口复制、CSA 本体、slot 写回；总成本以完整图计时为准。"""
+    """独立图诊断入口复制及含直接写回的CSA；总成本以完整图计时为准。"""
     import torch
 
-    phases = (call.prepare_indexer_cache, call.run_kernel, call.commit_indexer_cache)
-    names = ("split", "csa_body", "slot_writeback")
+    phases = (call.prepare_indexer_cache, call.run_kernel)
+    names = ("split", "csa_body")
     restore(fixture)
     call.prepare_indexer_cache()
     torch.npu.synchronize()
@@ -421,7 +421,10 @@ def measure_split_graph_phases(fixture, call, *, iters, warmup):
     ):
         raise ValueError("Split-cache slot commit did not restore the Native cache contents")
     return {
-        "scope": "三张独立图分别计时；CSA 本体不含转换/写回；不相加替代完整图实测",
+        "scope": "两张独立图分别计时；CSA本体包含核内直接写回；不相加替代完整图实测",
+        "native_commit_inside_csa": True,
+        "slot_writeback": {"samples_us": [], "us_mean": 0.0, "us_p50": 0.0,
+                           "us_p95": 0.0, "eliminated": True},
         "guards": checks, "native_slot_updates_equal": True,
         "cache_bytes": cache.key.numel() + cache.scale.numel() * cache.scale.element_size(),
         **{name: {"samples_us": values, "us_mean": statistics.mean(values),
@@ -782,7 +785,8 @@ def run(args, report):
             from dsv4_csa_single_card_bench import _export_swimlane
 
             # Each window contains one root invocation. For split-cache graph
-            # diagnostics, Torch preparation/commit stay outside the window.
+            # diagnostics, Torch preparation stays outside the window;
+            # direct Native-slot writes are included in the root invocation.
             split_cache = hasattr(call, "prepare_indexer_cache")
             run_root = call.run_kernel if split_cache else call
 
@@ -831,8 +835,6 @@ def run(args, report):
                 if not exported["exported"]:
                     raise RuntimeError(f"泳道导出失败：{exported}")
             report["swimlane"] = windows[0]
-            if split_cache:
-                call.commit_indexer_cache()
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
         if args.padding_graph:

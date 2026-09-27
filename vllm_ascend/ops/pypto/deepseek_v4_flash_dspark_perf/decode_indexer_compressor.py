@@ -25,7 +25,13 @@ from .config import (
 from .config import (
     FLASH as M,
 )
-from .layout import INDEXER_ROWS_DYN, INNER_STATE_PAGE_ELEMENTS_DYN, INNER_STATE_TABLE_COLUMNS_DYN
+from .layout import (
+    INDEXER_KEY_BYTES,
+    INDEXER_PAGE_BYTES_DYN,
+    INDEXER_ROWS_DYN,
+    INNER_STATE_PAGE_ELEMENTS_DYN,
+    INNER_STATE_TABLE_COLUMNS_DYN,
+)
 
 B_DYN = pl.dynamic("DECODE_IDX_C4_B_DYN")
 
@@ -70,6 +76,7 @@ COMPRESS_STATE_DIM = 2 * OUT_DIM
 IDX_MAX_BLOCKS = (MAX_SEQ_LEN // COMPRESS_RATIO + BLOCK_SIZE - 1) // BLOCK_SIZE
 
 IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
+IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
 
 COMPRESS_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
 
@@ -399,6 +406,7 @@ def indexer_compressor_write(
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
     idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
     idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
@@ -498,6 +506,14 @@ def indexer_compressor_write(
                     key_rows[cache_row : cache_row + 1, 0:HEAD_DIM] = kv_i8_blk[
                         inner : inner + 1, :
                     ]
+                    # Publish the same quantized row to Native storage. This
+                    # replaces the external Torch slot lookup and scatter.
+                    native_cache_page = pl.cast(native_page, pl.INDEX)
+                    native_key_begin = pl.cast(native_offset, pl.INDEX) * HEAD_DIM
+                    idx_native_kv_cache[
+                        native_cache_page : native_cache_page + 1,
+                        native_key_begin : native_key_begin + HEAD_DIM,
+                    ] = kv_i8_blk[inner : inner + 1, :]
 
     # Serialized indexer-cache scale commit.
     with pl.at(
@@ -536,12 +552,24 @@ def indexer_compressor_write(
                     # region. One task serializes updates to shared pages.
                     scale_page = cache_row // BLOCK_SIZE
                     scale_half = pl.tile.load(scale_pages, [scale_page, 0], [1, BLOCK_SIZE])
+                    scale_value = pl.cast(pl.read(idx_kv_scale_values, [compact_token, 0]), pl.FP16)
                     pl.tile.write(
                         scale_half,
                         [0, cache_row % BLOCK_SIZE],
-                        pl.cast(pl.read(idx_kv_scale_values, [compact_token, 0]), pl.FP16),
+                        scale_value,
                     )
                     pl.tile.store(scale_half, [scale_page, 0], scale_pages)
+                    # Native packs 32 FP16 scales into one aligned 64-byte
+                    # region. Serialize read-modify-write to preserve the
+                    # neighboring history slots, just as the precision path.
+                    native_scale_page = pl.cast(native_page, pl.INDEX)
+                    native_scale_bytes = pl.tile.load(
+                        idx_native_kv_cache, [native_scale_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
+                    )
+                    native_scale_half = pl.tile.reinterpret_view(native_scale_bytes, pl.FP16)
+                    pl.tile.write(native_scale_half, [0, native_offset], scale_value)
+                    native_updated_bytes = pl.tile.reinterpret_view(native_scale_half, pl.INT8)
+                    pl.tile.store(native_updated_bytes, [native_scale_page, INDEXER_KEY_BYTES], idx_native_kv_cache)
 
     return hadamard_tid, scale_commit_tid
 
@@ -562,6 +590,7 @@ def indexer_compressor(
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
     idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
     idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
@@ -593,6 +622,7 @@ def indexer_compressor(
         hadamard,
         idx_kv_cache,
         idx_kv_scale,
+        idx_native_kv_cache,
         idx_slot_mapping,
         compact_offsets,
         position_ids,

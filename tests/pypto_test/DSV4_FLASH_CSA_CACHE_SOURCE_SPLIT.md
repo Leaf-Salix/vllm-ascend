@@ -110,3 +110,12 @@ Native定向验证的脚本、命令及结果目录：
 eager及两次修改更新值后的图重放，key、scale位模式、Top-K均精确一致，保护区完整。
 [Native-only结果](results/csa_cache_source_split_20260927/native_check.json)。
 本次不修改生产分配器，不把单算子通过等同于完整prefill/回退链或整模型已验收。
+
+## 5. 已完成的最小改动：PTO内直接提交slot
+
+仅修改4个PTO性能版文件，复用原Native物理页；新增一个InOut描述符，
+在已有key和串行scale任务中写回相同量化结果，删除外部Torch定位/取行/scatter链。
+Native分配、算子、页表、slot与调度代码均未修改，precision入口未修改。
+两档完整PTO分别降到888.64/1382.39μs，比改造前快17.65%/16.00%；长档仍慢于Native6.23%。
+入口完整历史复制仍存在（98.35/184.49μs），下一项继续只在PTO侧处理。
+[完整性能、核内变化、保护区和补位图验证](results/csa_cache_direct_commit_20260927/README.md)。

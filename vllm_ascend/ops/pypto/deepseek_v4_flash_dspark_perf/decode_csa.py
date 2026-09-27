@@ -35,6 +35,7 @@ from .hc_pre import HC_DIM, HC_MULT, MIX_HC, hc_pre_norm
 from .layout import (
     COMPRESSED_ROWS_DYN,
     COMPRESSED_TABLE_COLUMNS_DYN,
+    INDEXER_PAGE_BYTES_DYN,
     INDEXER_ROWS_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
     INNER_STATE_PAGE_ELEMENTS_DYN,
@@ -53,6 +54,7 @@ T_DYN = pl.dynamic("T_DYN")  # T = B * S
 ORI_BLOCK_NUM_DYN = pl.dynamic("ORI_BLOCK_NUM_DYN")
 CMP_BLOCK_NUM_DYN = pl.dynamic("CMP_BLOCK_NUM_DYN")
 IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
+IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
 MAIN_STATE_BLOCK_NUM_DYN = pl.dynamic("CSA_STATE_BLOCK_NUM_DYN")
 INNER_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
 
@@ -159,6 +161,7 @@ def _decode_csa_tp1_layer(
     cmp_block_table: pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32],
     idx_kv_cache: pl.InOut[pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8]],
     idx_kv_scale: pl.InOut[pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16]],
+    idx_native_kv_cache: pl.InOut[pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     ori_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     ori_block_table: pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32],
@@ -212,6 +215,8 @@ def _decode_csa_tp1_layer(
     cmp_kv.bind_dynamic(0, CMP_BLOCK_NUM_DYN)
     idx_kv_cache.bind_dynamic(0, IDX_CACHE_BLOCK_NUM_DYN)
     idx_kv_scale.bind_dynamic(0, IDX_CACHE_BLOCK_NUM_DYN)
+    idx_native_kv_cache.bind_dynamic(0, IDX_NATIVE_CACHE_BLOCK_NUM_DYN)
+    idx_native_kv_cache.bind_dynamic(1, INDEXER_PAGE_BYTES_DYN)
     ori_slot_mapping.bind_dynamic(0, T_DYN)
     ori_block_table.bind_dynamic(0, B_DYN)
     ori_block_table.bind_dynamic(1, ORIGINAL_TABLE_COLUMNS_DYN)
@@ -392,6 +397,7 @@ def _decode_csa_tp1_layer(
             hadamard_idx,
             idx_kv_cache,
             idx_kv_scale,
+            idx_native_kv_cache,
             position_ids,
             kv_seq_lens,
             idx_slot_mapping,
