@@ -7201,3 +7201,23 @@ QLI=360.28、SparseAttnSharedkv=181.08、HcPre=55.58、HcPost=18.22 μs，
 [采集命令](results/csa_incore_20260927/native_h131072_b16/run.sh)、
 [来源说明](results/csa_incore_20260927/native_h131072_b16/source.json)。
 七档核内统计及主差距文档已补齐该列，明确这一次采集与既有六档的来源不同。
+
+## 191. 保留性能版B40 KV投影统一宽tile/split-K（2026-09-27）
+
+发现性能版仍保留T=240时的Native精度遍历：N32/K64、16个block、每核完整K4096。
+本次仅从性能版删除该特例，共用其他输入已有N128/K256、部署split-K=8的路径。
+精度版不改；性能版atomic=0仍为固定K顺序的单分片诊断路径。
+
+先在WS合并Indexer基底上测得本体1388.52 μs；为隔离收益，撤回WS候选后再次验证。
+最终任务task_20260927_150957_151486024668退出0，8K/B40、固定环境、5次预热/20次计时、4个DFX窗口。
+只有性能版qkv_proj_rope.py相对V10变化；Indexer/Sparse Attention均为V10。
+KV投影block均值90.05–103.11→11.32–12.00 μs、block数16→32；
+累计核内工作量1440.86–1649.72→362.22–384.04核·μs，Worker跨度仍有调度影响。
+CSA本体1428.20→1386.00 μs（−2.95%），p50/p95=1378.45/1431.02 μs；
+同轮Native1410.61 μs，PTO本体低1.74%。完整PTO1736.41 μs仍慢于Native，不能宣布目标完成。
+
+metadata/slot保护区、索引结构通过，非有限值0，Top-K替换901。
+x_out max_abs=0.03125、RMSE=0.003292748；SWA max_abs=0.015625、RMSE=0.000168484。
+其余浮点状态误差统计未扩大，零容差仍FAIL，未做16卡token/DSpark验收。
+[独立验证、逐项误差、补丁和原始路径](results/csa_incore_20260927/kv240_splitk_only/README.md)。
+该改动保留；其余六档当前源码的阶段出口测量尚未做，不拼接旧数冒充新七档结果。

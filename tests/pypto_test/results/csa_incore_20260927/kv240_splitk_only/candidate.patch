@@ -1,0 +1,153 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index 1b43e2f6..6ecdfc3d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -103,16 +103,6 @@ KV_OM = 3  # maximum kv_proj split-M factor
+ 
+ KV_SPLIT_K_TILE = D // KV_OK
+ 
+-# CANN 9.0 MatMulV2 NT, M240/N512/K4096. Keep the existing schedules
+-# for other token counts; Native chooses different tilings for those shapes.
+-KV_NATIVE_ROWS = 240
+-KV_NATIVE_N_TILE = 32  # Does not cross a Native 96-column group.
+-KV_NATIVE_K_TILE = 64
+-KV_NATIVE_K_BLOCK = 256
+-KV_NATIVE_N_GROUP = 96
+-KV_NATIVE_SHIFT_GROUPS = 4
+-KV_NATIVE_PAIR_SHIFT = 5
+-
+ KV_RMS_T_TILE = 32  # kv rms-norm + rope fused token (T) tile
+ 
+ Q_ROPE_T_TILE = 8
+@@ -692,50 +682,6 @@ def q_proj_rope(
+     )
+ 
+ 
+-@pl.jit.inline(auto_scope=False)
+-def kv_project_native_240(
+-    x: pl.Tensor[[KV_T_DYN, D], pl.BF16],
+-    wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+-    projected: pl.Tensor[[QPROJ_MM_T_DYN, HEAD_DIM], pl.FP32],
+-    tile_base: pl.Scalar[pl.INDEX],
+-    late_dep: pl.Scalar[pl.TASK_ID],
+-):
+-    """Match Native's paired K256 traversal and its single K64 accumulator."""
+-    with pl.spmd(HEAD_DIM // KV_NATIVE_N_TILE, name_hint="kv_proj_native_240", deps=[late_dep]):
+-        column = pl.tile.get_block_idx() * KV_NATIVE_N_TILE
+-        group = column // KV_NATIVE_N_GROUP
+-        for row in pl.range(0, (KV_NATIVE_ROWS // KV_DENSE_M_TILE) * KV_DENSE_M_TILE, KV_DENSE_M_TILE):
+-            accumulator = pl.create_tensor([KV_DENSE_M_TILE, KV_NATIVE_N_TILE], dtype=pl.FP32)
+-            for step in pl.pipeline(D // KV_NATIVE_K_TILE, stage=2):
+-                block = step // (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE)
+-                if group < KV_NATIVE_SHIFT_GROUPS:
+-                    direction = block
+-                    if group % 2 == 1:
+-                        direction = D // KV_NATIVE_K_BLOCK - 1 - block
+-                    block = (group // 2 * KV_NATIVE_PAIR_SHIFT + direction) % (D // KV_NATIVE_K_BLOCK)
+-                offset = block * KV_NATIVE_K_BLOCK + step % (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE) * KV_NATIVE_K_TILE
+-                a = x[tile_base + row : tile_base + row + KV_DENSE_M_TILE, offset : offset + KV_NATIVE_K_TILE]
+-                b = wkv[offset : offset + KV_NATIVE_K_TILE, column : column + KV_NATIVE_N_TILE]
+-                accumulator = pl.matmul_acc(accumulator, a, b, init_cond=(step == 0))
+-            projected[row : row + KV_DENSE_M_TILE, column : column + KV_NATIVE_N_TILE] = accumulator
+-        for row in pl.range((KV_NATIVE_ROWS // KV_DENSE_M_TILE) * KV_DENSE_M_TILE, KV_NATIVE_ROWS, KV_M_TILE):
+-            accumulator_tail = pl.create_tensor([KV_M_TILE, KV_NATIVE_N_TILE], dtype=pl.FP32)
+-            for step_tail in pl.pipeline(D // KV_NATIVE_K_TILE, stage=2):
+-                block_tail = step_tail // (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE)
+-                if group < KV_NATIVE_SHIFT_GROUPS:
+-                    direction_tail = block_tail
+-                    if group % 2 == 1:
+-                        direction_tail = D // KV_NATIVE_K_BLOCK - 1 - block_tail
+-                    block_tail = (group // 2 * KV_NATIVE_PAIR_SHIFT + direction_tail) % (D // KV_NATIVE_K_BLOCK)
+-                offset_tail = (block_tail * KV_NATIVE_K_BLOCK
+-                               + step_tail % (KV_NATIVE_K_BLOCK // KV_NATIVE_K_TILE) * KV_NATIVE_K_TILE)
+-                a_tail = x[tile_base + row : tile_base + row + KV_M_TILE, offset_tail : offset_tail + KV_NATIVE_K_TILE]
+-                b_tail = wkv[offset_tail : offset_tail + KV_NATIVE_K_TILE, column : column + KV_NATIVE_N_TILE]
+-                accumulator_tail = pl.matmul_acc(accumulator_tail, a_tail, b_tail, init_cond=(step_tail == 0))
+-            projected[row : row + KV_M_TILE, column : column + KV_NATIVE_N_TILE] = accumulator_tail
+-    return projected
+-
+-
+ @pl.jit.inline(auto_scope=False)
+ def kv_proj_rope(
+     x: pl.Tensor[[KV_T_DYN, D], pl.BF16],
+@@ -766,45 +712,41 @@ def kv_proj_rope(
+                         kv_seed = pl.full([KV_M_TILE, KV_N_TILE], dtype=pl.FP32, value=0.0)
+                         kv_fp32[kts0 : kts0 + KV_M_TILE, kvseed0 : kvseed0 + KV_N_TILE] = kv_seed
+ 
+-            # Native changes the K traversal at the B40/S6 shape.
+-            if tile_rows == KV_NATIVE_ROWS:
+-                kv_fp32 = kv_project_native_240(x, wkv, kv_fp32, tile_base, late_dep)
+-            else:
+-                # KV projection consumes the caller's readiness dependency.
+-                with pl.spmd(
+-                    (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
+-                    name_hint="kv_proj_matmul",
+-                    deps=[late_dep],
+-                ) as _kv_tid:
+-                    pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
+-                    kbg = pl.tile.get_block_idx()
+-                    kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
+-                    kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
+-                    kv_m_group = kbg % kv_m_groups
+-                    for dense_t0 in pl.range(kv_m_group * KV_DENSE_M_TILE, kv_full_rows, kv_m_groups * KV_DENSE_M_TILE):
+-                        dense_x0 = tile_base + dense_t0
+-                        dense_acc = pl.create_tensor([KV_DENSE_M_TILE, KV_N_TILE], dtype=pl.FP32)
+-                        for dense_k in pl.pipeline(0, KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
+-                            dense_d0 = kv_k_base + dense_k * KV_K_TILE
+-                            dense_x = x_view[dense_x0 : dense_x0 + KV_DENSE_M_TILE, dense_d0 : dense_d0 + KV_K_TILE]
+-                            dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
+-                            dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
+-                        kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
+-                    for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
+-                        kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
+-                        for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
+-                            d0 = kv_k_base + db * KV_K_TILE
+-                            kv_rows = pl.min(KV_M_TILE, tile_rows - t0)
+-                            x_t0 = tile_base + t0
+-                            kv_x_chunk_bf16 = pl.slice(
+-                                x_view,
+-                                [KV_M_TILE, KV_K_TILE],
+-                                [x_t0, d0],
+-                                valid_shape=[kv_rows, KV_K_TILE],
+-                            )
+-                            wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
+-                            kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
+-                        kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
++            # KV projection consumes the caller's readiness dependency.
++            with pl.spmd(
++                (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
++                name_hint="kv_proj_matmul",
++                deps=[late_dep],
++            ) as _kv_tid:
++                pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
++                kbg = pl.tile.get_block_idx()
++                kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
++                kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
++                kv_m_group = kbg % kv_m_groups
++                for dense_t0 in pl.range(kv_m_group * KV_DENSE_M_TILE, kv_full_rows, kv_m_groups * KV_DENSE_M_TILE):
++                    dense_x0 = tile_base + dense_t0
++                    dense_acc = pl.create_tensor([KV_DENSE_M_TILE, KV_N_TILE], dtype=pl.FP32)
++                    for dense_k in pl.pipeline(0, KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
++                        dense_d0 = kv_k_base + dense_k * KV_K_TILE
++                        dense_x = x_view[dense_x0 : dense_x0 + KV_DENSE_M_TILE, dense_d0 : dense_d0 + KV_K_TILE]
++                        dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
++                        dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
++                    kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
++                for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
++                    kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
++                    for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
++                        d0 = kv_k_base + db * KV_K_TILE
++                        kv_rows = pl.min(KV_M_TILE, tile_rows - t0)
++                        x_t0 = tile_base + t0
++                        kv_x_chunk_bf16 = pl.slice(
++                            x_view,
++                            [KV_M_TILE, KV_K_TILE],
++                            [x_t0, d0],
++                            valid_shape=[kv_rows, KV_K_TILE],
++                        )
++                        wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
++                        kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
++                    kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
+ 
+             kv_view = pl.reshape(kv, [t_dim, HEAD_DIM])
+ 
