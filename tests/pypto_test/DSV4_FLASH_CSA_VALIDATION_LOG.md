@@ -7019,3 +7019,12 @@ Top-K集合替换545（v7为534）；保护区和索引结构通过、非有限�
 Score核内37.23～40.34 μs，对v7的76.59～91.92 μs已明显缩短；Score→publish仍为75.66～117.36 μs。
 四窗口23/24/24/19核，独立merge和分配等待仍有成本。下一步处理短路径发布，不重复做未受影响的长档。
 [结果与泳道](results/csa_split_optimization_20260927/v9_native_short/README.md)。
+
+## 181. 小batch Score逻辑负载均衡（2026-09-27）
+
+v10只在query组少于24时改为leaf优先，B4完整leaf数由4×1、16×2、4×3调整为24×2。
+B8/B16及本轮8K各档保持原映射，不改变量化、Top-K或Simpler物理核分配。
+B4本体716.345 μs（v8为766.653，v7为749.032），p50/p95=712.480/728.760 μs；
+同轮Native865.137 μs，完整PTO路径996.090 μs。CPU编译与单卡验证通过，保护区、非有限值、索引结构正常；
+输出RMSE=0.0043222169、Top-K集合替换184，与v7/v8相同。
+[证据](results/csa_split_optimization_20260927/v10_native_balance/README.md)。

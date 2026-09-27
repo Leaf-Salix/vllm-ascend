@@ -486,8 +486,13 @@ def indexer_score_topk_native_cube(
         pl.system.set_ffts(buf_score_ffts)
         # S=6，每组两个 query 不跨请求；使用较晚 query 的可见范围准备共享 key。
         for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, TOPK_SCORE_WORKERS):
-            buf_query = buf_item // buf_max_leaves * 2
-            buf_leaf = buf_item % buf_max_leaves
+            if buf_query_count < 2 * TOPK_SCORE_WORKERS:
+                # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
+                buf_query = buf_item % (buf_query_count // 2) * 2
+                buf_leaf = buf_item // (buf_query_count // 2)
+            else:
+                buf_query = buf_item // buf_max_leaves * 2
+                buf_leaf = buf_item % buf_max_leaves
             buf_batch_idx = buf_query // S
             buf_last_position = pl.read(position_ids, [buf_query + 1])
             buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
@@ -632,8 +637,12 @@ def indexer_score_topk_native_cube(
 
         for buf_score_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
             for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, TOPK_SCORE_WORKERS):
-                buf_query = buf_item // buf_max_leaves * 2
-                buf_leaf = buf_item % buf_max_leaves
+                if buf_query_count < 2 * TOPK_SCORE_WORKERS:
+                    buf_query = buf_item % (buf_query_count // 2) * 2
+                    buf_leaf = buf_item // (buf_query_count // 2)
+                else:
+                    buf_query = buf_item // buf_max_leaves * 2
+                    buf_leaf = buf_item % buf_max_leaves
                 buf_batch_idx = buf_query // S
                 buf_last_position = pl.read(position_ids, [buf_query + 1])
                 buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
