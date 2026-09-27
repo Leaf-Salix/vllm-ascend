@@ -1,10 +1,36 @@
 # CSA Indexer：Native 与 PTO 实现差距
 
-更新：2026-09-27。按用户要求，后续性能优化先集中到 Indexer。
-基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
+更新：2026-09-28。当前性能版新增S6/M384/N64，先取得长档单卡收益，真实EP16仍待验收。
+下文v7/v10章节是历史分析，不能当作当前cache布局、query分组或长尾状态。
+历史基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
 v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/README.md)，
 当前统一实现的实测见[V10七档结果](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)。
 测量使用正式 layer 4 权重、合成历史，不能代替整模型 decode forward 或 token/DSpark 验收。
+
+## 当前长档改动与剩余差距
+
+压缩历史超过8192行且query数至少96时，当前性能版按一个请求的S6整组复用Key。
+QK为M384/N64、head规约K384/N64，L0A60 KiB、L0B56 KiB、L0C100 KiB。
+较小长档及8K保持双query/M128/N128；条件在算子内，不由测试脚本切换版本。
+原Native分页cache直接读写，入口Torch拆分和外部写回已消除。
+
+| 项目 | Native A3 QLI | 当前PTO长档S6 | 已记录的pypto-lib 2164563 |
+| --- | --- | --- | --- |
+| 同请求Key复用 | 4＋2组 | S6一组，按两页N64流水 | 逐query |
+| 128K忽略尾块的逻辑Key载荷 | 8 MiB/请求 | 4 MiB/请求 | 24 MiB/请求 |
+| 页布局 | 原生分页 | 原生分页，按页查表/加载 | 连续Key/scale入参 |
+| head加权规约 | FP16片上分数＋Cube WS | 同一路线，组内对角系数一次Cube规约 | 已记录源码使用Vector规约 |
+| Top-K和任务交接 | QLI内流式Top512 | 分数/半leaf候选落GM、独立merge和系数任务 | 半leaf森林、同类GM交接 |
+
+逻辑字节量不是DDR流量或耗时预测；它解释了为何继续吸收Native的query复用，
+而不是照搬上游连续cache的逐query实现。当前仍有分页寻址、跨任务调度和Top-K交接成本。
+历史725μs图缺完整配置，不与本轮长档作等输入速度比较。
+
+实测128K/B16：双→三query同轮Score AIC466.67→350.59μs、本体1237.70→1185.13μs；
+三query→S6下一轮本体1191.90→1129.72μs，P95 1207.82→1144.02μs。
+S6 Score AIC286.12μs，核内控制引用前一作业三query；与Native完整QLI的范围不同，不能直接相减。
+固定规约B16/H32768、完整leaf＋尾leaf的8类输出/状态对原版零差异，A→B→A通过；
+不外推到全部形状或EP16验收。[原始数据、源码和边界](results/csa_indexer_six_20260928/README.md)。
 
 ## v7基线已确认的差异
 

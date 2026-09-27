@@ -1,9 +1,10 @@
-# Indexer整请求S6复用：CPU候选
+# Indexer整请求S6复用：单卡收益与固定规约对照通过
 
 独立基于2a740c1f，工作树`.cache/csa-indexer-six-2a740c1f`。
 继承三query候选的constexpr分组实现，但长档query数至少96时改为一组S6：
 INT8 QK采用M384/N64，FP16 head规约采用K384/N64。小长档及8K仍用双query/M128/N128。
-当前未运行设备、未合入。它与QKV候选、source-split cache均独立，也没有修改工具链。
+单卡本体/核内收益及固定规约对照通过，已应用性能版；真实EP16正在验证。
+它与QKV候选、source-split cache均独立，也没有修改工具链。
 
 ## 设计依据和代价
 
@@ -36,7 +37,7 @@ Score/Top-K整体lowering、PTOAS、CCE及链接通过：[日志](compile.log)�
 
 完整CSA的lowering、PTOAS、CCE及链接也已通过：[完整编译日志](compile_full.log)。
 两次编译均在模型短档正式计时前完成，不创建设备Worker、不执行NPU。
-L0A容量更紧，不能把“编译能放下”当作流水加速；设备筛查尚未取得结果。
+L0A容量更紧，不能把“编译能放下”当作流水加速；设备筛查结果另列下文。
 score arena从240行增到288行，是为24个worker各自的两个AIV lane保留6个query的私有行。
 共享的双query AIV也改为跨行加载后切片，旧版短档数字不能替代候选短档回归。
 
@@ -67,4 +68,43 @@ task_20260928_033316_2907819818：[命令](run_layer.sh)。同一个单卡作业
 2. 128K/B16重新测三query控制与S6完整CSA，仍为5预热＋20次图计时。
 3. S6独立4个DFX窗口；三query核内控制复用前轮相同源码的4个窗口，明确不是同一作业。
 
-各次保留metadata/保护区、有限值与Top-K结构检查。尚无S6设备结果，也没有扩大七档或修改生产版本。
+各次保留metadata/保护区、有限值与Top-K结构检查，不扩大七档。
+
+## 单卡结果及保留依据
+
+task_20260928_033316_2907819818退出0。[汇总](report.json)、[汇总脚本](summarize.py)。
+
+| 指标 μs | 原版/三query短档，8K/B16 | 三query/S6长档，128K/B16 |
+| --- | ---: | ---: |
+| Native控制均值 | 921.537/940.877 | 1309.385/1306.358 |
+| PTO完整CSA均值 | 794.006/791.905 | 1191.899/1129.717 |
+| PTO P95 | 818.980/808.280 | 1207.820/1144.020 |
+
+S6相对同轮三query本体快5.22%，相对同轮Native快13.52%。
+短档这次比较的是三query源码的共用双query分支；S6的arena分配行数240→288，
+不能把该短档结果冒充S6源码的短档实测，模型短档仍单独验证。
+
+S6独立四DFX窗口Score AIC均值286.124μs，对照前一作业三query350.587μs再降18.39%；
+AIV299.148对365.664μs下降18.19%。其他未改任务的波动不算本次直接优化成果。
+三query相比原双query的核内收益与本体收益见相邻目录，不能把跨作业数字称为同轮三版本实验。
+
+完整输出对Native RMSE0.0041767351（三query本轮）/0.0041770055（S6），Top-K集合替换均为670；
+零容差仍FAIL。metadata、保护区、有限值、Top-K结构通过；统计相近不是跨版本逐元素证明。
+
+为补这一缺口，只做一个固定规约case：task_20260928_033929_295123724505退出0。
+B16/H32768/S6、atomic0、det1，实际压缩长度8193，触发长档分支，覆盖8192行完整leaf及causal tail。
+复用原有随物理行变化的scale fixture，原版和S6的8类输出/状态逐元素零差异，Native控制也精确一致；
+候选A→B→A图重放通过。没有声称覆盖全部batch或跨batch padding图。
+[固定规约结果](accuracy/comparison.json)、[运行命令](run_accuracy.sh)、[比较器](compare_accuracy.py)。
+
+根据用户“核内有收益即保留”规则，应用性能版的S6长档分支；短档及较小长档继续双query。
+三query保留测量与补丁，后续若小长档需要用它，须先测对应输入，不能沿用B16结果代替。
+Native分配和算子流程、精度版算术保持原样。
+
+## 真实EP16验证正在进行
+
+task_20260928_034149_296992718490：[命令](run_model.sh)、[收集器](collect_model.py)。
+隔离模型源码＝2a740c1f＋测试入场修复8dd737f4＋本目录候选；没有QKV边界或分离cache改动。
+128K/B16、8K/B40各重新采集Native和PTO，mode2/atomic1/det0/HCCL=false/EPLB关闭，
+warmup后10步无profiler forward，另3步profile。只有token/DSpark与真实forward结果可确认模型验收。
+本节当前没有整模型收益结论。
