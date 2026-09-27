@@ -1,7 +1,7 @@
 # Indexer三query/M192候选：仅完成CPU编译
 
 基于2a740c1f，独立工作树`.cache/csa-indexer-triple-2a740c1f`。
-未上卡、未合入，不修改正在排队的QKV EP16候选。只有[候选补丁](candidate.patch)涉及算子。
+尚未取得设备结果、未合入，不修改正在执行的QKV EP16候选。只有[候选补丁](candidate.patch)涉及算子。
 
 ## 与既有策略的区别
 
@@ -22,7 +22,8 @@ FP16输入舍入、FIXPIPE缩放、Key/scale页布局、Top-K树、worker数量�
 ## 片上容量与CPU证据
 
 [编译入口](compile.py)、[完整日志](compile.log)：PyPTO lowering、PTOAS、CCE及链接通过。
-`CompiledProgram.load()`只构建二进制，不创建设备Worker或执行NPU。Ruff通过。
+进一步以`--full`完整编译CSA并链接也通过：[完整CSA日志](compile_full.log)。
+`CompiledProgram.load()`只构建二进制，不创建设备Worker或执行NPU。Ruff与shell语法通过。
 
 生成的三query kernel：
 
@@ -56,3 +57,13 @@ python tests/pypto_test/results/csa_indexer_triple_20260928/compile.py \
   --source ../.cache/csa-indexer-triple-2a740c1f \
   --output tests/pypto_test/results/csa_indexer_triple_20260928/compiled
 ```
+
+## 已提交的单卡筛查
+
+task_20260928_030634_158754525942：[命令](run_layer.sh)，仅128K/B16。
+原版2a740c1f与候选依次测量：正式layer4权重、S6、mode2/atomic1/det0、EPLB关闭，
+每侧5次预热＋20次图计时，再独立采4个图重放DFX窗口；不混合profile与主计时。
+每次执行仍检查metadata、保护区、有限值及Top-K结构。
+当前QKV EP16占用16卡，此任务排队，不与其混测，也不叠加QKV算术候选。
+若长档核内没有收益则不扩大矩阵；如有收益再按用户要求保留核内改进并处理整体调度、短档共用代码回归。
+该计划不构成设备测试通过，当前尚待结果。

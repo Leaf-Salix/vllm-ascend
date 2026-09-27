@@ -10,6 +10,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--full", action="store_true", help="编译完整CSA，检查与其余算子的集成")
     args = parser.parse_args()
     sys.path.insert(0, str(args.source / "tests/pypto_test"))
     from dsv4_csa_env import activate
@@ -46,11 +47,17 @@ def main():
         score(query, query_scale, weights, cache, table, positions, lengths, scores, indices, dep, dep, dep)
         return scores, indices
 
-    compiled = pl.jit(auto_scope=False)(root).compile(
+    if args.full:
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.decode_csa import decode_csa_tp1_layer_test
+
+        kernel = decode_csa_tp1_layer_test
+    else:
+        kernel = pl.jit(auto_scope=False)(root)
+    compiled = kernel.compile(
         config=RunConfig(platform="a2a3", save_kernels=True, save_kernels_dir=str(args.output.resolve()))
     )
     compiled.load()
-    print("COMPILE_PASS pair/triple forest; no device execution", flush=True)
+    print(f"COMPILE_PASS full_csa={args.full}; no device execution", flush=True)
 
 
 if __name__ == "__main__":
