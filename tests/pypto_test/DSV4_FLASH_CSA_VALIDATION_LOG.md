@@ -7235,3 +7235,27 @@ qk_pv AIC范围分别332.92–347.37、361.14–388.00 μs；当前保留基底3
 保护区/索引结构通过、非有限值0，零容差仍FAIL；没有扩测或整模型验收。
 具体算术差异、误差、候选补丁及原始泳道路径见差距文档§6.1。
 本次文档整理仅复核既有数据，没有新增设备测试或hash校验。
+
+## 193. 16行UB双缓冲搬运无明确本体收益，撤回（2026-09-27）
+
+基于21d99f8a，参考Native每16行写回及UB双缓冲，保留PTO候选顺序、softmax/PV算术。
+CPU编译通过，生成代码确认不同UB地址。单卡任务task_20260927_153712_16465687755退出0；
+8K/B40、原配置、5次预热/20次无profiler采样/4个DFX窗口。
+本体1386.11 μs，基底1386.00 μs；qk_pv AIC为322.44–329.31 μs，与基底319.81–334.24重叠。
+保护区/索引结构通过、非有限值0，max_abs=0.03125，零容差FAIL。
+候选已撤回，不扩测。未实现Native成对DMA，不能将此结果理解为该策略已完整验证。
+[详细结果及补丁](results/csa_incore_20260927/sparse_gather16_pipeline/README.md)。
+
+## 194. 固定Native输入采Sparse Attention逐任务PMU（2026-09-27）
+
+当前kernel-mode不支持PMU；首次采集初始化失败，任务task_20260927_154057_172940414996退出1。
+撤回不支持的入口改动，在现有sparse diagnostic中增加独立program模式PMU选项。
+任务task_20260927_154452_175670032077退出0：先保存8K/B40正式layer4 Native输入，
+再用同一份性能版Sparse Attention采事件组2。没有修改PyPTO或Simpler，也未改变生产算子。
+
+qk_pv AIC/AIV记录24/48条，Cube busy=21.23%，Vector busy=33.97%，
+MTE2 busy分别22.56%/35.41%，Scalar busy分别55.35%/47.83%。
+独立case未持续占满算术流水；Scalar busy并不能区分控制与等待，需要沿核内同步边界定位。
+该诊断无完整CSA上下游及稳态warmup口径，不放入七档性能矩阵。
+固定输入的Sparse输出非有限值0，max_abs=0.0009765625、RMSE=0.00006348421，零容差FAIL。
+[PMU报告、原始CSV、func_id映射及复现](results/csa_incore_20260927/sparse_pmu/README.md)。

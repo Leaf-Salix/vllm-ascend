@@ -1,0 +1,65 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index d7b25e79..439f0b84 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -105,6 +105,8 @@ QK_PV_READY_EVENT = 3
+ # 与上游 max(2, ceil((WIN+CMP_TOPK)/128)) = 5 得到的 640 完全一致。
+ ATTN_K_TILE = 128
+ 
++KV_GATHER_ROWS = 16
++
+ NUM_QK_CORES = 24  # qk_pv dispatch lanes
+ 
+ CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
+@@ -423,8 +425,8 @@ def sparse_attn_csa(
+                         if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+                             qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_sb % QK_TRANSFER_SLOTS
+                             qk_kv_row = qk_slot * ATTN_K_TILE
+-                            qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
+                             if qk_sb == 0:
++                                qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
+                                 qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                                 qk_win_len = pl.min(qk_pos + 1, WIN)
+                                 qk_win_start = qk_pos - qk_win_len + 1
+@@ -445,20 +447,28 @@ def sparse_attn_csa(
+                                                 [ATTN_K_TILE // 2, HEAD_DIM],
+                                                 valid_shape=[qk_hi - qk_lo, HEAD_DIM],
+                                             )
++                                pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
+                             else:
+-                                for qk_row in pl.range(ATTN_K_TILE // 2):
+-                                    qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+-                                    if qk_cmp_k < CMP_TOPK:
+-                                        qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
+-                                        if qk_ridx >= 0:
+-                                            qk_page = pl.cast(
+-                                                pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
+-                                            )
+-                                            qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+-                                            qk_kv_half = pl.gather_row(
+-                                                qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+-                                            )
+-                            pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
++                                # Native stages sparse KV through two 16-row UB
++                                # buffers. Drain each chunk while gathering the
++                                # next; candidate order and attention arithmetic
++                                # stay unchanged.
++                                for qk_chunk in pl.pipeline(ATTN_K_TILE // 2 // KV_GATHER_ROWS, stage=2):
++                                    qk_chunk_row = qk_chunk * KV_GATHER_ROWS
++                                    qk_kv_chunk = pl.tile.full([KV_GATHER_ROWS, HEAD_DIM], dtype=pl.BF16, value=0.0)
++                                    for qk_row in pl.range(KV_GATHER_ROWS):
++                                        qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_chunk_row + qk_row
++                                        if qk_cmp_k < CMP_TOPK:
++                                            qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
++                                            if qk_ridx >= 0:
++                                                qk_page = pl.cast(
++                                                    pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
++                                                )
++                                                qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
++                                                qk_kv_chunk = pl.gather_row(
++                                                    qk_kv_chunk, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
++                                                )
++                                    pl.store(qk_kv_chunk, [qk_kv_row + qk_lane_kv + qk_chunk_row, 0], kv_transfer)
+                     if qk_tick > 0 and qk_tick <= SPARSE_BLOCKS:
+                         softmax_sb = qk_tick - 1
+                         if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:

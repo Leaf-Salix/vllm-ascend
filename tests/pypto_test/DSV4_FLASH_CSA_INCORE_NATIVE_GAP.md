@@ -247,5 +247,19 @@ CPU编译及单卡任务均成功；两个候选均已撤回，未扩测其他�
 [N128数据及四窗口路径](results/csa_incore_20260927/sparse_joint_n128/report.json)、
 [N128候选补丁](results/csa_incore_20260927/sparse_joint_n128/candidate.patch)。
 
+### 6.2 KV搬运先导与PMU定位
+
+[16行UB双缓冲先导](results/csa_incore_20260927/sparse_gather16_pipeline/README.md)
+只迁移Native的分批搬运，保留候选顺序和attention算术；8K/B40本体1386.11 μs，
+基底1386.00 μs，qk_pv AIC范围322.44–329.31 μs与基底重叠，已撤回。
+生成代码确实使用两个不同UB地址，但尚未实现Native动态行距的成对DMA。
+
+随后用[固定Native输入的独立Sparse Attention PMU](results/csa_incore_20260927/sparse_pmu/README.md)
+取得24个AIC/48个AIV记录：qk_pv AIC Cube busy=21.23%、MTE1=24.87%、MTE2=22.56%；
+AIV Vector busy=33.97%、MTE2=35.41%、MTE3=14.71%。各流水交叠，不能相加。
+Scalar busy分别55.35%/47.83%，不能直接归因为地址计算或跨任务调度。
+该独立program诊断不替代完整CSA的kernel-mode稳态计时；它支持继续定位核内流水串行和等待，
+不足以量化各段可节省时间。下步沿四类ready事件的已有同步边界拆解，避免继续盲试tile大小。
+
 仍缺：各项策略独立收益、完整其他 CSA 任务的等范围映射，
 以及新策略的整模型验收。阶段目标保持有效，尚未完成。
