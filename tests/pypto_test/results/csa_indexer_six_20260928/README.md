@@ -3,7 +3,7 @@
 独立基于2a740c1f，工作树`.cache/csa-indexer-six-2a740c1f`。
 继承三query候选的constexpr分组实现，但长档query数至少96时改为一组S6：
 INT8 QK采用M384/N64，FP16 head规约采用K384/N64。小长档及8K仍用双query/M128/N128。
-单卡本体/核内收益及固定规约对照通过，已应用性能版；真实EP16正在验证。
+单卡本体/核内收益及固定规约对照通过，已应用性能版；真实EP16两档小幅领先，仍待稳定优势和七档验收。
 它与QKV候选、source-split cache均独立，也没有修改工具链。
 
 ## 设计依据和代价
@@ -11,7 +11,7 @@ INT8 QK采用M384/N64，FP16 head规约采用K384/N64。小长档及8K仍用双q
 原版同一请求的Key读三遍。S6共用一遍，N64保证较大的M维仍能放入片上缓冲；
 不要求物理页连续，仍从原Native cache按页加载Key及scale。
 每query的causal mask、FP16输入策略、FIXPIPE缩放、Top-K树、worker数和调度标志保留。
-规约K维变长，逐元素/状态是否一致仍未验证，不能按零系数推断逐bit一致。
+规约K维变长，不能按零系数推断逐bit一致；下文记录一个固定规约case的实测边界。
 
 按128K/B16、24worker、8192行leaf及实际尾leaf推导：
 
@@ -101,14 +101,16 @@ B16/H32768/S6、atomic0、det1，实际压缩长度8193，触发长档分支，�
 三query保留测量与补丁，后续若小长档需要用它，须先测对应输入，不能沿用B16结果代替。
 Native分配和算子流程、精度版算术保持原样。
 
-## 真实EP16验证正在进行
+## 真实EP16两档结果
 
 task_20260928_034149_296992718490：[命令](run_model.sh)、[收集器](collect_model.py)。
 隔离模型源码＝2a740c1f＋测试入场修复8dd737f4＋本目录候选；没有QKV边界或分离cache改动。
 128K/B16、8K/B40各重新采集Native和PTO，mode2/atomic1/det0/HCCL=false/EPLB关闭，
 warmup后10步无profiler forward，另3步profile。只有token/DSpark与真实forward结果可确认模型验收。
-当前先完成128K/B16：Native73.033→PTO72.440ms，本轮快0.81%；
+task已退出0。128K/B16：Native73.033→PTO72.440ms，本轮快0.81%；
 每步最慢rank均值73.577→72.930ms（快0.88%），P95 74.191→73.256ms。
-65536输出token零差异，16组rank的DSpark统计一致；PTO P95/P50为1.010。
+8K/B40：Native104.182→PTO103.623ms，快0.54%，P95 107.484→105.861ms，
+每步最慢rank均值104.264→103.719ms，快0.52%。
+两档共229376输出token零差异、32组rank的DSpark统计一致；PTO P95/P50分别1.010/1.024。
 这是同轮重新采集控制后的实际EP16结果，但差额较小，尚不能宣布稳定优势或七档达标。
-8K/B40仍在执行；[已完成档位和逐rank样本](model/RESULTS.md)。
+另采三步profile只用于定位，不能替代正式10步；[两档结果及逐rank样本](model/RESULTS.md)。

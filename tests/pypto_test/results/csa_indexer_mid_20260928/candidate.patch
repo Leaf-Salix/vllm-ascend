@@ -1,0 +1,40 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index c2ac3ddb..0e12c3db 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -789,7 +789,7 @@ def indexer_score_topk_forest(
+             # 长档整组准入，并禁止Score提前释放下游，抑制重复图重放的长尾。
+             # 短档沿用原调度；sync_start不代表各核硬件同时起跑。
+             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
+-            # 较小batch保留双query，避免整请求分组使24个worker工作量过少。
++            # 中等query数用三query；更小输入用双query，避免整请求分组并行度不足。
+             if pl.tensor.dim(position_ids, 0) >= 4 * TOPK_SCORE_WORKERS:
+                 score_tid = indexer_score_topk_native_cube(
+                     qr_hadamard_i8,
+@@ -810,6 +810,26 @@ def indexer_score_topk_forest(
+                     True,
+                     False,
+                 )
++            elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
++                score_tid = indexer_score_topk_native_cube(
++                    qr_hadamard_i8,
++                    qr_hadamard_scale_dq,
++                    weights,
++                    idx_native_kv_cache,
++                    idx_block_table,
++                    position_ids,
++                    kv_seq_lens,
++                    score_arena,
++                    pair_arena,
++                    qh_quant_tid,
++                    weights_tid,
++                    cache_write_tid,
++                    3,
++                    NATIVE_QLI_QK_COLS,
++                    BUFFERED_LONG_SCORE_TILE,
++                    True,
++                    False,
++                )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+                     qr_hadamard_i8,
