@@ -7373,3 +7373,18 @@ Native完整融合kernel和PTO逐block均值边界不同，单列quant、scatter
 另发现Native在L1拼接KV/gate权重并以一次较宽Mmad投影，PTO分两次matmul；列为下一项核内候选。
 [其他模块统计与映射](results/csa_incore_20260927/v10_other_incore.json)，主差距文档第7节给出解释。
 清理性能包__init__中过时的“不做逐token比对”说明，恢复用户明确的token/DSpark验收约束；不改算术。
+
+## 201. KV/gate片上合并投影核内退化，撤回（2026-09-27）
+
+基于da2e2368，仅改两个性能版Compressor的投影；L1拼接KV/gate权重，N翻倍，一次matmul后切Acc分开写回。
+先在隔离副本CPU编译，通过Tile转置视图、首K剥离和显式切片valid_shape解决尾块类型/校验表达；
+完整根及AICPU调度源码编译成功，无工具链修改。待七档任务终态后才应用到生产做先导。
+任务task_20260927_171130_243676420225退出0，8K/B40、5次预热/20次计时/4个DFX窗口。
+
+本体1342.68→1340.21 μs，只下降约0.18%；Attention投影33.21–38.00→42.95–44.40 μs，
+Indexer投影23.36–25.52→29.48–35.95 μs，核内均明确退化，因此撤回，不扩测其他档位。
+生成代码L0B由Attention K256/N64变为K128/N128，Indexer K512/N32变为K256/N64；
+不能将高层两次matmul合一视为硬件指令数减半，也不能在无PMU情况下将全部退化归给K分块。
+保护区/Top-K结构/非有限值检查通过，max_abs=0.03125、RMSE=0.003291107、Top-K替换900；Native零容差仍FAIL。
+当前保留的生产算子及七档结果仍为da2e2368，不把候选的微小均值变化回填进去。
+[完整先导、补丁与生成tile证据](results/csa_incore_20260927/compressor_combined/README.md)。

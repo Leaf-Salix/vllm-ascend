@@ -184,7 +184,7 @@ Native 双流调用顺序对应的 KV `MatMulWeightNz` 设备事件为26.26 μs�
 
 | 档位 / 阶段 | 核内工作 | 验证与保留条件 |
 | --- | --- | --- |
-| 8K B16/24/32/40，先用 B40 代表 | 已保留跨query流水；下一项验证第7节Native式KV/gate合并投影；成对DMA暂不扩展API | 隔离核内收益，先CPU编译再代表档；不重复已失败候选 |
+| 8K B16/24/32/40，先用 B40 代表 | 已保留跨query流水；KV/gate合并投影先导退化已撤回；后续优先检查QKV额外准备及Vector处理 | 隔离核内收益，先CPU编译再代表档；不重复已失败候选 |
 | 128K B8/B16 | 优先评估流式 Top-K、尾块无效工作及重复准备；4＋2 复用和合并 head 规约先导已撤回 | 单项实现独立测量，核内下降须有证据；B16 Native分项已补齐，不重跑无关历史矩阵 |
 | 8K B40 | 已保留KV投影宽tile/split-K；继续评估复用Native NZ权重 | 新改动仍需隔离收益；精度版保持原算术 |
 | 128K B4 | 保留 V10 小 batch 完整 leaf 均衡 | 扩大 query 复用组后检查并行度和退化，必要时在算子内部按输入选策略 |
@@ -422,7 +422,11 @@ PTO根算子先调用Attention Compressor、再调用Indexer Compressor，因此
 `ComputeMm1` 用 `nDealSize=2*dBaseSize` 的一次Mmad计算两路，再分开Fixpipe写回。
 当前两个PTO Compressor在每个K512块中各调用一次KV matmul、一次gate matmul。
 可尝试在片上拼接两路权重并扩大N，用一次矩阵乘复用同一X加载，保留现有任务数和依赖。
-这是指令/流水策略差异，逻辑FLOPs和权重字节没有减半；目前无收益实测，不提前宣称更快。
+这是指令/流水策略差异，逻辑FLOPs和权重字节没有减半。
+随后B40先导完成：Attention投影33.21–38.00→42.95–44.40 μs，Indexer投影23.36–25.52→29.48–35.95 μs，
+均退化；本体1342.68→1340.21 μs只有约2.5μs变化，不认定有效，候选已撤回。
+生成代码显示扩大N同时将L0B的K分块减半，不能按高层matmul调用数预测硬件收益。
+[编译处理、补丁及实测证据](results/csa_incore_20260927/compressor_combined/README.md)。
 
 源码：[Native Compressor Cube](../../csrc/attention/compressor/op_kernel/arch32/compressor_block_cube_perf.h)、
 [PTO Attention Compressor](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_compressor_ratio4.py)、
