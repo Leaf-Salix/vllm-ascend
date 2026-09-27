@@ -7259,3 +7259,19 @@ MTE2 busy分别22.56%/35.41%，Scalar busy分别55.35%/47.83%。
 该诊断无完整CSA上下游及稳态warmup口径，不放入七档性能矩阵。
 固定输入的Sparse输出非有限值0，max_abs=0.0009765625、RMSE=0.00006348421，零容差FAIL。
 [PMU报告、原始CSV、func_id映射及复现](results/csa_incore_20260927/sparse_pmu/README.md)。
+
+## 195. Sparse Attention沿同步边界定位核内等待（2026-09-27）
+
+固定21d99f8a的Sparse实现，复用8K/B40 Native输入；仅修改诊断生成C++，不改生产算术或工具链。
+CPU编译通过，任务task_20260927_155702_180181112209退出0。
+在已有wait/sync边界读get_sys_cnt，不增加pipeline barrier；每核独占两条缓存行存储统计。
+24个AIC/48个AIV记录齐全，两类wait各50次；输出与未插桩PTO的7,864,320元素逐bit一致。
+
+AIC测量总区间均值306.75 μs，KV-ready等待208.00 μs（67.81%）、Prob-ready等待15.04 μs（4.90%）。
+AIV测量总区间301.33 μs，gather发射/排空124.30 μs（41.25%）、Score等待78.94 μs（26.20%）、
+PV等待63.71 μs（21.14%）。发射区间不是纯算术或DMA时间，不能将两种核相加或认定全部等待可消除。
+计数器50MHz依据本地Simpler平台配置；独立插桩program数据不写入稳态七档矩阵。
+
+源码核对发现PTO的KV通知晚于上一块softmax，而Native在ProcessVec0L后、上一轮ProcessVec1L前发布。
+接下来隔离验证提前KV通知，只调整核内流水，保持Score通知先消费、槽位及算术不变。
+[原始计数、脚本、边界说明](results/csa_incore_20260927/sparse_phase_probe/README.md)。

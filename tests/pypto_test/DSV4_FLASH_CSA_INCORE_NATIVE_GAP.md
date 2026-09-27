@@ -15,7 +15,8 @@
 4. 本阶段先吸收 Native 的核内策略；任务融合、派发间隙和任务调度留到核内阶段之后。
    按 batch/长度选择策略时，选择逻辑放在同一套当前 PTO 算子里，不按档位切换历史版本。
 5. 以下代码差异是真实存在的，但其耗时贡献尚未逐项实测，不能据此承诺优化百分比。
-   当前数据也不足以把核内时间拆成纯 Cube 算术、DMA、同步等待各占多少。
+   当前数据也不足以把核内时间完整拆成纯 Cube 算术、DMA、同步等待各占多少。
+   新增固定输入探针已定位8K/B40的主要核内等待边界，见第6.3节；不将发射区间当作纯算术耗时。
 
 初始七档基线提取只读取已有源码和 trace；后续先导和 Native 缺口补采见第6节，没有做 hash 校验。
 QKV、两个 Compressor、O projection、mHC 的完整等范围归因尚未完成；
@@ -259,7 +260,36 @@ CPU编译及单卡任务均成功；两个候选均已撤回，未扩测其他�
 AIV Vector busy=33.97%、MTE2=35.41%、MTE3=14.71%。各流水交叠，不能相加。
 Scalar busy分别55.35%/47.83%，不能直接归因为地址计算或跨任务调度。
 该独立program诊断不替代完整CSA的kernel-mode稳态计时；它支持继续定位核内流水串行和等待，
-不足以量化各段可节省时间。下步沿四类ready事件的已有同步边界拆解，避免继续盲试tile大小。
+不足以量化各段可节省时间。随后沿四类ready事件的已有同步边界拆解，结果见第6.3节。
+
+### 6.3 核内等待定位：KV发布晚于上一块softmax
+
+复用同一份8K/B40 Native输入，在基底生成的C++沿已有wait/sync边界读取系统计数器。
+没有增加pipeline barrier；24个AIC和48个AIV记录完整，输出与未插桩PTO逐bit一致。
+各核平均区间如下，单位μs；这是独立program诊断，不替代无profiler本体计时。
+
+| 核 | 主要区间 | 均值 | 占本核测量区间 |
+| --- | --- | ---: | ---: |
+| AIC | 等KV-ready | 208.00 | 67.81% |
+| AIC | 等Prob-ready | 15.04 | 4.90% |
+| AIC | QK发射及原有排空 | 52.01 | 16.96% |
+| AIC | PV发射及原有排空 | 25.86 | 8.43% |
+| AIV | gather发射及原有排空 | 124.30 | 41.25% |
+| AIV | 等Score-ready | 78.94 | 26.20% |
+| AIV | softmax发射及原有排空 | 24.74 | 8.21% |
+| AIV | 等PV-ready | 63.71 | 21.14% |
+
+AIC/AIV并行，表格不能相加；发射/排空区间不是对应流水独占时间，
+KV等待也不全是可消除开销。测量支持优先处理核内搬运和事件衔接，不支持把差距全归给跨任务调度。
+
+基底PTO在当前KV搬完后，还要等上一块Score并完成softmax/Prob发布，才通知AIC读取当前KV。
+Native `PreloadPipeline` 在 `ProcessVec0L` 后就发布 `syncV0C1`，随后执行上一轮 `ProcessVec1L`。
+因此下一步是保留上一块Score通知的消费顺序，但提前KV通知，使当前QK与上一块softmax交叠。
+不改变任务数、跨任务调度和attention算术。
+
+证据：[探针原理、完整分解和复现](results/csa_incore_20260927/sparse_phase_probe/README.md)、
+[区间汇总](results/csa_incore_20260927/sparse_phase_probe/summary.json)、
+[Native流水实现](../../csrc/attention/sparse_attn_sharedkv/op_kernel/arch32/sparse_attn_sharedkv_scfa_kernel.h)。
 
 仍缺：各项策略独立收益、完整其他 CSA 任务的等范围映射，
 以及新策略的整模型验收。阶段目标保持有效，尚未完成。
