@@ -68,12 +68,14 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    HC同输入诊断：post逐元素一致；pre/norm有995/393216差异，gate独立引入残差RMSE约0.000157，
    不直接外推成完整误差归因，也不改HC；[诊断](results/csa_hc_diagnostic_20260928/README.md)。
    WO-B整token量化单卡已测：PTO786.75→811.35μs，Native控制也增加1.94%，整层RMSE基本没变，
-   B3固定形状图/尾块与保护区通过。两档EP16干预已排队，验证是否减少后续MoE工作并补回CSA成本；
-   当前没有局部收益、不合入，也不因更像Native而宣称成功。保留性能版NZ与分块；
+   B3固定形状图/尾块与保护区通过。两档EP16已完成：75.403/104.846ms，慢于Native4.71%/0.47%；
+   token一致，长档15rank DSpark不同，专家GMM未下降。该候选不合入、不扩大七档；
    [差异依据及代价边界](results/csa_oproj_token_20260928/README.md)。
    等待期间独立准备WO-B两份INT32中间结果候选：NZ/ND完整CPU编译通过，尚无设备正确性或收益；
-   依赖共同token scale，待EP16量化干预结果后再决定单卡验证，不加入当前排队版本。
+   依赖共同token scale，因EP16量化干预未受益，本阶段不继续占卡。
    [补丁与编译边界](results/csa_oproj_accum2_20260928/README.md)。
+   下一项只恢复QKV的Native BF16数值边界，保留性能分块/atomic/流水和原cache；
+   先单卡筛查完整误差、成本与B3固定图尾块，有价值再决定EP16验证。
 2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
    继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
    Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。

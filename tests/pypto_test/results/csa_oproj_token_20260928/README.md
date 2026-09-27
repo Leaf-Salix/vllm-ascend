@@ -43,7 +43,8 @@ B3的固定形状A→B→A图重放通过，覆盖18 token尾块，未据此声�
 
 ## 后续受控模型对照
 
-已提交task_20260928_015726_18185222732：[两档模型命令](run_model.sh)及[收集入口](collect_model.py)，等待设备。
+task_20260928_015726_18185222732已完成、退出0：[两档模型命令](run_model.sh)及[收集入口](collect_model.py)。
+进程成功不等于验收通过，最终结论见下方。
 使用独立工作树`.cache/csa-oproj-token-ordered-2a740c1f`，
 组合既有`ordered/candidate.patch`与本目录的输出投影补丁。
 PTO两次候选之间固定分离/新页排序、atomic1、mode2、det0/HCCL=false及EPLB关闭。
@@ -60,3 +61,32 @@ Native复用`csa_source_split_ab_20260927/ordered/model/h*/b*/native`；不把�
 少18个（第4/5个草稿位置分别少4/14）；atomic0为76788/76800，仅最后草稿位置少12个。
 8K/B40两侧均为192000/192000。少量接受差异依然未满足精确统计合同，
 但不能将其比例当作forward约3%差距的耗时归因，或把全轮次计数写成正式10步内发生的拒绝。
+
+## 最终两档EP16结果：不合入、不扩大测试
+
+| 档位 | Native forward ms | 整token量化PTO ms | 变化 | PTO P95 ms | token差异 | DSpark差异rank |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 72.008891 | 75.402653 | +4.71% | 76.654678 | 0/65536 | 15/16 |
+| 8K/B40 | 104.357671 | 104.846230 | +0.47% | 106.401840 | 0/163840 | 0/16 |
+
+按既定10步纯forward，P95/P50分别1.017/1.012，没有本轮异常长尾证据。
+与相同ordered布局、atomic1的前轮PTO74.261609/104.120537 ms相比，均未改善。
+Native控制是复用结果，有时间漂移边界；此处用于否定当前候选已经胜出，不把小差额当作精确净成本。
+全部16rank的10步CPU位置相同，设备草稿token证据边界仍按上文保留。
+[正式结果](model/RESULTS.md)、[逐rank原始样本](model/forward.json)。
+
+独立rank0三步profile（不拼接为正式forward的分摊）：
+
+| 档位 | Native/PTO CSA body合计 ms | Native/PTO FFN合计 ms | 原ordered/PTO两类专家GMM合计 ms |
+| --- | ---: | ---: | ---: |
+| 128K/B16 | 26.888/25.386 | 33.729/36.461 | 10.065/10.091 |
+| 8K/B40 | 30.069/28.507 | 56.127/58.143 | 13.455/13.571 |
+
+两类GMM累积task duration均没有减少；CSA body相对原ordered增加0.429/0.755 ms。
+FFN task可能重叠，且首层dispatch包含跨rank到达等待，不能把FFN总增量全算到数值差异上。
+[profile边界](model/model_gap_rank0.json)、[长档FFN](model/h131072/ffn_breakdown_rank0.json)、
+[短档FFN](model/h8192/ffn_breakdown_rank0.json)。原trace保存在各PTO目录的profile输出下。
+
+该量化候选没有补回自己的成本，也没有解决长档DSpark差异，停止扩测并保留生产2a740c1f。
+依赖同一整token scale的WO-B两份整数中间结果候选仅保留CPU编译证据，本阶段不继续占卡。
+后续针对更上游的QKV BF16数值边界做独立单卡筛查，不叠加本候选。
