@@ -7579,3 +7579,11 @@ B16 Q_A末尾140.26–147.64→122.02–134.08 μs，但KV延后159.88–234.04 
 无profiler本体793.66→801.09 μs，p50/p95也退化，已撤回；保护区/Top-K结构/有限值通过，Native零容差仍FAIL。
 [完整证据](results/csa_scheduling_20260927/round03_kv_after_qa/README.md)，计数3/10。
 第4轮只允许merge_norm消费者O_A提前准备，保持数值和原有依赖，不叠加第3轮。
+
+## 218. 十轮调度第4轮：O_A预派发只缩短启动隙，尾段未改善（2026-09-27）
+
+基底2dd51f15，仅merge_norm开放allow_early_resolve；task_20260927_182955_30301211234退出0。
+B16 merge末尾到O_A首kernel由5.62–7.32降到4.34–4.80 μs，但末段177.76–183.46→178.80–185.92 μs未改善。
+本体793.66→788.27 μs（−0.68%），同轮Native约−0.41%；不足以确认末段策略收益，撤回，不扩测。
+保护区/Top-K结构/有限值通过，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/round04_merge_early/README.md)。
+计数4/10。第5轮只释放较轻Indexer Compressor与Q_A交叠，较重Attention Compressor仍等待Q_A。

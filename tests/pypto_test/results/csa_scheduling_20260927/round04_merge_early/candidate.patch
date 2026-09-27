@@ -1,0 +1,12 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -665,7 +665,8 @@
+     t_dim = pl.tensor.dim(q, 0)
+     merge_sink = pl.reshape(attn_sink, [H, 1])
+ 
+-    with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
++    with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid],
++                 allow_early_resolve=True) as merge_tid:
+         m_worker = pl.tile.get_block_idx()
+         # 换算索引（j^1 的 lane swap）就地算：它与 t_dim 无关，是纯常量表。
+         # 原先由一个 CORE_GROUP 的 rope_swap 任务算好写进 GM，本任务再读回来——
