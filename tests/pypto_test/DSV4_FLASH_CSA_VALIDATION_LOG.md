@@ -6948,3 +6948,40 @@ Worker span 为520.74/506.56/505.64/497.52 μs，均为24个block使用24个AIC�
 确认稳定收益后才扩大档位和做真实权重16卡 token / DSpark 看护。
 
 落盘版本：PyPTO `3e87a843`，性能算子 `9516acbe`，均为中文提交并带 Signed-off-by。
+
+## 178. Native Cube Score 七档泛化补测（2026-09-27）
+
+用户要求补齐其余六档，并额外纳入8K/B16；最终为128K B4/8/16、8K B16/24/32/40。
+v4 固定源码 da6f474a，v7 固定源码9516acbe，独立worktree执行，测试期间不修改。
+六个新档位共用当前 PyPTO 3e87a843、Simpler a54c05095、PTOAS 0.66、PTO-ISA 327cd586。
+128K/B16复用§177已有结果：v4的PyPTO为2a4e09ff，不包装成同工具链A/B。
+
+每档正式layer 4权重+合成输入/历史；第二CSA层metadata复用，mode=2、S6、atomic=1、确定性level=0、EPLB关闭。
+预热5次、无profiler采样20次；PyTorch profile与4窗口PTO DFX另行采集，不混入主计时。
+本体包含HC_pre/norm/CSA/HC_post，不含Torch入口拆分与slot写回；完整PTO路径另列。
+
+| H / B | 同轮Native均值 μs | v4本体均值 μs | v7本体均值 μs | v7对v4 | v7对Native | v7完整路径 μs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128K / 4 | 855.53 | 766.70 | 749.03 | -2.30% | -12.45% | 1044.70 |
+| 128K / 8 | 1012.99 | 968.48 | 947.36 | -2.18% | -6.48% | 1261.78 |
+| 128K / 16 | 1307.66 | 1576.93 | 1458.16 | -7.53% | +11.51% | 1864.03 |
+| 8K / 16 | 930.59 | 825.78 | 824.88 | -0.11% | -11.36% | 1129.20 |
+| 8K / 24 | 1118.84 | 1083.35 | 1081.03 | -0.21% | -3.38% | 1395.49 |
+| 8K / 32 | 1271.29 | 1268.13 | 1248.33 | -1.56% | -1.81% | 1566.07 |
+| 8K / 40 | 1426.27 | 1526.78 | 1511.62 | -0.99% | +5.98% | 1833.38 |
+
+六个补测档位metadata/slot保护区与Top-K索引结构检查通过、输出无非有限值；
+对Native仍存在浮点和Top-K集合差异，零容差FAIL不改写为精度通过，未做新候选的16卡token/DSpark验收。
+8K路径算术没有修改，v4/v7均值变化为−0.11%～−1.56%，同轮Native也有波动，不宣称为Cube策略的收益。
+128K/B4/B8本体仅改善约2.3%/2.2%；128K/B16的既有改善仍带长尾。完整拆分/本体/写回路径七档均慢于Native。
+
+Indexer单独观察进一步支持优先优化：8K/B24 Native QLI为56.34 μs，PTO四窗口Score→publish为119.02～142.36 μs；
+128K/B8为237.26 μs对280.12～284.52 μs。两侧独立采集，PTO span含调度并与其他分支交叠，
+未包含此前的系数任务，不把差额全部当作独占计算成本或可直接回收的整层收益。
+
+- [完整表、p50/p95、拆分/写回与数值](results/csa_native_cube_matrix_20260927/README.md)。
+- [统一下载目录](results/csa_native_cube_matrix_20260927/download/)：六个新档位各Native/PTO PyTorch trace + PTO四窗口，复用128K/B16的四窗口；共40份trace。
+- [原始来源与汇总](results/csa_native_cube_matrix_20260927/summary.json)、[任务ID](results/csa_native_cube_matrix_20260927/jobs.json)。
+
+按用户后续要求，转入Indexer专项。源码对照见[Native差距](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
+首个候选v8采用两个query共享key、M128 QK，保持v7量化及Top-K规则；CPU编译通过，设备结果续记下一节。
