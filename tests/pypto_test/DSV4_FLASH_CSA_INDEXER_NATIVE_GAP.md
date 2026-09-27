@@ -3,7 +3,7 @@
 更新：2026-09-27。按用户要求，后续性能优化先集中到 Indexer。
 基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
 v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/README.md)，
-已保留的后续改动见[v8～v10阶段结果](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)。
+当前统一实现的实测见[V10七档结果](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)。
 测量使用正式 layer 4 权重、合成历史，不能代替整模型 decode forward 或 token/DSpark 验收。
 
 ## v7基线已确认的差异
@@ -43,6 +43,12 @@ v4移植并扩大启用范围；v7进一步采用 Native 的片上Score与Cube W
 v8～v10已借鉴 Native 的 M128 和query复用，继续沿用已接好的连续cache；精度版算术不变。
 
 ## v10仍存在的差距
+
+V10是累计保留改动的一套实现，调用者不按档位选择V8/V9/V10版本。
+`indexer_score_topk_forest`按本batch最大压缩历史是否达到2048行选择Cube/Vector；
+本矩阵8K和128K都走Cube路径。`indexer_score_topk_native_cube`按query数是否小于48选择
+leaf优先或query组优先的工作分配，Cube与Vector侧使用同一规则；S6/B4命中前者。
+这些条件位于PTO算子内，报告中的历史label只标记数据采集批次。
 
 - key已经按两个query共用，QK已为M128；S6的逻辑key装载量从24降到12 MiB/请求，
   相比Native 4+2的8 MiB仍有差距。不能继续把v7的单query重复读取作为现状。

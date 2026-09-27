@@ -9,12 +9,12 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 七档v4/v7对照已补齐：128K B4/8/16、8K B16/24/32/40；见
 [矩阵记录](results/csa_native_cube_matrix_20260927/README.md)及验证日志§178。
 用户最新要求：先把Indexer性能赶上Native。已完成[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
-两个query共享key、M128 QK（v8）使128K/B8本体降到894.54 μs、B16降到1292.23 μs；
+当前性能版已统一为累计保留v8～v10改动的一套V10实现；128K/B8本体为889.22 μs、B16为1304.87 μs；
 B16仍有约1.58 ms的尾部，不能凭均值接近Native宣布赶上。
-8K使用片上FP16 Score与Cube head规约（v9），B24本体为1039.98 μs；
+8K使用片上FP16 Score与Cube head规约，V10的B24本体为1026.25 μs；
 小batch完整leaf负载均衡（v10）使128K/B4本体降到716.34 μs。
 8K/B16、B32、B40已补测为790.88/1196.32/1428.20 μs；B40仍慢于同轮Native约1.61%。
-已验证实现及阶段结果见[阶段汇总](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)和日志§179～183；
+七档现在均有同一套V10算子源码的实测，按输入选择策略而非切换历史版本；结果见[统一V10报告](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)和日志§179～184；
 Top-K融合候选v11编译失败已撤回，padding及整模型验收按下列任务补缺口。
 完整路径仍有拆分和写回成本，未做分配器改造或新的16卡验收。
 过程和历史结论保留在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，旧版本可查 Git；
@@ -35,6 +35,9 @@ Top-K融合候选v11编译失败已撤回，padding及整模型验收按下列�
 6. 四张目标权重 `wq_a / wq_b / wo_a / wo_b` 的 NZ 都继续推进；
    编译限制须先在算子侧寻找解法，未实现不能写成完成。
 7. mode=1、mode=2 均评估后选定性能更好的主口径；ND 独立实现与回归入口长期保留。
+8. 性能版保留一套当前实现，长短上下文、batch及工作量策略在PTO算子内部按实际输入选择，
+   不按测试档位切换历史源码版本。阶段对比使用同一套算子源码的实测结果；
+   旧版数据可以用于优化过程对照，不能仅凭计算分支未变就代替当前版本实测。
 
 **当前执行优先级（2026-09-27 用户最新调整）**：先在 CSA 外用现有 Torch API 将 Indexer cache
 拆成连续 key/scale，CSA 内直接消费并更新，CSA 后只写回当前 slot；单列拆分、本体、写回及完整路径耗时。
@@ -564,7 +567,7 @@ mode=2 暂作后续优化候选，mode=1 原始结果保留；两档之间的差
 | D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 迁移单卡验证、16 卡 token/DSpark 看护通过；worker 级确定性配置修正见日志 131 |
 | D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 已验证矩阵采集及token/DSpark看护；PTO性能未达标，B4已定位MoE等齐和GMM增量，原因缺口另列 |
 
-D2 近期工作（按Native/PTO Indexer差距推进，详见验证日志 §178～183及专项对照）：
+D2 近期工作（按Native/PTO Indexer差距推进，详见验证日志 §178～184及专项对照）：
 
 1. 两query共享key和M128 QK已保留，S6按2+2+2划分；B4/B8/B16已测，B4另修复完整leaf负载不均。
    后续评估Native的4+2分组及跨块驻留；遵守L0C容量和NZ pitch，保留长尾数据。

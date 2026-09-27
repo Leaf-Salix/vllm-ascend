@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""汇总已保留Indexer改动；复用未受影响档位，不重新占卡。"""
+"""汇总同一套V10算子代码的实测结果；保留各档实际采集来源。"""
 
 import importlib.util
 import json
@@ -9,10 +9,10 @@ ROOT = Path(__file__).resolve().parent
 BASELINE = ROOT.parent / "csa_native_cube_matrix_20260927"
 CASES = (
     (131072, 4, "v10_native_balance", "0ed4f926"),
-    (131072, 8, "v8_native_pair", "05e0b518"),
-    (131072, 16, "v8_native_pair", "05e0b518"),
+    (131072, 8, "v10_unified_followup", "79aaed98"),
+    (131072, 16, "v10_unified_followup", "79aaed98"),
     (8192, 16, "v10_short_followup", "0ed4f926"),
-    (8192, 24, "v9_native_short", "c553120c"),
+    (8192, 24, "v10_unified_followup", "79aaed98"),
     (8192, 32, "v10_short_followup", "0ed4f926"),
     (8192, 40, "v10_short_followup", "0ed4f926"),
 )
@@ -33,6 +33,8 @@ def main():
             "batch": batch,
             "label": label,
             "revision": revision,
+            "implementation": "v10",
+            "operator_revision": "0ed4f926",
             "timing": summary.summarize_timing(case / "timing/report.json"),
             "v7": summary.summarize_timing(old),
             "swimlane": [
@@ -43,16 +45,19 @@ def main():
         rows.append(row)
     (ROOT / "indexer_progress_v10.json").write_text(json.dumps(rows, indent=2) + "\n")
     lines = [
-        "# 已保留Indexer优化：v8～v10阶段结果（2026-09-27）",
+        "# 统一V10实现：七档单卡实测（2026-09-27）",
         "",
-        "旧七档v4/v7矩阵保持独立；本表汇总后续已保留实现，不含编译失败的v11。",
-        "复用未受后续改动影响的v8长上下文B8/B16、v9短上下文B24；其余使用v10。",
-        "这不是统一重跑的严格A/B，Native列为各行本次测量的同轮Native；源码和原始报告见JSON。",
+        "七档均实测同一套V10性能版算子源码（0ed4f926），长短上下文与batch策略由算子内部选择。",
+        "V10累计保留两query共享key/M128 QK、8K片上FP16/Cube规约和小batch工作量均衡。",
+        "128K/B8、B16及8K/B24补测使用checkout 79aaed98，其生产算子源码与0ed4f926无差异；",
+        "其余四档复用已经实测的V10记录。label仅标识采集目录，revision记录采集checkout。",
+        "数据来自不同采集批次，Native列为各行同轮测量；不再用V8/V9测量代替V10实测。",
+        "旧七档V4/V7基线独立保留，编译失败的V11未合入正式入口。",
         "正式layer 4权重、合成输入和历史，单卡S6/TP1/mode2/atomic1/确定性0/EPLB关闭。",
         "复用第二个CSA层metadata，5次预热、20次无profiler采样。单位μs。",
         "本体含HC_pre→norm→CSA→HC_post，完整PTO另含拆分和slot写回；各阶段独立测量。",
         "",
-        "| H / B | 候选 | 同轮Native | v7本体 | 本次本体 | 对v7 | 对Native | 本体p50 / p95 | 完整PTO |",
+        "| H / B | 实现 | 同轮Native | v7本体 | V10本体 | 对v7 | 对Native | 本体p50 / p95 | 完整PTO |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
@@ -60,11 +65,21 @@ def main():
         body = timing["body"]
         mean, native, old = body["mean_us"], timing["native"]["mean_us"], row["v7"]["body"]["mean_us"]
         lines.append(
-            f"| {row['history'] // 1024}K / {row['batch']} | {row['label']} | {native:.2f} | {old:.2f} | "
+            f"| {row['history'] // 1024}K / {row['batch']} | V10 | {native:.2f} | {old:.2f} | "
             f"{mean:.2f} | {100 * (mean / old - 1):+.2f}% | {100 * (mean / native - 1):+.2f}% | "
             f"{body['p50_us']:.2f} / {body['p95_us']:.2f} | {timing['pto_full']['mean_us']:.2f} |"
         )
     lines += [
+        "",
+        "统一策略由`decode_indexer.py`根据输入决定，调用者不选择V8/V9/V10：",
+        "",
+        "| 输入条件 | 算子内策略 |",
+        "| --- | --- |",
+        "| 本batch最大压缩历史≥2048行 | 两query共享key、M128 QK、片上FP16 Score与Cube head规约；"
+        "本矩阵8K/128K均走此路 |",
+        "| 本batch最大压缩历史<2048行 | 保留较短历史的Vector规约路径 |",
+        "| Cube路径query总数<48（S6时B<8） | leaf优先分派，均衡完整leaf工作量；本矩阵128K/B4命中 |",
+        "| Cube路径query总数≥48 | query组优先分派；其余六档命中 |",
         "",
         "PTO泳道独立采集；Score→publish含调度和交叠，不等于独占算术耗时。",
         "",
