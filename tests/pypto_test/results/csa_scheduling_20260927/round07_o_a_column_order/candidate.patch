@@ -1,0 +1,24 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -185,8 +185,8 @@
+     ) as pa_tid:
+         pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
+         pa_unit = pl.tile.get_block_idx()
+-        pa_rb = pa_unit // (O_LORA // A_COL_TILE)  # row block outermost
+-        nf = pa_unit % (O_LORA // A_COL_TILE)
++        pa_rb = pa_unit % proj_a_rows
++        nf = pa_unit // proj_a_rows
+         pa_r0 = pa_rb * PROJ_A_ROW_TILE
+         pa_rows = pl.min(PROJ_A_ROW_TILE, t_dim - pa_r0)
+         pa_src0 = row_base_o + pa_r0
+@@ -231,8 +231,8 @@
+     ) as pa_tid:
+         pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
+         pa_unit = pl.tile.get_block_idx()
+-        pa_rb = pa_unit // (O_LORA // A_COL_TILE)  # row block outermost
+-        nf = pa_unit % (O_LORA // A_COL_TILE)
++        pa_rb = pa_unit % proj_a_rows
++        nf = pa_unit // proj_a_rows
+         pa_r0 = pa_rb * PROJ_A_ROW_TILE
+         pa_rows = pl.min(PROJ_A_ROW_TILE, t_dim - pa_r0)
+         pa_src0 = row_base_o + pa_r0
