@@ -3,7 +3,7 @@
 更新：2026-09-27。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
 
 当前优先级：最小粒度优化PTO场景的入口搬运/出口写回；Native分配、算子与调度流程保持原样，精度版保持原算术。
-入口仍按请求逻辑页序复制成连续key/scale，Score整块读取；Compressor已在PTO内部直接提交Native slot，外部Torch写回已删除。
+当前PTO内部以0/64B GM视图按Native物理页读取，采用N128 key加载交错QK/WS；入口历史复制与外部Torch写回均已删除。
 现阶段所有功能/性能测试关闭EPLB，单卡代表case优先，最后再做正式权重16卡整模型。
 
 前十轮及追加五轮调度均已完成（10/10＋5/5）。前十轮仅保留第5轮轻Indexer Compressor交叠。
@@ -17,14 +17,13 @@
 [两档完整数据、缓存padding成本与泳道](results/csa_incore_20260927/indexer_score_panel1024/README.md)。
 当前3d1f0f65七档已齐：[最新七档及42张JSON图](results/csa_incore_20260927/final_3d1f0f65/README.md)。
 本体为713.69/870.13/1234.06/790.78/981.25/1122.65/1313.92 μs，均快于同轮Native，但完整PTO均更慢。
-下面07365e52保留为历史基线；当前已保留PTO内部直接更新Native物理slot，消除外部Torch写回。
-新实现两档完整PTO：8K/B16 1079.16→888.64 μs（同轮Native926.94），128K/B16 1645.76→1382.39（Native1301.29）；
-[两档、四窗口泳道及4→3→1→4补位图](results/csa_cache_direct_commit_20260927/README.md)。
-仅修改4个PTO性能文件；Native分配/调度/算子不改。
-随后用内部0/64B GM视图实现零拷贝直读，两档及补位检查通过；8K完整807.47μs，128K完整1396.31μs。
-长档Score核内升至537～565μs、完整均值比保留版慢1.01%、p95变差，候选已撤回，当前仍为bad985a9。
-下一项在PTO内改善页加载/流水，或短档直读、长档紧凑化，保持Native布局，按两档完整路径共同判断。
-[历史复查、新候选补丁和完整结果](results/csa_cache_direct_read_20260927/README.md)。
+下面07365e52及3d1f0f65保留为历史基线；当前进一步保留PTO内部读写Native物理页及N128加载流水。
+两档完整PTO：8K/B16 888.64→797.04μs（Native936.58），128K/B16 1382.39→1343.44（Native1321.69）；
+纯CSA分别801.55→797.04、1261.10→1343.44，长档增加82.34μs，完整路径减少38.94μs。
+用户接受为保留Native布局付出有限本体代价，必须继续逐档列清本体/完整区间收益，不能只报复制消失。
+[两档、四窗口泳道及Cube补位图](results/csa_cache_panel_read_20260927/README.md)。
+当前补齐同源码七档，复用两档正式计时/泳道，另外五档补测，七档都保留Native/PTO profile及四窗口泳道。
+Native分配/调度/算子均不改；性能版删除旧SplitIndexerCache，精度版算术和流程保持原样。
 [完整调度台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。源码参考最新pypto-lib官方main2164563（2026-09-27 depth=1核对）；
 历史725 μs图实际Worker首尾727.98 μs，缺源码和完整配置，只用作参考，不能冒认为最新版同输入A/B。
 
@@ -36,7 +35,7 @@
 
 当前保留的性能改动及证据：
 
-- Indexer连续缓存、Native式FP16 QK＋第二次Cube规约、双query合并规约和片上复用：[核内证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
+- Indexer Native式FP16 QK＋第二次Cube规约、双query合并规约和片上复用（当前已改为内部GM视图直接读Native页）：[核内证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
 - 性能版KV统一宽tile/split-K、Sparse按工作量提前发布KV及跨query流水：[核内差距及保留项](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
 - Q_A/KV连续清零：[代表档和padding证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
 - 重Compressor等待Q_A、轻Indexer交叠及O_A行列并行：[调度台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。
@@ -65,8 +64,8 @@
    旧版数据可以用于优化过程对照，不能仅凭计算分支未变就代替当前版本实测。
 
 **当前执行优先级（2026-09-27 用户最新调整）**：只针对PTO改造vllm-ascend，最小粒度，不改Native流程。
-PTO内直接提交物理slot已完成；纯分页直读已测，长档核内退化，接着优化PTO内部加载策略以取消入口历史复制。
-单列入口、本体及完整路径耗时；本体含已融合的写回，外部写回明确记为已删除。
+PTO内直接读写Native物理页已保留，使用N128加载交错QK/WS；当前补齐七档并继续降低分页读取成本。
+单列本体及完整路径耗时；入口历史复制和外部写回均记为已删除，不能伪造0μs样本。
 key/scale源头分离不等于请求历史连续，不能仅改分配器就删桥接。新候选只补受影响的档位；
 Score长尾仍待解决，不把正常窗口或中位数改善当作阶段完成。精度版算术保持原口径，当前不改分配器。
 [布局与Native影响评估](DSV4_FLASH_CSA_CACHE_SOURCE_SPLIT.md)。
@@ -278,7 +277,7 @@ group_list/tile工作量证据仍待做。图内整数采样完成单卡机制�
 3. FIXPIPE 新增 FP16 舍入，需在单卡记录逐元素/Top-K 误差，再按既定 16 卡输入做 token/DSpark 看护；
    当前零容差诊断差异仍在，不将结构合法、无越界标成精度通过。
 4. 用户最新调整：解除入口拆分/出口写回的暂缓，仅改PTO场景。外部Torch写回已删除且两档完整路径获益；
-   接着评估直接按页读取，复用原Native cache/metadata/slot，不改通用分配与调度。精度版不采用FP16 Score策略。
+   内部直接按页读写已保留，复用原Native cache/metadata/slot，不改通用分配与调度；七档共同判断有限本体代价。精度版不采用FP16 Score策略。
 
 本轮代码提交：连续缓存 `f35c9fc4`、投影分块/缓存策略 `be42f262`、Score 双缓冲 `5523ff0d`。
 证据见 [验证日志 §175](DSV4_FLASH_CSA_VALIDATION_LOG.md#175-上游对照与-csa-本体移植2026-09-27进行中)。

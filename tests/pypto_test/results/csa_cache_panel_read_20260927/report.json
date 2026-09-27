@@ -1,0 +1,1582 @@
+{
+  "retained": true,
+  "decision": "Both complete paths improve against bad985a9; N128 panel loading improves incore versus the prior paged candidate. Score incore remains slower than the old contiguous-cache body; record this tradeoff.",
+  "task_ids": [
+    "task_20260927_213048_1480693352",
+    "task_20260927_213355_17426121650"
+  ],
+  "complete": true,
+  "cases": [
+    {
+      "history": 8192,
+      "batch": 16,
+      "baseline_revision": "bad985a9",
+      "before": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h8192_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 926.9410014152527,
+          "p50_us": 927.3200035095215,
+          "p95_us": 933.2200288772583,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 888.6399954557419,
+          "p50_us": 887.4599933624268,
+          "p95_us": 897.0999717712402,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 801.5490025281906,
+          "p50_us": 798.770010471344,
+          "p95_us": 818.0400133132935,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 98.34899976849556,
+          "p50_us": 98.2699990272522,
+          "p95_us": 99.88000243902206,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0033201414147169413
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 366,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "after": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h8192_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 936.5759968757629,
+          "p50_us": 935.4299902915955,
+          "p95_us": 945.7399845123291,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 797.0419943332672,
+          "p50_us": 793.6099767684937,
+          "p95_us": 813.5799765586853,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 797.0419943332672,
+          "p50_us": 793.6099767684937,
+          "p95_us": 813.5799765586853,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.003320165988998116
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 366,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "binding": {
+        "history_copy_before_csa": false,
+        "native_storage_ptr": 20618298329600,
+        "root_views": {
+          "idx_native_kv_cache": {
+            "shape": [
+              1057,
+              4160
+            ],
+            "stride": [
+              4160,
+              1
+            ],
+            "storage_offset": 128,
+            "storage_ptr": 20618298329600
+          }
+        }
+      },
+      "direct_before": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h8192_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 913.8409972190857,
+          "p50_us": 913.9000177383423,
+          "p95_us": 917.9999828338623,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 807.4730008840561,
+          "p50_us": 806.6399991512299,
+          "p95_us": 823.5999941825867,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 807.4730008840561,
+          "p50_us": 806.6399991512299,
+          "p95_us": 823.5999941825867,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.003320184047675042
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 366,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "direct_before_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h8192_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 809.48,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 242.67999999999998,
+              "first_start_us": 243.17999999999998,
+              "last_start_us": 243.6,
+              "last_end_us": 248.66,
+              "start_spread_us": 0.4200000000000159,
+              "worker_envelope_us": 5.980000000000018,
+              "kernel_mean_us": 5.219999999999999,
+              "setup_mean_us": 0.6999999999999886
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 276.46000000000004,
+              "first_start_us": 277.12,
+              "last_start_us": 277.12,
+              "last_end_us": 284.82000000000005,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 8.360000000000014,
+              "kernel_mean_us": 7.7000000000000455,
+              "setup_mean_us": 0.6599999999999682
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 356.62,
+              "first_start_us": 364.18,
+              "last_start_us": 373.56000000000006,
+              "last_end_us": 418.1,
+              "start_spread_us": 9.380000000000052,
+              "worker_envelope_us": 61.48000000000002,
+              "kernel_mean_us": 48.292500000000004,
+              "setup_mean_us": 2.481666666666657
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 356.64000000000004,
+              "first_start_us": 364.26000000000005,
+              "last_start_us": 373.56000000000006,
+              "last_end_us": 424.16,
+              "start_spread_us": 9.300000000000011,
+              "worker_envelope_us": 67.51999999999998,
+              "kernel_mean_us": 53.26291666666666,
+              "setup_mean_us": 2.5466666666666655
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 837.32,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 254.10000000000002,
+              "first_start_us": 254.90000000000003,
+              "last_start_us": 255.20000000000005,
+              "last_end_us": 259.18,
+              "start_spread_us": 0.30000000000001137,
+              "worker_envelope_us": 5.079999999999984,
+              "kernel_mean_us": 4.079999999999984,
+              "setup_mean_us": 0.950000000000017
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 287.04,
+              "first_start_us": 287.84000000000003,
+              "last_start_us": 287.84000000000003,
+              "last_end_us": 295.70000000000005,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 8.660000000000025,
+              "kernel_mean_us": 7.860000000000014,
+              "setup_mean_us": 0.8000000000000114
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 370.34000000000003,
+              "first_start_us": 372.90000000000003,
+              "last_start_us": 422.74,
+              "last_end_us": 452.58000000000004,
+              "start_spread_us": 49.839999999999975,
+              "worker_envelope_us": 82.24000000000001,
+              "kernel_mean_us": 43.5475,
+              "setup_mean_us": 1.2449999999999974
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 371.82000000000005,
+              "first_start_us": 372.94,
+              "last_start_us": 428.74,
+              "last_end_us": 458.52000000000004,
+              "start_spread_us": 55.80000000000001,
+              "worker_envelope_us": 86.69999999999999,
+              "kernel_mean_us": 45.403333333333336,
+              "setup_mean_us": 0.9437500000000002
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 806.2800000000001,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 241.2,
+              "first_start_us": 241.77999999999997,
+              "last_start_us": 242.5,
+              "last_end_us": 246.21999999999997,
+              "start_spread_us": 0.7200000000000273,
+              "worker_envelope_us": 5.019999999999982,
+              "kernel_mean_us": 4.050000000000011,
+              "setup_mean_us": 0.9399999999999977
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 250.07999999999998,
+              "first_start_us": 250.8,
+              "last_start_us": 250.8,
+              "last_end_us": 260.84,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 10.759999999999991,
+              "kernel_mean_us": 10.039999999999964,
+              "setup_mean_us": 0.7200000000000273
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 360.38,
+              "first_start_us": 365.08,
+              "last_start_us": 374.06,
+              "last_end_us": 422.2,
+              "start_spread_us": 8.980000000000018,
+              "worker_envelope_us": 61.81999999999999,
+              "kernel_mean_us": 47.71,
+              "setup_mean_us": 2.0591666666666577
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 360.38,
+              "first_start_us": 365.2,
+              "last_start_us": 374.08,
+              "last_end_us": 428.16,
+              "start_spread_us": 8.879999999999995,
+              "worker_envelope_us": 67.78000000000003,
+              "kernel_mean_us": 52.312083333333334,
+              "setup_mean_us": 2.4433333333333316
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 806.0600000000001,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 276.59999999999997,
+              "first_start_us": 277.2,
+              "last_start_us": 278.03999999999996,
+              "last_end_us": 281.78,
+              "start_spread_us": 0.839999999999975,
+              "worker_envelope_us": 5.180000000000007,
+              "kernel_mean_us": 4.1299999999999955,
+              "setup_mean_us": 0.5600000000000023
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 288.15999999999997,
+              "first_start_us": 288.71999999999997,
+              "last_start_us": 288.71999999999997,
+              "last_end_us": 296.09999999999997,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 7.939999999999998,
+              "kernel_mean_us": 7.3799999999999955,
+              "setup_mean_us": 0.5600000000000023
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 357.08,
+              "first_start_us": 366.97999999999996,
+              "last_start_us": 367.41999999999996,
+              "last_end_us": 427.62,
+              "start_spread_us": 0.4399999999999977,
+              "worker_envelope_us": 70.54000000000002,
+              "kernel_mean_us": 58.01916666666666,
+              "setup_mean_us": 5.6641666666666595
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 357.09999999999997,
+              "first_start_us": 367.2,
+              "last_start_us": 367.9,
+              "last_end_us": 433.62,
+              "start_spread_us": 0.6999999999999886,
+              "worker_envelope_us": 76.52000000000004,
+              "kernel_mean_us": 62.8175,
+              "setup_mean_us": 5.923333333333333
+            }
+          }
+        }
+      ],
+      "single_native_root_without_history_copy": true,
+      "full_change_pct": -10.307661324144924,
+      "full_vs_native_pct": -14.89831076260274,
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h8192_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 804.68,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 267.1,
+              "first_start_us": 267.54,
+              "last_start_us": 267.66,
+              "last_end_us": 271.88,
+              "start_spread_us": 0.12000000000000455,
+              "worker_envelope_us": 4.779999999999973,
+              "kernel_mean_us": 4.22999999999999,
+              "setup_mean_us": 0.5
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 294.34000000000003,
+              "first_start_us": 294.94,
+              "last_start_us": 294.94,
+              "last_end_us": 302.20000000000005,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 7.860000000000014,
+              "kernel_mean_us": 7.260000000000048,
+              "setup_mean_us": 0.5999999999999659
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 376.98,
+              "first_start_us": 380.48,
+              "last_start_us": 391.84000000000003,
+              "last_end_us": 429.84000000000003,
+              "start_spread_us": 11.360000000000014,
+              "worker_envelope_us": 52.860000000000014,
+              "kernel_mean_us": 37.7175,
+              "setup_mean_us": 2.0616666666666625
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 377.02000000000004,
+              "first_start_us": 380.52000000000004,
+              "last_start_us": 392.08000000000004,
+              "last_end_us": 435.78000000000003,
+              "start_spread_us": 11.560000000000002,
+              "worker_envelope_us": 58.75999999999999,
+              "kernel_mean_us": 42.690416666666664,
+              "setup_mean_us": 2.044166666666668
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 792.8000000000001,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 292.46,
+              "first_start_us": 292.94,
+              "last_start_us": 293.02,
+              "last_end_us": 297.24,
+              "start_spread_us": 0.07999999999998408,
+              "worker_envelope_us": 4.78000000000003,
+              "kernel_mean_us": 4.260000000000019,
+              "setup_mean_us": 0.5100000000000193
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 324.7,
+              "first_start_us": 325.21999999999997,
+              "last_start_us": 325.21999999999997,
+              "last_end_us": 333.09999999999997,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 8.399999999999977,
+              "kernel_mean_us": 7.8799999999999955,
+              "setup_mean_us": 0.5199999999999818
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 349.94,
+              "first_start_us": 356.12,
+              "last_start_us": 365.94,
+              "last_end_us": 404.56,
+              "start_spread_us": 9.819999999999993,
+              "worker_envelope_us": 54.620000000000005,
+              "kernel_mean_us": 39.44583333333335,
+              "setup_mean_us": 2.384166666666656
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 349.96,
+              "first_start_us": 356.18,
+              "last_start_us": 365.35999999999996,
+              "last_end_us": 410.58,
+              "start_spread_us": 9.17999999999995,
+              "worker_envelope_us": 60.620000000000005,
+              "kernel_mean_us": 44.39166666666667,
+              "setup_mean_us": 2.4012499999999974
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 807.74,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 291.72,
+              "first_start_us": 292.18,
+              "last_start_us": 292.20000000000005,
+              "last_end_us": 297.62,
+              "start_spread_us": 0.020000000000038654,
+              "worker_envelope_us": 5.899999999999977,
+              "kernel_mean_us": 5.369999999999976,
+              "setup_mean_us": 0.46999999999999886
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 300.88000000000005,
+              "first_start_us": 301.42,
+              "last_start_us": 301.42,
+              "last_end_us": 308.86,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 7.979999999999961,
+              "kernel_mean_us": 7.439999999999998,
+              "setup_mean_us": 0.5399999999999636
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 364.68,
+              "first_start_us": 370.40000000000003,
+              "last_start_us": 381.04,
+              "last_end_us": 420.6,
+              "start_spread_us": 10.639999999999986,
+              "worker_envelope_us": 55.920000000000016,
+              "kernel_mean_us": 37.44166666666667,
+              "setup_mean_us": 1.9525000000000006
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 364.68,
+              "first_start_us": 370.46000000000004,
+              "last_start_us": 381.14000000000004,
+              "last_end_us": 426.62,
+              "start_spread_us": 10.680000000000007,
+              "worker_envelope_us": 61.94,
+              "kernel_mean_us": 42.281666666666666,
+              "setup_mean_us": 2.0300000000000047
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 791.38,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 238.87999999999997,
+              "first_start_us": 239.34,
+              "last_start_us": 239.35999999999999,
+              "last_end_us": 246.73999999999998,
+              "start_spread_us": 0.01999999999998181,
+              "worker_envelope_us": 7.860000000000014,
+              "kernel_mean_us": 7.289999999999992,
+              "setup_mean_us": 0.4700000000000273
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 268.1,
+              "first_start_us": 269.14000000000004,
+              "last_start_us": 269.14000000000004,
+              "last_end_us": 277.58000000000004,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.480000000000018,
+              "kernel_mean_us": 8.439999999999998,
+              "setup_mean_us": 1.0400000000000205
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 348.6,
+              "first_start_us": 353.48,
+              "last_start_us": 369.52000000000004,
+              "last_end_us": 407.40000000000003,
+              "start_spread_us": 16.04000000000002,
+              "worker_envelope_us": 58.80000000000001,
+              "kernel_mean_us": 37.016666666666666,
+              "setup_mean_us": 0.9916666666666695
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 348.62,
+              "first_start_us": 353.48,
+              "last_start_us": 369.46000000000004,
+              "last_end_us": 413.32000000000005,
+              "start_spread_us": 15.980000000000018,
+              "worker_envelope_us": 64.70000000000005,
+              "kernel_mean_us": 42.00875,
+              "setup_mean_us": 0.9241666666666681
+            }
+          }
+        }
+      ],
+      "previous_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h8192_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 788.48,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 277.06,
+              "first_start_us": 277.5,
+              "last_start_us": 277.64,
+              "last_end_us": 281.8,
+              "start_spread_us": 0.13999999999998636,
+              "worker_envelope_us": 4.740000000000009,
+              "kernel_mean_us": 4.159999999999997,
+              "setup_mean_us": 0.47999999999998977
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 287.06,
+              "first_start_us": 287.58,
+              "last_start_us": 287.58,
+              "last_end_us": 299.02,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 11.95999999999998,
+              "kernel_mean_us": 11.439999999999998,
+              "setup_mean_us": 0.5199999999999818
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 353.65999999999997,
+              "first_start_us": 357.2,
+              "last_start_us": 367.7,
+              "last_end_us": 393.78,
+              "start_spread_us": 10.5,
+              "worker_envelope_us": 40.120000000000005,
+              "kernel_mean_us": 26.986666666666668,
+              "setup_mean_us": 1.74583333333333
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 353.68,
+              "first_start_us": 357.2,
+              "last_start_us": 367.8,
+              "last_end_us": 399.64,
+              "start_spread_us": 10.600000000000023,
+              "worker_envelope_us": 45.95999999999998,
+              "kernel_mean_us": 31.567083333333336,
+              "setup_mean_us": 1.7966666666666693
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 797.5600000000001,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 278.84,
+              "first_start_us": 279.38,
+              "last_start_us": 279.54,
+              "last_end_us": 283.24,
+              "start_spread_us": 0.160000000000025,
+              "worker_envelope_us": 4.400000000000034,
+              "kernel_mean_us": 3.769999999999982,
+              "setup_mean_us": 0.5300000000000296
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 287.02,
+              "first_start_us": 287.56,
+              "last_start_us": 287.56,
+              "last_end_us": 297.08,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 10.060000000000002,
+              "kernel_mean_us": 9.519999999999982,
+              "setup_mean_us": 0.5400000000000205
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 360.68,
+              "first_start_us": 367.42,
+              "last_start_us": 367.9,
+              "last_end_us": 406.2,
+              "start_spread_us": 0.47999999999996135,
+              "worker_envelope_us": 45.51999999999998,
+              "kernel_mean_us": 35.54166666666667,
+              "setup_mean_us": 5.746666666666667
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 360.65999999999997,
+              "first_start_us": 367.58,
+              "last_start_us": 368.12,
+              "last_end_us": 412.06,
+              "start_spread_us": 0.5400000000000205,
+              "worker_envelope_us": 51.400000000000034,
+              "kernel_mean_us": 40.02499999999999,
+              "setup_mean_us": 5.887500000000006
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 793.7800000000001,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 290.36,
+              "first_start_us": 290.94,
+              "last_start_us": 291.06,
+              "last_end_us": 295.06,
+              "start_spread_us": 0.12000000000000455,
+              "worker_envelope_us": 4.699999999999989,
+              "kernel_mean_us": 3.990000000000009,
+              "setup_mean_us": 0.6299999999999955
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 302.2,
+              "first_start_us": 302.72,
+              "last_start_us": 302.72,
+              "last_end_us": 312.46,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 10.259999999999991,
+              "kernel_mean_us": 9.739999999999952,
+              "setup_mean_us": 0.5200000000000387
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 365.88,
+              "first_start_us": 366.44,
+              "last_start_us": 381.2,
+              "last_end_us": 405.08,
+              "start_spread_us": 14.759999999999991,
+              "worker_envelope_us": 39.19999999999999,
+              "kernel_mean_us": 23.03166666666667,
+              "setup_mean_us": 0.5699999999999908
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 365.86,
+              "first_start_us": 366.28000000000003,
+              "last_start_us": 381.24,
+              "last_end_us": 410.84000000000003,
+              "start_spread_us": 14.95999999999998,
+              "worker_envelope_us": 44.98000000000002,
+              "kernel_mean_us": 27.728749999999994,
+              "setup_mean_us": 0.4949999999999986
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 801.34,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 299.0,
+              "first_start_us": 299.52,
+              "last_start_us": 299.54,
+              "last_end_us": 303.98,
+              "start_spread_us": 0.020000000000038654,
+              "worker_envelope_us": 4.980000000000018,
+              "kernel_mean_us": 4.3799999999999955,
+              "setup_mean_us": 0.5300000000000011
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 338.44,
+              "first_start_us": 338.71999999999997,
+              "last_start_us": 338.71999999999997,
+              "last_end_us": 348.04,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.600000000000023,
+              "kernel_mean_us": 9.32000000000005,
+              "setup_mean_us": 0.2799999999999727
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 373.5,
+              "first_start_us": 377.42,
+              "last_start_us": 388.68,
+              "last_end_us": 415.04,
+              "start_spread_us": 11.259999999999991,
+              "worker_envelope_us": 41.54000000000002,
+              "kernel_mean_us": 32.4475,
+              "setup_mean_us": 2.359166666666667
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 373.52,
+              "first_start_us": 377.6,
+              "last_start_us": 388.98,
+              "last_end_us": 420.82,
+              "start_spread_us": 11.379999999999995,
+              "worker_envelope_us": 47.30000000000001,
+              "kernel_mean_us": 36.71166666666666,
+              "setup_mean_us": 2.6495833333333407
+            }
+          }
+        }
+      ],
+      "swimlane_guard_failures": []
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "baseline_revision": "bad985a9",
+      "before": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h131072_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1301.2930035591125,
+          "p50_us": 1301.0200262069702,
+          "p95_us": 1306.2599897384644,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1382.3850095272064,
+          "p50_us": 1353.1000018119812,
+          "p95_us": 1653.0799865722656,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1261.0980033874512,
+          "p50_us": 1180.3399920463562,
+          "p95_us": 1466.6800498962402,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 184.4860002398491,
+          "p50_us": 184.53000485897064,
+          "p95_us": 186.95999681949615,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.0390625,
+          "rmse": 0.004177067220991597
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 670,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "after": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h131072_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1321.687000989914,
+          "p50_us": 1322.380006313324,
+          "p95_us": 1326.1799812316895,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1343.440991640091,
+          "p50_us": 1252.1499991416931,
+          "p95_us": 1590.8000469207764,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1343.440991640091,
+          "p50_us": 1252.1499991416931,
+          "p95_us": 1590.8000469207764,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.0390625,
+          "rmse": 0.004177112080099714
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 670,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "binding": {
+        "history_copy_before_csa": false,
+        "native_storage_ptr": 20618068099072,
+        "root_views": {
+          "idx_native_kv_cache": {
+            "shape": [
+              16417,
+              4160
+            ],
+            "stride": [
+              4160,
+              1
+            ],
+            "storage_offset": 128,
+            "storage_ptr": 20618068099072
+          }
+        }
+      },
+      "direct_before": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h131072_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1325.5829989910126,
+          "p50_us": 1325.689971446991,
+          "p95_us": 1332.4400186538696,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1396.3139951229095,
+          "p50_us": 1333.7200284004211,
+          "p95_us": 1763.5200023651123,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1396.3139951229095,
+          "p50_us": 1333.7200284004211,
+          "p95_us": 1763.5200023651123,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "writeback": {
+          "mean_us": 0.0,
+          "p50_us": 0.0,
+          "p95_us": 0.0,
+          "samples": 0,
+          "eliminated": true
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.0390625,
+          "rmse": 0.0041770475141950725
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 670,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "direct_before_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h131072_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 1342.16,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 245.96,
+              "first_start_us": 246.46,
+              "last_start_us": 246.46,
+              "last_end_us": 252.42,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 6.4599999999999795,
+              "kernel_mean_us": 5.569999999999993,
+              "setup_mean_us": 0.5
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 286.38,
+              "first_start_us": 287.03999999999996,
+              "last_start_us": 287.03999999999996,
+              "last_end_us": 295.21999999999997,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 8.839999999999975,
+              "kernel_mean_us": 8.180000000000007,
+              "setup_mean_us": 0.6599999999999682
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 362.84,
+              "first_start_us": 365.78,
+              "last_start_us": 380.8,
+              "last_end_us": 946.86,
+              "start_spread_us": 15.020000000000039,
+              "worker_envelope_us": 584.02,
+              "kernel_mean_us": 537.4325,
+              "setup_mean_us": 1.0625000000000047
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 362.84,
+              "first_start_us": 365.76,
+              "last_start_us": 380.86,
+              "last_end_us": 958.4800000000001,
+              "start_spread_us": 15.100000000000023,
+              "worker_envelope_us": 595.6400000000001,
+              "kernel_mean_us": 547.4279166666666,
+              "setup_mean_us": 1.0420833333333388
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 1352.28,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 236.7,
+              "first_start_us": 237.38,
+              "last_start_us": 237.62,
+              "last_end_us": 242.36,
+              "start_spread_us": 0.2400000000000091,
+              "worker_envelope_us": 5.660000000000025,
+              "kernel_mean_us": 4.640000000000015,
+              "setup_mean_us": 0.8000000000000114
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 249.94,
+              "first_start_us": 250.42000000000002,
+              "last_start_us": 250.42000000000002,
+              "last_end_us": 259.3,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.360000000000014,
+              "kernel_mean_us": 8.879999999999995,
+              "setup_mean_us": 0.4800000000000182
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 361.4,
+              "first_start_us": 366.76,
+              "last_start_us": 378.38,
+              "last_end_us": 959.94,
+              "start_spread_us": 11.620000000000005,
+              "worker_envelope_us": 598.5400000000001,
+              "kernel_mean_us": 548.6341666666667,
+              "setup_mean_us": 2.50666666666667
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 361.4,
+              "first_start_us": 366.82,
+              "last_start_us": 378.3,
+              "last_end_us": 971.6400000000001,
+              "start_spread_us": 11.480000000000018,
+              "worker_envelope_us": 610.2400000000001,
+              "kernel_mean_us": 558.55,
+              "setup_mean_us": 2.613333333333338
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 1366.16,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 328.6,
+              "first_start_us": 329.1,
+              "last_start_us": 331.56000000000006,
+              "last_end_us": 334.96000000000004,
+              "start_spread_us": 2.4600000000000364,
+              "worker_envelope_us": 6.360000000000014,
+              "kernel_mean_us": 3.8100000000000023,
+              "setup_mean_us": 0.5500000000000114
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 340.9,
+              "first_start_us": 341.4,
+              "last_start_us": 341.4,
+              "last_end_us": 352.65999999999997,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 11.759999999999991,
+              "kernel_mean_us": 11.259999999999991,
+              "setup_mean_us": 0.5
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 358.6,
+              "first_start_us": 365.79999999999995,
+              "last_start_us": 366.24,
+              "last_end_us": 967.58,
+              "start_spread_us": 0.44000000000005457,
+              "worker_envelope_us": 608.98,
+              "kernel_mean_us": 565.1016666666667,
+              "setup_mean_us": 5.3950000000000005
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 358.6,
+              "first_start_us": 366.08000000000004,
+              "last_start_us": 369.28,
+              "last_end_us": 979.22,
+              "start_spread_us": 3.199999999999932,
+              "worker_envelope_us": 620.62,
+              "kernel_mean_us": 574.7670833333334,
+              "setup_mean_us": 5.7383333333333235
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_read/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 1361.96,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 312.34000000000003,
+              "first_start_us": 312.82000000000005,
+              "last_start_us": 313.14000000000004,
+              "last_end_us": 317.42,
+              "start_spread_us": 0.3199999999999932,
+              "worker_envelope_us": 5.079999999999984,
+              "kernel_mean_us": 4.409999999999968,
+              "setup_mean_us": 0.4800000000000182
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 325.22,
+              "first_start_us": 325.64000000000004,
+              "last_start_us": 325.64000000000004,
+              "last_end_us": 334.72,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.5,
+              "kernel_mean_us": 9.079999999999984,
+              "setup_mean_us": 0.4200000000000159
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 366.90000000000003,
+              "first_start_us": 370.72,
+              "last_start_us": 378.96000000000004,
+              "last_end_us": 961.3199999999998,
+              "start_spread_us": 8.240000000000009,
+              "worker_envelope_us": 594.4199999999998,
+              "kernel_mean_us": 556.7875,
+              "setup_mean_us": 1.7483333333333395
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 366.92,
+              "first_start_us": 370.90000000000003,
+              "last_start_us": 379.24,
+              "last_end_us": 972.9599999999999,
+              "start_spread_us": 8.339999999999975,
+              "worker_envelope_us": 606.04,
+              "kernel_mean_us": 566.4154166666667,
+              "setup_mean_us": 2.229583333333334
+            }
+          }
+        }
+      ],
+      "single_native_root_without_history_copy": true,
+      "full_change_pct": -2.817161472290186,
+      "full_vs_native_pct": 1.645926050107449,
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h131072_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 1272.5800000000002,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 273.38,
+              "first_start_us": 274.14000000000004,
+              "last_start_us": 274.70000000000005,
+              "last_end_us": 278.22,
+              "start_spread_us": 0.5600000000000023,
+              "worker_envelope_us": 4.840000000000032,
+              "kernel_mean_us": 3.7799999999999727,
+              "setup_mean_us": 0.620000000000033
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 285.96000000000004,
+              "first_start_us": 286.54,
+              "last_start_us": 286.54,
+              "last_end_us": 295.16,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.199999999999989,
+              "kernel_mean_us": 8.620000000000005,
+              "setup_mean_us": 0.5799999999999841
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 353.26000000000005,
+              "first_start_us": 362.46000000000004,
+              "last_start_us": 374.02000000000004,
+              "last_end_us": 865.14,
+              "start_spread_us": 11.560000000000002,
+              "worker_envelope_us": 511.87999999999994,
+              "kernel_mean_us": 466.1775,
+              "setup_mean_us": 2.5374999999999943
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 353.22,
+              "first_start_us": 362.56,
+              "last_start_us": 374.14000000000004,
+              "last_end_us": 876.76,
+              "start_spread_us": 11.580000000000041,
+              "worker_envelope_us": 523.54,
+              "kernel_mean_us": 476.11958333333337,
+              "setup_mean_us": 2.7249999999999965
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 1304.44,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 249.16000000000003,
+              "first_start_us": 249.74,
+              "last_start_us": 250.06,
+              "last_end_us": 254.44,
+              "start_spread_us": 0.3199999999999932,
+              "worker_envelope_us": 5.279999999999973,
+              "kernel_mean_us": 4.5,
+              "setup_mean_us": 0.7199999999999989
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 264.6,
+              "first_start_us": 265.04,
+              "last_start_us": 265.04,
+              "last_end_us": 274.76,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 10.159999999999968,
+              "kernel_mean_us": 9.71999999999997,
+              "setup_mean_us": 0.4399999999999977
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 381.52000000000004,
+              "first_start_us": 387.32,
+              "last_start_us": 394.94,
+              "last_end_us": 895.88,
+              "start_spread_us": 7.6200000000000045,
+              "worker_envelope_us": 514.3599999999999,
+              "kernel_mean_us": 475.295,
+              "setup_mean_us": 3.4633333333333405
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 381.54,
+              "first_start_us": 387.48,
+              "last_start_us": 394.8,
+              "last_end_us": 907.5,
+              "start_spread_us": 7.319999999999993,
+              "worker_envelope_us": 525.96,
+              "kernel_mean_us": 485.1879166666667,
+              "setup_mean_us": 3.673333333333332
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 1265.72,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 269.58000000000004,
+              "first_start_us": 270.12,
+              "last_start_us": 270.16,
+              "last_end_us": 275.56,
+              "start_spread_us": 0.040000000000020464,
+              "worker_envelope_us": 5.979999999999961,
+              "kernel_mean_us": 5.409999999999997,
+              "setup_mean_us": 0.5599999999999739
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 283.62,
+              "first_start_us": 284.22,
+              "last_start_us": 284.22,
+              "last_end_us": 292.98,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.360000000000014,
+              "kernel_mean_us": 8.759999999999991,
+              "setup_mean_us": 0.6000000000000227
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 340.58000000000004,
+              "first_start_us": 351.32000000000005,
+              "last_start_us": 361.96000000000004,
+              "last_end_us": 860.1,
+              "start_spread_us": 10.639999999999986,
+              "worker_envelope_us": 519.52,
+              "kernel_mean_us": 469.24583333333334,
+              "setup_mean_us": 4.898333333333333
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 340.6,
+              "first_start_us": 351.72,
+              "last_start_us": 362.22,
+              "last_end_us": 871.7200000000001,
+              "start_spread_us": 10.5,
+              "worker_envelope_us": 531.1200000000001,
+              "kernel_mean_us": 479.06666666666666,
+              "setup_mean_us": 5.160833333333339
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_panel_read/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 1287.8,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 277.02,
+              "first_start_us": 277.65999999999997,
+              "last_start_us": 277.68,
+              "last_end_us": 282.88,
+              "start_spread_us": 0.020000000000038654,
+              "worker_envelope_us": 5.860000000000014,
+              "kernel_mean_us": 4.700000000000017,
+              "setup_mean_us": 0.6400000000000148
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 301.02,
+              "first_start_us": 301.53999999999996,
+              "last_start_us": 301.53999999999996,
+              "last_end_us": 310.56,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 9.54000000000002,
+              "kernel_mean_us": 9.020000000000039,
+              "setup_mean_us": 0.5199999999999818
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 374.0,
+              "first_start_us": 379.09999999999997,
+              "last_start_us": 391.26,
+              "last_end_us": 884.44,
+              "start_spread_us": 12.160000000000025,
+              "worker_envelope_us": 510.44000000000005,
+              "kernel_mean_us": 464.58666666666664,
+              "setup_mean_us": 2.1066666666666714
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 373.98,
+              "first_start_us": 379.14,
+              "last_start_us": 391.38,
+              "last_end_us": 896.0200000000001,
+              "start_spread_us": 12.240000000000009,
+              "worker_envelope_us": 522.0400000000001,
+              "kernel_mean_us": 474.73625,
+              "setup_mean_us": 2.2429166666666682
+            }
+          }
+        }
+      ],
+      "previous_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h131072_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 1121.52,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 274.08,
+              "first_start_us": 274.65999999999997,
+              "last_start_us": 274.86,
+              "last_end_us": 279.91999999999996,
+              "start_spread_us": 0.20000000000004547,
+              "worker_envelope_us": 5.839999999999975,
+              "kernel_mean_us": 5.139999999999986,
+              "setup_mean_us": 0.6800000000000068
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 302.62,
+              "first_start_us": 303.15999999999997,
+              "last_start_us": 303.15999999999997,
+              "last_end_us": 314.18,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 11.560000000000002,
+              "kernel_mean_us": 11.020000000000039,
+              "setup_mean_us": 0.5399999999999636
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 351.26,
+              "first_start_us": 352.34,
+              "last_start_us": 360.78,
+              "last_end_us": 689.5,
+              "start_spread_us": 8.439999999999998,
+              "worker_envelope_us": 338.24,
+              "kernel_mean_us": 319.22333333333336,
+              "setup_mean_us": 1.2291666666666548
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 351.26,
+              "first_start_us": 352.56,
+              "last_start_us": 360.97999999999996,
+              "last_end_us": 700.9200000000001,
+              "start_spread_us": 8.419999999999959,
+              "worker_envelope_us": 349.6600000000001,
+              "kernel_mean_us": 328.665,
+              "setup_mean_us": 1.4491666666666714
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 1155.76,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 288.86,
+              "first_start_us": 289.3,
+              "last_start_us": 292.08,
+              "last_end_us": 296.0,
+              "start_spread_us": 2.7799999999999727,
+              "worker_envelope_us": 7.139999999999986,
+              "kernel_mean_us": 4.1200000000000045,
+              "setup_mean_us": 0.46999999999999886
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 332.38,
+              "first_start_us": 332.84,
+              "last_start_us": 332.84,
+              "last_end_us": 344.02,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 11.639999999999986,
+              "kernel_mean_us": 11.180000000000007,
+              "setup_mean_us": 0.45999999999997954
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 361.4,
+              "first_start_us": 374.28,
+              "last_start_us": 374.78,
+              "last_end_us": 717.08,
+              "start_spread_us": 0.5,
+              "worker_envelope_us": 355.68000000000006,
+              "kernel_mean_us": 323.8275,
+              "setup_mean_us": 6.244166666666672
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 361.46,
+              "first_start_us": 374.68,
+              "last_start_us": 375.34,
+              "last_end_us": 728.5,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 367.04,
+              "kernel_mean_us": 333.07958333333335,
+              "setup_mean_us": 6.600833333333338
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 1158.48,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 285.06000000000006,
+              "first_start_us": 285.58000000000004,
+              "last_start_us": 285.76000000000005,
+              "last_end_us": 291.32000000000005,
+              "start_spread_us": 0.18000000000000682,
+              "worker_envelope_us": 6.259999999999991,
+              "kernel_mean_us": 5.3799999999999955,
+              "setup_mean_us": 0.5300000000000011
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 299.50000000000006,
+              "first_start_us": 300.16,
+              "last_start_us": 300.16,
+              "last_end_us": 311.90000000000003,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 12.399999999999977,
+              "kernel_mean_us": 11.740000000000009,
+              "setup_mean_us": 0.6599999999999682
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 360.54,
+              "first_start_us": 375.98,
+              "last_start_us": 376.42,
+              "last_end_us": 718.76,
+              "start_spread_us": 0.4399999999999977,
+              "worker_envelope_us": 358.21999999999997,
+              "kernel_mean_us": 323.3858333333333,
+              "setup_mean_us": 4.418333333333339
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 360.56000000000006,
+              "first_start_us": 376.24,
+              "last_start_us": 377.12000000000006,
+              "last_end_us": 730.1999999999999,
+              "start_spread_us": 0.8800000000000523,
+              "worker_envelope_us": 369.6399999999999,
+              "kernel_mean_us": 332.7366666666667,
+              "setup_mean_us": 4.663749999999999
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/cache_direct_commit/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 1128.16,
+          "tasks": {
+            "kv_and_cache_write": {
+              "blocks": 2,
+              "first_receive_us": 284.26,
+              "first_start_us": 284.8,
+              "last_start_us": 284.82,
+              "last_end_us": 290.90000000000003,
+              "start_spread_us": 0.01999999999998181,
+              "worker_envelope_us": 6.640000000000043,
+              "kernel_mean_us": 6.050000000000011,
+              "setup_mean_us": 0.5500000000000114
+            },
+            "idx_kv_scale_commit": {
+              "blocks": 1,
+              "first_receive_us": 295.18,
+              "first_start_us": 295.72,
+              "last_start_us": 295.72,
+              "last_end_us": 306.6,
+              "start_spread_us": 0.0,
+              "worker_envelope_us": 11.420000000000016,
+              "kernel_mean_us": 10.879999999999995,
+              "setup_mean_us": 0.5400000000000205
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 357.6,
+              "first_start_us": 362.32,
+              "last_start_us": 372.26,
+              "last_end_us": 698.12,
+              "start_spread_us": 9.939999999999998,
+              "worker_envelope_us": 340.52,
+              "kernel_mean_us": 312.97333333333336,
+              "setup_mean_us": 2.096666666666659
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 357.62,
+              "first_start_us": 362.34000000000003,
+              "last_start_us": 372.22,
+              "last_end_us": 709.52,
+              "start_spread_us": 9.879999999999995,
+              "worker_envelope_us": 351.9,
+              "kernel_mean_us": 322.5783333333333,
+              "setup_mean_us": 2.101249999999998
+            }
+          }
+        }
+      ],
+      "swimlane_guard_failures": []
+    }
+  ],
+  "padding": {
+    "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_cache_panel_read_20260927/padding/report.json",
+    "status": "PASS",
+    "active_batches": [
+      4,
+      3,
+      1,
+      4
+    ],
+    "failures": []
+  },
+  "scope": "B16 layer4 formal weights plus synthetic history; metadata reuse, mode2, atomic1, no EPLB; five warmups and 20 unprofiled samples; four independent DFX windows.",
+  "limits": "Only AIC N128 panel loading changed relative to the direct-read candidate; new B4/H32767 atomic0/deterministic1 padding run targets the Cube path; its unchanged Vector fallback reuses the prior candidate evidence. History copy and external commit absent. Native zero-tolerance differences independent of guards. Not seven-case/16-card acceptance."
+}

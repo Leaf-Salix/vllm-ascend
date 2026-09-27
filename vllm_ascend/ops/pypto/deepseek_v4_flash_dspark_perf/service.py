@@ -3,8 +3,6 @@
 
 import torch
 
-from ..deepseek_v4_flash_dspark.native_storage import table_storage
-from .indexer_cache import SplitIndexerCache
 from .native_adapter import NativeCSACall, prepare_weights
 from .service_config import MAX_BATCH_SIZE, QUERY_TOKENS
 
@@ -42,7 +40,6 @@ class CSAServiceRuntime:
         self.scores = torch.empty((tokens, 512), dtype=torch.float32, device=device)
         self.topk = torch.empty((tokens, 512), dtype=torch.int32, device=device)
         self._hadamard = None
-        self._indexer_cache = None
 
     def eligible(self, context, hidden, positions):
         metadata = context.attn_metadata
@@ -130,13 +127,6 @@ class CSAServiceRuntime:
             for name in ("compressed", "indexer")
         }
         compressed, swa, state, indexer_state, indexer_key, indexer_scale = kv_cache
-        if self._indexer_cache is None or not self._indexer_cache.matches(indexer_key, indexer_scale):
-            if torch.npu.is_current_stream_capturing():
-                raise RuntimeError("Split indexer cache requires warmup before graph capture")
-            self._indexer_cache = SplitIndexerCache(
-                indexer_key, indexer_scale, batch_capacity=self.batch_capacity,
-                table_columns=table_storage(metadata["indexer"].decode.block_table).shape[1],
-            )
         groups = {
             "swa": (metadata["swa"], (swa,)),
             "compressed": (metadata["compressed"], (compressed,)),
@@ -148,7 +138,6 @@ class CSAServiceRuntime:
         call = NativeCSACall(
             self.operators, self.weights, hidden, positions, groups, layer_name=self.layer_name,
             compact_metadata=compact,
-            indexer_cache=self._indexer_cache,
             buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "x_out": output},
         )
         # A single fused call publishes all KV writes. Notify the connector on

@@ -26,6 +26,8 @@ from .config import (
     FLASH as M,
 )
 from .layout import (
+    INDEXER_KEY_BYTES,
+    INDEXER_PAGE_BYTES_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
 )
 
@@ -82,7 +84,7 @@ IDX_MAX_ROWS = MAX_SEQ_LEN // COMPRESS_RATIO
 
 IDX_MAX_BLOCKS = (IDX_MAX_ROWS + BLOCK_SIZE - 1) // BLOCK_SIZE
 
-IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
+IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
 
 CACHE_TILE = min(64, BLOCK_SIZE)
 
@@ -446,8 +448,8 @@ def indexer_score_topk_native_cube(
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
@@ -458,11 +460,17 @@ def indexer_score_topk_native_cube(
     score_tile: pl.constexpr,
 ):
     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
-    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
-    batch_count = pl.tensor.dim(kv_seq_lens, 0)
-    request_rows = cache_pages // batch_count * BLOCK_SIZE
-    kv_cache_i8_flat = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
-    kv_scale_rows = pl.reshape(idx_kv_scale, [batch_count, request_rows])
+    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
+    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+    key_rows = cache_bytes // IDX_HEAD_DIM
+    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+    idx_kv_cache_shift64 = pl.reshape(
+        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+    )
     coefficients, coefficients_tid = indexer_head_coefficients(
         qr_hadamard_scale_dq,
         weights,
@@ -527,34 +535,42 @@ def indexer_score_topk_native_cube(
                         pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                     buf_score_begin = buf_score_step * (score_tile // 2)
                     buf_transfer_row = buf_worker * 4 + buf_score_step % 2 * 2
-                    buf_kv_i8 = pl.tile.create(
-                        [score_tile, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
-                    )
-                    for buf_key_lane in pl.unroll(2):
-                        buf_kv_i8 = pl.gather_row(
-                            buf_kv_i8,
-                            kv_cache_i8_flat,
-                            [buf_key_lane * (score_tile // 2), 0],
-                            [
-                                buf_batch_idx * request_rows
-                                + buf_logical_begin
-                                + buf_score_begin
-                                + buf_key_lane * buf_lane_span,
-                                0,
-                            ],
-                            [(score_tile // 2), IDX_HEAD_DIM],
-                        )
                     buf_previous_l1 = pl.tile.create(
                         [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                     )
                     for buf_qk_panel in pl.unroll(score_tile // NATIVE_QLI_QK_COLS):
                         buf_panel_col = buf_qk_panel * NATIVE_QLI_QK_COLS
-                        buf_key_panel = pl.tile.extract(
-                            pl.tile.transpose_view(buf_kv_i8),
-                            0,
-                            buf_panel_col,
-                            [IDX_HEAD_DIM, NATIVE_QLI_QK_COLS],
-                            target_memory=pl.MemorySpace.Right,
+                        # Native QLI streams N128 key panels, overlapping the next
+                        # MTE2 load with QK/WS instead of loading the entire N768/1024.
+                        buf_panel_keys = pl.tile.create(
+                            [NATIVE_QLI_QK_COLS, IDX_HEAD_DIM], dtype=pl.INT8,
+                            target_memory=pl.MemorySpace.Mat,
+                        )
+                        for buf_key_page in pl.unroll(NATIVE_QLI_QK_COLS // BLOCK_SIZE):
+                            buf_key_row = (
+                                buf_logical_begin + buf_score_begin
+                                + (buf_panel_col // (score_tile // 2)) * buf_lane_span
+                                + buf_panel_col % (score_tile // 2) + buf_key_page * BLOCK_SIZE
+                            )
+                            buf_safe_page = pl.min(
+                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                            )
+                            buf_physical_page = pl.max(
+                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                            )
+                            buf_native_byte = buf_physical_page * native_page_bytes
+                            if buf_native_byte % IDX_HEAD_DIM == 0:
+                                buf_panel_keys = pl.gather_row(
+                                    buf_panel_keys, idx_kv_cache, [buf_key_page * BLOCK_SIZE, 0],
+                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                )
+                            else:
+                                buf_panel_keys = pl.gather_row(
+                                    buf_panel_keys, idx_kv_cache_shift64, [buf_key_page * BLOCK_SIZE, 0],
+                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                )
+                        buf_key_panel = pl.tile.move(
+                            pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right,
                         )
                         buf_scores_l1 = pl.tile.create(
                             [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
@@ -635,11 +651,22 @@ def indexer_score_topk_native_cube(
                         pl.system.sync_set(
                             SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
                         )
-                        buf_scale_half = pl.load(
-                            kv_scale_rows,
-                            [buf_batch_idx, buf_logical_begin + buf_score_begin + buf_lane_begin],
-                            [1, (score_tile // 2)],
-                        )
+                        buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
+                        for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
+                            buf_scale_row = (
+                                buf_logical_begin + buf_score_begin + buf_lane_begin + buf_scale_page * BLOCK_SIZE
+                            )
+                            buf_scale_safe_page = pl.min(
+                                buf_scale_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                            )
+                            buf_scale_physical_page = pl.max(
+                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
+                            )
+                            buf_scale_bytes = pl.gather_row(
+                                buf_scale_bytes, idx_native_kv_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
+                                [buf_scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
+                            )
+                        buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
                         for buf_query_lane in pl.unroll(2):
                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
@@ -699,8 +726,7 @@ def indexer_score_topk_forest(
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
@@ -712,12 +738,17 @@ def indexer_score_topk_forest(
 ):
     """Score and select half-leaves, then merge their exact Top-K rows."""
     b_dim = pl.tensor.dim(idx_block_table, 0)
-    # The Torch bridge orders all pages by request and logical page before CSA.
-    # The two AIV lanes can each load one contiguous 192-row key range.
-    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
-    request_rows = cache_pages // b_dim * BLOCK_SIZE
-    kv_cache_i8_flat = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
-    kv_scale_rows = pl.reshape(idx_kv_scale, [b_dim, request_rows])
+    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
+    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+    key_rows = cache_bytes // IDX_HEAD_DIM
+    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+    idx_kv_cache_shift64 = pl.reshape(
+        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+    )
     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
@@ -733,8 +764,8 @@ def indexer_score_topk_forest(
                 qr_hadamard_i8,
                 qr_hadamard_scale_dq,
                 weights,
-                idx_kv_cache,
-                idx_kv_scale,
+                idx_native_kv_cache,
+                idx_block_table,
                 position_ids,
                 kv_seq_lens,
                 score_arena,
@@ -749,8 +780,8 @@ def indexer_score_topk_forest(
                 qr_hadamard_i8,
                 qr_hadamard_scale_dq,
                 weights,
-                idx_kv_cache,
-                idx_kv_scale,
+                idx_native_kv_cache,
+                idx_block_table,
                 position_ids,
                 kv_seq_lens,
                 score_arena,
@@ -810,13 +841,25 @@ def indexer_score_topk_forest(
                         read_begin = score_begin * (1 + single_leaf)
                         kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8)
                         for key_lane in pl.unroll(2):
-                            kv_i8 = pl.gather_row(
-                                kv_i8,
-                                kv_cache_i8_flat,
-                                [key_lane * SCORE_LANE_ROWS, 0],
-                                [batch_idx * request_rows + logical_begin + read_begin + key_lane * lane_stride, 0],
-                                [SCORE_LANE_ROWS, IDX_HEAD_DIM],
-                            )
+                            for key_page in pl.range(SCORE_LANE_ROWS // BLOCK_SIZE):
+                                key_row = logical_begin + read_begin + key_lane * lane_stride + key_page * BLOCK_SIZE
+                                safe_page = pl.min(key_row // BLOCK_SIZE, pl.max((cache_len - 1) // BLOCK_SIZE, 0))
+                                physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [batch_idx, safe_page]), pl.INDEX), 0
+                                )
+                                native_byte = physical_page * native_page_bytes
+                                if native_byte % IDX_HEAD_DIM == 0:
+                                    kv_i8 = pl.gather_row(
+                                        kv_i8, idx_kv_cache,
+                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                                else:
+                                    kv_i8 = pl.gather_row(
+                                        kv_i8, idx_kv_cache_shift64,
+                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
                         # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
                         # 每个 score tile 一次 FP32->FP16 转换和一次 Cube matmul。
                         # 精度版那条链（NATIVE_QLI_QK_SCALE + FP16 rint + Cube）是为了
@@ -827,9 +870,18 @@ def indexer_score_topk_forest(
                             lane_begin = aiv_id * lane_stride
                             lane_valid_rows = pl.max(pl.min(valid_count - read_begin - lane_begin, SCORE_LANE_ROWS), 0)
                             scale_begin = logical_begin + read_begin + lane_begin
-                            kv_scale = kv_scale_rows[
-                                batch_idx : batch_idx + 1, scale_begin : scale_begin + SCORE_LANE_ROWS
-                            ]
+                            scale_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * 2], dtype=pl.INT8)
+                            for scale_page in pl.range(SCORE_LANE_ROWS // BLOCK_SIZE):
+                                scale_logical_page = pl.min((scale_begin + scale_page * BLOCK_SIZE) // BLOCK_SIZE,
+                                                            pl.max((cache_len - 1) // BLOCK_SIZE, 0))
+                                scale_physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [batch_idx, scale_logical_page]), pl.INDEX), 0
+                                )
+                                scale_bytes = pl.gather_row(
+                                    scale_bytes, idx_native_kv_cache, [0, scale_page * BLOCK_SIZE * 2],
+                                    [scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
+                                )
+                            kv_scale = pl.reinterpret_view(scale_bytes, pl.FP16)
                             score_shard = pl.aiv_shard(score_i32)
                             score_fp32 = pl.cast(score_shard, target_type=pl.FP32, mode="none")
                             score_fp32 = pl.maximum(score_fp32, 0.0)
@@ -1142,8 +1194,7 @@ def indexer_weights_score(
     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
@@ -1161,8 +1212,7 @@ def indexer_weights_score(
         qr_hadamard_i8,
         qr_hadamard_scale_dq,
         weights,
-        idx_kv_cache,
-        idx_kv_scale,
+        idx_native_kv_cache,
         idx_block_table,
         position_ids,
         kv_seq_lens,
@@ -1186,8 +1236,7 @@ def indexer(
     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     hadamard: pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
@@ -1216,8 +1265,7 @@ def indexer(
         weights_proj,
         qr_hadamard_i8,
         qr_hadamard_scale_dq,
-        idx_kv_cache,
-        idx_kv_scale,
+        idx_native_kv_cache,
         idx_block_table,
         topk_scores,
         topk_idxs,

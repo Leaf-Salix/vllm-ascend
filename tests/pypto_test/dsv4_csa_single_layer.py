@@ -375,65 +375,6 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
         restore(fixture)
 
 
-def measure_split_graph_phases(fixture, call, *, iters, warmup):
-    """独立图诊断入口复制及含直接写回的CSA；总成本以完整图计时为准。"""
-    import torch
-
-    phases = (call.prepare_indexer_cache, call.run_kernel)
-    names = ("split", "csa_body")
-    restore(fixture)
-    call.prepare_indexer_cache()
-    torch.npu.synchronize()
-    graphs = []
-    for phase in phases:
-        graph = torch.npu.NPUGraph()
-        with torch.npu.graph(graph):
-            phase()
-        graphs.append(graph)
-    samples = {name: [] for name in names}
-    events = [(torch.npu.Event(enable_timing=True), torch.npu.Event(enable_timing=True)) for _ in names]
-    initial = {name: group["initial"].to(group["allocation"].device)
-               for name, group in fixture["groups"].items()}
-    for iteration in range(warmup + iters):
-        for name, group in fixture["groups"].items():
-            group["allocation"].copy_(initial[name])
-        for graph, (start, end) in zip(graphs, events):
-            start.record()
-            graph.replay()
-            end.record()
-        torch.npu.synchronize()
-        if iteration >= warmup:
-            for name, (start, end) in zip(names, events):
-                elapsed = start.elapsed_time(end) * 1000
-                if not math.isfinite(elapsed) or elapsed <= 0:
-                    raise ValueError(f"Invalid split-cache phase timing: {name}={elapsed}")
-                samples[name].append(elapsed)
-    checks = guard_checks(fixture)
-    if any(check["status"] != "PASS" for check in checks.values()):
-        raise ValueError("Split-cache phase graphs changed metadata or storage outside valid slots")
-    cache = call.indexer_cache
-    slots = call.args["idx_slot_mapping"]
-    keys, scales = cache.slot_updates(slots, call.args["kv_seq_lens"], call.args["idx_query_start_loc"])
-    valid = (slots[:, 0] >= 0) & (slots[:, 1] >= 0)
-    pages, offsets = slots[valid, 0].long(), slots[valid, 1].long()
-    if not torch.equal(cache.native_key[pages, offsets], keys[valid]) or not torch.equal(
-        cache.native_scale[pages, offsets], scales[valid]
-    ):
-        raise ValueError("Split-cache slot commit did not restore the Native cache contents")
-    return {
-        "scope": "两张独立图分别计时；CSA本体包含核内直接写回；不相加替代完整图实测",
-        "native_commit_inside_csa": True,
-        "slot_writeback": {"samples_us": [], "us_mean": 0.0, "us_p50": 0.0,
-                           "us_p95": 0.0, "eliminated": True},
-        "guards": checks, "native_slot_updates_equal": True,
-        "cache_bytes": cache.key.numel() + cache.scale.numel() * cache.scale.element_size(),
-        **{name: {"samples_us": values, "us_mean": statistics.mean(values),
-                  "us_p50": statistics.median(values),
-                  "us_p95": sorted(values)[math.ceil(0.95 * len(values)) - 1]}
-           for name, values in samples.items()},
-    }
-
-
 def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
                            profile_dir=None):
     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
@@ -723,10 +664,19 @@ def run(args, report):
             layer_name=fixture["groups"]["compressed"]["prefix"],
             compact_metadata=fixture["compact"],
         )
+        report["indexer_cache_binding"] = {
+            "history_copy_before_csa": hasattr(call, "prepare_indexer_cache"),
+            "native_storage_ptr": groups["indexer"][1][0].untyped_storage().data_ptr(),
+            "root_views": {
+                name: {"shape": list(value.shape), "stride": list(value.stride()),
+                       "storage_offset": value.storage_offset(),
+                       "storage_ptr": value.untyped_storage().data_ptr()}
+                for name, value in call.args.items()
+                if name in ("idx_kv_cache", "idx_kv_cache_shift64", "idx_native_kv_cache", "idx_kv_scale")
+            },
+        }
         restore(fixture)
         if args.save_case:
-            if hasattr(call, "prepare_indexer_cache"):
-                call.prepare_indexer_cache()
             ordered = {name: call.args[name] for name in module.decode_csa_tp1_layer_test.param_names}
             meta, payload = capture_tensors(
                 ordered,
@@ -784,16 +734,11 @@ def run(args, report):
         if args.swimlane:
             from dsv4_csa_single_card_bench import _export_swimlane
 
-            # Each window contains one root invocation. For split-cache graph
-            # diagnostics, Torch preparation stays outside the window;
-            # direct Native-slot writes are included in the root invocation.
-            split_cache = hasattr(call, "prepare_indexer_cache")
-            run_root = call.run_kernel if split_cache else call
+            # One root invocation includes all Native cache reads and writes.
+            run_root = call
 
             def reset_swimlane():
                 restore(fixture)
-                if split_cache:
-                    call.prepare_indexer_cache()
 
             replay = run_root
             if args.swimlane_graph:
@@ -908,10 +853,6 @@ def run(args, report):
                 profile_dir=args.output / "profile/pto" if args.profile else None,
             )
             timing["native_over_pto_p50"] = timing["native"]["us_p50"] / timing["pto"]["us_p50"]
-            if hasattr(call, "prepare_indexer_cache"):
-                timing["split_cache_phases"] = measure_split_graph_phases(
-                    fixture, call, iters=args.timing_iters, warmup=args.timing_warmup,
-                )
             timing["status"] = "MEASURED"
 
 

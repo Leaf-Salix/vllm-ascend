@@ -5,6 +5,11 @@
 
 ## 结论
 
+当前保留PTO内部0/64B GM视图＋N128 key加载交错QK/WS，已消除入口历史复制和外部写回。
+Native原交错布局、分配、页表、生命周期及默认流程全部不改；源头分离仅保留为历史评估备选。
+用户接受有限的纯CSA代价来避免改Native；七档须分别报告本体增量和完整路径收益。
+
+
 **key/scale 在初始化时分成连续的两个视图，可以做成局部修改；但这不等于每个请求的历史连续。**
 现有桥接还按 block table 重排历史页，所以不能只修改分配布局就删除 load/commit 并保持当前 Score 寻址。
 此前“确认本体收益后，分配时分离即可完全去掉适配成本”的说法缺少这个前提，应撤回该简化结论。
@@ -26,7 +31,7 @@ Native 的 QLI 和 scatter 原本就分别接收 key/scale，并使用各自 str
 
 - [runner `_adjust_kv_layout`](../../vllm_ascend/worker/model_runner_v1.py) 用 `as_strided` 创建每页交错的两个 view。
   当前 key 的页 stride=4160 INT8 元素，scale 的页 stride=2080 FP16 元素。
-- [SplitIndexerCache.load](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/indexer_cache.py)
+- 3d1f0f65的 `SplitIndexerCache.load`（已删除，历史代码见Git）
   先用页表取得物理页号，再用两次 `index_select` 搬成按请求连续的历史；额外复制尾部保护页。
 - [Score](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)
   直接用 `request * request_rows + logical_row`，一次取384/512等连续行。
@@ -132,3 +137,11 @@ Native分配、算子、页表、slot与调度代码均未修改，precision入�
 已保存候选补丁并恢复bad985a9，入口复制仍在。下一步优先在PTO内部改善分页DMA/流水，
 或短档直读、长档内部紧凑化，继续共用原Native分配；不把分配布局改造作为必要前提。
 [本轮结果与全部泳道](results/csa_cache_direct_read_20260927/README.md)。
+
+## 7. 当前保留：N128分页加载流水，完全取消外部桥接
+
+继续借鉴Native按128列加载key并交错QK/WS；保持原页布局，PTO内部0/64B GM视图直接读取并提交物理slot。
+8K/B16完整888.64→797.04，128K/B16 1382.39→1343.44μs；纯CSA分别−4.51/+82.34μs。
+长档本体增加6.53%，完整路径减少2.82%，用户接受这一有限代价以避免改变vllm-ascend缓存流程。
+两档保护区/索引检查和B4/H32767同图4→3→1→4通过，Native零容差差异仍在；当前补齐七档。
+[完整区间、本体、核内、测试边界及全部泳道](results/csa_cache_panel_read_20260927/README.md)。
