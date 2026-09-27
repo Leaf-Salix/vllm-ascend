@@ -1,0 +1,42 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
+@@ -43,6 +43,7 @@
+     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
+     tile_rows: pl.Scalar[pl.INDEX],
+     qproj_dep: pl.Scalar[pl.TASK_ID],
++    sync_launch: pl.constexpr = False,
+ ):
+     """ND 版：N 索引直接用 `pl.range` 的循环变量，与上游同形。
+ 
+@@ -54,6 +55,7 @@
+         QPROJ_WORKERS,
+         name_hint="qproj_matmul",
+         deps=[qproj_dep],
++        sync_start=sync_launch,
+     ) as qproj_tid:
+         # Match upstream weight streaming; arithmetic is unchanged.
+         pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
+@@ -86,11 +88,12 @@
+     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
+     tile_rows: pl.Scalar[pl.INDEX],
+     qproj_dep: pl.Scalar[pl.TASK_ID],
++    sync_launch: pl.constexpr = False,
+ ):
+     """Use upstream's full-K resident weight and compact tail matmul on Native NZ."""
+     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+     qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+-    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
++    with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep], sync_start=sync_launch) as qproj_tid:
+         # Match upstream weight streaming; arithmetic is unchanged.
+         pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
+         qproj_worker = pl.tile.get_block_idx()
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -644,6 +644,7 @@
+                 q_proj_i32,
+                 tile_rows,
+                 qproj_dep,
++                True,
+             )
+             q_proj_q_dequant(
+                 wq_b_scale,

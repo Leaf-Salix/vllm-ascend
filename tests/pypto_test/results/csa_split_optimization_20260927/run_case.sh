@@ -7,7 +7,7 @@ batch="${3:?batch}"
 kind="${4:-timing}"
 workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
-source_repo="$repo"
+source_repo="${5:-$repo}"
 if [[ "$label" == v8_native_pair ]]; then
     source_repo="$workspace/.cache/csa-native-v8-05e0b518"
 fi
