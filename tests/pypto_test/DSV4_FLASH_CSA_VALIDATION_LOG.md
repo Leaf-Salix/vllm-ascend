@@ -8181,3 +8181,18 @@ Native控制925.906→934.391μs（+0.92%），不将全部差额当作候选净
 局部Sparse更接近Native，不等于完整CSA的主要差异已解决。该候选不合入、不再安排16卡，保留补丁与必要证据。
 随后用独立HC权重/输入的单卡诊断检查pre/norm、gates和同输入post，不加载完整attention/MoE：
 task_20260928_012144_372486520594正在运行。此项用于决定下一项算术干预，不提供性能成绩。
+
+## 260. HC post同输入一致；下一候选恢复WO-B整token量化合同（2026-09-28）
+
+HC诊断初次因直接加载checkpoint FP32 norm权重触发same-dtype cast错误；实际模型会copy_到BF16参数。
+只修正诊断输入类型，task_20260928_012327_376775325293退出0：
+Native pre两次mixed/post/comb均相同；PTO pre+norm 995/393216个差异、RMSE1.1585e-5；
+post gate/comb RMSE6.8401e-6/2.1839e-6；PTO post给同Native输入/gate后1572864元素完全一致。
+Native post仅换PTO gate后RMSE0.000157192，但这是独立合成attention输出，不能与整层误差直接相减归因。
+pre的小误差也可能被后续放大；当前不改HC。[同输入证据](results/csa_hc_diagnostic_20260928/README.md)。
+
+性能版WO-B目前沿pypto-lib的每组amax/scale、组内先反量化再FP32相加；Native则WO-A先BF16，
+整token8192列统一标度，先合并整数再反量化。这是明确的算法差别，不等于性能版理论精度更差。
+新隔离候选只迁入已有精度版的该算术，保留性能版自适应M/N分块、NZ读取、原Native cache，未合入。
+跨组标度依赖可能损失流水；task_20260928_012807_25358029066先做B16整层与B3固定图尾块，
+有收益依据后才决定是否需要整模型。[补丁与命令](results/csa_oproj_token_20260928/README.md)。

@@ -63,7 +63,10 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    [干预及全部样本](results/csa_source_split_ab_20260927/ordered_atomic0/README.md)。
    累计softmax/BF16 round候选局部RMSE下降36.10%、B3尾块通过，但完整CSA786.75→803.29μs，
    整层RMSE基本没变，因此不合入、不做16卡扩测；[候选与边界](results/csa_softmax_cumulative_20260928/README.md)。
-   下一步以单卡同输入隔离HC pre/post和归一化，定位整层误差的主要来源，再选择有依据的算术干预。
+   HC同输入诊断：post逐元素一致；pre/norm有995/393216差异，gate独立引入残差RMSE约0.000157，
+   不直接外推成完整误差归因，也不改HC；[诊断](results/csa_hc_diagnostic_20260928/README.md)。
+   当前单卡评估WO-B整token量化：迁入精度版Native BF16/标度/整数合并规则，保留性能版NZ与分块；
+   [差异依据及代价边界](results/csa_oproj_token_20260928/README.md)。
 2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
    继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
    Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。

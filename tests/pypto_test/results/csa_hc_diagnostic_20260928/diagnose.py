@@ -38,7 +38,11 @@ def main():
     for name in ("hc_attn_fn", "hc_attn_scale", "hc_attn_base", "attn_norm.weight"):
         key = f"layers.4.{name}"
         with safe_open(checkpoint / index[key], framework="pt", device="cpu") as handle:
-            weights[name] = handle.get_tensor(key).to(device).contiguous()
+            value = handle.get_tensor(key)
+        # The model creates RMSNorm parameters in the BF16 model dtype and
+        # copy_ casts checkpoint FP32; HC parameters are explicitly FP32.
+        dtype = torch.bfloat16 if name == "attn_norm.weight" else torch.float32
+        weights[name] = value.to(device=device, dtype=dtype).contiguous()
     torch.manual_seed(1024)
     torch.npu.manual_seed(1024)
     x = torch.randn((96, 4, 4096), device=device, dtype=torch.bfloat16)
