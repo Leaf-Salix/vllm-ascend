@@ -253,5 +253,27 @@
       "end_us": 1056.62
     }
   ],
-  "interpretation": "AIV_24/25 run merge before Score. AIC_0 receives no Score, AIC_3 receives two; test disabling Score producer early resolution, not merge producer."
+  "scheduler_events": [
+    {
+      "core": 3,
+      "task": "indexer_score_topk_native_pair_aic_spmd(r2t22)",
+      "dispatch_us": 348.3
+    },
+    {
+      "core": 3,
+      "task": "indexer_score_topk_native_pair_aic_spmd(r2t22)",
+      "dispatch_us": 362.28
+    },
+    {
+      "core": 24,
+      "task": "indexer_topk_query_merge_spmd(r3t0)",
+      "dispatch_us": 363.2
+    },
+    {
+      "core": 25,
+      "task": "indexer_topk_query_merge_spmd(r3t0)",
+      "dispatch_us": 363.2
+    }
+  ],
+  "interpretation": "Duplicate Score dispatched to busy AIC_3 at 362.28 us, before merge dispatch at 363.20 us. Merge waiting and Score imbalance coexist; merge cannot be asserted to cause the earlier duplicate dispatch."
 }

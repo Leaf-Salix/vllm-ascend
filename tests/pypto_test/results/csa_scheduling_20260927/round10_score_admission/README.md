@@ -6,7 +6,8 @@
 
 重测依据不是重复无效试验：此前仅测8K/B40。此次新128K基底坏窗口中，AIV_24/25提前接merge等待约674 μs，
 AIC_0无Score、AIC_3连续执行两份Score。见[原始事件提取](baseline_tail_evidence.json)与[提取脚本](diagnose_baseline.py)。
-这是一个坏窗口的直接时序观察，不是对所有长尾的充分因果证明。
+后续Scheduler View核对：第二份Score在362.28 μs派给忙AIC_3，merge在363.20 μs才派发。
+因此不能反向认定merge造成该重复派发；上面的Worker时序只能证明两种现象共存。
 
 A3 device0、S6/TP1、正式第4层权重+合成输入历史、第二CSA层metadata复用、mode2/atomic1/deterministic0，无EPLB。
 128K/B16与8K/B16各5预热/20无profiler采样，另外各4张DFX。任务task_20260927_185849_33482364519退出0，覆盖两档。
