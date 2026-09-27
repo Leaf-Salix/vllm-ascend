@@ -403,11 +403,12 @@ def indexer_head_coefficients(
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
     weights_tid: pl.Scalar[pl.TASK_ID],
-) -> tuple[pl.Tensor[[T_PAD * NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS], pl.FP16], pl.Scalar[pl.TASK_ID]]:
-    """Native FP16 inputs and product, broadcast for the 16-row Cube minimum."""
-    # Keep coefficients in owned GM/L1 storage: a cross-core pipe slot cannot
-    # remain live while the same slot transports each candidate score tile.
-    coefficients = pl.create_tensor([T_PAD * NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS], dtype=pl.FP16)
+) -> tuple[pl.Tensor[[T_PAD // 2 * NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS], pl.FP16], pl.Scalar[pl.TASK_ID]]:
+    """把两个query的FP16系数放在前两行的对角块，合并两次head规约。"""
+    coefficients = pl.create_tensor(
+        [T_PAD // 2 * NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS], dtype=pl.FP16
+    )
+    coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
     with pl.spmd(
         TOPK_QUERY_WORKERS,
         name_hint="indexer_head_coefficients",
@@ -416,26 +417,26 @@ def indexer_head_coefficients(
     ) as coefficients_tid:
         coefficient_worker = pl.tile.get_block_idx()
         coefficient_count = pl.tensor.dim(position_ids, 0)
-        for coefficient_query in pl.range(coefficient_worker, coefficient_count, TOPK_QUERY_WORKERS):
-            coefficient_head_begin = coefficient_query * IDX_N_HEADS
-            query_scale = pl.reshape(
-                qr_hadamard_scale_dq[coefficient_head_begin : coefficient_head_begin + IDX_N_HEADS, 0:1],
-                [1, IDX_N_HEADS],
+        for coefficient_pair in pl.range(coefficient_worker, coefficient_count // 2, TOPK_QUERY_WORKERS):
+            coefficient_rows = pl.tile.full(
+                [NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS], dtype=pl.FP16, value=0.0
             )
-            query_weight = weights[coefficient_query : coefficient_query + 1, 0:IDX_N_HEADS]
-            # Performance projections retain FP32 outputs. Round each input as
-            # Native's FP16 QLI ABI does, then round the product to FP16.
-            query_scale_half = pl.cast(query_scale, pl.FP16, mode="rint")
-            query_weight_half = pl.cast(query_weight, pl.FP16, mode="rint")
-            head_coefficient = pl.mul(query_scale_half, query_weight_half)
-            coefficient_rows = pl.col_expand_mul(
-                pl.full([NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS], dtype=pl.FP32, value=1.0),
-                pl.cast(head_coefficient, pl.FP32),
-            )
-            coefficient_row = coefficient_query * NATIVE_QLI_WEIGHT_ROWS
-            coefficients[coefficient_row : coefficient_row + NATIVE_QLI_WEIGHT_ROWS, :] = pl.cast(
-                coefficient_rows, pl.FP16
-            )
+            pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
+            for coefficient_lane in pl.unroll(2):
+                coefficient_query = coefficient_pair * 2 + coefficient_lane
+                query_scale = pl.load(
+                    coefficient_scales, [0, coefficient_query * IDX_N_HEADS], [1, IDX_N_HEADS]
+                )
+                query_weight = pl.load(weights, [coefficient_query, 0], [1, IDX_N_HEADS])
+                # 与Native ABI一致：两个输入先舍入FP16，乘积再保留FP16。
+                query_scale_half = pl.cast(query_scale, pl.FP16, mode="rint")
+                query_weight_half = pl.cast(query_weight, pl.FP16, mode="rint")
+                head_coefficient = pl.mul(query_scale_half, query_weight_half)
+                pl.store(
+                    head_coefficient,
+                    [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane, coefficient_lane * IDX_N_HEADS],
+                    coefficients,
+                )
     return coefficients, coefficients_tid
 
 
@@ -513,10 +514,12 @@ def indexer_score_topk_native_cube(
                 )
                 buf_coefficients_l1 = pl.load(
                     coefficients,
-                    [buf_query * NATIVE_QLI_WEIGHT_ROWS, 0],
-                    [2 * NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS],
+                    [buf_query // 2 * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS],
                     target_memory=pl.MemorySpace.Mat,
                 )
+                buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
+                buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
                 for buf_score_step in pl.range(buf_score_iters):
                     if buf_score_step >= 2:
                         pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
@@ -539,21 +542,6 @@ def indexer_score_topk_native_cube(
                             ],
                             [BUFFERED_SCORE_LANE_TILE, IDX_HEAD_DIM],
                         )
-                    buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
-                    buf_coefficient0 = pl.tile.extract(
-                        buf_coefficients_l1,
-                        0,
-                        0,
-                        [NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS],
-                        target_memory=pl.MemorySpace.Left,
-                    )
-                    buf_coefficient1 = pl.tile.extract(
-                        buf_coefficients_l1,
-                        NATIVE_QLI_WEIGHT_ROWS,
-                        0,
-                        [NATIVE_QLI_WEIGHT_ROWS, IDX_N_HEADS],
-                        target_memory=pl.MemorySpace.Left,
-                    )
                     buf_previous_l1 = pl.tile.create(
                         [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                     )
@@ -570,35 +558,19 @@ def indexer_score_topk_native_cube(
                             [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                         )
                         if buf_qk_panel > 0:
-                            buf_previous0 = pl.tile.extract(
-                                buf_previous_l1,
-                                0,
-                                0,
-                                [IDX_N_HEADS, NATIVE_QLI_QK_COLS],
+                            buf_previous_pair = pl.tile.extract(
+                                buf_previous_l1, 0, 0, [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS],
                                 target_memory=pl.MemorySpace.Right,
                             )
-                            buf_previous1 = pl.tile.extract(
-                                buf_previous_l1,
-                                IDX_N_HEADS,
-                                0,
-                                [IDX_N_HEADS, NATIVE_QLI_QK_COLS],
-                                target_memory=pl.MemorySpace.Right,
-                            )
-                            # 当前 QK 与前一块的两个 WS 同时存活，避免 L0 复用强制串行。
+                            # QK和上一panel的双query规约同时存活；WS从两次K64变为一次K128。
                             buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
-                            buf_reduced0 = pl.tile.matmul(buf_coefficient0, buf_previous0)
-                            buf_reduced1 = pl.tile.matmul(buf_coefficient1, buf_previous1)
+                            buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
                             buf_scores_l1 = pl.tile.assemble(
                                 buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
                             )
                             pl.store(
-                                pl.set_validshape(buf_reduced0, 1, NATIVE_QLI_QK_COLS),
+                                pl.set_validshape(buf_reduced_pair, 2, NATIVE_QLI_QK_COLS),
                                 [buf_transfer_row, buf_panel_col - NATIVE_QLI_QK_COLS],
-                                buf_score_transfer,
-                            )
-                            pl.store(
-                                pl.set_validshape(buf_reduced1, 1, NATIVE_QLI_QK_COLS),
-                                [buf_transfer_row + 1, buf_panel_col - NATIVE_QLI_QK_COLS],
                                 buf_score_transfer,
                             )
                         else:
@@ -607,26 +579,14 @@ def indexer_score_topk_native_cube(
                                 buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
                             )
                         buf_previous_l1 = buf_scores_l1
-                    buf_last0 = pl.tile.extract(
-                        buf_previous_l1, 0, 0, [IDX_N_HEADS, NATIVE_QLI_QK_COLS], target_memory=pl.MemorySpace.Right
-                    )
-                    buf_last1 = pl.tile.extract(
-                        buf_previous_l1,
-                        IDX_N_HEADS,
-                        0,
-                        [IDX_N_HEADS, NATIVE_QLI_QK_COLS],
+                    buf_last_pair = pl.tile.extract(
+                        buf_previous_l1, 0, 0, [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS],
                         target_memory=pl.MemorySpace.Right,
                     )
-                    buf_last_scores0 = pl.tile.matmul(buf_coefficient0, buf_last0)
-                    buf_last_scores1 = pl.tile.matmul(buf_coefficient1, buf_last1)
+                    buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
                     pl.store(
-                        pl.set_validshape(buf_last_scores0, 1, NATIVE_QLI_QK_COLS),
+                        pl.set_validshape(buf_last_scores, 2, NATIVE_QLI_QK_COLS),
                         [buf_transfer_row, BUFFERED_SCORE_TILE - NATIVE_QLI_QK_COLS],
-                        buf_score_transfer,
-                    )
-                    pl.store(
-                        pl.set_validshape(buf_last_scores1, 1, NATIVE_QLI_QK_COLS),
-                        [buf_transfer_row + 1, BUFFERED_SCORE_TILE - NATIVE_QLI_QK_COLS],
                         buf_score_transfer,
                     )
                     pl.system.sync_set(

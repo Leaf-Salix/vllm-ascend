@@ -11,7 +11,10 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 用户最新要求：先比较七档核内差异并吸收Native策略，再优化PTO调度。
 用户追加保留规则：必要功能检查通过且incore task有明确收益就保留，不以CSA本体暂时未改善为撤回理由。
 本体/长尾独立记录；基本可做的核内优化完成后转入调度，最终仍按整模型forward和完整CSA区间验收。
-先回查此前因本体未改善撤回、但核内获益的候选，尤其Indexer双query合并head规约。
+已恢复并保留Indexer双query合并head规约，当前128K/B16 Score AIC为335.59–346.15 μs；
+[代表档证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
+用户限定：本轮只再做三项核内候选——Indexer合并规约/片上复用、Q_A/KV连续清零、量化投影写回。
+每项必要代表档验证后按核内收益决定保留，三项收尾即开始调度优化，不扩展核内候选清单。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：
 128K重点为Indexer复用与Top-K；8K优先处理Sparse Attention的KV搬运和核内流水衔接。
 Indexer已有[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
