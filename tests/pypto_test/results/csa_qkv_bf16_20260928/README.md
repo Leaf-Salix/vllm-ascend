@@ -61,3 +61,39 @@ HCCL=false、EPLB关闭，严格整批入场后各取warmup后10步pure decode f
 独立模型工作树`.cache/csa-qkv-bf16-model-2a740c1f`＝2a740c1f＋测试入场修复8dd737f4＋本目录候选。
 保留原Native cache布局；当前没有ordered/source-split布局补丁，不能与前轮分离布局的成绩直接作单因素相减。
 只有真实forward、P95和token/DSpark达到要求才考虑保留；局部误差下降本身不是整模型优势。
+
+## EP16结果：本候选不合入
+
+task_20260928_024844_45752012651退出0；两档都使用同轮重新采集的Native控制。
+正式warmup后10步，无profiler，各16rank等权均值：
+
+| 档位 | Native/PTO forward ms | PTO变化 | Native/PTO P95 ms | Native/PTO最慢rank均值 ms |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 72.071/76.510 | +6.16% | 73.023/77.301 | 72.421/76.988 |
+| 8K/B40 | 104.243/103.593 | −0.62% | 107.595/105.494 | 104.332/103.679 |
+
+229376输出token零差异，32组rank的DSpark统计全部一致；两侧10步CPU位置数组一致，
+不将其外推为所有设备草稿输入相同。PTO P95/P50为1.009/1.019，没有观察到异常尾部。
+长档明显落后、短档小收益不足以宣布阶段完成；不合入、不扩大七档。
+[完整结果及口径](model/RESULTS.md)、[逐rank原始计时样本和配置](model/forward.json)。
+
+独立rank0三步Level0 profile已离线解析，未新增设备测试：
+
+| 指标 ms/step | 128K Native/PTO | 8K Native/PTO |
+| --- | ---: | ---: |
+| 21层CSA body区间之和 | 26.845/27.547 | 29.819/28.145 |
+| 43层FFN区间之和 | 34.701/32.358 | 57.089/56.439 |
+| 两类专家GMM任务duration之和 | 6.211/7.497 | 10.368/11.068 |
+| 第一层FFN区间 | 2.567/1.056 | 1.920/1.301 |
+| 主图区间 | 76.318/74.401 | 105.917/103.025 |
+
+长档模型内CSA均值1278.310/1313.516μs（PTO慢2.75%），短档1419.946/1342.344μs（快5.47%）。
+专家GMM仍增加1.286/0.700ms，但FFN区间反而缩短；通信到达等待与可重叠任务不能混算。
+本轮长档profile主图与正式10步forward的胜负反转，首层EP等待明显不同；
+因此这份独立profile不能闭合正式计时的4.439ms差距，不能拿profile结果覆盖正式结论。
+相较此前ordered的GMM增量有所缩小，但cache布局和轮次不同，尚不能作为QKV的单因素因果结论。
+
+[profile分解](model/model_gap_rank0.json)、逐层任务明细
+[128K](model/h131072/ffn_breakdown_rank0.json)/[8K](model/h8192/ffn_breakdown_rank0.json)。
+原始PyTorch JSON在各`model/h*/b*/{native,pto}/trace/rank0/*/ASCEND_PROFILER_OUTPUT/trace_view.json`。
+这些路径属于本次独立profile轮；不冒充无profiler主计时或单卡DFX泳道。
