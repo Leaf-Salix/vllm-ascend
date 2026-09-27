@@ -24,3 +24,5 @@ A3 device0，S6/TP1，第4层正式权重＋合成输入/历史，第二CSA meta
 这不是整模型token/DSpark验收。
 
 [补丁](candidate.patch)、[命令](run.sh)、[统计脚本](summarize.py)、[四窗口与原始路径](report.json)。
+
+阶段收尾：第15轮统一策略短档仍退化，五轮后未将本候选加入生产；见[统一实测](../round15_score_adaptive_admission/README.md)。

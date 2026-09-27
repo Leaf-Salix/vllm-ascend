@@ -1,0 +1,107 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -147,6 +147,7 @@
+ TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
+ 
+ TOPK_SCORE_WORKERS = 24  # Top-K score workers
++TOPK_LONG_SCORE_WORKERS = 2 * TOPK_SCORE_WORKERS
+ 
+ SCORE_TILE = 384
+ 
+@@ -454,6 +455,7 @@
+     qh_quant_tid: pl.Scalar[pl.TASK_ID],
+     weights_tid: pl.Scalar[pl.TASK_ID],
+     cache_write_tid: pl.Scalar[pl.TASK_ID],
++    score_workers: pl.constexpr,
+ ):
+     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
+     cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+@@ -469,10 +471,10 @@
+         weights_tid,
+     )
+     # 每个 worker 两个通信槽，每槽包含两个 query 的分数。
+-    buf_score_transfer = pl.create_tensor([TOPK_SCORE_WORKERS * 4, BUFFERED_SCORE_TILE], dtype=pl.FP32)
++    buf_score_transfer = pl.create_tensor([score_workers * 4, BUFFERED_SCORE_TILE], dtype=pl.FP32)
+     buf_score_ffts = pl.create_tensor([256], dtype=pl.INT64)
+     with pl.spmd(
+-        TOPK_SCORE_WORKERS,
++        score_workers,
+         name_hint="indexer_score_topk_native_pair",
+         deps=[coefficients_tid, cache_write_tid],
+         allow_early_resolve=True,
+@@ -486,8 +488,8 @@
+         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
+         pl.system.set_ffts(buf_score_ffts)
+         # S=6，每组两个 query 不跨请求；使用较晚 query 的可见范围准备共享 key。
+-        for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, TOPK_SCORE_WORKERS):
+-            if buf_query_count < 2 * TOPK_SCORE_WORKERS:
++        for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, score_workers):
++            if buf_query_count < 2 * score_workers:
+                 # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
+                 buf_query = buf_item % (buf_query_count // 2) * 2
+                 buf_leaf = buf_item // (buf_query_count // 2)
+@@ -596,8 +598,8 @@
+                     pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+ 
+         for buf_score_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
+-            for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, TOPK_SCORE_WORKERS):
+-                if buf_query_count < 2 * TOPK_SCORE_WORKERS:
++            for buf_item in pl.range(buf_worker, buf_query_count // 2 * buf_max_leaves, score_workers):
++                if buf_query_count < 2 * score_workers:
+                     buf_query = buf_item % (buf_query_count // 2) * 2
+                     buf_leaf = buf_item // (buf_query_count // 2)
+                 else:
+@@ -724,20 +726,39 @@
+     for topk_batch in pl.range(b_dim):
+         max_topk_cache_len = pl.max(max_topk_cache_len, pl.read(kv_seq_lens, [topk_batch]) // COMPRESS_RATIO)
+     if max_topk_cache_len >= INDEXER_NATIVE_CUBE_MIN_ROWS:
+-        score_tid = indexer_score_topk_native_cube(
+-            qr_hadamard_i8,
+-            qr_hadamard_scale_dq,
+-            weights,
+-            idx_kv_cache,
+-            idx_kv_scale,
+-            position_ids,
+-            kv_seq_lens,
+-            score_arena,
+-            pair_arena,
+-            qh_quant_tid,
+-            weights_tid,
+-            cache_write_tid,
+-        )
++        # 多leaf细分为两波任务；单leaf保留24任务，避免额外派发成本。
++        if max_topk_cache_len > TOPK_CANDIDATES_PER_LEAF:
++            score_tid = indexer_score_topk_native_cube(
++                qr_hadamard_i8,
++                qr_hadamard_scale_dq,
++                weights,
++                idx_kv_cache,
++                idx_kv_scale,
++                position_ids,
++                kv_seq_lens,
++                score_arena,
++                pair_arena,
++                qh_quant_tid,
++                weights_tid,
++                cache_write_tid,
++                TOPK_LONG_SCORE_WORKERS,
++            )
++        else:
++            score_tid = indexer_score_topk_native_cube(
++                qr_hadamard_i8,
++                qr_hadamard_scale_dq,
++                weights,
++                idx_kv_cache,
++                idx_kv_scale,
++                position_ids,
++                kv_seq_lens,
++                score_arena,
++                pair_arena,
++                qh_quant_tid,
++                weights_tid,
++                cache_write_tid,
++                TOPK_SCORE_WORKERS,
++            )
+     else:
+         with pl.spmd(
+             TOPK_SCORE_WORKERS,

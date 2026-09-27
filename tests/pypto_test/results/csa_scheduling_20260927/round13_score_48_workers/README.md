@@ -24,3 +24,5 @@ B16的96个query在新旧编号条件中均走query优先；两档各48个MIX任
 保护区/索引结构/有限值通过；Native零容差FAIL，长/短max_abs0.0390625/0.03125，Top-K替换670/366；非整模型验收。
 
 [补丁](candidate.patch)、[CPU编译脚本](compile_candidate.py)、[执行](run.sh)、[统计](summarize.py)、[计时和泳道路径](report.json)。
+
+阶段收尾：第15轮统一策略短档仍退化，五轮后未将本候选加入生产；见[统一实测](../round15_score_adaptive_admission/README.md)。
