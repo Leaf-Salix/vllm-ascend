@@ -6985,3 +6985,22 @@ Indexer单独观察进一步支持优先优化：8K/B24 Native QLI为56.34 μs�
 
 按用户后续要求，转入Indexer专项。源码对照见[Native差距](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
 首个候选v8采用两个query共享key、M128 QK，保持v7量化及Top-K规则；CPU编译通过，设备结果续记下一节。
+
+## 179. Indexer 两query共享key与M128 QK（2026-09-27）
+
+按照Native L0的M128组织QK，S6先采用2+2+2分组；key在两个query之间复用，
+保留v7 FP16量化与逐query Cube WS，两个query各自处理因果可见范围、slot和Top-K。
+尚未实现Native的4+2分组或流式Top-K。精度版和8K短路径没有改动。
+
+CPU完整编译通过，单卡两query/N768独立Torch公式及保护区检查通过。
+128K/B16同配置：本体均值1292.227 μs、p50/p95=1225.090/1578.640 μs；
+同轮Native为1306.960 μs，完整PTO路径1671.157 μs。
+相对v7本体均值1458.156 μs降低11.38%，接近Native，但尾部和入口/出口代价仍在。
+20次本体样本有4次约1.58 ms，不能仅凭均值刚低于Native就标完成。
+四窗口Score核内359.26～369.43 μs，相对v7的470.70～487.92 μs明确缩短；
+Score→publish为421.80～425.82 μs，四窗口都24核，不覆盖主计时中的所有长尾。
+
+metadata/slot保护区通过，输出无非有限值；max_abs=0.0390625、RMSE=0.0041760、
+Top-K集合替换670（v7同为670）。零容差仍FAIL，未做该候选16卡token/DSpark验收。
+[结果与复现](results/csa_split_optimization_20260927/v8_native_pair/README.md)。
+长上下文B4/B8受影响项待补；之后按专项对照处理8K的head规约和Top-K发布。
