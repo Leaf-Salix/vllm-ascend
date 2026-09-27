@@ -21,7 +21,7 @@ def canonical(name):
         return "indexer_score_topk_native_pair_" + score.group(1)
     if re.fullmatch(r"indexer_head_coefficients(?:_\d+)?", name):
         return "indexer_head_coefficients"
-    for prefix, alias in (("kv_proj_matmul", "kv_proj_matmul"),
+    for prefix, alias in (("qr_proj_matmul", "qr_proj_matmul"), ("kv_proj_matmul", "kv_proj_matmul"),
                           ("_proj_b_mm_nz_kernel", "proj_b_mm"), ("proj_a_mm", "proj_a_mm"),
                           ("proj_b_mm", "proj_b_mm"), ("proj_b_act", "proj_b_act"), ("quant", "quant")):
         if name == prefix or re.fullmatch(re.escape(prefix) + r"_+\d+", name):
