@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--task-id", default="task_20260928_030634_158754525942")
     parser.add_argument("--baseline-revision", default="2a740c1f")
+    parser.add_argument("--timing-subpath", default="{side}/timing/report.json")
+    parser.add_argument("--swimlane-subpath", default="{side}/swimlane/report.json")
     args = parser.parse_args()
     root = args.root.resolve()
     common = load("timing", RESULTS / "csa_native_cube_matrix_20260927/summarize.py")
@@ -44,9 +46,9 @@ def main():
         "task_changes": {},
     }
     for side in ("baseline", "candidate"):
-        folder = root / side
-        timing = common.summarize_timing(folder / "timing/report.json")
-        measured = json.loads((folder / "timing/report.json").read_text())
+        timing_path = root / args.timing_subpath.format(side=side)
+        timing = common.summarize_timing(timing_path)
+        measured = json.loads(timing_path.read_text())
         timed = measured["timing"]
         for key in (
             "history",
@@ -63,7 +65,7 @@ def main():
                 result[key] = measured[key]
             elif result[key] != measured[key]:
                 raise ValueError(f"{side}: 两侧配置{key}不同")
-        raw = json.loads((folder / "swimlane/report.json").read_text())
+        raw = json.loads((root / args.swimlane_subpath.format(side=side)).read_text())
         windows = [worker.summarize(Path(w["merged_swimlane"])) for w in raw["swimlane_windows"]]
         if len(windows) != 4 or timing["pto_full"]["samples"] != 20:
             raise ValueError(f"{side}: 需要20次计时及4个泳道窗口")
