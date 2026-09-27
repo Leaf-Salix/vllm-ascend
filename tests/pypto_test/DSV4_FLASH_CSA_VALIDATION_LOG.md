@@ -8474,3 +8474,17 @@ task_20260928_043821_36503161301正在跑128K/B8双方新控制，算子71153bb3
 七档既有rank0三步trace全部导出：CSA完整区间均下降约7.80%～20.04%，专家GMM任务duration均增加1.01～1.68ms。
 短档B16仍按DSpark失败标记，不能把其trace作为验收通过成绩；profile与正式轮分开。
 [七档模型区间与下游任务差距](results/csa_indexer_adaptive_20260928/model/MODEL_GAP.md)。
+
+## 280. 同轮事件边界没有毫秒级PTO额外间隙，B8正式仍慢（2026-09-28）
+
+task_20260928_043821_36503161301退出0，正式10步Native56.771→PTO57.541ms（+1.36%），
+P95/max和最慢rank仍略高；32768输出token零差异，16rank DSpark一致。
+rank0同轮profile事件/完整图分别59941.788/59749.587μs、58166.847/57972.107μs，
+差额192.201/194.741μs，无PTO独有的毫秒级事件外间隙；三步位置与图任务序列检查通过。
+不能把该结论扩大至无profiler的另一请求轮；历史§137～139软件/硬件event的profile扰动仍适用，
+不拿独立trace快慢反转持续盲测。已有CSA body节省2.669ms，FFN增加1.407ms，继续追查专家工作量。
+[同轮诊断完整证据](results/csa_forward_boundary_20260928/README.md)。
+
+task_20260928_045034_378240623103先测71153bb3原cache下128K/B8、8K/B16的atomic1/0单卡代价。
+复用已有固定规约开关，不改生产默认、数值源码、cache或det0；固定规约同时改变split-K，不能只归因于atomic硬件抖动。
+历史ordered/source-split实验不冒充当前结果。单卡后才测两档真实EP16，重点检查GMM增量及短档DSpark。

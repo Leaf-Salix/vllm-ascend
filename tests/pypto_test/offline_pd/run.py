@@ -432,7 +432,7 @@ def diagnose(args, llm, cases):
         level = 0 if args.command == "performance" else 1
         started = llm.collective_rpc("offline_begin_profile", args=(
             str((args.output / "trace").resolve()), args.profile_start_step,
-            args.profile_steps, expected_tokens, args.batch, level))
+            args.profile_steps, expected_tokens, args.batch, level, args.profile_forward_events))
         measured = generate_round(llm, args, case, args.decode_tokens)
         window = llm.collective_rpc("offline_end_profile")
         common.update({
@@ -1021,6 +1021,8 @@ def launch(args):
                    "--graph-mode", args.graph_mode]
             if args.recompute_scheduler:
                 cmd.append("--recompute-scheduler")
+            if args.profile_forward_events:
+                cmd.append("--profile-forward-events")
             if args.embedding_tp:
                 cmd += ["--embedding-tp", str(args.embedding_tp)]
             if args.deterministic:
@@ -1099,6 +1101,8 @@ def main():
                         help="采集 warmup 后连续满档周期数，默认 10，主结果取均值")
     parser.add_argument("--profile-start-step", type=int, default=8, help="从第几个稳态decode step开始采集")
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
+    parser.add_argument("--profile-forward-events", action="store_true",
+                        help="在profile窗口内另记同一次forward的设备事件；仅供边界诊断，不替代无profiler计时")
     parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
                         help="vllm-ascend 的 weight_nz_mode；1 会让 Native 把量化权重转成 NZ")
     parser.add_argument("--swimlane-rank", type=int, default=0, help="采集PTO DFX泳道的DP rank")
@@ -1160,6 +1164,8 @@ def main():
             parser.error(f"稳态至少采 10 个周期；--decode-tokens 须 >= {minimum}，为收尾留余量")
     if args.layout_only and args.command != "decode":
         parser.error("--layout-only 仅适用于 decode")
+    if args.profile_forward_events and args.command not in ("performance", "profile"):
+        parser.error("--profile-forward-events只适用于performance/profile")
     if args.command == "moe-routing":
         if args.graph_mode != "full_decode_only" or args.compare_samples < 1 or args.warmup_steps < 0:
             parser.error("路由诊断须使用 full_decode_only、非负 warmup_steps 和正 compare_samples")

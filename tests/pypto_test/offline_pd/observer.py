@@ -178,7 +178,8 @@ class OfflineCSAObserver:
                                            for layer, counts in _CSA_SELECTION.items()},
                 "note": "图重放不触发 forward hook，per-layer 命中看 capture_time_selection"}
 
-    def offline_begin_profile(self, directory, start_step, steps, expected_tokens, expected_requests, level=1):
+    def offline_begin_profile(self, directory, start_step, steps, expected_tokens, expected_requests,
+                              level=1, forward_events=False):
         """从指定稳态 step 起采集连续 CPU+NPU 数据，不采 Python stack。
 
         只统计达到稳态构成的 step，窗口两端各做一次同步，确保设备任务完整落在窗口内。
@@ -202,11 +203,29 @@ class OfflineCSAObserver:
         )
         runner = self.model_runner
         original = runner.execute_model
+        original_forward = runner._model_forward if forward_events else None
+        forward_records, active_forward = [], [None]
         state = {"dp_rank": rank, "trace_dir": target, "start_step": start_step,
                  "requested_steps": steps, "expected_tokens": expected_tokens,
                  "expected_requests": expected_requests, "seen_steady_steps": 0,
                  "profiled_steps": 0, "closed": False, "window": [], "observed": {},
-                 "profiler_level": level}
+                 "profiler_level": level, "forward_events_enabled": forward_events}
+
+        def measured_forward(*args, **kwargs):
+            import torch
+
+            entry = active_forward[0]
+            if entry is None:
+                return original_forward(*args, **kwargs)
+            entry["forward_calls"] += 1
+            entry["positions_cpu"] = runner._dsa_positions_cpu_buf[:expected_tokens].tolist()
+            begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            entry["begin"], entry["end"] = begin, end
+            begin.record()
+            try:
+                return original_forward(*args, **kwargs)
+            finally:
+                end.record()
 
         def profiled(scheduler_output, *args, **kwargs):
             import torch
@@ -227,9 +246,14 @@ class OfflineCSAObserver:
             if active and state["profiled_steps"] == 0:
                 torch.npu.synchronize()
                 profiler.start()
+            if active and forward_events:
+                active_forward[0] = {"steady_step_index": index, "forward_calls": 0}
             try:
                 return original(scheduler_output, *args, **kwargs)
             finally:
+                if active and forward_events:
+                    forward_records.append(active_forward[0])
+                    active_forward[0] = None
                 if active:
                     state["profiled_steps"] += 1
                     state["window"].append({"steady_step_index": index, "scheduled_tokens": tokens,
@@ -240,19 +264,39 @@ class OfflineCSAObserver:
                         state["closed"] = True
 
         runner.execute_model = profiled
-        self._offline_profile = (state, profiler, original)
+        if forward_events:
+            runner._model_forward = measured_forward
+        self._offline_profile = (state, profiler, original, original_forward, forward_records)
         return {"dp_rank": rank, "trace_dir": target}
 
     def offline_end_profile(self):
         import torch
 
-        state, profiler, original = self._offline_profile
+        state, profiler, original, original_forward, forward_records = self._offline_profile
         self.model_runner.execute_model = original
+        if original_forward is not None:
+            self.model_runner._model_forward = original_forward
         self._offline_profile = None
         if state["profiled_steps"] and not state["closed"]:
             torch.npu.synchronize()
             profiler.stop()
             state["closed"] = True
+        if original_forward is not None:
+            import math
+
+            valid = [entry for entry in forward_records if entry["forward_calls"] == 1]
+            values = [entry["begin"].elapsed_time(entry["end"]) * 1000 for entry in valid]
+            timestamps = [entry["begin"].recorded_time() for entry in valid]
+            state["profile_forward"] = {
+                "scope": "与本trace同一次forward的设备事件；含profiler影响，只用于对齐计时边界，不作为正式成绩",
+                "samples_us": values,
+                "start_timestamps_raw": timestamps,
+                "step_indices": [entry["steady_step_index"] for entry in valid],
+                "positions_cpu": [entry["positions_cpu"] for entry in valid],
+                "sufficient": (len(valid) == len(forward_records) == state["requested_steps"]
+                               and all(math.isfinite(v) and v > 0 for v in values)
+                               and all(b > a for a, b in zip(timestamps, timestamps[1:]))),
+            }
         # 采不到足够样本时**不要抛异常**：异常会让整个 rank 的 json 落不了盘，
         # 连同 observed 里的诊断信息一起丢失——T2.1 前两轮就是这样，失败了却
         # 拿不到"实际每步调度了多少 token"，只能另想办法查。这里如实记进报告，
