@@ -6862,3 +6862,89 @@ Native `ProcessVec0::Brcb` 将每个系数复制16次，再由 `LoadWeightToL0a`
 16行复制用于它的Cube分块映射，不代表16个不同query；多query外层另行循环。
 两次MMAD都在同一Native QLI kernel内部，第二次是用矩阵乘承载加权求和，额外的矩阵计算
 换取64-head中间矩阵留片上、Vector只接收规约后的单行。
+
+## 177. 将 Native 上游的 FP16 / Cube Score 策略接入性能版（2026-09-27）
+
+用户澄清本轮允许采用的是 **Native 上游已有的精度取舍**，先在性能版观察收益。
+精度版算术保持原状，当前重点仍是入口拆分/写回之外的 CSA 本体。
+
+先纠正 §176 的工具链限制：当时本地 PyPTO 尚未合入支持，不能据此推断当前官方工具链不支持。
+官方 PTOAS 0.66 已包含 #1570 修复；本轮把 PyPTO main `ab8e10fc`（#2876）移植到
+`feat/kernel-mode-integration-test`，形成本地提交 `3e87a843`，没有切换到 main。
+未修改 PTOAS / PTO-ISA 的实现。定向单测 23 项通过，官方 A3
+`acc_to_mat_dequant_relu_then_matmul` 单卡用例通过。
+
+候选数据流：长上下文保留连续 key/scale、N768 逻辑块和两槽 GM 通信，
+以 N256 小块执行 INT8 QK；FIXPIPE 做 ReLU、1/1024 缩放并将 FP16 结果写入 L1；
+Native 口径的 FP16 head 系数通过第二次 Cube 乘法得到 FP32 结果，只写一行到 GM。
+系数准备单独一个任务，先将两个 FP32 输入分别舍入到 FP16，再相乘保留 FP16。
+性能版此前的 FP32 Vector head 规约在长上下文被替换，短上下文暂保留。
+
+首版 v5 发现功能错误：对 L1 NZ key 使用 `tile.slice` 后，生成代码的子块别名丢失候选偏移
+和原 pitch，三个子块读取错误。128K/B16 的 Top-K 集合替换达到 47284/49152，
+输出 RMSE 为 0.03125；该版的计时 **无效，不作为优化收益**，也不是可接受的精度权衡。
+改为从完整 L1 tile 显式 `tile.extract` 到 Right，生成带偏移的 TEXTRACT。
+新增单卡小用例覆盖 N768 NZ 子块提取与两次 Cube 链路，以完整 Torch 矩阵公式作独立参考，
+同时检查仅写一行、下一行保护区保持不变。结果续记如下。
+
+修正切片后的 v5b：单卡小用例通过（`rtol=2e-4, atol=2e-4`，768 分数及保护区），
+128K/B16 整层输出无非有限值，metadata / slot 保护区全部通过。
+输出对 Native 的 max_abs=0.0390625、RMSE=0.0041770，Top-K 集合替换670，
+与 v4 的675和RMSE=0.0041873相近；这不是整模型 token / DSpark 验收。
+
+| 128K/B16，同 mode=2、atomic=1 | v4 FP16 GM + Vector规约 | v5b FP16 L1 + Cube规约 |
+| --- | ---: | ---: |
+| CSA 本体均值（μs） | 1576.926 | 1624.661 |
+| CSA 本体 p50 / p95（μs） | 1580.390 / 1817.540 | 1416.740 / 1962.600 |
+| 拆分+本体+写回完整路径均值（μs） | 1918.524 | 2004.500 |
+| 同轮 Native 完整区间均值（μs） | 1302.269 | 1309.306 |
+
+不能只用 p50 改善宣布获益。四窗口 DFX 中 v5b 的 Score 均使用24个AIC，
+核内均值为551.10/544.62/540.72/542.42 μs，Score Worker span 为569.82/571.06/565.30/566.10 μs；
+另有 head系数任务，span 为25.78/30.76/24.30/19.44 μs。
+v4 的 Score 核内为480–493 μs，说明当前串行接入第二次 Cube 本身仍有代价，
+不能把退化全部归为调度长尾；本轮DFX的四窗口也没有复现无profiler计时中的尾部。
+下一候选 v6 改用 Native 的 N128 小块、stage=2 流水，补齐片上双缓冲后再判断。
+
+v6 通用 stage=2 / N128 候选：小用例通过，完整层输出 RMSE=0.0041768、
+Top-K 集合替换仍为670。CSA 本体均值1665.266 μs，p50/p95=1490.530/2098.400 μs，
+同轮Native均值1327.081 μs，完整PTO路径2126.272 μs，未取得收益。
+生成指令仍按当前块 QK→FIXPIPE→当前块 WS 排列，通用双缓冲没有表达 Native 的
+QK(current) / WS(previous) 顺序，不能把设置 stage=2 当成已实现同等流水。
+
+v7 进一步显式安排 QK(current) / WS(previous)：query/系数 Left 常驻，
+同时保留当前 key Right 与上一块 score Right，并令 INT32 QK 和 FP32 WS 的累加器
+在写回前同时存活，避免内存复用导致额外的跨流水等待。CPU 编译通过，设备结果续记。
+
+v7 的 128K/B16 单卡结果：CSA 本体均值1458.156 μs，p50/p95=1342.840/1832.980 μs；
+同轮 Native 均值1307.660 μs，入口拆分+本体+写回的 PTO 完整路径1864.030 μs。
+相对 v4，本体本轮均值 -7.53%，p50 -15.03%；仍比同轮Native均值慢11.51%，
+长尾没有解决，不能据此宣称稳定收益或整模型验收完成。
+输出无非有限值，RMSE=0.0041770、max_abs=0.0390625，Top-K 集合替换670；
+metadata 和 slot 保护区全部通过。对 Native 的零容差诊断仍为 FAIL，不改写为精度验收通过。
+
+与 Native 仍不相同的部分：本候选逐 query 处理，尚未复用 Native 的四 query 共用 key；
+head 系数仍为独立 SPMD 任务；外层保留当前半叶森林 Top-K 及两 AIV lane 的 N768 逻辑块。
+与 pypto-lib 的差别是本候选采用 Native 的 FP16 系数和 Cube head 规约，
+不再把64行FP16分数写GM交Vector规约。此次缩小传输并不意味着MMAD次数减少。
+
+原始结果与复现：
+- [各候选对照](results/csa_split_optimization_20260927/native_cube_comparison.json)。
+- [v7 计时](results/csa_split_optimization_20260927/v7_native_overlap/h131072_b16/timing/report.json)。
+- [v7 泳道](results/csa_split_optimization_20260927/v7_native_overlap/h131072_b16/swimlane/dfx/merged_swimlane.json)。
+- 继续使用同目录 `run_case.sh`，label=`v7_native_overlap`，history=`131072`，batch=`16`。
+  label 仅区分产物目录，脚本执行当前 checkout；复现历史候选须先恢复对应源码。
+
+v7 四窗口 DFX：Score 核内均值487.92/474.43/470.70/471.91 μs，
+Worker span 为520.74/506.56/505.64/497.52 μs，均为24个block使用24个AIC。
+这把 v5b 串行 Cube 链路的额外核内成本压回 v4 附近；尚不能解释无profiler计时的长尾，
+也不能因为这四个窗口没有17核复用就宣布该问题消失。
+[泳道逐窗口聚合](results/csa_split_optimization_20260927/native_cube_swimlane_comparison.json)
+只统计 Worker View，不与 Scheduler View 叠加。
+
+本轮保留 v7 的性能版长上下文路径；v5 错误切片及 v5b/v6 较慢实现均未保留在生产入口。
+短上下文原路径和精度版未改，不为未受影响的档位重复占卡。
+后续优先处理四 query 的 key 复用、独立系数任务以及主计时长尾，
+确认稳定收益后才扩大档位和做真实权重16卡 token / DSpark 看护。
+
+落盘版本：PyPTO `3e87a843`，性能算子 `9516acbe`，均为中文提交并带 Signed-off-by。

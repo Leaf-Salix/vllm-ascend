@@ -1,0 +1,63 @@
+{
+  "scope": "单卡正式 layer4 权重、合成历史；第二个 CSA metadata 复用；H131072/B16/S6/TP1/mode2/atomic1，无 EPLB。Body 排除入口拆分与出口写回；非16卡验收。",
+  "toolchain_note": "v4 PyPTO 2a4e09ff；v5b/v6/v7 为移植 main #2876 后的 3e87a843，PTOAS/ISA/Simpler相同。",
+  "results": [
+    {
+      "label": "v4_buffered_score",
+      "report": "v4_buffered_score/h131072_b16/timing/report.json",
+      "native_mean_us": 1302.2690057754517,
+      "pto_full_mean_us": 1918.5239911079407,
+      "body_mean_us": 1576.9260048866272,
+      "body_p50_us": 1580.3900361061096,
+      "body_p95_us": 1817.5400495529175,
+      "output_max_abs": 0.03125,
+      "output_rmse": 0.0041872873560450255,
+      "topk_replaced": 675,
+      "guards_pass": true,
+      "decision": "baseline"
+    },
+    {
+      "label": "v5b_native_cube",
+      "report": "v5b_native_cube/h131072_b16/timing/report.json",
+      "native_mean_us": 1309.3060076236725,
+      "pto_full_mean_us": 2004.500013589859,
+      "body_mean_us": 1624.6610045433044,
+      "body_p50_us": 1416.7400002479553,
+      "body_p95_us": 1962.5999927520752,
+      "output_max_abs": 0.0390625,
+      "output_rmse": 0.004177016312274422,
+      "topk_replaced": 670,
+      "guards_pass": true,
+      "decision": "rejected: CSA body mean regressed"
+    },
+    {
+      "label": "v6_native_pipeline",
+      "report": "v6_native_pipeline/h131072_b16/timing/report.json",
+      "native_mean_us": 1327.0809948444366,
+      "pto_full_mean_us": 2126.272004842758,
+      "body_mean_us": 1665.2660191059113,
+      "body_p50_us": 1490.530014038086,
+      "body_p95_us": 2098.400115966797,
+      "output_max_abs": 0.0390625,
+      "output_rmse": 0.004176820634773914,
+      "topk_replaced": 670,
+      "guards_pass": true,
+      "decision": "rejected: CSA body mean regressed"
+    },
+    {
+      "label": "v7_native_overlap",
+      "report": "v7_native_overlap/h131072_b16/timing/report.json",
+      "native_mean_us": 1307.6599895954132,
+      "pto_full_mean_us": 1864.0300035476685,
+      "body_mean_us": 1458.156007528305,
+      "body_p50_us": 1342.840015888214,
+      "body_p95_us": 1832.9800367355347,
+      "output_max_abs": 0.0390625,
+      "output_rmse": 0.004177035378972155,
+      "topk_replaced": 670,
+      "guards_pass": true,
+      "decision": "retained candidate; long tail and model acceptance remain"
+    }
+  ],
+  "implementation_commit": "9516acbe787f58b72a7791e3d76d36ce11115e71"
+}

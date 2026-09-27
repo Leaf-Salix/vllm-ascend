@@ -65,6 +65,19 @@ B1/S6 的 runtime T=6 不满足 8 行分块，不能照搬完整块读写。
 [上游参考报告](results/csa_split_optimization_20260927/upstream_direct_cap16_h8192_b16/timing/report.json)，
 [上游新泳道](results/csa_split_optimization_20260927/upstream_direct_cap16_h8192_b16/swimlane/dfx/merged_swimlane.json)。
 
+## Native Score 片上链路候选（2026-09-27）
+
+PyPTO 调试分支 `3e87a843` 已移植 main #2876。性能版 v7 使用 Native 的
+FP16 query scale / weight / 乘积、FIXPIPE ReLU+1/1024 写 L1、第二次 Cube FP32 head 规约。
+显式安排 QK(current) / WS(previous)，并保持两组 L0C 结果同时存活；
+仅改用通用 stage=2 未获益，不能将二者混称相同流水。
+
+128K/B16 本体均值/p50/p95：v4 为1576.93/1580.39/1817.54 μs，
+v7 为1458.16/1342.84/1832.98 μs，同轮Native均值1307.66 μs。
+本轮均值改善7.53%，尚未快于Native，也未解决长尾；不代表16卡token/DSpark验收。
+与 Native 仍有单query粒度、独立系数任务、半叶Top-K/任务编排的差别；
+四query共享key尚未接入。来源、失败候选和精度边界见[验证日志 §177](DSV4_FLASH_CSA_VALIDATION_LOG.md#177-将-native-上游的-fp16--cube-score-策略接入性能版2026-09-27)。
+
 ## 历史数据与口径
 
 本轮补充 Native 对照（2026-09-27）：当前 A3 实际调用
@@ -78,14 +91,16 @@ Native 同样使用 `FIXPIPE ReLU + 1/1024 + FP16`，但 `FixpSToL1` 直接写�
 
 Native 的 `M_BASE_SIZE=256`、`gSize=64` 对应最多四个 query 共用 key 块；S6 分成4+2，
 当前 PTO/上游逐 query 处理。Native query scale、weights 及其乘积均有 FP16 舍入，
-当前性能版 head 系数保持 FP32；Native 不补偿公共的1/1024，当前上游/v4系数乘1024，
+v4 性能版 head 系数保持 FP32；Native 不补偿公共的1/1024，上游/v4系数乘1024，
 正的公共比例本身不改变理想 Top-K 排序，其他舍入及规约顺序仍可能改变选择。
 
 所以 v4 的 FP16 舍入是相对旧性能路径新增，不能说 Native 没有这层舍入。
 FIXPIPE 能力也须区分目的存储：本地 PyPTO `2a4e09ff` 允许 Acc→GM 带缩放，
 但明确拒绝 Acc→Mat/L1 的 `pre_quant`（移植的 verifier 标注 PTOAS#1570）。
 精度版当前通过 Vector 转换再 `aic_gather` 回 Cube 来表达 Native 算术，仍不是 Native 直接片上数据流。
-需核对后续官方 PTOAS/ISA 修复或寻找算子侧方案，不能把该限制写成优化完成。
+上述是 `2a4e09ff` 时的本地状态。现已确认官方 PTOAS 0.66 修复配套问题，
+并在调试分支移植 PyPTO main #2876，提交 `3e87a843`；23 项定向单测和 A3 片上写回用例通过。
+因此这项编译限制已解除，后续应按实际数据流与测量判断，而不是继续视为工具链阻塞。
 逐项源码依据见 [验证日志 §176](DSV4_FLASH_CSA_VALIDATION_LOG.md#176-native-a3-qli-与上游fixpipe路径的源码对照2026-09-27)。
 
 - 当前：保留的 `7eba45a3` 性能实现；B16/S6/H8192、mode=2、atomic=1，第二个 CSA 层复用 metadata。
