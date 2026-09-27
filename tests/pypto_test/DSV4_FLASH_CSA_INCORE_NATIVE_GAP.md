@@ -4,7 +4,7 @@
 本文件保存核内阶段的差异分析；新增候选必须另列实测结果，不能回填为 V10 基线。
 当前保留实现包含 `21d99f8a` 的性能版B40 KV投影优化、第6.4节按工作量选择的KV提前发布，
 以及第6.6节的跨query连续流水。
-新增策略仍只有先导及代表档验证，未完成同一最终源码的七档出口测量。
+上述保留策略已完成同一源码 `da2e2368` 的七档单卡测量，见第6.7节；整模型验收未完成。
 第2～4节用于核对七档基线，第5节列下一步，第6节区分已保留和已撤回的实验。
 
 ## 1. 当前结论与边界
@@ -21,8 +21,8 @@
    新增固定输入探针已定位8K/B40的主要核内等待边界，见第6.3节；不将发射区间当作纯算术耗时。
 
 初始七档基线提取只读取已有源码和 trace；后续先导和 Native 缺口补采见第6节，没有做 hash 校验。
-QKV、两个 Compressor、O projection、mHC 的完整等范围归因尚未完成；
-本文件先展开已有证据指向的 Indexer 和 Sparse Attention，不宣称已穷尽全部 CSA 差距。
+QKV、两个 Compressor、O projection、mHC 的操作对应及七档核内记录已补到第7节；
+融合边界、量化位置和缓存写入范围不同，完整等范围归因仍未完成，不能直接按任务均值相减。
 
 ## 2. 环境、数据来源和计时口径
 
@@ -184,7 +184,7 @@ Native 双流调用顺序对应的 KV `MatMulWeightNz` 设备事件为26.26 μs�
 
 | 档位 / 阶段 | 核内工作 | 验证与保留条件 |
 | --- | --- | --- |
-| 8K B16/24/32/40，先用 B40 代表 | 优先延续相邻query的核内流水，避免每query排空；成对DMA独立诊断仅小幅变化，暂不扩展API | 保持各query算术/输出顺序和三槽安全，先CPU编译、固定输入/尾块，再代表档计时；不重复已失败候选 |
+| 8K B16/24/32/40，先用 B40 代表 | 已保留跨query流水；下一项验证第7节Native式KV/gate合并投影；成对DMA暂不扩展API | 隔离核内收益，先CPU编译再代表档；不重复已失败候选 |
 | 128K B8/B16 | 优先评估流式 Top-K、尾块无效工作及重复准备；4＋2 复用和合并 head 规约先导已撤回 | 单项实现独立测量，核内下降须有证据；B16 Native分项已补齐，不重跑无关历史矩阵 |
 | 8K B40 | 已保留KV投影宽tile/split-K；继续评估复用Native NZ权重 | 新改动仍需隔离收益；精度版保持原算术 |
 | 128K B4 | 保留 V10 小 batch 完整 leaf 均衡 | 扩大 query 复用组后检查并行度和退化，必要时在算子内部按输入选策略 |
@@ -368,8 +368,65 @@ B16本体参考分别为最终早通知分派版/V10，核内参考均为V10；�
 CPU完整编译通过；固定Native输入的7,864,320个Sparse输出元素与基底PTO逐bit一致。
 B9有效→全无效→有效、不均分query尾部，以及B3零工作量核的解析检查通过。
 首版重用初始sink tile被循环状态别名覆盖，已改为每次重置重新加载sink；该问题按功能错误修复，未放宽容差。
-同一源码剩余四档与整模型验收尚未完成，不能把这三档拼入第2节V10基线。
+此处是最初三档代表验证，随后同一源码的完整七档见第6.7节；不回填第2节V10基线。
 [实现、初版定位、逐项误差和原始泳道](results/csa_incore_20260927/sparse_cross_query/README.md)。
 
-仍缺：完整其他 CSA 任务的等范围映射、七档当前源码阶段出口，
-以及新策略的整模型验收。阶段目标保持有效，尚未完成。
+### 6.7 保留策略的同一源码七档复测
+
+`da2e2368` 七档已收齐，5次预热/20次无profiler计时，每档4个DFX窗口。
+当前本体按128K B4/B8/B16、8K B16/B24/B32/B40顺序为
+729.21 / 891.92 / 1269.53 / 795.04 / 1002.28 / 1140.71 / 1342.68 μs。
+对V10依次 +1.80% / +0.30% / −2.71% / +0.53% / −2.33% / −4.65% / −5.99%。
+这是核内阶段累计保留改动的变化，不能全部归给跨query一项。
+
+8K/B32 qk_pv AIC为237.70–245.66 μs，V10为257.64–268.61；B40为283.06–288.68，
+V10为321.62–336.55。小档位没有本体收益，128K/B16 p95仍1549.14 μs。
+当前本体七档均低于各自同轮Native，完整PTO七档仍更慢；拆分和写回成本没有消除。
+保护区、Top-K结构、非有限值检查通过，Native零容差仍FAIL；未做新的整模型token/DSpark验收。
+[完整七档表、p95与功能/数值](results/csa_incore_20260927/sparse_cross_query/MATRIX.md)、
+[全部原始计时与28个泳道路径](results/csa_incore_20260927/sparse_cross_query/cases.json)。
+
+仍缺：其他CSA模块的完整等范围临界路径归因、后续核内候选的独立验证，
+以及保留策略的整模型验收。核内阶段未完成，跨任务调度暂不改。
+
+## 7. 其他CSA模块：补齐对应范围与可吸收的策略
+
+已按Native `_mla_prolog_multistream`、`cv_indexer_select_qli`、`_forward_decode`、
+`_forward_o_proj` 的调用顺序和trace stream/task id，将七档16组操作逐项对应。
+PTO根算子先调用Attention Compressor、再调用Indexer Compressor，因此本批V10 trace中
+`kv_score_proj` 对应Attention，`kv_score_proj_0` 对应Indexer；Native两个Compressor的执行顺序恰好相反。
+不能按名称相同或在trace中的第几个位置直接把两侧配对。
+
+[七档16组原始统计及对应关系](results/csa_incore_20260927/v10_other_incore.json)，
+[只读提取脚本](results/csa_incore_20260927/map_other_tasks.py)。下面仅用8K/B40展开示例，仍为V10基线。
+每个分号隔开的数值是不同任务，单位μs；PTO列是四窗口block均值范围，**不求和**。
+
+| 模块 | Native完整kernel | PTO核内任务 | 实现差异 / 解释边界 |
+| --- | --- | --- | --- |
+| HC_pre | 82.86 | widen 9.61–9.81；RMS 9.47–9.81；linear 14.95–17.02；linear reduce 2.33–3.57；Sinkhorn 16.81–17.77；split 4.89–6.29 | Native融合，PTO有BF16→FP32加宽和多个独立任务；后续融合属于调度阶段 |
+| 输入RMSNorm | 15.04 | mix_x_rms_norm 16.64–19.11 | 值得检查向量实现；单block均值不是完整kernel尾部，不能直接得出百分比 |
+| Q_A | 20.54 | seed 22.92–26.50；matmul 8.41–9.27 | Native NZ matmul；PTO NZ split-K需要清零及atomic归约，不能只看matmul宣称更快 |
+| Q_A RMS＋量化 | 20.24 | 10.69–11.05 | 任务工作量及布局仍需结合生成代码解释 |
+| KV投影 | 26.26 | 90.05–103.11，另有seed 11.76–12.60 | V10的B40精度特例；已在第6节独立移除，不能当作当前残留差距 |
+| KV RMS＋RoPE | RMS 23.12；RoPE 19.26 | 融合8.41–9.38 | Native后面另有scatter；PTO cache写入也另有任务，此处不含缓存成本 |
+| Q_B＋反量化＋RMS＋RoPE | quant matmul 85.42；RMS 26.96；RoPE 16.02 | matmul 67.90–84.17；dequant/RMS/RoPE 52.09–58.39 | Native quant matmul包含输出缩放/舍入；PTO先写INT32至GM，再由Vector反量化，不能按matmul单列直接对比 |
+| Indexer Compressor | 70.18 | 投影23.24–25.70；pool 8.57–9.69；state commit 5.94–10.82；RMS/RoPE 19.42–22.40 | Native融合范围不含后续Hadamard/量化/scatter；PTO也不能只取投影当整个Compressor |
+| Attention Compressor | 104.24 | 投影31.46–33.99；pool 7.20–12.79；state commit 6.81–9.39；RMS/RoPE/cache write 8.77–15.32 | PTO最后一项含scatter，Native对应scatter在Compressor之外；不存在可直接相减的单列 |
+| Indexer Q投影＋RoPE | quant matmul 28.20；RoPE 20.42 | matmul 22.70–26.95；dequant/RoPE 29.38–45.53 | 与Q_B类似，输出缩放的融合边界不同 |
+| O_A | TransposeBatchMatMul 138.46 | proj_a_mm 83.74–85.91 | 当前CANN Native无WeightNz入口，保留ND；PTO使用NZ，不能描述成两侧都走相同NZ路径 |
+| O_B | quant matmul 76.86 | quant 6.79–7.73；NZ matmul 20.92–21.91；act 15.98–16.06 | Native列不含其独立动态量化，PTO列含量化/反量化；无法仅据单项认定完整区间优势 |
+| HC_post | 34.26 | 24.95–27.00 | 输出范围相近，仍保持完整kernel与block均值的口径区别 |
+
+在本阶段继续吸收Native的核内实现，新增一项有明确源码依据的候选：
+`compressor_block_cube_perf.h::CopyWeightGmToL1` 将wkv、wgate写入同一L1 tile的不同列组，
+`ComputeMm1` 用 `nDealSize=2*dBaseSize` 的一次Mmad计算两路，再分开Fixpipe写回。
+当前两个PTO Compressor在每个K512块中各调用一次KV matmul、一次gate matmul。
+可尝试在片上拼接两路权重并扩大N，用一次矩阵乘复用同一X加载，保留现有任务数和依赖。
+这是指令/流水策略差异，逻辑FLOPs和权重字节没有减半；目前无收益实测，不提前宣称更快。
+
+源码：[Native Compressor Cube](../../csrc/attention/compressor/op_kernel/arch32/compressor_block_cube_perf.h)、
+[PTO Attention Compressor](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_compressor_ratio4.py)、
+[PTO Indexer Compressor](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py)。
+
+仍需单列metadata、cache scatter、布局/seed/adapter的临界路径范围；
+此节补齐的是操作对应和七档数据入口，没有把分散任务的均值拼成完整CSA归因。

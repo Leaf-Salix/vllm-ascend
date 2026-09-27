@@ -7354,3 +7354,22 @@ qk_pv AIC四窗口均值范围301.01–318.44→283.06–288.68 μs，核内下�
 Top-K集合替换901/366/670，Native零容差仍FAIL，未做16卡token/DSpark验收。
 三档不冒充最终七档；下一步以同一源码补剩余四档，不回填历史最优值。
 [补丁、别名定位、脚本、逐项误差及四窗口路径](results/csa_incore_20260927/sparse_cross_query/README.md)。
+
+## 200. da2e2368七档补齐，扩展其他模块的差异映射（2026-09-27）
+
+任务task_20260927_170134_22993926622退出0，补128K B4/B8、8K B24/B32；生产源码在三次任务期间保持相同。
+七档每档5次warmup/20次无profiler计时、4个独立DFX窗口；不使用历史最好值替代当前档位。
+本体按128K B4/B8/B16、8K B16/B24/B32/B40为729.21/891.92/1269.53/795.04/1002.28/1140.71/1342.68 μs，
+对V10累计变化+1.80%/+0.30%/−2.71%/+0.53%/−2.33%/−4.65%/−5.99%。
+当前本体七档均低于同轮Native，完整PTO七档仍更慢；小档无明确收益，128K/B16长尾保留。
+B32 qk_pv AIC为237.70–245.66 μs，V10为257.64–268.61；B40为283.06–288.68，V10为321.62–336.55。
+七档保护区失败0、Top-K结构错误0、非有限值0；浮点零容差仍FAIL，未做本轮16卡token/DSpark验收。
+[七档完整表](results/csa_incore_20260927/sparse_cross_query/MATRIX.md)，
+[误差、原始计时及28个泳道路径](results/csa_incore_20260927/sparse_cross_query/cases.json)。
+
+只读已有V10 trace，按Native调用顺序/stream/task id补七档16组QKV、Compressor、O、mHC操作映射。
+Native先Indexer Compressor再Attention Compressor，PTO根调用顺序相反，不能按出现顺序直接配对。
+Native完整融合kernel和PTO逐block均值边界不同，单列quant、scatter及额外准备的范围，不求和推算CSA。
+另发现Native在L1拼接KV/gate权重并以一次较宽Mmad投影，PTO分两次matmul；列为下一项核内候选。
+[其他模块统计与映射](results/csa_incore_20260927/v10_other_incore.json)，主差距文档第7节给出解释。
+清理性能包__init__中过时的“不做逐token比对”说明，恢复用户明确的token/DSpark验收约束；不改算术。

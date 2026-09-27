@@ -1,0 +1,4221 @@
+{
+  "scope": "Source-based operation correspondence, not identical fusion or arithmetic boundaries; no summed durations or speedup claims",
+  "native_order_evidence": "dsa_v1.py: _mla_prolog_multistream, cv_indexer_select_qli, _forward_decode, _forward_o_proj",
+  "pto_order_evidence": "decode_csa.py calls attention compressor before indexer compressor; suffix _0 is the latter in these V10 captures",
+  "limits": [
+    "Compressor PTO cache-write task includes output scatter, Native Compressor does not include the separate scatter kernel",
+    "Q dequantization and BF16 rounding placement differ",
+    "Native O_B column excludes its separate dynamic quant; PTO group includes quant and dequant",
+    "PTO QR hadamard quant group includes scale/quant, Native entry is matrix multiply only",
+    "Metadata, cache scatter, layout/seed/adapter tasks remain separate; no full critical-path accounting"
+  ],
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h131072_b4_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_native_balance/h131072_b4/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_native_balance/h131072_b4/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_native_balance/h131072_b4/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_native_balance/h131072_b4/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 38.96,
+              "timestamp": "1790483458998674.515",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                13.860000000000005,
+                14.040000000000004,
+                14.286666666666674,
+                14.36
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                1.6099999999999994,
+                1.5600000000000023,
+                1.5,
+                1.4499999999999993
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                8.455000000000002,
+                9.032499999999999,
+                8.825,
+                8.895
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                8.419999999999996,
+                8.806666666666665,
+                8.33333333333333,
+                8.386666666666665
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                8.78,
+                8.513333333333334,
+                8.366666666666667,
+                8.886666666666667
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                2.6400000000000055,
+                2.7933333333333317,
+                2.953333333333333,
+                2.2133333333333334
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 8.26,
+              "timestamp": "1790483458998714.175",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                16.626666666666665,
+                16.513333333333332,
+                16.426666666666673,
+                16.153333333333332
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 19.64,
+              "timestamp": "1790483458998722.495",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                3.89375,
+                4.206875000000001,
+                4.252500000000002,
+                4.071249999999997
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                3.4599999999999937,
+                3.760000000000005,
+                3.4200000000000017,
+                3.4200000000000017
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 9.62,
+              "timestamp": "1790483458998742.235",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                5.966666666666669,
+                5.7733333333333405,
+                5.839999999999994,
+                5.980000000000008
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 13.16,
+              "timestamp": "1790483458998742.775",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                6.803124999999998,
+                7.9625,
+                7.869999999999999,
+                5.84375
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                2.0600000000000023,
+                2.1600000000000037,
+                2.0799999999999983,
+                2.1200000000000045
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 13.04,
+              "timestamp": "1790483458998757.035",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 11.84,
+              "timestamp": "1790483458998770.095",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                9.97999999999999,
+                12.219999999999985,
+                8.080000000000013,
+                9.100000000000023
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 40.78,
+              "timestamp": "1790483458998757.675",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 14.04,
+              "timestamp": "1790483458998799.515",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 8.02,
+              "timestamp": "1790483458998813.595",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                8.37083333333334,
+                8.06,
+                8.80291666666667,
+                11.01958333333333
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                27.834166666666665,
+                35.525,
+                28.73333333333333,
+                30.261666666666663
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 55.7,
+              "timestamp": "1790483458998829.895",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 4,
+              "window_block_mean_us": [
+                7.445,
+                6.024999999999999,
+                9.530000000000001,
+                5.810000000000002
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                9.245000000000001,
+                7.064166666666667,
+                7.31,
+                8.455833333333336
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                5.519999999999996,
+                6.980000000000004,
+                5.829999999999984,
+                8.14
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 4,
+              "window_block_mean_us": [
+                7.440000000000005,
+                7.539999999999999,
+                6.550000000000004,
+                6.890000000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 61.22,
+              "timestamp": "1790483458998950.695",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 4,
+              "window_block_mean_us": [
+                5.675000000000004,
+                5.74499999999999,
+                5.969999999999999,
+                6.1499999999999915
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                15.049166666666666,
+                14.14,
+                22.241666666666667,
+                23.420833333333334
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                7.640000000000001,
+                7.930000000000007,
+                7.810000000000002,
+                7.990000000000009
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 4,
+              "window_block_mean_us": [
+                7.489999999999995,
+                6.695,
+                7.055,
+                6.820000000000007
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 20.02,
+              "timestamp": "1790483458998893.795",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 9.6,
+              "timestamp": "1790483458998914.755",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                10.093749999999996,
+                15.493333333333332,
+                10.540416666666669,
+                11.891666666666667
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                15.543333333333331,
+                15.838333333333333,
+                17.83083333333333,
+                18.430833333333336
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 4.88,
+              "timestamp": "1790483458998886.615",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                2.420000000000016,
+                10.95999999999998,
+                5.47999999999999,
+                7.060000000000002
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 7.34,
+              "timestamp": "1790483458998924.455",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                3.2941666666666714,
+                2.6124999999999914,
+                2.570833333333334,
+                2.8049999999999984
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                4.324999999999999,
+                3.705416666666667,
+                3.364166666666668,
+                3.6529166666666675
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 11.9,
+              "timestamp": "1790483458999013.355",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                1.5699999999999932,
+                1.3400000000000034,
+                1.3199999999999932,
+                1.75
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                4.577499999999999,
+                3.4825000000000017,
+                3.7100000000000044,
+                3.4424999999999972
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 111.14,
+              "timestamp": "1790483458999349.995",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                27.9853125,
+                27.673125,
+                27.541562500000012,
+                27.329374999999988
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 34.76,
+              "timestamp": "1790483458999472.935",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                11.553750000000008,
+                10.80625,
+                11.546874999999996,
+                9.960000000000003
+              ]
+            },
+            "proj_b_act_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                10.040000000000006,
+                10.025000000000006,
+                10.012500000000003,
+                9.96250000000002
+              ]
+            },
+            "quant": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                9.377499999999998,
+                9.897500000000008,
+                8.754999999999995,
+                8.747500000000016
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 10.9,
+              "timestamp": "1790483458999509.715",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                18.366666666666635,
+                18.17666666666666,
+                18.26333333333336,
+                18.566666666666663
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h131072_b8_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b8/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b8/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b8/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b8/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 45.2,
+              "timestamp": "1790483635278219.985",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                14.500000000000005,
+                14.770000000000001,
+                14.280000000000001,
+                14.796666666666667
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                1.5733333333333377,
+                1.7399999999999973,
+                1.7999999999999996,
+                1.9800000000000015
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                8.808333333333332,
+                8.360000000000001,
+                8.058333333333334,
+                8.678333333333333
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                8.456666666666663,
+                8.71,
+                8.503333333333332,
+                8.333333333333334
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                7.626666666666666,
+                7.783333333333333,
+                7.603333333333333,
+                7.9433333333333325
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                2.8300000000000005,
+                3.143333333333331,
+                2.8033333333333346,
+                2.846666666666664
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 15.8,
+              "timestamp": "1790483635278266.125",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                16.65,
+                16.19,
+                16.093333333333337,
+                16.336666666666673
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 18.28,
+              "timestamp": "1790483635278282.005",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                4.704062500000002,
+                4.715937500000001,
+                4.688125,
+                4.7031249999999964
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                5.039999999999999,
+                5.339999999999996,
+                5.200000000000003,
+                5.540000000000006
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 19.28,
+              "timestamp": "1790483635278300.385",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                5.986666666666669,
+                6.113333333333334,
+                6.436666666666663,
+                6.506666666666661
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 23.94,
+              "timestamp": "1790483635278300.905",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                7.049375000000001,
+                7.858750000000002,
+                6.524375000000001,
+                6.917499999999999
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                2.8400000000000034,
+                2.8999999999999986,
+                2.8999999999999986,
+                2.8200000000000003
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 16.9,
+              "timestamp": "1790483635278326.025",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 13.04,
+              "timestamp": "1790483635278342.965",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                8.460000000000008,
+                8.520000000000003,
+                9.36,
+                8.350000000000009
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 49.22,
+              "timestamp": "1790483635278326.345",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 16.54,
+              "timestamp": "1790483635278389.745",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 12.04,
+              "timestamp": "1790483635278406.305",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                13.12166666666667,
+                13.474166666666662,
+                13.917083333333332,
+                13.146666666666667
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                36.1725,
+                38.26416666666667,
+                34.1475,
+                34.498333333333335
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 57.8,
+              "timestamp": "1790483635278429.785",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                6.722500000000007,
+                5.787499999999994,
+                5.777500000000003,
+                6.302499999999998
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                7.06166666666667,
+                6.961666666666667,
+                10.754999999999995,
+                11.685833333333333
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                9.709999999999994,
+                6.509999999999991,
+                8.920000000000002,
+                6.6299999999999955
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                6.642499999999998,
+                9.467500000000005,
+                7.5575000000000045,
+                7.934999999999999
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 65.42,
+              "timestamp": "1790483635278567.685",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                7.927499999999998,
+                6.7225,
+                8.344999999999995,
+                5.965000000000007
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                12.726666666666665,
+                14.050833333333332,
+                14.095833333333331,
+                15.011666666666667
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                10.793333333333331,
+                9.500000000000009,
+                12.959999999999988,
+                8.293333333333331
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                6.442499999999999,
+                6.309999999999999,
+                6.132499999999997,
+                6.492500000000003
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 21.08,
+              "timestamp": "1790483635278498.185",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 12.04,
+              "timestamp": "1790483635278520.265",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                18.110833333333336,
+                17.6325,
+                9.809166666666666,
+                11.425833333333333
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                14.545833333333333,
+                14.500833333333334,
+                15.835,
+                16.565
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 6.72,
+              "timestamp": "1790483635278488.585",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                2.0600000000000023,
+                5.900000000000006,
+                3.180000000000007,
+                2.200000000000017
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 7.1,
+              "timestamp": "1790483635278532.405",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                4.084999999999996,
+                4.0283333333333315,
+                3.6199999999999997,
+                4.042500000000001
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                5.484166666666671,
+                5.502500000000001,
+                4.555000000000006,
+                4.675416666666667
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 10.54,
+              "timestamp": "1790483635278634.725",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                1.4866666666666692,
+                1.3999999999999961,
+                1.4333333333333325,
+                2.279999999999982
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                4.830000000000004,
+                5.782499999999997,
+                4.865,
+                5.302499999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 109.74,
+              "timestamp": "1790483635279031.425",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_0_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                32.371562499999996,
+                32.96062500000001,
+                32.2534375,
+                32.6871875
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 38.24,
+              "timestamp": "1790483635279160.505",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__2_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                12.311562499999999,
+                11.574375000000009,
+                12.347499999999995,
+                13.204062500000003
+              ]
+            },
+            "proj_b_act_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                11.476250000000007,
+                11.447500000000012,
+                11.693750000000009,
+                11.452499999999986
+              ]
+            },
+            "quant_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                10.86375000000001,
+                10.076250000000016,
+                9.920000000000009,
+                9.984999999999992
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 15.62,
+              "timestamp": "1790483635279200.725",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                18.92666666666666,
+                19.228333333333314,
+                19.053333333333313,
+                19.03666666666666
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_incore_20260927/native_h131072_b16/native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b16/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 55.58,
+              "timestamp": "1790492908168972.605",
+              "stream": 12,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                14.945,
+                14.61333333333333,
+                15.02833333333333,
+                14.453333333333335
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                2.1266666666666674,
+                1.8066666666666649,
+                1.733333333333339,
+                1.7566666666666653
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                7.277499999999998,
+                7.893333333333334,
+                7.3533333333333335,
+                7.135833333333334
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                9.081666666666667,
+                8.826666666666666,
+                8.755,
+                8.628333333333334
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                8.143333333333334,
+                8.125,
+                8.176666666666666,
+                7.873333333333334
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                3.1650000000000005,
+                3.246666666666665,
+                4.1983333333333315,
+                3.0633333333333312
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 13.88,
+              "timestamp": "1790492908169029.265",
+              "stream": 12,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                16.89666666666667,
+                16.763333333333332,
+                16.991666666666667,
+                16.81
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 18.6,
+              "timestamp": "1790492908169043.505",
+              "stream": 12,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                5.910312500000002,
+                5.7475,
+                6.121249999999999,
+                5.567500000000001
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                9.96,
+                9.82,
+                10.100000000000001,
+                10.119999999999997
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 19.08,
+              "timestamp": "1790492908169064.245",
+              "stream": 12,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                7.033333333333327,
+                6.275000000000001,
+                6.681666666666669,
+                6.541666666666669
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 22.5,
+              "timestamp": "1790492908169065.345",
+              "stream": 11,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                8.521875000000001,
+                8.535,
+                8.313125000000003,
+                8.314375
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                5.200000000000003,
+                5.219999999999999,
+                5.6200000000000045,
+                5.419999999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 17.1,
+              "timestamp": "1790492908169124.865",
+              "stream": 11,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 14.74,
+              "timestamp": "1790492908169142.005",
+              "stream": 11,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                8.186666666666667,
+                9.373333333333344,
+                7.760000000000001,
+                9.880000000000004
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 49.16,
+              "timestamp": "1790492908169115.845",
+              "stream": 12,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 18.22,
+              "timestamp": "1790492908169195.205",
+              "stream": 12,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 13.54,
+              "timestamp": "1790492908169213.445",
+              "stream": 12,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                20.74958333333333,
+                20.977500000000006,
+                22.64291666666667,
+                20.27666666666667
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                61.58916666666668,
+                62.7425,
+                58.77583333333334,
+                62.733333333333334
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 64.76,
+              "timestamp": "1790492908169244.565",
+              "stream": 12,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                6.627500000000001,
+                6.9250000000000025,
+                6.318749999999994,
+                8.5175
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                11.389999999999995,
+                11.802500000000004,
+                12.440833333333336,
+                12.2825
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                10.370000000000005,
+                11.299999999999997,
+                12.530000000000001,
+                15.230000000000004
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                8.37,
+                8.061250000000001,
+                7.832499999999994,
+                8.476249999999999
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 68.06,
+              "timestamp": "1790492908169458.105",
+              "stream": 12,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                7.265000000000002,
+                7.24625,
+                20.983750000000008,
+                5.927499999999997
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                22.849166666666665,
+                19.720000000000002,
+                22.096666666666668,
+                21.802500000000002
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                9.249999999999995,
+                10.546666666666667,
+                23.633333333333336,
+                8.259999999999996
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                8.890000000000002,
+                8.331249999999999,
+                8.0975,
+                8.402499999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 22.88,
+              "timestamp": "1790492908169322.085",
+              "stream": 12,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 14.1,
+              "timestamp": "1790492908169373.785",
+              "stream": 12,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                32.05083333333333,
+                32.224166666666676,
+                18.05,
+                31.727916666666665
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                21.620000000000008,
+                18.445833333333333,
+                19.918333333333333,
+                22.1325
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 9.08,
+              "timestamp": "1790492908169310.085",
+              "stream": 12,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                2.9000000000000057,
+                4.3799999999999955,
+                3.4399999999999977,
+                2.7200000000000273
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 7.72,
+              "timestamp": "1790492908169389.485",
+              "stream": 12,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                5.468333333333334,
+                4.083333333333336,
+                9.881666666666668,
+                4.9950000000000045
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                17.039166666666674,
+                16.649999999999995,
+                7.204583333333333,
+                17.638333333333332
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 12.64,
+              "timestamp": "1790492908169538.285",
+              "stream": 11,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                1.9633333333333383,
+                2.0333333333333266,
+                3.6966666666666677,
+                2.383333333333335
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                7.077500000000008,
+                7.2674999999999965,
+                7.5500000000000025,
+                8.0
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 103.72,
+              "timestamp": "1790492908170151.665",
+              "stream": 12,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_0_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                29.61249999999998,
+                28.6871875,
+                29.333125,
+                29.48375
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 37.96,
+              "timestamp": "1790492908170273.925",
+              "stream": 12,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__2_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                13.990937499999983,
+                13.000625000000003,
+                13.409375000000011,
+                13.984687500000003
+              ]
+            },
+            "proj_b_act_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                14.511666666666665,
+                15.159166666666644,
+                14.62916666666671,
+                14.71666666666664
+              ]
+            },
+            "quant_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                8.820833333333335,
+                8.772499999999999,
+                8.929166666666655,
+                9.409166666666636
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 18.22,
+              "timestamp": "1790492908170318.105",
+              "stream": 12,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                20.623333333333335,
+                20.73500000000003,
+                21.257500000000032,
+                21.669166666666626
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b16_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b16/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 53.62,
+              "timestamp": "1790483287122137.960",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                15.011666666666668,
+                14.545,
+                14.666666666666666,
+                14.98166666666667
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                1.5399999999999991,
+                2.096666666666669,
+                1.7099999999999984,
+                1.9733333333333316
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                7.246666666666666,
+                6.972500000000001,
+                7.589166666666668,
+                7.609166666666667
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                8.993333333333332,
+                8.401666666666667,
+                9.666666666666666,
+                8.915
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                7.689999999999998,
+                8.238333333333333,
+                7.824999999999998,
+                8.116666666666667
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                3.0033333333333325,
+                3.443333333333334,
+                3.939999999999999,
+                2.9883333333333346
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 12.94,
+              "timestamp": "1790483287122192.660",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                17.01,
+                17.028333333333336,
+                16.733333333333334,
+                17.08
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 19.52,
+              "timestamp": "1790483287122205.680",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                5.601250000000001,
+                5.907812499999999,
+                5.8771875,
+                5.975624999999999
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                10.14,
+                11.54,
+                11.440000000000005,
+                10.280000000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 18.9,
+              "timestamp": "1790483287122225.300",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                6.361666666666667,
+                7.18833333333333,
+                7.065,
+                6.461666666666669
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 22.36,
+              "timestamp": "1790483287122225.860",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                8.801875,
+                7.543750000000002,
+                11.465625,
+                8.246875
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                5.280000000000008,
+                6.32,
+                5.579999999999998,
+                5.319999999999993
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 20.3,
+              "timestamp": "1790483287122249.320",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 16.7,
+              "timestamp": "1790483287122269.660",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 3,
+              "window_block_mean_us": [
+                6.953333333333338,
+                7.826666666666682,
+                7.780000000000001,
+                9.380000000000004
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 48.82,
+              "timestamp": "1790483287122249.880",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 16.84,
+              "timestamp": "1790483287122319.820",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 12.92,
+              "timestamp": "1790483287122336.680",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                26.609166666666667,
+                26.825416666666676,
+                21.348333333333333,
+                21.859999999999992
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                41.05583333333333,
+                45.26083333333332,
+                40.6475,
+                41.650000000000006
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 63.4,
+              "timestamp": "1790483287122366.980",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                6.540000000000003,
+                6.936249999999992,
+                9.963750000000001,
+                8.178750000000004
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                13.976666666666667,
+                12.245000000000003,
+                11.878333333333334,
+                12.229166666666668
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                9.959999999999994,
+                9.0,
+                12.039999999999964,
+                9.509999999999991
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                12.17125,
+                12.913750000000004,
+                7.516249999999999,
+                7.94375
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 65.3,
+              "timestamp": "1790483287122546.440",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                7.211249999999998,
+                6.989999999999997,
+                7.424999999999994,
+                11.079999999999998
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                22.150833333333335,
+                34.15083333333333,
+                30.211666666666666,
+                24.446666666666665
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                10.916666666666671,
+                9.670000000000002,
+                11.926666666666657,
+                12.396666666666675
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                6.659999999999998,
+                7.8312500000000025,
+                10.247500000000002,
+                7.13875
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 20.4,
+              "timestamp": "1790483287122443.200",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 17.64,
+              "timestamp": "1790483287122481.760",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                16.62708333333333,
+                17.677083333333332,
+                12.563333333333341,
+                12.473333333333333
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                21.135000000000005,
+                20.83833333333333,
+                22.343333333333337,
+                16.301666666666673
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 8.96,
+              "timestamp": "1790483287122431.200",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                3.019999999999982,
+                2.780000000000001,
+                2.6999999999999886,
+                2.3600000000000136
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 13.22,
+              "timestamp": "1790483287122499.500",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                5.280000000000001,
+                4.7941666666666665,
+                5.965833333333339,
+                8.929999999999998
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                16.379583333333336,
+                16.289583333333336,
+                7.018749999999997,
+                7.075000000000003
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 20.7,
+              "timestamp": "1790483287122613.460",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                2.266666666666661,
+                2.8000000000000065,
+                1.7399999999999949,
+                1.6300000000000001
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                7.954999999999998,
+                6.9300000000000015,
+                8.322500000000002,
+                8.297500000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 111.9,
+              "timestamp": "1790483287122856.420",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_0_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                29.749375,
+                30.120312499999997,
+                29.7671875,
+                30.06750000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 36.08,
+              "timestamp": "1790483287122987.860",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__2_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                13.345624999999995,
+                12.832187500000003,
+                13.146250000000004,
+                13.138750000000003
+              ]
+            },
+            "proj_b_act_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                14.696666666666658,
+                14.685000000000008,
+                14.813333333333324,
+                15.064999999999998
+              ]
+            },
+            "quant_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                9.27500000000002,
+                9.243333333333345,
+                8.74166666666666,
+                9.580833333333317
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 20.6,
+              "timestamp": "1790483287123030.600",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                20.129166666666677,
+                19.862499999999994,
+                20.26666666666667,
+                20.068333333333342
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 24,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b24_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h8192_b24/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h8192_b24/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h8192_b24/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h8192_b24/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 59.82,
+              "timestamp": "1790483804334698.605",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 18,
+              "window_block_mean_us": [
+                16.006666666666668,
+                14.68888888888889,
+                15.455555555555556,
+                15.797777777777776
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 9,
+              "window_block_mean_us": [
+                2.1177777777777766,
+                1.9755555555555557,
+                2.1488888888888846,
+                2.482222222222221
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                9.8025,
+                11.47,
+                10.496666666666668,
+                10.806666666666667
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 18,
+              "window_block_mean_us": [
+                10.254444444444445,
+                9.293333333333333,
+                9.259999999999998,
+                9.097777777777779
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 18,
+              "window_block_mean_us": [
+                8.6,
+                8.712222222222222,
+                8.00888888888889,
+                8.611111111111112
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                3.4250000000000007,
+                3.3812499999999996,
+                3.5825000000000005,
+                3.426249999999997
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 15.14,
+              "timestamp": "1790483804334759.565",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 18,
+              "window_block_mean_us": [
+                16.93111111111111,
+                16.79888888888889,
+                16.973333333333333,
+                16.862222222222222
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 19.1,
+              "timestamp": "1790483804334774.765",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                5.598125000000001,
+                5.6846875,
+                6.223124999999998,
+                5.8903124999999985
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                17.380000000000003,
+                14.0,
+                13.96,
+                13.640000000000008
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 19.7,
+              "timestamp": "1790483804334793.985",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                8.541250000000002,
+                7.252500000000005,
+                8.715000000000002,
+                7.582499999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 22.94,
+              "timestamp": "1790483804334794.505",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                10.539375000000001,
+                10.29875,
+                7.706874999999999,
+                8.055625
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                7.140000000000001,
+                7.039999999999992,
+                7.480000000000004,
+                7.059999999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 20.1,
+              "timestamp": "1790483804334818.525",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 18.26,
+              "timestamp": "1790483804334838.645",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 5,
+              "window_block_mean_us": [
+                10.468,
+                8.292000000000002,
+                10.691999999999997,
+                7.936000000000002
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 65.34,
+              "timestamp": "1790483804334819.085",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 22.9,
+              "timestamp": "1790483804334903.745",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 14.54,
+              "timestamp": "1790483804334926.665",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                30.885833333333338,
+                32.675833333333344,
+                33.105000000000004,
+                35.702083333333334
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                52.70166666666667,
+                55.16916666666667,
+                51.141666666666666,
+                55.15416666666667
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 57.72,
+              "timestamp": "1790483804334964.625",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                6.995,
+                6.865000000000005,
+                6.8033333333333355,
+                6.3850000000000025
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                16.68,
+                16.012500000000003,
+                16.839166666666667,
+                17.000000000000007
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                12.469999999999999,
+                15.190000000000026,
+                14.600000000000023,
+                12.829999999999998
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                9.184166666666668,
+                8.049166666666666,
+                7.736666666666664,
+                8.43083333333333
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 87.7,
+              "timestamp": "1790483804335144.245",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                6.407499999999994,
+                8.941666666666665,
+                7.497499999999995,
+                5.998333333333331
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                29.844166666666666,
+                25.925,
+                27.19833333333333,
+                29.964166666666667
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 9,
+              "window_block_mean_us": [
+                10.164444444444444,
+                11.308888888888893,
+                12.686666666666667,
+                9.042222222222225
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                7.465000000000001,
+                8.883333333333333,
+                8.37,
+                7.878333333333333
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 20.9,
+              "timestamp": "1790483804335033.805",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 14.74,
+              "timestamp": "1790483804335072.285",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                19.096250000000005,
+                22.45916666666666,
+                17.469583333333336,
+                25.77
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                19.740000000000002,
+                23.0225,
+                19.287499999999998,
+                20.805833333333336
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 6.4,
+              "timestamp": "1790483804335023.605",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                3.1000000000000227,
+                3.6200000000000045,
+                3.2000000000000455,
+                4.319999999999993
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 16.12,
+              "timestamp": "1790483804335087.125",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                5.665000000000004,
+                6.034166666666654,
+                6.7216666666666685,
+                5.265833333333329
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                19.08875,
+                17.76125,
+                9.84666666666667,
+                18.68125
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 21.48,
+              "timestamp": "1790483804335233.325",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 9,
+              "window_block_mean_us": [
+                2.0133333333333403,
+                2.1666666666666696,
+                1.9799999999999993,
+                3.228888888888889
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                11.950000000000006,
+                11.910000000000005,
+                9.677499999999998,
+                9.952499999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 130.86,
+              "timestamp": "1790483804335550.725",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_1_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                68.133125,
+                70.204375,
+                69.4625,
+                69.86500000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 66.46,
+              "timestamp": "1790483804335703.125",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__3_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                23.485937500000006,
+                22.982812499999994,
+                23.749375000000008,
+                22.999999999999996
+              ]
+            },
+            "proj_b_act_1_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                16.69850000000001,
+                16.432000000000006,
+                16.383499999999994,
+                16.547499999999996
+              ]
+            },
+            "quant_1_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                7.032499999999999,
+                7.167499999999992,
+                8.001500000000007,
+                7.5874999999999915
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 26.96,
+              "timestamp": "1790483804335776.245",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 36,
+              "window_block_mean_us": [
+                25.096666666666653,
+                25.073333333333338,
+                25.920555555555552,
+                24.8961111111111
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b32_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b32/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b32/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b32/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b32/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 74.6,
+              "timestamp": "1790483976123592.190",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                16.037499999999998,
+                16.249166666666667,
+                16.0025,
+                15.829166666666666
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                2.694999999999999,
+                2.15,
+                2.6966666666666668,
+                2.6449999999999982
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                12.476666666666668,
+                15.085,
+                13.5675,
+                11.798333333333334
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                9.065000000000001,
+                9.080000000000002,
+                10.472500000000002,
+                9.507499999999999
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                8.301666666666666,
+                8.247499999999999,
+                8.444166666666666,
+                8.063333333333333
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                4.272499999999998,
+                5.4225,
+                4.465,
+                4.308749999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 16.56,
+              "timestamp": "1790483976123667.850",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                16.75,
+                17.491666666666667,
+                17.9225,
+                17.342499999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 19.68,
+              "timestamp": "1790483976123684.470",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                6.704375000000001,
+                6.189062500000001,
+                6.201562500000002,
+                6.179687500000001
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                18.700000000000003,
+                24.340000000000003,
+                20.28000000000001,
+                18.680000000000007
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 21.76,
+              "timestamp": "1790483976123704.250",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                9.111249999999998,
+                10.115000000000006,
+                8.098750000000006,
+                9.036249999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 26.7,
+              "timestamp": "1790483976123704.770",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_matmul_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                8.951250000000002,
+                7.670625000000001,
+                8.580624999999998,
+                7.924999999999998
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                9.420000000000002,
+                11.060000000000002,
+                9.759999999999998,
+                10.879999999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 20.52,
+              "timestamp": "1790483976123732.590",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 19.08,
+              "timestamp": "1790483976123753.130",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 6,
+              "window_block_mean_us": [
+                7.873333333333335,
+                8.519999999999996,
+                7.300000000000011,
+                9.863333333333316
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 71.58,
+              "timestamp": "1790483976123733.330",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 24.0,
+              "timestamp": "1790483976123826.850",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 15.48,
+              "timestamp": "1790483976123850.870",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                38.889583333333334,
+                43.85333333333334,
+                45.03875,
+                38.26208333333334
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                63.737500000000004,
+                63.478333333333325,
+                68.315,
+                65.72166666666666
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 71.02,
+              "timestamp": "1790483976123883.310",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                6.118750000000009,
+                8.055625000000004,
+                6.434375000000002,
+                6.3575000000000035
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                26.4775,
+                20.098333333333336,
+                20.238333333333333,
+                27.243333333333332
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                19.139999999999986,
+                18.430000000000007,
+                16.769999999999996,
+                16.00999999999999
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                7.952500000000004,
+                8.425624999999997,
+                11.760000000000005,
+                8.050624999999998
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 100.24,
+              "timestamp": "1790483976124077.610",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                7.436874999999994,
+                7.175000000000008,
+                9.125624999999994,
+                6.300000000000001
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                29.00916666666667,
+                28.39666666666667,
+                28.955833333333334,
+                29.14666666666666
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                9.531666666666666,
+                9.643333333333338,
+                13.62,
+                9.934999999999995
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                11.478124999999999,
+                8.69,
+                7.19,
+                12.203750000000003
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 24.58,
+              "timestamp": "1790483976123964.890",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 15.66,
+              "timestamp": "1790483976124011.630",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                29.837500000000002,
+                32.78625,
+                37.6475,
+                39.04291666666667
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                23.935,
+                21.88333333333333,
+                26.86583333333333,
+                24.37333333333333
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 6.12,
+              "timestamp": "1790483976123955.310",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                5.220000000000027,
+                3.2000000000000455,
+                4.339999999999975,
+                5.680000000000007
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 17.34,
+              "timestamp": "1790483976124027.390",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                6.514166666666671,
+                5.74833333333333,
+                6.080833333333328,
+                6.505
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                22.94083333333333,
+                23.187083333333334,
+                23.358333333333334,
+                23.19916666666667
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 20.74,
+              "timestamp": "1790483976124179.190",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 12,
+              "window_block_mean_us": [
+                2.4099999999999966,
+                1.8566666666666716,
+                2.5766666666666658,
+                2.799999999999997
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                12.809999999999999,
+                11.95,
+                11.792500000000008,
+                13.557499999999997
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 132.42,
+              "timestamp": "1790483976124599.970",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_1_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                79.61999999999999,
+                78.724375,
+                81.70250000000001,
+                79.296875
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 63.88,
+              "timestamp": "1790483976124752.370",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__3_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                21.89531250000001,
+                22.344062500000007,
+                22.215000000000007,
+                21.9328125
+              ]
+            },
+            "proj_b_act_1_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                18.70791666666665,
+                18.740833333333317,
+                18.748750000000005,
+                18.397083333333327
+              ]
+            },
+            "quant_1_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                7.815416666666645,
+                7.681250000000001,
+                7.426666666666662,
+                7.453333333333333
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 26.04,
+              "timestamp": "1790483976124824.750",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                27.589583333333348,
+                28.902083333333326,
+                28.394583333333344,
+                30.46083333333336
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 40,
+      "operator_revision": "0ed4f926",
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b40_native_pytorch.json",
+      "pto_trace_paths": [
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b40/swimlane/dfx/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b40/swimlane/dfx/window_1/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b40/swimlane/dfx/window_2/merged_swimlane.json",
+        "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_short_followup/h8192_b40/swimlane/dfx/window_3/merged_swimlane.json"
+      ],
+      "groups": [
+        {
+          "stage": "HC_pre",
+          "native_events": [
+            {
+              "name": "HcPre",
+              "occurrence": 0,
+              "duration_us": 82.86,
+              "timestamp": "1790484145865124.000",
+              "stream": 10,
+              "task_id": 1
+            }
+          ],
+          "pto_tasks": {
+            "comb_sinkhorn_spmd": {
+              "blocks": 30,
+              "window_block_mean_us": [
+                17.261333333333337,
+                17.769333333333332,
+                17.116,
+                16.81
+              ]
+            },
+            "hc_pre_linear_reduce_spmd": {
+              "blocks": 15,
+              "window_block_mean_us": [
+                3.574666666666666,
+                2.8613333333333344,
+                2.401333333333333,
+                2.3253333333333313
+              ]
+            },
+            "hc_pre_linear_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                17.015,
+                14.945833333333335,
+                16.700833333333332,
+                15.274166666666666
+              ]
+            },
+            "hc_pre_rms_spmd": {
+              "blocks": 30,
+              "window_block_mean_us": [
+                9.740666666666664,
+                9.474,
+                9.806000000000001,
+                9.473333333333334
+              ]
+            },
+            "hc_widen_spmd": {
+              "blocks": 30,
+              "window_block_mean_us": [
+                9.606666666666667,
+                9.810666666666666,
+                9.688666666666666,
+                9.782666666666668
+              ]
+            },
+            "split_pre_post_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                4.925000000000002,
+                4.88625,
+                6.286249999999999,
+                6.057500000000001
+              ]
+            }
+          }
+        },
+        {
+          "stage": "input_RMSNorm",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 0,
+              "duration_us": 15.04,
+              "timestamp": "1790484145865207.640",
+              "stream": 10,
+              "task_id": 2
+            }
+          ],
+          "pto_tasks": {
+            "mix_x_rms_norm_spmd": {
+              "blocks": 30,
+              "window_block_mean_us": [
+                19.112000000000005,
+                17.018666666666665,
+                16.718666666666667,
+                16.644
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 20.54,
+              "timestamp": "1790484145865222.740",
+              "stream": 10,
+              "task_id": 4
+            }
+          ],
+          "pto_tasks": {
+            "qr_proj_matmul_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                8.836249999999998,
+                8.923124999999999,
+                8.40875,
+                9.273437500000004
+              ]
+            },
+            "qr_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                24.5,
+                26.5,
+                25.099999999999994,
+                22.92
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_A_RMS_quant",
+          "native_events": [
+            {
+              "name": "RmsNormDynamicQuant",
+              "occurrence": 0,
+              "duration_us": 20.24,
+              "timestamp": "1790484145865243.380",
+              "stream": 10,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "qr_rms_norm_quant_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                11.05375,
+                10.947500000000009,
+                10.69250000000001,
+                10.755000000000013
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 26.26,
+              "timestamp": "1790484145865243.900",
+              "stream": 9,
+              "task_id": 3
+            }
+          ],
+          "pto_tasks": {
+            "kv_proj_native_240_spmd": {
+              "blocks": 16,
+              "window_block_mean_us": [
+                90.05375000000001,
+                103.10750000000002,
+                90.70500000000001,
+                91.34875000000001
+              ]
+            },
+            "kv_proj_seed": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                12.600000000000009,
+                12.340000000000003,
+                11.980000000000004,
+                11.760000000000005
+              ]
+            }
+          }
+        },
+        {
+          "stage": "KV_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "RmsNorm",
+              "occurrence": 1,
+              "duration_us": 23.12,
+              "timestamp": "1790484145865271.240",
+              "stream": 9,
+              "task_id": 6
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 0,
+              "duration_us": 19.26,
+              "timestamp": "1790484145865294.400",
+              "stream": 9,
+              "task_id": 7
+            }
+          ],
+          "pto_tasks": {
+            "kv_rms_norm_rope_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                8.405000000000001,
+                9.377499999999998,
+                8.879999999999995,
+                9.3275
+              ]
+            }
+          }
+        },
+        {
+          "stage": "Q_B_dequant_RMS_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 0,
+              "duration_us": 85.42,
+              "timestamp": "1790484145865272.040",
+              "stream": 10,
+              "task_id": 10
+            },
+            {
+              "name": "triton_rms_kernel_0",
+              "occurrence": 0,
+              "duration_us": 26.96,
+              "timestamp": "1790484145865378.300",
+              "stream": 10,
+              "task_id": 12
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 1,
+              "duration_us": 16.02,
+              "timestamp": "1790484145865405.280",
+              "stream": 10,
+              "task_id": 13
+            }
+          ],
+          "pto_tasks": {
+            "qproj_dequant_rms_nope_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                52.08500000000001,
+                57.49000000000001,
+                58.388333333333335,
+                53.93208333333335
+              ]
+            },
+            "qproj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                75.16916666666667,
+                77.2925,
+                67.90416666666665,
+                84.165
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 0,
+              "duration_us": 70.18,
+              "timestamp": "1790484145865442.680",
+              "stream": 10,
+              "task_id": 15
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_0_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                6.247000000000007,
+                10.815000000000003,
+                5.968500000000004,
+                5.944500000000007
+              ]
+            },
+            "kv_score_proj_0_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                23.713333333333335,
+                25.5575,
+                25.696666666666662,
+                23.238333333333337
+              ]
+            },
+            "rmsnorm_rope_spmd": {
+              "blocks": 2,
+              "window_block_mean_us": [
+                22.400000000000006,
+                21.059999999999974,
+                19.420000000000016,
+                21.129999999999995
+              ]
+            },
+            "scatter_softmax_pool_0_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                9.6065,
+                9.000500000000002,
+                9.689499999999999,
+                8.569999999999997
+              ]
+            }
+          }
+        },
+        {
+          "stage": "attention_compressor",
+          "native_events": [
+            {
+              "name": "Compressor",
+              "occurrence": 1,
+              "duration_us": 104.24,
+              "timestamp": "1790484145865649.040",
+              "stream": 10,
+              "task_id": 28
+            }
+          ],
+          "pto_tasks": {
+            "compress_state_commit_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                9.390499999999998,
+                8.683500000000006,
+                8.019000000000002,
+                6.806500000000002
+              ]
+            },
+            "kv_score_proj_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                33.986666666666665,
+                33.49583333333334,
+                32.090833333333336,
+                31.456666666666667
+              ]
+            },
+            "rmsnorm_rope_cache_write_spmd": {
+              "blocks": 15,
+              "window_block_mean_us": [
+                15.320000000000004,
+                14.25066666666667,
+                12.835999999999997,
+                8.773333333333332
+              ]
+            },
+            "scatter_softmax_pool_spmd": {
+              "blocks": 40,
+              "window_block_mean_us": [
+                7.743999999999997,
+                12.792499999999997,
+                7.204000000000001,
+                9.597499999999995
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_projection_RoPE",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 1,
+              "duration_us": 28.2,
+              "timestamp": "1790484145865524.840",
+              "stream": 10,
+              "task_id": 19
+            },
+            {
+              "name": "InplacePartialRotaryMul",
+              "occurrence": 2,
+              "duration_us": 20.42,
+              "timestamp": "1790484145865572.180",
+              "stream": 10,
+              "task_id": 21
+            }
+          ],
+          "pto_tasks": {
+            "idx_qr_dequant_rope_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                30.243750000000006,
+                30.893333333333334,
+                29.37666666666667,
+                45.52916666666667
+              ]
+            },
+            "idx_qr_proj_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                23.19333333333334,
+                26.953333333333333,
+                22.70166666666666,
+                26.170833333333327
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_K_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 0,
+              "duration_us": 6.8,
+              "timestamp": "1790484145865514.060",
+              "stream": 10,
+              "task_id": 16
+            }
+          ],
+          "pto_tasks": {
+            "kv_hadamard": {
+              "blocks": 1,
+              "window_block_mean_us": [
+                4.220000000000027,
+                3.6999999999999886,
+                8.379999999999995,
+                4.319999999999993
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_Q_hadamard",
+          "native_events": [
+            {
+              "name": "aclnnMatmul_MatMulCommon_MatMulV2",
+              "occurrence": 1,
+              "duration_us": 17.42,
+              "timestamp": "1790484145865592.700",
+              "stream": 10,
+              "task_id": 24
+            }
+          ],
+          "pto_tasks": {
+            "qr_hadamard_matmul_spmd": {
+              "blocks": 24,
+              "window_block_mean_us": [
+                10.314166666666665,
+                8.217500000000001,
+                7.151666666666666,
+                7.150833333333336
+              ]
+            },
+            "qr_hadamard_quant_spmd": {
+              "blocks": 48,
+              "window_block_mean_us": [
+                15.058750000000005,
+                26.01083333333333,
+                26.66208333333333,
+                25.581250000000004
+              ]
+            }
+          }
+        },
+        {
+          "stage": "indexer_head_weight_projection",
+          "native_events": [
+            {
+              "name": "aclnnMatmulWeightNz_MatMulCommon_MatMulV2",
+              "occurrence": 2,
+              "duration_us": 20.14,
+              "timestamp": "1790484145865755.040",
+              "stream": 9,
+              "task_id": 20
+            }
+          ],
+          "pto_tasks": {
+            "weights_proj_reduce_spmd": {
+              "blocks": 15,
+              "window_block_mean_us": [
+                2.4493333333333376,
+                2.8493333333333397,
+                2.654666666666666,
+                2.5093333333333345
+              ]
+            },
+            "weights_proj_spmd": {
+              "blocks": 8,
+              "window_block_mean_us": [
+                14.242500000000003,
+                14.620000000000005,
+                14.052500000000002,
+                13.842500000000005
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_A",
+          "native_events": [
+            {
+              "name": "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul",
+              "occurrence": 0,
+              "duration_us": 138.46,
+              "timestamp": "1790484145866242.860",
+              "stream": 10,
+              "task_id": 41
+            }
+          ],
+          "pto_tasks": {
+            "proj_a_mm_1_spmd": {
+              "blocks": 32,
+              "window_block_mean_us": [
+                85.91125,
+                83.73625,
+                85.78187499999999,
+                84.64812500000002
+              ]
+            }
+          }
+        },
+        {
+          "stage": "O_B",
+          "native_events": [
+            {
+              "name": "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3",
+              "occurrence": 2,
+              "duration_us": 76.86,
+              "timestamp": "1790484145866403.680",
+              "stream": 10,
+              "task_id": 43
+            }
+          ],
+          "pto_tasks": {
+            "_proj_b_mm_nz_kernel__3_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                21.111249999999984,
+                20.920624999999987,
+                20.943124999999984,
+                21.910937500000006
+              ]
+            },
+            "proj_b_act_1_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                15.980624999999971,
+                15.985937499999991,
+                16.01468749999998,
+                16.056562500000016
+              ]
+            },
+            "quant_1_spmd": {
+              "blocks": 64,
+              "window_block_mean_us": [
+                7.334999999999997,
+                6.794687500000027,
+                7.728750000000023,
+                7.133749999999999
+              ]
+            }
+          }
+        },
+        {
+          "stage": "HC_post",
+          "native_events": [
+            {
+              "name": "HcPost",
+              "occurrence": 0,
+              "duration_us": 34.26,
+              "timestamp": "1790484145866487.700",
+              "stream": 10,
+              "task_id": 45
+            }
+          ],
+          "pto_tasks": {
+            "hc_post_spmd": {
+              "blocks": 60,
+              "window_block_mean_us": [
+                24.949333333333325,
+                25.883666666666663,
+                26.998333333333342,
+                25.017
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

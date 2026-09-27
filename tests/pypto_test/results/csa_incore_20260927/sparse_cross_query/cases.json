@@ -1,10 +1,12 @@
 {
   "base_revision": "c160cabe",
+  "operator_revision": "da2e2368",
   "patch": "candidate.patch",
-  "scope": "同一跨query流水候选；各档独立采集，已有档位不自动代表七档或整模型验收",
+  "scope": "同一da2e2368算子七档单卡实测；每档独立采集，不代表16卡整模型验收",
   "task_ids": [
     "task_20260927_165242_22114026823",
-    "task_20260927_165609_22367535890"
+    "task_20260927_165609_22367535890",
+    "task_20260927_170134_22993926622"
   ],
   "fixed_input_vs_baseline": {
     "status": "PASS",
@@ -145,6 +147,232 @@
     }
   ],
   "cases": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b4/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 849.6239989995956,
+          "p50_us": 848.9599823951721,
+          "p95_us": 852.8599739074707,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1010.519003868103,
+          "p50_us": 1007.2000026702881,
+          "p95_us": 1025.8599519729614,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 729.2050033807755,
+          "p50_us": 724.6100008487701,
+          "p95_us": 742.8799867630005,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 114.85100015997887,
+          "p50_us": 114.79000002145767,
+          "p95_us": 116.49999767541885,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 179.1410006582737,
+          "p50_us": 177.64000594615936,
+          "p95_us": 186.039999127388,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.004322111614423838
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 184,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "swimlane": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b4/swimlane/dfx/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 50.089999999999996
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 51.991666666666674
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 12.425000000000006
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b4/swimlane/dfx/window_1/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 45.28833333333333
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 47.34708333333334
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 12.652500000000005
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b4/swimlane/dfx/window_2/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 49.68416666666666
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 51.63833333333334
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 12.180833333333338
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b4/swimlane/dfx/window_3/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 50.425000000000004
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 52.24166666666667
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 12.317916666666678
+          }
+        }
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b8/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1008.8539958000183,
+          "p50_us": 1008.8099837303162,
+          "p95_us": 1013.9800310134888,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1203.4360110759735,
+          "p50_us": 1201.8499970436096,
+          "p95_us": 1218.8600301742554,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 891.9189989566803,
+          "p50_us": 892.3299908638,
+          "p95_us": 902.0599722862244,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 138.56799826025963,
+          "p50_us": 138.67999613285065,
+          "p95_us": 140.30000567436218,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 195.30999958515167,
+          "p50_us": 197.87999987602234,
+          "p95_us": 202.29999721050262,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.004230760394724851
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 350,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "swimlane": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b8/swimlane/dfx/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 90.30083333333334
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 92.54208333333332
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 15.205
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b8/swimlane/dfx/window_1/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 100.04583333333335
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 102.09916666666666
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 15.569166666666666
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b8/swimlane/dfx/window_2/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 101.78333333333332
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 103.8775
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 15.590416666666671
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h131072_b8/swimlane/dfx/window_3/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 98.3175
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 100.36333333333334
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 15.355833333333331
+          }
+        }
+      ]
+    },
     {
       "history": 131072,
       "batch": 16,
@@ -367,6 +595,232 @@
           "merge_norm": {
             "blocks": 48,
             "mean_us": 24.994583333333328
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 24,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b24/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1133.224993944168,
+          "p50_us": 1134.2299580574036,
+          "p95_us": 1137.4599933624268,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1331.288993358612,
+          "p50_us": 1332.1899771690369,
+          "p95_us": 1346.019983291626,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1002.2839993238449,
+          "p50_us": 1003.790020942688,
+          "p95_us": 1031.5799713134766,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 102.03499980270863,
+          "p50_us": 101.90000012516975,
+          "p95_us": 103.3800020813942,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 237.3420000076294,
+          "p50_us": 236.8999943137169,
+          "p95_us": 244.42000687122345,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.003298217370275449
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 545,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "swimlane": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b24/swimlane/dfx/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 196.01
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 198.02
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 30.431250000000006
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b24/swimlane/dfx/window_1/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 200.13666666666668
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 202.05083333333332
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 30.197499999999998
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b24/swimlane/dfx/window_2/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 197.4033333333333
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 199.4154166666667
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 30.532499999999995
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b24/swimlane/dfx/window_3/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 200.745
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 202.64208333333335
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 30.23625000000001
+          }
+        }
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b32/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1290.6739950180054,
+          "p50_us": 1290.880024433136,
+          "p95_us": 1296.9000339508057,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1469.6339905261993,
+          "p50_us": 1468.6200022697449,
+          "p95_us": 1495.3199625015259,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1140.7140016555786,
+          "p50_us": 1142.449975013733,
+          "p95_us": 1163.8200283050537,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 101.79699882864952,
+          "p50_us": 101.87999904155731,
+          "p95_us": 103.17999869585037,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 240.42399898171425,
+          "p50_us": 239.51999843120575,
+          "p95_us": 247.51999974250793,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0032885364877523935
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 729,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "swimlane": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b32/swimlane/dfx/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 245.6641666666667
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 247.59833333333333
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 33.2825
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b32/swimlane/dfx/window_1/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 240.29583333333335
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 242.12333333333333
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 32.652916666666655
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b32/swimlane/dfx/window_2/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 237.70000000000002
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 239.52333333333334
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 33.03541666666667
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/sparse_cross_query/h8192_b32/swimlane/dfx/window_3/merged_swimlane.json",
+          "qk_pv_aic": {
+            "blocks": 24,
+            "mean_us": 241.66666666666669
+          },
+          "qk_pv_aiv": {
+            "blocks": 48,
+            "mean_us": 243.61291666666668
+          },
+          "merge_norm": {
+            "blocks": 48,
+            "mean_us": 32.659583333333316
           }
         }
       ]
