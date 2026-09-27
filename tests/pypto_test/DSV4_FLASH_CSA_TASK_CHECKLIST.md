@@ -27,6 +27,11 @@ Top-K融合候选v11编译失败已撤回，padding及整模型验收按下列�
 完整PTO1708.50 μs仍慢于同轮Native1401.18 μs，B16本体无明确收益。
 [先导、选择依据与最终复验](results/csa_incore_20260927/sparse_kv_early/README.md)分开记录；
 B24/B32仅有全档启用先导数据，不能冒充加入选择逻辑后的当前矩阵。
+另保留[跨query连续核内流水](results/csa_incore_20260927/sparse_cross_query/README.md)：
+B40本体1342.68 μs，qk_pv核内283.06–288.68 μs；8K/B16本体795.04 μs基本持平，
+128K/B16本体1269.53 μs但p95仍1549.14 μs、核内未明确获益。
+固定Native输入对基底PTO逐bit一致，混合无效query/不均分尾部/零工作量核通过；
+精度版及跨任务调度不变，当前同一源码还缺四档测量，未做新的整模型验收。
 其他先导因没有明确本体收益已撤回；128K/B16 Native分项trace已补齐。
 阶段出口仍须测同一当前实现七档，不能沿用旧六档组成新矩阵；Sparse Attention核内策略及WKV NZ复用待推进。
 过程和历史结论保留在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，旧版本可查 Git；
