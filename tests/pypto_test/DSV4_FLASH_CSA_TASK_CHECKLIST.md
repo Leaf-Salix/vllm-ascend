@@ -74,8 +74,10 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    等待期间独立准备WO-B两份INT32中间结果候选：NZ/ND完整CPU编译通过，尚无设备正确性或收益；
    依赖共同token scale，因EP16量化干预未受益，本阶段不继续占卡。
    [补丁与编译边界](results/csa_oproj_accum2_20260928/README.md)。
-   下一项只恢复QKV的Native BF16数值边界，保留性能分块/atomic/流水和原cache；
-   先单卡筛查完整误差、成本与B3固定图尾块，有价值再决定EP16验证。
+   QKV的Native BF16数值边界候选完成单卡：完整输出RMSE下降12.01%，Top-K集合替换366→272，
+   CSA781.998→789.491μs；同轮Native增加1.67%，不把差额全算候选净成本。B3固定图尾块通过。
+   已提交原cache两档EP16，并重新采集Native控制，判断能否降低下游专家工作；当前未合入。
+   [单卡依据、数值范围和命令](results/csa_qkv_bf16_20260928/README.md)。
 2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
    继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
    Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。

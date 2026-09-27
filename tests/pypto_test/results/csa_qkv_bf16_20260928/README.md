@@ -31,4 +31,33 @@ python tests/pypto_test/results/csa_qkv_bf16_20260928/compile.py \
 单卡task_20260928_023535_1798714557：[命令](run_layer.sh)。
 同轮原版/候选B16/H8192、正式layer4权重、mode2/atomic1/det0，5次预热20次图计时；
 另测B3/atomic0/det1固定形状A→B→A和尾块。主要观察完整CSA成本和完整HC输出误差，
-不能凭某个中间量更接近Native就认定整网受益。当前未合入，未提交16卡扩测。
+不能凭某个中间量更接近Native就认定整网受益。当前未合入；完成下述单卡筛查后才提交16卡代表档。
+
+## 单卡结果与进入EP16的依据
+
+task_20260928_023535_1798714557退出0，原版/候选正式layer4、B16/H8192、mode2/atomic1/det0：
+
+| 指标 | 原性能版 | QKV边界候选 |
+| --- | ---: | ---: |
+| PTO完整CSA均值 μs | 781.998 | 789.491 |
+| PTO P95 μs | 798.820 | 807.520 |
+| Native控制均值 μs | 919.414 | 934.725 |
+| 完整HC输出对Native RMSE | 0.0033201341 | 0.0029213311 |
+| 输出零容差差异元素 /1572864 | 652014 | 605887 |
+| Top-K集合替换索引总数 /49152 | 366 | 272 |
+
+完整误差降低12.01%，集合替换数降低25.68%。PTO均值增加0.96%、Native控制同时增加1.67%，
+不能把7.49μs当作候选的精确净成本；没有宣称CSA已加速，也没有将零容差FAIL改为PASS。
+各次metadata/保护区、有限值/Top-K结构通过。B3的atomic0/det1固定形状A→B→A图通过，
+覆盖18 token尾块；不代表跨batch padding图验收。
+[精简对照与原始样本](single_layer.json)，原始报告位于baseline/candidate/graph_b3的report.json。
+
+本轮第一次在完整层输出上观察到明确的误差下降，且局部成本不大，值得检验是否减少下游专家工作。
+提交task_20260928_024844_45752012651：128K/B16与8K/B40，正式16卡EP16、mode2/atomic1/det0、
+HCCL=false、EPLB关闭，严格整批入场后各取warmup后10步pure decode forward。
+[模型命令](run_model.sh)、[只读收集器](collect_model.py)。
+
+**本轮Native控制重新采集**，不复用两小时前的控制来判定小幅胜负。Native生产流程未修改。
+独立模型工作树`.cache/csa-qkv-bf16-model-2a740c1f`＝2a740c1f＋测试入场修复8dd737f4＋本目录候选。
+保留原Native cache布局；当前没有ordered/source-split布局补丁，不能与前轮分离布局的成绩直接作单因素相减。
+只有真实forward、P95和token/DSpark达到要求才考虑保留；局部误差下降本身不是整模型优势。

@@ -1,0 +1,2089 @@
+{
+  "task": "task_20260928_023535_1798714557",
+  "operator_base": "2a740c1f",
+  "candidate": "candidate.patch",
+  "cases": {
+    "baseline": {
+      "status": "MEASURED",
+      "batch": 16,
+      "history": 8192,
+      "layer_index": 4,
+      "variant": "performance",
+      "deterministic_level": 0,
+      "weight_nz_mode": 2,
+      "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
+      "pto_reduction": {
+        "atomic_add": 1,
+        "qr_split_k": 8,
+        "kv_split_k": 8
+      },
+      "state_vs_native": {
+        "x_out": {
+          "status": "FAIL",
+          "shape": [
+            96,
+            4,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            96,
+            4,
+            4096
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 1572864,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0033201341070262184,
+          "mismatches": 652014,
+          "first_mismatches": [
+            [
+              0,
+              0,
+              2
+            ],
+            [
+              0,
+              0,
+              3
+            ],
+            [
+              0,
+              0,
+              4
+            ],
+            [
+              0,
+              0,
+              8
+            ],
+            [
+              0,
+              0,
+              10
+            ],
+            [
+              0,
+              0,
+              11
+            ],
+            [
+              0,
+              0,
+              12
+            ],
+            [
+              0,
+              0,
+              14
+            ]
+          ]
+        },
+        "idx_topk": {
+          "status": "FAIL",
+          "shape": [
+            96,
+            512
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            96,
+            512
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 49152,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 42917,
+          "first_mismatches": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              1
+            ],
+            [
+              0,
+              5
+            ],
+            [
+              0,
+              6
+            ],
+            [
+              0,
+              8
+            ],
+            [
+              0,
+              9
+            ],
+            [
+              0,
+              11
+            ],
+            [
+              0,
+              12
+            ]
+          ]
+        },
+        "swa.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 2375680,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.015625,
+          "rmse": 0.00016972028168650696,
+          "mismatches": 14220,
+          "first_mismatches": [
+            [
+              5,
+              0,
+              0,
+              11
+            ],
+            [
+              5,
+              0,
+              0,
+              13
+            ],
+            [
+              5,
+              0,
+              0,
+              14
+            ],
+            [
+              5,
+              0,
+              0,
+              15
+            ],
+            [
+              5,
+              0,
+              0,
+              23
+            ],
+            [
+              5,
+              0,
+              0,
+              30
+            ],
+            [
+              5,
+              0,
+              0,
+              33
+            ],
+            [
+              5,
+              0,
+              0,
+              36
+            ]
+          ]
+        },
+        "compressed.0": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 17317888,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 1.8096691985307425e-06,
+          "mismatches": 74,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              108
+            ],
+            [
+              2,
+              0,
+              0,
+              131
+            ],
+            [
+              2,
+              0,
+              0,
+              205
+            ],
+            [
+              2,
+              0,
+              0,
+              274
+            ],
+            [
+              2,
+              0,
+              0,
+              394
+            ],
+            [
+              68,
+              0,
+              0,
+              134
+            ],
+            [
+              68,
+              0,
+              0,
+              197
+            ],
+            [
+              68,
+              0,
+              0,
+              208
+            ]
+          ]
+        },
+        "state.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 593920,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0007456839084625244,
+          "rmse": 1.4900923968085232e-05,
+          "mismatches": 196196,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        },
+        "indexer.0": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            128
+          ],
+          "dtype": "torch.int8",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            128
+          ],
+          "expected_dtype": "torch.int8",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 4329472,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 149,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              4
+            ],
+            [
+              2,
+              0,
+              0,
+              5
+            ],
+            [
+              2,
+              0,
+              0,
+              22
+            ],
+            [
+              2,
+              0,
+              0,
+              106
+            ],
+            [
+              68,
+              0,
+              0,
+              10
+            ],
+            [
+              68,
+              0,
+              0,
+              65
+            ],
+            [
+              68,
+              0,
+              0,
+              67
+            ],
+            [
+              68,
+              0,
+              0,
+              80
+            ]
+          ]
+        },
+        "indexer.1": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            1
+          ],
+          "dtype": "torch.float16",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            1
+          ],
+          "expected_dtype": "torch.float16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 33824,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 6.103515625e-05,
+          "rmse": 7.467067822672274e-07,
+          "mismatches": 11,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              0
+            ],
+            [
+              200,
+              0,
+              0,
+              0
+            ],
+            [
+              266,
+              0,
+              0,
+              0
+            ],
+            [
+              332,
+              0,
+              0,
+              0
+            ],
+            [
+              398,
+              0,
+              0,
+              0
+            ],
+            [
+              464,
+              0,
+              0,
+              0
+            ],
+            [
+              530,
+              0,
+              0,
+              0
+            ],
+            [
+              596,
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "indexer_state.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 148480,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0007491409778594971,
+          "rmse": 1.6786887854829738e-05,
+          "mismatches": 49049,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        }
+      },
+      "topk_selection": {
+        "status": "MEASURED",
+        "scope": "Top-K 结构与集合诊断，不代表选择规则或整模型验收",
+        "rows": 96,
+        "position_mismatches": 42917,
+        "order_only_rows": 0,
+        "different_set_rows": 96,
+        "replaced_indices": 366,
+        "invalid_rows": 0,
+        "structural_errors": []
+      },
+      "guard_statuses": [
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        },
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        }
+      ],
+      "timing": {
+        "native": {
+          "samples_us": [
+            911.7799997329712,
+            921.3399887084961,
+            922.21999168396,
+            921.7399954795837,
+            917.6200032234192,
+            917.3399806022644,
+            918.6999797821045,
+            916.5599942207336,
+            920.3199744224548,
+            918.179988861084,
+            917.4799919128418,
+            916.6200160980225,
+            921.8599796295166,
+            924.1399765014648,
+            921.5599894523621,
+            919.6799993515015,
+            918.2599782943726,
+            916.6600108146667,
+            921.6600060462952,
+            924.560010433197
+          ],
+          "mean_us": 919.4139927625656,
+          "p95_us": 924.1399765014648,
+          "max_us": 924.560010433197
+        },
+        "pto": {
+          "samples_us": [
+            782.3799848556519,
+            780.7000279426575,
+            787.7600193023682,
+            798.8200187683105,
+            777.1999835968018,
+            782.9800248146057,
+            773.8199830055237,
+            803.7599921226501,
+            777.2799730300903,
+            776.7199873924255,
+            777.2799730300903,
+            773.8800048828125,
+            792.2599911689758,
+            775.1200199127197,
+            771.2399959564209,
+            768.8400149345398,
+            788.919985294342,
+            789.4799709320068,
+            788.2000207901001,
+            773.3200192451477
+          ],
+          "mean_us": 781.997999548912,
+          "p95_us": 798.8200187683105,
+          "max_us": 803.7599921226501
+        }
+      }
+    },
+    "candidate": {
+      "status": "MEASURED",
+      "batch": 16,
+      "history": 8192,
+      "layer_index": 4,
+      "variant": "performance",
+      "deterministic_level": 0,
+      "weight_nz_mode": 2,
+      "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
+      "pto_reduction": {
+        "atomic_add": 1,
+        "qr_split_k": 8,
+        "kv_split_k": 8
+      },
+      "state_vs_native": {
+        "x_out": {
+          "status": "FAIL",
+          "shape": [
+            96,
+            4,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            96,
+            4,
+            4096
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 1572864,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.002921331139448681,
+          "mismatches": 605887,
+          "first_mismatches": [
+            [
+              0,
+              0,
+              2
+            ],
+            [
+              0,
+              0,
+              4
+            ],
+            [
+              0,
+              0,
+              6
+            ],
+            [
+              0,
+              0,
+              7
+            ],
+            [
+              0,
+              0,
+              8
+            ],
+            [
+              0,
+              0,
+              10
+            ],
+            [
+              0,
+              0,
+              11
+            ],
+            [
+              0,
+              0,
+              12
+            ]
+          ]
+        },
+        "idx_topk": {
+          "status": "FAIL",
+          "shape": [
+            96,
+            512
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            96,
+            512
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 49152,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 40946,
+          "first_mismatches": [
+            [
+              0,
+              8
+            ],
+            [
+              0,
+              9
+            ],
+            [
+              0,
+              11
+            ],
+            [
+              0,
+              12
+            ],
+            [
+              0,
+              18
+            ],
+            [
+              0,
+              19
+            ],
+            [
+              0,
+              20
+            ],
+            [
+              0,
+              21
+            ]
+          ]
+        },
+        "swa.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 2375680,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0078125,
+          "rmse": 4.3182155176349825e-05,
+          "mismatches": 2694,
+          "first_mismatches": [
+            [
+              5,
+              0,
+              0,
+              46
+            ],
+            [
+              5,
+              0,
+              0,
+              83
+            ],
+            [
+              5,
+              0,
+              0,
+              107
+            ],
+            [
+              5,
+              0,
+              0,
+              165
+            ],
+            [
+              5,
+              0,
+              0,
+              172
+            ],
+            [
+              5,
+              0,
+              0,
+              296
+            ],
+            [
+              5,
+              0,
+              0,
+              311
+            ],
+            [
+              5,
+              0,
+              0,
+              334
+            ]
+          ]
+        },
+        "compressed.0": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 17317888,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 1.8096691985307425e-06,
+          "mismatches": 74,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              108
+            ],
+            [
+              2,
+              0,
+              0,
+              131
+            ],
+            [
+              2,
+              0,
+              0,
+              205
+            ],
+            [
+              2,
+              0,
+              0,
+              274
+            ],
+            [
+              2,
+              0,
+              0,
+              394
+            ],
+            [
+              68,
+              0,
+              0,
+              134
+            ],
+            [
+              68,
+              0,
+              0,
+              197
+            ],
+            [
+              68,
+              0,
+              0,
+              208
+            ]
+          ]
+        },
+        "state.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 593920,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0007456839084625244,
+          "rmse": 1.4900923968085232e-05,
+          "mismatches": 196196,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        },
+        "indexer.0": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            128
+          ],
+          "dtype": "torch.int8",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            128
+          ],
+          "expected_dtype": "torch.int8",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 4329472,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 149,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              4
+            ],
+            [
+              2,
+              0,
+              0,
+              5
+            ],
+            [
+              2,
+              0,
+              0,
+              22
+            ],
+            [
+              2,
+              0,
+              0,
+              106
+            ],
+            [
+              68,
+              0,
+              0,
+              10
+            ],
+            [
+              68,
+              0,
+              0,
+              65
+            ],
+            [
+              68,
+              0,
+              0,
+              67
+            ],
+            [
+              68,
+              0,
+              0,
+              80
+            ]
+          ]
+        },
+        "indexer.1": {
+          "status": "FAIL",
+          "shape": [
+            1057,
+            32,
+            1,
+            1
+          ],
+          "dtype": "torch.float16",
+          "expected_shape": [
+            1057,
+            32,
+            1,
+            1
+          ],
+          "expected_dtype": "torch.float16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 33824,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 6.103515625e-05,
+          "rmse": 7.467067822672274e-07,
+          "mismatches": 11,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              0
+            ],
+            [
+              200,
+              0,
+              0,
+              0
+            ],
+            [
+              266,
+              0,
+              0,
+              0
+            ],
+            [
+              332,
+              0,
+              0,
+              0
+            ],
+            [
+              398,
+              0,
+              0,
+              0
+            ],
+            [
+              464,
+              0,
+              0,
+              0
+            ],
+            [
+              530,
+              0,
+              0,
+              0
+            ],
+            [
+              596,
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "indexer_state.0": {
+          "status": "FAIL",
+          "shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 148480,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0007491409778594971,
+          "rmse": 1.6786887854829738e-05,
+          "mismatches": 49049,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        }
+      },
+      "topk_selection": {
+        "status": "MEASURED",
+        "scope": "Top-K 结构与集合诊断，不代表选择规则或整模型验收",
+        "rows": 96,
+        "position_mismatches": 40946,
+        "order_only_rows": 0,
+        "different_set_rows": 96,
+        "replaced_indices": 272,
+        "invalid_rows": 0,
+        "structural_errors": []
+      },
+      "guard_statuses": [
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        },
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        }
+      ],
+      "timing": {
+        "native": {
+          "samples_us": [
+            939.6399855613708,
+            934.0000152587891,
+            936.8000030517578,
+            935.5999827384949,
+            937.6199841499329,
+            934.5600008964539,
+            933.9600205421448,
+            931.7200183868408,
+            934.9200129508972,
+            934.1199994087219,
+            932.919979095459,
+            931.9199919700623,
+            934.8199963569641,
+            934.0599775314331,
+            935.4199767112732,
+            929.0599822998047,
+            937.9000067710876,
+            931.2800168991089,
+            936.2999796867371,
+            937.8799796104431
+          ],
+          "mean_us": 934.7249954938889,
+          "p95_us": 937.9000067710876,
+          "max_us": 939.6399855613708
+        },
+        "pto": {
+          "samples_us": [
+            802.9199838638306,
+            777.3399949073792,
+            776.2200236320496,
+            799.1399765014648,
+            800.4199862480164,
+            796.0799932479858,
+            807.5199723243713,
+            780.2199721336365,
+            786.3799929618835,
+            780.6400060653687,
+            794.3800091743469,
+            798.4399795532227,
+            764.2999887466431,
+            807.8600168228149,
+            798.4600067138672,
+            789.2600297927856,
+            796.180009841919,
+            772.059977054596,
+            771.2399959564209,
+            790.7599806785583
+          ],
+          "mean_us": 789.490994811058,
+          "p95_us": 807.5199723243713,
+          "max_us": 807.8600168228149
+        }
+      }
+    },
+    "graph_b3": {
+      "status": "MEASURED",
+      "batch": 3,
+      "history": 8192,
+      "layer_index": 4,
+      "variant": "performance",
+      "deterministic_level": 1,
+      "weight_nz_mode": 2,
+      "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
+      "pto_reduction": {
+        "atomic_add": 0,
+        "qr_split_k": 1,
+        "kv_split_k": 1
+      },
+      "state_vs_native": {
+        "x_out": {
+          "status": "FAIL",
+          "shape": [
+            18,
+            4,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            18,
+            4,
+            4096
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 294912,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.003054722337294325,
+          "mismatches": 115144,
+          "first_mismatches": [
+            [
+              0,
+              0,
+              2
+            ],
+            [
+              0,
+              0,
+              4
+            ],
+            [
+              0,
+              0,
+              6
+            ],
+            [
+              0,
+              0,
+              7
+            ],
+            [
+              0,
+              0,
+              8
+            ],
+            [
+              0,
+              0,
+              10
+            ],
+            [
+              0,
+              0,
+              11
+            ],
+            [
+              0,
+              0,
+              12
+            ]
+          ]
+        },
+        "idx_topk": {
+          "status": "FAIL",
+          "shape": [
+            18,
+            512
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            18,
+            512
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 9216,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 7631,
+          "first_mismatches": [
+            [
+              0,
+              8
+            ],
+            [
+              0,
+              9
+            ],
+            [
+              0,
+              11
+            ],
+            [
+              0,
+              12
+            ],
+            [
+              0,
+              18
+            ],
+            [
+              0,
+              19
+            ],
+            [
+              0,
+              20
+            ],
+            [
+              0,
+              21
+            ]
+          ]
+        },
+        "swa.0": {
+          "status": "FAIL",
+          "shape": [
+            28,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            28,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 458752,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0078125,
+          "rmse": 4.14268379709817e-05,
+          "mismatches": 542,
+          "first_mismatches": [
+            [
+              5,
+              0,
+              0,
+              46
+            ],
+            [
+              5,
+              0,
+              0,
+              83
+            ],
+            [
+              5,
+              0,
+              0,
+              107
+            ],
+            [
+              5,
+              0,
+              0,
+              165
+            ],
+            [
+              5,
+              0,
+              0,
+              172
+            ],
+            [
+              5,
+              0,
+              0,
+              296
+            ],
+            [
+              5,
+              0,
+              0,
+              311
+            ],
+            [
+              5,
+              0,
+              0,
+              334
+            ]
+          ]
+        },
+        "compressed.0": {
+          "status": "FAIL",
+          "shape": [
+            199,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            199,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 3260416,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.00390625,
+          "rmse": 2.2050047771519725e-06,
+          "mismatches": 13,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              108
+            ],
+            [
+              2,
+              0,
+              0,
+              131
+            ],
+            [
+              2,
+              0,
+              0,
+              205
+            ],
+            [
+              2,
+              0,
+              0,
+              274
+            ],
+            [
+              2,
+              0,
+              0,
+              394
+            ],
+            [
+              68,
+              0,
+              0,
+              134
+            ],
+            [
+              68,
+              0,
+              0,
+              197
+            ],
+            [
+              68,
+              0,
+              0,
+              208
+            ]
+          ]
+        },
+        "state.0": {
+          "status": "FAIL",
+          "shape": [
+            28,
+            2,
+            1,
+            2048
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            28,
+            2,
+            1,
+            2048
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 114688,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0006489753723144531,
+          "rmse": 2.0008036332990123e-05,
+          "mismatches": 36816,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        },
+        "indexer.0": {
+          "status": "FAIL",
+          "shape": [
+            199,
+            32,
+            1,
+            128
+          ],
+          "dtype": "torch.int8",
+          "expected_shape": [
+            199,
+            32,
+            1,
+            128
+          ],
+          "expected_dtype": "torch.int8",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 815104,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 18,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              4
+            ],
+            [
+              2,
+              0,
+              0,
+              5
+            ],
+            [
+              2,
+              0,
+              0,
+              22
+            ],
+            [
+              2,
+              0,
+              0,
+              106
+            ],
+            [
+              68,
+              0,
+              0,
+              10
+            ],
+            [
+              68,
+              0,
+              0,
+              65
+            ],
+            [
+              68,
+              0,
+              0,
+              67
+            ],
+            [
+              68,
+              0,
+              0,
+              80
+            ]
+          ]
+        },
+        "indexer.1": {
+          "status": "FAIL",
+          "shape": [
+            199,
+            32,
+            1,
+            1
+          ],
+          "dtype": "torch.float16",
+          "expected_shape": [
+            199,
+            32,
+            1,
+            1
+          ],
+          "expected_dtype": "torch.float16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 6368,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 3.0517578125e-05,
+          "rmse": 3.8242699212424127e-07,
+          "mismatches": 1,
+          "first_mismatches": [
+            [
+              2,
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "indexer_state.0": {
+          "status": "FAIL",
+          "shape": [
+            28,
+            2,
+            1,
+            512
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            28,
+            2,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 28672,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0006167888641357422,
+          "rmse": 2.1014587327095178e-05,
+          "mismatches": 9203,
+          "first_mismatches": [
+            [
+              6,
+              0,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0,
+              1
+            ],
+            [
+              6,
+              0,
+              0,
+              2
+            ],
+            [
+              6,
+              0,
+              0,
+              3
+            ],
+            [
+              6,
+              0,
+              0,
+              4
+            ],
+            [
+              6,
+              0,
+              0,
+              5
+            ],
+            [
+              6,
+              0,
+              0,
+              6
+            ],
+            [
+              6,
+              0,
+              0,
+              7
+            ]
+          ]
+        }
+      },
+      "topk_selection": {
+        "status": "MEASURED",
+        "scope": "Top-K 结构与集合诊断，不代表选择规则或整模型验收",
+        "rows": 18,
+        "position_mismatches": 7631,
+        "order_only_rows": 0,
+        "different_set_rows": 18,
+        "replaced_indices": 59,
+        "invalid_rows": 0,
+        "structural_errors": []
+      },
+      "guard_statuses": [
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        },
+        {
+          "swa": "PASS",
+          "compressed": "PASS",
+          "state": "PASS",
+          "indexer": "PASS",
+          "indexer_state": "PASS",
+          "metadata.positions": "PASS",
+          "metadata.swa.query_start_loc": "PASS",
+          "metadata.swa.seq_lens": "PASS",
+          "metadata.swa.block_table": "PASS",
+          "metadata.swa.slot_mapping": "PASS",
+          "metadata.swa.start_pos": "PASS",
+          "metadata.compressed.query_start_loc": "PASS",
+          "metadata.compressed.seq_lens": "PASS",
+          "metadata.compressed.block_table": "PASS",
+          "metadata.compressed.start_pos": "PASS",
+          "metadata.state.query_start_loc": "PASS",
+          "metadata.state.seq_lens": "PASS",
+          "metadata.state.block_table": "PASS",
+          "metadata.state.slot_mapping": "PASS",
+          "metadata.state.start_pos": "PASS",
+          "metadata.indexer.query_start_loc": "PASS",
+          "metadata.indexer.seq_lens": "PASS",
+          "metadata.indexer.block_table": "PASS",
+          "metadata.indexer.start_pos": "PASS",
+          "metadata.indexer_state.query_start_loc": "PASS",
+          "metadata.indexer_state.seq_lens": "PASS",
+          "metadata.indexer_state.block_table": "PASS",
+          "metadata.indexer_state.slot_mapping": "PASS",
+          "metadata.indexer_state.start_pos": "PASS",
+          "metadata.compressed.compact_slots": "PASS",
+          "metadata.indexer.compact_slots": "PASS"
+        }
+      ],
+      "graph": {
+        "status": "PASS",
+        "scope": "单卡固定形状/metadata 的输入内容更新；不代表 padding/整模型图验收",
+        "replay_inputs": [
+          "A",
+          "B",
+          "A"
+        ]
+      }
+    }
+  },
+  "changes": {
+    "pto_mean_pct": 0.9581859885150923,
+    "native_control_mean_pct": 1.6653001642185306,
+    "x_out_rmse_pct": -12.011652382762872
+  }
+}
