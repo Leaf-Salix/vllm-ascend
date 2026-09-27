@@ -1,0 +1,11 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -475,7 +475,7 @@
+         TOPK_SCORE_WORKERS,
+         name_hint="indexer_score_topk_native_pair",
+         deps=[coefficients_tid, cache_write_tid],
+-        allow_early_resolve=True,
++        allow_early_resolve=False,
+     ) as buffered_leaf_tid:
+         buf_worker = pl.tile.get_block_idx()
+         buf_query_count = pl.tensor.dim(position_ids, 0)
