@@ -7571,3 +7571,11 @@ O_A窗口略短但O_B略长，merge→HC_post尾段275.96–285.62→278.92–28
 无profiler本体793.66→796.98 μs、p50/p95未改善，撤回。保护区/结构/有限值通过，Native零容差仍FAIL。
 [完整证据](results/csa_scheduling_20260927/round02_idx_q_sync/README.md)，计数2/10。
 第3轮保留所有算术和块数，仅让KV投影等待Q_A以减少早段AIC竞争；CPU根与调度C++已编译通过。
+
+## 217. 十轮调度第3轮：KV延后虽提前Q_A，但本体退化（2026-09-27）
+
+只增加KV对Q_A的调度依赖，CPU根/PTOAS/AICPU通过；task_20260927_182734_30115537818退出0。
+B16 Q_A末尾140.26–147.64→122.02–134.08 μs，但KV延后159.88–234.04 μs，Top-K末尾未提前。
+无profiler本体793.66→801.09 μs，p50/p95也退化，已撤回；保护区/Top-K结构/有限值通过，Native零容差仍FAIL。
+[完整证据](results/csa_scheduling_20260927/round03_kv_after_qa/README.md)，计数3/10。
+第4轮只允许merge_norm消费者O_A提前准备，保持数值和原有依赖，不叠加第3轮。

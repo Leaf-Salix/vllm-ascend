@@ -1,0 +1,19 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -959,6 +959,8 @@
+         qr,
+         qr_scale,
+     )
++    # Let the latency-sensitive Q_A chain finish before admitting KV Cube work.
++    kv_gate = pl.system.task_dummy(deps=[late_dep, qa_tid])
+     kv_proj_rope(
+         x,
+         wkv,
+@@ -967,6 +969,6 @@
+         q_rope_sin_signed,
+         q_rope_swap_idx,
+         kv,
+-        late_dep,
++        kv_gate,
+     )
+     return q, qa_tid
