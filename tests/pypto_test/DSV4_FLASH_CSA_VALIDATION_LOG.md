@@ -7756,3 +7756,22 @@ A3 TSCATTER清空目标不适用于追加分数，该试版任务提前终止并
 两档本体对同轮Native分别快14.70%/5.81%，完整PTO仍慢。保护区/metadata、索引结构、有限值通过，Native零容差FAIL。
 [实现、工具链差异、核内/本体/缓存成本与泳道](results/csa_incore_20260927/indexer_score_panel1024/README.md)。
 当前保留源码已新增此项，07365e52七档仅为历史同源码基线；其他五档和当前整模型验收尚未补齐。
+
+## 238. 当前3d1f0f65七档补齐，完整PTO仍受桥接成本限制（2026-09-27）
+
+补五档任务398204527328及补两档profile任务39817029444均退出0。复用同源码B16正式计时/四窗口，
+其他五档5预热20次无profiler计时，七档均有Native/PTO PyTorch profile与四窗口泳道，共42个JSON集中下载。
+本体按128K B4/B8/B16、8K B16/B24/B32/B40为713.69/870.13/1234.06/790.78/981.25/1122.65/1313.92 μs。
+对同轮Native快5.81%～17.06%，完整PTO全部更慢；128K/B16 p95 1482.84，未解决长尾和750 μs目标。
+保护区、索引结构、有限值通过；Native零容差FAIL，Top-K替换184/350/670/366/545/729/901，非token/DSpark验收。
+[全部数据及图](results/csa_incore_20260927/final_3d1f0f65/README.md)。
+
+## 239. cache源头分离评估与PTO最小改动边界（2026-09-27）
+
+确认现有桥接包含两件事：key/scale分离，以及按请求逻辑页序重排。仅分配时分离不能取消后者。
+撤回“源头分离即可全部消除成本”的简化表述；任意分页下PTO直接消费需要改按页读取及物理slot更新。
+Native binding和A3内核支持独立key/scale stride。Native-only小case任务408988615371退出0，
+非连续物理页、8K/4K混合历史，eager和两次图重放的cache/Top-K精确一致，保护区完整，无PyPTO依赖。
+用户进一步限定不改Native流程，仅针对PTO改造vllm-ascend且粒度最小。当前不改分配器；
+先在PTO Compressor内部提交Native slot，消除约216～220 μs的外部Torch写回，再评估直接页读取。
+[完整评估、证据与限制](DSV4_FLASH_CSA_CACHE_SOURCE_SPLIT.md)。
