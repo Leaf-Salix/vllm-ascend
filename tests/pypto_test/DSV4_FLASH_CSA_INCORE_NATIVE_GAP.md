@@ -6,11 +6,14 @@
 以及第6.6节的跨query连续流水。
 上述保留策略已完成同一源码 `da2e2368` 的七档单卡测量，见第6.7节；整模型验收未完成。
 第2～4节用于核对七档基线，第5节列下一步，第6节区分已保留和已撤回的实验。
+最新保留规则：incore task有明确收益且必要功能检查通过就保留，本体/长尾变化另记。
+不以本体未改善为核内优化的撤回理由；基本可做的核内优化完成后转调度。
+此前按本体否决的双query合并head规约正在按此规则恢复评估，历史测量值保持不变。
 
 ## 1. 当前结论与边界
 
 1. 128K Indexer 与 Native 在 query 复用、流式 Top-K、重复准备方面仍有差异。
-   4＋2 query 复用已经试过并退化，合并 head 规约也未带来本体收益；不能把源码差异直接当作可得收益。
+   4＋2 query 复用已经试过并退化；合并head规约有核内收益，先前仅因本体未改善撤回，现按用户新规则恢复评估。
 2. 8K 四档更直接的核内问题是稀疏注意力：PTO `qk_pv` 的 block 平均核内耗时，
    已超过对应 Native 整个 `SparseAttnSharedkv` kernel，PTO 后续另有 `merge_norm`。
 3. V10 已采用 QK→FP16→第二次 Cube 做 head 加权规约，不能继续把旧 Vector 规约当作当前差异。
@@ -185,7 +188,7 @@ Native 双流调用顺序对应的 KV `MatMulWeightNz` 设备事件为26.26 μs�
 | 档位 / 阶段 | 核内工作 | 验证与保留条件 |
 | --- | --- | --- |
 | 8K B16/24/32/40，先用 B40 代表 | 已保留跨query流水；KV/gate合并投影先导退化已撤回；后续优先检查QKV额外准备及Vector处理 | 隔离核内收益，先CPU编译再代表档；不重复已失败候选 |
-| 128K B8/B16 | 优先评估流式 Top-K、尾块无效工作及重复准备；4＋2 复用和合并 head 规约先导已撤回 | 单项实现独立测量，核内下降须有证据；B16 Native分项已补齐，不重跑无关历史矩阵 |
+| 128K B8/B16 | 优先恢复有核内收益的合并head规约，再评估流式Top-K、尾块及重复准备；4＋2复用核内退化仍撤回 | 核内获益即保留，本体变化另记；只补当前组合的必要代表档 |
 | 8K B40 | 已保留KV投影宽tile/split-K；继续评估复用Native NZ权重 | 新改动仍需隔离收益；精度版保持原算术 |
 | 128K B4 | 保留 V10 小 batch 完整 leaf 均衡 | 扩大 query 复用组后检查并行度和退化，必要时在算子内部按输入选策略 |
 | 核内阶段出口 | 汇总同一当前实现的七档，保留其真实策略与源码、误差及性能结果 | 不用历史版本拼出最优七档；不能只看正常窗口或中位数忽略长尾 |
@@ -209,7 +212,8 @@ Indexer的4＋2 query Key复用已做128K/B16先导：工作量配平版和进�
 [候选结果与限制](results/csa_incore_20260927/indexer_group4_balanced/README.md)保留实际证据；
 不能把逻辑Key读取量减少当成性能收益。
 随后[双query合并head规约](results/csa_incore_20260927/indexer_fused_ws/README.md)
-在128K两档及8K/B40下降了局部Score核内时间，但四档CSA本体均未改善，已撤回。
+在128K两档及8K/B40下降了局部Score核内时间，历史上因四档CSA本体未改善撤回；
+该撤回依据已被用户新规则修正，正在恢复评估，不再以本体耗时否定核内收益。
 [全有效KV省去UB清零](results/csa_incore_20260927/kv_valid_nozero/README.md)亦没有足够稳定收益，不进入正式源码。
 
 128K/B16 Native分项已补齐，QLI=360.28、Sparse Attention=181.08 μs。
@@ -434,3 +438,26 @@ PTO根算子先调用Attention Compressor、再调用Indexer Compressor，因此
 
 仍需单列metadata、cache scatter、布局/seed/adapter的临界路径范围；
 此节补齐的是操作对应和七档数据入口，没有把分散任务的均值拼成完整CSA归因。
+
+## 8. 当前保留实现的突出差异（da2e2368）
+
+重新只读刚完成的七档28个DFX窗口，得到[当前全部任务统计](results/csa_incore_20260927/current_incore_da2e2368.json)。
+这里PTO为当前采集，Native分项沿用已标注的独立profile；Native完整kernel与PTO block均值不能等范围相减。
+
+| 模块 / 档位 | Native完整kernel μs | 当前PTO核内 μs | 当前判断 |
+| --- | ---: | --- | --- |
+| Sparse，8K/B16 | 107.04 | qk_pv AIC 122.51–125.71；merge_norm 24.55–25.26 | qk_pv自身仍偏慢，不能全归调度 |
+| Sparse，8K/B24 | 166.90 | qk_pv AIC 196.01–200.75；merge_norm 30.20–30.53 | 仍是明确核内差距 |
+| Sparse，8K/B32 | 231.78 | qk_pv AIC 237.70–245.66；merge_norm 32.65–33.28 | 核内已接近，后续处理仍额外存在 |
+| Sparse，8K/B40 | 290.56 | qk_pv AIC 283.06–288.68；merge_norm 41.58–41.86 | 主QK/PV接近；merge还含逆RoPE/布局，不能全算纯规约开销 |
+| Indexer，128K/B16 | 360.28 | Score AIC 354.44–363.56、AIV 363.88–372.93；Top-K merge 17.64–18.70 | Score已占接近Native全QLI的量级，仍有准备/合并任务 |
+| Q_A，8K/B40 | matmul 20.54 | seed 25.86–27.32；matmul 8.56–9.38 | PTO split-K清零/归约表达的额外工作值得看，不能只报matmul |
+| Q_B，8K/B40 | quant matmul 85.42；RMS 26.96；RoPE 16.02 | matmul 64.86–75.78；dequant/RMS/RoPE 50.47–55.49 | Native在quant matmul内缩放；PTO先落INT32至GM再Vector处理，边界不同 |
+
+源码差异仍是：Sparse为128一块、五段softmax/PV及重标定，Native满窗口/候选为128＋512两段；
+Native PV按N128并双L0C槽，PTO累加N512；Native条件成对DMA，PTO逐行地址/页表gather。
+跨query排空和大工作量KV发布过晚两项已修，不再算尚未处理的差距。
+Indexer仍为2＋2＋2 Key复用、独立系数准备、半leaf排序后GM结果合并；Native为4＋2及流式Top-512。
+有源码差异不代表照搬就快：4＋2复用和Compressor合并投影实测核内退化，仍不保留。
+O_A、HC_post当前核内分别83.37–84.41 / 23.29–27.06 μs，Native为138.46 / 34.26 μs；
+没有证据把它们列为当前最突出的核内劣势，额外派发/融合边界留到调度阶段分析。
