@@ -96,7 +96,7 @@ KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
 KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
 
-# A single split preserves the fixed-order diagnostic path.
+# A single split keeps a fixed K accumulation order.
 KV_OK = 8 if ATOMIC_ADD else 1
 
 KV_OM = 3  # maximum kv_proj split-M factor
@@ -220,12 +220,15 @@ def _q_proj_qa_nd(
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
     qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
-    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qr_proj_seed"):
-        # Reuse one full-width zero tile; keep the same single seed task
-        # and padded row range, avoiding repeated narrow strided stores.
-        qr_seed = pl.full([QR_M_TILE, Q_LORA], dtype=pl.FP32, value=0.0)
-        for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
-            qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
+    # A single K partition overwrites each output tile exactly once.
+    # Only split-K atomic accumulation needs a zero seed in GM.
+    if ATOMIC_ADD == 1:
+        with pl.at(level=pl.Level.CORE_GROUP, name_hint="qr_proj_seed"):
+            # Reuse one full-width zero tile; keep the same single seed task
+            # and padded row range, avoiding repeated narrow strided stores.
+            qr_seed = pl.full([QR_M_TILE, Q_LORA], dtype=pl.FP32, value=0.0)
+            for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
+                qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
 
     with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
         qbg_idx = pl.tile.get_block_idx()
@@ -277,12 +280,15 @@ def _q_proj_qa_nz(
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
     qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
-    with pl.at(level=pl.Level.CORE_GROUP, name_hint="qr_proj_seed"):
-        # Reuse one full-width zero tile; keep the same single seed task
-        # and padded row range, avoiding repeated narrow strided stores.
-        qr_seed = pl.full([QR_M_TILE, Q_LORA], dtype=pl.FP32, value=0.0)
-        for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
-            qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
+    # A single K partition overwrites each output tile exactly once.
+    # Only split-K atomic accumulation needs a zero seed in GM.
+    if ATOMIC_ADD == 1:
+        with pl.at(level=pl.Level.CORE_GROUP, name_hint="qr_proj_seed"):
+            # Reuse one full-width zero tile; keep the same single seed task
+            # and padded row range, avoiding repeated narrow strided stores.
+            qr_seed = pl.full([QR_M_TILE, Q_LORA], dtype=pl.FP32, value=0.0)
+            for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
+                qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
 
     # 用 `with pl.spmd(...)` + `get_block_idx()` 而不是 `for ... in pl.spmd(...)`：
     # 后者给出的是 IterArg，`IsProvableNonNegative` 不追它，于是由它导出的行偏移
@@ -719,13 +725,15 @@ def kv_proj_rope(
             # Split-K kv_proj: KV_N_TILE N-groups expanded KV_OK-fold into cube blocks that
             # atomic-add their K partials into a zero-seeded output.
             kv_fp32 = pl.create_tensor([t_matmul, HEAD_DIM], dtype=pl.FP32)
-            with pl.at(level=pl.Level.CORE_GROUP, name_hint="kv_proj_seed"):
-                kv_seed = pl.full([KV_M_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
-                for kts0 in pl.range(0, t_matmul, KV_M_TILE):
-                    kv_fp32[kts0 : kts0 + KV_M_TILE, :] = kv_seed
+            # With KV_OK=1, disjoint M/N blocks overwrite every output tile.
+            if ATOMIC_ADD == 1:
+                with pl.at(level=pl.Level.CORE_GROUP, name_hint="kv_proj_seed"):
+                    kv_seed = pl.full([KV_M_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
+                    for kts0 in pl.range(0, t_matmul, KV_M_TILE):
+                        kv_fp32[kts0 : kts0 + KV_M_TILE, :] = kv_seed
 
             # 性能版所有token数共用宽tile/split-K；240行的Native K遍历仅留在精度版。
-            # atomic关闭时KV_OK=1，仍提供固定K顺序的诊断路径。
+            # atomic关闭时KV_OK=1，按固定K顺序累加并普通写回。
             with pl.spmd(
                 (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
                 name_hint="kv_proj_matmul",

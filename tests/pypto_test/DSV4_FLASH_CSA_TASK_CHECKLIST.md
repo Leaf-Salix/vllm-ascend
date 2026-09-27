@@ -2,16 +2,20 @@
 
 更新：2026-09-28。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
 
-当前生产算子为 **71153bb3**，Native cache分配与流程不变，PTO内部直接读写物理页；没有入口历史复制或外部Torch写回。
+当前性能版保留 **71153bb3** 的分组/调度、**45412ba3** 的默认固定规约，并新增atomic0免Q/KV清零种子；
+Native cache分配与流程不变，PTO内部直接读写物理页；没有入口历史复制或外部Torch写回。
 长历史按query数选择双query、三query/M192或S6/M384；短历史按最忙核工作量选择S6或双query。
 只有长档Score整组准入并禁止提前释放；精度版原算术保持。
-**性能版固定规约atomic0已通过统一源码七档真实EP16对照**，正式forward快1.35%～4.45%，
+**固定规约基线71153bb3＋atomic0已通过统一源码七档真实EP16对照**，正式forward快1.35%～4.45%，
 573440输出token零差异、112组rank DSpark及10步位置一致；每档P95、max和每步最慢rank均下降。
 本轮先PTO后Native，代表档上一轮先Native后PTO也通过；单次十步仍不代表罕见尾部已永久消失。
 性能版默认改为atomic0，精度版默认1与原算术保持；显式0/1仍可覆盖，配置在导入前固定。
 [七档正式结果](results/csa_atomic_matrix_20260928/model/RESULTS.md)、
 [代表档反向顺序与单卡代价](results/csa_atomic_current_20260928/README.md)。
 atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当前默认配置的结果。
+免seed两档更新已通过：128K/B8正式比Native快1.77%、8K/B16快7.31%，98304token零差异、DSpark一致，
+P95/max/慢卡均下降。该两档不能与其余旧五档拼成新的七档表，也不把全部收益归因于删除seed。
+[免seed单卡精确状态与两档EP16](results/csa_projection_no_seed_20260928/README.md)。
 
 当前判断依据：
 
@@ -45,14 +49,19 @@ atomic1原七档失败及其GMM增量作为历史原因证据，不再作为当�
    [运行入口与结果](results/csa_atomic_matrix_20260928/README.md)。
    保存各档PyTorch JSON及PTO泳道，并给出当前版本相对Native和pypto-lib的核内、调度、额外工作差异。
    已有同版本证据复用，只补缺口或受影响项，不做hash扫描或重复无关测试。
-   独立免QR/KV清零种子候选仅改变atomic0性能版；两档单卡状态/图重放精确一致、本体下降，Native控制也变快。
-   task_20260928_054914_3094321594仅补128K/B8与8K/B16真实EP16，在确认前不合入。
-   [候选范围与单卡证据](results/csa_projection_no_seed_20260928/README.md)。
+   atomic0性能版免QR/KV清零种子已保留；两档单卡状态/图重放精确一致，
+   task_20260928_054914_3094321594两档真实EP16也通过。其余档位在后续阶段出口补齐，不混用版本。
+   [范围与单卡/模型证据](results/csa_projection_no_seed_20260928/README.md)。
+   固定K的KV并行度仅4个N块，独立M32/最多3组候选已通过CPU编译，排单卡长短B16。
+   核内按每block与累计核时间同时判断；若有效，大档需在算子内选择M64以控制重复读取，不能直接外推。
+   [Native七档投影差距](results/csa_atomic_matrix_20260928/NATIVE_PROJECTION.md)、
+   [候选与验证范围](results/csa_kv_mgroups_20260928/README.md)。
 4. **cache策略继续按真实整模型性能决定。** 源头key/scale分离及连续四页候选已测，模型未取得共同收益且长档DSpark失败，暂不采用。
    物理key/scale连续不等于请求历史连续；真实allocator正式轮和profile轮页序不同，不能用人工连续页代替生产验收。
    保留原布局PTO内部读取，除非新证据支持其他方案。[旧分离干预与失败边界](results/csa_source_split_ab_20260927/ordered/README.md)。
 5. **性能稳定后补精度版。** 仅共用数值中性的适配和实现，算术策略明确隔离，精度版独立验收。
-   性能版明确超过Native、B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍未达成；当前atomic0单卡该档约781μs。
+   性能版七档基线已经整网领先；B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍未达成。
+   免seed当前单卡约768μs（det1、可变scale人工历史），不能替代整模型750μs验收。
 
 测试统一使用整批入队后DP同步启动，核对每个正式step的CPU位置；设备计时内不增加复制、hash或逐步同步。
 CPU位置相同不证明设备草稿token相同，严格路由归因使用独立诊断的实际设备输入。

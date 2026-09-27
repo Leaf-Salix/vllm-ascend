@@ -1,0 +1,25 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index 2bc44d16..7892eb57 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -90,7 +90,10 @@ QR_SPLIT_K_TILE = D // QR_OK
+ 
+ KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
+ 
+-KV_DENSE_M_TILE = 64
++KV_DENSE_M_TILE = 64 if ATOMIC_ADD else 32
++
++# Fixed-K has only four N blocks. Distribute dense M tiles to independent cores.
++KV_M_GROUP_ROWS = 2 * KV_DENSE_M_TILE if ATOMIC_ADD else KV_DENSE_M_TILE
+ 
+ KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
+ 
+@@ -714,7 +717,7 @@ def kv_proj_rope(
+             x_view = pl.reshape(x, [t_dim, D])
+             t_matmul = ((tile_rows + MATMUL_T_TILE - 1) // MATMUL_T_TILE) * MATMUL_T_TILE
+             kv_full_rows = (tile_rows // KV_DENSE_M_TILE) * KV_DENSE_M_TILE
+-            kv_m_groups = pl.min(KV_OM, pl.max(1, tile_rows // (2 * KV_DENSE_M_TILE)))
++            kv_m_groups = pl.min(KV_OM, pl.max(1, tile_rows // KV_M_GROUP_ROWS))
+ 
+             # Split-K kv_proj: KV_N_TILE N-groups expanded KV_OK-fold into cube blocks that
+             # atomic-add their K partials into a zero-seeded output.

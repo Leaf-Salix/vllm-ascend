@@ -35,7 +35,8 @@ def main():
             raise FileNotFoundError(entry["source"])
     summaries = [ROOT / "model" / name for name in (
         "RESULTS.md", "forward.json", "MODEL_GAP.md", "model_gap_rank0.json")]
-    summaries += [ROOT / name for name in ("WORKER_GAP.md", "worker_gap.json")]
+    summaries += [ROOT / name for name in (
+        "WORKER_GAP.md", "worker_gap.json", "NATIVE_PROJECTION.md", "native_projection.json")]
     for source in summaries:
         if not source.is_file():
             raise FileNotFoundError(source)

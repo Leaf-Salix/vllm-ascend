@@ -8616,3 +8616,33 @@ norm→Sparse首receive为341.00/317.14，Sparse→merge为182.38/184.90，末�
 上游图缺完整源码/config，不把分段差额冒充等输入归因；源码参考main2164563的QA/KV split-K2/4仍用atomic。
 当前1/1固定规约由真实EP16选择，下一步免seed有明确适用前提，不能盲目照搬上游atomic策略。
 [全部任务核内、启动分散和额外工作](results/csa_atomic_matrix_20260928/WORKER_GAP.md)。
+
+## 291. 固定K的KV并行度不足，独立按M分组先导（2026-09-28）
+
+免seed两档EP16先完成128K/B8：57.019→56.009ms（−1.77%），P95/max/每步最慢rank下降，
+token、DSpark与10步位置一致；短档仍在运行，未提前合入。
+
+只读已有七档Native profile，按QA的RmsNormDynamicQuant消费者及辅助stream上的KV→head投影顺序匹配，
+441个CSA区间通过计数和stream检查；B32使用编译后kernel名，保留原名并明确兼容识别。
+8K/B16第4层Native KV三步均值22.01μs，当前PTO单窗口block均值54.77、只有4个block。
+128K/B16对应13.89/45.67；这是不同输入、不同统计范围，不直接换算加速比。
+[七档明细与实际task号](results/csa_atomic_matrix_20260928/NATIVE_PROJECTION.md)。
+
+独立45412ba3工作树仅将atomic0性能版的KV dense M64改M32，并按完整M32块数启用最多3个M组。
+T96变为3组×4个N块，各输出仍单核按K256顺序完整累加K4096，不增加atomic；atomic1/精度版保持。
+复用pypto-lib已有split-M框架，不混入免seed候选。重复读权重可能增大总核工作，需实测而非只看每block均值。
+CPU完整编译通过，task_20260928_060059_4594592998排单卡128K/B16、8K/B16：
+精确状态/图重放、20次本体计时、独立四窗口KV核内及累计核时间。
+[补丁、源头差异与单卡命令](results/csa_kv_mgroups_20260928/README.md)。
+
+## 292. 免Q/KV种子两档EP16通过，保留性能版改动（2026-09-28）
+
+task_20260928_054914_3094321594退出0。128K/B8正式57.019→56.009ms（−1.77%），
+8K/B16为65.486→60.696（−7.31%），两档P95/max/每步最慢rank均下降。
+98304输出token零差异、32组rank DSpark一致、10步位置一致；单卡两版本8类状态与图重放已经精确通过。
+保留仅atomic0性能版的免seed改动，atomic1与精度版不改。七档45412ba3基线仍独立保存，
+不能把两档新数值拼进去，也不能声称7.31%全是删除清零的收益。
+[完整证据](results/csa_projection_no_seed_20260928/README.md)。
+
+M32/三组KV先导task_20260928_060059_4594592998开始单卡，源码仍独立45412ba3+M分组，
+不含此次免seed，避免把两项改动的收益混算；尚无设备结果，不合入。

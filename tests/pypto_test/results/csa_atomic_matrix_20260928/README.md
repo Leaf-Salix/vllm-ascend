@@ -40,3 +40,7 @@ DFX任务`task_20260928_054335_24490514569`已完成退出0，同71153bb3/atomic
 
 当前8K/B16 DFX Worker窗口784.30μs，历史上游727.98μs；分段差距主要在norm前与norm到Sparse启动之间。
 该历史图缺完整配置，只是调度参照，不等于等输入算法差额，也不代替750μs整模型验收。
+
+[七档Native Q/KV投影与当前核内对照](NATIVE_PROJECTION.md)只读取上述已有模型trace，
+按QA的归一化消费者及辅助stream中KV→head投影的次序匹配；441个CSA区间计数和stream检查通过。
+保留实际kernel名称及任务号，处理CANN输出ACL名称/编译后名称两种情况，不新增设备采样。
