@@ -36,7 +36,7 @@ Score/Top-K整体lowering、PTOAS、CCE及链接通过：[日志](compile.log)�
 
 完整CSA的lowering、PTOAS、CCE及链接也已通过：[完整编译日志](compile_full.log)。
 两次编译均在模型短档正式计时前完成，不创建设备Worker、不执行NPU。
-L0A容量更紧，不能把“编译能放下”当作流水加速；设备筛查尚未进行。
+L0A容量更紧，不能把“编译能放下”当作流水加速；设备筛查尚未取得结果。
 score arena从240行增到288行，是为24个worker各自的两个AIV lane保留6个query的私有行。
 共享的双query AIV也改为跨行加载后切片，旧版短档数字不能替代候选短档回归。
 
@@ -57,3 +57,14 @@ python tests/pypto_test/results/csa_indexer_six_20260928/compile.py \
 `FlattenTileNdTo2D`仍将自然Mat load的源窗口压到二维，不保留这种非连续三维视图。
 目前不能直接替换原算子的四次gather_row；正式请求还存在倒序物理页，需要另处理逻辑顺序。
 这只是能力边界，不是设备失败；没有改PTO-ISA/PTOAS，也没有将它叠加进S6候选。
+
+## 设备筛查范围
+
+三query已经在128K/B16测得Score AIC减少24.88%、完整CSA减少4.25%，因此继续尝试增加复用。
+task_20260928_033316_2907819818：[命令](run_layer.sh)。同一个单卡作业：
+
+1. 8K/B16原版和三query源码计时，只检查共用的短档双query路径。
+2. 128K/B16重新测三query控制与S6完整CSA，仍为5预热＋20次图计时。
+3. S6独立4个DFX窗口；三query核内控制复用前轮相同源码的4个窗口，明确不是同一作业。
+
+各次保留metadata/保护区、有限值与Top-K结构检查。尚无S6设备结果，也没有扩大七档或修改生产版本。
