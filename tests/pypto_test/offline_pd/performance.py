@@ -160,6 +160,11 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
             for row in rows), f"{path}: {name} 缺少请求/token")
     require(len(value["steady_window"]) == 1, f"{path}: TP1 只应返回一个 worker")
     steady = value["steady_window"][0]
+    if value.get("batch_admission") == "pause_enqueue_dp_barrier_resume":
+        positions = steady.get("step_positions_cpu")
+        require(isinstance(positions, list) and len(positions) == steady_cycles and all(
+            isinstance(row, list) and len(row) == expected_tokens for row in positions),
+            f"{path}: 完整批次入场后缺少实际CPU位置记录")
     require(value.get("eplb_enabled") is False and value.get("dynamic_eplb_env") == "false" and
             value.get("expert_map_record_env") == "false", f"{path}: 所有 CSA 测试必须关闭 EPLB")
     worker_config = value["worker_runtime_config"]

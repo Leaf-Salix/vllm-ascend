@@ -404,6 +404,10 @@ class OfflineCSAObserver:
             if entry is None:
                 return original_forward(*args, **kwargs)
             entry["forward_calls"] += 1
+            # CPU metadata already prepared by the production runner. Keep
+            # the actual request positions for comparing work across runs;
+            # no device copy, hash, or synchronization is added to timing.
+            entry["request_positions"] = runner._dsa_positions_cpu_buf[:expected_tokens].tolist()
             begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
             entry["begin"], entry["end"] = begin, end
             begin.record()
@@ -454,7 +458,8 @@ class OfflineCSAObserver:
         stamps = [entry["begin"].recorded_time() for entry in valid]
         state.update(measured_steps=len(events), step_tokens=[entry["tokens"] for entry in events],
                      step_requests=[entry["requests"] for entry in events],
-                     steady_step_indices=[entry["index"] for entry in events])
+                     steady_step_indices=[entry["index"] for entry in events],
+                     step_positions_cpu=[entry["request_positions"] for entry in events])
         state["forward"] = {"samples_us": values, "start_timestamps_raw": stamps,
                             "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
                                      "DSpark 草稿或步间调度等待；不逐步同步"}

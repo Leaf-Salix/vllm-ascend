@@ -45,6 +45,13 @@ class OfflineNPUWorker(NPUWorker):
 
         return end(self)
 
+    def offline_batch_barrier(self):
+        from vllm.distributed.parallel_state import get_dp_group
+
+        # GroupCoordinator.barrier uses its CPU group. It runs once after
+        # enqueue and before resuming scheduling, never in a timed forward.
+        get_dp_group().barrier()
+
     def offline_runtime_config(self):
         return {
             "requested_deterministic_level": self._offline_requested_deterministic_level,

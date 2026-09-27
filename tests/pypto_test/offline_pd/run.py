@@ -328,13 +328,19 @@ def generate_round(llm, args, case, limit, stagger=False):
     limits = stagger_limits(submitted, limit) if stagger else None
     params = [make(value) for value in limits] if limits else make(limit)
     start = time.perf_counter()
-    if submitted == 0:
+    if submitted == 0 and args.command not in ("performance", "moe-routing"):
         # 注意语义：这里直接返回，**引擎根本没被调用**，所以它不是 D04 要的
         # "rank 参与 DP 但没有调度到请求"那条路径，只是"这个 rank 本轮不出题"。
         # 真实空 rank 要用 --rank-decode-tokens 让某个 rank 的请求提前跑完，
         # 其余 rank 继续推进，那时它的引擎才会在有 DP 协调的前提下空转。
         return {"elapsed_seconds": 0.0, "max_tokens_per_request": [], "output_token_ids": []}
-    result = llm.generate([{"prompt_token_ids": tokens}] * submitted, params, use_tqdm=False)
+    prompts = [{"prompt_token_ids": tokens}] * submitted
+    if args.command in ("performance", "moe-routing"):
+        from offline_pd.batch import generate_aligned_batch
+
+        result = generate_aligned_batch(llm, prompts, params)
+    else:
+        result = llm.generate(prompts, params, use_tqdm=False)
     return {"elapsed_seconds": time.perf_counter() - start,
             "max_tokens_per_request": limits or [limit] * submitted,
             "output_token_ids": [list(r.outputs[0].token_ids) for r in result]}
@@ -392,6 +398,8 @@ def diagnose(args, llm, cases):
               "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens,
               "weight_nz_mode": args.weight_nz_mode, "graph_mode": args.graph_mode,
               "capture_sizes": args.capture_sizes,
+              "batch_admission": ("pause_enqueue_dp_barrier_resume"
+                                  if args.command in ("performance", "moe-routing") else "streaming_generate"),
               "deterministic": args.deterministic,
               "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
               "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
