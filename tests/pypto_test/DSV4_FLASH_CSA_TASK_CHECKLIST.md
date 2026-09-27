@@ -1,67 +1,34 @@
 # DSV4 Flash CSA：执行清单
 
-更新：2026-09-27。依据用户本轮确认重构；本文件只保留当前合同、有效证据和待办。
-当前状态：按用户要求，将入口拆分进一步改成按请求逻辑页序排列的连续 key/scale，
-Score 直接整块读取，Compressor 更新连续缓存，出口按 Native slot 写回。
-用户最新优先级：先优化拆分与写回之外的 CSA 本体；入口和出口优化暂缓。
-性能版先试 Native 上游已有的精度取舍：QK 经 FIXPIPE 转 FP16 留 L1，
-FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数交给 Vector。
-七档v4/v7对照已补齐：128K B4/8/16、8K B16/24/32/40；见
-[矩阵记录](results/csa_native_cube_matrix_20260927/README.md)及验证日志§178。
-用户最新要求：先比较七档核内差异并吸收Native策略，再优化PTO调度。
-用户追加保留规则：必要功能检查通过且incore task有明确收益就保留，不以CSA本体暂时未改善为撤回理由。
-本体/长尾独立记录；基本可做的核内优化完成后转入调度，最终仍按整模型forward和完整CSA区间验收。
-已恢复并保留Indexer双query合并head规约，当前128K/B16 Score AIC为335.59–346.15 μs；
-[代表档证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
-用户限定：本轮只再做三项核内候选——Indexer合并规约/片上复用、Q_A/KV连续清零、量化投影写回。
-每项必要代表档验证后按核内收益决定保留，三项收尾即开始调度优化，本轮调度十轮结束后再恢复新的核内阶段。
-三项核内先导已结束：前两项保留，第三项FP16紧凑写回核内退化撤回；当前进入调度优化。
-首项Q_A先行已获得B40本体1359.26→1327.86 μs（−2.31%），其他档位待阶段验证；
-[调度记录](results/csa_scheduling_20260927/qr_before_compressors/README.md)。
-用户追加：按泳道识别有害预派发，选择性关闭对应生产者的allow_early_resolve；每次单独比较本体及启动/等待。
-已单独试Score→Top-K merge、Indexer Q反量化→Query Hadamard两处：等待减少但B40本体未获益，均恢复；
-当前保留Q_A先行，继续分析关键链/资源准入，不以等待变短或泳道整齐代替整体收益。
-调度固定对照用户指定的历史725 μs泳道（实际Worker首尾727.98 μs）；源码参考pypto-lib官方main最新版。
-2026-09-27已用depth=1拉取确认main为2164563，本地一致。旧图缺源码/完整配置，不把最新版冒认为旧图采样源码。
-每项候选记录任务粒度、依赖、启动分散、交叠及额外工作；当前8K/B16分段对照见
-[727.98 μs参考分析](results/csa_scheduling_20260927/upstream_725/comparison.md)。
-已保留[O_A行列并行](results/csa_scheduling_20260927/o_a_row_parallel/README.md)：B40尾段明确缩短，本体均值1318.05 μs；
-B24本体983.49 μs且16行尾块通过。两档完整PTO仍慢于Native，七档/整模型验收未完成。
-HC转换开放预派发未获益，已撤回；B16恢复Compressor交叠使Q_A推迟，本体未改善，未保留工作量分支。
-RoPE准备开放预派发也无本体收益，已撤回。用户最新要求：**从新指令起再做十轮调度，然后回到incore task优化**。
-[十轮台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)从round01计数，前序试验不算；前十轮10/10完成（保留第5轮，其他撤回）；用户又要求追加五轮，第11–15轮完成后再转incore，追加五轮每轮必须测8K/B16与128K/B16综合判断，正在固定07365e52补齐七档与profile缺项，作为追加五轮基线；不重复整套矩阵。
-第二项连续清零已保留：B40 Q_A seed6.94–8.50 μs、KV seed4.96–5.20 μs，小档padding检查通过；
-[独立证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
-已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：
-128K重点为Indexer复用与Top-K；8K优先处理Sparse Attention的KV搬运和核内流水衔接。
-Indexer已有[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
-七档共同基线为累计保留v8～v10改动的V10实现；128K/B8本体为889.22 μs、B16为1304.87 μs；
-B16仍有约1.58 ms的尾部，不能凭均值接近Native宣布赶上。
-8K使用片上FP16 Score与Cube head规约，V10的B24本体为1026.25 μs；
-小batch完整leaf负载均衡（v10）使128K/B4本体降到716.34 μs。
-8K/B16、B32、B40已补测为790.88/1196.32/1428.20 μs；B40仍慢于同轮Native约1.61%。
-七档现在均有同一套V10算子源码的实测，按输入选择策略而非切换历史版本；结果见[统一V10报告](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)和日志§179～184；
-Top-K融合候选v11编译失败已撤回，padding及整模型验收按下列任务补缺口。
-完整路径仍有拆分和写回成本，未做分配器改造或新的16卡验收。
-核内阶段当前保留的新增改动：性能版B40 KV投影去除精度专用K遍历，统一宽tile/split-K；
-8K/B40本体1386.00 μs，对同轮Native −1.74%，完整PTO仍慢；见[独立验证](results/csa_incore_20260927/kv240_splitk_only/README.md)。
-另保留性能版Sparse Attention按工作量提前发布KV：T≥144启用，小工作量维持原顺序。
-最终B40复验本体1361.40 μs（较上述基底低1.77%），qk_pv核内301.01–318.44 μs；
-完整PTO1708.50 μs仍慢于同轮Native1401.18 μs，B16本体无明确收益。
-[先导、选择依据与最终复验](results/csa_incore_20260927/sparse_kv_early/README.md)分开记录；
-B24/B32早通知先导与后续当前矩阵分开记录。
-另保留[跨query连续核内流水](results/csa_incore_20260927/sparse_cross_query/README.md)：
-B40本体1342.68 μs，qk_pv核内283.06–288.68 μs；8K/B16本体795.04 μs基本持平，
-128K/B16本体1269.53 μs但p95仍1549.14 μs、核内未明确获益。
-固定Native输入对基底PTO逐bit一致，混合无效query/不均分尾部/零工作量核通过；
-精度版及跨任务调度不变；随后已补齐[da2e2368同一源码七档](results/csa_incore_20260927/sparse_cross_query/MATRIX.md)：
-本体按128K B4/B8/B16、8K B16/B24/B32/B40依次729.21/891.92/1269.53/795.04/1002.28/1140.71/1342.68 μs。
-大batch短上下文较V10获益，小档位没有本体收益，完整PTO七档仍慢于同轮Native；未做新的整模型验收。
-历史撤回项按上述新规则重新分类；核内退化项仍不保留，核内获益项恢复评估。128K/B16 Native分项trace已补齐。
-da2e2368的七档已齐；此后两项新增核内优化仅补代表档，尚未形成新的七档，不能拼历史最优值。Native式KV/gate合并投影先导核内退化，已撤回；
-其他CSA模块16组操作的七档对应关系已补入差距文档，完整临界路径归因和WKV NZ复用仍待推进。
-过程和历史结论保留在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，旧版本可查 Git；
-不再复制进清单，历史结果不自动沿用为当前验收证据。
+更新：2026-09-27。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
+
+当前优先级：性能版先优化CSA本体，入口拆分/写回暂缓；精度版保持对齐Native的算术边界。
+入口将Indexer cache拆成按请求逻辑页序连续的key/scale，Score整块读取，Compressor更新后按Native slot写回。
+现阶段所有功能/性能测试关闭EPLB，单卡代表case优先，最后再做正式权重16卡整模型。
+
+前十轮调度已经完成，仅新增保留第5轮：轻Indexer Compressor与Q_A交叠，重Attention Compressor仍等待Q_A。
+用户又要求**追加五轮调度（第11–15轮），完成后再恢复incore task优化**。
+追加五轮每轮必须用8K/B16与128K/B16综合判断均值、p50、p95及泳道，不因短档单独退化就提前否决；
+必要的batch/长度策略写在同一套PTO算子内。第11轮整组Score准入正在真机测试，当前追加计数0/5。
+[完整调度台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。源码参考最新pypto-lib官方main2164563（2026-09-27 depth=1核对）；
+历史725 μs图实际Worker首尾727.98 μs，缺源码和完整配置，只用作参考，不能冒认为最新版同输入A/B。
+
+追加阶段的固定基线为**07365e52**，七档同源码计时、PyTorch profile与四窗口PTO泳道已齐：
+[七档报告与42张JSON图](results/csa_scheduling_20260927/final_07365e52/README.md)。
+本体按128K B4/B8/B16、8K B16/B24/B32/B40依次为727.01/886.36/1247.03/781.52/981.64/1121.93/1306.88 μs，
+相对同轮Native快4.92%–15.63%；完整PTO仍慢，128K/B16 p95为1533.18 μs，750 μs及整模型验收仍未完成。
+三档计时/泳道复用同源码已有结果，其余四档补采；七档Native/PTO PyTorch profile均已补齐，后续每轮不重测整套矩阵。
+
+当前保留的性能改动及证据：
+
+- Indexer连续缓存、Native式FP16 QK＋第二次Cube规约、双query合并规约和片上复用：[核内证据](results/csa_incore_20260927/indexer_fused_ws_restore/README.md)。
+- 性能版KV统一宽tile/split-K、Sparse按工作量提前发布KV及跨query流水：[核内差距及保留项](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+- Q_A/KV连续清零：[代表档和padding证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
+- 重Compressor等待Q_A、轻Indexer交叠及O_A行列并行：[调度台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。
+
+后续incore仍以Native和最新版pypto-lib源码为参考，必要功能检查通过且有明确核内收益就保留，本体和长尾另记。
+七档已通过保护区、索引结构和有限值检查，但Native零容差比较仍有浮点/Top-K差异；新路径token/DSpark/16卡验收尚未完成。
+原始证据与范围限制见[Native核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)、[Indexer源码差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)及[上游泳道差距](DSV4_FLASH_CSA_UPSTREAM_GAP.md)。
 
 ## 1. 最终交付与验收合同
 

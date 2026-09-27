@@ -6,7 +6,7 @@
 
 前十轮已完成，仅保留轻Indexer Compressor与Q_A交叠，较重Attention Compressor仍等待Q_A；其他九项撤回。
 用户随后追加5轮（11–15），每轮长短上下文共同判断，完成后才回incore；本表仍是追加阶段固定起点。
-[逐轮台账与证据](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。当前已有同源码数据如下，七档缺项正在补齐。
+[逐轮台账与证据](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。七档同源码数据已齐，见[完整表与42张JSON图](results/csa_scheduling_20260927/final_07365e52/README.md)；下列两种长度代表档保持原样。
 
 | 档位 | Native均值 | PTO本体均值 | 本体p50 / p95 | 完整PTO均值 |
 | --- | ---: | ---: | ---: | ---: |
