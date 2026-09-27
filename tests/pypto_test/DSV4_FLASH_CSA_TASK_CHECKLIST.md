@@ -2,121 +2,59 @@
 
 更新：2026-09-28。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
 
-当前保留性能版在 **9a01a276** 基础上增加输入策略：长历史且query数至少96时选S6/M384/N64，
-48～95时选三query/M192/N128；短历史按最忙核工作量选择S6或双query。
-B8长档/B40短档已取得明确核内收益，两条新分支固定规约输出/状态及图重放通过；
-同源码真实EP16七档已采集，但B8长档仍慢4.77%、B16短档有2个rank的DSpark差异，验收未通过。
-其余五档快0.35%～2.37%，不能将单卡收益或采集完成当作整体目标达成。
-[当前策略与验收进度](results/csa_indexer_adaptive_20260928/README.md)。
-2a740c1f此前在f76b3ad4上新增等待Cube前读取Indexer scale：PTO内部直接读写Native物理页，key加载交错QK/WS，
-入口历史复制和外部Torch写回均已删除；只在长档Score启用整组准入且禁止提前释放。
-Native分配、算子和调度流程保持原样，精度版保持原算术。长短上下文策略在同一算子内选择。
-用户最新顺序：完成P95与cache改造精度检查，提供当前整模型forward七档，再交替优化调度与incore。
-不再沿用“只做incore/禁止新调度轮次”或继续追加旧调度轮数的限制。
+当前生产算子为 **71153bb3**，Native cache分配与流程不变，PTO内部直接读写物理页；没有入口历史复制或外部Torch写回。
+长历史按query数选择双query、三query/M192或S6/M384；短历史按最忙核工作量选择S6或双query。
+只有长档Score整组准入并禁止提前释放；精度版原算术保持。默认atomic1的真实EP16七档**未通过验收**：
+128K/B8慢4.77%，8K/B16两rank各少接受一个草稿；其余五档快0.35%～2.37%。
+[统一源码七档正式结果](results/csa_indexer_adaptive_20260928/model/RESULTS.md)、
+[模型CSA/FFN/GMM差距](results/csa_indexer_adaptive_20260928/model/MODEL_GAP.md)。
 
-当前有效证据：
+最新独立干预为相同算子关闭atomic：128K/B8正式forward Native56.307→PTO55.830ms（−0.85%），
+P95与最慢rank也下降，token/DSpark通过；8K/B16仍在运行。生产默认尚未修改，未宣布七档稳定优势。
+[当前atomic诊断、单卡代价和模型结果](results/csa_atomic_current_20260928/README.md)。
 
-- 新增S6长档复用：128K/B16同轮三query→S6完整CSA1191.90→1129.72μs，P95 1207.82→1144.02μs；
-  S6 Score AIC286.12μs，相对前轮三query下降18.39%。固定规约B16/H32768、完整leaf＋尾leaf的8类输出/状态
-  对原版逐元素零差异，A→B→A图重放通过。真实EP16长档先完成：Native73.033→PTO72.440ms（快0.81%），
-  短档8K/B40为104.182→103.623ms（快0.54%）；两档P95与慢卡同步改善、token/DSpark通过。
-  收益仍小，尚不能宣布稳定优势或七档达标，继续定位模型CSA与后续MoE/EP耗时。
-  [保留依据、源版本、短档证据范围和命令](results/csa_indexer_six_20260928/README.md)。
-- 新增scale提前读取仅完成8K/128K B16代表档：完整CSA均值776.94/1242.22μs，P95 784.98/1253.72μs；
-  长档Score AIC/AIV四窗口均值下降约1.88%/1.97%，保留。以下七档与模型结果仍属于f76b3ad4，不能冒充新候选实测。
-  [新候选、原始结果和验收范围](results/csa_incore_20260927/indexer_scale_prefetch/README.md)。
-- 单卡七档完整PTO＝本体，按128K B4/B8/B16、8K B16/B24/B32/B40依次为
-  728.89/879.74/1258.27/797.72/982.07/1127.93/1315.80μs，快于各自同轮Native3.34%～15.84%。
-  各档20次无profiler计时、Native/PTO PyTorch profile和4个PTO泳道窗口已齐，
-  [七档与42份JSON](results/csa_incore_20260927/final_f76b3ad4/README.md)。不能替代整模型结论。
-- 长档128K/B16原版/候选各100次，P95 1607.34→1280.96μs，P95/P50增幅28.21%→1.47%；
-  P50略升，收益主要是压低尾部，不能称为核内加速。
-  [尾部保护证据](results/csa_cache_tail_guard_20260927/README.md)。
-- cache改造前后固定规约的8K/128K对照通过：8类输出/状态逐元素零差异，两档A→B→A图重放通过。
-  单卡输入使用随物理行变化的Indexer scale检出错页，不改变性能计时fixture。
-  正式权重16卡H8192/B16的24576 token及DSpark统计也通过；
-  [精度对照和范围](results/csa_cache_accuracy_20260927/README.md)。不代表Native/PTO全部浮点状态逐bit一致。
-- 当前全模型forward七档已完成：128K B4/8/16、8K B16/24/32/40，
-  两侧mode2、TP1/DP=EP16、出5验6、EPLB关闭；每rank预热后连续10步纯decode forward。
-  PTO相对Native依次为+0.09%/+3.48%/+2.19%/−3.00%/−2.25%/−1.26%/+0.05%。
-  573440个token零差异，112组rank对照的DSpark统计一致；长档仍存在性能差距。
-  [当前完整档位和逐rank样本](results/csa_model_forward_f76b3ad4_20260927/RESULTS.md)。
-  不混入旧版模型数据，不删除偏慢样本；P95/max及每步最慢rank另列。
-  新发现：旧入场方式没有保证两侧满档step的token/position组成相同，可能改变MoE负载；上述历史实测保留，
-  不能作为严格同输入的算子因果对照。测试修正8dd737f4让整批入队后统一启动，并保存各计时step的CPU位置。
-  后续正式比较必须核对两侧位置一致，不在设备计时内增加复制、hash或同步。
-  此CPU位置核对不等于完整设备输入相同：异步DSpark会在设备端更新草稿/采样token，CPU input_ids可能滞后。
-  真实forward仍可比较部署表现；严格路由归因使用独立诊断的实际设备输入，不把CPU位置当作完整输入证据。
+当前判断依据：
+
+- 默认atomic1下，七档profile的CSA区间均缩短，但专家GMM任务duration均增加约1.01～1.68ms。
+  不同event模式会影响profile，且它与正式10步是独立请求轮，不能用该表精确分账正式forward。
+- B8同轮事件与完整图核对已完成：两侧图外差额约192/195μs，未见PTO独有的毫秒级额外间隙。
+  16rank已有trace全部配对，PTO的CSA结束跨度平均53μs，未复现旧版严重到达拖尾，不盲目加sync_start。
+  [边界与EP到达证据](results/csa_forward_boundary_20260928/README.md)。
+- 当前atomic0的B8 profile中专家GMM增量收窄至0.187ms，上次atomic1为1.523ms。
+  与固定归约减少下游工作差异相符，但本轮未直接采专家索引；该开关也改变split-K分片，不能单独归因于硬件atomic抖动。
+- 保留分组优化的依据：长档S6 Score AIC相对三query下降18.39%，小长档三query下降20.62%，
+  短档S6下降51.32%；两条新增分支的固定规约输出/状态与图重放精确一致。
+  [当前分组证据](results/csa_indexer_adaptive_20260928/README.md)。
+- 原cache改造前后8类输出/状态固定规约逐元素一致、图重放通过，使用随物理行变化的scale检出错页。
+  [cache精度证据](results/csa_cache_accuracy_20260927/README.md)。这不等于Native/PTO全部浮点状态逐bit一致。
+- 旧f76b3ad4单卡七档、42份JSON和模型历史仅作参考；不是71153bb3的新七档泳道交付。
+  [旧版单卡档案](results/csa_incore_20260927/final_f76b3ad4/README.md)。
 
 近期待办按依赖执行：
 
-1. 源头仅分离key/scale已测，短档约1%收益、长档略回退，暂不采用。
-   分离＋确认四页连续后合并N128读取，在连续页单卡128K/B16常规/压力下快5.68%/5.61%，短档快1.93%/2.78%；
-   两档固定规约输出/状态及图重放通过，详见[候选对照](results/csa_source_split_ab_20260927/README.md)。
-   真实16卡代表档已采集：128K/B16 forward反慢3.79%，8K/B40慢0.55%，候选暂不采用；两档token一致，
-   长档15/16 rank DSpark统计不同，待隔离原因。P95贴近中位数，本轮差距不能主要归因于长尾。
-   独立profile中的CSA仍快9.59%/7.16%，但不是正式计时轮。CPU真实allocator已复现复用页序递增/递减翻转；
-   原布局2a740c1f两档补测已完成，复用前轮Native控制，forward分别慢3.38%/0.16%，token/DSpark均通过。
-   原布局真实页序已确认：长档正式计时轮递增四页0%，profile轮91.65%；短档0%/31.72%。
-   原布局继续保留；新成对模型对照已完成，双方完整批次入场，16rank的10步位置数组相同。
-   分离＋新页排序候选128K/B16慢3.13%，8K/B40快0.23%；229376 token无差异，长档14rank DSpark不同。
-   短档差额不足以宣称明显优势，长档未通过，候选不合入；[实际分布和分解](results/csa_source_split_ab_20260927/ordered/README.md)。
-   用户要求分离策略以性能为准；物理key/scale连续不等于请求历史连续，不能将诊断连续输入冒充生产分配。
-   更大连续读取探针尚只有CPU编译证据；若需扩到请求分配/生命周期，先凭性能证据决定范围。
-   既有模型trace已确认128K/B16模型内CSA优势反转；缓存压力消除了约3%的单层优势，因此新布局还要比较受扰动状态。
-   [模型差距及压力实验](results/csa_model_forward_f76b3ad4_20260927/MODEL_GAP.md)。
-   独立profile没有闭合无profiler forward全部差距。f76b3ad4的8K/B40路由诊断已完成：
-   配对96.875%的请求后，平均活跃专家92.17→123.01（+33.46%），最多接收token的rank负载反降0.92%。
-   层0～2选择一致，后续差异累积；继续评估算术策略对MoE工作的影响，不把它仅当CSA内部精度问题。
-   诊断复制/同步耗时不作为性能成绩；[证据与局限](results/csa_model_forward_f76b3ad4_20260927/routing_b40/README.md)。
-   新profile两类专家GMM累计任务duration长档增加3.984ms、短档增加3.013ms；可重叠，不等于critical span。
-   长档首层dispatch还含明显EP等待，不能把所有FFN增量都归因于CSA数值。
-   单卡相同请求副本在atomic1/0均未复现分化；两条路径图/保护区通过，合成case不排除真实模型影响。
-   关闭PTO atomic的两档干预已完成：长档73.701ms、仍慢2.35%，12rank DSpark不同；短档104.072ms、快0.27%，
-   但P95从105.569升到110.292ms，暂不采用。独立profile专家GMM有下降，不能据此外推正式forward胜出；
-   [干预及全部样本](results/csa_source_split_ab_20260927/ordered_atomic0/README.md)。
-   累计softmax/BF16 round候选局部RMSE下降36.10%、B3尾块通过，但完整CSA786.75→803.29μs，
-   整层RMSE基本没变，因此不合入、不做16卡扩测；[候选与边界](results/csa_softmax_cumulative_20260928/README.md)。
-   HC同输入诊断：post逐元素一致；pre/norm有995/393216差异，gate独立引入残差RMSE约0.000157，
-   不直接外推成完整误差归因，也不改HC；[诊断](results/csa_hc_diagnostic_20260928/README.md)。
-   WO-B整token量化单卡已测：PTO786.75→811.35μs，Native控制也增加1.94%，整层RMSE基本没变，
-   B3固定形状图/尾块与保护区通过。两档EP16已完成：75.403/104.846ms，慢于Native4.71%/0.47%；
-   token一致，长档15rank DSpark不同，专家GMM未下降。该候选不合入、不扩大七档；
-   [差异依据及代价边界](results/csa_oproj_token_20260928/README.md)。
-   等待期间独立准备WO-B两份INT32中间结果候选：NZ/ND完整CPU编译通过，尚无设备正确性或收益；
-   依赖共同token scale，因EP16量化干预未受益，本阶段不继续占卡。
-   [补丁与编译边界](results/csa_oproj_accum2_20260928/README.md)。
-   QKV的Native BF16数值边界候选完成单卡：完整输出RMSE下降12.01%，Top-K集合替换366→272，
-   CSA781.998→789.491μs；同轮Native增加1.67%，不把差额全算候选净成本。B3固定图尾块通过。
-   原cache两档EP16已完成，同轮Native控制：长档76.510ms、慢6.16%，短档103.593ms、快0.62%；
-   token/DSpark均通过，无异常P95；不合入、不扩大七档。profile显示GMM仍增加1.286/0.700ms，
-   长档CSA也慢2.75%；profile首层EP等待不同且与正式计时胜负反转，尚未闭合全部forward差距。
-   [单卡与模型结果、profile边界](results/csa_qkv_bf16_20260928/README.md)。
-2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
-   继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
-   Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。
-   三query/M192已测：128K/B16 Score AIC466.67→350.59μs（−24.88%），完整CSA1237.70→1185.13（−4.25%），
-   P95下降；metadata/保护区/有限值/Top-K结构通过。8K/B16共用路径回归794.01→791.91μs，未见退化。
-   按核内收益保留推进，仍待跨版本数值与模型验收；[原始样本和范围](results/csa_indexer_triple_20260928/README.md)。
-   S6/M384/N64已取得同轮长档本体5.22%增益，固定规约与图检查通过并应用性能版；
-   原cache两档EP16仅小幅领先，模型profile已确认CSA合计省3.60/1.75ms，但FFN增加1.32/1.49ms；
-   专家GMM任务duration增加1.70/0.99ms，不能把不同轮profile套到正式10步，也不能只归因于P95。
-   [模型分解和边界](results/csa_indexer_six_20260928/model/MODEL_GAP.md)。
-   小长档三query已取得128K/B8 Score AIC下降20.62%、完整CSA下降3.38%；
-   [B8实测及证据范围](results/csa_indexer_mid_20260928/README.md)。
-   [S6容量、适用条件和multi-ND加载边界](results/csa_indexer_six_20260928/README.md)。
-   短档S6已取得B40 Score AIC下降51.32%、完整CSA下降1.84%，Native控制波动另记；
-   [短档规则及实测](results/csa_indexer_six_short_20260928/README.md)。
-   两条新策略合并，B8/H32768和B24/H8192各8类输出/状态固定规约零差异、图重放通过，已应用性能版。
-   task_20260928_041310_3365315916已采集统一源码七档EP16：B8长档慢4.77%，其独立profile却显示主图更快，
-   先补同一次forward事件与trace边界诊断，避免不同轮次猜因果。
-   B16短档rank8/12各少接受1个第5位置草稿，正式计时末步位置错位；token仍一致，但DSpark门禁失败，
-   继续定位规约/算术影响，不删除失败数据或放宽门禁。其余五档快0.35%～2.37%。
-   [当前策略、命令和进度](results/csa_indexer_adaptive_20260928/README.md)。
-   8K/B40全模型暂仅持平，也须定位；核内收益、本体收益和尾部收益分别记录。
-3. 继续以性能版为优化重点，稳定后按既定合同将数值中性的优化迁移到精度版并独立验收。
-   性能版明确超过Native、B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍为目标；
-   2a740c1f单卡B16/H8192约777μs；新增S6代码的短档/模型目标尚未验收完成。
+1. **完成当前atomic0两档EP16干预。** task_20260928_045503_382273916328：128K/B8、8K/B16，双方新的Native控制。
+   严格检查10步位置、逐token与逐位置DSpark统计，保留P95/max及每步最慢rank。
+   短档若仍失败，定位数值分歧；不得丢弃失败rank、放宽门禁或因最终token相同标通过。
+   若两档共同支持，再决定默认归约策略与受影响矩阵范围，不把不到1%的单次领先当稳定优势。
+2. **独立验证Top-K累计根保留UB。** 当前每份半leaf归并都读写GM根；候选保持归并顺序与相等分数规则，
+   只把累计根放UB，按Native做法减少搬运。完整CSA CPU编译已通过，未修改工具链。
+   task_20260928_051013_399892317506排队，只测128K/B8的固定规约逐元素/图重放、单卡本体与4窗口merge核内耗时。
+   不掺入正在运行的atomic对照。按用户规则，核内有明确收益则保留，调度问题另行处理。
+   [候选与能力边界](results/csa_topk_register_20260928/README.md)。
+3. **冻结选定源码和部署配置后补齐受影响七档。** 128K/B4/B8/B16、8K/B16/B24/B32/B40；双方相同weight NZ mode，
+   TP1/DP=EP16、出5验6、EPLB关。验收只用预热后连续10步无profiler decode forward；初始化和完整周期不计。
+   保存各档PyTorch JSON及PTO泳道，并给出当前版本相对Native和pypto-lib的核内、调度、额外工作差异。
+   已有同版本证据复用，只补缺口或受影响项，不做hash扫描或重复无关测试。
+4. **cache策略继续按真实整模型性能决定。** 源头key/scale分离及连续四页候选已测，模型未取得共同收益且长档DSpark失败，暂不采用。
+   物理key/scale连续不等于请求历史连续；真实allocator正式轮和profile轮页序不同，不能用人工连续页代替生产验收。
+   保留原布局PTO内部读取，除非新证据支持其他方案。[旧分离干预与失败边界](results/csa_source_split_ab_20260927/ordered/README.md)。
+5. **性能稳定后补精度版。** 仅共用数值中性的适配和实现，算术策略明确隔离，精度版独立验收。
+   性能版明确超过Native、B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍未达成；当前atomic0单卡该档约781μs。
+
+测试统一使用整批入队后DP同步启动，核对每个正式step的CPU位置；设备计时内不增加复制、hash或逐步同步。
+CPU位置相同不证明设备草稿token相同，严格路由归因使用独立诊断的实际设备输入。
+已有失败的累计softmax、WO-B整token量化、QKV BF16边界和旧source-split atomic干预见验证日志§262～270及其证据链接；
+没有新依据不重复扩测。近期交替优化核内与调度，先看长短代表档，阶段结束再覆盖矩阵，不继续机械追加旧调度轮数。
 
 后续源码参考Native与最新版pypto-lib官方main2164563（2026-09-27 depth=1核对）；
 历史725μs图实际Worker首尾727.98μs，缺源码和完整配置，只作调度参考。

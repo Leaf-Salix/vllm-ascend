@@ -8519,3 +8519,16 @@ P95 57.290→56.567、max57.511→57.028；最慢rank均值56.831→56.416ms（�
 独立rank0三步专家GMM总时长4.749/4.936ms，PTO增量0.187ms；§280 atomic1增量1.523ms。
 差距收窄与固定规约减少下游工作差异相符，但尚未采实际专家索引，不当作唯一因果证明。
 [正式样本与profile范围](results/csa_atomic_current_20260928/README.md)。
+
+## 284. 按Native方式减少Top-K根的GM往返，算子侧解决形状限制后排单卡（2026-09-28）
+
+独立71153bb3工作树将跨半leaf累计Top512保留UB，保持原合并顺序及相等分数规则。
+初版slice循环回边TMOV物理形状不匹配，显式assemble同样失败；不改PyPTO/PTOAS/ISA。
+改为携带完整2048-float归并结果，每轮只消费前1024-float；初始额外读一个已分配槽，
+八个半leaf时每query净少52KiB GM搬运。这是推导，不是收益；orchestration只建立原arena连续视图。
+Indexer及完整CSA CPU lowering/PTOAS/CCE/链接通过；完整编译于05:09:10结束，仍在模型加载阶段。
+
+task_20260928_051013_399892317506排队，一卡128K/B8，原版/候选固定规约状态、候选图重放，
+各20次本体计时，另各4次merge DFX。与运行中的atomic0 EP16源码完全分开，未合入生产。
+[补丁、编译说明与命令](results/csa_topk_register_20260928/README.md)。
+执行清单去掉将旧f76和473μs核内数据称为当前的段落，仅保留有效约束、证据和下一步，历史仍在本日志与Git。

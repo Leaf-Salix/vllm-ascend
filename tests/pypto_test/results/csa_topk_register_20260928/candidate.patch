@@ -1,0 +1,86 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index df3bb431..b67fda56 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -168,24 +168,6 @@ SCORE_ARENA_ROWS = max(T_PAD, TOPK_SCORE_WORKERS * 2 * SCORE_MAX_QUERY_GROUP)
+ assert S % SCORE_MAX_QUERY_GROUP == 0 and T_PAD % SCORE_MAX_QUERY_GROUP == 0
+ 
+ 
+-@pl.jit.inline
+-def merge2_top512_pairs(
+-    pair_arena: pl.Tensor,
+-    left_slot: pl.Scalar[pl.INDEX],
+-    right_slot: pl.Scalar[pl.INDEX],
+-    output_slot: pl.Scalar[pl.INDEX],
+-) -> None:
+-    """Merge two arena rows and store their exact Top-512 pair row."""
+-    left = pl.load(pair_arena, [left_slot, 0], [1, TOPK_PAIR_WIDTH])
+-    right = pl.load(pair_arena, [right_slot, 0], [1, TOPK_PAIR_WIDTH])
+-    merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+-    # Native QLI MergeSort places the incoming chunk before the accumulated
+-    # list, which determines the ordering when scores are exactly equal.
+-    merged_all = pl.tile.mrgsort(right, left, tmp=merge_tmp)
+-    merged = pl.tile.slice(merged_all, [1, TOPK_PAIR_WIDTH], [0, 0])
+-    pl.store(merged, [output_slot, 0], pair_arena)
+-
+-
+ @pl.jit.inline
+ def indexer_topk_half_leaf(
+     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+@@ -252,7 +234,7 @@ def indexer_topk_query_merge_one(
+     query: pl.Scalar[pl.INDEX],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+-    pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
++    pair_arena: pl.Tensor[[1, TOPK_ARENA_ROWS * TOPK_PAIR_WIDTH], pl.FP32],
+     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+ ):
+@@ -266,11 +248,18 @@ def indexer_topk_query_merge_one(
+         leaf_count = (visible_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF
+         half_count = leaf_count * 2
+         arena_base = query * TOPK_ROWS_PER_QUERY
++        # Carry the full MRGSORT result so A3 loop-carried TMOV has equal physical
++        # shapes. Only its first Top-512 pairs are consumed by the next merge.
++        # The initial 2048-float load spans two allocated half-leaf slots.
++        root_full = pl.load(pair_arena, [0, arena_base * TOPK_PAIR_WIDTH], [1, 2 * TOPK_PAIR_WIDTH])
++        merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+         for child in pl.range(1, half_count):
+-            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
++            incoming = pl.load(pair_arena, [0, (arena_base + child) * TOPK_PAIR_WIDTH], [1, TOPK_PAIR_WIDTH])
++            root_head = pl.tile.slice(root_full, [1, TOPK_PAIR_WIDTH], [0, 0])
++            # Same incoming-chunk-first tie order as Native and the old GM path.
++            root_full = pl.tile.mrgsort(incoming, root_head, tmp=merge_tmp)
++        root_pairs = pl.tile.slice(root_full, [1, TOPK_PAIR_WIDTH], [0, 0])
+ 
+-        root_slot = arena_base
+-        root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
+         root_scores = pl.tile.gather_mask(root_pairs, mask_pattern=pl.tile.MaskPattern.P0101, output_dtype=pl.FP32)
+         pl.store(root_scores, [query, 0], topk_scores)
+         root_indices = pl.tile.gather_mask(root_pairs, mask_pattern=pl.tile.MaskPattern.P1010, output_dtype=pl.INT32)
+@@ -290,7 +279,7 @@ def indexer_topk_query_merge_one(
+ def indexer_topk_query_merge(
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+-    pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
++    pair_arena: pl.Tensor[[1, TOPK_ARENA_ROWS * TOPK_PAIR_WIDTH], pl.FP32],
+     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+ ):
+@@ -776,6 +765,7 @@ def indexer_score_topk_forest(
+     idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+     idx_kv_cache_shift64 = pl.reshape(cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM])
+     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
++    pair_arena_flat = pl.reshape(pair_arena, [1, TOPK_ARENA_ROWS * TOPK_PAIR_WIDTH])
+     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
+     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+     # 8K及长上下文统一尝试片上FP16/Cube规约；更短历史保留Vector路径。
+@@ -1047,7 +1037,7 @@ def indexer_score_topk_forest(
+             with pl.spmd(
+                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
+             ):
+-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs)
++                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena_flat, topk_scores, topk_idxs)
+ 
+     return topk_scores, topk_idxs, score_tid
+ 
