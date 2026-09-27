@@ -7943,3 +7943,16 @@ TP1/DP=EP16、出5验6、mode2、FULL_DECODE_ONLY、性能版atomic1、确定性
 原performance入口的独立3步Level0 trace只用于CSA/尾部归因，不进入主计时；只读forward汇总不等trace离线解析。
 [扫描和汇总工具](results/csa_model_forward_f76b3ad4_20260927/README.md)已准备，须先完成当前16卡精度看护再启动。
 当前没有这一提交的模型forward结果，不拼旧模型结果或把单层CSA表代替整模型。
+
+## 249. 当前性能版16卡token/DSpark通过，开始整模型forward七档（2026-09-27）
+
+任务task_20260927_222524_66096122013退出0，比较器PASS：16/16 rank、24576 token零差异，DSpark总计数和逐位置接受计数无差异。
+日志核对两侧全部16rank均为mode2，worker实际Native确定性0、HCCL=false、EPLB=false。
+实际CANN event模式Native=0/PTO=1已逐rank记录，未隐瞒差异；性能版/atomic1由固定执行脚本明确指定。
+[当前模型精度对照](results/csa_cache_accuracy_20260927/model_b16h8192/comparison.json)和
+[配置](results/csa_cache_accuracy_20260927/model_b16h8192/execution.json)。
+本次是H8192/B16的模型看护，不外推全部长上下文、全部数值合同或EP16尾部最终验收。
+
+通过后提交task_20260927_223522_77333427523，固定f76b3ad4与同一16卡分配，先8K B16/24/32/40，再128K B4/8/16。
+两侧每上下文各加载一次，沿用§248约定口径；当前无新的forward数据，收齐两侧16rank后逐档汇总。
+[执行与只读汇总](results/csa_model_forward_f76b3ad4_20260927/README.md)。

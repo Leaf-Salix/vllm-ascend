@@ -4,12 +4,13 @@
 
 当前优先级：收尾长档P95定向保护，并继续降低PTO分页读取的核内成本；Native分配、算子与调度流程保持原样，精度版保持原算术。
 用户最新顺序：先完成P95与cache改造精度检查，再交替进行调度和incore优化；不再沿用“只做incore/禁止新调度轮次”的旧限制。
-当前不叠加新性能候选：固定规约改造前后8K/128K对照已通过（8类输出/状态零差异、两档A/B/A图PASS），正式权重16卡token/DSpark看护已提交。
+固定规约改造前后8K/128K对照已通过（8类输出/状态零差异、两档A/B/A图PASS）；正式权重16卡24576 token及DSpark统计也通过。
+当前先采当前提交的整模型forward七档，收齐后根据真实差距交替优化调度与incore。
 精度对照将原均匀0.01的Indexer scale换成随物理行变化的输入，以检出scale错页；不改变性能计时fixture。
 [当前精度补测](results/csa_cache_accuracy_20260927/README.md)。
 用户随后要求当前性能版整模型forward七档：128K B4/8/16、8K B16/24/32/40。
 精度看护后先补这一版，主指标仍为每rank warmup后连续10步纯decode forward，另列P95/max及每步最慢rank。
-[已准备的固定源码扫描与汇总](results/csa_model_forward_f76b3ad4_20260927/README.md)；尚无新整模型forward数据，不能拿单层或旧版本代替。
+[固定源码扫描与汇总](results/csa_model_forward_f76b3ad4_20260927/README.md)已提交；尚无新整模型forward数据，不能拿单层或旧版本代替。
 当前PTO内部以0/64B GM视图按Native物理页读取，采用N128 key加载交错QK/WS；入口历史复制与外部Torch写回均已删除。
 现阶段所有功能/性能测试关闭EPLB，单卡代表case优先，最后再做正式权重16卡整模型。
 用户新增尾延迟要求：EP16不能接受异常P95；七档同时报告p50/p95/max，并对异常档定向检查sync_start与提前释放。

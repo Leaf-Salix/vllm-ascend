@@ -1,6 +1,6 @@
-# Native原布局内部读写：单卡cache精度通过，16卡看护进行中
+# Native原布局内部读写：单卡cache精度及16卡token/DSpark看护通过
 
-用户要求先完成P95长尾及精度检查，再交替进行调度/incore优化。当前生产源码固定f76b3ad4，不叠加性能候选。
+用户要求先完成P95长尾及精度检查，再交替进行调度/incore优化。此报告固定f76b3ad4，不混入后续性能候选。
 
 ## 单卡隔离检查
 
@@ -30,9 +30,13 @@ Native侧也必须改造前后逐元素一致，作为输入/环境对照；PTO�
 原始两侧报告和states.pt保存在各档位/提交子目录，大张量不入Git。
 Native/PTO固有量化与Top-K差异仍在；这里证明所测case的cache改造数值中性，不是两种算术已对齐。
 
-## 之后的整模型看护
+## 整模型看护结果
 
-单卡两档通过后已提交[run_model.sh](run_model.sh)，任务`task_20260927_222524_66096122013`：正式W8A8、TP1/DP=EP16，
+单卡两档通过后执行[run_model.sh](run_model.sh)，任务`task_20260927_222524_66096122013`退出0：正式W8A8、TP1/DP=EP16，
 H8192/B16、DSpark出5验6、mode2、FULL_DECODE_ONLY、EPLB关、PTO性能版atomic1、两侧Native确定性0/HCCL=false。
 复用已有通过audit的真实prefill bank；两侧各生成96 token/请求，比较16×16×96=24576个token及各rank的DSpark总计数/逐位置统计。
+实测PASS：24576 token零差异，16rank的DSpark总计数与逐位置接受计数全部相同；报告无缺rank或缺样本。
+[完整对照](model_b16h8192/comparison.json)、[实际worker配置与明确请求项](model_b16h8192/execution.json)。
+所有rank日志确认mode2，两侧实际Native确定性均0、HCCL=false、EPLB=false；
+CANN event模式是Native=0/PTO=1，属于PTO初始化后的实际差异，已逐rank记录，没有隐瞒或擅自强制同值。
 这项是当前新算术/cache路径的模型看护，不能以旧整模型结果代替；也不把一次token看护外推为完整七档模型性能或EP16尾部验收。
