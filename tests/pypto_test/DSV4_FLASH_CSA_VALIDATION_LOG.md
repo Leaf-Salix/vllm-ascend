@@ -8016,3 +8016,20 @@ PTO P95 1282.96→1331.50，Native1315.96→1315.98；保护区/metadata/索引�
 [逐层/分项](results/csa_model_forward_f76b3ad4_20260927/model_gap_rank0.json)、
 [缓存压力全部样本](results/csa_model_forward_f76b3ad4_20260927/cache_pressure/cache_pressure.json)。
 后续先改善缓存受扰动条件下的分页读取/等待，并根据模型内数据选择调度或incore；不靠单卡热状态结果宣布整模型达标。
+
+## 252. 保留Indexer scale提前读取；新增源头分离对照的5%取舍条件（2026-09-27）
+
+仅性能版Score将原有页内scale加载及FP16→FP32转换提前到SCORE_READY等待前。
+scale依赖既有cache_write，不依赖Cube结果；地址、算术、任务数量和调度标志均不变。
+CPU完整编译通过；任务task_20260927_230953_118467913832退出0，8K/128K B16各5预热20次无profiler、4个DFX窗口。
+完整CSA均值797.72→776.94、1258.27→1242.22μs，P95 818.92→784.98、1275.16→1253.72μs。
+基底与本轮Native有1.01%/0.55%波动，不把完整差值当严格同场A/B。
+长档Score AIC/AIV四窗口均值下降1.88%/1.97%，范围不重叠；短档范围重叠，Top-K merge略回退。
+保护区、metadata、索引结构、有限值通过；Native零容差仍FAIL，计数相同不代表逐元素通过。
+本轮没有新增固定规约或16卡验收，七档整模型结论仍只属于f76b3ad4。
+[核内、完整路径、上游差别和复现](results/csa_incore_20260927/indexer_scale_prefetch/README.md)。
+
+用户新增要求：重新实现PTO场景下初始化分离key/scale的对照；完整CSA收益≤5%继续采用原布局、PTO内部消化。
+先明确仅物理key/scale分离仍需请求页表这一边界，再作最小PTO专用修改；默认Native流程不动。
+比较相同算术/调度，覆盖长短代表档、受扰动缓存状态和P95，不能仅凭重复单层热状态决定布局。
+撤回“单卡CSA全面更快便已证明模型内CSA更快”的外推；模型内长档优势反转和压力实测见§251。

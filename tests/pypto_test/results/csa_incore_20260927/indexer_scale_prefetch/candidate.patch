@@ -1,0 +1,48 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index cdedbb9b..e1352c42 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -640,20 +640,8 @@ def indexer_score_topk_native_cube(
+                     for buf_score_step in pl.range(buf_score_iters):
+                         buf_score_begin = buf_score_step * (score_tile // 2)
+                         buf_transfer_row = buf_worker * 4 + buf_score_step % 2 * 2
+-                        pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+-                        buf_score_sum0 = pl.load(
+-                            buf_score_transfer,
+-                            [buf_transfer_row, buf_score_lane * (score_tile // 2)],
+-                            [1, (score_tile // 2)],
+-                        )
+-                        buf_score_sum1 = pl.load(
+-                            buf_score_transfer,
+-                            [buf_transfer_row + 1, buf_score_lane * (score_tile // 2)],
+-                            [1, (score_tile // 2)],
+-                        )
+-                        pl.system.sync_set(
+-                            SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+-                        )
++                        # Native页内scale只依赖cache_write，不依赖Cube结果。
++                        # 在等待Score前加载scale，让独立分页读取与Cube执行交叠。
+                         buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
+                         for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
+                             buf_scale_row = (
+@@ -671,6 +659,20 @@ def indexer_score_topk_native_cube(
+                             )
+                         buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
+                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
++                        pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
++                        buf_score_sum0 = pl.load(
++                            buf_score_transfer,
++                            [buf_transfer_row, buf_score_lane * (score_tile // 2)],
++                            [1, (score_tile // 2)],
++                        )
++                        buf_score_sum1 = pl.load(
++                            buf_score_transfer,
++                            [buf_transfer_row + 1, buf_score_lane * (score_tile // 2)],
++                            [1, (score_tile // 2)],
++                        )
++                        pl.system.sync_set(
++                            SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
++                        )
+                         for buf_query_lane in pl.unroll(2):
+                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                             buf_query_visible = pl.max(
