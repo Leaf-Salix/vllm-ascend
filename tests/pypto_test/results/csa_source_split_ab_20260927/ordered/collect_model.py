@@ -32,7 +32,7 @@ def collect_case(history, batch):
                     "pause_enqueue_dp_barrier_resume", f"rank{rank}: 批次入场未统一")
             native_positions = native["steady_window"][0]["step_positions_cpu"]
             require(native_positions == pto["steady_window"][0]["step_positions_cpu"],
-                    f"rank{rank}: 两侧10步实际请求位置不同，不能把差异仅归因于CSA")
+                    f"rank{rank}: 两侧10步CPU请求位置不同，不能把差异仅归因于CSA")
             for key in ("key", "history", "capture_sizes", "max_num_seqs", "deterministic",
                         "hccl_deterministic", "atomic_add", "eplb_enabled", "dynamic_eplb_env",
                         "expert_map_record_env", "custom_opp_path", "requested_steady_cycles"):
@@ -84,10 +84,11 @@ def main():
             except (OSError, ValueError):
                 continue
         rows.append(collect_case(history, batch))
-    result = {"operator_revision": "2a740c1f + ordered/candidate.patch", "complete": len(rows) == len(CASES),
+    result = {"operator_revision": OPERATOR_REVISION, "complete": len(rows) == len(CASES),
               "scope": "每rank前8步后连续10步纯decode _model_forward；16rank等权均值；无profiler。",
               "limits": ("P95由16rank×10步的160个相关样本计算，最慢rank分布另列；"
-                         "不是CSA时间、完整decode周期或初始化耗时。10步不能证明罕见长尾已消失。"),
+                         "不是CSA时间、完整decode周期或初始化耗时。10步不能证明罕见长尾已消失。"
+                         "CPU position相同只验证请求位置对齐，不证明设备上的草稿token完全相同。"),
               "cases": rows}
     (ROOT / "forward.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     lines = [f"# 当前性能版整模型forward（{OPERATOR_REVISION}）", "", result["scope"], "", result["limits"], "",

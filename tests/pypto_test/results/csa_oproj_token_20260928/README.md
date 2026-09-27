@@ -17,3 +17,17 @@ WO-B每组INT32结果先反量化，再合并FP32。Native则先发布WO-A BF16�
 先做单卡正式layer4/B16/H8192完整CSA计时，以及B3固定规约A→B→A图/尾块/保护区，
 不会因更像Native就直接安排七档或声称通过。
 [命令](run_layer.sh)；待设备结果。
+
+## 后续受控模型对照
+
+已准备[两档模型命令](run_model.sh)及[收集入口](collect_model.py)，尚未提交16卡任务。
+只有单卡结果支持继续时才执行。使用独立工作树`.cache/csa-oproj-token-ordered-2a740c1f`，
+组合既有`ordered/candidate.patch`与本目录的输出投影补丁。
+PTO两次候选之间固定分离/新页排序、atomic1、mode2、det0/HCCL=false及EPLB关闭。
+Native复用`csa_source_split_ab_20260927/ordered/model/h*/b*/native`；不把复用结果写成新跑的控制。
+
+统一入场和10步CPU position相同能排除既有的请求入场错位，不能单独证明完整设备输入相同：
+异步spec decode在设备上更新采样及草稿token，`input_ids.cpu`不一定是实际输入的镜像。
+因此不能为补齐记录而把该CPU缓冲当作设备token，也不往正式计时流里添加复制或同步。
+正式forward仍衡量实际请求的部署表现；严格的路由因果分析需使用已有独立路由诊断的实际设备输入。
+输出token和DSpark统计仍分别验收，长档旧候选DSpark未通过的事实不变。
