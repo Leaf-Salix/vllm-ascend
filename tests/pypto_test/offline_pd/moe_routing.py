@@ -57,9 +57,13 @@ class RoutingCapture:
         if set(self.buffers) != set(range(self.layers)):
             raise RuntimeError(f"路由图内采集层不完整：{sorted(self.buffers)}，预期 {self.layers} 层")
         # 排除读取捕获期 dummy 数据：运行前毒化，真实 replay 必须重写这些独立缓冲。
-        for values in self.buffers.values():
-            values["topk_ids"].fill_(-1)
-            values["group_list"].fill_(-1)
+        # Worker graph capture creates inference tensors. The RPC that arms
+        # observation runs outside model inference, so re-enter that context
+        # before poisoning these fixed-address capture buffers.
+        with torch.inference_mode():
+            for values in self.buffers.values():
+                values["topk_ids"].fill_(-1)
+                values["group_list"].fill_(-1)
         torch.npu.synchronize()
 
     def snapshot(self):
