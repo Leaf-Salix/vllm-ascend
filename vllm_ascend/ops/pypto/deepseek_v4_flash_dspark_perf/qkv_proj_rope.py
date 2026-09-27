@@ -74,6 +74,12 @@ QR_M_TILE = MATMUL_T_TILE  # qr_proj token (M) tile; cube rows must be a 16-row 
 
 QR_DENSE_M_TILE = 64
 
+QR_FIXED_SMALL_M_TILE = 32
+
+QR_FIXED_SMALL_ROWS = 128
+
+QR_FIXED_M_GROUPS = 3
+
 QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul；上游值。取 32 是为了对齐 Native 的
 # 96 列分组且不跨 K 序边界，代价是每行只读 32 列 BF16 = 64 字节，
 # in-core 实测 MTE2 占 55.6%、Cube 只有 28.4%。
@@ -217,6 +223,8 @@ def _q_proj_qa_nd(
     qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
+    DENSE_M: pl.constexpr,
+    M_GROUP_LIMIT: pl.constexpr,
 ):
     """ND 版：K 分片用取模、N 分块用整除，与上游同形。
 
@@ -225,7 +233,8 @@ def _q_proj_qa_nd(
     qa_tokens = pl.tensor.dim(x, 0)
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
-    qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
+    qr_full_rows = (tile_rows // DENSE_M) * DENSE_M
+    qr_m_groups = pl.min(M_GROUP_LIMIT, pl.max(1, tile_rows // DENSE_M))
     # A single K partition overwrites each output tile exactly once.
     # Only split-K atomic accumulation needs a zero seed in GM.
     if ATOMIC_ADD == 1:
@@ -236,21 +245,22 @@ def _q_proj_qa_nd(
             for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
                 qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
 
-    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
+    with pl.spmd(QR_N_BLOCKS * QR_OK * qr_m_groups, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
         qbg_idx = pl.tile.get_block_idx()
         pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
-        q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
+        q_a_col0 = ((qbg_idx // QR_OK) % QR_N_BLOCKS) * QR_N_TILE
         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
-        for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
+        qr_m_group = qbg_idx // (QR_N_BLOCKS * QR_OK)
+        for dense_t0 in pl.range(qr_m_group * DENSE_M, qr_full_rows, qr_m_groups * DENSE_M):
             dense_x0 = tile_base + dense_t0
-            dense_acc = pl.create_tensor([QR_DENSE_M_TILE, QR_N_TILE], dtype=pl.FP32)
+            dense_acc = pl.create_tensor([DENSE_M, QR_N_TILE], dtype=pl.FP32)
             for dense_k in pl.pipeline(0, QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
                 dense_d0 = qr_k_base + dense_k * QR_K_TILE
-                dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
+                dense_x = x_view[dense_x0 : dense_x0 + DENSE_M, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_w = wq_a[q_a_col0 : q_a_col0 + QR_N_TILE, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, b_trans=True, init_cond=(dense_k == 0))
             qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=STORE_ATOMIC)
-        for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
+        for t0 in pl.range(qr_full_rows + qr_m_group * QR_M_TILE, qr_t_matmul, qr_m_groups * QR_M_TILE):
             q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
             for db in pl.pipeline(QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
                 qr_d0 = qr_k_base + db * QR_K_TILE
@@ -276,6 +286,8 @@ def _q_proj_qa_nz(
     qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
+    DENSE_M: pl.constexpr,
+    M_GROUP_LIMIT: pl.constexpr,
 ):
     """NZ 路径按 K 分片和 N 块分解 block 索引。
 
@@ -285,7 +297,8 @@ def _q_proj_qa_nz(
     qa_tokens = pl.tensor.dim(x, 0)
     x_view = pl.reshape(x, [qa_tokens, D])
     qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
-    qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
+    qr_full_rows = (tile_rows // DENSE_M) * DENSE_M
+    qr_m_groups = pl.min(M_GROUP_LIMIT, pl.max(1, tile_rows // DENSE_M))
     # A single K partition overwrites each output tile exactly once.
     # Only split-K atomic accumulation needs a zero seed in GM.
     if ATOMIC_ADD == 1:
@@ -300,21 +313,22 @@ def _q_proj_qa_nz(
     # 后者给出的是 IterArg，`IsProvableNonNegative` 不追它，于是由它导出的行偏移
     # 不可证（实测报 `slice offset on shape[-2] to be non-negative cannot be proven`）。
     # `get_block_idx()` 是明确的 SPMD block 索引，属于可证形式。
-    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
+    with pl.spmd(QR_N_BLOCKS * QR_OK * qr_m_groups, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
         pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         qbg_idx = pl.tile.get_block_idx()
-        qr_k_base = (qbg_idx // QR_N_BLOCKS) * QR_SPLIT_K_TILE
+        qr_k_base = ((qbg_idx // QR_N_BLOCKS) % QR_OK) * QR_SPLIT_K_TILE
         q_a_col0 = (qbg_idx % QR_N_BLOCKS) * QR_N_TILE
-        for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
+        qr_m_group = qbg_idx // (QR_N_BLOCKS * QR_OK)
+        for dense_t0 in pl.range(qr_m_group * DENSE_M, qr_full_rows, qr_m_groups * DENSE_M):
             dense_x0 = tile_base + dense_t0
-            dense_acc = pl.create_tensor([QR_DENSE_M_TILE, QR_N_TILE], dtype=pl.FP32)
+            dense_acc = pl.create_tensor([DENSE_M, QR_N_TILE], dtype=pl.FP32)
             for dense_k in pl.pipeline(0, QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
                 dense_d0 = qr_k_base + dense_k * QR_K_TILE
-                dense_x = x_view[dense_x0 : dense_x0 + QR_DENSE_M_TILE, dense_d0 : dense_d0 + QR_K_TILE]
+                dense_x = x_view[dense_x0 : dense_x0 + DENSE_M, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_w = wq_a[q_a_col0 : q_a_col0 + QR_N_TILE, dense_d0 : dense_d0 + QR_K_TILE]
                 dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, b_trans=True, init_cond=(dense_k == 0))
             qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0], atomic=STORE_ATOMIC)
-        for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
+        for t0 in pl.range(qr_full_rows + qr_m_group * QR_M_TILE, qr_t_matmul, qr_m_groups * QR_M_TILE):
             q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
             for db in pl.pipeline(QR_SPLIT_K_TILE // QR_K_TILE, stage=2):
                 qr_d0 = qr_k_base + db * QR_K_TILE
@@ -333,7 +347,31 @@ def _q_proj_qa_nz(
     return qa_tid
 
 
-q_proj_qa = _q_proj_qa_nz if BF16_WEIGHT_NZ else _q_proj_qa_nd
+_q_proj_qa_tiles = _q_proj_qa_nz if BF16_WEIGHT_NZ else _q_proj_qa_nd
+
+
+@pl.jit.inline(auto_scope=False)
+def q_proj_qa(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
+    tile_base: pl.Scalar[pl.INDEX],
+    tile_rows: pl.Scalar[pl.INDEX],
+):
+    """Keep complete K traversal; partition independent M/N outputs for fixed-K."""
+    if ATOMIC_ADD == 1:
+        qa_tid = _q_proj_qa_tiles(
+            x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, 1,
+        )
+    elif tile_rows < QR_FIXED_SMALL_ROWS:
+        qa_tid = _q_proj_qa_tiles(
+            x, wq_a, qr_fp32, tile_base, tile_rows, QR_FIXED_SMALL_M_TILE, QR_FIXED_M_GROUPS,
+        )
+    else:
+        qa_tid = _q_proj_qa_tiles(
+            x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, QR_FIXED_M_GROUPS,
+        )
+    return qa_tid
 
 
 @pl.jit.inline(auto_scope=False)
