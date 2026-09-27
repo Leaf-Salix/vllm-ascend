@@ -7621,3 +7621,13 @@ p95 1527.80→1533.18；Native1321.02→1311.63，完整PTO1676.76→1677.50。
 128K只有一行块，编号数学等价；p50 1201.37→1202.02、p95 1533.18→1533.78持平，均值1247.03→1265.18受长尾影响。
 收益证据不足撤回；保护区/结构/有限值通过，Native零容差FAIL。[完整证据](results/csa_scheduling_20260927/round07_o_a_column_order/README.md)。
 计数7/10；下一轮减少系数准备SPMD任务数，保持逐query的FP16量化与乘法不变。
+
+## 223. 十轮调度第8轮撤回；新增第10轮Score长尾直接证据（2026-09-27）
+
+系数准备SPMD从48→24，8K/B16本体781.52→789.78 μs、p95 791.80→814.62，撤回。
+任务退出0，保护区/结构/有限值通过，Native零容差FAIL；[证据](results/csa_scheduling_20260927/round08_coefficient_workers/README.md)。
+计数8/10，第9轮运行中。第10轮改用新证据驱动：2dd51f15的128K/B16坏窗口里，
+AIV_24/25提前接Top-K merge，setup约674 μs，AIC_0无Score、AIC_3连续两份Score。
+此前Score生产者False只测8K/B40，此次有充分理由在长上下文重测，并配8K典型档判断。
+[精简原始事件](results/csa_scheduling_20260927/round10_score_admission/baseline_tail_evidence.json)。
+原计划Attention投影任务细分仅CPU编译，不计一轮；已清理自己的临时候选。

@@ -1,0 +1,22 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -409,15 +409,16 @@
+         [T_PAD // 2 * NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS], dtype=pl.FP16
+     )
+     coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
++    coefficient_count = pl.tensor.dim(position_ids, 0)
++    coefficient_workers = pl.min(24, pl.max(coefficient_count // 2, 1))
+     with pl.spmd(
+-        TOPK_QUERY_WORKERS,
++        coefficient_workers,
+         name_hint="indexer_head_coefficients",
+         deps=[qh_quant_tid, weights_tid],
+         allow_early_resolve=True,
+     ) as coefficients_tid:
+         coefficient_worker = pl.tile.get_block_idx()
+-        coefficient_count = pl.tensor.dim(position_ids, 0)
+-        for coefficient_pair in pl.range(coefficient_worker, coefficient_count // 2, TOPK_QUERY_WORKERS):
++        for coefficient_pair in pl.range(coefficient_worker, coefficient_count // 2, coefficient_workers):
+             coefficient_rows = pl.tile.full(
+                 [NATIVE_QLI_WEIGHT_ROWS, 2 * IDX_N_HEADS], dtype=pl.FP16, value=0.0
+             )
