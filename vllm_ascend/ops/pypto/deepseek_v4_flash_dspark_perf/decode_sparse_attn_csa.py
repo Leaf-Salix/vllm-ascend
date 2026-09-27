@@ -105,6 +105,8 @@ QK_PV_READY_EVENT = 3
 # 与上游 max(2, ceil((WIN+CMP_TOPK)/128)) = 5 得到的 640 完全一致。
 ATTN_K_TILE = 128
 
+PV_N_TILE = 128  # Native PV uses N128/K128 and alternating accumulators.
+
 NUM_QK_CORES = 24  # qk_pv dispatch lanes
 
 # 提前发布KV在每核至少6个query的先导中减少了核内时间；较小工作量
@@ -409,9 +411,24 @@ def sparse_attn_csa(
                         target_memory=pl.MemorySpace.Mat,
                     )
                     pv_l1_row = (pv_work % QK_TRANSFER_SLOTS) * ATTN_K_TILE
-                    pv_kv = pl.tile.slice(qk_l1, [ATTN_K_TILE, HEAD_DIM], [pv_l1_row, 0])
-                    pv_output = pl.matmul(pv_probability, pv_kv, out_dtype=pl.FP32)
-                    pl.store(pv_output, [pv_transfer_row, 0], pv_transfer)
+                    # Match Native's N128/K128 PV shape while preserving each
+                    # 128-candidate softmax and the existing query pipeline.
+                    pv_probability_left = pl.tile.move(pv_probability, target_memory=pl.MemorySpace.Left)
+                    pv_first_right = pl.tile.extract(
+                        qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+                    )
+                    pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
+                    for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
+                        pv_next_right = pl.tile.extract(
+                            qk_l1, pv_l1_row, pv_n * PV_N_TILE,
+                            [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right,
+                        )
+                        # Keep two accumulators live so the preceding result's
+                        # FIX write can overlap the following Cube operation.
+                        pv_current = pl.tile.matmul(pv_probability_left, pv_next_right)
+                        pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
+                        pv_previous = pv_current
+                    pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
                     pl.system.sync_set(
                         QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
                     )
