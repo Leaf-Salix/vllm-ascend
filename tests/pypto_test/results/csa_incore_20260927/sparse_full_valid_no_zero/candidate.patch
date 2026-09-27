@@ -1,0 +1,39 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -248,9 +248,15 @@
+                     c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
+                     valid_shape=[bias_rows, ATTN_K_TILE],
+                 ))
++                c_blk_full = pl.row_min(pl.slice(
++                    c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
++                    valid_shape=[bias_rows, ATTN_K_TILE],
++                ))
+                 for c_dt in pl.range(bias_rows):
+                     c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
+-                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
++                    c_full = pl.cast(pl.read(c_blk_full, [c_dt, 0]), pl.INT32)
++                    # 0: empty, 1: partial, 2: every row will be overwritten.
++                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid + c_full)
+             # ---- 滑窗有效位：常见路径整块算 -------------------------------
+             # 每 token 的窗口长度 v_length = min(position+1, WIN)，补位请求压到 0。
+             # 有效位的主体就是 j < v_length[t]，与页表无关，可以一次算出
+@@ -454,7 +460,18 @@
+                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+                         qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
+                         qk_kv_row = qk_slot * ATTN_K_TILE
+-                        qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
++                        qk_kv_storage = pl.create_tile(
++                            [ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Vec
++                        )
++                        if qk_sb == 0 or pl.read(valid_block_mask, [qk_t, qk_sb]) != 2:
++                            # Clear the existing buffer only for SWA/partial blocks.
++                            # A fully valid compressed block overwrites every byte.
++                            qk_empty = pl.set_validshape(qk_kv_storage, 0, HEAD_DIM)
++                            qk_kv_half = pl.tile.fillpad_inplace(qk_empty, pad_value=pl.PadValue.zero)
++                        else:
++                            # Full valid shape: no padding writes; keep the same
++                            # buffer/result type in both branches.
++                            qk_kv_half = pl.tile.fillpad_inplace(qk_kv_storage, pad_value=pl.PadValue.zero)
+                         if qk_sb == 0:
+                             qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                             qk_win_len = pl.min(qk_pos + 1, WIN)

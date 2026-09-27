@@ -1,0 +1,1965 @@
+{
+  "baseline_commit": "ec12e0e9",
+  "baseline_label": "incore_sparse_pv_n128_pair",
+  "candidate_label": "incore_sparse_full_valid_no_zero_v2",
+  "scope": "Layer4 real weights + synthetic input/history; second CSA metadata reuse; TP1/S6/mode2/atomic1/deterministic0, no EPLB; 5/20 unprofiled and four independent DFX windows.",
+  "limits": "Worker block duration includes in-task waits. Native complete kernels are not per-block equivalents. Not whole-model token/DSpark acceptance.",
+  "cases": [
+    {
+      "label": "incore_sparse_pv_n128_pair",
+      "history": 8192,
+      "batch": 16,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h8192_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 935.9180003404617,
+          "p50_us": 935.8199834823608,
+          "p95_us": 941.0799741744995,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1099.8329937458038,
+          "p50_us": 1099.3199944496155,
+          "p95_us": 1110.7200384140015,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 786.5689992904663,
+          "p50_us": 788.7099981307983,
+          "p95_us": 803.6400079727173,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 100.53999982774258,
+          "p50_us": 98.94999861717224,
+          "p95_us": 100.040003657341,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 225.96499919891357,
+          "p50_us": 226.13999992609024,
+          "p95_us": 230.0799936056137,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0033200102253054006
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 366,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "tasks": {
+        "csa_slots_build_valid_qk_plan": {
+          "kernel_mean_us": 6.639687499999992,
+          "window_mean_min_us": 6.2687499999999865,
+          "window_mean_max_us": 7.0774999999999935,
+          "blocks": [
+            16,
+            16,
+            16,
+            16
+          ]
+        },
+        "qk_pv_aic": {
+          "kernel_mean_us": 126.71541666666667,
+          "window_mean_min_us": 116.66250000000001,
+          "window_mean_max_us": 132.7075,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "qk_pv_aiv": {
+          "kernel_mean_us": 128.6578125,
+          "window_mean_min_us": 118.6725,
+          "window_mean_max_us": 134.65125,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "merge_norm": {
+          "kernel_mean_us": 23.124166666666667,
+          "window_mean_min_us": 22.783333333333335,
+          "window_mean_max_us": 23.78541666666667,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_score_topk_native_pair_aic": {
+          "kernel_mean_us": 27.13520833333334,
+          "window_mean_min_us": 25.374999999999996,
+          "window_mean_max_us": 30.666666666666675,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "indexer_score_topk_native_pair_aiv": {
+          "kernel_mean_us": 31.695729166666666,
+          "window_mean_min_us": 30.050833333333333,
+          "window_mean_max_us": 34.99,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_topk_query_merge": {
+          "kernel_mean_us": 9.902916666666666,
+          "window_mean_min_us": 9.322500000000003,
+          "window_mean_max_us": 10.869583333333333,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h8192_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 749.62,
+          "phases_us": {
+            "first_worker_to_norm_end": 88.46000000000001,
+            "norm_end_to_sparse_receive": 326.79999999999995,
+            "sparse_receive_to_merge_end": 167.14,
+            "merge_end_to_last_worker": 167.22000000000003
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 399.76,
+              "first_start_us": 409.06,
+              "last_start_us": 409.54,
+              "last_end_us": 417.78000000000003,
+              "start_spread_us": 0.4800000000000182,
+              "worker_envelope_us": 18.02000000000004,
+              "kernel_mean_us": 6.355,
+              "setup_mean_us": 6.60625000000001
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 415.26,
+              "first_start_us": 421.40000000000003,
+              "last_start_us": 436.7,
+              "last_end_us": 549.64,
+              "start_spread_us": 15.299999999999955,
+              "worker_envelope_us": 134.38,
+              "kernel_mean_us": 116.66250000000001,
+              "setup_mean_us": 3.316666666666675
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 415.28000000000003,
+              "first_start_us": 421.52000000000004,
+              "last_start_us": 436.92,
+              "last_end_us": 551.7199999999999,
+              "start_spread_us": 15.399999999999977,
+              "worker_envelope_us": 136.43999999999988,
+              "kernel_mean_us": 118.6725,
+              "setup_mean_us": 3.4320833333333334
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 539.04,
+              "first_start_us": 556.66,
+              "last_start_us": 557.4399999999999,
+              "last_end_us": 582.4,
+              "start_spread_us": 0.7799999999999727,
+              "worker_envelope_us": 43.360000000000014,
+              "kernel_mean_us": 23.78541666666667,
+              "setup_mean_us": 11.994583333333347
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 342.3,
+              "first_start_us": 347.76,
+              "last_start_us": 356.94,
+              "last_end_us": 383.84000000000003,
+              "start_spread_us": 9.180000000000007,
+              "worker_envelope_us": 41.54000000000002,
+              "kernel_mean_us": 26.99250000000001,
+              "setup_mean_us": 2.7449999999999903
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 342.32,
+              "first_start_us": 347.88,
+              "last_start_us": 357.22,
+              "last_end_us": 389.62,
+              "start_spread_us": 9.340000000000032,
+              "worker_envelope_us": 47.30000000000001,
+              "kernel_mean_us": 31.481250000000003,
+              "setup_mean_us": 2.848749999999994
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 378.74,
+              "first_start_us": 391.52000000000004,
+              "last_start_us": 392.18,
+              "last_end_us": 406.56,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 27.819999999999993,
+              "kernel_mean_us": 10.869583333333333,
+              "setup_mean_us": 9.57875
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 761.4200000000001,
+          "phases_us": {
+            "first_worker_to_norm_end": 89.86,
+            "norm_end_to_sparse_receive": 321.0,
+            "sparse_receive_to_merge_end": 181.22000000000003,
+            "merge_end_to_last_worker": 169.34000000000003
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 396.96,
+              "first_start_us": 404.48,
+              "last_start_us": 404.86,
+              "last_end_us": 413.88,
+              "start_spread_us": 0.37999999999999545,
+              "worker_envelope_us": 16.920000000000016,
+              "kernel_mean_us": 6.8574999999999875,
+              "setup_mean_us": 5.876250000000002
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 410.86,
+              "first_start_us": 423.68,
+              "last_start_us": 424.0,
+              "last_end_us": 559.0200000000001,
+              "start_spread_us": 0.3199999999999932,
+              "worker_envelope_us": 148.16000000000008,
+              "kernel_mean_us": 132.7075,
+              "setup_mean_us": 9.064999999999998
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 410.88,
+              "first_start_us": 423.9,
+              "last_start_us": 424.64,
+              "last_end_us": 561.34,
+              "start_spread_us": 0.7400000000000091,
+              "worker_envelope_us": 150.46000000000004,
+              "kernel_mean_us": 134.65125,
+              "setup_mean_us": 9.394999999999996
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 556.1400000000001,
+              "first_start_us": 566.94,
+              "last_start_us": 567.62,
+              "last_end_us": 592.08,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 35.93999999999994,
+              "kernel_mean_us": 22.841666666666665,
+              "setup_mean_us": 8.135416666666664
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 340.94,
+              "first_start_us": 343.84,
+              "last_start_us": 356.44,
+              "last_end_us": 380.08,
+              "start_spread_us": 12.600000000000023,
+              "worker_envelope_us": 39.139999999999986,
+              "kernel_mean_us": 25.506666666666664,
+              "setup_mean_us": 2.149166666666666
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 340.94,
+              "first_start_us": 343.92,
+              "last_start_us": 356.5,
+              "last_end_us": 385.84,
+              "start_spread_us": 12.579999999999984,
+              "worker_envelope_us": 44.89999999999998,
+              "kernel_mean_us": 30.26083333333333,
+              "setup_mean_us": 1.9945833333333323
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 372.71999999999997,
+              "first_start_us": 387.71999999999997,
+              "last_start_us": 388.54,
+              "last_end_us": 400.66,
+              "start_spread_us": 0.82000000000005,
+              "worker_envelope_us": 27.940000000000055,
+              "kernel_mean_us": 9.962500000000004,
+              "setup_mean_us": 7.81166666666666
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 740.94,
+          "phases_us": {
+            "first_worker_to_norm_end": 85.42,
+            "norm_end_to_sparse_receive": 316.7,
+            "sparse_receive_to_merge_end": 170.64,
+            "merge_end_to_last_worker": 168.18000000000006
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 388.52,
+              "first_start_us": 397.1,
+              "last_start_us": 397.6,
+              "last_end_us": 405.76,
+              "start_spread_us": 0.5,
+              "worker_envelope_us": 17.24000000000001,
+              "kernel_mean_us": 6.2687499999999865,
+              "setup_mean_us": 6.296250000000011
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 402.12,
+              "first_start_us": 409.02,
+              "last_start_us": 416.94,
+              "last_end_us": 540.32,
+              "start_spread_us": 7.920000000000016,
+              "worker_envelope_us": 138.20000000000005,
+              "kernel_mean_us": 126.09916666666669,
+              "setup_mean_us": 4.273333333333333
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 402.12,
+              "first_start_us": 409.18,
+              "last_start_us": 416.9,
+              "last_end_us": 542.52,
+              "start_spread_us": 7.71999999999997,
+              "worker_envelope_us": 140.39999999999998,
+              "kernel_mean_us": 128.06333333333333,
+              "setup_mean_us": 4.456250000000003
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 534.64,
+              "first_start_us": 547.86,
+              "last_start_us": 548.5600000000001,
+              "last_end_us": 572.76,
+              "start_spread_us": 0.7000000000000455,
+              "worker_envelope_us": 38.120000000000005,
+              "kernel_mean_us": 22.783333333333335,
+              "setup_mean_us": 9.216666666666667
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 327.48,
+              "first_start_us": 336.26,
+              "last_start_us": 346.24,
+              "last_end_us": 372.04,
+              "start_spread_us": 9.980000000000018,
+              "worker_envelope_us": 44.56,
+              "kernel_mean_us": 30.666666666666675,
+              "setup_mean_us": 3.6358333333333284
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 327.5,
+              "first_start_us": 336.42,
+              "last_start_us": 346.3,
+              "last_end_us": 377.9,
+              "start_spread_us": 9.879999999999995,
+              "worker_envelope_us": 50.39999999999998,
+              "kernel_mean_us": 34.99,
+              "setup_mean_us": 3.826249999999998
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 369.86,
+              "first_start_us": 381.1,
+              "last_start_us": 381.78000000000003,
+              "last_end_us": 393.06,
+              "start_spread_us": 0.6800000000000068,
+              "worker_envelope_us": 23.19999999999999,
+              "kernel_mean_us": 9.457083333333326,
+              "setup_mean_us": 8.085833333333337
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 745.6400000000001,
+          "phases_us": {
+            "first_worker_to_norm_end": 86.28,
+            "norm_end_to_sparse_receive": 314.17999999999995,
+            "sparse_receive_to_merge_end": 177.3,
+            "merge_end_to_last_worker": 167.8800000000001
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 388.35999999999996,
+              "first_start_us": 395.08,
+              "last_start_us": 395.53999999999996,
+              "last_end_us": 404.76,
+              "start_spread_us": 0.45999999999997954,
+              "worker_envelope_us": 16.400000000000034,
+              "kernel_mean_us": 7.0774999999999935,
+              "setup_mean_us": 5.227499999999999
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 400.47999999999996,
+              "first_start_us": 411.5,
+              "last_start_us": 412.09999999999997,
+              "last_end_us": 546.0,
+              "start_spread_us": 0.5999999999999659,
+              "worker_envelope_us": 145.52000000000004,
+              "kernel_mean_us": 131.39249999999998,
+              "setup_mean_us": 8.536666666666667
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 400.46,
+              "first_start_us": 411.96,
+              "last_start_us": 412.62,
+              "last_end_us": 548.3000000000001,
+              "start_spread_us": 0.660000000000025,
+              "worker_envelope_us": 147.8400000000001,
+              "kernel_mean_us": 133.24416666666667,
+              "setup_mean_us": 8.96
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 541.6600000000001,
+              "first_start_us": 552.84,
+              "last_start_us": 553.5,
+              "last_end_us": 577.76,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 36.09999999999991,
+              "kernel_mean_us": 23.086250000000003,
+              "setup_mean_us": 7.420416666666644
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 330.15999999999997,
+              "first_start_us": 333.82,
+              "last_start_us": 346.68,
+              "last_end_us": 372.64,
+              "start_spread_us": 12.860000000000014,
+              "worker_envelope_us": 42.48000000000002,
+              "kernel_mean_us": 25.374999999999996,
+              "setup_mean_us": 1.9950000000000045
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 330.18,
+              "first_start_us": 333.85999999999996,
+              "last_start_us": 346.85999999999996,
+              "last_end_us": 378.46,
+              "start_spread_us": 13.0,
+              "worker_envelope_us": 48.27999999999997,
+              "kernel_mean_us": 30.050833333333333,
+              "setup_mean_us": 1.9191666666666631
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 362.08,
+              "first_start_us": 379.84,
+              "last_start_us": 380.56,
+              "last_end_us": 391.76,
+              "start_spread_us": 0.7200000000000273,
+              "worker_envelope_us": 29.680000000000007,
+              "kernel_mean_us": 9.322500000000003,
+              "setup_mean_us": 9.640833333333331
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "incore_sparse_full_valid_no_zero_v2",
+      "history": 8192,
+      "batch": 16,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h8192_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 933.546993136406,
+          "p50_us": 932.6199889183044,
+          "p95_us": 939.300000667572,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1086.4160060882568,
+          "p50_us": 1086.300015449524,
+          "p95_us": 1101.1600494384766,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 772.7139979600906,
+          "p50_us": 775.4800021648407,
+          "p95_us": 787.7799868583679,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 96.72499932348728,
+          "p50_us": 96.5999998152256,
+          "p95_us": 98.2000008225441,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 225.1890003681183,
+          "p50_us": 224.5600000023842,
+          "p95_us": 229.6600043773651,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0033201355916495394
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 366,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "tasks": {
+        "csa_slots_build_valid_qk_plan": {
+          "kernel_mean_us": 6.961250000000003,
+          "window_mean_min_us": 6.636250000000004,
+          "window_mean_max_us": 7.3750000000000036,
+          "blocks": [
+            16,
+            16,
+            16,
+            16
+          ]
+        },
+        "qk_pv_aic": {
+          "kernel_mean_us": 121.42270833333333,
+          "window_mean_min_us": 117.60083333333331,
+          "window_mean_max_us": 124.87833333333333,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "qk_pv_aiv": {
+          "kernel_mean_us": 123.448125,
+          "window_mean_min_us": 119.68291666666667,
+          "window_mean_max_us": 126.93,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "merge_norm": {
+          "kernel_mean_us": 22.9309375,
+          "window_mean_min_us": 22.741249999999994,
+          "window_mean_max_us": 23.153333333333332,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_score_topk_native_pair_aic": {
+          "kernel_mean_us": 28.477291666666666,
+          "window_mean_min_us": 24.56666666666666,
+          "window_mean_max_us": 31.5275,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "indexer_score_topk_native_pair_aiv": {
+          "kernel_mean_us": 32.87322916666667,
+          "window_mean_min_us": 29.20666666666667,
+          "window_mean_max_us": 35.76958333333334,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_topk_query_merge": {
+          "kernel_mean_us": 8.717500000000001,
+          "window_mean_min_us": 8.525833333333335,
+          "window_mean_max_us": 8.857083333333334,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h8192_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 770.14,
+          "phases_us": {
+            "first_worker_to_norm_end": 93.79999999999998,
+            "norm_end_to_sparse_receive": 318.88,
+            "sparse_receive_to_merge_end": 169.3,
+            "merge_end_to_last_worker": 188.15999999999997
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 397.78000000000003,
+              "first_start_us": 405.68,
+              "last_start_us": 406.02000000000004,
+              "last_end_us": 415.14000000000004,
+              "start_spread_us": 0.34000000000003183,
+              "worker_envelope_us": 17.360000000000014,
+              "kernel_mean_us": 7.052499999999998,
+              "setup_mean_us": 6.675000000000001
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 412.68,
+              "first_start_us": 420.3,
+              "last_start_us": 431.96000000000004,
+              "last_end_us": 548.64,
+              "start_spread_us": 11.660000000000025,
+              "worker_envelope_us": 135.95999999999998,
+              "kernel_mean_us": 124.87833333333333,
+              "setup_mean_us": 6.289999999999999
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 412.70000000000005,
+              "first_start_us": 420.46000000000004,
+              "last_start_us": 431.96000000000004,
+              "last_end_us": 550.9,
+              "start_spread_us": 11.5,
+              "worker_envelope_us": 138.19999999999993,
+              "kernel_mean_us": 126.93,
+              "setup_mean_us": 6.5220833333333355
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 544.84,
+              "first_start_us": 555.88,
+              "last_start_us": 556.5,
+              "last_end_us": 581.98,
+              "start_spread_us": 0.6200000000000045,
+              "worker_envelope_us": 37.139999999999986,
+              "kernel_mean_us": 23.153333333333332,
+              "setup_mean_us": 7.730416666666663
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 340.34000000000003,
+              "first_start_us": 345.06,
+              "last_start_us": 357.1,
+              "last_end_us": 381.18,
+              "start_spread_us": 12.04000000000002,
+              "worker_envelope_us": 40.839999999999975,
+              "kernel_mean_us": 24.56666666666666,
+              "setup_mean_us": 1.2083333333333333
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 340.36,
+              "first_start_us": 345.34000000000003,
+              "last_start_us": 357.22,
+              "last_end_us": 387.02000000000004,
+              "start_spread_us": 11.879999999999995,
+              "worker_envelope_us": 46.660000000000025,
+              "kernel_mean_us": 29.20666666666667,
+              "setup_mean_us": 1.1950000000000038
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 373.78000000000003,
+              "first_start_us": 389.74,
+              "last_start_us": 391.42,
+              "last_end_us": 400.50000000000006,
+              "start_spread_us": 1.6800000000000068,
+              "worker_envelope_us": 26.720000000000027,
+              "kernel_mean_us": 8.857083333333334,
+              "setup_mean_us": 10.692083333333334
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h8192_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 788.3000000000001,
+          "phases_us": {
+            "first_worker_to_norm_end": 89.82,
+            "norm_end_to_sparse_receive": 346.16,
+            "sparse_receive_to_merge_end": 168.77999999999997,
+            "merge_end_to_last_worker": 183.54000000000008
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 421.84000000000003,
+              "first_start_us": 429.84000000000003,
+              "last_start_us": 430.22,
+              "last_end_us": 439.14000000000004,
+              "start_spread_us": 0.37999999999999545,
+              "worker_envelope_us": 17.30000000000001,
+              "kernel_mean_us": 6.781250000000007,
+              "setup_mean_us": 6.323749999999997
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 435.98,
+              "first_start_us": 446.14000000000004,
+              "last_start_us": 446.54,
+              "last_end_us": 572.1,
+              "start_spread_us": 0.39999999999997726,
+              "worker_envelope_us": 136.12,
+              "kernel_mean_us": 123.14,
+              "setup_mean_us": 7.99249999999999
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 436.02000000000004,
+              "first_start_us": 446.38,
+              "last_start_us": 446.98,
+              "last_end_us": 574.26,
+              "start_spread_us": 0.6000000000000227,
+              "worker_envelope_us": 138.23999999999995,
+              "kernel_mean_us": 125.04,
+              "setup_mean_us": 8.222083333333336
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 568.44,
+              "first_start_us": 578.98,
+              "last_start_us": 579.62,
+              "last_end_us": 604.76,
+              "start_spread_us": 0.6399999999999864,
+              "worker_envelope_us": 36.319999999999936,
+              "kernel_mean_us": 22.753750000000007,
+              "setup_mean_us": 7.364999999999988
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 365.98,
+              "first_start_us": 370.32,
+              "last_start_us": 379.68,
+              "last_end_us": 405.98,
+              "start_spread_us": 9.360000000000014,
+              "worker_envelope_us": 40.0,
+              "kernel_mean_us": 27.960833333333337,
+              "setup_mean_us": 2.3808333333333374
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 365.96000000000004,
+              "first_start_us": 370.46000000000004,
+              "last_start_us": 379.78000000000003,
+              "last_end_us": 411.78000000000003,
+              "start_spread_us": 9.319999999999993,
+              "worker_envelope_us": 45.81999999999999,
+              "kernel_mean_us": 32.37291666666666,
+              "setup_mean_us": 2.5691666666666713
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 401.98,
+              "first_start_us": 414.14000000000004,
+              "last_start_us": 415.66,
+              "last_end_us": 425.04,
+              "start_spread_us": 1.5199999999999818,
+              "worker_envelope_us": 23.060000000000002,
+              "kernel_mean_us": 8.814999999999998,
+              "setup_mean_us": 9.055416666666668
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h8192_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 766.4000000000001,
+          "phases_us": {
+            "first_worker_to_norm_end": 88.53999999999999,
+            "norm_end_to_sparse_receive": 327.14,
+            "sparse_receive_to_merge_end": 166.22000000000008,
+            "merge_end_to_last_worker": 184.5
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 401.46,
+              "first_start_us": 409.5,
+              "last_start_us": 409.9,
+              "last_end_us": 419.52,
+              "start_spread_us": 0.39999999999997726,
+              "worker_envelope_us": 18.060000000000002,
+              "kernel_mean_us": 7.3750000000000036,
+              "setup_mean_us": 6.080000000000005
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 415.68,
+              "first_start_us": 423.21999999999997,
+              "last_start_us": 434.34,
+              "last_end_us": 548.0400000000001,
+              "start_spread_us": 11.120000000000005,
+              "worker_envelope_us": 132.36000000000007,
+              "kernel_mean_us": 120.07166666666667,
+              "setup_mean_us": 5.687499999999997
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 415.71999999999997,
+              "first_start_us": 423.47999999999996,
+              "last_start_us": 434.03999999999996,
+              "last_end_us": 550.32,
+              "start_spread_us": 10.560000000000002,
+              "worker_envelope_us": 134.60000000000008,
+              "kernel_mean_us": 122.13958333333333,
+              "setup_mean_us": 5.865416666666667
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 543.4200000000001,
+              "first_start_us": 555.96,
+              "last_start_us": 556.6,
+              "last_end_us": 581.9000000000001,
+              "start_spread_us": 0.6399999999999864,
+              "worker_envelope_us": 38.48000000000002,
+              "kernel_mean_us": 23.075416666666666,
+              "setup_mean_us": 8.802916666666667
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 339.0,
+              "first_start_us": 350.56,
+              "last_start_us": 351.06,
+              "last_end_us": 384.0,
+              "start_spread_us": 0.5,
+              "worker_envelope_us": 45.0,
+              "kernel_mean_us": 31.5275,
+              "setup_mean_us": 6.1191666666666675
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 339.0,
+              "first_start_us": 350.88,
+              "last_start_us": 351.74,
+              "last_end_us": 389.8,
+              "start_spread_us": 0.8600000000000136,
+              "worker_envelope_us": 50.80000000000001,
+              "kernel_mean_us": 35.76958333333334,
+              "setup_mean_us": 6.470416666666677
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 384.58,
+              "first_start_us": 394.46,
+              "last_start_us": 396.4,
+              "last_end_us": 405.02,
+              "start_spread_us": 1.9399999999999977,
+              "worker_envelope_us": 20.439999999999998,
+              "kernel_mean_us": 8.525833333333335,
+              "setup_mean_us": 7.510833333333334
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h8192_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 766.6800000000001,
+          "phases_us": {
+            "first_worker_to_norm_end": 86.10000000000001,
+            "norm_end_to_sparse_receive": 334.59999999999997,
+            "sparse_receive_to_merge_end": 160.3,
+            "merge_end_to_last_worker": 185.68000000000006
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 405.44,
+              "first_start_us": 413.09999999999997,
+              "last_start_us": 413.65999999999997,
+              "last_end_us": 422.2,
+              "start_spread_us": 0.5600000000000023,
+              "worker_envelope_us": 16.75999999999999,
+              "kernel_mean_us": 6.636250000000004,
+              "setup_mean_us": 5.967500000000005
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 420.7,
+              "first_start_us": 425.41999999999996,
+              "last_start_us": 433.74,
+              "last_end_us": 547.88,
+              "start_spread_us": 8.32000000000005,
+              "worker_envelope_us": 127.18,
+              "kernel_mean_us": 117.60083333333331,
+              "setup_mean_us": 3.8300000000000076
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 420.7,
+              "first_start_us": 425.58,
+              "last_start_us": 433.5,
+              "last_end_us": 550.1400000000001,
+              "start_spread_us": 7.920000000000016,
+              "worker_envelope_us": 129.4400000000001,
+              "kernel_mean_us": 119.68291666666667,
+              "setup_mean_us": 3.8970833333333323
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 544.82,
+              "first_start_us": 554.74,
+              "last_start_us": 555.62,
+              "last_end_us": 581.0,
+              "start_spread_us": 0.8799999999999955,
+              "worker_envelope_us": 36.17999999999995,
+              "kernel_mean_us": 22.741249999999994,
+              "setup_mean_us": 7.800000000000004
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 343.68,
+              "first_start_us": 355.88,
+              "last_start_us": 361.5,
+              "last_end_us": 388.18,
+              "start_spread_us": 5.6200000000000045,
+              "worker_envelope_us": 44.5,
+              "kernel_mean_us": 29.854166666666664,
+              "setup_mean_us": 6.1966666666666725
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 343.74,
+              "first_start_us": 356.12,
+              "last_start_us": 361.82,
+              "last_end_us": 394.02,
+              "start_spread_us": 5.699999999999989,
+              "worker_envelope_us": 50.27999999999997,
+              "kernel_mean_us": 34.143750000000004,
+              "setup_mean_us": 6.27291666666667
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 388.28,
+              "first_start_us": 398.09999999999997,
+              "last_start_us": 400.18,
+              "last_end_us": 408.78,
+              "start_spread_us": 2.080000000000041,
+              "worker_envelope_us": 20.5,
+              "kernel_mean_us": 8.672083333333335,
+              "setup_mean_us": 7.270833333333331
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "incore_sparse_pv_n128_pair",
+      "history": 131072,
+      "batch": 16,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h131072_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1309.9589943885803,
+          "p50_us": 1310.539960861206,
+          "p95_us": 1314.9800300598145,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1713.6660158634186,
+          "p50_us": 1607.0300340652466,
+          "p95_us": 1936.4800453186035,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1278.3180117607117,
+          "p50_us": 1197.8299617767334,
+          "p95_us": 1541.3999557495117,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 186.66100054979324,
+          "p50_us": 186.93000078201294,
+          "p95_us": 187.7399981021881,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 221.44500017166138,
+          "p50_us": 220.93000262975693,
+          "p95_us": 226.2199968099594,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.0390625,
+          "rmse": 0.004177043480221336
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 670,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "tasks": {
+        "csa_slots_build_valid_qk_plan": {
+          "kernel_mean_us": 7.159375000000001,
+          "window_mean_min_us": 6.420000000000016,
+          "window_mean_max_us": 7.642499999999991,
+          "blocks": [
+            16,
+            16,
+            16,
+            16
+          ]
+        },
+        "qk_pv_aic": {
+          "kernel_mean_us": 163.34916666666666,
+          "window_mean_min_us": 161.54416666666665,
+          "window_mean_max_us": 164.24583333333334,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "qk_pv_aiv": {
+          "kernel_mean_us": 165.23874999999998,
+          "window_mean_min_us": 163.4375,
+          "window_mean_max_us": 166.18791666666667,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "merge_norm": {
+          "kernel_mean_us": 22.979375000000005,
+          "window_mean_min_us": 22.677500000000013,
+          "window_mean_max_us": 23.34833333333333,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_score_topk_native_pair_aic": {
+          "kernel_mean_us": 343.34583333333336,
+          "window_mean_min_us": 339.49583333333334,
+          "window_mean_max_us": 349.12083333333334,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "indexer_score_topk_native_pair_aiv": {
+          "kernel_mean_us": 352.6409375,
+          "window_mean_min_us": 348.87,
+          "window_mean_max_us": 358.10875,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_topk_query_merge": {
+          "kernel_mean_us": 18.340312500000003,
+          "window_mean_min_us": 18.085416666666664,
+          "window_mean_max_us": 18.527916666666666,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h131072_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 1152.16,
+          "phases_us": {
+            "first_worker_to_norm_end": 86.16,
+            "norm_end_to_sparse_receive": 671.72,
+            "sparse_receive_to_merge_end": 214.60000000000002,
+            "merge_end_to_last_worker": 179.68000000000006
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 743.22,
+              "first_start_us": 751.76,
+              "last_start_us": 752.06,
+              "last_end_us": 760.66,
+              "start_spread_us": 0.2999999999999545,
+              "worker_envelope_us": 17.43999999999994,
+              "kernel_mean_us": 6.420000000000016,
+              "setup_mean_us": 5.514999999999979
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 757.88,
+              "first_start_us": 770.66,
+              "last_start_us": 771.08,
+              "last_end_us": 940.4399999999999,
+              "start_spread_us": 0.42000000000007276,
+              "worker_envelope_us": 182.55999999999995,
+              "kernel_mean_us": 164.24583333333334,
+              "setup_mean_us": 9.69249999999999
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 757.92,
+              "first_start_us": 770.84,
+              "last_start_us": 771.5,
+              "last_end_us": 942.54,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 184.62,
+              "kernel_mean_us": 166.18791666666667,
+              "setup_mean_us": 9.914583333333333
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 931.66,
+              "first_start_us": 946.38,
+              "last_start_us": 947.1,
+              "last_end_us": 972.48,
+              "start_spread_us": 0.7200000000000273,
+              "worker_envelope_us": 40.82000000000005,
+              "kernel_mean_us": 22.730833333333333,
+              "setup_mean_us": 9.132916666666668
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 346.70000000000005,
+              "first_start_us": 352.6,
+              "last_start_us": 368.29999999999995,
+              "last_end_us": 714.66,
+              "start_spread_us": 15.699999999999932,
+              "worker_envelope_us": 367.9599999999999,
+              "kernel_mean_us": 342.3491666666667,
+              "setup_mean_us": 2.164166666666669
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 346.68000000000006,
+              "first_start_us": 352.64,
+              "last_start_us": 369.12,
+              "last_end_us": 726.06,
+              "start_spread_us": 16.480000000000018,
+              "worker_envelope_us": 379.3799999999999,
+              "kernel_mean_us": 351.72041666666667,
+              "setup_mean_us": 2.380833333333341
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 694.16,
+              "first_start_us": 727.4,
+              "last_start_us": 728.08,
+              "last_end_us": 748.68,
+              "start_spread_us": 0.6800000000000637,
+              "worker_envelope_us": 54.51999999999998,
+              "kernel_mean_us": 18.085416666666664,
+              "setup_mean_us": 15.643750000000002
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 1151.2800000000002,
+          "phases_us": {
+            "first_worker_to_norm_end": 82.1,
+            "norm_end_to_sparse_receive": 681.3,
+            "sparse_receive_to_merge_end": 207.79999999999995,
+            "merge_end_to_last_worker": 180.08000000000027
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 747.5799999999999,
+              "first_start_us": 756.4599999999999,
+              "last_start_us": 756.9,
+              "last_end_us": 767.64,
+              "start_spread_us": 0.44000000000005457,
+              "worker_envelope_us": 20.06000000000006,
+              "kernel_mean_us": 7.642499999999991,
+              "setup_mean_us": 5.9462500000000205
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 763.4,
+              "first_start_us": 771.26,
+              "last_start_us": 785.62,
+              "last_end_us": 938.56,
+              "start_spread_us": 14.360000000000014,
+              "worker_envelope_us": 175.15999999999997,
+              "kernel_mean_us": 161.54416666666665,
+              "setup_mean_us": 6.159166666666683
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 763.42,
+              "first_start_us": 771.4,
+              "last_start_us": 786.56,
+              "last_end_us": 940.6999999999999,
+              "start_spread_us": 15.159999999999968,
+              "worker_envelope_us": 177.27999999999997,
+              "kernel_mean_us": 163.4375,
+              "setup_mean_us": 6.478749999999998
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 933.14,
+              "first_start_us": 945.36,
+              "last_start_us": 946.04,
+              "last_end_us": 971.1999999999999,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 38.059999999999945,
+              "kernel_mean_us": 22.677500000000013,
+              "setup_mean_us": 8.39416666666667
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 347.84000000000003,
+              "first_start_us": 353.38,
+              "last_start_us": 366.88,
+              "last_end_us": 718.68,
+              "start_spread_us": 13.5,
+              "worker_envelope_us": 370.8399999999999,
+              "kernel_mean_us": 342.4175,
+              "setup_mean_us": 2.2066666666666657
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 347.84000000000003,
+              "first_start_us": 353.6,
+              "last_start_us": 367.02000000000004,
+              "last_end_us": 730.06,
+              "start_spread_us": 13.420000000000016,
+              "worker_envelope_us": 382.2199999999999,
+              "kernel_mean_us": 351.86458333333337,
+              "setup_mean_us": 2.3474999999999966
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 696.1999999999999,
+              "first_start_us": 732.02,
+              "last_start_us": 732.66,
+              "last_end_us": 753.6,
+              "start_spread_us": 0.6399999999999864,
+              "worker_envelope_us": 57.40000000000009,
+              "kernel_mean_us": 18.321250000000017,
+              "setup_mean_us": 21.95624999999999
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 1177.36,
+          "phases_us": {
+            "first_worker_to_norm_end": 89.96000000000001,
+            "norm_end_to_sparse_receive": 687.2399999999999,
+            "sparse_receive_to_merge_end": 212.38,
+            "merge_end_to_last_worker": 187.77999999999997
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 762.3199999999999,
+              "first_start_us": 771.4,
+              "last_start_us": 771.68,
+              "last_end_us": 780.5799999999999,
+              "start_spread_us": 0.2799999999999727,
+              "worker_envelope_us": 18.25999999999999,
+              "kernel_mean_us": 7.066249999999997,
+              "setup_mean_us": 6.183750000000003
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 777.2199999999999,
+              "first_start_us": 788.9,
+              "last_start_us": 789.3199999999999,
+              "last_end_us": 959.0999999999999,
+              "start_spread_us": 0.4199999999999591,
+              "worker_envelope_us": 181.88,
+              "kernel_mean_us": 164.05333333333334,
+              "setup_mean_us": 9.195833333333345
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 777.1999999999999,
+              "first_start_us": 789.12,
+              "last_start_us": 790.12,
+              "last_end_us": 961.36,
+              "start_spread_us": 1.0,
+              "worker_envelope_us": 184.16000000000008,
+              "kernel_mean_us": 165.885,
+              "setup_mean_us": 9.55958333333333
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 952.18,
+              "first_start_us": 963.2199999999999,
+              "last_start_us": 963.9,
+              "last_end_us": 989.5799999999999,
+              "start_spread_us": 0.6800000000000637,
+              "worker_envelope_us": 37.39999999999998,
+              "kernel_mean_us": 23.34833333333333,
+              "setup_mean_us": 7.89583333333334
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 364.82,
+              "first_start_us": 371.46000000000004,
+              "last_start_us": 386.16,
+              "last_end_us": 733.42,
+              "start_spread_us": 14.699999999999989,
+              "worker_envelope_us": 368.59999999999997,
+              "kernel_mean_us": 339.49583333333334,
+              "setup_mean_us": 1.9508333333333354
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 364.8,
+              "first_start_us": 371.48,
+              "last_start_us": 386.54,
+              "last_end_us": 744.8,
+              "start_spread_us": 15.060000000000002,
+              "worker_envelope_us": 379.99999999999994,
+              "kernel_mean_us": 348.87,
+              "setup_mean_us": 2.1679166666666725
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 710.5,
+              "first_start_us": 746.26,
+              "last_start_us": 746.92,
+              "last_end_us": 767.76,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 57.25999999999999,
+              "kernel_mean_us": 18.426666666666673,
+              "setup_mean_us": 18.134583333333342
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_pv_n128_pair/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 1162.2800000000002,
+          "phases_us": {
+            "first_worker_to_norm_end": 87.17999999999999,
+            "norm_end_to_sparse_receive": 685.5,
+            "sparse_receive_to_merge_end": 209.34000000000003,
+            "merge_end_to_last_worker": 180.26000000000022
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 757.58,
+              "first_start_us": 765.74,
+              "last_start_us": 766.18,
+              "last_end_us": 775.9399999999999,
+              "start_spread_us": 0.4399999999999409,
+              "worker_envelope_us": 18.3599999999999,
+              "kernel_mean_us": 7.508749999999999,
+              "setup_mean_us": 5.814999999999998
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 772.68,
+              "first_start_us": 781.8,
+              "last_start_us": 782.24,
+              "last_end_us": 948.64,
+              "start_spread_us": 0.44000000000005457,
+              "worker_envelope_us": 175.96000000000004,
+              "kernel_mean_us": 163.5533333333333,
+              "setup_mean_us": 7.033333333333336
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 772.68,
+              "first_start_us": 782.02,
+              "last_start_us": 782.6999999999999,
+              "last_end_us": 950.92,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 178.24,
+              "kernel_mean_us": 165.44458333333333,
+              "setup_mean_us": 7.288749999999996
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 943.16,
+              "first_start_us": 956.06,
+              "last_start_us": 956.84,
+              "last_end_us": 982.02,
+              "start_spread_us": 0.7800000000000864,
+              "worker_envelope_us": 38.860000000000014,
+              "kernel_mean_us": 23.16083333333334,
+              "setup_mean_us": 8.39291666666667
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 361.58000000000004,
+              "first_start_us": 367.3,
+              "last_start_us": 378.92,
+              "last_end_us": 727.8199999999999,
+              "start_spread_us": 11.620000000000005,
+              "worker_envelope_us": 366.2399999999999,
+              "kernel_mean_us": 349.12083333333334,
+              "setup_mean_us": 2.970833333333329
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 361.58000000000004,
+              "first_start_us": 368.20000000000005,
+              "last_start_us": 379.02000000000004,
+              "last_end_us": 739.22,
+              "start_spread_us": 10.819999999999993,
+              "worker_envelope_us": 377.64,
+              "kernel_mean_us": 358.10875,
+              "setup_mean_us": 3.5754166666666705
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 716.4399999999999,
+              "first_start_us": 740.88,
+              "last_start_us": 741.5799999999999,
+              "last_end_us": 762.38,
+              "start_spread_us": 0.6999999999999318,
+              "worker_envelope_us": 45.940000000000055,
+              "kernel_mean_us": 18.527916666666666,
+              "setup_mean_us": 13.404583333333328
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "incore_sparse_full_valid_no_zero_v2",
+      "history": 131072,
+      "batch": 16,
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h131072_b16/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1307.776004076004,
+          "p50_us": 1307.3700070381165,
+          "p95_us": 1313.8999938964844,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1680.851000547409,
+          "p50_us": 1607.9300045967102,
+          "p95_us": 1924.739956855774,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1245.3499913215637,
+          "p50_us": 1198.170006275177,
+          "p95_us": 1529.1800498962402,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 189.43600058555603,
+          "p50_us": 189.51000273227692,
+          "p95_us": 190.9399926662445,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 224.67700019478798,
+          "p50_us": 224.22999888658524,
+          "p95_us": 228.0000001192093,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.0390625,
+          "rmse": 0.004177066073592022
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 670,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "tasks": {
+        "csa_slots_build_valid_qk_plan": {
+          "kernel_mean_us": 6.835312499999999,
+          "window_mean_min_us": 6.157499999999999,
+          "window_mean_max_us": 7.592500000000008,
+          "blocks": [
+            16,
+            16,
+            16,
+            16
+          ]
+        },
+        "qk_pv_aic": {
+          "kernel_mean_us": 173.69875,
+          "window_mean_min_us": 170.8275,
+          "window_mean_max_us": 176.06083333333333,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "qk_pv_aiv": {
+          "kernel_mean_us": 175.63802083333334,
+          "window_mean_min_us": 172.71666666666667,
+          "window_mean_max_us": 177.92875,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "merge_norm": {
+          "kernel_mean_us": 21.470416666666665,
+          "window_mean_min_us": 21.145416666666673,
+          "window_mean_max_us": 21.90125,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_score_topk_native_pair_aic": {
+          "kernel_mean_us": 338.40208333333334,
+          "window_mean_min_us": 335.6483333333333,
+          "window_mean_max_us": 342.985,
+          "blocks": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "indexer_score_topk_native_pair_aiv": {
+          "kernel_mean_us": 347.95197916666666,
+          "window_mean_min_us": 345.23333333333335,
+          "window_mean_max_us": 352.445,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        },
+        "indexer_topk_query_merge": {
+          "kernel_mean_us": 18.239375000000003,
+          "window_mean_min_us": 17.99125000000001,
+          "window_mean_max_us": 18.73583333333333,
+          "blocks": [
+            48,
+            48,
+            48,
+            48
+          ]
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h131072_b16/swimlane/dfx/merged_swimlane.json",
+          "worker_span_us": 1172.52,
+          "phases_us": {
+            "first_worker_to_norm_end": 94.03999999999999,
+            "norm_end_to_sparse_receive": 674.1200000000001,
+            "sparse_receive_to_merge_end": 223.22000000000003,
+            "merge_end_to_last_worker": 181.13999999999987
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 751.88,
+              "first_start_us": 760.7800000000001,
+              "last_start_us": 761.26,
+              "last_end_us": 769.34,
+              "start_spread_us": 0.4799999999999045,
+              "worker_envelope_us": 17.460000000000036,
+              "kernel_mean_us": 6.157499999999999,
+              "setup_mean_us": 6.652499999999989
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 768.1600000000001,
+              "first_start_us": 779.5,
+              "last_start_us": 779.9200000000001,
+              "last_end_us": 963.34,
+              "start_spread_us": 0.42000000000007276,
+              "worker_envelope_us": 195.17999999999995,
+              "kernel_mean_us": 174.07583333333332,
+              "setup_mean_us": 8.166666666666657
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 768.1600000000001,
+              "first_start_us": 779.6400000000001,
+              "last_start_us": 780.36,
+              "last_end_us": 965.62,
+              "start_spread_us": 0.7199999999999136,
+              "worker_envelope_us": 197.45999999999992,
+              "kernel_mean_us": 176.12833333333333,
+              "setup_mean_us": 8.414999999999987
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 947.0,
+              "first_start_us": 967.1400000000001,
+              "last_start_us": 967.98,
+              "last_end_us": 991.3800000000001,
+              "start_spread_us": 0.8399999999999181,
+              "worker_envelope_us": 44.38000000000011,
+              "kernel_mean_us": 21.45499999999999,
+              "setup_mean_us": 11.140416666666672
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 367.74,
+              "first_start_us": 373.98,
+              "last_start_us": 382.68000000000006,
+              "last_end_us": 727.1600000000001,
+              "start_spread_us": 8.700000000000045,
+              "worker_envelope_us": 359.4200000000001,
+              "kernel_mean_us": 342.985,
+              "setup_mean_us": 3.1258333333333375
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 367.74,
+              "first_start_us": 374.12,
+              "last_start_us": 382.74,
+              "last_end_us": 734.1600000000001,
+              "start_spread_us": 8.620000000000005,
+              "worker_envelope_us": 366.4200000000001,
+              "kernel_mean_us": 352.445,
+              "setup_mean_us": 3.3087500000000056
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 716.64,
+              "first_start_us": 735.26,
+              "last_start_us": 736.0200000000001,
+              "last_end_us": 757.0400000000001,
+              "start_spread_us": 0.7600000000001046,
+              "worker_envelope_us": 40.40000000000009,
+              "kernel_mean_us": 18.73583333333333,
+              "setup_mean_us": 7.9566666666666706
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h131072_b16/swimlane/dfx/window_1/merged_swimlane.json",
+          "worker_span_us": 1167.3799999999999,
+          "phases_us": {
+            "first_worker_to_norm_end": 87.88,
+            "norm_end_to_sparse_receive": 676.5400000000001,
+            "sparse_receive_to_merge_end": 223.95999999999992,
+            "merge_end_to_last_worker": 178.9999999999999
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 748.86,
+              "first_start_us": 756.94,
+              "last_start_us": 757.48,
+              "last_end_us": 766.5600000000001,
+              "start_spread_us": 0.5399999999999636,
+              "worker_envelope_us": 17.700000000000045,
+              "kernel_mean_us": 7.054999999999993,
+              "setup_mean_us": 5.861250000000005
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 764.44,
+              "first_start_us": 775.88,
+              "last_start_us": 776.4000000000001,
+              "last_end_us": 955.0400000000001,
+              "start_spread_us": 0.5200000000000955,
+              "worker_envelope_us": 190.60000000000002,
+              "kernel_mean_us": 176.06083333333333,
+              "setup_mean_us": 9.270000000000001
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 764.4200000000001,
+              "first_start_us": 776.1600000000001,
+              "last_start_us": 777.0600000000001,
+              "last_end_us": 957.32,
+              "start_spread_us": 0.8999999999999773,
+              "worker_envelope_us": 192.89999999999998,
+              "kernel_mean_us": 177.92875,
+              "setup_mean_us": 9.700833333333327
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 950.94,
+              "first_start_us": 963.44,
+              "last_start_us": 964.1600000000001,
+              "last_end_us": 988.38,
+              "start_spread_us": 0.7200000000000273,
+              "worker_envelope_us": 37.43999999999994,
+              "kernel_mean_us": 21.379999999999995,
+              "setup_mean_us": 8.984583333333333
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 361.04,
+              "first_start_us": 368.02000000000004,
+              "last_start_us": 381.1,
+              "last_end_us": 722.9000000000001,
+              "start_spread_us": 13.079999999999984,
+              "worker_envelope_us": 361.86000000000007,
+              "kernel_mean_us": 336.74833333333333,
+              "setup_mean_us": 1.9491666666666656
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 361.02000000000004,
+              "first_start_us": 368.02000000000004,
+              "last_start_us": 381.26000000000005,
+              "last_end_us": 731.4000000000001,
+              "start_spread_us": 13.240000000000009,
+              "worker_envelope_us": 370.38000000000005,
+              "kernel_mean_us": 346.395,
+              "setup_mean_us": 1.9479166666666654
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 705.3000000000001,
+              "first_start_us": 732.4200000000001,
+              "last_start_us": 733.1,
+              "last_end_us": 754.1,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 48.799999999999955,
+              "kernel_mean_us": 18.13916666666668,
+              "setup_mean_us": 12.380833333333333
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h131072_b16/swimlane/dfx/window_2/merged_swimlane.json",
+          "worker_span_us": 1156.92,
+          "phases_us": {
+            "first_worker_to_norm_end": 87.06,
+            "norm_end_to_sparse_receive": 674.3,
+            "sparse_receive_to_merge_end": 216.79999999999995,
+            "merge_end_to_last_worker": 178.7600000000001
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 743.82,
+              "first_start_us": 753.6,
+              "last_start_us": 754.16,
+              "last_end_us": 763.54,
+              "start_spread_us": 0.5599999999999454,
+              "worker_envelope_us": 19.719999999999914,
+              "kernel_mean_us": 7.592500000000008,
+              "setup_mean_us": 7.303750000000001
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 761.36,
+              "first_start_us": 768.8,
+              "last_start_us": 780.84,
+              "last_end_us": 946.98,
+              "start_spread_us": 12.040000000000077,
+              "worker_envelope_us": 185.62,
+              "kernel_mean_us": 173.83083333333335,
+              "setup_mean_us": 6.525833333333338
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 761.36,
+              "first_start_us": 769.14,
+              "last_start_us": 780.54,
+              "last_end_us": 949.3,
+              "start_spread_us": 11.399999999999977,
+              "worker_envelope_us": 187.93999999999994,
+              "kernel_mean_us": 175.77833333333334,
+              "setup_mean_us": 6.8958333333333215
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 942.54,
+              "first_start_us": 953.8,
+              "last_start_us": 954.56,
+              "last_end_us": 978.16,
+              "start_spread_us": 0.7599999999999909,
+              "worker_envelope_us": 35.620000000000005,
+              "kernel_mean_us": 21.145416666666673,
+              "setup_mean_us": 8.141250000000005
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 342.14,
+              "first_start_us": 363.98,
+              "last_start_us": 376.65999999999997,
+              "last_end_us": 715.26,
+              "start_spread_us": 12.67999999999995,
+              "worker_envelope_us": 373.12,
+              "kernel_mean_us": 335.6483333333333,
+              "setup_mean_us": 3.052500000000004
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 342.14,
+              "first_start_us": 364.08,
+              "last_start_us": 376.86,
+              "last_end_us": 726.54,
+              "start_spread_us": 12.78000000000003,
+              "worker_envelope_us": 384.4,
+              "kernel_mean_us": 345.23333333333335,
+              "setup_mean_us": 3.127083333333328
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 702.62,
+              "first_start_us": 727.98,
+              "last_start_us": 728.66,
+              "last_end_us": 749.5,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 46.879999999999995,
+              "kernel_mean_us": 18.09125,
+              "setup_mean_us": 13.905833333333348
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/incore_sparse_full_valid_no_zero_v2/h131072_b16/swimlane/dfx/window_3/merged_swimlane.json",
+          "worker_span_us": 1158.3200000000002,
+          "phases_us": {
+            "first_worker_to_norm_end": 89.42,
+            "norm_end_to_sparse_receive": 674.0,
+            "sparse_receive_to_merge_end": 213.98000000000002,
+            "merge_end_to_last_worker": 180.9200000000002
+          },
+          "tasks": {
+            "csa_slots_build_valid_qk_plan": {
+              "blocks": 16,
+              "first_receive_us": 747.58,
+              "first_start_us": 756.44,
+              "last_start_us": 756.92,
+              "last_end_us": 765.48,
+              "start_spread_us": 0.4799999999999045,
+              "worker_envelope_us": 17.899999999999977,
+              "kernel_mean_us": 6.5362499999999955,
+              "setup_mean_us": 6.2949999999999875
+            },
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 763.42,
+              "first_start_us": 771.96,
+              "last_start_us": 779.4,
+              "last_end_us": 945.72,
+              "start_spread_us": 7.439999999999941,
+              "worker_envelope_us": 182.30000000000007,
+              "kernel_mean_us": 170.8275,
+              "setup_mean_us": 7.010833333333338
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 763.42,
+              "first_start_us": 772.28,
+              "last_start_us": 779.22,
+              "last_end_us": 948.0600000000001,
+              "start_spread_us": 6.940000000000055,
+              "worker_envelope_us": 184.6400000000001,
+              "kernel_mean_us": 172.71666666666667,
+              "setup_mean_us": 7.418749999999991
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 941.76,
+              "first_start_us": 953.26,
+              "last_start_us": 954.0600000000001,
+              "last_end_us": 977.4,
+              "start_spread_us": 0.8000000000000682,
+              "worker_envelope_us": 35.639999999999986,
+              "kernel_mean_us": 21.90125,
+              "setup_mean_us": 7.70083333333334
+            },
+            "indexer_score_topk_native_pair_aic": {
+              "blocks": 24,
+              "first_receive_us": 359.74,
+              "first_start_us": 365.68,
+              "last_start_us": 377.21999999999997,
+              "last_end_us": 719.4,
+              "start_spread_us": 11.539999999999964,
+              "worker_envelope_us": 359.65999999999997,
+              "kernel_mean_us": 338.2266666666667,
+              "setup_mean_us": 2.760000000000005
+            },
+            "indexer_score_topk_native_pair_aiv": {
+              "blocks": 48,
+              "first_receive_us": 359.7,
+              "first_start_us": 365.8,
+              "last_start_us": 377.34,
+              "last_end_us": 730.28,
+              "start_spread_us": 11.539999999999964,
+              "worker_envelope_us": 370.58,
+              "kernel_mean_us": 347.7345833333333,
+              "setup_mean_us": 2.9054166666666723
+            },
+            "indexer_topk_query_merge": {
+              "blocks": 48,
+              "first_receive_us": 707.6,
+              "first_start_us": 731.78,
+              "last_start_us": 732.56,
+              "last_end_us": 753.96,
+              "start_spread_us": 0.7799999999999727,
+              "worker_envelope_us": 46.360000000000014,
+              "kernel_mean_us": 17.99125000000001,
+              "setup_mean_us": 14.195833333333326
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
