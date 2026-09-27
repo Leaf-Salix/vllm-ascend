@@ -1,0 +1,81 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -630,6 +630,8 @@
+     qproj_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Q projection and its dequant + RMSNorm + RoPE over bounded tiles."""
++    qproj_tids = pl.array.create(1, pl.TASK_ID)
++    qproj_tids[0] = pl.system.task_invalid()
+     t_dim = pl.tensor.dim(x, 0)
+     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
+         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
+@@ -645,6 +647,7 @@
+                 tile_rows,
+                 qproj_dep,
+             )
++            qproj_tids[0] = _qproj_tid
+             q_proj_q_dequant(
+                 wq_b_scale,
+                 rope_cos_il,
+@@ -656,7 +659,7 @@
+                 tile_base,
+                 tile_rows,
+             )
+-    return q
++    return q, qproj_tids[0]
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -679,7 +682,7 @@
+     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
+     qa_tid = q_proj_qr(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store)
+     q_seq_dep = pl.system.task_dummy(deps=[])
+-    q_proj_q(
++    q, qb_tid = q_proj_q(
+         x,
+         wq_b,
+         wq_b_scale,
+@@ -692,7 +695,7 @@
+         q_seq_dep,
+     )
+ 
+-    return qa_tid
++    return qa_tid, qb_tid
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -946,7 +949,7 @@
+     q_rope_sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
+     q_rope_swap_idx = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.INT32)
+     rope_prepare(rope_sin, q_rope_sin_signed, q_rope_swap_idx)
+-    qa_tid = q_proj_rope(
++    qa_tid, qb_tid = q_proj_rope(
+         x,
+         wq_a,
+         wq_b,
+@@ -969,4 +972,4 @@
+         kv,
+         late_dep,
+     )
+-    return q, qa_tid
++    return q, qa_tid, qb_tid
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -322,7 +322,7 @@
+     with pl.scope():
+         # Projection-chain dependency marker.
+         late_dep = pl.system.task_dummy(deps=[rope_tid])
+-        q, qa_tid = qkv_proj_rope(
++        q, qa_tid, qb_tid = qkv_proj_rope(
+             x_normed_t,
+             wq_a,
+             wq_b,
+@@ -355,7 +355,7 @@
+ 
+         # Keep Q_A ahead of the heavier Attention Compressor projection.
+         # The lighter Indexer projection overlaps Q_A; its Hadamard gate stays below.
+-        compressor_dep = pl.system.task_dummy(deps=[late_dep, qa_tid])
++        compressor_dep = pl.system.task_dummy(deps=[late_dep, qb_tid])
+         cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
+         cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
+             x_normed_t,

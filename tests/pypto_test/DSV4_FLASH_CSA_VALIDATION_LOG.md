@@ -7631,3 +7631,11 @@ AIV_24/25提前接Top-K merge，setup约674 μs，AIC_0无Score、AIC_3连续两
 此前Score生产者False只测8K/B40，此次有充分理由在长上下文重测，并配8K典型档判断。
 [精简原始事件](results/csa_scheduling_20260927/round10_score_admission/baseline_tail_evidence.json)。
 原计划Attention投影任务细分仅CPU编译，不计一轮；已清理自己的临时候选。
+
+## 224. 十轮调度第9轮：Q_B抢先并未改善完整关键链（2026-09-27）
+
+性能版Attention Compressor等待Q_B，完整CPU编译与真机通过；8K/B16本体781.52→800.31 μs。
+Q_B启动分散40.00–50.74→14.56–17.12、末尾277.22–303.92→249.90–274.08 μs，
+但Attention投影末尾延后到311.52–334.14，Top-K未提前，撤回。
+保护区/结构/有限值通过，Native零容差FAIL；[完整记录](results/csa_scheduling_20260927/round09_attention_after_qb/README.md)。
+计数9/10，第10轮已开始128K/B16与8K/B16，以直接长尾证据检验Score关闭消费者预派发。
