@@ -2,10 +2,11 @@
 
 更新：2026-09-27。按用户要求，后续性能优化先集中到 Indexer。
 基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
-当前单卡量测见[七档对照](results/csa_native_cube_matrix_20260927/README.md)，
+v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/README.md)，
+已保留的后续改动见[v8～v10阶段结果](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)。
 测量使用正式 layer 4 权重、合成历史，不能代替整模型 decode forward 或 token/DSpark 验收。
 
-## 已确认的差异
+## v7基线已确认的差异
 
 | 环节 | Native A3 QLI | PTO v7 性能版 | 性能含义 |
 | --- | --- | --- | --- |
@@ -39,15 +40,27 @@ PTO不同任务窗口有交叠，不能相加；Worker与Scheduler是同一批�
 上游长分支条件为 B≥64 且压缩历史≥32768，当前矩阵不会命中其原条件。
 v4移植并扩大启用范围；v7进一步采用 Native 的片上Score与Cube WS。
 因此仅照搬 pypto-lib 不能自动得到 Native 的query复用、流式Top-K或固定核内工作分配。
-本轮下一候选借鉴 Native 的 M128 和query复用，继续沿用已接好的连续cache；精度版算术不变。
+v8～v10已借鉴 Native 的 M128 和query复用，继续沿用已接好的连续cache；精度版算术不变。
+
+## v10仍存在的差距
+
+- key已经按两个query共用，QK已为M128；S6的逻辑key装载量从24降到12 MiB/请求，
+  相比Native 4+2的8 MiB仍有差距。不能继续把v7的单query重复读取作为现状。
+- 压缩历史≥2048已采用片上FP16 QK与Cube head规约；8K不再搬运64行INT32给Vector。
+  每个query仍由两个AIV分候选区间处理，各自写半leaf Top-K，再用独立任务归并。
+  分数/候选GM交接、系数准备任务与调度等待仍在；Native的UB流式Top512尚未移植。
+- B4完整leaf负载已均衡，但128K/B16仍有无profiler长尾；短路径也有物理核派发和独立merge等待。
+  核内收益不等于整个Indexer窗口已赶上Native，需保留当前四窗口和全部主计时样本。
+
+单leaf融合发布候选v11遇到输出ABI及scope别名的编译问题，未产生设备结果，已撤回到v10。
+最小候选与恢复条件见[v11记录](results/csa_split_optimization_20260927/v11_native_publish/README.md)。
 
 ## 执行顺序与验收
 
-1. 先验证两个query共用key、合并M128 QK；S6按2+2+2分组，保持v7量化与Top-K规则。
-   CPU编译后，用独立Torch公式检查两query的NZ子块、head归约与单行保护区，再测128K/B16。
-   只在代表档有收益后补128K/B4/B8，不立即重跑未修改的8K和16卡模型。
+1. 两个query共用key、合并M128 QK已保留，S6按2+2+2分组；独立Torch公式与128K三档已验证。
+   后续以v10为起点，不重复同一子块和已覆盖档位测试。
 2. 再评估4+2 query组共享key及跨S2块驻留，记录L1/L0占用和生成同步；不以“设置双缓冲”代替实际流水证据。
-3. 针对8K短路径，比较片上head规约与流式Top-K：减少分数落GM和独立publish的成本。
+3. 8K片上head规约已保留；下一步减少分数落GM和独立Top-K归并的成本。
    如改变Top-K合并/tie规则，单独记录数值策略与索引结构检查，不归类为数值中性改动。
 4. 核内变化与调度长尾分别量测。若核内已接近Native但长尾仍在，再针对具体依赖/物理分配修复，
    不做无依据的任务重排，也不把正常窗口当成稳定获益。
@@ -71,6 +84,6 @@ B4共有12个query组，按 `query_group * 5 + leaf` 再以24步长轮转分派�
 24个逻辑worker承担的完整leaf数为：4个worker仅1个、16个worker各2个、4个worker各3个。
 因此实例数接近均衡并不等于工作量均衡。
 改为先遍历leaf、再遍历query组后，48个完整leaf可恰好分到24个worker，每个2个，短尾单独分配。
-这是源码/任务映射推导，尚待设备确认收益；不等于物理核重复分配的长尾已经解决。
+该工作量分布由源码/任务映射推导，不等于物理核重复分配的长尾已经解决。
 
 v10单卡已验证该映射：B4本体降至716.345 μs，较v8的766.653 μs恢复并超过v7的749.032 μs。见验证日志§181。

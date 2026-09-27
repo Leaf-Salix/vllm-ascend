@@ -4570,6 +4570,9 @@ Native/PTO PyTorch profiling JSON 和 PTO 泳道图。两组分别报告，EPLB 
 同时发现测试配置漏算 DSpark 草稿预留：容量40、总预算256，实际
 `max_num_scheduled_tokens=256-40*4=96`，不能调度 B24 的144个验证 token。
 这是测试入口的容量设置问题，不是 Native CSA 算子错误。
+2026-09-27澄清：上述是整模型每卡KV容量与调度预算两项限制；B24历史需314.57万token，
+超过240.79万token容量。该次直接现象是未形成满档样本，并非本节已记录一次直接OOM异常；
+也不能外推为只加载一层的CSA单卡case必然放不下。
 
 128K PTO 补采任务 `task_20260926_224652_39544812557` 已完成 exit=0，源码同为 `a7dc706e`；
 B4/8/16两侧均已完成10步无 profiler forward与独立3步Level0记录，开始CPU导出。
@@ -7028,3 +7031,45 @@ B4本体716.345 μs（v8为766.653，v7为749.032），p50/p95=712.480/728.760 �
 同轮Native865.137 μs，完整PTO路径996.090 μs。CPU编译与单卡验证通过，保护区、非有限值、索引结构正常；
 输出RMSE=0.0043222169、Top-K集合替换184，与v7/v8相同。
 [证据](results/csa_split_optimization_20260927/v10_native_balance/README.md)。
+
+## 182. 单leaf融合发布的编译限制与撤回（2026-09-27）
+
+v11尝试把8K两个半leaf的独立Top-K归并并入Score任务，改为两个AIV各负责一个query。
+初版根参数idx_topk从Out派生为InOut，正式入口ABI检查拒绝；constexpr区分短/长路径、
+让每条分支明确生产输出后ABI通过，但AICPU调度C++存在scope内部别名向外泄漏，
+`idx_topk__ssa_v2 was not declared in this scope`。最终问题可在CPU编译复现。
+未修改编译器、PTOAS或ISA，未关闭ABI保护；正式入口恢复到已验证的v10（0ed4f926）。
+没有v11性能、数值或设备泳道结果，不能计入已完成优化。
+
+此前`kernel.compile`只覆盖ProgramArtifact，漏掉KernelArtifact ABI与AICPU C++编译检查；
+`compile_contiguous.py`已补上两步，用已有CPU fixture检查，不为可在CPU判定的错误占卡。
+保留[最小候选及错误记录](results/csa_split_optimization_20260927/v11_native_publish/README.md)。
+两次失败任务task_20260927_130109_3593909330、task_20260927_131614_41763712433均未执行新设备kernel。
+下一步继续保留v8～v10，补齐短路径受影响的B16/B32/B40；融合发布等scope问题解决后再恢复。
+
+## 183. 已保留Indexer短路径补齐与阶段汇总（2026-09-27）
+
+固定源码0ed4f926，经任务task_20260927_132128_44590027127（退出0）补8K/B16、B32、B40。
+正式layer 4权重+合成输入/历史、S6/TP1、mode2、atomic1、确定性0、EPLB关闭，
+复用第二个CSA层metadata；无profiler预热5次、计时20次，各另采4个PTO DFX窗口。
+未重复旧七档v4/v7或未受影响的长历史候选，也未重新采集PyTorch profiler。
+
+| B | v7本体 μs | 本次本体 μs | 对v7 | 同轮Native μs | 本体对Native | 完整PTO μs |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 16 | 824.88 | 790.88 | -4.12% | 941.46 | -15.99% | 1085.69 |
+| 32 | 1248.33 | 1196.32 | -4.17% | 1283.66 | -6.80% | 1516.50 |
+| 40 | 1511.62 | 1428.20 | -5.52% | 1405.57 | +1.61% | 1771.34 |
+
+Score核内四窗口均值范围分别为26.30～36.59、47.19～59.23、73.98～74.56 μs；
+Score→publish分别为62.98～70.08、87.64～141.68、109.64～156.54 μs。
+后两档仍有调度/独立归并窗口波动，不能把核内降低等同于全部Indexer已赶上Native。
+三档metadata/slot保护区与Top-K结构通过，非有限值0；输出max_abs=0.03125，
+RMSE=0.0033201/0.0032885/0.0032927，Top-K集合替换366/729/901，零容差FAIL保留。
+新FP16/Top-K策略的真实模型token/DSpark验收未完成。
+
+[补测记录与运行脚本](results/csa_split_optimization_20260927/v10_short_followup/README.md)。
+[阶段汇总](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)复用有效的v8/v9/v10结果，
+明确逐行源码、同轮Native与缺失的128K/B8新泳道，不伪装为统一重跑矩阵。
+[之前七档v4/v7](results/csa_native_cube_matrix_20260927/README.md)及§178保持原口径不变。
+下一步为长上下文尾部、Top-K/系数任务成本及新策略整模型看护；B40本体仍慢1.61%，
+完整PTO七档仍慢于Native，<750 μs目标未完成。
