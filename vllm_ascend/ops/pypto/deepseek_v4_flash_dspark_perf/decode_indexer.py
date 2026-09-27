@@ -17,6 +17,7 @@ from .config import (
     DECODE_BATCH,
     DECODE_SEQ,
     FP32_NEG_INF,
+    INDEXER_NATIVE_CUBE_MIN_ROWS,
     INT8_AMAX_EPS,
     INT8_SCALE_MAX,
     TP,
@@ -749,12 +750,11 @@ def indexer_score_topk_forest(
     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
-    # Long histories use Native's FP16/Cube head reduction; short histories
-    # keep the existing Vector path until the body timing justifies changing it.
+    # 8K及长上下文统一尝试片上FP16/Cube规约；更短历史保留Vector路径。
     max_topk_cache_len = 0
     for topk_batch in pl.range(b_dim):
         max_topk_cache_len = pl.max(max_topk_cache_len, pl.read(kv_seq_lens, [topk_batch]) // COMPRESS_RATIO)
-    if max_topk_cache_len > TOPK_CANDIDATES_PER_LEAF:
+    if max_topk_cache_len >= INDEXER_NATIVE_CUBE_MIN_ROWS:
         score_tid = indexer_score_topk_native_cube(
             qr_hadamard_i8,
             qr_hadamard_scale_dq,
@@ -874,7 +874,7 @@ def indexer_score_topk_forest(
         topk_cache_len = pl.read(kv_seq_lens, [topk_batch]) // COMPRESS_RATIO
         max_topk_cache_len = pl.max(max_topk_cache_len, topk_cache_len)
     with pl.scope():
-        if max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
+        if max_topk_cache_len < INDEXER_NATIVE_CUBE_MIN_ROWS:
             with pl.spmd(
                 TOPK_QUERY_WORKERS,
                 name_hint="indexer_topk_single_leaf_publish",

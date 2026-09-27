@@ -8,10 +8,11 @@ FP16 scales retain the Native rounding contract. Score tiles widen to FP32.
 
 import torch
 
+from .config import INDEXER_NATIVE_CUBE_MIN_ROWS
+
 INDEXER_PAGE_ROWS = 32
 SCORE_DIRECT_TILE_ROWS = 384
 SCORE_BUFFERED_TILE_ROWS = 768
-SCORE_LEAF_ROWS = 8192
 
 
 class SplitIndexerCache:
@@ -27,7 +28,7 @@ class SplitIndexerCache:
         self.table_columns = table_columns
         # The last tile can have only one valid candidate. Reserve a full tile
         # beyond the table width so both lanes remain inside the allocation.
-        score_tile = (SCORE_BUFFERED_TILE_ROWS if table_columns * INDEXER_PAGE_ROWS > SCORE_LEAF_ROWS
+        score_tile = (SCORE_BUFFERED_TILE_ROWS if table_columns * INDEXER_PAGE_ROWS >= INDEXER_NATIVE_CUBE_MIN_ROWS
                       else SCORE_DIRECT_TILE_ROWS)
         tail_pages = (score_tile - 1 + INDEXER_PAGE_ROWS - 1) // INDEXER_PAGE_ROWS
         self.request_pages = table_columns + tail_pages

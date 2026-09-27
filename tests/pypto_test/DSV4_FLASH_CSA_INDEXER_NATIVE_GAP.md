@@ -61,3 +61,14 @@ v4移植并扩大启用范围；v7进一步采用 Native 的片上Score与Cube W
 - [Native流水和分块](../../csrc/attention/vllm_quant_lightning_indexer/op_kernel/arch32/quant_lightning_indexer_kernel.h)：`M_BASE_SIZE=256`、`S2_BASE_SIZE=2048`、`ProcessBaseBlock`。
 - [Native分核](../../csrc/attention/vllm_quant_lightning_indexer_metadata/op_kernel_aicpu/vllm_quant_lightning_indexer_metadata_aicpu.cpp)：`CalcCostTable`与S1G/S2任务划分。
 - [PTO实现](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)：`indexer_score_topk_native_cube`、`indexer_score_topk_forest`、`indexer_topk_half_leaf`。
+
+## v8补测发现的工作分配问题
+
+128K/B8两个query分组后，本体947.36→894.54 μs；B16为1458.16→1292.23 μs。
+B4则749.03→766.65 μs，发生回退，不能用B16收益覆盖它。
+S6验证包含新增压缩候选，使总范围有4个完整8192 leaf和第5个极短leaf。
+B4共有12个query组，按 `query_group * 5 + leaf` 再以24步长轮转分派时，
+24个逻辑worker承担的完整leaf数为：4个worker仅1个、16个worker各2个、4个worker各3个。
+因此实例数接近均衡并不等于工作量均衡。
+改为先遍历leaf、再遍历query组后，48个完整leaf可恰好分到24个worker，每个2个，短尾单独分配。
+这是源码/任务映射推导，尚待设备确认收益；不等于物理核重复分配的长尾已经解决。

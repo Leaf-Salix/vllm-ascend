@@ -8,6 +8,9 @@ kind="${4:-timing}"
 workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 source_repo="$repo"
+if [[ "$label" == v8_native_pair ]]; then
+    source_repo="$workspace/.cache/csa-native-v8-05e0b518"
+fi
 if [[ "$label" == baseline_cd1fdaa1 ]]; then
     source_repo="$workspace/.cache/csa-split-baseline-cd1fdaa1"
 fi
