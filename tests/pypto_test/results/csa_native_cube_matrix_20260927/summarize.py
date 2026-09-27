@@ -43,7 +43,12 @@ def guard_failures(value, prefix=""):
 def summarize_timing(path):
     report = read_json(path)
     timing = report["timing"]
-    phases = timing["split_cache_phases"]
+    phases = timing.get("split_cache_phases")
+    if phases is None:
+        if report.get("indexer_cache_binding", {}).get("history_copy_before_csa") is not False:
+            raise ValueError(f"Missing cache phase boundary: {path}")
+        phases = {"csa_body": timing["pto"], "split": {"eliminated": True},
+                  "slot_writeback": {"eliminated": True}}
     output = report["pto_native"]["x_out"]
     guards = {key: report[key] for key in ("native_guards", "pto_guards")}
     for side in ("native", "pto"):

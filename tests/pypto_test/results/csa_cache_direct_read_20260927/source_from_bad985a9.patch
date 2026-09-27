@@ -1,0 +1,692 @@
+diff --git a/tests/pypto_test/dsv4_csa_single_layer.py b/tests/pypto_test/dsv4_csa_single_layer.py
+index a51577a7..2b254fc8 100644
+--- a/tests/pypto_test/dsv4_csa_single_layer.py
++++ b/tests/pypto_test/dsv4_csa_single_layer.py
+@@ -723,6 +723,17 @@ def run(args, report):
+             layer_name=fixture["groups"]["compressed"]["prefix"],
+             compact_metadata=fixture["compact"],
+         )
++        report["indexer_cache_binding"] = {
++            "history_copy_before_csa": hasattr(call, "prepare_indexer_cache"),
++            "native_storage_ptr": groups["indexer"][1][0].untyped_storage().data_ptr(),
++            "root_views": {
++                name: {"shape": list(value.shape), "stride": list(value.stride()),
++                       "storage_offset": value.storage_offset(),
++                       "storage_ptr": value.untyped_storage().data_ptr()}
++                for name, value in call.args.items()
++                if name in ("idx_kv_cache", "idx_kv_cache_shift64", "idx_native_kv_cache", "idx_kv_scale")
++            },
++        }
+         restore(fixture)
+         if args.save_case:
+             if hasattr(call, "prepare_indexer_cache"):
+diff --git a/tests/pypto_test/test_csa_split_cache.py b/tests/pypto_test/test_csa_split_cache.py
+deleted file mode 100644
+index 98052fb2..00000000
+--- a/tests/pypto_test/test_csa_split_cache.py
++++ /dev/null
+@@ -1,78 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-"""Request-major cache: permuted pages, padding, refresh, and physical slot commits."""
+-
+-import torch
+-
+-from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.indexer_cache import SplitIndexerCache
+-
+-
+-def cache_views():
+-    page_bytes, prefix, pages = 4224, 64, 6
+-    raw = torch.full((prefix + pages * page_bytes + 64,), 37, dtype=torch.int8)
+-    key = raw.as_strided((pages, 32, 1, 128), (page_bytes, 128, 128, 1), prefix)
+-    scale = raw.view(torch.float16).as_strided((pages, 32, 1, 1), (page_bytes // 2, 1, 1, 1),
+-                                             (prefix + 4096) // 2)
+-    key.copy_((torch.arange(key.numel()).reshape(key.shape) % 127 - 63).to(torch.int8))
+-    scale.copy_((torch.arange(scale.numel()).reshape(scale.shape) / 128 + 0.125).half())
+-    return raw, key, scale
+-
+-
+-def metadata():
+-    table = torch.tensor([[2, 4, 0], [1, 3, 5], [-1, -1, -1]], dtype=torch.int32)
+-    lengths = torch.tensor([132, 262, 0], dtype=torch.int32)
+-    bounds = torch.tensor([0, 6, 12, 12], dtype=torch.int32)
+-    return table, lengths, bounds
+-
+-
+-def test_split_cache_orders_logical_pages_and_refreshes_without_aliasing():
+-    raw, key, scale = cache_views()
+-    before = raw.clone()
+-    table, lengths, _ = metadata()
+-    cache = SplitIndexerCache(key, scale, batch_capacity=3, table_columns=3)
+-    cache.load(table, lengths)
+-    assert cache.key.is_contiguous() and cache.scale.is_contiguous()
+-    # Even a 33-candidate request issues a whole 384-candidate Score tile.
+-    assert cache.key.view(3, cache.request_rows, 128)[-1, :384].shape[0] == 384
+-    # Physical pages [2,4] and [1,3,5] become contiguous request-local ranges.
+-    # Tail pages repeat the last visible page; the padding request is safe.
+-    expected_pages = ([2] + [4] * (cache.request_pages - 1)
+-                      + [1, 3] + [5] * (cache.request_pages - 2) + [0] * cache.request_pages)
+-    assert torch.equal(cache.key, key[expected_pages])
+-    assert torch.equal(cache.scale, scale[expected_pages])
+-    assert torch.equal(raw, before)
+-    cache.key[0, 31].fill_(9)
+-    assert not torch.equal(cache.key[0], key[2])
+-    key[1, 7].fill_(23)
+-    scale[1, 7].fill_(0.75)
+-    table[1, 0] = 0
+-    cache.load(table, lengths)
+-    expected_pages[cache.request_pages] = 0
+-    assert torch.equal(cache.key, key[expected_pages])
+-    assert torch.equal(cache.scale, scale[expected_pages])
+-    assert cache.matches(key, scale)
+-    assert not cache.matches(key.clone(), scale.clone())
+-
+-
+-def test_split_cache_commits_only_current_valid_slots(monkeypatch):
+-    raw, key, scale = cache_views()
+-    table, lengths, bounds = metadata()
+-    cache = SplitIndexerCache(key, scale, batch_capacity=3, table_columns=3)
+-    cache.load(table, lengths)
+-    slots = torch.tensor([[2, 31], [4, 0], [5, 0], [-1, -1]], dtype=torch.int32)
+-    expected = raw.clone()
+-    for logical, page, row, value in ((31, 2, 31, 11), (32, 4, 0, 17), (cache.request_rows + 64, 5, 0, 23)):
+-        cache.key.view(-1, 128)[logical].fill_(value)
+-        cache.scale.view(-1)[logical] = value / 32
+-        start = key.storage_offset() + page * key.stride(0) + row * 128
+-        expected[start:start + 128].fill_(value)
+-        offset = scale.storage_offset() + page * scale.stride(0) + row
+-        expected.view(torch.float16)[offset] = value / 32
+-
+-    def reference_scatter(target, indices, values):
+-        for index, (page, row) in enumerate(indices.tolist()):
+-            if page >= 0 and row >= 0:
+-                target[page, row].copy_(values[index])
+-
+-    monkeypatch.setattr(torch.ops._C_ascend, "npu_scatter_nd_update_v2", reference_scatter, raising=False)
+-    cache.commit(slots, lengths, bounds)
+-    assert torch.equal(raw, expected)
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+index 15d110a1..a867fc01 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -53,7 +53,6 @@ B_DYN = pl.dynamic("B_DYN")  # per-request axis
+ T_DYN = pl.dynamic("T_DYN")  # T = B * S
+ ORI_BLOCK_NUM_DYN = pl.dynamic("ORI_BLOCK_NUM_DYN")
+ CMP_BLOCK_NUM_DYN = pl.dynamic("CMP_BLOCK_NUM_DYN")
+-IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
+ IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
+ MAIN_STATE_BLOCK_NUM_DYN = pl.dynamic("CSA_STATE_BLOCK_NUM_DYN")
+ INNER_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
+@@ -159,8 +158,6 @@ def _decode_csa_tp1_layer(
+     kv_cache: pl.InOut[pl.Tensor[[ORI_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16]],
+     cmp_kv: pl.InOut[pl.Tensor[[CMP_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16]],
+     cmp_block_table: pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32],
+-    idx_kv_cache: pl.InOut[pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8]],
+-    idx_kv_scale: pl.InOut[pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16]],
+     idx_native_kv_cache: pl.InOut[pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]],
+     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     ori_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+@@ -213,8 +210,6 @@ def _decode_csa_tp1_layer(
+     inner_state_block_table.bind_dynamic(1, INNER_STATE_TABLE_COLUMNS_DYN)
+     kv_cache.bind_dynamic(0, ORI_BLOCK_NUM_DYN)
+     cmp_kv.bind_dynamic(0, CMP_BLOCK_NUM_DYN)
+-    idx_kv_cache.bind_dynamic(0, IDX_CACHE_BLOCK_NUM_DYN)
+-    idx_kv_scale.bind_dynamic(0, IDX_CACHE_BLOCK_NUM_DYN)
+     idx_native_kv_cache.bind_dynamic(0, IDX_NATIVE_CACHE_BLOCK_NUM_DYN)
+     idx_native_kv_cache.bind_dynamic(1, INDEXER_PAGE_BYTES_DYN)
+     ori_slot_mapping.bind_dynamic(0, T_DYN)
+@@ -395,8 +390,6 @@ def _decode_csa_tp1_layer(
+             inner_freqs_sin,
+             idx_row_offsets,
+             hadamard_idx,
+-            idx_kv_cache,
+-            idx_kv_scale,
+             idx_native_kv_cache,
+             position_ids,
+             kv_seq_lens,
+@@ -417,8 +410,7 @@ def _decode_csa_tp1_layer(
+                 freqs_cos,
+                 idx_sin_signed,
+                 hadamard_idx,
+-                idx_kv_cache,
+-                idx_kv_scale,
++                idx_native_kv_cache,
+                 idx_block_table,
+                 idx_topk_scores,
+                 idx_topk,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index c87b042c..14aee376 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -26,6 +26,8 @@ from .config import (
+     FLASH as M,
+ )
+ from .layout import (
++    INDEXER_KEY_BYTES,
++    INDEXER_PAGE_BYTES_DYN,
+     INDEXER_TABLE_COLUMNS_DYN,
+ )
+ 
+@@ -82,7 +84,7 @@ IDX_MAX_ROWS = MAX_SEQ_LEN // COMPRESS_RATIO
+ 
+ IDX_MAX_BLOCKS = (IDX_MAX_ROWS + BLOCK_SIZE - 1) // BLOCK_SIZE
+ 
+-IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
++IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
+ 
+ CACHE_TILE = min(64, BLOCK_SIZE)
+ 
+@@ -446,8 +448,8 @@ def indexer_score_topk_native_cube(
+     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
+     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
+     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
++    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
++    idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+@@ -458,11 +460,17 @@ def indexer_score_topk_native_cube(
+     score_tile: pl.constexpr,
+ ):
+     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
+-    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+-    batch_count = pl.tensor.dim(kv_seq_lens, 0)
+-    request_rows = cache_pages // batch_count * BLOCK_SIZE
+-    kv_cache_i8_flat = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
+-    kv_scale_rows = pl.reshape(idx_kv_scale, [batch_count, request_rows])
++    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
++    # Zero-copy GM descriptors inside orchestration, as validation log §116.
++    # One writable root allocation avoids partial-overlap Torch ABI arguments.
++    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
++    key_rows = cache_bytes // IDX_HEAD_DIM
++    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
++    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
++    idx_kv_cache_shift64 = pl.reshape(
++        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
++    )
+     coefficients, coefficients_tid = indexer_head_coefficients(
+         qr_hadamard_scale_dq,
+         weights,
+@@ -531,19 +539,30 @@ def indexer_score_topk_native_cube(
+                         [score_tile, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                     )
+                     for buf_key_lane in pl.unroll(2):
+-                        buf_kv_i8 = pl.gather_row(
+-                            buf_kv_i8,
+-                            kv_cache_i8_flat,
+-                            [buf_key_lane * (score_tile // 2), 0],
+-                            [
+-                                buf_batch_idx * request_rows
+-                                + buf_logical_begin
+-                                + buf_score_begin
+-                                + buf_key_lane * buf_lane_span,
+-                                0,
+-                            ],
+-                            [(score_tile // 2), IDX_HEAD_DIM],
+-                        )
++                        for buf_key_page in pl.range((score_tile // 2) // BLOCK_SIZE):
++                            buf_key_row = (buf_logical_begin + buf_score_begin
++                                           + buf_key_lane * buf_lane_span + buf_key_page * BLOCK_SIZE)
++                            buf_safe_page = pl.min(
++                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                            )
++                            buf_physical_page = pl.max(
++                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
++                            )
++                            buf_native_byte = buf_physical_page * native_page_bytes
++                            # Native pages are 64-byte aligned; select the zero-copy
++                            # carrier whose 128-byte rows start at this page's key.
++                            if buf_native_byte % IDX_HEAD_DIM == 0:
++                                buf_kv_i8 = pl.gather_row(
++                                    buf_kv_i8, idx_kv_cache,
++                                    [buf_key_lane * (score_tile // 2) + buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
++                            else:
++                                buf_kv_i8 = pl.gather_row(
++                                    buf_kv_i8, idx_kv_cache_shift64,
++                                    [buf_key_lane * (score_tile // 2) + buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
+                     buf_previous_l1 = pl.tile.create(
+                         [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                     )
+@@ -635,11 +654,22 @@ def indexer_score_topk_native_cube(
+                         pl.system.sync_set(
+                             SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+                         )
+-                        buf_scale_half = pl.load(
+-                            kv_scale_rows,
+-                            [buf_batch_idx, buf_logical_begin + buf_score_begin + buf_lane_begin],
+-                            [1, (score_tile // 2)],
+-                        )
++                        buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
++                        for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
++                            buf_scale_row = (
++                                buf_logical_begin + buf_score_begin + buf_lane_begin + buf_scale_page * BLOCK_SIZE
++                            )
++                            buf_scale_safe_page = pl.min(
++                                buf_scale_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                            )
++                            buf_scale_physical_page = pl.max(
++                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
++                            )
++                            buf_scale_bytes = pl.gather_row(
++                                buf_scale_bytes, idx_native_kv_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
++                                [buf_scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                            )
++                        buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
+                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
+                         for buf_query_lane in pl.unroll(2):
+                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+@@ -699,8 +729,7 @@ def indexer_score_topk_forest(
+     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
+     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
+     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
++    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+@@ -712,12 +741,17 @@ def indexer_score_topk_forest(
+ ):
+     """Score and select half-leaves, then merge their exact Top-K rows."""
+     b_dim = pl.tensor.dim(idx_block_table, 0)
+-    # The Torch bridge orders all pages by request and logical page before CSA.
+-    # The two AIV lanes can each load one contiguous 192-row key range.
+-    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+-    request_rows = cache_pages // b_dim * BLOCK_SIZE
+-    kv_cache_i8_flat = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
+-    kv_scale_rows = pl.reshape(idx_kv_scale, [b_dim, request_rows])
++    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
++    # Zero-copy GM descriptors inside orchestration, as validation log §116.
++    # One writable root allocation avoids partial-overlap Torch ABI arguments.
++    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
++    key_rows = cache_bytes // IDX_HEAD_DIM
++    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
++    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
++    idx_kv_cache_shift64 = pl.reshape(
++        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
++    )
+     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
+     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
+     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+@@ -733,8 +767,8 @@ def indexer_score_topk_forest(
+                 qr_hadamard_i8,
+                 qr_hadamard_scale_dq,
+                 weights,
+-                idx_kv_cache,
+-                idx_kv_scale,
++                idx_native_kv_cache,
++                idx_block_table,
+                 position_ids,
+                 kv_seq_lens,
+                 score_arena,
+@@ -749,8 +783,8 @@ def indexer_score_topk_forest(
+                 qr_hadamard_i8,
+                 qr_hadamard_scale_dq,
+                 weights,
+-                idx_kv_cache,
+-                idx_kv_scale,
++                idx_native_kv_cache,
++                idx_block_table,
+                 position_ids,
+                 kv_seq_lens,
+                 score_arena,
+@@ -810,13 +844,25 @@ def indexer_score_topk_forest(
+                         read_begin = score_begin * (1 + single_leaf)
+                         kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8)
+                         for key_lane in pl.unroll(2):
+-                            kv_i8 = pl.gather_row(
+-                                kv_i8,
+-                                kv_cache_i8_flat,
+-                                [key_lane * SCORE_LANE_ROWS, 0],
+-                                [batch_idx * request_rows + logical_begin + read_begin + key_lane * lane_stride, 0],
+-                                [SCORE_LANE_ROWS, IDX_HEAD_DIM],
+-                            )
++                            for key_page in pl.range(SCORE_LANE_ROWS // BLOCK_SIZE):
++                                key_row = logical_begin + read_begin + key_lane * lane_stride + key_page * BLOCK_SIZE
++                                safe_page = pl.min(key_row // BLOCK_SIZE, pl.max((cache_len - 1) // BLOCK_SIZE, 0))
++                                physical_page = pl.max(
++                                    pl.cast(pl.read(idx_block_table, [batch_idx, safe_page]), pl.INDEX), 0
++                                )
++                                native_byte = physical_page * native_page_bytes
++                                if native_byte % IDX_HEAD_DIM == 0:
++                                    kv_i8 = pl.gather_row(
++                                        kv_i8, idx_kv_cache,
++                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
++                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                    )
++                                else:
++                                    kv_i8 = pl.gather_row(
++                                        kv_i8, idx_kv_cache_shift64,
++                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
++                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                    )
+                         # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
+                         # 每个 score tile 一次 FP32->FP16 转换和一次 Cube matmul。
+                         # 精度版那条链（NATIVE_QLI_QK_SCALE + FP16 rint + Cube）是为了
+@@ -827,9 +873,18 @@ def indexer_score_topk_forest(
+                             lane_begin = aiv_id * lane_stride
+                             lane_valid_rows = pl.max(pl.min(valid_count - read_begin - lane_begin, SCORE_LANE_ROWS), 0)
+                             scale_begin = logical_begin + read_begin + lane_begin
+-                            kv_scale = kv_scale_rows[
+-                                batch_idx : batch_idx + 1, scale_begin : scale_begin + SCORE_LANE_ROWS
+-                            ]
++                            scale_bytes = pl.create_tensor([1, SCORE_LANE_ROWS * 2], dtype=pl.INT8)
++                            for scale_page in pl.range(SCORE_LANE_ROWS // BLOCK_SIZE):
++                                scale_logical_page = pl.min((scale_begin + scale_page * BLOCK_SIZE) // BLOCK_SIZE,
++                                                            pl.max((cache_len - 1) // BLOCK_SIZE, 0))
++                                scale_physical_page = pl.max(
++                                    pl.cast(pl.read(idx_block_table, [batch_idx, scale_logical_page]), pl.INDEX), 0
++                                )
++                                scale_bytes = pl.gather_row(
++                                    scale_bytes, idx_native_kv_cache, [0, scale_page * BLOCK_SIZE * 2],
++                                    [scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                                )
++                            kv_scale = pl.reinterpret_view(scale_bytes, pl.FP16)
+                             score_shard = pl.aiv_shard(score_i32)
+                             score_fp32 = pl.cast(score_shard, target_type=pl.FP32, mode="none")
+                             score_fp32 = pl.maximum(score_fp32, 0.0)
+@@ -1142,8 +1197,7 @@ def indexer_weights_score(
+     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
+     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
+     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
++    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
+     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
+@@ -1161,8 +1215,7 @@ def indexer_weights_score(
+         qr_hadamard_i8,
+         qr_hadamard_scale_dq,
+         weights,
+-        idx_kv_cache,
+-        idx_kv_scale,
++        idx_native_kv_cache,
+         idx_block_table,
+         position_ids,
+         kv_seq_lens,
+@@ -1186,8 +1239,7 @@ def indexer(
+     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
+     hadamard: pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
++    idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
+     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
+@@ -1216,8 +1268,7 @@ def indexer(
+         weights_proj,
+         qr_hadamard_i8,
+         qr_hadamard_scale_dq,
+-        idx_kv_cache,
+-        idx_kv_scale,
++        idx_native_kv_cache,
+         idx_block_table,
+         topk_scores,
+         topk_idxs,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+index b18e07d3..6270eb5d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+@@ -75,7 +75,6 @@ COMPRESS_STATE_DIM = 2 * OUT_DIM
+ 
+ IDX_MAX_BLOCKS = (MAX_SEQ_LEN // COMPRESS_RATIO + BLOCK_SIZE - 1) // BLOCK_SIZE
+ 
+-IDX_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_CACHE_BLOCK_NUM_DYN")
+ IDX_NATIVE_CACHE_BLOCK_NUM_DYN = pl.dynamic("IDX_NATIVE_CACHE_BLOCK_NUM_DYN")
+ 
+ COMPRESS_STATE_BLOCK_NUM_DYN = pl.dynamic("INNER_STATE_BLOCK_NUM_DYN")
+@@ -404,8 +403,6 @@ def indexer_compressor_write(
+     kv: pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32],
+     normed_kv: pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16],
+     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+     idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
+     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+@@ -419,10 +416,6 @@ def indexer_compressor_write(
+     compact_rows = (bs // S) * BOUNDARY_ROWS_PER_REQUEST
+     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
+     kv_flat = kv
+-    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+-    request_rows = cache_pages // pl.tensor.dim(seq_lens, 0) * BLOCK_SIZE
+-    key_rows = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, HEAD_DIM])
+-    scale_pages = pl.reshape(idx_kv_scale, [cache_pages, BLOCK_SIZE])
+     idx_kv_scale_values = pl.create_tensor([BS_PAD, 1], dtype=pl.FP32)
+ 
+     kv_final = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
+@@ -501,13 +494,8 @@ def indexer_compressor_write(
+                 native_page = pl.read(idx_slot_mapping, [safe_row, 0])
+                 native_offset = pl.read(idx_slot_mapping, [safe_row, 1])
+                 if metadata_row < idx_rows and native_page >= 0 and native_offset >= 0:
+-                    cache_row = request * request_rows + token_pos // COMPRESS_RATIO
+                     kv_flat[token : token + 1, :] = kv_blk_f32[inner : inner + 1, :]
+-                    key_rows[cache_row : cache_row + 1, 0:HEAD_DIM] = kv_i8_blk[
+-                        inner : inner + 1, :
+-                    ]
+-                    # Publish the same quantized row to Native storage. This
+-                    # replaces the external Torch slot lookup and scatter.
++                    # Update the canonical Native slot directly.
+                     native_cache_page = pl.cast(native_page, pl.INDEX)
+                     native_key_begin = pl.cast(native_offset, pl.INDEX) * HEAD_DIM
+                     idx_native_kv_cache[
+@@ -547,18 +535,7 @@ def indexer_compressor_write(
+                 native_page = pl.read(idx_slot_mapping, [safe_row, 0])
+                 native_offset = pl.read(idx_slot_mapping, [safe_row, 1])
+                 if metadata_row < idx_rows and native_page >= 0 and native_offset >= 0:
+-                    cache_row = request * request_rows + token_pos // COMPRESS_RATIO
+-                    # Merge exactly one scale into the aligned 64-byte
+-                    # region. One task serializes updates to shared pages.
+-                    scale_page = cache_row // BLOCK_SIZE
+-                    scale_half = pl.tile.load(scale_pages, [scale_page, 0], [1, BLOCK_SIZE])
+                     scale_value = pl.cast(pl.read(idx_kv_scale_values, [compact_token, 0]), pl.FP16)
+-                    pl.tile.write(
+-                        scale_half,
+-                        [0, cache_row % BLOCK_SIZE],
+-                        scale_value,
+-                    )
+-                    pl.tile.store(scale_half, [scale_page, 0], scale_pages)
+                     # Native packs 32 FP16 scales into one aligned 64-byte
+                     # region. Serialize read-modify-write to preserve the
+                     # neighboring history slots, just as the precision path.
+@@ -588,8 +565,6 @@ def indexer_compressor(
+     sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
+     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
+-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
+-    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
+     idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+@@ -620,8 +595,6 @@ def indexer_compressor(
+         kv,
+         normed_kv,
+         hadamard,
+-        idx_kv_cache,
+-        idx_kv_scale,
+         idx_native_kv_cache,
+         idx_slot_mapping,
+         compact_offsets,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/indexer_cache.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/indexer_cache.py
+deleted file mode 100644
+index 26baf4f1..00000000
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/indexer_cache.py
++++ /dev/null
+@@ -1,80 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-"""Torch bridge from Native pages to request-major contiguous key/scale rows.
+-
+-Copies execute on the caller's stream and are captured in ACL Graph. The PTO
+-Compressor writes current compact slots directly to the original Native cache.
+-FP16 scales retain the Native rounding contract. Score tiles widen to FP32.
+-"""
+-
+-import torch
+-
+-from .config import INDEXER_NATIVE_CUBE_MIN_ROWS
+-
+-INDEXER_PAGE_ROWS = 32
+-SCORE_DIRECT_TILE_ROWS = 384
+-SCORE_BUFFERED_TILE_ROWS = 1024  # 覆盖长历史Score的最大物理读取范围。
+-
+-
+-class SplitIndexerCache:
+-    def __init__(self, key: torch.Tensor, scale: torch.Tensor, *, batch_capacity: int, table_columns: int):
+-        if key.dtype != torch.int8 or tuple(key.shape[1:]) != (32, 1, 128):
+-            raise ValueError("Expected INT8 indexer keys [pages, 32, 1, 128]")
+-        if scale.dtype != torch.float16 or tuple(scale.shape) != (key.shape[0], 32, 1, 1):
+-            raise ValueError("Expected FP16 indexer scales [pages, 32, 1, 1]")
+-        if key.device != scale.device:
+-            raise ValueError("Indexer key and scale must be on the same device")
+-        self.native_key, self.native_scale = key, scale
+-        self.batch_capacity = batch_capacity
+-        self.table_columns = table_columns
+-        # The last tile can have only one valid candidate. Reserve a full tile
+-        # beyond the table width so both lanes remain inside the allocation.
+-        score_tile = (SCORE_BUFFERED_TILE_ROWS if table_columns * INDEXER_PAGE_ROWS >= INDEXER_NATIVE_CUBE_MIN_ROWS
+-                      else SCORE_DIRECT_TILE_ROWS)
+-        tail_pages = (score_tile - 1 + INDEXER_PAGE_ROWS - 1) // INDEXER_PAGE_ROWS
+-        self.request_pages = table_columns + tail_pages
+-        self.request_rows = self.request_pages * 32
+-        pages = batch_capacity * self.request_pages
+-        self.key = torch.empty((pages, 32, 1, 128), dtype=key.dtype, device=key.device)
+-        self.scale = torch.empty((pages, 32, 1, 1), dtype=scale.dtype, device=scale.device)
+-        self.page_indices = torch.arange(self.request_pages, dtype=torch.int64, device=key.device).view(1, -1)
+-
+-    def matches(self, key: torch.Tensor, scale: torch.Tensor) -> bool:
+-        return all(
+-            source.device == target.device and source.dtype == target.dtype
+-            and source.shape == target.shape and source.stride() == target.stride()
+-            and source.data_ptr() == target.data_ptr()
+-            for source, target in ((key, self.native_key), (scale, self.native_scale))
+-        )
+-
+-    def views(self, batch: int):
+-        if not 1 <= batch <= self.batch_capacity:
+-            raise ValueError("Logical indexer cache exceeds its warmed batch capacity")
+-        pages = batch * self.request_pages
+-        return self.key[:pages], self.scale[:pages]
+-
+-    def load(self, block_table: torch.Tensor, seq_lens: torch.Tensor):
+-        if block_table.shape[1] != self.table_columns:
+-            raise ValueError("Logical indexer cache page-table width changed after allocation")
+-        key, scale = self.views(seq_lens.numel())
+-        last_page = ((seq_lens.to(torch.int64) // 4 - 1).clamp_min(0) // 32).view(-1, 1)
+-        logical_pages = torch.minimum(self.page_indices, last_page)
+-        physical_pages = torch.gather(block_table, 1, logical_pages).clamp_min(0).reshape(-1)
+-        torch.index_select(self.native_key, 0, physical_pages, out=key)
+-        torch.index_select(self.native_scale, 0, physical_pages, out=scale)
+-
+-    def slot_updates(self, slots: torch.Tensor, seq_lens: torch.Tensor, query_bounds: torch.Tensor):
+-        """Diagnostic view of updated rows; production publishes them inside CSA."""
+-        # Reproduce Native compact-row ownership, including zero-token padding
+-        # requests. Match the Native slot order for comparison after the call.
+-        starts = seq_lens - (query_bounds[1:] - query_bounds[:-1])
+-        counts = seq_lens // 4 - starts // 4
+-        ends = counts.cumsum(0)
+-        metadata_rows = torch.arange(slots.shape[0], device=slots.device, dtype=torch.int64)
+-        requests = torch.searchsorted(ends, metadata_rows, right=True).clamp_max(seq_lens.numel() - 1)
+-        prefix = ends - counts
+-        rows = requests * self.request_rows + (starts // 4)[requests] + metadata_rows - prefix[requests]
+-        valid = (slots[:, 0] >= 0) & (slots[:, 1] >= 0)
+-        rows = torch.where(valid, rows, 0)
+-        keys = torch.index_select(self.key.view(-1, 128), 0, rows).view(-1, 1, 128)
+-        scales = torch.index_select(self.scale.view(-1, 1), 0, rows).view(-1, 1, 1)
+-        return keys, scales
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+index 5b13ea9e..d403947b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+@@ -6,7 +6,6 @@ from ..deepseek_v4_flash_dspark.native_adapter import NativeCSACall as _NativeCS
+ from ..deepseek_v4_flash_dspark.native_adapter import prepare_weights as _prepare_weights
+ from ..deepseek_v4_flash_dspark.native_storage import indexer_storage
+ from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
+-from .indexer_cache import SplitIndexerCache
+ 
+ 
+ class CSAOperators(_CSAOperators):
+@@ -20,29 +19,9 @@ def prepare_weights(attention, hadamard, layer=None):
+ 
+ 
+ class NativeCSACall(_NativeCSACall):
+-    def __init__(self, *args, indexer_cache=None, **kwargs):
+-        self.indexer_cache = indexer_cache
++    def __init__(self, *args, **kwargs):
+         super().__init__(*args, kernel=decode_csa_tp1_layer_test, **kwargs)
+ 
+     def _indexer_cache_arguments(self):
+-        key, scale = self.views["indexer"]
+-        native_cache = indexer_storage(key, scale)
+-        if self.indexer_cache is None:
+-            self.indexer_cache = SplitIndexerCache(
+-                key, scale, batch_capacity=self.req["indexer"].seq_lens.numel(),
+-                table_columns=self.tables["indexer"].shape[1],
+-            )
+-        elif not self.indexer_cache.matches(key, scale):
+-            raise ValueError("Prepared split cache belongs to a different Native allocation")
+-        key, scale = self.indexer_cache.views(self.req["indexer"].seq_lens.numel())
+-        return {"idx_kv_cache": key, "idx_kv_scale": scale, "idx_native_kv_cache": native_cache}
+-
+-    def prepare_indexer_cache(self):
+-        self.indexer_cache.load(self.args["idx_block_table"], self.args["kv_seq_lens"])
+-
+-    def run_kernel(self):
+-        return super().__call__()
+-
+-    def __call__(self):
+-        self.prepare_indexer_cache()
+-        return self.run_kernel()
++        native_cache = indexer_storage(*self.views["indexer"])
++        return {"idx_native_kv_cache": native_cache}
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/service.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/service.py
+index ac867915..06139c2d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/service.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/service.py
+@@ -3,8 +3,6 @@
+ 
+ import torch
+ 
+-from ..deepseek_v4_flash_dspark.native_storage import table_storage
+-from .indexer_cache import SplitIndexerCache
+ from .native_adapter import NativeCSACall, prepare_weights
+ from .service_config import MAX_BATCH_SIZE, QUERY_TOKENS
+ 
+@@ -42,7 +40,6 @@ class CSAServiceRuntime:
+         self.scores = torch.empty((tokens, 512), dtype=torch.float32, device=device)
+         self.topk = torch.empty((tokens, 512), dtype=torch.int32, device=device)
+         self._hadamard = None
+-        self._indexer_cache = None
+ 
+     def eligible(self, context, hidden, positions):
+         metadata = context.attn_metadata
+@@ -130,13 +127,6 @@ class CSAServiceRuntime:
+             for name in ("compressed", "indexer")
+         }
+         compressed, swa, state, indexer_state, indexer_key, indexer_scale = kv_cache
+-        if self._indexer_cache is None or not self._indexer_cache.matches(indexer_key, indexer_scale):
+-            if torch.npu.is_current_stream_capturing():
+-                raise RuntimeError("Split indexer cache requires warmup before graph capture")
+-            self._indexer_cache = SplitIndexerCache(
+-                indexer_key, indexer_scale, batch_capacity=self.batch_capacity,
+-                table_columns=table_storage(metadata["indexer"].decode.block_table).shape[1],
+-            )
+         groups = {
+             "swa": (metadata["swa"], (swa,)),
+             "compressed": (metadata["compressed"], (compressed,)),
+@@ -148,7 +138,6 @@ class CSAServiceRuntime:
+         call = NativeCSACall(
+             self.operators, self.weights, hidden, positions, groups, layer_name=self.layer_name,
+             compact_metadata=compact,
+-            indexer_cache=self._indexer_cache,
+             buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "x_out": output},
+         )
+         # A single fused call publishes all KV writes. Notify the connector on
