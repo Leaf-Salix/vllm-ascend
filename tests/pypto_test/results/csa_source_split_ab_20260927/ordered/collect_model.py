@@ -70,6 +70,14 @@ def collect_case(history, batch):
         row["forward"] = {side: distribution(v) for side, v in samples.items()}
         row["slowest_rank_forward"] = {
             side: distribution([max(values) for values in zip(*ranks)]) for side, ranks in per_step.items()}
+        slowest = {side: [max(values) for values in zip(*ranks)] for side, ranks in per_step.items()}
+        deltas = [pto - native for native, pto in zip(slowest["native"], slowest["pto"])]
+        row["slowest_rank_step_comparison"] = {
+            "pto_minus_native_us": deltas,
+            "pto_faster_steps": sum(delta < 0 for delta in deltas),
+            "total_steps": len(deltas),
+            "scope": "独立运行按已核对的请求位置/步编号配对；不是160个独立重复实验。",
+        }
         row["change_pct"] = (row["forward"]["pto"]["mean_us"] / row["forward"]["native"]["mean_us"] - 1) * 100
     row["status"] = ("MEASURED_TOKEN_PASS" if not row["errors"] and not row["token_mismatches"]
                      and not row["dspark_mismatched_ranks"] else "FAIL")
@@ -112,8 +120,8 @@ def main():
                      f"{row['change_pct']:+.2f}% | {n['p95_us']/1000:.3f}/{p['p95_us']/1000:.3f} | "
                      f"{n['max_us']/1000:.3f}/{p['max_us']/1000:.3f} | {row['status']} |")
     lines += ["", "每步取16rank中最大的forward耗时，再对10步求均值；用于观察EP16最慢rank的影响。", "",
-              "| 档位 | Native最慢rank均值 | PTO最慢rank均值 | PTO变化 | Native/PTO P95÷P50 |",
-              "| --- | ---: | ---: | ---: | ---: |"]
+              "| 档位 | Native最慢rank均值 | PTO最慢rank均值 | PTO变化 | Native/PTO P95÷P50 | PTO较快步数 |",
+              "| --- | ---: | ---: | ---: | ---: | ---: |"]
     for row in rows:
         if "forward" not in row:
             continue
@@ -121,7 +129,9 @@ def main():
         fn, fp = (row["forward"][s] for s in ("native", "pto"))
         lines.append(f"| {row['history']//1024}K/B{row['batch']} | {n['mean_us']/1000:.3f} | "
                      f"{p['mean_us']/1000:.3f} | {(p['mean_us']/n['mean_us']-1)*100:+.2f}% | "
-                     f"{fn['p95_us']/fn['p50_us']:.3f}/{fp['p95_us']/fp['p50_us']:.3f} |")
+                     f"{fn['p95_us']/fn['p50_us']:.3f}/{fp['p95_us']/fp['p50_us']:.3f} | "
+                     f"{row['slowest_rank_step_comparison']['pto_faster_steps']}/"
+                     f"{row['slowest_rank_step_comparison']['total_steps']} |")
     lines += ["", "P95÷P50使用全部rank样本；每步最慢rank序列共10个样本，其P95等于最大值。",
               "每步按相同稳态步编号对齐，最慢rank耗时不包含各rank起始时间偏差或步间等待。", "",
               f"已取得{len(rows)}/{len(CASES)}档。逐rank样本、每步最慢rank分布、实际配置和错误详情"

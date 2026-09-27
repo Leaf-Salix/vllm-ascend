@@ -39,5 +39,24 @@ weights投影与两个Compressor同时使用其他AIC；当前证明了资源占
 已将同一自适应实现应用主工作树；atomic1和精度版保持原分组及算术。
 真实EP16只先补128K/B16与8K/B40，task_20260928_063233_77503215845，
 两侧重新测Native控制、同mode2/atomic0/det0、无EPLB，预热后10步forward；独立3步采profile。
-当前EP16仍在运行，阶段出口统一源码七档尚未补齐。
+两档EP16已经完成并通过；阶段出口统一源码七档尚未补齐。
 [单卡汇总](report.json)、[模型命令](run_model.sh)、[严格收集器](collect_model.py)。
+
+## 两档真实EP16通过
+
+任务task_20260928_063233_77503215845退出0，生产算子等效于88d0744f，使用冻结f1e4cee2+candidate.patch。
+
+| 档位 | Native forward ms | PTO forward ms | PTO变化 | Native/PTO P95 ms |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 72.855 | 69.365 | −4.79% | 75.086/70.239 |
+| 8K/B40 | 104.052 | 101.652 | −2.31% | 107.381/103.233 |
+
+229376输出token零差异，32组rank的DSpark和10步请求位置一致。
+每档10/10步的最慢rank耗时均低于Native；最慢rank均值分别下降4.79%/2.30%，最大值也下降。
+保留自适应KV核内实现；不能把本轮Native/PTO降幅全归因于KV分组，旧基线已包含其他优化。
+目前只补这两档，不将它们与旧五档拼成新七档。750μs主档尚未新增模型测量，仍未达标。
+
+[正式结果及慢卡](model/RESULTS.md)、[全部rank样本](model/forward.json)、
+[独立profile的CSA/FFN/GMM](model/MODEL_GAP.md)、[可复现导出](export_profiles.sh)。
+两侧rank0 PyTorch JSON已导出在各case的Native/PTO profiler目录中，其余rank原始profile保留。
+固定K KV的sync_start是后续独立候选；本表完全不含它。

@@ -8678,3 +8678,36 @@ B40四窗口KV核内均值−57.14%、累计核时间+28.58%，平均组跨度�
 另将免seed已采模型trace离线导出，没有增加设备测试：8K/B16 rank0 CSA中位数797.58μs，
 FFN合计32.700→31.020ms，长档FFN25.264→25.338ms；这些独立profile不精确分账正式10步。
 [免seed模型分段](results/csa_projection_no_seed_20260928/model/MODEL_GAP.md)，750μs目标仍未达到。
+
+## 295. 自适应KV长档EP16领先4.79%，定位忙核预派发并排单卡调度候选（2026-09-28）
+
+生产核内改动提交88d0744f。task_20260928_063233_77503215845先完成128K/B16：
+Native72.855/PTO69.365ms（−4.79%），最慢rank均值73.268/69.756ms（−4.79%），
+P95为75.086/70.239ms，token/DSpark及10步位置一致；短档B40继续运行。
+只读长档rank0独立profile：21个CSA完整区间（含首层metadata）合计26.877→23.290ms，
+本体口径26.877→23.253ms；FFN33.856→34.013ms，
+主图区间75.515→71.495ms。与无profiler收益方向相符，但不是同轮精确分账。
+[当前两档收集结果](results/csa_kv_adaptive_20260928/model/RESULTS.md)。
+
+自适应KV B40的Scheduler/Worker按task/core配对：window_1最后4块在约127.24μs已派发，
+但等QR约175～176μs结束才被Worker接收；dispatch→receive约48～49μs。
+其他三个窗口主要排在indexer Compressor后，等待约15～21μs。该时间含忙核等待，不能叫纯CPU调度耗时。
+独立88d0744f候选只加KV sync_start，固定K最多12块，CPU完整编译通过；仅验证atomic0。
+若保留必须隔离atomic1的大SPMD组，不能给超过硬件核数的split-K组强加sync_start。
+候选task_20260928_063940_83121115114在device0排队，等待现有16卡任务完成；
+只测128K/B16与8K/B40及各两窗口DFX，观察是否将等待转移到其他关键链。此时未改生产调度。
+[候选、配对证据与复现](results/csa_kv_sync_20260928/README.md)。
+
+## 296. 自适应KV两档真实EP16共同领先，保留当前生产实现（2026-09-28）
+
+task_20260928_063233_77503215845退出0。128K/B16为72.855→69.365ms（−4.79%），
+8K/B40为104.052→101.652ms（−2.31%）。P95/max均下降，逐步最慢rank每档10/10步都更快。
+229376输出token零差异，32组rank DSpark及请求位置全部一致。
+当前生产88d0744f已获得长短真实EP16对照，继续保留固定K的自适应M分组和免seed。
+不把整网降幅全归因于新KV，不把两档替换进旧七档。750μs及新统一七档出口仍未完成。
+[无profiler正式十步及逐卡数据](results/csa_kv_adaptive_20260928/model/RESULTS.md)，
+[独立模型内区间](results/csa_kv_adaptive_20260928/model/MODEL_GAP.md)。
+
+只读导出完成，完整CSA含首层metadata，本体与主图互斥分段另列，避免重复计费。
+新增收集项按相同步编号比较两侧逐步最慢rank；不把160个相关rank样本当独立重复实验。
+后续sync_start单卡任务在上述16卡结束后才获得设备0，已开始；没有干扰本轮正式计时。

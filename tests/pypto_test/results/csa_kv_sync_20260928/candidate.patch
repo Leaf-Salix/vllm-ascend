@@ -1,0 +1,12 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index 731d6efb..9e5e36a0 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -727,6 +727,7 @@ def _kv_project(
+     with pl.spmd(
+         (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
+         name_hint="kv_proj_matmul",
++        sync_start=True,
+         deps=[late_dep],
+     ) as _kv_tid:
+         pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
