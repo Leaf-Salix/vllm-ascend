@@ -1,0 +1,68 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index d7b25e79..1cc40193 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -107,6 +107,10 @@ ATTN_K_TILE = 128
+ 
+ NUM_QK_CORES = 24  # qk_pv dispatch lanes
+ 
++# 提前发布KV在每核至少6个query的先导中减少了核内时间；较小工作量
++# 尚无本体收益，保留原顺序。阈值来自单卡实测，不改变attention算术。
++EARLY_KV_MIN_TOKENS = NUM_QK_CORES * 6
++
+ CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
+ 
+ T_PAD = ((T + 16 - 1) // 16) * 16  # Cube M floor
+@@ -459,15 +463,30 @@ def sparse_attn_csa(
+                                                 qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                             )
+                             pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
++                    # Consume the preceding Score notification before allowing
++                    # the next QK to publish. KV is already written, so release
++                    # the Cube before running the preceding block's softmax.
++                    if t_dim >= EARLY_KV_MIN_TOKENS:
++                        if qk_tick > 0 and qk_tick <= SPARSE_BLOCKS:
++                            if pl.read(valid_block_mask, [qk_t, qk_tick - 1]) > 0:
++                                pl.system.sync_wait(
++                                    QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
++                                )
++                        if qk_tick < SPARSE_BLOCKS:
++                            if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
++                                pl.system.sync_set(
++                                    QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
++                                )
+                     if qk_tick > 0 and qk_tick <= SPARSE_BLOCKS:
+                         softmax_sb = qk_tick - 1
+                         if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
+                             qk_slot = qk_core * QK_TRANSFER_SLOTS + softmax_sb % QK_TRANSFER_SLOTS
+                             qk_transfer_row = qk_slot * H
+                             qk_s0 = softmax_sb * ATTN_K_TILE
+-                            pl.system.sync_wait(
+-                                QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
+-                            )
++                            if t_dim < EARLY_KV_MIN_TOKENS:
++                                pl.system.sync_wait(
++                                    QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
++                                )
+                             # 整条 H//2 一次做完：原先按 SOFTMAX_HEAD_TILE=8 切成四段，
+                             # 是 ATTN_K_TILE=512 时 UB 放不下留下的，现在 128 宽已无必要。
+                             qk_scores_half = pl.load(
+@@ -489,12 +508,12 @@ def sparse_attn_csa(
+                             pl.system.sync_set(
+                                 QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                             )
+-                    # KV-ready 必须等上一块 softmax 的落盘之后再发，槽位才不会被提前覆盖。
+-                    if qk_tick < SPARSE_BLOCKS:
+-                        if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
+-                            pl.system.sync_set(
+-                                QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+-                            )
++                    if t_dim < EARLY_KV_MIN_TOKENS:
++                        if qk_tick < SPARSE_BLOCKS:
++                            if pl.read(valid_block_mask, [qk_t, qk_tick]) > 0:
++                                pl.system.sync_set(
++                                    QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
++                                )
+                     if qk_tick >= QK_PRE_LAUNCH + 1:
+                         pv_sb = qk_tick - QK_PRE_LAUNCH - 1
+                         if pl.read(valid_block_mask, [qk_t, pv_sb]) > 0:

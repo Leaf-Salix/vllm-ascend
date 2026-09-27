@@ -1,0 +1,266 @@
+{
+  "base_revision": "daf06ec8",
+  "task_id": "task_20260927_160001_18132223006",
+  "candidate": "KV ready after previous score notification and before softmax",
+  "history": 8192,
+  "batch": 40,
+  "timing": {
+    "report": "tests/pypto_test/results/csa_split_optimization_20260927/sparse_kv_early/h8192_b40/timing/report.json",
+    "status": "MEASURED",
+    "native": {
+      "mean_us": 1424.692988395691,
+      "p50_us": 1423.9599704742432,
+      "p95_us": 1430.400013923645,
+      "samples": 20
+    },
+    "pto_full": {
+      "mean_us": 1702.3980140686035,
+      "p50_us": 1696.6700553894043,
+      "p95_us": 1738.919973373413,
+      "samples": 20
+    },
+    "body": {
+      "mean_us": 1357.3579847812653,
+      "p50_us": 1352.8599739074707,
+      "p95_us": 1396.5799808502197,
+      "samples": 20
+    },
+    "split": {
+      "mean_us": 114.99399989843369,
+      "p50_us": 114.9899996817112,
+      "p95_us": 115.8600002527237,
+      "samples": 20
+    },
+    "writeback": {
+      "mean_us": 241.59399941563606,
+      "p50_us": 243.12999844551086,
+      "p95_us": 249.11999702453613,
+      "samples": 20
+    },
+    "guard_failures": [],
+    "output": {
+      "status": "FAIL",
+      "nonfinite": 0,
+      "max_abs": 0.03125,
+      "rmse": 0.0032926721017422322
+    },
+    "nonfinite_by_tensor": {},
+    "topk": {
+      "replaced_indices": 901,
+      "invalid_rows": 0,
+      "structural_errors": []
+    },
+    "swimlane": [
+      {
+        "path": "tests/pypto_test/results/csa_split_optimization_20260927/sparse_kv_early/h8192_b40/swimlane/dfx/merged_swimlane.json",
+        "qk_pv_aic": {
+          "blocks": 24,
+          "mean_us": 305.91833333333335
+        },
+        "qk_pv_aiv": {
+          "blocks": 48,
+          "mean_us": 307.76416666666665
+        },
+        "merge_norm": {
+          "blocks": 48,
+          "mean_us": 43.94833333333333
+        }
+      },
+      {
+        "path": "tests/pypto_test/results/csa_split_optimization_20260927/sparse_kv_early/h8192_b40/swimlane/dfx/window_1/merged_swimlane.json",
+        "qk_pv_aic": {
+          "blocks": 24,
+          "mean_us": 318.06666666666666
+        },
+        "qk_pv_aiv": {
+          "blocks": 48,
+          "mean_us": 319.72875
+        },
+        "merge_norm": {
+          "blocks": 48,
+          "mean_us": 43.68666666666666
+        }
+      },
+      {
+        "path": "tests/pypto_test/results/csa_split_optimization_20260927/sparse_kv_early/h8192_b40/swimlane/dfx/window_2/merged_swimlane.json",
+        "qk_pv_aic": {
+          "blocks": 24,
+          "mean_us": 307.33333333333337
+        },
+        "qk_pv_aiv": {
+          "blocks": 48,
+          "mean_us": 309.22041666666667
+        },
+        "merge_norm": {
+          "blocks": 48,
+          "mean_us": 43.664166666666674
+        }
+      },
+      {
+        "path": "tests/pypto_test/results/csa_split_optimization_20260927/sparse_kv_early/h8192_b40/swimlane/dfx/window_3/merged_swimlane.json",
+        "qk_pv_aic": {
+          "blocks": 24,
+          "mean_us": 314.83000000000004
+        },
+        "qk_pv_aiv": {
+          "blocks": 48,
+          "mean_us": 316.85541666666666
+        },
+        "merge_norm": {
+          "blocks": 48,
+          "mean_us": 43.86833333333334
+        }
+      }
+    ]
+  },
+  "pmu": {
+    "scope": "standalone fixed Native inputs, event group 2; not full CSA steady timing",
+    "source": "tests/pypto_test/results/csa_incore_20260927/sparse_kv_early/standalone/build/dfx_outputs/pmu.csv",
+    "tasks": [
+      {
+        "task": "qk_pv_aic",
+        "blocks": 24,
+        "total_cycles_mean": 511270.9166666667,
+        "busy_pct": {
+          "vec_busy_cycles": 0.0,
+          "cube_busy_cycles": 22.645528275860272,
+          "scalar_busy_cycles": 59.686506713417266,
+          "mte1_busy_cycles": 26.532484164054576,
+          "mte2_busy_cycles": 26.603793390034085,
+          "mte3_busy_cycles": 0.0
+        }
+      },
+      {
+        "task": "csa_slots_build_valid_qk_plan",
+        "blocks": 16,
+        "total_cycles_mean": 24956.25,
+        "busy_pct": {
+          "vec_busy_cycles": 20.147758577510643,
+          "cube_busy_cycles": 0.0,
+          "scalar_busy_cycles": 60.37415477084899,
+          "mte1_busy_cycles": 0.0,
+          "mte2_busy_cycles": 6.996493864262459,
+          "mte3_busy_cycles": 10.832456799398948
+        }
+      },
+      {
+        "task": "qk_pv_aiv",
+        "blocks": 48,
+        "total_cycles_mean": 516639.9791666667,
+        "busy_pct": {
+          "vec_busy_cycles": 36.31308939788382,
+          "cube_busy_cycles": 0.0,
+          "scalar_busy_cycles": 59.285251790626766,
+          "mte1_busy_cycles": 0.0,
+          "mte2_busy_cycles": 39.133706866068366,
+          "mte3_busy_cycles": 16.55361714449847
+        }
+      },
+      {
+        "task": "merge_norm",
+        "blocks": 48,
+        "total_cycles_mean": 76072.10416666667,
+        "busy_pct": {
+          "vec_busy_cycles": 41.26345591531718,
+          "cube_busy_cycles": 0.0,
+          "scalar_busy_cycles": 17.452959240150722,
+          "mte1_busy_cycles": 0.0,
+          "mte2_busy_cycles": 37.55907566861593,
+          "mte3_busy_cycles": 17.442771537201136
+        }
+      },
+      {
+        "task": "kv_touch",
+        "blocks": 1,
+        "total_cycles_mean": 4114.0,
+        "busy_pct": {
+          "vec_busy_cycles": 0.6319883325230918,
+          "cube_busy_cycles": 0.0,
+          "scalar_busy_cycles": 34.05444822557122,
+          "mte1_busy_cycles": 0.0,
+          "mte2_busy_cycles": 23.99124939231891,
+          "mte3_busy_cycles": 6.441419543023821
+        }
+      },
+      {
+        "task": "rope_cs",
+        "blocks": 16,
+        "total_cycles_mean": 7851.625,
+        "busy_pct": {
+          "vec_busy_cycles": 13.621384108385207,
+          "cube_busy_cycles": 0.0,
+          "scalar_busy_cycles": 29.418273287376817,
+          "mte1_busy_cycles": 0.0,
+          "mte2_busy_cycles": 21.228885740213013,
+          "mte3_busy_cycles": 25.814719882826804
+        }
+      }
+    ]
+  },
+  "fixed_input_comparison_to_native": {
+    "status": "FAIL",
+    "shape": [
+      240,
+      64,
+      512
+    ],
+    "dtype": "torch.bfloat16",
+    "expected_shape": [
+      240,
+      64,
+      512
+    ],
+    "expected_dtype": "torch.bfloat16",
+    "atol": 0,
+    "rtol": 0,
+    "elements": 7864320,
+    "comparison": "tolerance",
+    "nonfinite": 0,
+    "max_abs": 0.0009765625,
+    "rmse": 6.34842105166731e-05,
+    "mismatches": 3328649,
+    "first_mismatches": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        6
+      ],
+      [
+        0,
+        0,
+        7
+      ],
+      [
+        0,
+        0,
+        8
+      ],
+      [
+        0,
+        0,
+        9
+      ],
+      [
+        0,
+        0,
+        11
+      ],
+      [
+        0,
+        0,
+        13
+      ],
+      [
+        0,
+        0,
+        14
+      ]
+    ]
+  },
+  "fixed_input_equal_to_baseline": true
+}

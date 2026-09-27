@@ -10,7 +10,7 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 [矩阵记录](results/csa_native_cube_matrix_20260927/README.md)及验证日志§178。
 用户最新要求：先比较七档核内差异并吸收Native策略，再优化PTO调度。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：
-128K重点为Indexer复用与Top-K；8K还需优先处理Sparse Attention的PV分块和KV搬运。
+128K重点为Indexer复用与Top-K；8K优先处理Sparse Attention的KV搬运和核内流水衔接。
 Indexer已有[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
 七档共同基线为累计保留v8～v10改动的V10实现；128K/B8本体为889.22 μs、B16为1304.87 μs；
 B16仍有约1.58 ms的尾部，不能凭均值接近Native宣布赶上。
@@ -22,6 +22,11 @@ Top-K融合候选v11编译失败已撤回，padding及整模型验收按下列�
 完整路径仍有拆分和写回成本，未做分配器改造或新的16卡验收。
 核内阶段当前保留的新增改动：性能版B40 KV投影去除精度专用K遍历，统一宽tile/split-K；
 8K/B40本体1386.00 μs，对同轮Native −1.74%，完整PTO仍慢；见[独立验证](results/csa_incore_20260927/kv240_splitk_only/README.md)。
+另保留性能版Sparse Attention按工作量提前发布KV：T≥144启用，小工作量维持原顺序。
+最终B40复验本体1361.40 μs（较上述基底低1.77%），qk_pv核内301.01–318.44 μs；
+完整PTO1708.50 μs仍慢于同轮Native1401.18 μs，B16本体无明确收益。
+[先导、选择依据与最终复验](results/csa_incore_20260927/sparse_kv_early/README.md)分开记录；
+B24/B32仅有全档启用先导数据，不能冒充加入选择逻辑后的当前矩阵。
 其他先导因没有明确本体收益已撤回；128K/B16 Native分项trace已补齐。
 阶段出口仍须测同一当前实现七档，不能沿用旧六档组成新矩阵；Sparse Attention核内策略及WKV NZ复用待推进。
 过程和历史结论保留在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，旧版本可查 Git；
