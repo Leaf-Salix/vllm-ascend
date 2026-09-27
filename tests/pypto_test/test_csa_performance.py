@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU 回归：性能窗口拒绝错误档位，设备时间与主机时间分别记录。"""
 
+import gc
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -40,7 +41,8 @@ def observer(monkeypatch):
 
 
 @pytest.mark.parametrize("failure", [None, "shape_gap", "missing_forward"])
-def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure):
+@pytest.mark.parametrize("host_diagnostics", [False, True])
+def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure, host_diagnostics):
     class Event:
         clock = 0
 
@@ -62,6 +64,8 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
 
     def execute(*_):
         Event.clock += 10000  # metadata 等前置操作不属于 forward。
+        if host_diagnostics:
+            gc.collect(0)
         if failure != "missing_forward":
             assert observer.model_runner._model_forward() == "hidden"
         Event.clock += 20000  # logits 等后置操作不属于 forward。
@@ -69,11 +73,13 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
 
     observer.model_runner.execute_model = execute
     observer.model_runner._model_forward = forward
+    observer.model_runner._dsa_positions_cpu_buf = torch.arange(24)
     monkeypatch.setattr(torch.npu, "Event", Event)
     monkeypatch.setattr(torch.npu, "reset_peak_memory_stats", Mock())
     monkeypatch.setattr(torch.npu, "max_memory_allocated", Mock(return_value=10))
     monkeypatch.setattr(torch.npu, "max_memory_reserved", Mock(return_value=20))
-    observer.offline_begin_forward(2, 24, 4, 10)
+    callbacks_before = list(gc.callbacks)
+    observer.offline_begin_forward(2, 24, 4, 10, host_diagnostics)
     shapes = [(4, 4)] + [(24, 4)] * 15
     if failure == "shape_gap":
         shapes.insert(6, (18, 3))
@@ -88,6 +94,17 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
         assert result["forward"]["mean_us"] == 100
     assert observer.model_runner.execute_model is execute
     assert observer.model_runner._model_forward is forward
+    assert gc.callbacks == callbacks_before
+    if host_diagnostics:
+        host = result["host_diagnostics"]
+        assert len(host["steps"]) == 10
+        assert any(e["phase"] == "stop" for e in host["gc_events"])
+        if failure != "missing_forward":
+            for step in host["steps"]:
+                assert step["execute_entry"]["monotonic_ns"] <= step["forward_entry"]["monotonic_ns"]
+                assert step["forward_submitted"]["monotonic_ns"] <= step["execute_return"]["monotonic_ns"]
+    else:
+        assert "host_diagnostics" not in result
 
 
 @pytest.mark.parametrize("last_shape, sufficient", [((96, 16), True), ((84, 14), False)])

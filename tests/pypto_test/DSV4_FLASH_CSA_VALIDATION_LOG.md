@@ -8742,3 +8742,21 @@ QR新组的启动分散已约0.4μs，下一调度实验不针对它。
 Indexer query投影仍有40～64μs启动分散，和attention QB/Compressor竞争Cube；
 拟只加Indexer query的整组准入，观察是否推迟其他关键任务，不沿用KV整组启动的结论。
 先对已保留QR/KV核内策略补统一源码七档EP16，旧七档和旧两档不能冒充本版本。
+
+
+## 299. 统一七档长档出现forward入场尾部，追加受影响单档主机观测（2026-09-28）
+
+30f2b228算子的七档EP16任务task_20260928_072337_13373713806正在执行。
+先取得128K/B4、B8、B16：正式forward均值比Native低1.04%、4.22%、1.81%，token/DSpark通过。
+但B8/B16的PTO P95为57.684/83.143ms，Native为57.370/72.637ms，不能将均值更快写成尾部通过。
+从同一次正式10步的起始事件中消去每rank稳定时钟偏移：B8 step11 rank4晚进入3.980ms；
+B16 step16 rank6晚进入14.060ms。其自身forward接近平时，其余rank分别增加3.631/13.892ms。
+[原样样本与方法](results/csa_qa_matrix_20260928/ARRIVAL.md)。这支持入场延迟被EP放大的解释，
+不能单凭此区分CPU调度、GC、前序草稿或设备队列；不剔除异常点，也不直接给CSA加sync_start。
+
+新增默认关闭的--forward-host-diagnostics，只记录execute/forward的主机时间、线程CPU时间和GC时间/代数；
+不扫描GC对象、不打印热路径、不修改GC配置、不增加设备同步。两侧相同开启，只补128K/B16。
+CPU6项通过，验证原设备边界不变、错误窗口/缺失forward不通过、钩子与GC回调恢复；
+顺带修复观测器缺失forward时读取不存在request_positions导致KeyError，使其明确返回insufficient。
+[命令与CPU验证](results/csa_forward_entry_20260928/README.md)。
+模型诊断task_20260928_074528_18466049204排队，算子未改；没有启动新七档或擅自关闭GC。

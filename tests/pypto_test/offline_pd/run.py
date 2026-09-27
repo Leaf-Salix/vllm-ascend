@@ -415,7 +415,8 @@ def diagnose(args, llm, cases):
         # _model_forward 之外的 metadata/logits/采样/草稿不计入本轮性能判断。
         llm.collective_rpc("offline_begin_observation")
         llm.collective_rpc("offline_begin_forward", args=(
-            args.warmup_steps, expected_tokens, args.batch, args.steady_cycles))
+            args.warmup_steps, expected_tokens, args.batch, args.steady_cycles, args.forward_host_diagnostics))
+        common["forward_host_diagnostics"] = args.forward_host_diagnostics
         common["stage"] = "measuring_forward"
         write_json(args.output / f"rank{args.rank}.performance.json", common)
         try:
@@ -1030,6 +1031,8 @@ def launch(args):
                 cmd.append("--deterministic")
             if args.event_work_mode is not None:
                 cmd += ["--event-work-mode", str(args.event_work_mode)]
+            if args.forward_host_diagnostics:
+                cmd.append("--forward-host-diagnostics")
             if args.stagger:
                 cmd.append("--stagger")
             if args.capture_sizes:
@@ -1134,6 +1137,8 @@ def main():
                              "用于排查同一DP组内四个TP副本的缓存差异，保留AIV展开模式不变")
     parser.add_argument("--event-work-mode", type=int, choices=(0, 1),
                         help="仅用于因果诊断：显式设置进程级 CANN event 模式（0 软件 / 1 硬件）")
+    parser.add_argument("--forward-host-diagnostics", action="store_true",
+                        help="performance的10步另记主机入场时钟和GC事件；不修改GC或增加设备同步")
     parser.add_argument("--capture-sizes", type=int, nargs="+",
                         help="显式指定ACL Graph捕获档位。默认列表按max_num_seqs*6截断后，"
                              "最大档可能盖不住potential_max_tokens，导致MoE选ALLTOALL而非MC2、"
@@ -1167,6 +1172,8 @@ def main():
         parser.error("--layout-only 仅适用于 decode")
     if args.profile_forward_events and args.command not in ("performance", "profile"):
         parser.error("--profile-forward-events只适用于performance/profile")
+    if args.forward_host_diagnostics and args.command != "performance":
+        parser.error("--forward-host-diagnostics只适用于performance")
     if args.command == "moe-routing":
         if args.graph_mode != "full_decode_only" or args.compare_samples < 1 or args.warmup_steps < 0:
             parser.error("路由诊断须使用 full_decode_only、非负 warmup_steps 和正 compare_samples")

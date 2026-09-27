@@ -428,7 +428,8 @@ class OfflineCSAObserver:
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
-    def offline_begin_forward(self, warmup_steps, expected_tokens, expected_requests, steps=10):
+    def offline_begin_forward(self, warmup_steps, expected_tokens, expected_requests, steps=10,
+                              host_diagnostics=False):
         """只包围 Native _model_forward；execute_model 仅用于辨认实际 decode 档位。"""
         import torch
 
@@ -442,11 +443,19 @@ class OfflineCSAObserver:
                  "all_execute_calls": 0, "observed": {}}
         events, active = [], [None]
         torch.npu.reset_peak_memory_stats()
+        diagnostic = None
+        if host_diagnostics:
+            from offline_pd.forward_host import ForwardHostDiagnostics
+
+            diagnostic = ForwardHostDiagnostics()
+            state["_host_diagnostic_session"] = diagnostic
 
         def forward(*args, **kwargs):
             entry = active[0]
             if entry is None:
                 return original_forward(*args, **kwargs)
+            if diagnostic is not None:
+                diagnostic.mark(entry, "forward_entry")
             entry["forward_calls"] += 1
             # CPU metadata already prepared by the production runner. Keep
             # the actual request positions for comparing work across runs;
@@ -459,6 +468,8 @@ class OfflineCSAObserver:
                 return original_forward(*args, **kwargs)
             finally:
                 end.record()
+                if diagnostic is not None:
+                    diagnostic.mark(entry, "forward_submitted")
 
         def execute(scheduler_output, *args, **kwargs):
             call = state["all_execute_calls"]
@@ -474,11 +485,15 @@ class OfflineCSAObserver:
             if index < warmup_steps or len(events) >= steps:
                 return original_execute(scheduler_output, *args, **kwargs)
             entry = {"call": call, "index": index, "tokens": tokens, "requests": requests, "forward_calls": 0}
+            if diagnostic is not None:
+                diagnostic.mark(entry, "execute_entry")
             active[0] = entry
             try:
                 return original_execute(scheduler_output, *args, **kwargs)
             finally:
                 active[0] = None
+                if diagnostic is not None:
+                    diagnostic.mark(entry, "execute_return")
                 events.append(entry)
 
         runner.execute_model, runner._model_forward = execute, forward
@@ -494,6 +509,9 @@ class OfflineCSAObserver:
         state, events, original_execute, original_forward = self._offline_forward
         self.model_runner.execute_model, self.model_runner._model_forward = original_execute, original_forward
         self._offline_forward = None
+        diagnostic = state.pop("_host_diagnostic_session", None)
+        if diagnostic is not None:
+            state["host_diagnostics"] = diagnostic.finish(events)
         state["peak_allocated_bytes"] = int(torch.npu.max_memory_allocated())
         state["peak_reserved_bytes"] = int(torch.npu.max_memory_reserved())
         torch.npu.synchronize()
@@ -503,7 +521,7 @@ class OfflineCSAObserver:
         state.update(measured_steps=len(events), step_tokens=[entry["tokens"] for entry in events],
                      step_requests=[entry["requests"] for entry in events],
                      steady_step_indices=[entry["index"] for entry in events],
-                     step_positions_cpu=[entry["request_positions"] for entry in events])
+                     step_positions_cpu=[entry.get("request_positions", []) for entry in events])
         state["forward"] = {"samples_us": values, "start_timestamps_raw": stamps,
                             "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
                                      "DSpark 草稿或步间调度等待；不逐步同步"}
