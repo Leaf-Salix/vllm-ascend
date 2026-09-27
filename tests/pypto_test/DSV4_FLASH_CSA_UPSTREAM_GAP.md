@@ -23,7 +23,10 @@
 前段增加BF16→FP32准备及前置依赖；Q/Indexer部分核内已更快但启动分散仍大；
 末段O_A同时存在核内时间和分批执行差异。Sparse分段已短于这份旧图，不能继续沿用旧热点排序。
 当前没有indexer_key_repack任务，新增的是head_coefficients，不能把两版额外任务混为一谈。
-最新上游O_A按行块×列块并行；接入NZ大batch仍核内串行行块，正在独立检验这一任务粒度差异。
+最新上游O_A按行块×列块并行；接入NZ大batch原先核内串行行块，已按二维grid改造并保留：
+B40尾段305–313→276–286 μs、本体1327.86→1318.05 μs，B24短尾行块通过；
+[实测及上游差异](results/csa_scheduling_20260927/o_a_row_parallel/README.md)。
+上表仍是c7a52af5的B16，B16只有一行块，不能据本次大batch收益改写该表。
 只调整O_A登记顺序的先导未获明确本体收益，已撤回。
 
 [完整差异、源码对应和范围限制](results/csa_scheduling_20260927/upstream_725/README.md)、
