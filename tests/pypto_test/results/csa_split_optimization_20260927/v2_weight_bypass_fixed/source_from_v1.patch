@@ -1,0 +1,88 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
+index 7801f6e2..2d0af95d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
+@@ -55,6 +55,8 @@ def _q_proj_q_matmul_nd(
+         name_hint="qproj_matmul",
+         deps=[qproj_dep],
+     ) as qproj_tid:
++        # Match upstream weight streaming; arithmetic is unchanged.
++        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
+         qproj_worker = pl.tile.get_block_idx()
+         for qproj_n_idx in pl.range(
+             qproj_worker,
+@@ -89,6 +91,8 @@ def _q_proj_q_matmul_nz(
+     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+     qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+     with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
++        # Match upstream weight streaming; arithmetic is unchanged.
++        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
+         qproj_worker = pl.tile.get_block_idx()
+         # Keep the column offset provably nonnegative after NZ outlining.
+         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index 70464633..748b1dd8 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -189,6 +189,7 @@ def _proj_a_mm_nz(
+         deps=[heads_dep],
+         allow_early_resolve=True,
+     ) as pa_tid:
++        pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
+         n0 = pl.tile.get_block_idx() * PROJ_A_MM_N_TILE
+         for pa_rb in pl.range(proj_a_rows):
+             pa_r0 = pa_rb * PROJ_A_ROW_TILE
+@@ -230,6 +231,7 @@ def _proj_a_mm_nd(
+         deps=[heads_dep],
+         allow_early_resolve=True,
+     ) as pa_tid:
++        pl.set_cache_policy(wo_a, pl.CachePolicy.BYPASS)
+         pa_unit = pl.tile.get_block_idx()
+         pa_rb = pa_unit // (O_LORA // PROJ_A_MM_N_TILE)  # row block outermost
+         nf = pa_unit % (O_LORA // PROJ_A_MM_N_TILE)
+@@ -271,6 +273,7 @@ def _proj_b_mm_nd(
+     with pl.spmd(
+         proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
+     ) as pb_tid:
++        pl.set_cache_policy(wo_b, pl.CachePolicy.BYPASS)
+         pb_unit = pl.tile.get_block_idx()
+         tb = pb_unit // (D // PROJ_B_D_TILE)
+         dc = pb_unit - tb * (D // PROJ_B_D_TILE)
+@@ -313,8 +316,7 @@ def _proj_b_mm_nz_kernel(
+                 # 独立核保留 g 的非负约束；调用方只传 0..O_GROUPS-1。
+                 wk0 = pl.max(g, 0) * O_LORA + kb * B_K_TILE
+                 b_weight = wo_b[
+-                    wk0 : wk0 + B_K_TILE,
+-                    n0 : n0 + PROJ_B_MM_N_TILE,
++                    wk0 : wk0 + B_K_TILE, n0 : n0 + PROJ_B_MM_N_TILE,
+                 ]
+                 acc_b = pl.matmul_acc(acc_b, b_act, b_weight, init_cond=(kb == 0))
+             partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index c0ef1e49..1b43e2f6 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -237,6 +237,7 @@ def _q_proj_qa_nd(
+                 qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
+ 
+     for qbg_idx in pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
++        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
+         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
+         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
+         for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
+@@ -293,6 +294,7 @@ def _q_proj_qa_nz(
+     # 不可证（实测报 `slice offset on shape[-2] to be non-negative cannot be proven`）。
+     # `get_block_idx()` 是明确的 SPMD block 索引，属于可证形式。
+     with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
++        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
+         qbg_idx = pl.tile.get_block_idx()
+         qr_k_base = (qbg_idx // QR_N_BLOCKS) * QR_SPLIT_K_TILE
+         q_a_col0 = (qbg_idx % QR_N_BLOCKS) * QR_N_TILE
+@@ -774,6 +776,7 @@ def kv_proj_rope(
+                     name_hint="kv_proj_matmul",
+                     deps=[late_dep],
+                 ) as _kv_tid:
++                    pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
+                     kbg = pl.tile.get_block_idx()
+                     kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
+                     kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE

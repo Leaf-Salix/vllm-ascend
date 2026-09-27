@@ -6637,3 +6637,169 @@ Error: The tile 'chk_cur_t_...' lives in a Orchestration function,
 增量 repack 的算法设计（§165）、持久缓冲管道（§170 已验证数值等价）、以及本节的绕法
 都已就位，剩下的是上面那个 IR 层面的问题。收益上限与显存代价不变：约 340 µs /
 ratio 约 1.09，1.32~5.25 GiB。
+
+
+## 173. Indexer cache 入口拆分实验与 Score 长尾（2026-09-27）
+
+起点为 `cd1fdaa1`。性能版 v0 在 CSA 外用 Torch 将 Native 的交错 key/FP16 scale
+复制为两个按物理页排列的连续张量，CSA 内更新它们，出口只写回当前 compact slot。
+精度版保持原算术和输入布局。该版本仍在 Score 中按页表取 12 个 key 页，
+因此“物理张量连续”并不等于“Score 逻辑候选连续读取”。8K/B16 实测没有收益。
+
+固定 A3、既定工具链与正式 W8A8 权重、TP1/S6、layer 4、mode=2、atomic_add=1、
+确定性级别 0、无 EPLB；单卡图重放复用 compact metadata，预热 5 次后取 20 次。
+CSA 本体仍包含 HC_pre/norm/CSA/HC_post；三段计时分别捕获独立图，不可相加冒充完整图。
+
+| 历史长度 / B | 拆分前 PTO 均值 / p50（μs） | v0 CSA 本体均值 / p50 | v0 完整路径均值 / p50 | v0 同轮 Native 均值 |
+| --- | ---: | ---: | ---: | ---: |
+| 8K / 16 | 853.541 / 853.010 | 869.795 / 875.150 | 941.836 / 939.890 | 928.431 |
+| 128K / 16 | 1736.646 / 1736.020 | 1796.824 / 1599.520 | 1911.218 / 1745.410 | 1312.714 |
+
+8K 的拆分、写回独立图均值分别为 46.556 / 80.532 μs；128K 分别为 75.029 / 88.635 μs。
+128K 中只选 <2000 μs 的窗口，本体 14/20 均值为 1593.411 μs，完整路径 15/20 均值为
+1737.669 μs。**这些是条件统计，不能代替上表全部样本的均值，也不是端到端稳定改善。**
+8K 的 853.541 μs 是本轮冻结工作树实测；旧日志中的 820.38 或约 850 μs 不混作同轮基线。
+
+128K 八个 DFX 窗口中，正常窗口 Score 24 个 block 落到 24 个 AIC；窗口 7 只有 17 个 AIC，
+其中 7 个接到第二个 block，Score span 从约 802.52 增至 1546.38 μs。
+单 block incore 均值却由 788.69 降至 767.02 μs，主要异常是两波排队。
+第二个 Score 在 367.62 μs 已下发，但在 1128.62 μs 才开始；消费者 Merge 的长等待是后果，
+目前不能认定它造成了 Score 最初的排队。单独看空闲 AIC 也不能判断 MIX 所需 AIV 是否可用。
+
+v0 的 CPU 布局/写回用例和编译通过，单卡保护区通过；旧/新保存张量中 Top-K、Indexer key/scale、
+两个 compressor state 一致，输出有 978 个元素不同（最大 0.015625），SWA 有 2 个不同
+（最大 0.00097656）。atomic 路径本身有重复运行差异，尚不能直接归因；没有新的整模型 token/DSpark 验收。
+同理，§170/§172 中仅凭摘要或 mismatch 数相等得出的“数值等价”不能作为逐元素等价证据。
+
+证据：
+
+- [128K 原始计时与长尾图](results/csa_split_cache_20260927/)，
+  [正常/长尾对照与全部窗口数据](results/csa_split_cache_20260927/swimlane_compare/README.md)。
+- [8K 拆分前实测](results/csa_split_optimization_20260927/baseline_cd1fdaa1/h8192_b16/timing/report.json)，
+  [8K v0 实测](results/csa_split_optimization_20260927/v0_split/h8192_b16/timing/report.json)。
+- [v0 相对 cd1fdaa1 的代码快照](results/csa_split_optimization_20260927/v0_split/source_from_cd1fdaa1.patch)。
+
+## 174. 请求逻辑连续缓存与 Score 连续读取（2026-09-27）
+
+用户指出仅拆分后继续分页读取没有达到优化目的。本轮 v1 改为：
+
+1. CSA 前使用 Torch `gather` 构造每个请求的逻辑页顺序，再对 Native key/scale 分别
+   `index_select(..., out=...)`，写入持久缓存。所有操作在设备上并纳入 ACL Graph。
+2. Score 每个 384 候选 tile 从 12 次单页 key 读取改为两次 192 行连续读取；
+   scale 每个 AIV lane 一次 192 元素连续读取，Score 内不再查页表。
+3. Indexer Compressor 写入相应请求的逻辑行；出口将本轮 compact 行映射回 Native 原物理 slot，
+   继续使用已有 scatter API。保持 FP16 scale 舍入及现有 Score/Top-K 算术。
+4. v1 最初每请求预留七个尾页。后续审查发现这不足以覆盖所有仅一个有效候选的尾 tile，
+   已改为按读取宽度预留：direct 384 行对应 12 页，buffered 768 行对应 24 页；
+   按最后有效页填充，有效候选掩码不变，padding/无效 slot 不写回。v1 结果只作阶段参考。
+
+两个 CPU 用例覆盖乱序物理页、尾页、padding、后续调用页表变化、跨页新增 compact 行及保护区，均通过。
+完整 CSA 编译通过，Ruff 和 diff 空白检查通过。8K/B16、128K/B16 的设备计时、保护区和当前 slot 写回检查已通过。
+此处“通过”不表示浮点逐元素或整模型验收完成。
+
+该路径暂时仍需入口搬运及出口映射/写回，不能称为最终分配时分离方案。页序复制成本、
+持久缓存显存和长尾都要计入后续判断。上游当前 checkout `2164563` 的独立对照脚本在编译时因
+`pl.store(pre_quant=...)` 与本地 PyPTO API 不兼容失败，尚无本轮同配置上游实测；
+不把历史上游 727.98 μs 泳道当作本轮设备事件对照。
+
+运行脚本与结果目录： [csa_split_optimization_20260927](results/csa_split_optimization_20260927/)。
+
+
+### v1 实测与后续执行方向
+
+| 档位 | Native 均值 μs | CSA 本体均值 / p50 | 完整路径均值 / p50 | 拆分均值 / p50 | 写回均值 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 8K/B16 | 934.625 | 847.060 / 847.790 | 1144.930 / 1142.580 | 139.155 / 95.440 | 220.994 |
+| 128K/B16 | 1315.637 | 1747.294 / 1615.930 | 2288.688 / 2025.310 | 224.743 / 185.820 | 218.520 |
+
+拆分阶段均值含一次较慢样本，原始样本保留，没有剔除。128K 本体仍有约 2.3 ms 长尾。
+新 128K 四个 DFX 窗口都覆盖 24 个 AIC，Score 核内约 752～767 μs，正常 span 774～803 μs。
+生成代码已确认 key 是两次大块 TLOAD；读取调用减少并未带来预期的本体收益。
+
+用户明确调整优先级：**先按上游写法提升 CSA 本体，暂不优化拆分/写回**。
+因此没有实现原计划的出口行映射融合；当前完整路径慢于 Native，不能包装为优化完成。
+
+## 175. 上游对照与 CSA 本体移植（2026-09-27，进行中）
+
+上游参考 `2164563` 的 direct-score 执行路径已跑通：TP1/B16/S6/H8192，5 次预热/20 次图外
+NPU Event，均值 810.202 μs、p50 810.410 μs，输出有限；没有数值/整模型验收。
+与接入侧的区别：自身合成权重、FP32 残差及 scale、编译容量 16。容量 64 初次运行的 scope
+活跃内存超过 kernel-mode 256 MiB heap；缩小容量后通过。参考副本仅移除 B≥64 才进入的
+buffered-score 分支，B16 实际执行的 direct-score 未改。没有修改 pypto-lib checkout。
+
+新的参考泳道、与当前模式的差异已写入 [上游差距记录](DSV4_FLASH_CSA_UPSTREAM_GAP.md)。
+
+首个本体候选 v2 采用上游 Q 投影的权重 L2 bypass，并将同样策略应用到接入侧 KV/O-A，
+NZ O-B 因独立 incore 边界暂时保持原缓存策略（上游 TP 分支有 O 权重 bypass，TP1 分支不完全相同）。
+8K/B16 本体均值从 847.060 降至 835.241 μs，p50 从 847.790 降至 832.990 μs；
+同轮 Native 922.558 μs，完整路径仍为 1131.983 μs。保护区、slot 写回及编译通过，
+不将这次 1.4% 本体变化解释为端到端收益。共享 Q INT8 投影只变缓存策略，未变算术。
+
+接下来：
+
+- O projection 按上游的 token 档位选择 ROW_TILE=32/96/128；N=256，较大档位完整 K 权重常驻，
+  保留 Native `[G,K,N]` / `[G*K,N]` NZ 描述及原数据指针，不做重排。
+- Score 移植上游 N768、两套 GM 传递缓冲及 FIXPIPE FP16 缩放/截负，head 规约仍 FP32；
+  在本地连续 cache 上将分页读取替换为每 lane 一次连续读取。启用档位和收益待设备验证。
+- 为此将 PyPTO main 的 `b9240c18`（#2838，FIXPIPE epilogue）干净应用到当前调试分支，
+  本地提交 `2a4e09ff`，保持 Simpler/PTOAS/PTO-ISA 不变。构建、当前 checkout 安装已完成；
+  35 个相关 CPU 单测及 A3 `acc_to_gm_dequant_relu` 用例通过，O projection 候选完整 CSA 编译通过。
+  移植前后工具链必须分段记录，不能混算成完全相同工具链的 A/B。
+
+FIXPIPE 在 Cube accumulator 写回 GM 时执行 ReLU、常数缩放及目标类型转换。
+上游 Score 使用 `FP16(max(INT32_score, 0) / 1024)`，Vector 的 head 系数乘回 1024，
+以 FP32 进行 head 规约。中间数据减半；双缓冲及生产/消费同步仍由算子实现。
+新增 FP16 舍入无法通过乘回系数撤销，属于性能版精度策略，尚无本候选的整模型 token/DSpark 验收。
+设备用例记录：[FIXPIPE 定向验证](results/csa_split_optimization_20260927/fixpipe/README.md)。
+
+### v3 O projection 自适应分块实测
+
+在 PyPTO `2a4e09ff` 上，O-A 按 token 数选择 N128/N256，O-B 选择 M32/M96/M128、N256；
+大 token 档位 NZ O-B 权重完整 K 常驻，小档位使用 K256 流水。Native 权重物理方向及指针不变。
+两个代表档位的编译、保护区、metadata 与当前 slot 写回检查通过。
+
+| 档位 | Native 均值 μs | CSA 本体均值 / p50 / p95 | 完整路径均值 μs |
+| --- | ---: | ---: | ---: |
+| 8K/B16 | 907.148 | 817.607 / 815.590 / 837.460 | 1111.308 |
+| 128K/B16 | 1318.607 | 1863.967 / 1611.490 / 2297.580 | 2222.449 |
+
+8K 本体相对 v2 的 835.241 μs 降低约 2.1%，但同轮 Native 也变快，且工具链已升级，
+不将所有差额严格归因于 O 分块。上游参考 810.202 μs 的输入/容量差别仍适用。
+128K 长尾未解决，全部样本均值仍差，不能仅凭 1611.490 μs 中位数宣布改善。
+数据：[v3 8K](results/csa_split_optimization_20260927/v3_oproj/h8192_b16/timing/report.json)、
+[v3 128K](results/csa_split_optimization_20260927/v3_oproj/h131072_b16/timing/report.json)。
+
+### v4 FIXPIPE FP16 双缓冲实测
+
+连续缓存上移植上游 N768、两个 GM 槽和 FFTS 同步；输入 scale 保留 Native FP16。
+上游只在 B≥64 且压缩历史≥32768 时启用，本候选扩大到压缩历史>8192，目的是测 B16 长上下文收益。
+8K 仍使用原 direct-score。初次编译因 reshape 内嵌 `tensor.dim` 未降为形状变量失败，
+算子侧改为先绑定 batch_count 后完整编译通过，未追加修改编译器。
+
+| 档位 | Native 均值 μs | CSA 本体均值 / p50 / p95 | 完整路径均值 μs |
+| --- | ---: | ---: | ---: |
+| 8K/B16 | 944.893 | 828.490 / 827.460 / 850.620 | 1143.368 |
+| 128K/B16 | 1302.269 | 1576.926 / 1580.390 / 1817.540 | 1918.524 |
+
+与同为新工具链的 v3 相比，128K 全样本本体均值下降约 15.4%，p95 下降约 20.9%，
+中位数仅下降约 1.9%。仍慢于 Native，不能宣称稳定或端到端目标达成。
+8K 算术分支未变，本体和 Native 均比 v3 慢；记录实际数据，不选择性用旧的较快值充当当前结果。
+
+四个新 DFX 窗口中，Score AIC 核内均值 489.46、480.04、493.32、480.93 μs，
+旧 v1 四窗口为 752～767 μs。正常窗口 0/2 使用 24 个 AIC，Score span 为 503.10/505.54 μs；
+长尾窗口 1/3 只使用 17 个 AIC、34 个 AIV，Score span 为 975.48/987.98 μs。
+任务本身已提速约三成，但重复分配造成的两波执行仍在。核内与调度分别记录，DFX 不替代无 profiler 计时。
+
+两个代表档位的非有限值、Top-K 索引结构、metadata/保护区及当前 slot 写回检查通过。
+128K 对 Native 的输出零容差诊断仍 FAIL：max_abs=0.03125、RMSE=0.0041873，
+v3 对应 RMSE=0.0041791；Top-K 被替换索引数由 673 变为 675。这些不同运行的统计
+不能充当 v3/v4 逐元素差分，也不表示通过当前候选精度或整模型 token/DSpark 验收。
+
+代码分项提交（均中文并 Signed-off-by）：`f35c9fc4` 连续 cache 桥接、`be42f262` 投影、
+`5523ff0d` Score 双缓冲；PyPTO 单独提交 `2a4e09ff`。未推送。
+
+- [128K 计时](results/csa_split_optimization_20260927/v4_buffered_score/h131072_b16/timing/report.json)、
+  [8K 计时](results/csa_split_optimization_20260927/v4_buffered_score/h8192_b16/timing/report.json)。
+- [新泳道 window 0](results/csa_split_optimization_20260927/v4_buffered_score/h131072_b16/swimlane/dfx/merged_swimlane.json)，
+  同目录 `window_1` / `window_3` 为长尾窗口。
+- [v1/v4 四窗口任务聚合](results/csa_split_optimization_20260927/v4_buffered_score/swimlane_comparison.json)。
