@@ -1,6 +1,38 @@
 # 当前性能版与 pypto-lib 泳道差距
 
-更新：2026-09-27。主表复用现有原始泳道；后续候选的整层计时单列，不混入主表。
+更新：2026-09-27。**当前调度口径见本节；下方旧表均保留其历史采样版本，不代表当前结果。**
+
+## 当前调度：725 μs历史图＋最新版源码
+
+用户要求调度优化持续对照725 μs上游泳道，源码参考pypto-lib最新版。
+已用depth=1拉取确认官方main为`2164563`，本地一致；旧泳道按Worker首尾实际为**727.98 μs**，
+没有源码/完整输入配置或Scheduler View，不能冒认为该版本采集，也不能作为严格同输入A/B。
+
+当前`c7a52af5`性能版8K/B16/S6/TP1、正式第4层权重、mode2/atomic1/deterministic0、第二CSA层metadata复用，
+单卡5预热/20无profiler计时，另4个DFX窗口。PTO本体均值832.26 μs、p50 799.37、p95 820.80；
+一次1424.66 μs长尾保留。Native均值929.81，PTO含拆分写回1100.77 μs，仍慢。
+
+| 不重叠区间 μs | 历史上游 | 当前4窗口 |
+| --- | ---: | ---: |
+| 首Worker→norm结束 | 66.62 | 86.82–91.48 |
+| norm结束→Sparse首receive | 317.14 | 321.56–358.06 |
+| Sparse首receive→merge结束 | 184.90 | 168.10–179.84 |
+| merge结束→末Worker | 159.32 | 182.10–185.88 |
+| 总Worker窗口 | 727.98 | 774.98–809.56 |
+
+前段增加BF16→FP32准备及前置依赖；Q/Indexer部分核内已更快但启动分散仍大；
+末段O_A同时存在核内时间和分批执行差异。Sparse分段已短于这份旧图，不能继续沿用旧热点排序。
+当前没有indexer_key_repack任务，新增的是head_coefficients，不能把两版额外任务混为一谈。
+最新上游O_A按行块×列块并行；接入NZ大batch仍核内串行行块，正在独立检验这一任务粒度差异。
+只调整O_A登记顺序的先导未获明确本体收益，已撤回。
+
+[完整差异、源码对应和范围限制](results/csa_scheduling_20260927/upstream_725/README.md)、
+[逐任务/四窗口表](results/csa_scheduling_20260927/upstream_725/comparison.md)、
+[当前关键路径和等待归因](results/csa_scheduling_20260927/upstream_725/critical_path_summary.md)。
+原始泳道链接在上述文档内；后续候选继续据此记录，原生最终验收合同不变。
+
+## 以下为此前阶段记录（按各自版本读取）
+
 当前已恢复性能优化。用户最新要求：先按上游写法优化连续缓存下的 CSA 本体，拆分和写回暂缓。
 历史表格保留其原采样范围，不改名为当前结果。
 
@@ -103,7 +135,7 @@ FIXPIPE 能力也须区分目的存储：本地 PyPTO `2a4e09ff` 允许 Acc→GM
 因此这项编译限制已解除，后续应按实际数据流与测量判断，而不是继续视为工具链阻塞。
 逐项源码依据见 [验证日志 §176](DSV4_FLASH_CSA_VALIDATION_LOG.md#176-native-a3-qli-与上游fixpipe路径的源码对照2026-09-27)。
 
-- 当前：保留的 `7eba45a3` 性能实现；B16/S6/H8192、mode=2、atomic=1，第二个 CSA 层复用 metadata。
+- 历史接入侧：当时保留的 `7eba45a3` 性能实现；B16/S6/H8192、mode=2、atomic=1，第二个 CSA 层复用 metadata。
   正式第 2 层权重及合成历史，PyPTO `88297437`、Simpler `a54c05095`、PTOAS 0.66。
   [原始泳道](results/csa_baseline_20260926/perf_qproj_upstream/swimlane/dfx/merged_swimlane.json)。
 - 上游：原 `shangyou-merged_swimlane_20260924_005402.json`，从 Git `30795c69^` 读取并保留这一份
