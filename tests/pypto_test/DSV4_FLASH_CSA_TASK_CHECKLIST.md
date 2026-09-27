@@ -58,8 +58,12 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    新profile两类专家GMM累计任务duration长档增加3.984ms、短档增加3.013ms；可重叠，不等于critical span。
    长档首层dispatch还含明显EP等待，不能把所有FFN增量都归因于CSA数值。
    单卡相同请求副本在atomic1/0均未复现分化；两条路径图/保护区通过，合成case不排除真实模型影响。
-   现在仅对PTO关闭atomic作两档EP16干预，复用新Native控制，Native确定性/cache/其他配置保持；
-   [运行与验收口径](results/csa_source_split_ab_20260927/ordered_atomic0/README.md)。不预先认定atomic为根因。
+   关闭PTO atomic的两档干预已完成：长档73.701ms、仍慢2.35%，12rank DSpark不同；短档104.072ms、快0.27%，
+   但P95从105.569升到110.292ms，暂不采用。独立profile专家GMM有下降，不能据此外推正式forward胜出；
+   [干预及全部样本](results/csa_source_split_ab_20260927/ordered_atomic0/README.md)。
+   累计softmax/BF16 round候选局部RMSE下降36.10%、B3尾块通过，但完整CSA786.75→803.29μs，
+   整层RMSE基本没变，因此不合入、不做16卡扩测；[候选与边界](results/csa_softmax_cumulative_20260928/README.md)。
+   下一步以单卡同输入隔离HC pre/post和归一化，定位整层误差的主要来源，再选择有依据的算术干预。
 2. 根据真实模型差距，交替推进incore与调度，先看8K和128K代表档，阶段结束再补受影响的矩阵档位。
    继续降低Native分页读取的L1搬运/同步成本；长档Score AIC block约473μs，仍是热点。
    Native完整QLI约362μs与PTO单block口径不同，不能直接相减当作等工作量差距。

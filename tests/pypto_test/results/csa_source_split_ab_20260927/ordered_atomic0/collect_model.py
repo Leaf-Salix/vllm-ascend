@@ -38,7 +38,7 @@ def collect_case(history, batch):
                         "expert_map_record_env", "custom_opp_path", "requested_steady_cycles"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧{key}不同")
             require(native["history"] == history, f"rank{rank}: 历史长度与矩阵不同")
-            require(native["atomic_add"] == 1 and pto["atomic_add"] == 0,
+            require(native["atomic_add"] == "1" and pto["atomic_add"] == "0",
                     f"rank{rank}: atomic干预未按声明执行")
             event_modes = compare_worker_configs(native["worker_runtime_config"][0],
                                                  pto["worker_runtime_config"][0])

@@ -1,0 +1,74 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index fb8378f6..4367c16f 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -443,9 +443,12 @@ def sparse_attn_csa(
+             running_l = pl.tile.muls(running_m, 0.0)
+             running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
+             running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
+-            for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
++            # Softmax's cumulative maximum advances before PV completes.
++            # Keep its state separate so the existing cross-query pipeline remains intact.
++            softmax_running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
++            for qk_tick, (m_iter, l_iter, left_iter, right_iter, softmax_m_iter) in pl.range(
+                 qk_block_count + QK_PRE_LAUNCH + 1,
+-                init_values=(running_m, running_l, running_left, running_right),
++                init_values=(running_m, running_l, running_left, running_right, softmax_running_m),
+             ):
+                 qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * NUM_QK_CORES
+                 qk_b = qk_t // S
+@@ -511,6 +514,10 @@ def sparse_attn_csa(
+                     softmax_work = qk_tick - 1
+                     softmax_sb = softmax_work % SPARSE_BLOCKS
+                     softmax_t = qk_core + (softmax_work // SPARSE_BLOCKS) * NUM_QK_CORES
++                    if softmax_sb == 0:
++                        softmax_m_base = pl.yield_(pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1]))
++                    else:
++                        softmax_m_base = pl.yield_(softmax_m_iter)
+                     if pl.read(valid_block_mask, [softmax_t, softmax_sb]) > 0:
+                         qk_slot = qk_core * QK_TRANSFER_SLOTS + softmax_work % QK_TRANSFER_SLOTS
+                         qk_transfer_row = qk_slot * H
+@@ -526,20 +533,26 @@ def sparse_attn_csa(
+                         )
+                         qk_bias = pl.load(sparse_bias, [softmax_t, qk_s0], [1, ATTN_K_TILE])
+                         qk_masked = pl.col_expand_add(pl.mul(qk_scores_half, SOFTMAX_SCALE), qk_bias)
+-                        # 块内取局部最大值，跨块的重标定挪到下面的归并里；
+-                        # 这样每块 softmax 互不依赖，流水才排得开。
+-                        qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
++                        # Use the cumulative maximum before BF16 probability rounding.
++                        # The 128-candidate partition still differs from Native's 512.
++                        qk_block_m = pl.row_max(qk_masked, qk_reduce_tmp)
++                        qk_mi = pl.maximum(softmax_m_base, qk_block_m)
+                         qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
+                         qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
+-                        # 性能版用 rint（就近偶数），与上游一致。精度版用 round
+-                        # 是为了复刻 Native SAS 的 CAST_ROUND——半数远离零。
+-                        qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
++                        # Match Native SAS CAST_ROUND at this probability boundary.
++                        qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="round")
+                         pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
+                         pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
+                         pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                         pl.system.sync_set(
+                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
+                         )
++                        softmax_m_valid = pl.yield_(qk_mi)
++                    else:
++                        softmax_m_valid = pl.yield_(softmax_m_base)
++                    softmax_m_after = pl.yield_(softmax_m_valid)
++                else:
++                    softmax_m_after = pl.yield_(softmax_m_iter)
+                 if t_dim < EARLY_KV_MIN_TOKENS:
+                     if qk_tick < qk_block_count:
+                         if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+@@ -599,8 +612,8 @@ def sparse_attn_csa(
+                     )
+                 else:
+                     m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
+-                running_m, running_l, running_left, running_right = pl.yield_(
+-                    m_after, l_after, left_after, right_after
++                running_m, running_l, running_left, running_right, softmax_running_m = pl.yield_(
++                    m_after, l_after, left_after, right_after, softmax_m_after
+                 )
+ 
+     # Native cosine rows already have the consumer's interleaved layout.
