@@ -353,7 +353,8 @@ def _decode_csa_tp1_layer(
                         write_row = pl.cast(write_page, pl.INDEX) * BLOCK_SIZE + write_offset
                         kv_cache_flat[write_row : write_row + 1, 0:HEAD_DIM] = kv[write_t : write_t + 1, 0:HEAD_DIM]
 
-        # Keep Q_A ahead of the two background Compressor projections.
+        # Keep Q_A ahead of the heavier Attention Compressor projection.
+        # The lighter Indexer projection overlaps Q_A; its Hadamard gate stays below.
         compressor_dep = pl.system.task_dummy(deps=[late_dep, qa_tid])
         cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
         cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
@@ -395,7 +396,7 @@ def _decode_csa_tp1_layer(
             kv_seq_lens,
             idx_slot_mapping,
             inner_state_slot_mapping,
-            compressor_dep,
+            late_dep,
             cmp_kv_score_tid,
         )
         # Bound indexer scratch to its own runtime scope.

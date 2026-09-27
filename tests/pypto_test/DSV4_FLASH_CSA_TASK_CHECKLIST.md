@@ -29,7 +29,7 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 B24本体983.49 μs且16行尾块通过。两档完整PTO仍慢于Native，七档/整模型验收未完成。
 HC转换开放预派发未获益，已撤回；B16恢复Compressor交叠使Q_A推迟，本体未改善，未保留工作量分支。
 RoPE准备开放预派发也无本体收益，已撤回。用户最新要求：**从新指令起再做十轮调度，然后回到incore task优化**。
-[十轮台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)从round01计数，前序试验不算；当前4/10完成，七档统一验证放到十轮收尾。
+[十轮台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)从round01计数，前序试验不算；当前5/10完成，七档统一验证放到十轮收尾。
 第二项连续清零已保留：B40 Q_A seed6.94–8.50 μs、KV seed4.96–5.20 μs，小档padding检查通过；
 [独立证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：

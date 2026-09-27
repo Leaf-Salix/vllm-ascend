@@ -7587,3 +7587,12 @@ B16 merge末尾到O_A首kernel由5.62–7.32降到4.34–4.80 μs，但末段177
 本体793.66→788.27 μs（−0.68%），同轮Native约−0.41%；不足以确认末段策略收益，撤回，不扩测。
 保护区/Top-K结构/有限值通过，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/round04_merge_early/README.md)。
 计数4/10。第5轮只释放较轻Indexer Compressor与Q_A交叠，较重Attention Compressor仍等待Q_A。
+
+## 219. 十轮调度第5轮：保留较轻Indexer Compressor提前交叠（2026-09-27）
+
+仅Indexer投影释放Q_A依赖，Attention投影仍等待Q_A，Hadamard原依赖保持。两个任务均退出0。
+B16本体793.66→781.52 μs、p95 813.52→791.80；B40本体1318.05→1306.88、p95 1364.58→1344.64。
+两档无profiler分布同向改善，保留待七档；泳道中B16关键链范围仍重叠，不能宣称每窗口都快。
+B40 Top-K末尾范围579.78–655.38→605.02–621.34，偏慢窗口收窄；Q_A本身变慢，不能单点解释全部收益。
+保护区/结构/有限值通过，Native零容差仍FAIL；[证据](results/csa_scheduling_20260927/round05_indexer_comp_overlap/README.md)。
+计数5/10；下一轮只增加Q_B整组启动，数学共享不变、精度版默认原策略。
