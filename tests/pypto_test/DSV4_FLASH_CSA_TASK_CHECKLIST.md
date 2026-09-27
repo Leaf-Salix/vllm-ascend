@@ -27,6 +27,7 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 [727.98 μs参考分析](results/csa_scheduling_20260927/upstream_725/comparison.md)。
 已保留[O_A行列并行](results/csa_scheduling_20260927/o_a_row_parallel/README.md)：B40尾段明确缩短，本体均值1318.05 μs；
 B24本体983.49 μs且16行尾块通过。两档完整PTO仍慢于Native，七档/整模型验收未完成。
+HC转换开放预派发试验前段未缩短，已撤回；下一项验证Q_A先行是否应按工作量选择，保持大档已验证策略。
 第二项连续清零已保留：B40 Q_A seed6.94–8.50 μs、KV seed4.96–5.20 μs，小档padding检查通过；
 [独立证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：

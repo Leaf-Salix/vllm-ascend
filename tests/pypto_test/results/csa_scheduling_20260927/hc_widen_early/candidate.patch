@@ -1,0 +1,14 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+index a4449348..b9bd27da 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -250,7 +250,8 @@ def _decode_csa_tp1_layer(
+     x_hc32_flat = pl.reshape(x_hc32, [t_dim, HC_MULT * D])
+     widen_rows = (t_dim + HC_WIDEN_T_TILE - 1) // HC_WIDEN_T_TILE
+     widen_tail = pl.create_tensor([HC_WIDEN_T_TILE, HC_MULT * D], dtype=pl.FP32)
+-    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen") as _widen_tid:
++    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen",
++                 allow_early_resolve=True) as _widen_tid:
+         for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows,
+                                   pl.min(widen_rows, HC_WIDEN_WORKERS)):
+             w_t0 = widen_blk * HC_WIDEN_T_TILE
