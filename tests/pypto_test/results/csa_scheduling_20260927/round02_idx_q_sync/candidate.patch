@@ -1,0 +1,12 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 1a49e55a..f33444f8 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -880,6 +880,7 @@ def indexer_qr_rope(
+     with pl.spmd(
+         QR_PROJ_WORKERS,
+         name_hint="idx_qr_proj_matmul",
++        sync_start=True,
+         allow_early_resolve=True,
+     ) as idx_qr_mm_tid:
+         qr_proj_worker = pl.tile.get_block_idx()

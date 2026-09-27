@@ -7562,3 +7562,12 @@ Top-K末尾405–427→416–438 μs，未获本体收益，撤回，不扩测�
 O_A窗口略短但O_B略长，merge→HC_post尾段275.96–285.62→278.92–286.42 μs，没有明确收益，已撤回。
 保护区/Top-K结构通过、非有限值0，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/round01_quant_no_early/README.md)。
 本轮计数1/10。第2轮只试Indexer Q的24个AIC块整组准入，CPU根/PTOAS/AICPU编译已通过，待真机结果。
+
+## 216. 十轮调度第2轮：Indexer Q整组启动更齐但未加速（2026-09-27）
+
+完整CPU编译通过，task_20260927_182348_298761627623退出0。8K/B16，基底2dd51f15。
+仅Indexer Q的24个AIC block设sync_start，启动分散14.10–72.18→0.34–0.86 μs，
+但首次开始范围169.62–199.82→161.80–263.14，Top-K末尾405.28–426.70→403.02–451.36 μs。
+无profiler本体793.66→796.98 μs、p50/p95未改善，撤回。保护区/结构/有限值通过，Native零容差仍FAIL。
+[完整证据](results/csa_scheduling_20260927/round02_idx_q_sync/README.md)，计数2/10。
+第3轮保留所有算术和块数，仅让KV投影等待Q_A以减少早段AIC竞争；CPU根与调度C++已编译通过。
