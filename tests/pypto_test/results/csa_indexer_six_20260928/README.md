@@ -107,4 +107,8 @@ task_20260928_034149_296992718490：[命令](run_model.sh)、[收集器](collect
 隔离模型源码＝2a740c1f＋测试入场修复8dd737f4＋本目录候选；没有QKV边界或分离cache改动。
 128K/B16、8K/B40各重新采集Native和PTO，mode2/atomic1/det0/HCCL=false/EPLB关闭，
 warmup后10步无profiler forward，另3步profile。只有token/DSpark与真实forward结果可确认模型验收。
-本节当前没有整模型收益结论。
+当前先完成128K/B16：Native73.033→PTO72.440ms，本轮快0.81%；
+每步最慢rank均值73.577→72.930ms（快0.88%），P95 74.191→73.256ms。
+65536输出token零差异，16组rank的DSpark统计一致；PTO P95/P50为1.010。
+这是同轮重新采集控制后的实际EP16结果，但差额较小，尚不能宣布稳定优势或七档达标。
+8K/B40仍在执行；[已完成档位和逐rank样本](model/RESULTS.md)。
