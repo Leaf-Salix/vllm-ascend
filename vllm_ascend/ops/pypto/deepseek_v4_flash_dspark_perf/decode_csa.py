@@ -322,7 +322,7 @@ def _decode_csa_tp1_layer(
     with pl.scope():
         # Projection-chain dependency marker.
         late_dep = pl.system.task_dummy(deps=[rope_tid])
-        qkv_proj_rope(
+        q, qa_tid = qkv_proj_rope(
             x_normed_t,
             wq_a,
             wq_b,
@@ -353,6 +353,8 @@ def _decode_csa_tp1_layer(
                         write_row = pl.cast(write_page, pl.INDEX) * BLOCK_SIZE + write_offset
                         kv_cache_flat[write_row : write_row + 1, 0:HEAD_DIM] = kv[write_t : write_t + 1, 0:HEAD_DIM]
 
+        # Keep Q_A ahead of the two background Compressor projections.
+        compressor_dep = pl.system.task_dummy(deps=[late_dep, qa_tid])
         cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
         cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
             x_normed_t,
@@ -371,7 +373,7 @@ def _decode_csa_tp1_layer(
             cmp_seq_lens,
             cmp_slot_mapping,
             state_slot_mapping,
-            late_dep,
+            compressor_dep,
         )
         idx_kv_unused = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
         idx_cache_write_tid = indexer_compressor(
@@ -393,7 +395,7 @@ def _decode_csa_tp1_layer(
             kv_seq_lens,
             idx_slot_mapping,
             inner_state_slot_mapping,
-            late_dep,
+            compressor_dep,
             cmp_kv_score_tid,
         )
         # Bound indexer scratch to its own runtime scope.

@@ -1,0 +1,169 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -208,7 +208,7 @@
+ def _q_proj_qa_nd(
+     x: pl.Tensor[[T_DYN, D], pl.BF16],
+     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16],
+-    qr_fp32: pl.Out[pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32]],
++    qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+ ):
+@@ -227,7 +227,8 @@
+         for ts0 in pl.range(0, qr_t_matmul, QR_M_TILE):
+             qr_fp32[ts0 : ts0 + QR_M_TILE, :] = qr_seed
+ 
+-    for qbg_idx in pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
++    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
++        qbg_idx = pl.tile.get_block_idx()
+         pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
+         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
+         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
+@@ -256,12 +257,14 @@
+                 q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, b_trans=True, init_cond=(db == 0))
+             qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=STORE_ATOMIC)
+ 
++    return qa_tid
++
+ 
+ @pl.jit.inline(auto_scope=False)
+ def _q_proj_qa_nz(
+     x: pl.Tensor[[T_DYN, D], pl.BF16],
+     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+-    qr_fp32: pl.Out[pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32]],
++    qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+ ):
+@@ -285,7 +288,7 @@
+     # 后者给出的是 IterArg，`IsProvableNonNegative` 不追它，于是由它导出的行偏移
+     # 不可证（实测报 `slice offset on shape[-2] to be non-negative cannot be proven`）。
+     # `get_block_idx()` 是明确的 SPMD block 索引，属于可证形式。
+-    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
++    with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True) as qa_tid:
+         pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
+         qbg_idx = pl.tile.get_block_idx()
+         qr_k_base = (qbg_idx // QR_N_BLOCKS) * QR_SPLIT_K_TILE
+@@ -315,6 +318,8 @@
+                 q_acc = pl.matmul_acc(q_acc, q_x_chunk_bf16, w_chunk, b_trans=True, init_cond=(db == 0))
+             qr_fp32 = pl.assemble(qr_fp32, q_acc, [t0, q_a_col0], atomic=STORE_ATOMIC)
+ 
++    return qa_tid
++
+ 
+ q_proj_qa = _q_proj_qa_nz if BF16_WEIGHT_NZ else _q_proj_qa_nd
+ 
+@@ -326,8 +331,8 @@
+     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+-    qr_i8_matmul: pl.Out[pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8]],
+-    qr_scale_pad_store: pl.Out[pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32]],
++    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
++    qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
+ ):
+     """Q LoRA, RMSNorm and quantization -- the half the indexer query chain needs.
+ 
+@@ -336,15 +341,19 @@
+     tile iteration must let the qproj half finish before the next one starts. Every
+     current caller has t_dim <= PREFILL_DENSE_TILE, i.e. a single iteration.
+     """
++    qa_tids = pl.array.create(1, pl.TASK_ID)
++    qa_tids[0] = pl.system.task_invalid()
+     t_dim = pl.tensor.dim(x, 0)
+     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
+         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
+         with pl.scope():
+             qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
+             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
+-            q_proj_qa(x, wq_a, qr_fp32, tile_base, tile_rows)
++            qa_tids[0] = q_proj_qa(x, wq_a, qr_fp32, tile_base, tile_rows)
+ 
+             q_proj_qr_normalize(qr_fp32, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, tile_base, tile_rows)
++
++    return qa_tids[0]
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -353,8 +362,8 @@
+     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+-    qr_i8_matmul: pl.Out[pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8]],
+-    qr_scale_pad_store: pl.Out[pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32]],
++    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
++    qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
+     tile_base: pl.Scalar[pl.INDEX],
+     tile_rows: pl.Scalar[pl.INDEX],
+ ):
+@@ -668,7 +677,7 @@
+     qr_i8_matmul = pl.create_tensor([QPROJ_T_PAD, Q_LORA], dtype=pl.INT8)
+     # The quant scale rides the qr_i8 -> qproj_matmul -> dequant chain.
+     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
+-    q_proj_qr(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store)
++    qa_tid = q_proj_qr(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store)
+     q_seq_dep = pl.system.task_dummy(deps=[])
+     q_proj_q(
+         x,
+@@ -682,6 +691,8 @@
+         qr_scale_pad_store,
+         q_seq_dep,
+     )
++
++    return qa_tid
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -935,7 +946,7 @@
+     q_rope_sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
+     q_rope_swap_idx = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.INT32)
+     rope_prepare(rope_sin, q_rope_sin_signed, q_rope_swap_idx)
+-    q_proj_rope(
++    qa_tid = q_proj_rope(
+         x,
+         wq_a,
+         wq_b,
+@@ -958,4 +969,4 @@
+         kv,
+         late_dep,
+     )
+-    return q
++    return q, qa_tid
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -322,7 +322,7 @@
+     with pl.scope():
+         # Projection-chain dependency marker.
+         late_dep = pl.system.task_dummy(deps=[rope_tid])
+-        qkv_proj_rope(
++        q, qa_tid = qkv_proj_rope(
+             x_normed_t,
+             wq_a,
+             wq_b,
+@@ -353,6 +353,8 @@
+                         write_row = pl.cast(write_page, pl.INDEX) * BLOCK_SIZE + write_offset
+                         kv_cache_flat[write_row : write_row + 1, 0:HEAD_DIM] = kv[write_t : write_t + 1, 0:HEAD_DIM]
+ 
++        # Keep Q_A ahead of the two background Compressor projections.
++        compressor_dep = pl.system.task_dummy(deps=[late_dep, qa_tid])
+         cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
+         cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
+             x_normed_t,
+@@ -371,7 +373,7 @@
+             cmp_seq_lens,
+             cmp_slot_mapping,
+             state_slot_mapping,
+-            late_dep,
++            compressor_dep,
+         )
+         idx_kv_unused = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
+         idx_cache_write_tid = indexer_compressor(
+@@ -393,7 +395,7 @@
+             kv_seq_lens,
+             idx_slot_mapping,
+             inner_state_slot_mapping,
+-            late_dep,
++            compressor_dep,
+             cmp_kv_score_tid,
+         )
+         # Bound indexer scratch to its own runtime scope.

@@ -439,7 +439,7 @@ PTO根算子先调用Attention Compressor、再调用Indexer Compressor，因此
 仍需单列metadata、cache scatter、布局/seed/adapter的临界路径范围；
 此节补齐的是操作对应和七档数据入口，没有把分散任务的均值拼成完整CSA归因。
 
-## 8. 当前保留实现的突出差异（da2e2368）
+## 8. 七档基线的突出差异（da2e2368，后续变化见第9节）
 
 重新只读刚完成的七档28个DFX窗口，得到[当前全部任务统计](results/csa_incore_20260927/current_incore_da2e2368.json)。
 这里PTO为当前采集，Native分项沿用已标注的独立profile；Native完整kernel与PTO block均值不能等范围相减。
@@ -475,4 +475,16 @@ O_A、HC_post当前核内分别83.37–84.41 / 23.29–27.06 μs，Native为138.
 
 三项已结束：保留Indexer合并规约、连续清零；撤回FP16紧凑写回。当前转入调度阶段，停止追加核内候选。
 首项调度目标是Q_A上游链派发：B40四窗口每block核内8.41–9.49 μs，整组启动分散47.76–108.88 μs。
-先验证normal/early准入策略对关键链和无profiler本体的影响；上述分散包含资源占用，不全部等同调度器软件开销。
+首轮用显式依赖让两个Compressor投影等Q_A完成；上述分散包含资源占用，不全部等同调度器软件开销。
+
+## 10. 已转调度：Q_A先行与选择性预派发
+
+B40先导让两个Compressor投影等待Q_A，保持核内计算不变。
+Q_A启动分散47.76–108.88→36.72–46.64 μs，本体1359.26→1327.86 μs（−2.31%）；先保留，其他档位待本阶段验证。
+Top-K链尾部仍有波动，不能仅凭Q_A提前宣称调度已完成。
+[先导结果、数值与原始泳道](results/csa_scheduling_20260927/qr_before_compressors/README.md)。
+
+用户要求：对预派发抢占靠前槽位却使时序更差的任务，选择性关闭allow_early_resolve。
+该标志控制生产者的消费者是否可提前占位，不能当成当前任务自己的priority。
+现有B40中O_A后quant平均local_setup80.20–83.71 μs，Top-K merge7.77–52.58 μs；
+local_setup含准备和等依赖，大数本身不证明有害。先独立检验关闭Score生产者标志，阻止Top-K merge预派发。
