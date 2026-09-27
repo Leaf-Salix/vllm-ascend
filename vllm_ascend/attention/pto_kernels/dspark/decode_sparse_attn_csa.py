@@ -480,10 +480,20 @@ def sparse_attn_csa(
                 l_cmp_seed = pl.load(
                     attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
                 )
+                # 压缩块的 l 用平衡树而不是左折叠。写成 8 个 64 通道部分和：
+                # 左折叠是 (((P0+P1)+(P2+P3))+(P4+P5))+(P6+P7)，
+                # 这里的两段各自累加再相加是 ((P0+P1)+(P2+P3))+((P4+P5)+(P6+P7))，
+                # 即平衡树 —— 三个候选结合方式里唯一没实测过的那个。
+                # 初值不能共用同一个 load 回来的缓冲，每段单独 load 一次。
+                l_cmp_hi_seed = pl.load(
+                    attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec,
+                )
                 running_l_win = pl.tile.muls(l_win_seed, 0.0)
                 running_l_cmp = pl.tile.muls(l_cmp_seed, 0.0)
-                for exp_tick, (ex_w, ex_c) in pl.range(
-                    SPARSE_BLOCKS, init_values=(running_l_win, running_l_cmp),
+                running_l_cmp_hi = pl.tile.muls(l_cmp_hi_seed, 0.0)
+                CMP_MID = WIN_BLOCKS + (SPARSE_BLOCKS - WIN_BLOCKS) // 2
+                for exp_tick, (ex_w, ex_c, ex_d) in pl.range(
+                    SPARSE_BLOCKS, init_values=(running_l_win, running_l_cmp, running_l_cmp_hi),
                 ):
                     softmax_sb = exp_tick
                     if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
@@ -519,10 +529,18 @@ def sparse_attn_csa(
                             ffts_mode=2, core_type=pl.KernelType.AIV,
                         )
                         if qk_s0 < WIN:
-                            ex_wv, ex_cv = pl.yield_(pl.add(ex_w, qk_li), ex_c)
+                            ex_wv, ex_cv, ex_dv = pl.yield_(pl.add(ex_w, qk_li), ex_c, ex_d)
                         else:
-                            ex_wv, ex_cv = pl.yield_(ex_w, pl.add(ex_c, qk_li))
-                        ex_wa, ex_ca = pl.yield_(ex_wv, ex_cv)
+                            # elif 会让外层 else 的 body 只有一条裸 IfStmt、末尾没有
+                            # yield，SSAVerify 直接拒（IfStmt else branch must end
+                            # with YieldStmt when return_vars exist）。显式嵌套 +
+                            # 合并 yield 是这份文件里既有的写法。
+                            if softmax_sb < CMP_MID:
+                                ex_w2, ex_c2, ex_d2 = pl.yield_(ex_w, pl.add(ex_c, qk_li), ex_d)
+                            else:
+                                ex_w2, ex_c2, ex_d2 = pl.yield_(ex_w, ex_c, pl.add(ex_d, qk_li))
+                            ex_wv, ex_cv, ex_dv = pl.yield_(ex_w2, ex_c2, ex_d2)
+                        ex_wa, ex_ca, ex_da = pl.yield_(ex_wv, ex_cv, ex_dv)
                     else:
                         exp_zero = pl.tile.full(
                             [H // 2, ATTN_K_TILE], dtype=pl.BF16, value=0.0,
@@ -536,8 +554,9 @@ def sparse_attn_csa(
                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
                             ffts_mode=2, core_type=pl.KernelType.AIV,
                         )
-                        ex_wa, ex_ca = pl.yield_(ex_w, ex_c)
-                    running_l_win, running_l_cmp = pl.yield_(ex_wa, ex_ca)
+                        ex_wa, ex_ca, ex_da = pl.yield_(ex_w, ex_c, ex_d)
+                    running_l_win, running_l_cmp, running_l_cmp_hi = pl.yield_(ex_wa, ex_ca, ex_da)
+                running_l_cmp = pl.add(running_l_cmp, running_l_cmp_hi)
                 # Publish the chunk sums where the merge reads them: the window
                 # chunk in block 0's slot, the compressed chunk in block
                 # WIN_BLOCKS's, zero for the rest so folding them is a no-op.
