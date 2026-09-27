@@ -11,6 +11,7 @@ SPLIT = RESULTS / "csa_split_optimization_20260927"
 NAMES = (
     "mix_x_rms_norm_spmd", "qr_proj_matmul_spmd", "qr_rms_norm_quant_spmd",
     "qproj_matmul_spmd", "qproj_dequant_rms_nope_rope_spmd", "idx_qr_proj_matmul_spmd",
+    "idx_qr_dequant_rope_spmd", "qr_hadamard_matmul_spmd",
     "kv_score_proj_spmd", "kv_score_proj_0_spmd", "indexer_head_coefficients_spmd",
     "indexer_score_topk_native_pair_aic_spmd", "indexer_score_topk_native_pair_aiv_spmd",
     "indexer_topk_query_merge_spmd", "qk_pv_aic_spmd", "merge_norm_spmd",

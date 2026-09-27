@@ -7455,3 +7455,12 @@ Top-K末尾位置仍有长尾，不声称全链调度完成；按B40收益先保
 
 用户要求按泳道选择性关闭有害预派发。API核对：allow_early_resolve在生产者上，控制其消费者提前占位。
 因此最初仅改Q_A该标志的草案未上卡；下一项独立关闭Score生产者标志，检查Top-K merge抢占及本体。
+
+## 207. 按用户方向选择性关闭预派发，Score一项未获本体收益（2026-09-27）
+
+在6cfc737d基底仅关闭Score生产者allow_early_resolve，阻止Top-K merge提前占AIV。
+任务task_20260927_173803_265073027486退出0；B40/H8K同口径20次计时和4个DFX窗口。
+Top-K merge平均local_setup8.16–53.01→0.68–0.71 μs，完成位置范围617.86–706.46→621.70–653.70 μs。
+但无profiler本体1327.86→1330.48 μs（+0.20%），p95基本持平；未证明整体收益，撤回，不扩测。
+保护区/Top-K结构/非有限值检查通过，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/score_no_early/README.md)。
+下一项独立关闭idx_qr_dequant_rope生产者标志，检验Query Hadamard预占AIC与Q_B竞争，不叠加本项。

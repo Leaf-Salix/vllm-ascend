@@ -488,3 +488,8 @@ Top-K链尾部仍有波动，不能仅凭Q_A提前宣称调度已完成。
 该标志控制生产者的消费者是否可提前占位，不能当成当前任务自己的priority。
 现有B40中O_A后quant平均local_setup80.20–83.71 μs，Top-K merge7.77–52.58 μs；
 local_setup含准备和等依赖，大数本身不证明有害。先独立检验关闭Score生产者标志，阻止Top-K merge预派发。
+
+关闭Score生产者标志的B40先导已完成：Top-K merge平均前置等待8.16–53.01→0.68–0.71 μs，
+但无profiler本体1327.86→1330.48 μs，无明确收益，已撤回；[独立证据](results/csa_scheduling_20260927/score_no_early/README.md)。
+下一项针对Query Hadamard：B40部分窗口提前占AIC等待约44 μs，而Q_B仍在计算；
+单独关闭其上游idx_qr_dequant_rope的生产者标志，不叠加Score试验。
