@@ -15,6 +15,11 @@
 此项基底07365e52，与本页前面V10历史基线不同；[三档核内、两档本体、局限与源码](results/csa_incore_20260927/sparse_pv_n128_pair/README.md)。
 保持现有五块softmax与跨query流水，区别于第6.1节的联合softmax/N128失败试验；本体长尾未解决。
 
+最新保留Indexer长历史1024/短历史768：完整leaf每半区11轮→8轮，128K/B16 Score AIC343.35→311.93 μs（−9.15%）。
+同一源码8K/B16本体790.78、128K/B16本体1234.06 μs；短档Score/merge较慢尚未归因，长尾/完整路径仍未解决。
+[独立核内/本体证据与适用边界](results/csa_incore_20260927/indexer_score_panel1024/README.md)。
+免清零和Score驻留UB候选均已撤回（验证日志§234/236），不算保留优化。
+
 ## 1. 当前结论与边界
 
 1. 128K Indexer 与 Native 在 query 复用、流式 Top-K、重复准备方面仍有差异。

@@ -151,6 +151,7 @@ TOPK_SCORE_WORKERS = 24  # Top-K score workers
 SCORE_TILE = 384
 
 BUFFERED_SCORE_TILE = 768
+BUFFERED_LONG_SCORE_TILE = 1024
 BUFFERED_SCORE_LANE_TILE = BUFFERED_SCORE_TILE // 2
 BUFFERED_SCORE_SCALE = 1024.0
 NATIVE_QLI_WEIGHT_ROWS = 16
@@ -454,6 +455,7 @@ def indexer_score_topk_native_cube(
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
     weights_tid: pl.Scalar[pl.TASK_ID],
     cache_write_tid: pl.Scalar[pl.TASK_ID],
+    score_tile: pl.constexpr,
 ):
     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
     cache_pages = pl.tensor.dim(idx_kv_cache, 0)
@@ -469,7 +471,7 @@ def indexer_score_topk_native_cube(
         weights_tid,
     )
     # 每个 worker 两个通信槽，每槽包含两个 query 的分数。
-    buf_score_transfer = pl.create_tensor([TOPK_SCORE_WORKERS * 4, BUFFERED_SCORE_TILE], dtype=pl.FP32)
+    buf_score_transfer = pl.create_tensor([TOPK_SCORE_WORKERS * 4, score_tile], dtype=pl.FP32)
     buf_score_ffts = pl.create_tensor([256], dtype=pl.INT64)
     with pl.spmd(
         TOPK_SCORE_WORKERS,
@@ -503,9 +505,9 @@ def indexer_score_topk_native_cube(
             buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
             if buf_logical_begin < buf_visible_count:
                 buf_valid_count = pl.min(TOPK_CANDIDATES_PER_LEAF, buf_visible_count - buf_logical_begin)
-                buf_tile_count = (buf_valid_count + BUFFERED_SCORE_TILE - 1) // BUFFERED_SCORE_TILE
-                buf_lane_span = pl.min(buf_tile_count * BUFFERED_SCORE_LANE_TILE, TOPK_CANDIDATES_PER_LEAF // 2)
-                buf_score_iters = (buf_lane_span + BUFFERED_SCORE_LANE_TILE - 1) // BUFFERED_SCORE_LANE_TILE
+                buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
                 buf_query_vector = pl.load(
                     qr_hadamard_i8,
                     [buf_query * IDX_N_HEADS, 0],
@@ -523,16 +525,16 @@ def indexer_score_topk_native_cube(
                 for buf_score_step in pl.range(buf_score_iters):
                     if buf_score_step >= 2:
                         pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                    buf_score_begin = buf_score_step * BUFFERED_SCORE_LANE_TILE
+                    buf_score_begin = buf_score_step * (score_tile // 2)
                     buf_transfer_row = buf_worker * 4 + buf_score_step % 2 * 2
                     buf_kv_i8 = pl.tile.create(
-                        [BUFFERED_SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                        [score_tile, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
                     )
                     for buf_key_lane in pl.unroll(2):
                         buf_kv_i8 = pl.gather_row(
                             buf_kv_i8,
                             kv_cache_i8_flat,
-                            [buf_key_lane * BUFFERED_SCORE_LANE_TILE, 0],
+                            [buf_key_lane * (score_tile // 2), 0],
                             [
                                 buf_batch_idx * request_rows
                                 + buf_logical_begin
@@ -540,12 +542,12 @@ def indexer_score_topk_native_cube(
                                 + buf_key_lane * buf_lane_span,
                                 0,
                             ],
-                            [BUFFERED_SCORE_LANE_TILE, IDX_HEAD_DIM],
+                            [(score_tile // 2), IDX_HEAD_DIM],
                         )
                     buf_previous_l1 = pl.tile.create(
                         [2 * IDX_N_HEADS, NATIVE_QLI_QK_COLS], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                     )
-                    for buf_qk_panel in pl.unroll(BUFFERED_SCORE_TILE // NATIVE_QLI_QK_COLS):
+                    for buf_qk_panel in pl.unroll(score_tile // NATIVE_QLI_QK_COLS):
                         buf_panel_col = buf_qk_panel * NATIVE_QLI_QK_COLS
                         buf_key_panel = pl.tile.extract(
                             pl.tile.transpose_view(buf_kv_i8),
@@ -586,7 +588,7 @@ def indexer_score_topk_native_cube(
                     buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
                     pl.store(
                         pl.set_validshape(buf_last_scores, 2, NATIVE_QLI_QK_COLS),
-                        [buf_transfer_row, BUFFERED_SCORE_TILE - NATIVE_QLI_QK_COLS],
+                        [buf_transfer_row, score_tile - NATIVE_QLI_QK_COLS],
                         buf_score_transfer,
                     )
                     pl.system.sync_set(
@@ -612,23 +614,23 @@ def indexer_score_topk_native_cube(
                 buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
                 if buf_logical_begin < buf_visible_count:
                     buf_valid_count = pl.min(TOPK_CANDIDATES_PER_LEAF, buf_visible_count - buf_logical_begin)
-                    buf_tile_count = (buf_valid_count + BUFFERED_SCORE_TILE - 1) // BUFFERED_SCORE_TILE
-                    buf_lane_span = pl.min(buf_tile_count * BUFFERED_SCORE_LANE_TILE, TOPK_CANDIDATES_PER_LEAF // 2)
-                    buf_score_iters = (buf_lane_span + BUFFERED_SCORE_LANE_TILE - 1) // BUFFERED_SCORE_LANE_TILE
+                    buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                    buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                    buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
                     buf_lane_begin = buf_score_lane * buf_lane_span
                     for buf_score_step in pl.range(buf_score_iters):
-                        buf_score_begin = buf_score_step * BUFFERED_SCORE_LANE_TILE
+                        buf_score_begin = buf_score_step * (score_tile // 2)
                         buf_transfer_row = buf_worker * 4 + buf_score_step % 2 * 2
                         pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                         buf_score_sum0 = pl.load(
                             buf_score_transfer,
-                            [buf_transfer_row, buf_score_lane * BUFFERED_SCORE_LANE_TILE],
-                            [1, BUFFERED_SCORE_LANE_TILE],
+                            [buf_transfer_row, buf_score_lane * (score_tile // 2)],
+                            [1, (score_tile // 2)],
                         )
                         buf_score_sum1 = pl.load(
                             buf_score_transfer,
-                            [buf_transfer_row + 1, buf_score_lane * BUFFERED_SCORE_LANE_TILE],
-                            [1, BUFFERED_SCORE_LANE_TILE],
+                            [buf_transfer_row + 1, buf_score_lane * (score_tile // 2)],
+                            [1, (score_tile // 2)],
                         )
                         pl.system.sync_set(
                             SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
@@ -636,7 +638,7 @@ def indexer_score_topk_native_cube(
                         buf_scale_half = pl.load(
                             kv_scale_rows,
                             [buf_batch_idx, buf_logical_begin + buf_score_begin + buf_lane_begin],
-                            [1, BUFFERED_SCORE_LANE_TILE],
+                            [1, (score_tile // 2)],
                         )
                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
                         for buf_query_lane in pl.unroll(2):
@@ -650,7 +652,7 @@ def indexer_score_topk_native_cube(
                             buf_lane_valid_rows = pl.max(
                                 pl.min(
                                     buf_query_visible - buf_logical_begin - buf_score_begin - buf_lane_begin,
-                                    BUFFERED_SCORE_LANE_TILE,
+                                    (score_tile // 2),
                                 ),
                                 0,
                             )
@@ -724,20 +726,40 @@ def indexer_score_topk_forest(
     for topk_batch in pl.range(b_dim):
         max_topk_cache_len = pl.max(max_topk_cache_len, pl.read(kv_seq_lens, [topk_batch]) // COMPRESS_RATIO)
     if max_topk_cache_len >= INDEXER_NATIVE_CUBE_MIN_ROWS:
-        score_tid = indexer_score_topk_native_cube(
-            qr_hadamard_i8,
-            qr_hadamard_scale_dq,
-            weights,
-            idx_kv_cache,
-            idx_kv_scale,
-            position_ids,
-            kv_seq_lens,
-            score_arena,
-            pair_arena,
-            qh_quant_tid,
-            weights_tid,
-            cache_write_tid,
-        )
+        # 长历史的完整leaf每半区4096候选：512一轮，11轮降至8轮。
+        # 短历史保留384半区，避免扩大最后一轮的padding计算。
+        if max_topk_cache_len > TOPK_CANDIDATES_PER_LEAF:
+            score_tid = indexer_score_topk_native_cube(
+                qr_hadamard_i8,
+                qr_hadamard_scale_dq,
+                weights,
+                idx_kv_cache,
+                idx_kv_scale,
+                position_ids,
+                kv_seq_lens,
+                score_arena,
+                pair_arena,
+                qh_quant_tid,
+                weights_tid,
+                cache_write_tid,
+                BUFFERED_LONG_SCORE_TILE,
+            )
+        else:
+            score_tid = indexer_score_topk_native_cube(
+                qr_hadamard_i8,
+                qr_hadamard_scale_dq,
+                weights,
+                idx_kv_cache,
+                idx_kv_scale,
+                position_ids,
+                kv_seq_lens,
+                score_arena,
+                pair_arena,
+                qh_quant_tid,
+                weights_tid,
+                cache_write_tid,
+                BUFFERED_SCORE_TILE,
+            )
     else:
         with pl.spmd(
             TOPK_SCORE_WORKERS,

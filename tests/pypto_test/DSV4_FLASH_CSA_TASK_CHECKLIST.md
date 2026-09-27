@@ -12,7 +12,10 @@
 性能判断继续覆盖8K/B16与128K/B16；核内收益、本体、长尾分别记录。
 已保留本轮PV N128/K128：B40 qk_pv AIC均值−2.68%、128K/B16−1.89%、8K/B16持平；
 [三档核内、两档本体和诊断](results/csa_incore_20260927/sparse_pv_n128_pair/README.md)。Score长尾仍在，完整路径未加速。
-下方07365e52七档属于PV修改前的固定基线，不能称为这项新修改的七档实测。
+再保留Indexer长历史1024/短历史768统一策略：128K/B16 Score AIC均值343.35→311.93 μs（−9.15%），
+本体1234.06 μs、p95 1482.84；8K/B16本体790.78 μs，相比PV基底+0.54%，短档Score/merge退化待归因。
+[两档完整数据、缓存padding成本与泳道](results/csa_incore_20260927/indexer_score_panel1024/README.md)。
+下方07365e52七档是PV和Indexer新修改之前的固定基线，不能称为当前保留实现的七档实测。
 [完整调度台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)。源码参考最新pypto-lib官方main2164563（2026-09-27 depth=1核对）；
 历史725 μs图实际Worker首尾727.98 μs，缺源码和完整配置，只用作参考，不能冒认为最新版同输入A/B。
 
