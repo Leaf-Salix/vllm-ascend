@@ -12,7 +12,6 @@
 import pypto.language as pl
 
 from .compact_metadata import ROPE_TILE_ROWS, load_compact_rope_rows
-
 from .config import (
     BLOCK_SIZE,
     C4A_COMPRESSOR_BLOCK_SIZE,
@@ -26,7 +25,7 @@ from .config import (
 from .config import (
     FLASH as M,
 )
-from .layout import INDEXER_KEY_BYTES, INDEXER_PAGE_BYTES_DYN, INDEXER_ROWS_DYN, INNER_STATE_PAGE_ELEMENTS_DYN, INNER_STATE_TABLE_COLUMNS_DYN
+from .layout import INDEXER_ROWS_DYN, INNER_STATE_PAGE_ELEMENTS_DYN, INNER_STATE_TABLE_COLUMNS_DYN
 
 B_DYN = pl.dynamic("DECODE_IDX_C4_B_DYN")
 
@@ -398,7 +397,8 @@ def indexer_compressor_write(
     kv: pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32],
     normed_kv: pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16],
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
+    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
@@ -411,6 +411,10 @@ def indexer_compressor_write(
     compact_rows = (bs // S) * BOUNDARY_ROWS_PER_REQUEST
     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
     kv_flat = kv
+    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+    request_rows = cache_pages // pl.tensor.dim(seq_lens, 0) * BLOCK_SIZE
+    key_rows = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, HEAD_DIM])
+    scale_pages = pl.reshape(idx_kv_scale, [cache_pages, BLOCK_SIZE])
     idx_kv_scale_values = pl.create_tensor([BS_PAD, 1], dtype=pl.FP32)
 
     kv_final = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
@@ -489,11 +493,9 @@ def indexer_compressor_write(
                 native_page = pl.read(idx_slot_mapping, [safe_row, 0])
                 native_offset = pl.read(idx_slot_mapping, [safe_row, 1])
                 if metadata_row < idx_rows and native_page >= 0 and native_offset >= 0:
-                    cache_row = pl.cast(native_page, pl.INDEX) * BLOCK_SIZE + native_offset
+                    cache_row = request * request_rows + token_pos // COMPRESS_RATIO
                     kv_flat[token : token + 1, :] = kv_blk_f32[inner : inner + 1, :]
-                    cache_page = cache_row // BLOCK_SIZE
-                    key_begin = (cache_row % BLOCK_SIZE) * HEAD_DIM
-                    idx_kv_cache[cache_page : cache_page + 1, key_begin : key_begin + HEAD_DIM] = kv_i8_blk[
+                    key_rows[cache_row : cache_row + 1, 0:HEAD_DIM] = kv_i8_blk[
                         inner : inner + 1, :
                     ]
 
@@ -529,19 +531,17 @@ def indexer_compressor_write(
                 native_page = pl.read(idx_slot_mapping, [safe_row, 0])
                 native_offset = pl.read(idx_slot_mapping, [safe_row, 1])
                 if metadata_row < idx_rows and native_page >= 0 and native_offset >= 0:
-                    cache_row = pl.cast(native_page, pl.INDEX) * BLOCK_SIZE + native_offset
+                    cache_row = request * request_rows + token_pos // COMPRESS_RATIO
                     # Merge exactly one scale into the aligned 64-byte
                     # region. One task serializes updates to shared pages.
                     scale_page = cache_row // BLOCK_SIZE
-                    scale_bytes = pl.tile.load(idx_kv_cache, [scale_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2])
-                    scale_half = pl.tile.reinterpret_view(scale_bytes, pl.FP16)
+                    scale_half = pl.tile.load(scale_pages, [scale_page, 0], [1, BLOCK_SIZE])
                     pl.tile.write(
                         scale_half,
                         [0, cache_row % BLOCK_SIZE],
                         pl.cast(pl.read(idx_kv_scale_values, [compact_token, 0]), pl.FP16),
                     )
-                    updated_bytes = pl.tile.reinterpret_view(scale_half, pl.INT8)
-                    pl.tile.store(updated_bytes, [scale_page, INDEXER_KEY_BYTES], idx_kv_cache)
+                    pl.tile.store(scale_half, [scale_page, 0], scale_pages)
 
     return hadamard_tid, scale_commit_tid
 
@@ -560,7 +560,8 @@ def indexer_compressor(
     sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.INT8],
+    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
@@ -591,6 +592,7 @@ def indexer_compressor(
         normed_kv,
         hadamard,
         idx_kv_cache,
+        idx_kv_scale,
         idx_slot_mapping,
         compact_offsets,
         position_ids,

@@ -25,9 +25,6 @@ from .config import (
     FLASH as M,
 )
 from .layout import (
-    INDEXER_KEY_BYTES,
-    INDEXER_MIN_PAGE_BYTES,
-    INDEXER_PAGE_BYTES_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
 )
 
@@ -149,10 +146,6 @@ TOPK_QUERY_WORKERS = 48  # Top-K query-merge workers
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
-
-REPACK_WORKERS = 192  # indexer 键重排的 AIV 通道数；repack 是 DMA 启动延迟受限，
-# 块数多才能把各页不齐的耗时摊平并让更多 DMA 在飞。实测 128K/B16 上 48→192 让 PTO
-# 从 1935.0 降到 1770.1（-8.5%），96 起就有 -6%，144/192 饱和（见验证日志 §147）。
 
 SCORE_TILE = 384
 
@@ -399,7 +392,8 @@ def indexer_score_topk_forest(
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
@@ -411,71 +405,21 @@ def indexer_score_topk_forest(
 ):
     """Score and select half-leaves, then merge their exact Top-K rows."""
     b_dim = pl.tensor.dim(idx_block_table, 0)
-    table_columns = pl.tensor.dim(idx_block_table, 1)
-    idx_table_len = b_dim * table_columns
-    # Native packs each page's INT8 keys and FP16 scales into one allocation.
-    idx_block_table_flat = pl.reshape(
-        idx_block_table,
-        [idx_table_len],
-    )
+    # The Torch bridge orders all pages by request and logical page before CSA.
+    # The two AIV lanes can each load one contiguous 192-row key range.
+    cache_pages = pl.tensor.dim(idx_kv_cache, 0)
+    request_rows = cache_pages // b_dim * BLOCK_SIZE
+    kv_cache_i8_flat = pl.reshape(idx_kv_cache, [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
+    kv_scale_rows = pl.reshape(idx_kv_scale, [b_dim, request_rows])
     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
-    # Native 每页含 4096B INT8 key 和 64B FP16 scale，上游两者分开存储。
-    # 4160B 页跨度不整除 128，不能直接视为紧凑 [blocks*32,128]；但 0/64B
-    # 两个 GM 别名可以按页直读 L1，并不必然需要重排。该直读候选主档完整区间
-    # 为 837.36us，未优于保留版 817.22us（验证日志第 116 节），因此仍用重排。
-    # 每请求每步只读一次可见页，key/scale 按逻辑页序紧凑化；随后 S 个 query
-    # 都能将一个 lane 的 6 页合并为一次读取，减少评分侧重复发起 DMA。
-    # 这是一项性能取舍；应比较 repack→score→publish 全链，不能只比较任务数。
-    repack_max_len = 0
-    for repack_batch in pl.range(b_dim):
-        repack_max_len = pl.max(repack_max_len, pl.read(kv_seq_lens, [repack_batch]) // COMPRESS_RATIO)
-    repack_max_len = pl.max(pl.min(repack_max_len, TOPK_MAX_CANDIDATES), 1)
-    # 末尾多留一个 SCORE_TILE 的余量：打分侧的最后一个 tile 总是读满
-    # SCORE_LANE_ROWS 行（超出 lane_valid_rows 的列随后被丢掉），留足余量就不必把
-    # 读起点往回夹——往回夹会让 tile 内的行与候选列号错位。余量页由下面的
-    # repack_safe 用最后一个有效页填上，不留未初始化数据。
-    repack_pages = (repack_max_len + BLOCK_SIZE - 1) // BLOCK_SIZE + (SCORE_LANE_ROWS // BLOCK_SIZE + 1)
-    repack_rows = repack_pages * BLOCK_SIZE
-    key_compact = pl.create_tensor([b_dim * repack_rows, IDX_HEAD_DIM], dtype=pl.INT8)
-    scale_compact = pl.create_tensor([b_dim, repack_rows], dtype=pl.FP16)
-    with pl.spmd(
-        REPACK_WORKERS, name_hint="indexer_key_repack", deps=[cache_write_tid], allow_early_resolve=True
-    ) as repack_tid:
-        repack_worker = pl.tile.get_block_idx()
-        for repack_unit in pl.range(repack_worker, b_dim * repack_pages, REPACK_WORKERS):
-            repack_b = repack_unit // repack_pages
-            repack_page = repack_unit - repack_b * repack_pages
-            repack_len = pl.read(kv_seq_lens, [repack_b]) // COMPRESS_RATIO
-            repack_valid = pl.max(pl.min(repack_len, TOPK_MAX_CANDIDATES), 0)
-            # 超出本请求可见范围的页钳到最后一页：紧凑缓冲里对应的行不会被读到
-            # （打分侧按 valid_count 截断），只是不留未初始化数据。
-            repack_safe = pl.min(repack_page, pl.max((repack_valid - 1) // BLOCK_SIZE, 0))
-            repack_block = pl.cast(
-                pl.read(idx_block_table_flat, [repack_b * table_columns + repack_safe]), pl.INDEX
-            )
-            # 键与 scale 在页内连续（4096 + 32*2 = INDEXER_MIN_PAGE_BYTES），一次读完。
-            # 分两次读会让 DMA 次数翻倍，而 repack 的开销就是次数乘以启动开销。
-            repack_bytes = pl.create_tensor([1, INDEXER_MIN_PAGE_BYTES], dtype=pl.INT8)
-            repack_bytes = pl.gather_row(
-                repack_bytes, idx_kv_cache, [0, 0], [repack_block, 0], [1, INDEXER_MIN_PAGE_BYTES]
-            )
-            repack_dst = (repack_b * repack_pages + repack_page) * BLOCK_SIZE
-            key_compact[repack_dst : repack_dst + BLOCK_SIZE, 0:IDX_HEAD_DIM] = pl.reshape(
-                repack_bytes[0:1, 0:INDEXER_KEY_BYTES], [BLOCK_SIZE, IDX_HEAD_DIM]
-            )
-            repack_scale_col = repack_page * BLOCK_SIZE
-            scale_compact[repack_b : repack_b + 1, repack_scale_col : repack_scale_col + BLOCK_SIZE] = (
-                pl.reinterpret_view(repack_bytes[0:1, INDEXER_KEY_BYTES:INDEXER_MIN_PAGE_BYTES], pl.FP16)
-            )
-
     # 性能版不外提 head 系数：上游在 leaf 内按 query 现算，省掉一个独占关键路径
     # 约 40.7us 的任务；精度版保留外提是为了配合 Cube 规约的 FP16 权重行布局。
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_leaf",
-        deps=[qh_quant_tid, weights_tid, repack_tid],
+        deps=[qh_quant_tid, weights_tid, cache_write_tid],
         allow_early_resolve=True,
         optimizations=[pl.cross_core_slot(slot_num=1)],
     ) as score_tid:
@@ -493,7 +437,6 @@ def indexer_score_topk_forest(
             query = item // max_leaves
             leaf = item % max_leaves
             batch_idx = query // S
-            repack_base = batch_idx * repack_rows
             position = pl.read(position_ids, [query])
             cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
             cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -519,18 +462,11 @@ def indexer_score_topk_forest(
                     head_coefficient = pl.reshape(pl.mul(query_scale, query_weight), [IDX_N_HEADS, 1])
                 for score_begin in pl.pipeline(0, lane_span, SCORE_LANE_ROWS, stage=2):
                     read_begin = score_begin * (1 + single_leaf)
-                    # 紧凑缓冲里同一请求的逻辑页是连续行，一个 lane 的整段候选
-                    # （SCORE_LANE_ROWS 行）一次 gather_row 就能直搬进 L1，
-                    # 不再需要 UB 中转，也不再是每页一次 DMA。
-                    # 用 create_l1 而不是 tile.create：query_vector 是 Tensor，
-                    # pl.matmul 不允许 Tensor 与 Tile 混用。
                     kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8)
                     for key_lane in pl.unroll(2):
                         kv_i8 = pl.gather_row(
-                            kv_i8,
-                            key_compact,
-                            [key_lane * SCORE_LANE_ROWS, 0],
-                            [repack_base + logical_begin + read_begin + key_lane * lane_stride, 0],
+                            kv_i8, kv_cache_i8_flat, [key_lane * SCORE_LANE_ROWS, 0],
+                            [batch_idx * request_rows + logical_begin + read_begin + key_lane * lane_stride, 0],
                             [SCORE_LANE_ROWS, IDX_HEAD_DIM],
                         )
                     # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
@@ -542,10 +478,9 @@ def indexer_score_topk_forest(
                     for aiv_id in pl.split_aiv(2, mode=pl.SplitMode.LEFT_RIGHT):
                         lane_begin = aiv_id * lane_stride
                         lane_valid_rows = pl.max(pl.min(valid_count - read_begin - lane_begin, SCORE_LANE_ROWS), 0)
-                        # scale 同样已按逻辑页序排好，一个 lane 一次读完。
-                        scale_col0 = logical_begin + read_begin + lane_begin
-                        kv_scale = scale_compact[
-                            batch_idx : batch_idx + 1, scale_col0 : scale_col0 + SCORE_LANE_ROWS
+                        scale_begin = logical_begin + read_begin + lane_begin
+                        kv_scale = kv_scale_rows[
+                            batch_idx : batch_idx + 1, scale_begin : scale_begin + SCORE_LANE_ROWS
                         ]
                         score_shard = pl.aiv_shard(score_i32)
                         score_fp32 = pl.cast(score_shard, target_type=pl.FP32, mode="none")
@@ -847,7 +782,8 @@ def indexer_weights_score(
     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
@@ -866,6 +802,7 @@ def indexer_weights_score(
         qr_hadamard_scale_dq,
         weights,
         idx_kv_cache,
+        idx_kv_scale,
         idx_block_table,
         position_ids,
         kv_seq_lens,
@@ -889,7 +826,8 @@ def indexer(
     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     hadamard: pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16],
-    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
+    idx_kv_cache: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, IDX_HEAD_DIM], pl.INT8],
+    idx_kv_scale: pl.Tensor[[IDX_CACHE_BLOCK_NUM_DYN, BLOCK_SIZE, 1, 1], pl.FP16],
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
@@ -919,6 +857,7 @@ def indexer(
         qr_hadamard_i8,
         qr_hadamard_scale_dq,
         idx_kv_cache,
+        idx_kv_scale,
         idx_block_table,
         topk_scores,
         topk_idxs,

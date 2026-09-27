@@ -375,6 +375,62 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
         restore(fixture)
 
 
+def measure_split_graph_phases(fixture, call, *, iters, warmup):
+    """独立图诊断入口复制、CSA 本体、slot 写回；总成本以完整图计时为准。"""
+    import torch
+
+    phases = (call.prepare_indexer_cache, call.run_kernel, call.commit_indexer_cache)
+    names = ("split", "csa_body", "slot_writeback")
+    restore(fixture)
+    call.prepare_indexer_cache()
+    torch.npu.synchronize()
+    graphs = []
+    for phase in phases:
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph):
+            phase()
+        graphs.append(graph)
+    samples = {name: [] for name in names}
+    events = [(torch.npu.Event(enable_timing=True), torch.npu.Event(enable_timing=True)) for _ in names]
+    initial = {name: group["initial"].to(group["allocation"].device)
+               for name, group in fixture["groups"].items()}
+    for iteration in range(warmup + iters):
+        for name, group in fixture["groups"].items():
+            group["allocation"].copy_(initial[name])
+        for graph, (start, end) in zip(graphs, events):
+            start.record()
+            graph.replay()
+            end.record()
+        torch.npu.synchronize()
+        if iteration >= warmup:
+            for name, (start, end) in zip(names, events):
+                elapsed = start.elapsed_time(end) * 1000
+                if not math.isfinite(elapsed) or elapsed <= 0:
+                    raise ValueError(f"Invalid split-cache phase timing: {name}={elapsed}")
+                samples[name].append(elapsed)
+    checks = guard_checks(fixture)
+    if any(check["status"] != "PASS" for check in checks.values()):
+        raise ValueError("Split-cache phase graphs changed metadata or storage outside valid slots")
+    cache = call.indexer_cache
+    slots = call.args["idx_slot_mapping"]
+    keys, scales = cache.slot_updates(slots, call.args["kv_seq_lens"], call.args["idx_query_start_loc"])
+    valid = (slots[:, 0] >= 0) & (slots[:, 1] >= 0)
+    pages, offsets = slots[valid, 0].long(), slots[valid, 1].long()
+    if not torch.equal(cache.native_key[pages, offsets], keys[valid]) or not torch.equal(
+        cache.native_scale[pages, offsets], scales[valid]
+    ):
+        raise ValueError("Split-cache slot commit did not restore the Native cache contents")
+    return {
+        "scope": "三张独立图分别计时；CSA 本体不含转换/写回；不相加替代完整图实测",
+        "guards": checks, "native_slot_updates_equal": True,
+        "cache_bytes": cache.key.numel() + cache.scale.numel() * cache.scale.element_size(),
+        **{name: {"samples_us": values, "us_mean": statistics.mean(values),
+                  "us_p50": statistics.median(values),
+                  "us_p95": sorted(values)[math.ceil(0.95 * len(values)) - 1]}
+           for name, values in samples.items()},
+    }
+
+
 def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
                            profile_dir=None):
     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
@@ -641,6 +697,8 @@ def run(args, report):
         )
         restore(fixture)
         if args.save_case:
+            if hasattr(call, "prepare_indexer_cache"):
+                call.prepare_indexer_cache()
             ordered = {name: call.args[name] for name in module.decode_csa_tp1_layer_test.param_names}
             meta, payload = capture_tensors(
                 ordered,
@@ -698,24 +756,58 @@ def run(args, report):
         if args.swimlane:
             from dsv4_csa_single_card_bench import _export_swimlane
 
-            # 两次预热已完成；只包围一次完整根调用，恢复初态与 compact metadata 均在窗口外。
-            restore(fixture)
-            torch.npu.synchronize()
-            pypto.torch.begin_dfx()
-            try:
-                call()
-            finally:
-                pypto.torch.end_dfx()
-            torch.npu.synchronize()
-            exported = _export_swimlane(args.output / "dfx")
-            exported.update(
-                layer_index=args.layer_index, compact_metadata_policy="reuse",
-                input_source="formal_layer_weights_synthetic_history",
-                scope="单卡合成输入，同一步第二个 CSA 层复用 metadata；DFX 不作整模型 forward 计时",
-            )
-            report["swimlane"] = exported
-            if not exported["exported"]:
-                raise RuntimeError(f"泳道导出失败：{exported}")
+            # Each window contains one root invocation. For split-cache graph
+            # diagnostics, Torch preparation/commit stay outside the window.
+            split_cache = hasattr(call, "prepare_indexer_cache")
+            run_root = call.run_kernel if split_cache else call
+
+            def reset_swimlane():
+                restore(fixture)
+                if split_cache:
+                    call.prepare_indexer_cache()
+
+            replay = run_root
+            if args.swimlane_graph:
+                reset_swimlane()
+                torch.npu.synchronize()
+                swimlane_graph = torch.npu.NPUGraph()
+                with torch.npu.graph(swimlane_graph):
+                    run_root()
+                replay = swimlane_graph.replay
+                for _ in range(5):
+                    reset_swimlane()
+                    replay()
+                torch.npu.synchronize()
+            windows = []
+            start, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            for window in range(args.swimlane_windows):
+                reset_swimlane()
+                torch.npu.synchronize()
+                pypto.torch.begin_dfx()
+                try:
+                    start.record()
+                    replay()
+                    end.record()
+                finally:
+                    pypto.torch.end_dfx()
+                directory = args.output / "dfx"
+                if window:
+                    directory /= f"window_{window}"
+                exported = _export_swimlane(directory)
+                exported.update(
+                    window=window, layer_index=args.layer_index, compact_metadata_policy="reuse",
+                    input_source="formal_layer_weights_synthetic_history",
+                    execution="graph_replay" if args.swimlane_graph else "eager",
+                    profiled_event_us=start.elapsed_time(end) * 1000,
+                    scope="单卡第二个 CSA 层；每窗口一次根调用；DFX 不替代无 profiler 性能计时",
+                )
+                windows.append(exported)
+                report["swimlane_windows"] = windows
+                if not exported["exported"]:
+                    raise RuntimeError(f"泳道导出失败：{exported}")
+            report["swimlane"] = windows[0]
+            if split_cache:
+                call.commit_indexer_cache()
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
         if args.padding_graph:
@@ -789,6 +881,10 @@ def run(args, report):
                 profile_dir=args.output / "profile/pto" if args.profile else None,
             )
             timing["native_over_pto_p50"] = timing["native"]["us_p50"] / timing["pto"]["us_p50"]
+            if hasattr(call, "prepare_indexer_cache"):
+                timing["split_cache_phases"] = measure_split_graph_phases(
+                    fixture, call, iters=args.timing_iters, warmup=args.timing_warmup,
+                )
             timing["status"] = "MEASURED"
 
 
@@ -822,6 +918,8 @@ def main():
     parser.add_argument("--profile", action="store_true", help="计时后每侧单独采一次设备 profiler 核对区间与热点")
     parser.add_argument("--swimlane", action="store_true",
                         help="单独采一次完整 PTO 根的 DFX 泳道，复用前层 metadata；在新的工作目录执行")
+    parser.add_argument("--swimlane-windows", type=int, default=1, help="每个 DFX 窗口只执行一次根调用")
+    parser.add_argument("--swimlane-graph", action="store_true", help="DFX 采 ACL Graph 重放；不采 eager 调用")
     args = parser.parse_args()
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
@@ -833,6 +931,8 @@ def main():
         parser.error("--profile 须配合正数 --timing-iters")
     if args.swimlane and (args.timing_iters or args.profile or args.graph or args.padding_graph):
         parser.error("--swimlane 单独采集，不与图计时或图正确性窗口混用")
+    if args.swimlane_windows < 1 or ((args.swimlane_graph or args.swimlane_windows != 1) and not args.swimlane):
+        parser.error("泳道窗口数必须为正，--swimlane-graph/windows 须配合 --swimlane")
     os.environ["VLLM_ASCEND_ENABLE_NZ"] = str(args.weight_nz_mode)
     os.environ["PTO_CSA_VARIANT"] = args.variant
     if args.atomic_add is not None:

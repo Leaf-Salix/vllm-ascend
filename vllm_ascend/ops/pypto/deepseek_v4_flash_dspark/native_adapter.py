@@ -260,7 +260,7 @@ class NativeCSACall:
             x_hc=hidden,
             kv_cache=self.views["swa"][0],
             cmp_kv=self.views["compressed"][0],
-            idx_kv_cache=indexer_storage(*self.views["indexer"]),
+            **self._indexer_cache_arguments(),
             cmp_block_table=table_storage(self.req["compressed"].block_table),
             idx_block_table=table_storage(self.req["indexer"].block_table),
             kv_seq_lens=self.req["indexer"].seq_lens,
@@ -307,6 +307,9 @@ class NativeCSACall:
         self.args["freqs_cos"] = self.native_cos
         self.args["freqs_sin"] = self.native_sin
         self.core_args = tuple(self.args[name] for name in kernel.param_names)
+
+    def _indexer_cache_arguments(self):
+        return {"idx_kv_cache": indexer_storage(*self.views["indexer"])}
 
     def __call__(self):
         self.ops.attention(*self.core_args)
