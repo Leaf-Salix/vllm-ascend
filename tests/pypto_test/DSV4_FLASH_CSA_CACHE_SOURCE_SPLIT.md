@@ -1,9 +1,9 @@
 # Indexer cache：源头分离与原布局的性能对照
 
-更新：2026-09-27。范围仅为A3 C4 Indexer的INT8 key / FP16 scale。
+更新：2026-09-28。范围仅为A3 C4 Indexer的INT8 key / FP16 scale。
 SWA、压缩Attention cache、Compressor state和算术保持不变；历史尝试见验证日志与Git。
 
-用户要求重新实测源头分离，并按性能选择分离策略；与原布局完整CSA差异在5%以内，优先保留原布局由PTO内部处理。
+用户最新要求按性能选择分离策略，以真实16卡EP16的整模型收益为准；先前“CSA差异≤5%保留原布局”不再作为硬门槛。
 比较完整CSA均值、P95及缓存受扰动时的表现，最终仍以整模型forward验收；不能只比较若干核内任务之和。
 
 ## 当前基线与实验范围
@@ -21,7 +21,7 @@ SWA、压缩Attention cache、Compressor state和算术保持不变；历史尝�
 - PTO继续使用一个可写根描述符，内部派生不重叠key/scale区域；无需每步copy或commit桥接。
   Score去掉交错页的0/64B相位判断，Compressor原地更新相同物理slot。
 - 页数、总字节、页表、请求生命周期不变。Native prefill/回退消费同一组带stride的key/scale view。
-  Native完整prefill链和16卡模型还未验证，不能把单卡通过称作全主流程通过。
+  Native完整prefill链尚未验证。16卡decode已完成但性能未胜出，且长档DSpark统计不同，不能称全主流程通过。
 
 CPU完整PTOAS/AICPU编译已通过。CPU直接调用runner初始化函数确认：Native模型和PTO precision页stride仍为4160/2080；
 PTO performance为4096/32；共享所有权、偏移和保护区检查通过，实验ABI拒收旧交错布局。

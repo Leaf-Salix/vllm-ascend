@@ -1,0 +1,2636 @@
+{
+  "operator_revision": "2a740c1f + coalesced/candidate.patch",
+  "complete": true,
+  "scope": "每rank前8步后连续10步纯decode _model_forward；16rank等权均值；无profiler。",
+  "limits": "P95由16rank×10步的160个相关样本计算，最慢rank分布另列；不是CSA时间、完整decode周期或初始化耗时。10步不能证明罕见长尾已消失。",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "operator_revision": "2a740c1f + coalesced/candidate.patch",
+      "errors": [],
+      "token_mismatches": 0,
+      "dspark_mismatched_ranks": 15,
+      "compared_tokens": 65536,
+      "ranks": [
+        {
+          "rank": 0,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73769.56176757812,
+              72925.72021484375,
+              73542.87719726562,
+              73356.78100585938,
+              73993.72100830078,
+              73567.90161132812,
+              74362.09869384766,
+              73271.37756347656,
+              74318.02368164062,
+              73062.63732910156
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72925.72021484375,
+              "mean_us": 73617.07000732422,
+              "p50_us": 73555.38940429688,
+              "p95_us": 74362.09869384766,
+              "max_us": 74362.09869384766
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              76071.98333740234,
+              75747.36022949219,
+              75865.5014038086,
+              76575.01983642578,
+              77416.86248779297,
+              76930.7632446289,
+              76821.57897949219,
+              76875.76293945312,
+              77434.09729003906,
+              75807.7621459961
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75747.36022949219,
+              "mean_us": 76554.66918945312,
+              "p50_us": 76698.29940795898,
+              "p95_us": 77434.09729003906,
+              "max_us": 77434.09729003906
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 1,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73890.76232910156,
+              72902.35900878906,
+              73566.0400390625,
+              73233.68072509766,
+              73889.16015625,
+              73533.62274169922,
+              74201.21765136719,
+              73331.3217163086,
+              74134.23919677734,
+              72950.5615234375
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72902.35900878906,
+              "mean_us": 73563.29650878906,
+              "p50_us": 73549.83139038086,
+              "p95_us": 74201.21765136719,
+              "max_us": 74201.21765136719
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              76036.23962402344,
+              75693.28308105469,
+              75831.59637451172,
+              76738.51776123047,
+              77137.64190673828,
+              76631.40106201172,
+              76663.27667236328,
+              76680.99975585938,
+              77142.46368408203,
+              75721.39739990234
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75693.28308105469,
+              "mean_us": 76427.68173217773,
+              "p50_us": 76647.3388671875,
+              "p95_us": 77142.46368408203,
+              "max_us": 77142.46368408203
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73499.38201904297,
+              72795.18127441406,
+              73594.482421875,
+              73157.11975097656,
+              73908.203125,
+              73502.57873535156,
+              74166.3589477539,
+              74284.73663330078,
+              74184.98229980469,
+              72889.51873779297
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72795.18127441406,
+              "mean_us": 73598.25439453125,
+              "p50_us": 73548.53057861328,
+              "p95_us": 74284.73663330078,
+              "max_us": 74284.73663330078
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              76223.15979003906,
+              75739.19677734375,
+              75824.50103759766,
+              76852.20336914062,
+              77287.00256347656,
+              76630.66101074219,
+              76775.54321289062,
+              76878.77655029297,
+              77274.5590209961,
+              75782.88269042969
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75739.19677734375,
+              "mean_us": 76526.84860229492,
+              "p50_us": 76703.1021118164,
+              "p95_us": 77287.00256347656,
+              "max_us": 77287.00256347656
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              74133.3236694336,
+              72964.79797363281,
+              73703.59802246094,
+              73490.08178710938,
+              74258.79669189453,
+              73825.92010498047,
+              74330.2230834961,
+              74580.85632324219,
+              74298.53820800781,
+              73085.31951904297
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72964.79797363281,
+              "mean_us": 73867.14553833008,
+              "p50_us": 73979.62188720703,
+              "p95_us": 74580.85632324219,
+              "max_us": 74580.85632324219
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75870.0180053711,
+              75467.95654296875,
+              75746.49810791016,
+              76514.35852050781,
+              77042.08374023438,
+              76554.65698242188,
+              76698.19641113281,
+              76521.79718017578,
+              76682.40356445312,
+              75791.77856445312
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75467.95654296875,
+              "mean_us": 76288.97476196289,
+              "p50_us": 76518.0778503418,
+              "p95_us": 77042.08374023438,
+              "max_us": 77042.08374023438
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73058.6166381836,
+              71799.4384765625,
+              72349.47967529297,
+              71883.63647460938,
+              72622.03979492188,
+              72373.71826171875,
+              72633.90350341797,
+              73177.36053466797,
+              72599.38049316406,
+              71685.57739257812
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 71685.57739257812,
+              "mean_us": 72418.31512451172,
+              "p50_us": 72486.5493774414,
+              "p95_us": 73177.36053466797,
+              "max_us": 73177.36053466797
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              76031.02111816406,
+              75600.95977783203,
+              75864.92156982422,
+              75406.25762939453,
+              75750.44250488281,
+              75089.95819091797,
+              75167.44232177734,
+              74976.89819335938,
+              75219.23828125,
+              74733.65783691406
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 74733.65783691406,
+              "mean_us": 75384.07974243164,
+              "p50_us": 75312.74795532227,
+              "p95_us": 76031.02111816406,
+              "max_us": 76031.02111816406
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73815.48309326172,
+              72904.09851074219,
+              73414.9169921875,
+              73056.38122558594,
+              74119.74334716797,
+              73641.19720458984,
+              74199.08142089844,
+              74181.4193725586,
+              74224.60174560547,
+              72945.86181640625
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72904.09851074219,
+              "mean_us": 73650.27847290039,
+              "p50_us": 73728.34014892578,
+              "p95_us": 74224.60174560547,
+              "max_us": 74224.60174560547
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75829.69665527344,
+              75169.72351074219,
+              75688.53759765625,
+              76445.15991210938,
+              76504.89807128906,
+              76313.30108642578,
+              76428.59649658203,
+              76298.85864257812,
+              76403.50341796875,
+              75672.72186279297
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75169.72351074219,
+              "mean_us": 76075.4997253418,
+              "p50_us": 76306.07986450195,
+              "p95_us": 76504.89807128906,
+              "max_us": 76504.89807128906
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 6,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              74008.62121582031,
+              73130.11932373047,
+              73574.92065429688,
+              73240.6997680664,
+              74259.3994140625,
+              73774.07836914062,
+              74252.02178955078,
+              74254.34112548828,
+              74172.85919189453,
+              73148.42224121094
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 73130.11932373047,
+              "mean_us": 73781.54830932617,
+              "p50_us": 73891.34979248047,
+              "p95_us": 74259.3994140625,
+              "max_us": 74259.3994140625
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75946.35772705078,
+              75392.37976074219,
+              75783.04290771484,
+              76407.78350830078,
+              76751.03759765625,
+              76385.7421875,
+              76627.08282470703,
+              76415.39764404297,
+              76871.65832519531,
+              75817.22259521484
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75392.37976074219,
+              "mean_us": 76239.7705078125,
+              "p50_us": 76396.76284790039,
+              "p95_us": 76871.65832519531,
+              "max_us": 76871.65832519531
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 7,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73921.57745361328,
+              73208.32061767578,
+              73616.63818359375,
+              73166.259765625,
+              74241.6763305664,
+              73712.46337890625,
+              74271.17919921875,
+              74188.5986328125,
+              73855.94177246094,
+              73086.66229248047
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 73086.66229248047,
+              "mean_us": 73726.93176269531,
+              "p50_us": 73784.2025756836,
+              "p95_us": 74271.17919921875,
+              "max_us": 74271.17919921875
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75877.12097167969,
+              75429.23736572266,
+              75774.58190917969,
+              76612.67852783203,
+              76889.57977294922,
+              76507.04193115234,
+              76711.57836914062,
+              76569.99969482422,
+              77008.85772705078,
+              75713.78326416016
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75429.23736572266,
+              "mean_us": 76309.44595336914,
+              "p50_us": 76538.52081298828,
+              "p95_us": 77008.85772705078,
+              "max_us": 77008.85772705078
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 8,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73602.79846191406,
+              73052.2232055664,
+              73530.47943115234,
+              73310.85968017578,
+              73956.1767578125,
+              73612.89978027344,
+              74289.32189941406,
+              74116.83654785156,
+              74232.78045654297,
+              73085.56365966797
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 73052.2232055664,
+              "mean_us": 73678.99398803711,
+              "p50_us": 73607.84912109375,
+              "p95_us": 74289.32189941406,
+              "max_us": 74289.32189941406
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75488.99841308594,
+              75557.40356445312,
+              75854.27856445312,
+              76869.49920654297,
+              76829.23889160156,
+              75448.28033447266,
+              76797.119140625,
+              76410.72082519531,
+              77059.44061279297,
+              75810.79864501953
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75448.28033447266,
+              "mean_us": 76212.57781982422,
+              "p50_us": 76132.49969482422,
+              "p95_us": 77059.44061279297,
+              "max_us": 77059.44061279297
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 9,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73838.98162841797,
+              73271.89636230469,
+              73606.14013671875,
+              73295.41778564453,
+              74331.45904541016,
+              73754.31823730469,
+              74187.4008178711,
+              74292.64068603516,
+              74261.17706298828,
+              72991.50085449219
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72991.50085449219,
+              "mean_us": 73783.09326171875,
+              "p50_us": 73796.64993286133,
+              "p95_us": 74331.45904541016,
+              "max_us": 74331.45904541016
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              74998.10028076172,
+              75141.89910888672,
+              75529.35791015625,
+              76629.18090820312,
+              76728.10363769531,
+              76498.8021850586,
+              76632.56072998047,
+              76602.85949707031,
+              77127.5634765625,
+              75765.1596069336
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 74998.10028076172,
+              "mean_us": 76165.35873413086,
+              "p50_us": 76550.83084106445,
+              "p95_us": 77127.5634765625,
+              "max_us": 77127.5634765625
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 10,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73827.42309570312,
+              73250.07629394531,
+              73637.65716552734,
+              73347.12219238281,
+              74299.81994628906,
+              73752.83813476562,
+              74184.57794189453,
+              73197.998046875,
+              74230.43823242188,
+              72943.17626953125
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72943.17626953125,
+              "mean_us": 73667.1127319336,
+              "p50_us": 73695.24765014648,
+              "p95_us": 74299.81994628906,
+              "max_us": 74299.81994628906
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75889.87731933594,
+              75677.36053466797,
+              75789.01672363281,
+              76981.48345947266,
+              77043.25866699219,
+              76628.21960449219,
+              76811.11907958984,
+              76847.28240966797,
+              77355.40008544922,
+              75786.65924072266
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75677.36053466797,
+              "mean_us": 76480.96771240234,
+              "p50_us": 76719.66934204102,
+              "p95_us": 77355.40008544922,
+              "max_us": 77355.40008544922
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 11,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              72225.14343261719,
+              71967.74291992188,
+              72281.18133544922,
+              71774.00207519531,
+              72916.93878173828,
+              72217.49877929688,
+              72669.99816894531,
+              71781.08215332031,
+              73867.53845214844,
+              72849.60174560547
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 71774.00207519531,
+              "mean_us": 72455.07278442383,
+              "p50_us": 72253.1623840332,
+              "p95_us": 73867.53845214844,
+              "max_us": 73867.53845214844
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75416.87774658203,
+              75555.4428100586,
+              75848.41918945312,
+              76901.45874023438,
+              76978.7826538086,
+              76860.33630371094,
+              76741.73736572266,
+              76933.25805664062,
+              77298.69842529297,
+              75797.08099365234
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75416.87774658203,
+              "mean_us": 76433.20922851562,
+              "p50_us": 76801.0368347168,
+              "p95_us": 77298.69842529297,
+              "max_us": 77298.69842529297
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 12,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73248.33679199219,
+              72966.42303466797,
+              73366.69921875,
+              73174.05700683594,
+              73813.17901611328,
+              73662.53662109375,
+              74022.65930175781,
+              74073.76098632812,
+              73881.52313232422,
+              73042.6025390625
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72966.42303466797,
+              "mean_us": 73525.17776489258,
+              "p50_us": 73514.61791992188,
+              "p95_us": 74073.76098632812,
+              "max_us": 74073.76098632812
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75162.39929199219,
+              75142.77648925781,
+              75402.70233154297,
+              76674.79705810547,
+              76844.27642822266,
+              76652.90069580078,
+              76745.0180053711,
+              76653.28216552734,
+              77356.68182373047,
+              75854.52270507812
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75142.77648925781,
+              "mean_us": 76248.93569946289,
+              "p50_us": 76653.09143066406,
+              "p95_us": 77356.68182373047,
+              "max_us": 77356.68182373047
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 13,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73414.74151611328,
+              72940.49835205078,
+              73354.94232177734,
+              73331.93969726562,
+              74006.9808959961,
+              73704.13970947266,
+              74223.80065917969,
+              73941.27655029297,
+              74132.1792602539,
+              72855.65948486328
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72855.65948486328,
+              "mean_us": 73590.61584472656,
+              "p50_us": 73559.44061279297,
+              "p95_us": 74223.80065917969,
+              "max_us": 74223.80065917969
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              76009.11712646484,
+              75763.49639892578,
+              75803.48205566406,
+              77037.13989257812,
+              77299.26300048828,
+              76919.7006225586,
+              76728.69873046875,
+              76880.46264648438,
+              77322.41821289062,
+              75741.8212890625
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75741.8212890625,
+              "mean_us": 76550.5599975586,
+              "p50_us": 76804.58068847656,
+              "p95_us": 77322.41821289062,
+              "max_us": 77322.41821289062
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 14,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              72533.94317626953,
+              72647.39990234375,
+              73213.98162841797,
+              72973.80065917969,
+              74063.6978149414,
+              73750.0,
+              74151.93939208984,
+              74219.4595336914,
+              74296.9970703125,
+              73003.73840332031
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72533.94317626953,
+              "mean_us": 73485.49575805664,
+              "p50_us": 73481.99081420898,
+              "p95_us": 74296.9970703125,
+              "max_us": 74296.9970703125
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75495.06378173828,
+              75680.03845214844,
+              75803.52020263672,
+              76691.64276123047,
+              76524.64294433594,
+              76937.68310546875,
+              76807.35778808594,
+              76845.07751464844,
+              76843.68133544922,
+              75787.10174560547
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75495.06378173828,
+              "mean_us": 76341.58096313477,
+              "p50_us": 76608.1428527832,
+              "p95_us": 76937.68310546875,
+              "max_us": 76937.68310546875
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        },
+        {
+          "rank": 15,
+          "token_mismatches": 0,
+          "dspark_equal": false,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              73131.9808959961,
+              72872.74169921875,
+              73471.35925292969,
+              73447.79968261719,
+              73938.63677978516,
+              73631.94274902344,
+              73949.57733154297,
+              74182.06024169922,
+              73972.8012084961,
+              72774.26147460938
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 72774.26147460938,
+              "mean_us": 73537.3161315918,
+              "p50_us": 73551.65100097656,
+              "p95_us": 74182.06024169922,
+              "max_us": 74182.06024169922
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              75545.35675048828,
+              75753.50189208984,
+              75713.5009765625,
+              76994.21691894531,
+              77369.47631835938,
+              76764.99938964844,
+              75569.61822509766,
+              76470.61920166016,
+              76856.4224243164,
+              75813.4994506836
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 75545.35675048828,
+              "mean_us": 76285.12115478516,
+              "p50_us": 76142.05932617188,
+              "p95_us": 77369.47631835938,
+              "max_us": 77369.47631835938
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 256,
+                "max_num_scheduled_tokens": 96
+              }
+            }
+          }
+        }
+      ],
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_source_split_ab_20260927/coalesced/model/h131072/b16",
+      "forward": {
+        "native": {
+          "samples": 160,
+          "min_us": 71685.57739257812,
+          "mean_us": 73496.60739898682,
+          "p50_us": 73571.4111328125,
+          "p95_us": 74292.64068603516,
+          "max_us": 74580.85632324219
+        },
+        "pto": {
+          "samples": 160,
+          "min_us": 74733.65783691406,
+          "mean_us": 76282.83009529114,
+          "p50_us": 76436.8782043457,
+          "p95_us": 77287.00256347656,
+          "max_us": 77434.09729003906
+        }
+      },
+      "slowest_rank_forward": {
+        "native": {
+          "samples": 10,
+          "min_us": 73148.42224121094,
+          "mean_us": 73916.56799316406,
+          "p50_us": 73979.62188720703,
+          "p95_us": 74580.85632324219,
+          "max_us": 74580.85632324219
+        },
+        "pto": {
+          "samples": 10,
+          "min_us": 75763.49639892578,
+          "mean_us": 76628.73001098633,
+          "p50_us": 76877.4185180664,
+          "p95_us": 77434.09729003906,
+          "max_us": 77434.09729003906
+        }
+      },
+      "change_pct": 3.790954160889237,
+      "status": "FAIL"
+    },
+    {
+      "history": 8192,
+      "batch": 40,
+      "operator_revision": "2a740c1f + coalesced/candidate.patch",
+      "errors": [],
+      "token_mismatches": 0,
+      "dspark_mismatched_ranks": 0,
+      "compared_tokens": 163840,
+      "ranks": [
+        {
+          "rank": 0,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103575.84381103516,
+              101572.08251953125,
+              103094.87915039062,
+              103160.84289550781,
+              102244.2398071289,
+              101393.66149902344,
+              102492.21801757812,
+              102272.3617553711,
+              102693.2373046875,
+              104683.40301513672
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101393.66149902344,
+              "mean_us": 102718.27697753906,
+              "p50_us": 102592.72766113281,
+              "p95_us": 104683.40301513672,
+              "max_us": 104683.40301513672
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104038.9404296875,
+              102881.84356689453,
+              104156.92138671875,
+              103862.50305175781,
+              101948.72283935547,
+              102533.09631347656,
+              103178.13873291016,
+              103228.37829589844,
+              102901.17645263672,
+              104227.72216796875
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101948.72283935547,
+              "mean_us": 103295.74432373047,
+              "p50_us": 103203.2585144043,
+              "p95_us": 104227.72216796875,
+              "max_us": 104227.72216796875
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 1,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103546.1196899414,
+              101626.1978149414,
+              103071.8002319336,
+              103188.14086914062,
+              102268.37921142578,
+              101354.69818115234,
+              102492.88177490234,
+              102283.53881835938,
+              102708.29772949219,
+              104690.39916992188
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101354.69818115234,
+              "mean_us": 102723.0453491211,
+              "p50_us": 102600.58975219727,
+              "p95_us": 104690.39916992188,
+              "max_us": 104690.39916992188
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104021.63696289062,
+              102917.19818115234,
+              104156.982421875,
+              103841.84265136719,
+              101924.81994628906,
+              102476.0971069336,
+              103150.71868896484,
+              103215.95764160156,
+              102832.00073242188,
+              104123.26049804688
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101924.81994628906,
+              "mean_us": 103266.0514831543,
+              "p50_us": 103183.3381652832,
+              "p95_us": 104156.982421875,
+              "max_us": 104156.982421875
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 2,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103594.23828125,
+              101628.89862060547,
+              103099.29656982422,
+              103186.78283691406,
+              102241.53900146484,
+              101440.36102294922,
+              102515.54107666016,
+              102297.94311523438,
+              102818.97735595703,
+              104755.7601928711
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101440.36102294922,
+              "mean_us": 102757.93380737305,
+              "p50_us": 102667.2592163086,
+              "p95_us": 104755.7601928711,
+              "max_us": 104755.7601928711
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104083.67919921875,
+              102894.04296875,
+              104226.2191772461,
+              103866.9204711914,
+              101976.99737548828,
+              102578.17840576172,
+              103271.1410522461,
+              103278.80096435547,
+              102875.51879882812,
+              104190.53649902344
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101976.99737548828,
+              "mean_us": 103324.20349121094,
+              "p50_us": 103274.97100830078,
+              "p95_us": 104226.2191772461,
+              "max_us": 104226.2191772461
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 3,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103544.60144042969,
+              101642.7993774414,
+              103071.9985961914,
+              103184.15832519531,
+              102235.90087890625,
+              101375.8773803711,
+              102475.72326660156,
+              102291.65649414062,
+              102717.88024902344,
+              104727.18048095703
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101375.8773803711,
+              "mean_us": 102726.77764892578,
+              "p50_us": 102596.8017578125,
+              "p95_us": 104727.18048095703,
+              "max_us": 104727.18048095703
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104021.82006835938,
+              102906.72302246094,
+              104229.53796386719,
+              103883.11767578125,
+              101933.77685546875,
+              102521.84295654297,
+              103208.23669433594,
+              103259.90295410156,
+              102897.59826660156,
+              104237.25891113281
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101933.77685546875,
+              "mean_us": 103309.98153686523,
+              "p50_us": 103234.06982421875,
+              "p95_us": 104237.25891113281,
+              "max_us": 104237.25891113281
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 4,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103534.01947021484,
+              101588.04321289062,
+              103141.86096191406,
+              103216.17889404297,
+              102244.1177368164,
+              101431.08367919922,
+              102512.23754882812,
+              102270.79772949219,
+              102698.1430053711,
+              104733.22296142578
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101431.08367919922,
+              "mean_us": 102736.97052001953,
+              "p50_us": 102605.19027709961,
+              "p95_us": 104733.22296142578,
+              "max_us": 104733.22296142578
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104041.71752929688,
+              102837.47863769531,
+              104224.54071044922,
+              103887.7182006836,
+              101926.55944824219,
+              102520.78247070312,
+              103245.43762207031,
+              103197.38006591797,
+              102818.44329833984,
+              104193.7026977539
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101926.55944824219,
+              "mean_us": 103289.37606811523,
+              "p50_us": 103221.40884399414,
+              "p95_us": 104224.54071044922,
+              "max_us": 104224.54071044922
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 5,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103673.91967773438,
+              101637.26043701172,
+              103106.58264160156,
+              103248.779296875,
+              102265.99884033203,
+              101451.98059082031,
+              102494.84252929688,
+              102317.39807128906,
+              102835.86120605469,
+              104776.42059326172
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101451.98059082031,
+              "mean_us": 102780.90438842773,
+              "p50_us": 102665.35186767578,
+              "p95_us": 104776.42059326172,
+              "max_us": 104776.42059326172
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104154.28161621094,
+              102943.359375,
+              104211.09771728516,
+              103897.00317382812,
+              101948.73809814453,
+              102534.98077392578,
+              103254.95910644531,
+              103343.39904785156,
+              102882.53784179688,
+              104219.55871582031
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101948.73809814453,
+              "mean_us": 103338.99154663086,
+              "p50_us": 103299.17907714844,
+              "p95_us": 104219.55871582031,
+              "max_us": 104219.55871582031
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 6,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103573.08197021484,
+              101603.15704345703,
+              103210.67810058594,
+              103207.1762084961,
+              102278.12194824219,
+              101472.6791381836,
+              102538.65814208984,
+              102327.36206054688,
+              102726.93634033203,
+              104877.47955322266
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101472.6791381836,
+              "mean_us": 102781.53305053711,
+              "p50_us": 102632.79724121094,
+              "p95_us": 104877.47955322266,
+              "max_us": 104877.47955322266
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104093.39904785156,
+              102914.64233398438,
+              104316.39862060547,
+              103938.21716308594,
+              101957.58056640625,
+              102567.2378540039,
+              103271.89636230469,
+              103313.8427734375,
+              102950.98114013672,
+              104331.38275146484
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101957.58056640625,
+              "mean_us": 103365.55786132812,
+              "p50_us": 103292.8695678711,
+              "p95_us": 104331.38275146484,
+              "max_us": 104331.38275146484
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 7,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103563.16375732422,
+              101597.34344482422,
+              103051.5365600586,
+              103146.04187011719,
+              102195.13702392578,
+              101398.3383178711,
+              102505.41687011719,
+              102287.52136230469,
+              102690.64331054688,
+              104692.91687011719
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101398.3383178711,
+              "mean_us": 102712.8059387207,
+              "p50_us": 102598.03009033203,
+              "p95_us": 104692.91687011719,
+              "max_us": 104692.91687011719
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104034.89685058594,
+              102847.86224365234,
+              104138.65661621094,
+              103855.78155517578,
+              101893.78356933594,
+              102500.03814697266,
+              103198.40240478516,
+              103235.87799072266,
+              102901.48162841797,
+              104167.03796386719
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101893.78356933594,
+              "mean_us": 103277.38189697266,
+              "p50_us": 103217.1401977539,
+              "p95_us": 104167.03796386719,
+              "max_us": 104167.03796386719
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 8,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103590.36254882812,
+              101621.26159667969,
+              103071.56372070312,
+              103170.66192626953,
+              102252.50244140625,
+              101412.85705566406,
+              102511.42120361328,
+              102281.53991699219,
+              102820.87707519531,
+              104713.82141113281
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101412.85705566406,
+              "mean_us": 102744.68688964844,
+              "p50_us": 102666.1491394043,
+              "p95_us": 104713.82141113281,
+              "max_us": 104713.82141113281
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104044.29626464844,
+              102892.99774169922,
+              104207.07702636719,
+              103870.1171875,
+              101947.54028320312,
+              102599.9984741211,
+              103262.22229003906,
+              103262.33673095703,
+              102938.46130371094,
+              104193.65692138672
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101947.54028320312,
+              "mean_us": 103321.87042236328,
+              "p50_us": 103262.27951049805,
+              "p95_us": 104207.07702636719,
+              "max_us": 104207.07702636719
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 9,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103593.58215332031,
+              101626.3427734375,
+              103141.73889160156,
+              103212.3794555664,
+              102260.5972290039,
+              101431.44226074219,
+              102516.61682128906,
+              102324.4400024414,
+              102865.21911621094,
+              104782.0816040039
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101431.44226074219,
+              "mean_us": 102775.44403076172,
+              "p50_us": 102690.91796875,
+              "p95_us": 104782.0816040039,
+              "max_us": 104782.0816040039
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104076.57623291016,
+              102896.40045166016,
+              104237.54119873047,
+              103890.57922363281,
+              101961.63940429688,
+              102559.89837646484,
+              103272.4380493164,
+              103294.38018798828,
+              102890.93780517578,
+              104229.14123535156
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101961.63940429688,
+              "mean_us": 103330.95321655273,
+              "p50_us": 103283.40911865234,
+              "p95_us": 104237.54119873047,
+              "max_us": 104237.54119873047
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 10,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103594.07806396484,
+              101633.79669189453,
+              103115.21911621094,
+              103194.07653808594,
+              102248.16131591797,
+              101437.08038330078,
+              102550.10223388672,
+              102292.8237915039,
+              102759.27734375,
+              104749.64141845703
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101437.08038330078,
+              "mean_us": 102757.42568969727,
+              "p50_us": 102654.68978881836,
+              "p95_us": 104749.64141845703,
+              "max_us": 104749.64141845703
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104067.45910644531,
+              102924.94201660156,
+              104214.6224975586,
+              103879.24194335938,
+              101914.43634033203,
+              102546.62322998047,
+              103240.3564453125,
+              103243.58367919922,
+              102912.36114501953,
+              104198.3413696289
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101914.43634033203,
+              "mean_us": 103314.19677734375,
+              "p50_us": 103241.97006225586,
+              "p95_us": 104214.6224975586,
+              "max_us": 104214.6224975586
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 11,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103594.87915039062,
+              101565.65856933594,
+              103110.42022705078,
+              103166.93878173828,
+              102262.12310791016,
+              101418.83850097656,
+              102529.12139892578,
+              102300.21667480469,
+              102687.30163574219,
+              104725.35705566406
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101418.83850097656,
+              "mean_us": 102736.0855102539,
+              "p50_us": 102608.21151733398,
+              "p95_us": 104725.35705566406,
+              "max_us": 104725.35705566406
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104067.84057617188,
+              102880.8364868164,
+              104227.3178100586,
+              103808.18176269531,
+              101954.37622070312,
+              102542.93823242188,
+              103259.69696044922,
+              103262.97760009766,
+              102829.01763916016,
+              104171.05865478516
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101954.37622070312,
+              "mean_us": 103300.42419433594,
+              "p50_us": 103261.33728027344,
+              "p95_us": 104227.3178100586,
+              "max_us": 104227.3178100586
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 12,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103586.0366821289,
+              101614.61639404297,
+              103073.31848144531,
+              103184.37957763672,
+              102255.94329833984,
+              101403.64074707031,
+              102451.8814086914,
+              102292.87719726562,
+              102750.45776367188,
+              104721.7025756836
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101403.64074707031,
+              "mean_us": 102733.48541259766,
+              "p50_us": 102601.16958618164,
+              "p95_us": 104721.7025756836,
+              "max_us": 104721.7025756836
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104070.25909423828,
+              102905.47943115234,
+              104243.9193725586,
+              103876.73950195312,
+              102025.52032470703,
+              102442.65747070312,
+              103165.97747802734,
+              103223.67858886719,
+              102995.74279785156,
+              104229.1030883789
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 102025.52032470703,
+              "mean_us": 103317.90771484375,
+              "p50_us": 103194.82803344727,
+              "p95_us": 104243.9193725586,
+              "max_us": 104243.9193725586
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 13,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103580.5435180664,
+              101580.11627197266,
+              103022.88055419922,
+              103160.3012084961,
+              102227.62298583984,
+              101436.75994873047,
+              102532.05871582031,
+              102329.42199707031,
+              102698.3413696289,
+              104750.3433227539
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101436.75994873047,
+              "mean_us": 102731.83898925781,
+              "p50_us": 102615.20004272461,
+              "p95_us": 104750.3433227539,
+              "max_us": 104750.3433227539
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104045.24230957031,
+              102866.18041992188,
+              104200.30212402344,
+              103837.73803710938,
+              101939.27764892578,
+              102505.69915771484,
+              103231.00280761719,
+              103257.2021484375,
+              102839.66064453125,
+              104144.20318603516
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101939.27764892578,
+              "mean_us": 103286.65084838867,
+              "p50_us": 103244.10247802734,
+              "p95_us": 104200.30212402344,
+              "max_us": 104200.30212402344
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 14,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103588.57727050781,
+              101624.74060058594,
+              103135.55908203125,
+              103239.83764648438,
+              102290.58074951172,
+              101445.22094726562,
+              102519.98138427734,
+              102299.72076416016,
+              102774.16229248047,
+              104700.18005371094
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101445.22094726562,
+              "mean_us": 102761.85607910156,
+              "p50_us": 102647.0718383789,
+              "p95_us": 104700.18005371094,
+              "max_us": 104700.18005371094
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104083.28247070312,
+              102897.04132080078,
+              104251.220703125,
+              103891.92199707031,
+              101978.21807861328,
+              102551.27716064453,
+              103245.53680419922,
+              103269.76013183594,
+              102959.13696289062,
+              104289.71862792969
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101978.21807861328,
+              "mean_us": 103341.71142578125,
+              "p50_us": 103257.64846801758,
+              "p95_us": 104289.71862792969,
+              "max_us": 104289.71862792969
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        },
+        {
+          "rank": 15,
+          "token_mismatches": 0,
+          "dspark_equal": true,
+          "cann_event_work_mode": {
+            "native": 0,
+            "pto": 1
+          },
+          "native": {
+            "samples_us": [
+              103581.298828125,
+              101613.70086669922,
+              103050.48370361328,
+              103157.41729736328,
+              102204.43725585938,
+              101395.27893066406,
+              102511.80267333984,
+              102300.17852783203,
+              102719.68078613281,
+              104613.2583618164
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101395.27893066406,
+              "mean_us": 102714.75372314453,
+              "p50_us": 102615.74172973633,
+              "p95_us": 104613.2583618164,
+              "max_us": 104613.2583618164
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 0,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          },
+          "pto": {
+            "samples_us": [
+              104053.71856689453,
+              102897.74322509766,
+              104148.00262451172,
+              103866.56188964844,
+              101908.15734863281,
+              102538.9404296875,
+              103267.30346679688,
+              103300.69732666016,
+              102805.13763427734,
+              104147.74322509766
+            ],
+            "distribution": {
+              "samples": 10,
+              "min_us": 101908.15734863281,
+              "mean_us": 103293.40057373047,
+              "p50_us": 103284.00039672852,
+              "p95_us": 104148.00262451172,
+              "max_us": 104148.00262451172
+            },
+            "worker_runtime_config": {
+              "requested_deterministic_level": 0,
+              "deterministic_level": 0,
+              "torch_deterministic": false,
+              "hccl_deterministic": "false",
+              "dynamic_eplb": false,
+              "cann_event_work_mode": 1,
+              "scheduler": {
+                "max_num_seqs": 40,
+                "max_num_batched_tokens": 400,
+                "max_num_scheduled_tokens": 240
+              }
+            }
+          }
+        }
+      ],
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_source_split_ab_20260927/coalesced/model/h8192/b40",
+      "forward": {
+        "native": {
+          "samples": 160,
+          "min_us": 101354.69818115234,
+          "mean_us": 102743.36400032043,
+          "p50_us": 102618.70193481445,
+          "p95_us": 104725.35705566406,
+          "max_us": 104877.47955322266
+        },
+        "pto": {
+          "samples": 160,
+          "min_us": 101893.78356933594,
+          "mean_us": 103310.90021133423,
+          "p50_us": 103256.0806274414,
+          "p95_us": 104229.14123535156,
+          "max_us": 104331.38275146484
+        }
+      },
+      "slowest_rank_forward": {
+        "native": {
+          "samples": 10,
+          "min_us": 101472.6791381836,
+          "mean_us": 102816.16592407227,
+          "p50_us": 102707.66067504883,
+          "p95_us": 104877.47955322266,
+          "max_us": 104877.47955322266
+        },
+        "pto": {
+          "samples": 10,
+          "min_us": 102025.52032470703,
+          "mean_us": 103392.07382202148,
+          "p50_us": 103307.91854858398,
+          "p95_us": 104331.38275146484,
+          "max_us": 104331.38275146484
+        }
+      },
+      "change_pct": 0.5523823524135496,
+      "status": "MEASURED_TOKEN_PASS"
+    }
+  ]
+}

@@ -1,0 +1,729 @@
+diff --git a/tests/pypto_test/dsv4_csa_native_case.py b/tests/pypto_test/dsv4_csa_native_case.py
+index 3157971e..4279397a 100644
+--- a/tests/pypto_test/dsv4_csa_native_case.py
++++ b/tests/pypto_test/dsv4_csa_native_case.py
+@@ -73,7 +73,14 @@ def allocate_native_cache(group, pages, device):
+     guard_bytes = 128
+     allocation = torch.full((pages * spec.page_size_bytes + 2 * guard_bytes,), 37, dtype=torch.int8, device=device)
+     raw = allocation[guard_bytes:-guard_bytes]
+-    views = NPUModelRunner._adjust_kv_layout(None, raw, shapes, dtypes, spec.page_size_bytes)
++    from vllm_ascend.ops.pypto.variant import selected_variant
++
++    if getattr(spec, "scale_dim", 0) and selected_variant() == "performance":
++        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.split_storage import split_indexer_views
++
++        views = split_indexer_views(raw, shapes[0], shapes[1])
++    else:
++        views = NPUModelRunner._adjust_kv_layout(None, raw, shapes, dtypes, spec.page_size_bytes)
+     group.update(allocation=allocation, raw=raw, views=views, page_size=page_size, pages=pages)
+     return {
+         "spec": repr(spec),
+diff --git a/tests/pypto_test/dsv4_csa_single_layer.py b/tests/pypto_test/dsv4_csa_single_layer.py
+index d04bf72b..38ebf045 100644
+--- a/tests/pypto_test/dsv4_csa_single_layer.py
++++ b/tests/pypto_test/dsv4_csa_single_layer.py
+@@ -376,7 +376,7 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
+ 
+ 
+ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
+-                           profile_dir=None):
++                           profile_dir=None, before_timing=None):
+     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
+     import torch
+ 
+@@ -402,6 +402,8 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
+     samples, timestamps = [], []
+     for iteration in range(warmup + iters):
+         reset()
++        if before_timing is not None:
++            before_timing()
+         start.record()
+         graph.replay()
+         end.record()
+diff --git a/tests/pypto_test/offline_pd/batch.py b/tests/pypto_test/offline_pd/batch.py
+new file mode 100644
+index 00000000..c3f04230
+--- /dev/null
++++ b/tests/pypto_test/offline_pd/batch.py
+@@ -0,0 +1,15 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Queue a complete offline comparison batch before starting its generation."""
++
++
++def generate_aligned_batch(llm, prompts, params):
++    # vLLM's public level-0 pause only stops scheduling; it neither offloads
++    # weights nor frees KV memory. All operations here precede measured steps.
++    llm.sleep(level=0, mode="keep")
++    try:
++        if prompts:
++            llm.enqueue(prompts, params, use_tqdm=False)
++        llm.collective_rpc("offline_batch_barrier")
++    finally:
++        llm.wake_up(tags=["scheduling"])
++    return llm.wait_for_completion(use_tqdm=False)
+diff --git a/tests/pypto_test/offline_pd/connector.py b/tests/pypto_test/offline_pd/connector.py
+index b731fd84..81aac421 100644
+--- a/tests/pypto_test/offline_pd/connector.py
++++ b/tests/pypto_test/offline_pd/connector.py
+@@ -196,6 +196,22 @@ class OfflineDSV4Connector(KVConnectorBase_V1, SupportsHMA):
+         for request in self._get_connector_metadata().loads:
+             folder = self._folder(request["key"], 0)
+             manifest = json.loads((folder / "manifest.json").read_text())
++            # CPU-only diagnostics at bank restore, outside all timed steps.
++            if self.dp == 0:
++                seen_groups = set()
++                for _, (gid, spec) in sorted(self.specs.items()):
++                    if gid in seen_groups or not getattr(spec, "scale_dim", 0):
++                        continue
++                    seen_groups.add(gid)
++                    page_ids = [b for _, b in live_blocks(request["blocks"][gid], spec, manifest["history"])]
++                    panels = [page_ids[i:i + 4] for i in range(0, len(page_ids) - 3, 4)]
++                    ascending = sum(all(b == a + 1 for a, b in zip(p, p[1:])) for p in panels)
++                    descending = sum(all(b == a - 1 for a, b in zip(p, p[1:])) for p in panels)
++                    print("OFFLINE_INDEXER_PAGE_ORDER " + json.dumps({
++                        "request": request["request_id"], "group": gid, "pages": len(page_ids),
++                        "panels": len(panels), "ascending": ascending, "descending": descending,
++                        "first_pages": page_ids[:8], "last_pages": page_ids[-8:],
++                    }), flush=True)
+             tensors = load_file(str(folder / "cache.safetensors"))
+             local = {name: (cache, gid, spec) for name, cache, gid, spec in self._tensors()}
+             if set(local) != set(tensors):
+diff --git a/tests/pypto_test/offline_pd/observer.py b/tests/pypto_test/offline_pd/observer.py
+index ca954c13..1d83fb6b 100644
+--- a/tests/pypto_test/offline_pd/observer.py
++++ b/tests/pypto_test/offline_pd/observer.py
+@@ -404,6 +404,10 @@ class OfflineCSAObserver:
+             if entry is None:
+                 return original_forward(*args, **kwargs)
+             entry["forward_calls"] += 1
++            # CPU metadata already prepared by the production runner. Keep
++            # the actual request positions for comparing work across runs;
++            # no device copy, hash, or synchronization is added to timing.
++            entry["request_positions"] = runner._dsa_positions_cpu_buf[:expected_tokens].tolist()
+             begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+             entry["begin"], entry["end"] = begin, end
+             begin.record()
+@@ -454,7 +458,8 @@ class OfflineCSAObserver:
+         stamps = [entry["begin"].recorded_time() for entry in valid]
+         state.update(measured_steps=len(events), step_tokens=[entry["tokens"] for entry in events],
+                      step_requests=[entry["requests"] for entry in events],
+-                     steady_step_indices=[entry["index"] for entry in events])
++                     steady_step_indices=[entry["index"] for entry in events],
++                     step_positions_cpu=[entry["request_positions"] for entry in events])
+         state["forward"] = {"samples_us": values, "start_timestamps_raw": stamps,
+                             "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
+                                      "DSpark 草稿或步间调度等待；不逐步同步"}
+diff --git a/tests/pypto_test/offline_pd/performance.py b/tests/pypto_test/offline_pd/performance.py
+index 01022920..683c7142 100644
+--- a/tests/pypto_test/offline_pd/performance.py
++++ b/tests/pypto_test/offline_pd/performance.py
+@@ -160,6 +160,11 @@ def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seq
+             for row in rows), f"{path}: {name} 缺少请求/token")
+     require(len(value["steady_window"]) == 1, f"{path}: TP1 只应返回一个 worker")
+     steady = value["steady_window"][0]
++    if value.get("batch_admission") == "pause_enqueue_dp_barrier_resume":
++        positions = steady.get("step_positions_cpu")
++        require(isinstance(positions, list) and len(positions) == steady_cycles and all(
++            isinstance(row, list) and len(row) == expected_tokens for row in positions),
++            f"{path}: 完整批次入场后缺少实际CPU位置记录")
+     require(value.get("eplb_enabled") is False and value.get("dynamic_eplb_env") == "false" and
+             value.get("expert_map_record_env") == "false", f"{path}: 所有 CSA 测试必须关闭 EPLB")
+     worker_config = value["worker_runtime_config"]
+diff --git a/tests/pypto_test/offline_pd/run.py b/tests/pypto_test/offline_pd/run.py
+index 58c43031..c9bb0759 100644
+--- a/tests/pypto_test/offline_pd/run.py
++++ b/tests/pypto_test/offline_pd/run.py
+@@ -328,13 +328,19 @@ def generate_round(llm, args, case, limit, stagger=False):
+     limits = stagger_limits(submitted, limit) if stagger else None
+     params = [make(value) for value in limits] if limits else make(limit)
+     start = time.perf_counter()
+-    if submitted == 0:
++    if submitted == 0 and args.command not in ("performance", "moe-routing"):
+         # 注意语义：这里直接返回，**引擎根本没被调用**，所以它不是 D04 要的
+         # "rank 参与 DP 但没有调度到请求"那条路径，只是"这个 rank 本轮不出题"。
+         # 真实空 rank 要用 --rank-decode-tokens 让某个 rank 的请求提前跑完，
+         # 其余 rank 继续推进，那时它的引擎才会在有 DP 协调的前提下空转。
+         return {"elapsed_seconds": 0.0, "max_tokens_per_request": [], "output_token_ids": []}
+-    result = llm.generate([{"prompt_token_ids": tokens}] * submitted, params, use_tqdm=False)
++    prompts = [{"prompt_token_ids": tokens}] * submitted
++    if args.command in ("performance", "moe-routing"):
++        from offline_pd.batch import generate_aligned_batch
++
++        result = generate_aligned_batch(llm, prompts, params)
++    else:
++        result = llm.generate(prompts, params, use_tqdm=False)
+     return {"elapsed_seconds": time.perf_counter() - start,
+             "max_tokens_per_request": limits or [limit] * submitted,
+             "output_token_ids": [list(r.outputs[0].token_ids) for r in result]}
+@@ -392,6 +398,8 @@ def diagnose(args, llm, cases):
+               "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens,
+               "weight_nz_mode": args.weight_nz_mode, "graph_mode": args.graph_mode,
+               "capture_sizes": args.capture_sizes,
++              "batch_admission": ("pause_enqueue_dp_barrier_resume"
++                                  if args.command in ("performance", "moe-routing") else "streaming_generate"),
+               "deterministic": args.deterministic,
+               "hccl_deterministic": os.environ.get("HCCL_DETERMINISTIC", "false"),
+               "variant": os.environ.get("PTO_CSA_VARIANT", "precision"),
+diff --git a/tests/pypto_test/offline_pd/worker.py b/tests/pypto_test/offline_pd/worker.py
+index 97e0ef25..cfd98c71 100644
+--- a/tests/pypto_test/offline_pd/worker.py
++++ b/tests/pypto_test/offline_pd/worker.py
+@@ -45,6 +45,13 @@ class OfflineNPUWorker(NPUWorker):
+ 
+         return end(self)
+ 
++    def offline_batch_barrier(self):
++        from vllm.distributed.parallel_state import get_dp_group
++
++        # GroupCoordinator.barrier uses its CPU group. It runs once after
++        # enqueue and before resuming scheduling, never in a timed forward.
++        get_dp_group().barrier()
++
+     def offline_runtime_config(self):
+         return {
+             "requested_deterministic_level": self._offline_requested_deterministic_level,
+diff --git a/tests/pypto_test/test_indexer_ordered_blocks_cpu.py b/tests/pypto_test/test_indexer_ordered_blocks_cpu.py
+new file mode 100644
+index 00000000..92c27fc0
+--- /dev/null
++++ b/tests/pypto_test/test_indexer_ordered_blocks_cpu.py
+@@ -0,0 +1,91 @@
++# SPDX-License-Identifier: Apache-2.0
++"""PTO-only page ordering: real allocator, no device initialization."""
++
++from dataclasses import replace
++from types import SimpleNamespace
++
++import pytest
++import torch
++from vllm.platforms import current_platform
++
++current_platform.pre_register_and_update()
++from vllm.v1.core.block_pool import BlockPool  # noqa: E402
++
++from vllm_ascend.core.kv_cache_interface import AscendMLAAttentionSpec  # noqa: E402
++from vllm_ascend.core.single_type_kv_cache_manager import CompressAttentionManager  # noqa: E402
++from vllm_ascend.worker import model_runner_v1 as runner_module  # noqa: E402
++
++
++def indexer_spec(ordered=False):
++    return AscendMLAAttentionSpec(block_size=32, num_kv_heads=1, head_size=128,
++                                dtype=torch.int8, scale_dim=1, scale_dtype=torch.float16,
++                                compress_ratio=4, model_version="deepseek_v4",
++                                prefer_contiguous_blocks=ordered)
++
++
++def test_model_selection_and_merge(monkeypatch):
++    spec = indexer_spec()
++    layer = SimpleNamespace(get_kv_cache_spec=lambda _: spec)
++    config = SimpleNamespace(model_config=SimpleNamespace(hf_config=SimpleNamespace(architectures=[])))
++    runner = SimpleNamespace(use_compress=True, vllm_config=config)
++    monkeypatch.setattr(runner_module, "has_ec_transfer", lambda: False)
++    monkeypatch.setattr(runner_module, "get_layers_from_vllm_config", lambda *_: {"indexer": layer})
++    monkeypatch.setattr(runner_module, "get_ascend_device_type", lambda: runner_module.AscendDeviceType.A3)
++    for architecture, variant, ordered in (
++            ("AscendDeepseekV4ForCausalLM", "performance", False),
++            ("PyptoCSADeepseekV4ForCausalLM", "precision", False),
++            ("PyptoCSADeepseekV4ForCausalLM", "performance", True)):
++        config.model_config.hf_config.architectures = [architecture]
++        monkeypatch.setenv("PTO_CSA_VARIANT", variant)
++        actual = runner_module.NPUModelRunner.get_kv_cache_spec(runner)["indexer"]
++        assert actual == replace(spec, prefer_contiguous_blocks=ordered)
++        assert AscendMLAAttentionSpec.merge([actual, actual]).prefer_contiguous_blocks == ordered
++    with pytest.raises(AssertionError):
++        AscendMLAAttentionSpec.merge([spec, replace(spec, prefer_contiguous_blocks=True)])
++    assert not torch.npu.is_initialized()
++
++
++@pytest.mark.parametrize("ordered", [False, True])
++def test_reuse_and_incremental_append(ordered):
++    pool = BlockPool(65, False, 128)
++    manager = CompressAttentionManager(indexer_spec(ordered), pool, enable_caching=False,
++                                      kv_cache_group_id=0, scheduler_block_size=128)
++    first_ids = []
++    for phase in range(3):
++        request = str(phase)
++        manager.add_local_computed_blocks(request, [], 0, 2048)
++        manager.allocate_external_computed_blocks(request, 0, 2048)
++        before = list(manager.req_to_blocks[request])
++        ids = [b.block_id for b in before]
++        first_ids.append(ids[0])
++        if ordered:
++            assert ids == sorted(ids)
++        assert len(ids) == len(set(ids)) == 16
++        if phase == 0:
++            extra = manager.allocate_new_blocks(request, 2560, 2560)
++            assert manager.req_to_blocks[request][:16] == before
++            assert manager.req_to_blocks[request][16:] == extra
++            assert len(extra) == 4
++        manager.free(request)
++        assert pool.get_num_free_blocks() == 64
++    assert first_ids[0] == 1
++    assert first_ids[1] == (5 if ordered else 20)
++    assert not torch.npu.is_initialized()
++
++
++def test_shared_prefix_stays_in_logical_order():
++    pool = BlockPool(65, True, 128)
++    manager = CompressAttentionManager(indexer_spec(True), pool, enable_caching=True,
++                                      kv_cache_group_id=0, scheduler_block_size=128)
++    owned = pool.get_new_blocks(4)
++    prefix = [owned[2], owned[0]]
++    manager.add_local_computed_blocks("shared", prefix, 256, 1024)
++    manager.allocate_external_computed_blocks("shared", 256, 1024)
++    assert manager.req_to_blocks["shared"][:2] == prefix
++    assert [b.ref_cnt for b in prefix] == [2, 2]
++    assert len(manager.req_to_blocks["shared"]) == 10
++    manager.free("shared")
++    assert [b.ref_cnt for b in prefix] == [1, 1]
++    pool.free_blocks(owned)
++    assert pool.get_num_free_blocks() == 64
++    assert not torch.npu.is_initialized()
+diff --git a/tests/pypto_test/test_offline_batch_cpu.py b/tests/pypto_test/test_offline_batch_cpu.py
+new file mode 100644
+index 00000000..8051d340
+--- /dev/null
++++ b/tests/pypto_test/test_offline_batch_cpu.py
+@@ -0,0 +1,52 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Batch admission must not run early requests or change model memory."""
++
++from types import SimpleNamespace
++
++from offline_pd.batch import generate_aligned_batch
++
++
++def test_all_requests_are_queued_before_resume():
++    calls = []
++    outputs = [object(), object()]
++
++    class Engine:
++        def sleep(self, *, level, mode):
++            assert (level, mode) == (0, "keep")
++            calls.append("pause")
++
++        def enqueue(self, prompts, params, *, use_tqdm):
++            assert calls == ["pause"] and len(prompts) == 2
++            calls.append("enqueue_all")
++
++        def collective_rpc(self, method):
++            assert calls == ["pause", "enqueue_all"] and method == "offline_batch_barrier"
++            calls.append("dp_ready")
++
++        def wake_up(self, *, tags):
++            assert calls == ["pause", "enqueue_all", "dp_ready"] and tags == ["scheduling"]
++            calls.append("resume")
++
++        def wait_for_completion(self, *, use_tqdm):
++            assert calls[-1] == "resume"
++            return outputs
++
++    assert generate_aligned_batch(Engine(), ["a", "b"], object()) is outputs
++
++
++def test_actual_level_zero_does_not_call_memory_sleep_or_wakeup():
++    from vllm.v1.engine.core import EngineCore
++
++    calls = []
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("A scheduling-only pause touched model memory")
++
++    engine = SimpleNamespace(
++        pause_scheduler=lambda **kwargs: calls.append(("pause", kwargs)),
++        resume_scheduler=lambda: calls.append(("resume", {})),
++        model_executor=SimpleNamespace(sleep=forbidden, wake_up=forbidden, is_sleeping=False),
++    )
++    EngineCore.sleep(engine, level=0, mode="keep")
++    EngineCore.wake_up(engine, tags=["scheduling"])
++    assert calls == [("pause", {"mode": "keep", "clear_cache": False}), ("resume", {})]
+diff --git a/vllm_ascend/core/kv_cache_interface.py b/vllm_ascend/core/kv_cache_interface.py
+index 2243bd42..d3fa85a5 100644
+--- a/vllm_ascend/core/kv_cache_interface.py
++++ b/vllm_ascend/core/kv_cache_interface.py
+@@ -30,6 +30,9 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
+     # main-cache property here; indexer-specific C8 properties belong to the
+     # indexer spec.
+     cache_sparse_c8: bool = False
++    # PTO Indexer can coalesce adjacent physical pages. Sort only newly
++    # allocated blocks; existing history and shared prefix mappings stay fixed.
++    prefer_contiguous_blocks: bool = False
+ 
+     @property
+     def page_size_bytes(self) -> int:
+@@ -52,6 +55,7 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
+                 spec.scale_dim,
+                 spec.scale_dtype,
+                 spec.dtype,
++                spec.prefer_contiguous_blocks,
+             )
+             for spec in specs
+         }
+@@ -75,6 +79,7 @@ class AscendMLAAttentionSpec(MLAAttentionSpec):
+             dtype=specs[0].dtype,
+             cache_dtype_str=cache_dtype_str_set.pop(),
+             cache_sparse_c8=specs[0].cache_sparse_c8,
++            prefer_contiguous_blocks=specs[0].prefer_contiguous_blocks,
+         )
+ 
+     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
+diff --git a/vllm_ascend/core/single_type_kv_cache_manager.py b/vllm_ascend/core/single_type_kv_cache_manager.py
+index cb3c817d..fe1860f3 100644
+--- a/vllm_ascend/core/single_type_kv_cache_manager.py
++++ b/vllm_ascend/core/single_type_kv_cache_manager.py
+@@ -35,6 +35,13 @@ class CompressAttentionManager(FullAttentionManager):
+         self.compress_ratio = kv_cache_spec.compress_ratio
+         self._null_block = block_pool.null_block
+ 
++    def _order_new_blocks(self, blocks: list[KVCacheBlock]) -> None:
++        # Sorting a newly allocated suffix changes no existing token mapping
++        # and neither allocates nor copies device memory. Fragmented runs are
++        # still valid; PTO verifies adjacency before selecting its fast path.
++        if getattr(self.kv_cache_spec, "prefer_contiguous_blocks", False):
++            blocks.sort(key=lambda block: block.block_id)
++
+     def get_num_blocks_to_allocate(
+         self,
+         request_id: str,
+@@ -143,6 +150,7 @@ class CompressAttentionManager(FullAttentionManager):
+             allocated_blocks = self.block_pool.get_new_blocks(
+                 cdiv(num_total_computed_tokens, self.block_size) - len(req_blocks)
+             )
++            self._order_new_blocks(allocated_blocks)
+             req_blocks.extend(allocated_blocks)
+             if type(self.kv_cache_spec) is FullAttentionSpec:
+                 self.new_block_ids.extend(b.block_id for b in allocated_blocks)
+@@ -171,6 +179,7 @@ class CompressAttentionManager(FullAttentionManager):
+             return []
+         else:
+             new_blocks = self.block_pool.get_new_blocks(num_new_blocks)
++            self._order_new_blocks(new_blocks)
+             req_blocks.extend(new_blocks)
+             return new_blocks
+ 
+@@ -189,11 +198,17 @@ class CompressAttentionManager(FullAttentionManager):
+         # "could not broadcast (4,) into (2,)".
+         num_local_computed_tokens //= self.compress_ratio
+         num_external_computed_tokens //= self.compress_ratio
++        before = len(self.req_to_blocks[request_id])
+         super().allocate_external_computed_blocks(
+             request_id,
+             num_local_computed_tokens,
+             num_external_computed_tokens,
+         )
++        if getattr(self.kv_cache_spec, "prefer_contiguous_blocks", False):
++            req_blocks = self.req_to_blocks[request_id]
++            new_blocks = req_blocks[before:]
++            self._order_new_blocks(new_blocks)
++            req_blocks[before:] = new_blocks
+ 
+     def cache_blocks(
+         self,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index e1352c42..a6b9d80c 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -462,17 +462,13 @@ def indexer_score_topk_native_cube(
+     score_early_resolve: pl.constexpr,
+ ):
+     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
+-    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+-    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+-    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    # One owner, two planar regions, established before graph capture.
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
+     cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+-    key_rows = cache_bytes // IDX_HEAD_DIM
+-    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+-    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+-    idx_kv_cache_shift64 = pl.reshape(
+-        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+-    )
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    idx_kv_cache = pl.reshape(cache_flat[0:key_bytes], [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
++    idx_scale_cache = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     coefficients, coefficients_tid = indexer_head_coefficients(
+         qr_hadamard_scale_dq,
+         weights,
+@@ -549,28 +545,45 @@ def indexer_score_topk_native_cube(
+                             [NATIVE_QLI_QK_COLS, IDX_HEAD_DIM], dtype=pl.INT8,
+                             target_memory=pl.MemorySpace.Mat,
+                         )
+-                        for buf_key_page in pl.unroll(NATIVE_QLI_QK_COLS // BLOCK_SIZE):
+-                            buf_key_row = (
+-                                buf_logical_begin + buf_score_begin
+-                                + (buf_panel_col // (score_tile // 2)) * buf_lane_span
+-                                + buf_panel_col % (score_tile // 2) + buf_key_page * BLOCK_SIZE
+-                            )
+-                            buf_safe_page = pl.min(
+-                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                        buf_first_key_row = (
++                            buf_logical_begin + buf_score_begin
++                            + (buf_panel_col // (score_tile // 2)) * buf_lane_span
++                            + buf_panel_col % (score_tile // 2)
++                        )
++                        buf_last_valid_page = pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                        buf_first_key_page = buf_first_key_row // BLOCK_SIZE
++                        buf_first_physical_page = pl.max(pl.cast(pl.read(
++                            idx_block_table, [buf_batch_idx, pl.min(buf_first_key_page, buf_last_valid_page)]
++                        ), pl.INDEX), 0)
++                        buf_contiguous_panel = buf_first_key_page + NATIVE_QLI_QK_COLS // BLOCK_SIZE - 1 <= buf_last_valid_page
++                        for buf_check_page in pl.unroll(1, NATIVE_QLI_QK_COLS // BLOCK_SIZE):
++                            buf_check_physical = pl.read(idx_block_table, [
++                                buf_batch_idx, pl.min(buf_first_key_page + buf_check_page, buf_last_valid_page)
++                            ])
++                            buf_contiguous_panel = buf_contiguous_panel and (
++                                buf_check_physical == buf_first_physical_page + buf_check_page
+                             )
+-                            buf_physical_page = pl.max(
+-                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
++                        if buf_contiguous_panel:
++                            buf_panel_keys = pl.gather_row(
++                                buf_panel_keys, idx_kv_cache, [0, 0],
++                                [buf_first_physical_page * BLOCK_SIZE, 0], [NATIVE_QLI_QK_COLS, IDX_HEAD_DIM],
+                             )
+-                            buf_native_byte = buf_physical_page * native_page_bytes
+-                            if buf_native_byte % IDX_HEAD_DIM == 0:
+-                                buf_panel_keys = pl.gather_row(
+-                                    buf_panel_keys, idx_kv_cache, [buf_key_page * BLOCK_SIZE, 0],
+-                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                        else:
++                            for buf_key_page in pl.unroll(NATIVE_QLI_QK_COLS // BLOCK_SIZE):
++                                buf_key_row = (
++                                    buf_logical_begin + buf_score_begin
++                                    + (buf_panel_col // (score_tile // 2)) * buf_lane_span
++                                    + buf_panel_col % (score_tile // 2) + buf_key_page * BLOCK_SIZE
++                                )
++                                buf_safe_page = pl.min(
++                                    buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                                )
++                                buf_physical_page = pl.max(
++                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                                 )
+-                            else:
+                                 buf_panel_keys = pl.gather_row(
+-                                    buf_panel_keys, idx_kv_cache_shift64, [buf_key_page * BLOCK_SIZE, 0],
+-                                    [buf_native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                    buf_panel_keys, idx_kv_cache, [buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_physical_page * BLOCK_SIZE, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+                                 )
+                         buf_key_panel = pl.tile.move(
+                             pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right,
+@@ -654,8 +667,8 @@ def indexer_score_topk_native_cube(
+                                 pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
+                             )
+                             buf_scale_bytes = pl.gather_row(
+-                                buf_scale_bytes, idx_native_kv_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
+-                                [buf_scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                                buf_scale_bytes, idx_scale_cache, [0, buf_scale_page * BLOCK_SIZE * 2],
++                                [buf_scale_physical_page, 0], [1, BLOCK_SIZE * 2],
+                             )
+                         buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
+                         buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
+@@ -743,17 +756,13 @@ def indexer_score_topk_forest(
+ ):
+     """Score and select half-leaves, then merge their exact Top-K rows."""
+     b_dim = pl.tensor.dim(idx_block_table, 0)
+-    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+-    # Zero-copy GM descriptors inside orchestration, as validation log §116.
+-    # One writable root allocation avoids partial-overlap Torch ABI arguments.
+-    cache_bytes = pl.tensor.dim(idx_native_kv_cache, 0) * native_page_bytes
++    # One owner, two planar regions, established before graph capture.
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
+     cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
+-    key_rows = cache_bytes // IDX_HEAD_DIM
+-    shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+-    idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+-    idx_kv_cache_shift64 = pl.reshape(
+-        cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM]
+-    )
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    idx_kv_cache = pl.reshape(cache_flat[0:key_bytes], [cache_pages * BLOCK_SIZE, IDX_HEAD_DIM])
++    idx_scale_cache = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     pair_arena = pl.create_tensor([TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], dtype=pl.FP32)
+     # The whole batch uses query rows for one leaf, or private lane rows for multiple leaves.
+     score_arena = pl.create_tensor([SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32)
+@@ -858,19 +867,11 @@ def indexer_score_topk_forest(
+                                 physical_page = pl.max(
+                                     pl.cast(pl.read(idx_block_table, [batch_idx, safe_page]), pl.INDEX), 0
+                                 )
+-                                native_byte = physical_page * native_page_bytes
+-                                if native_byte % IDX_HEAD_DIM == 0:
+-                                    kv_i8 = pl.gather_row(
+-                                        kv_i8, idx_kv_cache,
+-                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+-                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+-                                    )
+-                                else:
+-                                    kv_i8 = pl.gather_row(
+-                                        kv_i8, idx_kv_cache_shift64,
+-                                        [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
+-                                        [native_byte // IDX_HEAD_DIM, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
+-                                    )
++                                kv_i8 = pl.gather_row(
++                                    kv_i8, idx_kv_cache,
++                                    [key_lane * SCORE_LANE_ROWS + key_page * BLOCK_SIZE, 0],
++                                    [physical_page * BLOCK_SIZE, 0], [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
+                         # 性能版改用 Vector 的 col_sum 规约 head，与上游一致：省掉
+                         # 每个 score tile 一次 FP32->FP16 转换和一次 Cube matmul。
+                         # 精度版那条链（NATIVE_QLI_QK_SCALE + FP16 rint + Cube）是为了
+@@ -889,8 +890,8 @@ def indexer_score_topk_forest(
+                                     pl.cast(pl.read(idx_block_table, [batch_idx, scale_logical_page]), pl.INDEX), 0
+                                 )
+                                 scale_bytes = pl.gather_row(
+-                                    scale_bytes, idx_native_kv_cache, [0, scale_page * BLOCK_SIZE * 2],
+-                                    [scale_physical_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
++                                    scale_bytes, idx_scale_cache, [0, scale_page * BLOCK_SIZE * 2],
++                                    [scale_physical_page, 0], [1, BLOCK_SIZE * 2],
+                                 )
+                             kv_scale = pl.reinterpret_view(scale_bytes, pl.FP16)
+                             score_shard = pl.aiv_shard(score_i32)
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+index 6270eb5d..5e09b5ed 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer_compressor.py
+@@ -412,6 +412,12 @@ def indexer_compressor_write(
+     hadamard_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Rotate compact boundary rows and write their quantized indexer KV cache."""
++    cache_pages = pl.tensor.dim(idx_native_kv_cache, 0)
++    cache_bytes = cache_pages * pl.tensor.dim(idx_native_kv_cache, 1)
++    cache_flat = pl.reshape(idx_native_kv_cache, [cache_bytes])
++    key_bytes = cache_pages * INDEXER_KEY_BYTES
++    indexer_key_pages = pl.reshape(cache_flat[0:key_bytes], [cache_pages, INDEXER_KEY_BYTES])
++    indexer_scale_pages = pl.reshape(cache_flat[key_bytes:cache_bytes], [cache_pages, BLOCK_SIZE * 2])
+     bs = pl.tensor.dim(position_ids, 0)
+     compact_rows = (bs // S) * BOUNDARY_ROWS_PER_REQUEST
+     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
+@@ -498,7 +504,7 @@ def indexer_compressor_write(
+                     # Update the canonical Native slot directly.
+                     native_cache_page = pl.cast(native_page, pl.INDEX)
+                     native_key_begin = pl.cast(native_offset, pl.INDEX) * HEAD_DIM
+-                    idx_native_kv_cache[
++                    indexer_key_pages[
+                         native_cache_page : native_cache_page + 1,
+                         native_key_begin : native_key_begin + HEAD_DIM,
+                     ] = kv_i8_blk[inner : inner + 1, :]
+@@ -541,12 +547,12 @@ def indexer_compressor_write(
+                     # neighboring history slots, just as the precision path.
+                     native_scale_page = pl.cast(native_page, pl.INDEX)
+                     native_scale_bytes = pl.tile.load(
+-                        idx_native_kv_cache, [native_scale_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
++                        indexer_scale_pages, [native_scale_page, 0], [1, BLOCK_SIZE * 2]
+                     )
+                     native_scale_half = pl.tile.reinterpret_view(native_scale_bytes, pl.FP16)
+                     pl.tile.write(native_scale_half, [0, native_offset], scale_value)
+                     native_updated_bytes = pl.tile.reinterpret_view(native_scale_half, pl.INT8)
+-                    pl.tile.store(native_updated_bytes, [native_scale_page, INDEXER_KEY_BYTES], idx_native_kv_cache)
++                    pl.tile.store(native_updated_bytes, [native_scale_page, 0], indexer_scale_pages)
+ 
+     return hadamard_tid, scale_commit_tid
+ 
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+index d403947b..2440420d 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/native_adapter.py
+@@ -4,8 +4,8 @@
+ from ..deepseek_v4_flash_dspark.native_adapter import CSAOperators as _CSAOperators
+ from ..deepseek_v4_flash_dspark.native_adapter import NativeCSACall as _NativeCSACall
+ from ..deepseek_v4_flash_dspark.native_adapter import prepare_weights as _prepare_weights
+-from ..deepseek_v4_flash_dspark.native_storage import indexer_storage
+ from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
++from .split_storage import indexer_storage
+ 
+ 
+ class CSAOperators(_CSAOperators):
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py
+new file mode 100644
+index 00000000..08b67a4c
+--- /dev/null
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/split_storage.py
+@@ -0,0 +1,35 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Experimental planar Indexer allocation; no device copy or new owner."""
++
++import torch
++
++KEY_BYTES = 32 * 128
++SCALE_BYTES = 32 * 2
++PAGE_BYTES = KEY_BYTES + SCALE_BYTES
++
++
++def split_indexer_views(raw, key_shape, scale_shape):
++    pages = key_shape[0]
++    if (tuple(key_shape) != (pages, 32, 1, 128)
++            or tuple(scale_shape) != (pages, 32, 1, 1)
++            or raw.dtype != torch.int8 or not raw.is_contiguous()
++            or raw.numel() != pages * PAGE_BYTES):
++        raise ValueError("Planar Indexer requires A3 C4 INT8 keys and FP16 scales")
++    flat = raw.view(-1)
++    return [flat[:pages * KEY_BYTES].view(key_shape),
++            flat[pages * KEY_BYTES:].view(torch.float16).view(scale_shape)]
++
++
++def indexer_storage(key, scale):
++    pages = key.shape[0]
++    if (key.dtype != torch.int8 or tuple(key.shape) != (pages, 32, 1, 128)
++            or scale.dtype != torch.float16 or tuple(scale.shape) != (pages, 32, 1, 1)
++            or not key.is_contiguous() or not scale.is_contiguous()):
++        raise ValueError("Experimental PTO requires planar Indexer key/scale views")
++    if (key.untyped_storage().data_ptr() != scale.untyped_storage().data_ptr()
++            or scale.storage_offset() * 2 != key.storage_offset() + pages * KEY_BYTES
++            or key.storage_offset() + pages * PAGE_BYTES > key.untyped_storage().nbytes()):
++        raise ValueError("Planar key/scale must cover disjoint regions of one allocation")
++    # Root tensor transports bytes, not interleaved pages. All subviews are
++    # derived inside PTO, keeping the graph ABI to one writable owner.
++    return key.as_strided((pages, PAGE_BYTES), (PAGE_BYTES, 1), key.storage_offset())
+diff --git a/vllm_ascend/worker/model_runner_v1.py b/vllm_ascend/worker/model_runner_v1.py
+index 6db102d2..fdd3a088 100644
+--- a/vllm_ascend/worker/model_runner_v1.py
++++ b/vllm_ascend/worker/model_runner_v1.py
+@@ -127,6 +127,7 @@ from vllm_ascend.eplb.core.eplb_worker import EplbProcess
+ from vllm_ascend.eplb.eplb_updator import EplbUpdator
+ from vllm_ascend.model_executor.offloader import create_offloader
+ from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.service_config import can_replay_csa_graph, is_csa_model
++from vllm_ascend.ops.pypto.variant import selected_variant
+ from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
+ from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
+ from vllm_ascend.quantization.utils import enable_fa_quant
+@@ -4071,6 +4072,22 @@ class NPUModelRunner(GPUModelRunner):
+                             ]
+                             overlap_full_kv_cache = False
+ 
++                    # Experimental PTO-only Indexer allocation. Native models,
++                    # precision PTO, other caches and their lifecycle stay on
++                    # the existing layout. Native prefill/fallback use strides.
++                    if (is_csa_model(self.vllm_config)
++                            and selected_variant() == "performance"
++                            and get_ascend_device_type() == AscendDeviceType.A3
++                            and getattr(current_kv_cache_spec, "scale_dim", 0) == 1
++                            and current_kv_cache_spec.dtype == torch.int8
++                            and current_kv_cache_spec.scale_dtype == torch.float16
++                            and getattr(current_kv_cache_spec, "compress_ratio", 0) == 4):
++                        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.split_storage import split_indexer_views
++
++                        kv_caches[layer_name] = split_indexer_views(
++                            kv_tensor, indexer_k_shape, indexer_scale_shape)
++                        continue
++
+                     kv_cache = self._adjust_kv_layout(kv_tensor,
+                                            kv_cache_shape_list,
+                                            kv_cache_dtype_list,
+@@ -4537,6 +4554,13 @@ class NPUModelRunner(GPUModelRunner):
+             elif self.use_compress:
+                 # Skip modules that don't need KV cache (eg encoder-only attention)
+                 if spec := attn_module.get_kv_cache_spec(self.vllm_config):
++                    if (is_csa_model(self.vllm_config)
++                            and selected_variant() == "performance"
++                            and get_ascend_device_type() == AscendDeviceType.A3
++                            and isinstance(spec, AscendMLAAttentionSpec)
++                            and spec.compress_ratio == 4 and spec.scale_dim == 1
++                            and spec.dtype == torch.int8 and spec.scale_dtype == torch.float16):
++                        spec = replace(spec, prefer_contiguous_blocks=True)
+                     kv_cache_spec[layer_name] = spec
+             elif isinstance(attn_module, Attention):
+                 if spec := attn_module.get_kv_cache_spec(self.vllm_config):

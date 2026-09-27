@@ -1,0 +1,27 @@
+diff --git a/tests/pypto_test/offline_pd/connector.py b/tests/pypto_test/offline_pd/connector.py
+index b731fd84..81aac421 100644
+--- a/tests/pypto_test/offline_pd/connector.py
++++ b/tests/pypto_test/offline_pd/connector.py
+@@ -196,6 +196,22 @@ class OfflineDSV4Connector(KVConnectorBase_V1, SupportsHMA):
+         for request in self._get_connector_metadata().loads:
+             folder = self._folder(request["key"], 0)
+             manifest = json.loads((folder / "manifest.json").read_text())
++            # CPU-only diagnostics at bank restore, outside all timed steps.
++            if self.dp == 0:
++                seen_groups = set()
++                for _, (gid, spec) in sorted(self.specs.items()):
++                    if gid in seen_groups or not getattr(spec, "scale_dim", 0):
++                        continue
++                    seen_groups.add(gid)
++                    page_ids = [b for _, b in live_blocks(request["blocks"][gid], spec, manifest["history"])]
++                    panels = [page_ids[i:i + 4] for i in range(0, len(page_ids) - 3, 4)]
++                    ascending = sum(all(b == a + 1 for a, b in zip(p, p[1:])) for p in panels)
++                    descending = sum(all(b == a - 1 for a, b in zip(p, p[1:])) for p in panels)
++                    print("OFFLINE_INDEXER_PAGE_ORDER " + json.dumps({
++                        "request": request["request_id"], "group": gid, "pages": len(page_ids),
++                        "panels": len(panels), "ascending": ascending, "descending": descending,
++                        "first_pages": page_ids[:8], "last_pages": page_ids[-8:],
++                    }), flush=True)
+             tensors = load_file(str(folder / "cache.safetensors"))
+             local = {name: (cache, gid, spec) for name, cache, gid, spec in self._tensors()}
+             if set(local) != set(tensors):
