@@ -493,3 +493,9 @@ local_setup含准备和等依赖，大数本身不证明有害。先独立检验
 但无profiler本体1327.86→1330.48 μs，无明确收益，已撤回；[独立证据](results/csa_scheduling_20260927/score_no_early/README.md)。
 下一项针对Query Hadamard：B40部分窗口提前占AIC等待约44 μs，而Q_B仍在计算；
 单独关闭其上游idx_qr_dequant_rope的生产者标志，不叠加Score试验。
+
+Query Hadamard预派发先导也已完成：平均前置等待9.50–44.10→0.53–0.56 μs，
+但Q_B启动分散仍在，无profiler本体1327.86→1333.59 μs，p50/p95未改善，已撤回；
+[独立证据](results/csa_scheduling_20260927/query_hadamard_no_early/README.md)。
+当前仍保留Q_A先行（B40本体1327.86 μs）；两个预派发开关已恢复。
+这两项只证明移除等待本身不足以加速，不能推广为所有预派发都有益；后续继续定位真实关键链和O projection分批准入。

@@ -19,6 +19,8 @@ FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数�
 首项Q_A先行已获得B40本体1359.26→1327.86 μs（−2.31%），其他档位待阶段验证；
 [调度记录](results/csa_scheduling_20260927/qr_before_compressors/README.md)。
 用户追加：按泳道识别有害预派发，选择性关闭对应生产者的allow_early_resolve；每次单独比较本体及启动/等待。
+已单独试Score→Top-K merge、Indexer Q反量化→Query Hadamard两处：等待减少但B40本体未获益，均恢复；
+当前保留Q_A先行，继续分析关键链/资源准入，不以等待变短或泳道整齐代替整体收益。
 第二项连续清零已保留：B40 Q_A seed6.94–8.50 μs、KV seed4.96–5.20 μs，小档padding检查通过；
 [独立证据](results/csa_incore_20260927/projection_seed_wide/README.md)。
 已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：

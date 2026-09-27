@@ -1,0 +1,11 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -897,7 +897,7 @@
+     qr_bf16_2d = pl.reshape(qr_bf16, [T_PAD, IDX_N_HEADS * IDX_HEAD_DIM])
+     dq_rope_units = ((bs + DEQUANT_T_TILE - 1) // DEQUANT_T_TILE) * (IDX_N_HEADS // DQ_ROPE_H_TILE)
+     dq_rope_workers = pl.min(dq_rope_units, DQ_ROPE_WORKERS)
+-    for dq_rope_worker in pl.spmd(dq_rope_workers, name_hint="idx_qr_dequant_rope", allow_early_resolve=True):
++    for dq_rope_worker in pl.spmd(dq_rope_workers, name_hint="idx_qr_dequant_rope", allow_early_resolve=False):
+         sw_ones = pl.full([DEQUANT_T_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
+         sw_index = pl.cast(pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32), target_type=pl.FP32)
+         sw_col = pl.col_expand_mul(sw_ones, sw_index)

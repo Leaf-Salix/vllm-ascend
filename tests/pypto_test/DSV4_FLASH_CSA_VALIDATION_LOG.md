@@ -7464,3 +7464,15 @@ Top-K merge平均local_setup8.16–53.01→0.68–0.71 μs，完成位置范围6
 但无profiler本体1327.86→1330.48 μs（+0.20%），p95基本持平；未证明整体收益，撤回，不扩测。
 保护区/Top-K结构/非有限值检查通过，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/score_no_early/README.md)。
 下一项独立关闭idx_qr_dequant_rope生产者标志，检验Query Hadamard预占AIC与Q_B竞争，不叠加本项。
+
+## 208. Query Hadamard取消预派发未改善本体，恢复开关（2026-09-27）
+
+Score开关恢复后，在同一Q_A先行基底只关闭idx_qr_dequant_rope生产者allow_early_resolve。
+任务task_20260927_174025_266828031875退出0，B40/H8K同口径20次计时和4个DFX窗口。
+Query Hadamard平均前置等待9.50–44.10→0.53–0.56 μs，但Q_B启动分散71.52–93.58→77.84–98.68 μs，未被解决。
+无profiler本体1327.86→1333.59 μs（+0.43%），p50/p95也未改善，撤回。
+完整路径1674.93→1662.00 μs与本体方向不同，不将其解释成本体调度获益；未追加其他档或整模型。
+保护区/Top-K结构通过、非有限值0，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/query_hadamard_no_early/README.md)。
+
+两个预派发候选均恢复；当前生产保留三个核内候选中的前两项，以及Q_A先行调度。
+本轮无hash扫描、无七档重复测试；调度与整模型验收仍未完成，继续定位关键链及O projection分批准入。
