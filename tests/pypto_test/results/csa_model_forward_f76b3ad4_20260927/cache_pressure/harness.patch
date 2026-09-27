@@ -1,0 +1,22 @@
+diff --git a/tests/pypto_test/dsv4_csa_single_layer.py b/tests/pypto_test/dsv4_csa_single_layer.py
+index d04bf72b..38ebf045 100644
+--- a/tests/pypto_test/dsv4_csa_single_layer.py
++++ b/tests/pypto_test/dsv4_csa_single_layer.py
+@@ -376,7 +376,7 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
+ 
+ 
+ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
+-                           profile_dir=None):
++                           profile_dir=None, before_timing=None):
+     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
+     import torch
+ 
+@@ -402,6 +402,8 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
+     samples, timestamps = [], []
+     for iteration in range(warmup + iters):
+         reset()
++        if before_timing is not None:
++            before_timing()
+         start.record()
+         graph.replay()
+         end.record()
