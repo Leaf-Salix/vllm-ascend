@@ -1,0 +1,11 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -294,7 +294,7 @@
+     # 上游 csa_rope_interleave 用的 t_dim // 4 会丢掉尾行（batch=1 时 t_dim=6 只覆盖 0~3）。
+     rope_sign_blocks = (t_dim + CSA_ROPE_SIGN_T_TILE - 1) // CSA_ROPE_SIGN_T_TILE
+     with pl.spmd(pl.min(rope_sign_blocks, CSA_ROPE_WORKERS), name_hint="csa_rope_sign",
+-                 deps=[offsets_tid]) as rope_tid:
++                 deps=[offsets_tid], allow_early_resolve=True) as rope_tid:
+         for rope_rb in pl.range(pl.tile.get_block_idx(), rope_sign_blocks,
+                                 pl.min(rope_sign_blocks, CSA_ROPE_WORKERS)):
+             rope_t0 = rope_rb * CSA_ROPE_SIGN_T_TILE

@@ -1,0 +1,735 @@
+{
+  "baseline": "2dd51f15",
+  "cases": [
+    {
+      "label": "o_a_row_parallel",
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/o_a_row_parallel/h8192_b40/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1419.1049933433533,
+          "p50_us": 1420.2100038528442,
+          "p95_us": 1423.8200187683105,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1674.5720088481903,
+          "p50_us": 1668.209969997406,
+          "p95_us": 1712.0800018310547,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1318.048995733261,
+          "p50_us": 1319.1799521446228,
+          "p95_us": 1364.5800352096558,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 112.25999929010868,
+          "p50_us": 112.40999773144722,
+          "p95_us": 113.05999755859375,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 243.10400038957596,
+          "p50_us": 242.34000593423843,
+          "p95_us": 252.18001008033752,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0032925946937182866
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 901,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/o_a_row_parallel/h8192_b40/swimlane/dfx/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 124.18,
+            "norm_end_to_sparse_receive": 488.28000000000003,
+            "sparse_receive_to_merge_end": 345.79999999999995,
+            "merge_end_to_last_worker": 275.96000000000004
+          },
+          "worker_span_us": 1234.22,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 899.4,
+              "first_start_us": 909.66,
+              "last_start_us": 912.0,
+              "last_end_us": 958.26,
+              "start_spread_us": 2.340000000000032,
+              "worker_envelope_us": 58.860000000000014,
+              "kernel_mean_us": 46.04666666666667,
+              "setup_mean_us": 7.994166666666675
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 965.46,
+              "first_start_us": 966.12,
+              "last_start_us": 1059.78,
+              "last_end_us": 1095.34,
+              "start_spread_us": 93.65999999999997,
+              "worker_envelope_us": 129.87999999999988,
+              "kernel_mean_us": 41.744375000000005,
+              "setup_mean_us": 0.6243749999999828
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 1026.44,
+              "first_start_us": 1027.02,
+              "last_start_us": 1101.16,
+              "last_end_us": 1108.34,
+              "start_spread_us": 74.1400000000001,
+              "worker_envelope_us": 81.89999999999986,
+              "kernel_mean_us": 8.556562499999988,
+              "setup_mean_us": 18.45687500000001
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1052.28,
+              "first_start_us": 1053.18,
+              "last_start_us": 1122.96,
+              "last_end_us": 1143.38,
+              "start_spread_us": 69.77999999999997,
+              "worker_envelope_us": 91.10000000000014,
+              "kernel_mean_us": 20.788749999999983,
+              "setup_mean_us": 0.8393750000000182
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1122.68,
+              "first_start_us": 1146.1200000000001,
+              "last_start_us": 1169.16,
+              "last_end_us": 1182.08,
+              "start_spread_us": 23.039999999999964,
+              "worker_envelope_us": 59.399999999999864,
+              "kernel_mean_us": 18.140937499999986,
+              "setup_mean_us": 16.243437500000017
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1166.1200000000001,
+              "first_start_us": 1184.34,
+              "last_start_us": 1215.98,
+              "last_end_us": 1234.22,
+              "start_spread_us": 31.6400000000001,
+              "worker_envelope_us": 68.09999999999991,
+              "kernel_mean_us": 26.689333333333316,
+              "setup_mean_us": 10.69100000000002
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/o_a_row_parallel/h8192_b40/swimlane/dfx/window_1/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 126.94,
+            "norm_end_to_sparse_receive": 499.04,
+            "sparse_receive_to_merge_end": 347.69999999999993,
+            "merge_end_to_last_worker": 281.32000000000005
+          },
+          "worker_span_us": 1255.0,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 909.48,
+              "first_start_us": 925.3199999999999,
+              "last_start_us": 926.5799999999999,
+              "last_end_us": 973.68,
+              "start_spread_us": 1.259999999999991,
+              "worker_envelope_us": 64.19999999999993,
+              "kernel_mean_us": 45.70958333333334,
+              "setup_mean_us": 9.077499999999992
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 979.68,
+              "first_start_us": 980.28,
+              "last_start_us": 1074.02,
+              "last_end_us": 1109.72,
+              "start_spread_us": 93.74000000000001,
+              "worker_envelope_us": 130.04000000000008,
+              "kernel_mean_us": 41.89750000000002,
+              "setup_mean_us": 0.6521874999999913
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 986.8199999999999,
+              "first_start_us": 1031.2,
+              "last_start_us": 1115.5,
+              "last_end_us": 1122.3,
+              "start_spread_us": 84.29999999999995,
+              "worker_envelope_us": 135.48000000000002,
+              "kernel_mean_us": 8.86624999999998,
+              "setup_mean_us": 58.55906250000003
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1067.82,
+              "first_start_us": 1068.96,
+              "last_start_us": 1143.9,
+              "last_end_us": 1164.22,
+              "start_spread_us": 74.94000000000005,
+              "worker_envelope_us": 96.40000000000009,
+              "kernel_mean_us": 21.13687500000001,
+              "setup_mean_us": 1.0140624999999908
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1136.02,
+              "first_start_us": 1165.3799999999999,
+              "last_start_us": 1190.68,
+              "last_end_us": 1202.82,
+              "start_spread_us": 25.300000000000182,
+              "worker_envelope_us": 66.79999999999995,
+              "kernel_mean_us": 18.174374999999984,
+              "setup_mean_us": 21.279375000000048
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1185.8,
+              "first_start_us": 1204.46,
+              "last_start_us": 1236.62,
+              "last_end_us": 1255.0,
+              "start_spread_us": 32.159999999999854,
+              "worker_envelope_us": 69.20000000000005,
+              "kernel_mean_us": 27.242999999999995,
+              "setup_mean_us": 11.372999999999998
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/o_a_row_parallel/h8192_b40/swimlane/dfx/window_2/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 123.10000000000001,
+            "norm_end_to_sparse_receive": 543.08,
+            "sparse_receive_to_merge_end": 351.52,
+            "merge_end_to_last_worker": 280.22
+          },
+          "worker_span_us": 1297.92,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 956.6600000000001,
+              "first_start_us": 969.3000000000001,
+              "last_start_us": 972.4200000000001,
+              "last_end_us": 1017.7,
+              "start_spread_us": 3.1200000000000045,
+              "worker_envelope_us": 61.039999999999964,
+              "kernel_mean_us": 44.85458333333332,
+              "setup_mean_us": 8.652916666666655
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 1022.3600000000001,
+              "first_start_us": 1022.96,
+              "last_start_us": 1114.54,
+              "last_end_us": 1153.04,
+              "start_spread_us": 91.57999999999993,
+              "worker_envelope_us": 130.67999999999984,
+              "kernel_mean_us": 41.94500000000001,
+              "setup_mean_us": 0.6143749999999883
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 1029.72,
+              "first_start_us": 1073.22,
+              "last_start_us": 1160.64,
+              "last_end_us": 1168.92,
+              "start_spread_us": 87.42000000000007,
+              "worker_envelope_us": 139.20000000000005,
+              "kernel_mean_us": 8.930312500000017,
+              "setup_mean_us": 47.33999999999999
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1110.8,
+              "first_start_us": 1111.7,
+              "last_start_us": 1184.98,
+              "last_end_us": 1206.9,
+              "start_spread_us": 73.27999999999997,
+              "worker_envelope_us": 96.10000000000014,
+              "kernel_mean_us": 22.135937500000026,
+              "setup_mean_us": 0.8884374999999842
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1180.4,
+              "first_start_us": 1207.76,
+              "last_start_us": 1230.68,
+              "last_end_us": 1242.68,
+              "start_spread_us": 22.920000000000073,
+              "worker_envelope_us": 62.27999999999997,
+              "kernel_mean_us": 17.521562499999998,
+              "setup_mean_us": 20.660937500000017
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1226.28,
+              "first_start_us": 1245.18,
+              "last_start_us": 1280.06,
+              "last_end_us": 1297.92,
+              "start_spread_us": 34.87999999999988,
+              "worker_envelope_us": 71.6400000000001,
+              "kernel_mean_us": 29.253333333333327,
+              "setup_mean_us": 10.833666666666659
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/o_a_row_parallel/h8192_b40/swimlane/dfx/window_3/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 120.03999999999999,
+            "norm_end_to_sparse_receive": 473.06000000000006,
+            "sparse_receive_to_merge_end": 355.5,
+            "merge_end_to_last_worker": 285.62
+          },
+          "worker_span_us": 1234.22,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 887.98,
+              "first_start_us": 900.38,
+              "last_start_us": 904.0,
+              "last_end_us": 948.6,
+              "start_spread_us": 3.6200000000000045,
+              "worker_envelope_us": 60.620000000000005,
+              "kernel_mean_us": 45.63250000000001,
+              "setup_mean_us": 8.982499999999982
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 955.26,
+              "first_start_us": 955.84,
+              "last_start_us": 1047.72,
+              "last_end_us": 1084.12,
+              "start_spread_us": 91.88,
+              "worker_envelope_us": 128.8599999999999,
+              "kernel_mean_us": 42.09125,
+              "setup_mean_us": 0.6078124999999854
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 958.44,
+              "first_start_us": 1007.32,
+              "last_start_us": 1091.3,
+              "last_end_us": 1097.56,
+              "start_spread_us": 83.9799999999999,
+              "worker_envelope_us": 139.1199999999999,
+              "kernel_mean_us": 7.9768750000000175,
+              "setup_mean_us": 56.15062499999998
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1043.3,
+              "first_start_us": 1044.36,
+              "last_start_us": 1122.72,
+              "last_end_us": 1141.36,
+              "start_spread_us": 78.36000000000013,
+              "worker_envelope_us": 98.05999999999995,
+              "kernel_mean_us": 21.537812499999994,
+              "setup_mean_us": 1.0337500000000013
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1111.1599999999999,
+              "first_start_us": 1142.9399999999998,
+              "last_start_us": 1166.1399999999999,
+              "last_end_us": 1179.1799999999998,
+              "start_spread_us": 23.200000000000045,
+              "worker_envelope_us": 68.01999999999998,
+              "kernel_mean_us": 18.465625,
+              "setup_mean_us": 22.540937500000013
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1163.3,
+              "first_start_us": 1181.56,
+              "last_start_us": 1216.3,
+              "last_end_us": 1234.22,
+              "start_spread_us": 34.74000000000001,
+              "worker_envelope_us": 70.92000000000007,
+              "kernel_mean_us": 29.359,
+              "setup_mean_us": 10.729333333333326
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "round01_quant_no_early",
+      "timing": {
+        "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/round01_quant_no_early/h8192_b40/timing/report.json",
+        "status": "MEASURED",
+        "native": {
+          "mean_us": 1412.8000020980835,
+          "p50_us": 1413.569986820221,
+          "p95_us": 1416.9800281524658,
+          "samples": 20
+        },
+        "pto_full": {
+          "mean_us": 1664.2819941043854,
+          "p50_us": 1662.999987602234,
+          "p95_us": 1706.0999870300293,
+          "samples": 20
+        },
+        "body": {
+          "mean_us": 1311.9619965553284,
+          "p50_us": 1309.0999722480774,
+          "p95_us": 1359.339952468872,
+          "samples": 20
+        },
+        "split": {
+          "mean_us": 116.51299968361855,
+          "p50_us": 116.48999899625778,
+          "p95_us": 117.73999780416489,
+          "samples": 20
+        },
+        "writeback": {
+          "mean_us": 232.69799947738647,
+          "p50_us": 233.24000090360641,
+          "p95_us": 236.88000440597534,
+          "samples": 20
+        },
+        "guard_failures": [],
+        "output": {
+          "status": "FAIL",
+          "nonfinite": 0,
+          "max_abs": 0.03125,
+          "rmse": 0.0032927057248742855
+        },
+        "nonfinite_by_tensor": {},
+        "topk": {
+          "replaced_indices": 901,
+          "invalid_rows": 0,
+          "structural_errors": []
+        }
+      },
+      "windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/round01_quant_no_early/h8192_b40/swimlane/dfx/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 130.62,
+            "norm_end_to_sparse_receive": 499.52,
+            "sparse_receive_to_merge_end": 350.82000000000005,
+            "merge_end_to_last_worker": 286.4200000000001
+          },
+          "worker_span_us": 1267.38,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 923.34,
+              "first_start_us": 934.24,
+              "last_start_us": 936.72,
+              "last_end_us": 980.96,
+              "start_spread_us": 2.480000000000018,
+              "worker_envelope_us": 57.620000000000005,
+              "kernel_mean_us": 44.03166666666668,
+              "setup_mean_us": 7.764166666666671
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 987.02,
+              "first_start_us": 987.52,
+              "last_start_us": 1078.18,
+              "last_end_us": 1113.1200000000001,
+              "start_spread_us": 90.66000000000008,
+              "worker_envelope_us": 126.10000000000014,
+              "kernel_mean_us": 40.920937500000015,
+              "setup_mean_us": 0.6468749999999908
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 990.3199999999999,
+              "first_start_us": 1037.84,
+              "last_start_us": 1120.5,
+              "last_end_us": 1126.22,
+              "start_spread_us": 82.66000000000008,
+              "worker_envelope_us": 135.9000000000001,
+              "kernel_mean_us": 7.838125000000016,
+              "setup_mean_us": 47.71781250000003
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1073.7,
+              "first_start_us": 1074.06,
+              "last_start_us": 1157.3600000000001,
+              "last_end_us": 1175.32,
+              "start_spread_us": 83.30000000000018,
+              "worker_envelope_us": 101.61999999999989,
+              "kernel_mean_us": 21.966562499999988,
+              "setup_mean_us": 0.7503125000000033
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1145.0,
+              "first_start_us": 1176.16,
+              "last_start_us": 1198.42,
+              "last_end_us": 1210.78,
+              "start_spread_us": 22.25999999999999,
+              "worker_envelope_us": 65.77999999999997,
+              "kernel_mean_us": 17.744687500000012,
+              "setup_mean_us": 22.812812499999986
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1195.8600000000001,
+              "first_start_us": 1213.1,
+              "last_start_us": 1247.78,
+              "last_end_us": 1267.38,
+              "start_spread_us": 34.680000000000064,
+              "worker_envelope_us": 71.51999999999998,
+              "kernel_mean_us": 29.36033333333334,
+              "setup_mean_us": 10.232999999999997
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/round01_quant_no_early/h8192_b40/swimlane/dfx/window_1/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 122.6,
+            "norm_end_to_sparse_receive": 487.19999999999993,
+            "sparse_receive_to_merge_end": 359.4000000000001,
+            "merge_end_to_last_worker": 284.0600000000002
+          },
+          "worker_span_us": 1253.2600000000002,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 901.04,
+              "first_start_us": 921.36,
+              "last_start_us": 924.4,
+              "last_end_us": 969.2,
+              "start_spread_us": 3.0399999999999636,
+              "worker_envelope_us": 68.16000000000008,
+              "kernel_mean_us": 44.85041666666667,
+              "setup_mean_us": 11.154583333333342
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 974.62,
+              "first_start_us": 975.26,
+              "last_start_us": 1066.1200000000001,
+              "last_end_us": 1100.16,
+              "start_spread_us": 90.86000000000013,
+              "worker_envelope_us": 125.54000000000008,
+              "kernel_mean_us": 40.93875,
+              "setup_mean_us": 0.5962500000000102
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 977.7,
+              "first_start_us": 1026.18,
+              "last_start_us": 1108.0400000000002,
+              "last_end_us": 1116.48,
+              "start_spread_us": 81.86000000000013,
+              "worker_envelope_us": 138.77999999999997,
+              "kernel_mean_us": 7.940937500000004,
+              "setup_mean_us": 59.2296875
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1063.0,
+              "first_start_us": 1063.64,
+              "last_start_us": 1141.7600000000002,
+              "last_end_us": 1160.96,
+              "start_spread_us": 78.12000000000012,
+              "worker_envelope_us": 97.96000000000004,
+              "kernel_mean_us": 22.91343749999998,
+              "setup_mean_us": 0.6987500000000146
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1133.24,
+              "first_start_us": 1162.8000000000002,
+              "last_start_us": 1185.0200000000002,
+              "last_end_us": 1197.7,
+              "start_spread_us": 22.220000000000027,
+              "worker_envelope_us": 64.46000000000004,
+              "kernel_mean_us": 17.651249999999987,
+              "setup_mean_us": 20.75625
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1182.5,
+              "first_start_us": 1200.74,
+              "last_start_us": 1234.74,
+              "last_end_us": 1253.2600000000002,
+              "start_spread_us": 34.0,
+              "worker_envelope_us": 70.76000000000022,
+              "kernel_mean_us": 28.750333333333337,
+              "setup_mean_us": 10.951000000000002
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/round01_quant_no_early/h8192_b40/swimlane/dfx/window_2/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 126.84,
+            "norm_end_to_sparse_receive": 547.66,
+            "sparse_receive_to_merge_end": 357.05999999999995,
+            "merge_end_to_last_worker": 284.72
+          },
+          "worker_span_us": 1316.28,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 969.9,
+              "first_start_us": 983.82,
+              "last_start_us": 986.0,
+              "last_end_us": 1031.56,
+              "start_spread_us": 2.17999999999995,
+              "worker_envelope_us": 61.65999999999997,
+              "kernel_mean_us": 44.70833333333332,
+              "setup_mean_us": 8.18249999999999
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 1037.62,
+              "first_start_us": 1038.1999999999998,
+              "last_start_us": 1126.04,
+              "last_end_us": 1163.56,
+              "start_spread_us": 87.84000000000015,
+              "worker_envelope_us": 125.94000000000005,
+              "kernel_mean_us": 41.29937500000001,
+              "setup_mean_us": 0.6543749999999839
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 1045.0,
+              "first_start_us": 1089.86,
+              "last_start_us": 1171.24,
+              "last_end_us": 1177.9599999999998,
+              "start_spread_us": 81.38000000000011,
+              "worker_envelope_us": 132.9599999999998,
+              "kernel_mean_us": 7.942499999999978,
+              "setup_mean_us": 53.54406250000001
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1129.74,
+              "first_start_us": 1130.34,
+              "last_start_us": 1205.56,
+              "last_end_us": 1225.3799999999999,
+              "start_spread_us": 75.22000000000003,
+              "worker_envelope_us": 95.63999999999987,
+              "kernel_mean_us": 22.83218749999998,
+              "setup_mean_us": 0.6134375000000176
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1196.5,
+              "first_start_us": 1227.6399999999999,
+              "last_start_us": 1250.76,
+              "last_end_us": 1262.5,
+              "start_spread_us": 23.12000000000012,
+              "worker_envelope_us": 66.0,
+              "kernel_mean_us": 17.688750000000017,
+              "setup_mean_us": 22.869375
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1247.4399999999998,
+              "first_start_us": 1264.6399999999999,
+              "last_start_us": 1297.8799999999999,
+              "last_end_us": 1316.28,
+              "start_spread_us": 33.24000000000001,
+              "worker_envelope_us": 68.84000000000015,
+              "kernel_mean_us": 28.006666666666664,
+              "setup_mean_us": 10.349000000000009
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/round01_quant_no_early/h8192_b40/swimlane/dfx/window_3/merged_swimlane.json",
+          "phases_us": {
+            "first_worker_to_norm_end": 126.38000000000002,
+            "norm_end_to_sparse_receive": 534.38,
+            "sparse_receive_to_merge_end": 348.93999999999994,
+            "merge_end_to_last_worker": 278.9200000000002
+          },
+          "worker_span_us": 1288.6200000000001,
+          "tasks": {
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 945.98,
+              "first_start_us": 962.76,
+              "last_start_us": 964.28,
+              "last_end_us": 1009.6999999999999,
+              "start_spread_us": 1.5199999999999818,
+              "worker_envelope_us": 63.719999999999914,
+              "kernel_mean_us": 44.23583333333332,
+              "setup_mean_us": 9.025833333333336
+            },
+            "proj_a_mm": {
+              "blocks": 64,
+              "first_receive_us": 1015.4,
+              "first_start_us": 1016.0199999999999,
+              "last_start_us": 1104.44,
+              "last_end_us": 1140.52,
+              "start_spread_us": 88.42000000000019,
+              "worker_envelope_us": 125.12,
+              "kernel_mean_us": 40.72374999999999,
+              "setup_mean_us": 0.5918750000000053
+            },
+            "quant": {
+              "blocks": 64,
+              "first_receive_us": 1018.1999999999999,
+              "first_start_us": 1065.74,
+              "last_start_us": 1148.74,
+              "last_end_us": 1155.5,
+              "start_spread_us": 83.0,
+              "worker_envelope_us": 137.30000000000007,
+              "kernel_mean_us": 8.06718750000001,
+              "setup_mean_us": 55.6453125
+            },
+            "proj_b_mm": {
+              "blocks": 64,
+              "first_receive_us": 1104.88,
+              "first_start_us": 1105.26,
+              "last_start_us": 1178.3400000000001,
+              "last_end_us": 1198.2,
+              "start_spread_us": 73.08000000000015,
+              "worker_envelope_us": 93.31999999999994,
+              "kernel_mean_us": 21.043437499999985,
+              "setup_mean_us": 0.641250000000003
+            },
+            "proj_b_act": {
+              "blocks": 64,
+              "first_receive_us": 1171.1000000000001,
+              "first_start_us": 1200.16,
+              "last_start_us": 1222.68,
+              "last_end_us": 1235.3000000000002,
+              "start_spread_us": 22.519999999999982,
+              "worker_envelope_us": 64.20000000000005,
+              "kernel_mean_us": 17.751250000000002,
+              "setup_mean_us": 20.660937499999996
+            },
+            "hc_post": {
+              "blocks": 60,
+              "first_receive_us": 1220.5400000000002,
+              "first_start_us": 1236.92,
+              "last_start_us": 1270.6000000000001,
+              "last_end_us": 1288.6200000000001,
+              "start_spread_us": 33.680000000000064,
+              "worker_envelope_us": 68.07999999999993,
+              "kernel_mean_us": 28.209666666666674,
+              "setup_mean_us": 10.05499999999999
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "decision": "reverted",
+  "limits": "Four independent DFX windows; Worker origins normalized separately. Setup includes dependency gating."
+}

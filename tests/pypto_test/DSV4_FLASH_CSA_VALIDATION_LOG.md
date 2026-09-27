@@ -7544,3 +7544,21 @@ Top-K末尾405–427→416–438 μs，未获本体收益，撤回，不扩测�
 [严格基底、候选与泳道](results/csa_scheduling_20260927/qa_workload_gate/README.md)。
 
 本轮最后独立验证csa_rope_sign生产者预派发策略，之后统一补齐当前源码七档，结束这轮无上限的小标志试验。
+
+## 214. RoPE准备预派发无本体收益；用户要求再做十轮调度（2026-09-27）
+
+2dd51f15基底仅开放csa_rope_sign消费者预派发，task_20260927_181518_28700138050退出0。
+8K/B16本体793.66→793.80 μs，p50/p95也未改善，已撤回；保护区/结构/有限值检查通过，Native零容差仍FAIL。
+[独立记录](results/csa_scheduling_20260927/rope_sign_early/README.md)。
+
+用户在本项结束后要求“调度再调整十轮，然后继续incore task”。从新指令计数，前面先导不算十轮。
+已建立[十轮台账](DSV4_FLASH_CSA_SCHEDULING_TEN_ROUNDS.md)，一轮一个明确假设及实测结论，完成十轮后统一七档并回核内。
+不为凑数重复已证伪候选，不增加hash扫描与无关测试。
+
+## 215. 十轮调度第1轮：取消O_B预占未缩短尾段（2026-09-27）
+
+基底2dd51f15，仅关闭quant生产者allow_early_resolve；最新上游与基底均开启。
+8K/B40任务task_20260927_181859_29094976610退出0，本体1318.05→1311.96 μs（−0.46%），Native同步约−0.44%。
+O_A窗口略短但O_B略长，merge→HC_post尾段275.96–285.62→278.92–286.42 μs，没有明确收益，已撤回。
+保护区/Top-K结构通过、非有限值0，Native零容差仍FAIL；[完整证据](results/csa_scheduling_20260927/round01_quant_no_early/README.md)。
+本轮计数1/10。第2轮只试Indexer Q的24个AIC块整组准入，CPU根/PTOAS/AICPU编译已通过，待真机结果。

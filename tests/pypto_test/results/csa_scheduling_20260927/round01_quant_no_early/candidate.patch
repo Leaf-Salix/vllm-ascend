@@ -1,0 +1,13 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+index a9e75f4c..7451f98f 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py
+@@ -398,7 +398,7 @@ def _decode_o_proj_tp1_tiled(
+                 (t_dim + QUANT_TASK_T_TILE - 1) // QUANT_TASK_T_TILE,
+                 name_hint="quant",
+                 deps=[pa_tid],
+-                allow_early_resolve=True,
++                allow_early_resolve=False,
+             ) as q_tid:
+                 quant_start = pl.tile.get_block_idx() * QUANT_TASK_T_TILE
+                 for qt in pl.pipeline(
