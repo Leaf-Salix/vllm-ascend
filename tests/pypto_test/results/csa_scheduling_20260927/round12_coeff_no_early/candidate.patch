@@ -1,0 +1,11 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -413,7 +413,7 @@
+         TOPK_QUERY_WORKERS,
+         name_hint="indexer_head_coefficients",
+         deps=[qh_quant_tid, weights_tid],
+-        allow_early_resolve=True,
++        allow_early_resolve=False,
+     ) as coefficients_tid:
+         coefficient_worker = pl.tile.get_block_idx()
+         coefficient_count = pl.tensor.dim(position_ids, 0)

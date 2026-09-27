@@ -7676,3 +7676,9 @@ Q_B启动分散40.00–50.74→14.56–17.12、末尾277.22–303.92→249.90–
 生产源暂回07365e52继续独立候选。结构/保护区/有限值通过，Native零容差FAIL。
 [补丁、数据、限制和泳道路径](results/csa_scheduling_20260927/round11_score_atomic_admission/README.md)。
 追加1/5；第12轮关闭系数生产者allow_early_resolve，以检验Score入口预派发，而非重复第10轮的merge入口控制。
+
+## 229. 第12轮撤回，进入Score任务细分（2026-09-27）
+
+两档5/20计时＋4窗口完成，系数生产者False移除了Score前置等待，但128K p50/p95几乎不变，8K本体+1.40%。
+撤回。保护区/索引结构/有限值通过，Native零容差FAIL。[数据和泳道](results/csa_scheduling_20260927/round12_coeff_no_early/README.md)。
+追加2/5；第13轮在同一07365e52基底只将Score任务24→48，不叠加第11轮整组准入（48超过24个MIX核簇）。
