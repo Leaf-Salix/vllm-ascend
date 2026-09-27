@@ -1,0 +1,15 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index 1cc40193..c4e8aadc 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -363,7 +363,9 @@ def sparse_attn_csa(
+     with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
+         qk_core = pl.tile.get_block_idx()
+         pl.system.set_ffts(ffts_workspace)
+-        for qk_t in pl.range(qk_core, t_dim, NUM_QK_CORES):
++        # Keep adjacent queries near each other within a core, as in Native's
++        # contiguous batch/query ranges. Floor boundaries also balance tails.
++        for qk_t in pl.range(qk_core * t_dim // NUM_QK_CORES, (qk_core + 1) * t_dim // NUM_QK_CORES):
+             qk_b = qk_t // S
+             qk_q = pl.load(q_flat, [qk_t * H, 0], [H, HEAD_DIM], target_memory=pl.MemorySpace.Mat)
+             # KV 只进一次 L1：QK 用它的转置视图，PV 用同一份的行切片。

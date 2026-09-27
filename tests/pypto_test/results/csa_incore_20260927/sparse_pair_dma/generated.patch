@@ -1,0 +1,192 @@
+--- build/kernels/aic/qk_pv_aic.cpp
++++ build/kernels/aic/qk_pv_aic.cpp
+@@ -1529,59 +1529,40 @@
+             TEXPANDS(v251, v62);
+             set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+             wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+-            for (int64_t v364 = v56; v364 < v51; v364 += v46) {
+-              // pto: %136, %137, %138, %139
+-              ;
+-              int64_t v365 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v248 - (uint64_t) v46) * (uint64_t) v50) + (uint64_t) v227) + (uint64_t) v364);
+-              // pto: %140
+-              ;
+-              if (v365 < v45) {
+-                // pto: %141, %142, %qk_ridx_inline380__tile
+-                ;
+-                int32_t v366 = (v12)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) v365)];
+-                // pto: %143
+-                ;
+-                int64_t v367 = (int64_t) v366;
+-                // pto: %144
+-                ;
+-                if (v367 >= v56) {
+-                  // pto: %148, %149, %147, %145
+-                  ;
+-                  int32_t v368 = (v13)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (v367 / v55))];
+-                  // pto: %150, %151, %154, %153
+-                  ;
+-                  int64_t v369 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) v368) * (uint64_t) v55) + (uint64_t) (v367 % v55));
+-                  // pto: %155
+-                  ;
+-                  Tile<TileType::Vec, bfloat16_t, 1, 512, BLayout::RowMajor, 1, 512, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v370;
+-                  // pto: %155
+-                  ;
+-                  uint64_t v371 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v364 * (uint64_t) v33) + (uint64_t) v39);
+-                  TASSIGN(v370, v371);
+-                  // pto: %156
+-                  ;
+-                  int64_t v372 = v369 < v56 ? v56 : v369;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  __gm__ bfloat16_t* v373 = PTOAS__GLOBAL_TENSOR_DATA(v125);
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  const int64_t v374 = 0;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  const int64_t v375 = 512;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  pto::Shape<1, 1, 1, 1, 512> v376 = pto::Shape<1, 1, 1, 1, 512>();
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  pto::Stride<512, 512, 512, 512, 1> v377 = pto::Stride<512, 512, 512, 512, 1>();
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND> v378 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND>(v373 + (v374 + v372 * v375), v376, v377);
+-                  TLOAD(v370, v378);
+-                };
+-              };
++            
++            // Diagnostic only: two valid rows may be permuted by physical address.
++            // Existing V->MTE2 and MTE2->MTE3 fences around this loop are retained.
++            for (int64_t pair_row = 0; pair_row < 64; pair_row += 2) {
++              int64_t pair_col = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v248 - (uint64_t) v46) * (uint64_t) v50) + (uint64_t) v227) + (uint64_t) pair_row);
++              int64_t pair_idx0 = v12[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) pair_col)];
++              int64_t pair_idx1 = v12[((int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) pair_col)) + 1];
++              int64_t pair_src0 = -1, pair_src1 = -1;
++              if (pair_idx0 >= 0) {
++                int64_t pair_idx = pair_idx0;
++                int32_t pair_page = v13[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (pair_idx / v55))];
++                pair_src0 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) pair_page) * (uint64_t) v55) + (uint64_t) (pair_idx % v55));
++                if (pair_src0 < 0) pair_src0 = 0; // baseline gather_row clamps
++              }
++              if (pair_idx1 >= 0) {
++                int64_t pair_idx = pair_idx1;
++                int32_t pair_page = v13[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (pair_idx / v55))];
++                pair_src1 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) pair_page) * (uint64_t) v55) + (uint64_t) (pair_idx % v55));
++                if (pair_src1 < 0) pair_src1 = 0;
++              }
++              __ubuf__ bfloat16_t* pair_dst = reinterpret_cast<__ubuf__ bfloat16_t*>((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) pair_row * (uint64_t) v33) + (uint64_t) v39));
++              __gm__ bfloat16_t* pair_pool = PTOAS__GLOBAL_TENSOR_DATA(v125);
++              int64_t pair_low = pair_src0 < pair_src1 ? pair_src0 : pair_src1;
++              int64_t pair_high = pair_src0 > pair_src1 ? pair_src0 : pair_src1;
++              int64_t pair_gap = (pair_high - pair_low - 1) * 1024;
++              if (pair_src0 >= 0 && pair_src1 >= 0 && pair_gap >= 0 && pair_gap < 2147483647) {
++                copy_gm_to_ubuf_align_b16(pair_dst, pair_pool + pair_low * 512,
++                                        0, 2, 1024, 0, 0, static_cast<uint32_t>(pair_gap), 0);
++              } else {
++                if (pair_src0 >= 0)
++                  copy_gm_to_ubuf_align_b16(pair_dst, pair_pool + pair_src0 * 512, 0, 1, 1024, 0, 0, 0, 0);
++                if (pair_src1 >= 0)
++                  copy_gm_to_ubuf_align_b16(pair_dst + 512, pair_pool + pair_src1 * 512, 0, 1, 1024, 0, 0, 0, 0);
++              }
+             };
+           };
+           set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+--- build/kernels/aiv/qk_pv_aiv.cpp
++++ build/kernels/aiv/qk_pv_aiv.cpp
+@@ -1529,59 +1529,40 @@
+             TEXPANDS(v251, v62);
+             set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+             wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+-            for (int64_t v364 = v56; v364 < v51; v364 += v46) {
+-              // pto: %136, %137, %138, %139
+-              ;
+-              int64_t v365 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v248 - (uint64_t) v46) * (uint64_t) v50) + (uint64_t) v227) + (uint64_t) v364);
+-              // pto: %140
+-              ;
+-              if (v365 < v45) {
+-                // pto: %141, %142, %qk_ridx_inline380__tile
+-                ;
+-                int32_t v366 = (v12)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) v365)];
+-                // pto: %143
+-                ;
+-                int64_t v367 = (int64_t) v366;
+-                // pto: %144
+-                ;
+-                if (v367 >= v56) {
+-                  // pto: %148, %149, %147, %145
+-                  ;
+-                  int32_t v368 = (v13)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (v367 / v55))];
+-                  // pto: %150, %151, %154, %153
+-                  ;
+-                  int64_t v369 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) v368) * (uint64_t) v55) + (uint64_t) (v367 % v55));
+-                  // pto: %155
+-                  ;
+-                  Tile<TileType::Vec, bfloat16_t, 1, 512, BLayout::RowMajor, 1, 512, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v370;
+-                  // pto: %155
+-                  ;
+-                  uint64_t v371 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v364 * (uint64_t) v33) + (uint64_t) v39);
+-                  TASSIGN(v370, v371);
+-                  // pto: %156
+-                  ;
+-                  int64_t v372 = v369 < v56 ? v56 : v369;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  __gm__ bfloat16_t* v373 = PTOAS__GLOBAL_TENSOR_DATA(v125);
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  const int64_t v374 = 0;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  const int64_t v375 = 512;
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  pto::Shape<1, 1, 1, 1, 512> v376 = pto::Shape<1, 1, 1, 1, 512>();
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  pto::Stride<512, 512, 512, 512, 1> v377 = pto::Stride<512, 512, 512, 512, 1>();
+-                  // pto: %cmp_kv_flat_inline289__ssa_v0_pview
+-                  ;
+-                  GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND> v378 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND>(v373 + (v374 + v372 * v375), v376, v377);
+-                  TLOAD(v370, v378);
+-                };
+-              };
++            
++            // Diagnostic only: two valid rows may be permuted by physical address.
++            // Existing V->MTE2 and MTE2->MTE3 fences around this loop are retained.
++            for (int64_t pair_row = 0; pair_row < 64; pair_row += 2) {
++              int64_t pair_col = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v248 - (uint64_t) v46) * (uint64_t) v50) + (uint64_t) v227) + (uint64_t) pair_row);
++              int64_t pair_idx0 = v12[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) pair_col)];
++              int64_t pair_idx1 = v12[((int64_t) ((uint64_t) ((int64_t) (uint64_t) v222 * (uint64_t) v45) + (uint64_t) pair_col)) + 1];
++              int64_t pair_src0 = -1, pair_src1 = -1;
++              if (pair_idx0 >= 0) {
++                int64_t pair_idx = pair_idx0;
++                int32_t pair_page = v13[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (pair_idx / v55))];
++                pair_src0 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) pair_page) * (uint64_t) v55) + (uint64_t) (pair_idx % v55));
++                if (pair_src0 < 0) pair_src0 = 0; // baseline gather_row clamps
++              }
++              if (pair_idx1 >= 0) {
++                int64_t pair_idx = pair_idx1;
++                int32_t pair_page = v13[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v223 * (uint64_t) v28) + (uint64_t) (pair_idx / v55))];
++                pair_src1 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) pair_page) * (uint64_t) v55) + (uint64_t) (pair_idx % v55));
++                if (pair_src1 < 0) pair_src1 = 0;
++              }
++              __ubuf__ bfloat16_t* pair_dst = reinterpret_cast<__ubuf__ bfloat16_t*>((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) pair_row * (uint64_t) v33) + (uint64_t) v39));
++              __gm__ bfloat16_t* pair_pool = PTOAS__GLOBAL_TENSOR_DATA(v125);
++              int64_t pair_low = pair_src0 < pair_src1 ? pair_src0 : pair_src1;
++              int64_t pair_high = pair_src0 > pair_src1 ? pair_src0 : pair_src1;
++              int64_t pair_gap = (pair_high - pair_low - 1) * 1024;
++              if (pair_src0 >= 0 && pair_src1 >= 0 && pair_gap >= 0 && pair_gap < 2147483647) {
++                copy_gm_to_ubuf_align_b16(pair_dst, pair_pool + pair_low * 512,
++                                        0, 2, 1024, 0, 0, static_cast<uint32_t>(pair_gap), 0);
++              } else {
++                if (pair_src0 >= 0)
++                  copy_gm_to_ubuf_align_b16(pair_dst, pair_pool + pair_src0 * 512, 0, 1, 1024, 0, 0, 0, 0);
++                if (pair_src1 >= 0)
++                  copy_gm_to_ubuf_align_b16(pair_dst + 512, pair_pool + pair_src1 * 512, 0, 1, 1024, 0, 0, 0, 0);
++              }
+             };
+           };
+           set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
