@@ -1,0 +1,50 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 0bb764e0..cdedbb9b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -458,6 +458,8 @@ def indexer_score_topk_native_cube(
+     weights_tid: pl.Scalar[pl.TASK_ID],
+     cache_write_tid: pl.Scalar[pl.TASK_ID],
+     score_tile: pl.constexpr,
++    score_sync_start: pl.constexpr,
++    score_early_resolve: pl.constexpr,
+ ):
+     """两个 query 共用 key 和 M128 QK，保留 Native 的 FP16/Cube 算术。"""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+@@ -485,7 +487,8 @@ def indexer_score_topk_native_cube(
+         TOPK_SCORE_WORKERS,
+         name_hint="indexer_score_topk_native_pair",
+         deps=[coefficients_tid, cache_write_tid],
+-        allow_early_resolve=True,
++        sync_start=score_sync_start,
++        allow_early_resolve=score_early_resolve,
+     ) as buffered_leaf_tid:
+         buf_worker = pl.tile.get_block_idx()
+         buf_query_count = pl.tensor.dim(position_ids, 0)
+@@ -760,6 +763,8 @@ def indexer_score_topk_forest(
+         # 长历史的完整leaf每半区4096候选：512一轮，11轮降至8轮。
+         # 短历史保留384半区，避免扩大最后一轮的padding计算。
+         if max_topk_cache_len > TOPK_CANDIDATES_PER_LEAF:
++            # 长档整组准入，并禁止Score提前释放下游，抑制重复图重放的长尾。
++            # 短档沿用原调度；sync_start不代表各核硬件同时起跑。
+             score_tid = indexer_score_topk_native_cube(
+                 qr_hadamard_i8,
+                 qr_hadamard_scale_dq,
+@@ -774,6 +779,8 @@ def indexer_score_topk_forest(
+                 weights_tid,
+                 cache_write_tid,
+                 BUFFERED_LONG_SCORE_TILE,
++                True,
++                False,
+             )
+         else:
+             score_tid = indexer_score_topk_native_cube(
+@@ -790,6 +797,8 @@ def indexer_score_topk_forest(
+                 weights_tid,
+                 cache_write_tid,
+                 BUFFERED_SCORE_TILE,
++                False,
++                True,
+             )
+     else:
+         with pl.spmd(
