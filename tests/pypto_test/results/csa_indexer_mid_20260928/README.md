@@ -30,3 +30,21 @@ python tests/pypto_test/results/csa_indexer_triple_20260928/summarize.py \
   --root tests/pypto_test/results/csa_indexer_mid_20260928 \
   --task-id task_20260928_040125_325427313063 --baseline-revision 9a01a276
 ```
+
+## 单卡结果
+
+task退出0。[四窗口与全部计时样本](report.json)。
+
+| 指标μs | 基线9a01a276 | 三query候选 |
+| --- | ---: | ---: |
+| Native控制均值 | 1001.745 | 999.979 |
+| 完整CSA均值 | 884.768 | 854.860 |
+| PTO P95/max | 918.200/963.680 | 865.240/866.240 |
+| Score AIC四窗口block均值 | 238.083 | 188.991 |
+| Score AIV四窗口block均值 | 247.469 | 201.000 |
+
+Score AIC下降20.62%、AIV下降18.78%，完整CSA下降3.38%。Native控制基本稳定。
+metadata/保护区、有限值和Top-K结构通过；Native零容差仍FAIL，输出RMSE两侧均0.0042308482，
+Top-K集合替换均350；统计一致不等于跨版本逐元素一致。
+按核内收益保留推进，与短档S6合并成独立候选，补两条新分支固定规约状态对照后再测模型。
+其他未改任务核内变化不记为直接优化收益；四窗口与20次主计时独立。

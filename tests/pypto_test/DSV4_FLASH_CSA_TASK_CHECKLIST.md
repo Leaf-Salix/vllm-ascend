@@ -2,8 +2,11 @@
 
 更新：2026-09-28。本文件保留当前合同、有效证据和待办；过程与旧版本结论见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)和Git。
 
-当前保留性能版 **9a01a276** 在2a740c1f上新增Indexer整请求S6复用：长历史且query数至少96时选M384/N64，
-其余维持双query/M128/N128。它已通过单卡核内/本体及固定规约状态对照，真实EP16两档小幅领先，仍未达到稳定优势。
+当前保留性能版在 **9a01a276** 基础上增加输入策略：长历史且query数至少96时选S6/M384/N64，
+48～95时选三query/M192/N128；短历史按最忙核工作量选择S6或双query。
+B8长档/B40短档已取得明确核内收益，两条新分支固定规约输出/状态及图重放通过；
+同源码真实EP16七档正在运行。基底9a01a276两档小幅领先，仍未达到稳定优势。
+[当前策略与验收进度](results/csa_indexer_adaptive_20260928/README.md)。
 2a740c1f此前在f76b3ad4上新增等待Cube前读取Indexer scale：PTO内部直接读写Native物理页，key加载交错QK/WS，
 入口历史复制和外部Torch写回均已删除；只在长档Score启用整组准入且禁止提前释放。
 Native分配、算子和调度流程保持原样，精度版保持原算术。长短上下文策略在同一算子内选择。
@@ -95,11 +98,17 @@ Native分配、算子和调度流程保持原样，精度版保持原算术。�
    P95下降；metadata/保护区/有限值/Top-K结构通过。8K/B16共用路径回归794.01→791.91μs，未见退化。
    按核内收益保留推进，仍待跨版本数值与模型验收；[原始样本和范围](results/csa_indexer_triple_20260928/README.md)。
    S6/M384/N64已取得同轮长档本体5.22%增益，固定规约与图检查通过并应用性能版；
-   原cache两档EP16仅小幅领先，按实际模型结果继续推进。小长档三query策略已排128K/B8同轮单卡对照，
-   完整CPU编译通过，未合入；[B8候选和证据范围](results/csa_indexer_mid_20260928/README.md)。
+   原cache两档EP16仅小幅领先，模型profile已确认CSA合计省3.60/1.75ms，但FFN增加1.32/1.49ms；
+   专家GMM任务duration增加1.70/0.99ms，不能把不同轮profile套到正式10步，也不能只归因于P95。
+   [模型分解和边界](results/csa_indexer_six_20260928/model/MODEL_GAP.md)。
+   小长档三query已取得128K/B8 Score AIC下降20.62%、完整CSA下降3.38%；
+   [B8实测及证据范围](results/csa_indexer_mid_20260928/README.md)。
    [S6容量、适用条件和multi-ND加载边界](results/csa_indexer_six_20260928/README.md)。
-   独立短档S6候选按最忙核工作量选择，完整CPU编译通过，只排8K/B40原版/候选先导。
-   未加入当前模型对照、未合入；[短档选择规则及设备计划](results/csa_indexer_six_short_20260928/README.md)。
+   短档S6已取得B40 Score AIC下降51.32%、完整CSA下降1.84%，Native控制波动另记；
+   [短档规则及实测](results/csa_indexer_six_short_20260928/README.md)。
+   两条新策略合并，B8/H32768和B24/H8192各8类输出/状态固定规约零差异、图重放通过，已应用性能版。
+   task_20260928_041310_3365315916正在跑统一源码的七档EP16，保留新Native控制与独立PyTorch JSON；
+   [当前策略、命令和进度](results/csa_indexer_adaptive_20260928/README.md)。
    8K/B40全模型暂仅持平，也须定位；核内收益、本体收益和尾部收益分别记录。
 3. 继续以性能版为优化重点，稳定后按既定合同将数值中性的优化迁移到精度版并独立验收。
    性能版明确超过Native、B16/H8192完整HC_pre→norm→CSA→HC_post低于750μs仍为目标；

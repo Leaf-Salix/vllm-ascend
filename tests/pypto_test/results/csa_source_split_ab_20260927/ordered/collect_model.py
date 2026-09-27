@@ -116,11 +116,11 @@ def main():
                      f"{fn['p95_us']/fn['p50_us']:.3f}/{fp['p95_us']/fp['p50_us']:.3f} |")
     lines += ["", "P95÷P50使用全部rank样本；每步最慢rank序列共10个样本，其P95等于最大值。",
               "每步按相同稳态步编号对齐，最慢rank耗时不包含各rank起始时间偏差或步间等待。", "",
-              f"已取得{len(rows)}/2档。逐rank样本、每步最慢rank分布、实际配置和错误详情"
+              f"已取得{len(rows)}/{len(CASES)}档。逐rank样本、每步最慢rank分布、实际配置和错误详情"
               "见[forward.json](forward.json)。",
               "旧版本全模型和当前单层数据不混入本表。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")
-    print(f"{len(rows)}/2 cases")
+    print(f"{len(rows)}/{len(CASES)} cases")
     for row in rows:
         print(row["history"], row["batch"], row["status"], row.get("change_pct"), row["errors"])
     if any(r["status"] == "FAIL" for r in rows):

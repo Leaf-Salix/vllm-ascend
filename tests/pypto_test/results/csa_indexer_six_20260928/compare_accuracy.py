@@ -1,5 +1,6 @@
 """固定规约对照已有CPU状态；不发起设备测试，不放宽逐元素标准。"""
 
+import argparse
 import importlib.util
 import json
 import sys
@@ -13,6 +14,13 @@ from dsv4_csa_validation import compare_tensor  # noqa: E402
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=ROOT / "accuracy")
+    parser.add_argument(
+        "--scope", default="B16/H32768/S6，长档8192行leaf+causal tail；2a740c1f对照S6，非Native对齐验收"
+    )
+    args = parser.parse_args()
+    root = args.root.resolve()
     torch.set_num_threads(4)
     common_path = ROOT.parent / "csa_cache_accuracy_20260927/compare.py"
     spec = importlib.util.spec_from_file_location("cache_accuracy", common_path)
@@ -20,11 +28,11 @@ def main():
     spec.loader.exec_module(common)
     reports, states = {}, {}
     for label in ("baseline", "candidate"):
-        folder = ROOT / "accuracy" / label
+        folder = root / label
         reports[label] = json.loads((folder / "report.json").read_text())
         states[label] = torch.load(folder / "states.pt", map_location="cpu", weights_only=True)
     result = {
-        "scope": "B16/H32768/S6，长档8192行leaf+causal tail；2a740c1f对照S6，非Native对齐验收",
+        "scope": args.scope,
         "checks": {},
         "errors": [],
     }
@@ -65,7 +73,7 @@ def main():
     if result["graph"].get("status") != "PASS":
         result["errors"].append("候选A/B/A图重放失败")
     result["status"] = "FAIL" if result["errors"] else "PASS"
-    (ROOT / "accuracy/comparison.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    (root / "comparison.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(result["status"], result["errors"], flush=True)
     if result["errors"]:
         raise SystemExit(1)
