@@ -8,7 +8,10 @@ Score 直接整块读取，Compressor 更新连续缓存，出口按 Native slot
 FP16 head 系数通过第二次 Cube 乘法作 FP32 规约，仅将单行分数交给 Vector。
 七档v4/v7对照已补齐：128K B4/8/16、8K B16/24/32/40；见
 [矩阵记录](results/csa_native_cube_matrix_20260927/README.md)及验证日志§178。
-用户最新要求：先把Indexer性能赶上Native。已完成[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
+用户最新要求：先比较七档核内差异并吸收Native策略，再优化PTO调度。
+已整理[七档核内差异、证据与优化顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)：
+128K重点为Indexer复用与Top-K；8K还需优先处理Sparse Attention的PV分块和KV搬运。
+Indexer已有[逐段源码对照](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)，
 当前性能版已统一为累计保留v8～v10改动的一套V10实现；128K/B8本体为889.22 μs、B16为1304.87 μs；
 B16仍有约1.58 ms的尾部，不能凭均值接近Native宣布赶上。
 8K使用片上FP16 Score与Cube head规约，V10的B24本体为1026.25 μs；

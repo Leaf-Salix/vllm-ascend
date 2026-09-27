@@ -7107,3 +7107,18 @@ checkout 79aaed98的生产算子源码与0ed4f926无差异；其余四档已有V
 [三档补测与脚本](results/csa_split_optimization_20260927/v10_unified_followup/README.md)。
 [统一V10七档报告](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)区分implementation、
 operator_revision、采集checkout和目录label，不再将历史采集标签当成运行版本。
+
+## 185. 七档核内差异归档与优化优先级（2026-09-27）
+
+用户要求先呈现拆解，再将分析放入独立文档，已新增
+[CSA Native/PTO核内差异分析](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)，任务清单已链接。
+复用V10的28个Worker泳道窗口及既有6份Native单卡设备trace，只做CPU提取，无新增NPU测试和hash校验。
+[逐任务统计及原始路径](results/csa_incore_20260927/v10_incore.json)由同目录summarize_v10.py生成。
+
+明确Native整kernel与PTO每窗口block核内均值不等范围，AIC/AIV和重叠任务不能相加；
+128K/B16 Native分算子trace缺失，未用其他层或总区间替代。
+8K四档qk_pv核内均值均超过Native完整Sparse Attention；剩余差距不能统一归为Indexer或调度。
+源码和生成C++确认PTO PV使用64×512 FP32累加区、128KiB L0C和K32分块，
+Native按输出N128分块并用L0C双缓冲；其单项收益尚未测得。
+Indexer剩余差异为4＋2与2＋2＋2的query复用、流式Top-K、重复准备及尾块处理。
+PV N128候选开始修改但尚无设备结果；分析表格保持V10基线，不将实验计为已验证收益。
