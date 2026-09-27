@@ -1,0 +1,33 @@
+--- vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -242,9 +242,15 @@
+                     c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
+                     valid_shape=[bias_rows, ATTN_K_TILE],
+                 ))
++                c_blk_full = pl.row_min(pl.slice(
++                    c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
++                    valid_shape=[bias_rows, ATTN_K_TILE],
++                ))
+                 for c_dt in pl.range(bias_rows):
+                     c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
+-                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
++                    c_full = pl.cast(pl.read(c_blk_full, [c_dt, 0]), pl.INT32)
++                    # 0=全无效，1=部分有效，2=全部有效；Cube侧仍按>0消费。
++                    pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid + c_full)
+             # ---- 滑窗有效位：常见路径整块算 -------------------------------
+             # 每 token 的窗口长度 v_length = min(position+1, WIN)，补位请求压到 0。
+             # 有效位的主体就是 j < v_length[t]，与页表无关，可以一次算出
+@@ -423,7 +429,12 @@
+                         if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
+                             qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_sb % QK_TRANSFER_SLOTS
+                             qk_kv_row = qk_slot * ATTN_K_TILE
+-                            qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
++                            qk_kv_storage = pl.create_tile([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16)
++                            qk_full_rows = pl.max(pl.read(valid_block_mask, [qk_t, qk_sb]) - 1, 0) * (ATTN_K_TILE // 2)
++                            # 同一UB缓冲：全有效时不填充；其余块把零有效行扩成全零。
++                            qk_kv_half = pl.tile.fillpad_inplace(
++                                pl.set_validshape(qk_kv_storage, qk_full_rows, HEAD_DIM), pad_value=0
++                            )
+                             if qk_sb == 0:
+                                 qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                                 qk_win_len = pl.min(qk_pos + 1, WIN)

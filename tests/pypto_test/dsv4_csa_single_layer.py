@@ -645,6 +645,31 @@ def run(args, report):
             name: compare_tensor(native[1][name], value, 0, 0) for name, value in native[0].items()
         }
 
+        if args.native_profile_only:
+            # 补 Native 分算子 trace 缺口，不为此编译/执行 PTO 或重复整套矩阵。
+            def profile_qli(*inputs, **kwargs):
+                value = original_qli(*inputs, **kwargs)
+                captured["profile_topk"] = value[0]
+                return value
+
+            def profile_native_call():
+                with set_ascend_forward_context(
+                    fixture["metadata"], config, num_tokens=fixture["tokens"], num_actual_tokens=fixture["tokens"]
+                ):
+                    _native_attention_half(layer.self_attn.dsa_attn, fixture["hidden"], fixture["positions"], output)
+
+            torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = profile_qli
+            try:
+                report["timing"] = {"native": measure_graph_interval(
+                    fixture, profile_native_call, output, lambda: captured["profile_topk"], native[0],
+                    iters=args.timing_iters, warmup=args.timing_warmup,
+                    require_exact=bool(args.deterministic_level), profile_dir=args.output / "profile/native",
+                )}
+            finally:
+                torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
+            report.update(status="MEASURED", scope="仅 Native 图重放与分算子 trace；不含 PTO 对照或整模型验收")
+            return
+
         import pypto.torch
 
         from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts
@@ -916,6 +941,8 @@ def main():
     parser.add_argument("--timing-metadata", choices=("reuse", "produce"), default="reuse",
                         help="默认 reuse 按同一步第二个 CSA 层复用 metadata；produce 单独测首层成本")
     parser.add_argument("--profile", action="store_true", help="计时后每侧单独采一次设备 profiler 核对区间与热点")
+    parser.add_argument("--native-profile-only", action="store_true",
+                        help="仅补采 Native 图重放及分算子 trace，不编译或执行 PTO")
     parser.add_argument("--swimlane", action="store_true",
                         help="单独采一次完整 PTO 根的 DFX 泳道，复用前层 metadata；在新的工作目录执行")
     parser.add_argument("--swimlane-windows", type=int, default=1, help="每个 DFX 窗口只执行一次根调用")
@@ -927,8 +954,11 @@ def main():
         parser.error("padding-graph 的 batch 至少为 2")
     if args.timing_iters < 0 or args.timing_warmup < 1:
         parser.error("timing-iters 不得为负，timing-warmup 至少为 1")
-    if args.profile and not args.timing_iters:
-        parser.error("--profile 须配合正数 --timing-iters")
+    if (args.profile or args.native_profile_only) and not args.timing_iters:
+        parser.error("--profile/native-profile-only 须配合正数 --timing-iters")
+    if args.native_profile_only and (args.profile or args.swimlane or args.graph or args.padding_graph
+                                     or args.save_case or args.save_state):
+        parser.error("--native-profile-only 不与 PTO 测量、正确性或状态保存选项混用")
     if args.swimlane and (args.timing_iters or args.profile or args.graph or args.padding_graph):
         parser.error("--swimlane 单独采集，不与图计时或图正确性窗口混用")
     if args.swimlane_windows < 1 or ((args.swimlane_graph or args.swimlane_windows != 1) and not args.swimlane):
@@ -946,6 +976,7 @@ def main():
         "seed": args.seed,
         "weight_nz_mode": args.weight_nz_mode,
         "variant": args.variant,
+        "native_profile_only": args.native_profile_only,
         "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
         "deterministic_level": args.deterministic_level,
         "hccl_deterministic": bool(args.deterministic_level),

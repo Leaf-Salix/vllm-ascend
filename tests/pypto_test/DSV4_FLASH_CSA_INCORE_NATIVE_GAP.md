@@ -14,7 +14,7 @@
 5. 以下代码差异是真实存在的，但其耗时贡献尚未逐项实测，不能据此承诺优化百分比。
    当前数据也不足以把核内时间拆成纯 Cube 算术、DMA、同步等待各占多少。
 
-本轮分析只读取已有源码和 trace，没有为此重跑 NPU 测试或做 hash 校验。
+初始七档基线提取只读取已有源码和 trace；后续先导和 Native 缺口补采见第6节，没有做 hash 校验。
 QKV、两个 Compressor、O projection、mHC 的完整等范围归因尚未完成；
 本文件先展开已有证据指向的 Indexer 和 Sparse Attention，不宣称已穷尽全部 CSA 差距。
 
@@ -23,10 +23,10 @@ QKV、两个 Compressor、O projection、mHC 的完整等范围归因尚未完�
 - A3 / CANN 9.0.0 / 当前隔离环境，正式 `DeepSeek-V4-Flash-0731-w8a8` 的 layer 4 权重，合成输入与历史。
 - 单卡 S6、TP1、mode2、atomic1、确定性0、EPLB关闭，复用同一步第二个 CSA 层 metadata。
 - 七档：128K B4/8/16；8K B16/24/32/40。PTO 七档均为同一套 V10 算子。
-- Native 列来自之前七档矩阵中保留的六份 Native PyTorch profiling JSON，Native 实现未改。
+- Native 六档来自之前矩阵保留的 Native PyTorch profiling JSON，Native 实现未改。
   与 V10 的 PTO DFX 是独立采集，不是同一次调用；这些 trace 不冒充 V10 新采集数据。
-- 128K/B16 有 Native 总区间计时，但没有同口径的 Native 分算子 trace，表中留空；
-  不拿旧整模型其他层的 QLI 时间补齐。
+- 128K/B16 已用相同 layer4/单卡/S6/TP1/mode2/确定性0 配置单独补采 Native 图重放，
+  没有运行 PTO；本次 profile 只补分项，不替换原有20次总区间基线。
 
 **Native**：`Ascend Hardware` 进程中完整融合 kernel 的设备耗时。
 **PTO**：仅取 `Worker View` 的 `kernel-duration-us`，每个窗口分别对同名任务所有 block 求均值，
@@ -43,6 +43,7 @@ AIC/AIV 并行、不同任务也可能交叠，不能把表格列相加得到 CS
 - [统一 V10 七档总性能](results/csa_split_optimization_20260927/INDEXER_PROGRESS_V10.md)
 - [V10 每档原始 timing / 四窗口泳道路径](results/csa_split_optimization_20260927/indexer_progress_v10.json)
 - [Native 原始 profiling 下载目录清单](results/csa_native_cube_matrix_20260927/download/manifest.json)
+- [补采的128K/B16 Native profiling JSON](results/csa_incore_20260927/native_h131072_b16/native_pytorch.json)
 - [本次全部任务核内统计、block 数、单 block 最大值及原始路径](results/csa_incore_20260927/v10_incore.json)
 - [离线提取脚本](results/csa_incore_20260927/summarize_v10.py)，只读已有 JSON，不触发设备执行。
 
@@ -55,7 +56,7 @@ Score 任务包含局部排序，不能将其视为只有矩阵乘法。
 | --- | ---: | ---: | ---: | ---: |
 | 128K / 4 | 240.18 | 89.42–95.85 | 97.10–103.86 | 8.61–9.55 |
 | 128K / 8 | 237.26 | 178.65–184.16 | 188.09–193.69 | 14.37–15.28 |
-| 128K / 16 | 缺分项 trace | 356.79–367.98 | 366.41–377.34 | 17.69–18.44 |
+| 128K / 16 | 360.28 | 356.79–367.98 | 366.41–377.34 | 17.69–18.44 |
 | 8K / 16 | 56.10 | 26.30–36.59 | 30.76–40.90 | 8.94–9.78 |
 | 8K / 24 | 56.34 | 38.61–47.22 | 37.40–51.40 | 11.62–11.79 |
 | 8K / 32 | 91.68 | 47.19–59.23 | 51.00–63.20 | 11.12–11.73 |
@@ -99,7 +100,7 @@ Native 两个 AIV 按 query 分工，PTO 两个 AIV 按候选半区分工；不�
 | --- | ---: | ---: | ---: | ---: |
 | 128K / 4 | 53.88 | 41.11–50.13 | 43.22–52.09 | 16.35–18.00 |
 | 128K / 8 | 100.50 | 94.39–100.14 | 96.52–102.11 | 17.46–18.53 |
-| 128K / 16 | 缺分项 trace | 170.48–181.13 | 172.36–183.01 | 20.58–21.09 |
+| 128K / 16 | 181.08 | 170.48–181.13 | 172.36–183.01 | 20.58–21.09 |
 | 8K / 16 | 107.04 | 124.04–137.00 | 126.12–139.03 | 20.92–22.56 |
 | 8K / 24 | 166.90 | 200.22–209.62 | 202.12–211.70 | 29.43–30.13 |
 | 8K / 32 | 231.78 | 257.64–268.61 | 259.63–270.60 | 35.35–35.77 |
@@ -133,12 +134,31 @@ L0C 占用差异与耗时之间目前仍是优化假设；没有计数器证据�
 - [Native Sparse Attention Vector](../../csrc/attention/sparse_attn_sharedkv/op_kernel/arch32/sparse_attn_sharedkv_scfa_block_vector.h)：`CopyInKv`、`ProcessVec0L`、`SoftmaxFlashV2Compute`。
 - [Native tiling](../../csrc/attention/sparse_attn_sharedkv/op_host/sparse_attn_sharedkv_tiling.h)：`sInnerSize_=512`。
 
+### 4.2 B40 的 KV 投影遗留精度特例
+
+V10 性能版仍在 `T=240` 时调用 `kv_project_native_240`：N32/K64、16个block、
+按 Native 的列组规则重排 K256 遍历，用于追求精度对齐。其他形状使用 N128/K256、
+部署配置下 split-K=8。这个特例在性能版中也绕过了既有的较宽 tile/split-K 路径。
+8K/B40 的 V10 四窗口该任务 block 均值约90 μs，明显值得独立处理。
+
+Native 双流调用顺序对应的 KV `MatMulWeightNz` 设备事件为26.26 μs；
+这一映射依据 `_mla_prolog_multistream` 的 Q_A→KV 分工及 trace 的 stream/顺序，
+不是逐block的等范围比较，不能由两数直接算加速比。
+此外 Native 该权重使用 NZ，而 PTO `wkv` 根入参仍是 ND `[D,512]`，
+在初始化时由共享 adapter 解包/转置一次；这不是每次 CSA 的权重重排。
+先独立去除性能版的240行精度特例，保留精度版原路径；WKV 的 NZ 复用另列后续项。
+
+源码：[性能版 QKV](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py)、
+[Native 双流实现](../../vllm_ascend/attention/dsa_v1.py)、
+[权重适配](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/native_adapter.py)。
+
 ## 5. 优化顺序与必要验证
 
 | 档位 / 阶段 | 核内工作 | 验证与保留条件 |
 | --- | --- | --- |
 | 8K B16/24/32/40，先用 B40 代表 | PV N128 分块；随后独立尝试 KV 成组搬运 | 先 CPU 编译检查，再单卡原有 case 检查输出、保护区、无 profiler 本体与 DFX qk_pv；有收益再覆盖受影响档位 |
-| 128K B8/B16 | Indexer 多 query 共享 Key、Query/系数驻留、流式 Top-K | 单项实现独立测量，核内下降须有证据；补 B16 Native 分算子 profile 缺口，不重跑无关历史矩阵 |
+| 128K B8/B16 | Indexer 多 query 共享 Key、Query/系数驻留、流式 Top-K | 单项实现独立测量，核内下降须有证据；B16 Native分项已补齐，不重跑无关历史矩阵 |
+| 8K B40 | 移除性能版KV投影240行精度特例，评估复用Native NZ权重 | 先隔离改动测量，按整套当前实现记录结果；精度版保持原算术 |
 | 128K B4 | 保留 V10 小 batch 完整 leaf 均衡 | 扩大 query 复用组后检查并行度和退化，必要时在算子内部按输入选策略 |
 | 核内阶段出口 | 汇总同一当前实现的七档，保留其真实策略与源码、误差及性能结果 | 不用历史版本拼出最优七档；不能只看正常窗口或中位数忽略长尾 |
 | 随后调度阶段 | 任务融合、任务数量、派发/依赖间隙 | 先记录核内阶段结果，再评价调度收益，避免混淆归因 |
@@ -159,7 +179,14 @@ Native满128窗口＋512 compressed候选时为两段PV结果，PTO128分块为�
 但目前没有设备收益证据，不能按逻辑字节差推算加速比。
 Indexer的4＋2 query Key复用已做128K/B16先导：工作量配平版和进一步L0驻留版均退化，已撤回。
 [候选结果与限制](results/csa_incore_20260927/indexer_group4_balanced/README.md)保留实际证据；
-不能把逻辑Key读取量减少当成性能收益。后续保持双query分组，尝试合并两次head加权Cube规约。
+不能把逻辑Key读取量减少当成性能收益。
+随后[双query合并head规约](results/csa_incore_20260927/indexer_fused_ws/README.md)
+在128K两档及8K/B40下降了局部Score核内时间，但四档CSA本体均未改善，已撤回。
+[全有效KV省去UB清零](results/csa_incore_20260927/kv_valid_nozero/README.md)亦没有足够稳定收益，不进入正式源码。
 
-仍缺：128K/B16 Native 分算子 trace、各项策略独立收益、完整其他 CSA 任务的等范围映射，
+128K/B16 Native分项已补齐，QLI=360.28、Sparse Attention=181.08 μs。
+可见V10的Score/qk_pv核内均值已经接近这两个Native完整kernel，但PTO仍有额外准备/合并，
+这些数据不能支持“128K/B16所有差距都来自纯矩阵计算”的判断。
+
+仍缺：各项策略独立收益、完整其他 CSA 任务的等范围映射，
 以及新策略的整模型验收。阶段目标保持有效，尚未完成。

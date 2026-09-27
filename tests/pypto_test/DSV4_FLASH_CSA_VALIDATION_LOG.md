@@ -7172,3 +7172,32 @@ Score AIC四窗口均值范围从V10的356.79–367.98 μs，变为441.99–444.
 [详细数据和候选补丁](results/csa_incore_20260927/indexer_group4_balanced/README.md)。
 不做其他六档无效扩测。下一项把双query的两个K64 head规约合并成一个K128矩阵乘，
 通过系数矩阵的两个对角块独立表达两个query，同时减少Cube调用和FIXPIPE写回次数；尚无设备收益结论。
+
+## 189. 双query合并规约有局部下降但无本体收益，撤回（2026-09-27）
+
+任务task_20260927_145023_138201120081、task_20260927_145502_14071568099均退出0。
+沿用固定layer4/S6/TP1/mode2/atomic1/确定性0，单卡预热5次/20次计时和4个DFX窗口。
+两个K64 WS合为一个K128，并将Query/系数放在L0A跨step复用。
+128K/B8、B16的Score AIC均值范围从178.65–184.16、356.79–367.98 μs
+降至165.68–174.42、339.72–350.25 μs；8K/B40也下降，8K/B16范围重叠。
+但四档本体均值892.05/1331.23/812.60/1470.46 μs均未低于V10，故撤回正式源码。
+未扩测其他三档。保护区/索引结构通过，非有限值0，Top-K替换数量不变；零容差FAIL。
+[完整先导结果及补丁](results/csa_incore_20260927/indexer_fused_ws/README.md)。
+
+另用8K/B40试全有效compressed KV跳过UB清零，任务task_20260927_150252_14677743863退出0。
+qk_pv AIC为320.15–334.00 μs，本体1436.35 μs，核内范围重叠、未优于V10，不保留。
+该项基于合并规约Indexer，不能把它与V10的本体差直接视为独立收益。
+[实现、基底、CPU容量处理与设备证据](results/csa_incore_20260927/kv_valid_nozero/README.md)。
+
+## 190. 补齐128K/B16 Native分项trace（2026-09-27）
+
+单层脚本增加`--native-profile-only`，只走Native图重放和原有保护区检查，避免为补缺口编译PTO。
+任务task_20260927_150612_14900281244退出0；同任务前半是独立KV投影候选，Native补采独立进程。
+补采采用原配置、5次图预热、1条无profiler检查样本及另外1次profiler图重放；
+不把单样本当作新性能均值，不覆盖已有20次总区间基线。
+QLI=360.28、SparseAttnSharedkv=181.08、HcPre=55.58、HcPost=18.22 μs，
+两次Compressor=64.76/68.06 μs。Native metadata/slot保护区均通过。
+[原始Native profiling JSON](results/csa_incore_20260927/native_h131072_b16/native_pytorch.json)、
+[采集命令](results/csa_incore_20260927/native_h131072_b16/run.sh)、
+[来源说明](results/csa_incore_20260927/native_h131072_b16/source.json)。
+七档核内统计及主差距文档已补齐该列，明确这一次采集与既有六档的来源不同。

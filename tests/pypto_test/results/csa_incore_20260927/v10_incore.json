@@ -1,12 +1,13 @@
 {
   "scope": "Native fused device kernels versus per-window PTO block-mean incore durations; do not add AIC/AIV or compute equal-scope speedups",
-  "native_source": "Earlier v7 matrix, unchanged Native implementation; independent capture from V10 PTO windows",
+  "native_source": "Six earlier v7 captures plus a Native-only 128K/B16 capture; unchanged Native implementation, independent from V10 PTO windows",
   "cases": [
     {
       "history": 131072,
       "batch": 4,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h131072_b4_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.0
@@ -1224,6 +1225,7 @@
       "batch": 8,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h131072_b8_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.0
@@ -2440,8 +2442,183 @@
       "history": 131072,
       "batch": 16,
       "operator_revision": "0ed4f926",
-      "native_trace": null,
-      "native_kernel_us": {},
+      "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_incore_20260927/native_h131072_b16/native_pytorch.json",
+      "native_capture": "2026-09-27补采；仅Native，layer4/TP1/S6/mode2/确定性0",
+      "native_kernel_us": {
+        "PROFILING_ENABLE": [
+          0.0
+        ],
+        "EVENT_RECORD": [
+          0.02,
+          0.02
+        ],
+        "MODEL_EXECUTE": [
+          5.6
+        ],
+        "aclnnInplaceCopy_TensorMoveAiCore_TensorMove": [
+          11.34,
+          9.42,
+          5.34,
+          5.72
+        ],
+        "CAPTURE_WAIT": [
+          0.0,
+          0.14,
+          7.48,
+          0.0,
+          0.1,
+          1.68,
+          0.0,
+          0.12,
+          2.02,
+          0.0,
+          0.12,
+          5.28,
+          0.02,
+          0.12,
+          5.04,
+          0.02,
+          0.32,
+          4.98,
+          0.0,
+          0.14,
+          5.1,
+          0.02,
+          0.24,
+          5.38,
+          0.02,
+          0.12,
+          5.34,
+          0.02,
+          0.12,
+          1.22,
+          0.0,
+          0.14,
+          5.22,
+          0.02,
+          0.12,
+          5.0,
+          0.02,
+          0.14,
+          1.38
+        ],
+        "HcPre": [
+          55.58
+        ],
+        "NOTIFY_WAIT": [
+          1358.3
+        ],
+        "RmsNorm": [
+          13.88,
+          17.1
+        ],
+        "CAPTURE_RECORD": [
+          0.32,
+          0.22,
+          0.12,
+          0.12,
+          0.12,
+          0.12,
+          0.1,
+          0.12,
+          0.2,
+          0.14,
+          0.2,
+          0.12,
+          0.12
+        ],
+        "aclnnMatmulWeightNz_MatMulCommon_MatMulV2": [
+          18.6,
+          22.5,
+          12.64
+        ],
+        "RmsNormDynamicQuant": [
+          19.08
+        ],
+        "aclnnQuantMatmulWeightNz_QuantBatchMatmulV3_QuantBatchMatmulV3": [
+          49.16,
+          22.88,
+          37.96
+        ],
+        "InplacePartialRotaryMul": [
+          14.74,
+          13.54,
+          14.1,
+          13.66
+        ],
+        "aclnnScatterNdUpdateV2_ScatterNdUpdateV2AiCore_ScatterNdUpdateV2": [
+          25.44,
+          26.38,
+          20.3,
+          19.48
+        ],
+        "triton_rms_kernel_0": [
+          18.22
+        ],
+        "CompressorMetadata": [
+          16.68,
+          16.18
+        ],
+        "Compressor": [
+          64.76,
+          68.06
+        ],
+        "aclnnMatmul_MatMulCommon_MatMulV2": [
+          9.08,
+          7.72
+        ],
+        "aclnnMuls_Muls_Muls": [
+          1.78,
+          8.46,
+          1.64
+        ],
+        "aclnnDynamicQuantV2_DynamicQuant_DynamicQuant": [
+          4.7,
+          23.24,
+          17.56
+        ],
+        "aclnnInplaceCopy_CastAiCore_Cast": [
+          1.42,
+          2.0,
+          2.2
+        ],
+        "VllmQuantLightningIndexer": [
+          360.28
+        ],
+        "SparseAttnSharedkv": [
+          181.08
+        ],
+        "aclnnNeg_NegAiCore_Neg": [
+          2.3
+        ],
+        "aclnnTransposeBatchMatMul_TransposeBatchMatMul_TransposeBatchMatMul": [
+          103.72
+        ],
+        "HcPost": [
+          18.22
+        ],
+        "MEM_WRITE_VALUE": [
+          0.1,
+          0.1,
+          0.14,
+          0.12,
+          0.12,
+          0.1,
+          0.12,
+          0.1,
+          0.14,
+          0.1,
+          0.14,
+          0.1,
+          0.12
+        ],
+        "NOTIFY_RECORD": [
+          0.02
+        ],
+        "PROFILING_DISABLE": [
+          0.02
+        ]
+      },
       "pto_windows": [
         {
           "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_split_optimization_20260927/v10_unified_followup/h131072_b16/swimlane/dfx/merged_swimlane.json",
@@ -3510,6 +3687,7 @@
       "batch": 16,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b16_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.02
@@ -4725,6 +4903,7 @@
       "batch": 24,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b24_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.0
@@ -5940,6 +6119,7 @@
       "batch": 32,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b32_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.02
@@ -7155,6 +7335,7 @@
       "batch": 40,
       "operator_revision": "0ed4f926",
       "native_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_native_cube_matrix_20260927/download/h8192_b40_native_pytorch.json",
+      "native_capture": "原v7矩阵；Native实现未改",
       "native_kernel_us": {
         "PROFILING_ENABLE": [
           0.0

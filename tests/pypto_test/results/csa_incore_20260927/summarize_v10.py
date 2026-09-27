@@ -32,6 +32,10 @@ def main():
     for case in cases:
         history, batch = case["history"], case["batch"]
         native_path = RESULTS / "csa_native_cube_matrix_20260927/download" / f"h{history}_b{batch}_native_pytorch.json"
+        native_capture = "原v7矩阵；Native实现未改"
+        if (history, batch) == (131072, 16):
+            native_path = ROOT / "native_h131072_b16/native_pytorch.json"
+            native_capture = "2026-09-27补采；仅Native，layer4/TP1/S6/mode2/确定性0"
         native = defaultdict(list)
         if native_path.exists():
             for event in process_events(native_path, "Ascend Hardware"):
@@ -51,11 +55,12 @@ def main():
         rows.append({
             "history": history, "batch": batch, "operator_revision": case["operator_revision"],
             "native_trace": str(native_path) if native_path.exists() else None,
+            "native_capture": native_capture,
             "native_kernel_us": dict(native), "pto_windows": windows,
         })
     result = {
         "scope": "Native fused device kernels versus per-window PTO block-mean incore durations; do not add AIC/AIV or compute equal-scope speedups",
-        "native_source": "Earlier v7 matrix, unchanged Native implementation; independent capture from V10 PTO windows",
+        "native_source": "Six earlier v7 captures plus a Native-only 128K/B16 capture; unchanged Native implementation, independent from V10 PTO windows",
         "cases": rows,
     }
     (ROOT / "v10_incore.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
