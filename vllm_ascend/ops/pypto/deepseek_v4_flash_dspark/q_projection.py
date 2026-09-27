@@ -55,6 +55,8 @@ def _q_proj_q_matmul_nd(
         name_hint="qproj_matmul",
         deps=[qproj_dep],
     ) as qproj_tid:
+        # Match upstream weight streaming; arithmetic is unchanged.
+        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qproj_worker = pl.tile.get_block_idx()
         for qproj_n_idx in pl.range(
             qproj_worker,
@@ -89,6 +91,8 @@ def _q_proj_q_matmul_nz(
     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
     qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
     with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
+        # Match upstream weight streaming; arithmetic is unchanged.
+        pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
         qproj_worker = pl.tile.get_block_idx()
         # Keep the column offset provably nonnegative after NZ outlining.
         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):

@@ -237,6 +237,7 @@ def _q_proj_qa_nd(
                 qr_fp32[ts0 : ts0 + QR_M_TILE, nseed0 : nseed0 + QR_N_TILE] = qr_seed
 
     for qbg_idx in pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
+        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         q_a_col0 = (qbg_idx // QR_OK) * QR_N_TILE
         qr_k_base = (qbg_idx % QR_OK) * QR_SPLIT_K_TILE
         for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
@@ -293,6 +294,7 @@ def _q_proj_qa_nz(
     # 不可证（实测报 `slice offset on shape[-2] to be non-negative cannot be proven`）。
     # `get_block_idx()` 是明确的 SPMD block 索引，属于可证形式。
     with pl.spmd(QR_N_BLOCKS * QR_OK, name_hint="qr_proj_matmul", allow_early_resolve=True):
+        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
         qbg_idx = pl.tile.get_block_idx()
         qr_k_base = (qbg_idx // QR_N_BLOCKS) * QR_SPLIT_K_TILE
         q_a_col0 = (qbg_idx % QR_N_BLOCKS) * QR_N_TILE
@@ -774,6 +776,7 @@ def kv_proj_rope(
                     name_hint="kv_proj_matmul",
                     deps=[late_dep],
                 ) as _kv_tid:
+                    pl.set_cache_policy(wkv, pl.CachePolicy.BYPASS)
                     kbg = pl.tile.get_block_idx()
                     kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
                     kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
