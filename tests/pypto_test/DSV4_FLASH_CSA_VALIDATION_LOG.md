@@ -8122,3 +8122,30 @@ forward另存已有CPU位置，不在设备计时内增加复制、hash或同步
 Native生产逻辑、既有cache历史/共享前缀、分配总量及引用计数不变；四项CPU分配检查通过。
 仍需完成两档实际性能、位置配对及token/DSpark验收；当前没有保证整网优势已经实现。
 [候选与运行命令](results/csa_source_split_ab_20260927/ordered/README.md)。
+
+## 257. 严格批次入场后仍未取得EP16优势；FFN增量与单卡规约筛查（2026-09-28）
+
+task_20260928_004008_231719416500退出0。双方16rank的正式10步CPU position数组逐元素相同。
+128K/B16 Native72.009→PTO74.262ms（+3.13%）；8K/B40 104.358→104.121ms（−0.23%）。
+每步最慢rank均值分别+3.13%/−0.21%。229376输出token无差异，长档14rank的DSpark统计不同，短档全通过。
+短档微小差额不视为明显优势，长档性能/DSpark未达标，分离排序候选不合入；主树仍为原布局2a740c1f。
+长档实际正式轮递增四页3954/4096（96.53%），短档412/640（64.38%），已减少逆序但仍有碎片。
+
+现有rank0独立3步Level0拆分：长档21层CSA body合计省1.931ms，43层FFN span增加3.087ms；
+短档分别省2.318ms、增加2.196ms。长档两类专家GMM累计任务duration增加2.733/1.251ms，
+短档增加1.924/1.089ms；任务可能重叠，不能相加解释正式forward。
+长档首层FFN（还未经过PTO CSA）增加2.206ms，其中dispatch增加2.203ms，明显含跨rank到达等待。
+因此不把全部FFN增量解释为数值，更不删首层样本来制造胜出结论。
+两侧实际event模式0/1，profile有配置及采集扰动边界；正式10步仍是主验收。
+[报告、分层原始值及CPU重建器](results/csa_source_split_ab_20260927/ordered/README.md)。
+
+task_20260928_005959_25474208374完成单卡同输入/同逻辑历史的16个请求副本，独立物理页、正式layer4/H8192。
+atomic1/0的两次eager和最后一次图输出均无跨副本差异，保护区/metadata/结构通过；没有在合成case复现真实路由分化。
+PTO均值809.53/769.91μs，但Native控制929.23/903.71μs也有波动，不能把全部4.89%差额归因于规约开关。
+Native零容差误差仍存在；相同误差汇总不表示两轮PTO输出做过完整逐元素比较。
+[单卡诊断及范围](results/csa_duplicate_requests_20260928/README.md)。
+
+在单卡执行性检查后，提交task_20260928_010335_25771591179：固定分离排序候选，仅将PTO atomic_add设0，
+两代表档，Native仍det0/HCCL=false，复用本节Native控制，不改写原始配置；收集器明确允许Native未使用的atomic开关不同。
+这是对真实EP16影响的受控干预，不是提前认定atomic为原因；当前尚待结果。
+[命令与配置](results/csa_source_split_ab_20260927/ordered_atomic0/README.md)。
