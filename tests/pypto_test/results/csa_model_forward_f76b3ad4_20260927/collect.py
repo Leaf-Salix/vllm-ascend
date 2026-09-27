@@ -80,7 +80,8 @@ def main():
         rows.append(collect_case(history, batch))
     result = {"operator_revision": "f76b3ad4", "complete": len(rows) == 7,
               "scope": "每rank前8步后连续10步纯decode _model_forward；16rank等权均值；无profiler。",
-              "limits": "P95由160个rank样本计算，最慢rank分布另列；不是CSA时间、完整decode周期或初始化耗时。",
+              "limits": ("P95由16rank×10步的160个相关样本计算，最慢rank分布另列；"
+                         "不是CSA时间、完整decode周期或初始化耗时。10步不能证明罕见长尾已消失。"),
               "cases": rows}
     (ROOT / "forward.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     lines = ["# 当前性能版整模型forward（f76b3ad4）", "", result["scope"], "", result["limits"], "",
@@ -95,7 +96,20 @@ def main():
         lines.append(f"| {row['history']//1024}K/B{row['batch']} | {n['mean_us']/1000:.3f} | {p['mean_us']/1000:.3f} | "
                      f"{row['change_pct']:+.2f}% | {n['p95_us']/1000:.3f}/{p['p95_us']/1000:.3f} | "
                      f"{n['max_us']/1000:.3f}/{p['max_us']/1000:.3f} | {row['status']} |")
-    lines += ["", f"已取得{len(rows)}/7档。逐rank样本、每步最慢rank分布、实际配置和错误详情"
+    lines += ["", "每步取16rank中最大的forward耗时，再对10步求均值；用于观察EP16最慢rank的影响。", "",
+              "| 档位 | Native最慢rank均值 | PTO最慢rank均值 | PTO变化 | Native/PTO P95÷P50 |",
+              "| --- | ---: | ---: | ---: | ---: |"]
+    for row in rows:
+        if "forward" not in row:
+            continue
+        n, p = (row["slowest_rank_forward"][s] for s in ("native", "pto"))
+        fn, fp = (row["forward"][s] for s in ("native", "pto"))
+        lines.append(f"| {row['history']//1024}K/B{row['batch']} | {n['mean_us']/1000:.3f} | "
+                     f"{p['mean_us']/1000:.3f} | {(p['mean_us']/n['mean_us']-1)*100:+.2f}% | "
+                     f"{fn['p95_us']/fn['p50_us']:.3f}/{fp['p95_us']/fp['p50_us']:.3f} |")
+    lines += ["", "P95÷P50使用全部rank样本；每步最慢rank序列共10个样本，其P95等于最大值。",
+              "每步按相同稳态步编号对齐，最慢rank耗时不包含各rank起始时间偏差或步间等待。", "",
+              f"已取得{len(rows)}/7档。逐rank样本、每步最慢rank分布、实际配置和错误详情"
               "见[forward.json](forward.json)。",
               "旧版本全模型和当前单层数据不混入本表。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")
