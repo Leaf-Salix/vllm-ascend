@@ -580,6 +580,7 @@ def test_native_consumer_rms_rope_math_and_tail(inner):
         reshape=lambda x, shape: x.reshape(shape),
         col_expand_mul=torch.mul,
         row_expand_mul=torch.mul,
+        row_expand_div=torch.div,
         row_sum=lambda x, tmp: x.sum(-1, keepdim=True),
         transpose=lambda x, axis1, axis2: x.transpose(axis1, axis2),
         create_tile=lambda shape, dtype, **kw: torch.empty(shape, dtype=dtype),

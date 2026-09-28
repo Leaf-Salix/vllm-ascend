@@ -730,33 +730,41 @@ def compressor_ratio4_cache_write_vllm(
             cos, sin, position_ids, token_valid, token_request,
             compact_offsets, row_begin, rows,
         )
-        partial_sq = pl.tile.full([1, RMS_PAD_TILE], dtype=pl.FP32, value=0.0)
+        # Native RmsNorm squares the whole FP32 row, folds its 64-column
+        # vector blocks by halves, then performs one WholeReduceSum over 64.
+        # Reducing each block first changes the floating-point addition tree.
+        norm_values = pl.load(
+            pooled_kv, [row_begin, 0], [RMS_PAD_TILE, HEAD_DIM],
+            valid_shape=[rows, HEAD_DIM],
+        )
+        squares = pl.mul(norm_values, norm_values)
+        folded04 = pl.add(squares[:, 0:64], squares[:, 256:320])
+        folded15 = pl.add(squares[:, 64:128], squares[:, 320:384])
+        folded26 = pl.add(squares[:, 128:192], squares[:, 384:448])
+        folded37 = pl.add(squares[:, 192:256], squares[:, 448:512])
+        folded = pl.add(pl.add(folded04, folded26), pl.add(folded15, folded37))
         reduce_tmp = pl.create_tile([RMS_PAD_TILE, HEAD_TILE], dtype=pl.FP32,
                                     target_memory=pl.MemorySpace.Vec)
-        for k0 in pl.range(0, HEAD_DIM, HEAD_TILE):
-            values = pl.load(pooled_kv, [row_begin, k0], [RMS_PAD_TILE, HEAD_TILE],
-                             valid_shape=[rows, HEAD_TILE])
-            partial_sq = pl.add(
-                partial_sq,
-                pl.reshape(pl.row_sum(pl.mul(values, values), reduce_tmp), [1, RMS_PAD_TILE]),
-            )
+        partial_sq = pl.reshape(pl.row_sum(folded, reduce_tmp), [1, RMS_PAD_TILE])
         variance = pl.reshape(
             pl.add(pl.mul(partial_sq, HEAD_DIM_INV), EPS),
             [RMS_PAD_TILE, 1],
         )
-        inv_rms = pl.recip(pl.sqrt(variance))
+        # RowDivs uses vector Div by sqrt(variance), then multiplies gamma.
+        # Keep gamma and all norm intermediates FP32 through the following RoPE.
+        rms_denominator = pl.sqrt(variance)
         for k0 in pl.range(0, NOPE_HEAD_DIM, HEAD_TILE):
             values = pl.load(pooled_kv, [row_begin, k0], [RMS_PAD_TILE, HEAD_TILE],
                              valid_shape=[rows, HEAD_TILE])
             gamma = pl.load(norm_w_2d, [0, k0], [1, HEAD_TILE])
-            normed = pl.col_expand_mul(pl.row_expand_mul(values, inv_rms), gamma)
+            normed = pl.col_expand_mul(pl.row_expand_div(values, rms_denominator), gamma)
             pl.store(normed, [row_begin, k0], normed_kv)
 
         rope_values = pl.load(pooled_kv, [row_begin, NOPE_HEAD_DIM], [RMS_PAD_TILE, ROPE_HEAD_DIM],
                               valid_shape=[rows, ROPE_HEAD_DIM])
         rope_gamma = pl.load(norm_w_2d, [0, NOPE_HEAD_DIM], [1, ROPE_HEAD_DIM])
         rope_normed = pl.col_expand_mul(
-            pl.row_expand_mul(rope_values, inv_rms), rope_gamma,
+            pl.row_expand_div(rope_values, rms_denominator), rope_gamma,
         )
         rope_ones = pl.tile.full(
             [RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0,
