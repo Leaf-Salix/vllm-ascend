@@ -715,6 +715,13 @@ cache allocation 及输出 guard 检查通过。参考使用已完成的 BSH 对
 `native-align-20260928/nalinaly-canonical-comparison/`，通过输入哈希断言，
 未改动正式 kernel。环境预检通过；没有重新安装或编译框架依赖。
 
+## 性能优化提交索引
+
+| 提交 | 实际改动 | 验证结果与限制 |
+| --- | --- | --- |
+| `60dd8eb18` | O-B token tile 128→32。 | 三形状输出保持一致；早期跨任务耗时下降有Native漂移，不能全部归因于改动。 |
+| `f993dbddc` | Indexer scale直接广播，删除全1张量及乘法。 | 45项CPU检查、完整编译、三形状eager/Graph跨版本逐字节一致；B4两组约快3.2%/3.9%，B16无明确收益。 |
+
 ## 2026-09-28：O-B M32 单因素性能优化
 
 基线源码 `bdf2cf0fb`，候选只将 `PROJ_B_MM_T_TILE` 从128改为32。
@@ -899,6 +906,106 @@ Graph预热50次、20轮×200重放和同任务交错运行顺序。每个进程
 后续继续测量；不能宣称当前已整体快于Native。
 证据：`indexer-broadcast/evidence/`、候选 `manifest.json`、远端
 `oproj-idx-broadcast-graph-comparison.json`。
+
+## 2026-09-28：Q/O-proj 扩展直接广播
+
+以 `f993dbddc` 的Indexer广播为基线，在独立候选中将Q和O-B反量化的
+全1乘法改为直接col/row expand。scale乘法、INT32转FP32和最终BF16
+边界保持不变，独立静态审查及完整CPU编译通过。
+任务 `task_20260928_181217_30624869476` 完成exit=0；三形状eager和Graph
+的输出均与基线逐字节一致。沿用50预热、20×200 Graph计时，其余条件同前。
+
+| 形状 | Indexer版CSA ms | 扩展版CSA ms | 变化 | Indexer轮Native ms | 扩展轮Native ms |
+| --- | --- | --- | --- | --- | --- |
+| B4/T24 | 0.605292 | 0.610847 | 慢0.92% | 0.580369 | 0.580991 |
+| B4/T18 | 0.576388 | 0.580669 | 慢0.74% | 0.573037 | 0.568959 |
+| B16/T60 | 0.926923 | 0.917947 | 快0.97% | 0.739072 | 0.725393 |
+
+没有一致收益，扩展版暂不合入。尤其本轮Indexer基线自身较上一轮明显变快，
+跨进程漂移大于这些小优化的差距。因此继续用同一进程中的Native、M32、
+Indexer版、扩展版四路Graph交替测量，优先采用该受控复测的结论。
+证据：`scale-broadcast/evidence/`、`manifest.json` 和Graph逐字节比较汇总。
+
+## 2026-09-28：同进程四路复测，修正小优化收益判断
+
+为排除前述跨进程漂移，改用同一进程同时注册Native、M32基线
+（`60dd8eb18`）、Indexer直接广播（`f993dbddc`）和Q/O扩展广播。
+三个CSA模块采用独立Python package、JIT对象和custom op命名空间，
+共享同一权重、hidden及metadata，各有独立cache和output。
+运行时记录源码路径、文件SHA256与调用计数，禁止静默回退Native。
+Q/O扩展仍为独立实验，没有合入正式分支。
+
+测试保持真实C4层2权重、seed62合成hidden/history、TP1、页128、
+start_pos=8186和确定性Native；CANN9.2、torch_npu2.10.0.post4、
+vLLM0.29及PyPTO/Simpler提交与前述测试相同。
+B4/T24长度为[6,6,6,6]，B4/T18为[3,4,5,6]，B16/T60为
+[1,2,3,4,5,6,1,2,3,4,5,6,3,4,5,6]。
+每形状50次Graph预热，四路的全部24种排列各测200次replay；
+每种实现处于各顺序位置均为6次。cache重置、同步和精度检查在计时区外。
+
+- 首次任务 `task_20260928_183448_312163832420`：exit=1。
+  三个CSA已执行且eager输出跨版本逐位一致；随后诊断脚本在没有forward
+  context时调用compressor metadata producer失败。该失败属于测试脚本，
+  没有候选性能结果。保留原始脚本及失败记录。
+- 修正后的独立 `ab-v2.py` 仅为该metadata调用设置forward context，
+  没有删除或放宽任何精度/稳定性断言。
+- 任务 `task_20260928_184109_33443831159`：exit=0，三组全部完成。
+
+Graph每轮平均延迟的24轮中位数，单位ms/attention forward：
+
+| 形状 | Native | M32基线 | 当前Indexer广播 | Q/O扩展候选 | 当前版相对Native |
+| --- | --- | --- | --- | --- | --- |
+| B4/T24 | 0.579327 | 0.660354 | 0.657840 | 0.653141 | 慢13.55% |
+| B4/T18 | 0.596191 | 0.647539 | 0.647230 | 0.644288 | 慢8.56% |
+| B16/T60 | 0.719525 | 0.990406 | 0.987625 | 0.986830 | 慢37.26% |
+
+同轮配对变化也仅为小幅趋势，并非每轮都改善：
+
+| 形状 | Indexer相对M32配对变化中位数 | Indexer更快轮数 | 扩展相对M32配对变化中位数 | 扩展更快轮数 |
+| --- | --- | --- | --- | --- |
+| B4/T24 | 快0.186% | 15/24 | 快1.145% | 18/24 |
+| B4/T18 | 慢0.061% | 12/24 | 快0.525% | 17/24 |
+| B16/T60 | 快0.317% | 13/24 | 快0.292% | 16/24 |
+
+**结论修正：先前跨进程观察到的Indexer 3.19%/3.90%下降未被本轮确认。**
+保留已合入的冗余计算简化，但不能将其宣传为稳定3%～4%加速。
+Q/O扩展的幅度仍小且与前轮方向不一致，暂不合入；当前还没有达到快于Native
+的目标。不能把这里的同进程绝对耗时与不同进程历史数据直接相减归因。
+
+精度与工作负载稳定性：
+
+- 三个CSA的eager输出、Graph输出、六类有效cache/state写入跨版本逐位一致。
+- 四路各自的首次Graph replay与全部重复计时之后，输出和六类有效写入均
+  逐位一致；Native独立重复检查也通过。输出guard完整，无NaN遗留。
+- 两个B4的输出与Native逐位一致；B16保留相同的994/245760个差异元素，
+  relative L2=0.00021757883036598835，max abs=0.00390625。
+  本轮优化没有增加误差，也没有消除既有B16误差。
+- 仅验证单层、所列三形状及输入；没有证明128K、整模型或DP16性能。
+
+原始证据保存在独立报告 `same-process-broadcast/evidence/`：各形状
+`result.json`（含24轮原始延迟、调用计数、源码来源）、`pre_timing.json`、
+`replay_checks.json`，以及独立runner/hash manifest。远端保留Graph输出tensor。
+
+### 参考实现与后续优化优先级
+
+本轮只更新参考引用：pypto-lib main为`fbe92bf`，nalinaly分支为
+`e58ddc94d77c93a0a8a85ab2db4bd773da9dff84`，未改参考工作树。
+[nalinaly七档记录](https://github.com/nalinaly/vllm-ascend/blob/e58ddc94d77c93a0a8a85ab2db4bd773da9dff84/tests/pypto_test/results/csa_qa_matrix_20260928/README.md)
+明确报告CSA profile均值快9.45%～23.30%，正式forward均值快1.04%～7.11%。
+该结果使用其性能算子、TP1/DP=EP16、EPLB关闭、NZ mode2、确定性关闭；
+不能当作我们确定性单层TND配置的受控对照，也不否认它确有加速结果。
+
+后续重点应从广播/清零等小改动转向已观察到的主要耗时：
+
+1. TopK前的投影、压缩与Indexer链：检查任务分组及依赖造成的启动间隙，
+   参考其QR/KV自适应分组；保留当前full-K、INT32求和及BF16舍入边界。
+2. Sparse attention跨query流水与访存复用：保留真TND寻址、mask、
+   softmax与inverse RoPE数值边界，逐项对拍后再判断收益。
+3. O-proj权重NZ布局：当前先被PyPTO入口ABI检查阻塞，必须用最小案例
+   验证物理布局与入口契约，不能绕过校验或声称已有性能收益。
+
+参考性能版的按组量化和atomic拆K不直接移植；每个改变都必须维持当前
+逐位基线，并使用同进程交替Graph对拍判断性能。
 
 ## 后续每次测试的记录方式
 
