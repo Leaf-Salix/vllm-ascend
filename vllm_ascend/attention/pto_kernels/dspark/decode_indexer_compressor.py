@@ -95,6 +95,15 @@ GROUP_BS = DECODE_BATCH * DECODE_SEQ
 BS_PAD = ((GROUP_BS + MM_B_TILE - 1) // MM_B_TILE) * MM_B_TILE
 HEAD_TILE = 64
 RMS_PAD_TILE = 16  # 16-row block of B (hadamard matmul M multiple of 16)
+# TH NORMAL-template geometry for the head128 compressor on 24 cube cores.
+# SetBaseSize uses eight column groups for short, equal-length requests.
+NATIVE_CUBE_CORES = 24
+NATIVE_D_BASE = 64
+NATIVE_NARROW_D_PARTS = 8
+NATIVE_PROJ_OUT_TILE = HEAD_DIM // NATIVE_NARROW_D_PARTS
+NATIVE_PROJ_K_TILE = 128
+NATIVE_K_ROTATION_STEP = 256
+NATIVE_NARROW_MAX_TOKENS = 128 * (NATIVE_CUBE_CORES // (HEAD_DIM // NATIVE_D_BASE))
 
 
 @pl.jit.inline(auto_scope=False)
@@ -136,6 +145,61 @@ def indexer_compressor_project(
             score_proj_pad[global_row0 : global_row0 + MM_B_TILE, o0 : o0 + PROJ_OUT_TILE] = score_acc
 
     return _kv_score_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_compressor_project_vllm(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wkv: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    wgate: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    kv_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    score_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    late_dep: pl.Scalar[pl.TASK_ID],
+    chain_dep: pl.Scalar[pl.TASK_ID],
+):
+    """Match the native compressor's column-dependent FP32 accumulation."""
+    tokens = pl.tensor.dim(x, 0)
+    row_blocks = (tokens + MM_B_TILE - 1) // MM_B_TILE
+    with pl.spmd(
+        KV_SCORE_WORKERS, name_hint="kv_score_proj", deps=[late_dep, chain_dep],
+    ) as projection_tid:
+        worker = pl.tile.get_block_idx()
+        requests = pl.tensor.dim(query_start_loc, 0) - 1
+        first_length = pl.read(query_start_loc, [1]) - pl.read(query_start_loc, [0])
+        # Comparison masks cast to signed INT32 as -1 on the device. Use
+        # length differences instead of counting cast boolean predicates.
+        length_deviation = pl.cast(0, pl.INT32)
+        for request in pl.range(requests):
+            length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
+            difference = length - first_length
+            length_deviation = length_deviation + difference * difference
+        used_tokens = pl.read(query_start_loc, [requests]) - pl.read(query_start_loc, [0])
+        d_base = NATIVE_D_BASE
+        if length_deviation == 0 and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
+            d_base = HEAD_DIM // NATIVE_NARROW_D_PARTS
+        for unit in pl.range(worker, row_blocks * OUT_DIM // NATIVE_PROJ_OUT_TILE, KV_SCORE_WORKERS):
+            row_begin = (unit // (OUT_DIM // NATIVE_PROJ_OUT_TILE)) * MM_B_TILE
+            column = (unit % (OUT_DIM // NATIVE_PROJ_OUT_TILE)) * NATIVE_PROJ_OUT_TILE
+            rows = pl.min(MM_B_TILE, tokens - row_begin)
+            # CalcSplitCoreInfo maps this column to its original cube;
+            # ComputeMm1 starts that cube at a 256-column K offset.
+            k_start = ((column % HEAD_DIM) // d_base) * NATIVE_K_ROTATION_STEP
+            kv_acc = pl.create_tensor([MM_B_TILE, NATIVE_PROJ_OUT_TILE], dtype=pl.FP32)
+            gate_acc = pl.create_tensor([MM_B_TILE, NATIVE_PROJ_OUT_TILE], dtype=pl.FP32)
+            for step in pl.pipeline(0, D // NATIVE_PROJ_K_TILE, stage=1):
+                k = (k_start + step * NATIVE_PROJ_K_TILE) % D
+                hidden = pl.slice(
+                    x, [MM_B_TILE, NATIVE_PROJ_K_TILE], [row_begin, k],
+                    valid_shape=[rows, NATIVE_PROJ_K_TILE],
+                )
+                kv_weight = wkv[column : column + NATIVE_PROJ_OUT_TILE, k : k + NATIVE_PROJ_K_TILE]
+                gate_weight = wgate[column : column + NATIVE_PROJ_OUT_TILE, k : k + NATIVE_PROJ_K_TILE]
+                kv_acc = pl.matmul_acc(kv_acc, hidden, kv_weight, b_trans=True, init_cond=(step == 0))
+                gate_acc = pl.matmul_acc(gate_acc, hidden, gate_weight, b_trans=True, init_cond=(step == 0))
+            kv_proj_pad[row_begin : row_begin + MM_B_TILE, column : column + NATIVE_PROJ_OUT_TILE] = kv_acc
+            score_proj_pad[row_begin : row_begin + MM_B_TILE, column : column + NATIVE_PROJ_OUT_TILE] = gate_acc
+    return projection_tid
 
 
 @pl.jit.inline(auto_scope=False)
@@ -981,12 +1045,13 @@ def indexer_compressor_vllm(
     """Run the inner compressor on vLLM-native shared pages."""
     kv_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
     score_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
-    projection_tid = indexer_compressor_project(
+    projection_tid = indexer_compressor_project_vllm(
         x,
         wkv,
         wgate,
         kv_proj_pad,
         score_proj_pad,
+        query_start_loc,
         late_dep,
         hadamard_dep,
     )

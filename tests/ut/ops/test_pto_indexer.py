@@ -1,7 +1,9 @@
 """CPU reference checks for the native Indexer score storage boundaries."""
 
 import ast
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -105,3 +107,102 @@ def test_indexer_reference_matches_native_half_score_contract(weight_magnitude):
         old = (dots.float().clamp_min(0) * query_scale.float() * weights.float()).sum(0)
         old *= data["idx_kv_scale"].float().flatten() / 1024
         assert not torch.equal(old.topk(3).values, expected_scores)
+
+
+def load_inner_projection(worker):
+    """Execute the real DSL projection with CPU FP32 accumulator operations."""
+    path = KERNELS / "decode_indexer_compressor.py"
+    function = next(
+        n
+        for n in ast.parse(path.read_text()).body
+        if isinstance(n, ast.FunctionDef) and n.name == "indexer_compressor_project_vllm"
+    )
+    function.decorator_list = []
+    function.returns = None
+    for arg in function.args.args:
+        arg.annotation = None
+
+    def load_tile(tensor, shape, offset, valid_shape):
+        # Model the zero-filled invalid rows of a partial cube tile.
+        tile = torch.zeros(shape, dtype=tensor.dtype)
+        rows, columns = valid_shape
+        row, column = offset
+        tile[:rows, :columns] = tensor[row : row + rows, column : column + columns]
+        return tile
+
+    def accumulate(accumulator, lhs, rhs, b_trans, init_cond):
+        product = lhs.float() @ (rhs.float().T if b_trans else rhs.float())
+        return product if init_cond else accumulator + product
+
+    pl = SimpleNamespace(
+        tensor=SimpleNamespace(dim=lambda tensor, axis: tensor.shape[axis]),
+        create_tensor=lambda shape, dtype: torch.zeros(shape, dtype=dtype),
+        FP32=torch.float32,
+        INT32=torch.int32,
+        min=min,
+        range=range,
+        pipeline=lambda begin, end, stage: range(begin, end),
+        spmd=lambda *args, **kwargs: nullcontext(0),
+        tile=SimpleNamespace(get_block_idx=lambda: worker),
+        read=lambda tensor, index: int(tensor[tuple(index)]),
+        # Device comparison masks sign-extend True to -1, not Python's +1.
+        cast=lambda value, dtype: -int(value) if isinstance(value, bool) else int(value),
+        slice=load_tile,
+        matmul_acc=accumulate,
+    )
+    namespace = dict(
+        pl=pl,
+        D=1024,
+        HEAD_DIM=128,
+        OUT_DIM=256,
+        MM_B_TILE=16,
+        KV_SCORE_WORKERS=24,
+        NATIVE_D_BASE=64,
+        NATIVE_NARROW_D_PARTS=8,
+        NATIVE_PROJ_OUT_TILE=16,
+        NATIVE_PROJ_K_TILE=128,
+        NATIVE_K_ROTATION_STEP=256,
+        NATIVE_NARROW_MAX_TOKENS=1536,
+    )
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+    return namespace[function.name]
+
+
+def native_inner_dot(weight, cube_column_group):
+    # Directly follow ComputeMm1's h / k / kL0 loops rather than the candidate
+    # kernel's flattened loop. Each test tile has at most one nonzero product,
+    # so the CPU dot reduction itself cannot hide the inter-tile ordering.
+    accumulator = torch.tensor(0.0)
+    for h in range(0, len(weight), 512):
+        for k in (0, 256):
+            h_index = (h + k + cube_column_group * 256) % len(weight)
+            for k_l0 in (0, 128):
+                accumulator = accumulator + weight[h_index + k_l0 : h_index + k_l0 + 128].float().sum()
+    return accumulator
+
+
+@pytest.mark.parametrize("lengths", [(2, 2), (1, 3)], ids=["uniform-dbase16", "tnd-dbase64"])
+def test_inner_state_projection_preserves_native_k_order(lengths):
+    # Equal total tokens, different request lengths: replay must recompute
+    # native SetBaseSize's column grouping from device query boundaries.
+    bounds = torch.tensor([0, lengths[0], sum(lengths)], dtype=torch.int32)
+    hidden = torch.ones(sum(lengths), 1024, dtype=torch.bfloat16)
+    weights = torch.zeros(256, 1024, dtype=torch.bfloat16)
+    weights[:, [0, 256, 512, 768]] = torch.tensor([2.0**24, 1.0, -(2.0**24), 1.0]).bfloat16()
+    gate_weights = weights * 0.5
+    kv, scores = torch.empty(16, 256), torch.empty(16, 256)
+    for worker in range(24):
+        load_inner_projection(worker)(hidden, weights, gate_weights, kv, scores, bounds, 0, 0)
+
+    d_base = 16 if lengths[0] == lengths[1] else 64
+    expected = torch.empty(256)
+    for half in range(2):
+        for group in range(128 // d_base):
+            column = half * 128 + group * d_base
+            expected[column : column + d_base] = native_inner_dot(weights[0], group)
+    torch.testing.assert_close(kv[: len(hidden)], expected.expand(len(hidden), -1), rtol=0, atol=0)
+    torch.testing.assert_close(scores[: len(hidden)], (expected * 0.5).expand(len(hidden), -1), rtol=0, atol=0)
+
+    # Unrotated accumulation cannot produce the native column-dependent result.
+    assert expected[d_base] != expected[0]
+    assert not torch.equal(expected, expected[0].expand_as(expected))
