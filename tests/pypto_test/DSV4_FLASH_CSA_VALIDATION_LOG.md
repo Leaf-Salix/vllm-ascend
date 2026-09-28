@@ -9325,3 +9325,42 @@ x_out明确改变算术：短/长档对原PTO RMSE为0.000775363/0.000773415，m
 两项已保留Top-K UB和QR尾修正版的组合尚需必要验收，当前模型数字仍对应d1f170ff。
 清单删除已过时的QR/UB“等待设备”状态，后续核内优先128K的Indexer Score。
 [两档原始样本、算术边界、窗口分布和命令](results/csa_sparse_online_pv_20260928/README.md)。
+
+## 331. Top-K UB与QR尾修正版组合通过单卡，长档计时保留编译重叠限制（2026-09-28）
+
+冻结2d2f9ca0对d1f170ff，task_20260928_160301_64273522658完成、退出0。
+两档B16，mode2/atomic0/det0、每侧20次图计时和两个DFX；八类状态零容差、metadata/保护区、
+自重放、计时图状态及A→B→A均通过。没有包含其他会话未提交WO_A/Runner，也未纳入失败的Sparse候选。
+128K/B16完整CSA1125.885→1107.323μs、P95 1139.62→1121.50；
+8K/B16为799.225→784.552μs、P95 823.46→794.02。原始7:3变化−1.705%。
+
+设备队列启动时独立Key预取候选的CPU lowering仍在运行，两侧长档计时报告均在该进程挂起前完成。
+已记录进程/时间和范围，样本原样保留，不能据该小差额宣称组合净收益；不将此限制藏入精简证据之外。
+单卡结束后恢复同一CPU进程，未重复提交或冒称它已经停止；模型正式窗口前完成全部CPU编译。
+不额外重复单层，后续既定EP16 forward/P95用于判定模型效果，状态/图重放证据独立有效。
+
+两窗口长档Top-K核内11.882→8.407μs、QR 6.550→6.543；短档Top-K 8.553→9.089、QR 6.741→6.397μs。
+未改Sparse/merge_norm也变化，Native控制长档1310.652→1337.379、短档956.030→928.436μs；不归一化或删样。
+八个DFX均Sparse 24AIC各一份，未复现不等于旧尾部修复。当前仍非新版七档/EP16验收。
+修正Indexer差距文档中的旧分派描述，列出七档当前2/3/6query规则及四路UB根，不将历史V10当当前实现。
+[原始样本、状态、限制与模型准备入口](results/csa_ub_combined_20260928/README.md)。
+
+## 332. 准备长档Score的Key L0B预发，CPU表达继续调整，组合EP16已提交（2026-09-28）
+
+参考ops-transformer b5b33e14 QLIV2Matmul::ProcessQk/LoadKeyToL0b的多槽轮换。
+当前S6生成代码的INT8 Key Right固定L0B地址0，占8KiB；下一面板TMOV要等上一QK释放。
+FP16 WS Right占8192起的48KiB。独立2d2f9ca0候选尝试提前一个N64 Key面板，
+期望2×8KiB+48KiB共64KiB；只在已有长档S6分派启用，其他档位保持旧策略。
+QK/WS形状、量化/归约、cache、任务数和调度标志不变，不是旧页表UB预取的重测。
+
+inline helper无法推断中间GM视图metadata，改为原核内展开；未修改PyPTO。
+统一预发循环的第一版Tile声明在分支内，SSA报153处作用域错误；修正声明后SSA通过，
+但Mat分配638976字节超过524288。保留精简诊断、失败源码及日志，不将容量推导当作CPU通过。
+当前改为独立Key prologue、保持原QK/WS循环结构，尝试避免Mat存活扩大；这项解释和新源码仍待编译确认。
+没有提交候选设备任务或合入生产，不将编译限制标完成。
+
+上述CPU进程均已退出后，提交组合2d2f9ca0真实EP16任务task_20260928_162727_150252329060：
+长短B16，同轮Native/PTO、mode2/atomic0/det0/EPLB关，正式10步decode forward和独立3步profile，
+检查token/DSpark、位置、P95及逐步最慢rank。当前无模型结果；Key新表达的CPU编译留到本任务结束后。
+[Key候选来源/补丁/失败记录](results/csa_score_key_prefetch_20260928/README.md)、
+[组合EP16命令与口径](results/csa_ub_combined_20260928/README.md)。

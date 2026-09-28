@@ -1,8 +1,12 @@
 # CSA Indexer：Native 与 PTO 实现差距
 
-更新：2026-09-28。当前性能版71153bb3在长档S6/M384/N64基础上增加B8范围的三query、
-以及短档按工作量选择S6。两条新分支核内收益和固定规约状态检查已通过，统一源码七档EP16仍待验收。
-[当前分派、实测与边界](results/csa_indexer_adaptive_20260928/README.md)。
+更新：2026-09-28。当前生产性能版2d2f9ca0保留自适应query分组，新增按实际长度分核的
+四路Top-K及UB累计根；QR输入/gamma驻留及尾行修复属于本轮组合，未改变Score算术。
+下面分派表为当前代码；原71153bb3单变量来源见
+[自适应分组实测](results/csa_indexer_adaptive_20260928/README.md)。
+当前组合长短B16单卡八类状态/图重放已通过；长档计时有CPU编译重叠，不据小幅差额判断净收益。
+[组合证据与测量限制](results/csa_ub_combined_20260928/README.md)。
+完整七档/真实EP16仍待本组合测量；已完成模型结果d1f170ff不覆盖新增UB根/QR。
 下文v7/v10章节是历史分析，不能当作当前cache布局、query分组或长尾状态。
 历史基线为性能版 v7（`9516acbe`），Native 为当前 release 的 A3 `arch32` QLI。
 v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/README.md)，
@@ -11,10 +15,23 @@ v7基线量测见[之前七档对照](results/csa_native_cube_matrix_20260927/RE
 
 ## 当前长档改动与剩余差距
 
-压缩历史超过8192行且query数至少96时，当前性能版按一个请求的S6整组复用Key。
-QK为M384/N64、head规约K384/N64，L0A60 KiB、L0B56 KiB、L0C100 KiB。
-较小长档及8K保持双query/M128/N128；条件在算子内，不由测试脚本切换版本。
+压缩历史超过8192行时，query数至少96用S6、至少48用三query，其余用双query。
+短档按最忙worker的query工作量选择S6或双query，分派条件在算子内，不由脚本选择历史版本。
+S6的QK为M384/N64、head规约K384/N64，L0A60 KiB、L0B56 KiB、L0C100 KiB。
 原Native分页cache直接读写，入口Torch拆分和外部写回已消除。
+
+| 七档场景 | 同组query数 | QK M/N | Score每轮候选数 | 跨半leaf Top-K |
+| --- | ---: | --- | ---: | --- |
+| 128K/B4 | 2 | 128/128 | 1024 | 多leaf四路，累计根留UB |
+| 128K/B8 | 3 | 192/128 | 1024 | 多leaf四路，累计根留UB |
+| 128K/B16 | 6 | 384/64 | 1024 | 多leaf四路，累计根留UB |
+| 8K/B16 | 2 | 128/128 | 768 | 单leaf二路 |
+| 8K/B24 | 6 | 384/64 | 768 | 单leaf二路 |
+| 8K/B32 | 2 | 128/128 | 768 | 单leaf二路 |
+| 8K/B40 | 6 | 384/64 | 768 | 单leaf二路 |
+
+表是既定S6输入下的分派结果；实际判断依据最大压缩cache长度与query工作量，尾leaf/有效长度仍动态处理。
+后续优先128K，长短耗时变化率按7:3评价；核内、完整CSA及真实EP16 forward分开记录，P95单列。
 
 | 项目 | Native A3 QLI | 当前PTO长档S6 | 已记录的pypto-lib 2164563 |
 | --- | --- | --- | --- |
@@ -22,7 +39,7 @@ QK为M384/N64、head规约K384/N64，L0A60 KiB、L0B56 KiB、L0C100 KiB。
 | 128K忽略尾块的逻辑Key载荷 | 8 MiB/请求 | 4 MiB/请求 | 24 MiB/请求 |
 | 页布局 | 原生分页 | 原生分页，按页查表/加载 | 连续Key/scale入参 |
 | head加权规约 | FP16片上分数＋Cube WS | 同一路线，组内对角系数一次Cube规约 | 已记录源码使用Vector规约 |
-| Top-K和任务交接 | QLI内流式Top512 | 分数/半leaf候选落GM、独立merge和系数任务 | 半leaf森林、同类GM交接 |
+| Top-K和任务交接 | QLI内流式Top512；最新QLI V2跨片四路归并、累计根留UB | 分数/半leaf候选落GM、独立merge和系数任务；多leaf已四路归并且累计根留UB | 半leaf森林、同类GM交接 |
 
 逻辑字节量不是DDR流量或耗时预测；它解释了为何继续吸收Native的query复用，
 而不是照搬上游连续cache的逐query实现。当前仍有分页寻址、跨任务调度和Top-K交接成本。

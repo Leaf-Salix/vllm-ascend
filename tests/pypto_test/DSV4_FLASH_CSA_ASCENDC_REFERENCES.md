@@ -114,6 +114,13 @@ PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未�
 另外七类状态/保护区/图重放通过，x_out改变算术，误差单列且均有限；不标Native精度通过，不扩测EP16。
 [累计softmax/PV候选与旧实验区别](results/csa_sparse_online_pv_20260928/README.md)。
 
+128K优先的新候选：QLI V2的`ProcessQk/LoadKeyToL0b`按四个16KiB L0B槽轮换，
+当前PTO长档S6的生成代码始终用地址0的8KiB Key Right；下一次TMOV需等待前一QK释放。
+WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key面板，保持S6算术与QK/WS形状。
+双Key+WS的64KiB只是容量推导；初版在SSA修正后仍因Mat分配638976>524288失败。
+已在算子侧将预发放到独立prologue，完整编译待组合EP16结束后再进行；未修改工具链或生产路径。
+[来源、当前补丁和失败证据](results/csa_score_key_prefetch_20260928/README.md)。
+
 ## 3. ops-math的适用边界
 
 - [TopKV2入口](../../../ops-math/math/top_k_v2/op_kernel/top_k_v2_apt.cpp)此次读到的实现引用arch35路径。
@@ -132,7 +139,9 @@ PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未�
 QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要单卡状态/尾块通过，
 组合源码d1f170ff长短B16真实EP16的forward分别比同轮Native快4.03%/4.10%，P95更低，token/DSpark一致；
 [完整模型证据](results/csa_ascendc_topk_hc_ep16_20260928/README.md)不能证明每项独立整网收益，也未完成新版七档。
-下一步先验收新增Top-K UB与QR尾修正版的组合：长短B16单卡，再必要真实EP16，分别计算7:3与P95。
+新增Top-K UB与QR尾修正版组合2d2f9ca0的长短B16状态/图重放通过，
+长档计时有CPU编译重叠，不据微小差额判断净收益；真实EP16已提交，分别看7:3与P95。
+[组合范围、数据限制及任务](results/csa_ub_combined_20260928/README.md)。
 核内研究优先128K的Indexer Score，继续核对QLI V2实际驻留与流水；已有Sparse两项候选结束，不原样重测。
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
