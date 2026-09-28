@@ -3,13 +3,20 @@
 ## 范围与当前结论
 
 本轮先复现完整参考实现及其原始测试，再按完整模块迁移到 Leaf BSH 分支。
-此前局部候选的结果不能代表完整参考实现。当前已完成独立环境构建、完整 kernel CPU 编译及原版单层 graph 预检。
-单层输出对Native有误差，该档没有提速；七档整模型复现和模块迁移尚未完成。
+截至2026-09-29，完整BSH计算集合已在561492fa5迁移，原生生产接入固定393134f1d。
+之前只迁移部分优化、融合边界不同，不能称为完整对齐；当时局部结果也不能代表参考整网收益。
 
-参考完整性能 kernel 融合 HC pre、input norm、CSA 与 HC post，输入输出包含 mHC 残差流。
-现有 Leaf DSA 入口处理已经归一化的 attention 输入，融合边界不同。
-后续完整模块迁移需要保留原生 DecoderLayer 的外部签名和返回值，并明确内部融合边界；
-不能只移植若干 tile 常量后宣称对齐。
+| 最新已核验项目 | 结论 |
+|---|---|
+| 完整融合边界 | HC pre、input norm、CSA、HC post；保留Native Decoder外部签名、返回值和FFN |
+| 与冻结参考的数值对齐 | 共同历史8K/128K保存的rank0 tensor逐字节一致；8K整模型graph的16rank×2步hidden/logits也逐字节一致 |
+| 七档整模型forward耗时 | 下降1.66%～4.94%；参考独立复现下降1.85%～6.02%。各档仅单轮，不宣称统计稳定性 |
+| C4区间trace | 下降9.27%～21.41%，包含HC pre至HC post |
+| 与Native精度 | 未实现零误差；本轮整模型graph logits相对L2为9.44%～31.71%，Leaf与参考相同 |
+| 适配处理 | 不保留独立CSAServiceRuntime/NativeCSACall链；内部metadata、零拷贝view与参数绑定仍存在 |
+
+本轮参考配置EPLB关闭，性能为model forward设备时间，不是端到端吞吐。
+下面按时间保留所有原始阶段、失败和当时结论；“尚未完成”等字样描述对应历史时点。
 
 ## 固定版本
 
@@ -464,3 +471,52 @@ compact producer复算得到的非负页仅为0；这些是寻址证据，不是
 观测/恢复CPU回归通过，独立review无阻断；已补生成异常时finally关闭窗口并保存诊断。
 本轮含CPU同步和metadata复算，耗时不纳入性能报告。证据为`padding-summary.json`、
 `padding-evidence-manifest.json`、`results/padding-v1/`和`results/single-padding-v1/`。
+
+## 2026-09-29 第六阶段：完整模型graph输出与logits
+
+生产Leaf固定393134f1d，完整参考固定71153bb3，环境沿用本报告固定工具链。
+任务`task_20260929_010959_12508009643`正常结束，exit0。
+8K bank、B4/S6、TP1/DP=EP16、DSpark5、EPLB关闭，FULL_DECODE_ONLY，capture24，预算256。
+预热一轮64token，实测每请求96token；每rank跳过8个均匀S6步骤后保存第8/9步。
+三组为同一Leaf源码关闭CSA、Leaf开启CSA、冻结参考开启CSA，独立生成轨迹。
+
+每组16rank全部完成。PTO两组逐rank核验固定21个C4层确实捕获CSA。
+每个样本实际FULL、恰好一次model forward和一次logits调用，窗口内无新图捕获；
+CPU拷贝在真实graph调用返回后进行，因此本轮不用于性能结论。
+保存全部rank原始hidden、辅助输出、logits输入、logits、input ids、positions及logits indices。
+核验文件SHA、rank与采样步号、query长度[6,6,6,6]、padding24，以及
+logits输入确实是按原生indices选取的model output。三组对应输入与位置全部相同。
+
+| 比较（各32个采样） | hidden及所有保存tensor逐位一致 | logits相对L2范围 | 完整生成token一致 |
+|---|---|---|---|
+| Leaf vs 冻结参考 | 32/32，0字节差异 | 0 | 是 |
+| Leaf vs Native | 否 | 9.4398%～31.7068% | 是 |
+| 冻结参考 vs Native | 否 | 9.4398%～31.7068% | 是 |
+
+这是独立轨迹下的完整模型观测，不能将logits误差归因到某一层。
+model output（含保存的辅助输出）的最大relative L2为57.0428%；
+所有保存浮点值均有限，没有NaN/Inf。不能因token一致宣称Native精度达标。
+本项证明本配置下Leaf复现参考，不证明参考本身达到“只差几个bit”。
+尚未覆盖128K整模型graph数值、全部batch、EPLB开启或长期请求分布。
+
+前一轮`task_20260929_005648_86404932576`exit1：测试驱动graph分支结束后误落入swimlane分支，
+报GraphNPUWorker没有offline_begin_swimlane。Native虽已采样，但该轮不计通过。
+新harness-v5补保存结果后return，成功/异常路径CPU回归通过，另存新结果目录后完整重跑三组。
+比较器另补非有限值门禁：hidden必须全有限，logits拒绝NaN/+Inf；如有词表mask的-Inf，
+须每行存在有限候选并单独计数。本轮实际非有限总数为0，10项反例回归通过。
+
+证据在工作区`reports/dsv4-full-layer-integration-20260928/results/graph-numerics-v2/`，
+全部96个原始tensor文件已备份本地，`comparison.json`保留每个样本的指标；
+`graph-numerics-evidence-manifest.json`保存逐文件SHA。失败v1日志、v3/v5脚本及manifest均保留。
+
+## 延迟入场测试：正常运行，但未覆盖混合query
+
+任务`task_20260929_011418_13482408511`exit0，独立harness-v4，生产仍393134f1d。
+8K、B4、S6、16rank，每rank先提交2请求，收到未结束的输出后通过原生enqueue再提交2请求。
+测试层仅将输出交付模式改为CUMULATIVE，以触发延迟入场；未修改生产scheduler或metadata。
+Native和Leaf各完成64请求、8192输出token，实际FULL步骤各432、初始NONE步骤各16，
+dummy各576，窗口内新增graph为0。
+
+实际记录只有均匀S1/S6 batch，没有不同query长度混在同一batch。因此此轮证明延迟入场能完成，
+不能作为真实混合query自动回退验收。该覆盖项继续列为未验证，不用强制回退单测替代它。
+全部rank结果及日志已备份，见`mixed-query-summary.json`和`mixed-query-evidence-manifest.json`。
