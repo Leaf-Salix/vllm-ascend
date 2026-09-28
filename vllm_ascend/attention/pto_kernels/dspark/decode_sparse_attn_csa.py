@@ -322,6 +322,16 @@ def sparse_attn_csa(
                                     )
                                     pv_cmp_out = pl.matmul(pv_cmp_prob, pv_cmp_kv, out_dtype=pl.FP32)
                                     pl.store(pv_cmp_out, [pv_transfer_row, pv_col], pv_transfer)
+                                    # 每凑满半个 HEAD_DIM 就发布一次。merge 本来就按
+                                    # 左右两个半区读 pv_transfer，所以它的 left 半区
+                                    # 不必再等 right 半区算完。这四个 pass 是 N 切分、
+                                    # 每个都是完整 K=512（12.73），所以任何输出列的
+                                    # 归约顺序都没变，数值上是恒等的。
+                                    if pv_col + PV_N_TILE == HEAD_DIM // 2:
+                                        pl.system.sync_set(
+                                            QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
+                                            ffts_mode=2, core_type=pl.KernelType.AIC,
+                                        )
                             # Blocks 2..4 contribute nothing; the AIV zeroed
                             # their PV slots, so only the event is raised here.
                         pl.system.sync_set(
@@ -598,6 +608,13 @@ def sparse_attn_csa(
                             target_memory=pl.MemorySpace.Vec,
                         )
                         next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pv_left)
+                        # 压缩块的 PV 现在分两次发布（左半区 / 右半区），
+                        # 所以这里要把第二次收掉，旗标计数才配平。
+                        if pv_sb == WIN_BLOCKS:
+                            pl.system.sync_wait(
+                                QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2,
+                                core_type=pl.KernelType.AIV,
+                            )
                         pv_right = pl.load(
                             pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2],
                             target_memory=pl.MemorySpace.Vec,
