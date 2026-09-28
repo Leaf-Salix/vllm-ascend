@@ -77,19 +77,15 @@ VLLM_STATE_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_MAIN_STATE_TABLE_DYN")
 VLLM_CMP_TABLE_BLOCKS_DYN = pl.dynamic("VLLM_CSA_CMP_TABLE_DYN")
 
 # tiling
-# native 的 mm1 走 NORMAL 模板（compressor_block_cube_perf.h），K_L1_BASE = 256，
-# 每个输出列块从不同的 K 块起步并绕回：hIdx = (h + k + hIdxStart) % hSize，
-# hIdxStart = (aiCoreIdx % dBasicBlockNum) * K_L1_BASE。K_TILE 必须等于 256，
-# OUT_TILE 必须等于 dBaseSize，否则一个 tile 里的列会共用错误的移位量。
-K_TILE = 256
-CMP_DBASE = 32  # native 的 dBaseSize：等长 batch 且 token 数够小时走 32
-CMP_DBASE_WIDE = 64  # 其余情况走 64
-# mBaseSize * (aicNum / dBaseBlockNum) = 128 * (24 / 8)
-CMP_SAME_SEQ_MAX_TOKENS = 384
-OUT_TILE = CMP_DBASE
-# OUT_TILE 降到 32 之后工作单元翻倍，每个单元都要重读整块 x；把 M 也降到 32
-# 让 x 的流量回到原来的 8 MB，同时 24 个有效 token 的 padding 浪费从 62% 降到 25%。
-MM_B_TILE = 32
+# 性能分支：不再复刻 native 的 hIdxStart 循环移位（精度分支那一套是
+# K_TILE=256 / OUT_TILE=CMP_DBASE=32 / MM_B_TILE=32 + 逐输出列的 K 起点旋转）。
+# 移位只改归约顺序、不改求和的 K 块集合，所以去掉它换来的是：K 迭代数
+# D/K_TILE 从 16 降到 8，工作单元数按 OUT_TILE/MM_B_TILE 缩小，并且 vLLM 路径上
+# 那个逐 request 算 len_dev 判等长的标量循环整个消失。
+# decode_indexer_compressor.py 本来就是 K_TILE=512 / OUT_TILE=64 且没有移位。
+K_TILE = 512
+OUT_TILE = 64
+MM_B_TILE = 64
 KV_SCORE_WORKERS = 24  # KV-score projection workers
 POOL_WORKERS = 48  # Pool workers
 COMMIT_WORKERS = 48
@@ -128,13 +124,8 @@ def compressor_ratio4_project(
             x_rows = pl.min(MM_B_TILE, bs - global_row0)
             kv_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
             score_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
-            # 输出列块 o0 的 K 遍历从第 rot 个块起步、绕回，复刻 native 的
-            # hIdxStart 循环移位。rot 和输出列绑定：rot = (c mod headDim) / dBaseSize。
-            cmp_rot = (o0 % HEAD_DIM) // CMP_DBASE
             for kb in pl.pipeline(0, D // K_TILE, stage=2):
-                kr = kb + cmp_rot
-                kr = kr - (D // K_TILE) * (kr // (D // K_TILE))
-                k0 = kr * K_TILE
+                k0 = kb * K_TILE
                 x_tile = pl.slice(x_flat, [MM_B_TILE, K_TILE], [global_row0, k0], valid_shape=[x_rows, K_TILE])
                 # Transposed [OUT_DIM, D] projection weights.
                 wkv_tile = wkv[o0 : o0 + OUT_TILE, k0 : k0 + K_TILE]
@@ -144,7 +135,7 @@ def compressor_ratio4_project(
                 # mad writes at pitch ceil(validRow/16)*16 while a create_tensor
                 # accumulator is read back at 64. Only pl.matmul stamps the
                 # accumulator compact, so dropping it fails AccCompactValid.
-                if kb == 0:  # 移位后第一次迭代不再是 k0 == 0
+                if kb == 0:
                     kv_acc = pl.matmul(x_tile, wkv_tile, out_dtype=pl.FP32, b_trans=True)
                     score_acc = pl.matmul(x_tile, wgate_tile, out_dtype=pl.FP32, b_trans=True)
                 else:
@@ -186,32 +177,16 @@ def compressor_ratio4_project_vllm(
         # （compressor_kernel_perf.h:302-320）。等长性必须在设备侧判：host 标量会被
         # 烤进捕获图，而同样 token 数的两个 batch 可以在等长性上不同。用长度偏差的
         # 平方和判等长，避免在 pl.range 里写带 if 的标量赋值。
-        req_count = pl.tensor.dim(query_start_loc, 0) - 1
-        first_len = pl.read(query_start_loc, [1]) - pl.read(query_start_loc, [0])
-        len_dev = pl.cast(0, pl.INT32)
-        for r in pl.range(1, req_count):
-            r_len = pl.read(query_start_loc, [r + 1]) - pl.read(query_start_loc, [r])
-            len_dev = len_dev + (r_len - first_len) * (r_len - first_len)
-        cmp_dbase = CMP_DBASE_WIDE
-        if len_dev == 0 and bs <= CMP_SAME_SEQ_MAX_TOKENS:
-            cmp_dbase = CMP_DBASE
         for idx in pl.range(kv_worker, t_matmul * OUT_DIM // (MM_B_TILE * OUT_TILE), KV_SCORE_WORKERS):
             global_row0 = (idx // (OUT_DIM // OUT_TILE)) * MM_B_TILE
             o0 = (idx % (OUT_DIM // OUT_TILE)) * OUT_TILE
             x_rows = pl.min(MM_B_TILE, bs - global_row0)
             kv_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
             score_acc = pl.create_tensor([MM_B_TILE, OUT_TILE], dtype=pl.FP32)
-            # 输出列块 o0 的 K 遍历从第 rot 个块起步、绕回，复刻 native 的
-            # hIdxStart 循环移位。rot 和输出列绑定：rot = (c mod headDim) / dBaseSize。
-            cmp_rot = (o0 % HEAD_DIM) // cmp_dbase
-            # K_TILE / OUT_TILE 减半后这个循环有 5 个 pipeline group 抢同一块
-            # 空间，编译器报 PH-MR-001：depth 2 只装得下 1 个 buffer、相邻 stage
-            # 共用存储而串行化。既然双缓冲拿不到就别申请。流水深度不改变累加顺序
-            # （stage=2 换成 pl.range 实测逐位相同）。
+            # 流水深度不改变累加顺序（stage=2 换成 pl.range 实测逐位相同）；
+            # tile 变大之后 depth 2 未必装得下，若 PH-MR-001 再报就降到 1。
             for kb in pl.pipeline(0, D // K_TILE, stage=1):
-                kr = kb + cmp_rot
-                kr = kr - (D // K_TILE) * (kr // (D // K_TILE))
-                k0 = kr * K_TILE
+                k0 = kb * K_TILE
                 x_tile = pl.slice(x_flat, [MM_B_TILE, K_TILE], [global_row0, k0], valid_shape=[x_rows, K_TILE])
                 # Transposed [OUT_DIM, D] projection weights.
                 wkv_tile = wkv[o0 : o0 + OUT_TILE, k0 : k0 + K_TILE]
@@ -221,7 +196,7 @@ def compressor_ratio4_project_vllm(
                 # mad writes at pitch ceil(validRow/16)*16 while a create_tensor
                 # accumulator is read back at 64. Only pl.matmul stamps the
                 # accumulator compact, so dropping it fails AccCompactValid.
-                if kb == 0:  # 移位后第一次迭代不再是 k0 == 0
+                if kb == 0:
                     kv_acc = pl.matmul(x_tile, wkv_tile, out_dtype=pl.FP32, b_trans=True)
                     score_acc = pl.matmul(x_tile, wgate_tile, out_dtype=pl.FP32, b_trans=True)
                 else:
