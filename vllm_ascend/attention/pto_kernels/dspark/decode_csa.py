@@ -106,6 +106,8 @@ INNER_OUT_DIM = COFF * IDX_HEAD_DIM
 
 # tiling
 TP1_CSA_WB_WORKERS = 8  # TP1 CSA cache-write workers
+ROPE_CS_T_TILE = min(T, 8)  # rope sin/swap row block
+ROPE_CS_WORKERS = 16
 VLLM_KV_PAGE_ROWS = 128
 VLLM_COMPRESS_STATE_PAGE_ROWS = 16
 VLLM_COMPRESS_STATE_LIVE_ROWS = 8
@@ -266,28 +268,63 @@ def _decode_csa_attn_tp1(
     idx_sin_signed = pl.create_tensor(
         [t_dim, ROPE_HEAD_DIM], dtype=pl.FP32,
     )
-    with pl.at(
-        level=pl.Level.CORE_GROUP, name_hint="csa_vllm_rope_interleave",
-    ) as rope_tid:
-        ones = pl.full([1, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
-        columns = pl.col_expand_mul(
-            ones,
+    # The sin fold and the lane-swap index are per-token vector work with no
+    # dependency on the scalar plan below, but they used to share its single
+    # CORE_GROUP task and ran one row at a time -- t_dim single-row gathers,
+    # with the whole layer waiting on the result. Upstream pypto-lib split the
+    # same work into a token-blocked spmd in e68e091 (the `rope_cs` task in
+    # models/deepseek_v4_flash_dspark/decode_sparse_attn_csa.py); this follows
+    # it. Same expressions and same multiply order, so it is bit-identical.
+    rope_cs_blocks = (t_dim + ROPE_CS_T_TILE - 1) // ROPE_CS_T_TILE
+    rope_cs_workers = pl.min(rope_cs_blocks, ROPE_CS_WORKERS)
+    with pl.spmd(
+        rope_cs_workers,
+        name_hint="csa_vllm_rope_cs",
+        allow_early_resolve=True,
+    ) as rope_cs_tid:
+        cs_ones = pl.tile.full(
+            [ROPE_CS_T_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0,
+        )
+        cs_col = pl.col_expand_mul(
+            cs_ones,
             pl.cast(
-                pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32),
+                pl.tile.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32),
                 target_type=pl.FP32,
             ),
         )
-        duplicate = pl.cast(
-            pl.cast(
-                pl.mul(columns, 0.5), target_type=pl.INT32, mode="trunc",
-            ),
+        cs_dup_f = pl.cast(
+            pl.cast(pl.mul(cs_col, 0.5), target_type=pl.INT32, mode="trunc"),
             target_type=pl.FP32,
         )
-        lane = pl.sub(columns, pl.mul(duplicate, 2.0))
-        sign = pl.sub(pl.mul(lane, 2.0), 1.0)
-        swap = pl.cast(
-            pl.sub(pl.add(columns, 1.0), pl.mul(lane, 2.0)), pl.INT32,
+        cs_lane = pl.sub(cs_col, pl.mul(cs_dup_f, 2.0))
+        cs_sign = pl.sub(pl.mul(cs_lane, 2.0), 1.0)
+        cs_swap = pl.cast(
+            pl.sub(pl.add(cs_col, 1.0), pl.mul(cs_lane, 2.0)), pl.INT32,
         )
+        for cs_block in pl.range(
+            pl.tile.get_block_idx(), rope_cs_blocks, rope_cs_workers,
+        ):
+            cs_t0 = cs_block * ROPE_CS_T_TILE
+            cs_rows = pl.min(ROPE_CS_T_TILE, t_dim - cs_t0)
+            cs_sin = pl.load(
+                freqs_sin, [cs_t0, 0], [ROPE_CS_T_TILE, ROPE_HEAD_DIM],
+                valid_shape=[cs_rows, ROPE_HEAD_DIM],
+                target_memory=pl.MemorySpace.Vec,
+            )
+            pl.store(
+                pl.set_validshape(
+                    pl.mul(cs_sin, cs_sign), cs_rows, ROPE_HEAD_DIM,
+                ),
+                [cs_t0, 0], idx_sin_signed,
+            )
+            pl.store(
+                pl.set_validshape(cs_swap, cs_rows, ROPE_HEAD_DIM),
+                [cs_t0, 0], rope_swap_idx,
+            )
+
+    with pl.at(
+        level=pl.Level.CORE_GROUP, name_hint="csa_vllm_rope_interleave",
+    ) as rope_tid:
         # Native compact rows are grouped by request, not by absolute position.
         cmp_prefix = 0
         idx_prefix = 0
@@ -316,8 +353,6 @@ def _decode_csa_attn_tp1(
                 active_position = position
             pl.write(token_valid, [token], pl.cast(valid, pl.INT32))
             pl.write(positions_i32, [token], pl.cast(active_position, pl.INT32))
-            idx_sin_signed[token : token + 1, :] = pl.mul(freqs_sin[token : token + 1, :], sign)
-            rope_swap_idx[token : token + 1, :] = swap
         # TND request ownership comes from vLLM's native cumulative query
         # bounds. Empty padded requests naturally write no rows.
         for request in pl.range(b_dim):
@@ -334,7 +369,7 @@ def _decode_csa_attn_tp1(
     topk_indices = pl.create_tensor([t_dim, IDX_TOPK], dtype=pl.INT32)
     indexer_topk_indices_out = pl.reshape(topk_indices, [t_dim, IDX_TOPK])
     position_ids_2d = pl.reshape(positions_i32, [t_dim, 1])
-    late_dep = pl.system.task_dummy(deps=[rope_tid])
+    late_dep = pl.system.task_dummy(deps=[rope_tid, rope_cs_tid])
     q_proj_rope(
         x_normed,
         wq_a,
