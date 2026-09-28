@@ -78,6 +78,12 @@ PTO Score AIC/AIV383.890/412.053、独立merge14.260μs。AIC已较接近参考�
 短档算法未变但Score核时上升、启动分散与包络下降，等待和核分派必须分别解释。
 [当前保留代码与四窗口证据](results/csa_stream_root_ub_20260929/README.md)。
 
+c93ec723长B24近期组合补测完成：相对3b27c7fd，Score AIC383.660→349.409、
+AIV411.575→366.048、merge16.852→13.960μs；真实编译CSA1376.883→1312.313μs（−4.690%）。
+同配置Native半层1396.274μs，QLI profile的PMU AIC/AIV参考369.919/369.524μs；
+PTO Score已接近此参考，但有独立merge且计量范围不同，不据此计算严格的整个Indexer加速比。
+八类跨版本状态、图和保护区通过；[完整B24证据](results/csa_b24_integrated_20260929/RESULTS.md)。
+
 具体代码分工与待办见[Indexer差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
 
 ## Sparse attention
@@ -123,13 +129,14 @@ O_A/O_B在该档各64份任务，24个AIC需要多波；77μs级O_A启动分散�
 
 ## 已保留策略及下一步
 
-1. 保留已验证的长2/3/6 query Key复用、长档Key独立L1预取、B16均衡leaf、2560/3072局部排序、四路Top-K及UB根。
+1. 保留已验证的长B≥4 S6、B<4双query Key复用、长档Key独立L1预取、均衡leaf、2560/3072局部排序、四路Top-K及UB根。
    [均衡与排序](results/csa_score_balanced_sort_20260928/README.md)、[Key预取](results/csa_score_key_l1_20260928/README.md)。
 2. 保留HC输入/RMS融合、QR输入/gamma驻留、QR/KV按行数分组及免冗余seed、KV K512；精度版新增移植尚未完成。
 3. [WO_A NZ三档集成](results/csa_wo_a_native_nz_20260928/README.md)已通过原地址、八类状态、核时及CSA/P95，
    N128、N256及112行尾块均覆盖，保留现有修正，不重复全矩阵。
-4. 随后按最新AscendC A3路径研究长档Score的L1 query/key跨M面板复用、2048候选流式Top-K。
-   先写出生成指令/缓冲/等待的实质差异，再做一个可区分原因的候选；不重复旧4+2分组或完整4096 Score UB驻留。
+4. 跨query Key复用、2048排序和UB中间根已保留；当前继续检查长档AIV接收、scale与排序的搬运/等待。
+   Native按query分AIV、PTO按候选分AIV的差异已补入Indexer文档，取舍需同时考虑scale复用与根数量。
+   先写出生成指令/缓冲/等待的实质差异，再做单因素候选；不重复旧4+2分组或完整4096 Score UB驻留。
 5. 有核内收益且必要功能检查通过即保留，完整CSA及P95单列；再对受影响档位补测。核内阶段后优化CSA关键依赖和派发。
    已否定的短Score sync_start、Qproj整组启动、O_A重排等不无依据重试。
 6. 先128K/B16与8K/B24，补受影响128K/B24，长短收益按8:2；阶段出口覆盖新七档。当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。

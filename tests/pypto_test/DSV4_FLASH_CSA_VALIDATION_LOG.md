@@ -10408,3 +10408,32 @@ B4更多leaf的归并核时5.669→7.454μs；B8归并12.760→11.929μs；短�
 按用户核内收益及8:2规则合入性能版，生产/测试根解析通过；精度版未迁移。
 这不覆盖§376真实编译入口的间歇长尾，也不代表新七档或EP16 token/DSpark验收；长B24仍待覆盖。
 [三档完整结果与泳道路径](results/csa_small_long_s6_20260929/RESULTS.md)。
+
+## 378. 长B24近期组合：状态通过，真实编译CSA低于Native 6.013%（2026-09-29）
+
+共同依赖c93ec723冻结整包，旧PTO仅将decode_indexer回到3b27c7fd，当前PTO为c93ec723。
+比较近期2048排序/UB根组合的长B24覆盖，不混入尚在实验的矩阵scale候选。
+两根解析、完整CPU编译/load通过；CANN9.2/mode2/det0、PTO atomic0，ring沿用已验证B24配置。
+实际编译半层走生产custom-op及服务适配，Native走可追踪半层；每侧独立可写OPP和AOT缓存。
+
+首轮task_20260929_023737_351388018732在PTO候选阶段exit=1：vLLM AOT加载不设wrapper.compiled，
+测试误判了成功的缓存命中。修正为同时记录fresh compile与was_aot_compile_fn_loaded_from_disk，
+并隔离VLLM_CACHE_ROOT；没有修改生产vLLM或共享缓存。
+第二轮task_20260929_024354_36935528666在同一卡完成三侧计时，随后因图/泳道CLI互斥exit=2。
+已分开独立采集，task_20260929_025117_388714826078补两侧泳道与候选A→B→A，exit=0；未重跑成功计时。
+
+| 实现 | CSA均值μs | P95μs | 最大值μs |
+| --- | ---: | ---: | ---: |
+| 旧PTO（3b27c7fd Indexer） | 1376.883 | 1393.240 | 1397.460 |
+| Native实际编译 | 1396.274 | 1403.260 | 1404.520 |
+| 当前PTO（c93ec723） | 1312.313 | 1337.940 | 1348.820 |
+
+当前PTO相对旧PTO−4.690%、相对同配置Native−6.013%。每侧5预热/20次无profiler计时；
+独立四窗口DFX的Score AIC383.660→349.409、AIV411.575→366.048、merge16.852→13.960μs。
+Native QLI独立profile Duration382.500、PMU AIC/AIV369.919/369.524μs；边界不同且PTO另有merge，
+不把Score均值直接当成整个Indexer严格加速比，也不与无profiler时长相减归因调度。
+
+八类跨版本状态精确一致，当前图重放/A→B→A、31项metadata/保护区通过，P95和max均下降。
+Native det0的编译/eager浮点和Top-K差异单列；未作两侧精度或EP16 token/DSpark验收。
+当前组合的长B24缺口已补；不把此局部对照拼成同轮七档，也不关闭§376间歇长尾。
+[完整证据、Native热点和泳道路径](results/csa_b24_integrated_20260929/RESULTS.md)。
