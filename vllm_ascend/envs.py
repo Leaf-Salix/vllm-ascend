@@ -31,6 +31,9 @@ env_variables: dict[str, Callable[[], Any]] = {
     # Opt-in PyPTO CSA decode for the supported single-card DSV4 path.
     # 0: native attention (default); 1: attempt the supported CSA adapter.
     "VLLM_ASCEND_PYPTO_DSV4_CSA": lambda: bool(int(os.getenv("VLLM_ASCEND_PYPTO_DSV4_CSA", "0"))),
+    # Complete BSH CSA reduction: 0 uses one K partition; 1 uses atomic add.
+    # Default 1 matches the reference; set before importing kernels. Not secret.
+    "VLLM_ASCEND_PTO_CSA_ATOMIC_ADD": lambda: int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", "1")),
     # max compile thread number for package building. Usually, it is set to
     # the number of CPU cores. If not set, the default value is None, which
     # means all number of CPU cores will be used.

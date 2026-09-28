@@ -237,3 +237,41 @@ BF16 ULP指标也有明显大于几个ULP的项，不能将本次结果概括为
 
 本地证据目录`reports/dsv4-reference-all-layer-precision-20260928`保存测试扩展、源码身份、
 32份rank结果、日志及rank0的84份配对张量；服务器原件保留。Leaf生产实现尚未迁移。
+
+## 22:20 第一阶段迁移：完整 BSH 计算集合
+
+在Leaf `e4fea8891`基线上增加`attention/pto_kernels/dspark_layer`，包含16个计算依赖模块，
+来自冻结参考`71153bb3`的performance实现及其共享HC/Q投影/规约/NZ模块。
+`SOURCE.json`保存每个原始文件SHA256与来源。除了包内导入重定向、导入排序与格式外，
+计算AST一致，相对导入闭合；共享config对被引用常量的值不变。独立审查无静态阻断。
+新增中央env `VLLM_ASCEND_PTO_CSA_ATOMIC_ADD`，默认1与参考相同；本次显式0。
+内部完整kernel共56个tensor参数；本阶段尚未修改模型forward、旧DSA派发或生产初始化。
+
+同一设备顺序运行原参考和迁入kernel，保留参考host权重/metadata/cache绑定及原始单层测试。
+B4/S6、H8192、真实第2层权重、seed1024、合成hidden/history、NZ2/atomic0、deterministic0，
+graph计时各20次、预热5次，metadata复用口径。环境同前述固定参考工具链。
+
+| 指标 | 原版完整kernel | 迁入完整kernel |
+| --- | ---: | ---: |
+| 对应Native graph p50(μs) | 578.70 | 541.61 |
+| PTO graph p50(μs) | 570.74 | 564.80 |
+| 相对Native融合输出relative L2 | 0.195028% | 0.195028% |
+| 相对Native输出不同元素 | 96,880/393,216 | 96,880/393,216 |
+| graph A/B/A及保护区检查 | 通过 | 通过 |
+
+额外直接加载两份`states.pt`逐字节对比：两轮Native的8组状态完全一致，
+两轮PTO的8组状态也完全一致，包括最终输出、TopK及六个cache/state视图。
+这支持本用例中完整计算集合迁入未改变结果；不是说PTO与Native逐位一致。
+PTO p50相差约1.04%，但Native两轮本身变化约6.41%，不能认定为新的优化收益。
+本次没有修改算术或调度策略，不把单层计时替代此前整模型七档性能。
+
+首轮候选在运行前因诊断脚本过早导入PyPTO，被原始环境来源检查拒绝；
+修复为先执行原activate，再加载候选，没有绕过检查。
+第二次提交因等待设备默认600秒超时被调度器取消，无候选执行。
+第三次改为提交后轮询，最终exit0。原失败日志与成功原始张量均已备份。
+仓库新增`tests/pto_attn/run_full_layer_reference.py`提供可复用入口，
+`test_full_layer_reference_harness.py`两项CPU回归通过，验证环境拒绝时不加载候选及正确加载时序。
+
+当前范围：完整计算模块已迁入并通过上述迁移对拍，**Leaf生产模型入口尚未切换**。
+后续必须接入原生attention半层、加载后初始化、graph准入与真正Native回退，
+然后重新完成全层数值及同口径七档性能验证。不能将本阶段写成完整服务迁移已完成。
