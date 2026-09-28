@@ -115,7 +115,10 @@ Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因
    [实测及诊断](results/csa_coefficient_active_workers_20260929/README.md)。
    后续[按组批量准备](results/csa_coefficient_group_20260929/README.md)已保留真实系数核内收益，
    同样16/24个有效worker，长短均值分别4.579→3.318、4.559→3.165μs。
-   下一项检查UB构造完整对角块并一次写回；双query及其他受影响档位在阶段出口验证。
+   [UB构造后一次发布](results/csa_coefficient_publish_20260929/README.md)也按核内收益保留：
+   长短系数核时3.415→2.534、3.394→2.156μs，S6 TSTORE 7→1、新增6次TMOV。
+   CSA−0.543%/+1.453%，8:2仅−0.143%；P95两档略升，不记作明显CSA或尾部优化。
+   双query及其他受影响档位在阶段出口验证，精度版尚未迁移。
 2. Score多数窗口已提前派发。长B16有些窗口最后等待系数，有些等待idx_kv_scale_commit；
    分开记录生产者end→FIN、FIN→派发和派发→开始，不将时序相关性称为资源阻塞因果。
    原cache的scale写回涉及64字节读改写，没有页面所有权证明前不得直接并行或删除依赖。

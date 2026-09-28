@@ -1,0 +1,27 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -603,7 +603,6 @@
+             coefficient_rows = pl.tile.full(
+                 [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16, value=0.0
+             )
+-            pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
+             # Native ProcessVec0 loads and multiplies the complete S1 group.
+             # Keep the original FP16 rounding order and diagonal publication.
+             coefficient_begin = coefficient_pair * query_group_size
+@@ -618,11 +617,12 @@
+                 head_coefficient = pl.tile.extract(
+                     head_coefficients, coefficient_lane, 0, [1, IDX_N_HEADS], target_memory=pl.MemorySpace.Vec
+                 )
+-                pl.store(
+-                    head_coefficient,
+-                    [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane, coefficient_lane * IDX_N_HEADS],
+-                    coefficients,
++                coefficient_rows = pl.tile.assemble(
++                    coefficient_rows, head_coefficient, [coefficient_lane, coefficient_lane * IDX_N_HEADS]
+                 )
++            # Keep the complete zero-padded diagonal block in UB, then publish it
++            # once, like Native ProcessVec0's UB layout followed by one CopyOut.
++            pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
+     return coefficients, coefficients_tid
+ 
+ 

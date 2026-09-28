@@ -38,7 +38,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | query/Key复用 | L1 query最多256行，L0按128行M面板；同一Key L1面板跨M子块复用 | 长B≥4用S6 M384/N64；更小长档保留双query | 长B4/B8 S6已取得明显核时收益；分组相似仍不等于L1/L0流水相同，旧4+2拼接退化不重试 |
 | Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24固定组跨leaf驻留已测，AIC约+3.72%、AIV持平；当前候选不采用，不能把少读字节直接当收益 |
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为76.619/135.495μs，后续按当前核时继续看等待与重复move |
-| 系数生成 | ProcessVec0在QLI内由偶数AIV成块加载FP16 weight/qScale，相乘、Brcb后GM交接 | 独立SPMD成块加载FP32输入，分别转FP16相乘后逐行写对角块；提交min(48,query组数)，stride48不变 | 空worker与批量准备已保留；直接融合失败，下一步检查UB构造后一次写回；Native QLI不含Query Hadamard量化 |
+| 系数生成 | ProcessVec0在QLI内由偶数AIV成块加载FP16 weight/qScale，相乘、Brcb后GM交接 | 独立SPMD成块加载FP32输入，分别转FP16相乘；在UB补入对角行后一次GM写回，提交min(48,query组数)，stride48不变 | 空worker、批量准备和UB一次发布已保留；独立任务/转换/对角布局开销仍在，朴素融合失败；Native QLI不含Query Hadamard量化 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
 | Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | PTO每leaf有两个half根；改成query分工可能减少根归并，但会增加scale重复读取，未验证前不能判收益 |
@@ -67,6 +67,9 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
    [实测、历史区别和诊断](results/csa_coefficient_active_workers_20260929/README.md)。
    后续按组加载/乘法已保留，长B16/短B24系数核时4.579→3.318、4.559→3.165μs，
    CSA 8:2−0.887%；短档CSA/P95回退仍记录。[本轮证据](results/csa_coefficient_group_20260929/README.md)。
+   再保留UB构造后一次发布，长短系数核时−25.798%/−36.454%；
+   CSA−0.543%/+1.453%，8:2仅−0.143%，P95两档略升，按核内收益采用。
+   [一次发布与分项](results/csa_coefficient_publish_20260929/README.md)。
 3. 按现有level-4数据分别解释系数/scale依赖。Score已有early派发不能写成一直等待AICPU，
    cache scale的64字节读改写也不能在未证明页面所有权时直接并行。
    后续研究独立归并、AIV数据交接及关键链，保持长短8:2；明显顾此失彼时在同一算子内分场景。
@@ -78,7 +81,8 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 去除4个dummy也只有约0.1%的加权CSA差异，未合入；不继续原样扩测。
 系数融合进Score已测，长B16/短B24 CSA分别+2.772%/+0.778%，8:2为+2.373%，未合入。
 长档Score提前19.220μs启动，但系数从每组一次变为每leaf一次，核时增加。
-后续Native式批量读入/乘法已用于独立系数任务，下一步检查UB一次发布，再考虑融合；
+后续Native式批量读入/乘法及UB一次发布已用于独立系数任务；再次融合仍须解决每leaf重复构造，
+不能直接复用先前失败版本；
 [结果、Native/pypto-lib差异及泳道](results/csa_coefficient_fused_20260929/README.md)。
 
 ## 有效证据与排除方向

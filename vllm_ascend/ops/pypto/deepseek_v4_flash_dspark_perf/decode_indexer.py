@@ -600,10 +600,11 @@ def indexer_head_coefficients(
         coefficient_worker = pl.tile.get_block_idx()
         coefficient_count = pl.tensor.dim(position_ids, 0)
         for coefficient_pair in pl.range(coefficient_worker, coefficient_count // query_group_size, TOPK_QUERY_WORKERS):
+            # Equal-width UB rows avoid A3's partial-column TMOV restriction.
+            # Block row lane*(group+1) is the original diagonal [lane, lane*64].
             coefficient_rows = pl.tile.full(
-                [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16, value=0.0
+                [NATIVE_QLI_WEIGHT_ROWS * query_group_size, IDX_N_HEADS], dtype=pl.FP16, value=0.0
             )
-            pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
             # Native ProcessVec0 loads and multiplies the complete S1 group.
             # Keep the original FP16 rounding order and diagonal publication.
             coefficient_begin = coefficient_pair * query_group_size
@@ -618,11 +619,15 @@ def indexer_head_coefficients(
                 head_coefficient = pl.tile.extract(
                     head_coefficients, coefficient_lane, 0, [1, IDX_N_HEADS], target_memory=pl.MemorySpace.Vec
                 )
-                pl.store(
-                    head_coefficient,
-                    [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane, coefficient_lane * IDX_N_HEADS],
-                    coefficients,
+                coefficient_rows = pl.tile.assemble(
+                    coefficient_rows, head_coefficient, [coefficient_lane * (query_group_size + 1), 0]
                 )
+            # Keep the complete zero-padded diagonal block in UB, then publish it
+            # once, like Native ProcessVec0's UB layout followed by one CopyOut.
+            coefficient_matrix = pl.tile.reshape(
+                coefficient_rows, [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS]
+            )
+            pl.store(coefficient_matrix, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
     return coefficients, coefficients_tid
 
 
