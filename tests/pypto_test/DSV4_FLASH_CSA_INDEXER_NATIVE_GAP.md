@@ -36,7 +36,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，S6/双query连到L0B，三query受L0B容量约束 | 长B4/B8核时仍高，需看生成指令的等待和重复move，不能只数逻辑读取字节 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
-| 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 每AIV收集half-leaf score，再按512/1024/2048/2560/3072/4096排序；已减尾块padding | Native逐段UB累计与当前half-leaf GM交接仍不同 |
+| 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长档先排序前2048候选并将Top-512根留UB，尾段完成后合并；短档保留原路径 | PTO缩放后score仍经GM，最终归并仍独立；临时根GM往返已消除 |
 | 分片平衡 | metadata按工作成本切S1/S2并给最终归并核分工 | 长档按query组与24worker平衡leaf；B16从8/8/8/8/1分成6/6/6/5/5/5个tile | 最忙核下降已保留；新增root数量和AIV排序成本单列 |
 | 最终归并 | LocalTopK/Merge/MS式四路归并，可在同融合kernel结束 | 四路归并与UB累计根已采用，但仍独立merge task | 固定tie/量化规则需保持；任务融合是后续调度/结构调整，不能仅凭少一个任务声称收益 |
 
@@ -53,10 +53,10 @@ pypto-lib的连续私有cache、量化顺序、函数分界仅供PTO写法参考
    merge14.260μs，四窗口均每核一份；完整CSA1362.396μs，详见[B24报告](results/csa_b24_cann92_20260928/RESULTS.md)。
 2. 针对长B4/B8，逐项核对Native的query L1驻留、Key跨M子块复用与PTO生成的L1/L0同步。
    新候选必须改变真实搬运或等待，不再做无依据的query分组扫描；先128K/B16和8K/B24，加受影响长B4/B8/B24必要项；不再新增8K/B16。
-3. 先验证已编译的[2048候选排序前移](results/csa_score_stream2048_20260928/README.md)：
-   收到前2048后立即排序，尝试与后续Cube交叠；当前保留GM中转，并承担一次临时根写读，设备结果待完成。
-   若流水获益，再研究UB根/分数驻留以消除half-leaf score GM落地；两项不能混成同一因素。
-   明确UB容量、两AIV分工与跨轮累计依赖后才实现；历史完整4096 Score UB驻留因gather/copy退化，不能原样重试。
+3. [2048分段排序与UB中间根](results/csa_stream_root_ub_20260929/README.md)已保留：长档AIC/AIV约−4%，
+   长短8:2核时受益、CSA+0.818%单列；两档状态精确、图及保护区通过。受影响长B8/B24仍需覆盖。
+   仍有缩放后score的GM中转；Native也有Cube WS结果GM交接，不能把二者混称为同一种复制。
+   历史完整4096 Score UB驻留因gather/copy退化，不能原样重试。
 4. 局部核内收益通过必要状态/图检查即保留，CSA与P95分别记录；更换候选划分或舍入才按算术差异单列验收。
 5. 核内阶段之后，再按当前DFX处理独立归并、系数依赖、准入和物理核分派。短B16/B32/B40同核两份仍有记录，
    但已测短Score sync_start、Sparse sync_start都没有综合收益，不能把开关当作已证明的修复。

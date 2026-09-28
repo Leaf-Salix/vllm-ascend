@@ -1,0 +1,142 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -315,6 +315,48 @@
+         # Native sorts 2048 candidates at a time, then merges the new chunk first.
+         medium_merged = pl.tile.mrgsort(medium_right, medium_left, tmp=medium_tmp)
+         pl.store(pl.tile.slice(medium_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++
++
++@pl.jit.inline
++def indexer_topk_segment_pairs(
++    score_arena: pl.Tensor,
++    score_row: pl.Scalar[pl.INDEX],
++    logical_begin: pl.Scalar[pl.INDEX],
++    valid_count: pl.Scalar[pl.INDEX],
++    score_offset: pl.constexpr,
++) -> pl.Tile:
++    """Sort the at-most-2048 candidates with the original tie rule."""
++    logical_i32 = pl.cast(logical_begin, pl.INT32)
++    if valid_count <= 512:
++        tiny_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_i32)
++        tiny_raw = pl.load(score_arena, [score_row, score_offset], [1, 512], valid_shape=[1, valid_count])
++        tiny_scores = pl.maximum(pl.tile.fillpad(tiny_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++        tiny_pairs = pl.sort32(tiny_scores, pl.reinterpret_view(tiny_indices, pl.UINT32))
++        tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
++        tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
++        root = pl.tile.extract(tiny_pairs, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++    elif valid_count <= 1024:
++        small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_i32)
++        small_raw = pl.load(score_arena, [score_row, score_offset], [1, 1024], valid_shape=[1, valid_count])
++        small_scores = pl.maximum(pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++        small_pairs = pl.sort32(small_scores, pl.reinterpret_view(small_indices, pl.UINT32))
++        small_pairs = pl.mrgsort(small_pairs, block_len=64)
++        small_pairs = pl.mrgsort(small_pairs, block_len=256)
++        small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++        small_right = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 1024])
++        small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
++        root = pl.tile.extract(small_merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++    else:
++        large_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_i32)
++        large_raw = pl.load(score_arena, [score_row, score_offset], [1, 2048], valid_shape=[1, valid_count])
++        large_scores = pl.maximum(pl.tile.fillpad(large_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++        large_pairs = pl.sort32(large_scores, pl.reinterpret_view(large_indices, pl.UINT32))
++        large_pairs = pl.mrgsort(large_pairs, block_len=64)
++        large_pairs = pl.mrgsort(large_pairs, block_len=256)
++        large_pairs = pl.mrgsort(large_pairs, block_len=1024)
++        root = pl.tile.extract(large_pairs, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++    return root
+ 
+ 
+ @pl.jit.inline
+@@ -918,6 +960,10 @@
+                     buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                     buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+                     buf_lane_begin = buf_score_lane * buf_lane_span
++                    # QLI V2 retains the accumulated root in UB until publication.
++                    prefix_roots = pl.tile.full(
++                        [query_group_size, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF
++                    )
+                     for buf_score_step in pl.range(buf_score_iters):
+                         buf_score_begin = buf_score_step * (score_tile // 2)
+                         buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+@@ -978,6 +1024,23 @@
+                                     ],
+                                     score_arena,
+                                 )
++                        if balance_leaves:
++                            if buf_score_step == 3 and buf_score_iters > 4:
++                                for stream_lane in pl.unroll(query_group_size):
++                                    stream_position = pl.read(position_ids, [buf_query + stream_lane])
++                                    stream_visible = pl.max(
++                                        pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
++                                               TOPK_MAX_CANDIDATES), 0
++                                    )
++                                    stream_begin = buf_logical_begin + buf_lane_begin
++                                    stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
++                                    if stream_valid > 0:
++                                        stream_root = indexer_topk_segment_pairs(
++                                            score_arena,
++                                            buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
++                                            stream_begin, stream_valid, 0,
++                                        )
++                                        prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
+                     for buf_query_lane in pl.unroll(query_group_size):
+                         buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                         buf_query_visible = pl.max(
+@@ -988,21 +1051,41 @@
+                         buf_half_slot = (
+                             (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
+                         )
+-                        if buf_half_valid > 0:
+-                            indexer_topk_half_leaf(
+-                                score_arena,
+-                                pair_arena,
+-                                buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+-                                buf_half_begin,
+-                                buf_half_valid,
+-                                buf_half_slot,
+-                            )
++                        if balance_leaves and buf_score_iters > 4:
++                            if buf_half_valid > 2048:
++                                tail = indexer_topk_segment_pairs(
++                                    score_arena,
++                                    buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
++                                    buf_half_begin + 2048, buf_half_valid - 2048, 2048,
++                                )
++                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
++                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++                                merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                                # Preserve the later-2048-chunk priority of the
++                                # existing 2560/3072/4096 half-leaf paths.
++                                merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
++                                pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
++                                         [buf_half_slot, 0], pair_arena)
++                            else:
++                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
++                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++                                pl.store(prefix, [buf_half_slot, 0], pair_arena)
+                         else:
+-                            pl.store(
+-                                pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+-                                [buf_half_slot, 0],
+-                                pair_arena,
+-                            )
++                            if buf_half_valid > 0:
++                                indexer_topk_half_leaf(
++                                    score_arena,
++                                    pair_arena,
++                                    buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
++                                    buf_half_begin,
++                                    buf_half_valid,
++                                    buf_half_slot,
++                                )
++                            else:
++                                pl.store(
++                                    pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
++                                    [buf_half_slot, 0],
++                                    pair_arena,
++                                )
+     return buffered_leaf_tid
+ 
+ 
