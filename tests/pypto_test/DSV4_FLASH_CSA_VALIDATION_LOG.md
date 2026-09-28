@@ -8826,3 +8826,23 @@ attention metadata、预处理的起止时间；默认关闭、不新增同步�
 CPU6项通过，确认forward边界、失败窗口拒绝及全部方法/GC回调恢复。
 没有改本轮正在运行的冻结源码，分项字段将在下一次必要模型验证中使用，不额外为它重跑七档。
 [范围与复现](results/csa_forward_sequence_20260928/README.md)。
+
+
+## 304. 连续三档EP16均值与P95领先，但两侧出现不同位置的主机入场尾部（2026-09-28）
+
+task_20260928_081648_96094015347退出0，128K/B4、B8、B16的Native/PTO均值为
+46.577/43.301、56.583/54.760、72.675/70.526ms（−7.03%/−3.22%/−2.96%）。
+三档P95/max更低、30/30个对应最慢rank步骤更快；114688token零差异、48组DSpark/位置一致。
+[同源码独立顺序复测](results/csa_forward_sequence_20260928/model/RESULTS.md)。不替换原统一七档的异常。
+
+PTO B16 step11 rank3的3.147ms设备晚入场，对应主机准备延迟，其他rank平均多2.438ms；
+Native B16 step11 rank15晚7.498ms，对应主机提交墙钟7.856ms/线程CPU0.454ms，其他rank多7.454ms。
+Native主机forward进入时间正常、异常在该入口之后；PTO主机forward进入已晚、提交本身正常。
+两侧B16正式窗口无GC，不能由墙钟减CPU直接推断OS抢占，也不据此修改GC策略。
+[主机证据](results/csa_forward_sequence_20260928/HOST.md)。生产尚无尾部修复，750μs仍未完成。
+
+可选诊断增加event_record_ready标记于begin.record之前，用于区分观测器自身准备与后续提交，
+配合§303的既有同步/metadata分项，在后续必要模型验证中使用；CPU6项再次通过。
+并行准备固定K的KV K256→512独立候选，CPU完整编译通过、L0仍K128；
+单卡task_20260928_082115_13519341598排队，尚未改生产或声称核内收益。
+[候选与编译证据](results/csa_kv_k512_20260928/README.md)。

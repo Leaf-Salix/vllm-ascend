@@ -464,6 +464,8 @@ class OfflineCSAObserver:
             entry["request_positions"] = runner._dsa_positions_cpu_buf[:expected_tokens].tolist()
             begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
             entry["begin"], entry["end"] = begin, end
+            if diagnostic is not None:
+                diagnostic.mark(entry, "event_record_ready")
             begin.record()
             try:
                 return original_forward(*args, **kwargs)

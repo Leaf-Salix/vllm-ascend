@@ -121,6 +121,8 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
         if failure != "missing_forward":
             for step in host["steps"]:
                 assert step["execute_entry"]["monotonic_ns"] <= step["forward_entry"]["monotonic_ns"]
+                assert step["forward_entry"]["monotonic_ns"] <= step["event_record_ready"]["monotonic_ns"]
+                assert step["event_record_ready"]["monotonic_ns"] <= step["forward_submitted"]["monotonic_ns"]
                 assert step["forward_submitted"]["monotonic_ns"] <= step["execute_return"]["monotonic_ns"]
     else:
         assert "host_diagnostics" not in result
