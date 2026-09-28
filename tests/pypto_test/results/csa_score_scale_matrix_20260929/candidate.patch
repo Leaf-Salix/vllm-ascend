@@ -1,0 +1,55 @@
+--- a/decode_indexer.py
++++ b/decode_indexer.py
+@@ -1003,6 +1003,11 @@
+                         pl.system.sync_set(
+                             SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+                         )
++                        buf_scaled_sums = buf_score_sums
++                        if balance_leaves:
++                            # Apply the shared KV scale to the full S6 Score tile
++                            # before per-query valid-shape publication.
++                            buf_scaled_sums = pl.col_expand_mul(buf_score_sums, buf_kv_scale)
+                         for buf_query_lane in pl.unroll(query_group_size):
+                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                             buf_query_visible = pl.max(
+@@ -1018,17 +1023,30 @@
+                                 ),
+                                 0,
+                             )
+-                            buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
+-                            buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
+-                            if buf_lane_valid_rows > 0:
+-                                pl.store(
+-                                    pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+-                                    [
+-                                        buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+-                                        buf_score_begin,
+-                                    ],
+-                                    score_arena,
++                            if balance_leaves:
++                                if buf_lane_valid_rows > 0:
++                                    buf_valid_score_row = pl.tile.slice(
++                                        buf_scaled_sums, [1, score_tile // 2], [buf_query_lane, 0],
++                                        valid_shape=[1, buf_lane_valid_rows],
++                                    )
++                                    pl.store(
++                                        buf_valid_score_row,
++                                        [buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
++                                         buf_score_begin],
++                                        score_arena,
++                                    )
++                            else:
++                                buf_score_sum = pl.tile.slice(
++                                    buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0]
+                                 )
++                                buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
++                                if buf_lane_valid_rows > 0:
++                                    pl.store(
++                                        pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
++                                        [buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
++                                         buf_score_begin],
++                                        score_arena,
++                                    )
+                         if balance_leaves:
+                             if buf_score_step == 3 and buf_score_iters > 4:
+                                 for stream_lane in pl.unroll(query_group_size):

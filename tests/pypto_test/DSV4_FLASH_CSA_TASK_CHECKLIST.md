@@ -61,7 +61,7 @@ P95 1498.500/1374.220μs，自重放、图状态、保护区和四个DFX窗口�
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
 | 1 | Native对齐部署模板并重取代表档基线 | 同卡同配置编译后Native/PTO：128K/B16 1217.529/1090.391μs，8K/B24 1026.713/988.208μs；长档PTO P95 1391.560μs异常待定位，Worker/整机仍待验收 |
-| 2 | 128K Score继续吸收最新Native A3策略 | 2048分段排序+UB中间根及长B4/B8 S6 Key复用已保留；S6三档8:2 CSA−1.443%，短B24+3.291%单列。长B24近期组合补测完成：CSA−4.690%，状态/图通过；继续AIV scale及Query/系数跨leaf驻留 |
+| 2 | 128K Score继续吸收最新Native A3策略 | 2048分段排序+UB中间根及长B4/B8 S6 Key复用已保留；S6三档8:2 CSA−1.443%，短B24+3.291%单列。长B24近期组合补测完成：CSA−4.690%，状态/图通过；scale矩阵广播无核内收益不采用，继续Query/系数跨leaf驻留 |
 | 3 | 核内收益保留与受影响范围检查 | 长短8:2分别计算核内/CSA变化；总体收益保留，单侧明显退化则分场景；基本状态通过，P95异常单列 |
 | 4 | 核内阶段后CSA关键链/分派优化 | 以当前源码DFX为依据，区分必要多波和可减少等待，避免重复已否定sync_start组合 |
 | 5 | 阶段结束七档收口及精度版迁移 | 同一源码覆盖七档；新数值中性优化按精度版规则迁移，尚未完成部分不沿用旧通过状态 |
@@ -83,7 +83,8 @@ Native cache布局/分配不改，PTO内直接按物理页读写，没有入口�
 [重复长度扫描消除](results/csa_maxlen_reuse_20260928/README.md)、
 [短Score整组准入](results/csa_short_score_sync_20260928/README.md)、
 [Sparse整组准入](results/csa_sparse_sync_20260928/README.md)、
-[Indexer query整组准入](results/csa_query_sync_20260928/README.md)。
+[Indexer query整组准入](results/csa_query_sync_20260928/README.md)、
+[Score矩阵scale广播](results/csa_score_scale_matrix_20260929/README.md)。
 不能因这些候选无收益就宣称核内已无差距。
 
 最近完整模型证据仍为554b3bca/CANN9.0七档：573440输出token零差异、112组rank DSpark一致，

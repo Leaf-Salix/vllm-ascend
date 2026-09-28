@@ -81,6 +81,8 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 - [四路Top-K与UB根](results/csa_topk_ub4_20260928/README.md)、[Key L1预取](results/csa_score_key_l1_20260928/README.md)：已保留。
 - [编排最大长度复用](results/csa_maxlen_reuse_20260928/README.md)：生成码扫描减少但无明确核内收益，不采用。
 - [query排序循环](results/csa_sort_query_loop_20260928/README.md)：代码体积下降，短档核时恶化，不采用。
+- [Score矩阵scale广播](results/csa_score_scale_matrix_20260929/README.md)：长档6个TMUL调用点合为1个TCOLEXPANDMUL，
+  状态精确、CSA略降，但长B16 Score AIC/AIV约+7%，没有核内收益，不采用。
 - [源码入口和版本](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)：A3 arch22优先，不套用不兼容的arch35能力。
 - [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)、
   [Native调用接口](../../vllm_ascend/attention/dsa_v1.py)。
