@@ -194,8 +194,15 @@ MTE1→FIX等待15→0，另外9份Score生成二进制一致；后续两档状�
 [候选、生成地址与测试合同](results/csa_score_key_l1_20260928/README.md)。
 长档小batch后续候选已准备：仅双query/M128/N128启用同类Key L1/L0B双槽，CPU完整编译/load通过。
 双Key32KiB+WS32KiB恰为64KiB；三query需80KiB，不直接移植。尾段多一条MTE1→FIX等待，尚无实测收益。
-待七档模型阶段结束后，定向对照128K/B4与8K/B16；其他长档生成核不变，不额外重跑。
+队列确认模型前仍有两组16卡任务后，定向单卡改为按auto队列空闲时段推进，冻结模型实现保持。
+首任务在作业内查询队列时被嵌套提交保护拒绝，未执行测试；移除该查询后task_20260928_184711_373603922282已运行。
+仅对照128K/B4与8K/B16，其他长档生成核不变，不额外重跑。
 [独立候选与CPU证据](results/csa_score_key_l1_pair_20260928/README.md)。
+长档三query的L0B差异已进一步拆清：Native每query用K64/16KiB Right，PTO一次K192占48KiB。
+只预取下一Key到L1、维持单Key L0B的B8独立候选已通过完整CPU编译/load，
+Key L1为32KiB、Score为双48KiB，Mat末端128KiB；L0B稳态Key16KiB+WS48KiB，9份未改Score执行核一致。
+在B4设备任务与状态汇总结束后编译，未与本线程设备计时重叠；已提交task_20260928_190508_19636832316。
+[容量与WS取舍](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、[候选状态](results/csa_score_key_l1_only_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。

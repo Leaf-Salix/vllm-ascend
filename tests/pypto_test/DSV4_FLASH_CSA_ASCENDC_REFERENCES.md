@@ -139,6 +139,28 @@ Key L1池32KiB与稳态Score双槽分离，尾段复用死Key池并增加一条M
 没有设备收益结论；待当前七档EP16结束，再做128K/B4与短B16控制，不重复未改长B8/B16。
 [候选、生成地址及定向入口](results/csa_score_key_l1_pair_20260928/README.md)。
 
+### QLI分组与L0B容量的具体差异
+
+再次读取QLI V2 `ProcessWs/LoadSToL0b/ComputeWs`：Native按query逐个取gSize=64行Score，
+K64/N128的FP16 Right每份16KiB；Key N128 INT8也为16KiB，二者共用四个16KiB L0B槽轮转。
+PTO用分块对角系数把多query的WS合为一次Cube，减少调用次数，但一次驻留整个query组的Score。
+因此能否预取不能只看都叫“双缓冲”，必须结合WS Right实际尺寸。
+
+| 554b3bca代表档 | query组 | QK M/N | Key稳态L0B | WS Right | 现有预取 |
+| --- | ---: | --- | --- | --- | --- |
+| 128K/B4 | 2 | 128/128 | 单16KiB | 32KiB | 无，双槽候选在测 |
+| 128K/B8 | 3 | 192/128 | 单16KiB | 48KiB | 无，L0B没有第二Key槽余量 |
+| 128K/B16 | 6 | 384/64 | 双8KiB | 48KiB | 独立Key L1及L0B预取已保留 |
+| 8K/B16、B32 | 2 | 128/128 | 单16KiB | 32KiB | 无 |
+| 8K/B24、B40 | 6 | 384/64 | 单8KiB | 48KiB | 无 |
+
+这些是同一算子内部按实际cache长度和query数选择的分组，不是脚本换版本。
+正式单卡B8的Score AIC均值189.48μs、包络229.50μs；核内包含流水等待，不能用差额直接当作调度开销。
+三query下一候选保留一次K192的WS，只把下一Key提前到独立L1池，使用前再提取到单份L0B；
+不直接退回Native的三次K64 WS，也不同时改N128分块，先隔离MTE2预取的贡献。
+这仍与pypto-lib连续cache/query组织不同，保持Native分页零复制视图；源码方案尚不等于重叠已经发生。
+[B8独立候选及待验证项](results/csa_score_key_l1_only_20260928/README.md)。
+
 ## 3. ops-math的适用边界
 
 - [TopKV2入口](../../../ops-math/math/top_k_v2/op_kernel/top_k_v2_apt.cpp)此次读到的实现引用arch35路径。

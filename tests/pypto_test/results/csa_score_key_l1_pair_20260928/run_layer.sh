@@ -7,10 +7,12 @@ workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 source "$workspace/env-dsv4-0251rc1.sh"
 export LD_LIBRARY_PATH="$repo/.cache/csa/native-install:$LD_LIBRARY_PATH"
-root="$repo/tests/pypto_test/results/csa_score_key_l1_pair_20260928"
+root="${1:-$repo/tests/pypto_test/results/csa_score_key_l1_pair_20260928}"
+candidate_repo="${2:-$workspace/.cache/csa-score-key-l1-pair-554b3bca}"
+long_batch="${3:-4}"
 rg -q '^COMPILE_PASS ' "$root/compile.log"
-# Only long small-batch changes; use B4 to exercise it and short B16 as control.
-for case_spec in 131072:4 8192:16; do
+# Exercise the changed long group and retain short B16 as the control.
+for case_spec in "131072:$long_batch" 8192:16; do
     history="${case_spec%:*}"
     batch="${case_spec#*:}"
     for phase in timing swimlane; do
@@ -20,7 +22,7 @@ for case_spec in 131072:4 8192:16; do
             source_repo="$workspace/.cache/csa-key-l1-seven-554b3bca"
             extra=()
             if [[ "$label" == candidate ]]; then
-                source_repo="$workspace/.cache/csa-score-key-l1-pair-554b3bca"
+                source_repo="$candidate_repo"
                 extra=(--graph)
             fi
             if [[ "$phase" == timing ]]; then
