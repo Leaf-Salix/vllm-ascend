@@ -151,6 +151,7 @@ TOPK_MERGE_FAN_IN = 4  # QLI V2: accumulated Top-512 plus three incoming roots.
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
+LONG_S6_MIN_QUERY_ROWS = 4 * S  # Four requests can fill 24 workers with six balanced leaves.
 
 SCORE_TILE = 384
 
@@ -364,19 +365,25 @@ def indexer_long_leaf_plan(
     max_cache_count: pl.Scalar[pl.INDEX],
     query_groups: pl.Scalar[pl.INDEX],
 ):
-    """Balance 16 query groups over 24 workers without enlarging pair storage.
+    """Balance four/eight/sixteen request groups over the 24 Score workers.
 
-    Round the leaf count to a multiple of three, then spread N1024 tiles evenly
-    over those leaves. At 32769 candidates this is 6/6/6/5/5/5 tiles,
-    instead of 8/8/8/8/1. Other group counts keep their original leaves.
+    S6 reuses each Key panel for all six queries. Round four groups to six
+    leaves, eight/sixteen groups to three-leaf multiples, within the existing
+    pair arena. Other request counts preserve the original leaf partition.
     """
     tile_count = (max_cache_count + BUFFERED_LONG_SCORE_TILE - 1) // BUFFERED_LONG_SCORE_TILE
     leaf_count = pl.max((max_cache_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
     leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
     extra_leaves = 0
-    balanced_count = (leaf_count + 2) // 3 * 3
-    if 3 * query_groups == 2 * TOPK_SCORE_WORKERS:
-        # Do not grow the arena at the maximum supported history.
+    leaf_multiple = 1
+    if 3 * query_groups == 2 * TOPK_SCORE_WORKERS:  # noqa: SIM114 - explicit scalar branches for PyPTO
+        leaf_multiple = 3
+    elif 3 * query_groups == TOPK_SCORE_WORKERS:
+        leaf_multiple = 3
+    elif 6 * query_groups == TOPK_SCORE_WORKERS:
+        leaf_multiple = 6
+    if leaf_multiple > 1:
+        balanced_count = (leaf_count + leaf_multiple - 1) // leaf_multiple * leaf_multiple
         if balanced_count <= TOPK_MAX_LEAVES:
             leaf_count = balanced_count
             leaf_tiles = pl.max(tile_count // balanced_count, 1)
@@ -453,10 +460,8 @@ def indexer_topk_query_merge(
         for batch in pl.range(query_count // S):
             max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
         query_groups = query_count // 2
-        if query_count >= 4 * TOPK_SCORE_WORKERS:
+        if query_count >= LONG_S6_MIN_QUERY_ROWS:
             query_groups = query_count // S
-        elif query_count >= 2 * TOPK_SCORE_WORKERS:
-            query_groups = query_count // 3
         _merge_leaf_count, merge_leaf_tiles, merge_extra_leaves = indexer_long_leaf_plan(
             pl.min(max_cache_count, TOPK_MAX_CANDIDATES), query_groups
         )
@@ -1129,8 +1134,8 @@ def indexer_score_topk_forest(
             # 长档整组准入，并禁止Score提前释放下游，抑制重复图重放的长尾。
             # 短档沿用原调度；sync_start不代表各核硬件同时起跑。
             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
-            # 中等query数用三query；更小输入用双query，避免整请求分组并行度不足。
-            if pl.tensor.dim(position_ids, 0) >= 4 * TOPK_SCORE_WORKERS:
+            # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
+            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
                 score_tid = indexer_score_topk_native_cube(
                     qr_hadamard_i8,
                     qr_hadamard_scale_dq,
@@ -1151,29 +1156,6 @@ def indexer_score_topk_forest(
                     False,
                     1,
                     True,
-                    True,
-                )
-            elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
-                score_tid = indexer_score_topk_native_cube(
-                    qr_hadamard_i8,
-                    qr_hadamard_scale_dq,
-                    weights,
-                    idx_native_kv_cache,
-                    idx_block_table,
-                    position_ids,
-                    kv_seq_lens,
-                    score_arena,
-                    pair_arena,
-                    qh_quant_tid,
-                    weights_tid,
-                    cache_write_tid,
-                    3,
-                    NATIVE_QLI_QK_COLS,
-                    BUFFERED_LONG_SCORE_TILE,
-                    True,
-                    False,
-                    1,
-                    False,
                     True,
                 )
             else:

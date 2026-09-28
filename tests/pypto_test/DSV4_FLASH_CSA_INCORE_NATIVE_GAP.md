@@ -42,6 +42,12 @@ PTO表格取四个窗口的核时均值；完整分布、最慢核、包络、�
 
 ## Indexer：当前最大长档方向
 
+2026-09-29新增长B4/B8 S6 Key复用已保留：相对d8627207，B4 Score AIC/AIV由134.025/141.809
+降至71.036/81.382μs，B8由168.931/173.838降至137.435/144.219μs。
+CSA分别−2.108%/−3.145%，短B24+3.291%；三档长短8:2 CSA−1.443%，八类状态/图/保护区通过。
+按最新AscendC跨M子块复用Key的策略扩展现有S6，不改Native cache；详情和最新pypto-lib差异见
+[实测与来源](results/csa_small_long_s6_20260929/README.md)。下表保留同轮e33完整矩阵，不拼接新局部结果。
+
 Native QLI包含系数、Score、本地Top-K和最终归并；PTO另拆系数与merge。单位μs。
 
 | 档位 | Native QLI Duration | Native AIC / AIV参考 | PTO Score AIC / AIV | PTO merge |
