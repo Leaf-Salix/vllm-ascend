@@ -38,11 +38,14 @@ Q_LORA = M.q_lora_rank
 ROPE_HEAD_DIM = M.qk_rope_head_dim
 IDX_N_HEADS = M.index_n_heads
 IDX_HEAD_DIM = M.index_head_dim
+HADAMARD_SCALE = IDX_HEAD_DIM**-0.5
 IDX_NOPE_HEAD_DIM = M.index_nope_head_dim
 WEIGHTS_SCALE = M.index_weights_scale
 MAX_SEQ_LEN = M.max_position_embeddings
 
 # kernel constants
+# Native A3 QLI FixpSToL1 dequantizes QK to FP16 with 0x3a800000.
+NATIVE_QLI_QK_SCALE = 1.0 / 1024
 COMPRESS_RATIO = 4  # the indexer only runs on ratio-4 layers
 IDX_TOPK = M.index_topk
 INNER_OVERLAP = COMPRESS_RATIO == 4
@@ -601,8 +604,9 @@ def indexer_score_topk_forest_vllm(
                         [1, IDX_N_HEADS],
                     )
                     query_weight = weights[query : query + 1, 0:IDX_N_HEADS]
+                    # Native QLI ProcessVec0 multiplies its two FP16 inputs in FP16.
                     head_coefficient = pl.reshape(
-                        pl.mul(query_scale, query_weight),
+                        pl.cast(pl.cast(pl.mul(query_scale, query_weight), pl.FP16, mode="rint"), pl.FP32),
                         [IDX_N_HEADS, 1],
                     )
                 for score_begin in pl.pipeline(
@@ -665,6 +669,11 @@ def indexer_score_topk_forest_vllm(
                                 mode="none",
                             ),
                             0.0,
+                        )
+                        # Preserve Native Fixpipe's FP16 QK boundary and scale.
+                        score_shard = pl.cast(
+                            pl.cast(pl.mul(score_shard, NATIVE_QLI_QK_SCALE), pl.FP16, mode="rint"),
+                            pl.FP32,
                         )
                         score_shard = pl.row_expand_mul(
                             score_shard,
@@ -914,7 +923,14 @@ def indexer_qr_rope(
                 acc_fp32 = pl.cast(
                     qr_acc_pad[dq_t0 : dq_t0 + DEQUANT_T_TILE, h0 : h0 + IDX_HEAD_DIM], target_type=pl.FP32, mode="none"
                 )
-                qr_dequant = pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale)
+                # Native per-token quant matmul combines scales before the accumulator.
+                qr_dequant_scale = pl.col_expand_mul(
+                    pl.row_expand_mul(pl.full([DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0), qr_scale_tile),
+                    wq_scale,
+                )
+                qr_dequant = pl.mul(acc_fp32, qr_dequant_scale)
+                # Quant matmul publishes BF16 before the in-place rotary operation.
+                qr_dequant = pl.cast(pl.cast(qr_dequant, pl.BF16, mode="rint"), pl.FP32)
                 qr_nope_bf16 = pl.cast(qr_dequant[:, 0:IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
                 qr_rope_slice = qr_dequant[:, IDX_NOPE_HEAD_DIM:IDX_HEAD_DIM]
                 qr_swapped = pl.gather(qr_rope_slice, dim=-1, index=rope_swap_idx)
@@ -935,7 +951,7 @@ def indexer_qr_hadamard_mm(
     qr_hadamard_scale_dq: pl.Out[pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32]],
     qh_mm_dep: pl.Scalar[pl.TASK_ID],
 ) -> tuple[pl.Scalar[pl.TASK_ID], pl.Scalar[pl.TASK_ID]]:
-    """q @ hadamard and its INT8 quant, fenced behind the caller's cube ordering."""
+    """Apply an unscaled Hadamard, BF16 scaling, then INT8 query quantization."""
     bs = pl.tensor.dim(x, 0)
     bs_heads = bs * IDX_N_HEADS
 
@@ -964,6 +980,9 @@ def indexer_qr_hadamard_mm(
         for idx in pl.range(qh_quant_worker, bs_heads // QH_QUANT_TILE, QH_QUANT_WORKERS):
             o0 = idx * QH_QUANT_TILE
             qh_full_f32 = qh_acc_gm[o0 : o0 + QH_QUANT_TILE, 0:IDX_HEAD_DIM]
+            # Native rotate_activation materializes BF16 after matmul and after scaling.
+            qh_full_f32 = pl.cast(pl.cast(qh_full_f32, pl.BF16, mode="rint"), pl.FP32)
+            qh_full_f32 = pl.cast(pl.cast(pl.mul(qh_full_f32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
             qh_amax = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
             for h0 in pl.range(0, IDX_HEAD_DIM, QH_HEAD_DIM_TILE):
                 qh_a_f32 = qh_full_f32[:, h0 : h0 + QH_HEAD_DIM_TILE]
@@ -976,7 +995,10 @@ def indexer_qr_hadamard_mm(
             qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
             qh_scale_recip = pl.recip(qh_scale_quant_row)
             qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
-            qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = qh_scale_dq
+            # The native A3 QLI input stores each query scale in FP16.
+            qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = pl.cast(
+                pl.cast(qh_scale_dq, pl.FP16, mode="rint"), pl.FP32
+            )
             qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
             qh_q_scaled = pl.row_expand_mul(qh_full_f32, qh_scale_quant)
             qh_q_i32 = pl.cast(qh_q_scaled, target_type=pl.INT32, mode="rint")
@@ -1187,7 +1209,10 @@ def indexer_weights_score_vllm(
                     0:IDX_N_HEADS,
                 ],
             )
-        weights[row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS] = pl.mul(total, WEIGHTS_SCALE)
+        # Native publishes BF16 linear/scaled results, then QLI consumes FP16 weights.
+        total = pl.cast(pl.cast(total, pl.BF16, mode="rint"), pl.FP32)
+        scaled_weights = pl.cast(pl.mul(total, WEIGHTS_SCALE), pl.BF16, mode="rint")
+        weights[row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS] = pl.cast(pl.cast(scaled_weights, pl.FP16), pl.FP32)
 
     scores, indices, completion = indexer_score_topk_forest_vllm(
         qr_hadamard_i8,
@@ -1479,13 +1504,15 @@ def golden_indexer(tensors, inner_full=None):
     ratio, rd = COMPRESS_RATIO, ROPE_HEAD_DIM
 
     q_i32 = qr.to(torch.int32) @ wq_b.to(torch.int32)
-    q = (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).view(tokens, IDX_N_HEADS, IDX_HEAD_DIM)
+    q = (q_i32.float() * (qr_scale * wq_b_scale.view(1, -1))).to(torch.bfloat16).float()
+    q = q.view(tokens, IDX_N_HEADS, IDX_HEAD_DIM)
     q_rope = q[..., -rd:]
     q_rope_swapped = q_rope.unflatten(-1, (-1, 2)).flip(-1).flatten(-2)
     q_rope = q_rope * cos[:, None, :] + q_rope_swapped * sin[:, None, :]
     q = torch.cat([q[..., :-rd], q_rope], dim=-1)
 
-    q = q.to(torch.bfloat16).float() @ hadamard
+    q = (q.to(torch.bfloat16).float() @ hadamard).to(torch.bfloat16).float()
+    q = (q * HADAMARD_SCALE).to(torch.bfloat16).float()
     # W8A8C16: q and Indexer Cache are quantized per row to INT8 for score matmul,
     # then dequantized with q_scale * kv_scale.
     # flash: fp4_act_quant on q (FP4 simulation).
@@ -1521,7 +1548,7 @@ def golden_indexer(tensors, inner_full=None):
     topk_idxs = torch.full((tokens, IDX_TOPK), -1, dtype=torch.int32)
     q_i8, q_scale = int8_quant_per_row(q.reshape(tokens * IDX_N_HEADS, IDX_HEAD_DIM))
     q_i8 = q_i8.view(tokens, IDX_N_HEADS, IDX_HEAD_DIM)
-    q_scale = q_scale.view(tokens, IDX_N_HEADS, 1)
+    q_scale = q_scale.to(torch.float16).float().view(tokens, IDX_N_HEADS, 1)
     flat_cache = idx_kv_cache_i8.reshape(-1, IDX_HEAD_DIM)
     flat_scale = idx_kv_scale.reshape(-1, 1)
 
@@ -1692,7 +1719,7 @@ def build_tensor_specs(start_pos=None, batch=B):
         return cmp_rope_sin.clone()
 
     def init_hadamard():
-        return torch.rand(IDX_HEAD_DIM, IDX_HEAD_DIM) * (IDX_HEAD_DIM**-0.5)
+        return torch.rand(IDX_HEAD_DIM, IDX_HEAD_DIM)
 
     def init_inner_compress_state():
         return (

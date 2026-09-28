@@ -125,16 +125,15 @@ def _int8(linear, want: tuple, scale_len: int, kcfg):
 
 
 def _hadamard(dim: int, device, dtype=torch.bfloat16) -> torch.Tensor:
-    """Sylvester Hadamard, normalized.
+    """Unscaled Sylvester Hadamard for native BF16 matmul and scaling.
 
-    The kernel treats this as a bare right-hand matmul operand with no scaling of
-    its own, so the 1/sqrt(dim) that vLLM's rotate_activation applies separately
-    has to be folded in here. Mirrors decode_csa.py::init_hadamard_idx.
+    The kernels round the matmul result to BF16 before applying 1/sqrt(dim),
+    matching vLLM's rotate_activation materialization boundaries.
     """
     h = torch.ones((1, 1), dtype=torch.float32)
     while h.shape[0] < dim:
         h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
-    return (h / (dim**0.5)).to(dtype).to(device)
+    return h.to(dtype).to(device)
 
 
 def _native_rope_tables(layer: str):

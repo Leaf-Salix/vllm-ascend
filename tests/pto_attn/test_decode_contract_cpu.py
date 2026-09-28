@@ -9,7 +9,7 @@ import torch
 
 import vllm_ascend.ops  # noqa: F401 -- initialize native operator registry before backend imports
 from vllm_ascend.attention import pto_attn as pto
-from vllm_ascend.attention.dsa_v1 import AscendDSABackend, AscendDSAImpl
+from vllm_ascend.attention.dsa_v1 import AscendDSABackend, AscendDSAImpl, rotate_activation
 
 
 @pytest.fixture
@@ -291,3 +291,37 @@ def test_backend_selects_implementation(monkeypatch, enabled):
     monkeypatch.setattr(utils, "enable_dsa_cp", lambda: False)
     monkeypatch.setenv("VLLM_ASCEND_PYPTO_DSV4_CSA", str(int(enabled)))
     assert AscendDSABackend.get_impl_cls() is (pto.PyptoDSAImpl if enabled else AscendDSAImpl)
+
+
+def _unscaled_hadamard_ref(dim):
+    # Independent sign definition, without the production Sylvester recursion.
+    return torch.tensor(
+        [[1 - 2 * ((row & col).bit_count() % 2) for col in range(dim)] for row in range(dim)],
+        dtype=torch.bfloat16,
+    )
+
+
+@pytest.mark.parametrize("dim", [64, 128])
+def test_hadamard_preserves_unscaled_native_matrix(dim):
+    actual = pto._hadamard(dim, "cpu")
+    assert actual.dtype == torch.bfloat16
+    assert torch.equal(actual, _unscaled_hadamard_ref(dim))
+
+
+def test_hadamard_native_bf16_rounding_boundaries():
+    dim = 128
+    generator = torch.Generator().manual_seed(20260928)
+    source = torch.randn(64, dim, generator=generator).to(torch.bfloat16)
+    reference = _unscaled_hadamard_ref(dim)
+    scale = dim**-0.5
+
+    # Native materializes BF16 once after the matmul and once after scaling.
+    linear_bf16 = (source.float() @ reference.float().T).to(torch.bfloat16)
+    expected = (linear_bf16.float() * scale).to(torch.bfloat16)
+    actual = rotate_activation(source, pto._hadamard(dim, "cpu"))
+    assert torch.equal(actual, expected)
+
+    # This input must expose the old folded-scale boundary, not merely shape.
+    folded_weight = (reference.float() * scale).to(torch.bfloat16)
+    folded_output = torch.nn.functional.linear(source, folded_weight)
+    assert not torch.equal(folded_output, expected)

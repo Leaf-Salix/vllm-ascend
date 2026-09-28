@@ -3,7 +3,9 @@
 ## 基线
 
 官方 vLLM-Ascend `v0.25.1rc1`（`9bf964cb4b87c8cd0d6852c41a55b3c29711fa95`）定义接口契约。
-CSA kernel 完整保留 Leaf `8990a7d8e`，来源是 sunkaixuan 分支与 PR #5；本次不使用 nalinaly kernel。
+CSA kernel 以 Leaf `8990a7d8e` 为基础，来源是 sunkaixuan 分支与 PR #5。
+2026-09-28 参考 nalinaly `0d1b8ea7292ffefc6e90cac0e2f4308749be53db` 的 BSH 精度实现，
+按官方原生计算边界修正 Q/KV、indexer、sparse attention 和 O-proj；保留本分支40参数 ABI 与128页缓存布局。
 环境为 vLLM 0.25.1、CANN 9.0.1、Torch 2.10.0、Torch-NPU 2.10.0.post2。
 
 ## 接入及必要的内部绑定
@@ -20,8 +22,8 @@ CSA kernel 完整保留 Leaf `8990a7d8e`，来源是 sunkaixuan 分支与 PR #5�
 | RoPE | 引用官方持久完整 FP32 表 | 原 kernel 用绝对位置索引，未改成消费 compact RoPE |
 | token_valid | 保留8990的 position、block table、seq_lens 计算 | 未宣称直接消费官方 slot_mapping |
 | KV/cache | 原6项tuple及共享allocation；零拷贝物理页view | 128-token KV页、8-row逻辑state页；其他规格回原生 |
-| 权重 | 在原生 post-load 后进行8990原有准备 | 保留已有反量化/量化处理，不宣称与原生数学完全一致 |
-| kernel | 保留40 tensor参数及计算实现 | 无52参数、32页kernel迁移 |
+| 权重 | 在原生 post-load 后准备；Hadamard 使用未缩放矩阵，缩放放回 kernel 的原生舍入边界 | 其他既有反量化/量化处理仍在；本轮只验收实际 checkpoint 类型 |
+| kernel | 保留40 tensor参数；修正 BF16/FP16 舍入、QR归约、512候选 softmax 和完整8192维 O-proj量化 | 未迁移52参数 ABI 或32页缓存布局 |
 | 生命周期 | wait、提交kernel、通知cache write、save；启动错误直接抛出 | fused kernel没有原生prolog/attention之间的独立通知边界 |
 
 本次不修改 allocator、metadata builder、调度器、HC、RMSNorm 或 MoE。
@@ -36,8 +38,10 @@ prefill、profiling、gather、CP、LoRA、KV transfer、特殊 output projectio
 ## 验证口径
 
 CPU契约测试位于 `tests/pto_attn/test_decode_contract_cpu.py`。
-硬件对照需使用相同128页、相同原kernel、相同输入与权重，并区分 eager、独立capture/replay和整模型graph。
+硬件对照需使用相同逻辑历史KV、输入与权重，并区分 eager、独立capture/replay和整模型graph。
 实际命中记录为 `[pto-native-csa] ... seq=...`；原生回退不能算CSA通过。
 
-8990的单层精度此前未通过。保留其计算路径不等于修复精度，不放宽阈值，也不以生成成功替代精度验收。
-上一版52参数kernel的精度和整模型成绩不适用于此实现。
+8990的单层精度此前未通过；本轮40参数实现已做独立对拍，结果见
+[BSH精度修正报告](source/developer_guide/DSV4_CSA_BSH_PRECISION_20260928.md)。
+报告区分阈值通过、逐元素一致和ULP分布；不能把单层合成输入验证当作完整模型精度验收。
+上一版52参数kernel的精度和整模型成绩不自动适用于此实现。

@@ -150,18 +150,17 @@ def decode_o_proj_tp1(
     proj_b_t_rows = (t_dim + PROJ_B_MM_T_TILE - 1) // PROJ_B_MM_T_TILE
     proj_b_padded_rows = proj_b_t_rows * PROJ_B_MM_T_TILE
 
-    # Back-to-back grouped output projection: proj_a[g] -> quant[g] -> proj_b[g]
-    # pipelines per group; the per-group amax keeps the quant reduction inside one
-    # O_LORA group. manual_scope suppresses auto-dep, so every edge is explicit:
-    # proj_a waits on heads_dep, quant[g] on proj_a[g], proj_b[g] on quant[g].
-    # proj_b_act combines the group partials with their row scales and is the
-    # consolidated attn_out writer.
+    # Native WO-A materializes BF16 before WO-B quantizes all O_GROUPS * O_LORA
+    # columns with one scale per token. Keep grouped matmuls, but wait for every
+    # WO-A group before reducing the common amax.
     o_r_pad = pl.create_tensor([T_PAD, O_GROUPS * O_LORA], dtype=pl.FP32)
     o_r_i8_pad = pl.create_tensor([T_PAD, O_GROUPS * O_LORA], dtype=pl.INT8)
-    act_scale_dq = pl.create_tensor([O_GROUPS, T_PAD], dtype=pl.FP32)
+    act_scale_dq = pl.create_tensor([1, T_PAD], dtype=pl.FP32)
+    act_scale_q = pl.create_tensor([1, T_PAD], dtype=pl.FP32)
     # Per-group INT32 partials: proj_b_mm writes group g's contribution to output
     # channel n at partials[:, g*D + n]. No atomic-add -> no zero-seed.
     partials = pl.create_tensor([T_PAD, O_GROUPS * D], dtype=pl.INT32)
+    proj_a_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
     proj_b_tids = pl.array.create(O_GROUPS, pl.TASK_ID)
 
     with pl.manual_scope():
@@ -197,21 +196,43 @@ def decode_o_proj_tp1(
                 # acc_a is 3D (wo_a keeps its group axis), which subscript-write cannot express.
                 o_r_pad = pl.assemble(o_r_pad, acc_a, [pa_r0, out_col_g + n0])
 
+            proj_a_tids[g] = pa_tid
+
+    scale_blocks = (t_dim + PROJ_B_ACT_TASK_T_TILE - 1) // PROJ_B_ACT_TASK_T_TILE
+    with pl.spmd(
+        scale_blocks,
+        name_hint="oproj_token_scale",
+        deps=[proj_a_tids[i] for i in range(O_GROUPS)],
+        allow_early_resolve=True,
+    ) as scale_tid:
+        scale_start = pl.tile.get_block_idx() * PROJ_B_ACT_TASK_T_TILE
+        for qt in pl.pipeline(
+            scale_start, pl.min(scale_start + PROJ_B_ACT_TASK_T_TILE, t_dim), QUANT_TOKEN_TILE, stage=2
+        ):
+            token_amax = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
+            for scale_group in pl.range(O_GROUPS):
+                scale_col = scale_group * O_LORA
+                projected = o_r_pad[qt : qt + QUANT_TOKEN_TILE, scale_col : scale_col + O_LORA]
+                projected = pl.cast(pl.cast(projected, pl.BF16, mode="rint"), pl.FP32)
+                group_amax = pl.reshape(pl.row_max(pl.abs(projected)), [1, QUANT_TOKEN_TILE])
+                token_amax = pl.maximum(token_amax, group_amax)
+            # Native dynamic_quant computes the quantization multiplier and
+            # dequantization scale independently, rather than reciprocating one.
+            act_scale_dq[0:1, qt : qt + QUANT_TOKEN_TILE] = pl.mul(token_amax, 1.0 / INT8_SCALE_MAX)
+            quant_numerator = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
+            act_scale_q[0:1, qt : qt + QUANT_TOKEN_TILE] = pl.div(quant_numerator, token_amax)
+
+    with pl.manual_scope():
+        for g in pl.parallel(O_GROUPS):
             col_g = g * O_LORA
-            with pl.at(level=pl.Level.CORE_GROUP, name_hint="quant", deps=[pa_tid], allow_early_resolve=True) as q_tid:
+            with pl.at(
+                level=pl.Level.CORE_GROUP, name_hint="quant", deps=[scale_tid], allow_early_resolve=True
+            ) as q_tid:
                 for qt in pl.pipeline(0, t_dim, QUANT_TOKEN_TILE, stage=2):
-                    oc_amax = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
-                    g_abs = pl.abs(oc_amax)
-                    g_row_max = pl.row_max(g_abs)
-                    g_row_max = pl.reshape(g_row_max, [1, QUANT_TOKEN_TILE])
-                    g_amax_floor = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS)
-                    g_amax = pl.maximum(g_amax_floor, g_row_max)
-                    g_scale_num = pl.full([1, QUANT_TOKEN_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
-                    g_sq_row = pl.div(g_scale_num, g_amax)
-                    g_scale_dq = pl.mul(g_amax, 1.0 / INT8_SCALE_MAX)
-                    act_scale_dq[g : g + 1, qt : qt + QUANT_TOKEN_TILE] = g_scale_dq
-                    g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
+                    token_multiplier = act_scale_q[0:1, qt : qt + QUANT_TOKEN_TILE]
+                    g_sq_col = pl.reshape(token_multiplier, [QUANT_TOKEN_TILE, 1])
                     oc_q = o_r_pad[qt : qt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA]
+                    oc_q = pl.cast(pl.cast(oc_q, pl.BF16, mode="rint"), pl.FP32)
                     oq_scaled = pl.row_expand_mul(oc_q, g_sq_col)
                     oq_i32 = pl.cast(oq_scaled, target_type=pl.INT32, mode="rint")
                     oq_half = pl.cast(oq_i32, target_type=pl.FP16, mode="round")
@@ -220,9 +241,9 @@ def decode_o_proj_tp1(
                 # Zero the tail of the final active proj_b_mm row tile.
                 for zt in pl.range(t_dim, proj_b_padded_rows, QUANT_TOKEN_TILE):
                     zero_half = pl.full([QUANT_TOKEN_TILE, O_LORA], dtype=pl.FP16, value=0.0)
-                    o_r_i8_pad[zt : zt + QUANT_TOKEN_TILE, col_g : col_g + O_LORA] = pl.cast(
-                        zero_half, target_type=pl.INT8, mode="trunc"
-                    )
+                    zero_i8 = pl.cast(zero_half, target_type=pl.INT8, mode="trunc")
+                    zero_rows = pl.min(QUANT_TOKEN_TILE, proj_b_padded_rows - zt)
+                    o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
 
             with pl.spmd(
                 proj_b_t_rows * (D // PROJ_B_D_TILE), name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
@@ -243,9 +264,8 @@ def decode_o_proj_tp1(
                     partials[t0 : t0 + PROJ_B_MM_T_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
             proj_b_tids[g] = pb_tid
 
-    # proj_b_act sums the O_GROUPS INT32 partials -- each dequantized by its group's
-    # per-row act scale -- then applies the per-channel weight scale -> BF16. Explicit
-    # deps on all proj_b_mm tasks bridge manual_scope -> the return's auto-dep.
+    # Sum INT32 group partials before dequantizing, matching Native's single
+    # quantized WO-B matmul. All proj_b_mm tasks must complete before this read.
     with pl.spmd(
         act_t_blks * (D // PROJ_B_ACT_N_TILE),
         name_hint="proj_b_act",
@@ -260,16 +280,15 @@ def decode_o_proj_tp1(
         wb_scale = wo_b_scale[ob_n0 : ob_n0 + PROJ_B_ACT_N_TILE]
         wb_scale_chunk = pl.reshape(wb_scale, [1, PROJ_B_ACT_N_TILE])
         for b_tb in pl.range(t0, pl.min(t0 + PROJ_B_ACT_TASK_T_TILE, t_dim), PROJ_B_ACT_T_TILE):
-            acc = pl.full([PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.FP32, value=0.0)
+            acc_i32 = pl.full([PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.INT32, value=0)
             for act_g in pl.pipeline(O_GROUPS, stage=2):
                 p_col0 = act_g * D + ob_n0
                 p_g = partials[b_tb : b_tb + PROJ_B_ACT_T_TILE, p_col0 : p_col0 + PROJ_B_ACT_N_TILE]
-                g_scale_row = act_scale_dq[act_g : act_g + 1, b_tb : b_tb + PROJ_B_ACT_T_TILE]
-                g_scale = pl.reshape(g_scale_row, [PROJ_B_ACT_T_TILE, 1])
-                p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
-                p_g_scaled = pl.row_expand_mul(p_g_f32, g_scale)
-                acc = pl.add(acc, p_g_scaled)
-            out_t = pl.col_expand_mul(acc, wb_scale_chunk)
+                acc_i32 = pl.add(acc_i32, p_g)
+            output_token_scale = pl.reshape(act_scale_dq[0:1, b_tb : b_tb + PROJ_B_ACT_T_TILE], [PROJ_B_ACT_T_TILE, 1])
+            # Native applies the weight scale before the token scale.
+            acc = pl.col_expand_mul(pl.cast(acc_i32, pl.FP32), wb_scale_chunk)
+            out_t = pl.row_expand_mul(acc, output_token_scale)
             out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
             out_rows = pl.min(PROJ_B_ACT_T_TILE, t_dim - b_tb)
             attn_out[b_tb : b_tb + PROJ_B_ACT_T_TILE, ob_n0 : ob_n0 + PROJ_B_ACT_N_TILE] = pl.set_validshape(
@@ -765,19 +784,20 @@ def golden_decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, tokens):
     import torch
 
     attention = o_packed_heads.reshape(O_GROUPS, T_PAD, O_GROUP_IN)[:, :tokens].float()
-    o_a = torch.einsum("gti,gri->gtr", attention, wo_a.float())
-    row_amax = o_a.abs().amax(dim=-1, keepdim=True).clamp_min(INT8_AMAX_EPS)
+    o_a = torch.einsum("gti,gri->gtr", attention, wo_a.float()).to(torch.bfloat16).float()
+    row_amax = o_a.abs().amax(dim=(0, 2)).clamp_min(INT8_AMAX_EPS)
     scale_q = INT8_SCALE_MAX / row_amax
-    o_a_i8 = torch.round(o_a * scale_q).to(torch.int32).to(torch.float16).to(torch.int8)
-    scale_dq = 1.0 / scale_q
+    o_a_i8 = torch.round(o_a * scale_q[None, :, None]).to(torch.int32).to(torch.float16).to(torch.int8)
+    scale_dq = row_amax * (1.0 / INT8_SCALE_MAX)
     wo_b_groups = wo_b.reshape(D, O_GROUPS, O_LORA)
-    attn_out = torch.zeros(tokens, D, dtype=torch.float32)
+    accumulated = torch.zeros(tokens, D, dtype=torch.int32, device=o_a.device)
     for group in range(O_GROUPS):
         group_i32 = o_a_i8[group].to(torch.int32)
         weight_i32 = wo_b_groups[:, group].to(torch.int32)
         group_partial = group_i32 @ weight_i32.T
-        attn_out = attn_out + group_partial.float() * scale_dq[group]
-    attn_out = attn_out * wo_b_scale.float().unsqueeze(0)
+        accumulated = accumulated + group_partial
+    attn_out = accumulated.float() * wo_b_scale.float().unsqueeze(0)
+    attn_out = attn_out * scale_dq[:, None]
     return attn_out.to(torch.bfloat16)
 
 

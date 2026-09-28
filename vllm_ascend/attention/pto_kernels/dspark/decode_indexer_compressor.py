@@ -37,6 +37,7 @@ S = DECODE_SEQ
 EPS = M.rms_norm_eps
 D = M.hidden_size
 HEAD_DIM = M.index_head_dim
+HADAMARD_SCALE = HEAD_DIM**-0.5
 HEAD_DIM_INV = 1.0 / HEAD_DIM
 ROPE_HEAD_DIM = M.qk_rope_head_dim
 NOPE_HEAD_DIM = M.index_nope_head_dim
@@ -366,7 +367,7 @@ def indexer_compressor_write(
     rms_tid: pl.Scalar[pl.TASK_ID],
     hadamard_dep: pl.Scalar[pl.TASK_ID],
 ):
-    """Rotate compact boundary rows and write their quantized indexer KV cache."""
+    """Rotate with an unscaled Hadamard, apply BF16 scaling, and write KV/cache."""
     bs = pl.tensor.dim(position_ids, 0)
     compact_rows = bs // COMPRESS_RATIO
     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
@@ -409,6 +410,8 @@ def indexer_compressor_write(
             pl.cast(kv_final[wr_b0 : wr_b0 + RMS_PAD_TILE, 0:HEAD_DIM], target_type=pl.BF16, mode="rint"),
             target_type=pl.FP32,
         )
+        # Match the shared query helper: BF16 matmul, then BF16 scaling.
+        kv_blk_f32 = pl.cast(pl.cast(pl.mul(kv_blk_f32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
         # Per-row absolute maximum.
         kv_amax = pl.reshape(pl.row_max(pl.abs(kv_blk_f32)), [1, RMS_PAD_TILE])
         kv_amax = pl.maximum(kv_amax, pl.full([1, RMS_PAD_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS))
@@ -431,7 +434,7 @@ def indexer_compressor_write(
             cache_row_i64 = pl.read(idx_slot_mapping, [token])
             if cache_row_i64 >= 0:
                 cache_row = pl.cast(cache_row_i64, pl.INDEX)
-                kv_flat[token : token + 1, :] = kv_final[compact_token : compact_token + 1, 0:HEAD_DIM]
+                kv_flat[token : token + 1, :] = kv_blk_f32[inner : inner + 1, :]
                 idx_kv_cache_flat[cache_row : cache_row + 1, :] = kv_i8_blk[inner : inner + 1, :]
 
     # Serialized indexer-cache scale commit.
@@ -783,7 +786,7 @@ def indexer_compressor_write_vllm(
     hadamard_dep: pl.Scalar[pl.TASK_ID],
     state_commit_tid: pl.Scalar[pl.TASK_ID],
 ):
-    """Write key and FP16 scale into one packed vLLM index page."""
+    """Apply an unscaled Hadamard and write key/scale into packed vLLM pages."""
     b_dim = pl.tensor.dim(index_block_table, 0)
     tokens = pl.tensor.dim(position_ids, 0)
     s_dim = tokens // b_dim
@@ -839,6 +842,8 @@ def indexer_compressor_write_vllm(
                 ),
                 target_type=pl.FP32,
             )
+            # Native rotate_activation scales after its BF16 Hadamard matmul.
+            row_fp32 = pl.cast(pl.cast(pl.mul(row_fp32, HADAMARD_SCALE), pl.BF16, mode="rint"), pl.FP32)
             amax = pl.reshape(
                 pl.row_max(pl.abs(row_fp32)),
                 [1, RMS_PAD_TILE],
@@ -1209,7 +1214,8 @@ def golden_compressor(tensors):
             rope_swapped = rope_normed.reshape(1, -1, 2).flip(-1).flatten(-2)
             rope_rot = rope_normed * cos[token] + rope_swapped * sin[token]
             kv_b = torch.cat([kv_b[..., :-rd], rope_rot], dim=-1)
-            kv_b = kv_b.to(torch.bfloat16).float() @ hadamard
+            kv_b = (kv_b.to(torch.bfloat16).float() @ hadamard).to(torch.bfloat16).float()
+            kv_b = (kv_b * HADAMARD_SCALE).to(torch.bfloat16).float()
 
             cache_row = int(idx_slot_mapping[b, s].item())
             if cache_row < 0:
@@ -1326,7 +1332,7 @@ def build_tensor_specs(start_pos=None, batch=B):
         return rope_sin.clone()
 
     def init_hadamard():
-        return torch.rand(HEAD_DIM, HEAD_DIM) * (HEAD_DIM**-0.5)
+        return torch.rand(HEAD_DIM, HEAD_DIM)
 
     def init_idx_kv_cache():
         return torch.zeros(IDX_CACHE_BLOCK_NUM, BLOCK_SIZE, 1, HEAD_DIM, dtype=torch.int8)
