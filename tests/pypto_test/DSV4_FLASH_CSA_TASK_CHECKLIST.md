@@ -8,7 +8,9 @@
 已经明确要求优先核实的短档CSA长尾继续收尾。当前Native是性能/行为基线，pypto-lib是PTO实现参考。
 核内收益、完整CSA及P95分别记录，最终仍以真实权重EP16的forward、token与DSpark验收。
 
-当前性能算子 **e58ddc94** 在30f2b228基础保留固定K的KV L1 K512；四档受影响场景已完成EP16确认。
+当前性能算子在 **e58ddc94** 基础新增按实际cache长度分核的四路Top-K，长档merge核内已确认收益，
+短档不退化及新增策略的EP16仍待确认；[最新单卡结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
+e58ddc94在30f2b228基础保留固定K的KV L1 K512，四档受影响场景已完成EP16；该证据不覆盖新增Top-K。
 保留长短Indexer分组，默认atomic0固定规约，删除冗余QR/KV清零种子，
 QR/KV按行数选择M32/M64和最多3个M组。精度版保持原算术及默认atomic1，显式0/1均可覆盖。
 Native cache分配和流程不变，PTO内部直接读写原物理页，没有入口历史复制或外部Torch写回。
@@ -81,12 +83,14 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
    最新AscendC QLI V2四路Top-K候选：按实际半leaf数分组，新块优先tie顺序保持；
    首轮长档merge核内17.63→13.83μs（−21.53%），但8K/B16核内+7.14%、本体762.96→783.50μs，P95也升高。
    五组merge边界、长短八类状态及图重放通过；通用核暂不合入，[首轮完整数据](results/csa_topk_fourway_20260928/README.md)。
-   已按实际cache长度区分原二路核/多路核，仍为同一套算子内策略；CPU编译通过，
-   task_20260928_130855_23326697870正在测长短B16，不叠加前两项sync_start。
-   [分核候选、阈值及任务](results/csa_topk_fourway_adaptive_20260928/README.md)。
+   按实际cache长度区分原二路核/多路核后，两档状态/重放通过；长档核内18.37→13.88μs（−24.44%），按规则保留。
+   短档生成核已恢复原实现，但同轮无profiler均值仍+1.30%、P95升8.38μs；独立DFX方向相反，不判噪声或不退化通过。
+   两档完整CSA尚无收益，EP16未覆盖本项；不叠加前两项sync_start。
+   [分核源码、阈值及全部结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
    HC输入加宽/RMS融合候选：性能版消除重复FP32读取，精度版保留原归约；
-   两入口完整CPU编译已通过，原pending单卡任务未执行即取消，优先处理上述短档Score波动后恢复。
-   按最新AscendC源码优先级，先收尾当前QLI V2四路候选，再恢复HC候选。
+   两入口完整CPU编译已通过，原pending单卡任务因优先处理短档波动而取消；
+   已按最新AscendC输入复用思路恢复，task_20260928_131803_262469420227正在执行长短B16，
+   使用e58独立候选，不混入Top-K；之后以最终组合源码补必要EP16。
    [候选及冻结脚本](results/csa_hc_input_rms_20260928/README.md)。
    [Simpler #2389](results/csa_mix_preload_20260928/README.md)已完成源码可用性评估，本轮不采用：
    存在采样被pending事件污染、跨callable估计复用及共享非原子表问题，长档Score的sync_start不直接受益。
@@ -109,8 +113,8 @@ CPU位置相同不证明设备草稿token相同，严格路由归因使用独立
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。
 本仓Native用于既定环境的性能/行为对照，pypto-lib用于PTO写法、工具链能力和布局参考。
 pypto-lib官方main73078d0的CSA目录与2164563没有差异；历史上游泳道仍按原来源注明。
-已据QLI V2实现四路Top-K，首轮长档核内收益21.53%；短档回退，当前验证按实际长度生成独立二路/多路核。
-相等score等边界及两档八类状态通过；尚未合入或完成EP16，不把局部收益当整网收益。
+已据QLI V2保留按实际长度分核的四路Top-K，长档核内收益24.44%；短档生成核保持原二路，实测不退化尚未确认。
+相等score等边界及两档八类状态通过；新增策略未完成EP16，不把局部收益当整网收益。
 [具体源码、已采用策略、待做范围与架构限制](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
 历史725μs图实际Worker首尾727.98μs，缺源码和完整配置，只作调度参考。
 此前失败的四query配平、Score留UB、页表预读等见验证日志，不能无新依据重复测试。

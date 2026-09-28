@@ -146,6 +146,8 @@ TOPK_ROWS_PER_QUERY = TOPK_MAX_LEAVES * 2
 
 TOPK_QUERY_WORKERS = 48  # Top-K query-merge workers
 
+TOPK_MERGE_FAN_IN = 4  # QLI V2: accumulated Top-512 plus three incoming roots.
+
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
@@ -184,6 +186,44 @@ def merge2_top512_pairs(
     merged_all = pl.tile.mrgsort(right, left, tmp=merge_tmp)
     merged = pl.tile.slice(merged_all, [1, TOPK_PAIR_WIDTH], [0, 0])
     pl.store(merged, [output_slot, 0], pair_arena)
+
+
+@pl.jit.inline
+def merge_multi_top512_pairs(
+    pair_arena: pl.Tensor,
+    root_slot: pl.Scalar[pl.INDEX],
+    first_incoming: pl.Scalar[pl.INDEX],
+    merge_way: pl.constexpr,
+) -> None:
+    """Merge three/four roots, preserving the existing newer-chunk tie priority."""
+    root = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
+    incoming1 = pl.load(pair_arena, [first_incoming, 0], [1, TOPK_PAIR_WIDTH])
+    incoming2 = pl.load(pair_arena, [first_incoming + 1, 0], [1, TOPK_PAIR_WIDTH])
+    merge_tmp = pl.tile.create([1, merge_way * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+    # Each list contains 512 pairs. Exhausting any list has already emitted
+    # at least 512 sorted pairs; only that defined prefix is stored/consumed.
+    if merge_way == TOPK_MERGE_FAN_IN:
+        incoming3 = pl.load(pair_arena, [first_incoming + 2, 0], [1, TOPK_PAIR_WIDTH])
+        merged_all = pl.tile.mrgsort(incoming3, incoming2, incoming1, root, tmp=merge_tmp, exhausted=True)
+    else:
+        merged_all = pl.tile.mrgsort(incoming2, incoming1, root, tmp=merge_tmp, exhausted=True)
+    merged = pl.tile.slice(merged_all, [1, TOPK_PAIR_WIDTH], [0, 0])
+    pl.store(merged, [root_slot, 0], pair_arena)
+
+
+@pl.jit.inline
+def merge_top512_roots(
+    pair_arena: pl.Tensor,
+    arena_base: pl.Scalar[pl.INDEX],
+    half_count: pl.Scalar[pl.INDEX],
+) -> None:
+    for child in pl.range(1, half_count, TOPK_MERGE_FAN_IN - 1):
+        if child + 2 < half_count:
+            merge_multi_top512_pairs(pair_arena, arena_base, arena_base + child, TOPK_MERGE_FAN_IN)
+        elif child + 1 < half_count:
+            merge_multi_top512_pairs(pair_arena, arena_base, arena_base + child, 3)
+        else:
+            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
 
 
 @pl.jit.inline
@@ -255,6 +295,7 @@ def indexer_topk_query_merge_one(
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+    multiway: pl.constexpr,
 ):
     """Merge half-leaf roots and materialize one query's Top-512."""
     batch_idx = query // S
@@ -266,8 +307,11 @@ def indexer_topk_query_merge_one(
         leaf_count = (visible_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF
         half_count = leaf_count * 2
         arena_base = query * TOPK_ROWS_PER_QUERY
-        for child in pl.range(1, half_count):
-            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
+        if multiway:
+            merge_top512_roots(pair_arena, arena_base, half_count)
+        else:
+            for child in pl.range(1, half_count):
+                merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
 
         root_slot = arena_base
         root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
@@ -293,6 +337,7 @@ def indexer_topk_query_merge(
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+    multiway: pl.constexpr,
 ):
     """Merge query roots on one persistent worker per physical AIV."""
     worker = pl.tile.get_block_idx()
@@ -305,6 +350,7 @@ def indexer_topk_query_merge(
             pair_arena,
             topk_scores,
             topk_indices,
+            multiway,
         )
 
 
@@ -1043,11 +1089,18 @@ def indexer_score_topk_forest(
                 allow_early_resolve=True,
             ):
                 indexer_topk_single_leaf_publish(position_ids, kv_seq_lens, score_arena, topk_scores, topk_idxs)
+        elif max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
+            # Keep the single-leaf kernel free of the multiway branches and
+            # their larger UB temporaries. The choice follows actual length.
+            with pl.spmd(
+                TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
+            ):
+                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, False)
         else:
             with pl.spmd(
                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
             ):
-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs)
+                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, True)
 
     return topk_scores, topk_idxs, score_tid
 

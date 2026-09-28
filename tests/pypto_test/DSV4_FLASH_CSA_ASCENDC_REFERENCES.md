@@ -21,13 +21,13 @@
 其`ldProcessLen=4`，每轮将累计Top-512与三个新分片做MrgSort，保留前512对在UB，最后发布结果；
 尾部分别使用二路或三路，`validBit`区分有效输入。
 
-当前PTO的
+e58基线PTO的
 [indexer_topk_query_merge_one / merge2_top512_pairs](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)
 逐份二路归并，每轮把累计根写回pair_arena，下轮再读取。
 有H份半leaf时，当前H−1轮；四路累计归并可降至ceil((H−1)/3)轮。
 例如H=8时7→3轮，H=2仍是一轮。实际H取可见候选数，不能按128K标签硬编码。
 
-待做范围：
+本项实施范围及保留判据：
 
 1. 仅在性能版跨leaf合并采用四路分组；Score算术、cache布局和任务数不动，短档保留原二路路径。
 2. 先核对PyPTO四输入`mrgsort`的有效输入、截断及物理tile形状；原AscendC的耗尽暂停语义不能直接假定等价。
@@ -43,8 +43,9 @@ QLI V2的metadata和`ProcessDecode()`还带全核同步，当前PTO已有任务�
 128K/B16的merge核内17.63→13.83μs（−21.53%），整层1106.84→1108.84μs尚未改善；
 8K/B16核内8.59→9.20μs、整层762.96→783.50μs，P95上升，通用核不直接合入。
 [首轮实测](results/csa_topk_fourway_20260928/README.md)。
-当前按实际cache长度生成独立二路/多路核，阈值沿用每leaf候选数，单套源码选择；
-已编译通过，正在定向长短设备验证。[分核候选](results/csa_topk_fourway_adaptive_20260928/README.md)。
+按实际cache长度生成独立二路/多路核后，两档状态/重放通过，长档四窗口核内18.37→13.88μs（−24.44%）。
+按核内规则保留分核实现；短档生成代码恢复原二路，实测均值/P95仍略升，不标不退化或整网完成。
+[保留实现、完整反例及局限](results/csa_topk_fourway_adaptive_20260928/README.md)。
 
 ## 2. 已经采用的策略与仍需核对的差异
 
