@@ -1,0 +1,38 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index fb8378f6..d04ece35 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -417,18 +417,27 @@ def sparse_attn_csa(
+                     pv_first_right = pl.tile.extract(
+                         qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+                     )
++                    # Keep the next N128 operand live before consuming the
++                    # current one. AscendC uses two L0B slots as well as two
++                    # L0C accumulators; otherwise the allocator aliases every
++                    # Right tile and serializes MTE1 behind the previous MMAD.
++                    pv_next_right = pl.tile.extract(
++                        qk_l1, pv_l1_row, PV_N_TILE,
++                        [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right,
++                    )
+                     pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
+-                    for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
++                    for pv_n in pl.unroll(2, HEAD_DIM // PV_N_TILE):
++                        pv_current_right = pv_next_right
+                         pv_next_right = pl.tile.extract(
+                             qk_l1, pv_l1_row, pv_n * PV_N_TILE,
+                             [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right,
+                         )
+-                        # Keep two accumulators live so the preceding result's
+-                        # FIX write can overlap the following Cube operation.
+-                        pv_current = pl.tile.matmul(pv_probability_left, pv_next_right)
+-                        pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
++                        pv_current = pl.tile.matmul(pv_probability_left, pv_current_right)
++                        pl.store(pv_previous, [pv_transfer_row, (pv_n - 2) * PV_N_TILE], pv_transfer)
+                         pv_previous = pv_current
+-                    pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
++                    pv_last = pl.tile.matmul(pv_probability_left, pv_next_right)
++                    pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - 2 * PV_N_TILE], pv_transfer)
++                    pl.store(pv_last, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
+                     pl.system.sync_set(
+                         QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                     )

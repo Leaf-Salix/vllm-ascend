@@ -123,6 +123,10 @@ CPU位置相同不证明设备草稿token相同，严格路由归因使用独立
 已有失败的累计softmax、WO-B整token量化、QKV BF16边界和旧source-split atomic干预见验证日志§262～270及其证据链接；
 没有新依据不重复扩测。近期交替优化核内与调度，先看长短代表档，阶段结束再覆盖矩阵，不继续机械追加旧调度轮数。
 
+Sparse PV对齐最新AscendC的L0B双缓冲已做长短单卡对照：状态/图重放通过，
+核内小幅均值下降未超出四窗口的分散，完整区间仅短档改善、长档略退，暂不合入或扩测。
+[PV证据](results/csa_sparse_pv_l0b_20260928/README.md)；下一项评估ops-nn的QR输入/gamma UB驻留。
+
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。
 本仓Native用于既定环境的性能/行为对照，pypto-lib用于PTO写法、工具链能力和布局参考。

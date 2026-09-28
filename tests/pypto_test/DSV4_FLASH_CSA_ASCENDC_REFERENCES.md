@@ -79,6 +79,15 @@ QR的另一项差异是输入/gamma复用：当前8行×1024列的FP32输入按2
 而Sparse AIC约119～148μs；不能把省一遍GM读取直接说成完整CSA的大幅收益。
 本项列作后续小范围候选，优先核实Sparse等更大热点；未新建NPU测试或宣称收益。
 
+2026-09-28继续核实PV生成代码：当前两份L0C已生效，但四个N128 Right tile仍复用L0B偏移0，
+下一块TEXTRACT等待前一MMAD。最新AscendC `ComputeMm2`则按`abL0BufIter % 2`使用两个L0B槽。
+据此做仅调整核内读取生命周期的候选，编译确认Right偏移0/32768交替，不改L1 KV驻留或softmax。
+QK已是K128双缓冲，不再重复调整该参数；本项也不是旧PV两份Acc试验的重跑。
+[候选、来源、编译证据与长短单卡结果](results/csa_sparse_pv_l0b_20260928/README.md)：
+两档状态/图重放通过，AIC均值仅下降2.44%/1.01%、四窗口分布重叠；
+完整CSA短档−1.17%、长档+0.30%，长档P95略升。没有明确收益，暂不合入，也不扩测EP16。
+下一项按最新ops-nn的UB输入/权重驻留方式评估QR复用；保留现有归约和量化顺序。
+
 ## 3. ops-math的适用边界
 
 - [TopKV2入口](../../../ops-math/math/top_k_v2/op_kernel/top_k_v2_apt.cpp)此次读到的实现引用arch35路径。
