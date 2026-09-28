@@ -5,11 +5,11 @@ workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 root="$repo/tests/pypto_test/results/csa_coefficient_active_workers_20260929"
 side="${1:?baseline or candidate}"
-phase="${2:?timing or swimlane}"
+phase="${2:?timing, swimlane, or tail}"
 history="${3:?history length}"
 batch="${4:?batch size}"
 [[ "$side" == baseline || "$side" == candidate ]]
-[[ "$phase" == timing || "$phase" == swimlane ]]
+[[ "$phase" == timing || "$phase" == swimlane || "$phase" == tail ]]
 source "$workspace/env-dsv4-0251rc1.sh"
 source "$repo/tests/pypto_test/results/csa_native_template_20260929/env.sh"
 source_repo="$workspace/.cache/csa-coefficient-active-c93ec723-$side"
@@ -28,11 +28,15 @@ test ! -e "$out/report.json"
 mkdir -p "$out/ascend" "$out/ascend_cache"
 export ASCEND_PROCESS_LOG_PATH="$out/ascend" ASCEND_CACHE_PATH="$out/ascend_cache"
 export VLLM_CACHE_ROOT="$out/vllm_cache"
-if [[ "$phase" == timing ]]; then
+if [[ "$phase" == timing || "$phase" == tail ]]; then
     ASCEND_OPP_PATH="$(python "$repo/tests/pypto_test/results/csa_compiled_pair_20260929/prepare_opp.py" \
         --destination "$out/opp_env")"
     export ASCEND_OPP_PATH
     cd "$out"
+    if [[ "$phase" == tail ]]; then
+        exec python "$root/diagnose.py" --side pto --history "$history" --batch "$batch" \
+            --output "$out" --device "$TASK_DEVICE" > "$out/run.log" 2>&1
+    fi
     exec python "$repo/tests/pypto_test/results/csa_compiled_seven_20260929/compiled_case.py" \
         --side pto --history "$history" --batch "$batch" --output "$out" \
         --device "$TASK_DEVICE" --save-state > "$out/run.log" 2>&1

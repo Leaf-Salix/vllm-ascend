@@ -1,8 +1,9 @@
 # CSA：当前七档核内差距与优化顺序
 
-更新：2026-09-29。当前完整基线为 **c93ec723 / CANN9.2**，同一个auto单卡任务完成
+更新：2026-09-29。最新完整基线为 **c93ec723 / CANN9.2**，同一个auto单卡任务完成
 128K B4/B8/B16/B24、8K B24/B32/B40。Native/PTO均走真实编译半层；
 Native启用npugraph_ex、static kernel与norm/quant融合，详见[配置及边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
+主线随后保留系数空worker优化，代表两档8:2为−1.885%；其结果单列，不覆盖下方七档表。
 旧e33d842a手工NPUGraph矩阵及局部A/B移至[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，不再作为当前表格。
 
 ## 范围和读数
@@ -105,9 +106,11 @@ Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因
 [长B16路径](results/csa_compiled_seven_20260929/h131072_b16/schedule/README.md)、
 [短B24路径](results/csa_compiled_seven_20260929/h8192_b24/schedule/README.md)。
 
-1. 仅删除系数空worker的私有候选已完整CPU编译/load：上限min(48,组数)，内部stride48不变。
-   长B16/短B24先检验实际提交数48→16/24、Score首次启动、CSA均值及P95，再决定受影响范围覆盖。
-   [候选与对照任务](results/csa_coefficient_active_workers_20260929/README.md)。
+1. 系数仅取消空worker已保留，上限min(48,组数)，内部stride48不变。
+   长B16/短B24运行时48→16/24，八类状态/图/保护区通过，8:2完整CSA−1.885%，两档P95下降。
+   短档首轮一次1062.480μs最大值保持开放；连续诊断捕获的1085.260μs事件中根调用945.440μs，
+   不用它替首轮异常归因，不宣称长尾已修复。阶段出口继续覆盖受影响档位。
+   [实测及诊断](results/csa_coefficient_active_workers_20260929/README.md)。
 2. Score多数窗口已提前派发。长B16有些窗口最后等待系数，有些等待idx_kv_scale_commit；
    分开记录生产者end→FIN、FIN→派发和派发→开始，不将时序相关性称为资源阻塞因果。
    原cache的scale写回涉及64字节读改写，没有页面所有权证明前不得直接并行或删除依赖。

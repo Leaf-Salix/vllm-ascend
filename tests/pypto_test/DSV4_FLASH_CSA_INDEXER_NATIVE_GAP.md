@@ -1,7 +1,8 @@
 # Indexer：当前PTO与最新AscendC的差异
 
-更新：2026-09-29。当前实现及完整新七档均为c93ec723 / CANN9.2，
+更新：2026-09-29。最新完整新七档为c93ec723 / CANN9.2，
 Native/PTO已按同配置真实编译半层重测；长档B4/B8/B16/B24、短档B24/B32/B40全部完成。
+主线随后保留系数空worker优化，代表两档8:2−1.885%；该项不与七档旧样本拼表。
 旧V7/V10及入口cache拆分结论移出当前说明；实验历史见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)。
 
 ## 实际接口与主路径
@@ -35,6 +36,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | query/Key复用 | L1 query最多256行，L0按128行M面板；同一Key L1面板跨M子块复用 | 长B≥4用S6 M384/N64；更小长档保留双query | 长B4/B8 S6已取得明显核时收益；分组相似仍不等于L1/L0流水相同，旧4+2拼接退化不重试 |
 | Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24固定组跨leaf驻留已测，AIC约+3.72%、AIV持平；当前候选不采用，不能把少读字节直接当收益 |
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为76.619/135.495μs，后续按当前核时继续看等待与重复move |
+| 系数生成 | ProcessVec0在QLI内由偶数AIV完成FP16 weight×qScale、Brcb及每核GM交接 | 独立SPMD生成对角块系数，提交min(48,query组数)，stride48不变 | 取消空worker已保留；仍有独立任务，后续研究融合时须说明Native的QLI不含Query Hadamard量化 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
 | Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | PTO每leaf有两个half根；改成query分工可能减少根归并，但会增加scale重复读取，未验证前不能判收益 |
@@ -57,9 +59,10 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
    当前长B16 Score AIC/AIV为254.344/260.119μs，merge13.511μs；
    长B24为346.587/363.192μs、merge13.815μs。Native融合QLI的PMU参考分别为
    248.899/248.300和370.853/370.460μs；不能忽略PTO独立系数、scale提交与merge。
-2. 先验证系数任务仅取消空worker的调度候选：固定stride48，提交数min(48, query组数)。
-   完整CPU编译/load及生成码通过，长B16/短B24真实编译A/B正在运行；
-   [候选、历史失败试验区别与范围](results/csa_coefficient_active_workers_20260929/README.md)。
+2. 系数任务仅取消空worker已保留：固定stride48，提交数min(48, query组数)。
+   长B16/短B24真实编译A/B的8:2均值−1.885%、两档P95下降；短档一次最大值和连续诊断分别保留。
+   这是任务提交优化，不能把Score核时略升隐去或称为算术加速。
+   [实测、历史区别和诊断](results/csa_coefficient_active_workers_20260929/README.md)。
 3. 按现有level-4数据分别解释系数/scale依赖。Score已有early派发不能写成一直等待AICPU，
    cache scale的64字节读改写也不能在未证明页面所有权时直接并行。
    后续研究独立归并、AIV数据交接及关键链，保持长短8:2；明显顾此失彼时在同一算子内分场景。

@@ -586,8 +586,13 @@ def indexer_head_coefficients(
         [T_PAD // query_group_size * NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16
     )
     coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
+    # Trim only workers whose original stride-48 loop has no iteration.
+    # Keep every nonempty worker's query groups and arithmetic unchanged.
+    coefficient_workers = pl.min(
+        TOPK_QUERY_WORKERS, pl.tensor.dim(position_ids, 0) // query_group_size
+    )
     with pl.spmd(
-        TOPK_QUERY_WORKERS,
+        coefficient_workers,
         name_hint="indexer_head_coefficients",
         deps=[qh_quant_tid, weights_tid],
         allow_early_resolve=True,
@@ -1644,8 +1649,8 @@ def indexer_weights_project(
         for kb in pl.unroll(1, WEIGHTS_OK):
             partial_r0 = kb * T_PAD + w_r0
             w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
-        # 性能版不做 BF16/FP16 往返：那是为了复刻 Native 先落 BF16、A3 QLI 再吃
-        # FP16 权重的次序，而性能版 leaf 已改走 Vector col_sum，没有 FP16 权重行。
+        # 性能版在此保留FP32，不复刻Native先落BF16的中间舍入。
+        # Cube路径在indexer_head_coefficients里转FP16；更短历史的Vector路径仍读FP32。
         weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.mul(w_sum, WEIGHTS_SCALE)
 
     return weights, weights_tid
