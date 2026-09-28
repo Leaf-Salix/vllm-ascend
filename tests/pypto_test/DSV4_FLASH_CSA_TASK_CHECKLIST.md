@@ -126,6 +126,10 @@ FIN、派发和核启动，不能将“无dummy”直接等同于更快，也不
 独立组合CSA−1.536%、P95下降；无新DFX/Native或16卡，不把该点拼入旧七档。
 下一步用当前保留源码完成阶段出口七档性能/核内与JSON记录。
 [补测结果与范围](results/csa_coefficient_dual_check_20260929/README.md)。
+当前保留4ffccb7b的阶段出口七档已冻结并通过两根解析，
+task_20260929_070256_21859435951正在auto单卡执行Native/PTO实际编译配对、PyTorch JSON及四窗DFX。
+范围仍为128K B4/8/16/24、8K B24/32/40；完成前最新完整表保持c93ec723，不提前替换或拼接。
+[阶段出口范围与收集入口](results/csa_coefficients_seven_20260929/README.md)。
 Native det0的编译/eager曾出现浮点及Top-K集合/顺序差异，保护区通过不等于两侧精度验收。
 [Native编译数值范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 历史d8627207长B16有3次明显拖尾，P95达1391.560μs；后续独立采样未复现，**未证明修复**。

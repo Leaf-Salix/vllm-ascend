@@ -10916,3 +10916,21 @@ max1170.340→1139.060μs；不将此独立点拼进旧七档，也不算作新�
 覆盖128K B4/8/16/24和8K B24/32/40，按8:2更新CSA/核内/P95和原始JSON。
 精度版迁移及新CANN9.2的EP16 token/DSpark与forward仍保持后续任务，不用单卡通过替代。
 [双query结果与证据](results/csa_coefficient_dual_check_20260929/README.md)。
+
+## 398. 启动保留系数优化后的同源码七档阶段出口（2026-09-29）
+
+生产算子4ffccb7b，冻结pkg:dsv4_csa_coefficients_seven_20260929及公共代码/全部设备runner。
+包含已保留的系数空worker、按组准备与UB一次发布；不含§393/§395否定的候选。
+两根依赖图解析通过；PyPTO88f60598、Simplera54c05095的跟踪工作树干净，CANN9.2不变。
+
+task_20260929_070256_21859435951已auto单卡提交，128K B4/8/16/24、8K B24/32/40。
+两侧mode2、PTO atomic0、det0、EPLB关闭，各5预热/20次真实编译图计时；
+逐档交替Native/PTO先后，另采两侧PyTorch JSON及四个PTO level-4窗口。
+复用图/eager、Top-K结构与保护区，跨版本完整状态已由代表S6和§397双query补齐，
+不在七档重复另加状态矩阵。Native仍是release custom，非新ops源码重编产物。
+
+收集器复用上一轮正式工具，严格检查私有包实际路径，增加系数核时分项；
+调度用官方时钟域与行数/block核对，固定window_3，下载汇聚21份原始JSON。
+按上下文内batch等权和长短8:2报告，P95/max单列；不拼接局部轮次或不同版本。
+任务仍在执行，最新完整结果仍为c93ec723；模型与精度版后续验收保持待办。
+[范围、冻结版本与执行入口](results/csa_coefficients_seven_20260929/README.md)。
