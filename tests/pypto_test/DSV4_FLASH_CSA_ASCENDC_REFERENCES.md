@@ -126,6 +126,11 @@ WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key�
 进一步核对`InitBuffers`：Native分别分配双槽Key L1和双槽Score L1，当前PTO候选没有隔离两者。
 下一候选先表达持久Key L1池并核查分配/依赖，再决定是否上卡；不因L0B已双槽就宣称Native流水已复现。
 [来源、四窗口回退与状态证据](results/csa_score_key_prefetch_20260928/README.md)。
+后续独立Key L1池已按AscendC的缓冲寿命实现：Key独占16KiB、Score双槽各48KiB，MTE1→FIX等待15→0。
+两档状态/图重放通过，128K/B16 Score AIC四窗口285.446→269.906μs（−5.44%），完整CSA−2.12%；
+短档完整CSA−0.66%、P95+1.96μs，完整CSA七三−1.682%，保留到性能版。
+短档生成核未变但DFX核内读数变慢，原始Score AIC七三+0.155%，不能写成综合核内已改善。
+整模型尚未包含该项；[完整范围、设备启动失败/补采与证据](results/csa_score_key_l1_20260928/README.md)。
 
 ## 3. ops-math的适用边界
 

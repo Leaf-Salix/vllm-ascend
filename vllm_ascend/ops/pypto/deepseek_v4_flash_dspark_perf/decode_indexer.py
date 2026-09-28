@@ -503,6 +503,7 @@ def indexer_score_topk_native_cube(
     score_tile: pl.constexpr,
     score_sync_start: pl.constexpr,
     score_early_resolve: pl.constexpr,
+    key_prefetch_panels: pl.constexpr,
 ):
     """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -585,50 +586,140 @@ def indexer_score_topk_native_cube(
                         dtype=pl.FP16,
                         target_memory=pl.MemorySpace.Mat,
                     )
-                    for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
-                        buf_panel_col = buf_qk_panel * qk_panel_cols
+                    buf_current_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    buf_prefetched_key = pl.tile.create(
+                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    )
+                    # Native QLI keeps Key L1 separate from FIXPIPE's Score L1.
+                    # A live two-panel pool prevents the allocator from recycling
+                    # each next-Key staging tile as the current Score destination.
+                    buf_key_l1_pool = pl.tile.create(
+                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    )
+                    # Keep QK/WS outside a conditional prologue so their Mat
+                    # intermediates retain the original lifetimes.
+                    if key_prefetch_panels > 0:
+                        buf_prime_col = 0
                         # Native QLI streams N128 key panels, overlapping the next
                         # MTE2 load with QK/WS instead of loading the entire N768/1024.
-                        buf_panel_keys = pl.tile.create(
-                            [qk_panel_cols, IDX_HEAD_DIM],
-                            dtype=pl.INT8,
-                            target_memory=pl.MemorySpace.Mat,
-                        )
-                        for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
-                            buf_key_row = (
+                        for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            buf_prime_key_row = (
                                 buf_logical_begin
                                 + buf_score_begin
-                                + (buf_panel_col // (score_tile // 2)) * buf_lane_span
-                                + buf_panel_col % (score_tile // 2)
-                                + buf_key_page * BLOCK_SIZE
+                                + (buf_prime_col // (score_tile // 2)) * buf_lane_span
+                                + buf_prime_col % (score_tile // 2)
+                                + buf_prime_key_page * BLOCK_SIZE
                             )
-                            buf_safe_page = pl.min(
-                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                            buf_prime_safe_page = pl.min(
+                                buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
                             )
-                            buf_physical_page = pl.max(
-                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                            buf_prime_physical_page = pl.max(
+                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX), 0
                             )
-                            buf_native_byte = buf_physical_page * native_page_bytes
-                            if buf_native_byte % IDX_HEAD_DIM == 0:
-                                buf_panel_keys = pl.gather_row(
-                                    buf_panel_keys,
+                            buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
+                            if buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                buf_key_l1_pool = pl.gather_row(
+                                    buf_key_l1_pool,
                                     idx_kv_cache,
-                                    [buf_key_page * BLOCK_SIZE, 0],
-                                    [buf_native_byte // IDX_HEAD_DIM, 0],
+                                    [buf_prime_key_page * BLOCK_SIZE, 0],
+                                    [buf_prime_native_byte // IDX_HEAD_DIM, 0],
                                     [BLOCK_SIZE, IDX_HEAD_DIM],
                                 )
                             else:
-                                buf_panel_keys = pl.gather_row(
-                                    buf_panel_keys,
+                                buf_key_l1_pool = pl.gather_row(
+                                    buf_key_l1_pool,
                                     idx_kv_cache_shift64,
-                                    [buf_key_page * BLOCK_SIZE, 0],
-                                    [buf_native_byte // IDX_HEAD_DIM, 0],
+                                    [buf_prime_key_page * BLOCK_SIZE, 0],
+                                    [buf_prime_native_byte // IDX_HEAD_DIM, 0],
                                     [BLOCK_SIZE, IDX_HEAD_DIM],
                                 )
-                        buf_key_panel = pl.tile.move(
-                            pl.tile.transpose_view(buf_panel_keys),
+                        buf_current_key = pl.tile.extract(
+                            pl.tile.transpose_view(buf_key_l1_pool),
+                            0,
+                            0,
+                            [IDX_HEAD_DIM, qk_panel_cols],
                             target_memory=pl.MemorySpace.Right,
                         )
+                    for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                        buf_panel_col = buf_qk_panel * qk_panel_cols
+                        buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                        buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                            # Native QLI streams N128 key panels, overlapping the next
+                            # MTE2 load with QK/WS instead of loading the entire N768/1024.
+                            buf_panel_keys = pl.tile.create(
+                                [qk_panel_cols, IDX_HEAD_DIM],
+                                dtype=pl.INT8,
+                                target_memory=pl.MemorySpace.Mat,
+                            )
+                            for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                buf_key_row = (
+                                    buf_logical_begin
+                                    + buf_score_begin
+                                    + (buf_load_col // (score_tile // 2)) * buf_lane_span
+                                    + buf_load_col % (score_tile // 2)
+                                    + buf_key_page * BLOCK_SIZE
+                                )
+                                buf_safe_page = pl.min(
+                                    buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                buf_physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                                )
+                                buf_native_byte = buf_physical_page * native_page_bytes
+                                if buf_native_byte % IDX_HEAD_DIM == 0:
+                                    if key_prefetch_panels > 0:
+                                        buf_key_l1_pool = pl.gather_row(
+                                            buf_key_l1_pool,
+                                            idx_kv_cache,
+                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        buf_panel_keys = pl.gather_row(
+                                            buf_panel_keys,
+                                            idx_kv_cache,
+                                            [buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                else:
+                                    if key_prefetch_panels > 0:
+                                        buf_key_l1_pool = pl.gather_row(
+                                            buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        buf_panel_keys = pl.gather_row(
+                                            buf_panel_keys,
+                                            idx_kv_cache_shift64,
+                                            [buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                            if key_prefetch_panels > 0:
+                                buf_prefetched_key = pl.tile.extract(
+                                    pl.tile.transpose_view(buf_key_l1_pool),
+                                    0,
+                                    buf_load_slot,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                            else:
+                                buf_prefetched_key = pl.tile.move(
+                                    pl.tile.transpose_view(buf_panel_keys),
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        if key_prefetch_panels > 0:
+                            buf_key_panel = buf_current_key
+                        else:
+                            buf_key_panel = buf_prefetched_key
                         buf_scores_l1 = pl.tile.create(
                             [query_group_size * IDX_N_HEADS, qk_panel_cols],
                             dtype=pl.FP16,
@@ -659,6 +750,9 @@ def indexer_score_topk_native_cube(
                                 buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
                             )
                         buf_previous_l1 = buf_scores_l1
+                        if key_prefetch_panels > 0:
+                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                buf_current_key = buf_prefetched_key
                     buf_last_pair = pl.tile.extract(
                         buf_previous_l1,
                         0,
@@ -849,6 +943,7 @@ def indexer_score_topk_forest(
                     BUFFERED_LONG_SCORE_TILE,
                     True,
                     False,
+                    1,
                 )
             elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
                 score_tid = indexer_score_topk_native_cube(
@@ -869,6 +964,7 @@ def indexer_score_topk_forest(
                     BUFFERED_LONG_SCORE_TILE,
                     True,
                     False,
+                    0,
                 )
             else:
                 score_tid = indexer_score_topk_native_cube(
@@ -889,6 +985,7 @@ def indexer_score_topk_forest(
                     BUFFERED_LONG_SCORE_TILE,
                     True,
                     False,
+                    0,
                 )
         else:
             short_queries = pl.tensor.dim(position_ids, 0)
@@ -919,6 +1016,7 @@ def indexer_score_topk_forest(
                     BUFFERED_SCORE_TILE,
                     False,
                     True,
+                    0,
                 )
             else:
                 score_tid = indexer_score_topk_native_cube(
@@ -939,6 +1037,7 @@ def indexer_score_topk_forest(
                     BUFFERED_SCORE_TILE,
                     False,
                     True,
+                    0,
                 )
     else:
         with pl.spmd(
