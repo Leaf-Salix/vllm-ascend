@@ -96,6 +96,14 @@ QR输入/gamma UB驻留候选已按最新ops-nn实现，完整CPU编译/链接�
 生成代码确认每8行只读一次输入，显式extract避免多使用点重复UB提取；256列规约和量化顺序不变。
 [冻结候选与单卡任务](results/csa_qr_ub_20260928/README.md)等待设备，未并入生产或宣称收益。
 
+继续核实Sparse Vector的`SoftmaxFlashV2Compute/DealBmm2ResBaseBlock`：Native概率先按累计最大值生成，
+PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未利用该单调性；旧整层回退结论不撤销。
+新独立候选删去冗余beta、两次新PV缩放及局部分母乘法，保留N128/三槽/跨query流水。
+完整CPU编译通过，生成代码TEXP 3→2处、TROWEXPANDMUL 4→2处；尚无设备结果，未合入。
+概率累计最大值和round是明确算术变化，不能作为数值中性搬运优化验收；
+先收集QR/Top-K已排队任务，再安排必要单卡检查，不直接扩测EP16。
+[累计softmax/PV候选与旧实验区别](results/csa_sparse_online_pv_20260928/README.md)。
+
 ## 3. ops-math的适用边界
 
 - [TopKV2入口](../../../ops-math/math/top_k_v2/op_kernel/top_k_v2_apt.cpp)此次读到的实现引用arch35路径。

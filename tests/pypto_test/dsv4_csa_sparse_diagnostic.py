@@ -76,6 +76,8 @@ def main():
                         help="零 Q 均匀 attention 回归：B1/3 覆盖尾块，B4 覆盖整块，输出要求 bit 一致")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--variant", choices=("precision", "performance"), required=True)
+    parser.add_argument("--device", type=int, default=0,
+                        help="task-submit 分配的单卡编号；诊断不自行选择其他设备")
     parser.add_argument("--pmu", type=int, choices=(0, 1, 2, 4, 5, 6, 7, 8), default=0,
                         help="独立 program 模式采核内计数器；2=流水利用率，4=内存，不作稳态性能计时")
     args = parser.parse_args()
@@ -85,11 +87,11 @@ def main():
     import torch
     import torch_npu  # noqa: F401
 
-    torch.npu.set_device(0)
+    torch.npu.set_device(args.device)
     payload = (uniform_case(args.synthetic_batch) if args.synthetic_batch else
                torch.load(args.input, map_location="cpu", weights_only=True))
     kernel, mod = build_kernel(args.variant)
-    target = "cpu" if args.pmu else "npu:0"
+    target = "cpu" if args.pmu else f"npu:{args.device}"
     names = ("q", "ori_kv", "ori_block_table", "cmp_kv", "cmp_block_table",
              "cmp_sparse_indices", "position_ids", "seqused_kv", "sinks")
     tensors = [payload[n].contiguous().to(target) for n in names]
@@ -103,12 +105,12 @@ def main():
     if args.pmu:
         from pypto.runtime import RunConfig
 
-        config = RunConfig(platform="a2a3", device_id=0, enable_pmu=args.pmu,
+        config = RunConfig(platform="a2a3", device_id=args.device, enable_pmu=args.pmu,
                            save_kernels=True, save_kernels_dir=str((args.output / "build").resolve()))
         compiled = kernel.compile(*tensors, cos, sin, output, config=config)
         compiled(*tensors, cos, sin, output, config=config)
     else:
-        pypto.torch.init(device=0, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        pypto.torch.init(device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer")
         kernel(*tensors, cos, sin, output)
     actual = output.view(mod.O_GROUPS, mod.T_PAD, mod.O_GROUP_IN)[:, :tokens]
     actual = actual.transpose(0, 1).contiguous().view(tokens, mod.H, mod.HEAD_DIM).cpu()
@@ -117,7 +119,7 @@ def main():
     report = {"status": checks["status"] if args.synthetic_batch else "MEASURED", "variant": args.variant,
               "input": str(args.input) if args.input else None,
               "reference": "均匀 attention 解析值" if args.synthetic_batch else "Native sparse attention",
-              "batch": payload["batch"], "history": payload["history"],
+              "batch": payload["batch"], "history": payload["history"], "device": args.device,
               "scope": "固定 Q/cache/Top-K；逆 RoPE 用 cos=1/sin=0 隔离 QK/softmax/PV；零容差比较",
               "comparison": checks,
               "per_token": [compare_tensor(a, e, 0, 0) for a, e in zip(actual, expected)]}

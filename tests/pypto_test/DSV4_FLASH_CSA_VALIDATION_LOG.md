@@ -9224,3 +9224,25 @@ H=8/10的三轮归并推导减少24KiB/query GM搬运，但实际核内收益仍
 task_20260928_145106_4822976856已提交，当前等待设备；先小用例通过才跑长短B16各20图计时/四DFX。
 当前没有设备数值或性能结论，未并入生产，继续收集QR与本项任务，不重提已确认存在的任务。
 [候选、CPU证据、测试合同及复现入口](results/csa_topk_ub4_20260928/README.md)。
+
+## 325. 最新AscendC累计softmax的PV更新：准备消除冗余新结果缩放（2026-09-28）
+
+准备本候选时QR和Top-K UB两个原任务均仍pending，未重提、未据排队状态宣称收益；
+本节CPU工作结束时两任务已经开始运行，Top-K五组独立排序/保护区先导通过，完整两档结果待收。
+继续核对ops-transformer b5b33e14的SoftmaxFlashV2Compute/DealBmm2ResBaseBlock：
+概率按累计最大值生成，PV合并只对旧结果乘alpha，再加当前结果。
+历史§258–259的累计softmax候选仍保留beta=exp(pv_m-next_m)及新结果乘法；
+其整层回退证据保持，不将旧候选改写为成功。本项以该冗余为新的代码依据。
+
+独立a66255ea工作树只改性能版Sparse：延用累计最大值/round的明确算术边界，
+利用同query有效块顺序及pv_m单调性令next_m=pv_m，删除beta和新PV、局部分母的乘法。
+与Native仍有N128/N512分块差异，与pypto-lib仍有局部最大值/rint差异；不是数值中性优化。
+三槽、预发深度、跨query流水、cache、任务数及调度开关不变；其他候选和主树WO_A修改不混入。
+CPU lowering/PTOAS/CCE/AICPU链接通过，生成AIV循环TEXP从3处减为2处，
+TROWEXPANDMUL从4处减为2处。静态指令减少不等于设备加速。
+
+尚未提交设备任务、未合入；先收集已有两项单卡对照，再复用固定Native输入和B3解析尾块验证新旧累计实现，
+有依据后测长短B16核内、完整CSA/P95及图重放。算术变化不可冒用搬运候选的零容差浮点状态合同。
+现有Sparse诊断新增--device，按队列分配编号设置torch_npu、PyPTO kernel/program和输出设备，
+默认0保留旧命令，报告记录实际编号；只改诊断工具，不改Native或生产设备流程。
+[冻结补丁、CPU证据与验证安排](results/csa_sparse_online_pv_20260928/README.md)。
