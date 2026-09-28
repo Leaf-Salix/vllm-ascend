@@ -433,6 +433,8 @@ class OfflineCSAObserver:
         """只包围 Native _model_forward；execute_model 仅用于辨认实际 decode 档位。"""
         import torch
 
+        from offline_pd.forward_timing import TIMING_EVENT_SETUP, prewarm_timing_events
+
         if getattr(self, "_offline_forward", None) is not None or getattr(self, "_offline_steady", None) is not None:
             raise RuntimeError("Forward/steady measurement is already active")
         runner = self.model_runner
@@ -440,9 +442,10 @@ class OfflineCSAObserver:
         state = {"schema": 3, "kind": "model_forward",
                  "dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
                  "warmup_steps": warmup_steps, "requested_steps": steps, "seen_steps": 0,
-                 "all_execute_calls": 0, "observed": {}}
+                 "all_execute_calls": 0, "observed": {}, "timing_event_setup": TIMING_EVENT_SETUP}
         events, active = [], [None]
         torch.npu.reset_peak_memory_stats()
+        event_pairs = prewarm_timing_events(steps)
         diagnostic = None
         if host_diagnostics:
             from offline_pd.forward_host import ForwardHostDiagnostics
@@ -462,7 +465,7 @@ class OfflineCSAObserver:
             # the actual request positions for comparing work across runs;
             # no device copy, hash, or synchronization is added to timing.
             entry["request_positions"] = runner._dsa_positions_cpu_buf[:expected_tokens].tolist()
-            begin, end = (torch.npu.Event(enable_timing=True) for _ in range(2))
+            begin, end = event_pairs[len(events)]
             entry["begin"], entry["end"] = begin, end
             if diagnostic is not None:
                 diagnostic.mark(entry, "event_record_ready")

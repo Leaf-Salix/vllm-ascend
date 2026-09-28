@@ -39,7 +39,9 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
    连续128K/B4→B8→B16已完成，三档均值快7.03%/3.22%/2.96%，P95更低、token/DSpark一致。
    但PTO B16仍有3.147ms准备阶段入场延迟，Native另有7.498ms提交区间入场延迟，均无GC。
    后续必要模型验证复用新增分项观测，不把未定位尾部标修复，不另做完整七档诊断。
-   不扫描GC对象、不改GC策略、不加设备同步，不从正式forward中扣除等待。
+   两侧计时Event已改为生成前预建并首次record，仅准备时等待一次，单卡两种event模式通过；
+   正式10步不新建Event或加同步，不扫描GC对象、不改GC策略，不扣除forward等待。
+   [计时工具修正及边界](results/csa_forward_event_prewarm_20260928/README.md)。
    [直接B16诊断](results/csa_forward_entry_20260928/README.md)、
    [连续换档诊断](results/csa_forward_sequence_20260928/README.md)。
 2. **Indexer query整组准入已否定。** 两档状态/图重放精确通过，但长短本体慢1.59%/3.63%，P95均升高；

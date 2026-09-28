@@ -8,7 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent / "model"
 ARTIFACTS = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ARTIFACTS.parent))
-from offline_pd.performance import compare_worker_configs, distribution, load_rank, require  # noqa: E402
+from offline_pd.performance import (  # noqa: E402
+    compare_forward_setup,
+    compare_worker_configs,
+    distribution,
+    load_rank,
+    require,
+)
 
 CASES = ((131072, 16), (8192, 40))
 OPERATOR_REVISION = "2a740c1f + ordered/candidate.patch"
@@ -44,6 +50,7 @@ def collect_case(history, batch):
             require(native["history"] == history, f"rank{rank}: 历史长度与矩阵不同")
             event_modes = compare_worker_configs(native["worker_runtime_config"][0],
                                                  pto["worker_runtime_config"][0])
+            observation_setup = compare_forward_setup(native, pto)
             mismatch = sum(a != b for name in ("steady_output_token_ids", "output_token_ids")
                            for left, right in zip(native[name], pto[name]) for a, b in zip(left, right))
             stats_equal = values["native"][1] == values["pto"][1]
@@ -51,6 +58,7 @@ def collect_case(history, batch):
             row["dspark_mismatched_ranks"] += not stats_equal
             row["compared_tokens"] += 2 * batch * 128
             detail = {"rank": rank, "token_mismatches": mismatch, "dspark_equal": stats_equal,
+                      "forward_observation_setup": observation_setup,
                       "cann_event_work_mode": event_modes, "step_positions_cpu": native_positions,
                       "positions_equal": positions_equal}
             if not positions_equal:

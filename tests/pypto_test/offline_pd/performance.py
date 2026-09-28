@@ -139,6 +139,15 @@ def layer_intervals(rows, side, steps=3):
             "profiled_main_steps": model_steps}
 
 
+def compare_forward_setup(native, pto):
+    setups = [{"timing_event_setup": value["steady_window"][0].get("timing_event_setup", "lazy_per_forward"),
+               "forward_host_diagnostics": value.get("forward_host_diagnostics", False)} for value in (native, pto)]
+    require(setups[0] == setups[1], "两侧forward观测方式不同，不能配对计时")
+    require(setups[0]["timing_event_setup"] in ("lazy_per_forward", "prewarm_before_generation"),
+            "未知forward事件准备方式")
+    return setups[0]
+
+
 def load_rank(root, side, rank, mode, plan, *, batch, tokens, steps, max_num_seqs, steady_cycles):
     path = root / side / f"rank{rank}.performance.json"
     value = json.loads(path.read_text())
@@ -227,6 +236,7 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
                         "requested_steady_cycles"):
                 require(native[key] == pto[key], f"rank{rank}: 两侧 {key} 不同")
             event_modes = compare_worker_configs(native["worker_runtime_config"][0], pto["worker_runtime_config"][0])
+            observation_setup = compare_forward_setup(native, pto)
             require(native["window"][0]["window"] == pto["window"][0]["window"],
                     f"rank{rank}: 两侧 trace 步序或形状不同")
             mismatches = sum(a != b for name in ("steady_output_token_ids", "output_token_ids")
@@ -236,6 +246,7 @@ def compare(root, mode, plan, *, batch=16, tokens=128, steps=3, ranks=16, max_nu
             report["spec_decode_mismatched_ranks"] += not stats_equal
             report["compared_tokens"] += 2 * batch * tokens
             entry = {"rank": rank, "key": native["key"], "token_mismatches": mismatches,
+                     "forward_observation_setup": observation_setup,
                      "cann_event_work_mode": event_modes,
                      "spec_decode_equal": stats_equal}
             for side, (data, stats) in loaded.items():

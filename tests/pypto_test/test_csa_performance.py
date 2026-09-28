@@ -11,7 +11,18 @@ import torch
 import torch_npu
 from offline_pd.forward_host import ForwardHostDiagnostics
 from offline_pd.observer import OfflineCSAObserver
-from offline_pd.performance import compare_worker_configs, layer_intervals
+from offline_pd.performance import compare_forward_setup, compare_worker_configs, layer_intervals
+
+
+def test_forward_pairing_rejects_different_observers():
+    legacy = {"steady_window": [{}]}
+    current = {"steady_window": [{"timing_event_setup": "prewarm_before_generation"}]}
+    assert compare_forward_setup(legacy, legacy)["timing_event_setup"] == "lazy_per_forward"
+    assert compare_forward_setup(current, current)["timing_event_setup"] == "prewarm_before_generation"
+    with pytest.raises(ValueError, match="观测方式不同"):
+        compare_forward_setup(legacy, current)
+    with pytest.raises(ValueError, match="观测方式不同"):
+        compare_forward_setup(current, {**current, "forward_host_diagnostics": True})
 
 
 def test_worker_event_difference_is_reported_without_ignoring_other_configuration():
@@ -76,9 +87,12 @@ def observer(monkeypatch):
 def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure, host_diagnostics):
     class Event:
         clock = 0
+        created = 0
+        setup_waits = 0
 
         def __init__(self, **kwargs):
             self.stamp = None
+            Event.created += 1
 
         def record(self):
             self.stamp = Event.clock
@@ -88,6 +102,9 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
 
         def elapsed_time(self, end):
             return (end.stamp - self.stamp) / 1000
+
+        def synchronize(self):
+            Event.setup_waits += 1
 
     def forward():
         Event.clock += 100
@@ -123,12 +140,17 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
     monkeypatch.setattr(torch.npu, "max_memory_reserved", Mock(return_value=20))
     callbacks_before = list(gc.callbacks)
     observer.offline_begin_forward(2, 24, 4, 10, host_diagnostics)
+    assert Event.created == 20
+    assert Event.setup_waits == 1
     shapes = [(4, 4)] + [(24, 4)] * 15
     if failure == "shape_gap":
         shapes.insert(6, (18, 3))
     for shape in shapes:
         observer.model_runner.execute_model(scheduler(*shape))
     result = observer.offline_end_forward()
+    assert Event.created == 20  # No event allocation during measured forwards.
+    assert Event.setup_waits == 1  # No per-step event synchronization.
+    assert result["timing_event_setup"] == "prewarm_before_generation"
     assert result["sufficient"] is (failure is None)
     assert result["measured_steps"] == 10
     assert result["steady_step_indices"] == list(range(2, 12))
