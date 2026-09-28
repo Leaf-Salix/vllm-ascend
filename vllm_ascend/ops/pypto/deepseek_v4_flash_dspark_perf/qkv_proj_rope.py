@@ -106,7 +106,7 @@ KV_FIXED_SMALL_ROWS = 128
 
 KV_N_TILE = 128  # kv_proj HEAD_DIM (N) per matmul
 
-KV_K_TILE = 256  # kv_proj D (K) reduction tile   | divides KV_SPLIT_K_TILE
+KV_K_TILE = 256 if ATOMIC_ADD else 512  # Fixed-K: fewer L1 transfers; atomic path unchanged.
 
 # A single split keeps a fixed K accumulation order.
 KV_OK = 8 if ATOMIC_ADD else 1
