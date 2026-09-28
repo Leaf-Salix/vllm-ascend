@@ -1,5 +1,6 @@
-"""定向对照短档 Score sync_start：固定规约状态、100次计时及四窗口关键链。"""
+"""定向对照CSA候选：固定规约状态、原始计时及独立窗口关键链。"""
 
+import argparse
 import collections
 import importlib.util
 import json
@@ -78,15 +79,27 @@ def scheduling(path, canonical):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--history', type=int, default=8192)
+    parser.add_argument('--batch', type=int, default=16)
+    parser.add_argument('--iters', type=int, default=100)
+    parser.add_argument('--windows', type=int, default=4)
+    parser.add_argument('--task', default='task_20260928_112109_314698014843')
+    parser.add_argument('--operator', default='e58ddc94 + short Score sync_start=True; early_resolve remains True')
+    args = parser.parse_args()
     torch.set_num_threads(4)
     spec = importlib.util.spec_from_file_location(
         'worker', ROOT.parent / 'csa_scheduling_20260927/upstream_725/compare.py')
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
-    folder = ROOT / 'h8192_b16'
+    folder = args.root / f'h{args.history}_b{args.batch}'
     reports = {s: read(folder / s / 'report.json') for s in ('baseline', 'candidate')}
     before, after = (reports[s] for s in ('baseline', 'candidate'))
     errors = []
+    if before['history'] != args.history or before['batch'] != args.batch:
+        errors.append('输入档位与报告不一致')
     for field in ('checkpoint', 'seed', 'batch', 'history', 'layer_index', 'weight_nz_mode', 'variant',
                   'deterministic_level', 'hccl_deterministic', 'pto_reduction', 'accuracy_fixture'):
         if before[field] != after[field]:
@@ -100,14 +113,14 @@ def main():
     checks = {name: compare_tensor(states['candidate'][name], states['baseline'][name], 0, 0)
               for name in STATE_NAMES}
     if any(c['status'] != 'PASS' for c in checks.values()):
-        errors.append('PTO调度候选跨版本状态不一致')
+        errors.append('PTO候选跨版本状态不一致')
     graph = after.get('graph', after.get('graph_replay', {}))
     if graph.get('status') != 'PASS':
         errors.append('候选A→B→A图重放失败')
     measurements = {}
     for side, report in reports.items():
-        if report['timing']['iters'] != 100:
-            errors.append(f'{side}: 计时样本不足100')
+        if report['timing']['iters'] != args.iters:
+            errors.append(f'{side}: 计时样本数不等于{args.iters}')
         for values in (report['pto_self'], report['timing']['pto']['eager_comparison']):
             if any(c['status'] != 'PASS' for c in values.values()):
                 errors.append(f'{side}: 固定规约自重放不一致')
@@ -118,21 +131,23 @@ def main():
             errors.append(f'{side}: Top-K结构失败')
         swimlane_path = folder / 'swimlane' / side / 'report.json'
         windows = read(swimlane_path)['swimlane_windows']
-        if len(windows) != 4:
-            errors.append(f'{side}: DFX窗口不足4')
+        if len(windows) != args.windows:
+            errors.append(f'{side}: DFX窗口数不等于{args.windows}')
         measurements[side] = {'timing_source': str(folder / side / 'report.json'),
                               'timing': {s: stats(report['timing'][s]['samples_us']) for s in ('pto', 'native')},
                               'worker_windows': [worker.summarize(Path(w['merged_swimlane'])) for w in windows],
                               'scheduler_windows': [scheduling(Path(w['merged_swimlane']), worker.canonical)
                                                     for w in windows]}
-    result = {'operator': 'e58ddc94 + short Score sync_start=True; early_resolve remains True',
-              'task': 'task_20260928_112109_314698014843',
-              'scope': 'H8192/B16/S6，layer4真实权重/合成历史，mode2/atomic0/det0；单卡图重放。',
+    result = {'operator': args.operator,
+              'task': args.task,
+              'scope': f'H{args.history}/B{args.batch}/S6，layer4真实权重/合成历史，'
+                       'mode2/atomic0/det0；单卡图重放。',
               'limits': 'PTO八类状态精确比较不含idx_topk_scores；det0 Native浮点仅作控制，'
-                        '不要求Native跨进程逐bit一致。独立DFX不与100次计时逐个对应，非真实EP16验收。',
+                        '不要求Native跨进程逐bit一致。独立DFX不与无profiler计时逐个对应，非真实EP16验收。',
               'checks': checks, 'graph_status': graph.get('status'), 'errors': errors,
+              'timing_iters': args.iters, 'dfx_windows': args.windows,
               'status': 'FAIL' if errors else 'PASS', 'measurements': measurements}
-    (ROOT / 'report.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+    (args.output or args.root / 'report.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(result['status'], errors)
     for side, value in measurements.items():
         print(side, {k: v for k, v in value['timing']['pto'].items() if k != 'samples_us'})

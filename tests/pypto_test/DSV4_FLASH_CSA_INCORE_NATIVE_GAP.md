@@ -1,5 +1,10 @@
 # CSA 七档 Native / PTO 核内差异与优化顺序
 
+2026-09-28目标修正：后续核内策略主要参考最新AscendC ops源码，以ops-transformer为首，
+结合ops-nn、ops-math。本页保留各版本历史差异和实验依据，当前待办以
+[执行清单](DSV4_FLASH_CSA_TASK_CHECKLIST.md)及[最新源码索引](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)为准；
+本页所引当时内嵌Native实现不等于最新AscendC实现。
+
 更新：2026-09-27。分析基线为统一 V10 性能版，算子源码 `0ed4f926`，七档汇总提交 `60c0ee63`。
 本文件保存核内阶段的差异分析；新增候选必须另列实测结果，不能回填为 V10 基线。
 当前保留实现包含 `21d99f8a` 的性能版B40 KV投影优化、第6.4节按工作量选择的KV提前发布，

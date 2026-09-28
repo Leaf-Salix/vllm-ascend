@@ -1,0 +1,14 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+index fb8378f6..86f9fd80 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_sparse_attn_csa.py
+@@ -362,7 +362,8 @@ def sparse_attn_csa(
+     mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
+     li_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
+     ffts_workspace = pl.create_tensor([256], dtype=pl.INT64)
+-    with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
++    with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], sync_start=True,
++                 allow_early_resolve=True) as qk_tid:
+         qk_core = pl.tile.get_block_idx()
+         pl.system.set_ffts(ffts_workspace)
+         # Continue the software pipeline across this core's queries. The

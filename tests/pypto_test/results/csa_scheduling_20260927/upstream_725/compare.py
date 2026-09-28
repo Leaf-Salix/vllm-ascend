@@ -19,8 +19,9 @@ def canonical(name):
     score = re.fullmatch(r"indexer_score_topk_native_pair(?:_\d+)?_(aic|aiv)", name)
     if score:
         return "indexer_score_topk_native_pair_" + score.group(1)
-    if re.fullmatch(r"indexer_head_coefficients(?:_\d+)?", name):
-        return "indexer_head_coefficients"
+    for hint in ("indexer_head_coefficients", "indexer_topk_query_merge"):
+        if re.fullmatch(re.escape(hint) + r"(?:_+\d+)?", name):
+            return hint
     for prefix, alias in (("qr_proj_matmul", "qr_proj_matmul"), ("kv_proj_matmul", "kv_proj_matmul"),
                           ("_proj_b_mm_nz_kernel", "proj_b_mm"), ("proj_a_mm", "proj_a_mm"),
                           ("proj_b_mm", "proj_b_mm"), ("proj_b_act", "proj_b_act"), ("quant", "quant")):

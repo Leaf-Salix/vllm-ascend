@@ -39,7 +39,12 @@
 这不是重复旧的[二路UB累计根候选](results/csa_topk_register_20260928/README.md)：
 旧候选没有减少归并轮数，核内11.814→12.068μs，未保留；本项的新变量是四路归并。
 QLI V2的metadata和`ProcessDecode()`还带全核同步，当前PTO已有任务依赖，不整体移植这套调度。
-当前尚未实现或测量四路候选，轮数下降不是性能收益。
+首轮完整CPU编译、五组单卡merge边界及长短八类状态/重放通过。
+128K/B16的merge核内17.63→13.83μs（−21.53%），整层1106.84→1108.84μs尚未改善；
+8K/B16核内8.59→9.20μs、整层762.96→783.50μs，P95上升，通用核不直接合入。
+[首轮实测](results/csa_topk_fourway_20260928/README.md)。
+当前按实际cache长度生成独立二路/多路核，阈值沿用每leaf候选数，单套源码选择；
+已编译通过，正在定向长短设备验证。[分核候选](results/csa_topk_fourway_adaptive_20260928/README.md)。
 
 ## 2. 已经采用的策略与仍需核对的差异
 
@@ -64,8 +69,9 @@ RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及
 
 ## 4. 当前执行顺序
 
-先处理[短档Score/Sparse长尾证据](results/csa_short_score_sync_20260928/README.md)，
-随后恢复已有HC候选，再验证上述四路Top-K和有明确搬运差异的核内候选。
+短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
+[同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
+按用户修正后的源码优先级，当前先验证QLI V2四路Top-K，随后恢复已有HC输入复用候选，继续筛选最新AscendC差异。
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。
