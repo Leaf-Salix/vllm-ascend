@@ -985,7 +985,8 @@ def indexer_score_topk_forest(
                     BUFFERED_LONG_SCORE_TILE,
                     True,
                     False,
-                    0,
+                    # M128/N128 fits two 16KiB Key slots plus 32KiB WS in L0B.
+                    1,
                 )
         else:
             short_queries = pl.tensor.dim(position_ids, 0)
