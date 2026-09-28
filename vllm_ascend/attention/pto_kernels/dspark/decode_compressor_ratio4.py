@@ -171,9 +171,16 @@ def compressor_ratio4_project_vllm(
     ) as projection_tid:
         worker = pl.tile.get_block_idx()
         requests = pl.tensor.dim(query_start_loc, 0) - 1
+        # Native Init removes trailing empty requests before SetBaseSize.
+        # Keep interior empty requests in the range: they still break equality.
+        active_requests = pl.cast(0, pl.INDEX)
+        for request in pl.range(requests):
+            length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
+            if length > 0:
+                active_requests = request + 1
         first_length = pl.read(query_start_loc, [1]) - pl.read(query_start_loc, [0])
         length_variation = pl.cast(0, pl.INT32)
-        for request in pl.range(requests):
+        for request in pl.range(active_requests):
             length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
             delta = length - first_length
             length_variation = length_variation + delta * delta
@@ -182,7 +189,7 @@ def compressor_ratio4_project_vllm(
         # the capacity of x. Keep this decision in the graph for replay.
         d_base = NATIVE_D_BASE
         # A signed cast of a device predicate can yield -1, not the count 1.
-        if length_variation == 0 and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
+        if active_requests > 0 and length_variation == 0 and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
             d_base = HEAD_DIM // NATIVE_NARROW_D_PARTS
         for unit in pl.range(worker, row_blocks * OUT_DIM // NATIVE_PROJ_N_TILE, KV_SCORE_WORKERS):
             row_begin = (unit // (OUT_DIM // NATIVE_PROJ_N_TILE)) * NATIVE_PROJ_M_TILE

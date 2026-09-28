@@ -139,6 +139,7 @@ def load_inner_projection(worker):
         create_tensor=lambda shape, dtype: torch.zeros(shape, dtype=dtype),
         FP32=torch.float32,
         INT32=torch.int32,
+        INDEX=torch.int64,
         min=min,
         range=range,
         pipeline=lambda begin, end, stage: range(begin, end),
@@ -181,11 +182,15 @@ def native_inner_dot(weight, cube_column_group):
     return accumulator
 
 
-@pytest.mark.parametrize("lengths", [(2, 2), (1, 3)], ids=["uniform-dbase16", "tnd-dbase64"])
-def test_inner_state_projection_preserves_native_k_order(lengths):
+@pytest.mark.parametrize(
+    "lengths,d_base",
+    [((2, 2), 16), ((1, 3), 64), ((2, 2, 0), 16), ((2, 0, 2), 64)],
+    ids=["uniform-dbase16", "tnd-dbase64", "trailing-padding-dbase16", "interior-empty-dbase64"],
+)
+def test_inner_state_projection_preserves_native_k_order(lengths, d_base):
     # Equal total tokens, different request lengths: replay must recompute
     # native SetBaseSize's column grouping from device query boundaries.
-    bounds = torch.tensor([0, lengths[0], sum(lengths)], dtype=torch.int32)
+    bounds = torch.tensor([0, *lengths], dtype=torch.int32).cumsum(0, dtype=torch.int32)
     hidden = torch.ones(sum(lengths), 1024, dtype=torch.bfloat16)
     weights = torch.zeros(256, 1024, dtype=torch.bfloat16)
     weights[:, [0, 256, 512, 768]] = torch.tensor([2.0**24, 1.0, -(2.0**24), 1.0]).bfloat16()
@@ -194,7 +199,6 @@ def test_inner_state_projection_preserves_native_k_order(lengths):
     for worker in range(24):
         load_inner_projection(worker)(hidden, weights, gate_weights, kv, scores, bounds, 0, 0)
 
-    d_base = 16 if lengths[0] == lengths[1] else 64
     expected = torch.empty(256)
     for half in range(2):
         for group in range(128 // d_base):

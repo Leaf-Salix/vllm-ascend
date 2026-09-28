@@ -159,7 +159,10 @@ def test_pool_preserves_native_rounding_instead_of_online_accumulation():
     assert historical != expected[0]
 
 
-@pytest.mark.parametrize("lengths,expected", [([6, 6, 6, 6], 32), ([3, 4, 5, 6], 64), ([6, 6, 0], 64), ([6] * 65, 64)])
+@pytest.mark.parametrize(
+    "lengths,expected",
+    [([6, 6, 6, 6], 32), ([3, 4, 5, 6], 64), ([6, 6, 0], 32), ([6, 0, 6], 64), ([0, 0], 64), ([6] * 65, 64)],
+)
 def test_projection_uses_native_equal_length_tiling(lengths, expected):
     function = next(
         node
@@ -176,6 +179,7 @@ def test_projection_uses_native_equal_length_tiling(lengths, expected):
         tile=SimpleNamespace(get_block_idx=lambda: 0),
         range=range,
         INT32=torch.int32,
+        INDEX=torch.int64,
         read=lambda tensor, index: int(tensor[tuple(index)]),
         cast=lambda value, dtype: -int(value) if isinstance(value, bool) else int(value),
     )

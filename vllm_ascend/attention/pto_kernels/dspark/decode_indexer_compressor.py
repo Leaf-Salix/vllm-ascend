@@ -166,17 +166,24 @@ def indexer_compressor_project_vllm(
     ) as projection_tid:
         worker = pl.tile.get_block_idx()
         requests = pl.tensor.dim(query_start_loc, 0) - 1
+        # Match Native Init's trailing-empty trim without removing empty
+        # requests between live requests from the equal-length check.
+        active_requests = pl.cast(0, pl.INDEX)
+        for request in pl.range(requests):
+            length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
+            if length > 0:
+                active_requests = request + 1
         first_length = pl.read(query_start_loc, [1]) - pl.read(query_start_loc, [0])
         # Comparison masks cast to signed INT32 as -1 on the device. Use
         # length differences instead of counting cast boolean predicates.
         length_deviation = pl.cast(0, pl.INT32)
-        for request in pl.range(requests):
+        for request in pl.range(active_requests):
             length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
             difference = length - first_length
             length_deviation = length_deviation + difference * difference
         used_tokens = pl.read(query_start_loc, [requests]) - pl.read(query_start_loc, [0])
         d_base = NATIVE_D_BASE
-        if length_deviation == 0 and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
+        if active_requests > 0 and length_deviation == 0 and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
             d_base = HEAD_DIM // NATIVE_NARROW_D_PARTS
         for unit in pl.range(worker, row_blocks * OUT_DIM // NATIVE_PROJ_OUT_TILE, KV_SCORE_WORKERS):
             row_begin = (unit // (OUT_DIM // NATIVE_PROJ_OUT_TILE)) * MM_B_TILE
