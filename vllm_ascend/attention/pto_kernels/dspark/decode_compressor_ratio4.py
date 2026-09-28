@@ -88,6 +88,17 @@ BS_PAD = ((GROUP_BS + MM_B_TILE - 1) // MM_B_TILE) * MM_B_TILE
 HEAD_TILE = 64
 POOL_HEAD_TILE = HEAD_DIM
 RMS_PAD_TILE = 16  # 16-row block of B (min M for FP32 vec ops)
+# Native TH NORMAL-template geometry on the 24-cube target. The native
+# projection rotates K in 256-column chunks and issues 128-column MMADs.
+NATIVE_CUBE_CORES = 24
+NATIVE_PROJ_K_TILE = 128
+NATIVE_PROJ_ROTATION_STEP = 256
+NATIVE_PROJ_M_TILE = 32
+NATIVE_PROJ_N_TILE = 32
+NATIVE_M_BASE = 128
+NATIVE_D_BASE = 64
+NATIVE_NARROW_D_PARTS = 16
+NATIVE_NARROW_MAX_TOKENS = NATIVE_M_BASE * (NATIVE_CUBE_CORES // (HEAD_DIM // NATIVE_D_BASE))
 
 
 @pl.jit.inline(auto_scope=False)
@@ -140,6 +151,64 @@ def compressor_ratio4_project(
             cmp4_score_proj_pad[global_row0 : global_row0 + MM_B_TILE, o0 : o0 + OUT_TILE] = score_acc
 
     return _kv_score_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def compressor_ratio4_project_vllm(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wkv: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    wgate: pl.Tensor[[OUT_DIM, D], pl.BF16],
+    kv_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    score_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    late_dep: pl.Scalar[pl.TASK_ID],
+):
+    """Preserve the native TH compressor's output-dependent K traversal."""
+    tokens = pl.tensor.dim(x, 0)
+    row_blocks = (tokens + NATIVE_PROJ_M_TILE - 1) // NATIVE_PROJ_M_TILE
+    with pl.spmd(
+        KV_SCORE_WORKERS, name_hint="kv_score_proj", deps=[late_dep],
+    ) as projection_tid:
+        worker = pl.tile.get_block_idx()
+        requests = pl.tensor.dim(query_start_loc, 0) - 1
+        first_length = pl.read(query_start_loc, [1]) - pl.read(query_start_loc, [0])
+        equal_lengths = pl.cast(0, pl.INT32)
+        for request in pl.range(requests):
+            length = pl.read(query_start_loc, [request + 1]) - pl.read(query_start_loc, [request])
+            equal_lengths = equal_lengths + pl.cast(length == first_length, pl.INT32)
+        used_tokens = pl.read(query_start_loc, [requests]) - pl.read(query_start_loc, [0])
+        # CompressorKernelPerf::SetBaseSize uses real sequence lengths, not
+        # the capacity of x. Keep this decision in the graph for replay.
+        d_base = NATIVE_D_BASE
+        if equal_lengths == pl.cast(requests, pl.INT32) and used_tokens <= NATIVE_NARROW_MAX_TOKENS:
+            d_base = HEAD_DIM // NATIVE_NARROW_D_PARTS
+        for unit in pl.range(worker, row_blocks * OUT_DIM // NATIVE_PROJ_N_TILE, KV_SCORE_WORKERS):
+            row_begin = (unit // (OUT_DIM // NATIVE_PROJ_N_TILE)) * NATIVE_PROJ_M_TILE
+            column = (unit % (OUT_DIM // NATIVE_PROJ_N_TILE)) * NATIVE_PROJ_N_TILE
+            rows = pl.min(NATIVE_PROJ_M_TILE, tokens - row_begin)
+            # dIdx = (aiCoreIdx % dBasicBlockNum) * dBaseSize, so the
+            # original cube's hIdxStart follows the output column directly.
+            k_start = ((column % HEAD_DIM) // d_base) * NATIVE_PROJ_ROTATION_STEP
+            kv_acc = pl.create_tensor([NATIVE_PROJ_M_TILE, NATIVE_PROJ_N_TILE], dtype=pl.FP32)
+            gate_acc = pl.create_tensor([NATIVE_PROJ_M_TILE, NATIVE_PROJ_N_TILE], dtype=pl.FP32)
+            for step in pl.pipeline(0, D // NATIVE_PROJ_K_TILE, stage=1):
+                k = (k_start + step * NATIVE_PROJ_K_TILE) % D
+                hidden = pl.slice(
+                    x, [NATIVE_PROJ_M_TILE, NATIVE_PROJ_K_TILE], [row_begin, k],
+                    valid_shape=[rows, NATIVE_PROJ_K_TILE],
+                )
+                kv_weight = wkv[column : column + NATIVE_PROJ_N_TILE, k : k + NATIVE_PROJ_K_TILE]
+                gate_weight = wgate[column : column + NATIVE_PROJ_N_TILE, k : k + NATIVE_PROJ_K_TILE]
+                # Seed with matmul to preserve the compact partial-row layout.
+                if step == 0:
+                    kv_acc = pl.matmul(hidden, kv_weight, out_dtype=pl.FP32, b_trans=True)
+                    gate_acc = pl.matmul(hidden, gate_weight, out_dtype=pl.FP32, b_trans=True)
+                else:
+                    kv_acc = pl.matmul_acc(kv_acc, hidden, kv_weight, b_trans=True)
+                    gate_acc = pl.matmul_acc(gate_acc, hidden, gate_weight, b_trans=True)
+            kv_proj_pad[row_begin : row_begin + NATIVE_PROJ_M_TILE, column : column + NATIVE_PROJ_N_TILE] = kv_acc
+            score_proj_pad[row_begin : row_begin + NATIVE_PROJ_M_TILE, column : column + NATIVE_PROJ_N_TILE] = gate_acc
+    return projection_tid
 
 
 @pl.jit.inline(auto_scope=False)
@@ -409,6 +478,10 @@ def compressor_ratio4_pool_projected_vllm(
         compress_state_pages,
         [state_page_count * VLLM_COMPRESS_STATE_PAGE_ROWS, COMPRESS_STATE_DIM],
     )
+    # PadAlign stores L0,R0,L1,R1,L2,R2,L3,R3 for each compression window.
+    # Both ColumnSum reductions below operate in this native physical order.
+    pool_scores = pl.create_tensor([BS_PAD * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
+    pool_values = pl.create_tensor([BS_PAD * STATE_LEN, HEAD_DIM], dtype=pl.FP32)
     pool_workers = pl.min(b_dim, POOL_WORKERS)
     with pl.spmd(
         pool_workers,
@@ -445,8 +518,9 @@ def compressor_ratio4_pool_projected_vllm(
                                 HEAD_DIM + h0 : HEAD_DIM + h0 + POOL_HEAD_TILE,
                             ],
                         )
-                        li = pl.exp(pl.sub(mi, mi))
-                        oi = kv_proj_pad[
+                        pool_begin = token * STATE_LEN
+                        pool_scores[pool_begin + STATE_LEN - 1 : pool_begin + STATE_LEN, :] = mi
+                        pool_values[pool_begin + STATE_LEN - 1 : pool_begin + STATE_LEN, :] = kv_proj_pad[
                             token : token + 1,
                             HEAD_DIM + h0 : HEAD_DIM + h0 + POOL_HEAD_TILE,
                         ]
@@ -524,16 +598,39 @@ def compressor_ratio4_pool_projected_vllm(
                                             state_half + h0 : state_half + h0 + POOL_HEAD_TILE,
                                         ],
                                     )
-                            mi_next = pl.maximum(mi, score)
-                            alpha = pl.exp(pl.sub(mi, mi_next))
-                            beta = pl.exp(pl.sub(score, mi_next))
-                            li = pl.add(pl.mul(alpha, li), beta)
-                            oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))
-                            mi = mi_next
+                            physical_row = pool_begin + 2 * (state_idx % COMPRESS_RATIO) + state_idx // COMPRESS_RATIO
+                            pool_scores[physical_row : physical_row + 1, :] = score
+                            pool_values[physical_row : physical_row + 1, :] = value
+                        # ColumnSoftMax: max, subtract, exp, column sum, divide.
+                        max_0 = pl.maximum(pool_scores[pool_begin + 0 : pool_begin + 1, :], pool_scores[pool_begin + 4 : pool_begin + 5, :])
+                        max_1 = pl.maximum(pool_scores[pool_begin + 1 : pool_begin + 2, :], pool_scores[pool_begin + 5 : pool_begin + 6, :])
+                        max_2 = pl.maximum(pool_scores[pool_begin + 2 : pool_begin + 3, :], pool_scores[pool_begin + 6 : pool_begin + 7, :])
+                        max_3 = pl.maximum(pool_scores[pool_begin + 3 : pool_begin + 4, :], pool_scores[pool_begin + 7 : pool_begin + 8, :])
+                        column_max = pl.maximum(pl.maximum(max_0, max_2), pl.maximum(max_1, max_3))
+                        pool_scores[pool_begin : pool_begin + STATE_LEN, :] = pl.exp(
+                            pl.col_expand_sub(pool_scores[pool_begin : pool_begin + STATE_LEN, :], column_max),
+                        )
+                        sum_0 = pl.add(pool_scores[pool_begin + 0 : pool_begin + 1, :], pool_scores[pool_begin + 4 : pool_begin + 5, :])
+                        sum_1 = pl.add(pool_scores[pool_begin + 1 : pool_begin + 2, :], pool_scores[pool_begin + 5 : pool_begin + 6, :])
+                        sum_2 = pl.add(pool_scores[pool_begin + 2 : pool_begin + 3, :], pool_scores[pool_begin + 6 : pool_begin + 7, :])
+                        sum_3 = pl.add(pool_scores[pool_begin + 3 : pool_begin + 4, :], pool_scores[pool_begin + 7 : pool_begin + 8, :])
+                        denominator = pl.add(pl.add(sum_0, sum_2), pl.add(sum_1, sum_3))
+                        pool_scores[pool_begin : pool_begin + STATE_LEN, :] = pl.col_expand_div(
+                            pool_scores[pool_begin : pool_begin + STATE_LEN, :], denominator,
+                        )
+                        # Normalize before multiplying values, as KvMulReduceScore does.
+                        pool_values[pool_begin : pool_begin + STATE_LEN, :] = pl.mul(
+                            pool_values[pool_begin : pool_begin + STATE_LEN, :],
+                            pool_scores[pool_begin : pool_begin + STATE_LEN, :],
+                        )
+                        weighted_0 = pl.add(pool_values[pool_begin + 0 : pool_begin + 1, :], pool_values[pool_begin + 4 : pool_begin + 5, :])
+                        weighted_1 = pl.add(pool_values[pool_begin + 1 : pool_begin + 2, :], pool_values[pool_begin + 5 : pool_begin + 6, :])
+                        weighted_2 = pl.add(pool_values[pool_begin + 2 : pool_begin + 3, :], pool_values[pool_begin + 6 : pool_begin + 7, :])
+                        weighted_3 = pl.add(pool_values[pool_begin + 3 : pool_begin + 4, :], pool_values[pool_begin + 7 : pool_begin + 8, :])
                         pooled_kv[
                             token : token + 1,
                             h0 : h0 + POOL_HEAD_TILE,
-                        ] = pl.div(oi, li)
+                        ] = pl.add(pl.add(weighted_0, weighted_2), pl.add(weighted_1, weighted_3))
     return pool_tid
 
 
@@ -763,8 +860,8 @@ def compressor_ratio4_vllm(
     pooled_kv = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
     kv_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
     score_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
-    projection_tid = compressor_ratio4_project(
-        x, wkv, wgate, kv_proj_pad, score_proj_pad, late_dep,
+    projection_tid = compressor_ratio4_project_vllm(
+        x, wkv, wgate, kv_proj_pad, score_proj_pad, query_start_loc, late_dep,
     )
     pool_dep = pl.system.task_dummy(deps=[projection_tid, persistent_dep])
     pool_tid = compressor_ratio4_pool_projected_vllm(
