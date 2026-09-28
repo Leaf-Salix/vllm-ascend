@@ -44,6 +44,12 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 Indexer保留提交51501f1f的旧单项收益基于8e176285；新两侧统一e33d842a，包含664c69ce WO_A ND及4e830c32 arena配置，
 已经补齐9.2下长短单卡必要组合检查。工具链PyPTO88f60598/Simplera54c05095/PTOAS0.66/PTO-ISA327cd586；
 不拼接9.0历史数值，当前组合尚无新七档或整网验收。
+Native式query排序循环也已完成两档：代码体积缩小但长档Score核内持平偏慢、短档AIV+15.343%，
+八类状态/图重放通过后仍不保留。[完整反例](results/csa_sort_query_loop_20260928/README.md)。
+现在收口已保留的核内策略：统一e33d842a生产实现和公共9.2，七档各20次无profiler单卡图计时、
+独立Native/PTO PyTorch profile及四DFX窗口，补齐当前Native核内对照与P95，再决定调度重点。
+task_20260928_224619_23037581103已提交；不含两个已否定候选，不新增EP16。
+[七档范围和执行入口](results/csa_cann92_incore_seven_20260928/README.md)。
 
 最近完成统一七档真实EP16的冻结组合为 **554b3bca**：包含四路Top-K及UB累计根、HC输入/RMS融合、
 QR输入/gamma驻留及尾行修复，以及长S6 Score的独立Key L1预取。

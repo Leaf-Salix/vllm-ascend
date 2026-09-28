@@ -249,8 +249,18 @@ AIV均值287.238→306.229、最终merge 11.721→14.187，增加的排序/归�
 
 继续核对Native metadata准备与核内消费：当前PTO编排已经扫描kv_seq_lens得到max_topk_cache_len，
 Score每worker仍扫描一次，新增长merge又扫描一次。已在长merge生成C++确认该循环及GM标量读取留在核内，
-不是只看Python重复代码推断开销。下一步优先传递现有编排标量，保留动态图重放语义及原分片/归约；
-不增加CPU预处理入口或metadata executor，也不预先声称这些标量读取贡献了多少μs。
+不是只看Python重复代码推断开销。标量复用候选已经在CANN9.2完成长短B16：
+生成扫描消失且状态/图重放通过，但长档Score核内持平，短档AIC/AIV增加8.276%/7.259%，不合入。
+[代码和核内反例](results/csa_maxlen_reuse_20260928/README.md)。不能把少读GM推导成设备收益。
+
+下一项核查`ProcessVec1`的`innerS1Idx`循环：Native复用一份SortAll/归并正文，
+当前PTO按query_group_size完全展开half-leaf排序，六种长度分支在S6中复制六份。
+仅把末尾query排序的pl.unroll换为pl.range，完整编译/load通过；S6 AIV实际.text从41200降至9596字节，
+2/3query同样减少重复代码。前面的scale展开、Cube算术、任务分工及调度不变。
+无I-cache stall证据，不将代码尺寸降幅等同于性能降幅。两档状态/图重放已通过，
+但长档Score AIV+0.644%、短档+15.343%，核内七三+5.054%，不合入生产或扩测。
+CSA七三−0.681%不能代替核内目标；短档P95+7.54μs，控制漂移与全部窗口保留。
+[唯一补丁、生成码及完整反例](results/csa_sort_query_loop_20260928/README.md)。
 
 ## 3. ops-math的适用边界
 

@@ -1,0 +1,16 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 88e64c0e..5a837926 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -978,7 +978,10 @@ def indexer_score_topk_native_cube(
+                                     ],
+                                     score_arena,
+                                 )
+-                    for buf_query_lane in pl.unroll(query_group_size):
++                    # QLI V2 ProcessVec1 reuses one sorting body across query rows.
++                    # Keep the same order while avoiding 2/3/6 copies of every
++                    # half-leaf sort branch in the worker instruction stream.
++                    for buf_query_lane in pl.range(query_group_size):
+                         buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                         buf_query_visible = pl.max(
+                             pl.min(pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
