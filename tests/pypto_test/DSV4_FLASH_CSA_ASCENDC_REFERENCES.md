@@ -11,10 +11,10 @@
 | [ops-math](../../../ops-math) | 81802185 | 排序、Top-K及基础向量操作 |
 
 三个HEAD提交日期均为2026-09-28。本次只读源码，没有安装这些仓库、升级CANN或改Native流程。
-性能算子对照为e58ddc94，pypto-lib参考为73078d0；后续更新源码时记录实际使用版本即可，不做全仓hash扫描。
+当前冻结生产算子对照为d1f170ff，各单变量候选另记实际基底；pypto-lib参考为73078d0；后续更新源码时记录实际使用版本即可，不做全仓hash扫描。
 先按产品支持表、构建入口与指令确认A3适用性，不能单凭`arch22/arch32/arch35`目录名称类推。
 
-## 1. 新的优先候选：跨分片Top-K四路归并
+## 1. QLI V2跨分片Top-K：已保留四路，继续减少中间搬运
 
 来源：QLI V2 A3路径
 [ProcessLD](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_service_vector_arch22.h)。
@@ -46,6 +46,12 @@ QLI V2的metadata和`ProcessDecode()`还带全核同步，当前PTO已有任务�
 按实际cache长度生成独立二路/多路核后，两档状态/重放通过，长档四窗口核内18.37→13.88μs（−24.44%）。
 按核内规则保留分核实现；短档生成代码恢复原二路，实测均值/P95仍略升，不标不退化或整网完成。
 [保留实现、完整反例及局限](results/csa_topk_fourway_adaptive_20260928/README.md)。
+
+继续对齐ProcessLD的UB累计根：旧二路候选因view底层存储而携带2048-float并多出TMOV；
+本轮用显式extract只携带1024-float精确前缀，四/三/二路尾块统一根形状，最终直接发布。
+CPU生成代码确认循环根尺寸正确、没有额外TMOV；短档二路核正文保持一致，未修改工具链。
+这是新实现依据，不能据此认定性能收益。独立边界及长短B16设备任务待执行，尚未合入。
+[四路UB根候选](results/csa_topk_ub4_20260928/README.md)。
 
 ## 2. 已经采用的策略与仍需核对的差异
 

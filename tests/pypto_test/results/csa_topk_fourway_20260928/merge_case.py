@@ -7,8 +7,10 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-SOURCE = Path('/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-topk-fourway-e58ddc94')
+ROOT = Path(os.environ.get('CSA_TOPK_PROBE_OUTPUT', str(Path(__file__).resolve().parent)))
+SOURCE = Path(os.environ.get(
+    'CSA_TOPK_PROBE_SOURCE', '/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-topk-fourway-e58ddc94'))
+ROOT_IN_UB = os.environ.get('CSA_TOPK_PROBE_ROOT_IN_UB', '0') == '1'
 sys.path.insert(0, str(SOURCE / 'tests/pypto_test'))
 from dsv4_csa_env import activate
 
@@ -22,13 +24,25 @@ merge_top512_roots = importlib.import_module(
     'vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.decode_indexer').merge_top512_roots
 
 
+# Select the ABI in Python: a runtime DSL branch cannot merge a void-return
+# helper with a Tile-return helper while keeping the old probe reproducible.
+if ROOT_IN_UB:
+    @pl.jit.inline
+    def probe_root(arena: pl.Tensor, root: pl.Scalar[pl.INDEX], count: pl.Scalar[pl.INDEX]) -> pl.Tile:
+        return merge_top512_roots(arena, root, count)
+else:
+    @pl.jit.inline
+    def probe_root(arena: pl.Tensor, root: pl.Scalar[pl.INDEX], count: pl.Scalar[pl.INDEX]) -> pl.Tile:
+        merge_top512_roots(arena, root, count)
+        return pl.load(arena, [root, 0], [1, 1024])
+
+
 @pl.jit
 def merge_probe(arena: pl.InOut[pl.Tensor[[50, 1024], pl.FP32]],
                 output: pl.InOut[pl.Tensor[[7, 1024], pl.FP32]]):
     for case in pl.spmd(5, name_hint='topk_merge_probe'):
         root = case * 10
-        merge_top512_roots(arena, root, (case + 1) * 2)
-        pairs = pl.load(arena, [root, 0], [1, 1024])
+        pairs = probe_root(arena, root, (case + 1) * 2)
         pl.store(pairs, [case + 1, 0], output)
     return arena, output
 
@@ -84,7 +98,10 @@ def main():
     for case, (name, gold) in enumerate(zip(names, expected)):
         torch.testing.assert_close(output[case + 1].view(torch.int32), gold.view(torch.int32), rtol=0, atol=0)
         root = case * 10
-        torch.testing.assert_close(arena[root].view(torch.int32), gold.view(torch.int32), rtol=0, atol=0)
+        if ROOT_IN_UB:
+            torch.testing.assert_close(arena[root].view(torch.int32), initial[root].view(torch.int32), rtol=0, atol=0)
+        else:
+            torch.testing.assert_close(arena[root].view(torch.int32), gold.view(torch.int32), rtol=0, atol=0)
         torch.testing.assert_close(arena[root + 1:root + 10].view(torch.int32),
                                    initial[root + 1:root + 10].view(torch.int32), rtol=0, atol=0)
         results.append({'case': name, 'half_count': (case + 1) * 2, 'status': 'PASS'})

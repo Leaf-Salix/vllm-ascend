@@ -128,6 +128,9 @@ Sparse PV对齐最新AscendC的L0B双缓冲已做长短单卡对照：状态/图
 [PV证据](results/csa_sparse_pv_l0b_20260928/README.md)。
 按ops-nn的QR输入/gamma UB驻留候选已完成CPU编译与生成代码核对，长短B16单卡任务待设备；
 [候选及状态](results/csa_qr_ub_20260928/README.md)。未修改生产QR或宣称性能收益。
+四路Top-K另按最新QLI V2保留精确尺寸的UB累计根；显式extract消除了旧二路候选的额外整块TMOV，
+完整CPU编译及五组探针编译通过。单卡先独立tie/尾部/保护区再长短B16，任务待设备，尚未合入。
+[四路UB根来源、与旧候选区别及任务](results/csa_topk_ub4_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。
