@@ -4,6 +4,8 @@
 128K B4/B8/B16/B24、8K B24/B32/B40。Native/PTO均走真实编译半层；
 Native启用npugraph_ex、static kernel与norm/quant融合，详见[配置及边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
 主线随后保留系数空worker优化，代表两档8:2为−1.885%；其结果单列，不覆盖下方七档表。
+再保留组内批量系数准备：长B16/短B24系数核时−27.544%/−30.589%，代表两档CSA 8:2为−0.887%。
+短档CSA+1.113%及P95+1.660%仍需后续改善；两轮局部收益不相加、不拼入七档表。
 旧e33d842a手工NPUGraph矩阵及局部A/B移至[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，不再作为当前表格。
 
 ## 范围和读数
@@ -111,6 +113,9 @@ Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因
    短档首轮一次1062.480μs最大值保持开放；连续诊断捕获的1085.260μs事件中根调用945.440μs，
    不用它替首轮异常归因，不宣称长尾已修复。阶段出口继续覆盖受影响档位。
    [实测及诊断](results/csa_coefficient_active_workers_20260929/README.md)。
+   后续[按组批量准备](results/csa_coefficient_group_20260929/README.md)已保留真实系数核内收益，
+   同样16/24个有效worker，长短均值分别4.579→3.318、4.559→3.165μs。
+   下一项检查UB构造完整对角块并一次写回；双query及其他受影响档位在阶段出口验证。
 2. Score多数窗口已提前派发。长B16有些窗口最后等待系数，有些等待idx_kv_scale_commit；
    分开记录生产者end→FIN、FIN→派发和派发→开始，不将时序相关性称为资源阻塞因果。
    原cache的scale写回涉及64字节读改写，没有页面所有权证明前不得直接并行或删除依赖。
@@ -130,7 +135,7 @@ Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因
   短Score/Sparse整组准入、query整组准入等旧失败候选无新依据不重复测试。
 - [系数直接融合Score](results/csa_coefficient_fused_20260929/README.md)状态精确，但两档CSA均回退，
   8:2为+2.373%；长Score提前19.220μs启动，AIC/AIV核时却各增加约36μs，未合入。
-  下一步先吸收Native按组批量加载/乘法，降低独立系数任务核时，再评估融合和补零复用。
+  后续独立系数任务的批量加载/乘法已保留；该直接融合版本不因此转为有效优化。
 
 [最新AscendC入口](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、
 [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)。

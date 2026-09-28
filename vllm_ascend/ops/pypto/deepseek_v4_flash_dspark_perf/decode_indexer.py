@@ -585,7 +585,7 @@ def indexer_head_coefficients(
     coefficients = pl.create_tensor(
         [T_PAD // query_group_size * NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16
     )
-    coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
+    coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [T_PAD, IDX_N_HEADS])
     # Trim only workers whose original stride-48 loop has no iteration.
     # Keep every nonempty worker's query groups and arithmetic unchanged.
     coefficient_workers = pl.min(
@@ -604,14 +604,20 @@ def indexer_head_coefficients(
                 [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16, value=0.0
             )
             pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
+            # Native ProcessVec0 loads and multiplies the complete S1 group.
+            # Keep the original FP16 rounding order and diagonal publication.
+            coefficient_begin = coefficient_pair * query_group_size
+            query_scales = pl.load(
+                coefficient_scales, [coefficient_begin, 0], [query_group_size, IDX_N_HEADS]
+            )
+            query_weights = pl.load(weights, [coefficient_begin, 0], [query_group_size, IDX_N_HEADS])
+            query_scale_half = pl.cast(query_scales, pl.FP16, mode="rint")
+            query_weight_half = pl.cast(query_weights, pl.FP16, mode="rint")
+            head_coefficients = pl.mul(query_scale_half, query_weight_half)
             for coefficient_lane in pl.unroll(query_group_size):
-                coefficient_query = coefficient_pair * query_group_size + coefficient_lane
-                query_scale = pl.load(coefficient_scales, [0, coefficient_query * IDX_N_HEADS], [1, IDX_N_HEADS])
-                query_weight = pl.load(weights, [coefficient_query, 0], [1, IDX_N_HEADS])
-                # 与Native ABI一致：两个输入先舍入FP16，乘积再保留FP16。
-                query_scale_half = pl.cast(query_scale, pl.FP16, mode="rint")
-                query_weight_half = pl.cast(query_weight, pl.FP16, mode="rint")
-                head_coefficient = pl.mul(query_scale_half, query_weight_half)
+                head_coefficient = pl.tile.extract(
+                    head_coefficients, coefficient_lane, 0, [1, IDX_N_HEADS], target_memory=pl.MemorySpace.Vec
+                )
                 pl.store(
                     head_coefficient,
                     [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane, coefficient_lane * IDX_N_HEADS],
