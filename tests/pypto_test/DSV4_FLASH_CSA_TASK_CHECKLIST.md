@@ -83,6 +83,11 @@ Native cache布局/分配不改，PTO内直接按物理页读写，没有入口�
 未证明首轮尖峰原因，不关闭间歇长尾。阶段出口补受影响档位，当前七档表仍为c93ec723。
 [结果、诊断和保留依据](results/csa_coefficient_active_workers_20260929/README.md)。
 
+系数直接融合进Score的后续候选已否定：两档状态/图通过，但128K/B16 CSA+2.772%、
+8K/B24+0.778%，8:2为+2.373%；长档Score虽提前启动，包含新增系数计算/同步的核时增加。
+下一步先按Native ProcessVec0将系数备料改为组内成块加载/计算，验证独立任务核内收益，
+再研究融合和每worker补零复用。[结果与边界](results/csa_coefficient_fused_20260929/README.md)。
+
 最近完整模型证据仍为554b3bca/CANN9.0七档：573440输出token零差异、112组rank DSpark一致，
 forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干入场尾部未关闭。
 这些历史记录不覆盖新增Indexer、arena、WO_A或CANN9.2，不与新单卡数值拼接。

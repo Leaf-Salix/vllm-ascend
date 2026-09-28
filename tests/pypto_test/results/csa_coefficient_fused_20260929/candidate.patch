@@ -1,0 +1,143 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -163,6 +163,7 @@
+ NATIVE_QLI_QK_COLS = 128
+ SCORE_READY_EVENT = 0
+ SCORE_CONSUMED_EVENT = 1
++COEFFICIENT_READY_EVENT = 2
+ 
+ SCORE_LANE_ROWS = SCORE_TILE // 2
+ 
+@@ -573,54 +574,6 @@
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+-def indexer_head_coefficients(
+-    qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
+-    weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
+-    position_ids: pl.Tensor[[T_DYN], pl.INT64],
+-    qh_quant_tid: pl.Scalar[pl.TASK_ID],
+-    weights_tid: pl.Scalar[pl.TASK_ID],
+-    query_group_size: pl.constexpr,
+-):
+-    """把同组query的FP16系数放在对角块，一次Cube完成各自的head规约。"""
+-    coefficients = pl.create_tensor(
+-        [T_PAD // query_group_size * NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16
+-    )
+-    coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
+-    # Trim only workers whose original stride-48 loop has no iteration.
+-    # Keep every nonempty worker's query groups and arithmetic unchanged.
+-    coefficient_workers = pl.min(
+-        TOPK_QUERY_WORKERS, pl.tensor.dim(position_ids, 0) // query_group_size
+-    )
+-    with pl.spmd(
+-        coefficient_workers,
+-        name_hint="indexer_head_coefficients",
+-        deps=[qh_quant_tid, weights_tid],
+-        allow_early_resolve=True,
+-    ) as coefficients_tid:
+-        coefficient_worker = pl.tile.get_block_idx()
+-        coefficient_count = pl.tensor.dim(position_ids, 0)
+-        for coefficient_pair in pl.range(coefficient_worker, coefficient_count // query_group_size, TOPK_QUERY_WORKERS):
+-            coefficient_rows = pl.tile.full(
+-                [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16, value=0.0
+-            )
+-            pl.store(coefficient_rows, [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
+-            for coefficient_lane in pl.unroll(query_group_size):
+-                coefficient_query = coefficient_pair * query_group_size + coefficient_lane
+-                query_scale = pl.load(coefficient_scales, [0, coefficient_query * IDX_N_HEADS], [1, IDX_N_HEADS])
+-                query_weight = pl.load(weights, [coefficient_query, 0], [1, IDX_N_HEADS])
+-                # 与Native ABI一致：两个输入先舍入FP16，乘积再保留FP16。
+-                query_scale_half = pl.cast(query_scale, pl.FP16, mode="rint")
+-                query_weight_half = pl.cast(query_weight, pl.FP16, mode="rint")
+-                head_coefficient = pl.mul(query_scale_half, query_weight_half)
+-                pl.store(
+-                    head_coefficient,
+-                    [coefficient_pair * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane, coefficient_lane * IDX_N_HEADS],
+-                    coefficients,
+-                )
+-    return coefficients, coefficients_tid
+-
+-
+-@pl.jit.inline(auto_scope=False)
+ def indexer_score_topk_native_cube(
+     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
+     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
+@@ -653,21 +606,19 @@
+     shifted_rows = (cache_bytes - 64) // IDX_HEAD_DIM
+     idx_kv_cache = pl.reshape(cache_flat[0 : key_rows * IDX_HEAD_DIM], [key_rows, IDX_HEAD_DIM])
+     idx_kv_cache_shift64 = pl.reshape(cache_flat[64 : 64 + shifted_rows * IDX_HEAD_DIM], [shifted_rows, IDX_HEAD_DIM])
+-    coefficients, coefficients_tid = indexer_head_coefficients(
+-        qr_hadamard_scale_dq,
+-        weights,
+-        position_ids,
+-        qh_quant_tid,
+-        weights_tid,
+-        query_group_size,
++    # One GM coefficient slot belongs to each MIX worker. Its AIV0 fills the
++    # diagonal block with the same FP16 operations as the standalone task.
++    coefficients = pl.create_tensor(
++        [TOPK_SCORE_WORKERS * NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16
+     )
++    coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
+     # 每个worker两个通信槽，每槽容纳整个query组的分数。
+     buf_score_transfer = pl.create_tensor([TOPK_SCORE_WORKERS * 2 * query_group_size, score_tile], dtype=pl.FP32)
+     buf_score_ffts = pl.create_tensor([256], dtype=pl.INT64)
+     with pl.spmd(
+         TOPK_SCORE_WORKERS,
+         name_hint="indexer_score_topk_native_pair",
+-        deps=[coefficients_tid, cache_write_tid],
++        deps=[qh_quant_tid, weights_tid, cache_write_tid],
+         sync_start=score_sync_start,
+         allow_early_resolve=score_early_resolve,
+     ) as buffered_leaf_tid:
+@@ -720,9 +671,12 @@
+                     [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                     target_memory=pl.MemorySpace.Mat,
+                 )
++                pl.system.sync_wait(
++                    COEFFICIENT_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
++                )
+                 buf_coefficients_l1 = pl.load(
+                     coefficients,
+-                    [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
++                    [buf_worker * NATIVE_QLI_WEIGHT_ROWS, 0],
+                     [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                     target_memory=pl.MemorySpace.Mat,
+                 )
+@@ -970,6 +924,35 @@
+                     buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                     buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+                     buf_lane_begin = buf_score_lane * buf_lane_span
++                    # Both AIVs signal mode 2; only AIV0 writes the per-worker slot.
++                    # Before the next leaf, AIV0 must consume the final Score READY
++                    # of this leaf, so Cube has already finished every use of its
++                    # coefficients. The existing Score handshake protects reuse.
++                    if buf_score_lane == 0:
++                        coefficient_rows = pl.tile.full(
++                            [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
++                            dtype=pl.FP16, value=0.0,
++                        )
++                        pl.store(coefficient_rows, [buf_worker * NATIVE_QLI_WEIGHT_ROWS, 0], coefficients)
++                        for coefficient_lane in pl.unroll(query_group_size):
++                            coefficient_query = buf_query + coefficient_lane
++                            query_scale = pl.load(
++                                coefficient_scales, [0, coefficient_query * IDX_N_HEADS], [1, IDX_N_HEADS]
++                            )
++                            query_weight = pl.load(weights, [coefficient_query, 0], [1, IDX_N_HEADS])
++                            query_scale_half = pl.cast(query_scale, pl.FP16, mode="rint")
++                            query_weight_half = pl.cast(query_weight, pl.FP16, mode="rint")
++                            head_coefficient = pl.mul(query_scale_half, query_weight_half)
++                            pl.store(
++                                head_coefficient,
++                                [buf_worker * NATIVE_QLI_WEIGHT_ROWS + coefficient_lane,
++                                 coefficient_lane * IDX_N_HEADS],
++                                coefficients,
++                            )
++                    pl.system.sync_set(
++                        COEFFICIENT_READY_EVENT, pipe=pl.PipeType.MTE3,
++                        ffts_mode=2, core_type=pl.KernelType.AIV,
++                    )
+                     # QLI V2 retains the accumulated root in UB until publication.
+                     prefix_roots = pl.tile.full(
+                         [query_group_size, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF

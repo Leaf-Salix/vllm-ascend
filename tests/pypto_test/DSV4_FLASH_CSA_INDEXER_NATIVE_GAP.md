@@ -72,6 +72,10 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 固定组跨leaf Query/系数驻留已否定：生成代码虽证明TLOAD/TMOV移出leaf循环，
 但长B24 AIC约+3.72%、AIV持平，没有明确收益。理论少搬运不能代替核时证据。
 去除4个dummy也只有约0.1%的加权CSA差异，未合入；不继续原样扩测。
+系数融合进Score已测，长B16/短B24 CSA分别+2.772%/+0.778%，8:2为+2.373%，未合入。
+长档Score提前19.220μs启动，但系数从每组一次变为每leaf一次，核时增加。
+先按Native ProcessVec0的批量读入/乘法优化独立系数任务，再考虑融合；
+[结果、Native/pypto-lib差异及泳道](results/csa_coefficient_fused_20260929/README.md)。
 
 ## 有效证据与排除方向
 

@@ -10640,3 +10640,49 @@ Score核时并未降低：长AIC/AIV251.823/257.794→255.403/261.154μs，
 精度版未迁移，新优化的其他受影响档位在阶段出口覆盖，c93ec723完整七档表不拼入本轮局部数据。
 [完整A/B及保留依据](results/csa_coefficient_active_workers_20260929/README.md)、
 [短档逐次诊断](results/csa_coefficient_active_workers_20260929/TAIL.md)。
+
+## 386. 参考Native ProcessVec0将系数生成并入Score MIX，开始两档对照（2026-09-29）
+
+基线91276630，独立私有整包`pkg:dsv4_csa_coefficient_fused_91276630`，不叠加dummy候选。
+参考ops-transformer28f40354的QLI V2 ProcessVec0/ProcessBaseBlock：AIV0生成系数，
+两个AIV经mode2 MTE3事件交给Cube。保留原对角块、FP16舍入/乘法及Score双缓冲，
+每个worker单独GM槽；复用由既有最后Score READY约束，详见实验README的所有权说明。
+系数按leaf生成可能增加重复计算；不能只按任务数减少认定收益。
+
+两根_get_dep_graph、完整候选CPU编译/load通过，生成四个Score特化，独立系数提交为0，
+Score直接依赖QH量化、weights和cache scale写回。生成AIC在系数GM加载前等待，
+AIV在写回后发送MTE3事件；未改变early、sync_start、cache布局或生产源码。
+task_20260929_044158_1383300700已auto单卡提交，128K/B16、8K/B24分别做实际编译A/B与四窗DFX。
+两侧CANN9.2/mode2/atomic0/det0，5预热/20次计时，复用八类状态及图/保护区检查，
+不新增Native控制或整模型测试。结果未出，不提前合入。
+[候选、编译和单卡入口](results/csa_coefficient_fused_20260929/README.md)。
+
+## 387. 系数融合已完整对照：派发提前但长档核时增加，两档CSA回退，不合入（2026-09-29）
+
+接§386，task_20260929_044158_1383300700完成exit=0。128K/B16与8K/B24两侧各5预热、
+20次无profiler真实编译计时及四个独立DFX窗口；配置和冻结源码不变。
+两档八类完整PTO状态跨版本精确一致，编译图/eager、Top-K结构、metadata和保护区通过。
+16个窗口均经官方clock join、原始/合并行数与每任务block核对；系数worker长16→0、短24→0。
+
+| 档位 | CSA基线→候选μs | 变化 | P95μs | 最大值μs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1037.773→1066.543 | +2.772% | 1050.500→1080.460 | 1062.500→1087.040 |
+| 8K/B24 | 962.084→969.567 | +0.778% | 973.520→986.920 | 977.720→990.160 |
+
+长短8:2为+2.373%。长档Score首次start331.900→312.680μs（提前19.220），
+AIC/AIV均值254.839/260.440→291.012/296.572μs，Score最终结束延后17.840μs。
+候选Score包含原独立系数工作及核间等待，范围不同，不把核时差全称算术回退。
+长档系数由16个query组各生成一次变为每leaf一次，共96次，每个Score worker负责4个leaf；
+逐query的加载、FP16运算和整矩阵补零未同时优化。Worker总跨度1001.040→1022.535μs，
+Sparse及后续任务也延后，派发提前未转化为完整CSA收益。
+
+短档Score首次start367.110→337.735μs，AIC/AIV31.118/44.036→37.737/49.274μs。
+独立DFX Worker总跨度反而921.575→904.965μs，与正式CSA的回退方向不同；
+不将不同采样直接相减给正式样本归因，也不按泳道收益覆盖正式计时。长档已明确回退，
+本候选不扩七档或16卡，不合入生产；不声称精度版、token/DSpark或间歇长尾已验证。
+
+下一步参考Native ProcessVec0按组连续加载weights/qScale并批量乘法，先验证独立系数任务的
+核内收益，再研究融合与补零复用。最新pypto-lib的Vector head规约不需要此FP16对角矩阵，
+不能直接照搬其系数布局/核时；差异及固定window_3路径已写入实验README。
+[结果及原始证据](results/csa_coefficient_fused_20260929/README.md)、
+[逐任务分项](results/csa_coefficient_fused_20260929/TASKS.md)。

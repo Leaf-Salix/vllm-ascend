@@ -128,6 +128,9 @@ Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因
   [Query/系数跨leaf驻留](results/csa_query_resident_20260929/RESULTS.md)没有取得长档核内收益，未合入。
 - [去除4个dummy](results/csa_direct_deps_20260929/RESULTS.md)仅8:2约−0.1%，未合入；
   短Score/Sparse整组准入、query整组准入等旧失败候选无新依据不重复测试。
+- [系数直接融合Score](results/csa_coefficient_fused_20260929/README.md)状态精确，但两档CSA均回退，
+  8:2为+2.373%；长Score提前19.220μs启动，AIC/AIV核时却各增加约36μs，未合入。
+  下一步先吸收Native按组批量加载/乘法，降低独立系数任务核时，再评估融合和补零复用。
 
 [最新AscendC入口](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、
 [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)。
