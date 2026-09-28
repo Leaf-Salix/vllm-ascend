@@ -8979,3 +8979,19 @@ task_20260928_103131_11716825293已提交，长短B16各20次无profiler图计�
 同时核实跨callable复用估计、共享非原子采样及pending ACK/FIN污染估计的限制。
 设备对照保留原运行时、PR门限0和50三组，0仍有采样开销，不能冒充原二进制。
 [分析、隔离构建与待测范围](results/csa_mix_preload_20260928/README.md)。
+
+
+## 312. Simpler #2389 当前不直接采用，结束评估（2026-09-28）
+
+按用户最新要求只判断可用性，不为该PR扩大修复和测试范围。
+源码确认：估计表按局部func_id跨callable复用；多调度线程读写非原子表；
+pending ACK/FIN也会置running_done，导致前序kernel样本包含后续任务时间。
+当前长档Score已用sync_start，不直接受普通ready MIX预加载门限优化。
+因此本轮不采用该PR，不声称它已实测无收益，也不直接套用上游HCA结果。
+
+隔离Simpler A3 wheel、PyPTO及torch_npu适配扩展构建和SDK导入检查通过。
+完整CSA预检在冻结vLLM源码缺少生成的_build_info模块时退出，尚未进入算子编译；
+这不是PR编译失败，按停止决定不修复此实验入口。没有提交该PR的NPU测试任务。
+删除未执行的入口和运行/汇总脚本；保留简要评估与已有泳道统计，历史脚本依靠Git。
+生产环境未切换，回到仍在排队的HC输入复用候选及CSA性能主线。
+[最终评估记录](results/csa_mix_preload_20260928/README.md)。

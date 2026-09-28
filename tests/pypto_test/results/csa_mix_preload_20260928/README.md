@@ -1,7 +1,9 @@
 # Simpler #2389 在当前 CSA kernel-mode 的评估
 
-本轮在 HC 输入加宽/RMS 融合候选收尾后进行设备对照；准备期间不修改其冻结环境。
-目前只有源码分析和隔离构建，**尚无当前 CSA 的 PR 性能结论**。
+**结论：当前版本不直接采用，结束本轮评估，不追加修复或设备测试。**
+用户最新要求仅判断是否可用；源码确认预测采样及跨 callable 复用存在问题，
+当前长档 Score 又已有 sync_start，不直接受其优化。继续原 HC/CSA 优化。
+本记录只有源码分析、既有泳道检查和隔离构建，**没有当前 CSA 的 PR 性能实测结论**。
 
 ## 改动及适用范围
 
@@ -33,7 +35,7 @@ Score/Sparse 的已匹配 Scheduler dispatch → Worker receive 间隔最大约 
 部分 AIV Worker 记录缺少匹配的 Scheduler 记录，且这 4 个窗口不覆盖无 profiler 的偶发异常。
 因此只能说这些窗口没有复现 PR 所针对的长等待，不能据此证明它没有收益或长尾已解决。
 Worker local_setup 和 kernel-duration 分开，不能把这里的等待或 setup 全部解释为调度成本。
-[逐窗口等待样本及未匹配数量](existing_waits.json)。
+[逐窗口等待统计及未匹配数量](existing_waits.json)。
 
 ## kernel-mode 需要单独确认的限制
 
@@ -42,22 +44,23 @@ Worker local_setup 和 kernel-duration 分开，不能把这里的等待或 setu
   PR 的表只按局部 func_id 索引，没有 callable 身份。不同 callable 共用 arena 时可能沿用其他 kernel 的估计。
   这影响调度预测，不能直接定性为输出正确性缺陷；整模型验收必须观察实际多 callable 场景。
 - 上游估计表是跨调度线程读写的普通 uint32_t，存在 C++ 数据竞争问题。
-  首轮性能评估保留原 PR 行为；若保留进入正式分支，需要处理共享采样的并发语义。
+  若未来重新考虑进入正式分支，需要处理共享采样的并发语义。
 - 已核实 `decide_slot_transition()` 会在 pending ACK/FIN 时把 `running_done` 置为 true，
   而 PR 仅以 `running_done` 为采样条件，会把后续任务的时间计入前一个 kernel。
   [上游评审也指出这一点](https://github.com/hw-native-sys/simpler/pull/2389#discussion_r4056116140)，
   此处结论来自当前移植源码核对，不能把该估计称为精确的 kernel 执行时长。
 - `0` 仅关闭门限，新增计时和 EWMA 采样仍执行；所以仍需原 a54 运行时对照，不能把 `0` 当成完全原始二进制。
 
-## 最小设备对照
+## 已完成的准备及停止边界
 
-固定本轮最终选定的 CSA 算子、PyPTO 算术、PTOAS 0.66、PTO-ISA 327cd586、CANN 9.0，
-layer4 正式权重、合成历史、mode2/atomic0/det1、EPLB 关闭。
-8K/B16、128K/B16 各比较：原运行时、PR 门限 0、PR 门限 50。
-每组先预热，再保存全部无 profiler 样本、均值/中位数/P95/最大值；独立 DFX 检查任务排队与启动分散。
-随测试比较 8 类状态及保护区，不重新生成 bank，不先扩大七档或 EP16。
-只有长短档收益成立且 P95 不恶化，才继续评估多 callable 和真实 EP16 forward。
+Simpler 候选 A3 wheel 构建通过；配套 PyPTO `58aab925` 完整构建、torch_npu 适配扩展构建和
+SDK 导入一致性检查通过。对照环境沿用 PTOAS 0.66、PTO-ISA 327cd586、CANN 9.0。
+一次完整 CSA 编译预检在冻结 vLLM 源码缺少生成的 `_build_info` 模块时退出，尚未进入算子编译，
+不能将其归因于该 PR，也不声称完整 CSA 编译已通过；按本轮停止决定不修复该实验入口。
+
+原计划比较原运行时、门限 0、门限 50；**未提交任何 PR 设备测试任务**。
+未执行的实验入口及运行/汇总脚本从当前工作树删除，历史保留在 Git；不留下待执行任务干扰当前计划。
+以后只有上游修正相关预测问题、且实际泳道出现适用的 MIX pending 长等待时，再决定是否重新评估。
 
 构建目录：`.cache/simpler-pr2389-a54c05095`、`.cache/pypto-pr2389-3e87a843`。
 原生产安装与源码未切换，未将本实验提交推送到上游。
-[执行脚本](run_layer.sh)、[隔离环境入口](isolated_case.py)、[结果汇总脚本](summarize.py)。
