@@ -1,5 +1,17 @@
 # BSH 分项对齐 nalinaly 优化：2026-09-28
 
+## 结论更正：这些局部实验不等于复现nalinaly完整性能实现
+
+用户指出后重新核对：本文五项是从nalinaly提取部分机制后，在本分支旧CSA上做的局部实验；没有完整对齐其优化组合，也没有复现其报告的稳定收益。本文“无稳定收益”只限定各表的局部候选，不否定nalinaly完整实现。
+
+nalinaly `csa_atomic_matrix_20260928`报告使用71153bb3完整performance变体、atomic0、weight NZ mode2、det0、HCCL_DETERMINISTIC=false、TP1/DP=EP16、DSpark出5验6、EPLB关。使用离线P/D bank准备真实历史，full_decode_only图，8步warmup后连续10步无profiler模型forward。七档性能版相对Native均值快1.35%～4.45%，模型profile中CSA区间下降7.88%～20.85%；不是本文的单层候选相对旧CSA百分比。
+
+本文使用ND/mode0、det1、HCCL_DETERMINISTIC=true、单层真实权重与合成history、固定位置replay，且采用旧CSA输出/cache逐字节一致的门槛。本文没有迁移完整NZ权重路径及完整性能版Indexer/稀疏attention，也没有测试Q-A与KV共同固定归约、直接发布和分组的完整组合。Q-A分组候选保留旧seed/atomic，KV候选保留旧M分块/分组方式，不能称为其模块实现完全一致。
+
+因此尚不能解释整套实现的性能差距由哪一项导致。尤其第三项对Native误差略降却触发“与旧CSA逐位相同”门槛，只能说未保持旧结果，不能据此否定精度或性能价值。后续应先用固定版本、相同输入与计时边界建立完整nalinaly参考实现对照，再按模块迁移并以Native为数值基准评估；不得把本文结果当作该复现已经完成。
+
+依据：[七档方法与配置](https://github.com/nalinaly/vllm-ascend/blob/e58ddc94d77c93a0a8a85ab2db4bd773da9dff84/tests/pypto_test/results/csa_atomic_matrix_20260928/README.md)、[七档模型forward结果](https://github.com/nalinaly/vllm-ascend/blob/e58ddc94d77c93a0a8a85ab2db4bd773da9dff84/tests/pypto_test/results/csa_atomic_matrix_20260928/model/RESULTS.md)、[运行命令](https://github.com/nalinaly/vllm-ascend/blob/e58ddc94d77c93a0a8a85ab2db4bd773da9dff84/tests/pypto_test/results/csa_atomic_matrix_20260928/run_model.sh)。
+
 ## 固定版本和方法
 
 - Leaf分支：`dev/pypto-dsv4-csa-v0.25.1rc1-cann9.0.1`，运行源码基线 `c4383cfea0077f79edd68b4e6ed3950ab9a2242f`。
