@@ -121,3 +121,17 @@ CPU门禁确认差异恰为该参数、decode kwargs为空、TP4/DP4下的
 仍为原模型、TP4/DP4/EP16、原缓存布局，顺序8K/128K。
 输出使用新目录 `results/prefill-native-config-h8192` 与 `...-h131072`，保留失败日志。
 状态待核验；尚无完整参考性能结果，也没有将该配置修改用于Leaf生产代码。
+
+## Bank验收与完整decode任务
+
+`task_20260928_200045_19802682608` 已完成，exit0。8K与128K各4组输入、16份TP
+manifest、每份191个tensor；原始audit全部PASS，各TP副本有效前缀无差异。
+四个DP rank均生成1 token并保存请求结果；prefill耗时含IO，8K约15–18秒、128K约39–41秒，
+不能用这些数值声称decode性能。
+原始prefill日志及audit已取回本地，远端bank保留完整payload。生产kernel没有改动。
+
+20:12:47提交 `task_20260928_201247_22649656531`，16卡max7200秒，
+原始七档矩阵：H131072/B4,8,16和H8192/B16,24,32,40；PTO、Native分开运行，
+NZ2/performance/atomic0/det0、DSpark5、EPLB关闭、FULL_DECODE_ONLY。
+每档先独立计时再独立profile，不用profile扰动的耗时作主结果；结果尚待核验。
+仍使用冻结71153原始decode脚本，prefill配置恢复不传播到decode。
