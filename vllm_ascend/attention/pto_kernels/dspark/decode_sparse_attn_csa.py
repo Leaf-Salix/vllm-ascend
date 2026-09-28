@@ -245,7 +245,7 @@ def sparse_attn_csa(
             # fit, so the scores are all computed first and the KV of each block
             # is staged into L1 a second time when its PV turn comes. The second
             # staging is a GM-to-L1 copy of rows the AIV already gathered.
-            for qk_tick in pl.range(2 * SPARSE_BLOCKS):
+            for qk_tick in pl.range(SPARSE_BLOCKS + WIN_BLOCKS + 1):
                 if qk_tick < SPARSE_BLOCKS:
                     qk_sb = qk_tick
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
@@ -266,11 +266,10 @@ def sparse_attn_csa(
                             ffts_mode=2, core_type=pl.KernelType.AIC,
                         )
                 else:
-                    # DIAGNOSTIC: the compressed chunk becomes one K = CMP_TOPK
-                    # matmul, the way native's second s2 loop does it, while the
-                    # merge, the maxima, the chunk sums and every sync count stay
-                    # exactly as they are. Blocks 2..4 publish a zero PV so the
-                    # five-iteration merge folds them as no-ops.
+                    # 压缩块是一个 K = CMP_TOPK 的 matmul，和 native 第二个 s2
+                    # 循环一样。它已经把 2..4 三块算进去了，所以 PV 只走
+                    # WIN_BLOCKS + 1 个 tick：那三块不做 PV、不发旗标、也不进
+                    # merge，省掉每 query 384 KiB 的纯零写和同样多的零读。
                     pv_sb = qk_tick - SPARSE_BLOCKS
                     # The window matmul needs one probability, the compressed
                     # one needs the other four, so the waits split that way and
@@ -332,8 +331,6 @@ def sparse_attn_csa(
                                             QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
                                             ffts_mode=2, core_type=pl.KernelType.AIC,
                                         )
-                            # Blocks 2..4 contribute nothing; the AIV zeroed
-                            # their PV slots, so only the event is raised here.
                         pl.system.sync_set(
                             QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
                             ffts_mode=2, core_type=pl.KernelType.AIC,
@@ -569,8 +566,7 @@ def sparse_attn_csa(
                 running_l_cmp = pl.add(running_l_cmp, running_l_cmp_hi)
                 # Publish the chunk sums where the merge reads them: the window
                 # chunk in block 0's slot, the compressed chunk in block
-                # WIN_BLOCKS's, zero for the rest so folding them is a no-op.
-                li_zero = pl.tile.muls(running_l_win, 0.0)
+                # WIN_BLOCKS's. 2..4 的槽位不再写零 —— merge 也不再读它们。
                 for li_tick in pl.range(SPARSE_BLOCKS):
                     li_row = (qk_core * SPARSE_BLOCKS + li_tick) * H + qk_lane_head
                     if li_tick == 0:
@@ -578,12 +574,12 @@ def sparse_attn_csa(
                     else:
                         if li_tick == WIN_BLOCKS:
                             pl.store(running_l_cmp, [li_row, 0], li_transfer)
-                        else:
-                            pl.store(li_zero, [li_row, 0], li_transfer)
-                            pv_zero = pl.tile.full([H // 2, HEAD_DIM], dtype=pl.FP32, value=0.0)
-                            pl.store(pv_zero, [li_row, 0], pv_transfer)
+                # 只折 block 0 和压缩块两个槽位。原来还要折 2..4 三个全零槽，
+                # 那三次的 alpha 是 exp(0) 恰好 1.0、加的是恰好 +0.0，而
+                # running_left / running_right 从 +0.0 起、永远取不到 -0.0
+                # （+0.0 + -0.0 = +0.0），所以去掉这三次折叠逐位等价。
                 for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
-                    SPARSE_BLOCKS,
+                    WIN_BLOCKS + 1,
                     init_values=(running_m, running_l, running_left, running_right),
                 ):
                     pv_sb = qk_tick
