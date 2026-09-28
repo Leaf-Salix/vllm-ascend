@@ -32,9 +32,17 @@ pypto-lib仍作其连续cache/query组织参考；本候选保留Native分页零
 
 [补丁](candidate.patch)基于8e176285；[CPU分片账本](partition_evidence.json)只核对连续覆盖、
 可见前缀边界、最大支持长度回退和pair容量，不能代替设备正确性。
-Ruff通过；[全CSA CPU编译入口](compile.py)由既有监视器等待当前模型任务结束后执行，尚无编译结论。
-未执行NPU、未提交新的单卡任务。
+Ruff通过；[全CSA CPU编译入口](compile.py)由既有监视器确认当前模型结束后执行。
+首次在ConvertToSSA失败：两个leaf-plan标量只在constexpr分支内定义；
+已在算子侧给出分支前默认值，重新编译，不改工具链。
+[失败摘要](compile_scope_failure.txt)保留，完整首轮IR日志在本地compile_scope_failed.log。
+随后遇到整数边界`[1,0]`错误，仅将leaf步数限制为正数仍未解决；
+将可见根数改为两个前缀计数之和，消除零长度前缀的条件分支后，完整lowering/PTOAS/CCE/链接/load通过。
+两次边界失败分别保留在compile_bound_failed.log、compile_bound_clamp_failed.log；
+成功[日志](compile.log)及[CPU/设备不重叠记录](compile_guard.jsonl)均保留。
 
 CPU通过后先用[定向单卡入口](run_layer.sh)对比128K/B16和8K/B16，各20次无profiler图计时，
 四个独立DFX窗口、八类状态和A→B→A重放；保留P95及全部异常样本。
+已提交auto单卡`task_20260928_203745_30431952702`，最长2400秒；尚无设备结论。
 如果有可保留收益，再补同策略B8及必要tie/边界缺口，不直接重跑七档或扩展EP16。
+按用户最新优先级，本阶段主看128K incore与CSA调度、8K控制及七三指标，整网性能验收后置。

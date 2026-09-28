@@ -17,10 +17,13 @@ cases=(131072:4 131072:8 8192:16)
 for case_spec in "${cases[@]}"; do
     history="${case_spec%:*}"
     batch="${case_spec#*:}"
+    ranks=0
+    # Reuse captured B8 data to inspect the persistently late host ranks.
+    if [[ "$history:$batch" == 131072:8 ]]; then ranks=0,5,9; fi
     for backend in native pto; do
         python "$source_repo/tests/pypto_test/offline_pd/run.py" profile-export \
             --bank "tests/pypto_test/results/release_offline_pd_20260923/h${history}_bank" \
-            --output "$root/model/h$history/b$batch/$backend" --profile-ranks 0 --analyse-processes 4 \
+            --output "$root/model/h$history/b$batch/$backend" --profile-ranks "$ranks" --analyse-processes 4 \
             > "$root/model/h$history/b$batch/export_$backend.log" 2>&1
     done
 done
