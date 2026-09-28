@@ -137,11 +137,15 @@ O_A/O_B在该档各64份任务，24个AIC需要多波；77μs级O_A启动分散�
 4. 跨query Key复用、2048排序和UB中间根已保留；当前继续检查长档AIV接收、scale与排序的搬运/等待。
    Native按query分AIV、PTO按候选分AIV的差异已补入Indexer文档，取舍需同时考虑scale复用与根数量。
    [scale矩阵广播](results/csa_score_scale_matrix_20260929/RESULTS.md)已测：长B16 Score AIC/AIV约+7%，
-   CSA虽略降但没有取得核内收益，不合入；下一项检查Query/系数跨leaf驻留。
+   CSA虽略降但没有取得核内收益，不合入。
+   [Query/系数跨leaf驻留](results/csa_query_resident_20260929/RESULTS.md)也未保留：
+   长B24 AIC约+3.72%、AIV持平，长短8:2 CSA+0.028%；减少搬运未带来明确核时收益。
    先写出生成指令/缓冲/等待的实质差异，再做单因素候选；不重复旧4+2分组或完整4096 Score UB驻留。
 5. 有核内收益且必要功能检查通过即保留，完整CSA及P95单列；再对受影响档位补测。核内阶段后优化CSA关键依赖和派发。
    已否定的短Score sync_start、Qproj整组启动、O_A重排等不无依据重试。
-6. 先128K/B16与8K/B24，补受影响128K/B24，长短收益按8:2；阶段出口覆盖新七档。当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。
+6. 当前冻结c93ec723重取[真实编译新七档](results/csa_compiled_seven_20260929/README.md)，
+   长短收益按8:2，按Native/PTO任务细分确定下一阶段CSA调度重点。
+   当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。
 
 [统一七档证据](results/csa_cann92_incore_seven_20260928/README.md)、
 [21份可下载JSON](results/csa_cann92_incore_seven_20260928/download/README.md)、

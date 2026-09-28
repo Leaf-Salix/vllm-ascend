@@ -33,7 +33,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | 环节 | 最新Native A3策略 | 当前PTO | 剩余问题/证据 |
 | --- | --- | --- | --- |
 | query/Key复用 | L1 query最多256行，L0按128行M面板；同一Key L1面板跨M子块复用 | 长B≥4用S6 M384/N64；更小长档保留双query | 长B4/B8 S6已取得明显核时收益；分组相似仍不等于L1/L0流水相同，旧4+2拼接退化不重试 |
-| Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24恰为24个S6组，可研究固定worker处理同一组的全部leaf并保持Q/系数驻留；不等同已验证收益 |
+| Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24固定组跨leaf驻留已测，AIC约+3.72%、AIV持平；当前候选不采用，不能把少读字节直接当收益 |
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | B4/B8 AIC均值已降至71.036/137.435μs，后续按当前核时继续看等待与重复move |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
@@ -68,12 +68,10 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 5. 核内阶段之后，再按当前DFX处理独立归并、系数依赖、准入和物理核分派。短B16/B32/B40同核两份仍有记录，
    但已测短Score sync_start、Sparse sync_start都没有综合收益，不能把开关当作已证明的修复。
 
-后续核内候选的具体约束：长B24当前走query-major枚举，32769候选产生5个leaf，
-一个worker会轮换处理5个不同query组，因而不能直接把Q/系数加载移出leaf循环。
-若改成每worker固定一组，理论上可消除该组后4次的48KiB Q和12KiB系数读取，
-但必须同时改变两侧AIC/AIV枚举、保持根槽位置，并对不均匀请求长度保留原负载平衡策略。
-先确认生成代码的驻留/同步，再做长B24和短档定向对照；不为“少读了字节”提前记收益。
-此前只复用编排最大长度的失败候选不等同这一跨leaf驻留策略，不能混为同一次优化重试。
+长B24固定组Query/系数驻留已完成定向对照：生成代码证实TLOAD/TMOV移出leaf循环，
+八类状态/图/保护区通过，但长档AIC变慢、AIV持平，长短8:2 CSA+0.028%，没有明确收益。
+该候选未合入，不扩测不均匀长度；理论上减少240KiB/worker的加载不能替代核时证据。
+当前冻结已保留代码重取真实编译新七档，再按任务细分确定CSA调度优化重点。
 
 ## 有效证据与排除方向
 

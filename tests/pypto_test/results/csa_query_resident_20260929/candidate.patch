@@ -1,0 +1,209 @@
+--- a/decode_indexer.py
++++ b/decode_indexer.py
+@@ -637,6 +637,7 @@
+     key_prefetch_panels: pl.constexpr,
+     key_prefetch_to_l0: pl.constexpr,
+     balance_leaves: pl.constexpr,
++    query_resident: pl.constexpr,
+ ):
+     """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+@@ -680,9 +681,33 @@
+                 buf_capped_history, buf_query_count // query_group_size
+             )
+         pl.system.set_ffts(buf_score_ffts)
++        # Uniform full-worker groups keep Query/coefficients across all leaves,
++        # analogous to Native QLI's first-S2-only Query/Weight DMA.
++        buf_query_left = pl.tile.create(
++            [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM], dtype=pl.INT8,
++            target_memory=pl.MemorySpace.Left,
++        )
++        buf_coefficient_pair = pl.tile.create(
++            [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16,
++            target_memory=pl.MemorySpace.Left,
++        )
++        if query_resident:
++            resident_query_l1 = pl.load(
++                qr_hadamard_i8, [buf_worker * query_group_size * IDX_N_HEADS, 0],
++                [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Mat,
++            )
++            resident_coefficients_l1 = pl.load(
++                coefficients, [buf_worker * NATIVE_QLI_WEIGHT_ROWS, 0],
++                [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], target_memory=pl.MemorySpace.Mat,
++            )
++            buf_query_left = pl.tile.move(resident_query_l1, target_memory=pl.MemorySpace.Left)
++            buf_coefficient_pair = pl.tile.move(resident_coefficients_l1, target_memory=pl.MemorySpace.Left)
+         # S=6可作为一整组或三组2，均不跨请求；共享Key用组内最后query可见范围。
+         for buf_item in pl.range(buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS):
+-            if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
++            if query_resident:
++                buf_query = buf_worker * query_group_size
++                buf_leaf = buf_item // TOPK_SCORE_WORKERS
++            elif buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                 # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
+                 buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
+                 buf_leaf = buf_item // (buf_query_count // query_group_size)
+@@ -709,20 +734,21 @@
+                 buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                 buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                 buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+-                buf_query_vector = pl.load(
+-                    qr_hadamard_i8,
+-                    [buf_query * IDX_N_HEADS, 0],
+-                    [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+-                    target_memory=pl.MemorySpace.Mat,
+-                )
+-                buf_coefficients_l1 = pl.load(
+-                    coefficients,
+-                    [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
+-                    [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+-                    target_memory=pl.MemorySpace.Mat,
+-                )
+-                buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
+-                buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
++                if not query_resident:
++                    buf_query_vector = pl.load(
++                        qr_hadamard_i8,
++                        [buf_query * IDX_N_HEADS, 0],
++                        [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
++                        target_memory=pl.MemorySpace.Mat,
++                    )
++                    buf_coefficients_l1 = pl.load(
++                        coefficients,
++                        [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
++                        [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
++                        target_memory=pl.MemorySpace.Mat,
++                    )
++                    buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
++                    buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
+                 for buf_score_step in pl.range(buf_score_iters):
+                     if buf_score_step >= 2:
+                         pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+@@ -938,7 +964,10 @@
+             for buf_item in pl.range(
+                 buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
+             ):
+-                if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
++                if query_resident:
++                    buf_query = buf_worker * query_group_size
++                    buf_leaf = buf_item // TOPK_SCORE_WORKERS
++                elif buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                     buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
+                     buf_leaf = buf_item // (buf_query_count // query_group_size)
+                 else:
+@@ -1136,28 +1165,69 @@
+             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
+             # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
+             if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+-                score_tid = indexer_score_topk_native_cube(
+-                    qr_hadamard_i8,
+-                    qr_hadamard_scale_dq,
+-                    weights,
+-                    idx_native_kv_cache,
+-                    idx_block_table,
+-                    position_ids,
+-                    kv_seq_lens,
+-                    score_arena,
+-                    pair_arena,
+-                    qh_quant_tid,
+-                    weights_tid,
+-                    cache_write_tid,
+-                    S,
+-                    64,
+-                    BUFFERED_LONG_SCORE_TILE,
+-                    True,
+-                    False,
+-                    1,
+-                    True,
+-                    True,
+-                )
++                resident_min_visible = TOPK_MAX_CANDIDATES
++                resident_max_visible = 0
++                if pl.tensor.dim(position_ids, 0) == S * TOPK_SCORE_WORKERS:
++                    for resident_batch in pl.range(b_dim):
++                        resident_cache_len = pl.read(kv_seq_lens, [resident_batch]) // COMPRESS_RATIO
++                        resident_last_position = pl.read(position_ids, [resident_batch * S + S - 1])
++                        resident_visible = pl.max(pl.min(
++                            pl.min(resident_cache_len, (resident_last_position + 1) // COMPRESS_RATIO),
++                            TOPK_MAX_CANDIDATES), 0)
++                        resident_min_visible = pl.min(resident_min_visible, resident_visible)
++                        resident_max_visible = pl.max(resident_max_visible, resident_visible)
++                resident_eligible = pl.cast(0, pl.INT32)
++                if resident_min_visible == resident_max_visible:
++                    if resident_min_visible > TOPK_CANDIDATES_PER_LEAF:
++                        resident_eligible = pl.cast(1, pl.INT32)
++                if resident_eligible == 1:
++                    score_tid = indexer_score_topk_native_cube(
++                        qr_hadamard_i8,
++                        qr_hadamard_scale_dq,
++                        weights,
++                        idx_native_kv_cache,
++                        idx_block_table,
++                        position_ids,
++                        kv_seq_lens,
++                        score_arena,
++                        pair_arena,
++                        qh_quant_tid,
++                        weights_tid,
++                        cache_write_tid,
++                        S,
++                        64,
++                        BUFFERED_LONG_SCORE_TILE,
++                        True,
++                        False,
++                        1,
++                        True,
++                        True,
++                        True,
++                    )
++                else:
++                    score_tid = indexer_score_topk_native_cube(
++                        qr_hadamard_i8,
++                        qr_hadamard_scale_dq,
++                        weights,
++                        idx_native_kv_cache,
++                        idx_block_table,
++                        position_ids,
++                        kv_seq_lens,
++                        score_arena,
++                        pair_arena,
++                        qh_quant_tid,
++                        weights_tid,
++                        cache_write_tid,
++                        S,
++                        64,
++                        BUFFERED_LONG_SCORE_TILE,
++                        True,
++                        False,
++                        1,
++                        True,
++                        True,
++                        False,
++                    )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+                     qr_hadamard_i8,
+@@ -1180,6 +1250,7 @@
+                     # M128/N128 fits two 16KiB Key slots plus 32KiB WS in L0B.
+                     1,
+                     True,
++                    False,
+                     False,
+                 )
+         else:
+@@ -1214,6 +1285,7 @@
+                     0,
+                     True,
+                     False,
++                    False,
+                 )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -1236,6 +1308,7 @@
+                     True,
+                     0,
+                     True,
++                    False,
+                     False,
+                 )
+     else:
