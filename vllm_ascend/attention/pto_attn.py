@@ -13,6 +13,7 @@ capture: no device-to-host read (no ``.item()``, no boolean-mask indexing, no
 
 from __future__ import annotations
 
+import os
 import sys
 
 import torch
@@ -548,13 +549,42 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
 _OP = None
 
 
+def _swimlane_options():
+    """Read the swimlane and dependency-capture knobs from the environment.
+
+    Every standalone kernel entry in ``pto_kernels`` exposes
+    ``--enable-chip-swimlane``. Running inside vLLM there is no argv of our own
+    to carry it, so the same two knobs arrive as environment variables. Both
+    default off, so a normal serving process calls ``init()`` exactly as before.
+    """
+    level = int(os.environ.get("PYPTO_CSA_SWIMLANE", "0"))
+    dep_gen = os.environ.get("PYPTO_CSA_DEP_GEN", "0") != "0"
+    if level == 0 and not dep_gen:
+        return {}
+    output_dir = os.environ.get("PYPTO_CSA_SWIMLANE_DIR")
+    if not output_dir:
+        raise ValueError(
+            "PYPTO_CSA_SWIMLANE / PYPTO_CSA_DEP_GEN require "
+            "PYPTO_CSA_SWIMLANE_DIR: both write artifacts and "
+            "pypto.torch.init rejects a missing output_dir"
+        )
+    options = {"output_dir": output_dir}
+    if level:
+        options["enable_chip_swimlane"] = level
+    if dep_gen:
+        # The swimlane records name tasks only by registered id; the dependency
+        # capture is what carries the name_hint for each one.
+        options["enable_dep_gen"] = True
+    return options
+
+
 def _registered():
     global _OP
     if _OP is None:
         from pypto.torch import init, register
 
         kcsa, _ = kernel()
-        init()
+        init(**_swimlane_options())
         _OP = register(kcsa.decode_csa_attn_tp1_test, "pypto_csa::attention_csa")
     return _OP
 
