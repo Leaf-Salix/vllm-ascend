@@ -23,6 +23,7 @@ def main():
              result["limits"], "", "以下只列相对进入异常超过2ms的诊断点；2ms不是验收阈值，JSON保留全部10步。", "",
              "| 档位 | 侧 | 正式step | 相对晚进入rank | 偏移ms | 该rank forward/平时中位ms | 其余rank增加ms |",
              "| --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+    tail_count = 0
     for case in forward["cases"]:
         if "forward" not in case:
             continue
@@ -48,13 +49,20 @@ def main():
                           "late_rank_typical_forward_us": typical[late], "other_ranks_mean_extra_us": others_delta}
                 samples.append(sample)
                 if excursions[late] > 2000:
+                    tail_count += 1
                     lines.append(f"| {case['history']//1024}K/B{case['batch']} | {side} | {sample['step']} | {late} | "
                                  f"{excursions[late]/1000:.3f} | {durations[late][step]/1000:.3f}/"
                                  f"{typical[late]/1000:.3f} | {others_delta/1000:.3f} |")
             row[side] = {"rank_clock_offset_us": offsets, "samples": samples}
         result["cases"].append(row)
-    lines += ["", "晚进入rank自身forward正常、其余rank耗时同量级增加，与EP等待放大相符；"
-              "这是证据支持的解释，尚未定位晚进入的根因。不会据此直接给CSA加sync_start。",
+    result["entry_tail_count_over_2ms"] = tail_count
+    interpretation = (
+        "晚进入rank自身forward正常、其余rank耗时同量级增加时，与EP等待放大相符；"
+        "需逐样本核对，不能只因进入较晚就认定根因或给CSA加sync_start。"
+        if tail_count else
+        "本轮两侧均未发现超过2ms的相对进入异常；2ms仅用于诊断筛选，不能据未复现称旧长尾已修复。"
+    )
+    lines += ["", interpretation,
               "正式均值/P95/max仍原样保留在[RESULTS.md](model/RESULTS.md)。", "",
               f"单位依据：[Ascend API]({TIMESTAMP_DOC})、[torch_npu实现]({TORCH_SOURCE})。"]
     (ROOT / "arrival.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

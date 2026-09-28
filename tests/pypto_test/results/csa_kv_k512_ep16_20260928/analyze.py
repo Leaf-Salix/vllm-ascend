@@ -19,7 +19,7 @@ PHASES = {
 }
 
 
-def main():
+def main(*, attribution_note="本轮同时验证KV候选，不能把跨轮变化单独归因于事件预热。"):
     source = ROOT.parent / "csa_forward_sequence_20260928/analyze.py"
     spec = importlib.util.spec_from_file_location("host_analysis", source)
     analyzer = importlib.util.module_from_spec(spec)
@@ -76,7 +76,7 @@ def main():
         report["cases"].append(item)
     lines += ["", "全部rank原始标记与分项：[phases.json](phases.json)。"
               "正式统计：[model/RESULTS.md](model/RESULTS.md)。",
-              "未复现不能证明已修复；本轮同时验证KV候选，不能把跨轮变化单独归因于事件预热。"]
+              "未复现不能证明已修复；" + attribution_note]
     (ROOT / "phases.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     (ROOT / "PHASES.md").write_text("\n".join(lines) + "\n")
 

@@ -53,13 +53,31 @@ QLI V2的metadata和`ProcessDecode()`还带全核同步，当前PTO已有任务�
 | --- | --- | --- |
 | [QLI V2 Cube](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_service_cube_arch22.h) | 与本仓Native QLI Cube的主体流程相同，主要为名称、布局枚举及stride字段差异；FIXPIPE的1/1024缩放、ReLU、FP16第二次Cube规约并非新发现，性能版已采用 | 对照Q/Key/S的实际驻留周期与流水等待；不要再次把已采用的Cube head规约当作新优化 |
 | [SparseFlashMla CSA Cube](../../../ops-transformer/attention/sparse_flash_mla/op_kernel/arch22/sparse_flash_mla_csa_block_cube.h) | Q/P四份L1区、KV三份L1区及DataCopyPA；当前Native Sharedkv已有同类配置 | 核对PTO QK/PV复用、跨query流水中实际等待的位置，再决定搬运/缓冲改动；旧16行UB双缓冲与成对DMA没有稳定收益，不原样重测 |
-| [MhcPreSinkhorn M分块](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_m_split_core.h) | Stage1 AIV加宽输入，一份写给Cube，原UB值直接计算平方和；已据此保留性能版输入/RMS融合，精度版原归约不变 | 两档输入/RMS累计核时间下降27%～30%，但HC区间慢2.5～4.1μs；T60性能版及精度版共用函数回归通过，下一步组合源码EP16及Cube启动延迟 |
+| [MhcPreSinkhorn M分块](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_m_split_core.h) | Stage1 AIV加宽输入，一份写给Cube，原UB值直接计算平方和；已据此保留性能版输入/RMS融合，精度版原归约不变 | 两档输入/RMS累计核时间下降27%～30%，但HC区间慢2.5～4.1μs；T60双入口及组合源码B16 EP16通过，Cube启动延迟仍需处理 |
 | [MhcPreSinkhorn Cube](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_cube_compute.h) | 另一条M/K分块路径的`ComputeDecode/MmadA2/MmadAB`在L1/L0A复用输入，用Cube计算平方和及投影 | 与上述Vector RMS路线区分；当前PTO未采用Cube A2，不把读取复用候选称为原样移植此算法。后续须单独评估规约变化与纯AIC开销 |
 | [RmsNormDynamicQuant](../../../ops-nn/norm/rms_norm_dynamic_quant/op_kernel/rms_norm_dynamic_quant_normal_kernel.h) | A3支持，多行UB处理、权重驻留、归一化与量化融合；FP32→INT32 RINT→FP16→INT8 TRUNC链与当前PTO一致 | 检查QR的两遍输入/gamma读取能否减少，先算UB生命周期；当前性能版已把平方和与amax合在第一遍，不能把“融合”本身重复计为新改进 |
 
 RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及beta接口，
 不能把删去另一条输出分支带来的代码简化称为当前CSA的确定性能收益。
 精度版仍以现有Native舍入及规约合同为准，不能直接套用性能版的代数化简。
+
+Sparse的“三缓冲”还需要区分实际驻留对象。最新AscendC `InitBuffers/ComputeMm1/ComputeMm2`：
+Q/P占4×64KiB，KV占3×64KiB；QK沿K256分片加载，PV又按K256/N128读取KV。
+当前PTO则让三个完整128×512 BF16 KV块跨QK/PV保留，仅KV就占384KiB，减少GM重读但压缩了L1余量。
+因此两个实现都写“三缓冲”不代表相同布局，也不能据此认定该项已完全对齐。
+旧的QK预发2→3候选曾因Mat使用606208字节超出524288而编译失败（验证日志§154），
+不原样重跑；后续若验证更深流水，应先明确分块驻留/重新加载的取舍，量化额外MTE2开销和等待。
+这是源码差异和候选方向，尚无该布局改造的设备收益，不调整现有预发深度。
+同时核实`SparseFlashMlaCsa`的`PRELOAD_NUM=2`、`SMLA_PRELOAD_TASK_CACHE_SIZE=3`：
+后者缓存本轮、上轮和上两轮的RunInfo；不能将三个任务描述槽或三个KV L1槽误称为预发深度3。
+因此下一步先比较驻留粒度与实际流水等待，不能凭“三缓冲”直接扩大PTO预发深度。
+
+QR的另一项差异是输入/gamma复用：当前8行×1024列的FP32输入按256列两遍读取，
+最新RMSNormDynamicQuant在UB保留输入和权重。驻留输入32KiB加FP32 gamma 4KiB只是基本容量，
+还需计入归约、量化和流水临时量；采用时优先保留现有256列归约/乘法/舍入顺序。
+已有HC单变量DFX中该任务每worker约6.54～7.15μs、B16共12worker，
+而Sparse AIC约119～148μs；不能把省一遍GM读取直接说成完整CSA的大幅收益。
+本项列作后续小范围候选，优先核实Sparse等更大热点；未新建NPU测试或宣称收益。
 
 ## 3. ops-math的适用边界
 
@@ -74,7 +92,9 @@ RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及
 短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
 [同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
 QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要单卡状态/尾块通过，
-下一步对组合源码补长短B16真实EP16/token/DSpark，记录完整forward及P95；继续筛选最新AscendC差异。
+组合源码d1f170ff长短B16真实EP16的forward分别比同轮Native快4.03%/4.10%，P95更低，token/DSpark一致；
+[完整模型证据](results/csa_ascendc_topk_hc_ep16_20260928/README.md)不能证明每项独立整网收益，也未完成新版七档。
+下一步继续筛选最新AscendC差异，先核实Sparse大热点的片上布局与等待，再安排QR输入驻留等小范围候选。
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。

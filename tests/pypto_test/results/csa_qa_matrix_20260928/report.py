@@ -22,9 +22,9 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
-def model_report():
+def model_report(*, matrix_label="统一七档"):
     data = json.loads((ROOT / "model/model_gap_rank0.json").read_text())
-    lines = [f"# {REVISION}：统一七档模型内区间", "", data["scope"], "", data["limits"], "",
+    lines = [f"# {REVISION}：{matrix_label}模型内区间", "", data["scope"], "", data["limits"], "",
              "正式验收见[无profiler十步forward](RESULTS.md)。以下为独立三步rank0 profile，不能精确分账正式计时。",
              "每档63个完整CSA区间（3步×21层），包含首次metadata。", "",
              "| 档位 | Native/PTO CSA均值 μs | PTO变化 | Native/PTO P50 μs | Native/PTO P95 μs |",
