@@ -279,10 +279,14 @@ CSA七三−0.681%不能代替核内目标；短档P95+7.54μs，控制漂移与
 但长B4/B8 Score核时仍高于Native PMU参考；不能用Native任务Duration代替核内参考而宣布差距关闭。
 [七档完整读数](results/csa_cann92_incore_seven_20260928/RESULTS.md)、
 [PMU/DFX定义](results/csa_cann92_incore_seven_20260928/METRICS.md)。
-主线3b27c7fd随后改变WO_A为Native实际NZ存储，旧矩阵不覆盖该项，正在补长短B16集成与核内对照。
+主线3b27c7fd随后改变WO_A为Native实际NZ存储，旧矩阵不覆盖该项。局部长短B16及8K/B40已通过，
+O_A核时分别−25.778%/−26.636%/−20.317%，完整CSA及P95均改善，保留该修正。
 ops-nn19614968的A3 `transpose_batch_mat_mul/op_kernel/pp_matmul_ein_sum_kernel.h`
 中GetOffsetB/CopyTileB区分ND/NZ，NZ直接GM→L1；当前PTO同样保留根三维几何、直接借用格式29。
-先量化这一路径的O_A核时和关键链，再追加其他调度改动，见[两档验证](results/csa_wo_a_native_nz_20260928/README.md)。
+完整读数见[三档验证](results/csa_wo_a_native_nz_20260928/README.md)。
+用户后续矩阵改为128K B4/8/16/24、8K B24/32/40；新增长B24已在私有包中完成9.2单卡对照，
+PTO完整CSA1362.396μs、比Native低8.548%，[证据](results/csa_b24_cann92_20260928/RESULTS.md)。
+后续代表档128K/B16与8K/B24，历史8K/B16记录不继续扩测。
 
 短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
 [同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
