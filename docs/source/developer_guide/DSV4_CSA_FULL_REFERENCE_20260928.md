@@ -13,6 +13,7 @@
 | 七档整模型forward耗时 | 下降1.66%～4.94%；参考独立复现下降1.85%～6.02%。各档仅单轮，不宣称统计稳定性 |
 | C4区间trace | 下降9.27%～21.41%，包含HC pre至HC post |
 | 与Native精度 | 未实现零误差；本轮整模型graph logits相对L2为9.44%～31.71%，Leaf与参考相同 |
+| 真实混合query回退 | 16rank×12步6/6/6/5全部NONE；21个C4层回退计数匹配，64请求完成 |
 | 适配处理 | 不保留独立CSAServiceRuntime/NativeCSACall链；内部metadata、零拷贝view与参数绑定仍存在 |
 
 本轮参考配置EPLB关闭，性能为model forward设备时间，不是端到端吞吐。
@@ -520,3 +521,61 @@ dummy各576，窗口内新增graph为0。
 实际记录只有均匀S1/S6 batch，没有不同query长度混在同一batch。因此此轮证明延迟入场能完成，
 不能作为真实混合query自动回退验收。该覆盖项继续列为未验证，不用强制回退单测替代它。
 全部rank结果及日志已备份，见`mixed-query-summary.json`和`mixed-query-evidence-manifest.json`。
+
+## 预算受限的回退覆盖尝试
+
+`task_20260929_014101_243122216951`exit0，生产393134f1d、harness-v4不变。
+仅将max_num_batched_tokens改为39，真实worker确认扣除draft预留后调度预算为23；
+每请求64输出token。Native/Leaf各16rank、64请求、4096token完成，新增graph为0。
+两侧实际调度均为初始2条S1，其后1/2/3条完整S6；混合query仍为0，不计回退验收。
+
+原因已核对固定vLLM scheduler：当已有running decode时，新请求剩余1token会补成S6，
+若预算不足6则推迟入场。因此延迟2+2提交下，23预算最多先容纳3条S6。
+不能仅按23除以6推断出现6/6/6/5。结果、日志和hash见本地mixed-budget-v1证据。
+
+## 2026-09-29 02:10 第七阶段：真实混合query回退通过
+
+任务`task_20260929_020053_282310813426`正常结束，exit0；Native和Leaf两组前后
+源码/依赖指纹完全相同。生产继续固定393134f1d，独立harness-v6仅将v4的
+延迟生成入口替换为原有generate_aligned_batch，共两行改动。
+暂停调度后四请求全部enqueue，经过DP barrier统一恢复；不修改scheduler、metadata或kernel。
+其余为8K bank、TP1/DP=EP16、B4、DSpark5、EPLB关闭、capture24、64输出token。
+max_num_batched_tokens39，实际max_num_scheduled_tokens23。
+
+| 检查（每组16rank） | Native | Leaf |
+|---|---|---|
+| 初始四条S1，NONE | 16步 | 16步 |
+| 真实6/6/6/5，NONE | 192步（每rank12步） | 192步（每rank12步） |
+| 后续单请求S6，FULL | 32步（每rank2步） | 32步（每rank2步） |
+| 窗口内新增graph | 0 | 0 |
+| 请求/输出token | 64 / 4096 | 64 / 4096 |
+| 最终生成序列 | 两侧全部一致 | 两侧全部一致 |
+
+Leaf首个C4层的Native回退记录，按完整dispatch内容及次数与192个混合步骤匹配；
+进一步核验每个rank的全部21个C4层，tokens23、非dummy的Native调用均恰为12次。
+因此不是初始S1、dummy调用或人为强制eligible=False代替混合query覆盖。
+原生FULL_DECODE_ONLY调度在这些非均匀步骤本身就选择NONE；本次不宣称必须触发
+CSA额外graph门禁的拒绝分支。同步hook没有唯一step id，相同重复步骤按内容与次数对应，
+不是独立时间戳跟踪；具体记录与所有层计数共同支持本次回退结论。
+
+本轮只验收调度/回退/恢复与请求完成，含观测同步，不纳入性能数据；
+token一致不代表本轮有Native逐位精度证据。各rank无顶层/window诊断错误。
+102份结果/日志及前后指纹已备份本地，见mixed-budget-v2-summary.json、
+mixed-budget-v2-evidence-manifest.json；严格校验脚本validate_mixed_budget.py保留。
+
+## 本轮目标完成性核对
+
+| 原定要求 | 最终证据 |
+|---|---|
+| 冻结完整参考和工具链 | 71153源码、e58方法、3e87/a54c/327cd/0.66指纹；目标CANN9.0.1与作者环境差异明确 |
+| 原始prefill bank和七档方法 | 8K/128K正式75分片、TP4/DP4/EP16 bank audit；七档完整参考forward/独立trace |
+| 完整模块迁入BSH | 561492fa5；16模块参考源SHA、计算AST和重定位后import集合逐项相同 |
+| 原生生产接入和生命周期 | 393134f1d；Decoder签名/返回/FFN、原生metadata/cache所有权、初始化/graph/回退回归 |
+| 每阶段Native与参考精度 | 单层状态、8K/128K共同历史、8K完整graph hidden/logits；精度差异均保留，不把token相同当零误差 |
+| 同口径性能 | Leaf与参考七档均完成，固定NZ2/atomic0/det0；Native事件模式0/PTO1均沿用参考，不宣称纯kernel独立贡献 |
+| 真实运行边界 | DP补位/空rank、同图B4/B3/B1/B4、真实mixed-query Native回退及恢复均有证据 |
+| 历史可追溯 | 保留失败和未覆盖尝试、精确源码/harness/依赖身份、全部结果与SHA，报告随代码提交 |
+
+该表完成的是完整参考复现与BSH迁移目标；**完整模型相对Native的高精度目标仍未解决**。
+不扩大到所有batch、所有请求分布、EPLB开启、128K B24～40、接受步长3.8或端到端吞吐。
+本轮性能独立重复次数不足，不宣称长期稳定收益。未为得到这些结果修改或放宽精度阈值。
