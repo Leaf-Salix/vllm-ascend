@@ -1232,9 +1232,7 @@ def indexer_weights_score_vllm(
     row_blocks = (bs + MM_ROW_TILE - 1) // MM_ROW_TILE
 
     weights = pl.create_tensor([T_PAD, IDX_N_HEADS], dtype=pl.FP32)
-    weights_partial = pl.create_tensor(
-        [WEIGHTS_OK * T_PAD, IDX_N_HEADS], dtype=pl.FP32,
-    )
+    weights_projected = pl.create_tensor([T_PAD, IDX_N_HEADS], dtype=pl.FP32)
     with pl.spmd(
         weights_workers,
         name_hint="weights_proj_vllm",
@@ -1242,19 +1240,16 @@ def indexer_weights_score_vllm(
         allow_early_resolve=True,
     ):
         worker = pl.tile.get_block_idx()
-        for unit in pl.range(
-            worker, WEIGHTS_OK * row_blocks, weights_workers,
-        ):
-            row_block = unit // WEIGHTS_OK
-            k_block = unit - row_block * WEIGHTS_OK
+        for row_block in pl.range(worker, row_blocks, weights_workers):
             row_begin = row_block * MM_ROW_TILE
             valid_rows = pl.min(MM_ROW_TILE, bs - row_begin)
-            k_begin = k_block * WEIGHTS_K_TILE
             acc = pl.create_tensor(
                 [MM_ROW_TILE, IDX_N_HEADS], dtype=pl.FP32,
             )
-            for d_block in pl.range(WEIGHTS_K_TILE // D_TILE):
-                d_begin = k_begin + d_block * D_TILE
+            # Keep one accumulator for the complete Linear projection;
+            # rounding separate K partials can cross a BF16 output boundary.
+            for d_block in pl.range(D // D_TILE):
+                d_begin = d_block * D_TILE
                 x_tile = pl.slice(
                     x,
                     [MM_ROW_TILE, D_TILE],
@@ -1267,30 +1262,20 @@ def indexer_weights_score_vllm(
                 acc = pl.matmul_acc(
                     acc, x_tile, weight_tile, init_cond=(d_block == 0),
                 )
-            out_begin = k_block * T_PAD + row_begin
-            weights_partial[
-                out_begin : out_begin + MM_ROW_TILE, 0:IDX_N_HEADS
+            weights_projected[
+                row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS
             ] = acc
 
     with pl.spmd(
         row_blocks,
-        name_hint="weights_proj_reduce_vllm",
+        name_hint="weights_scale_vllm",
         allow_early_resolve=True,
     ) as weights_tid:
         row_block = pl.tile.get_block_idx()
         row_begin = row_block * MM_ROW_TILE
-        total = weights_partial[
+        total = weights_projected[
             row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS
         ]
-        for k_block in pl.unroll(1, WEIGHTS_OK):
-            partial_begin = k_block * T_PAD + row_begin
-            total = pl.add(
-                total,
-                weights_partial[
-                    partial_begin : partial_begin + MM_ROW_TILE,
-                    0:IDX_N_HEADS,
-                ],
-            )
         # Match weights_proj's output dtype before applying the scalar factor.
         projected_weights = pl.cast(total, target_type=pl.BF16, mode="rint")
         scaled_weights = pl.mul(pl.cast(projected_weights, target_type=pl.FP32), WEIGHTS_SCALE)

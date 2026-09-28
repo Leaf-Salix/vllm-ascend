@@ -210,3 +210,86 @@ def test_inner_state_projection_preserves_native_k_order(lengths, d_base):
     # Unrotated accumulation cannot produce the native column-dependent result.
     assert expected[d_base] != expected[0]
     assert not torch.equal(expected, expected[0].expand_as(expected))
+
+
+def load_weights_projection():
+    """Execute the actual weights path without loading the device runtime."""
+    path = KERNELS / "decode_indexer.py"
+    function = next(
+        n
+        for n in ast.parse(path.read_text()).body
+        if isinstance(n, ast.FunctionDef) and n.name == "indexer_weights_score_vllm"
+    )
+    function.decorator_list = []
+    function.returns = None
+    for arg in function.args.args:
+        arg.annotation = None
+
+    def load_tile(tensor, shape, offset, valid_shape):
+        tile = torch.zeros(shape, dtype=tensor.dtype)
+        rows, columns = valid_shape
+        row, column = offset
+        tile[:rows, :columns] = tensor[row : row + rows, column : column + columns]
+        return tile
+
+    def accumulate(accumulator, lhs, rhs, init_cond):
+        product = lhs.float() @ rhs.float()
+        return product if init_cond else accumulator + product
+
+    pl = SimpleNamespace(
+        tensor=SimpleNamespace(dim=lambda tensor, axis: tensor.shape[axis]),
+        create_tensor=lambda shape, dtype: torch.zeros(shape, dtype=dtype),
+        FP32=torch.float32,
+        BF16=torch.bfloat16,
+        min=min,
+        range=range,
+        spmd=lambda *args, **kwargs: nullcontext(0),
+        tile=SimpleNamespace(get_block_idx=lambda: 0),
+        slice=load_tile,
+        matmul_acc=accumulate,
+        cast=lambda value, target_type, **kwargs: value.to(target_type),
+        mul=torch.mul,
+    )
+    namespace = dict(
+        pl=pl,
+        D=4096,
+        D_TILE=512,
+        T_PAD=16,
+        MM_ROW_TILE=16,
+        IDX_N_HEADS=2,
+        WEIGHTS_SCALE=0.125,
+        # Inspect the real weights passed to score selection, not a copied
+        # projection implementation. No score computation is needed here.
+        indexer_score_topk_forest_vllm=lambda *args: (args[2], None, 0),
+    )
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+    return namespace[function.name], {arg.arg: None for arg in function.args.args}
+
+
+@pytest.mark.parametrize("tokens", [1, 13])
+def test_weights_projection_preserves_one_accumulator_across_k(tokens):
+    hidden = torch.ones(tokens, 4096, dtype=torch.bfloat16)
+    weight = torch.zeros(4096, 2, dtype=torch.bfloat16)
+    # One nonzero product per K512 tile isolates inter-tile accumulation.
+    # Cancelling +/-2**24 first leaves 1 + 2**-8 + 2**-16, just above the
+    # BF16 midpoint. Split-K loses 2**-8 inside (-2**24 + 2**-8), so its
+    # later reduction rounds to 1 instead of 1 + 2**-7.
+    terms = torch.tensor([2.0**24, 0, -(2.0**24), 2.0**-8, 1, 2.0**-16, 0, 0])
+    weight[::512, 0] = terms.bfloat16()
+    weight[:, 1] = -weight[:, 0]
+    project, args = load_weights_projection()
+    args.update(x=hidden, weights_proj=weight, weights_workers=1)
+    actual, _, _ = project(**args)
+
+    expected = torch.tensor([1 + 2.0**-7, -(1 + 2.0**-7)]) * 0.125
+    torch.testing.assert_close(actual[:tokens], expected.expand(tokens, -1), rtol=0, atol=0)
+    assert torch.count_nonzero(actual[tokens:]) == 0
+
+    # Negative control: independently model the previous four FP32 partials.
+    partials = terms[::2] + terms[1::2]
+    old = partials[0]
+    for partial in partials[1:]:
+        old = old + partial
+    old = (old.bfloat16().float() * 0.125).bfloat16().float()
+    assert old == 0.125
+    assert old != expected[0]
