@@ -1,7 +1,7 @@
 # DeepSeek V4 Flash PyPTO CSA 测试历史
 
 本记录属于 `dev/pypto-dsv4-csa-tnd-main-20260924` 分支，覆盖从首次接入
-`6c9d552a1` 到 Hadamard 对齐提交 `34fd15d54` 的全部源码提交。更新日期：2026-09-24。
+`6c9d552a1` 到当前原生数值对齐系列的源码提交。更新日期：2026-09-28。
 后续改变 kernel、绑定、原生基线或测量方法时，在本文追加记录，保留旧结果，
 以便按提交比较。这里的“通过运行”仅指程序完成；数值验收单独标注。
 
@@ -13,7 +13,8 @@
   DSpark 接收率或 GBS=16×4 吞吐。
 - Native 精度基线开启 `torch_npu.npu.set_deterministic_level(1)` 和
   `HCCL_DETERMINISTIC=true`。`relative L2 = ||CSA - Native||₂ / ||Native||₂`；
-  逐元素验收为 `torch.allclose(rtol=1e-2, atol=1e-2)`。记录输出及实际写入的
+  历史记录包含 `torch.allclose(rtol=1e-2, atol=1e-2)`；2026-09-28 起优先检验
+  原始字节一致性与 ULP，不再把旧阈值通过作为精度完成。记录输出及实际写入的
   cache/state，不能用整块未写历史缓存稀释误差。
 - Graph 延迟是固定地址 ACLGraph replay 的单层 attention forward 时间，不含
   编译、权重准备、capture、scheduler 或模型其他层。正数“CSA 慢”表示
@@ -404,6 +405,132 @@ cache 的指标不变。Graph 数值仅为短测记录，未测 B16、整模型�
 `reports/dsv4-tnd-kernel-20260924/npu-ab/evidence/formal-34fd15d54-b4-t18/`。
 下一步优先定位 TopK 截断附近的少数候选差异，并继续隔离未注入 Native
 Q/cache 时的输出误差。
+
+## 2026-09-28：按原生计算顺序进一步对齐
+
+基线是 `34fd15d54` 的正式源码，文档 HEAD 为 `1ddf5d5fc`。
+参考独立 opus55 分支的定位思路，重新核对本仓库原生 DSV4、QLI、
+RMSNorm Dynamic Quant 和 Sparse Attention C++，分开提交以下修改：
+
+| 提交 | 变更与正确性依据 | 当前验证范围 |
+| --- | --- | --- |
+| `1f4fec753` | 原生 `impl.wkv` 投影输出进入共享 PyPTO KV norm/RoPE；QR 对齐完整 K 累加、半区平方和、实际归一化值 amax 和标量除法；Q/O-proj 先合并反量化系数。 | CPU 合约、数学边界检查及 227 编译通过；NPU 待验证。 |
+| `a68e6c4e9` | Indexer 对齐 BF16 投影和 Hadamard、FP16 权重/系数/scale、fixpipe 的 ReLU 与 `2^-10`/FP16 边界、新块优先的 TopK 合并。 | CPU 数值回归及 227 编译通过；NPU 待验证。 |
+| `0106bfd4f` | Attention 按窗口128和压缩512两个逻辑 chunk 计算，概率按原生 `CAST_ROUND` 舍入，压缩 PV 完整 K 累加并沿输出 N 分块。 | 6项 CPU 回归、227 specialize/lower/codegen 通过；NPU 待验证。 |
+| `49cba0a23` | Compressor 对齐 TH NORMAL 的 K 起点旋转、128维 MMAD、交错物理行和8→4→2→1池化归约；保留设备端 TND query bounds。 | 3项 CPU 回归及完整 kernel 编译通过；NPU 待验证。 |
+| `f03093456` | Compressor RMS 按64列块进行半区平方和归约，再执行 Sqrt→Div→FP32 gamma。 | 原有主/inner RMS 数值回归和完整 kernel 编译通过；NPU 待验证。 |
+
+这些改动没有改变 TND 请求边界、slot/block table 的来源或原生 cache 所有权，
+没有引入按 S6 对齐的服务 Graph 限制。ABI 从51增至52个 tensor，新增
+`kv_projected`。KV norm/RoPE 复用本分支已有实现；原生 WKV 是正式执行路径，
+不是将同一次 Native 对拍结果注入 CSA。
+
+### 环境与静态验证
+
+- 227 使用既有 CANN 9.2.0-beta.2、ATB ABI1、Torch 2.10.0+cpu、
+  Torch-NPU 2.10.0.post4、vLLM 0.29.0。
+- PyPTO `54957491ede07ad5d5015f5e69874f367113cf45`；
+  Simpler `32dff953d07f6bd2aacab8532860f28aca6df931`；PTOAS 0.63。
+- 复用已有扩展和环境，仅编译修改后的 kernel；框架未重新安装。
+- 共48项 CPU 回归通过：35项 metadata/KV 合约、2项 O-proj、2项 Indexer、
+  6项 attention、3项 compressor。Compressor 的构造性舍入用例在旧池化实现上失败，
+  在本轮实现上逐位通过；CPU DSL 检查也覆盖了有效/无效 slot 与非等长请求。
+- QR sqrt 整数中点修正另经独立数学复核；前提是正 normal 输入且 VSQRT
+  误差在1 ULP内。生成 C++ 确认小张量位于私有 UB，整数平方/移位保持64位，
+  标量除法保留 FP32，存在相应 V/S 同步。
+- 首次 specialize 因循环变量推导的 tile 宽度不是编译常量失败；改为
+  constexpr 参数的两个显式 chunk 调用后，specialize、lower、codegen通过。
+- 增量 pre-commit 通过；本机缺少 gitleaks 可执行文件，该 hook 未执行。
+  `bash format.sh ci` 的 shellcheck 因本机缺少可执行文件而失败；ruff、codespell、
+  typos、clang-format、markdownlint 等已通过，不将缺工具记为源码失败。
+
+### 硬件对拍安排与证据边界
+
+- 原生反量化顺序小任务：`task_20260928_092241_28589849376`。
+- 第一批正式候选（`0106bfd4f`）B4/T18 和 B4/T24：`task_20260928_093210_314681911248`。
+- 第二批正式候选（`f03093456`，增加 compressor 对齐）相同负载：`task_20260928_094410_365671727193`。
+- 两个负载仍是模型真实第2个 C4 层权重、合成 hidden/history、TP1、128槽页、
+  start_pos=8186，长度分别为 `[3,4,5,6]`、`[6,6,6,6]`。
+- Native 启用 deterministic level 1 和 `HCCL_DETERMINISTIC=true`。
+  本轮增加原始字节一致性和 Native Graph 重复性检查；旧 allclose 不能代替本轮精度目标。
+- 首轮仅使用每组6轮、每轮5次 replay 验证 Graph 行为，不用于性能结论。
+- 反量化小任务已完成：T18/T24 共172032个 BF16 输出，Native 重复运行与
+  合并 scale 参考均逐位相同。不过顺序乘 scale 参考也逐位相同，此随机样本
+  **不能单独证明两种计算顺序的区别**；源码边界与实际模型阶段对拍仍是依据。
+- 本节更新时正式候选任务已开始执行，尚无完整精度结果；不得将 CPU/编译通过表述为精度通过。
+- 远端是以 `34fd15d54` 为基线的独立 worktree 加本轮源码快照；修改文件 SHA256
+  记录在本机 `reports/dsv4-tnd-kernel-20260924/native-align-20260928/stage1-manifest.json`，
+  第一批源码对应前三个提交的组合；第二批对应五个提交，另记录 `stage2-manifest.json`。
+  不覆盖旧实验 checkout。
+
+尚待核验：CANN softmax 内部归约树、短上下文的负槽 compact 顺序、完整 TopK
+tie-breaking、B16/128K/整模型。阶段探针须先证明与对应正式源码输出和 cache 逐位一致，
+才可用于解释模块误差。
+
+### 第一、二批实测结果（09:55补充）
+
+前三个提交组合与后两个 compressor 提交分别使用独立源码快照。
+下表所有已完成项的 Native Graph 重复运行逐位一致，CSA 没有回退原生，
+eager 与 Graph 的输出差异数量相同。表中的 state 数量仅统计实际写入行。
+
+| 源码 / 用例 | Graph 输出不同元素/总数 | 输出 relative L2 | main / inner state 不同元素 | Native / CSA Graph ms |
+| --- | ---: | ---: | ---: | ---: |
+| `0106bfd4f` / b4-t18 | 0/73728 | 0.000000% | 28620 / 4037 | 0.5805 / 0.6686 |
+| `0106bfd4f` / b4-t24 | 0/98304 | 0.000000% | 40812 / 9597 | 0.6971 / 0.7929 |
+| `f03093456` / b4-t18 | 0/73728 | 0.000000% | 0 / 4037 | 0.5891 / 0.6121 |
+| `f03093456` / b4-t24 | 0/98304 | 0.000000% | 40845 / 9597 | 0.6001 / 0.6377 |
+| `f03093456` / b4-t18-p8189 | 0/73728 | 0.000000% | 0 / 4032 | 0.5847 / 0.5938 |
+| `f03093456` / b4-t18-p8194 | 0/73728 | 0.000000% | 0 / 4078 | 0.5759 / 0.6020 |
+| `f03093456` / b16-t60 | 3267/245760 | 0.116280% | 0 / 13421 | 0.7316 / 0.9615 |
+
+本轮6×5次 replay 用于验证 Graph 行为。环境存在其他卡上的并发任务，
+这些短测数字仅留作历史记录，不能据此宣称性能改善或稳定的回退比例。
+第一批与第二批 B4/T24 的 compressed cache 均为2/4096元素不同，
+最大绝对误差6.1035e-5；所有列出的 raw/index key/index scale 均逐位一致。
+B4/T18 两个新增相位8189、8194和B16/T60的 compressed cache逐位一致。
+
+阶段探针任务 `task_20260928_094613_37458769572`、
+`task_20260928_095015_391228918413` 使用本次正式源码自动导出中间张量。
+先证明探针与正式kernel输出、三个完整cache allocation逐字节相同，才进行归因。
+
+| 探针 | Q / raw KV / 主QR codes和scale | TopK | inverse RoPE后的heads | 同heads经原生O-proj |
+| --- | --- | --- | --- | --- |
+| B4/T18，8189 | 全部逐位一致 | 全部逐位一致 | 1/589824不同，仅1 ULP | 与CSA输出逐位一致；最终输出与Native也相同 |
+| B16/T60，8186 | 全部逐位一致 | 65/30720位置不同；仅token56集合有一枚替换 | 30622/1966080不同，主要集中token56 | 与CSA输出逐位一致 |
+
+B16只有token56的最终输出不同，其余token输出逐位一致。token27仅有两个TopK
+位置互换且输出不变。**主QR codes/scale不是Indexer的128维query/scale**，
+因此尚不能认为QLI的所有输入已一致；下一步需区分Indexer投影/量化输入、score
+归约与TopK边界。不能把B4逐位一致推广到B16或整模型。
+
+### 第三批：Compressor设备分支和inner投影
+
+- `c63fbdc96`：修正等长判断。已检查的生成C++把`pl.cast(predicate, INT32)`
+  的True转为-1，B4等长计数成为-4，导致错误选择dBase64；改用长度差平方和。
+  此根因解释了第二批非等长main state精确、等长仍有FP32末位差异。
+- `80047af08`：inner compressor独立对齐head128投影的K128累加、列相关256偏移；
+  使用自己的dBase16/64选择规则，不复用head512的32/64参数。
+- 当前54项CPU回归通过；新增测试使用True→-1的设备mask语义，旧等长判断会失败。
+  227完整kernel编译通过，生成C++确认两个投影均已消除bool计数。
+- 第三批相同B4/T24、B16/T60负载：`task_20260928_095429_409899525342`，
+  本节记录时仍在执行，不提前写作精度通过。源码身份另存`stage3-manifest.json`。
+- 独立复核另发现Native会裁掉query bounds中的尾部零长请求，再判断等长；
+  当前正长度小测不覆盖此边界，后续单独修复和验证，不排除中间零长请求。
+
+### 第三批新增实测与padding后续（10:00补充）
+
+`80047af08` 的 B4/T24 已完成：eager/Graph最终输出、六类实际写入的cache/state
+全部逐位一致，Native Graph重复逐位一致。主/inner投影和等长分支的修正已获得
+该负载的硬件证据，不能把这项成功覆盖尚在执行的B16。
+
+`d8d180c09` 补齐Native对尾部零长请求的处理，仅在投影分块选择中裁剪尾部；
+中间空请求仍保留。58项CPU测试通过，227完整kernel编译通过，生成C++确认
+两个active_requests变量均保留循环phi和条件更新。独立padding脚本只允许
+`[0,6]`长度且至少一个token，其余对拍流程与ab.py相同。硬件专项仍待记录。
+
+B16 TopK单因素诊断 `task_20260928_095712_1993526209` 继续运行Indexer，
+只在attention消费端替换Native TopK；同时保存Native QLI真实输入。
+该任务属于归因工具，不将注入版当作正式源码精度。
 
 ## 后续每次测试的记录方式
 
