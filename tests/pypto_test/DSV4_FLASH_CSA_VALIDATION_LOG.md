@@ -10834,3 +10834,26 @@ P95及max分别记录，不据此关闭历史间歇拖尾或EP16问题；最新�
 调用数、L0搬运和流水仍不同，分析已补入[Indexer差距](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
 用户关注的dummy直接依赖已由§372实测覆盖：四个dummy→0，长短8:2仅−0.100%，未合入；
 后续需配合真实任务准入和关键链，避免weights提前却使Score延后，不原样重复该候选。
+
+## 394. 去除dummy并用真实任务保留Q_B准入、延后weights，开始两档组合调度对照（2026-09-29）
+
+基线fa53246c/生产算子4ffccb7b，冻结pkg:dsv4_csa_direct_chain_fa53246c。
+§372只删除四个dummy约0.1%差异未采用；本轮先复核生产者early标志语义与当前真实调度。
+原空dummy不能视为纯无作用节点：它还阻止消费者预派发，移成task_invalid可能改变队列行为。
+新组合将RoPE中转改直接TaskId，Attention Compressor显式依赖RoPE/Q_A；
+Q_B的空dummy改为真实RoPE前置，保持非预派发；weights改为依赖Attention Compressor投影，
+用该真实任务的非early属性控制准入。两套入口解析和完整CPU编译/load通过，生成码dummy为零。
+算术、cache、worker、early/sync标志不改，原tensor自动依赖保留；无工具链修改。
+
+已有4ffccb7b固定window_3中，长档Q_A91.340–108.080μs、weights105.740–114.900μs，
+weights reduce125.460μs结束，Attention投影186.460μs结束，系数最终305.480μs就绪。
+因此存在试验weights后移的余量，但没有全引擎饱和证据，不能直接声称其为资源阻塞原因。
+Score该窗end→FIN/FIN→dispatch/dispatch→start分别4.460/8.280/3.400μs，不能混算软件开销。
+两档既有窗口已由官方解析器复核，dummy缺时戳处的完整ready归因为空。
+
+task_20260929_063915_20346931582已auto单卡提交，长B16/短B24，
+CANN9.2/mode2/atomic0/det0，每侧5预热/20次真实编译图计时及四窗DFX；
+复用八类状态零容差、图/eager和保护区检查。逐窗核对dummy4→0、真实显式边和实际预派发，
+按完整CSA的8:2及P95/max判断，不以单任务提前采用；组合收益不得单独归因于dummy删除。
+尚未合入，等待同一任务终态，不追加七档或整模型。
+[候选、冻结源码、编译与收集入口](results/csa_direct_chain_20260929/README.md)。

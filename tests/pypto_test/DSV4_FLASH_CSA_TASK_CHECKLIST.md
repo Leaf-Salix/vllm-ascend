@@ -118,6 +118,10 @@ forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干�
 后续组合实验需在当前生产基线上保持Q_A/Compressor关键链优先，分别观察真实前置完成、
 FIN、派发和核启动，不能将“无dummy”直接等同于更快，也不重复已测的原样替换。
 [结果与关键链](results/csa_direct_deps_20260929/RESULTS.md)。
+组合候选已提交task_20260929_063915_20346931582：四个dummy移除，Q_B保留真实RoPE前置以维持
+非预派发策略，weights直接等待Attention Compressor投影。两根解析和完整CPU编译通过；
+同配置长B16/短B24真实编译A/B与四窗DFX进行中，等待CSA/P95及真实依赖边证据，不先合入。
+[与原去dummy实验的区别](results/csa_direct_chain_20260929/README.md)。
 Native det0的编译/eager曾出现浮点及Top-K集合/顺序差异，保护区通过不等于两侧精度验收。
 [Native编译数值范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 历史d8627207长B16有3次明显拖尾，P95达1391.560μs；后续独立采样未复现，**未证明修复**。
