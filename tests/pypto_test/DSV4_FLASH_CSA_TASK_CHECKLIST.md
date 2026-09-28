@@ -38,9 +38,11 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
 0. **用户最新优先项：核实8K/B16相邻CSA的765/807μs波动。** 已在03泳道同目录02整模型图定位到第3步第12/14层，
    设备CSA765.84→807.84μs、AICPU根776.62→814.86μs；不是调用间空隙。03是独立单层一次调用，不能直接对应模型慢点。
    该单层Score各核各一份，但启动分散约14μs；尚不能把42μs归给Score。
-   当前e58基底只给短档Cube Score增加sync_start，保留early_resolve=True；完整CPU编译通过。
-   task_20260928_112109_314698014843排队：同卡100次计时/四DFX窗口，先检验P95和完整关键链，不扩测整矩阵。
-   [精确事件、范围与候选](results/csa_short_score_sync_20260928/README.md)。HC原pending任务已取消，待本问题收尾后恢复。
+   e58基底只给短档Cube Score增加sync_start、保留early_resolve=True的同卡任务已完成，状态/图重放通过。
+   100次计时均值776.45→780.31μs、P95 805.10→792.14μs，暂不合入，不能称整层稳定加速。
+   独立基线DFX还捕获Sparse的24份任务落到22个AIC、两核各跑两份，实际启动分散124.86μs、Worker首尾866.46μs。
+   下一项只验证qk_pv整组准入，Score与算术保持，先看长短代表档及drain成本，再按结果决定模型验证。
+   [完整计时、状态及同核串行证据](results/csa_short_score_sync_20260928/README.md)。HC在该优先项之后恢复。
 1. **先定位实际EP16入场尾部。** 直接测128K/B16的主机/GC诊断已完成，forward快4.69%、P95更低，
    正式窗口无GC、无>2ms入场异常；未复现不是修复，不覆盖原七档尾部。
    连续128K/B4→B8→B16已完成，三档均值快7.03%/3.22%/2.96%，P95更低、token/DSpark一致。
@@ -90,6 +92,10 @@ CPU位置相同不证明设备草稿token相同，严格路由归因使用独立
 
 后续源码参考Native与最新版pypto-lib官方main73078d0（2026-09-28 depth=1核对）；
 其deepseek_v4_flash_dspark目录与此前2164563没有差异，历史上游泳道仍按原来源注明。
+新增本地ops-transformer b5b33e14、ops-nn 7a71d54e、ops-math 81802185，优先确认A3可用路径。
+已发现QLI V2跨分片四路Top-K归并与PTO逐份二路合并的差异，待当前长尾及HC候选之后定向验证；
+先查物理tile形状、相等score优先次序和实际归并轮数，不把省操作数当作实测收益。
+[具体源码、已采用策略、待做范围与架构限制](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
 历史725μs图实际Worker首尾727.98μs，缺源码和完整配置，只作调度参考。
 此前失败的四query配平、Score留UB、页表预读等见验证日志，不能无新依据重复测试。
 [Native核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)、

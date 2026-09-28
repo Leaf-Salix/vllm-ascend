@@ -37,12 +37,28 @@ def scheduling(path, canonical):
     workers = [e for e in events if e.get('pid') == pids['Worker View'] and e.get('ph') == 'X'
                and 'kernel-duration-us' in e.get('args', {})]
     origin = min(e['ts'] for e in workers)
-    score = {}
-    for core in ('aic', 'aiv'):
-        blocks = [e for e in workers if canonical(e['name']) == 'indexer_score_topk_native_pair_' + core]
-        assignment = collections.Counter(e['tid'] for e in blocks)
-        score[core] = {'blocks': len(blocks), 'used_cores': len(assignment),
-                       'max_blocks_per_core': max(assignment.values())}
+    track_names = {e['tid']: e['args']['name'] for e in events
+                   if e.get('name') == 'thread_name' and e.get('pid') == pids['Worker View']}
+
+    def assignment_for(task):
+        result = {}
+        for core in ('aic', 'aiv'):
+            blocks = [e for e in workers if canonical(e['name']) == task + '_' + core]
+            assignment = collections.Counter(e['tid'] for e in blocks)
+            result[core] = {
+                'blocks': len(blocks), 'used_cores': len(assignment),
+                'max_blocks_per_core': max(assignment.values(), default=0),
+                'blocks_per_track': {track_names[t]: n for t, n in sorted(assignment.items())},
+                'unused_tracks': [name for tid, name in sorted(track_names.items())
+                                  if name.startswith(core.upper() + '_') and tid not in assignment],
+                'reused_track_events': [
+                    {'track': track_names[e['tid']], 'task_id': e['args']['taskId'],
+                     'receive_us': e['ts'] - origin, 'end_us': e['ts'] + e['dur'] - origin,
+                     'kernel_us': e['args']['kernel-duration-us']}
+                    for e in blocks if assignment[e['tid']] > 1],
+            }
+        return result
+
     drains = [{'thread': e['tid'], 'start_us': e['ts'] - origin, 'duration_us': e['dur'],
                'staged_blocks': e['args']['tasks_processed']}
               for e in events if e.get('pid') == pids['AICPU Scheduler'] and e.get('ph') == 'X'
@@ -55,7 +71,8 @@ def scheduling(path, canonical):
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])
-    return {'score_assignment': score, 'drain_markers': drains,
+    return {'score_assignment': assignment_for('indexer_score_topk_native_pair'),
+            'sparse_assignment': assignment_for('qk_pv'), 'drain_markers': drains,
             'drain_marker_union_us': sum(end - start for start, end in merged),
             'drain_limit': '仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。'}
 
