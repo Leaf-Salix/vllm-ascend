@@ -89,8 +89,18 @@ SPARSE_BLOCKS = max(2, (TOPK + ATTN_K_TILE - 1) // ATTN_K_TILE)  # Sparse-K bloc
 # Blocks of the sliding-window chunk; the rest are the compressed chunk.
 WIN_BLOCKS = WIN // ATTN_K_TILE
 # HEAD_DIM per PV pass: L1 holds the compressed chunk's whole KV at this width.
-PV_N_TILE = HEAD_DIM // 4
+# 压缩块 PV 的 N 切分。L0C 占用 = H * PV_N_TILE * 4B，上限 131072B：
+#   HEAD_DIM//4 = 128 -> 32KiB（25%）   HEAD_DIM//2 = 256 -> 64KiB（50%）
+#   HEAD_DIM    = 512 -> 128KiB（100%），但 Mat(L1) 要 512*512*2 = 512KiB，
+#               与 prob 的 64KiB 一起超平台 524288B 上限，编不过（实测）。
+# 性能分支取 256：b16 实测 −1.25%，代价是 b4 +2.7%。按 t_dim 分档试过
+# （va-pvdisp），数值完全正确但收益消失 —— traced if 把两支都编进 kernel，
+# L1 仍按宽档分配，窄档白付代价。见 perf-version-plan 的 P0 记录。
+PV_N_TILE = HEAD_DIM // 2
 PV_PASSES = HEAD_DIM // PV_N_TILE
+# 补满左半区的那一趟：A5-1 的半区发布在这一趟触发，对任何 PV_N_TILE 都只一次。
+# 不能写成链式比较 —— pypto 的 parser 只接受 simple comparisons。
+PV_HALF_PASS = (HEAD_DIM // 2 + PV_N_TILE - 1) // PV_N_TILE - 1
 # One whole 64-byte DDR line per token row of valid_block_mask: the plan lanes
 # write it with scalar pl.write, and a scalar write lands a full line, so two
 # lanes sharing a line would silently drop each other's stores.
@@ -326,7 +336,7 @@ def sparse_attn_csa(
                                     # 不必再等 right 半区算完。这四个 pass 是 N 切分、
                                     # 每个都是完整 K=512（12.73），所以任何输出列的
                                     # 归约顺序都没变，数值上是恒等的。
-                                    if pv_col + PV_N_TILE == HEAD_DIM // 2:
+                                    if pv_pass == PV_HALF_PASS:
                                         pl.system.sync_set(
                                             QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
                                             ffts_mode=2, core_type=pl.KernelType.AIC,
