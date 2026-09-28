@@ -42,7 +42,7 @@
 
 - 正式权重仍为用户已锁定的`/data/model/DeepSeek-V4-Flash-0731-w8a8`；不换模板config中的另一份权重。
 - 继续CANN9.2、TP1/DP=EP16、DSpark出5验6、mode2、EPLB关闭；PTO使用已验证私有整包。
-- 七档仍为128K B4/8/16/24、8K B24/32/40。max_num_seqs、capture_sizes、token预算与max_model_len
+- 2026-09-29起正式六档为128K B4/8/16/24、8K B24/32，B40退出后续对比。max_num_seqs、capture_sizes、token预算与max_model_len
   按场景显式记录；不把模板B32、1M容量配置直接覆盖到这些负载。两侧使用相同档位与容量参数。
 - 模板是在线MooncakeHybridConnector；本测试使用已验收离线bank恢复，恢复在稳态forward计时之外。
   现有connector明确拒绝local prefix hit，测试要求请求独立KV，因此保留enable_prefix_caching=False。

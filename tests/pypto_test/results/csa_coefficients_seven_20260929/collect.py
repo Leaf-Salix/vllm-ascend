@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+CASES = ((131072, 4), (131072, 8), (131072, 16), (131072, 24), (8192, 24), (8192, 32))
 
 
 def load_previous(name):
@@ -15,6 +16,8 @@ def load_previous(name):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     module.ROOT = ROOT
+    if hasattr(module, "CASES"):
+        module.CASES = CASES
     return module
 
 
@@ -37,6 +40,8 @@ def main():
                     raise ValueError("PTO loaded a different private package")
     base.TASKS = (*base.TASKS, "indexer_head_coefficients")
     base.main()
+    path = ROOT / "RESULTS.md"
+    path.write_text(path.read_text().replace("当前七档", "当前六档"))
 
 
 if __name__ == "__main__":

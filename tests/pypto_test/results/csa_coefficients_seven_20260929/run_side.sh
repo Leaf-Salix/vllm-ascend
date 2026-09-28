@@ -7,6 +7,13 @@ root="$repo/tests/pypto_test/results/csa_coefficients_seven_20260929"
 side="${1:?native, pto, or swimlane}"
 history="${2:?history length}"
 batch="${3:?batch size}"
+# 2026-09-29: user retired B40 while this matrix was running. The parent
+# shell may already have parsed its old case list; skip before sourcing the
+# device environment or starting any compiler, profiler, or NPU process.
+if [[ "$batch" == 40 ]]; then
+    echo "SKIPPED: B40 comparison retired by user (history=$history, phase=$side)"
+    exit 0
+fi
 source "$workspace/env-dsv4-0251rc1.sh"
 source "$repo/tests/pypto_test/results/csa_native_template_20260929/env.sh"
 source_repo="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"])' "$root/source.json")"

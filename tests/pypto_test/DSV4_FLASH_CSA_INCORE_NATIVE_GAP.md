@@ -1,5 +1,8 @@
 # CSA：当前七档核内差距与优化顺序
 
+> 2026-09-29范围修订：后续仅比较128K×B4/B8/B16/B24＋8K×B24/B32，长短权重8:2。
+> 本页现有七档表属于已完成的c93ec723历史结果；B40退出后续对比，待当前六档完成后更新主表。
+
 更新：2026-09-29。最新完整基线为 **c93ec723 / CANN9.2**，同一个auto单卡任务完成
 128K B4/B8/B16/B24、8K B24/B32/B40。Native/PTO均走真实编译半层；
 Native启用npugraph_ex、static kernel与norm/quant融合，详见[配置及边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
