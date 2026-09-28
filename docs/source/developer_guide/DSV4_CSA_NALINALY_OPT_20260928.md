@@ -1,0 +1,52 @@
+# BSH 分项对齐 nalinaly 优化：2026-09-28
+
+## 固定版本和方法
+
+- Leaf分支：`dev/pypto-dsv4-csa-v0.25.1rc1-cann9.0.1`，运行源码基线 `c4383cfea0077f79edd68b4e6ed3950ab9a2242f`。
+- 参考nalinaly：`e58ddc94d77c93a0a8a85ab2db4bd773da9dff84`，`deepseek_v4_flash_dspark_perf/qkv_proj_rope.py`。
+- CANN9.0.1、vLLM0.25.1、vLLM-Ascend0.25.1rc1、Torch2.10.0+cpu、torch_npu2.10.0.post2。
+- PyPTO `54957491ede07ad5d5015f5e69874f367113cf45`，Simpler `166852bfa658c259478b39e1991a7fd5e7379ac5`，PTOAS0.63。环境包含已有局部补丁，不能只用HEAD复现；测试前后保存了实际导入、dirty状态及全部Python源码SHA256，已完成组前后一致。
+- 使用DeepSeek-V4-Flash-0731-w8a8真实第2层权重、固定合成hidden/history。BSH、40 tensor ABI、原生128页cache布局保持。
+- Native/基线/候选同进程同卡，分别capture；12轮×100 replay轮换测量顺序，以NPU Event计时。cache复位在计时外，无profiler。
+- 性能测试前要求：输出与完整cache allocation逐字节等于基线、A/B/A输入切换时graph/eager一致、输出有限、保护区不变、CSA调用计数命中。相对Native精度另列。
+
+这是固定位置的单层graph延迟，不是16卡整模型吞吐或完整模型精度验收。每项独立冻结源码，失败候选不自动累加。
+
+## 第一项：Q-A直接写回，精度不退化，未证明稳定提速
+
+Q-A已有`QR_OK=1`，一个任务独立累加完整K。候选只去掉零初始化任务与`atomic Add`，直接写回；分块、K遍历、RMS/RoPE、KV及Indexer均不变。增加`QR_OK == 1`断言约束唯一写者。
+
+候选`qkv_proj_rope.py` SHA256：`7d0d9346c3a224438c43ea00c858873092bf8428d9c370c17bb466bade0ae139`。
+
+| B/S/起始position | Native中位ms | 基线中位ms | 候选中位ms | 配对变化中位 | 对Native output relative L2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| B1/S6/8191 | 0.474843 | 0.563994 | 0.567036 | +0.503% | 0% |
+| B4/S6/8191 | 0.561442 | 0.695188 | 0.704314 | +1.717% | 0.0743908% |
+| B4/S6/131071 | 0.772634 | 0.977186 | 0.962666 | −1.200% | 0.0569393% |
+| B11/S6/8191，诊断heap | 0.771851 | 0.956378 | 0.958257 | +0.205% | 0.1173750% |
+
+正值代表变慢；配对值为每轮candidate/baseline百分比的中位数，不是两侧绝对中位数之比。B4/8K逐轮变化−4.920%…+5.187%，128K为−2.316%…+0.588%，不能把小幅变化外推为稳定收益。
+
+四组候选输出及完整cache均与基线逐字节一致，graph/eager和A/B/A等门槛通过；**不等于与Native全部逐位一致**。B1覆盖量化尾部，B4覆盖M16尾部，B11覆盖64行dense和2行有效tail。
+
+### B11首次失败与重试
+
+默认ring heap 256MiB下，B11在原基线阶段出现`Task Allocator Deadlock - Heap Exhausted! ring=1`：剩余4,329,472字节而申请8,650,752字节，随后output_count断言及设备错误507018。候选尚未执行，不计为候选精度失败。
+
+重试保持kernel源码，只将同一进程中两种CSA共同设为`ring_heap=[2GiB]*4`，完成上述验证。默认配置失败仍保留；B11耗时不能与前三组默认heap拼接，也不能据此宣称生产默认支持B11。
+
+结论：第一项未合入，保留原基线。删除清零/atomic并未在本组负载得到一致的整层收益。
+
+## 第二项：Q-A自适应M32/M64及最多三组行并行
+
+独立基线仍为c4383cfea，保留原seed/atomic，不叠加第一项。按nalinaly策略，小于128行使用M32，其余M64，最多三个M组，K256遍历顺序保持。M改变仍可能影响编译器实际计算分块，必须重新对拍。
+
+初版在注册阶段遇到分支内scratch shape符号的`ParserTypeError`，没有设备精度/性能结果。修正版按nalinaly将scratch放在分支外分配，helper只返回task ID；CPU `specialize()`已通过。
+
+设备测试待完成：8K B11/B16/B40、128K B16，两侧统一2GiB×4诊断heap。B11覆盖两个M组与不满16行tail；B16/B40覆盖三个M组。不能提前认为编译成功即精度通过。
+
+## 证据保存与后续顺序
+
+每项保留manifest（基点、参考提交、逐文件SHA256）、候选patch、运行器、逐轮计时、输出张量、环境前后指纹及失败日志。Q-A直接写回、其B11诊断重试、M分组初版和修正版使用不同归档目录；不覆盖历史结果。
+
+后续依次评估KV固定K累加、KV L1 K512和Top-K片上归并。改变累加顺序的候选必须先定位精度差异，不能为追求速度放宽门槛。
