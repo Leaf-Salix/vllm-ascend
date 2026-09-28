@@ -88,12 +88,12 @@ Native cache布局/分配不改，PTO内直接按物理页读写，没有入口�
 该融合候选维持否定结论。[结果与边界](results/csa_coefficient_fused_20260929/README.md)。
 后续按组批量加载/计算已保留：长B16/短B24系数核时−27.544%/−30.589%，
 CSA分别−1.387%/+1.113%，两代表档8:2为−0.887%；短档P95+1.660%单列，不宣称长尾修复。
-状态/图/保护区及生产两根解析通过，精度版未迁移；双query仅编译，阶段出口补8K/B32等档位。
+状态/图/保护区及生产两根解析通过，精度版未迁移；双query后续组合8K/B32零容差已通过，七档性能待阶段出口。
 [结果与保留依据](results/csa_coefficient_group_20260929/README.md)。
 后续UB构造完整对角块后一次写回也已保留：相同worker下系数核时长短−25.798%/−36.454%，
 S6的GM写回7→1，新增6次UB搬运；算术、零填充与依赖不变。
 两档CSA−0.543%/+1.453%、8:2仅−0.143%，按核内收益采用，不把它称为明显CSA加速。
-P95长短+0.179%/+1.418%单列；状态/图通过，未替代双query、精度版或EP16验收。
+P95长短+0.179%/+1.418%单列；状态/图通过，双query后续已补，不替代精度版或EP16验收。
 后续继续研究AIV分工、独立merge与数据交接，阶段出口覆盖受影响档位。
 [一次发布及其代价](results/csa_coefficient_publish_20260929/README.md)。
 
@@ -118,10 +118,14 @@ forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干�
 后续组合实验需在当前生产基线上保持Q_A/Compressor关键链优先，分别观察真实前置完成、
 FIN、派发和核启动，不能将“无dummy”直接等同于更快，也不重复已测的原样替换。
 [结果与关键链](results/csa_direct_deps_20260929/RESULTS.md)。
-组合候选已提交task_20260929_063915_20346931582：四个dummy移除，Q_B保留真实RoPE前置以维持
-非预派发策略，weights直接等待Attention Compressor投影。两根解析和完整CPU编译通过；
-同配置长B16/短B24真实编译A/B与四窗DFX进行中，等待CSA/P95及真实依赖边证据，不先合入。
-[与原去dummy实验的区别](results/csa_direct_chain_20260929/README.md)。
+后续真实任务准入组合也已否定：dummy全部移除，Q_B保留RoPE前置，weights等待Attention投影，
+两档状态零容差、图/保护区及16窗真实依赖核对通过；长CSA+0.821%、短−2.086%，8:2为+0.240%。
+长P95上升，Score平均start长短均未提前，生产不合入，不原样重复。
+[候选区别、结果与泳道](results/csa_direct_chain_20260929/README.md)。
+双query的8K/B32缺口已补齐：c93ec723→4ffccb7b八类完整状态零容差、图/保护区通过，
+独立组合CSA−1.536%、P95下降；无新DFX/Native或16卡，不把该点拼入旧七档。
+下一步用当前保留源码完成阶段出口七档性能/核内与JSON记录。
+[补测结果与范围](results/csa_coefficient_dual_check_20260929/README.md)。
 Native det0的编译/eager曾出现浮点及Top-K集合/顺序差异，保护区通过不等于两侧精度验收。
 [Native编译数值范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 历史d8627207长B16有3次明显拖尾，P95达1391.560μs；后续独立采样未复现，**未证明修复**。
@@ -688,7 +692,7 @@ D2 近期工作按§4执行；15轮调度已结束，不沿用旧“再加十轮
 
 D3旧阶段已移植INT8 Q的NZ整段K加载、N256/尾行、反量化head分组、QR归一化worker轮转、
 O量化SPMD和RoPE索引生成。保留精度版QR/KV规约、Compressor运算次序、累计softmax、Q/KV/O舍入，
-以及O投影跨全部组的统一量化尺度；不复制性能版FP16 Score与分组量化。
+以及O投影跨全部组的统一量化尺度；不照搬性能版系数的量化顺序、S6对角布局及O分组量化。
 旧B16/B1/B40状态、图重放和整模型token/DSpark证据见
 [迁移记录](results/csa_baseline_20260926/precision_port/migration.json)、
 [模型看护](results/csa_baseline_20260926/model_precision_migration/comparison.json)及验证日志§127～131。
@@ -705,7 +709,10 @@ O量化SPMD和RoPE索引生成。保留精度版QR/KV规约、Compressor运算�
 | QR | 独立M行分工；唯一写入者时消除seed及不必要atomic store | QR_OK本来恒为1；N32不得改成性能版N128，96列组的K256正反向/轮转规则以原tile_rows判定，不能以局部M行数判定 |
 | 通用KV | atomic0的M32/M64分工、覆盖完整输出后免seed | atomic1仍split-K2，需要seed；BF16发布、RMS归约和RoPE舍入边界不变 |
 | B40/S6 KV | 评估已有直接覆盖写路径的冗余seed；行分组单独审查 | 保留kv_project_native_240的N32/K64及K256块顺序；不能替换为通用性能版路径 |
-| K512候选 | 先完成性能版设备评估，再审查适用性 | 当前只是性能版候选，不能把L1分块扩大视为已验证数值中性，更不能覆盖精度版B40 K64路径 |
+| KV K512 | 性能版固定K路径已保留，见验证日志§307～308；精度版尚未迁移 | 必须独立审查精度版K遍历与发布顺序，不能以性能版通过证明数值中性，更不能覆盖精度版B40 K64路径 |
+| 系数空worker | 沿原stride48，仅减少无迭代的worker | 精度版按单query分工，应取min(48, query数)，不能照搬性能版按query组计数；新七档仅B4的24个query存在该空worker余量 |
+| 系数批量准备 | 可独立研究多query一起加载；仅迁移数据读取策略 | 精度版是FP32 scale×weight后转FP16；性能版先分别转FP16再相乘，不可替换。保持每query的16行重复布局，不移入S6对角布局 |
+| 系数一次发布 | 精度版当前每query已一次GM写回，无对应的多次补写 | 性能版清零后补对角块的7→1/3→1收益不适用于此布局，不为迁移名义引入额外UB构造或宣称相同收益 |
 
 精度版QR当前有32个N块，而性能版固定K只有8个N块；M分组后的任务数和资源竞争不同，
 不能套用性能版47%～52%的核内收益。迁移后先单卡状态/尾块，再真实EP16看护，不先扩大测试矩阵。

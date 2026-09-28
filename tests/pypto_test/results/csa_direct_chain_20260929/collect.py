@@ -186,15 +186,15 @@ def write_task_breakdown(result):
             "",
             f"Worker首尾跨度：{span[0]:.3f}→{span[1]:.3f}。",
             "",
-            "| Task | 首次start | 最后end | 核内均值 |",
-            "| --- | ---: | ---: | ---: |",
+            "| Task | 首次start | 最后end | 核内均值 | 启动分散 |",
+            "| --- | ---: | ---: | ---: | ---: |",
         ]
         for name in selected:
             if not all(name in w["tasks"] for ws in windows for w in ws):
                 continue
             cells = [
                 "→".join(f"{statistics.mean(w['tasks'][name][key] for w in ws):.3f}" for ws in windows)
-                for key in ("first_start_us", "last_end_us", "kernel_mean_us")
+                for key in ("first_start_us", "last_end_us", "kernel_mean_us", "start_spread_us")
             ]
             lines.append("| " + " | ".join([name, *cells]) + " |")
         lines.append("")
