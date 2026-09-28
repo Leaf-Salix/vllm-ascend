@@ -275,6 +275,15 @@ CSA七三−0.681%不能代替核内目标；短档P95+7.54μs，控制漂移与
 用户最新要求优先128K：长短档取舍按耗时变化率7:3评估，七档先在各上下文内平均。
 核内、完整CSA及最终forward各自计算，异常P95和功能约束单列，不能用权重掩盖。
 
+最新完整测量已更新为CANN9.2/e33d842a七档，全部CSA均值/P95/max低于同轮Native，
+但长B4/B8 Score核时仍高于Native PMU参考；不能用Native任务Duration代替核内参考而宣布差距关闭。
+[七档完整读数](results/csa_cann92_incore_seven_20260928/RESULTS.md)、
+[PMU/DFX定义](results/csa_cann92_incore_seven_20260928/METRICS.md)。
+主线3b27c7fd随后改变WO_A为Native实际NZ存储，旧矩阵不覆盖该项，正在补长短B16集成与核内对照。
+ops-nn19614968的A3 `transpose_batch_mat_mul/op_kernel/pp_matmul_ein_sum_kernel.h`
+中GetOffsetB/CopyTileB区分ND/NZ，NZ直接GM→L1；当前PTO同样保留根三维几何、直接借用格式29。
+先量化这一路径的O_A核时和关键链，再追加其他调度改动，见[两档验证](results/csa_wo_a_native_nz_20260928/README.md)。
+
 短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
 [同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
 QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要单卡状态/尾块通过，

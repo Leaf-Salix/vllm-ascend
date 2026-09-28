@@ -47,7 +47,8 @@ def profile(folder, side):
     events = payload["traceEvents"] if isinstance(payload, dict) else payload
     if not rows or not any(e.get("ph") == "X" for e in events):
         raise ValueError(f"Empty profile: {trace}")
-    fields = ("Name", "Type", "Duration(us)", "aicore_time(us)", "aiv_time(us)")
+    fields = ("Name", "Type", "Duration(us)", "aicore_time(us)", "aiv_time(us)",
+              "Block Num", "Mix Block Num", "aic_total_cycles", "aiv_total_cycles")
     return {"trace": str(trace), "csv": str(paths[0]),
             "kernels": [{k: row[k] for k in fields} for row in rows]}
 
@@ -147,6 +148,7 @@ def main():
     (ROOT / "matrix.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     lines = ["# CANN 9.2：e33d842a七档单卡结果", "",
              "同一卡、同一已保留算子；每侧5次预热/20次无profiler图计时。单位μs。",
+             "冻结e33d842a，不包含采集期间新增的3b27c7fd WO_A NZ布局修正。",
              "Native算术差异单列于matrix.json；自重放通过不等于Native逐bit或整网token/DSpark通过。", "",
              "| 档位 | Native均值 | PTO均值 | 变化 | Native/PTO P95 | Native/PTO最大值 |",
              "| --- | ---: | ---: | ---: | ---: | ---: |"]
@@ -158,7 +160,9 @@ def main():
     lines += ["", f"各history内batch等权后，七三耗时变化{result['weighted_change_pct']:+.3f}%。",
               "不使用权重覆盖P95异常；不与旧9.0或不同候选拼表。", "", "## Native独立kernel profile", "",
               "以下为单次独立profile的原始duration/aicore_time/aiv_time，非20次正式计时均值。",
-              "QLI包含本地Top-K/最终归并，Sparse包含其内部规约；与PTO拆分任务范围不同，不直接相减归因。", "",
+              "QLI包含本地Top-K/最终归并，Sparse包含其内部规约；与PTO拆分任务范围不同，不直接相减归因。",
+              "aicore_time/aiv_time由PMU周期按block数和波次折算，不是纯算术时间或最慢核，"
+              "定义见[METRICS.md](METRICS.md)。", "",
               "| 档位 | Native kernel | Duration | aicore_time | aiv_time |",
               "| --- | --- | ---: | ---: | ---: |"]
     for row in cases:
