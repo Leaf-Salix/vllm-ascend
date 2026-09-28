@@ -398,6 +398,7 @@ def diagnose(args, llm, cases):
               "requested_steady_cycles": args.steady_cycles,
               "warmup_elapsed_seconds": warmup, "expected_tokens": expected_tokens,
               "weight_nz_mode": args.weight_nz_mode, "graph_mode": args.graph_mode,
+              "gpu_memory_utilization": args.gpu_memory_utilization,
               "capture_sizes": args.capture_sizes,
               "batch_admission": ("pause_enqueue_dp_barrier_resume"
                                   if args.command in ("performance", "moe-routing") else "streaming_generate"),
@@ -777,9 +778,7 @@ def worker(args):
         max_num_seqs=1 if prefill else args.batch,
         max_num_batched_tokens=args.max_num_batched_tokens,
         enable_prefix_caching=False, enforce_eager=prefill or args.graph_mode == "eager", seed=1024,
-        # 默认仍是 0.9；显存排查时可用 PTO_GPU_MEM_UTIL 覆盖（见
-        # tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md）。
-        gpu_memory_utilization=float(os.environ.get("PTO_GPU_MEM_UTIL", "0.9")), block_size=32,
+        gpu_memory_utilization=args.gpu_memory_utilization, block_size=32,
         # 清单约定的 D 侧上线口径为 FULL_DECODE_ONLY；
         # eager 只用于定位问题，其每步重入 Python 派发路径，不代表上线表现。
         # draft 保持 eager。两侧 NZ mode 均由显式 CLI 控制。
@@ -1011,6 +1010,7 @@ def launch(args):
                    "--rank", str(rank), "--batch", str(args.batch),
                    "--rank-batch", str(rank_counts[rank]),
                    "--rank-decode-token", str(rank_tokens[rank]), "--backend", args.backend,
+                   "--gpu-memory-utilization", str(args.gpu_memory_utilization),
                    "--weight-nz-mode", str(args.weight_nz_mode),
                    "--decode-tokens", str(args.decode_tokens),
                    "--warmup-rounds", str(args.warmup_rounds),
@@ -1109,6 +1109,9 @@ def main():
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
     parser.add_argument("--profile-forward-events", action="store_true",
                         help="在profile窗口内另记同一次forward的设备事件；仅供边界诊断，不替代无profiler计时")
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9,
+                        help="两侧使用相同显存预算；默认 0.9。PTO 在 128K/B24/EP16 下需要 0.97 "
+                             "才能跑满 24 路（Native 0.95 即可），0.98 会在启动期 OOM")
     parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
                         help="vllm-ascend 的 weight_nz_mode；1 会让 Native 把量化权重转成 NZ")
     parser.add_argument("--swimlane-rank", type=int, default=0, help="采集PTO DFX泳道的DP rank")
