@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 import torch_npu
+from offline_pd.forward_host import ForwardHostDiagnostics
 from offline_pd.observer import OfflineCSAObserver
 from offline_pd.performance import compare_worker_configs, layer_intervals
 
@@ -22,6 +23,35 @@ def test_worker_event_difference_is_reported_without_ignoring_other_configuratio
         compare_worker_configs(native, {**pto, "scheduler": {"max_num_batched_tokens": 400}})
     with pytest.raises(ValueError, match="观测覆盖不同"):
         compare_worker_configs(native, {key: value for key, value in pto.items() if key != "cann_event_work_mode"})
+
+
+def test_host_phases_restore_inherited_methods_after_prepare_error():
+    class Runner:
+        @contextmanager
+        def synchronize_input_prep(self):
+            yield
+
+        def _prepare_inputs(self, value):
+            if value < 0:
+                raise ValueError("invalid input")
+            return value
+
+    runner = Runner()
+    entry = {"index": 8}
+    callbacks = list(gc.callbacks)
+    diagnostic = ForwardHostDiagnostics()
+    diagnostic.attach_runner(runner, lambda: entry)
+    try:
+        with pytest.raises(ValueError, match="invalid input"), runner.synchronize_input_prep():
+            runner._prepare_inputs(-1)
+    finally:
+        result = diagnostic.finish([entry])
+    assert runner.__dict__ == {}
+    assert runner._prepare_inputs(3) == 3
+    assert gc.callbacks == callbacks
+    step = result["steps"][0]
+    assert step["inputs_begin"]["monotonic_ns"] <= step["inputs_end"]["monotonic_ns"]
+    assert step["inputs_end"]["monotonic_ns"] <= step["input_prep_end"]["monotonic_ns"]
 
 
 def scheduler(tokens, requests):

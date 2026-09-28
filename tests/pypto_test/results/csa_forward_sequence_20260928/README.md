@@ -45,3 +45,7 @@ PTO对应异常发生在准备阶段：入场晚3.147ms，其他rank平均增加
 下一次必要模型验证启用更细分项，并在原begin.record之前补event_record_ready主机标记，
 区分CPU位置记录/事件对象构造和后续提交；标记仍位于设备计时开始之前，不改变计时边界。
 不剔除异常、提前加barrier、改GC或把旧坏样本换成新好样本。
+
+分项诊断另补继承方法的异常恢复：准备阶段抛错后，恢复类方法绑定、移除临时实例属性、
+保留原GC回调；单项CPU回归通过，未重跑其他已通过测试或新增NPU测试。
+[cpu_phase_restore_test.log](cpu_phase_restore_test.log)。
