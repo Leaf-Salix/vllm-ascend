@@ -193,3 +193,47 @@ FFN及其他attention区间也随执行变化；不能把整网差值全部归�
 特别保留参考运行的实际CANN event mode差异：Native=0、PTO=1。
 因此这是完整参考配置对照，不能把差值全部归因于单个kernel；“耗时下降”也不等于相同比例的吞吐提升。
 CPU位置及输出token/DSpark相同，仍不能证明device draft token、完整logits或cache逐位相同。
+
+## 21:46 完整参考的全 C4 层共同输入精度诊断
+
+本次仍为 nalinaly `71153bb3` 完整 performance 实现，不是 Leaf 生产 kernel 的新版本。
+沿用上述精确工具链及已审计的离线 bank，B4/S6、TP1/DP=EP16、NZ2、atomic0、
+deterministic0、EPLB关、eager；分别测8K与128K，生成16 token。
+独立测试扩展覆盖21个C4层，每层每rank采前2次24-token调用。
+原参考4124个受版本控制文件未修改；扩展只添加诊断入口与observer。
+CPU状态恢复及指标测试2项通过，独立审查后提交。任务exit0，前后环境校验通过并释放全部设备。
+
+每次先保存输入和声明写入页，运行PTO，恢复初态，再运行Native；保留Native的输出和cache继续。
+超过采样预算或不匹配shape时同样运行Native，避免后续层输入混入先前PTO误差。
+捕获五组cache/state物理页（indexer carrier包含key和scale）及三组scratch/output；
+诊断内补齐performance版本的indexer参数别名，不改变生产接口。
+
+| 上下文 | 配对数 | 融合输出relative L2最小值 | 中位数 | 最大值 | 逐位相同输出 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 8K | 672 | 0.001669% | 0.183727% | 0.949103% | 0/672 |
+| 128K | 672 | 0.001694% | 0.236263% | 0.988056% | 0/672 |
+
+每组672=16rank×21层×2样本，所有rank覆盖充分，输出均有限，未发现新增非有限cache项。
+状态`MEASURED`表示数据采集充分，不表示数值精度通过。两组最大输出误差均在第18层第二次采样。
+这些是`[24,4,4096]`、HC pre到HC post的完整融合输出指标；不是DSA-only输出，
+不能直接与旧单层attention指标或其他提交的BSH结果比较。
+
+| cache/state物理页 | 8K最大relative L2 | 128K最大relative L2 |
+| --- | ---: | ---: |
+| KV | 0.336264% | 0.330800% |
+| compressed KV | 0.133164% | 0.117804% |
+| compressor state | 0.025453% | 0.031410% |
+| indexer compressor state | 0.024325% | 0.024273% |
+
+五组cache/state在每个配对中均存在差异；packed INT8 indexer页只统计字节差异，
+不能用整数L2冒充其中FP16 scale的数值精度。页指标包含触及页中的未改写部分，
+不是逐有效slot误差，也不构成未声明页面的越界写验证。
+BF16 ULP指标也有明显大于几个ULP的项，不能将本次结果概括为“只差几个bit”。
+
+结论：完整参考配置的七档性能收益已复现，但真实模型共同输入下并非逐位精度一致。
+此前输出token相同不等于tensor相同。本次不测性能，不证明独立PTO轨迹的累积误差、
+完整logits、graph精度或所有形状。尚未保存Q/QR/heads中间值，不能据此归因到具体子算子。
+后续迁移必须同时保留同口径的Native精度检查和性能比较，不将参考误差当作自动放宽门槛的理由。
+
+本地证据目录`reports/dsv4-reference-all-layer-precision-20260928`保存测试扩展、源码身份、
+32份rank结果、日志及rank0的84份配对张量；服务器原件保留。Leaf生产实现尚未迁移。
