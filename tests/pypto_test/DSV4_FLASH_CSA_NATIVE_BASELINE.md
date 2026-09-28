@@ -60,10 +60,14 @@ npu_add_rms_norm_bias，所以只打开fuse_norm_quant不构成可运行环境�
 
 1. 已补齐AddRmsNormBias；单卡验证真实调用、融合注册、static kernel编译成功、静态包安装和图重放。
    CANN9.2只读OPP改用私有可写根，原tiling库内容不变；两侧source结果目录env.sh后运行。
-2. 单层测量补充真正的模板编译路径，或从已编译模型中提取同范围CSA；单填additional_config无效。
-   当前手工图区间报告已经明确标注execution_config，不当作该步骤完成。
-3. 用128K/B16与8K/B24取得同配置基线、实际kernel/profile与P95，再判断既有收益在新基线下是否成立。
+2. 已补真实Native半层模板编译：128K/B16从同进程手工图1294.493降到1238.764μs（−4.305%），
+   static_compile实际True、安装包和覆盖QLI/Compressor/Sparse的39个算子描述已确认。
+   Top-K集合不变、3行顺序变化；浮点输出有差异，不能直接称精度通过。旧手工图报告继续标明范围。
+3. Native两档编译后均值1238.764/1041.954μs及profile、P95已取得；继续补PTO同配置，
+   再判断既有PTO收益是否成立。短档手工图控制可能复用长档静态包，不单独归因static kernel收益。
 4. 核内优化继续按长短8:2；阶段收口才覆盖七档及真实EP16，避免每个配置问题都占16卡调试。
 
-当前完成入口修订、10项CPU参数/Worker回归及单卡编译依赖验证；
-没有新配置的Native CSA性能结果，不修改旧表的百分比。
+当前已完成入口修订、10项CPU参数/Worker回归、单卡编译依赖与128K/B16、8K/B24真实编译半层对照；
+PTO同配置及整模型仍待完成，不修改旧七档表的百分比。
+本单卡attention半层不含MoE，也未通过Worker实际绑核，不冒称整机模板已完整验收。
+[新单层结果、数值差异与profile](results/csa_native_compiled_layer_20260929/RESULTS.md)。

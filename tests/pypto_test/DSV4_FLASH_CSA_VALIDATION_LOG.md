@@ -10280,3 +10280,40 @@ static compile=True、一个静态包安装及图重放全部通过。未修改N
 这只关闭部署模板启动依赖缺口。单层真正编译路径、CSA新基线和EP16性能仍未完成，
 旧手工图Native列继续明确标控制数据。10项CPU入口/Worker测试已通过，无需重复无关测试。
 [环境复现与设备证据](results/csa_native_template_20260929/README.md)。
+
+
+## 374. Native模板真实attention半层编译：128K/B16快4.305%（2026-09-29）
+
+接§373，从仅依赖探针推进到真实HC_pre+norm+CSA+HC_post。
+CompiledAttentionHalf使用vLLM support_torch_compile，保留Native dsa_forward边界；
+正式layer4权重与合成独立历史，同进程先手工图后模板编译，CANN9.2/mode2/det0。
+5预热/20次无profiler采样，profile另采；初态恢复与状态读回均在计时区间之外。
+task_20260929_011152_128409915531 auto/card0完成exit=0。
+
+Native均值1294.493→1238.764μs（−4.305%），P95 1299.440→1245.240，max1299.620→1246.260。
+wrapper compiled、static_compile实际True、一个安装包确认；39个静态算子描述覆盖QLI、
+Compressor、Sparse、HC和Q/O投影，不是仅填配置字段。另核对38份编译成功日志及安装binary manifest；
+CompressorMetadata未列入静态二进制，其余关键计算已覆盖，不宣称所有节点静态化。独立profile kernel数43→42，
+初始residual clone的TensorMove被消除；QLI单次368.00→363.76μs，Sparse179.20→172.96μs。
+profile单次核时不当作20次均值，也不把全部收益归因于消除这一个copy或全部称为核内优化。
+
+手工图八类状态与eager精确一致；编译图31项metadata/保护区全PASS、无非有限值。
+编译输出6083/1572864元素不同，max_abs0.015625、RMSE0.000159397；SWA有13元素不同。
+Top-K 519位置不同，均为3行的顺序变化，集合不同0行、非法0行；其余五类状态精确相同。
+未区分编译算术与det0运行波动，不默认归因于某个fusion，不称整模型精度验收通过。
+
+这证明旧手工图基线需要收紧，但尚无PTO同配置新比较，不拼接历史PTO数字更新百分比。
+半层不含MoE/EP16，Worker绑核、共享专家多流仍待最终整机验证。
+8K/B24同路径已auto提交task_20260929_012814_198666224698，目前排队；不重复提交等待任务。
+[结果与原始证据](results/csa_native_compiled_layer_20260929/RESULTS.md)。
+
+§374续：8K/B24任务随后auto/card4完成exit=0。Native手工图1113.380→编译半层1041.954μs，
+P95 1116.700→1046.240，max1119.320→1049.020；实际static compile/安装及38份成功日志通过。
+metadata/保护区31项PASS，无非有限值；输出18453元素不同，max_abs0.015625、RMSE0.000324394，
+SWA21元素不同。Top-K 2行仅顺序变化、2行集合不同共替换4个索引，非法行0；其余五类状态精确相同。
+因此短档也只能记作性能诊断、数值差异待整模型验收，不能称所有Top-K集合不变。
+
+发现范围限制：私有OPP中的长档静态包保留至短档，部分同形状op可能被短档手工控制复用。
+短档−6.415%只描述这次手工调用→编译半层的增量变化，不是静态包有/无的完全隔离归因。
+后续要归因static kernel需独立OPP/static_kernel目录；当前编译后Native绝对基线仍有效，
+不为已完成的编译路径验证重跑无关测试。两档profile、raw采样与状态报告均已留档。
