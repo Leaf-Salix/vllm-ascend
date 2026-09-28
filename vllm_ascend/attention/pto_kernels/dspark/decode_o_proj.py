@@ -81,7 +81,7 @@ PROJ_A_MM_N_TILE = 128
 PROJ_A_ROW_TILE = 128  # proj_a token block; one block covers T_PAD, 8 tasks/group
 B_K_TILE = 256
 # Keep the INT32 proj-b accumulator within the A2/A3 tile buffer.
-PROJ_B_MM_T_TILE = 128
+PROJ_B_MM_T_TILE = 32
 PROJ_B_MM_N_TILE = 256
 PROJ_B_ACT_N_TILE = 512
 QUANT_TOKEN_TILE = 8
