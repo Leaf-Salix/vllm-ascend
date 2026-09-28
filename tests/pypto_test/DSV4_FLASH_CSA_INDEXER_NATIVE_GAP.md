@@ -36,7 +36,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，S6/双query连到L0B，三query受L0B容量约束 | 长B4/B8核时仍高，需看生成指令的等待和重复move，不能只数逻辑读取字节 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
-| 本地Top-K | 2048候选分段排序，UB中维护Top512并滚动合并 | 每AIV收集half-leaf score，再按512/1024/2048/2560/3072/4096排序；已减尾块padding | Native逐段UB累计与当前half-leaf GM交接仍不同 |
+| 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 每AIV收集half-leaf score，再按512/1024/2048/2560/3072/4096排序；已减尾块padding | Native逐段UB累计与当前half-leaf GM交接仍不同 |
 | 分片平衡 | metadata按工作成本切S1/S2并给最终归并核分工 | 长档按query组与24worker平衡leaf；B16从8/8/8/8/1分成6/6/6/5/5/5个tile | 最忙核下降已保留；新增root数量和AIV排序成本单列 |
 | 最终归并 | LocalTopK/Merge/MS式四路归并，可在同融合kernel结束 | 四路归并与UB累计根已采用，但仍独立merge task | 固定tie/量化规则需保持；任务融合是后续调度/结构调整，不能仅凭少一个任务声称收益 |
 

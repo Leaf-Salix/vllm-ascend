@@ -1,13 +1,16 @@
 # Indexer：2048候选分段排序与Cube重叠
 
-状态：两侧依赖图、完整CSA编译/load及排序探针编译已通过。
-单卡task_20260929_000225_403316119769已提交，当前等待共享卡；尚无设备结果，生产不改。
+状态：两侧排序探针及两档CSA状态/图检查通过，计时与四DFX窗口已收齐。
+task_20260929_002109_36305829117完成exit=0，auto分配card0；[同轮结果](RESULTS.md)。
+长B16 CSA−3.066%、短B24+0.452%，8:2−2.362%；长Score AIC+3.965%、AIV−1.973%，
+不能称为全面核内改善。候选保留，待Native模板基线对齐和核内分项分析，尚未改生产或扩测。
 基线19d93a5b（生产等同3b27c7fd），两侧CANN9.2、mode2/atomic0/det0、正式layer4权重/合成历史。
 
 ## Native依据及当前差异
 
-最新ops-transformer28f40354 A3 QLI V2的ProcessVec1每段最多2048候选，立即排序并累计Top-512，
-随后继续处理下段；QK/WS在Cube侧可继续推进。当前PTO在AIV接收完一整个half-leaf后统一排序，
+最新ops-transformer28f40354 A3 QLI V2的ProcessVec1每段最多2048候选，立即排序并累计根，
+随后继续处理下段。该源码BASE_TOPK=2048，内部保留2048对，最后按sparseCount输出；
+PTO按当前模型需求保留Top-512，借鉴分段时序，不照搬Native缓冲大小。QK/WS在Cube侧可继续推进。当前PTO在AIV接收完一整个half-leaf后统一排序，
 2560/3072/4096候选的排序集中在最后一次Score_READY之后，不能与同leaf后续Cube流水重叠。
 
 本候选仅长档（balance_leaves=True）：收到第四个512候选块就先排序前2048并发布临时Top-512，
@@ -27,6 +30,11 @@ pypto-lib原Score/TopK函数边界不同，本候选源自AscendC融合流水，
 八类状态零容差、A→B→A、metadata/保护区，各5预热/20无profiler图计时及四DFX窗口。
 按2026-09-29用户新口径，长短8:2分别算Score核时与完整CSA；P95/max单列。无明确核内收益则撤回，不扩测整矩阵或EP16。
 若有收益，再按受影响分组补长B4/B8/B24，阶段出口覆盖新七档。
+
+首次task_20260929_000225_403316119769完成两侧十个排序边界/tie用例，值、索引和保护区全部通过；
+随后runner误将队列追加的`--device`当作case参数，在启动CSA前argparse失败，exit=2。
+修正runner为固定case数组，续跑复用已通过探针，不重复占卡测试。两份task分别保留，不能将exit=2称为整任务通过。
+续跑八类状态零容差、A→B→A、metadata/保护区通过；不是Native或整模型token/DSpark验收。
 
 [源码差异](candidate.patch)、[CPU准备](compile.py)、[边界/tie](sort_case.py)、[单卡入口](run_layer.sh)、[冻结路径](source.txt)。
 

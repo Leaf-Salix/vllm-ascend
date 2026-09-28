@@ -38,7 +38,9 @@ pypto-lib参考为73078d0；后续更新源码时记录实际使用版本即可�
 
 来源：QLI V2 A3路径
 [ProcessLD](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_service_vector_arch22.h)。
-其`ldProcessLen=4`，每轮将累计Top-512与三个新分片做MrgSort，保留前512对在UB，最后发布结果；
+其`ldProcessLen=4`，每轮将累计根与三个新分片做MrgSort。该V2源码的BASE_TOPK=2048、
+BASE_TOPK_VALUE_IDX_SIZE=4096，UB内部保留2048对，最终按sparseCount输出；
+PTO按当前模型需求保留512对，借鉴四路/UB累计结构，并未照搬Native缓冲尺寸；
 尾部分别使用二路或三路，`validBit`区分有效输入。
 
 e58基线PTO的

@@ -16,18 +16,13 @@ export PTO_CSA_RING_TASK_WINDOW=4096
 for side in baseline candidate; do
     rg -q 'COMPILE_PASS' "$root/compile_${side}.json"
 done
-# Covers original tie order, 2048/2560/3072/4096 boundaries and guard rows.
+# Boundary/tie device cases already passed in probe_task.txt. Reuse them;
+# the queue appends --device arguments, so do not parse $1 as a case list.
 for side in baseline candidate; do
-    source_repo="$baseline_repo"
-    extra=()
-    if [[ "$side" == candidate ]]; then
-        source_repo="$candidate_repo"
-        extra=(--reference "$root/probe/baseline/pairs.pt")
-    fi
-    python "$root/sort_case.py" --source "$source_repo" --output "$root/probe/$side" "${extra[@]}" \
-        > "$root/probe_${side}.log" 2>&1
+    python -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "PASS"' \
+        "$root/probe/$side/report.json"
 done
-read -r -a csa_case_specs <<< "${1:-131072:16 8192:24}"
+csa_case_specs=(131072:16 8192:24)
 for case_spec in "${csa_case_specs[@]}"; do
     history="${case_spec%:*}"
     batch="${case_spec#*:}"

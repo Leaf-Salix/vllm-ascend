@@ -32,7 +32,8 @@ def main():
             raise ValueError("Sorting boundaries/ties failed")
     metrics = load("seven_metrics", ROOT.parent / "csa_cann92_incore_seven_20260928/collect.py")
     worker = load("worker_metrics", ROOT.parent / "csa_scheduling_20260927/upstream_725/compare.py")
-    result = {"task": task, "operator": "19d93a5b + long half-leaf prefix sorting",
+    result = {"task": task, "probe_task": (ROOT / "probe_task.txt").read_text().strip(),
+              "operator": "19d93a5b + long half-leaf prefix sorting",
               "variant": "pkg:dsv4_csa_stream2048_19d93a5b", "cann": "9.2.0-beta.2", "cases": [],
               "scope": "Exact paired PTO states/graph; independent DFX and timing. Not EP16 acceptance."}
     for history, batch in CASES:
