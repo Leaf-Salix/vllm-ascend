@@ -9644,3 +9644,29 @@ Native控制长档871.355→856.347、短档924.891→943.231μs，未改Sparse/
 正在排队的七档模型仍冻结554b3bca，不包含本节新保留的B4分支；
 不为此2.2μs核内收益立即追加整矩阵，最终组合受影响档、尾部及token/DSpark仍须验收。
 [全部状态、20次计时、四窗口与七三指标](results/csa_score_key_l1_pair_20260928/README.md)。
+
+## 347. 七档模型先取得128K三档，尾部细化到C128 builder及准备空隙（2026-09-28）
+
+task_20260928_182811_290034987正在执行，冻结554b3bca；128K两侧三档已经齐全，
+只读已有rank结果先汇总，不重跑、不同旧版本配对，也不输出尚未齐全七档的七三指标。
+B4/B8/B16 Native/PTO正式forward均值分别45.605/44.308、55.394/55.439、72.894/69.162ms，
+变化−2.85%/+0.08%/−5.12%；B8没有形成收益。114688个输出token零差异、48组rank DSpark一致，
+正式请求位置及配置门禁通过。B4 P95为47.415/47.628ms，仍有代价；本段不是全部阶段验收。
+
+B4 PTO step15/rank14的设备相对入场迟到3.786ms，自身forward 43.289ms接近平时43.435ms，
+其他rank平均增加3.491ms。新增builder诊断显示g1_a0对应奇数层C128 attention，
+`build_decode_metadata`墙钟3.703ms、线程CPU3.678ms，通常墙钟0.251ms；父区间不与子区间累加。
+同轮Native step16/rank0相同builder也到2.528ms，不能将其定性为PTO独有。
+现有区间还不能区分内部metadata算子、设备等待和其他调用，不改Native流程或直接断言根因。
+
+B4 PTO step16/rank3设备相对迟到4.534ms，各builder都正常；
+离线补齐已有标记的空隙后，发现batch_coordination_end到attention_metadata_begin为4.449ms，
+同rank中位0.118ms、线程CPU4.420ms。该范围有deferred状态修正、DSA位置准备和query padding，
+不能凭时间差指认某一函数。step11/rank14另有preprocess 2.039ms；三次迟到当步均未重合GC。
+均值/P95仍包含所有正式样本，不扣除EP等待，不以Score sync_start处理已定位在forward前的迟到。
+
+[当前三档forward](results/csa_key_l1_seven_20260928/model/RESULTS.md)、
+[入场及builder证据](results/csa_key_l1_seven_20260928/README.md)。
+8K两侧仍待齐全；B8 Key L1-only单卡task_20260928_190508_19636832316仍pending。
+另从最新QLI V2 kernel/metadata确认实际S2分片为2048，整理长B8/B16最忙核的8192 leaf工作量差异；
+仅记入[AscendC后续分工分析](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)，未据静态计数宣称收益或启动额外测试。

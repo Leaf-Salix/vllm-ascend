@@ -136,7 +136,7 @@ WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key�
 三query/M192/N128则需80KiB L0B，不能直接打开同一预取。
 已准备仅双query的独立554b3bca候选，CPU完整编译/load通过；实际Key稳态L0B 0/16384、WS 32768，
 Key L1池32KiB与稳态Score双槽分离，尾段复用死Key池并增加一条MTE1→FIX等待。
-没有设备收益结论；待当前七档EP16结束，再做128K/B4与短B16控制，不重复未改长B8/B16。
+后续128K/B4与短B16对照已完成，保留范围及尾部限制见本节末尾；未重复未改长B8/B16。
 [候选、生成地址及定向入口](results/csa_score_key_l1_pair_20260928/README.md)。
 
 ### QLI分组与L0B容量的具体差异
@@ -165,6 +165,28 @@ PTO用分块对角系数把多query的WS合为一次Cube，减少调用次数，
 最近边界只有0.07μs，幅度有限；状态/图重放通过后按核内规则保留。完整CSA长短七三仅−0.087%，
 短档P95增加31.28μs、最大值增加40.26μs，不能标稳定性或整网已通过；短档生成核不变，但观测仍有变化。
 全部控制值、Sparse/Score同核串行窗口及来源见[B4完整结果](results/csa_score_key_l1_pair_20260928/README.md)。
+
+### 后续长档分工：分片粒度与最忙核工作量
+
+继续核实最新QLI V2的
+[kernel常量及SplitCore](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_kernel_arch22.h)：
+`S2_BASE_SIZE=2048`在`InitTilingData`实际写入constInfo，不只是Cube中的注释；
+`SplitCore`从metadata读取每核的batch、query组和S2起止。
+[metadata的AssignByBlock](../../../ops-transformer/attention/quant_lightning_indexer_v2_metadata/op_kernel_aicpu/quant_lightning_indexer_v2_metadata_aicpu.cpp)
+按剩余代价逐S2块分配，A3所用910B分支同样取2048。
+Vector在每个S2块排序后把累计Top-K留在UB，和PTO按8192 leaf、两个AIV各排半leaf的组织不同。
+
+当前128K/B8（三query）和B16（六query）都形成16个query组；只计32768候选的完整部分，
+每组4个8192 leaf，共64份分到24个worker，16个worker做3份、8个做2份。
+这说明核内循环工作量本身不齐；不能把最慢核与均值的差额全部称为运行时调度开销。
+若仅改4096，最忙核仍是6×4096=24576候选，不能据“块更小”推断关键路径变短；
+2048时理论最忙核为11×2048=22528，完整部分的工作量上界减少8.33%，
+但会增加Q/系数读取、通信尾部排空和跨分片Top-K归并。上述是静态计数，不是设备收益。
+
+旧日志§152的全局8192→4096失败来自单leaf publish写死的切片范围，不能原样重试全局常量替换。
+若后续实施，须把长档工作分片与score arena容量、短档分支、pair槽数/归并计数分别表达，
+并保留tie顺序及边界；先看当前B8 L1-only结果和七档模型归因，再决定是否值得单卡验证。
+本轮尚未实施此候选，也未增加设备测试。
 
 ## 3. ops-math的适用边界
 

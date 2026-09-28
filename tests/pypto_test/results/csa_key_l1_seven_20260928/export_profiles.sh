@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 模型结束后离线解析，不与该阶段正式设备计时竞争CPU。
+# 本线程模型及后续B8单卡结束后再离线解析，避免竞争正式计时的CPU。
 set -eo pipefail
 workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
@@ -9,6 +9,12 @@ model_task=$(cat "$root/model_task.txt")
 status=$(task-submit --status "$model_task")
 if [[ "$status" != 'completed (exit=0)' ]]; then
     echo "$model_task: $status; defer profile export" >&2
+    exit 1
+fi
+candidate_task=$(cat "$root/../csa_score_key_l1_only_20260928/layer_task.txt")
+candidate_status=$(task-submit --status "$candidate_task")
+if [[ "$candidate_status" != completed* ]]; then
+    echo "$candidate_task: $candidate_status; defer CPU export until the queued single-card run ends" >&2
     exit 1
 fi
 source "$workspace/env-dsv4-0251rc1.sh"
