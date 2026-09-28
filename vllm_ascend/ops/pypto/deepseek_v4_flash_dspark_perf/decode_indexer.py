@@ -189,41 +189,36 @@ def merge2_top512_pairs(
 
 
 @pl.jit.inline
-def merge_multi_top512_pairs(
-    pair_arena: pl.Tensor,
-    root_slot: pl.Scalar[pl.INDEX],
-    first_incoming: pl.Scalar[pl.INDEX],
-    merge_way: pl.constexpr,
-) -> None:
-    """Merge three/four roots, preserving the existing newer-chunk tie priority."""
-    root = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
-    incoming1 = pl.load(pair_arena, [first_incoming, 0], [1, TOPK_PAIR_WIDTH])
-    incoming2 = pl.load(pair_arena, [first_incoming + 1, 0], [1, TOPK_PAIR_WIDTH])
-    merge_tmp = pl.tile.create([1, merge_way * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-    # Each list contains 512 pairs. Exhausting any list has already emitted
-    # at least 512 sorted pairs; only that defined prefix is stored/consumed.
-    if merge_way == TOPK_MERGE_FAN_IN:
-        incoming3 = pl.load(pair_arena, [first_incoming + 2, 0], [1, TOPK_PAIR_WIDTH])
-        merged_all = pl.tile.mrgsort(incoming3, incoming2, incoming1, root, tmp=merge_tmp, exhausted=True)
-    else:
-        merged_all = pl.tile.mrgsort(incoming2, incoming1, root, tmp=merge_tmp, exhausted=True)
-    merged = pl.tile.slice(merged_all, [1, TOPK_PAIR_WIDTH], [0, 0])
-    pl.store(merged, [root_slot, 0], pair_arena)
-
-
-@pl.jit.inline
 def merge_top512_roots(
     pair_arena: pl.Tensor,
     arena_base: pl.Scalar[pl.INDEX],
     half_count: pl.Scalar[pl.INDEX],
-) -> None:
+) -> pl.Tile:
+    """Keep the exact Top-512 prefix in UB between four-way merge rounds.
+
+    QLI V2's ProcessLD retains the accumulated root until final publication.
+    Explicit extract gives the loop-carried value a 1024-float allocation;
+    carrying a slice of the full merge output would also carry its storage.
+    """
+    root = pl.load(pair_arena, [arena_base, 0], [1, TOPK_PAIR_WIDTH])
     for child in pl.range(1, half_count, TOPK_MERGE_FAN_IN - 1):
+        incoming1 = pl.load(pair_arena, [arena_base + child, 0], [1, TOPK_PAIR_WIDTH])
         if child + 2 < half_count:
-            merge_multi_top512_pairs(pair_arena, arena_base, arena_base + child, TOPK_MERGE_FAN_IN)
+            incoming2 = pl.load(pair_arena, [arena_base + child + 1, 0], [1, TOPK_PAIR_WIDTH])
+            incoming3 = pl.load(pair_arena, [arena_base + child + 2, 0], [1, TOPK_PAIR_WIDTH])
+            merge_tmp4 = pl.tile.create([1, TOPK_MERGE_FAN_IN * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+            merged4 = pl.tile.mrgsort(incoming3, incoming2, incoming1, root, tmp=merge_tmp4, exhausted=True)
+            root = pl.tile.extract(merged4, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
         elif child + 1 < half_count:
-            merge_multi_top512_pairs(pair_arena, arena_base, arena_base + child, 3)
+            incoming2 = pl.load(pair_arena, [arena_base + child + 1, 0], [1, TOPK_PAIR_WIDTH])
+            merge_tmp3 = pl.tile.create([1, 3 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+            merged3 = pl.tile.mrgsort(incoming2, incoming1, root, tmp=merge_tmp3, exhausted=True)
+            root = pl.tile.extract(merged3, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
         else:
-            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
+            merge_tmp2 = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+            merged2 = pl.tile.mrgsort(incoming1, root, tmp=merge_tmp2)
+            root = pl.tile.extract(merged2, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+    return root
 
 
 @pl.jit.inline
@@ -308,13 +303,12 @@ def indexer_topk_query_merge_one(
         half_count = leaf_count * 2
         arena_base = query * TOPK_ROWS_PER_QUERY
         if multiway:
-            merge_top512_roots(pair_arena, arena_base, half_count)
+            root_pairs = merge_top512_roots(pair_arena, arena_base, half_count)
         else:
             for child in pl.range(1, half_count):
                 merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
-
-        root_slot = arena_base
-        root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
+            root_slot = arena_base
+            root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
         root_scores = pl.tile.gather_mask(root_pairs, mask_pattern=pl.tile.MaskPattern.P0101, output_dtype=pl.FP32)
         pl.store(root_scores, [query, 0], topk_scores)
         root_indices = pl.tile.gather_mask(root_pairs, mask_pattern=pl.tile.MaskPattern.P1010, output_dtype=pl.INT32)

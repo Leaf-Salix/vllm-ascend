@@ -9,6 +9,10 @@
 核内收益、完整CSA及P95分别记录，最终仍以真实权重EP16的forward、token与DSpark验收。
 
 性能算子 **d1f170ff** 在e58ddc94基础新增按实际cache长度分核的四路Top-K及HC输入/RMS融合，核内已确认收益。
+当前继续保留多leaf Top-K UB累计根：长档merge均值13.072→11.539μs（−11.73%），
+五组归并边界及两档状态/重放通过；短档完整CSA/P95小幅回退仍保留记录。
+[UB根结果及局限](results/csa_topk_ub4_20260928/README.md)。这项新增核内优化尚无七档/真实EP16，
+下面两档最新模型数字仍仅对应d1f170ff，不能当作新增UB根的整模型证据。
 新增策略已完成长短B16真实EP16：128K/B16、8K/B16的forward分别快4.03%、4.10%，P95更低，token/DSpark一致；
 这是对同轮Native的比较，不证明相对e58的短档单层不退化，尚非新版七档验收。
 [最新组合模型结果](results/csa_ascendc_topk_hc_ep16_20260928/README.md)、
