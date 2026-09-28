@@ -419,6 +419,10 @@ RMSNorm Dynamic Quant 和 Sparse Attention C++，分开提交以下修改：
 | `0106bfd4f` | Attention 按窗口128和压缩512两个逻辑 chunk 计算，概率按原生 `CAST_ROUND` 舍入，压缩 PV 完整 K 累加并沿输出 N 分块。 | 6项 CPU 回归、227 specialize/lower/codegen 通过；NPU 待验证。 |
 | `49cba0a23` | Compressor 对齐 TH NORMAL 的 K 起点旋转、128维 MMAD、交错物理行和8→4→2→1池化归约；保留设备端 TND query bounds。 | 3项 CPU 回归及完整 kernel 编译通过；NPU 待验证。 |
 | `f03093456` | Compressor RMS 按64列块进行半区平方和归约，再执行 Sqrt→Div→FP32 gamma。 | 原有主/inner RMS 数值回归和完整 kernel 编译通过；NPU 待验证。 |
+| `c63fbdc96` | 用长度差平方和判断等长，避免设备 bool 转 INT32 时 True 为 -1。 | CPU 模拟设备 mask 语义、生成 C++ 检查通过；与下一提交组合的硬件结果见第三批。 |
+| `80047af08` | inner compressor 独立采用原生 head128 的投影 K 顺序和 dBase16/64 规则。 | B4/T24、B16/T60 六类实际写入 cache/state 全逐位一致；B4 输出一致，B16 输出仍有差异。 |
+| `d8d180c09` | 投影等长判定先裁掉尾部零长请求，保留中间空请求。 | 58项 CPU、完整编译通过；尾部 `[6,6,0]` 输出逐位一致，中间 `[6,0,6]` 仍需 attention 定位。 |
+| `bdf2cf0fb` | Indexer weights 从 split-K4 加法改为完整 K4096 连续累加。 | 60项 CPU、完整编译通过；B16 真实 QLI 输入全逐位一致，TopK 集合一致；最终输出仍994处不同。 |
 
 这些改动没有改变 TND 请求边界、slot/block table 的来源或原生 cache 所有权，
 没有引入按 S6 对齐的服务 Graph 限制。ABI 从51增至52个 tensor，新增
@@ -531,6 +535,101 @@ B16只有token56的最终输出不同，其余token输出逐位一致。token27�
 B16 TopK单因素诊断 `task_20260928_095712_1993526209` 继续运行Indexer，
 只在attention消费端替换Native TopK；同时保存Native QLI真实输入。
 该任务属于归因工具，不将注入版当作正式源码精度。
+
+### 第三、四批完整结果与Indexer诊断入口（10:06补充）
+
+- `80047af08` B16/T60已完成：六类实际写入cache/state全部逐位一致；
+  eager/Graph输出仍3267/245760不同、relative L2 0.116280%，集中在token56。
+  Native Graph重复逐位一致。投影修复消除state差异，并未解决该TopK选点。
+- `d8d180c09` 尾部空请求`[6,6,0]`、T12、start8186的任务
+  `task_20260928_095922_8732217657`已完成该子用例：输出和六类cache/state
+  在eager逐位一致，Graph输出与Native及Native重复运行也逐位一致。
+  这是query bounds中的尾部空请求覆盖，不代表已验证所有token容量padding情况。
+- 同任务的中间空请求`[6,0,6]`首轮输出871元素不同，六类cache/state逐位一致；
+  需继续模块归因，不能将尾部padding结果推广到中间空请求。
+- `task_20260928_095712_1993526209`在CLI解析时退出，未运行kernel；
+  后续显式传入长度和位置重提，不能记作源码精度失败。
+- `task_20260928_100239_2457642357`中原生QLI输入已成功保存，随后额外的
+  Hadamard hook检查失败。实际Native走`quantize_update_cache_and_select_topk`
+  融合路径，绕过`quantize_query`，因此属于探针覆盖问题；普通基线对拍有效。
+  第二版诊断同时捕获融合入口，保持实际QLI query/scale/weights为必检项。
+
+### B16单因素与真正Indexer输入定位（10:13补充）
+
+`task_20260928_100514_31132030226`在`80047af08`基础上只向attention
+注入同次Native TopK：输出relative L2从0.116280%降到0.021758%，
+heads从30622个不同元素降到8个（均1 ULP），但最终输出仍994个不同元素。
+同heads经两边O-proj依然逐位一致，说明微小attention差异可跨过量化边界，
+不能仅以heads的1 ULP判定整个替换已经逐位对齐。此处属于诊断注入，未合入正式路径。
+
+`task_20260928_100655_4098433694`的第二版Indexer导出完成；正式输出和
+全部cache allocation的等价门槛通过，真实QLI输入结果为：
+
+| 阶段 | 不同元素/总数 | 说明 |
+| --- | ---: | --- |
+| RoPE后query / Hadamard后query | 0 / 491520，各自一致 | 原生融合quantize/scatter入口已覆盖 |
+| 128维INT8 query | 0 / 491520 | 真正的QLI输入 |
+| FP16 query scale | 0 / 3840 | 比较时无损扩FP32，差异为0 |
+| weights | 2 / 3840 | token40、token56各一个；最大绝对误差1.220703125e-4 |
+
+按Native真实输入重建token56的2047个候选，五种CPU归约均完整复现Native
+Top512；657、1627的参考分数相差约1.915e-8，并非同分。CPU重建不是直接
+导出的Native score，但结合输入定位，下一单因素应检查weights投影，
+不应先改TopK tie规则。源码当前明确将K4096分成四段，再Vector合并；
+后续验证单完整K累加是否消除这两个weights差异。
+
+### weights误差的单因素证据与修正候选
+
+Native和CSA的weights仅`[40,14]`、`[56,55]`不同。token56/head55分别是
+`-0.0157470703125`、`-0.015869140625`。只将Native参考中的这一个值换为CSA值，
+其余query/cache/scale保持原值，三个不同归约版本均完整复现CSA的63处TopK
+排名变化和657→1627替换；换回Native值则完整复现Native。token40对应的
+FP16乘积系数两边均归零，故不影响TopK。这是CPU输入单因素闭环，正式修复仍需NPU复测。
+
+`bdf2cf0fb`将vllm Indexer weights改为完整K4096连续累加，保留两次BF16
+边界和原有scale；四份partial staging变成一份完整投影staging。
+独立静态审查确认仍在同一Indexer scope，数据依赖与TopK消费者保留。
+60项CPU回归通过；新BF16临界值用例能区分旧分段累加和连续累加。
+原探针与新增Indexer导出探针的TopK也已用保存tensor确认逐位置一致。
+
+### weights修复硬件闭环与attention读取顺序排查（10:28补充）
+
+正式源码`bdf2cf0fb`，第五批快照和`stage5-manifest.json`对应；任务
+`task_20260928_101701_70308530658`依次执行Indexer导出、B16 Graph、
+中间空请求Graph和B4/T24回归。复用前述完整环境和确定性配置，未重装框架。
+
+Indexer探针输出与正式路径的output、完整cache allocation及TopK逐位等价。
+真实QLI query（491520元素）、FP16 scale（3840）、weights（3840）、
+RoPE和Hadamard全部逐位一致。独立读取保存tensor确认：前一版仅有的
+`[40,14]`和`[56,55]`两处weights已修正，Native输入在两次实验间也逐位相同。
+60个token的TopK集合全部一致；只剩token27的索引431/432（从0开始）交换key109/1196，
+token56排名已完全一致。此负载的weights误差已闭环。
+
+| 第五批负载，start8186 | eager / Graph最终输出 | 六类有效写入cache/state | Native / CSA Graph中位数 |
+| --- | --- | --- | ---: |
+| B16/T60，前述非等长请求 | 均994/245760不同；relative L2 0.021758%，最大绝对误差0.00390625 | 全逐位一致 | 0.733076 / 0.994856 ms |
+| B3/T12，`[6,0,6]` | 均871/49152不同；relative L2 0.042117% | 全逐位一致 | 0.568952 / 0.618212 ms |
+| B4/T24，`[6,6,6,6]` | 均逐位一致，98304个输出元素 | 全逐位一致 | 0.587570 / 0.721158 ms |
+
+三组Native Graph重复逐位一致，任务已退出0。Graph仅6轮×5次，记录为实验耗时，
+当前不据此选择计算顺序。
+
+B16阶段导出只剩8/1966080个heads元素不同，每个1 BF16 ULP；其中
+`[56,11,181]`为Native `0.0091552734375`、CSA `0.00909423828125`。
+最终994个差异全在token56，最大最终ULP为310。同heads输入两边O-proj仍
+逐位一致。因此不能把中间heads的1 ULP表述为最终输出已经控制到几个ULP。
+
+另一个独立诊断`task_20260928_102307_95344216166`在第三批源码上保持
+Native TopK注入，仅把compressed KV读取改为Native `CopyInKv`的物理地址
+成对排序规则。CPU检查15360对、7684对实际交换，完整kernel编译通过。
+设备探针的Q/KV/QR/scale、Indexer结果和cache等价检查全部通过；与原TopK
+注入相比2个heads改变，但仍8处1 ULP，最终输出完全未变，仍994处不同。
+所以该读取顺序实验未解释剩余误差，未合入正式kernel。
+后续继续导出归一化heads和softmax状态，定位归约或计算边界。
+
+本节证据在工作区`native-align-20260928/evidence/`的`stage5-*`与
+`stage3-topk-pair-b16-t60`目录，属于前述`reports/dsv4-tnd-kernel-20260924/`。
+探针脚本、AST变换manifest、源码SHA256和独立复核报告与证据一同保存。
 
 ## 后续每次测试的记录方式
 
