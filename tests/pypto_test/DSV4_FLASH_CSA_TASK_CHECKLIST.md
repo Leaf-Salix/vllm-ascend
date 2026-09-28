@@ -25,7 +25,7 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
   [固定规约干预](results/csa_atomic_current_20260928/README.md)、
   [旧七档基线](results/csa_atomic_matrix_20260928/README.md)。
 - QR三档核内均值下降47%～52%，组跨度缩短26%～35%，累计核时间增加43%～58%；按用户核内规则保留。
-  不能把核内降幅当整层收益；QR自身已较整齐，Indexer query仍有40～64μs启动分散。
+  不能把核内降幅当整层收益；QR自身已较整齐，当前七档Indexer query有21～119μs启动分散；单纯整组准入未获收益。
   [QR证据](results/csa_qa_adaptive_20260928/README.md)、[KV自适应证据](results/csa_kv_adaptive_20260928/README.md)。
 - KV整组启动虽减少分散，却使核内变慢，长短本体无共同收益，未采用；Top-K UB候选没有明确核内收益也未采用。
   [已排除的KV调度](results/csa_kv_sync_20260928/README.md)、[Top-K候选](results/csa_topk_register_20260928/README.md)。
@@ -36,11 +36,11 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
 
 1. **先定位实际EP16入场尾部。** 仅补128K/B16，两侧相同开启默认关闭的主机时钟/线程CPU时间与GC观测。
    不扫描GC对象、不改GC策略、不加设备同步，不从正式forward中扣除等待。
-   task_20260928_074528_18466049204已提交，CPU6项验证通过；按证据决定修复点。
+   task_20260928_074528_18466049204已运行，CPU6项验证通过；按证据决定修复点。
    [独立诊断](results/csa_forward_entry_20260928/README.md)。
-2. **独立验证Indexer query整组准入。** 只改一个sync_start标记，长短B16各20次本体计时和两窗口DFX；
-   核对Score/Sparse及竞争任务，不能只看启动整齐。task_20260928_074745_19051001890进行中，生产未采用。
-   [候选范围](results/csa_query_sync_20260928/README.md)。
+2. **Indexer query整组准入已否定。** 两档状态/图重放精确通过，但长短本体慢1.59%/3.63%，P95均升高；
+   query整齐后KV/Compressor等生产者被推迟，Score/Sparse更晚。task_20260928_074745_19051001890退出0，未合入。
+   [反例与关键链证据](results/csa_query_sync_20260928/README.md)。下个调度候选须据此处理竞争，不能盲目扩大sync_start。
 3. **本版泳道与模型分项已交付，按新修改补受影响项。** 主矩阵task_20260928_072337_13373713806退出0；
    14份rank0 PyTorch JSON离线导出、7份同源码det0单层泳道汇集，正式原始16rank数据保留。
    DFX任务task_20260928_074745_190439310251退出0；[21份JSON汇集](results/csa_qa_matrix_20260928/download/README.md)，
@@ -598,7 +598,7 @@ mode=2 暂作后续优化候选，mode=1 原始结果保留；两档之间的差
 | ID | 目标 | 完成判据 | 依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | D1 | 同源码、同配置重新定位关键路径 | Worker/Scheduler 不重复计数；计算、内部等待、资源竞争分别解释；只列有当前证据的热点 | A5、随 C 更新 | 进行中 |
-| D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 保留已验证核内收益；调度以无profiler本体及关键链共同判断。最终仍验收完整区间和整模型token/DSpark | C、D1 | QR/KV核内分组已保留；七档EP16均值领先但入场尾部待解；Indexer query调度候选进行中；<750 μs 未完成 |
+| D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 保留已验证核内收益；调度以无profiler本体及关键链共同判断。最终仍验收完整区间和整模型token/DSpark | C、D1 | QR/KV核内分组已保留；七档均值领先但入场尾部待解；Indexer query整组准入已否定；<750 μs 未完成 |
 | D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 旧迁移单卡/16卡看护通过；本轮新增QR/KV策略尚未移植，worker确定性修正见日志131 |
 | D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B16/24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 固定规约七档已有整网优势；最新QR/KV七档均值领先，长档两档P95未通过；实际专家索引因果证据仍缺 |
 
