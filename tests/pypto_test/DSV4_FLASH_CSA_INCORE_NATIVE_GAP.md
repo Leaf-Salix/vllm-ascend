@@ -73,7 +73,7 @@ Native Sparse融合其内部规约，PTO另有merge_norm，不求两列差值得
 
 长B16 QK/PV均值低于Native PMU参考，但另有25.145μs merge_norm；短B16 QK/PV仍偏高。
 不同分段、softmax/量化和规约范围不能当成完全同一个kernel。已有PV N128、交替累加缓冲及跨query流水继续保留。
-长短权重为7:3，短档是回退约束；下一项Sparse策略应先证明有128K核内收益，不重复已否定的联合softmax候选。
+后续长短权重按2026-09-29用户新要求为8:2，总体收益保留，单侧明显退化则按场景分支；下一项Sparse策略应先证明有128K核内收益，不重复已否定的联合softmax候选。
 
 ## 其余任务与O projection
 
@@ -109,7 +109,7 @@ O_A/O_B在该档各64份任务，24个AIC需要多波；77μs级O_A启动分散�
    先写出生成指令/缓冲/等待的实质差异，再做一个可区分原因的候选；不重复旧4+2分组或完整4096 Score UB驻留。
 5. 有核内收益且必要功能检查通过即保留，完整CSA及P95单列；再对受影响档位补测。核内阶段后优化CSA关键依赖和派发。
    已否定的短Score sync_start、Qproj整组启动、O_A重排等不无依据重试。
-6. 先128K/B16与8K/B24，补受影响128K/B24，长短收益按7:3；阶段出口覆盖新七档。当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。
+6. 先128K/B16与8K/B24，补受影响128K/B24，长短收益按8:2；阶段出口覆盖新七档。当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。
 
 [统一七档证据](results/csa_cann92_incore_seven_20260928/README.md)、
 [21份可下载JSON](results/csa_cann92_incore_seven_20260928/download/README.md)、
