@@ -24,8 +24,14 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 
 当前长档均衡leaf候选完成B16长短单卡：八类状态/图重放通过，长档Score AIC最慢核−12.358%，
 但AIV均值+6.612%、merge+21.041%；完整CSA长档−0.888%、短档+0.707%，七三−0.410%，短档P95+9.18μs。
-继续保留均衡方向，先针对2560/3072被padding至4096的排序代价做独立优化，再补受影响B8；
-尚未合入生产、不重跑七档或EP16。[全部结果和反例](results/csa_score_balanced_leaves_20260928/README.md)。
+均衡方向继续保留。[全部结果和反例](results/csa_score_balanced_leaves_20260928/README.md)。
+减少2560/3072排序padding的独立候选已完成：十组排序边界/tie及长短B16八类状态/图重放通过，
+长档Score AIV均值−10.315%，完整CSA长档−3.322%、短档+0.648%，七三−2.131%，两档P95/max下降。
+同一组合的128K/B8补充已通过八类状态/图重放，对照8e176285均值840.716→813.022μs（−3.294%），P95/max下降；
+不将组合B8与仅排序B16的不同基线混算。已保留性能版Indexer，尚非新七档或EP16。
+[排序收益及B8结果](results/csa_score_balanced_sort_20260928/README.md)。
+下一项先减少重复计划计算：复用编排已算出的max_topk_cache_len，避免Score/长merge各worker重新扫描kv_seq_lens；
+仅在算子内部传现有标量，先确认生成码及图重放，不新增metadata executor，不改Native流程。
 
 最近完成统一七档真实EP16的冻结组合为 **554b3bca**：包含四路Top-K及UB累计根、HC输入/RMS融合、
 QR输入/gamma驻留及尾行修复，以及长S6 Score的独立Key L1预取。

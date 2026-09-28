@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--long-batch", type=int, default=16)
+    parser.add_argument("--long-only", action="store_true")
     parser.add_argument("--title", default="均衡leaf")
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location(
@@ -42,7 +43,10 @@ def main():
         "| 档位 | task | 核内均值 | 最慢任务 | Worker包络 | 启动分散 |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    for history, batch in ((131072, args.long_batch), (8192, 16)):
+    case_specs = [(131072, args.long_batch)]
+    if not args.long_only:
+        case_specs.append((8192, 16))
+    for history, batch in case_specs:
         source = read(args.root / f"h{history}_b{batch}" / "summary.json")
         case = {"history": history, "batch": batch, "operator": source["operator"],
                 "state_status": source["status"], "sides": {}}

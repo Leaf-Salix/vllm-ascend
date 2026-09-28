@@ -1,0 +1,24 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-9.0.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-9.0.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-9.0.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-9.0.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+PASS []
+baseline {'mean_us': 840.7160013914108, 'p50_us': 837.0600044727325, 'p95_us': 855.9200167655945, 'max_us': 925.7400035858154, 'over_p50_2pct': 2, 'over_p50_5pct': 1}
+candidate {'mean_us': 813.0219995975494, 'p50_us': 811.0100030899048, 'p95_us': 826.3999819755554, 'max_us': 833.6600065231323, 'over_p50_2pct': 1, 'over_p50_5pct': 0}
+# 均衡分片及局部排序组合：长B8补充：核内分布与包络
+
+每格为基线→候选，单位μs；数值是四个独立DFX窗口指标的均值。
+kernel最大值是每窗口最慢任务，包含核内等待；包络含启动分散，不能视为纯调度耗时。
+无profiler CSA/P95、状态门禁和全部原始窗口另见各档evidence.json。
+
+| 档位 | task | 核内均值 | 最慢任务 | Worker包络 | 启动分散 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 128K/B8 | indexer_score_topk_native_pair_aic | 167.855→167.513 | 202.965→173.220 | 207.345→176.295 | 1.495→1.690 |
+| 128K/B8 | indexer_score_topk_native_pair_aiv | 179.528→177.415 | 205.345→184.500 | 209.915→187.705 | 1.120→2.670 |
+| 128K/B8 | indexer_topk_query_merge | 6.998→12.452 | 9.880→14.625 | 12.510→16.280 | 4.240→5.530 |
+| 128K/B8 | qk_pv_aic | 76.976→78.844 | 80.390→81.620 | 90.720→91.600 | 7.015→3.645 |
+| 128K/B8 | qk_pv_aiv | 79.112→80.838 | 82.570→83.690 | 93.040→93.855 | 7.065→3.880 |
