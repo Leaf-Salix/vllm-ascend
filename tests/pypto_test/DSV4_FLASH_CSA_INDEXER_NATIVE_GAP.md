@@ -42,6 +42,8 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 
 PTO Native cache适配没有device重排，但页内Key/scale错位、动态有效长度和更新依赖仍需正确表达。
 pypto-lib的连续私有cache、量化顺序、函数分界仅供PTO写法参考，不能消除Native ABI约束。
+已检查Native页指针式切片替代双视图的写法：当前PyPTO默认核内转换会把tensor.slice变为Tile，
+后续GM reshape/load链不能成立；该轻量探针未产生设备候选，保留原路径，见[表达限制](results/csa_key_page_view_20260929/README.md)。
 当前实际核时与七档Native对照见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)；
 [完整四窗口、最慢核与包络](results/csa_cann92_incore_seven_20260928/RESULTS.md)保留全部原始读数。
 

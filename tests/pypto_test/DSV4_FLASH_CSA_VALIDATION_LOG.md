@@ -10181,3 +10181,16 @@ PTO Score383.890/412.053μs，另有merge14.260μs；两侧范围不同，不给
 两侧9.2、mode2/atomic0/det0、ring[256,128,256,32]/4096，按用户新8:2权重分别报告核内与CSA。
 无设备收益结论，未合入生产，未扩测整矩阵或EP16；后续应轮询同一task，不因等待重新提交。
 [冻结路径、补丁、CPU证明与单卡入口](results/csa_score_stream2048_20260928/README.md)。
+
+## 369. 核查Native页指针式Key视图，当前slice/reshape表达未通过lowering（2026-09-29）
+
+分段排序任务仍pending期间只做轻量CPU源码/IR检查，不重新提交任务或启动完整CCE编译。
+最新ops-transformer A3 KeyNd2NzForPA直接用物理页×字节stride构造Key地址；
+当前PTO通过原始/偏移64字节的二维视图处理4160字节页起点，对每页做选择。
+试图用核内tensor.slice(cache,[1,4096],[page,0])、reshape[32,128]再load到Mat表达同一地址。
+
+PyPTO88f60598默认转换将slice变成Tile，后续tile.load因要求TensorType而失败，未产生PTO MLIR。
+源码PreservesTensorLike仅保留tensor.dim/view；view接口无动态字节offset参数，本地main f997db72接口亦同。
+未查远端最新、不外推为所有替代写法都不可行；只否定这一条直接表达链，不改PyPTO、PTOAS或ISA。
+无CCE/NPU测试、无生产改动，不因该限制拆Native cache。保留失败探针和精简错误，防止重复相同假设。
+[源码、错误与适用范围](results/csa_key_page_view_20260929/README.md)。
