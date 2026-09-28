@@ -32,6 +32,9 @@ Top-K独立长档merge核内下降11.73%；QR首版核内长短下降6.36%/6.89%
 该rank的attention_metadata阶段7.740ms、平时中位4.137ms，线程CPU7.569ms，正式窗口无GC。
 已定位到`_build_attention_metadata`区间，具体子调用尚不明确；不能把这次入场迟到归为CSA Score。
 不增加正式步同步、不扣除等待或删除样本；后续必要模型验证继续细化该阶段观察。
+现有可选主机诊断已增加各metadata builder的build/decode/prefill子区间与层名映射，
+仅在runner构建metadata期间记录，重复调用分别保留；CPU行为检查通过，下一次必要模型验收再观察。
+这些嵌套区间不能相加，新增观测尚无设备结果，不标尾部已修复。
 [当前两档模型结果、尾部及四份PyTorch JSON](results/csa_ub_combined_20260928/README.md)。
 Key L0B预取独立候选已完成单卡：长档Score核内+14.87%、完整CSA七三+2.917%，不合入；未计入上述模型结果。
 e58ddc94在30f2b228基础保留固定K的KV L1 K512，四档受影响场景已完成EP16；该证据不覆盖新增Top-K。
@@ -174,7 +177,9 @@ Native QLI V2独立分配Key L1和Score L1，本候选仍复用池并产生MTE1�
 下一步在算子侧表达独立Key池，先看实际分配和指令依赖，通过后才安排必要单卡。
 [代码差异、四窗口回退与状态证据](results/csa_score_key_prefetch_20260928/README.md)。
 独立Key L1池候选已通过CPU：Key占单独16KiB，Score双槽各48KiB，Mat末端112KiB，
-MTE1→FIX等待15→0，另外9份Score生成二进制一致；长短B16单卡原任务正在执行，尚未合入。
+MTE1→FIX等待15→0，另外9份Score生成二进制一致；长短B16候选尚未合入。
+原任务在8K基线DFX的SetDevice阶段报507033设备子进程启动超时，退出1；
+两档计时和长档四窗口已保留，仅补采缺失短档DFX，未重跑已完成部分。
 [候选、生成地址与测试合同](results/csa_score_key_l1_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，

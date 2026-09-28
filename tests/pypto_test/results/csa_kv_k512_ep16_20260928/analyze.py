@@ -29,10 +29,11 @@ def main(*, attribution_note="本轮同时验证KV候选，不能把跨轮变化
     source = json.loads((ROOT / "arrival.json").read_text())
     report = {"scope": "同一正式10步的可选主机分项，不从设备forward中扣减；不是kernel计时。",
               "limits": "准备段含已有设备同步/忙等，墙钟与线程CPU之差不能单独证明OS抢占。"
-                        "gap是两个既有标记之间的范围，不能自动归因为单一函数。", "cases": []}
+                        "gap是两个既有标记之间的范围，不能自动归因为单一函数。"
+                        "builder父子区间嵌套，不能相加；重复调用分别编号。", "cases": []}
     lines = ["# EP16入场分项", "", report["scope"], "", report["limits"], "",
              "下面仅展开设备相对入场异常>2ms的rank；所有正式样本仍用于性能统计。", "",
-             "| 档位/侧/step/rank | 设备迟到ms | 主机段 | 当步墙钟/线程CPU ms | 同rank十步墙钟中位ms |",
+             "| 档位/侧/step/rank | 设备迟到ms | 主机段 | 当步墙钟/线程CPU ms | 同rank墙钟中位ms/出现次数 |",
              "| --- | ---: | --- | ---: | ---: |"]
     for case in source["cases"]:
         item = {"history": case["history"], "batch": case["batch"], "sides": {}}
@@ -47,7 +48,11 @@ def main(*, attribution_note="本轮同时验证KV候选，不能把跨轮变化
                 steps = []
                 for entry in window["host_diagnostics"]["steps"]:
                     phases = {}
-                    for name, (start, finish) in PHASES.items():
+                    pairs = dict(PHASES)
+                    for mark in entry:
+                        if mark.startswith("metadata_builder_") and mark.endswith("_begin"):
+                            pairs[mark.removesuffix("_begin")] = (mark, mark.removesuffix("_begin") + "_end")
+                    for name, (start, finish) in pairs.items():
                         # Report missing hooks explicitly; never silently use zeros.
                         if start not in entry or finish not in entry:
                             raise ValueError(f"{folder}/rank{rank}/step{entry['step']}: 缺少 {start}/{finish}")
@@ -55,7 +60,8 @@ def main(*, attribution_note="本轮同时验证KV候选，不能把跨轮变化
                         phases[name] = {"wall_ms": (b["monotonic_ns"] - a["monotonic_ns"]) / 1e6,
                                         "thread_cpu_ms": (b["thread_cpu_ns"] - a["thread_cpu_ns"]) / 1e6}
                     steps.append({"step": entry["step"], "phases": phases, "raw_marks": entry})
-                ranks.append({"rank": rank, "steps": steps})
+                ranks.append({"rank": rank, "steps": steps,
+                              "metadata_builders": window["host_diagnostics"].get("metadata_builders", [])})
             tails = []
             for sample in case[side]["samples"]:
                 rank = sample["late_rank"]
@@ -66,11 +72,13 @@ def main(*, attribution_note="本轮同时验证KV候选，不能把跨轮变化
                 current = next(s for s in steps if s["step"] == sample["step"])
                 tail = {"rank": rank, "step": sample["step"], "relative_device_entry_ms": delay, "phases": {}}
                 for name, phase in current["phases"].items():
-                    typical = statistics.median(s["phases"][name]["wall_ms"] for s in steps)
-                    tail["phases"][name] = {**phase, "rank_median_wall_ms": typical}
+                    samples = [s["phases"][name]["wall_ms"] for s in steps if name in s["phases"]]
+                    typical = statistics.median(samples)
+                    tail["phases"][name] = {**phase, "rank_median_wall_ms": typical,
+                                           "rank_sample_count": len(samples)}
                     lines.append(f"| {case['history']//1024}K/B{case['batch']}/{side}/{sample['step']}/{rank} | "
                                  f"{delay:.3f} | {name} | {phase['wall_ms']:.3f}/{phase['thread_cpu_ms']:.3f} | "
-                                 f"{typical:.3f} |")
+                                 f"{typical:.3f}/{len(samples)} |")
                 tails.append(tail)
             item["sides"][side] = {"ranks": ranks, "entry_tails": tails}
         report["cases"].append(item)

@@ -14,6 +14,8 @@ class ForwardHostDiagnostics:
         self.gc_freeze_count = gc.get_freeze_count()
         self.runner = None
         self.original_methods = []
+        self.metadata_entry = None
+        self.metadata_builders = []
         self.callback = self._gc_event
         gc.callbacks.append(self.callback)
 
@@ -32,20 +34,32 @@ class ForwardHostDiagnostics:
         """Separate existing waits from preparation without adding any sync."""
         self.runner = runner
 
-        def install(name, wrapped, original):
-            self.original_methods.append((name, name in vars(runner), original))
-            setattr(runner, name, wrapped)
+        def install(name, wrapped, original, owner=runner):
+            self.original_methods.append((owner, name, name in vars(owner), original))
+            setattr(owner, name, wrapped)
 
-        def timed(original, label):
+        def timed(original, label, metadata_only=False):
             def call(*args, **kwargs):
-                entry = active_entry()
+                entry = self.metadata_entry if metadata_only else active_entry()
                 if entry is None:
                     return original(*args, **kwargs)
-                self.mark(entry, f"{label}_begin")
+                previous_metadata_entry = self.metadata_entry
+                if label == "attention_metadata":
+                    self.metadata_entry = entry
+                call_label = label
+                if metadata_only:
+                    # Keep repeated calls rather than overwriting the slow one.
+                    occurrence = 1
+                    while f"{call_label}_begin" in entry.get("host", {}):
+                        occurrence += 1
+                        call_label = f"{label}_call{occurrence}"
+                self.mark(entry, f"{call_label}_begin")
                 try:
                     return original(*args, **kwargs)
                 finally:
-                    self.mark(entry, f"{label}_end")
+                    self.mark(entry, f"{call_label}_end")
+                    if label == "attention_metadata":
+                        self.metadata_entry = previous_metadata_entry
             return call
 
         for name, label in (
@@ -57,6 +71,26 @@ class ForwardHostDiagnostics:
             original = getattr(runner, name, None)
             if callable(original):
                 install(name, timed(original, label), original)
+
+        # The decode harness uses builder 0 (no microbatching). Resolve builders
+        # once when attaching, outside measured steps; never inspect tensors here.
+        seen_builders = {}
+        for cache_group, groups in enumerate(getattr(runner, "attn_groups", ())):
+            for attention_group, group in enumerate(groups):
+                builder = group.get_metadata_builder(0)
+                location = {"cache_group": cache_group, "attention_group": attention_group,
+                            "layer_names": list(group.layer_names)}
+                if id(builder) in seen_builders:
+                    seen_builders[id(builder)]["groups"].append(location)
+                    continue
+                label = f"metadata_builder_g{cache_group}_a{attention_group}"
+                description = {"label": label, "type": type(builder).__name__, "groups": [location]}
+                seen_builders[id(builder)] = description
+                self.metadata_builders.append(description)
+                for name in ("build", "build_decode_metadata", "build_prefill_metadata"):
+                    original = getattr(builder, name, None)
+                    if callable(original):
+                        install(name, timed(original, f"{label}_{name}", metadata_only=True), original, builder)
 
         original_sync = getattr(runner, "synchronize_input_prep", None)
         if callable(original_sync):
@@ -76,15 +110,17 @@ class ForwardHostDiagnostics:
             install("synchronize_input_prep", input_prep, original_sync)
 
     def finish(self, entries):
-        for name, instance_attribute, original in reversed(self.original_methods):
+        for owner, name, instance_attribute, original in reversed(self.original_methods):
             if instance_attribute:
-                setattr(self.runner, name, original)
+                setattr(owner, name, original)
             else:
-                delattr(self.runner, name)
+                delattr(owner, name)
         self.original_methods.clear()
         self.runner = None
+        self.metadata_entry = None
         gc.callbacks.remove(self.callback)
         return {"scope": "主机观测单独列出，不从设备forward耗时中扣除；未改变GC配置、未新增设备同步。",
                 "gc_enabled": self.gc_enabled, "gc_threshold": self.gc_threshold,
+                "metadata_builders": self.metadata_builders,
                 "gc_freeze_count": self.gc_freeze_count, "gc_events": self.events,
                 "steps": [{"step": e["index"], **e.get("host", {})} for e in entries]}

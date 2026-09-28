@@ -1,0 +1,20 @@
+{
+  "status": "FAIL",
+  "batch": 16,
+  "history": 8192,
+  "layer_index": 4,
+  "seed": 1024,
+  "weight_nz_mode": 2,
+  "variant": "performance",
+  "native_profile_only": false,
+  "scope": "正式单层权重、合成输入/历史；零容差差异诊断，不代表数值或整模型验收",
+  "deterministic_level": 0,
+  "hccl_deterministic": false,
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "error": "RuntimeError('ExchangeDevice:../torch_npu/csrc/core/npu/sys_ctrl/npu_sys_ctrl.cpp:286 NPU function error: c10_npu::SetDevice(device), error code is 507033\\n[ERROR] 2026-09-28-17:59:54 (PID:2475163, Device:0, RankID:-1) ERR00100 PTA call acl api failed\\n[Error]: Failed to start the device. \\n        Rectify the fault based on the error information in the ascend log.\\n[PID: 2475163] 2026-09-28-17:59:54.300.156 Inner_Error_Device_Subprocess_Startup_Timeout(E39007): Starting a subprocess on the device timed out.\\n        Possible Cause: 1.Failed to start the subprocess. 2. The HDC link is faulty.\\n        Solution: Obtain the device log and contact technical support at https://www.hiascend.com/support.\\n        TraceBack (most recent call last):\\n        tsd client wait response fail, hostpid:2475163, receive device response data failed, check hdc service.[FUNC:WaitRsp][FILE:process_mode_manager.cpp][LINE:340]\\n        Starting a subprocess on the device timed out.\\n        TsdOpen failed. devId=0, tdt error=31[FUNC:PrintfTsdError][FILE:runtime.cc][LINE:2638]\\n        Check param failed, dev can not be NULL![FUNC:DeviceRetain][FILE:runtime.cc][LINE:3558]\\n        Check param failed, dev can not be NULL![FUNC:PrimaryContextRetain][FILE:runtime.cc][LINE:3175]\\n        Check param failed, ctx can not be NULL![FUNC:PrimaryContextRetain][FILE:runtime.cc][LINE:3206]\\n        Check param failed, context can not be null.[FUNC:SetDevice][FILE:api_impl.cc][LINE:3319]\\n        rtSetDevice execution failed, reason=device retain error[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:65]\\n        open device 0 failed, runtime result = 507033.[FUNC:ReportCallError][FILE:log_inner.cpp][LINE:148]\\n')",
+  "accuracy_fixture": {
+    "kind": "per_physical_row",
+    "formula": "FP16(0.00390625 + ((physical_row * 37) % 251) / 16384)",
+    "page_table": "unchanged fixture: reverse physical pages within each request"
+  }
+}

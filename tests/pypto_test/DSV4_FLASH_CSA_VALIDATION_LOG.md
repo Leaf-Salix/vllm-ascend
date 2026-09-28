@@ -9477,3 +9477,21 @@ L0B Key首块16384、稳态0/8192，WS占16384起48KiB，总64KiB。
 同基底长短B16、20次无profiler图计时与四个独立DFX，八类状态零容差及A→B→A；
 按128K优先、长短七三分别衡量核内/完整CSA并检查P95，不为失败前版补测EP16。
 [新候选、CPU证据和命令](results/csa_score_key_l1_20260928/README.md)。
+
+## 338. 准备metadata builder子区间诊断；Key L1单卡只补缺失泳道（2026-09-28）
+
+§335正式EP16尾部只定位到`_build_attention_metadata`，现有可选`--forward-host-diagnostics`
+增加每个builder的build/build_decode_metadata/build_prefill_metadata墙钟与线程CPU区间。
+挂接时一次解析builder 0及层名/共享别名，适用当前无microbatch的decode合同；热路径不读取设备tensor。
+只在runner构建metadata期间记录，草稿等区间外调用不加标记；重复调用分别编号，避免慢调用被覆盖。
+结束时恢复实例已有属性或类方法，保留原始返回/异常；不改变GC策略、不新增NPU事件/同步。
+分析器保留builder到层/缓存组的映射，比较同rank出现该调用的样本中位数并标次数；父子区间不能相加。
+CPU行为检查覆盖嵌套/重复调用、共享builder、范围排除、异常清理及方法恢复，Ruff/diff通过。
+尚未执行带此细分的设备验收、未测观测开销，不宣称尾部已修复；放入下一次必要模型验收，不单独重跑EP16。
+
+Key L1原任务task_20260928_175014_22857933418在8K基线DFX的SetDevice阶段报507033/E39007，
+设备子进程启动超时，退出1；当时尚未执行该阶段CSA，不定性为候选算术失败。
+两档正式计时/状态报告、长档基线/候选每侧四窗口已保存。原失败报告和日志单独留存，未覆盖。
+仅提交task_20260928_180158_266927127827补缺失8K基线/候选DFX，未重复完成部分；
+最终状态/性能汇总待补齐后判断，不将原任务改写为退出0。
+[设备错误、保留范围与补采命令](results/csa_score_key_l1_20260928/README.md)。
