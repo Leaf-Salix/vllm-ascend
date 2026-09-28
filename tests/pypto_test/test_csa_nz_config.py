@@ -38,10 +38,14 @@ def test_launcher_forwards_mode_to_every_rank(mode, monkeypatch, tmp_path):
     assert len(children) == 16
     worker = Mock()
     monkeypatch.setattr(run, "worker", worker)
-    expected = mode if mode is not None else 0
+    expected = mode if mode is not None else 2
     for rank, (cmd, env) in enumerate(children):
         assert env["VLLM_ASCEND_ENABLE_NZ"] == str(expected)
         assert env["DYNAMIC_EPLB"] == env["EXPERT_MAP_RECORD"] == "false"
+        assert env["OMP_NUM_THREADS"] == "10"
+        assert env["HCCL_BUFFSIZE"] == "1800"
+        assert env["HCCL_OP_EXPANSION_MODE"] == "AIV"
+        assert env["VLLM_BATCH_INVARIANT"] == "0"
         monkeypatch.setattr(sys, "argv", cmd[1:])
         run.main()
         parsed = worker.call_args.args[0]
@@ -85,14 +89,27 @@ class NativeWorker:
         assert torch.are_deterministic_algorithms_enabled() == bool(level)
         self.model_runner = SimpleNamespace(dynamic_eplb=False, scheduler_config=SimpleNamespace(
             max_num_seqs=40, max_num_batched_tokens=400, max_num_scheduled_tokens=240))
+        self.vllm_config = SimpleNamespace(
+            scheduler_config=SimpleNamespace(async_scheduling=True, disable_hybrid_kv_cache_manager=False),
+            cache_config=SimpleNamespace(enable_prefix_caching=False),
+            compilation_config=SimpleNamespace(cudagraph_mode="FULL_DECODE_ONLY"))
 module.NPUWorker = NativeWorker
 sys.modules[module.__name__] = module
+ascend_module = ModuleType("vllm_ascend.ascend_config")
+ascend_module.get_ascend_config = lambda: SimpleNamespace(
+    ascend_compilation_config=SimpleNamespace(enable_npugraph_ex=True, enable_static_kernel=True, fuse_norm_quant=True),
+    enable_cpu_binding=True, multistream_overlap_shared_expert=True,
+    scheduler_config=SimpleNamespace(recompute_scheduler_enable=False))
+sys.modules[ascend_module.__name__] = ascend_module
 from offline_pd.worker import OfflineNPUWorker
 worker = OfflineNPUWorker(SimpleNamespace(additional_config={"offline_deterministic_level": level}))
 actual = worker.offline_runtime_config()
 assert actual["deterministic_level"] == actual["requested_deterministic_level"] == level
 assert actual["dynamic_eplb"] is False
 assert actual["scheduler"]["max_num_scheduled_tokens"] == 240
+assert actual["decode_optimizations"]["ascend_compilation_config"]["enable_static_kernel"] is True
+assert actual["decode_optimizations"]["multistream_overlap_shared_expert"] is True
+assert actual["engine"]["async_scheduling"] is True
 assert not torch_npu.npu.is_initialized()
 '''
     env = dict(os.environ, TORCH_DEVICE_BACKEND_AUTOLOAD="0")

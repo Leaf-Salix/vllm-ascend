@@ -22,6 +22,22 @@ FORMAL_MODEL = "/data/model/DeepSeek-V4-Flash-0731-w8a8"
 FIRST_TARGET_CSA_LAYER = 2
 
 
+def decode_additional_config(args):
+    """两侧共用 runtime/decode/run_dp_template.sh 的计算配置；eager 仅用于诊断。"""
+    graph = args.graph_mode != "eager"
+    return {
+        "ascend_compilation_config": {
+            "enable_npugraph_ex": graph,
+            "enable_static_kernel": graph,
+            "fuse_norm_quant": True,
+            **({} if not args.capture_sizes else {"align_decode_capture_sizes": False}),
+        },
+        "enable_cpu_binding": True,
+        "multistream_overlap_shared_expert": True,
+        "recompute_scheduler_enable": bool(args.recompute_scheduler),
+    }
+
+
 def write_json(path, data):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
@@ -778,6 +794,7 @@ def worker(args):
         max_num_seqs=1 if prefill else args.batch,
         max_num_batched_tokens=args.max_num_batched_tokens,
         enable_prefix_caching=False, enforce_eager=prefill or args.graph_mode == "eager", seed=1024,
+        **({} if prefill else {"async_scheduling": True, "disable_hybrid_kv_cache_manager": False}),
         gpu_memory_utilization=args.gpu_memory_utilization, block_size=32,
         # 清单约定的 D 侧上线口径为 FULL_DECODE_ONLY；
         # eager 只用于定位问题，其每步重入 Python 派发路径，不代表上线表现。
@@ -806,20 +823,9 @@ def worker(args):
                            **({"offline_moe_routing_tokens": (args.rank_batch or args.batch)
                                * (plan["decode"]["speculative_tokens"] + 1)}
                               if args.command == "moe-routing" else {}),
-                           # 本机 CANN 9.0.0 的 libopapi.so 与已构建的 CSA 自定义算子包里都没有
-                           # aclnnAddRmsNormBias。norm_quant 融合 pass 的 pattern 里直接调用
-                           # npu_add_rms_norm_bias，而 PyTorch 的 pattern matcher 用
-                           # tracing_mode="real" 追踪 pattern，等于真的执行一次，于是图编译在
-                           # 建 pattern 阶段就崩。关掉该融合即可，属本地环境适配，不改生产代码。
-                           # 注意这偏离上线口径：参考脚本所在环境有该算子，融合是开启的。
-                           **({} if prefill or args.graph_mode == "eager"
-                              else {"ascend_compilation_config": {
-                                  "fuse_norm_quant": False,
-                                  # 显式给档位时关掉对齐，让非 6 倍数的档位原样保留。
-                                  **({} if not args.capture_sizes
-                                     else {"align_decode_capture_sizes": False})}}),
-                           **({} if not args.recompute_scheduler
-                              else {"recompute_scheduler_enable": True}),
+                           # 不再用关闭融合绕过缺失算子；先补齐模板所需的 Native 运行环境。
+                           # 静态 kernel 和共享专家重叠同时应用于 Native/PTO，不能只改一侧。
+                           **({} if prefill else decode_additional_config(args)),
                            # T1.10：embedding TP 走组内 all_gather，要求各 rank 贡献的 token
                            # 数一致，因此即便 eager 也会引出 DP 补齐。_forward_embed_tp 的
                            # 静态缓冲按 get_potential_max_tokens() 预分配，超了直接 ValueError，
@@ -829,12 +835,20 @@ def worker(args):
                                   "embedding_tensor_parallel_size": args.embedding_tp}}),
                            # EP 保留；所有 CSA 功能/性能测试均关闭动态 EPLB。
                            "eplb_config": {"dynamic_eplb": False}},
-        model_loader_extra_config={"enable_multithread_load": True, "num_threads": 16},
+        model_loader_extra_config={"enable_multithread_load": True, "num_threads": 16 if prefill else 128},
         kv_transfer_config=connector, disable_log_stats=False,
         **({} if prefill else {"worker_extension_cls": "offline_pd.observer.OfflineCSAObserver"}),
     )
     print(f"OFFLINE_MODEL_READY role={args.command} dp={args.rank}", flush=True)
     args.worker_runtime_config = llm.collective_rpc("offline_runtime_config")
+    if not prefill:
+        expected = decode_additional_config(args)
+        expected["ascend_compilation_config"].pop("align_decode_capture_sizes", None)
+        for actual in args.worker_runtime_config:
+            if actual.get("decode_optimizations") != expected:
+                raise RuntimeError(f"Decode 模板配置未生效：expected={expected}, actual={actual}")
+            if not actual["engine"]["async_scheduling"] or actual["engine"]["disable_hybrid_kv_cache_manager"]:
+                raise RuntimeError(f"Decode 异步调度/HMA 配置未生效：{actual}")
     if not args.worker_runtime_config or any(
         config["deterministic_level"] != int(args.deterministic) or config["dynamic_eplb"]
         for config in args.worker_runtime_config
@@ -975,7 +989,7 @@ def launch(args):
                 "ASCEND_RT_VISIBLE_DEVICES": ",".join(devices[rank * tp:(rank + 1) * tp]),
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn", "VLLM_USE_V2_MODEL_RUNNER": "0",
                 "VLLM_ASCEND_ENABLE_NZ": str(args.weight_nz_mode),
-                "OMP_NUM_THREADS": "4", "OMP_PROC_BIND": "false",
+                "OMP_NUM_THREADS": "4" if prefill else "10", "OMP_PROC_BIND": "false",
                 "HCCL_IF_IP": args.host, "HCCL_SOCKET_IFNAME": args.nic,
                 "GLOO_SOCKET_IFNAME": args.nic, "TP_SOCKET_IFNAME": args.nic,
                 # 采集窗口会在各 rank 上做同步和落盘，给集合通信留出等待余量。
@@ -998,7 +1012,9 @@ def launch(args):
                 # 不继承父进程的 EPLB 配置，关闭重平衡和专家热度采集。
                 "DYNAMIC_EPLB": "false", "EXPERT_MAP_RECORD": "false",
                 "PYTORCH_NPU_ALLOC_CONF": "expandable_segments:True",
-                "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+                "VLLM_BATCH_INVARIANT": "0",
+                "VLLM_RPC_TIMEOUT": "3600000",
+                "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "30000",
                 "PYTHONPATH": str(Path(__file__).resolve().parent.parent) + os.pathsep + env.get("PYTHONPATH", ""),
             })
             env.pop("TORCH_DEVICE_BACKEND_AUTOLOAD", None)
@@ -1109,11 +1125,11 @@ def main():
     parser.add_argument("--profile-steps", type=int, default=3, help="采集的完整decode step数")
     parser.add_argument("--profile-forward-events", action="store_true",
                         help="在profile窗口内另记同一次forward的设备事件；仅供边界诊断，不替代无profiler计时")
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9,
-                        help="两侧使用相同显存预算；默认 0.9。PTO 在 128K/B24/EP16 下需要 0.97 "
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.95,
+                        help="两侧使用相同显存预算；默认与decode模板一致为0.95。PTO在128K/B24/EP16下需要0.97 "
                              "才能跑满 24 路（Native 0.95 即可），0.98 会在启动期 OOM")
-    parser.add_argument("--weight-nz-mode", type=int, default=0, choices=(0, 1, 2),
-                        help="vllm-ascend 的 weight_nz_mode；1 会让 Native 把量化权重转成 NZ")
+    parser.add_argument("--weight-nz-mode", type=int, default=2, choices=(0, 1, 2),
+                        help="默认与decode模板一致为2（含BF16）；0/1保留用于布局诊断")
     parser.add_argument("--swimlane-rank", type=int, default=0, help="采集PTO DFX泳道的DP rank")
     parser.add_argument("--swimlane-layer", type=int, default=FIRST_TARGET_CSA_LAYER,
                         help="采集泳道的target C4层序号")

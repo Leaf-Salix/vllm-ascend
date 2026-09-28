@@ -462,6 +462,13 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
 
 
 def run(args, report):
+    report["execution_config"] = {
+        "path": "manual_npu_graph",
+        "enable_npugraph_ex": False,
+        "enable_static_kernel": False,
+        "worker_cpu_binding": False,
+        "scope": "核内与手工图区间诊断；未经过decode模板的编译优化，不作为该模板下Native性能验收",
+    }
     activate()
     import torch
     import torch_npu
