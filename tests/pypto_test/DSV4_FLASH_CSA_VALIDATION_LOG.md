@@ -8961,3 +8961,21 @@ P95 780.50→792.80μs。短档明确退化、长档收益不足，拒绝候选�
 生产仍为QR K256、KV K512。与上游的split-K、M分工及权重视图差异已在候选记录中说明，
 没有把更大的连续搬运等同于必然收益，也没有在无PMU证据时定性退化pipe。
 [两档完整样本与泳道路径](results/csa_qr_k512_20260928/README.md)。
+
+
+## 311. HC输入复用候选及后续MIX预加载评估准备（2026-09-28）
+
+性能版候选将BF16→FP32加宽与原512列分段RMS合并，保留纯AIC的HC线性投影及原精度边界。
+共用HC文件只抽取数值中性函数，精度版仍走原RMS路径；两个完整入口CPU编译/链接通过。
+task_20260928_103131_11716825293已提交，长短B16各20次无profiler图计时、状态比较及独立DFX，
+截至本条记录仍在等待设备资源。不能把省去约6MiB逻辑读取量直接记为性能收益。
+[候选源码、范围及运行脚本](results/csa_hc_input_rms_20260928/README.md)。
+
+用户指定本轮收尾后评估[Simpler #2389](https://github.com/hw-native-sys/simpler/pull/2389)。
+隔离worktree已基于a54c05095移植其18文件，候选52c4e019e；不修改HC在用环境。
+该PR只门控普通ready路径的MIX pending放置，长档Score的sync_start与early-dispatch不直接改变。
+已有长短各2个DFX窗口中，已匹配的Score/Sparse派发至接收最长7.32μs，没有复现目标长等待；
+部分Scheduler记录缺失，少量DFX窗口不能排除无profiler的偶发P95异常。
+同时核实跨callable复用估计、共享非原子采样及pending ACK/FIN污染估计的限制。
+设备对照保留原运行时、PR门限0和50三组，0仍有采样开销，不能冒充原二进制。
+[分析、隔离构建与待测范围](results/csa_mix_preload_20260928/README.md)。

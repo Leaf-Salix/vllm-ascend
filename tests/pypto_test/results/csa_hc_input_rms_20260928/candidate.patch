@@ -1,0 +1,258 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py
+index 31d2ee3c..d5379ea4 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py
+@@ -35,6 +35,7 @@ from .rmsnorm import rms_norm_apply, rms_norm_inverse
+ 
+ # Dynamic shape variables.
+ T_DYN = pl.dynamic("T_DYN")  # T = B * S
++HC_PAD_ROWS_DYN = pl.dynamic("HC_PAD_ROWS_DYN")
+ 
+ # model config
+ D = M.hidden_size
+@@ -66,7 +67,7 @@ assert HC_MULT == 4, f"hc_pre is specialized to HC_MULT == 4, got {HC_MULT}"
+ 
+ 
+ @pl.jit.inline
+-def hc_pre_gates(
++def hc_pre_gates_from_rms(
+     x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
+     hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+     hc_scale: pl.Tensor[[3], pl.FP32],
+@@ -75,8 +76,9 @@ def hc_pre_gates(
+     post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
+     comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
+     row_recip: pl.Scalar[pl.BOOL],
++    inv_rms: pl.Tensor[[HC_PAD_ROWS_DYN, 1], pl.FP32],
+ ):
+-    """Compute pre/post gates and Sinkhorn combinations with padded linear intermediates."""
++    """共享门控与Sinkhorn算术，复用调用方按原规则生成的RMS统计。"""
+     t_dim = pl.tensor.dim(x, 0)
+     token_tiles = (t_dim + T_TILE - 1) // T_TILE
+     t_linear = ((t_dim + LINEAR_T_TILE - 1) // LINEAR_T_TILE) * LINEAR_T_TILE  # pad t_dim up to whole 16-row cube tiles
+@@ -86,28 +88,6 @@ def hc_pre_gates(
+     scale2 = pl.read(hc_scale, [2])
+     hc_base_2d = pl.reshape(hc_base, [1, MIX_HC])  # for per-group comb base loads in comb_sinkhorn
+ 
+-    inv_rms = pl.create_tensor([t_linear, 1], dtype=pl.FP32)
+-
+-    # rms: full-K sum-of-squares per token-tile -> inv_rms.
+-    for t in pl.spmd(token_tiles, name_hint="hc_pre_rms", allow_early_resolve=True):
+-        t0 = t * T_TILE
+-        valid_rows = pl.min(T_TILE, t_dim - t0)
+-        sq_sum = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
+-        for kb in pl.pipeline(HC_DIM // RMS_K_TILE, stage=4):
+-            k0 = kb * RMS_K_TILE
+-            if valid_rows == T_TILE:
+-                x_chunk_full = x_flat[t0:t0 + T_TILE, k0:k0 + RMS_K_TILE]
+-                x_sq_full = pl.mul(x_chunk_full, x_chunk_full)
+-                x_sq_row_full = pl.reshape(pl.row_sum(x_sq_full), [1, T_TILE])
+-                sq_sum = pl.add(sq_sum, x_sq_row_full)
+-            else:
+-                x_chunk_tail = pl.slice(x_flat, [T_TILE, RMS_K_TILE], [t0, k0], valid_shape=[valid_rows, RMS_K_TILE])
+-                x_sq_tail = pl.mul(x_chunk_tail, x_chunk_tail)
+-                x_sq_row_tail = pl.reshape(pl.row_sum(x_sq_tail), [1, T_TILE])
+-                sq_sum = pl.add(sq_sum, x_sq_row_tail)
+-        sq_mean = pl.add(pl.mul(sq_sum, HC_DIM_INV), NORM_EPS)
+-        inv = pl.reshape(pl.rsqrt(sq_mean, high_precision=True), [T_TILE, 1])
+-        inv_rms[t0:t0 + T_TILE, 0:1] = inv
+ 
+     # linear: split-K matmul -> per-split partials. The t_dim..t_linear pad rows are
+     # zero-filled by valid_shape, never materialized.
+@@ -302,6 +282,50 @@ def hc_pre_gates(
+     return pre_val_store
+ 
+ 
++@pl.jit.inline
++def hc_pre_gates(
++    x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
++    hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
++    hc_scale: pl.Tensor[[3], pl.FP32],
++    hc_base: pl.Tensor[[MIX_HC], pl.FP32],
++    pre_val_store: pl.Tensor[[T_DYN, HC_PAD], pl.FP32],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    row_recip: pl.Scalar[pl.BOOL],
++):
++    """保留原独立RMS任务及其归约次序。"""
++    t_dim = pl.tensor.dim(x, 0)
++    token_tiles = (t_dim + T_TILE - 1) // T_TILE
++    t_linear = ((t_dim + LINEAR_T_TILE - 1) // LINEAR_T_TILE) * LINEAR_T_TILE
++    x_flat = pl.reshape(x, [t_dim, HC_DIM])
++    inv_rms = pl.create_tensor([t_linear, 1], dtype=pl.FP32)
++
++    # rms: full-K sum-of-squares per token-tile -> inv_rms.
++    for t in pl.spmd(token_tiles, name_hint="hc_pre_rms", allow_early_resolve=True):
++        t0 = t * T_TILE
++        valid_rows = pl.min(T_TILE, t_dim - t0)
++        sq_sum = pl.full([1, T_TILE], dtype=pl.FP32, value=0.0)
++        for kb in pl.pipeline(HC_DIM // RMS_K_TILE, stage=4):
++            k0 = kb * RMS_K_TILE
++            if valid_rows == T_TILE:
++                x_chunk_full = x_flat[t0:t0 + T_TILE, k0:k0 + RMS_K_TILE]
++                x_sq_full = pl.mul(x_chunk_full, x_chunk_full)
++                x_sq_row_full = pl.reshape(pl.row_sum(x_sq_full), [1, T_TILE])
++                sq_sum = pl.add(sq_sum, x_sq_row_full)
++            else:
++                x_chunk_tail = pl.slice(x_flat, [T_TILE, RMS_K_TILE], [t0, k0], valid_shape=[valid_rows, RMS_K_TILE])
++                x_sq_tail = pl.mul(x_chunk_tail, x_chunk_tail)
++                x_sq_row_tail = pl.reshape(pl.row_sum(x_sq_tail), [1, T_TILE])
++                sq_sum = pl.add(sq_sum, x_sq_row_tail)
++        sq_mean = pl.add(pl.mul(sq_sum, HC_DIM_INV), NORM_EPS)
++        inv = pl.reshape(pl.rsqrt(sq_mean, high_precision=True), [T_TILE, 1])
++        inv_rms[t0:t0 + T_TILE, 0:1] = inv
++
++    return hc_pre_gates_from_rms(
++        x, hc_fn, hc_scale, hc_base, pre_val_store, post, comb, row_recip, inv_rms,
++    )
++
++
+ def _hc_pre(
+     x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
+     hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+@@ -360,22 +384,14 @@ hc_pre_test = pl.jit(_hc_pre)
+ 
+ 
+ @pl.jit.inline
+-def hc_pre_norm(
++def hc_mix_norm(
+     x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
+-    hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+-    hc_scale: pl.Tensor[[3], pl.FP32],
+-    hc_base: pl.Tensor[[MIX_HC], pl.FP32],
++    pre_val_store: pl.Tensor[[HC_PAD_ROWS_DYN, HC_PAD], pl.FP32],
+     norm_w: pl.Tensor[[D], pl.BF16],
+-    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
+-    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
+     x_normed: pl.Tensor[[T_DYN, D], pl.BF16],
+-    row_recip: pl.Scalar[pl.BOOL],
+ ):
+-    """Normalize pre-mixed activations for complete eight-token decode tiles."""
++    """共享HC混合、BF16边界及后续RMSNorm算术。"""
+     t_dim = pl.tensor.dim(x, 0)
+-    t_linear = ((t_dim + LINEAR_T_TILE - 1) // LINEAR_T_TILE) * LINEAR_T_TILE
+-    pre_val_store = pl.create_tensor([t_linear, HC_PAD], dtype=pl.FP32)
+-    hc_pre_gates(x, hc_fn, hc_scale, hc_base, pre_val_store, post, comb, row_recip)
+     x_flat = pl.reshape(x, [t_dim, HC_DIM])
+     # 上游这段按整 8 行块走（它的 T 恒为 384）。本包的档位只保证是 DSpark 的 6 的
+     # 倍数，t_dim=12/18/30/... 都不是 8 的倍数，向下取整会整块丢掉尾部 token。
+@@ -440,6 +456,26 @@ def hc_pre_norm(
+     return mixed_tid
+ 
+ 
++@pl.jit.inline
++def hc_pre_norm(
++    x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
++    hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
++    hc_scale: pl.Tensor[[3], pl.FP32],
++    hc_base: pl.Tensor[[MIX_HC], pl.FP32],
++    norm_w: pl.Tensor[[D], pl.BF16],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    x_normed: pl.Tensor[[T_DYN, D], pl.BF16],
++    row_recip: pl.Scalar[pl.BOOL],
++):
++    """Normalize pre-mixed activations for complete eight-token decode tiles."""
++    t_dim = pl.tensor.dim(x, 0)
++    t_linear = ((t_dim + LINEAR_T_TILE - 1) // LINEAR_T_TILE) * LINEAR_T_TILE
++    pre_val_store = pl.create_tensor([t_linear, HC_PAD], dtype=pl.FP32)
++    hc_pre_gates(x, hc_fn, hc_scale, hc_base, pre_val_store, post, comb, row_recip)
++    return hc_mix_norm(x, pre_val_store, norm_w, x_normed)
++
++
+ def _hc_pre_norm_entry(
+     x: pl.Tensor[[T_DYN, HC_MULT, D], pl.FP32],
+     hc_fn: pl.Tensor[[MIX_HC, HC_DIM], pl.FP32],
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+index a867fc01..4fa52c05 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -31,7 +31,10 @@ from .decode_indexer_compressor import indexer_compressor
+ from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
+ from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
+ from .hc_post import hc_post
+-from .hc_pre import HC_DIM, HC_MULT, MIX_HC, hc_pre_norm
++from .hc_pre import (
++    HC_DIM, HC_DIM_INV, HC_MULT, HC_PAD, LINEAR_T_TILE, MIX_HC, NORM_EPS,
++    RMS_K_TILE, hc_mix_norm, hc_pre_gates_from_rms,
++)
+ from .layout import (
+     COMPRESSED_ROWS_DYN,
+     COMPRESSED_TABLE_COLUMNS_DYN,
+@@ -108,7 +111,7 @@ CSA_PROJECTION_PACK_WORKERS = 16
+ CSA_ALL_VISIBLE_WORKERS = 16
+ CSA_WB_TOKEN_TILE = 8
+ HC_WIDEN_T_TILE = 8    # hc 残差流 BF16->FP32 的行块
+-HC_WIDEN_D_TILE = 1024  # 同上，列块
++HC_WIDEN_D_TILE = RMS_K_TILE  # 与原RMS的512列归约分段一致。
+ HC_WIDEN_WORKERS = 48   # 同上，AIV 通道数
+ CSA_ROPE_SIGN_T_TILE = 4  # RoPE 符号行块，沿用上游 csa_rope_interleave 的 4 行
+ CSA_ROPE_WORKERS = 16
+@@ -240,43 +243,55 @@ def _decode_csa_tp1_layer(
+     # 保留已验证的 HC scope 边界以管理任务和临时张量的生命周期。
+     # scope 退出释放引用，并不是设备端等待所有任务完成的 barrier；
+     # 消费者的执行顺序由张量依赖和显式 TaskId 依赖保证。
+-    # hc 残差流在 vllm-ascend 侧是 BF16（与 Native 的 npu_hc_pre_v2 / npu_hc_post 一致），
+-    # 而上游 hc_pre 全程按 FP32 算。这里一次性加宽，不把 cast 下沉到 hc_pre 的每处
+-    # tile 读取——下沉过的版本有两个后果：cast 丢掉 pl.slice 的 valid_shape 标记，
+-    # padding 区的陈旧字节混进归约（T=60 实测 64 个非有限值）；而且 cast 是 AIV 操作，
+-    # 会把纯 Cube 的 hc_pre_linear 编成 mix kernel（泳道里裂成 _aic + _aiv，24.2 -> 32.9us）。
++    # 加宽后顺手按原512列次序计算RMS，消除独立RMS任务对FP32中间缓冲的再读取。
++    # Cube及mix仍消费同一FP32缓冲；不把AIV cast下沉到纯Cube任务。
+     x_hc32 = pl.create_tensor([t_dim, HC_MULT, D], dtype=pl.FP32)
+     x_hc_flat = pl.reshape(x_hc, [t_dim, HC_MULT * D])
+     x_hc32_flat = pl.reshape(x_hc32, [t_dim, HC_MULT * D])
+     widen_rows = (t_dim + HC_WIDEN_T_TILE - 1) // HC_WIDEN_T_TILE
++    hc_padded_rows = ((t_dim + LINEAR_T_TILE - 1) // LINEAR_T_TILE) * LINEAR_T_TILE
++    inv_rms = pl.create_tensor([hc_padded_rows, 1], dtype=pl.FP32)
+     widen_tail = pl.create_tensor([HC_WIDEN_T_TILE, HC_MULT * D], dtype=pl.FP32)
+-    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen") as _widen_tid:
++    with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen_rms") as _widen_tid:
+         for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows,
+                                   pl.min(widen_rows, HC_WIDEN_WORKERS)):
+             w_t0 = widen_blk * HC_WIDEN_T_TILE
+             w_rows = pl.min(HC_WIDEN_T_TILE, t_dim - w_t0)
+-            for w_db in pl.range(HC_MULT * D // HC_WIDEN_D_TILE):
++            w_sq_sum = pl.full([1, HC_WIDEN_T_TILE], dtype=pl.FP32, value=0.0)
++            for w_db in pl.pipeline(HC_MULT * D // HC_WIDEN_D_TILE, stage=4):
+                 w_d0 = w_db * HC_WIDEN_D_TILE
+                 w_src = pl.slice(x_hc_flat, [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE], [w_t0, w_d0],
+                                  valid_shape=[w_rows, HC_WIDEN_D_TILE])
+                 w_val = pl.cast(w_src, pl.FP32)
+                 if w_rows == HC_WIDEN_T_TILE:
+                     x_hc32_flat[w_t0:w_t0 + HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
++                    w_sq = pl.mul(w_val, w_val)
++                    w_sq_row = pl.reshape(pl.row_sum(w_sq), [1, HC_WIDEN_T_TILE])
++                    w_sq_sum = pl.add(w_sq_sum, w_sq_row)
+                 else:
++                    # cast可能丢失valid_shape，显式恢复并清零无效行后才参与归约。
++                    w_valid = pl.set_validshape(w_val, w_rows, HC_WIDEN_D_TILE)
++                    w_clean = pl.fillpad(w_valid, pad_value=pl.PadValue.zero)
++                    w_sq_tail = pl.mul(w_clean, w_clean)
++                    w_sq_row_tail = pl.reshape(pl.row_sum(w_sq_tail), [1, HC_WIDEN_T_TILE])
++                    w_sq_sum = pl.add(w_sq_sum, w_sq_row_tail)
+                     widen_tail[0:HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
+                     w_out = pl.load(
+                         widen_tail, [0, w_d0], [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE],
+                         valid_shape=[w_rows, HC_WIDEN_D_TILE], target_memory=pl.MemorySpace.Vec,
+                     )
+                     pl.store(w_out, [w_t0, w_d0], x_hc32_flat)
++            w_mean = pl.add(pl.mul(w_sq_sum, HC_DIM_INV), NORM_EPS)
++            w_inv = pl.reshape(pl.rsqrt(w_mean, high_precision=True), [HC_WIDEN_T_TILE, 1])
++            inv_rms[w_t0:w_t0 + HC_WIDEN_T_TILE, 0:1] = w_inv
+ 
+-    # 后续若拆分此 scope，需分别核对 x_normed、post、comb 到各消费者的依赖。
+-    # 仅持有 rms_tid 不能代替检查另外两项输出；不由历史 token 差异推断缺边成因。
+     with pl.scope():
+-        hc_pre_norm(
+-            x_hc32, hc_attn_fn, hc_attn_scale, hc_attn_base, attn_norm_w,
+-            post_t, comb_t, x_normed_t, False,
++        pre_val_store = pl.create_tensor([hc_padded_rows, HC_PAD], dtype=pl.FP32)
++        hc_pre_gates_from_rms(
++            x_hc32, hc_attn_fn, hc_attn_scale, hc_attn_base,
++            pre_val_store, post_t, comb_t, False, inv_rms,
+         )
++        hc_mix_norm(x_hc32, pre_val_store, attn_norm_w, x_normed_t)
+     wb_blocks = (t_dim + CSA_WB_TOKEN_TILE - 1) // CSA_WB_TOKEN_TILE
+ 
+     idx_sin_signed = pl.create_tensor([t_dim, ROPE_HEAD_DIM], dtype=pl.FP32)
