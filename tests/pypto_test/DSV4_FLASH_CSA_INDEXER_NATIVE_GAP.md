@@ -45,7 +45,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | WS归约粒度 | ProcessWs逐query循环，ComputeWs的M=16、K=gSize=64，N最大128；Brcb的16行重复结果只发布有效行 | S6以[16,384]对角系数同时规约六个query，N64，发布六个有效行 | 同六query/128候选的FP16 MAC数均为6×16×64×128=786432；不能只看到PTO的零系数就认定额外算力浪费。调用数与L0/流水布局不同，应连同QK分块评估 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
-| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | PTO每leaf有两个half根；改成query分工可能减少根归并，但会增加scale重复读取，未验证前不能判收益 |
+| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | 当前query分工候选先保持两个half根，只隔离分工：每AIV三query×完整候选段，TMUL调用减半、scale重复读翻倍；CPU通过，设备收益待测 |
 | 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长档先排序前2048候选并将Top-512根留UB，尾段完成后合并；短档保留原路径 | PTO缩放后score仍经GM，最终归并仍独立；临时根GM往返已消除 |
 | 分片平衡 | metadata按工作成本切S1/S2并给最终归并核分工 | 长档按query组与24worker平衡leaf；B16从8/8/8/8/1分成6/6/6/5/5/5个tile | 最忙核下降已保留；新增root数量和AIV排序成本单列 |
 | 最终归并 | LocalTopK/Merge/MS式四路归并，可在同融合kernel结束 | 四路归并与UB累计根已采用，但仍独立merge task | 固定tie/量化规则需保持；任务融合是后续调度/结构调整，不能仅凭少一个任务声称收益 |
@@ -108,3 +108,7 @@ FixpResToGm（552行）只发布各query的有效行。上述MAC计算不包含D
 - [源码入口和版本](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)：A3 arch22优先，不套用不兼容的arch35能力。
 - [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)、
   [Native调用接口](../../vllm_ascend/attention/dsa_v1.py)。
+
+当前[长S6 query分工候选](results/csa_score_query_split_20260929/README.md)已完成私有整包及CPU编译；
+不融合最终输出、不改根ABI和同分排序顺序。只有真机核内收益成立才进一步评估减少half根，
+不把这一候选当作已保留项，也不恢复B40或另开全矩阵。

@@ -10952,3 +10952,25 @@ task_20260929_070256_21859435951经状态查询仍running，变更时输出只�
 README及source.json明确说明其正式范围已改六档，后续不以目录名推断测试档位。
 清单、Native基线合同及差距文档已同步；阶段结果仍待原任务完成，不提前冒称六档通过。
 [当前六档范围与入口](results/csa_coefficients_seven_20260929/README.md)。
+
+## 400. 长档S6的AIV按query分工候选完成CPU编译（2026-09-29）
+
+最新ops-transformer28f40354的QLI V2 A3 ProcessVec1按S1/query分摊两个AIV。
+冻结生产4ffccb7b与私有候选pkg:dsv4_csa_score_query_split_4ffccb7b，
+仅长档S6由每AIV六query×半候选段改为三query×两个候选半段；
+每轮分数元素数6×512=3×1024不变，逐行TMUL调用点6→3。
+两侧均读完整scale，scale页读取/转换翻倍，不能由少三次调用推断真机收益。
+Cube QK/WS和Key读取、系数、half根布局、原排序同分规则、跨leaf归并及调度边界不变。
+短档和小query长档仍保持原路径；没有恢复§182失败的Score融合最终输出。
+
+两侧两根解析通过；候选完整CPU编译/load通过，生成长S6 AIV有3个TMUL调用点。
+开发中已在CPU修正常量分支不同shape重用变量名和slice动态有效长度表达；
+工具链未修改，没有关闭ABI或占卡试错。补丁和精简编译证据保存，生产暂不合入。
+状态/官方四窗口DFX收集复用旧工具，只参数化源码前缀和报告描述，旧默认行为保持。
+
+下一步在当前六档原任务完成后，auto单卡只比较128K/B16与8K/B24，
+八类状态零容差、图/eager/保护区及Score核内、CSA/P95分别判断；没有收益不扩矩阵。
+不新增B40，不以此候选触发16卡。当前尚无设备结果。
+另外，当前六档B4/B8/B16的已完成四窗DFX已逐档官方解析，固定window_3，
+不把Observed逻辑任务覆盖当成纯算术，也不从独立DFX与正式CSA相减归因。
+[候选、Native/pypto-lib差异及CPU证据](results/csa_score_query_split_20260929/README.md)。

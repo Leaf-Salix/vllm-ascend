@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT.parents[4]
 CASES = ((131072, 16), (8192, 24))
 VARIANT = "pkg:dsv4_csa_score_segment_ub_4ffccb7b"
+SOURCE_PREFIX = WORKSPACE / ".cache/csa-score-segment-ub-4ffccb7b"
+TITLE = "2048分数分段驻留UB：真实编译CSA及核内对照"
+CHANGE_DESCRIPTION = "长档缩放分数分段留UB，短档源码路径及任务依赖不变。"
 STATES = {"x_out", "idx_topk", "swa.0", "compressed.0", "state.0",
           "indexer.0", "indexer.1", "indexer_state.0"}
 sys.path.insert(0, str(ROOT.parents[1]))
@@ -117,7 +120,8 @@ def write_compact_summary(result):
                                                "us_max", "samples_us", "guards")}
             entry["windows"] = [
                 {key: window[key] for key in ("path", "joined_rows", "coefficient_workers", "score_producers",
-                                              "score_start_us", "score_end_us", "worker_span_us", "coefficient_end_to_finish_us")}
+                                              "score_start_us", "score_end_us", "worker_span_us",
+                                              "coefficient_end_to_finish_us")}
                 for window in side["windows"]
             ]
             entry["coefficient_kernel_us"] = [w["tasks"]["indexer_head_coefficients"]["kernel_mean_us"]
@@ -148,7 +152,7 @@ def main():
         folder = ROOT / f"h{history}_b{batch}"
         reports = {s: read(folder / "timing" / s / "report.json") for s in ("baseline", "candidate")}
         for side, report in reports.items():
-            expected_source = str(WORKSPACE / f".cache/csa-score-segment-ub-4ffccb7b-{side}")
+            expected_source = f"{SOURCE_PREFIX}-{side}"
             if (report["source"], report["variant"], report["batch"], report["history"], report["side"]) != (
                     expected_source, VARIANT, batch, history, "pto"):
                 raise ValueError("Wrong frozen source/package/shape/side")
@@ -167,7 +171,8 @@ def main():
                   for s in reports}
         if any(set(state) != STATES for state in states.values()):
             raise ValueError("Incomplete state coverage")
-        checks = {name: compare_tensor(states["candidate"][name], states["baseline"][name], 0, 0) for name in sorted(STATES)}
+        checks = {name: compare_tensor(states["candidate"][name], states["baseline"][name], 0, 0)
+                  for name in sorted(STATES)}
         del states
         for side, value in sides.items():
             value["samples_us"] = reports[side]["timing"]["samples_us"]
@@ -192,7 +197,7 @@ def main():
     (ROOT / "evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     write_task_breakdown(result)
     write_compact_summary(result)
-    lines = ["# 2048分数分段驻留UB：真实编译CSA及核内对照", "",
+    lines = ["# " + TITLE, "",
              "同卡CANN9.2/mode2/atomic0/det0；5次预热、20次无profiler图计时，单位μs。", "",
              "| 档位 | CSA基线→候选 | 变化 | P95 | 最大值 |", "| --- | ---: | ---: | ---: | ---: |"]
     for case in result["cases"]:
@@ -216,7 +221,7 @@ def main():
         lines.append("| " + " | ".join([f"{case['history']//1024}K/B{case['batch']}", *cells]) + " |")
     lines += ["", f"八类跨版本完整PTO状态零容差检查：{result['state_status']}。",
               "编译图/eager及保护区检查复用现有入口；未增加独立A→B→A或整模型测试。",
-              "两侧系数任务的有效query、worker和工作分配相同，系数未改；长档缩放分数分段留UB，短档源码路径及任务依赖不变。",
+              "两侧系数任务的有效query、worker和工作分配相同，系数未改；" + CHANGE_DESCRIPTION,
               "保留各窗口直接前置、实际early派发及FIN→dispatch；缺未计时前置时不做完整ready归因。",
               "[原始样本、完整检查和泳道](evidence.json)、[Worker分项](TASKS.md)。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")

@@ -1,0 +1,19 @@
+1 function(s) failed to compile:
+
+  Function                        | Error
+  --------------------------------+--------------------------------------------------------------
+  indexer_score_topk_native_pair  | pl.set_validshape cannot narrow a tile view (a slice or
+                                  | reshape result): a view carries its valid extent in its
+                                  | type, not in the runtime operands this lowers to. Narrow at
+                                  | the slice itself -- pl.tile.slice(tile, shape, offset,
+                                  | valid_shape=[...]), which also accepts runtime extents -- or
+                                  | call pl.set_validshape on the source tile before taking the
+                                  | view [/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-score-
+                                  | query-split-4ffccb7b-
+                                  | candidate/vllm_ascend/ops/pypto/dsv4_csa_score_query_split_4
+                                  | ffccb7b/decode_indexer.py:1042:41]
+  --------------------------------+--------------------------------------------------------------
+
+  [indexer_score_topk_native_pair]
+pl.set_validshape cannot narrow a tile view (a slice or reshape result): a view carries its valid extent in its type, not in the runtime operands this lowers to. Narrow at the slice itself -- pl.tile.slice(tile, shape, offset, valid_shape=[...]), which also accepts runtime extents -- or call pl.set_validshape on the source tile before taking the view [/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-score-query-split-4ffccb7b-candidate/vllm_ascend/ops/pypto/dsv4_csa_score_query_split_4ffccb7b/decode_indexer.py:1042:41]
+Check failed: !codegen.IsTileViewName(tile_buf) at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/backend/common/pto_ops_datamove.cpp:1604

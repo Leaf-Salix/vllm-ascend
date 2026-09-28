@@ -1,0 +1,14 @@
+ Cannot reassign 'buf_scale_bytes' with a different type: was pl.Tile[[1, 1536], pl.INT8], got pl.Tile[[1, 768], pl.INT8]
+  --> /data/pyptouser/qinchuanyu/pto-eager/.cache/csa-score-query-split-4ffccb7b-candidate/vllm_ascend/ops/pypto/dsv4_csa_score_query_split_4ffccb7b/decode_indexer.py:1149:29
+     |
+1147 |                             # Native页内scale只依赖cache_write，不依赖Cube结果。
+1148 |                             # 在等待Score前加载scale，让独立分页读取与Cube执行交叠。
+1149 |                             buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
+     |                             ^^^^^^^^^^^^^^^
+1150 |                             for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
+1151 |                                 buf_scale_row = (
+     |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.
+[ERROR] 2026-09-29-07:22:27 (PID:2795167, Device:-1, RankID:-1) ERR99999 UNKNOWN applicaiton exception

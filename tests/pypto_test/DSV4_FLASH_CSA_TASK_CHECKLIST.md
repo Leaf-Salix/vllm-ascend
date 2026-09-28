@@ -134,6 +134,10 @@ task_20260929_070256_21859435951正在auto单卡执行Native/PTO实际编译配�
 范围为128K B4/8/16/24、8K B24/32；B40在外层入口跳过，冻结算子及设备runner不改。
 完成前最新完整表保持c93ec723，不提前替换或拼接。
 [阶段出口范围与收集入口](results/csa_coefficients_seven_20260929/README.md)。
+并行准备长S6 AIV按query分工候选：两侧两根解析及候选CPU编译/load通过，生产未合入；
+保持Cube、half根和排序规则，减少逐行TMUL调用但重复scale读取。当前六档任务完成后
+仅128K/B16与8K/B24验证核内/CSA/P95，不恢复B40。
+[候选依据和编译证据](results/csa_score_query_split_20260929/README.md)。
 Native det0的编译/eager曾出现浮点及Top-K集合/顺序差异，保护区通过不等于两侧精度验收。
 [Native编译数值范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 历史d8627207长B16有3次明显拖尾，P95达1391.560μs；后续独立采样未复现，**未证明修复**。
