@@ -1,0 +1,1132 @@
+{
+  "operator": "d1f170ff vs a66255ea + QR input/gamma UB reuse; arithmetic/scheduler unchanged",
+  "task": "task_20260928_143910_419318230381",
+  "scope": "H131072/B16/S6，layer4真实权重/合成历史，mode2/atomic0/det0；单卡图重放。",
+  "limits": "PTO八类状态精确比较不含idx_topk_scores；det0 Native浮点仅作控制，不要求Native跨进程逐bit一致。独立DFX不与无profiler计时逐个对应，非真实EP16验收。",
+  "checks": {
+    "x_out": {
+      "status": "PASS",
+      "shape": [
+        96,
+        4,
+        4096
+      ],
+      "dtype": "torch.bfloat16",
+      "expected_shape": [
+        96,
+        4,
+        4096
+      ],
+      "expected_dtype": "torch.bfloat16",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 1572864,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "idx_topk": {
+      "status": "PASS",
+      "shape": [
+        96,
+        512
+      ],
+      "dtype": "torch.int32",
+      "expected_shape": [
+        96,
+        512
+      ],
+      "expected_dtype": "torch.int32",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 49152,
+      "comparison": "exact",
+      "nonfinite": 0,
+      "max_abs": null,
+      "rmse": null,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "swa.0": {
+      "status": "PASS",
+      "shape": [
+        145,
+        32,
+        1,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "expected_shape": [
+        145,
+        32,
+        1,
+        512
+      ],
+      "expected_dtype": "torch.bfloat16",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 2375680,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "compressed.0": {
+      "status": "PASS",
+      "shape": [
+        16417,
+        32,
+        1,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "expected_shape": [
+        16417,
+        32,
+        1,
+        512
+      ],
+      "expected_dtype": "torch.bfloat16",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 268976128,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "state.0": {
+      "status": "PASS",
+      "shape": [
+        145,
+        2,
+        1,
+        2048
+      ],
+      "dtype": "torch.float32",
+      "expected_shape": [
+        145,
+        2,
+        1,
+        2048
+      ],
+      "expected_dtype": "torch.float32",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 593920,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "indexer.0": {
+      "status": "PASS",
+      "shape": [
+        16417,
+        32,
+        1,
+        128
+      ],
+      "dtype": "torch.int8",
+      "expected_shape": [
+        16417,
+        32,
+        1,
+        128
+      ],
+      "expected_dtype": "torch.int8",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 67244032,
+      "comparison": "exact",
+      "nonfinite": 0,
+      "max_abs": null,
+      "rmse": null,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "indexer.1": {
+      "status": "PASS",
+      "shape": [
+        16417,
+        32,
+        1,
+        1
+      ],
+      "dtype": "torch.float16",
+      "expected_shape": [
+        16417,
+        32,
+        1,
+        1
+      ],
+      "expected_dtype": "torch.float16",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 525344,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    },
+    "indexer_state.0": {
+      "status": "PASS",
+      "shape": [
+        145,
+        2,
+        1,
+        512
+      ],
+      "dtype": "torch.float32",
+      "expected_shape": [
+        145,
+        2,
+        1,
+        512
+      ],
+      "expected_dtype": "torch.float32",
+      "atol": 0,
+      "rtol": 0,
+      "elements": 148480,
+      "comparison": "tolerance",
+      "nonfinite": 0,
+      "max_abs": 0.0,
+      "rmse": 0.0,
+      "mismatches": 0,
+      "first_mismatches": []
+    }
+  },
+  "graph_status": "PASS",
+  "errors": [],
+  "timing_iters": 20,
+  "dfx_windows": 4,
+  "status": "PASS",
+  "measurements": {
+    "baseline": {
+      "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/baseline/report.json",
+      "timing": {
+        "pto": {
+          "samples_us": [
+            1118.0000305175781,
+            1122.9000091552734,
+            1109.9799871444702,
+            1120.360016822815,
+            1101.6600131988525,
+            1116.1199808120728,
+            1113.860011100769,
+            1127.7799606323242,
+            1112.4399900436401,
+            1112.1799945831299,
+            1105.5400371551514,
+            1113.5400533676147,
+            1098.099946975708,
+            1109.71999168396,
+            1105.9399843215942,
+            1106.279969215393,
+            1093.2799577713013,
+            1115.2600049972534,
+            1098.479986190796,
+            1108.4400415420532
+          ],
+          "mean_us": 1110.4929983615875,
+          "p50_us": 1111.0799908638,
+          "p95_us": 1122.9000091552734,
+          "max_us": 1127.7799606323242,
+          "over_p50_2pct": 0,
+          "over_p50_5pct": 0
+        },
+        "native": {
+          "samples_us": [
+            1322.2399950027466,
+            1323.1799602508545,
+            1328.5200595855713,
+            1325.1999616622925,
+            1321.1599588394165,
+            1326.8799781799316,
+            1324.180006980896,
+            1326.159954071045,
+            1321.5199708938599,
+            1329.0200233459473,
+            1320.7999467849731,
+            1331.6800594329834,
+            1330.680012702942,
+            1325.160026550293,
+            1321.9799995422363,
+            1331.820011138916,
+            1324.9200582504272,
+            1332.0399522781372,
+            1323.9599466323853,
+            1328.5000324249268
+          ],
+          "mean_us": 1325.979995727539,
+          "p50_us": 1325.1799941062927,
+          "p95_us": 1331.820011138916,
+          "max_us": 1332.0399522781372,
+          "over_p50_2pct": 0,
+          "over_p50_5pct": 0
+        }
+      },
+      "worker_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/baseline/dfx/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1090.8600000000001,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 90.18,
+            "norm_end_to_sparse_receive": 640.94,
+            "sparse_receive_to_merge_end": 193.05999999999995,
+            "merge_end_to_last_worker": 166.68000000000018
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 731.12,
+              "first_start_us": 741.44,
+              "last_start_us": 741.72,
+              "last_end_us": 891.5600000000001,
+              "start_spread_us": 0.2799999999999727,
+              "worker_envelope_us": 160.44000000000005,
+              "kernel_mean_us": 146.8516666666667,
+              "setup_mean_us": 7.990000000000005
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 731.12,
+              "first_start_us": 741.54,
+              "last_start_us": 742.2,
+              "last_end_us": 893.82,
+              "start_spread_us": 0.6600000000000819,
+              "worker_envelope_us": 162.70000000000005,
+              "kernel_mean_us": 148.80916666666667,
+              "setup_mean_us": 8.209583333333336
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 886.26,
+              "first_start_us": 899.02,
+              "last_start_us": 899.72,
+              "last_end_us": 924.18,
+              "start_spread_us": 0.7000000000000455,
+              "worker_envelope_us": 37.91999999999996,
+              "kernel_mean_us": 22.71708333333332,
+              "setup_mean_us": 8.390416666666681
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 105.00000000000001,
+              "first_start_us": 120.60000000000001,
+              "last_start_us": 120.92,
+              "last_end_us": 128.78000000000003,
+              "start_spread_us": 0.3199999999999932,
+              "worker_envelope_us": 23.780000000000015,
+              "kernel_mean_us": 7.125000000000004,
+              "setup_mean_us": 15.633333333333326
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/baseline/dfx/window_1/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1085.3200000000002,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 85.74,
+            "norm_end_to_sparse_receive": 633.98,
+            "sparse_receive_to_merge_end": 195.14,
+            "merge_end_to_last_worker": 170.46000000000015
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 719.72,
+              "first_start_us": 731.54,
+              "last_start_us": 731.8199999999999,
+              "last_end_us": 881.72,
+              "start_spread_us": 0.2799999999999727,
+              "worker_envelope_us": 162.0,
+              "kernel_mean_us": 145.25833333333335,
+              "setup_mean_us": 8.258333333333335
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 719.74,
+              "first_start_us": 731.68,
+              "last_start_us": 732.28,
+              "last_end_us": 883.9,
+              "start_spread_us": 0.6000000000000227,
+              "worker_envelope_us": 164.15999999999997,
+              "kernel_mean_us": 147.18458333333334,
+              "setup_mean_us": 8.497916666666667
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 872.9,
+              "first_start_us": 889.5,
+              "last_start_us": 890.18,
+              "last_end_us": 914.86,
+              "start_spread_us": 0.67999999999995,
+              "worker_envelope_us": 41.960000000000036,
+              "kernel_mean_us": 23.062916666666663,
+              "setup_mean_us": 10.425833333333337
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 99.62,
+              "first_start_us": 118.18,
+              "last_start_us": 118.46000000000001,
+              "last_end_us": 126.34,
+              "start_spread_us": 0.28000000000000114,
+              "worker_envelope_us": 26.72,
+              "kernel_mean_us": 7.0683333333333325,
+              "setup_mean_us": 18.608333333333334
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/baseline/dfx/window_2/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1099.64,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 85.62,
+            "norm_end_to_sparse_receive": 639.74,
+            "sparse_receive_to_merge_end": 202.79999999999995,
+            "merge_end_to_last_worker": 171.48000000000013
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 725.36,
+              "first_start_us": 737.8,
+              "last_start_us": 738.16,
+              "last_end_us": 892.92,
+              "start_spread_us": 0.36000000000001364,
+              "worker_envelope_us": 167.55999999999995,
+              "kernel_mean_us": 150.87,
+              "setup_mean_us": 9.227499999999992
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 725.36,
+              "first_start_us": 737.96,
+              "last_start_us": 738.54,
+              "last_end_us": 895.12,
+              "start_spread_us": 0.5799999999999272,
+              "worker_envelope_us": 169.76,
+              "kernel_mean_us": 152.83458333333334,
+              "setup_mean_us": 9.454583333333323
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 886.28,
+              "first_start_us": 902.36,
+              "last_start_us": 903.02,
+              "last_end_us": 928.16,
+              "start_spread_us": 0.6599999999999682,
+              "worker_envelope_us": 41.879999999999995,
+              "kernel_mean_us": 23.753750000000004,
+              "setup_mean_us": 11.372916666666667
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 118.50000000000001,
+              "first_start_us": 118.89999999999999,
+              "last_start_us": 119.22000000000001,
+              "last_end_us": 126.67999999999999,
+              "start_spread_us": 0.3200000000000216,
+              "worker_envelope_us": 8.179999999999978,
+              "kernel_mean_us": 6.7700000000000005,
+              "setup_mean_us": 0.5399999999999991
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/baseline/dfx/window_3/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1090.04,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 87.94,
+            "norm_end_to_sparse_receive": 630.78,
+            "sparse_receive_to_merge_end": 202.66000000000008,
+            "merge_end_to_last_worker": 168.65999999999997
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 718.7199999999999,
+              "first_start_us": 734.0999999999999,
+              "last_start_us": 734.62,
+              "last_end_us": 888.66,
+              "start_spread_us": 0.5200000000000955,
+              "worker_envelope_us": 169.94000000000005,
+              "kernel_mean_us": 149.24333333333334,
+              "setup_mean_us": 9.969166666666661
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 718.76,
+              "first_start_us": 734.4,
+              "last_start_us": 735.3399999999999,
+              "last_end_us": 890.76,
+              "start_spread_us": 0.9399999999999409,
+              "worker_envelope_us": 172.0,
+              "kernel_mean_us": 150.90833333333333,
+              "setup_mean_us": 10.446666666666664
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 881.04,
+              "first_start_us": 895.3399999999999,
+              "last_start_us": 896.06,
+              "last_end_us": 921.38,
+              "start_spread_us": 0.7200000000000273,
+              "worker_envelope_us": 40.34000000000003,
+              "kernel_mean_us": 23.359583333333337,
+              "setup_mean_us": 9.684166666666679
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 102.66000000000001,
+              "first_start_us": 117.38,
+              "last_start_us": 117.76000000000002,
+              "last_end_us": 126.06,
+              "start_spread_us": 0.3800000000000239,
+              "worker_envelope_us": 23.39999999999999,
+              "kernel_mean_us": 7.590000000000001,
+              "setup_mean_us": 14.826666666666666
+            }
+          }
+        }
+      ],
+      "scheduler_windows": [
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 11.060000000000002,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 11.620000000000005,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 13.680000000000007,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 14.0,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        }
+      ]
+    },
+    "candidate": {
+      "timing_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/candidate/report.json",
+      "timing": {
+        "pto": {
+          "samples_us": [
+            1100.4400253295898,
+            1108.5400581359863,
+            1110.4600429534912,
+            1097.0200300216675,
+            1101.4200448989868,
+            1104.6600341796875,
+            1100.3799438476562,
+            1101.4399528503418,
+            1120.6599473953247,
+            1104.0799617767334,
+            1092.2000408172607,
+            1120.7200288772583,
+            1106.3599586486816,
+            1097.100019454956,
+            1109.220027923584,
+            1105.9800386428833,
+            1099.0400314331055,
+            1114.1599416732788,
+            1090.3400182724,
+            1091.7799472808838
+          ],
+          "mean_us": 1103.8000047206879,
+          "p50_us": 1102.7599573135376,
+          "p95_us": 1120.6599473953247,
+          "max_us": 1120.7200288772583,
+          "over_p50_2pct": 0,
+          "over_p50_5pct": 0
+        },
+        "native": {
+          "samples_us": [
+            1316.6199922561646,
+            1313.6600255966187,
+            1318.619966506958,
+            1318.4800148010254,
+            1313.5600090026855,
+            1316.059947013855,
+            1316.580057144165,
+            1317.8800344467163,
+            1321.0599422454834,
+            1318.120002746582,
+            1315.179944038391,
+            1325.1999616622925,
+            1317.8000450134277,
+            1316.480040550232,
+            1318.660020828247,
+            1319.5600509643555,
+            1320.8800554275513,
+            1316.7200088500977,
+            1319.4799423217773,
+            1319.9199438095093
+          ],
+          "mean_us": 1318.0260002613068,
+          "p50_us": 1318.0000185966492,
+          "p95_us": 1321.0599422454834,
+          "max_us": 1325.1999616622925,
+          "over_p50_2pct": 0,
+          "over_p50_5pct": 0
+        }
+      },
+      "worker_windows": [
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/candidate/dfx/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1078.6799999999998,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 92.94,
+            "norm_end_to_sparse_receive": 624.56,
+            "sparse_receive_to_merge_end": 190.06000000000006,
+            "merge_end_to_last_worker": 171.11999999999978
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 717.5,
+              "first_start_us": 722.4200000000001,
+              "last_start_us": 735.7600000000001,
+              "last_end_us": 878.0200000000001,
+              "start_spread_us": 13.340000000000032,
+              "worker_envelope_us": 160.5200000000001,
+              "kernel_mean_us": 143.7925,
+              "setup_mean_us": 3.857500000000016
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 717.5,
+              "first_start_us": 722.5400000000001,
+              "last_start_us": 735.62,
+              "last_end_us": 880.1,
+              "start_spread_us": 13.079999999999927,
+              "worker_envelope_us": 162.60000000000002,
+              "kernel_mean_us": 145.82291666666669,
+              "setup_mean_us": 3.9791666666666736
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 867.22,
+              "first_start_us": 882.24,
+              "last_start_us": 882.88,
+              "last_end_us": 907.5600000000001,
+              "start_spread_us": 0.6399999999999864,
+              "worker_envelope_us": 40.34000000000003,
+              "kernel_mean_us": 22.00208333333335,
+              "setup_mean_us": 10.482083333333316
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 107.36000000000001,
+              "first_start_us": 120.6,
+              "last_start_us": 120.92000000000002,
+              "last_end_us": 128.28,
+              "start_spread_us": 0.3200000000000216,
+              "worker_envelope_us": 20.919999999999987,
+              "kernel_mean_us": 6.760000000000001,
+              "setup_mean_us": 13.286666666666667
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/candidate/dfx/window_1/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1068.5,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 84.7,
+            "norm_end_to_sparse_receive": 622.9399999999999,
+            "sparse_receive_to_merge_end": 186.39999999999998,
+            "merge_end_to_last_worker": 174.46000000000004
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 707.66,
+              "first_start_us": 714.22,
+              "last_start_us": 728.12,
+              "last_end_us": 864.54,
+              "start_spread_us": 13.899999999999977,
+              "worker_envelope_us": 156.88,
+              "kernel_mean_us": 139.40583333333333,
+              "setup_mean_us": 2.9050000000000247
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 707.64,
+              "first_start_us": 714.3199999999999,
+              "last_start_us": 728.14,
+              "last_end_us": 866.66,
+              "start_spread_us": 13.82000000000005,
+              "worker_envelope_us": 159.01999999999998,
+              "kernel_mean_us": 141.48791666666668,
+              "setup_mean_us": 3.0087500000000182
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 855.14,
+              "first_start_us": 868.4399999999999,
+              "last_start_us": 869.26,
+              "last_end_us": 894.04,
+              "start_spread_us": 0.82000000000005,
+              "worker_envelope_us": 38.89999999999998,
+              "kernel_mean_us": 22.73541666666668,
+              "setup_mean_us": 9.170000000000002
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 115.97999999999999,
+              "first_start_us": 116.96000000000001,
+              "last_start_us": 117.88,
+              "last_end_us": 125.03999999999999,
+              "start_spread_us": 0.9199999999999875,
+              "worker_envelope_us": 9.060000000000002,
+              "kernel_mean_us": 6.611666666666667,
+              "setup_mean_us": 1.4749999999999919
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/candidate/dfx/window_2/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1073.04,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 87.82,
+            "norm_end_to_sparse_receive": 628.94,
+            "sparse_receive_to_merge_end": 189.36,
+            "merge_end_to_last_worker": 166.91999999999996
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 716.76,
+              "first_start_us": 729.22,
+              "last_start_us": 729.72,
+              "last_end_us": 874.04,
+              "start_spread_us": 0.5,
+              "worker_envelope_us": 157.27999999999997,
+              "kernel_mean_us": 141.51333333333332,
+              "setup_mean_us": 7.830000000000003
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 716.78,
+              "first_start_us": 729.34,
+              "last_start_us": 730.1,
+              "last_end_us": 876.28,
+              "start_spread_us": 0.7599999999999909,
+              "worker_envelope_us": 159.5,
+              "kernel_mean_us": 143.48916666666668,
+              "setup_mean_us": 8.035833333333334
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 865.8,
+              "first_start_us": 880.6800000000001,
+              "last_start_us": 881.74,
+              "last_end_us": 906.12,
+              "start_spread_us": 1.0599999999999454,
+              "worker_envelope_us": 40.32000000000005,
+              "kernel_mean_us": 22.67333333333332,
+              "setup_mean_us": 7.716666666666685
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 99.6,
+              "first_start_us": 124.78,
+              "last_start_us": 125.22,
+              "last_end_us": 132.66,
+              "start_spread_us": 0.4399999999999977,
+              "worker_envelope_us": 33.06,
+              "kernel_mean_us": 7.064999999999998,
+              "setup_mean_us": 25.261666666666667
+            }
+          }
+        },
+        {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/swimlane/candidate/dfx/window_3/merged_swimlane.json",
+          "metadata": {
+            "run_boundaries": [
+              {
+                "launch_epoch": 0,
+                "start_time_us": 0.0
+              }
+            ]
+          },
+          "worker_span_us": 1083.74,
+          "worker_instances": 1057,
+          "phases_us": {
+            "first_worker_to_norm_end": 88.22,
+            "norm_end_to_sparse_receive": 639.64,
+            "sparse_receive_to_merge_end": 183.45999999999992,
+            "merge_end_to_last_worker": 172.42000000000007
+          },
+          "tasks": {
+            "qk_pv_aic": {
+              "blocks": 24,
+              "first_receive_us": 727.86,
+              "first_start_us": 736.28,
+              "last_start_us": 736.74,
+              "last_end_us": 879.18,
+              "start_spread_us": 0.4600000000000364,
+              "worker_envelope_us": 151.31999999999994,
+              "kernel_mean_us": 138.75416666666666,
+              "setup_mean_us": 7.3091666666666555
+            },
+            "qk_pv_aiv": {
+              "blocks": 48,
+              "first_receive_us": 727.86,
+              "first_start_us": 736.48,
+              "last_start_us": 737.24,
+              "last_end_us": 881.28,
+              "start_spread_us": 0.7599999999999909,
+              "worker_envelope_us": 153.41999999999996,
+              "kernel_mean_us": 140.64041666666665,
+              "setup_mean_us": 7.575
+            },
+            "merge_norm": {
+              "blocks": 48,
+              "first_receive_us": 872.38,
+              "first_start_us": 885.86,
+              "last_start_us": 886.56,
+              "last_end_us": 911.3199999999999,
+              "start_spread_us": 0.6999999999999318,
+              "worker_envelope_us": 38.93999999999994,
+              "kernel_mean_us": 22.149583333333336,
+              "setup_mean_us": 8.484166666666672
+            },
+            "qr_rms_norm_quant": {
+              "blocks": 12,
+              "first_receive_us": 101.1,
+              "first_start_us": 121.24000000000001,
+              "last_start_us": 121.52000000000001,
+              "last_end_us": 128.5,
+              "start_spread_us": 0.28000000000000114,
+              "worker_envelope_us": 27.400000000000006,
+              "kernel_mean_us": 6.301666666666662,
+              "setup_mean_us": 20.215000000000003
+            }
+          }
+        }
+      ],
+      "scheduler_windows": [
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 12.879999999999995,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 10.279999999999973,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 11.04000000000002,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        },
+        {
+          "score_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "sparse_assignment": {
+            "aic": {
+              "blocks": 24,
+              "used_cores": 24,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            },
+            "aiv": {
+              "blocks": 48,
+              "used_cores": 48,
+              "max_blocks_per_core": 1,
+              "reused_track_events": []
+            }
+          },
+          "drain_marker_union_us": 10.660000000000025,
+          "drain_limit": "仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。"
+        }
+      ]
+    }
+  },
+  "full_summary_source": "tests/pypto_test/results/csa_qr_ub_20260928/h131072_b16/summary.json"
+}
