@@ -1,6 +1,7 @@
 # CSA核内优化：本地AscendC源码参考
 
-更新：2026-09-28。按用户要求，将新下载的三个仓库纳入Native、pypto-lib之外的源码参考。
+更新：2026-09-28。按用户修正后的目标，最新AscendC实现是后续核内优化的主要依据：
+首先研究ops-transformer，结合ops-nn、ops-math等ops仓库；当前Native作性能/行为对照，pypto-lib作PTO实现参考。
 以下是本地已读取版本，不表示当前CANN二进制已包含这些实现，也不表示这些实现已测得比PTO快。
 
 | 本地仓库 | 本次读取HEAD | CSA相关入口 |
@@ -65,5 +66,6 @@ RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及
 
 先处理[短档Score/Sparse长尾证据](results/csa_short_score_sync_20260928/README.md)，
 随后恢复已有HC候选，再验证上述四路Top-K和有明确搬运差异的核内候选。
+按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。
