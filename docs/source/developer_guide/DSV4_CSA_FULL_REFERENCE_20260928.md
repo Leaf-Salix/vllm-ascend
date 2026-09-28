@@ -428,3 +428,39 @@ NZ2/atomic0/deterministic0与参考一致。使用同一离线prefill bank和FUL
 原始rank0设备事件已按14组压缩保存为`device_tasks/rank0.json.gz`，随结果备份本地。
 `model_gap_rank0.json`保留区间、分阶段耗时及分析限制；完整原始profiler目录保留227。
 逐文件哈希见`matrix-evidence-manifest.json`。该trace不能用来声明EPLB开启或独立CSA轨迹数值通过。
+
+## 2026-09-29 00:51 第五阶段：真实DP补位与单卡补位图重放
+
+生产仍固定393134f1d；测试harness-v2使用独立副本，不修改前述数值或性能采集脚本。
+16卡任务`task_20260929_003954_61771222787`、单卡任务`task_20260929_004626_69176422503`均exit0。
+
+16卡使用8K bank、BS容量4、capture24、NZ2/atomic0/det0、EPLB关闭；
+rank0/1/2分别提交4/3/2个请求，其余4；rank0最长16token，其余64，单rank内请求错峰结束。
+共61请求、2345输出token，Native/Leaf逐token一致。以下是各16rank求和，计数类型不可混用：
+
+| 观测 | Native | Leaf |
+|---|---|---|
+| 实际请求FULL步骤 | 184 | 184 |
+| 实际请求NONE步骤（起始S1） | 16 | 16 |
+| 空rank dummy步骤 | 312 | 312 |
+| 补位metadata builder调用 | 3424 | 3424 |
+| CSA graph门禁调用 | 0 | 992 |
+| 门禁允许补位调用 | 0 | 856 |
+| 门禁拒绝调用 | 0 | 0 |
+| 窗口内新graph捕获 | 0 | 0 |
+| 同一batch混合query长度 | 0 | 0 |
+
+Native不使用CSA门禁，0是正常观测。门禁可能每步调用两次，builder会按cache group调用；
+856不能当作856个独立图重放步骤。dummy抽样中原生常驻slot均为-1、block table均为0，
+compact producer复算得到的非负页仅为0；这些是寻址证据，不是整模型cache逐字节相等证明。
+无观测错误，各rank请求均完成；真实混合query（如6/6/5）没有出现，该项仍未覆盖。
+
+单卡沿用真实第2层权重、B4/S6/H8192 fixture，捕获实际Leaf `full_csa_forward`，
+由生产入口生成compact metadata，无参考NativeCSACall注入。原生builder同址更新输入，
+同一张图依次B4→B3→B1→B4；有效行输出/TopK、cache写入及保护区全部通过零容差比较。
+输出oracle是同一CSA满档运行的有效请求前缀；Native compact结果只定义允许写区。
+它证明补位一致性/写入隔离，不能替代相对Native精度检查或完整模型graph数值验收。
+
+观测/恢复CPU回归通过，独立review无阻断；已补生成异常时finally关闭窗口并保存诊断。
+本轮含CPU同步和metadata复算，耗时不纳入性能报告。证据为`padding-summary.json`、
+`padding-evidence-manifest.json`、`results/padding-v1/`和`results/single-padding-v1/`。
