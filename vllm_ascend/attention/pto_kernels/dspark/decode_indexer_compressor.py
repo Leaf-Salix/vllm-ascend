@@ -194,7 +194,7 @@ def indexer_compressor_project_vllm(
             k_start = ((column % HEAD_DIM) // d_base) * NATIVE_K_ROTATION_STEP
             kv_acc = pl.create_tensor([MM_B_TILE, NATIVE_PROJ_OUT_TILE], dtype=pl.FP32)
             gate_acc = pl.create_tensor([MM_B_TILE, NATIVE_PROJ_OUT_TILE], dtype=pl.FP32)
-            for step in pl.pipeline(0, D // NATIVE_PROJ_K_TILE, stage=1):
+            for step in pl.pipeline(0, D // NATIVE_PROJ_K_TILE, stage=2):
                 k = (k_start + step * NATIVE_PROJ_K_TILE) % D
                 hidden = pl.slice(
                     x, [MM_B_TILE, NATIVE_PROJ_K_TILE], [row_begin, k],
