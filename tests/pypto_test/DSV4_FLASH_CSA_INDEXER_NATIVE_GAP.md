@@ -40,6 +40,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为76.619/135.495μs，后续按当前核时继续看等待与重复move |
 | 系数生成 | ProcessVec0在QLI内由偶数AIV成块加载FP16 weight/qScale，相乘、Brcb后GM交接 | 独立SPMD成块加载FP32输入，分别转FP16相乘；在UB补入对角行后一次GM写回，提交min(48,query组数)，stride48不变 | 空worker、批量准备和UB一次发布已保留；独立任务/转换/对角布局开销仍在，朴素融合失败；Native QLI不含Query Hadamard量化 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
+| WS归约粒度 | ProcessWs逐query循环，ComputeWs的M=16、K=gSize=64，N最大128；Brcb的16行重复结果只发布有效行 | S6以[16,384]对角系数同时规约六个query，N64，发布六个有效行 | 同六query/128候选的FP16 MAC数均为6×16×64×128=786432；不能只看到PTO的零系数就认定额外算力浪费。调用数与L0/流水布局不同，应连同QK分块评估 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
 | Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | PTO每leaf有两个half根；改成query分工可能减少根归并，但会增加scale重复读取，未验证前不能判收益 |
 | 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长档先排序前2048候选并将Top-512根留UB，尾段完成后合并；短档保留原路径 | PTO缩放后score仍经GM，最终归并仍独立；临时根GM往返已消除 |
@@ -54,6 +55,11 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 后续GM reshape/load链不能成立；该轻量探针未产生设备候选，保留原路径，见[表达限制](results/csa_key_page_view_20260929/README.md)。
 当前实际核时与七档Native对照见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)；
 [完整四窗口、最慢核与包络](results/csa_compiled_seven_20260929/RESULTS.md)保留全部原始读数。
+
+WS粒度的源码依据为同目录`quant_lightning_indexer_v2_service_cube_arch22.h`：
+ProcessWs（179行）逐gSize调用，ComputeWs（496行）设置M/N/K，
+FixpResToGm（552行）只发布各query的有效行。上述MAC计算不包含DMA、FIXPIPE、同步、
+尾部padding及Cube指令吞吐差别，不能据此判定两实现等速；不原样重试已失败的4+2/固定组驻留。
 
 ## 下一步按依赖推进
 
@@ -93,6 +99,9 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 - [query排序循环](results/csa_sort_query_loop_20260928/README.md)：代码体积下降，短档核时恶化，不采用。
 - [Score矩阵scale广播](results/csa_score_scale_matrix_20260929/README.md)：长档6个TMUL调用点合为1个TCOLEXPANDMUL，
   状态精确、CSA略降，但长B16 Score AIC/AIV约+7%，没有核内收益，不采用。
+- [缩放分数按2048段驻留UB](results/csa_score_segment_ub_20260929/README.md)：固定512等宽行/48KiB缓冲，
+  状态零容差通过，生成码去掉排序前GM中转；长Score AIC/AIV仅+0.065%/−0.294%，
+  首轮长CSA−2.081%，同源码反向复测仅−0.151%，未形成稳定收益，暂不采用。
 - [源码入口和版本](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)：A3 arch22优先，不套用不兼容的arch35能力。
 - [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)、
   [Native调用接口](../../vllm_ascend/attention/dsa_v1.py)。
