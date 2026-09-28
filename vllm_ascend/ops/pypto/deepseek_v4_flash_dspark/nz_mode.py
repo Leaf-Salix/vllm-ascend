@@ -35,12 +35,41 @@ QUANT_WEIGHT_NZ = WEIGHT_NZ_MODE >= 1
 # PyPTO 支持把 layout 放在闭包变量里，见 pypto/python/pypto/jit/cache.py 的说明。
 BF16_WEIGHT_LAYOUT = pl.NZ if BF16_WEIGHT_NZ else None
 QUANT_WEIGHT_LAYOUT = pl.NZ if QUANT_WEIGHT_NZ else None
-# wo_a 单独一档，恒为 ND：它是三维分组权重 [O_GROUPS, O_GROUP_IN, O_LORA]，
-# Native 的 NZ 后处理钩子覆盖不到它（实测 mode=2 下它仍是 ND(2)，而同为 BF16 的
-# 二维 wq_a 已是 NZ(29)）。若这里声明 NZ，`root_weight` 就得 npu_format_cast 出一份
-# 私有副本——每层 64 MiB、21 个 ratio-4 层合计 1.31 GiB，直接吃掉 KV cache 的额度。
-# 详见 tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md。
-WO_A_WEIGHT_LAYOUT = None
+
+
+def _native_keeps_3d_bf16_as_nz() -> bool:
+    """Native 会不会把三维 BF16 权重存成 NZ——实测一次，不按版本号猜。
+
+    `wo_a` 是三维分组权重 `[O_GROUPS, O_GROUP_IN, O_LORA]`。它在 Native 侧最终是
+    ND 还是 NZ，取决于当前 CANN 的 `npu_format_cast` 支不支持三维 BF16：
+    CANN 9.0.0 不支持，于是 Native 侧留在 ND(2)；9.2.0 支持，于是是 NZ(29)。
+    vllm-ascend 侧的钩子代码两版相同，差异只来自 CANN。
+
+    这一项必须跟着 Native 走，写死任何一边都会在另一边付出代价：kernel 声明的
+    布局与 Native 实际存法不一致时，`root_weight` 就要 npu_format_cast 出一份
+    私有副本——`wo_a` 每层 64 MiB、21 个 ratio-4 层合计 **1.31 GiB**，直接从
+    KV cache 的额度里扣。两个方向都实测过，数字一样大。
+
+    探针只分配 4 KiB，且用当前设备；拿不到设备或调用失败时回落到与其它 BF16
+    权重相同的档位（即本开关引入之前的行为），并由 `native_adapter.root_weight`
+    的不匹配告警兜底。
+    """
+    try:
+        import torch  # noqa: PLC0415
+        import torch_npu  # noqa: PLC0415
+
+        if not torch.npu.is_available() or not torch.npu.is_initialized():
+            return BF16_WEIGHT_NZ
+        probe = torch.empty((2, 32, 32), dtype=torch.bfloat16, device=torch.npu.current_device())
+        return int(torch_npu.get_npu_format(torch_npu.npu_format_cast(probe, 29))) == 29
+    except Exception:  # noqa: BLE001 - 探针失败不该拖垮导入
+        return BF16_WEIGHT_NZ
+
+
+# wo_a 单独一档：它跟随的不是全局 BF16 档位，而是 Native 对三维 BF16 的实际存法。
+# 详见 `_native_keeps_3d_bf16_as_nz` 与
+# tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md。
+WO_A_WEIGHT_LAYOUT = pl.NZ if (BF16_WEIGHT_NZ and _native_keeps_3d_bf16_as_nz()) else None
 
 
 def validate_weight_nz_mode(effective_mode: int) -> None:

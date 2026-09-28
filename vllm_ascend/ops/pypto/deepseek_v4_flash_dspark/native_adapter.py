@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+from vllm.logger import logger
 
 from .config import DECODE_BATCH
 from .decode_csa import _decode_csa_tp1_layer, decode_csa_tp1_layer_test
@@ -128,6 +129,18 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
 
     layouts = root_weight_layouts(root_function)
 
+    def _recast(name, value, current, target):
+        # 声明的布局与 Native 实际存法不符时只能另开一份私有副本。这条路径静默走过
+        # 一次就意味着每层多占一份权重，而且只会体现在 worker 的 weights 汇总里——
+        # 2026-09-28 的 CANN 9.0 -> 9.2 升级就是这样让 wo_a 悄悄多吃了 1.31 GiB
+        # （9.0 的 Native 把三维 BF16 留在 ND，9.2 改存 NZ）。所以显式报出来。
+        logger.warning(
+            "PTO_CSA_WEIGHT_RECAST %s: kernel 声明 %s 但 Native 存的是 format=%d，"
+            "复制一份私有副本 %.2f MiB/层；请核对 nz_mode 的布局判据是否还跟得上当前 CANN",
+            name, layouts[name], current, value.numel() * value.element_size() / (1 << 20),
+        )
+        return torch_npu.npu_format_cast(value, target)
+
     def root_weight(name, shape, dtype):
         # 根矩阵方向与 Native 相同。格式已匹配时借用原存储，禁止解包、转置或重新打包。
         value = getattr(attention, name).weight.detach()
@@ -135,8 +148,10 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
             raise ValueError(f"Unexpected Native {name} weight: {value.shape}/{value.dtype}")
         current = int(torch_npu.get_npu_format(value))
         if layouts[name] == "NZ":
-            return value if current == 29 else torch_npu.npu_format_cast(value, 29)
-        return value if current in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND) else torch_npu.npu_format_cast(value, 2)
+            return value if current == 29 else _recast(name, value, current, 29)
+        if current in (_ACL_FORMAT_NCHW, _ACL_FORMAT_ND):
+            return value
+        return _recast(name, value, current, _ACL_FORMAT_ND)
 
     def weight(module, shape, dtype, transpose=False):
         value = module.weight.detach()
