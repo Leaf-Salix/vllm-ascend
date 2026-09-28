@@ -157,3 +157,35 @@ def test_pool_preserves_native_rounding_instead_of_online_accumulation():
     historical = online_sum / len(values)
     assert historical.item() == 2.0**21 + 0.25
     assert historical != expected[0]
+
+
+@pytest.mark.parametrize("lengths,expected", [([6, 6, 6, 6], 32), ([3, 4, 5, 6], 64), ([6, 6, 0], 64), ([6] * 65, 64)])
+def test_projection_uses_native_equal_length_tiling(lengths, expected):
+    function = next(
+        node
+        for node in ast.parse(SOURCE.read_text()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "compressor_ratio4_project_vllm"
+    )
+    body = next(node for node in function.body if isinstance(node, ast.With)).body
+    end = next(i for i, node in enumerate(body) if isinstance(node, ast.For) and node.target.id == "unit")
+    bounds = torch.tensor([0] + lengths, dtype=torch.int32).cumsum(0)
+    # The actual compiler sign-extends a predicate: True becomes -1. This
+    # regression failed for equal lengths when the code counted bool casts.
+    pl = SimpleNamespace(
+        tensor=SimpleNamespace(dim=lambda tensor, axis: tensor.shape[axis]),
+        tile=SimpleNamespace(get_block_idx=lambda: 0),
+        range=range,
+        INT32=torch.int32,
+        read=lambda tensor, index: int(tensor[tuple(index)]),
+        cast=lambda value, dtype: -int(value) if isinstance(value, bool) else int(value),
+    )
+    namespace = dict(
+        pl=pl,
+        query_start_loc=bounds,
+        NATIVE_D_BASE=64,
+        NATIVE_NARROW_MAX_TOKENS=384,
+        HEAD_DIM=512,
+        NATIVE_NARROW_D_PARTS=16,
+    )
+    exec(compile(ast.Module(body=body[:end], type_ignores=[]), str(SOURCE), "exec"), namespace)
+    assert namespace["d_base"] == expected
