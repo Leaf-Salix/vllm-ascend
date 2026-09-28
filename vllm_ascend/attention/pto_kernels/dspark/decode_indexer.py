@@ -1017,6 +1017,16 @@ def indexer_qr_rope(
             qr_scale_tile = pl.reshape(pl.fillpad(pl.slice(
                 qr_scale_row, [1, DEQUANT_T_TILE], [0, dq_t0], valid_shape=[1, dq_rows],
             ), pad_value=pl.PadValue.zero), [DEQUANT_T_TILE, 1])
+            # The qr_scale half does not depend on the inner h_inner (only
+            # wq_scale varies per head), so materializing it and this
+            # row_expand_mul move out here and run once; the inner loop keeps
+            # just the col_expand_mul. The expression and the multiply order
+            # are unchanged -- it is the same value computed DQ_ROPE_H_TILE-1
+            # fewer times, so it is bit-identical.
+            qr_ones = pl.full(
+                [DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0,
+            )
+            qr_scale_bcast = pl.row_expand_mul(qr_ones, qr_scale_tile)
             cos_tile = pl.fillpad(pl.slice(
                 cos, [DEQUANT_T_TILE, ROPE_HEAD_DIM], [dq_t0, 0],
                 valid_shape=[dq_rows, ROPE_HEAD_DIM],
@@ -1051,12 +1061,7 @@ def indexer_qr_rope(
                 # 100.0000% was uniform-b4 only. The sequential order is
                 # bit-exact on uniform-b4 and off by 1..8 int8 elements on
                 # other window phases, which is what flips the top-k.
-                qr_ones = pl.full(
-                    [DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0,
-                )
-                qr_factor = pl.col_expand_mul(
-                    pl.row_expand_mul(qr_ones, qr_scale_tile), wq_scale,
-                )
+                qr_factor = pl.col_expand_mul(qr_scale_bcast, wq_scale)
                 qr_dequant = pl.cast(
                     pl.cast(
                         pl.mul(acc_fp32, qr_factor),
