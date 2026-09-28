@@ -56,6 +56,7 @@ T_TILE = 8
 MATMUL_T_TILE = 16
 QR_M_TILE = MATMUL_T_TILE  # qr_proj token (M) tile; cube rows must be a 16-row boxed tile
 QR_DENSE_M_TILE = 64
+QR_M_GROUPS = 2  # Parallel independent row tiles; retain the full K reduction.
 QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul
 QR_K_TILE = 256  # keep one FP32 accumulator across the complete K reduction
 KV_M_TILE = MATMUL_T_TILE  # kv_proj token (M) tile; decode pads from 8 real rows to 16
@@ -283,17 +284,25 @@ def q_proj_qr(
             qr_t_matmul = ((tile_rows + QR_M_TILE - 1) // QR_M_TILE) * QR_M_TILE
             qr_full_rows = (tile_rows // QR_DENSE_M_TILE) * QR_DENSE_M_TILE
 
+            qr_m_groups = pl.min(
+                QR_M_GROUPS,
+                qr_full_rows // QR_DENSE_M_TILE + (qr_t_matmul - qr_full_rows) // QR_M_TILE,
+            )
+
             # Native linear materializes BF16 only after the complete K
             # reduction. Do not round and atomically merge split-K partials.
             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
             with pl.spmd(
-                Q_LORA // QR_N_TILE,
+                (Q_LORA // QR_N_TILE) * qr_m_groups,
                 name_hint="qr_proj_matmul",
                 allow_early_resolve=True,
             ) as qr_mm_tid:
                 qbg_idx = pl.tile.get_block_idx()
-                q_a_col0 = qbg_idx * QR_N_TILE
-                for dense_t0 in pl.range(0, qr_full_rows, QR_DENSE_M_TILE):
+                qr_m_group = qbg_idx // (Q_LORA // QR_N_TILE)
+                q_a_col0 = (qbg_idx % (Q_LORA // QR_N_TILE)) * QR_N_TILE
+                for dense_t0 in pl.range(
+                    qr_m_group * QR_DENSE_M_TILE, qr_full_rows, qr_m_groups * QR_DENSE_M_TILE,
+                ):
                     dense_x0 = tile_base + dense_t0
                     dense_acc = pl.create_tensor([QR_DENSE_M_TILE, QR_N_TILE], dtype=pl.FP32)
                     for dense_k in pl.pipeline(0, D // QR_K_TILE, stage=2):
@@ -302,7 +311,9 @@ def q_proj_qr(
                         dense_w = wq_a[dense_d0 : dense_d0 + QR_K_TILE, q_a_col0 : q_a_col0 + QR_N_TILE]
                         dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
                     qr_fp32 = pl.assemble(qr_fp32, dense_acc, [dense_t0, q_a_col0])
-                for t0 in pl.range(qr_full_rows, qr_t_matmul, QR_M_TILE):
+                for t0 in pl.range(
+                    qr_full_rows + qr_m_group * QR_M_TILE, qr_t_matmul, qr_m_groups * QR_M_TILE,
+                ):
                     q_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
                     for db in pl.pipeline(D // QR_K_TILE, stage=2):
                         qr_d0 = db * QR_K_TILE
