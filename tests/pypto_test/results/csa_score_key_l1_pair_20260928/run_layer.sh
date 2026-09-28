@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 : "${TASK_DEVICE:?Submit through task-submit with one device}"
-[[ "$(task-submit --status task_20260928_182811_290034987)" == 'completed (exit=0)' ]]
+# Check queue handles before submission. Even read-only task-submit --status
+# is rejected inside this daemon's task execution environment.
 workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 source "$workspace/env-dsv4-0251rc1.sh"

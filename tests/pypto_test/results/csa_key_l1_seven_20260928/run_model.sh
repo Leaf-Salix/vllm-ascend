@@ -3,7 +3,8 @@ set -eo pipefail
 : "${TASK_DEVICE:?Submit through task-submit with 16 devices}"
 IFS=',' read -r -a stage_devices <<< "$TASK_DEVICE"
 [[ "${#stage_devices[@]}" == 16 ]]
-[[ "$(task-submit --status task_20260928_181207_305949327631)" == 'completed (exit=0)' ]]
+# Queue status was checked before submission; nested task-submit is forbidden.
+# The collected seven-case PASS report below remains the on-task input gate.
 workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 source_repo="$workspace/.cache/csa-key-l1-seven-554b3bca"
