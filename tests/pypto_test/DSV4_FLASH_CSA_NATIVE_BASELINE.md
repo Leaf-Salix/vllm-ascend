@@ -63,11 +63,12 @@ npu_add_rms_norm_bias，所以只打开fuse_norm_quant不构成可运行环境�
 2. 已补真实Native半层模板编译：128K/B16从同进程手工图1294.493降到1238.764μs（−4.305%），
    static_compile实际True、安装包和覆盖QLI/Compressor/Sparse的39个算子描述已确认。
    Top-K集合不变、3行顺序变化；浮点输出有差异，不能直接称精度通过。旧手工图报告继续标明范围。
-3. Native两档编译后均值1238.764/1041.954μs及profile、P95已取得；继续补PTO同配置，
-   再判断既有PTO收益是否成立。已核对两档安装包的38个选择键各不相同；这里不单独归因static kernel收益。
+3. 同卡同配置Native/PTO编译对照已补：128K/B16为1217.529/1090.391μs，8K/B24为1026.713/988.208μs。
+   每侧独立空static_kernel目录；PTO真实custom-op调用确认。长档PTO P95异常，正在定位，不以均值代替稳定性。
 4. 核内优化继续按长短8:2；阶段收口才覆盖七档及真实EP16，避免每个配置问题都占16卡调试。
 
-当前已完成入口修订、10项CPU参数/Worker回归、单卡编译依赖与128K/B16、8K/B24真实编译半层对照；
-PTO同配置及整模型仍待完成，不修改旧七档表的百分比。
+当前已完成入口修订、10项CPU参数/Worker回归、单卡编译依赖及两档Native/PTO实际编译半层对照；
+长档P95、两侧数值和整模型仍待验收，不修改旧七档表的百分比。
 本单卡attention半层不含MoE，也未通过Worker实际绑核，不冒称整机模板已完整验收。
 [新单层结果、数值差异与profile](results/csa_native_compiled_layer_20260929/RESULTS.md)。
+[同配置Native/PTO对照及范围](results/csa_compiled_pair_20260929/RESULTS.md)。

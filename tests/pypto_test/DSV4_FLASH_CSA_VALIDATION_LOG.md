@@ -10348,3 +10348,34 @@ group3为107→104、47→38，短路径调用点不变。该计数是静态展�
 正式文件与已测私有候选一致，生产/测试根依赖图解析通过。精度版不动，CSA回退如实保留。
 不跨轮拼接相对旧生产的百分比；下一步补受影响长B8/B24，并针对长B4/B8减少Key跨query重复读取。
 [完整结果、状态与全部泳道](results/csa_stream_root_ub_20260929/RESULTS.md)。
+
+## 376. Native/PTO同配置真实编译半层：均值改善但长档P95异常（2026-09-29）
+
+使用d8627207冻结整包，不包含长B4/B8 S6候选。task_20260929_021429_306800420660 auto/card1完成exit=0；
+两侧CANN9.2、mode2/det0，PTO atomic0，ring=[256,128,256,32]MiB/task_window4096。
+沿用decode模板的编译/融合配置，Native走可追踪半层，PTO走生产dsv4_csa_forward及CSAServiceRuntime，
+要求实际PTO调用且不允许静默回退。每进程独立空static_kernel的私有OPP，未复用其他档位静态包。
+Native wrapper编译、static_compile=True、安装包通过；PTO wrapper编译、实际dispatch通过，
+PTO不透明custom-op内部由PyPTO编译，没有可交给CANN static compiler的算子描述符和安装包。
+
+| 档位 | Native/PTO均值μs | PTO变化 | Native/PTO P95μs | Native/PTO maxμs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1217.529/1090.391 | −10.442% | 1223.500/1391.560 | 1226.040/1455.720 |
+| 8K/B24 | 1026.713/988.208 | −3.750% | 1030.200/1003.020 | 1033.800/1011.380 |
+
+正式layer4权重/合成历史、每物理行不同scale，PTO第二层复用已有compact metadata。
+5次预热/20次无profiler计时，另采四份PyTorch JSON。PTO八类自身eager/图状态精确一致，保护区通过；
+Native det0浮点/Top-K差异单列，不作为两侧数值、token或DSpark验收。半层不含MoE/EP16及Worker绑核效果。
+
+长档PTO20次中3次为1249.740、1391.560、1455.720μs，其余约1027–1053μs；异常全部保留，
+不能以均值低10.442%宣称稳定性通过。仅追加长B16的连续编号profile，区分根内变慢与图派发间隙，
+未确认前不归因dummy、sync_start或共享机干扰。
+[同配置结果与完整证据](results/csa_compiled_pair_20260929/RESULTS.md)。
+
+§376定向诊断：task_20260929_021945_336685212482 auto/card1完成exit=0；同算子和编译入口，
+无profiler20次均值1041.044、P95 1060.400、max1065.840μs，未复现首轮大拖尾。
+独立连续profile20次，根kernel997.620–1046.701μs，AICPU执行1006.020–1055.441μs，
+图外事件1033.400–1159.800μs；按顺序一一对应的事件减根耗时为33.919–128.519μs。
+该差额不能等同纯CPU或纯调度开销，更不能用未复现的profile解释首轮1391/1456μs异常。
+没有改算子或新增sync_start，不宣称长尾修复；保留记录，后续实际编译入口继续观察。
+[逐次配对和profile路径](results/csa_compiled_tail_20260929/RESULTS.md)。
