@@ -213,6 +213,12 @@ Key L1为32KiB、Score为双48KiB，Mat末端128KiB；L0B稳态Key16KiB+WS48KiB�
 [定向验收入口与范围](results/csa_key_prefetch_final_20260928/README.md)。
 [容量与WS取舍](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、[候选状态](results/csa_score_key_l1_only_20260928/README.md)。
 
+下一长档候选已在独立8e176285快照准备：16个query组时均衡leaf中的N1024步，
+128K常见尾块的最忙核25→22步，保持score/pair容量、现有算术及任务调度。
+代价是更多Q/系数重载、排序和一次额外四路归并；静态步数不能代替设备收益。
+CPU编译等待当前三档EP16结束，尚未上卡或合入；通过后先测长短B16，按7:3和P95判定，再补受影响B8。
+[具体边界和验证范围](results/csa_score_balanced_leaves_20260928/README.md)。
+
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。
 本仓Native用于既定环境的性能/行为对照，pypto-lib用于PTO写法、工具链能力和布局参考。

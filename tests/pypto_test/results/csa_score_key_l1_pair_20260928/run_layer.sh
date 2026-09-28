@@ -10,6 +10,7 @@ export LD_LIBRARY_PATH="$repo/.cache/csa/native-install:$LD_LIBRARY_PATH"
 root="${1:-$repo/tests/pypto_test/results/csa_score_key_l1_pair_20260928}"
 candidate_repo="${2:-$workspace/.cache/csa-score-key-l1-pair-554b3bca}"
 long_batch="${3:-4}"
+baseline_repo="${4:-$workspace/.cache/csa-key-l1-seven-554b3bca}"
 rg -q '^COMPILE_PASS ' "$root/compile.log"
 # Exercise the changed long group and retain short B16 as the control.
 for case_spec in "131072:$long_batch" 8192:16; do
@@ -19,7 +20,7 @@ for case_spec in "131072:$long_batch" 8192:16; do
         labels=(candidate baseline)
         if [[ "$history" == 8192 ]]; then labels=(baseline candidate); fi
         for label in "${labels[@]}"; do
-            source_repo="$workspace/.cache/csa-key-l1-seven-554b3bca"
+            source_repo="$baseline_repo"
             extra=()
             if [[ "$label" == candidate ]]; then
                 source_repo="$candidate_repo"

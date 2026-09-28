@@ -1,0 +1,182 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -283,6 +283,31 @@
+ 
+ 
+ @pl.jit.inline
++def indexer_long_leaf_plan(
++    max_cache_count: pl.Scalar[pl.INDEX],
++    query_groups: pl.Scalar[pl.INDEX],
++):
++    """Balance 16 query groups over 24 workers without enlarging pair storage.
++
++    Round the leaf count to three waves, then spread N1024 tiles evenly
++    over those leaves. At 32769 candidates this is 6/6/6/5/5/5 tiles,
++    instead of 8/8/8/8/1. Other group counts keep their original leaves.
++    """
++    tile_count = (max_cache_count + BUFFERED_LONG_SCORE_TILE - 1) // BUFFERED_LONG_SCORE_TILE
++    leaf_count = pl.max((max_cache_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
++    leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
++    extra_leaves = 0
++    balanced_count = (leaf_count + 2) // 3 * 3
++    if 3 * query_groups == 2 * TOPK_SCORE_WORKERS:
++        # Do not grow the arena at the maximum supported history.
++        if balanced_count <= TOPK_MAX_LEAVES:
++            leaf_count = balanced_count
++            leaf_tiles = tile_count // balanced_count
++            extra_leaves = tile_count % balanced_count
++    return leaf_count, leaf_tiles, extra_leaves
++
++
++@pl.jit.inline
+ def indexer_topk_query_merge_one(
+     query: pl.Scalar[pl.INDEX],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+@@ -291,6 +316,8 @@
+     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+     multiway: pl.constexpr,
++    leaf_tiles: pl.Scalar[pl.INDEX],
++    extra_leaves: pl.Scalar[pl.INDEX],
+ ):
+     """Merge half-leaf roots and materialize one query's Top-512."""
+     batch_idx = query // S
+@@ -300,6 +327,13 @@
+     visible_count = pl.min(cache_bound, TOPK_MAX_CANDIDATES)
+     if visible_count > 0:
+         leaf_count = (visible_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF
++        if multiway:
++            visible_tiles = (visible_count + BUFFERED_LONG_SCORE_TILE - 1) // BUFFERED_LONG_SCORE_TILE
++            larger_leaf_tiles = extra_leaves * (leaf_tiles + 1)
++            if visible_tiles <= larger_leaf_tiles:
++                leaf_count = (visible_tiles + leaf_tiles) // (leaf_tiles + 1)
++            else:
++                leaf_count = extra_leaves + (visible_tiles - larger_leaf_tiles + leaf_tiles - 1) // leaf_tiles
+         half_count = leaf_count * 2
+         arena_base = query * TOPK_ROWS_PER_QUERY
+         if multiway:
+@@ -336,6 +370,20 @@
+     """Merge query roots on one persistent worker per physical AIV."""
+     worker = pl.tile.get_block_idx()
+     query_count = pl.tensor.dim(position_ids, 0)
++    merge_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
++    merge_extra_leaves = 0
++    if multiway:
++        max_cache_count = 0
++        for batch in pl.range(query_count // S):
++            max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
++        query_groups = query_count // 2
++        if query_count >= 4 * TOPK_SCORE_WORKERS:
++            query_groups = query_count // S
++        elif query_count >= 2 * TOPK_SCORE_WORKERS:
++            query_groups = query_count // 3
++        _merge_leaf_count, merge_leaf_tiles, merge_extra_leaves = indexer_long_leaf_plan(
++            pl.min(max_cache_count, TOPK_MAX_CANDIDATES), query_groups
++        )
+     for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
+         indexer_topk_query_merge_one(
+             query,
+@@ -345,6 +393,8 @@
+             topk_scores,
+             topk_indices,
+             multiway,
++            merge_leaf_tiles,
++            merge_extra_leaves,
+         )
+ 
+ 
+@@ -505,6 +555,7 @@
+     score_early_resolve: pl.constexpr,
+     key_prefetch_panels: pl.constexpr,
+     key_prefetch_to_l0: pl.constexpr,
++    balance_leaves: pl.constexpr,
+ ):
+     """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+@@ -541,6 +592,10 @@
+             buf_max_cache_len = pl.max(buf_max_cache_len, pl.read(kv_seq_lens, [buf_batch]) // COMPRESS_RATIO)
+         buf_capped_history = pl.min(buf_max_cache_len, TOPK_MAX_CANDIDATES)
+         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
++        if balance_leaves:
++            buf_max_leaves, buf_leaf_tiles, buf_extra_leaves = indexer_long_leaf_plan(
++                buf_capped_history, buf_query_count // query_group_size
++            )
+         pl.system.set_ffts(buf_score_ffts)
+         # S=6可作为一整组或三组2，均不跨请求；共享Key用组内最后query可见范围。
+         for buf_item in pl.range(buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS):
+@@ -558,8 +613,16 @@
+                 pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
+             )
+             buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
++            buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
++            if balance_leaves:
++                buf_logical_begin = (
++                    buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
++                ) * BUFFERED_LONG_SCORE_TILE
++                buf_leaf_capacity = (
++                    buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
++                ) * BUFFERED_LONG_SCORE_TILE
+             if buf_logical_begin < buf_visible_count:
+-                buf_valid_count = pl.min(TOPK_CANDIDATES_PER_LEAF, buf_visible_count - buf_logical_begin)
++                buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                 buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                 buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                 buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+@@ -805,8 +868,16 @@
+                     pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
+                 )
+                 buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
++                buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
++                if balance_leaves:
++                    buf_logical_begin = (
++                        buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
++                    ) * BUFFERED_LONG_SCORE_TILE
++                    buf_leaf_capacity = (
++                        buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
++                    ) * BUFFERED_LONG_SCORE_TILE
+                 if buf_logical_begin < buf_visible_count:
+-                    buf_valid_count = pl.min(TOPK_CANDIDATES_PER_LEAF, buf_visible_count - buf_logical_begin)
++                    buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                     buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                     buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                     buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+@@ -961,6 +1032,7 @@
+                     False,
+                     1,
+                     True,
++                    True,
+                 )
+             elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -983,6 +1055,7 @@
+                     False,
+                     1,
+                     False,
++                    True,
+                 )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -1006,6 +1079,7 @@
+                     # M128/N128 fits two 16KiB Key slots plus 32KiB WS in L0B.
+                     1,
+                     True,
++                    False,
+                 )
+         else:
+             short_queries = pl.tensor.dim(position_ids, 0)
+@@ -1038,6 +1112,7 @@
+                     True,
+                     0,
+                     True,
++                    False,
+                 )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -1060,6 +1135,7 @@
+                     True,
+                     0,
+                     True,
++                    False,
+                 )
+     else:
+         with pl.spmd(
