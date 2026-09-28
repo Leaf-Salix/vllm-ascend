@@ -9944,3 +9944,33 @@ Ruff、shell语法及所属文件diff --check通过；尚无当前组合新七�
 原先的其他会话未提交修改因此消失；这些未被本次提交覆盖或回退。
 本轮设备快照始终固定8e176285，未混入两项新修改，所以不声称当前分支完整组合已经验收。
 下一轮两侧统一到新冻结基线，再进行标量复用对照及必要组合检查，不拼接旧数值。
+
+## 360. Native CANN 9.2验证通过，按用户要求切换CSA/HCA公共环境（2026-09-28）
+
+用户指定yejia目录的CANN 9.2.0-beta.2，要求可运行后用于Native性能验证，随后明确CSA/HCA共改公共入口。
+冻结9d237d33，保留Python3.10、torch2.10.0、torch_npu2.10.0.post2、ATB9.0和release custom包，
+仅切CANN运行库/内置算子。CPU导入及进程maps确认libascendcl/libruntime/libopapi来自指定9.2目录。
+
+首轮task_20260928_214924_80499418895因本测试脚本未创建ASCEND_CACHE_PATH退出1，修复目录创建后，
+task_20260928_215010_8189894329在card1完成退出0。第二个CSA层正式权重、query6、mode2、det0、EPLB关闭；
+每侧预热5、20次无profiler图计时，另采一次profile。初态恢复在区间之外，没有执行PTO或16卡模型。
+
+| 档位 | Native 9.0均值 μs | Native 9.2均值 μs | 变化 | 9.0/9.2 P95 μs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1326.612 | 1323.392 | −0.243% | 1332.14/1328.34 |
+| 8K/B16 | 939.637 | 938.628 | −0.107% | 944.92/943.26 |
+
+有限值、Top-K、metadata和保护区通过。长档max1332.96→1333.86μs略升，短档946.00→943.74μs。
+变化不到0.3%，不宣布明显性能收益；不是七档或模型token/DSpark验收。
+当前VllmQuantLightningIndexer与SparseAttnSharedkv仍来自release自定义包，9.2内置没有这两个同名API。
+配套custom优先解析，不能把本轮称为已经运行最新版ops-transformer QLI/Sparse。
+
+9.2自动profile导出因安装属主为另一用户而失败。复制39MB同版本profiler至本用户cache后，
+两份原始记录离线重导出通过，四份JSON均有43个设备kernel；没有改对方目录、没有重跑计时。
+
+公共/data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh现切到9.2；env.sh、HCA单层/Compressor/decode
+及其性能脚本均继承。清理旧CANN路径，先deactivate再source以避免venv恢复旧PATH；固定PTOAS0.66和release包。
+旧9.0激活环境→公共入口反复source→HCA源码激活及Native/PyPTO导入检查通过，bisheng也来自9.2。
+HCA现有未提交算子/测试代码未改，已运行进程保持原环境，后续新任务用9.2。
+Native两档设备通过不等于PTO/HCA新环境完整验收，下轮局部优化需在同9.2基线完成必要编译/单卡检查。
+[命令、环境前后快照、全部样本、加载来源及四份JSON](results/csa_native_cann92_20260928/README.md)。

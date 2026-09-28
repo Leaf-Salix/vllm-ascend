@@ -6,6 +6,13 @@
 近期依据单卡核内耗时、Score/Sparse包络、完整CSA与P95推进，不为每个局部候选追加EP16。
 已经完成的模型数据保留；B8持续入场迟到、FFN等待和额外rank profile解析暂缓，待CSA阶段取得收益后再回到模型验收。
 
+用户新增环境要求已执行：指定CANN 9.2.0-beta.2在9d237d33的128K/B16与8K/B16 Native单卡图重放通过。
+公共env-dsv4-0251rc1.sh已切9.2，CSA/HCA后续新任务统一生效；两档均值相比9.0变化−0.243%/−0.107%，无明显加速。
+必须区分CANN运行库/内置算子更新与release custom算子版本，不能将仅切换环境称为已采用最新QLI。
+[9.2验证范围、加载来源与结果](results/csa_native_cann92_20260928/README.md)。
+该环境验证先于下一项PTO标量复用；历史9.0结果保留，不与9.2拼接计算收益。
+下一轮PTO对照也必须冻结新环境并做必要编译/设备检查；当前两档Native通过不代替PTO/HCA设备验收。
+
 **性能优先级（用户最新修正）**：后续优先128K，8K以守住性能为主；存在长档收益/短档代价时，
 用70%长档、30%短档权重衡量，不再要求所有优化必须长短档同时加速。
 对同范围、同轮基线计算耗时变化率Δ，综合指标为`0.7×Δ128K + 0.3×Δ8K`，负值表示改善。
@@ -364,8 +371,10 @@ Native 保留实际逐层执行路径。首层 metadata 生产成本单独记录
   分支 `dsv4-flash-pto-v0.25.1rc1`。
 - 固定模型：`/data/model/DeepSeek-V4-Flash-0731-w8a8`，正式 75 分片 ModelSlim；
   不混用 cann_recipe 参考权重。
-- 固定运行基线：A3、CANN 9.0.0、vLLM Ascend 0.25.1rc1、
+- 当前公共运行环境：A3、CANN 9.2.0-beta.2（2026-09-28按用户要求切换）、vLLM Ascend 0.25.1rc1、
   vLLM 0.25.1、当前隔离 Python 环境。
+- release custom算子及ATB 9.0保持；CANN运行库/内置算子切换不表示QLI/Sparse已换成最新ops-transformer。
+  9.0历史基线独立保留，新A/B固定9.2；已经运行的进程不受source脚本修改影响。
 - 涉及 vLLM/torch_npu 的命令先执行
   `source /data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh`。
 - PyPTO、Simpler 保持 `feat/kernel-mode-integration-test`。
