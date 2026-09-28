@@ -331,3 +331,45 @@ CPU接口/存储/graph门禁及测试驱动回归14项通过。另在227真实�
 `source-manifest-single-v1.json`、`source-manifest.json`、结果`states.pt`、
 `cross-reference-bitcompare.json`及逐文件`evidence-manifest.json`。
 复现入口为`tests/pto_attn/run_full_layer_native.py`，需提供冻结参考的测试助手路径、完整checkpoint和新输出目录。
+
+## 23:52 第三阶段：Leaf完整模型共同历史精度
+
+生产版本`393134f1d13b0319c85c8ef7165b7c8ad25c40e5`。
+任务`task_20260928_234136_369477911503`正常结束，exit0；8K和128K的前后源码/依赖检查均通过。
+完整75分片DSV4模型，TP1/DP=EP16、B4/S6、EPLB关闭、eager、每请求生成16token。
+模型包含43层，逐一检查21个C4层；每个rank每层采2次，共每档672组比较。
+复用冻结参考已审计通过的Native离线prefill bank、同一工具链和采样口径。
+每个worker记录并断言Leaf、pto_layer、DSA模块实际路径，确认没有误入参考生产源码。
+
+测试钩子拦截各层实际`_pto_csa_operator`：保存slot声明的写页与scratch/output，执行PTO，
+恢复所保存初态，再执行Native；样本预算外也保留Native计算路径。
+因此后续层的输入历史由Native产生，不是独立CSA生成轨迹。
+这里仅恢复声明写页；脚本本身不检查页外写入，不可用它单独证明所有cache均完整恢复。
+该前提由此前单层guard提供限定范围证据。整模型计时不使用这些双执行钩子。
+
+| 历史长度 | rank数 / 共同输入对数 | 输出L2中位数 | 输出L2最大值 | 相对Native输出逐位一致 |
+|---|---|---|---|---|
+| 8K | 16 / 672 | 0.183727% | 0.949103% | 0 / 672 |
+| 128K | 16 / 672 | 0.236263% | 0.988056% | 0 / 672 |
+
+两档所有rank的输出、cache指标和positions字段，与冻结参考此前同口径结果完全相同。
+原始tensor另作逐字节核对：每档rank0的42个文件、1008对tensor，均为0字节差异；
+两档合计84文件、2016对tensor。覆盖hidden、positions、初始页、Native/PTO输出、
+Native/PTO写后页及page ids。原始tensor只保存rank0，其他rank不能从指标相同推断逐位一致。
+
+结论：本次真实模型共同输入对照支持Leaf完整BSH迁移复现了参考的数值行为；
+仍不能说它相对Native逐位精确，也不覆盖独立CSA轨迹的logits、graph整模型数值或全部请求形状。
+所有输出有限，未出现新增的非有限cache值；`MEASURED`表示采集完整有效，不是精度达标阈值。
+
+新测试钩子CPU回归2项通过：21层cache恢复、预算结束后的Native保留、原方法恢复、
+特殊数值/ULP指标。独立审阅未发现当前bitcompare/performance入口阻断。
+其他参考诊断入口尚未移植，脚本显式拒绝使用，不能声称已测试padding-capture等路径。
+
+证据目录：`reports/dsv4-full-layer-integration-20260928/`的
+`results/full-precision-v1/`、`full-precision-summary.json`、
+`full-precision-h8192-cross-reference.json`、`full-precision-h131072-cross-reference.json`、
+`full-precision-evidence-manifest.json`（186文件哈希）。源码为本节固定提交，
+测试harness全部14个Python文件另有manifest；原始结果已从227备份本地。
+
+下一阶段已提交同口径七档FULL_DECODE_ONLY性能矩阵；结果待任务结束后另记，
+不使用上面eager双执行过程的耗时作为性能数据。
