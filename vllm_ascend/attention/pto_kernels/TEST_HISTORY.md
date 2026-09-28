@@ -662,6 +662,59 @@ native_lse_repeat_valid全部通过才允许读入，不从LSE反推Native sum�
 完整源码出处、候选manifest及CPU检查保存在工作区
 `native-align-20260928/native-softmax-reduce/`，阶段探针在同级目录。
 
+## 2026-09-28：当前 TND 与 nalinaly 同逻辑输入精度对比
+
+当前运行源码为 `bdf2cf0fb`，参考为 nalinaly
+`0d1b8ea7292ffefc6e90cac0e2f4308749be53db` 的精度版本。
+单卡任务 `task_20260928_105743_222713730819` 完成，exit=0；
+`complete=true`、`probe_valid=true`，诊断副本与正式路径的 output、
+cache allocation 及输出 guard 检查通过。参考使用已完成的 BSH 对拍原始张量。
+
+### 配置与可比性
+
+- 模型：DeepSeek-V4-Flash-0731-w8a8，第2层真实 C4 权重；合成 hidden/history。
+- TP=1，B=4，每请求 S=6，总 T=24，起始位置8191；单层 eager 精度诊断。
+- 当前环境：CANN9.2.0-beta.2、Torch2.10.0、Torch-NPU2.10.0.post4、vLLM0.29，物理页128。
+- 参考环境：CANN9.0.1、Torch2.10.0、Torch-NPU2.10.0.post2、vLLM0.25.1，物理页32。
+- 当前 PyPTO `54957491ede07ad5d5015f5e69874f367113cf45`，
+  Simpler `32dff953d07f6bd2aacab8532860f28aca6df931`；复用已有环境。
+- Native 确定性 level1，`HCCL_DETERMINISTIC=true`。
+- 按逻辑位置生成相同六类历史及 hidden，保留各自物理页布局。
+  两边逻辑输入 SHA256 均为
+  `eb841527b5fda671b680d4c30db61722816963a87cd53cc78c3af5e3e519fd3d`。
+- 额外读取保存的 Native 张量交叉比较：两环境的 Q、QR、QR scale、
+  inverse RoPE 后 heads、最终 output 均逐元素一致。
+  因此本用例的已比较 Native 基准一致，但不宣称两环境所有算子普遍等价。
+
+### 相对各自 Native 的结果
+
+| 指标 | 当前 TND | nalinaly |
+| --- | --- | --- |
+| 最终 output relative L2 | 0 | 0.000743908035733065（0.0743908%） |
+| 最终 output 不同元素 | 0 / 98,304 | 4,853 / 98,304 |
+| 最终 output max abs | 0 | 0.00390625 |
+| heads relative L2 | 1.4583752610230643e-6 | 1.2195475738471703e-5 |
+| heads 不同元素 | 5 / 786,432 | 1,115 / 786,432 |
+| heads 最大 ULP，全部有限元素 | 1 | 93 |
+| raw KV 不同元素 | 0 / 12,288 | 1 / 12,288，1 ULP |
+| Q、QR、QR scale | 逐位一致 | 逐位一致 |
+| 其余五类 cache/state 有效写入 | 逐位一致 | 逐位一致 |
+| 同一 heads 经两边 O-proj | 逐位一致 | 逐位一致 |
+
+两边最终输出均通过固定 `rtol=atol=1e-2`；当前输出进一步达到逐位一致。
+当前 heads 仍有5个元素各差1 BF16 ULP，本组未传播到最终 output，
+不能据此宣称 attention 内部已完全对齐。nalinaly 的全元素 heads 最大 ULP
+为93；若只看其报告中 reference abs>=0.01 的元素，则最大 ULP 为1，
+不可混用过滤后与未过滤的指标。
+
+本轮没有测性能、Graph replay、非等长或整模型；不得覆盖之前 B16/T60
+等用例仍有输出误差的结论。当前分支只在这组同逻辑输入上更接近 Native。
+
+原始证据为 `canonical_manifest.json`、`result.json`、`native_stages.pt`、
+`csa_stages.pt`、`cross_native_comparison.json`；独立 runner 位于工作区报告
+`native-align-20260928/nalinaly-canonical-comparison/`，通过输入哈希断言，
+未改动正式 kernel。环境预检通过；没有重新安装或编译框架依赖。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文
