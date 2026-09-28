@@ -88,7 +88,7 @@ QR的另一项差异是输入/gamma复用：当前8行×1024列的FP32输入按2
 还需计入归约、量化和流水临时量；采用时优先保留现有256列归约/乘法/舍入顺序。
 已有HC单变量DFX中该任务每worker约6.54～7.15μs、B16共12worker，
 而Sparse AIC约119～148μs；不能把省一遍GM读取直接说成完整CSA的大幅收益。
-本项列作后续小范围候选，优先核实Sparse等更大热点；未新建NPU测试或宣称收益。
+本项后续单卡及尾块修正结果如下；核内保留不代替最终组合模型验收。
 
 2026-09-28继续核实PV生成代码：当前两份L0C已生效，但四个N128 Right tile仍复用L0B偏移0，
 下一块TEXTRACT等待前一MMAD。最新AscendC `ComputeMm2`则按`abL0BufIter % 2`使用两个L0B槽。
@@ -106,10 +106,12 @@ QR输入/gamma UB驻留候选已按最新ops-nn实现，完整CPU编译/链接�
 继续核实Sparse Vector的`SoftmaxFlashV2Compute/DealBmm2ResBaseBlock`：Native概率先按累计最大值生成，
 PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未利用该单调性；旧整层回退结论不撤销。
 新独立候选删去冗余beta、两次新PV缩放及局部分母乘法，保留N128/三槽/跨query流水。
-完整CPU编译通过，生成代码TEXP 3→2处、TROWEXPANDMUL 4→2处；尚无设备结果，未合入。
+完整CPU编译通过，生成代码TEXP 3→2处、TROWEXPANDMUL 4→2处；独立两档单卡已完成，暂不合入。
 概率累计最大值和round是明确算术变化，不能作为数值中性搬运优化验收；
-固定Native输入7864320个元素与旧累计算法零容差一致，B3解析尾块通过；已开始单卡两档性能筛查。
-该数值证据不代表对Native逐bit或整模型验收通过。
+固定Native输入7864320个元素与旧累计算法零容差一致，B3解析尾块通过。
+128K/B16完整CSA+0.03%、8K/B16+1.36%，7:3综合+0.427%，短档P95升10.20μs。
+长档Sparse AIC均值下降1.76%，但四窗口中位数反升0.30%，分布重叠，尚无稳定长档收益依据。
+另外七类状态/保护区/图重放通过，x_out改变算术，误差单列且均有限；不标Native精度通过，不扩测EP16。
 [累计softmax/PV候选与旧实验区别](results/csa_sparse_online_pv_20260928/README.md)。
 
 ## 3. ops-math的适用边界
@@ -130,7 +132,8 @@ PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未�
 QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要单卡状态/尾块通过，
 组合源码d1f170ff长短B16真实EP16的forward分别比同轮Native快4.03%/4.10%，P95更低，token/DSpark一致；
 [完整模型证据](results/csa_ascendc_topk_hc_ep16_20260928/README.md)不能证明每项独立整网收益，也未完成新版七档。
-下一步继续筛选最新AscendC差异，先核实Sparse大热点的片上布局与等待，再安排QR输入驻留等小范围候选。
+下一步先验收新增Top-K UB与QR尾修正版的组合：长短B16单卡，再必要真实EP16，分别计算7:3与P95。
+核内研究优先128K的Indexer Score，继续核对QLI V2实际驻留与流水；已有Sparse两项候选结束，不原样重测。
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。

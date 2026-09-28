@@ -88,6 +88,9 @@ def main():
     parser.add_argument('--windows', type=int, default=4)
     parser.add_argument('--task', default='task_20260928_112109_314698014843')
     parser.add_argument('--operator', default='e58ddc94 + short Score sync_start=True; early_resolve remains True')
+    parser.add_argument('--measure-output-arithmetic', action='store_true',
+                        help='明确改变输出算术的候选：x_out只记录零容差误差并要求有限；'
+                             '其他七类状态仍精确一致；结果标MEASURED_OUTPUT，不作精度PASS')
     args = parser.parse_args()
     torch.set_num_threads(4)
     spec = importlib.util.spec_from_file_location(
@@ -112,8 +115,14 @@ def main():
         raise ValueError('保存的PTO状态项不完整')
     checks = {name: compare_tensor(states['candidate'][name], states['baseline'][name], 0, 0)
               for name in STATE_NAMES}
-    if any(c['status'] != 'PASS' for c in checks.values()):
+    mandatory = {name: c for name, c in checks.items()
+                 if not (args.measure_output_arithmetic and name == 'x_out')}
+    if any(c['status'] != 'PASS' for c in mandatory.values()):
         errors.append('PTO候选跨版本状态不一致')
+    if 'reason' in checks['x_out']:
+        errors.append(f"PTO候选输出不可比较: {checks['x_out']['reason']}")
+    if checks['x_out'].get('nonfinite'):
+        errors.append('PTO候选输出包含非有限值')
     graph = after.get('graph', after.get('graph_replay', {}))
     if graph.get('status') != 'PASS':
         errors.append('候选A→B→A图重放失败')
@@ -146,7 +155,13 @@ def main():
                         '不要求Native跨进程逐bit一致。独立DFX不与无profiler计时逐个对应，非真实EP16验收。',
               'checks': checks, 'graph_status': graph.get('status'), 'errors': errors,
               'timing_iters': args.iters, 'dfx_windows': args.windows,
-              'status': 'FAIL' if errors else 'PASS', 'measurements': measurements}
+              'output_policy': 'record_arithmetic_difference' if args.measure_output_arithmetic else 'exact',
+              'status': ('FAIL' if errors else
+                         'MEASURED_OUTPUT' if args.measure_output_arithmetic else 'PASS'),
+              'measurements': measurements}
+    if args.measure_output_arithmetic:
+        result['limits'] += (' x_out明确改变算术，保留零容差误差与非有限值检查；'
+                             'MEASURED_OUTPUT不表示输出误差或整模型token/DSpark验收通过。')
     (args.output or args.root / 'report.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(result['status'], errors)
     for side, value in measurements.items():

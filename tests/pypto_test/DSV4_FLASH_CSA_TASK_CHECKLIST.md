@@ -24,7 +24,7 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 QR输入/gamma UB驻留也已保留：长短B16核内均值下降6.36%/6.89%，满档状态通过；
 必要T60检查发现尾行陈旧GM读取后已改为直接从UB发布，修正版八类状态及图重放通过。
 [QR结果与失败/修复证据](results/csa_qr_ub_20260928/README.md)。满档性能是首版实测，修正版只补受影响尾块，未冒充新测量。
-新增策略已完成长短B16真实EP16：128K/B16、8K/B16的forward分别快4.03%、4.10%，P95更低，token/DSpark一致；
+前述d1f170ff组合已完成长短B16真实EP16：128K/B16、8K/B16的forward分别快4.03%、4.10%，P95更低，token/DSpark一致；
 这是对同轮Native的比较，不证明相对e58的短档单层不退化，尚非新版七档验收。
 [最新组合模型结果](results/csa_ascendc_topk_hc_ep16_20260928/README.md)、
 [Top-K单变量结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
@@ -141,11 +141,19 @@ CPU位置相同不证明设备草稿token相同，严格路由归因使用独立
 Sparse PV对齐最新AscendC的L0B双缓冲已做长短单卡对照：状态/图重放通过，
 核内小幅均值下降未超出四窗口的分散，完整区间仅短档改善、长档略退，暂不合入或扩测。
 [PV证据](results/csa_sparse_pv_l0b_20260928/README.md)。
-按ops-nn的QR输入/gamma UB驻留候选已完成CPU编译与生成代码核对，长短B16单卡任务待设备；
-[候选及状态](results/csa_qr_ub_20260928/README.md)。未修改生产QR或宣称性能收益。
+按ops-nn的QR输入/gamma UB驻留已完成两档单卡，核内长短下降6.36%/6.89%，按规则保留性能版；
+T60暴露尾行陈旧GM回读，已改为直接发布UB并通过受影响状态/图重放，满档计时仍注明首版测量。
+[候选、尾块修复及证据](results/csa_qr_ub_20260928/README.md)。
 四路Top-K另按最新QLI V2保留精确尺寸的UB累计根；显式extract消除了旧二路候选的额外整块TMOV，
-完整CPU编译及五组探针编译通过。单卡先独立tie/尾部/保护区再长短B16，任务待设备，尚未合入。
-[四路UB根来源、与旧候选区别及任务](results/csa_topk_ub4_20260928/README.md)。
+五组设备边界及两档状态/重放通过，长档merge核内下降11.73%，已保留多leaf路径。
+两档完整CSA按7:3加权为+0.057%，尚无综合整层收益依据，不把核内保留标为整网验收。
+[四路UB根来源、与旧候选区别及结果](results/csa_topk_ub4_20260928/README.md)。
+累计softmax加单侧PV缩放的两档已完成：长档完整CSA+0.03%、短档+1.36%，7:3综合+0.427%。
+长档核内小幅均值下降依赖基线慢窗口，未确认稳定收益；暂不合入，不扩测EP16。
+七类状态/保护区/图重放通过，x_out算术差异单列，不标精度通过。
+[Sparse完整结果及取舍](results/csa_sparse_online_pv_20260928/README.md)。
+下一步优先验收已保留Top-K UB及QR尾修正版的组合，先长短B16单卡，再真实EP16；
+后续核内优先128K的Indexer Score大热点，按实际长度区分策略，避免短档独有工作拖慢长档。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。
