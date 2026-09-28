@@ -56,6 +56,8 @@ def prepare_csa_model(model):
     # The opt-in runner hook runs after Native per-layer quant finalization.
     # No PyPTO initialization or NPU allocation occurs during model inspection.
     import importlib
+    import inspect
+    import os
 
     import pypto.torch
     from vllm.config import get_current_vllm_config
@@ -63,7 +65,7 @@ def prepare_csa_model(model):
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import (
         root_weight_layouts, validate_weight_nz_mode,
     )
-    from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
+    from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs, selected_variant, variant_package
 
     # 两套 CSA 算子并存，由 PTO_CSA_VARIANT 选择，默认精度版。只有算子与其适配层
     # 按版本取；service_config 的档位与图重放闸门两套共用一份（性能版里是重导出），
@@ -83,7 +85,29 @@ def prepare_csa_model(model):
         ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
     )
 
-    pypto.torch.init(device=torch.npu.current_device(), platform="a2a3", runtime="tensormap_and_ringbuffer")
+    # 运行时默认仍是 tensormap_and_ringbuffer。显存排查发现它在 init 期固定占用
+    # 1.343 GiB 设备显存（与 kernel / batch / 层数无关），而 host_build_graph 只占
+    # 0.598 GiB；128K/B24 这类 KV 吃紧的场景可用 PTO_CSA_RUNTIME 切换后实测对比。
+    # 见 tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md。
+    # PyPTO 运行时 arena 的尺寸只能在 init 时给（之后 prepare_callable / launch
+    # 都不再携带 CallConfig），默认那 4x256 MiB heap + 16384 深 task window 合计
+    # 占 1.343 GiB 设备显存。取值来自 additional_config["pto_csa_ring_config"]，
+    # 也可用 PTO_CSA_RING_* 环境变量临时覆盖；不设则沿用 Simpler 的编译期默认。
+    ring_kwargs = ring_sizing_kwargs(get_current_vllm_config().additional_config)
+    if ring_kwargs and "ring_heap" not in inspect.signature(pypto.torch.init).parameters:
+        # 这条接口是 hw-native-sys/pypto#2940 才加的。没有它时静默忽略会让人以为
+        # 显存已经省下来了，所以宁可在这里直接报错。
+        raise ValueError(
+            "当前 PyPTO 的 pypto.torch.init 不接受 ring 尺寸参数；"
+            "请升级到含 kernel 模式 ring sizing 的版本，或去掉 pto_csa_ring_config "
+            "与 PTO_CSA_RING_* 设置"
+        )
+    pypto.torch.init(
+        device=torch.npu.current_device(),
+        platform="a2a3",
+        runtime=os.environ.get("PTO_CSA_RUNTIME", "tensormap_and_ringbuffer"),
+        **ring_kwargs,
+    )
     operators = CSAOperators.register()
     max_num_seqs = get_current_vllm_config().scheduler_config.max_num_seqs
     count = 0

@@ -161,10 +161,14 @@ def _run_benchmark(args, report):
         run = lambda: compiled(*call_args, config=pmu_config)  # noqa: E731
     else:
         # 执行目标一次性定在进程上：JIT 调用本身不接 RunConfig。
+        # 与生产路径共用 ring 尺寸开关，用来评估收窄 ring 的时延代价。
+        from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
         pypto.torch.init(device=args.device, platform="a2a3",
                          enable_chip_swimlane=args.swimlane,
                          enable_dep_gen=args.swimlane >= 4,
-                         output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None)
+                         output_dir=str((args.output / "dfx").resolve()) if args.swimlane else None,
+                         # 取证用：只认 PTO_CSA_RING_* 环境变量
+                         **ring_sizing_kwargs())
         run = lambda: kernel(*call_args)  # noqa: E731
 
     report.update({"variant": selected_variant(), "package": package, "device": args.device,

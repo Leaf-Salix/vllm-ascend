@@ -777,7 +777,9 @@ def worker(args):
         max_num_seqs=1 if prefill else args.batch,
         max_num_batched_tokens=args.max_num_batched_tokens,
         enable_prefix_caching=False, enforce_eager=prefill or args.graph_mode == "eager", seed=1024,
-        gpu_memory_utilization=0.9, block_size=32,
+        # 默认仍是 0.9；显存排查时可用 PTO_GPU_MEM_UTIL 覆盖（见
+        # tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md）。
+        gpu_memory_utilization=float(os.environ.get("PTO_GPU_MEM_UTIL", "0.9")), block_size=32,
         # 清单约定的 D 侧上线口径为 FULL_DECODE_ONLY；
         # eager 只用于定位问题，其每步重入 Python 派发路径，不代表上线表现。
         # draft 保持 eager。两侧 NZ mode 均由显式 CLI 控制。

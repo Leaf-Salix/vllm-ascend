@@ -692,8 +692,12 @@ def run(args, report):
             )
             meta.update(layer_index=args.layer_index, tokens=fixture["tokens"])
             save_snapshot(args.output / "case", meta, payload)
+        # 与生产路径 (vllm_ascend/models/pypto_deepseek_v4.py) 共用同一个开关，
+        # 用来验证收窄 ring heap 之后 CSA 算子还能不能跑。
+        from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
         pypto.torch.init(
             device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer",
+            **ring_sizing_kwargs(),  # 取证用：只认 PTO_CSA_RING_* 环境变量
             **({"enable_chip_swimlane": 4, "enable_dep_gen": True,
                 "output_dir": str((args.output / "dfx").resolve())} if args.swimlane else {}),
         )
