@@ -26,20 +26,20 @@ pypto-lib 2164563的dspark路径按单query×leaf执行，无法直接套用本�
 
 ## 编译与验证范围
 
-两个私有副本从当前六档的冻结公共源码复制；整包、公共依赖、设备runner均独立。
+两个私有副本从当前七档的冻结公共源码复制；整包、公共依赖、设备runner均独立。
 两侧的两根_get_dep_graph解析通过；候选PTOAS/CCE及KernelArtifact.load的CPU检查已通过。
 首轮发现常量分支两侧复用不同shape变量名、slice后缩小validshape的表达限制，
 已分别改为独立局部名及slice自身的动态valid_shape；没有修改工具链或关闭ABI检查。
 
 候选长S6生成的AIV代码确认TMUL调用点为3；这些静态数量不作为性能结论。
-当前六档任务完成后提交auto单卡：128K/B16与8K/B24，CANN9.2/mode2/atomic0/det0，
+当前七档任务完成后提交auto单卡：128K/B16与8K/B24，CANN9.2/mode2/atomic0/det0，
 5预热/20次无profiler真实编译图计时，各四个独立level-4窗口。
 两侧完整八类状态跨版本零容差、图/eager、Top-K结构及保护区检查；不新增B40，
-不为此局部候选启动六档或16卡。idx_topk_scores未列入八类状态，不宣称其独立验证。
+不为此局部候选启动七档或16卡。idx_topk_scores未列入八类状态，不宣称其独立验证。
 
 核内实际收益、CSA 8:2变化及P95/max分别报告；短档源路径相同也保留实测回退。
 没有核内收益不扩大测试，长档明显收益/短档明显代价时再在同一算子内按场景处理。
-正式设备任务尚未提交；当前六档原任务继续执行，不修改其冻结源码。
+正式设备任务尚未提交；当前七档原任务继续执行，不修改其冻结源码。
 
 [候选补丁](candidate.patch)、[冻结来源](source.txt)、[CPU编译](compile.py)、
 [编译结果](compile_candidate.json)、[生成代码计数](lowering.json)、

@@ -13,7 +13,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     history, batch = args.history, args.batch
     if (history, batch) not in CASES:
-        raise ValueError("This shape is outside the current six-case comparison")
+        raise ValueError("This shape is outside the current seven-case comparison")
     load_previous("analyze_schedule").main()
     source = json.loads((ROOT / "source.json").read_text())
     path = ROOT / f"h{history}_b{batch}/schedule/README.md"

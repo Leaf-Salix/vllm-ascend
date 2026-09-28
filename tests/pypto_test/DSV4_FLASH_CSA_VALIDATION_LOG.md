@@ -10974,3 +10974,74 @@ Cube QK/WS和Key读取、系数、half根布局、原排序同分规则、跨lea
 另外，当前六档B4/B8/B16的已完成四窗DFX已逐档官方解析，固定window_3，
 不把Observed逻辑任务覆盖当成纯算术，也不从独立DFX与正式CSA相减归因。
 [候选、Native/pypto-lib差异及CPU证据](results/csa_score_query_split_20260929/README.md)。
+
+## 401. 恢复8K/B16，正式矩阵为长四档加短三档（2026-09-29）
+
+用户最新要求后续带8K/B16，共七档：128K B4/B8/B16/B24，8K B16/B24/B32。
+B40继续退役；长四档、短三档各自batch等权，仍按8:2合成，不改已完成旧矩阵的原始范围。
+
+task_20260929_070256_21859435951仍running，变更时进行到8K/B24，未到B32。
+只改外层驱动：B32泳道成功返回后，在同一TASK_DEVICE下补齐B16的Native/PTO/四窗DFX，
+仍属于原排队任务，不裸跑、不嵌套提交；父shell已解析的旧B40入口继续提前跳过。
+新的run.sh直接列出七档；若B16已完整完成则不重复，若目录部分存在则报错防止覆盖。
+当前补跑将在B32之后执行，采样顺序如实记录，不伪装成在B24之前完成。
+冻结算子、公共依赖和设备runner保持，已有档位不重跑，收集器严格要求新版七档和21份原始JSON。
+
+同时按用户询问核实Native编译：npugraph_ex的super_kernel_optimize默认False，
+冻结vllm-ascend配置只开启static_kernel_compile，没有设置super开关或显式调用该优化。
+已有同进程CANN9.2手工图→模板编译长B16−4.305%、短B24−6.415%，
+是图编译/静态kernel/融合组合的实测；没有static单开关消融，不宣称其单独贡献。
+不因解释已有结果而新增设备测试。
+[当前范围和执行](results/csa_coefficients_seven_20260929/README.md)、
+[Native配置边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
+
+## 402. 系数优化后的新版七档同源码阶段出口完成（2026-09-29）
+
+task_20260929_070256_21859435951退出0，38分20秒，同一auto设备0；源码固定4ffccb7b。
+最终七档为128K B4/B8/B16/B24、8K B16/B24/B32；B16在B32之后补齐，B40三个入口均提前跳过。
+没有取消重跑、变更冻结算子/公共依赖或替换已完成样本。
+
+| 档位 | Native均值μs | PTO均值μs | PTO变化 | Native/PTO P95μs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B4 | 794.933 | 674.644 | −15.132% | 800.620/683.700 |
+| 128K/B8 | 945.401 | 815.204 | −13.772% | 949.100/828.580 |
+| 128K/B16 | 1225.289 | 1052.786 | −14.079% | 1229.900/1070.600 |
+| 128K/B24 | 1399.230 | 1318.600 | −5.762% | 1406.580/1338.240 |
+| 8K/B16 | 845.610 | 788.918 | −6.704% | 851.920/813.860 |
+| 8K/B24 | 1018.715 | 978.402 | −3.957% | 1022.800/995.500 |
+| 8K/B32 | 1190.600 | 1120.371 | −5.899% | 1197.840/1148.740 |
+
+每侧5预热/20次无profiler采样，完整HC_pre+norm+CSA+HC_post；长短组内batch等权后8:2为−10.853%。
+PTO P95/P50为1.0143–1.0292，max/P50最高1.0456；本轮未重现大拖尾，不关闭历史间歇尾部或EP16问题。
+两侧CANN9.2/mode2/det0，PTO atomic0；Native实际static编译和PTO真实pkg调用已核实。
+PTO图/eager、Top-K结构和metadata/保护区通过；Native det0的浮点/Top-K差异保留，不冒称跨实现精度通过。
+本轮Native仍是vLLM编译包装进入npugraph_ex、force_eager后外层图捕获，superkernel关闭。
+后续用户指定的直接torch.compile和后端自管图属于新入口，另做对照，不能改写本轮配置。
+
+28个level-4窗口完成官方原始/合并行数和block检查，固定window_3；缺失dummy时戳的完整ready归因置空。
+21份原始JSON已汇聚，七档CSA/核内差距与清单已更新，不再以旧c93ec723/B40矩阵冒充当前表。
+长B4/B8 Score AIV仍高于Native PMU参考，长B16接近但独立归并仍在；两种计时边界不能简单相减。
+[完整表](results/csa_coefficients_seven_20260929/RESULTS.md)、
+[21份原始JSON](results/csa_coefficients_seven_20260929/download/README.md)、
+[当前核内分析](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+
+## 403. Native显式npugraph_ex与superkernel代表档A/B入队（2026-09-29）
+
+用户要求Native使用torch.compile(..., backend="npugraph_ex")，多流遵循该后端用法，GitCode不加代理。
+直连读取multi_stream.md，确认torch.npu.stream、event record/wait及同event不可跨graph break。
+本仓npu_stream_switch本来就是torch.npu.stream包装，保持DSA显式依赖；不是GE同名接口。
+旧长B16 Native profile实际有两个stream（13/12，33/9个kernel），并非配置名开启但单流串行。
+这不代表新入口或superkernel已经正确，需要其自身profile检查。
+
+独立复制冻结源码，移除测试Native类的vLLM编译装饰器，显式named backend、fullgraph=True、dynamic=False，
+force_eager=False，由npugraph_ex自管捕获/重放，不外套手工图；失败不静默回退。
+两侧static kernel开启，分别记录静态编译实际super参数和后端调用NPUGraph.super_kernel_optimize结果。
+直接入口使用npugraph_ex自身passes，不把EngineArgs中的融合开关冒称vLLM FX pass manager已运行。
+仅长B16 off→on、短B24 on→off；同卡/形状/权重和5预热20次样本，另留profile、八类状态/保护区。
+
+HCA优先占卡时没有提交；用户随后允许正常排队，07:48提交task_20260929_074812_36535424506，
+在HCA任务结束后实际启动。入队后冻结源码不再编辑，不改变生产Native或PTO。
+GitCode superkernel.md当时提示访问频次限制，未取得正文；运行位置已按安装源码核对，未冒称读过该文档。
+用户限定：本轮没有明确收益就关闭并结束superkernel方向，后续不调参、扩档或重复测试。
+CPU语法/Ruff及shell检查通过；设备结论待同一任务结束后记录。
+[实验入口与限制](results/csa_native_superkernel_20260929/README.md)。

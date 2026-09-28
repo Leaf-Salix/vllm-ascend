@@ -41,12 +41,28 @@ if [[ "$side" == native || "$side" == pto ]]; then
         --output "$out" --device "$TASK_DEVICE" > "$out/run.log" 2>&1
 elif [[ "$side" == swimlane ]]; then
     cd "$out"
-    exec python "$source_repo/tests/pypto_test/coefficients_seven_experiment/accuracy_case.py" "$source_repo" \
+    python "$source_repo/tests/pypto_test/coefficients_seven_experiment/accuracy_case.py" "$source_repo" \
         --checkpoint /data/model/DeepSeek-V4-Flash-0731-w8a8 \
         --output "$out" --device "$TASK_DEVICE" --batch "$batch" --history "$history" \
         --layer-index 4 --variant "$PTO_CSA_VARIANT" --weight-nz-mode 2 --seed 1024 \
         --atomic-add 0 --deterministic-level 0 --swimlane --swimlane-graph --swimlane-windows 4 \
         > "$out/run.log" 2>&1
+    # The running parent parsed its case list before the user restored 8K/B16.
+    # Append only the missing case on the same allocated device after B32.
+    # A fresh run.sh already includes B16 and therefore takes the skip branch.
+    if [[ "$history" == 8192 && "$batch" == 32 ]]; then
+        if [[ ! -d "$root/h8192_b16" ]]; then
+            echo "APPENDED: user restored 8K/B16; Native/PTO/DFX on the same allocated device"
+            for appended_side in native pto swimlane; do
+                bash "$root/run_side.sh" "$appended_side" 8192 16
+            done
+        elif [[ ! -f "$root/h8192_b16/native/report.json" ||
+                ! -f "$root/h8192_b16/pto/report.json" ||
+                ! -f "$root/h8192_b16/swimlane/report.json" ]]; then
+            echo "Incomplete existing 8K/B16; refusing to overwrite or claim completion" >&2
+            exit 2
+        fi
+    fi
 else
     echo "Unsupported phase: $side" >&2
     exit 2

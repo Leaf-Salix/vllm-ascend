@@ -6,7 +6,7 @@ test -f "$root/source.json"
 test -f "$root/parse.json"
 # One allocated device for the complete matrix; no model run in this task.
 case_index=0
-for case_spec in 131072:4 131072:8 131072:16 131072:24 8192:24 8192:32; do
+for case_spec in 131072:4 131072:8 131072:16 131072:24 8192:16 8192:24 8192:32; do
     history="${case_spec%:*}"
     batch="${case_spec#*:}"
     sides=(native pto)

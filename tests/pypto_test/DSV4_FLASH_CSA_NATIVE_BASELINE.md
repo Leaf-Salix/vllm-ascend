@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | enable_npugraph_ex | True | 两侧显式True；eager诊断False |
 | enable_static_kernel | True | 两侧显式True；eager诊断False |
+| super_kernel_optimize | 模板未设置 | 本轮未启用；npugraph_ex默认False，static kernel不会自动开启该项 |
 | fuse_norm_quant | 默认True | 两侧显式True，移除旧环境绕行 |
 | enable_cpu_binding | True | 两侧显式True；仍需设备日志确认绑核成功 |
 | multistream_overlap_shared_expert | True | 两侧显式True；实际回退须报错，不能静默比较 |
@@ -42,7 +43,7 @@
 
 - 正式权重仍为用户已锁定的`/data/model/DeepSeek-V4-Flash-0731-w8a8`；不换模板config中的另一份权重。
 - 继续CANN9.2、TP1/DP=EP16、DSpark出5验6、mode2、EPLB关闭；PTO使用已验证私有整包。
-- 2026-09-29起正式六档为128K B4/8/16/24、8K B24/32，B40退出后续对比。max_num_seqs、capture_sizes、token预算与max_model_len
+- 2026-09-29起正式七档为128K B4/8/16/24、8K B16/24/32，B40退出后续对比。max_num_seqs、capture_sizes、token预算与max_model_len
   按场景显式记录；不把模板B32、1M容量配置直接覆盖到这些负载。两侧使用相同档位与容量参数。
 - 模板是在线MooncakeHybridConnector；本测试使用已验收离线bank恢复，恢复在稳态forward计时之外。
   现有connector明确拒绝local prefix hit，测试要求请求独立KV，因此保留enable_prefix_caching=False。
@@ -75,5 +76,25 @@ npu_add_rms_norm_bias，所以只打开fuse_norm_quant不构成可运行环境�
 [新单层结果、数值差异与profile](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 [同配置Native/PTO对照及范围](results/csa_compiled_pair_20260929/RESULTS.md)。
 
-[当前七档真实编译结果](results/csa_compiled_seven_20260929/RESULTS.md)、
-[21份JSON](results/csa_compiled_seven_20260929/download/README.md)。
+[当前七档真实编译结果](results/csa_coefficients_seven_20260929/RESULTS.md)、
+[21份JSON](results/csa_coefficients_seven_20260929/download/README.md)。
+
+2026-09-29核查：当前冻结compiler_interface只传static_kernel_compile，不设置super_kernel_optimize；
+安装的npugraph_ex配置默认False，其图优化调用受该标志控制。现有Native收益应表述为
+npugraph_ex、static kernel与融合的组合收益；已有同进程CANN9.2对照长B16−4.305%、短B24−6.415%，
+没有只切static kernel的消融，不能拆出其单项贡献，也不能归因于未启用的super kernel。
+
+## 最新入口要求与superkernel判据（2026-09-29）
+
+4ffccb7b同源码新版七档已完成：128K B4/8/16/24及8K B16/24/32，长短8:2为−10.853%。
+该轮Native仍使用vLLM Ascend编译包装，force_eager后手工外图捕获，superkernel关闭。
+用户现在要求显式torch.compile(..., backend="npugraph_ex")；新对照由后端自行捕获/重放，
+不再嵌套手工图。直接入口应用npugraph_ex自身passes，未走vLLM FX pass manager，二者须单列。
+多流沿用torch.npu.stream及event/wait显式依赖，DSA自定义算子内部在捕获时实际下发，
+结合profile检查真实stream；共享专家配置不代表单CSA包含MoE验收。
+GitCode文档必须直连无代理，同event不得跨graph break，fullgraph编译失败不降级为eager。
+
+先仅长B16/短B24对照static kernel+superkernel开/关；记录静态编译实际参数、图优化调用与profile。
+有明确收益且数值检查通过才采用、再更新受影响Native基线；无明确收益则后续不再碰superkernel。
+不将编译入口失败冒充superkernel有效负收益，不将API成功冒充所有kernel已融合。
+[源码、冻结方法及队列任务](results/csa_native_superkernel_20260929/README.md)。

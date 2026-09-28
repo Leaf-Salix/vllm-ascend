@@ -1,4 +1,4 @@
-# 系数优化阶段出口：当前保留源码的六档对照
+# 系数优化阶段出口：当前保留源码的七档对照
 
 生产算子4ffccb7b，私有整包`pkg:dsv4_csa_coefficients_seven_20260929`。
 保留c93ec723之后的系数空worker删除、按组准备与UB一次发布；不含被否定的分数驻留UB、
@@ -6,7 +6,7 @@
 
 ## 范围与口径
 
-- 128K：B4、B8、B16、B24；8K：B24、B32，不新增8K/B16。
+- 128K：B4、B8、B16、B24；8K：B16、B24、B32；B40退役。
 - 同一auto分配单卡，逐档Native/PTO交替先后顺序；各5预热/20次无profiler真实编译图计时。
 - CANN9.2.0-beta.2、两侧mode2，PTO atomic0、det0，EPLB关闭；layer4正式权重与独立合成历史。
 - HC_pre+norm+CSA+HC_post完整设备区间，按同上下文batch等权，再按128K/8K的8:2加权。
@@ -21,22 +21,28 @@ PyPTO/Simpler版本及冻结来源见[source.json](source.json)，提交前两�
 
 ## 当前状态与收集
 
-2026-09-29用户退役B40，正式范围改为128K×B4/B8/B16/B24＋8K×B24/B32。
-变更时任务仍在128K/B8，尚未执行B40；保留同一个任务，外层run_side先跳过B40，
-再进入环境与设备初始化。冻结算子、公共依赖和设备runner没有修改。
-目录及pkg保留原seven名称，仅用于维持正在运行的引用；后续按六档收集和8:2统计。
+2026-09-29用户先退役B40，随后明确恢复8K/B16；正式七档为
+128K×B4/B8/B16/B24＋8K×B16/B24/B32。长四档、短三档各自等权，再按8:2合成。
+变更时原任务仍在8K/B24。保留同一任务，B32泳道完成后在同一TASK_DEVICE内
+顺带执行缺少的B16 Native/PTO/四窗DFX；原父循环中的B40仍在环境加载前跳过。
+新run.sh已直接列出正确七档；B16先前已有完整结果时不再补跑。
+冻结算子、公共依赖和设备runner没有修改，已有档位无需重跑；实际执行次序保留。
 
-
-task_20260929_070256_21859435951已auto单卡提交，**正在执行；最新完整结果仍为c93ec723旧七档**。
+task_20260929_070256_21859435951已成功结束（exit=0，38分20秒），新版七档全部完成。
+长B16 Native/PTO为1225.289/1052.786μs；七档长短8:2为−10.853%。
+PTO P95/P50为1.0143–1.0292，最大值/P50不超过1.0456；只代表本轮各20次采样。
+完整结果和核内分项见[RESULTS.md](RESULTS.md)，21份原始JSON见[下载目录](download/README.md)。
+本轮Native通过vLLM Ascend编译包装进入npugraph_ex，force_eager后手工外图捕获，superkernel关闭；
+用户后续要求的显式torch.compile与后端自行捕获/Superkernel A/B单列，不能倒写本轮配置。
 本轮不重复已有跨版本完整状态矩阵，复用runner内的图/eager、Top-K结构与保护区检查。
 Native det0的编译/eager差异继续如实记录，不冒称两侧逐bit或整模型token/DSpark通过。
 正式性能、独立DFX/PMU与模型forward分别报告，不将不同采样相减作因果归因。
 
-完成后依次执行：
+收集入口：
 
-1. `collect.py`：检查同卡/同配置/真实PTO包和完整六档，输出CSA/P95、Native PMU及PTO核内分项。
+1. `collect.py`：检查同卡/同配置/真实PTO包和完整七档，输出CSA/P95、Native PMU及PTO核内分项。
 2. `analyze_schedule.py --history H --batch B`：复用官方时钟域、行数/block校验和固定window_3关键路径。
-3. `bundle.py`：汇聚18份未改写的原始JSON，保留原路径映射。
+3. `bundle.py`：汇聚21份未改写的原始JSON，保留原路径映射。
 
 收集和分析复用上一轮已验证工具，只增加严格私有包检查和系数任务分项，不再复制整套分析代码。
 两侧精度版、新CANN9.2模型token/DSpark和稳态decode forward仍为后续任务。
