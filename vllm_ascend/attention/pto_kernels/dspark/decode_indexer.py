@@ -43,6 +43,9 @@ MAX_SEQ_LEN = M.max_position_embeddings
 # Native hadamard_scale applies dim**-0.5 after the matmul; the kernel consumes
 # the native (unscaled) matrix and keeps that ordering.
 HADAMARD_SCALE = IDX_HEAD_DIM ** -0.5
+# QLI arch22 FixpSToL1 uses DEQF16 with the FP32 flag 0x3a800000.
+# Keep this common score factor: TopK consumes only the ordering.
+SCORE_DEQUANT_SCALE = 2.0 ** -10
 
 # kernel constants
 COMPRESS_RATIO = 4   # the indexer only runs on ratio-4 layers
@@ -210,7 +213,9 @@ def indexer_topk_query_merge_one(
         half_count = leaf_count * 2
         arena_base = query * TOPK_ROWS_PER_QUERY
         for child in pl.range(1, half_count):
-            merge2_top512_pairs(pair_arena, arena_base, arena_base + child, arena_base)
+            # QLI MergeSort places the incoming block before the running block.
+            # Equal-score candidates inherit this operand ordering.
+            merge2_top512_pairs(pair_arena, arena_base + child, arena_base, arena_base)
 
         root_slot = arena_base
         root_pairs = pl.load(pair_arena, [root_slot, 0], [1, TOPK_PAIR_WIDTH])
@@ -465,7 +470,14 @@ def indexer_score_topk_forest(
                         [1, IDX_N_HEADS],
                     )
                     query_weight = weights[query : query + 1, 0:IDX_N_HEADS]
-                    head_coefficient = pl.reshape(pl.mul(query_scale, query_weight), [IDX_N_HEADS, 1])
+                    # prepare_dsa_indexer_weights casts to half; ProcessVec0
+                    # multiplies those half weights and query scales into half.
+                    query_weight_fp16 = pl.cast(query_weight, target_type=pl.FP16, mode="rint")
+                    head_product = pl.mul(query_scale, pl.cast(query_weight_fp16, target_type=pl.FP32))
+                    head_product_fp16 = pl.cast(head_product, target_type=pl.FP16, mode="rint")
+                    head_coefficient = pl.reshape(
+                        pl.cast(head_product_fp16, target_type=pl.FP32), [IDX_N_HEADS, 1],
+                    )
                 for score_begin in pl.pipeline(0, lane_span, SCORE_LANE_ROWS, stage=2):
                     read_begin = score_begin * (1 + single_leaf)
                     kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], pl.INT8)
@@ -505,6 +517,12 @@ def indexer_score_topk_forest(
                         score_shard = pl.aiv_shard(score_i32)
                         score_fp32 = pl.cast(score_shard, target_type=pl.FP32, mode="none")
                         score_fp32 = pl.maximum(score_fp32, 0.0)
+                        # Reproduce the native INT32 -> L1 half fixpipe boundary.
+                        score_fp16 = pl.cast(
+                            pl.mul(score_fp32, SCORE_DEQUANT_SCALE),
+                            target_type=pl.FP16, mode="rint",
+                        )
+                        score_fp32 = pl.cast(score_fp16, target_type=pl.FP32)
                         score_fp32 = pl.row_expand_mul(score_fp32, head_coefficient)
                         score_sum = pl.col_sum(score_fp32)
                         score_row = pl.reshape(score_sum, [1, SCORE_LANE_ROWS])
@@ -658,8 +676,19 @@ def indexer_score_topk_forest_vllm(
                     query_weight = weights[
                         query : query + 1, 0:IDX_N_HEADS
                     ]
+                    # Native passes half weights to QLI, whose ProcessVec0
+                    # stores the product with the half query scale as half.
+                    query_weight_fp16 = pl.cast(
+                        query_weight, target_type=pl.FP16, mode="rint",
+                    )
+                    head_product = pl.mul(
+                        query_scale, pl.cast(query_weight_fp16, target_type=pl.FP32),
+                    )
+                    head_product_fp16 = pl.cast(
+                        head_product, target_type=pl.FP16, mode="rint",
+                    )
                     head_coefficient = pl.reshape(
-                        pl.mul(query_scale, query_weight),
+                        pl.cast(head_product_fp16, target_type=pl.FP32),
                         [IDX_N_HEADS, 1],
                     )
                 for score_begin in pl.pipeline(
@@ -722,6 +751,14 @@ def indexer_score_topk_forest_vllm(
                             ),
                             0.0,
                         )
+                        # QLI FixpSToL1 applies ReLU and 2^-10 before DEQF16.
+                        # The second matmul reads these half values, rather
+                        # than the full-precision INT32 dot products.
+                        score_fp16 = pl.cast(
+                            pl.mul(score_shard, SCORE_DEQUANT_SCALE),
+                            target_type=pl.FP16, mode="rint",
+                        )
+                        score_shard = pl.cast(score_fp16, target_type=pl.FP32)
                         score_shard = pl.row_expand_mul(
                             score_shard, head_coefficient,
                         )
@@ -971,7 +1008,17 @@ def indexer_qr_rope(
                 acc_fp32 = pl.cast(
                     qr_acc_pad[dq_t0 : dq_t0 + DEQUANT_T_TILE, h0 : h0 + IDX_HEAD_DIM],
                     target_type=pl.FP32, mode="none")
-                qr_dequant = pl.col_expand_mul(pl.row_expand_mul(acc_fp32, qr_scale_tile), wq_scale)
+                # npu_quant_matmul combines both scales before dequantizing;
+                # its BF16 output is the input to inplace_partial_rotary_mul.
+                scale_rows = pl.row_expand_mul(
+                    pl.full([DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0),
+                    qr_scale_tile,
+                )
+                dequant_factor = pl.col_expand_mul(scale_rows, wq_scale)
+                qr_projected = pl.cast(
+                    pl.mul(acc_fp32, dequant_factor), target_type=pl.BF16, mode="rint",
+                )
+                qr_dequant = pl.cast(qr_projected, target_type=pl.FP32)
                 qr_nope_bf16 = pl.cast(qr_dequant[:, 0 : IDX_NOPE_HEAD_DIM], target_type=pl.BF16, mode="rint")
                 qr_rope_slice = qr_dequant[:, IDX_NOPE_HEAD_DIM : IDX_HEAD_DIM]
                 qr_swapped = pl.gather(qr_rope_slice, dim=-1, index=rope_swap_idx)
@@ -1009,10 +1056,11 @@ def indexer_qr_hadamard_mm(
         for idx in pl.range(qh_worker, bs_heads // QH_MM_TILE, QH_WORKERS):
             o0 = idx * QH_MM_TILE
             qh_acc = pl.matmul(qr_bf16[o0 : o0 + QH_MM_TILE, :], qh_hadamard, out_dtype=pl.FP32)
-            # The matrix is now the native (unscaled) one, so apply dim**-0.5
-            # here. Native additionally rounds to BF16 before and after this
-            # scale; that boundary is still open and measured separately.
-            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = pl.mul(qh_acc, HADAMARD_SCALE)
+            # hadamard_linear and hadamard_scale each return a BF16 tensor.
+            qh_linear_bf16 = pl.cast(qh_acc, target_type=pl.BF16, mode="rint")
+            qh_scaled = pl.mul(pl.cast(qh_linear_bf16, target_type=pl.FP32), HADAMARD_SCALE)
+            qh_scaled_bf16 = pl.cast(qh_scaled, target_type=pl.BF16, mode="rint")
+            qh_acc_gm[o0 : o0 + QH_MM_TILE, :] = pl.cast(qh_scaled_bf16, target_type=pl.FP32)
 
     with pl.spmd(
         QH_QUANT_WORKERS,
@@ -1033,8 +1081,13 @@ def indexer_qr_hadamard_mm(
                 qh_amax = pl.maximum(qh_amax, qh_a_max)
             qh_scale_numerator = pl.full([1, QH_QUANT_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX)
             qh_scale_quant_row = pl.div(qh_scale_numerator, qh_amax)
+            # indexer_quantize_query casts only the returned scale to half;
+            # the INT8 codes still use the unrounded dynamic-quant multiplier.
             qh_scale_recip = pl.recip(qh_scale_quant_row)
-            qh_scale_dq = pl.reshape(qh_scale_recip, [QH_QUANT_TILE, 1])
+            qh_scale_fp16 = pl.cast(qh_scale_recip, target_type=pl.FP16, mode="rint")
+            qh_scale_dq = pl.reshape(
+                pl.cast(qh_scale_fp16, target_type=pl.FP32), [QH_QUANT_TILE, 1],
+            )
             qr_hadamard_scale_dq[o0 : o0 + QH_QUANT_TILE, :] = qh_scale_dq
             qh_scale_quant = pl.reshape(qh_scale_quant_row, [QH_QUANT_TILE, 1])
             qh_q_scaled = pl.row_expand_mul(qh_full_f32, qh_scale_quant)
@@ -1127,7 +1180,11 @@ def indexer_weights_score(
         for kb in pl.unroll(1, WEIGHTS_OK):
             partial_r0 = kb * T_PAD + w_r0
             w_sum = pl.add(w_sum, weights_partial[partial_r0 : partial_r0 + MM_ROW_TILE, :])
-        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.mul(w_sum, WEIGHTS_SCALE)
+        # weights_proj and its following scalar multiplication both emit BF16.
+        projected_weights = pl.cast(w_sum, target_type=pl.BF16, mode="rint")
+        scaled_weights = pl.mul(pl.cast(projected_weights, target_type=pl.FP32), WEIGHTS_SCALE)
+        rounded_weights = pl.cast(scaled_weights, target_type=pl.BF16, mode="rint")
+        weights[w_r0 : w_r0 + MM_ROW_TILE, :] = pl.cast(rounded_weights, target_type=pl.FP32)
 
     topk_scores, topk_idxs, leaf_tid = indexer_score_topk_forest(
         qr_hadamard_i8, qr_hadamard_scale_dq, weights,
@@ -1234,9 +1291,13 @@ def indexer_weights_score_vllm(
                     0:IDX_N_HEADS,
                 ],
             )
+        # Match weights_proj's output dtype before applying the scalar factor.
+        projected_weights = pl.cast(total, target_type=pl.BF16, mode="rint")
+        scaled_weights = pl.mul(pl.cast(projected_weights, target_type=pl.FP32), WEIGHTS_SCALE)
+        rounded_weights = pl.cast(scaled_weights, target_type=pl.BF16, mode="rint")
         weights[
             row_begin : row_begin + MM_ROW_TILE, 0:IDX_N_HEADS
-        ] = pl.mul(total, WEIGHTS_SCALE)
+        ] = pl.cast(rounded_weights, target_type=pl.FP32)
 
     scores, indices, completion = indexer_score_topk_forest_vllm(
         qr_hadamard_i8,
@@ -1487,7 +1548,8 @@ def golden_indexer(tensors, inner_full=None):
     ratio, rd = COMPRESS_RATIO, ROPE_HEAD_DIM
 
     q_i32 = qr.to(torch.int32) @ wq_b.to(torch.int32)
-    q = (q_i32.float() * qr_scale * wq_b_scale.view(1, -1)).view(
+    q_dequant_factor = qr_scale * wq_b_scale.view(1, -1)
+    q = (q_i32.float() * q_dequant_factor).bfloat16().float().view(
         tokens, IDX_N_HEADS, IDX_HEAD_DIM
     )
     q_rope = q[..., -rd:]
@@ -1495,8 +1557,9 @@ def golden_indexer(tensors, inner_full=None):
     q_rope = q_rope * cos[:, None, :] + q_rope_swapped * sin[:, None, :]
     q = torch.cat([q[..., :-rd], q_rope], dim=-1)
 
-    # Native applies dim**-0.5 after the matmul, not folded into the matrix.
-    q = (q.to(torch.bfloat16).float() @ hadamard) * HADAMARD_SCALE
+    # The native Hadamard linear and scalar multiplication both return BF16.
+    q_linear = (q.bfloat16().float() @ hadamard).bfloat16().float()
+    q = (q_linear * HADAMARD_SCALE).bfloat16().float()
     # W8A8C16: q and Indexer Cache are quantized per row to INT8 for score matmul,
     # then dequantized with q_scale * kv_scale.
     # flash: fp4_act_quant on q (FP4 simulation).
@@ -1522,7 +1585,10 @@ def golden_indexer(tensors, inner_full=None):
     }
     golden_compressor(inner_tensors)
 
-    weights = (x @ weights_proj) * WEIGHTS_SCALE
+    weights = (x @ weights_proj).bfloat16().float()
+    weights = (weights * WEIGHTS_SCALE).bfloat16().float()
+    # prepare_dsa_indexer_weights converts the BF16 result to half for QLI.
+    weights = weights.half().float()
 
     # C8 cache: pre-quantized INT8 KV + per-position dequant scale (no score-time re-quant)
     idx_kv_cache_i8 = tensors["idx_kv_cache"]
@@ -1536,7 +1602,7 @@ def golden_indexer(tensors, inner_full=None):
         q.reshape(tokens * IDX_N_HEADS, IDX_HEAD_DIM)
     )
     q_i8 = q_i8.view(tokens, IDX_N_HEADS, IDX_HEAD_DIM)
-    q_scale = q_scale.view(tokens, IDX_N_HEADS, 1)
+    q_scale = q_scale.half().float().view(tokens, IDX_N_HEADS, 1)
     flat_cache = idx_kv_cache_i8.reshape(-1, IDX_HEAD_DIM)
     flat_scale = idx_kv_scale.reshape(-1, 1)
 
@@ -1575,8 +1641,11 @@ def golden_indexer(tensors, inner_full=None):
                     q_i8[token].to(torch.int32),
                     kv_i8[begin:end].to(torch.int32),
                 )
-                score = score_i32.float() * q_scale[token]
-                score = (torch.relu(score) * weights[token].unsqueeze(-1)).sum(dim=0)
+                # QLI first materializes the rectified dot products and the
+                # query-scale/weight products in FP16, then reduces heads.
+                score = (torch.relu(score_i32.float()) * SCORE_DEQUANT_SCALE).half().float()
+                coefficient = (q_scale[token] * weights[token].unsqueeze(-1)).half().float()
+                score = (score * coefficient).sum(dim=0)
                 score = score * kv_scale[begin:end, 0]
                 score = torch.where(
                     valid_pages[begin:end],
@@ -1584,8 +1653,10 @@ def golden_indexer(tensors, inner_full=None):
                     torch.full_like(score, FP32_NEG_INF),
                 )
                 indices = torch.arange(begin, end, dtype=torch.int64)
-                merged_scores = torch.cat([running_scores, score])
-                merged_indices = torch.cat([running_indices, indices])
+                # Operand order matches native MergeSort. torch.topk does not
+                # model the device's tie-breaking for equal scores.
+                merged_scores = torch.cat([score, running_scores])
+                merged_indices = torch.cat([indices, running_indices])
                 keep = min(IDX_TOPK, merged_scores.numel())
                 running_scores, selected = torch.topk(
                     merged_scores, keep
