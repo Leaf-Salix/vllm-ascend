@@ -51,3 +51,9 @@ Native控制长档1310.652→1337.379μs，短档956.030→928.436μs，全部�
 [主机/GC/入场诊断](analyze.py)。两侧同一冻结源码/权重，TP1、DP=EP16、出5验6、mode2/atomic0/det0、EPLB关；
 96 token预热、跳过8步后连续10步纯decode forward，独立3步PyTorch profile，不包含加载/编译/草稿/采样。
 正式窗口不新增Event或同步，保留所有rank及逐步最慢rank；结果按7:3记录，P95与token/DSpark单列。
+
+设备任务成功结束后执行[离线profile导出](export_profiles.sh)；入口先核对该任务已完成，
+使用2d2f9ca0冻结Runner解析，避免混入其他会话的Runner修改。
+[区间与相邻层报告](profile_report.py)复用已有分析，分别输出完整CSA的7:3变化率、
+各档P95、原第12/14层明细和四份真实EP16 PyTorch JSON下载入口。
+正式forward单独输出7:3变化率；两种指标都以同轮Native为基线，不作旧PTO到新PTO的因果归因。

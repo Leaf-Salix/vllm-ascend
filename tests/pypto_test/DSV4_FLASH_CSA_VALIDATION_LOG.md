@@ -9348,7 +9348,8 @@ x_out明确改变算术：短/长档对原PTO RMSE为0.000775363/0.000773415，m
 ## 332. 准备长档Score的Key L0B预发，CPU表达继续调整，组合EP16已提交（2026-09-28）
 
 参考ops-transformer b5b33e14 QLIV2Matmul::ProcessQk/LoadKeyToL0b的多槽轮换。
-当前S6生成代码的INT8 Key Right固定L0B地址0，占8KiB；下一面板TMOV要等上一QK释放。
+当前S6生成代码的INT8 Key Right在稳态固定L0B地址0，占8KiB；下一面板TMOV要等上一QK释放。
+补充核查：首块Key在WS开始前临时使用8192地址，不构成稳态双缓冲；基线L1最大分配末端仅96KiB。
 FP16 WS Right占8192起的48KiB。独立2d2f9ca0候选尝试提前一个N64 Key面板，
 期望2×8KiB+48KiB共64KiB；只在已有长档S6分派启用，其他档位保持旧策略。
 QK/WS形状、量化/归约、cache、任务数和调度标志不变，不是旧页表UB预取的重测。
@@ -9364,3 +9365,19 @@ inline helper无法推断中间GM视图metadata，改为原核内展开；未修
 检查token/DSpark、位置、P95及逐步最慢rank。当前无模型结果；Key新表达的CPU编译留到本任务结束后。
 [Key候选来源/补丁/失败记录](results/csa_score_key_prefetch_20260928/README.md)、
 [组合EP16命令与口径](results/csa_ub_combined_20260928/README.md)。
+
+## 333. 完善七三权重汇总并核查Key预取基线分配（2026-09-28）
+
+组合EP16仍使用原任务task_20260928_162727_150252329060排队，未重复提交或混入其他源码。
+排队期间仅做源码阅读和轻量脚本检查；Key候选编译及profile离线解析继续留到任务结束后。
+forward收集入口将7:3变化率同时写入JSON/Markdown；模型profile另报完整CSA的7:3变化率，
+两者均以同轮Native为基线，P95、逐步最慢rank和token/DSpark单列，不由加权均值抵消。
+复用原相邻CSA分析，参数化源码版本与输出根目录，旧报告默认口径保持；
+新增导出入口要求原任务成功结束，并使用2d2f9ca0冻结Runner，最终汇集四份模型PyTorch JSON。
+
+阅读基线Score的AIC生成代码确认：首Key在8192地址、后15个在0地址，WS Right位于8192起的48KiB；
+L1/L0A/L0B/L0C最大分配末端分别96/60/56/100KiB。已修正“全部Key始终地址0”的过度概括。
+候选超L1不能解释为基线容量用尽；独立prologue是否改善分配仍待CPU编译，未提交设备任务。
+已准备同2d2f基底长短B16的单卡入口，20次计时、四个独立DFX窗口，八类状态零容差；
+编译通过并检查生成的L0B后才提交，不放宽算术或扩大到七档。
+本轮Ruff、两个shell入口语法及差异检查通过；尚无新模型或Key预取设备性能结论。

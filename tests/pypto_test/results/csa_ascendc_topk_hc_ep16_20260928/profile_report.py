@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT.parents[1]))
 from offline_pd.performance import device_tasks  # noqa: E402
 
 
-def focus_pair(case):
+def focus_pair(case, root=ROOT):
     """只展开用户指出的8K/B16第12/14层，用已有记录区分根与设备Worker。"""
     result = {"history": 8192, "batch": 16, "layers": [12, 14], "sides": {}}
     lines = ["", "## 原问题对应的第12/14层", "",
@@ -24,7 +24,7 @@ def focus_pair(case):
                   for layer in (12, 14)] for step in range(3)]
         lines.append(f"| {side} | " + " | ".join(f"{a:.2f}/{b:.2f}" for a, b in pairs) + " |")
         detail = {"three_step_pair_us": pairs, "step3": []}
-        folder = ROOT / "model/h8192/b16" / side
+        folder = root / "model/h8192/b16" / side
         tasks = device_tasks(folder, 0)
         for layer in (12, 14):
             interval = next(row for row in case[side]["intervals"] if row["step"] == 2 and row["layer"] == layer)
@@ -65,25 +65,25 @@ def focus_pair(case):
               "任务记录包含图内控制事件，并集不是纯Cube/Vector忙时；不能把两侧同位置变慢直接判为同一根因。",
               "本轮没有这两层的逐incore DFX，因此未定位到Score或Sparse；不能据此宣称sync_start已解决问题。",
               "[两层原始统计](pair_detail.json)。"]
-    (ROOT / "model/pair_detail.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    (root / "model/pair_detail.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     return lines
 
 
-def main():
-    source = ROOT.parent / "csa_qa_matrix_20260928/report.py"
+def main(root=ROOT, revision="d1f170ff"):
+    source = root.parent / "csa_qa_matrix_20260928/report.py"
     spec = importlib.util.spec_from_file_location("model_report", source)
     reporter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reporter)
-    reporter.ROOT = ROOT
-    reporter.REVISION = "d1f170ff"
+    reporter.ROOT = root
+    reporter.REVISION = revision
     reporter.model_report(matrix_label="长短B16")
-    data = json.loads((ROOT / "model/model_gap_rank0.json").read_text())
+    data = json.loads((root / "model/model_gap_rank0.json").read_text())
     adjacent = []
     manifest = []
-    download = ROOT / "download"
+    download = root / "download"
     download.mkdir(exist_ok=True)
     lines = ["# 同一步内相邻CSA的差值", "",
-             "独立rank0三步profile，按本轮算子d1f170ff分析；不代替正式十步forward。",
+             f"独立rank0三步profile，按本轮算子{revision}分析；不代替正式十步forward。",
              "PTO使用根/Worker并集的body_us，Native为HC_pre到HC_post；首次根调用前的metadata另列。",
              "step从1开始、模型layer从0开始；每行取该侧三步内最大向上跳变，所有相邻对见JSON。",
              "不同层权重/状态不同，差值不能自动解释为调度噪声，旧765/807μs样本也没有被替换。", "",
@@ -107,7 +107,7 @@ def main():
             lines.append(f"| {label} | {side} | {largest['step']} | {largest['layers'][0]}→"
                          f"{largest['layers'][1]} | {largest['before_us']:.2f}/{largest['after_us']:.2f} | "
                          f"{largest['increase_us']:+.2f} |")
-            folder = ROOT / "model" / f"h{case['history']}" / f"b{case['batch']}" / side
+            folder = root / "model" / f"h{case['history']}" / f"b{case['batch']}" / side
             exported = json.loads((folder / "profile_export.json").read_text())["exported"]
             entries = [entry for entry in exported if entry["rank"] == "rank0"]
             if len(entries) != 1:
@@ -119,17 +119,17 @@ def main():
                     raise ValueError(f"{destination}: 已有文件来源不同")
             else:
                 os.link(trace, destination)
-            manifest.append({"file": destination.name, "source": str(trace), "operator": "d1f170ff",
+            manifest.append({"file": destination.name, "source": str(trace), "operator": revision,
                              "scope": "真实EP16 rank0独立三步PyTorch profile，不是单层DFX"})
-    (ROOT / "model/adjacent_csa.json").write_text(json.dumps(adjacent, ensure_ascii=False, indent=2) + "\n")
+    (root / "model/adjacent_csa.json").write_text(json.dumps(adjacent, ensure_ascii=False, indent=2) + "\n")
     short_case = next(case for case in data["cases"] if case["history"] == 8192 and case["batch"] == 16)
-    lines += focus_pair(short_case)
+    lines += focus_pair(short_case, root)
     lines += ["", "[全部相邻对](adjacent_csa.json)、[模型分项](MODEL_GAP.md)、",
               "[正式forward](RESULTS.md)、[四份PyTorch JSON](../download/README.md)。"]
-    (ROOT / "model/ADJACENT_CSA.md").write_text("\n".join(lines) + "\n")
+    (root / "model/ADJACENT_CSA.md").write_text("\n".join(lines) + "\n")
     (download / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     (download / "README.md").write_text(
-        "# d1f170ff长短B16模型profile\n\n"
+        f"# {revision}长短B16模型profile\n\n"
         "四份真实EP16 rank0三步PyTorch JSON；未混入旧源码或单卡合成历史DFX。\n\n" +
         "\n".join(f"- [{item['file']}]({item['file']})" for item in manifest) +
         "\n\n[原始路径与口径](manifest.json)、[相邻CSA](../model/ADJACENT_CSA.md)。\n"

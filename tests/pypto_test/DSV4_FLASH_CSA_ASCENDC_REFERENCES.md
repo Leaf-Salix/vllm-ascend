@@ -115,7 +115,8 @@ PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未�
 [累计softmax/PV候选与旧实验区别](results/csa_sparse_online_pv_20260928/README.md)。
 
 128K优先的新候选：QLI V2的`ProcessQk/LoadKeyToL0b`按四个16KiB L0B槽轮换，
-当前PTO长档S6的生成代码始终用地址0的8KiB Key Right；下一次TMOV需等待前一QK释放。
+当前PTO长档S6在稳态用地址0的8KiB Key Right；下一次TMOV需等待前一QK释放。
+首块Key在WS开始前临时使用8192地址，不构成稳态Key双缓冲；基线L1最大分配末端仅96KiB。
 WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key面板，保持S6算术与QK/WS形状。
 双Key+WS的64KiB只是容量推导；初版在SSA修正后仍因Mat分配638976>524288失败。
 已在算子侧将预发放到独立prologue，完整编译待组合EP16结束后再进行；未修改工具链或生产路径。

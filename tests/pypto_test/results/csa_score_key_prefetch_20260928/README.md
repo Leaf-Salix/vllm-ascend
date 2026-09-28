@@ -2,8 +2,11 @@
 
 独立基底2d2f9ca0，工作树`.cache/csa-score-key-prefetch-2d2f9ca0`，未改生产实现或正在排队的组合验证源码。
 参考最新ops-transformer b5b33e14 QLIV2Matmul::ProcessQk/LoadKeyToL0b：L0A/B使用四个16KiB槽轮转。
-当前PTO S6/M384/N64的生成代码对INT8 Key Right始终使用L0B地址0，
+当前PTO S6/M384/N64的生成代码在稳态对INT8 Key Right使用L0B地址0，
 下一panel的TMOV在PIPE_M→PIPE_MTE1等待后才能重用；FP16 WS Right占8192起的48KiB。
+首块Key临时使用8192地址，此时WS尚未开始；这不构成稳态Key双缓冲。
+已读2d2f9ca0生成代码确认：L1最大分配末端96KiB、L0A60KiB、L0B56KiB、L0C100KiB。
+此前638976字节的L1失败是候选表达的分配结果，不能解释为基线已接近L1容量上限。
 
 本候选在S6长档中让两个N64 Key Right同时存活，先装入下一panel再消费当前panel，
 目标是2×8KiB Key加48KiB WS占满64KiB L0B，保持现有Query/系数驻留。
@@ -31,3 +34,8 @@ QK/WS形状、FP16量化/规约、score分块、Top-K、24MIX任务及调度标�
 这项因果解释仍待生成代码确认。源码Ruff/差异检查之后，完整编译留到
 组合EP16任务`task_20260928_162727_150252329060`结束后，不再与正式模型计时交叠。
 当前候选没有CPU通过或设备收益结论，不合入生产，不把本项标完成。
+
+[单卡对照入口](run_layer.sh)已准备，尚未提交。只有完整CPU编译通过并检查实际L0B分配后才执行。
+基线为同一2d2f9ca0，长短B16交换执行顺序，每侧5次预热、20次无profiler图计时、4个独立DFX窗口；
+八类输出/状态必须零容差，保留Native控制、metadata保护区、自重放及候选A→B→A。
+重点判断128K Score核内及完整CSA，8K检查回退，二者按7:3记录；不改变算术容差或原生cache布局。

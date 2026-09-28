@@ -46,6 +46,14 @@ def main():
                              'P95/最慢rank与token/DSpark单列，不以加权均值覆盖异常。')
     data['performance_observations'] = observations
     path.write_text(formatter.format_json(data) + '\n')
+    if 'weighted_forward_change_pct' in observations:
+        with (collector.ROOT / 'RESULTS.md').open('a') as output:
+            output.write(
+                '\n128K/8K的正式forward均值变化率按7:3加权为'
+                f"{observations['weighted_forward_change_pct']:+.3f}%。\n"
+                '同轮Native为基线，不代表对旧PTO的单因素收益。各档P95、逐步最慢rank及'
+                'token/DSpark单独列示，不能由均值权重抵消异常。\n'
+            )
     print(observations)
 
 
