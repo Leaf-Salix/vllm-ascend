@@ -10194,3 +10194,89 @@ PyPTO88f60598默认转换将slice变成Tile，后续tile.load因要求TensorType
 未查远端最新、不外推为所有替代写法都不可行；只否定这一条直接表达链，不改PyPTO、PTOAS或ISA。
 无CCE/NPU测试、无生产改动，不因该限制拆Native cache。保留失败探针和精简错误，防止重复相同假设。
 [源码、错误与适用范围](results/csa_key_page_view_20260929/README.md)。
+
+## 370. 分段排序两档完成，保留候选但不声称全面核内改善（2026-09-29）
+
+先更正§368源码描述：最新QLI V2的BASE_TOPK=2048，UB内部累计2048对，最终按sparseCount输出。
+PTO使用模型所需的512对，借鉴分段排序/累计时序；撤回“Native内部累计Top-512”的说法。
+当前AscendC参考与Indexer差距文档已经改正，不改动原始性能数据。
+
+原task_20260929_000225_403316119769两侧十个独立排序边界/tie用例通过，值/索引与参考及基线逐bit一致，保护区通过。
+随后runner把队列追加的--device误当case参数，CSA进程在argparse阶段退出2，尚未执行CSA测量。
+修正为固定case数组，复用已通过探针；续任务task_20260929_002109_36305829117自动分配card0、退出0。
+两侧私有源码未变，CANN9.2/mode2/atomic0/det0，128K/B16和8K/B24正式5预热/20次计时、四DFX窗口。
+
+| 档位 | CSA基线→候选 μs | 变化 | P95 μs | Score AIC μs | Score AIV μs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1064.285→1031.657 | −3.066% | 1076.240→1039.700 | 252.572→262.587 | 273.486→268.089 |
+| 8K/B24 | 961.650→965.993 | +0.452% | 978.320→987.160 | 31.066→29.424 | 45.398→43.370 |
+
+长短8:2完整CSA−2.362%，Score AIC加权+2.115%、AIV−2.472%；短档merge9.151→16.770μs。
+短档算法没改，但分派/包络和Native控制也有变化，不能把全部差异归因到算术或直接扣除Native漂移。
+长档AIV末尾缩短而AIC增加，说明“前移排序”不是Cube/Vector同时加速；需要结合流水等待继续分析。
+八类PTO状态零容差、图A→B→A、metadata/保护区通过；本轮没有Native或整模型token/DSpark验收。
+按用户总体收益规则保留候选与证据，尚未合入生产或覆盖受影响B4/B8/B24。
+用户随后要求优先对齐Native部署模板，因此先修正基线，不把此手工图区间作为模板优化后的Native结论。
+[完整结果与四窗口分项](results/csa_score_stream2048_20260928/RESULTS.md)。
+
+## 371. Native测试对齐decode模板，补齐静态编译和融合依赖（2026-09-29）
+
+用户指定vllm-ascend-main/tests/dsv4_perf_accuracy_20260827/runtime/decode/run_dp_template.sh。
+逐项读取模板和config.sh，并核对旧Native/PTO实际日志：整模型npugraph_ex=True、static_kernel=False，
+CPU绑核已执行；shared-expert overlap默认False，recompute默认False，fuse_norm_quant被旧适配关闭、OMP=4。
+旧单层enforce_eager构造后手工NPUGraph捕获，不能等同模板的编译优化。此前优势只适用于原配置。
+
+现修订offline_pd公共入口：两侧显式npugraph_ex/static kernel/CPU binding/shared-expert overlap开启，
+recompute默认False；恢复norm/quant融合，显式async和HMA，decode OMP10、加载线程128、默认NZ2与显存0.95。
+显式场景参数仍保留，尤其B24/128K使用0.97；原权重、新七档、独立KV、EPLB关闭均不变。
+离线connector拒绝本地prefix命中，故不照搬在线模板prefix-sharing；其余容量差异逐项记录。
+Worker记录实际编译/重叠/调度及环境配置，发生静默降级时在正式采样前失败。单层报告明确标手工图范围。
+真实LLM参数、16rank环境传递、Worker返回配置的10项CPU回归通过；尚无新配置性能结论。
+
+CPU符号检查证实CANN9.2及当前CSA custom包仍缺aclnnAddRmsNormBias。
+用当前release csrc/moe/add_rms_norm_bias构建独立csa_template vendor成功，两个ACLNN入口已导出；
+没有替换Native计算源码或公共环境，旧包仍保留。下一步单卡检查实际调用、融合注册和static compiler执行，
+通过后再做编译CSA代表档基线，避免直接用16卡调试启动依赖。
+任务task_20260929_004257_6492222513已auto提交；此前004215在尚未启动时因探针类名修正被取消，未执行设备代码。
+[模板差异及后续验收](DSV4_FLASH_CSA_NATIVE_BASELINE.md)、[依赖构建与单卡入口](results/csa_native_template_20260929/README.md)。
+
+
+## 372. 去除四个AICPU dummy并改为直接任务依赖，收益未超出波动（2026-09-29）
+
+按用户要求优先做此调度实验。生产基线d3adbe04（算子等同3b27c7fd），不叠加stream2048。
+RoPE中转改直接TaskId，Compressor显式依赖RoPE和Q_A；Q_B、weights的空dummy改无任务哨兵，
+原tensor自动依赖和scope保留。私有整包两根解析、完整编译/load通过，调度C++ dummy提交4→0。
+实际DFX同样确认4→0及四组直接边，计算任务和算术不变。
+
+task_20260929_005243_82229510692自动单卡完成exit=0；两侧CANN9.2/mode2/atomic0/det0，
+正式layer4权重/合成历史、ring[256,128,256,32]/4096。5预热/20次计时，独立四DFX窗口。
+
+| 档位 | CSA基线→直接依赖 μs | 变化 | P95 μs | max μs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1046.853→1045.684 | −0.112% | 1057.100→1055.840 | 1057.480→1072.560 |
+| 8K/B24 | 976.313→975.806 | −0.052% | 992.400→992.760 | 999.880→999.780 |
+
+长短8:2为−0.100%，不足以证明明确收益，不记作有效优化或长尾修复，不合入生产。
+长档weights首次接收提前29.745μs，但Q_A启动分散0.470→22.555μs，
+Compressor首次接收延后7.515μs、Score延后13.975μs。短档Score提前12.750μs，
+但其包络及后续核时上升，完整CSA几乎不变。调度资源竞争需整体处理，不能只数dummy节点。
+两档八类状态精确一致，图A→B→A、metadata/保护区通过；未做Native/整模型token验收。
+候选与证据保留，不扩七档/16卡，也不将等待重叠引起的核时变化称为新incore算法收益。
+[结果、分项与泳道路径](results/csa_direct_deps_20260929/RESULTS.md)。
+
+## 373. Native模板依赖与static kernel单卡验证通过，CSA基线仍待重取（2026-09-29）
+
+接§371，AddRmsNormBias和Native融合注册已通过。初次探针全静态输入被vLLM sym_range过滤，
+修为符号token维度后进入static compile；工具却因CANN9.2 OPP目录只读在打包时返回1。
+中间探针005226的原始PASS只检查函数返回，不能证明静态kernel生效，明确撤回该判定；
+现检查static_compile实际True及非空安装包。失败证据和原因一并保留。
+
+不改其他用户共享CANN权限：创建私有可写OPP根，静态kernel写入私有目录。
+浅层built-in软链接导致Cast tiling未注册；将op_tiling目录链实体化并复制原始两份库约40MiB后，
+最终task_20260929_010148_105901111670单卡auto/card1完成exit=0：真实算子、融合注册、
+static compile=True、一个静态包安装及图重放全部通过。未修改Native算术或共享公共环境。
+后续两侧source公共环境后再source结果目录env.sh，使用同一补充vendor与可写OPP。
+
+这只关闭部署模板启动依赖缺口。单层真正编译路径、CSA新基线和EP16性能仍未完成，
+旧手工图Native列继续明确标控制数据。10项CPU入口/Worker测试已通过，无需重复无关测试。
+[环境复现与设备证据](results/csa_native_template_20260929/README.md)。

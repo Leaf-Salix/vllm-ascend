@@ -1,0 +1,104 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_csa.py
+@@ -335,8 +335,8 @@
+     # 创建会被判成 scope 局部张量而参与内存复用。上游 _decode_csa_tp1 也在这里创建。
+     attn_out = pl.create_tensor([t_dim, D], dtype=pl.BF16)
+     with pl.scope():
+-        # Projection-chain dependency marker.
+-        late_dep = pl.system.task_dummy(deps=[rope_tid])
++        # 直接传递 RoPE 任务，不创建 AICPU dummy 中转节点。
++        late_dep = rope_tid
+         q, qa_tid = qkv_proj_rope(
+             x_normed_t,
+             wq_a,
+@@ -370,7 +370,6 @@
+ 
+         # Keep Q_A ahead of the heavier Attention Compressor projection.
+         # The lighter Indexer projection overlaps Q_A; its Hadamard gate stays below.
+-        compressor_dep = pl.system.task_dummy(deps=[late_dep, qa_tid])
+         cmp_out = pl.create_tensor([t_dim, HEAD_DIM], dtype=pl.FP32)
+         cmp_out, cmp_cache_write_tid, cmp_kv_score_tid = compressor_ratio4(
+             x_normed_t,
+@@ -389,7 +388,8 @@
+             cmp_seq_lens,
+             cmp_slot_mapping,
+             state_slot_mapping,
+-            compressor_dep,
++            late_dep,
++            qa_tid,
+         )
+         idx_kv_unused = pl.create_tensor([t_dim, IDX_HEAD_DIM], dtype=pl.FP32)
+         idx_cache_write_tid = indexer_compressor(
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_compressor_ratio4.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_compressor_ratio4.py
+@@ -108,6 +108,7 @@
+     kv_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+     score_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
+     late_dep: pl.Scalar[pl.TASK_ID],
++    qa_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Project token-local compressor values and scores in FP32."""
+     bs = pl.tensor.dim(x, 0)
+@@ -121,7 +122,7 @@
+     with pl.spmd(
+         KV_SCORE_WORKERS,
+         name_hint="kv_score_proj",
+-        deps=[late_dep],
++        deps=[late_dep, qa_dep],
+     ) as _kv_score_tid:
+         kv_worker = pl.tile.get_block_idx()
+         for idx in pl.range(kv_worker, t_matmul * OUT_DIM // (MM_B_TILE * OUT_TILE), KV_SCORE_WORKERS):
+@@ -264,6 +265,7 @@
+     kv_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
+     score_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
+     late_dep: pl.Scalar[pl.TASK_ID],
++    qa_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Project, then pool and commit the token stream."""
+     projection_tid = compressor_ratio4_project(
+@@ -273,6 +275,7 @@
+         kv_proj_pad,
+         score_proj_pad,
+         late_dep,
++        qa_dep,
+     )
+     pool_tid, projection_ready_tid = compressor_ratio4_pool_projected(
+         compress_state,
+@@ -437,6 +440,7 @@
+     cmp_slot_mapping: pl.Tensor[[COMPRESSED_ROWS_DYN, 2], pl.INT32],
+     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
+     late_dep: pl.Scalar[pl.TASK_ID],
++    qa_dep: pl.Scalar[pl.TASK_ID],
+ ) -> tuple[pl.Tensor, pl.Scalar[pl.TASK_ID], pl.Scalar[pl.TASK_ID]]:
+     pooled_kv = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
+     kv_proj_pad = pl.create_tensor([BS_PAD, OUT_DIM], dtype=pl.FP32)
+@@ -454,6 +458,7 @@
+         kv_proj_pad,
+         score_proj_pad,
+         late_dep,
++        qa_dep,
+     )
+     cache_write_tid = compressor_ratio4_cache_write(
+         kv,
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -744,7 +744,7 @@
+     # The quant scale rides the qr_i8 -> qproj_matmul -> dequant chain.
+     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
+     qa_tid = q_proj_qr(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store)
+-    q_seq_dep = pl.system.task_dummy(deps=[])
++    q_seq_dep = pl.system.task_invalid()
+     q_proj_q(
+         x,
+         wq_b,
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -1657,7 +1657,7 @@
+         qr_hadamard_i8,
+         qr_hadamard_scale_dq,
+     )
+-    weights_gate_dep = pl.system.task_dummy(deps=[])
++    weights_gate_dep = pl.system.task_invalid()
+     topk_scores, topk_idxs, _leaf_tid = indexer_weights_score(
+         x,
+         weights_proj,

@@ -9,6 +9,10 @@ CSA为1055.481/784.767μs、P95下降；8K/B40分块边界也通过，O_A核时�
 
 ## 范围和读数
 
+2026-09-29核查补充：以下Native单层数据来自手工NPUGraph，未启用部署模板的npugraph_ex/static kernel。
+旧整模型另有关闭norm/quant融合和共享专家重叠的配置差异；
+[Native基线修订](DSV4_FLASH_CSA_NATIVE_BASELINE.md)完成前，不能把本页优势推广到模板优化后的Native。
+
 正式 layer4（第二个CSA）权重、合成历史及输入，TP1/S6/mode2/atomic0/det0、EPLB关闭。
 单卡自动分配card0；每侧预热5次，20次无profiler图计时。完整区间含HC_pre、norm、CSA、HC_post。
 Native cache布局未改，PTO内直接分页读写，没有入口拆分和外部写回；不能再引用旧“纯CSA/含复制”两套现状。
@@ -58,8 +62,9 @@ Native QLI包含系数、Score、本地Top-K和最终归并；PTO另拆系数与
 新128K/B24为3b27c7fd独立9.2结果，Native QLI Duration387.340、AIC/AIV参考374.920/374.468μs；
 PTO Score AIC/AIV383.890/412.053、独立merge14.260μs。AIC已较接近参考，AIV末尾排序仍值得研究，
 不按两侧不同融合范围直接相减声称可回收时长。
-当前2048候选分段排序候选已完成CPU编译并排队，尝试将前段排序与后续Cube计算重叠；
-保留原GM缓冲，新增临时根写读的代价需要实测，未声称核内或完整CSA收益。
+2048候选分段排序两档已完成：长B16 CSA−3.066%、AIV核时−1.973%，但AIC核时+3.965%；
+短B24 CSA+0.452%、merge核时明显升高，长短8:2 CSA−2.362%。候选保留，暂不合入生产。
+保留原GM缓冲的排序前移会改变Cube/Vector等待，不能将源码重叠直接当作两类核时都下降。
 [候选、Native依据与验证范围](results/csa_score_stream2048_20260928/README.md)。
 
 具体代码分工与待办见[Indexer差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
