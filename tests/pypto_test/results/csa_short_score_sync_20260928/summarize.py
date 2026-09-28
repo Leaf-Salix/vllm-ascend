@@ -1,5 +1,6 @@
 """定向对照短档 Score sync_start：固定规约状态、100次计时及四窗口关键链。"""
 
+import collections
 import importlib.util
 import json
 import math
@@ -28,6 +29,35 @@ def stats(samples):
             'p95_us': ordered[math.ceil(.95 * len(ordered)) - 1], 'max_us': ordered[-1],
             'over_p50_2pct': sum(v > p50 * 1.02 for v in samples),
             'over_p50_5pct': sum(v > p50 * 1.05 for v in samples)}
+
+
+def scheduling(path, canonical):
+    events = read(path)['traceEvents']
+    pids = {e['args']['name']: e['pid'] for e in events if e.get('name') == 'process_name'}
+    workers = [e for e in events if e.get('pid') == pids['Worker View'] and e.get('ph') == 'X'
+               and 'kernel-duration-us' in e.get('args', {})]
+    origin = min(e['ts'] for e in workers)
+    score = {}
+    for core in ('aic', 'aiv'):
+        blocks = [e for e in workers if canonical(e['name']) == 'indexer_score_topk_native_pair_' + core]
+        assignment = collections.Counter(e['tid'] for e in blocks)
+        score[core] = {'blocks': len(blocks), 'used_cores': len(assignment),
+                       'max_blocks_per_core': max(assignment.values())}
+    drains = [{'thread': e['tid'], 'start_us': e['ts'] - origin, 'duration_us': e['dur'],
+               'staged_blocks': e['args']['tasks_processed']}
+              for e in events if e.get('pid') == pids['AICPU Scheduler'] and e.get('ph') == 'X'
+              and e.get('args', {}).get('phase') == 'drain']
+    # 三个调度线程的外层区间会重叠；只计时间并集，不累加线程耗时。
+    intervals = sorted((e['start_us'], e['start_us'] + e['duration_us']) for e in drains)
+    merged = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return {'score_assignment': score, 'drain_markers': drains,
+            'drain_marker_union_us': sum(end - start for start, end in merged),
+            'drain_limit': '仅实际stage的drain才有DFX标记，未包含所有无进展重试；不能当作全部暂停派发时间。'}
 
 
 def main():
@@ -75,7 +105,9 @@ def main():
             errors.append(f'{side}: DFX窗口不足4')
         measurements[side] = {'timing_source': str(folder / side / 'report.json'),
                               'timing': {s: stats(report['timing'][s]['samples_us']) for s in ('pto', 'native')},
-                              'worker_windows': [worker.summarize(Path(w['merged_swimlane'])) for w in windows]}
+                              'worker_windows': [worker.summarize(Path(w['merged_swimlane'])) for w in windows],
+                              'scheduler_windows': [scheduling(Path(w['merged_swimlane']), worker.canonical)
+                                                    for w in windows]}
     result = {'operator': 'e58ddc94 + short Score sync_start=True; early_resolve remains True',
               'task': 'task_20260928_112109_314698014843',
               'scope': 'H8192/B16/S6，layer4真实权重/合成历史，mode2/atomic0/det0；单卡图重放。',
