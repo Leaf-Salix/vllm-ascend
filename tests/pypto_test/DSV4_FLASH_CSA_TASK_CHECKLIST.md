@@ -173,6 +173,9 @@ Native控制与所有样本保留，CPU进程当时已挂起，后续模型正�
 Native QLI V2独立分配Key L1和Score L1，本候选仍复用池并产生MTE1→FIX等待；
 下一步在算子侧表达独立Key池，先看实际分配和指令依赖，通过后才安排必要单卡。
 [代码差异、四窗口回退与状态证据](results/csa_score_key_prefetch_20260928/README.md)。
+独立Key L1池候选已通过CPU：Key占单独16KiB，Score双槽各48KiB，Mat末端112KiB，
+MTE1→FIX等待15→0，另外9份Score生成二进制一致；长短B16单卡原任务正在执行，尚未合入。
+[候选、生成地址与测试合同](results/csa_score_key_l1_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。

@@ -9458,3 +9458,22 @@ Native控制长档1329.045→1313.446μs、短档930.691→950.573μs；
 现有DFX没有逐指令stall，尚不能把43μs增量全部归给某条等待。
 下一步仅依据这项明确差异表达独立Key L1池，先核查CPU分配/依赖，不原样重复失败版本。
 [原始计时、四窗口核内/分派、状态与源码差异](results/csa_score_key_prefetch_20260928/README.md)。
+
+## 337. 依据QLI V2隔离Key L1与Score L1，CPU通过后提交长短单卡（2026-09-28）
+
+独立2d2f9ca0候选只在已有长档S6启用：保留Key L0B预发，增加跨panel存活的16KiB Key L1池，
+两个N64 INT8面板按槽填入，由转置视图TEXTRACT到L0B，避免被当前Score的FIXPIPE写回复用。
+Native原生cache、分页映射/尾部保护、算术、M384/N64、任务数及调度标志不改；生产路径不变。
+此项来自最新AscendC QLI V2独立Key/Score双槽分配，与pypto-lib连续cache/query组织差异明确保留。
+
+完整CPU lowering/PTOAS/CCE/AICPU链接及load通过，没有工具链修改。
+实际Key L1基址49152占16KiB，Score L1基址0/65536、各48KiB，Mat末端112KiB；
+L0B Key首块16384、稳态0/8192，WS占16384起48KiB，总64KiB。
+每N1024块仍16次Key读取、16次QK/WS；Key TEXTRACT列偏移0/64交替。
+前版15处MTE1→FIX等待降为0，其他必要同步保持；9份未改Score分支/AIV二进制定向比较一致。
+以上是生成代码证据，不能替代设备状态或推断实际收益。
+
+编译完成后提交单卡task_20260928_175014_22857933418，已开始运行。
+同基底长短B16、20次无profiler图计时与四个独立DFX，八类状态零容差及A→B→A；
+按128K优先、长短七三分别衡量核内/完整CSA并检查P95，不为失败前版补测EP16。
+[新候选、CPU证据和命令](results/csa_score_key_l1_20260928/README.md)。
