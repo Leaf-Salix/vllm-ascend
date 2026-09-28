@@ -1,43 +1,55 @@
-# CANN9.2：当前性能版与Native真实编译七档对照
+# 当前源码：真实编译新七档
 
-阶段出口矩阵：128K B4/B8/B16/B24，8K B24/B32/B40；不再新增8K B16。
-Query驻留候选已判定不保留；最终整包冻结为c93ec723，版本及路径见[source.json](source.json)。
-两根依赖图解析通过，task_20260929_032251_2642121879已通过auto单卡启动。
-当前尚未完成本轮矩阵，不拼接历史局部数字填表。
+状态：task_20260929_032251_2642121879已完成exit=0，auto单卡串行运行38分2秒。
+128K B4/B8/B16/B24、8K B24/B32/B40全部完成，不再新增8K B16。
+算子及公共依赖冻结为c93ec723，版本及路径见[source.json](source.json)。
+Query驻留、矩阵scale及去dummy候选均未混入。
 
-同一auto单卡依次测七档，每档交替Native/PTO先后次序；各侧独立OPP静态包与AOT缓存。
-复用已验证的实际编译半层入口，要求Native实际安装静态包、PTO实际调用且不回退。
-同一CANN9.2、mode2、det0，PTO atomic0；EPLB关闭，ring=[256,128,256,32]MiB/task_window4096。
-Native部署模板编译配置与PTO一致；Worker绑核和MoE共享专家多流不在单卡半层范围。
+[完整性能与核内表](RESULTS.md)、[原始计时及状态证据](evidence.json)、
+[21份原始PyTorch/PTO JSON集中下载](download/README.md)。
 
-每侧5预热/20次无profiler图事件，独立PyTorch profile；PTO再采四个DFX窗口。
-报告均值、P95/max、完整原始样本、Native热点PMU与PTO任务核时/包络/启动分散。
-长档内部等权、短档内部等权，再按8:2计算变化率；不删除拖尾，不将独立profile核时与正式事件相减。
-该矩阵覆盖HC_pre+norm+CSA+HC_post，不等同整模型forward、EP16稳定性或token/DSpark验收。
-本阶段复用已有必要状态检查，不为数值中性未改路径重复全套精度测试。
+## 计量范围
 
-## 进行中的同轮结果
+同一auto单卡，每档交替Native/PTO先后次序；各侧独立OPP静态包和AOT缓存。
+Native/PTO真实编译HC_pre+norm+CSA+HC_post；Native实际安装静态包，PTO实际custom-op调用已确认。
+两侧CANN9.2、mode2、det0，PTO atomic0；EPLB关闭，ring=[256,128,256,32]MiB/task_window4096。
+正式layer4权重、独立合成历史/输入、每物理行不同scale及反向物理页表。
+Worker绑核和MoE共享专家多流不在单卡半层范围，不将配置请求值冒称Worker验收。
 
-截至2026-09-29 03:50，四个长档及8K/B24两侧实际编译、状态/保护区和profile已完成；B32/B40仍在任务内运行。
-单位μs，不拼接旧测试，也不计算未完成七档的加权结论。
+每侧5次预热、20次无profiler图事件，独立PyTorch profile，PTO另采四个DFX窗口。
+原始慢样本全部保留；不将独立profile核时与正式事件相减归因调度。
+长档内部batch等权、短档内部batch等权，再按8:2计算变化率。
+PTO图/eager八类状态、Top-K结构及metadata/保护区通过；不等于两侧精度或EP16/token/DSpark验收。
 
-| 档位 | Native均值 | PTO均值 | PTO变化 | Native/PTO P95 |
-| --- | ---: | ---: | ---: | ---: |
-| 128K/B4 | 787.465 | 701.483 | −10.919% | 791.540/715.980 |
-| 128K/B8 | 938.911 | 802.377 | −14.542% | 942.540/814.040 |
-| 128K/B16 | 1232.308 | 1043.478 | −15.323% | 1236.900/1061.640 |
-| 128K/B24 | 1403.680 | 1309.122 | −6.736% | 1411.080/1328.000 |
-| 8K/B24 | 1052.183 | 985.264 | −6.360% | 1055.580/1012.320 |
+## 当前结论
 
-B16当前20次未复现约1.4ms拖尾，不代表间歇问题已修复。
+长档平均变化−11.880%、短档−4.039%，长短8:2为−10.312%。
+128K/B16为Native1232.308/PTO1043.478μs，PTO P95为1061.640μs。
+本轮七档PTO P95/P50为1.0127–1.0341，没有超过各档P50的105%的样本。
+8K/B40的PTO max1339.720μs仍高于Native1330.740μs；不关闭历史间歇1.4ms拖尾或EP16问题。
+
+## 依赖时序
+
+七档28个level-4窗口由Simpler官方解析器检查时钟域合并、原始/合并行数和每任务block数。
+固定window_3展示Observed路径，不选择最快窗口；Static CPM交叉检查。
+dummy缺少物理时戳时将完整ready归因置空，logical compute含SPMD跨度与内部等待。
+
 [长B4](h131072_b4/schedule/README.md)、[长B8](h131072_b8/schedule/README.md)、
 [长B16](h131072_b16/schedule/README.md)、[长B24](h131072_b24/schedule/README.md)、
-[短B24](h8192_b24/schedule/README.md)的四窗口关键路径
-复用现有level-4数据；预先固定window_3作完整路径展示，不选择最快窗口。
-`analyze_schedule.py`逐窗核对官方时钟域合并及block数；dummy缺时戳时将完整ready归因置空。
-历史727.98μs上游图只作结构参照，输入/版本不全且形状不同，不作同输入速度比较。
+[短B24](h8192_b24/schedule/README.md)、[短B32](h8192_b32/schedule/README.md)、
+[短B40](h8192_b40/schedule/README.md)。
 
-Score并非始终等待同一前置：长B16的window_0/1为cache scale写回最后完成，window_2/3为系数任务。
-因此不能把所有Score前空档归因于dummy、空worker或单个任务；观察派发、数据就绪与首次开始的先后分别解释。
+长B16的window_0/1为cache scale写回最后完成，window_2/3为系数任务；
+不能将Score前所有空档归因于dummy或空worker。分别记录FIN、派发和首次开始。
+历史727.98μs上游图仅作结构参照，形状/版本不齐，不作为同输入速度对比。
 
-收齐后由`collect.py`汇总，`bundle.py`将21份原始JSON集中到download；矩阵未完成时二者拒绝发布完整结果。
+## 结果字段修正
+
+首次collect.py因PTO报告中的variant=performance而停止。核查确认原入口将
+`selected_variant()`的类别覆盖了`pkg:`选择器；它返回performance不代表回退了包。
+七档编译日志均明确引用冻结私有包的decode_csa.py/decode_indexer.py，源码根也一致。
+收集器要求这两处实际编译来源并写入variant_evidence，不修改原报告或重跑成功测试。
+后续入口分别记录variant选择器、variant_kind、implementation_package/source，避免混淆。
+
+本轮入口、收集器和下载脚本：[run.sh](run.sh)、[compiled_case.py](compiled_case.py)、
+[collect.py](collect.py)、[analyze_schedule.py](analyze_schedule.py)、[bundle.py](bundle.py)。

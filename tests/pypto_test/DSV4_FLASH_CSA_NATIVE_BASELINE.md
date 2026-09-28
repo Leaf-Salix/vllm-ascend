@@ -63,12 +63,17 @@ npu_add_rms_norm_bias，所以只打开fuse_norm_quant不构成可运行环境�
 2. 已补真实Native半层模板编译：128K/B16从同进程手工图1294.493降到1238.764μs（−4.305%），
    static_compile实际True、安装包和覆盖QLI/Compressor/Sparse的39个算子描述已确认。
    Top-K集合不变、3行顺序变化；浮点输出有差异，不能直接称精度通过。旧手工图报告继续标明范围。
-3. 同卡同配置Native/PTO编译对照已补：128K/B16为1217.529/1090.391μs，8K/B24为1026.713/988.208μs。
-   每侧独立空static_kernel目录；PTO真实custom-op调用确认。长档PTO P95异常，正在定位，不以均值代替稳定性。
-4. 核内优化继续按长短8:2；阶段收口才覆盖七档及真实EP16，避免每个配置问题都占16卡调试。
+3. c93ec723同卡新七档真实编译对照已完整完成：128K B4/B8/B16/B24、8K B24/B32/B40。
+   每侧独立OPP静态包/AOT缓存；Native实际安装和PTO custom-op调用已确认。
+   长B16 Native/PTO为1232.308/1043.478μs，PTO P95为1061.640μs；
+   全七档长短8:2均值变化−10.312%。本轮未复现历史1.4ms拖尾，不宣称修复。
+4. 后续按长短8:2进行定向核内/调度A/B；阶段出口再覆盖受影响档位，真实EP16优先级后置。
 
-当前已完成入口修订、10项CPU参数/Worker回归、单卡编译依赖及两档Native/PTO实际编译半层对照；
-长档P95、两侧数值和整模型仍待验收，不修改旧七档表的百分比。
+当前已完成入口修订、CPU参数/Worker回归、单卡编译依赖及新七档Native/PTO实际编译半层对照；
+历史间歇P95、两侧逐元素精度和整模型仍待验收，不修改旧矩阵原始读数。
 本单卡attention半层不含MoE，也未通过Worker实际绑核，不冒称整机模板已完整验收。
 [新单层结果、数值差异与profile](results/csa_native_compiled_layer_20260929/RESULTS.md)。
 [同配置Native/PTO对照及范围](results/csa_compiled_pair_20260929/RESULTS.md)。
+
+[当前七档真实编译结果](results/csa_compiled_seven_20260929/RESULTS.md)、
+[21份JSON](results/csa_compiled_seven_20260929/download/README.md)。

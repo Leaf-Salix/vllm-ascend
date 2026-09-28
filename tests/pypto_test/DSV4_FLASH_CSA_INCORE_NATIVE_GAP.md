@@ -1,152 +1,130 @@
 # CSA：当前七档核内差距与优化顺序
 
-更新：2026-09-29。以统一 CANN9.2 的 e33d842a 七档为当前完整测量基线。
-主线随后加入3b27c7fd的WO_A NZ修正，长短B16局部A/B已通过：O_A核时−25.778%/−26.636%，
-CSA为1055.481/784.767μs、P95下降；8K/B40分块边界也通过，O_A核时−20.317%、CSA−3.370%。
-新增128K/B24独立9.2对照为Native1489.736/PTO1362.396μs（−8.548%），[结果及泳道](results/csa_b24_cann92_20260928/RESULTS.md)。
-下方完整七档仍为e33，不拼接局部结果；后续矩阵为128K B4/8/16/24、8K B24/32/40，8K/B16只保留历史。
-历史版本、实验数字和撤回理由保留于[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)及Git；本页只保留有效现状与待办。
+更新：2026-09-29。当前完整基线为 **c93ec723 / CANN9.2**，同一个auto单卡任务完成
+128K B4/B8/B16/B24、8K B24/B32/B40。Native/PTO均走真实编译半层；
+Native启用npugraph_ex、static kernel与norm/quant融合，详见[配置及边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
+旧e33d842a手工NPUGraph矩阵及局部A/B移至[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，不再作为当前表格。
 
 ## 范围和读数
 
-2026-09-29核查补充：以下Native单层数据来自手工NPUGraph，未启用部署模板的npugraph_ex/static kernel。
-旧整模型另有关闭norm/quant融合和共享专家重叠的配置差异；
-[Native基线修订](DSV4_FLASH_CSA_NATIVE_BASELINE.md)完成前，不能把本页优势推广到模板优化后的Native。
+正式layer4（第二个CSA）权重、独立合成历史/输入、S6/mode2/det0，PTO atomic0，EPLB关闭。
+Native原cache布局不改，PTO直接分页读写，无入口拆分和外部写回。WO_A借用Native NZ29原地址。
+每侧5次预热、20次无profiler图事件；完整区间含HC_pre、norm、CSA、HC_post。
+两侧PyTorch profile独立采集；PTO每档另采四个level-4窗口，不以DFX时长替代正式CSA。
+Native QLI/Sparse仍使用release custom二进制；最新ops-transformer28f40354、ops-nn19614968、
+ops-math361722c0是优化源码参考，不冒称已重建并测量其最新kernel。
 
-正式 layer4（第二个CSA）权重、合成历史及输入，TP1/S6/mode2/atomic0/det0、EPLB关闭。
-单卡自动分配card0；每侧预热5次，20次无profiler图计时。完整区间含HC_pre、norm、CSA、HC_post。
-Native cache布局未改，PTO内直接分页读写，没有入口拆分和外部写回；不能再引用旧“纯CSA/含复制”两套现状。
-Native QLI/Sparse是release custom二进制；最新ops-transformer 28f40354、ops-nn19614968、ops-math361722c0用于源码参考。
-
-Native Duration 是任务完整时间，PMU aicore/aiv_time是按block和波次折算的执行参考；
-PTO DFX kernel-duration包含DMA及内部等待，不是纯算术。Native融合范围与PTO拆分任务不同，
-不可直接计算严格等范围加速比，详见[指标定义](results/csa_cann92_incore_seven_20260928/METRICS.md)。
-PTO表格取四个窗口的核时均值；完整分布、最慢核、包络、启动分散均在[本轮报告](results/csa_cann92_incore_seven_20260928/RESULTS.md)。
+Native PMU按block/波次折算；PTO kernel-duration含DMA与内部等待，且两侧融合范围不同。
+下表用于定位差距，不能直接相减计算可回收时长，或据此宣称严格的纯算术加速比。
+[本轮完整证据](results/csa_compiled_seven_20260929/RESULTS.md)、
+[21份原始JSON下载目录](results/csa_compiled_seven_20260929/download/README.md)。
 
 ## 完整CSA
 
-单位μs，正式20次计时，独立于后续profile/DFX。
-
-| 档位 | Native均值 | PTO均值 | 耗时变化 | PTO P95 | PTO最大值 |
+| 档位 | Native均值μs | PTO均值μs | PTO变化 | PTO P95μs | PTO最大值μs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 128K/B4 | 863.12 | 730.70 | -15.34% | 744.76 | 750.00 |
-| 128K/B8 | 997.25 | 828.19 | -16.95% | 842.22 | 862.96 |
-| 128K/B16 | 1279.55 | 1078.85 | -15.69% | 1087.12 | 1104.04 |
-| 8K/B16 | 924.75 | 804.29 | -13.03% | 821.16 | 824.10 |
-| 8K/B24 | 1108.69 | 969.46 | -12.56% | 981.06 | 984.94 |
-| 8K/B32 | 1249.61 | 1140.21 | -8.75% | 1166.64 | 1167.08 |
-| 8K/B40 | 1387.34 | 1315.09 | -5.21% | 1336.04 | 1349.60 |
+| 128K/B4 | 787.465 | 701.483 | -10.919% | 715.980 | 716.900 |
+| 128K/B8 | 938.911 | 802.377 | -14.542% | 814.040 | 817.440 |
+| 128K/B16 | 1232.308 | 1043.478 | -15.323% | 1061.640 | 1062.200 |
+| 128K/B24 | 1403.680 | 1309.122 | -6.736% | 1328.000 | 1341.000 |
+| 8K/B24 | 1052.183 | 985.264 | -6.360% | 1012.320 | 1012.900 |
+| 8K/B32 | 1180.726 | 1137.006 | -3.703% | 1168.860 | 1181.840 |
+| 8K/B40 | 1324.654 | 1297.427 | -2.055% | 1325.660 | 1339.720 |
 
-七档均值/P95/max均低于同轮Native，按长短档7:3加权均值变化−14.161%。
-这证明当前单卡区间优势，不代表完整核内差距收敛，也不代表旧EP16尾部或新组合token/DSpark已通过。
+长档均值变化-11.880%，短档-4.039%，
+各上下文内batch等权、再按8:2加权为 **-10.312%**。
+七档P95/P50为1.0127–1.0341，本轮没有大拖尾；8K/B40的PTO最大值1339.720μs仍高于Native1330.740μs。
+这些20次采样不能关闭历史约1.4ms的间歇长尾，也不替代EP16模型稳定性或token/DSpark验收。
 
-## Indexer：当前最大长档方向
+## Indexer
 
-2026-09-29新增长B4/B8 S6 Key复用已保留：相对d8627207，B4 Score AIC/AIV由134.025/141.809
-降至71.036/81.382μs，B8由168.931/173.838降至137.435/144.219μs。
-CSA分别−2.108%/−3.145%，短B24+3.291%；三档长短8:2 CSA−1.443%，八类状态/图/保护区通过。
-按最新AscendC跨M子块复用Key的策略扩展现有S6，不改Native cache；详情和最新pypto-lib差异见
-[实测与来源](results/csa_small_long_s6_20260929/README.md)。下表保留同轮e33完整矩阵，不拼接新局部结果。
+Native QLI融合系数生成、Score、本地Top-K及最终归并；PTO仍独立生成系数和执行merge。单位μs。
 
-Native QLI包含系数、Score、本地Top-K和最终归并；PTO另拆系数与merge。单位μs。
-
-| 档位 | Native QLI Duration | Native AIC / AIV参考 | PTO Score AIC / AIV | PTO merge |
+| 档位 | Native QLI Duration | Native AIC/AIV参考 | PTO Score AIC/AIV | PTO merge |
 | --- | ---: | ---: | ---: | ---: |
-| 128K/B4 | 235.640 | 66.855 / 66.536 | 134.262 / 142.025 | 6.743 |
-| 128K/B8 | 236.340 | 124.422 / 124.119 | 166.674 / 176.767 | 6.665 |
-| 128K/B16 | 355.700 | 240.925 / 240.421 | 242.765 / 263.622 | 10.943 |
-| 8K/B16 | 53.400 | 38.580 / 38.037 | 42.381 / 46.791 | 8.703 |
-| 8K/B24 | 54.940 | 52.448 / 52.097 | 28.157 / 43.124 | 10.157 |
-| 8K/B32 | 92.300 | 65.106 / 64.546 | 74.183 / 77.959 | 10.457 |
-| 8K/B40 | 92.600 | 77.205 / 76.626 | 53.890 / 66.212 | 12.379 |
+| 128K/B4 | 238.440 | 69.927/69.511 | 76.619/86.833 | 6.897 |
+| 128K/B8 | 237.340 | 125.406/125.138 | 135.495/142.600 | 9.198 |
+| 128K/B16 | 364.160 | 248.899/248.300 | 254.344/260.119 | 13.511 |
+| 128K/B24 | 380.240 | 370.853/370.460 | 346.587/363.192 | 13.815 |
+| 8K/B24 | 55.780 | 52.249/51.931 | 27.350/41.749 | 11.574 |
+| 8K/B32 | 95.280 | 68.515/68.027 | 80.102/84.484 | 15.994 |
+| 8K/B40 | 92.040 | 76.668/76.068 | 49.400/64.105 | 15.537 |
 
-- B4/B8仍有明确核时差距。Native任务Duration较长不能据此声称PTO核内已领先；须看PMU参考及其局限。
-- B16 AIC均值已接近，AIV和独立Top-K仍有开销。优先解释QK/WS流水、排序/片外候选交接，避免只调调度掩盖核内差异。
-- 短B16/B32/B40部分DFX出现同核两份Score；长档各核一份。需区分短档分派问题与长档核内工作量。
-- Native式query排序循环和编排最大长度复用已否定；不能由这两个小候选无收益推断核内已无优化空间。
+- 长B4/B8采用S6复用后，AIC已接近Native PMU参考；AIV仍分别为86.833/142.600μs，另有独立归并。
+- 长B16为254.344/260.119μs，Native参考248.899/248.300μs；继续看AIV数据交接、排序和分片根。
+- 长B24 Score读数低于Native融合QLI参考，但仍有系数、scale提交、merge及它们的依赖，不能只看Score。
+- 短B32仍走双query，Score高于Native参考；以20%权重约束回退，必要时在同一算子内按场景分支。
 
-新128K/B24为3b27c7fd独立9.2结果，Native QLI Duration387.340、AIC/AIV参考374.920/374.468μs；
-PTO Score AIC/AIV383.890/412.053、独立merge14.260μs。AIC已较接近参考，AIV末尾排序仍值得研究，
-不按两侧不同融合范围直接相减声称可回收时长。
-2048候选分段排序两档已完成：长B16 CSA−3.066%、AIV核时−1.973%，但AIC核时+3.965%；
-短B24 CSA+0.452%、merge核时明显升高，长短8:2 CSA−2.362%。随后与UB中间根组合纳入性能版，见下。
-保留原GM缓冲的排序前移会改变Cube/Vector等待，不能将源码重叠直接当作两类核时都下降。
-[分段排序、Native依据与验证范围](results/csa_score_stream2048_20260928/README.md)。
-新增UB中间根相对stream2048：128K/B16 Score AIC265.586→254.643、AIV271.308→260.415μs，
-完整CSA1031.826→1040.988μs；8K/B24完整CSA952.648→957.764μs。长短8:2核时受益、CSA+0.818%，
-两档P95/max下降、八类状态精确一致及图检查通过，按核内收益规则保留；未声称CSA回退由某个调度因素造成。
-短档算法未变但Score核时上升、启动分散与包络下降，等待和核分派必须分别解释。
-[当前保留代码与四窗口证据](results/csa_stream_root_ub_20260929/README.md)。
-
-c93ec723长B24近期组合补测完成：相对3b27c7fd，Score AIC383.660→349.409、
-AIV411.575→366.048、merge16.852→13.960μs；真实编译CSA1376.883→1312.313μs（−4.690%）。
-同配置Native半层1396.274μs，QLI profile的PMU AIC/AIV参考369.919/369.524μs；
-PTO Score已接近此参考，但有独立merge且计量范围不同，不据此计算严格的整个Indexer加速比。
-八类跨版本状态、图和保护区通过；[完整B24证据](results/csa_b24_integrated_20260929/RESULTS.md)。
-
-具体代码分工与待办见[Indexer差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
+[最新AscendC和pypto-lib的逐项实现差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
 
 ## Sparse attention
 
-Native Sparse融合其内部规约，PTO另有merge_norm，不求两列差值得到可回收时长。
+Native包含内部规约；PTO另有merge_norm，不将两列简单相加减求精确加速比。单位μs。
 
-| 档位 | Native Duration | Native AIC / AIV参考 | PTO QK/PV AIC / AIV | PTO merge_norm |
+| 档位 | Native Duration | Native AIC/AIV参考 | PTO QK/PV AIC/AIV | PTO merge_norm |
 | --- | ---: | ---: | ---: | ---: |
-| 128K/B4 | 64.520 | 58.186 / 62.117 | 42.883 / 44.757 | 12.474 |
-| 128K/B8 | 110.540 | 101.659 / 105.164 | 77.515 / 79.484 | 16.615 |
-| 128K/B16 | 182.820 | 176.008 / 179.262 | 142.638 / 144.507 | 25.145 |
-| 8K/B16 | 116.140 | 108.018 / 110.984 | 125.400 / 127.196 | 24.152 |
-| 8K/B24 | 180.840 | 170.281 / 172.635 | 174.601 / 176.526 | 31.761 |
-| 8K/B32 | 233.800 | 220.917 / 223.541 | 226.647 / 228.631 | 35.741 |
-| 8K/B40 | 293.200 | 278.789 / 281.158 | 280.353 / 282.274 | 45.329 |
+| 128K/B4 | 57.660 | 50.654/53.187 | 48.443/50.328 | 15.637 |
+| 128K/B8 | 94.980 | 88.729/92.545 | 80.978/82.904 | 20.515 |
+| 128K/B16 | 181.580 | 172.805/176.115 | 152.931/154.882 | 25.238 |
+| 128K/B24 | 238.680 | 228.556/231.094 | 212.034/213.900 | 31.362 |
+| 8K/B24 | 173.360 | 161.609/164.300 | 178.482/180.312 | 34.163 |
+| 8K/B32 | 233.880 | 219.917/222.550 | 227.092/229.101 | 40.304 |
+| 8K/B40 | 289.380 | 278.969/281.398 | 277.485/279.458 | 45.903 |
 
-长B16 QK/PV均值低于Native PMU参考，但另有25.145μs merge_norm；短B16 QK/PV仍偏高。
-不同分段、softmax/量化和规约范围不能当成完全同一个kernel。已有PV N128、交替累加缓冲及跨query流水继续保留。
-后续长短权重按2026-09-29用户新要求为8:2，总体收益保留，单侧明显退化则按场景分支；下一项Sparse策略应先证明有128K核内收益，不重复已否定的联合softmax候选。
+长B16/B24的QK/PV核时低于Native参考，但独立merge_norm仍需25.238/31.362μs。
+短B24/B32的QK/PV偏高，且另有34.163/40.304μs归并，是短档优势收窄的待研究项。
+已有PV N128、交替累加缓冲与跨query流水保留；新策略仍优先证明128K收益，不原样重试已否定联合softmax。
 
 ## 其余任务与O projection
 
-128K/B16的四窗口指标均值，单位μs。完整七档全部task已收录matrix.json，不遗漏其他任务。
+128K/B16四窗口均值，单位μs；所有七档完整任务及物理核分配保留在本轮evidence.json。
 
-| Task | 核内均值 | 最慢核 | 包络 | 启动分散 |
-| --- | ---: | ---: | ---: | ---: |
-| hc_pre_linear | 7.212 | 9.220 | 14.185 | 6.830 |
-| mix_x_rms_norm | 17.623 | 18.525 | 19.455 | 0.630 |
-| qr_proj_matmul | 16.463 | 17.840 | 39.105 | 0.520 |
-| kv_proj_matmul | 27.117 | 29.690 | 34.415 | 6.390 |
-| qproj_matmul | 41.026 | 50.340 | 94.850 | 61.450 |
-| idx_qr_proj_matmul | 17.527 | 29.920 | 79.380 | 65.525 |
-| kv_score_proj | 24.353 | 44.350 | 65.210 | 45.935 |
-| kv_score_proj_0 | 11.408 | 13.960 | 43.440 | 33.080 |
-| proj_a_mm | 36.631 | 41.230 | 117.195 | 77.025 |
-| quant | 6.675 | 7.580 | 122.290 | 77.645 |
-| proj_b_mm | 9.724 | 11.730 | 66.725 | 55.935 |
-| hc_post | 20.974 | 23.200 | 40.200 | 0.685 |
+| Task | block数 | 核内均值 | 最慢核 | 包络 | 启动分散 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| hc_pre_linear | 24 | 7.585 | 9.385 | 12.050 | 4.865 |
+| mix_x_rms_norm | 12 | 17.290 | 18.190 | 19.030 | 0.870 |
+| qr_proj_matmul | 24 | 16.336 | 17.610 | 38.100 | 0.445 |
+| kv_proj_matmul | 12 | 22.192 | 24.605 | 29.305 | 7.005 |
+| qproj_matmul | 24 | 43.870 | 54.110 | 92.745 | 59.385 |
+| idx_qr_proj_matmul | 24 | 16.599 | 33.610 | 63.830 | 44.635 |
+| indexer_head_coefficients | 48 | 3.722 | 6.760 | 19.680 | 11.500 |
+| idx_kv_scale_commit | 1 | 8.615 | 8.615 | 9.160 | 0.000 |
+| proj_a_mm | 64 | 27.230 | 31.790 | 86.940 | 61.345 |
+| quant | 24 | 8.444 | 11.010 | 97.595 | 57.495 |
+| proj_b_mm | 64 | 11.250 | 16.090 | 58.840 | 47.895 |
+| hc_post | 24 | 21.338 | 22.895 | 41.600 | 0.635 |
 
-O_A/O_B在该档各64份任务，24个AIC需要多波；77μs级O_A启动分散包含必要执行，不能直接称为纯调度空隙。
-同轮Native TransposeBatchMatMul Duration93.30μs、AIC参考75.035μs；PTO O_A尚有研究价值，
-但e33的WO_A是由Native NZ反转ND，最新3b已修正，先量化这项影响再动任务布局。
+O_A/O_B各64份工作由24个AIC执行，需要多波。O_A的61.345μs启动分散含必要执行，不能全称调度空隙。
+同轮Native TransposeBatchMatMul Duration88.880μs、AIC参考72.118μs；PTO包络86.940μs。
+当前WO_A已是NZ29原地址，旧ND转换造成的差距不再作为现状。
 
-## 已保留策略及下一步
+## 当前调度证据与下一步
 
-1. 保留已验证的长B≥4 S6、B<4双query Key复用、长档Key独立L1预取、均衡leaf、2560/3072局部排序、四路Top-K及UB根。
-   [均衡与排序](results/csa_score_balanced_sort_20260928/README.md)、[Key预取](results/csa_score_key_l1_20260928/README.md)。
-2. 保留HC输入/RMS融合、QR输入/gamma驻留、QR/KV按行数分组及免冗余seed、KV K512；精度版新增移植尚未完成。
-3. [WO_A NZ三档集成](results/csa_wo_a_native_nz_20260928/README.md)已通过原地址、八类状态、核时及CSA/P95，
-   N128、N256及112行尾块均覆盖，保留现有修正，不重复全矩阵。
-4. 跨query Key复用、2048排序和UB中间根已保留；当前继续检查长档AIV接收、scale与排序的搬运/等待。
-   Native按query分AIV、PTO按候选分AIV的差异已补入Indexer文档，取舍需同时考虑scale复用与根数量。
-   [scale矩阵广播](results/csa_score_scale_matrix_20260929/RESULTS.md)已测：长B16 Score AIC/AIV约+7%，
-   CSA虽略降但没有取得核内收益，不合入。
-   [Query/系数跨leaf驻留](results/csa_query_resident_20260929/RESULTS.md)也未保留：
-   长B24 AIC约+3.72%、AIV持平，长短8:2 CSA+0.028%；减少搬运未带来明确核时收益。
-   先写出生成指令/缓冲/等待的实质差异，再做单因素候选；不重复旧4+2分组或完整4096 Score UB驻留。
-5. 有核内收益且必要功能检查通过即保留，完整CSA及P95单列；再对受影响档位补测。核内阶段后优化CSA关键依赖和派发。
-   已否定的短Score sync_start、Qproj整组启动、O_A重排等不无依据重试。
-6. 当前冻结c93ec723重取[真实编译新七档](results/csa_compiled_seven_20260929/README.md)，
-   长短收益按8:2，按Native/PTO任务细分确定下一阶段CSA调度重点。
-   当前不追加EP16/FFN/主机入场诊断，最终仍需模型token/DSpark和forward验收。
+七档28个level-4窗口已核对原始/合并行数及每任务block数。固定window_3展示Observed路径，
+Static CPM只作交叉检查；dummy缺少物理时戳时不作完整ready归因。
+[长B16路径](results/csa_compiled_seven_20260929/h131072_b16/schedule/README.md)、
+[短B24路径](results/csa_compiled_seven_20260929/h8192_b24/schedule/README.md)。
 
-[统一七档证据](results/csa_cann92_incore_seven_20260928/README.md)、
-[21份可下载JSON](results/csa_cann92_incore_seven_20260928/download/README.md)、
-[最新AscendC入口](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
+1. 仅删除系数空worker的私有候选已完整CPU编译/load：上限min(48,组数)，内部stride48不变。
+   长B16/短B24先检验实际提交数48→16/24、Score首次启动、CSA均值及P95，再决定受影响范围覆盖。
+   [候选与对照任务](results/csa_coefficient_active_workers_20260929/README.md)。
+2. Score多数窗口已提前派发。长B16有些窗口最后等待系数，有些等待idx_kv_scale_commit；
+   分开记录生产者end→FIN、FIN→派发和派发→开始，不将时序相关性称为资源阻塞因果。
+   原cache的scale写回涉及64字节读改写，没有页面所有权证明前不得直接并行或删除依赖。
+3. 长档8:2优先继续降低归并/数据交接和关键链等待；保留有证据的核内收益，CSA与P95分别判断。
+   若长短明显相反，采用同一算子内的形状策略，不让调用者切历史版本。
+4. 精度版保持Native舍入/规约规则，近期数值中性优化尚待迁移；CANN9.2/新B24的
+   EP16逐token、DSpark和稳态10步forward验收仍未完成，不能由本轮单卡状态通过代替。
+
+## 保留策略和已否定方向
+
+- 已保留长B≥4的S6 Key复用、B<4双query、独立Key L1预取、均衡leaf、2560/3072尾排序、
+  2048分段排序和UB中间根、四路Top-K，以及HC/QR/KV/Sparse已有核内优化。
+  [S6实测](results/csa_small_long_s6_20260929/RESULTS.md)、[UB根](results/csa_stream_root_ub_20260929/RESULTS.md)。
+- [矩阵scale广播](results/csa_score_scale_matrix_20260929/RESULTS.md)和
+  [Query/系数跨leaf驻留](results/csa_query_resident_20260929/RESULTS.md)没有取得长档核内收益，未合入。
+- [去除4个dummy](results/csa_direct_deps_20260929/RESULTS.md)仅8:2约−0.1%，未合入；
+  短Score/Sparse整组准入、query整组准入等旧失败候选无新依据不重复测试。
+
+[最新AscendC入口](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、
+[当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)。

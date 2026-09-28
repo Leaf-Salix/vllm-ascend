@@ -152,7 +152,9 @@ def main():
                 runtime = service.CSAServiceRuntime(layer.self_attn, adapter.CSAOperators.register(), 40, layer)
                 observed = RequirePTORuntime(runtime)
                 layer.self_attn.dsa_attn._pto_csa_runtime = observed
-                report["variant"] = selected_variant()
+                report["variant_kind"] = selected_variant()
+                report["implementation_package"] = service.__package__
+                report["implementation_source"] = str(Path(service.__file__).resolve())
                 report["native_weight_formats"] = {
                     name: int(torch_npu.get_npu_format(getattr(layer.self_attn, name).weight))
                     for name in ("wq_a", "wq_b", "wo_a", "wo_b")}

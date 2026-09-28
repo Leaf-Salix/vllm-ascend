@@ -6,12 +6,10 @@
 近期依据单卡核内耗时、Score/Sparse包络、完整CSA与P95推进，不为每个局部候选追加EP16。
 已经完成的模型数据保留；B8持续入场迟到、FFN等待和额外rank profile解析暂缓，待CSA阶段取得收益后再回到模型验收。
 
-用户新增环境要求已执行：指定CANN 9.2.0-beta.2在9d237d33的128K/B16与8K/B16 Native单卡图重放通过。
-公共env-dsv4-0251rc1.sh已切9.2，CSA/HCA后续新任务统一生效；两档均值相比9.0变化−0.243%/−0.107%，无明显加速。
-必须区分CANN运行库/内置算子更新与release custom算子版本，不能将仅切换环境称为已采用最新QLI。
-[9.2验证范围、加载来源与结果](results/csa_native_cann92_20260928/README.md)。
-该环境验证先于下一项PTO标量复用；历史9.0结果保留，不与9.2拼接计算收益。
-PTO两侧e33d842a已完成9.2完整编译及128K/B16、8K/B16状态/图重放检查；尚不代替HCA设备或整模型验收。
+公共env-dsv4-0251rc1.sh统一CANN9.2.0-beta.2，CSA/HCA新任务沿用；
+历史9.0不与9.2混作A/B。CANN运行库/内置算子与release custom算子版本分别记录，
+不能将仅切环境称为采用最新QLI。[环境证据](results/csa_native_cann92_20260928/README.md)。
+当前WO_A在9.2借用Native NZ29权重原地址；单卡验证不替代HCA设备或整模型验收。
 
 **性能优先级（用户最新修正）**：后续优先128K，8K以守住性能为主；存在长档收益/短档代价时，
 2026-09-29起用80%长档、20%短档权重衡量，总体有收益就保留；单侧明显退化时在同一套算子内按场景分支。
@@ -35,33 +33,24 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 2026-09-29用户要求Native对齐main的decode/run_dp_template.sh。核查发现旧整模型static kernel和
 共享专家多流未开、norm/quant融合被关闭；单层是手工NPUGraph，未经过模板编译。
 已修订两侧公共测试入口并记录实际配置，旧数据不得冒称该模板下的Native基线。
-AddRmsNormBias依赖与两侧真实单卡编译已补齐，代表档同卡对照已完成；长档PTO P95异常正在定位。
+AddRmsNormBias依赖及新七档真实单卡编译已完成；历史间歇P95仍保持开放，不以本轮未复现代替修复。
 [配置差异、保留的离线负载与待办](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。这不改变128K核内优先及最终七档范围。
 
-已完成CANN9.2/e33d842a统一七档单卡对照，task_20260928_224619_23037581103退出0，auto分配card0。
-每侧预热5次、正式20次图计时，另14份Native/PTO PyTorch JSON和28个DFX窗口。
-完整CSA七档均值/P95/max都低于同轮Native，七三均值变化−14.161%；128K/B16为1279.55→1078.85μs。
-自重放、A→B→A图状态、metadata/保护区通过；不等于Native逐bit或新组合整网token/DSpark验收。
-[完整七档](results/csa_cann92_incore_seven_20260928/README.md)、
-[21份JSON汇集](results/csa_cann92_incore_seven_20260928/download/README.md)。
-
-该矩阵仍有核内差距：128K B4/B8 Score AIC分别134.262/166.674μs，Native PMU参考为66.855/124.422；
-B16 AIC已接近，但AIV263.622μs和独立merge10.943μs仍有开销。
-Native PMU与PTO DFX边界不同，不直接相减给出可回收时间，见[当前核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
-短B16/B32/B40部分DFX仍有Score同核两份；七档正式P95正常不等于旧EP16尾部修复。
-
-当前主线随后新增3b27c7fd：CANN9.2下WO_A跟随Native的NZ29、借用原权重地址，消除每层64MiB反向ND副本。
-**旧七档冻结e33d842a，不包含该修正。** [WO_A局部对照](results/csa_wo_a_native_nz_20260928/README.md)已完成：
-长短B16原地址、八类状态、图及保护区通过，O_A核时−25.778%/−26.636%，CSA−2.285%/−2.797%。
-8K/B40的N256及112行尾块也通过，O_A核时−20.317%、CSA−3.370%，三档P95/max均下降，继续保留3b27c7fd。
-新增128K/B24已在私有整包、相同9.2环境下完成：Native/PTO完整CSA 1489.736/1362.396μs（−8.548%），
-P95 1498.500/1374.220μs，自重放、图状态、保护区和四个DFX窗口通过。
-不把局部结果拼入旧七档；[B24报告与下载](results/csa_b24_cann92_20260928/RESULTS.md)。
+**当前完整基线：c93ec723 / CANN9.2，真实编译新七档已齐。**
+task_20260929_032251_2642121879退出0，同一auto单卡；128K B4/B8/B16/B24、8K B24/B32/B40。
+每侧5次预热和20次无profiler图计时、独立Native/PTO PyTorch JSON及四窗口PTO DFX。
+长档均值变化−11.880%、短档−4.039%，按8:2为−10.312%；长B16为1232.308→1043.478μs。
+七档P95/P50为1.0127–1.0341，但短B40的max略高于Native；不关闭历史间歇长尾或EP16问题。
+PTO编译图/eager、Top-K结构、metadata/保护区通过，不等于两侧逐bit或模型token/DSpark验收。
+[完整七档](results/csa_compiled_seven_20260929/RESULTS.md)、
+[21份原始JSON](results/csa_compiled_seven_20260929/download/README.md)、
+[当前核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+旧e33手工图、WO_A局部A/B与新增B24单项记录保留于验证日志，不与本轮拼表。
 
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
-| 1 | Native对齐部署模板并重取代表档基线 | 同卡同配置编译后Native/PTO：128K/B16 1217.529/1090.391μs，8K/B24 1026.713/988.208μs；长档PTO P95 1391.560μs异常待定位，Worker/整机仍待验收 |
-| 2 | 128K Score继续吸收最新Native A3策略 | 2048分段排序+UB中间根及长B4/B8 S6 Key复用已保留；长B24组合CSA−4.690%、状态/图通过。scale矩阵广播、固定组Query/系数驻留无明确核内收益不采用；当前重取七档分项，按结果进入CSA调度阶段 |
+| 1 | Native对齐部署模板并重取基线 | 新七档实际编译半层已齐，长短8:2均值−10.312%；历史间歇P95及Worker/整机仍待验收 |
+| 2 | 128K Score继续吸收最新Native A3策略 | 2048分段排序+UB中间根及长B4/B8 S6 Key复用已保留；长B24组合CSA−4.690%、状态/图通过。scale矩阵广播、固定组Query/系数驻留无明确核内收益不采用；同源码新七档分项已齐，进入系数/归并及CSA调度阶段 |
 | 3 | 核内收益保留与受影响范围检查 | 长短8:2分别计算核内/CSA变化；总体收益保留，单侧明显退化则分场景；基本状态通过，P95异常单列 |
 | 4 | 核内阶段后CSA关键链/分派优化 | 以当前源码DFX为依据，区分必要多波和可减少等待，避免重复已否定sync_start组合 |
 | 5 | 阶段结束七档收口及精度版迁移 | 同一源码覆盖七档；新数值中性优化按精度版规则迁移，尚未完成部分不沿用旧通过状态 |
@@ -70,12 +59,10 @@ P95 1498.500/1374.220μs，自重放、图状态、保护区和四个DFX窗口�
 已保留：长B≥4整请求S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、2560/3072尾排序、四路Top-K/UB根、
 2048候选提前排序与UB中间根、HC输入/RMS融合、QR输入/gamma驻留与行分组、KV分组/K512/免冗余seed、Sparse PV N128与跨query流水。
 精度版保留原算术与默认atomic1；本轮新增中性优化迁移尚未完成。
-最新[UB中间根结果](results/csa_stream_root_ub_20260929/RESULTS.md)已完成代表两档状态/图检查；
-长B8已随S6候选补齐状态/图和四窗口；长B24当前c93ec723组合也已通过八类跨版本状态/图及独立DFX，
-真实编译CSA1312.313μs，相对同配置Native1396.274μs低6.013%，P95/max也更低。
-这不替代新七档同源码矩阵或整网验收。
-[长B4/B8 Key复用及短档代价](results/csa_small_long_s6_20260929/RESULTS.md)。
-[长B24组合及Native真实编译基线](results/csa_b24_integrated_20260929/RESULTS.md)。
+各项优化的跨版本状态、图及受影响边界证据保留在对应报告；本轮完整七档采用同一保留组合。
+[UB中间根](results/csa_stream_root_ub_20260929/RESULTS.md)、
+[S6 Key复用](results/csa_small_long_s6_20260929/RESULTS.md)、
+[长B24组合](results/csa_b24_integrated_20260929/RESULTS.md)。
 Native cache布局/分配不改，PTO内直接按物理页读写，没有入口复制及外部写回。
 
 已否定方向保留证据，无新依据不重试：
@@ -88,17 +75,11 @@ Native cache布局/分配不改，PTO内直接按物理页读写，没有入口�
 [固定组Query/系数跨leaf驻留](results/csa_query_resident_20260929/README.md)。
 不能因这些候选无收益就宣称核内已无差距。
 
-阶段出口[真实编译新七档](results/csa_compiled_seven_20260929/README.md)已冻结c93ec723并启动，
-task_20260929_032251_2642121879；收齐后统一呈现Native/PTO均值、P95/max和任务细分，
-再确定CSA内部关键链优化，不提前沿用旧七档或局部结果作为本轮结论。
-
-四个长档及8K/B24的两侧正式计时、profile和四窗口level-4关键路径解析已完成，B32/B40仍运行。
-长B4/B8/B16/B24相对同轮Native均值分别−10.919%/−14.542%/−15.323%/−6.736%，短B24−6.360%；
-尚不计算完整七档权重。Score多数窗口已提前派发，系数核结束→FIN和FIN→派发需分开。
-长B16部分窗口的最后前置是cache scale写回、部分是系数任务；尚未证明空任务是延迟原因。
-下一调度候选仅删除系数生成的空worker，保留stride48和有效组分配，
-区别于历史把48个有效组并到24worker的失败试验；私有两根解析通过，完整编译/设备验证待七档收齐后决定。
-[新依据与候选范围](results/csa_coefficient_active_workers_20260929/README.md)。
+新七档28个level-4窗口已完成官方解析。Score多数窗口提前派发，
+系数核结束→FIN和FIN→派发需分开；长B16部分窗口最后前置是cache scale、部分是系数。
+当前调度候选只删除系数空worker，保留stride48和有效组分配，区别于历史合并有效工作的失败试验。
+私有整包两根解析、完整CPU编译/load及生成码通过，长B16/短B24正在做真实编译A/B。
+[候选与任务](results/csa_coefficient_active_workers_20260929/README.md)。
 
 最近完整模型证据仍为554b3bca/CANN9.0七档：573440输出token零差异、112组rank DSpark一致，
 forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干入场尾部未关闭。
@@ -109,19 +90,11 @@ forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干�
 最新定向调度实验：4个dummy改直接依赖，两档状态/图检查通过，但CSA长短8:2仅−0.100%，
 长档max略升，未形成明确收益，候选留存不合入生产。
 [结果与关键链](results/csa_direct_deps_20260929/RESULTS.md)。
-Native模板的融合依赖、可写OPP与static kernel已通过；真实Native attention半层编译已完成128K/B16，
-同fixture手工图1294.493→编译图1238.764μs（−4.305%），P95同时下降。
-Top-K集合相同但3行顺序有差异，浮点输出非逐bit；保护区通过，尚非整网精度验收。
-8K/B24编译后1041.954μs，Top-K两行集合共替换4个索引，不能称精度验收通过。
-上述历史Native两档静态包选择键交集为0，范围见报告。
-[单卡编译证据与范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
-
-随后完成d8627207两侧同卡同配置编译对照：长B16 Native/PTO 1217.529/1090.391μs（−10.442%），
-短B24 1026.713/988.208μs（−3.750%）。PTO经生产custom-op，禁止静默回退；Native实际静态编译安装成功。
-每侧独立可写OPP，未继承其他档位静态包。长档PTO P95 1391.560μs高于Native1223.500μs，
-20次中3次明显拖尾，**不能称长尾已关闭**；追加受影响长档的连续profile区分根内与图区间间隙。
-Worker实际绑核/专家重叠、两侧精度及最终整机比较仍待验收。
-[同配置两侧结果](results/csa_compiled_pair_20260929/RESULTS.md)。
+Native det0的编译/eager曾出现浮点及Top-K集合/顺序差异，保护区通过不等于两侧精度验收。
+[Native编译数值范围](results/csa_native_compiled_layer_20260929/RESULTS.md)。
+历史d8627207长B16有3次明显拖尾，P95达1391.560μs；后续独立采样未复现，**未证明修复**。
+[间歇长尾原样本](results/csa_compiled_pair_20260929/RESULTS.md)。
+Worker绑核/专家重叠、两侧精度及最终整机比较仍待验收。
 
 ## 1. 最终交付与验收合同
 
@@ -147,7 +120,7 @@ Worker实际绑核/专家重叠、两侧精度及最终整机比较仍待验收�
    旧版数据可以用于优化过程对照，不能仅凭计算分支未变就代替当前版本实测。
 
 **当前执行优先级（2026-09-27 用户最新调整）**：只针对PTO改造vllm-ascend，最小粒度，不改Native流程。
-PTO内直接读写Native物理页及长档调度保护已保留，使用N128加载交错QK/WS；当前同源码单卡七档已齐，继续降低分页读取成本。
+PTO内直接读写Native物理页及长档调度保护已保留，按物理页加载交错Key/scale；当前同源码单卡七档已齐，继续降低分页读取成本。
 单列本体及完整路径耗时；入口历史复制和外部写回均记为已删除，不能伪造0μs样本。
 key/scale源头分离不等于请求历史连续，不能仅改分配器就删桥接。新候选只补受影响的档位；
 Score单卡长尾已明显改善，受影响七档已覆盖，EP16结果单独记录；不把正常窗口或中位数改善当作阶段完成。

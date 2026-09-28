@@ -42,13 +42,39 @@ def main():
             if sides["native"][field] != sides["pto"][field]:
                 raise ValueError(f"Paired configuration differs: {history}/{batch}/{field}")
         samples = {}
+        tails = {}
         for side in sides:
             report = read(folder / side / "report.json")
-            if (report["source"], report["variant"]) != (source["source"], source["variant"]):
-                raise ValueError("Measurement did not use the frozen source/package")
+            if report["source"] != source["source"]:
+                raise ValueError("Measurement did not use the frozen source")
+            if report["variant"] == source["variant"]:
+                sides[side]["variant_evidence"] = {"selector": report["variant"]}
+            elif side == "pto" and report["variant"] == "performance":
+                # The original runner stored selected_variant(), which returns
+                # the category "performance" for every pkg selector. Preserve
+                # raw reports and require the actual compiler source paths.
+                package = Path(source["source"]) / "vllm_ascend/ops/pypto" / source["variant"].removeprefix("pkg:")
+                log_path = folder / side / "run.log"
+                log = log_path.read_text()
+                required = [str(package / name) for name in ("decode_csa.py", "decode_indexer.py")]
+                if any(path not in log for path in required):
+                    raise ValueError("Legacy category lacks frozen package compilation evidence")
+                sides[side]["variant_evidence"] = {
+                    "selector": source["variant"], "legacy_report_category": report["variant"],
+                    "compiler_source_paths": required, "compiler_log": str(log_path),
+                }
+            else:
+                raise ValueError("Measurement package differs")
             if report["timing"]["topk_selection"]["structural_errors"]:
                 raise ValueError("Invalid Top-K structure")
             samples[side] = report["timing"]["samples_us"]
+            median = statistics.median(samples[side])
+            tails[side] = {
+                "p95_over_p50": sides[side]["us_p95"] / median,
+                "max_over_p50": sides[side]["us_max"] / median,
+                "over_p50_5pct": sum(v > median * 1.05 for v in samples[side]),
+                "note": "Descriptive tail indicators for these 20 samples; no EP16 stability claim",
+            }
         if not sides["pto"]["compiler"]["pto_dispatch_calls"]:
             raise ValueError("No actual PTO service call")
         windows_report = read(folder / "swimlane/report.json")
@@ -72,7 +98,7 @@ def main():
                 raise ValueError(f"Expected one Native {name}")
         n, p = (sides[s]["mean_us"] for s in ("native", "pto"))
         result["cases"].append({"history": history, "batch": batch, "sides": sides, "samples_us": samples,
-                                "csa_change_pct": 100 * (p / n - 1), "native_profile": native,
+                                "csa_change_pct": 100 * (p / n - 1), "tail_indicators": tails, "native_profile": native,
                                 "worker_windows": summaries, "incore_means": means})
     if len({case["sides"]["native"]["device"] for case in result["cases"]}) != 1:
         raise ValueError("Matrix promised one allocated device")
@@ -106,7 +132,14 @@ def main():
         lines.append(f"| {case['history']//1024}K/B{case['batch']} | {pmu('VllmQuantLightningIndexer')} "
                      f"| {kt(TASKS[0]):.3f}/{kt(TASKS[1]):.3f} | {kt(TASKS[2]):.3f} "
                      f"| {pmu('SparseAttnSharedkv')} | {kt(TASKS[3]):.3f}/{kt(TASKS[4]):.3f} | {kt(TASKS[5]):.3f} |")
-    lines += ["", "每档两侧PyTorch JSON、PTO四个泳道、全部样本及状态限制见[evidence.json](evidence.json)。",
+    lines += ["", "| 档位 | PTO P95/P50 | PTO max/P50 | PTO超过P50的105%的样本数 |",
+              "| --- | ---: | ---: | ---: |"]
+    for case in result["cases"]:
+        tail = case["tail_indicators"]["pto"]
+        lines.append(f"| {case['history']//1024}K/B{case['batch']} | {tail['p95_over_p50']:.4f} "
+                     f"| {tail['max_over_p50']:.4f} | {tail['over_p50_5pct']}/20 |")
+    lines += ["", "上述尾部比例仅描述本轮20次采样，不能据此关闭历史间歇拖尾或EP16稳定性问题。",
+              "每档两侧PyTorch JSON、PTO四个泳道、全部样本及状态限制见[evidence.json](evidence.json)。",
               "不等同整模型forward或EP16/token/DSpark验收；拖尾样本全部保留。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

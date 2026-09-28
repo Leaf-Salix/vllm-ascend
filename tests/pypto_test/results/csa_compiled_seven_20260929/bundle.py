@@ -31,6 +31,7 @@ def main():
             mapping.append({"file": name, "original": str(source)})
     (destination / "sources.json").write_text(json.dumps(mapping, indent=2) + "\n")
     shutil.copyfile(ROOT / "RESULTS.md", destination / "RESULTS.md")
+    shutil.copyfile(ROOT / "evidence.json", destination / "evidence.json")
     (destination / "README.md").write_text(
         "# 七档JSON下载包\n\n"
         "21份原始JSON：每档Native/PTO各一份PyTorch profiler导出，另含PTO的第4个独立泳道窗口。\n"

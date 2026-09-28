@@ -1,7 +1,7 @@
 # Indexer：当前PTO与最新AscendC的差异
 
-更新：2026-09-29。当前实现c93ec723；完整旧矩阵仍为CANN9.2/e33d842a，
-局部长B4/B8 S6、B16分段排序/UB根及近期组合长B24的状态/图和核时验证已补齐。
+更新：2026-09-29。当前实现及完整新七档均为c93ec723 / CANN9.2，
+Native/PTO已按同配置真实编译半层重测；长档B4/B8/B16/B24、短档B24/B32/B40全部完成。
 旧V7/V10及入口cache拆分结论移出当前说明；实验历史见[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)。
 
 ## 实际接口与主路径
@@ -34,7 +34,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | --- | --- | --- | --- |
 | query/Key复用 | L1 query最多256行，L0按128行M面板；同一Key L1面板跨M子块复用 | 长B≥4用S6 M384/N64；更小长档保留双query | 长B4/B8 S6已取得明显核时收益；分组相似仍不等于L1/L0流水相同，旧4+2拼接退化不重试 |
 | Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24固定组跨leaf驻留已测，AIC约+3.72%、AIV持平；当前候选不采用，不能把少读字节直接当收益 |
-| Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | B4/B8 AIC均值已降至71.036/137.435μs，后续按当前核时继续看等待与重复move |
+| Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为76.619/135.495μs，后续按当前核时继续看等待与重复move |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
 | Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | PTO每leaf有两个half根；改成query分工可能减少根归并，但会增加scale重复读取，未验证前不能判收益 |
@@ -49,29 +49,26 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 已检查Native页指针式切片替代双视图的写法：当前PyPTO默认核内转换会把tensor.slice变为Tile，
 后续GM reshape/load链不能成立；该轻量探针未产生设备候选，保留原路径，见[表达限制](results/csa_key_page_view_20260929/README.md)。
 当前实际核时与七档Native对照见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)；
-[完整四窗口、最慢核与包络](results/csa_cann92_incore_seven_20260928/RESULTS.md)保留全部原始读数。
+[完整四窗口、最慢核与包络](results/csa_compiled_seven_20260929/RESULTS.md)保留全部原始读数。
 
 ## 下一步按依赖推进
 
-1. WO_A NZ长短B16及8K/B40集成对照已通过并取得核内收益；新128K/B24的Score AIC/AIV为383.890/412.053μs，
-   merge14.260μs，四窗口均每核一份；完整CSA1362.396μs，详见[B24报告](results/csa_b24_cann92_20260928/RESULTS.md)。
-2. 长B4/B8 S6已保留：相对d8627207，CSA−2.108%/−3.145%，Score AIC/AIV明显下降；
-   短B24 CSA+3.291%单列，三档8:2 CSA−1.443%，状态/图/保护区通过。
-   [实测与Native/pypto-lib差异](results/csa_small_long_s6_20260929/README.md)。
-3. [2048分段排序与UB中间根](results/csa_stream_root_ub_20260929/README.md)已保留：长档AIC/AIV约−4%，
-   长短8:2核时受益、CSA+0.818%单列；长B8已随S6补齐，长B24近期组合也已通过。
-   B24 Score AIC/AIV383.660/411.575→349.409/366.048μs，merge16.852→13.960μs，
-   CSA1376.883→1312.313μs；同配置Native编译半层1396.274μs，详情见[B24补测](results/csa_b24_integrated_20260929/RESULTS.md)。
-   仍有缩放后score的GM中转；Native也有Cube WS结果GM交接，不能把二者混称为同一种复制。
-   历史完整4096 Score UB驻留因gather/copy退化，不能原样重试。
-4. 局部核内收益通过必要状态/图检查即保留，CSA与P95分别记录；更换候选划分或舍入才按算术差异单列验收。
-5. 核内阶段之后，再按当前DFX处理独立归并、系数依赖、准入和物理核分派。短B16/B32/B40同核两份仍有记录，
-   但已测短Score sync_start、Sparse sync_start都没有综合收益，不能把开关当作已证明的修复。
+1. 已保留的S6 Key复用、2048分段排序、UB中间根和WO_A NZ已由同源码七档覆盖。
+   当前长B16 Score AIC/AIV为254.344/260.119μs，merge13.511μs；
+   长B24为346.587/363.192μs、merge13.815μs。Native融合QLI的PMU参考分别为
+   248.899/248.300和370.853/370.460μs；不能忽略PTO独立系数、scale提交与merge。
+2. 先验证系数任务仅取消空worker的调度候选：固定stride48，提交数min(48, query组数)。
+   完整CPU编译/load及生成码通过，长B16/短B24真实编译A/B正在运行；
+   [候选、历史失败试验区别与范围](results/csa_coefficient_active_workers_20260929/README.md)。
+3. 按现有level-4数据分别解释系数/scale依赖。Score已有early派发不能写成一直等待AICPU，
+   cache scale的64字节读改写也不能在未证明页面所有权时直接并行。
+   后续研究独立归并、AIV数据交接及关键链，保持长短8:2；明显顾此失彼时在同一算子内分场景。
+4. 有真实核内收益且必要功能检查通过即保留，CSA和P95单列；算术或量化改变则另记精度影响。
+   当前精度版新增中性优化迁移、新CANN9.2/B24整模型token/DSpark验收尚未完成。
 
-长B24固定组Query/系数驻留已完成定向对照：生成代码证实TLOAD/TMOV移出leaf循环，
-八类状态/图/保护区通过，但长档AIC变慢、AIV持平，长短8:2 CSA+0.028%，没有明确收益。
-该候选未合入，不扩测不均匀长度；理论上减少240KiB/worker的加载不能替代核时证据。
-当前冻结已保留代码重取真实编译新七档，再按任务细分确定CSA调度优化重点。
+固定组跨leaf Query/系数驻留已否定：生成代码虽证明TLOAD/TMOV移出leaf循环，
+但长B24 AIC约+3.72%、AIV持平，没有明确收益。理论少搬运不能代替核时证据。
+去除4个dummy也只有约0.1%的加权CSA差异，未合入；不继续原样扩测。
 
 ## 有效证据与排除方向
 
