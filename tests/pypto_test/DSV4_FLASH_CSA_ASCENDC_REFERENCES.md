@@ -118,8 +118,10 @@ PV更新只缩放旧结果。历史累计softmax候选仍对新PV乘beta，未�
 当前PTO长档S6在稳态用地址0的8KiB Key Right；下一次TMOV需等待前一QK释放。
 首块Key在WS开始前临时使用8192地址，不构成稳态Key双缓冲；基线L1最大分配末端仅96KiB。
 WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key面板，保持S6算术与QK/WS形状。
-双Key+WS的64KiB只是容量推导；初版在SSA修正后仍因Mat分配638976>524288失败。
-已在算子侧将预发放到独立prologue，完整编译待组合EP16结束后再进行；未修改工具链或生产路径。
+初版在SSA修正后仍因Mat分配638976>524288失败；改为独立prologue后完整CPU编译通过，Mat恢复96KiB。
+实际L0B确认两个8KiB Key槽交替、48KiB WS位于16384起，L0B合计64KiB；保持16次QK/WS。
+未启用预取的四组AIC/AIV及长S6 AIV共9份生成二进制一致，其他策略没有新增核内指令。
+单卡task_20260928_170324_293095832121已提交、结果待收；未修改工具链或生产路径。
 [来源、当前补丁和失败证据](results/csa_score_key_prefetch_20260928/README.md)。
 
 ## 3. ops-math的适用边界

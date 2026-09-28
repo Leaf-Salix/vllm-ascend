@@ -1,12 +1,12 @@
 diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
-index 4acc45f6..b8c4077b 100644
+index 4acc45f6..43cc7e6f 100644
 --- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
 +++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
 @@ -503,6 +503,7 @@ def indexer_score_topk_native_cube(
      score_tile: pl.constexpr,
      score_sync_start: pl.constexpr,
      score_early_resolve: pl.constexpr,
-+    key_prefetch: pl.constexpr,
++    key_prefetch_panels: pl.constexpr,
  ):
      """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
      native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -24,7 +24,7 @@ index 4acc45f6..b8c4077b 100644
 +                    )
 +                    # Keep QK/WS outside a conditional prologue so their Mat
 +                    # intermediates retain the original lifetimes.
-+                    if key_prefetch:
++                    if key_prefetch_panels > 0:
 +                        buf_prime_col = 0
                          # Native QLI streams N128 key panels, overlapping the next
                          # MTE2 load with QK/WS instead of loading the entire N768/1024.
@@ -92,8 +92,8 @@ index 4acc45f6..b8c4077b 100644
                          )
 +                    for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
 +                        buf_panel_col = buf_qk_panel * qk_panel_cols
-+                        buf_load_col = (buf_qk_panel + key_prefetch) * qk_panel_cols
-+                        if buf_qk_panel + key_prefetch < score_tile // qk_panel_cols:
++                        buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
++                        if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
 +                            # Native QLI streams N128 key panels, overlapping the next
 +                            # MTE2 load with QK/WS instead of loading the entire N768/1024.
 +                            buf_panel_keys = pl.tile.create(
@@ -136,7 +136,7 @@ index 4acc45f6..b8c4077b 100644
 +                                pl.tile.transpose_view(buf_panel_keys),
 +                                target_memory=pl.MemorySpace.Right,
 +                            )
-+                        if key_prefetch:
++                        if key_prefetch_panels > 0:
 +                            buf_key_panel = buf_current_key
 +                        else:
 +                            buf_key_panel = buf_prefetched_key
@@ -147,7 +147,7 @@ index 4acc45f6..b8c4077b 100644
                                  buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
                              )
                          buf_previous_l1 = buf_scores_l1
-+                        if key_prefetch:
++                        if key_prefetch_panels > 0:
 +                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
 +                                buf_current_key = buf_prefetched_key
                      buf_last_pair = pl.tile.extract(
@@ -157,7 +157,7 @@ index 4acc45f6..b8c4077b 100644
                      BUFFERED_LONG_SCORE_TILE,
                      True,
                      False,
-+                    True,
++                    1,
                  )
              elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
                  score_tid = indexer_score_topk_native_cube(
@@ -165,7 +165,7 @@ index 4acc45f6..b8c4077b 100644
                      BUFFERED_LONG_SCORE_TILE,
                      True,
                      False,
-+                    False,
++                    0,
                  )
              else:
                  score_tid = indexer_score_topk_native_cube(
@@ -173,7 +173,7 @@ index 4acc45f6..b8c4077b 100644
                      BUFFERED_LONG_SCORE_TILE,
                      True,
                      False,
-+                    False,
++                    0,
                  )
          else:
              short_queries = pl.tensor.dim(position_ids, 0)
@@ -181,7 +181,7 @@ index 4acc45f6..b8c4077b 100644
                      BUFFERED_SCORE_TILE,
                      False,
                      True,
-+                    False,
++                    0,
                  )
              else:
                  score_tid = indexer_score_topk_native_cube(
@@ -189,7 +189,7 @@ index 4acc45f6..b8c4077b 100644
                      BUFFERED_SCORE_TILE,
                      False,
                      True,
-+                    False,
++                    0,
                  )
      else:
          with pl.spmd(

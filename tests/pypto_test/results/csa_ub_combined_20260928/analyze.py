@@ -14,7 +14,8 @@ def main():
     analyzer.ROOT = ROOT
     analyzer.main(attribution_note=(
         '本轮冻结2d2f9ca0，验证Top-K UB与QR尾修正版组合；两侧预热计时事件，'
-        '正式模型窗口无并发CPU编译。不能把旧版本跨轮差额归因于任一单项。'
+        '本会话候选编译在模型任务仍pending时完成，正式窗口未并行编译。'
+        '不能把旧版本跨轮差额归因于任一单项。'
     ))
 
 
