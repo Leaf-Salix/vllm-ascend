@@ -55,6 +55,13 @@ Native QLI包含系数、Score、本地Top-K和最终归并；PTO另拆系数与
 - 短B16/B32/B40部分DFX出现同核两份Score；长档各核一份。需区分短档分派问题与长档核内工作量。
 - Native式query排序循环和编排最大长度复用已否定；不能由这两个小候选无收益推断核内已无优化空间。
 
+新128K/B24为3b27c7fd独立9.2结果，Native QLI Duration387.340、AIC/AIV参考374.920/374.468μs；
+PTO Score AIC/AIV383.890/412.053、独立merge14.260μs。AIC已较接近参考，AIV末尾排序仍值得研究，
+不按两侧不同融合范围直接相减声称可回收时长。
+当前2048候选分段排序候选已完成CPU编译并排队，尝试将前段排序与后续Cube计算重叠；
+保留原GM缓冲，新增临时根写读的代价需要实测，未声称核内或完整CSA收益。
+[候选、Native依据与验证范围](results/csa_score_stream2048_20260928/README.md)。
+
 具体代码分工与待办见[Indexer差异](DSV4_FLASH_CSA_INDEXER_NATIVE_GAP.md)。
 
 ## Sparse attention
