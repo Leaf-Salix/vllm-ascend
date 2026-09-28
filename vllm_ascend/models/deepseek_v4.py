@@ -43,6 +43,7 @@ from vllm.distributed import (
     get_tensor_model_parallel_world_size,
     tensor_model_parallel_all_gather,
 )
+from vllm.logger import logger
 from vllm.model_executor.layers.activation import SiluAndMul, SiluAndMulWithClamp
 from vllm.model_executor.layers.fused_moe import FusedMoE, fused_moe_make_expert_params_mapping
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -89,6 +90,7 @@ from vllm_ascend.utils import (
     extract_dsv4_layer_index,
     get_ascend_device_type,
     get_dsv4_compress_ratio,
+    is_builtin_aclnn_op_available,
 )
 
 
@@ -639,6 +641,10 @@ class Compressor(nn.Module):
             return_bias=False,
         )
 
+        # The fused compressor accepts ND weights even when weight NZ mode is 2.
+        self.wkv.keep_weight_nd = True
+        self.wgate.keep_weight_nd = True
+
         # A5 compressor kernel needs float for norm_weight input
         norm_dtype = torch.float32 if get_ascend_device_type() == AscendDeviceType.A5 else None
         self.norm = RMSNorm(self.head_dim, config.rms_norm_eps, dtype=norm_dtype)
@@ -780,6 +786,13 @@ class DeepseekV4Attention(nn.Module):
             prefix=f"{prefix}.wo_a",
             return_bias=False,
         )
+        if (
+            get_ascend_config().weight_nz_mode == 2
+            and get_ascend_device_type() != AscendDeviceType.A5
+            and not is_builtin_aclnn_op_available("aclnnTransposeBatchMatMulWeightNz")
+        ):
+            self.wo_a.keep_weight_nd = True
+            logger.warning_once("CANN lacks TransposeBatchMatMulWeightNz; native wo_a stays ND")
         self.wo_b = RowParallelLinear(
             self.n_groups * config.o_lora_rank,
             self.dim,
@@ -989,12 +1002,19 @@ class DeepseekV2DecoderLayer(nn.Module):
         residual: torch.Tensor | None,
         llama_4_scaling: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        residual = hidden_states.clone()
-        hidden_states, post, comb = self.hc_pre(hidden_states, self.hc_attn_fn, self.hc_attn_scale, self.hc_attn_base)
-        hidden_states = self.input_layernorm(hidden_states)
-        attn_kwargs = {"positions": positions, "hidden_states": hidden_states, "llama_4_scaling": llama_4_scaling}
-        hidden_states = self.self_attn(**attn_kwargs)
-        hidden_states = self.hc_post(hidden_states, residual, post, comb)
+        if getattr(self, "_pto_csa_enabled", False) and llama_4_scaling is None:
+            output = torch.empty_like(hidden_states)
+            torch.ops.vllm.full_csa_forward(hidden_states, positions, output, self.self_attn.dsa_attn.prefix)
+            hidden_states = output
+        else:
+            residual = hidden_states.clone()
+            hidden_states, post, comb = self.hc_pre(
+                hidden_states, self.hc_attn_fn, self.hc_attn_scale, self.hc_attn_base
+            )
+            hidden_states = self.input_layernorm(hidden_states)
+            attn_kwargs = {"positions": positions, "hidden_states": hidden_states, "llama_4_scaling": llama_4_scaling}
+            hidden_states = self.self_attn(**attn_kwargs)
+            hidden_states = self.hc_post(hidden_states, residual, post, comb)
         residual = hidden_states.clone()
         hidden_states, post, comb = self.hc_pre(hidden_states, self.hc_ffn_fn, self.hc_ffn_scale, self.hc_ffn_base)
         hidden_states = self.post_attention_layernorm(hidden_states)

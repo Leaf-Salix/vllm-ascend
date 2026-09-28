@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import functools
 import json
 import math
@@ -288,6 +289,16 @@ def maybe_trans_nz(weight: torch.Tensor) -> torch.Tensor:
     if not _should_trans_nz(weight):
         return weight
     return torch_npu.npu_format_cast(weight, ACL_FORMAT_FRACTAL_NZ)
+
+
+@functools.cache
+def is_builtin_aclnn_op_available(op_name: str) -> bool:
+    """只在初始化时查询当前 CANN libopapi 的执行/工作区接口，不启动设备计算。"""
+    try:
+        library = ctypes.CDLL("libopapi.so")
+    except OSError:
+        return False
+    return hasattr(library, op_name) and hasattr(library, f"{op_name}GetWorkspaceSize")
 
 
 def _round_up(x: int, align: int):

@@ -275,3 +275,59 @@ PTO p50相差约1.04%，但Native两轮本身变化约6.41%，不能认定为新
 当前范围：完整计算模块已迁入并通过上述迁移对拍，**Leaf生产模型入口尚未切换**。
 后续必须接入原生attention半层、加载后初始化、graph准入与真正Native回退，
 然后重新完成全层数值及同口径七档性能验证。不能将本阶段写成完整服务迁移已完成。
+
+## 23:26 第二阶段：Leaf生产入口单层验收
+
+基线`561492fa5`上的完整BSH接入修改。保留原生DecoderLayer签名、返回tuple及FFN，
+由原生runner加载权重后初始化，C4 attention半层通过custom op调用完整融合kernel。
+层对象持有权重和工作区；原生builder提供metadata、原生owner持有cache；
+内部函数绑定56个tensor参数，无独立CSAServiceRuntime/NativeCSACall类链。
+仍有必要的参数整理、compact metadata生成及零拷贝存储描述符，不能说“完全没有适配工作”。
+
+环境继续固定CANN9.0.1、vLLM0.25.1、torch2.10.0、torch_npu2.10.0.post2、
+PyPTO`3e87a843`、Simpler`a54c0509`、PTO-ISA`327cd586`、PTOAS0.66。
+生产原生扩展复用既有编译产物，未覆盖现有环境。2980个源码文件SHA和工具链前后检查通过。
+
+必要兼容处理：与参考一致保留Compressor wkv/wgate的ND权重；
+CANN缺少TransposeBatchMatMulWeightNz时wo_a也保留ND。原生DSA工厂不再返回旧CSA实现，
+保证新融合的回退真正执行Native。缓存规格不满足会显式报错，不承诺自动回退。
+
+### 任务及结果
+
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| `task_20260928_231059_287902114524` | exit1 | 新测试驱动漏调用enable_custom_op；metadata构建失败，未执行CSA。保留失败日志。 |
+| `task_20260928_232409_335427211168` | exit0 | 补回原版相同初始化后完成真实Leaf单层入口测试。 |
+
+配置B4/S6/H8192、真实第2层权重、seed1024、合成hidden/history、NZ2、atomic0、deterministic0。
+使用Leaf模型、metadata builder、缓存布局与真实custom op；参考仅提供fixture及计量助手。
+输出范围是HC pre→norm→CSA→HC post的`[24,4,4096]`，不含FFN。
+
+| 指标 | 结果 |
+|---|---|
+| 与冻结参考的Native八组状态逐字节比较 | 全部0差异 |
+| 与冻结参考的PTO八组状态逐字节比较 | 全部0差异 |
+| PTO相对Native输出relative L2 | 0.19502785% |
+| 输出不同元素 | 96880 / 393216 |
+| 输出最大绝对误差 | 0.03125 |
+| graph A/B/A replay | PASS |
+| metadata及cache写入边界 | PASS，非法slot外写入0 |
+| 强制Native回退 | 八组结果与Native一致，未再次进入CSA |
+| Native graph p50 | 575.70 μs |
+| Leaf graph p50 | 555.61 μs |
+| 本轮中位耗时下降 | 3.49% |
+
+计时20次、warmup5次，两侧capture均包含metadata生成；不包含逐步Python host适配开销。
+不能与上一阶段metadata reuse计时直接相减。只有一次运行，无独立重复置信区间。
+八组状态为输出、TopK、SWA、compressed KV、state、indexer key、indexer scale、indexer state。
+相对参考逐位一致不代表相对Native逐位一致，精度差异未消除。
+
+CPU接口/存储/graph门禁及测试驱动回归14项通过。另在227真实依赖环境运行后端工厂CPU回归，2项通过，确认开关开/关均保持Native DSA。
+强制eligible=False只证明回退代码；不证明真实非均匀请求、DP padding或调度图选择正确。
+本次也未执行完整DecoderLayer/FFN、整模型21层接入、整模型共同历史数值或七档性能。
+这些仍为下一阶段必要门禁，当前不能宣称完整生产迁移验收完成。
+
+证据：`reports/dsv4-full-layer-integration-20260928/`保存两轮日志、
+`source-manifest-single-v1.json`、`source-manifest.json`、结果`states.pt`、
+`cross-reference-bitcompare.json`及逐文件`evidence-manifest.json`。
+复现入口为`tests/pto_attn/run_full_layer_native.py`，需提供冻结参考的测试助手路径、完整checkpoint和新输出目录。

@@ -100,6 +100,7 @@ from vllm.v1.worker.ubatch_utils import (
 from vllm.v1.worker.utils import AttentionGroup, select_common_block_size
 
 # yapf: enable
+from vllm_ascend import envs
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionBackend, AscendAttentionState
 from vllm_ascend.attention.context_parallel.dsa_cp import AscendDSACPMetadataBuilder
@@ -2709,12 +2710,13 @@ class NPUModelRunner(GPUModelRunner):
         )
         has_lora = num_active_loras > 0 if force_has_lora is None else force_has_lora
 
+        csa_actual_tokens = num_tokens
         # ruff: noqa: E731
         def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
             if force_eager:
                 return (CUDAGraphMode.NONE, BatchDescriptor(num_tokens_padded))
 
-            return self.cudagraph_dispatcher.dispatch(
+            mode, descriptor = self.cudagraph_dispatcher.dispatch(
                 num_tokens=num_tokens,
                 has_lora=has_lora,
                 uniform_decode=uniform_decode,
@@ -2722,6 +2724,18 @@ class NPUModelRunner(GPUModelRunner):
                 invalid_modes={CUDAGraphMode.FULL} if disable_full else None,
                 num_active_loras=num_active_loras,
             )
+
+            if mode == CUDAGraphMode.FULL and getattr(self, "_full_csa_enabled", False):
+                from vllm_ascend.attention.pto_layer import can_replay_csa_graph
+
+                if not can_replay_csa_graph(
+                    num_tokens=csa_actual_tokens,
+                    num_reqs=num_reqs,
+                    uniform_decode=uniform_decode,
+                    padded_tokens=descriptor.num_tokens,
+                ):
+                    return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)
+            return mode, descriptor
 
         cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded, use_cascade_attn or has_encoder_output)
         num_tokens_padded = batch_descriptor.num_tokens
@@ -3454,6 +3468,13 @@ class NPUModelRunner(GPUModelRunner):
                 from vllm.model_executor.model_loader.default_loader import DefaultModelLoader
                 DefaultModelLoader._init_ep_weight_filter = mock_pass
             self.model: nn.Module = get_model(vllm_config=self.vllm_config)
+            self._full_csa_enabled = envs.VLLM_ASCEND_PYPTO_DSV4_CSA and (
+                self.model_config.hf_config.model_type == "deepseek_v4"
+            )
+            if self._full_csa_enabled:
+                from vllm_ascend.attention.pto_layer import prepare_model
+
+                prepare_model(self.model, self.vllm_config)
             for name, _ in self.model.named_parameters():
                 # sinks is a kind of parameter in attention
                 # only set in weight name

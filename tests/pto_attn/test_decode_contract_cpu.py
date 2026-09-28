@@ -285,12 +285,12 @@ def test_incomplete_physical_page_rejected():
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_backend_selects_implementation(monkeypatch, enabled):
+def test_backend_retains_native_for_full_layer_fallback(monkeypatch, enabled):
     from vllm_ascend import utils
 
     monkeypatch.setattr(utils, "enable_dsa_cp", lambda: False)
     monkeypatch.setenv("VLLM_ASCEND_PYPTO_DSV4_CSA", str(int(enabled)))
-    assert AscendDSABackend.get_impl_cls() is (pto.PyptoDSAImpl if enabled else AscendDSAImpl)
+    assert AscendDSABackend.get_impl_cls() is AscendDSAImpl
 
 
 def _unscaled_hadamard_ref(dim):

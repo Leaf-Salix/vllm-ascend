@@ -28,8 +28,8 @@ from typing import Any
 # begin-env-vars-definition
 
 env_variables: dict[str, Callable[[], Any]] = {
-    # Opt-in PyPTO CSA decode for the supported single-card DSV4 path.
-    # 0: native attention (default); 1: attempt the supported CSA adapter.
+    # Opt-in complete BSH CSA attention half for DSV4 TP1 / DSpark S6.
+    # 0: native (default); 1: post-load full-kernel initialization; unsupported steps use native.
     "VLLM_ASCEND_PYPTO_DSV4_CSA": lambda: bool(int(os.getenv("VLLM_ASCEND_PYPTO_DSV4_CSA", "0"))),
     # Complete BSH CSA reduction: 0 uses one K partition; 1 uses atomic add.
     # Default 1 matches the reference; set before importing kernels. Not secret.
