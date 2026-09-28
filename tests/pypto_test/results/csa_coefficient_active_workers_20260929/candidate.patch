@@ -1,0 +1,17 @@
+--- a/decode_indexer.py
++++ b/decode_indexer.py
+@@ -586,8 +586,13 @@
+         [T_PAD // query_group_size * NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS], dtype=pl.FP16
+     )
+     coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [1, T_PAD * IDX_N_HEADS])
++    # Trim only workers whose original stride-48 loop has no iteration.
++    # Keep every nonempty worker's query groups and arithmetic unchanged.
++    coefficient_workers = pl.min(
++        TOPK_QUERY_WORKERS, pl.tensor.dim(position_ids, 0) // query_group_size
++    )
+     with pl.spmd(
+-        TOPK_QUERY_WORKERS,
++        coefficient_workers,
+         name_hint="indexer_head_coefficients",
+         deps=[qh_quant_tid, weights_tid],
+         allow_early_resolve=True,
