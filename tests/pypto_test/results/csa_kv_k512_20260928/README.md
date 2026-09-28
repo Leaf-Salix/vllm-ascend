@@ -1,7 +1,8 @@
 # 固定K的KV投影：L1 K256→512
 
 基底30f2b228，仅性能版atomic0把KV_K_TILE 256→512。M/N分组、完整K4096单FP32累加链、
-RMS/RoPE及原始cache接口不变；atomic1仍K256，精度版不改。三档单卡核内收益已验证并本地保留，真实EP16待验收。
+RMS/RoPE及原始cache接口不变；atomic1仍K256，精度版不改。三档单卡核内收益已验证并在e58ddc94保留。
+受影响的四档真实EP16确认见[后续验收](../csa_kv_k512_ep16_20260928/README.md)，不将本页单卡结果替换为整网收益。
 
 CPU完整lowering/PTOAS/CCE/链接通过。[编译日志](compile.log)、[L0分块](lowering_tiles.json)。
 生成代码M32/M64及尾M16均仍L0 K128/N128，每输出32次MMAD；L1分段由16次降8次，运算量不变。

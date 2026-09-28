@@ -1,0 +1,13 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+index 0b0ad5f4..e657543f 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/qkv_proj_rope.py
+@@ -84,7 +84,7 @@ QR_N_TILE = 128  # qr_proj Q_LORA (N) per matmul；上游值。取 32 是为了
+ # 96 列分组且不跨 K 序边界，代价是每行只读 32 列 BF16 = 64 字节，
+ # in-core 实测 MTE2 占 55.6%、Cube 只有 28.4%。
+ 
+-QR_K_TILE = 256  # qr_proj D (K) reduction tile   | divides QR_SPLIT_K_TILE
++QR_K_TILE = 256 if ATOMIC_ADD else 512  # 固定K减少L1搬运分段；atomic路径保留原分块。
+ 
+ # Keep the deployment split counts; smaller upstream counts did not lower the full-layer interval.
+ QR_OK = 8 if ATOMIC_ADD else 1  # 单分片按固定 K 顺序累加，避免跨核 atomic add。

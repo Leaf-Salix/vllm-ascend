@@ -8898,3 +8898,49 @@ vllm-ascend/PyPTO/Simpler分别有260/8/1个本地未推送提交。后续本地
 
 随后用户再次明确授权PyPTO、Simpler和vllm-ascend三个分支push；当前终端无有效Git凭据，
 已请求用户恢复gh登录。仅认证阻塞推送，不阻塞已授权的本地性能优化。
+
+
+## 308. KV K512的四档EP16均值与P95领先，入场分项保留原始边界（2026-09-28）
+
+task_20260928_091907_200100128342完成、退出0，冻结源码实际HEAD=e58ddc94。
+固定权重/bank、TP1/DP=EP16、mode2/atomic0/det0、EPLB关，预热8步后10步无profiler forward，另采3步profile。
+128K/B4→B8→B16同进程连续换档，8K/B40另验M64尾块；两侧均使用已预创建的计时事件与相同主机分项诊断。
+
+| 档位 | Native/PTO forward均值 ms | PTO变化 | Native/PTO P95 ms |
+| --- | ---: | ---: | ---: |
+| 128K/B4 | 45.708/44.694 | −2.22% | 47.830/45.486 |
+| 128K/B8 | 56.780/55.631 | −2.02% | 57.839/56.196 |
+| 128K/B16 | 73.327/70.947 | −3.25% | 74.634/72.039 |
+| 8K/B40 | 104.243/101.996 | −2.16% | 107.740/103.586 |
+
+278528个token零差异，64组rank的DSpark/请求位置一致；40/40个对应步骤最慢rank耗时更低。
+本轮PTO未出现>2ms设备相对入场异常。Native 128K/B4 step10 rank14晚2.844ms，
+输入准备24.862ms（同rank中位23.468ms），DP协调4.259ms（中位3.820ms）；这些增量不能单独解释全部偏差。
+没有改GC或生产Runner，也不能用同时包含KV修改及计时事件预热的跨轮结果证明旧长尾已修复。
+这四档不是新统一七档成绩，原30f2b228七档及异常保持原样；750μs目标仍未完成。
+[正式结果、原始样本及入场分项](results/csa_kv_k512_ep16_20260928/README.md)。
+
+
+## 309. 拆分PyPTO上游PR，保持本地已验证环境（2026-09-28）
+
+认证恢复后，vllm-ascend已推送至e58ddc94；PyPTO/Simpler因上游只读权限通过fork提交PR。
+随后按用户要求关闭未合并的[PyPTO #2924](https://github.com/hw-native-sys/pypto/pull/2924)，
+替换为均面向feat/kernel-mode-integration-test、各一个提交的独立PR：
+
+- [#2926](https://github.com/hw-native-sys/pypto/pull/2926)：torch_npu 2.10关闭流程版本兼容，1文件。
+- [#2927](https://github.com/hw-native-sys/pypto/pull/2927)：PTOAS 0.66标量读写接口，19文件。
+- [#2928](https://github.com/hw-native-sys/pypto/pull/2928)：Simpler gitlink与SDK标记同步，2文件。
+- [#2929](https://github.com/hw-native-sys/pypto/pull/2929)：NZ视图证明和物理步长，13文件。
+- [#2930](https://github.com/hw-native-sys/pypto/pull/2930)：Call/Submit布局校验，11文件。
+- [#2931](https://github.com/hw-native-sys/pypto/pull/2931)：Native NZ只读权重零拷贝桥接及完整参数合同，15文件。
+- [#2932](https://github.com/hw-native-sys/pypto/pull/2932)：FIXPIPE缩放/ReLU及INT32 Acc→FP16 L1，40文件。
+
+七份补丁组合后的Git树与原3e87a843一致，没有重装环境或冒称每个分支重新独立构建/设备验收。
+NZ视图与布局校验共用相同slice布局传播前置补丁，PR明确合并时只保留一次。
+[Simpler #2458](https://github.com/hw-native-sys/simpler/pull/2458)已合并；本地仍使用原已验证a54c05095，
+后续若切换上游合并revision须同步SDK标记和扩展重建。所有新提交均详细中文并Signed-off-by。
+
+性能工作继续：pypto-lib官方main浅拉取到73078d0，CSA目录相对2164563无差异。
+新候选仅性能版atomic0的QR L1 K256→512，CPU完整编译通过，L0仍K128、FP32完整K4096累加。
+单卡长短B16任务task_20260928_101129_50937415458已启动，尚未合入生产或声称设备收益。
+[候选说明](results/csa_qr_k512_20260928/README.md)。
