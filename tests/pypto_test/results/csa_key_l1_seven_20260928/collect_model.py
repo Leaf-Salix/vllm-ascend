@@ -23,7 +23,8 @@ def weighted_changes(rows):
         raise ValueError('七档必须齐全且不重复，才能计算阶段七三指标')
     means = {history: statistics.mean(r['change_pct'] for r in rows if r['history'] == history)
              for history in (131072, 8192)}
-    return {'mean_change_pct_by_history': means,
+    # The compact JSON formatter expects object keys to be strings.
+    return {'mean_change_pct_by_history': {str(history): value for history, value in means.items()},
             'weighted_change_pct': .7 * means[131072] + .3 * means[8192],
             'scope': '同轮Native为基线，各history内batch等权后按128K/8K七三合成；'
                      '不替代P95、最慢rank、token及DSpark检查，不作跨轮单因素归因。'}

@@ -30,24 +30,35 @@ Native零容差浮点/量化差异仍诊断记录，不冒充逐bit一致；最�
 8K/B32一个DFX窗口Score仅用18个AIC执行24份，B40一个窗口用23核，均出现同核串行；
 前者启动散布79.56μs，后者30.56μs。完整计时P95/中位数最大为B32的1.036；慢样本和窗口均保留。
 [七档计时与核内分项](LAYER.md)、[原始样本/全部窗口/数值诊断](layer.json)、[收集入口](collect_layer.py)。
-554b3bca模型已取得128K三档，8K仍在执行；2d2f9ca0模型数字不替代本轮。
+554b3bca七档模型已完成；2d2f9ca0模型数字不替代本轮。
 
 [七档模型入口](run_model.sh)要求五档单卡原任务成功退出、七档功能报告通过且分配16卡后才能执行。
-已提交`task_20260928_182811_290034987`，当前运行；[任务句柄](model_task.txt)供后续查询和离线导出使用。
+`task_20260928_182811_290034987`已完成、退出0；[任务句柄](model_task.txt)供后续查询和离线导出使用。
 长档一次sweep B4/8/16，短档一次sweep B16/24/32/40，长短交换Native/PTO执行顺序。
 [forward收集](collect_model.py)复用逐rank token/DSpark、位置、配置及事件门禁，七档全通过才汇总7:3；
 可通过`--available`读取已齐全档位，但不足七档时不输出阶段加权收益。
 [主机及builder诊断](analyze.py)保留异常rank十步标记，不根据P95好看而删除尾部。
-[离线profile导出](export_profiles.sh)必须等模型任务成功结束后执行；
+[离线profile导出](export_profiles.sh)要求模型成功结束，并等本线程后续B8单卡也结束以避免CPU竞争；
 [报告及下载汇集](profile_report.py)生成14份真实EP16 rank0 JSON和7份单CSA DFX入口。
 DFX固定选窗口0供下载，其他窗口仍全部保留，避免按性能挑图。
 
-19:24先收集已齐全的128K三档，均通过16rank的配置/位置、token和DSpark检查，
-共114688个输出token零差异、48组rank统计一致。Native/PTO forward均值：
-B4为45.605/44.308ms（−2.85%），B8为55.394/55.439ms（+0.08%），
-B16为72.894/69.162ms（−5.12%）。B8尚无收益；B4 P95为47.415/47.628ms，仍有尾部代价。
-[正式三档样本](model/RESULTS.md)、[逐rank数据](model/forward.json)仅是当前阶段进度，
-没有输出七档七三综合指标；模型profile尚未离线解析。
+七档均通过16rank的配置/位置、token和DSpark检查，
+共573440个输出token零差异、112组rank统计一致。正式forward如下，单位ms：
+
+| 档位 | Native | PTO | 耗时变化 | Native/PTO P95 |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B4 | 45.605 | 44.308 | −2.85% | 47.415/47.628 |
+| 128K/B8 | 55.394 | 55.439 | +0.08% | 56.552/56.231 |
+| 128K/B16 | 72.894 | 69.162 | −5.12% | 73.867/70.198 |
+| 8K/B16 | 65.914 | 62.728 | −4.83% | 67.028/65.754 |
+| 8K/B24 | 80.266 | 76.094 | −5.20% | 85.333/78.516 |
+| 8K/B32 | 90.930 | 87.970 | −3.26% | 91.715/89.416 |
+| 8K/B40 | 103.549 | 101.572 | −1.91% | 105.363/103.354 |
+
+各history内部等权：128K−2.628%、8K−3.799%，七三forward变化−2.979%；
+逐步最慢rank均值六档更低，61/70步更快。B8尚无收益、B4 P95仍有代价，不标阶段目标完成。
+[正式七档样本与最大值](model/RESULTS.md)、[逐rank数据](model/forward.json)。
+模型profile尚未离线解析，不能用历史模型CSA表代替本轮。
 
 新增builder观察定位到B4 PTO step15/rank14的C128 attention `build_decode_metadata`：
 墙钟3.703ms、线程CPU3.678ms，同rank通常墙钟0.251ms；设备相对入场迟到3.786ms，
@@ -56,6 +67,10 @@ B4 PTO step16/rank3的另一处迟到4.534ms，现有标记显示
 `batch_coordination_end → attention_metadata_begin`空隙4.449ms（通常0.118ms），线程CPU4.420ms。
 该区间含deferred修正、DSA位置准备和query padding等调用，尚未区分具体调用；
 step11/rank14还出现preprocess 2.039ms。以上不能统一归因于Score或添加sync_start直接处理。
+8K/B16 PTO step17/rank4晚进入2.738ms，自身forward 61.140ms、平时60.670ms，
+其余rank平均增加3.139ms；该rank g4_a0（C4 compressor state）builder的decode阶段3.324ms，通常0.183ms。
+8K/B24 Native step12/rank14晚进入5.846ms，主机forward入口却未晚于中位数，
+event到提交段7.571ms、线程CPU0.300ms；只定位到提交/设备入场之间，不直接判为同一metadata问题。
 [入场证据](ARRIVAL.md)、[全部分项](PHASES.md)、[异常rank全部十步](metadata_tail.json)。
 本轮只在离线分析补齐现有标记间空隙，未修改运行中源码、同步、GC策略或删减正式样本。
 
