@@ -22,7 +22,13 @@ from .config import (
 from .config import (
     TP as TP_SIZE,
 )
-from .nz_mode import BF16_WEIGHT_LAYOUT, BF16_WEIGHT_NZ, QUANT_WEIGHT_LAYOUT, QUANT_WEIGHT_NZ
+from .nz_mode import (
+    BF16_WEIGHT_LAYOUT,
+    BF16_WEIGHT_NZ,
+    QUANT_WEIGHT_LAYOUT,
+    QUANT_WEIGHT_NZ,
+    WO_A_WEIGHT_LAYOUT,
+)
 
 D = M.hidden_size
 
@@ -164,7 +170,7 @@ if T_PAD % PROJ_B_MM_T_TILE != 0:
 @pl.jit.inline
 def _proj_a_mm_nz(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
     o_r_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.FP32],
     g: pl.Scalar[pl.INDEX],
     row_base_o: pl.Scalar[pl.INDEX],
@@ -211,7 +217,7 @@ def _proj_a_mm_nz(
 @pl.jit.inline
 def _proj_a_mm_nd(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
     o_r_pad: pl.Tensor[[T_PAD, O_GROUPS * O_LORA], pl.FP32],
     g: pl.Scalar[pl.INDEX],
     row_base_o: pl.Scalar[pl.INDEX],
@@ -342,7 +348,7 @@ proj_b_mm = _proj_b_mm_nz if QUANT_WEIGHT_NZ else _proj_b_mm_nd
 @pl.jit.inline
 def decode_o_proj_tp1(
     o_packed: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_b_scale: pl.Tensor[[D], pl.FP32],
     attn_out: pl.Tensor[[T_DYN, D], pl.BF16],

@@ -45,7 +45,7 @@ from .layout import (
     STATE_PAGE_ELEMENTS_DYN,
     STATE_TABLE_COLUMNS_DYN,
 )
-from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT
+from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT, WO_A_WEIGHT_LAYOUT
 from .qkv_proj_rope import qkv_proj_rope
 
 # Dynamic shape variables.
@@ -172,7 +172,7 @@ def _decode_csa_tp1_layer(
     cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
-    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
     # 保持 Native 加载后的 K×N 矩阵，分组仅体现为核内 K 偏移。
     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
     wo_b_scale: pl.Tensor[[D], pl.FP32],

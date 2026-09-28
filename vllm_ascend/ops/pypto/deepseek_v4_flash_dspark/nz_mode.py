@@ -35,6 +35,12 @@ QUANT_WEIGHT_NZ = WEIGHT_NZ_MODE >= 1
 # PyPTO 支持把 layout 放在闭包变量里，见 pypto/python/pypto/jit/cache.py 的说明。
 BF16_WEIGHT_LAYOUT = pl.NZ if BF16_WEIGHT_NZ else None
 QUANT_WEIGHT_LAYOUT = pl.NZ if QUANT_WEIGHT_NZ else None
+# wo_a 单独一档，恒为 ND：它是三维分组权重 [O_GROUPS, O_GROUP_IN, O_LORA]，
+# Native 的 NZ 后处理钩子覆盖不到它（实测 mode=2 下它仍是 ND(2)，而同为 BF16 的
+# 二维 wq_a 已是 NZ(29)）。若这里声明 NZ，`root_weight` 就得 npu_format_cast 出一份
+# 私有副本——每层 64 MiB、21 个 ratio-4 层合计 1.31 GiB，直接吃掉 KV cache 的额度。
+# 详见 tests/pypto_test/results/mem_128k_b24_20260928/ANALYSIS.md。
+WO_A_WEIGHT_LAYOUT = None
 
 
 def validate_weight_nz_mode(effective_mode: int) -> None:

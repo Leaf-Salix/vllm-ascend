@@ -9,6 +9,7 @@
 from ..deepseek_v4_flash_dspark.nz_mode import *  # noqa: F401,F403
 from ..deepseek_v4_flash_dspark.nz_mode import (  # noqa: F401
     BF16_WEIGHT_LAYOUT,
+    WO_A_WEIGHT_LAYOUT,
     BF16_WEIGHT_NZ,
     QUANT_WEIGHT_LAYOUT,
     QUANT_WEIGHT_NZ,
