@@ -1010,10 +1010,7 @@ def indexer_qr_rope(
                     target_type=pl.FP32, mode="none")
                 # npu_quant_matmul combines both scales before dequantizing;
                 # its BF16 output is the input to inplace_partial_rotary_mul.
-                scale_rows = pl.row_expand_mul(
-                    pl.full([DEQUANT_T_TILE, IDX_HEAD_DIM], dtype=pl.FP32, value=1.0),
-                    qr_scale_tile,
-                )
+                scale_rows = pl.row_expand(acc_fp32, qr_scale_tile)
                 dequant_factor = pl.col_expand_mul(scale_rows, wq_scale)
                 qr_projected = pl.cast(
                     pl.mul(acc_fp32, dequant_factor), target_type=pl.BF16, mode="rint",
