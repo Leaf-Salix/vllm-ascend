@@ -47,3 +47,16 @@ Compressor首次接收延后7.515μs，Score首次接收延后13.975μs；稀疏
 两档八类状态零容差、图A→B→A、metadata/保护区通过；DFX确认dummy 4→0与原前置任务直接边。
 本轮保留候选补丁和证据，不合入生产，不为约0.1%的差异扩跑七档或16卡。
 后续若调整整组准入或任务优先次序，可基于此无dummy版本继续做定向对照。
+
+本结论只覆盖d3adbe04基线上的单独替换，不与后续incore优化的计时拼接。
+独立四窗Worker首尾跨度长档1014.100→1007.920μs、短档925.645→937.710μs，
+也没有呈现长短一致改善；这些profile区间不能替代正式无profiler CSA均值。
+因此保留此候选作为后续组合调度实验的基础，不以约0.1%的差异认定dummy是主要瓶颈，
+也不据此断言所有任务图中的dummy都无开销。
+
+固定第4次重放window_3供对比，不挑选最快窗口：
+
+| 档位 | 原dummy依赖 | 真实任务直接依赖 |
+| --- | --- | --- |
+| 128K/B16 | [泳道JSON](h131072_b16/swimlane/baseline/dfx/window_3/merged_swimlane.json) | [泳道JSON](h131072_b16/swimlane/candidate/dfx/window_3/merged_swimlane.json) |
+| 8K/B24 | [泳道JSON](h8192_b24/swimlane/baseline/dfx/window_3/merged_swimlane.json) | [泳道JSON](h8192_b24/swimlane/candidate/dfx/window_3/merged_swimlane.json) |
