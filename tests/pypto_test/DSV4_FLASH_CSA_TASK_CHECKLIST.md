@@ -125,7 +125,9 @@ CPU位置相同不证明设备草稿token相同，严格路由归因使用独立
 
 Sparse PV对齐最新AscendC的L0B双缓冲已做长短单卡对照：状态/图重放通过，
 核内小幅均值下降未超出四窗口的分散，完整区间仅短档改善、长档略退，暂不合入或扩测。
-[PV证据](results/csa_sparse_pv_l0b_20260928/README.md)；下一项评估ops-nn的QR输入/gamma UB驻留。
+[PV证据](results/csa_sparse_pv_l0b_20260928/README.md)。
+按ops-nn的QR输入/gamma UB驻留候选已完成CPU编译与生成代码核对，长短B16单卡任务待设备；
+[候选及状态](results/csa_qr_ub_20260928/README.md)。未修改生产QR或宣称性能收益。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。

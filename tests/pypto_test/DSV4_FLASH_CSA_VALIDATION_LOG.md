@@ -9188,3 +9188,19 @@ AIC核内均值139.01→135.61、144.98→143.52μs，降2.44%/1.01%，但窗口
 暂不并入性能版：没有明确核内收益，完整区间长短不同向；不追加矩阵/EP16以反复寻找收益。
 候选补丁、全部图计时样本、四窗口明细与复现入口见
 [PV L0B结果](results/csa_sparse_pv_l0b_20260928/README.md)。
+
+## 323. 参考最新ops-nn准备QR输入/gamma UB驻留候选（2026-09-28）
+
+来源ops-nn 7a71d54e RmsNormDynamicQuantNormal的CopyInWeights/ComputeRmsNorm/ComputeDynamicQuant。
+独立a66255ea工作树只改性能版q_proj_qr_normalize：worker一次读取并转换gamma，
+每8行将完整1024列输入留在UB，两阶段从中提取256列子块；不叠加PV或主工作树其他改动。
+保留平方和/amax累计顺序、RMS再乘gamma、原高精度rsqrt和RINT→I32→FP16→I8 TRUNC。
+这只移植数据复用，未将AscendC全套算术替换性能版；精度版没有修改。
+
+完整CPU lowering/PTOAS/CCE/AICPU链接通过。生成代码发现tile.slice的view会在多使用点重复TEXTRACT，
+最终改为显式tile.extract，同一子块被平方与gamma加权共用；不修改PyPTO/PTOAS/ISA。
+初次设备任务task_20260928_143632_39768493767仍pending时取消，没有运行。
+最终冻结任务task_20260928_143910_419318230381已提交单卡8K/B16、128K/B16，当前等待设备；
+mode2/atomic0/det0、每侧20次图计时及四DFX，复用状态/保护区/图重放看护。
+结果待收，尚未并入生产，不能将减少GM读取直接称为核内或完整CSA收益。
+[候选、生成代码证据、编译与任务入口](results/csa_qr_ub_20260928/README.md)。
