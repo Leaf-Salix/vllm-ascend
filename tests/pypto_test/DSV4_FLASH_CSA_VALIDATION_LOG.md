@@ -10317,3 +10317,8 @@ SWA21元素不同。Top-K 2行仅顺序变化、2行集合不同共替换4个索
 短档−6.415%只描述这次手工调用→编译半层的增量变化，不是静态包有/无的完全隔离归因。
 后续要归因static kernel需独立OPP/static_kernel目录；当前编译后Native绝对基线仍有效，
 不为已完成的编译路径验证重跑无关测试。两档profile、raw采样与状态报告均已留档。
+
+§374选择键补充核实：读取两档实际安装binary manifest的simplifiedKeyWithPlatform，
+各38项、交集0，排除上述长短档静态包同键复用的疑点；不是源码hash校验，也未重跑设备测试。
+短档−6.415%仍是手工调用→模板编译半层的综合变化，不单独归因static kernel开关。
+[选择键计数](results/csa_native_compiled_layer_20260929/static_selection_overlap.json)。

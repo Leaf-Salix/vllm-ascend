@@ -60,6 +60,22 @@ def main():
     cases = {path.name: analyze_case(path) for path in sorted(ROOT.glob("h*_b*"))
              if (path / "report.json").exists()}
     (ROOT / "evidence.json").write_text(json.dumps(cases, ensure_ascii=False, indent=2) + "\n")
+    selection_keys = {}
+    for name, case in cases.items():
+        if "installed_manifest" in case:
+            manifest = json.loads(Path(case["installed_manifest"]).read_text())
+            selection_keys[name] = {
+                (op, entry.get("simplifiedKeyWithPlatform", entry.get("simplifiedKey")))
+                for op, value in manifest.items() for entry in value["staticList"]
+            }
+    overlap = (selection_keys.get("h131072_b16", set()) & selection_keys.get("h8192_b24", set()))
+    overlap_report = {
+        "key": "simplifiedKeyWithPlatform (fall back to simplifiedKey)",
+        "counts": {name: len(keys) for name, keys in selection_keys.items()},
+        "overlap_count": len(overlap), "overlap_op_types": sorted(op for op, key in overlap),
+        "scope": "Installed CANN selection keys; no source hash or device rerun",
+    }
+    (ROOT / "static_selection_overlap.json").write_text(json.dumps(overlap_report, indent=2) + "\n")
     lines = [
         "# Native 模板编译：attention 半层对照", "",
         "同进程、同 fixture、正式 layer4 权重、CANN9.2/mode2/det0；",
@@ -77,8 +93,9 @@ def main():
             f"| {compiled['mean_us']:.3f} | {case['change_pct']:+.3f}% "
             f"| {manual['us_p95']:.3f}→{compiled['us_p95']:.3f} "
             f"| {manual['us_max']:.3f}→{compiled['us_max']:.3f} |")
-    lines += ["", "短档执行前私有 OPP 已保留长档静态包，手工控制可能复用匹配形状的已有二进制。",
-              "短档百分比是这次手工调用→编译半层的增量变化，不是完全隔离静态包有/无的收益归因。",
+    lines += ["", f"两档静态包各自的 CANN 选择键交集为 {len(overlap)}（并非源码 hash 校验），"
+              "详见 [选择键核对](static_selection_overlap.json)。",
+              "变化率描述手工调用→模板编译半层的综合收益，包含编译图变化，不单独归因于 static kernel。",
               "编译后绝对耗时作为当前单卡 Native 配置基线；尚未取得同配置 PTO 对照。",
               "", "## 数值与范围", ""]
     for case in cases.values():

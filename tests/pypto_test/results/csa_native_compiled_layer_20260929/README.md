@@ -29,9 +29,9 @@ compiled profile 42 个 kernel，manual 43 个，少了开头 residual clone 的
 编译后 Top-K 有 2 行仅顺序变化、2 行集合变化，共替换 4 个索引；无非法行。
 输出 max_abs=0.015625，RMSE=0.000324394；这不是已完成数值或整网 token 验收。
 
-两档共用私有可写 OPP，长档安装包在短档开始前仍存在；短档手工图可能复用部分匹配形状的
-已有静态二进制。短档百分比只描述本次手工调用与编译半层的增量变化，
-不称“全量无静态包 vs 有静态包”的严格开关隔离实验。后续若单独归因 static kernel 收益，
-应给该实验独立空 static_kernel 根；无需为当前 Native 编译后绝对基线重复整套测试。
+两档共用私有可写 OPP，长档安装包在短档开始前仍存在。进一步读取实际安装 manifest，
+两档各 38 个 CANN simplifiedKeyWithPlatform 选择键，交集为 0；没有这两档静态包的同键复用。
+[选择键证据](static_selection_overlap.json)排除了此前提出的跨档匹配形状疑点，无需重跑设备测试。
+这里比较的是手工调用与模板编译半层，包含图优化及静态 kernel 的综合变化，不单独归因于某个开关。
 两份测试入口未经过整模型 Worker，CPU 绑核和共享专家重叠属于请求配置，
 本 attention 半层不具备验证 MoE 多流或实际 Worker 绑核的条件，仍待整机阶段核实。
