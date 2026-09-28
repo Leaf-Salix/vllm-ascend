@@ -78,6 +78,7 @@ def case(monkeypatch):
         return result
 
     impl = NS(
+        wkv=lambda x: x.new_zeros((x.shape[0], k.HEAD_DIM)),
         compressor=NS(_compute_metadata=lambda req: compute(req, compact)),
         indexer=NS(compressor=NS(_compute_metadata=lambda req: compute(req, inner))),
         compress_ratio=4,
@@ -137,6 +138,41 @@ def test_binding_accepts_native_nonuniform_tnd_bounds(case):
     assert bound["position_ids"].shape == (8,)
     assert bound["query_start_loc"].data_ptr() == bounds.data_ptr()
     assert torch.equal(bound["query_start_loc"], bounds)
+
+
+@pytest.mark.parametrize("returns_tuple", [False, True])
+@pytest.mark.parametrize("contiguous", [False, True])
+def test_native_kv_projection_preserves_output_and_active_rows(case, returns_tuple, contiguous):
+    impl, md, caches, hidden, *_ = case
+    # Hidden-state storage may cover a larger graph bucket than native metadata.
+    hidden = torch.cat((hidden, hidden[:4]))
+    projection = torch.arange(12 * 1024).reshape(12, 1024).to(torch.bfloat16)[:, ::2]
+    if contiguous:
+        projection = projection.contiguous()
+    inputs = []
+
+    def project(x):
+        inputs.append(x)
+        return (projection, None) if returns_tuple else projection
+
+    impl.wkv = project
+    args, _ = a.build_args(impl, hidden, caches, md, 6, "layer")
+    result = args[a.ARG_ORDER.index("kv_projected")]
+    assert len(inputs) == 1
+    assert inputs[0].shape == (12, 4)
+    assert inputs[0].data_ptr() == hidden.data_ptr()
+    assert result.dtype == torch.bfloat16 and result.is_contiguous()
+    assert torch.equal(result, projection)
+    if contiguous:
+        assert result.data_ptr() == projection.data_ptr()
+
+
+@pytest.mark.parametrize("shape,dtype", [((12, 512), torch.float32), ((12, 511), torch.bfloat16)])
+def test_native_kv_projection_rejects_wrong_contract(case, shape, dtype):
+    impl, md, caches, hidden, *_ = case
+    impl.wkv = lambda x: torch.zeros(shape, dtype=dtype)
+    with pytest.raises(a.NativeLayoutError, match="native KV projection must produce BF16"):
+        a.build_args(impl, hidden, caches, md, 6, "layer")
 
 
 def test_page_descriptors_reused_and_invalidated(case):
@@ -223,7 +259,7 @@ def test_kernel_abi_matches_adapter():
     assert tuple(arg.arg for arg in fn.args.args) == a.ARG_ORDER
 
 
-def test_hot_binding_has_no_device_tensor_derivation():
+def test_hot_binding_has_no_metadata_device_tensor_derivation():
     tree = ast.parse(SOURCE.read_text())
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_args")
     forbidden = {"to", "gather", "clamp", "div", "item", "cpu", "float"}

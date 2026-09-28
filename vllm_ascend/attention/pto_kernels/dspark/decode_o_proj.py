@@ -256,8 +256,16 @@ def decode_o_proj_tp1(
                 acc_i32 = pl.add(acc_i32, p_g)
             scale_row = act_scale_dq[0:1, b_tb:b_tb+PROJ_B_ACT_T_TILE]
             scale_col = pl.reshape(scale_row, [PROJ_B_ACT_T_TILE, 1])
-            acc = pl.row_expand_mul(pl.cast(acc_i32, target_type=pl.FP32), scale_col)
-            out_t = pl.col_expand_mul(acc, wb_scale_chunk)
+            # npu_quant_matmul combines token/channel scales before applying
+            # them to the accumulator. Preserve that FP32 rounding boundary.
+            dequant_scale = pl.col_expand_mul(
+                pl.row_expand_mul(
+                    pl.full([PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.FP32, value=1.0),
+                    scale_col,
+                ),
+                wb_scale_chunk,
+            )
+            out_t = pl.mul(pl.cast(acc_i32, target_type=pl.FP32), dequant_scale)
             out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
             out_rows = pl.min(PROJ_B_ACT_T_TILE, t_dim - b_tb)
             attn_out[b_tb : b_tb + PROJ_B_ACT_T_TILE, ob_n0 : ob_n0 + PROJ_B_ACT_N_TILE] = pl.set_validshape(
@@ -742,8 +750,8 @@ def golden_decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, tokens):
     row_amax = o_a.abs().amax(dim=-1, keepdim=True).clamp_min(INT8_AMAX_EPS)
     o_a_i8 = torch.round(o_a * (INT8_SCALE_MAX / row_amax)).to(torch.int8)
     accumulator = o_a_i8.to(torch.int32) @ wo_b.to(torch.int32).T
-    attn_out = accumulator.float() * (row_amax / INT8_SCALE_MAX)
-    attn_out = attn_out * wo_b_scale.float().unsqueeze(0)
+    dequant_scale = (row_amax / INT8_SCALE_MAX) * wo_b_scale.float().unsqueeze(0)
+    attn_out = accumulator.float() * dequant_scale
     return attn_out.to(torch.bfloat16)
 
 

@@ -33,7 +33,7 @@ def test_oproj_matches_native_bf16_and_full_row_quantization(tokens):
     flattened = oa.transpose(0, 1).reshape(tokens, 8).float()
     scale = flattened.abs().amax(-1, keepdim=True) / 127
     quantized = torch.round(flattened / scale).to(torch.int8)
-    expected = ((quantized.float() @ wb.float().T) * scale * weight_scale).bfloat16()
+    expected = ((quantized.float() @ wb.float().T) * (scale * weight_scale)).bfloat16()
     actual = load_golden()(heads.reshape(8, 4), wa, wb, weight_scale, tokens)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 

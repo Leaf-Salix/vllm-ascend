@@ -235,6 +235,7 @@ ARG_ORDER = (
     "wq_b",
     "wq_b_scale",
     "wkv",
+    "kv_projected",
     "gamma_cq",
     "gamma_ckv",
     "freqs_cos",
@@ -333,7 +334,7 @@ def _cached_page_view(impl, name, cache, rows, row_shape):
 
 
 def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: str, output=None):
-    """Bind original 0.29 metadata and cache views; never derive device tensors."""
+    """Bind native metadata/cache views and retain the native KV linear result."""
     if not isinstance(layer, str):
         # RopeDataProxy takes a non-string key as a slice and hands back another
         # proxy, so a wrong name surfaces two frames later as a missing reshape.
@@ -522,6 +523,20 @@ def build_args(impl, hidden_states, kv_cache, layer_metadata, seq: int, layer: s
     )[: b + 1]
     if a["query_start_loc"].shape != (b + 1,):
         raise NativeLayoutError("native query bounds do not cover the batch")
+
+    # Match the native BF16 linear boundary, including its reduction order.
+    # The kernel continues with KV norm/RoPE and writes the original cache.
+    kv_projected = impl.wkv(a["x_normed"])
+    if isinstance(kv_projected, tuple):
+        kv_projected = kv_projected[0]
+    if (
+        not isinstance(kv_projected, torch.Tensor)
+        or kv_projected.dtype != torch.bfloat16
+        or kv_projected.shape != (t, kcsa.HEAD_DIM)
+        or kv_projected.device != hidden_states.device
+    ):
+        raise NativeLayoutError(f"native KV projection must produce BF16 [{t}, {kcsa.HEAD_DIM}] on the input device")
+    a["kv_projected"] = kv_projected.contiguous()
 
     return [a[name] for name in ARG_ORDER], (pos, n_real)
 
