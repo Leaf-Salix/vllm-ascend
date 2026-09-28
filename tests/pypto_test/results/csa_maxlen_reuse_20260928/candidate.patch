@@ -1,0 +1,123 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 88e64c0e..06c55c65 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -396,6 +396,7 @@ def indexer_topk_query_merge_one(
+ def indexer_topk_query_merge(
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
++    max_cache_count: pl.Scalar[pl.INDEX],
+     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
+     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
+     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
+@@ -407,16 +408,13 @@ def indexer_topk_query_merge(
+     merge_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
+     merge_extra_leaves = 0
+     if multiway:
+-        max_cache_count = 0
+-        for batch in pl.range(query_count // S):
+-            max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
+         query_groups = query_count // 2
+         if query_count >= 4 * TOPK_SCORE_WORKERS:
+             query_groups = query_count // S
+         elif query_count >= 2 * TOPK_SCORE_WORKERS:
+             query_groups = query_count // 3
+         _merge_leaf_count, merge_leaf_tiles, merge_extra_leaves = indexer_long_leaf_plan(
+-            pl.min(max_cache_count, TOPK_MAX_CANDIDATES), query_groups
++            pl.min(pl.max(max_cache_count, 0), TOPK_MAX_CANDIDATES), query_groups
+         )
+     for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
+         indexer_topk_query_merge_one(
+@@ -577,6 +575,7 @@ def indexer_score_topk_native_cube(
+     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
+     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
++    max_cache_count: pl.Scalar[pl.INDEX],
+     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
+     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
+     qh_quant_tid: pl.Scalar[pl.TASK_ID],
+@@ -621,10 +620,10 @@ def indexer_score_topk_native_cube(
+     ) as buffered_leaf_tid:
+         buf_worker = pl.tile.get_block_idx()
+         buf_query_count = pl.tensor.dim(position_ids, 0)
+-        buf_max_cache_len = 0
+-        for buf_batch in pl.range(buf_query_count // S):
+-            buf_max_cache_len = pl.max(buf_max_cache_len, pl.read(kv_seq_lens, [buf_batch]) // COMPRESS_RATIO)
+-        buf_capped_history = pl.min(buf_max_cache_len, TOPK_MAX_CANDIDATES)
++        # The orchestration already scans the current lengths to select the
++        # Score policy. Reuse that scalar on every worker and graph replay.
++        # Keep the old nonnegative loop bound visible across the kernel ABI.
++        buf_capped_history = pl.min(pl.max(max_cache_count, 0), TOPK_MAX_CANDIDATES)
+         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
+         buf_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
+         buf_extra_leaves = 0
+@@ -1056,6 +1055,7 @@ def indexer_score_topk_forest(
+                     idx_block_table,
+                     position_ids,
+                     kv_seq_lens,
++                    max_topk_cache_len,
+                     score_arena,
+                     pair_arena,
+                     qh_quant_tid,
+@@ -1079,6 +1079,7 @@ def indexer_score_topk_forest(
+                     idx_block_table,
+                     position_ids,
+                     kv_seq_lens,
++                    max_topk_cache_len,
+                     score_arena,
+                     pair_arena,
+                     qh_quant_tid,
+@@ -1102,6 +1103,7 @@ def indexer_score_topk_forest(
+                     idx_block_table,
+                     position_ids,
+                     kv_seq_lens,
++                    max_topk_cache_len,
+                     score_arena,
+                     pair_arena,
+                     qh_quant_tid,
+@@ -1136,6 +1138,7 @@ def indexer_score_topk_forest(
+                     idx_block_table,
+                     position_ids,
+                     kv_seq_lens,
++                    max_topk_cache_len,
+                     score_arena,
+                     pair_arena,
+                     qh_quant_tid,
+@@ -1159,6 +1162,7 @@ def indexer_score_topk_forest(
+                     idx_block_table,
+                     position_ids,
+                     kv_seq_lens,
++                    max_topk_cache_len,
+                     score_arena,
+                     pair_arena,
+                     qh_quant_tid,
+@@ -1303,10 +1307,6 @@ def indexer_score_topk_forest(
+ 
+         score_tid = direct_leaf_tid
+ 
+-    max_topk_cache_len = 0
+-    for topk_batch in pl.range(b_dim):
+-        topk_cache_len = pl.read(kv_seq_lens, [topk_batch]) // COMPRESS_RATIO
+-        max_topk_cache_len = pl.max(max_topk_cache_len, topk_cache_len)
+     with pl.scope():
+         if max_topk_cache_len < INDEXER_NATIVE_CUBE_MIN_ROWS:
+             with pl.spmd(
+@@ -1322,12 +1322,16 @@ def indexer_score_topk_forest(
+             with pl.spmd(
+                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
+             ):
+-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, False)
++                indexer_topk_query_merge(
++                    position_ids, kv_seq_lens, max_topk_cache_len, pair_arena, topk_scores, topk_idxs, False
++                )
+         else:
+             with pl.spmd(
+                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
+             ):
+-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, True)
++                indexer_topk_query_merge(
++                    position_ids, kv_seq_lens, max_topk_cache_len, pair_arena, topk_scores, topk_idxs, True
++                )
+ 
+     return topk_scores, topk_idxs, score_tid
+ 

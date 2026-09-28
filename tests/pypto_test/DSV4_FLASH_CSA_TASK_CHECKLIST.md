@@ -39,6 +39,9 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 [排序收益及B8结果](results/csa_score_balanced_sort_20260928/README.md)。
 下一项先减少重复计划计算：复用编排已算出的max_topk_cache_len，避免Score/长merge各worker重新扫描kv_seq_lens；
 仅在算子内部传现有标量，先确认生成码及图重放，不新增metadata executor，不改Native流程。
+该候选已在e33d842a独立快照实现，并删除第二次编排扫描；新9.2两侧完整编译及长度变化图探针待执行。
+CPU编译由guard等待当前整机任务结束后启动，随后只测128K/B16和8K/B16，不预先保留生产改动或宣称收益。
+[当前补丁与执行入口](results/csa_maxlen_reuse_20260928/README.md)。
 Indexer保留提交51501f1f；本轮测量仍基于8e176285派生快照，未包含并行合入的664c69ce WO_A ND及4e830c32 arena配置。
 下一轮两侧统一新冻结基线，同时补该组合的必要集成检查；不将已有单项结果称为当前整个分支已验证。
 
