@@ -90,4 +90,34 @@ cache/state相对Native也有差异，全部逐项结果保存在report.json与s
 
 单卡原始报告已取回工作区 `single-env6/`；远端保留states.pt和全部原始日志、前后环境指纹。
 18:23:08提交 `task_20260928_182308_268934625417`，按原脚本TP4/DP4/EP16依次生成8K/128K真实离线bank。
-该任务尚待完成；此阶段不测CSA性能。
+该任务最终 exit 1；此阶段不测CSA性能。详细原因及后续重测如下。
+
+## 原生 prefill 初始化失败与配置恢复
+
+任务 `task_20260928_182308_268934625417` 在19:06启动、约19:10失败，
+日志已备份到本地 `prefill-failed/`。19:48才观察到终态，未做到连续每五分钟监控。
+75分片已加载，但首次原生 dummy run 的 MoE hash 路由报 `input_ids=4, rows=2`，
+部分TP rank为 `3, rows=2`；真实prefill未开始，两套bank只有plan/token文件，没有KV payload。
+
+根因由源码及独立review确认：
+
+- 历史 `e048502b1` 和 `a28328967` 父提交的离线脚本使用默认auto worker。
+- 官方平台只在 `worker_cls == "auto"` 且未启用SP时，将 `all2all_backend` 设置为
+  `flashinfer_all2allv`，以关闭框架层 `use_sequence_parallel_moe`。
+- `a28328967`（9月26日）新增显式 `OfflineNPUWorker`，绕过该配置分支。
+- TP4/DP4/EP16下，模型先拆hidden，MC2随后再次拆hidden；token ID没有第一次拆分。
+  8行输入先拆成2行，hidden补6再拆得到2行；ID从8补6再拆得到[4,4,3,3]，吻合错误。
+- 官方配套vLLM `752a3a504485790a2e8491cacbb35c137339ad34` 本身也默认
+  `allgather_reducescatter`；不能将此错误归因于CSA kernel或仅凭版本字符串归因于依赖漂移。
+
+新增独立 `run_prefill_native_config.py` 副本，仅prefill显式恢复
+`all2all_backend="flashinfer_all2allv"`；原始文件、模型、kernel、decode脚本均未修改。
+这应称为“恢复原始bank生成的有效配置”，不能称执行脚本完全未修改。
+`prefill-native-config.patch` 和manifest保存唯一差异及原/新SHA256。
+CPU门禁确认差异恰为该参数、decode kwargs为空、TP4/DP4下的
+`use_sequence_parallel_moe` 从True恢复False；这尚不能替代真实NPU验证。
+
+20:00:45提交 `task_20260928_200045_19802682608`，16卡、执行上限7200秒，
+仍为原模型、TP4/DP4/EP16、原缓存布局，顺序8K/128K。
+输出使用新目录 `results/prefill-native-config-h8192` 与 `...-h131072`，保留失败日志。
+状态待核验；尚无完整参考性能结果，也没有将该配置修改用于Leaf生产代码。
