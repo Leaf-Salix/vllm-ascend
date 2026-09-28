@@ -16,18 +16,24 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 已经明确要求优先核实的短档CSA长尾继续收尾。当前Native是性能/行为基线，pypto-lib是PTO实现参考。
 核内收益、完整CSA及P95分别记录，最终仍以真实权重EP16的forward、token与DSpark验收。
 
-性能算子 **d1f170ff** 在e58ddc94基础新增按实际cache长度分核的四路Top-K及HC输入/RMS融合，核内已确认收益。
-当前继续保留多leaf Top-K UB累计根：长档merge均值13.072→11.539μs（−11.73%），
-五组归并边界及两档状态/重放通过；短档完整CSA/P95小幅回退仍保留记录。
-[UB根结果及局限](results/csa_topk_ub4_20260928/README.md)。这项新增核内优化尚无七档/真实EP16，
-下面两档最新模型数字仍仅对应d1f170ff，不能当作新增UB根的整模型证据。
-QR输入/gamma UB驻留也已保留：长短B16核内均值下降6.36%/6.89%，满档状态通过；
-必要T60检查发现尾行陈旧GM读取后已改为直接从UB发布，修正版八类状态及图重放通过。
-[QR结果与失败/修复证据](results/csa_qr_ub_20260928/README.md)。满档性能是首版实测，修正版只补受影响尾块，未冒充新测量。
-前述d1f170ff组合已完成长短B16真实EP16：128K/B16、8K/B16的forward分别快4.03%、4.10%，P95更低，token/DSpark一致；
-这是对同轮Native的比较，不证明相对e58的短档单层不退化，尚非新版七档验收。
-[最新组合模型结果](results/csa_ascendc_topk_hc_ep16_20260928/README.md)、
-[Top-K单变量结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
+最近通过两档真实EP16的冻结组合为 **2d2f9ca0**：在d1f170ff的四路Top-K、HC输入/RMS融合基础上，
+新增多leaf Top-K UB累计根及QR输入/gamma驻留、尾行直接UB发布。长短B16八类状态/保护区/图重放已通过。
+Top-K独立长档merge核内下降11.73%；QR首版核内长短下降6.36%/6.89%，必要T60暴露的尾行旧GM回读已修复。
+[Top-K依据](results/csa_topk_ub4_20260928/README.md)、[QR失败/修复记录](results/csa_qr_ub_20260928/README.md)。
+组合单卡长档有CPU编译重叠限制，不据微小差额验收净收益；完整EP16另行采集。
+
+2d2f组合的128K/B16、8K/B16正式forward分别为Native/PTO **72.784/69.626ms、65.553/61.147ms**，
+快4.34%/6.72%，7:3变化率−5.054%；两档P95、max及逐步最慢rank均值更低，各10/10步更快。
+131072个输出token零差异、32组rank DSpark一致、正式位置与配置通过。
+独立模型profile的完整CSA为1284.26/1103.12μs、971.59/794.54μs，7:3变化率−15.340%。
+这些均比较同轮Native，不能把跨轮差额归因于任一单项，尚未完成新版七档。
+
+**长尾仍未关闭。** 本轮128K/B16 PTO step14 rank13相对入场晚3.408ms，其他rank的forward平均增加2.795ms；
+该rank的attention_metadata阶段7.740ms、平时中位4.137ms，线程CPU7.569ms，正式窗口无GC。
+已定位到`_build_attention_metadata`区间，具体子调用尚不明确；不能把这次入场迟到归为CSA Score。
+不增加正式步同步、不扣除等待或删除样本；后续必要模型验证继续细化该阶段观察。
+[当前两档模型结果、尾部及四份PyTorch JSON](results/csa_ub_combined_20260928/README.md)。
+Key L0B预取是下一项独立候选，未计入上述结果。
 e58ddc94在30f2b228基础保留固定K的KV L1 K512，四档受影响场景已完成EP16；该证据不覆盖新增Top-K。
 保留长短Indexer分组，默认atomic0固定规约，删除冗余QR/KV清零种子，
 QR/KV按行数选择M32/M64和最多3个M组。精度版保持原算术及默认atomic1，显式0/1均可覆盖。
@@ -124,7 +130,7 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
    [Simpler #2389](results/csa_mix_preload_20260928/README.md)已完成源码可用性评估，本轮不采用：
    存在采样被pending事件污染、跨callable估计复用及共享非原子表问题，长档Score的sync_start不直接受益。
    按用户最新要求不追加修复或设备测试，移除未执行的对照脚本，继续当前HC/CSA优化。
-   B16/H8192的HC_pre→norm→CSA→HC_post <750μs仍未达成；d1f170ff模型内63区间均值796.76μs。
+   B16/H8192的HC_pre→norm→CSA→HC_post <750μs参考仍未达成；2d2f组合模型内63区间均值794.54μs。
    调度与核内轮流推进，保留已验证核内收益，同时检查累计核工作、完整span和P95，不重复无依据扫描。
 5. **性能稳定后补精度版新增迁移。** 共用数值中性适配，实现专有算术明确隔离；原生规约/量化次序不改。
    新QR/KV策略尚未移植，旧D3通过不能覆盖新增代码；独立补状态、尾块、token/DSpark及性能。
@@ -156,7 +162,7 @@ T60暴露尾行陈旧GM回读，已改为直接发布UB并通过受影响状态/
 原始完整CSA分别−1.65%/−1.84%，但长档与CPU候选编译重叠，不据该差额验收净收益。
 Native控制与所有样本保留，CPU进程当时已挂起，后续模型正式窗口前完成编译。
 [组合状态、数据限制与EP16入口](results/csa_ub_combined_20260928/README.md)。
-真实EP16任务task_20260928_162727_150252329060已提交、结果待收；
+真实EP16任务task_20260928_162727_150252329060已完成、退出0，两档forward/token/DSpark通过，长档metadata入场尾部单列；
 后续核内优先128K的Indexer Score大热点，按实际长度区分策略，避免短档独有工作拖慢长档。
 长档S6的Key L0B预发已准备独立候选：参考QLI V2多槽轮换，尝试用剩余8KiB缓冲下一面板。
 首版SSA作用域修正后遇到Mat分配638976>524288，改为独立预加载段后完整CPU编译通过，Mat恢复96KiB。
