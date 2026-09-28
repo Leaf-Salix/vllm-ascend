@@ -8995,3 +8995,21 @@ pending ACK/FIN也会置running_done，导致前序kernel样本包含后续任�
 删除未执行的入口和运行/汇总脚本；保留简要评估与已有泳道统计，历史脚本依靠Git。
 生产环境未切换，回到仍在排队的HC输入复用候选及CSA性能主线。
 [最终评估记录](results/csa_mix_preload_20260928/README.md)。
+
+## 313. 优先核实8K/B16相邻CSA波动，准备短档Score单变量对照（2026-09-28）
+
+用户指出下载包04档765/807μs。已精确定位到30f2b228的02整模型PyTorch图第3步第12/14层：
+设备`aicore_kernel_mode_0_mix_aic`为765.84/807.84μs，增加42.00μs（5.48%）；
+对应AICPU根为776.62/814.86μs。不是调用之间的空隙；rank0未显示其他计算/HCCL任务重叠。
+03文件是独立单卡layer4、合成历史的一次根调用，没有连续两个模型CSA，不能直接对应模型慢点。
+该03泳道Score为24 AIC/48 AIV各一份，无重复派发；启动分散14.04/13.94μs，尚不能解释全部42μs。
+同e58旧单卡两窗口中，较慢788.48μs窗口Score启动反而比770.34μs窗口整齐；
+norm结束→Sparse首次接收增加28.06μs，说明必须看前置竞争与完整关键链，不以整齐程度代替性能。
+
+当前e58算子基底仅将短档Cube Score的sync_start改True，保持early_resolve=True、数学及任务数不变。
+旧R11同时改两个开关，其短档退化不能直接否定本次单变量；Indexer query整组准入仍不采用。
+完整CPU编译/链接通过，冻结候选`.cache/csa-short-score-sync-e58ddc94`尚未合入生产。
+任务task_20260928_112109_314698014843已排队：8K/B16/S6，layer4、mode2/atomic0/det0，
+两侧各100次无profiler图计时与独立四窗口，保留P95/max及全部样本，检查PTO八类状态和A→B→A。
+原HC任务task_20260928_103131_11716825293按新优先级在pending时取消，未执行，候选保留待恢复。
+[事件时间戳、现有证据及对照脚本](results/csa_short_score_sync_20260928/README.md)。

@@ -17,7 +17,9 @@ pypto-lib 73078d0的HC入口是FP32，无本接入的BF16桥接；因此仍保�
 完整CPU lowering/PTOAS/CCE/链接通过，生成代码有AIV `hc_widen_rms`和纯AIC `hc_pre_linear`，
 独立`hc_pre_rms`消失。融合可能延后Cube启动，需同时看核内累计工作、HC关键链及完整CSA。
 
-任务`task_20260928_103131_11716825293`已提交。长短B16各20次无profiler图计时及2个DFX窗口，
+原任务`task_20260928_103131_11716825293`已在pending时取消，未执行：用户要求先核实短档相邻CSA波动。
+源码、脚本与编译产物保留，[优先事项](../csa_short_score_sync_20260928/README.md)完成后恢复。
+原计划为长短B16各20次无profiler图计时及2个DFX窗口，
 layer4真实权重、合成历史、mode2/atomic0/det1。若分配到device8，复用上一轮同卡K256基线DFX；
 其他卡重新采基线DFX，两侧无profiler计时始终同卡同轮。设备结果尚待收集，不改变生产默认值。
 若代表档有收益，再补T60尾块及受影响的真实EP16；候选无收益则不扩测。
