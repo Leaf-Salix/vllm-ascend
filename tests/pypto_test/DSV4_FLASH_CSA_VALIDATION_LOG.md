@@ -10778,3 +10778,23 @@ stride48、early/sync和dummy均未改。双query仅编译，阶段出口覆盖8
 同时复核§372直接依赖实验，文档补入固定window_3前后路径及基线边界，未重复上卡。
 [一次发布结果与泳道](results/csa_coefficient_publish_20260929/README.md)、
 [去dummy实验及其边界](results/csa_direct_deps_20260929/README.md)。
+
+## 392. 参考Native将缩放分数按2048段留UB，开始两档对照（2026-09-29）
+
+基线4ffccb7b，冻结pkg:dsv4_csa_score_segment_ub_4ffccb7b。
+先复核§182的query分工/发布编译失败及§236完整半leaf驻留回退，不原样重试。
+参考最新ops-transformer ProcessVec1，将长S6的缩放分数按2048段留UB后沿用现有排序；
+等宽[24,512]行存储只占48KiB，reshape后直接提取，不用旧大物理tile或UB gather。
+半leaf、query分组、Top-K顺序、pair布局、scale读取及任务边界保持，短档与双query未改。
+
+初次CPU检查的死分支shape问题改为固定512行宽；条件内创建缓冲造成SSA作用域问题，
+提升创建位置后解决。当前两根解析及完整CPU编译/load通过，未修改工具链或占卡调试编译。
+长S6 AIV静态TLOAD74→2、TSTORE60→6，分别只剩scale/Cube输入和最终六query根；
+TMOV18→24、TEXTRACT48→54，TGATHER仍0。排序调用点72/222→18/54来自循环表达统一，
+不等于运行指令同比减少。其他AIV特化及全部AIC调用点计数不变。
+
+task_20260929_060528_18437739541已auto单卡提交，128K/B16、8K/B24，
+两侧CANN9.2/mode2/atomic0/det0，各5预热/20次实际编译计时和四窗独立DFX。
+复用完整状态/图/保护区检查，先验证本次移动位置改变是否精确等价，再看核内及8:2 CSA，
+P95单列；尚未合入，不提前宣称缩小Native差距或完成全形状/模型验收。
+[策略区别、编译证据和运行入口](results/csa_score_segment_ub_20260929/README.md)。

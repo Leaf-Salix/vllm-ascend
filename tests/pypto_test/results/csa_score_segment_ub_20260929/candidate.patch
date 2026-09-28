@@ -1,0 +1,139 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -985,6 +985,11 @@
+                     prefix_roots = pl.tile.full(
+                         [query_group_size, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF
+                     )
++                    # Four 512-score rows form one contiguous 2048 segment.
++                    # Matching physical row widths allow ordinary UB TMOV;
++                    # no oversized operands or UB gather are needed.
++                    # Hoisted for SSA; unused short-path storage is eliminated.
++                    buf_score_ub = pl.tile.create([query_group_size * 4, BUFFERED_LONG_SCORE_TILE // 2], dtype=pl.FP32)
+                     for buf_score_step in pl.range(buf_score_iters):
+                         buf_score_begin = buf_score_step * (score_tile // 2)
+                         buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+@@ -1036,7 +1041,12 @@
+                             )
+                             buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
+                             buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
+-                            if buf_lane_valid_rows > 0:
++                            if balance_leaves:
++                                buf_score_ub = pl.tile.assemble(
++                                    buf_score_ub, buf_score_row,
++                                    [buf_query_lane * 4 + buf_score_step % 4, 0],
++                                )
++                            elif buf_lane_valid_rows > 0:
+                                 pl.store(
+                                     pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+                                     [
+@@ -1046,21 +1056,71 @@
+                                     score_arena,
+                                 )
+                         if balance_leaves:
+-                            if buf_score_step == 3 and buf_score_iters > 4:
++                            if buf_score_step % 4 == 3 or buf_score_step + 1 == buf_score_iters:
++                                score_segment = pl.tile.reshape(buf_score_ub, [query_group_size, 2048])
+                                 for stream_lane in pl.unroll(query_group_size):
+                                     stream_position = pl.read(position_ids, [buf_query + stream_lane])
+                                     stream_visible = pl.max(
+                                         pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
+                                                TOPK_MAX_CANDIDATES), 0
+                                     )
+-                                    stream_begin = buf_logical_begin + buf_lane_begin
+-                                    stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
++                                    stream_begin = buf_logical_begin + buf_lane_begin + buf_score_step // 4 * 2048
++                                    # The final segment must stop at this AIV's half-leaf boundary.
++                                    stream_valid = pl.max(
++                                        pl.min(pl.min(stream_visible - stream_begin, 2048),
++                                               buf_lane_span - buf_score_step // 4 * 2048), 0
++                                    )
+                                     if stream_valid > 0:
+-                                        stream_root = indexer_topk_segment_pairs(
+-                                            score_arena,
+-                                            buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
+-                                            stream_begin, stream_valid, 0,
+-                                        )
++                                        logical_i32 = pl.cast(stream_begin, pl.INT32)
++                                        if stream_valid <= 512:
++                                            tiny_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_i32)
++                                            tiny_raw = pl.set_validshape(
++                                                pl.tile.extract(score_segment, stream_lane, 0, [1, 512], target_memory=pl.MemorySpace.Vec),
++                                                1, stream_valid,
++                                            )
++                                            tiny_scores = pl.maximum(pl.tile.fillpad(tiny_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++                                            tiny_pairs = pl.sort32(tiny_scores, pl.reinterpret_view(tiny_indices, pl.UINT32))
++                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
++                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
++                                            stream_root = pl.tile.extract(tiny_pairs, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++                                        elif stream_valid <= 1024:
++                                            small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_i32)
++                                            small_raw = pl.set_validshape(
++                                                pl.tile.extract(score_segment, stream_lane, 0, [1, 1024], target_memory=pl.MemorySpace.Vec),
++                                                1, stream_valid,
++                                            )
++                                            small_scores = pl.maximum(pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++                                            small_pairs = pl.sort32(small_scores, pl.reinterpret_view(small_indices, pl.UINT32))
++                                            small_pairs = pl.mrgsort(small_pairs, block_len=64)
++                                            small_pairs = pl.mrgsort(small_pairs, block_len=256)
++                                            small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
++                                            small_right = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 1024])
++                                            small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                                            small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
++                                            stream_root = pl.tile.extract(small_merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++                                        else:
++                                            large_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_i32)
++                                            large_raw = pl.set_validshape(
++                                                pl.tile.extract(score_segment, stream_lane, 0, [1, 2048], target_memory=pl.MemorySpace.Vec),
++                                                1, stream_valid,
++                                            )
++                                            large_scores = pl.maximum(pl.tile.fillpad(large_raw, pad_value=pl.PadValue.min), FP32_NEG_INF)
++                                            large_pairs = pl.sort32(large_scores, pl.reinterpret_view(large_indices, pl.UINT32))
++                                            large_pairs = pl.mrgsort(large_pairs, block_len=64)
++                                            large_pairs = pl.mrgsort(large_pairs, block_len=256)
++                                            large_pairs = pl.mrgsort(large_pairs, block_len=1024)
++                                            stream_root = pl.tile.extract(large_pairs, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
++                                        if buf_score_step >= 4:
++                                            prefix = pl.tile.extract(
++                                                prefix_roots, stream_lane, 0, [1, TOPK_PAIR_WIDTH],
++                                                target_memory=pl.MemorySpace.Vec,
++                                            )
++                                            merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++                                            # Preserve the existing later-2048-segment priority.
++                                            merged = pl.tile.mrgsort(stream_root, prefix, tmp=merge_tmp)
++                                            stream_root = pl.tile.extract(
++                                                merged, 0, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
++                                            )
+                                         prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
+                     for buf_query_lane in pl.unroll(query_group_size):
+                         buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+@@ -1072,25 +1132,11 @@
+                         buf_half_slot = (
+                             (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
+                         )
+-                        if balance_leaves and buf_score_iters > 4:
+-                            if buf_half_valid > 2048:
+-                                tail = indexer_topk_segment_pairs(
+-                                    score_arena,
+-                                    buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+-                                    buf_half_begin + 2048, buf_half_valid - 2048, 2048,
+-                                )
+-                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
+-                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+-                                merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+-                                # Preserve the later-2048-chunk priority of the
+-                                # existing 2560/3072/4096 half-leaf paths.
+-                                merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
+-                                pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
+-                                         [buf_half_slot, 0], pair_arena)
+-                            else:
+-                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
+-                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+-                                pl.store(prefix, [buf_half_slot, 0], pair_arena)
++                        if balance_leaves:
++                            root = pl.tile.extract(
++                                prefix_roots, buf_query_lane, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
++                            )
++                            pl.store(root, [buf_half_slot, 0], pair_arena)
+                         else:
+                             if buf_half_valid > 0:
+                                 indexer_topk_half_leaf(

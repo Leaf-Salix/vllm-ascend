@@ -97,6 +97,13 @@ P95长短+0.179%/+1.418%单列；状态/图通过，未替代双query、精度�
 后续继续研究AIV分工、独立merge与数据交接，阶段出口覆盖受影响档位。
 [一次发布及其代价](results/csa_coefficient_publish_20260929/README.md)。
 
+当前候选：长S6的缩放分数按2048段驻留UB，减少排序前GM往返。
+已区别于旧§236大物理tile/UB gather失败版本：固定512等宽行、48KiB分段缓冲，
+沿用原排序与半leaf根，短档不改；两根解析及完整编译/load通过，生成码证实去掉该GM中转。
+task_20260929_060528_18437739541正在同配置128K/B16、8K/B24对照，尚未合入，
+下一步收齐状态、Score核时、CSA及P95后判定，不先按指令数量认定收益。
+[候选与历史区别](results/csa_score_segment_ub_20260929/README.md)。
+
 最近完整模型证据仍为554b3bca/CANN9.0七档：573440输出token零差异、112组rank DSpark一致，
 forward七三−2.979%、模型profile CSA七三−15.673%；B8均值及若干入场尾部未关闭。
 这些历史记录不覆盖新增Indexer、arena、WO_A或CANN9.2，不与新单卡数值拼接。
