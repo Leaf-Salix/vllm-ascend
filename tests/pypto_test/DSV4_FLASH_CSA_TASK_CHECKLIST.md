@@ -25,7 +25,11 @@ task_20260928_182811_290034987已完成、退出0；七档573440个输出token�
 B8均值尚无收益，B4 P95略高，逐步最慢rank比较61/70步更快。完整阶段目标尚未完成。
 
 单卡七档自重放/图状态/保护区通过，完整CSA均值/P95都低于同轮Native，七三均值变化−16.306%；
-这与模型forward是不同测量范围。模型profile已经采集，待后续B8单卡结束再离线解析，避免CPU竞争。
+这与模型forward是不同测量范围。模型profile已离线解析，七档完整CSA均值/P95均低于Native，
+七三模型CSA变化−15.673%；B8的CSA节省2.991ms/步，同时FFN增加1.377ms，主要落在首层MoE Dispatch。
+该独立profile主图区间仍快2.320ms，不能与正式十步混算或当作B8无收益的完整因果解释。
+[模型CSA及分项](results/csa_key_l1_seven_20260928/model/MODEL_GAP.md)、
+[21份JSON汇集](results/csa_key_l1_seven_20260928/download/README.md)。
 此前两档[2d2f组合证据](results/csa_ub_combined_20260928/README.md)保留为过程参考，不混入本轮七档。
 [Top-K依据](results/csa_topk_ub4_20260928/README.md)、[QR尾行修复](results/csa_qr_ub_20260928/README.md)、
 [Key L1独立对照及短档反例](results/csa_score_key_l1_20260928/README.md)。
@@ -36,6 +40,8 @@ B8均值尚无收益，B4 P95略高，逐步最慢rank比较61/70步更快。完
 8K/B16 PTO step17/rank4另有入场晚2.738ms，对应g4_a0 builder异常；不由短档均值优势覆盖。
 新增观察只记录主机时间，父子区间不相加、不增加正式同步、不扣除EP等待、不删除慢样本。
 单卡8K/B32及B40 DFX仍出现Score同核串行（24份用18/23个AIC）；不能和模型入场迟到混为一因。
+本轮8K/B16模型第三步第12→14层仍为772.86→805.72μs，设备Worker同步增加33.86μs；
+无对应incore DFX，仍未定位到Score/Sparse，不标sync_start已解决。
 [本阶段范围、命令和复用证据](results/csa_key_l1_seven_20260928/README.md)。
 性能版进一步保留长档双query（代表128K/B4）的Key预取：Score核内135.158→132.958μs（−1.63%），
 四窗口候选均低于基线，八类状态/图重放通过。完整CSA七三仅−0.087%，短档P95增加31.28μs，
@@ -201,7 +207,10 @@ Key L1为32KiB、Score为双48KiB，Mat末端128KiB；L0B稳态Key16KiB+WS48KiB�
 该任务现已完成、退出0：两档八类状态/图重放通过，长B8 Score AIC 188.230→167.660μs（−10.93%），
 四窗口分布不重叠；完整CSA长短−1.478%/−0.115%，七三−1.069%，两档P95及max均下降。
 保留性能版长三query的L1-only预取；短档核内读数虽下降，但执行核未改，不归因为候选收益。
-与已保留B4组合的完整CPU编译/load通过；当前554b3bca七档模型不含两项新增，组合模型收益仍待验。
+与已保留B4组合的完整CPU编译/load通过；当前554b3bca七档模型不含两项新增。
+冻结组合8e176285，只补128K/B4、B8及8K/B16控制；模型任务task_20260928_200111_19871068850已提交，
+继续使用预热8步后10步EP16 forward/token/DSpark和独立profile，不重复其余四档，组合收益待验。
+[定向验收入口与范围](results/csa_key_prefetch_final_20260928/README.md)。
 [容量与WS取舍](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、[候选状态](results/csa_score_key_l1_only_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
@@ -756,7 +765,7 @@ mode=2 暂作后续优化候选，mode=1 原始结果保留；两档之间的差
 | D1 | 同源码、同配置重新定位关键路径 | Worker/Scheduler 不重复计数；计算、内部等待、资源竞争分别解释；只列有当前证据的热点 | A5、随 C 更新 | 进行中 |
 | D2 | 优化性能版完整 HC_pre+norm+CSA+HC_post 区间 | 保留已验证核内收益；调度以无profiler本体及关键链共同判断。最终仍验收完整区间和整模型token/DSpark | C、D1 | QR/KV核内分组已保留；七档均值领先但入场尾部待解；Indexer query整组准入已否定；<750 μs 未完成 |
 | D3 | 移植/共享已保留的数值中性优化到精度版 | 保留 Native 算术方式；固定规约下验证移植前后、必要尾块和完整区间；专有算术差异明确隔离 | B4、已保留性能实现 | 旧迁移单卡/16卡看护通过；本轮新增QR/KV策略尚未移植，worker确定性修正见日志131 |
-| D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B16/24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 554b3bca七档token/DSpark通过，forward七三−2.979%；B8无收益，B4及短B16仍有入场尾部；模型profile待离线解析 |
+| D4 | 精度复查后做性能版泛化对比 | TP1/DP=EP16、EPLB 关、S6；128K 测 B4/8/16，8K 测 B16/24/32/40；记录10步forward均值、两侧profiling JSON及PTO泳道 | D3、B 必要复查 | 554b3bca七档token/DSpark通过，forward七三−2.979%、模型CSA−15.673%，21份JSON齐全；B8均值及长尾未关闭；新增8e176285只补受影响长B4/B8和短B16控制 |
 
 D2 近期工作按§4执行；15轮调度已结束，不沿用旧“再加十轮”的待办。
 当前P95定向保护来自用户新增要求，保留长档sync_start/禁止提前释放；

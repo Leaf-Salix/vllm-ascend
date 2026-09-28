@@ -58,7 +58,18 @@ DFX固定选窗口0供下载，其他窗口仍全部保留，避免按性能挑�
 各history内部等权：128K−2.628%、8K−3.799%，七三forward变化−2.979%；
 逐步最慢rank均值六档更低，61/70步更快。B8尚无收益、B4 P95仍有代价，不标阶段目标完成。
 [正式七档样本与最大值](model/RESULTS.md)、[逐rank数据](model/forward.json)。
-模型profile尚未离线解析，不能用历史模型CSA表代替本轮。
+14份模型profile已离线解析；每档63个完整CSA（独立3步×21层、含首次metadata），
+128K B4/B8/B16分别比Native低20.73%/13.88%/13.66%，8K B16/B24/B32/B40低18.83%/18.51%/12.23%/9.22%。
+各history内部等权后128K−16.091%、8K−14.699%，七三模型CSA−15.673%。
+这是另一采集轮次的rank0区间，不能拆账正式十步forward。
+[模型CSA及互斥分段](model/MODEL_GAP.md)、[14份模型JSON及7份固定窗口单CSA泳道](download/README.md)。
+
+8K/B16第三步第12→14层仍为772.86→805.72μs，Worker为763.22→797.08μs；
+差异包含设备Worker内部，缺同层逐incore DFX，不能归因Score/Sparse或称sync_start已修复。
+[全部相邻CSA及原问题对应层](model/ADJACENT_CSA.md)。
+128K/B8独立profile的CSA本体每步节省2.991ms，FFN增加1.377ms，首层MoE Dispatch增加1.577ms；
+该轮主图区间仍快2.320ms，不能据此完整解释正式B8 forward的+0.08%。
+[B8分项和证据边界](model/B8_FFN.md)。
 
 新增builder观察定位到B4 PTO step15/rank14的C128 attention `build_decode_metadata`：
 墙钟3.703ms、线程CPU3.678ms，同rank通常墙钟0.251ms；设备相对入场迟到3.786ms，
