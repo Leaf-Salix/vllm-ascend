@@ -198,6 +198,10 @@ MTE1→FIX等待15→0，另外9份Score生成二进制一致；后续两档状�
 只预取下一Key到L1、维持单Key L0B的B8独立候选已通过完整CPU编译/load，
 Key L1为32KiB、Score为双48KiB，Mat末端128KiB；L0B稳态Key16KiB+WS48KiB，9份未改Score执行核一致。
 在B4设备任务与状态汇总结束后编译，未与本线程设备计时重叠；已提交task_20260928_190508_19636832316。
+该任务现已完成、退出0：两档八类状态/图重放通过，长B8 Score AIC 188.230→167.660μs（−10.93%），
+四窗口分布不重叠；完整CSA长短−1.478%/−0.115%，七三−1.069%，两档P95及max均下降。
+保留性能版长三query的L1-only预取；短档核内读数虽下降，但执行核未改，不归因为候选收益。
+与已保留B4组合的完整CPU编译/load通过；当前554b3bca七档模型不含两项新增，组合模型收益仍待验。
 [容量与WS取舍](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)、[候选状态](results/csa_score_key_l1_only_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，

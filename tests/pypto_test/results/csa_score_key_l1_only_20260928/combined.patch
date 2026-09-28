@@ -1,0 +1,126 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+index 76cfe3e2..4ab7881b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -504,6 +504,7 @@ def indexer_score_topk_native_cube(
+     score_sync_start: pl.constexpr,
+     score_early_resolve: pl.constexpr,
+     key_prefetch_panels: pl.constexpr,
++    key_prefetch_to_l0: pl.constexpr,
+ ):
+     """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
+     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+@@ -635,17 +636,30 @@ def indexer_score_topk_native_cube(
+                                     [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                     [BLOCK_SIZE, IDX_HEAD_DIM],
+                                 )
+-                        buf_current_key = pl.tile.extract(
+-                            pl.tile.transpose_view(buf_key_l1_pool),
+-                            0,
+-                            0,
+-                            [IDX_HEAD_DIM, qk_panel_cols],
+-                            target_memory=pl.MemorySpace.Right,
+-                        )
++                        if key_prefetch_to_l0:
++                            buf_current_key = pl.tile.extract(
++                                pl.tile.transpose_view(buf_key_l1_pool),
++                                0,
++                                0,
++                                [IDX_HEAD_DIM, qk_panel_cols],
++                                target_memory=pl.MemorySpace.Right,
++                            )
+                     for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                         buf_panel_col = buf_qk_panel * qk_panel_cols
+                         buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                         buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
++                        if key_prefetch_panels > 0:
++                            if not key_prefetch_to_l0:
++                                # M192/N128 leaves only one 16KiB Key Right tile.
++                                # Extract the current Key before staging the next
++                                # L1 panel so its move does not depend on that DMA.
++                                buf_current_key = pl.tile.extract(
++                                    pl.tile.transpose_view(buf_key_l1_pool),
++                                    0,
++                                    buf_qk_panel % 2 * qk_panel_cols,
++                                    [IDX_HEAD_DIM, qk_panel_cols],
++                                    target_memory=pl.MemorySpace.Right,
++                                )
+                         if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                             # Native QLI streams N128 key panels, overlapping the next
+                             # MTE2 load with QK/WS instead of loading the entire N768/1024.
+@@ -704,13 +718,14 @@ def indexer_score_topk_native_cube(
+                                             [BLOCK_SIZE, IDX_HEAD_DIM],
+                                         )
+                             if key_prefetch_panels > 0:
+-                                buf_prefetched_key = pl.tile.extract(
+-                                    pl.tile.transpose_view(buf_key_l1_pool),
+-                                    0,
+-                                    buf_load_slot,
+-                                    [IDX_HEAD_DIM, qk_panel_cols],
+-                                    target_memory=pl.MemorySpace.Right,
+-                                )
++                                if key_prefetch_to_l0:
++                                    buf_prefetched_key = pl.tile.extract(
++                                        pl.tile.transpose_view(buf_key_l1_pool),
++                                        0,
++                                        buf_load_slot,
++                                        [IDX_HEAD_DIM, qk_panel_cols],
++                                        target_memory=pl.MemorySpace.Right,
++                                    )
+                             else:
+                                 buf_prefetched_key = pl.tile.move(
+                                     pl.tile.transpose_view(buf_panel_keys),
+@@ -751,8 +766,9 @@ def indexer_score_topk_native_cube(
+                             )
+                         buf_previous_l1 = buf_scores_l1
+                         if key_prefetch_panels > 0:
+-                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+-                                buf_current_key = buf_prefetched_key
++                            if key_prefetch_to_l0:
++                                if buf_qk_panel + 1 < score_tile // qk_panel_cols:
++                                    buf_current_key = buf_prefetched_key
+                     buf_last_pair = pl.tile.extract(
+                         buf_previous_l1,
+                         0,
+@@ -944,6 +960,7 @@ def indexer_score_topk_forest(
+                     True,
+                     False,
+                     1,
++                    True,
+                 )
+             elif pl.tensor.dim(position_ids, 0) >= 2 * TOPK_SCORE_WORKERS:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -964,7 +981,8 @@ def indexer_score_topk_forest(
+                     BUFFERED_LONG_SCORE_TILE,
+                     True,
+                     False,
+-                    0,
++                    1,
++                    False,
+                 )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -987,6 +1005,7 @@ def indexer_score_topk_forest(
+                     False,
+                     # M128/N128 fits two 16KiB Key slots plus 32KiB WS in L0B.
+                     1,
++                    True,
+                 )
+         else:
+             short_queries = pl.tensor.dim(position_ids, 0)
+@@ -1018,6 +1037,7 @@ def indexer_score_topk_forest(
+                     False,
+                     True,
+                     0,
++                    True,
+                 )
+             else:
+                 score_tid = indexer_score_topk_native_cube(
+@@ -1039,6 +1059,7 @@ def indexer_score_topk_forest(
+                     False,
+                     True,
+                     0,
++                    True,
+                 )
+     else:
+         with pl.spmd(
