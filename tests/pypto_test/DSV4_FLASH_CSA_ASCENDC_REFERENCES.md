@@ -6,11 +6,26 @@
 
 | 本地仓库 | 本次读取HEAD | CSA相关入口 |
 | --- | --- | --- |
-| [ops-transformer](../../../ops-transformer) | b5b33e14 | QLI/QLI V2、SparseFlashMla、mHC |
-| [ops-nn](../../../ops-nn) | 7a71d54e | RMSNorm、动态量化及融合路径 |
-| [ops-math](../../../ops-math) | 81802185 | 排序、Top-K及基础向量操作 |
+| [ops-transformer](../../../ops-transformer) | 28f40354 | QLI/QLI V2、SparseFlashMla、mHC |
+| [ops-nn](../../../ops-nn) | 19614968 | RMSNorm、动态量化及融合路径 |
+| [ops-math](../../../ops-math) | 361722c0 | 排序、Top-K及基础向量操作 |
 
-三个HEAD提交日期均为2026-09-28。本次只读源码，没有安装这些仓库、升级CANN或改Native流程。
+2026-09-28 20:48 CST核对官方GitCode远端master，三仓均以`fetch --depth=1`更新源码参考，
+保留原分支并切换到上述提交；提交时间分别为20:43、20:28、20:03。
+没有安装这些仓库、升级CANN或改Native流程，实测Native仍是本阶段固定二进制。
+后续优化先查这些最新AscendC实现，再查pypto-lib的PTO表达；每项记录具体文件、版本、A3适用性、
+采用策略及保留差异的原因，不能将新源码推导直接称作Native新版本的实测性能。
+
+本次与上午版本b5b33e14/7a71d54e/81802185的定向源码差异：
+
+- QLI、QLI V2的A3核函数、QLI V2 AICPU metadata，以及SparseFlashMla arch22核函数没有变化；
+  当前均衡leaf候选所依据的2048粒度、cost分配、UB累计Top-K仍有效。
+- QLI V2有较大的arch35内核与host重构，不能把arch35策略视为A3现成能力；README明确列出A3支持，
+  具体策略仍须追到对应构建入口及指令。
+- MhcPreSinkhorn在另一条通用Matmul路径的`IterateAll`后新增`SetHF32(false)`；
+  这不构成当前PTO mHC核内变快的依据，不据此改变精度策略。
+- 本轮所参考的ops-nn RMSNorm/动态量化，以及ops-math TopKV2/Sort目录没有源码变化。
+
 最近完成统一七档模型的组合为554b3bca，包含长S6 Key L1预取；token/DSpark通过，forward七三−2.979%。
 B8均值无收益、B4仍有尾部代价；模型profile完整CSA七三−15.673%，21份JSON已汇集。
 B8 profile的CSA本体节省2.991ms/步，FFN增加1.377ms，主要为首层MoE Dispatch；
@@ -211,6 +226,13 @@ Native `CalcCost`实际是`6×ceil(M/16)+10×ceil(S2/64)`，`AssignBlockToCore`�
 未分配cost/剩余核数更新限额；不是单纯数S2块。Vector `AlignS2`还按32/128/512元素分段对齐，
 最大处理2048候选，避免一律padding至2的幂。PTO新候选的2560/3072半leaf仍走4096排序，
 因此先测当前单因素的AIC/AIV最大核、包络和完整CSA，不把新增排序padding同时修改后混合归因。
+
+进一步核对[Native SortAll](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_vector.h)
+与当前[PTO-ISA A3 TMRGSORT](../../../pto-isa-src/include/pto/npu/a2a3/TMrgSort.hpp)：
+Native按剩余有序段数选择二/三/四路尾部，PTO单输入`block_len`形式要求有效列数整除`4×block_len`。
+所以不能把4096候选tile直接改为3072后沿用三次相同mrgsort；最后一级6144个value/index元素不满足4096整除。
+如后续实测排序成为瓶颈，应在算子侧显式组织二/三路尾部，不改PTO-ISA，也不能只凭少padding断言收益。
+此前整半leaf Score留UB已在日志§236因额外子视图搬运及gather无收益而撤回；不原样重复该实验。
 
 ## 3. ops-math的适用边界
 

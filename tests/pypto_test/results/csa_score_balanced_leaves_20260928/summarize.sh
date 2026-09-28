@@ -16,3 +16,4 @@ for case_spec in 131072:16 8192:16; do
 done
 python "$repo/tests/pypto_test/results/csa_score_key_prefetch_20260928/evidence.py" \
     --root "$root" --long-batch 16 --short-batch 16 --baseline 8e176285
+python "$root/incore.py"

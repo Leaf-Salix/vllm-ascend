@@ -19,6 +19,8 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 按batch、seq及实际工作量的策略差异在同一套PTO算子内部处理。先减少incore task耗时，再优化调度；
 已经明确要求优先核实的短档CSA长尾继续收尾。当前Native是性能/行为基线，pypto-lib是PTO实现参考。
 核内收益、完整CSA及P95分别记录，最终仍以真实权重EP16的forward、token与DSpark验收。
+源码参考已于20:48 CST浅更新为ops-transformer 28f40354、ops-nn 19614968、ops-math 361722c0；
+优先采用其中适用于A3的策略，版本、入口及与当前Native二进制的区别见[AscendC参考](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
 
 最近完成统一七档真实EP16的冻结组合为 **554b3bca**：包含四路Top-K及UB累计根、HC输入/RMS融合、
 QR输入/gamma驻留及尾行修复，以及长S6 Score的独立Key L1预取。

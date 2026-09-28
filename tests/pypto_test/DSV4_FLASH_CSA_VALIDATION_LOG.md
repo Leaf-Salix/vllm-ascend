@@ -9842,3 +9842,19 @@ Ruff通过，逻辑arena容量保持，不据CPU或静态25→22步提前声称�
 每侧20次图计时及四个独立DFX，检查八类状态、metadata/保护区及A→B→A；关注Score AIC/AIV均值、最大核、包络和CSA P95。
 候选未合入生产、无设备结论；有收益才补同策略B8及必要边界，按用户新优先级不立即扩展模型。
 [最新补丁、编译证据及实际单卡句柄](results/csa_score_balanced_leaves_20260928/README.md)。
+
+## 355. 按最新要求浅更新AscendC主参考，核对A3相关变化（2026-09-28）
+
+20:48 CST已核对官方GitCode master并以`fetch --depth=1`更新三个干净源码仓：
+ops-transformer b5b33e14→28f40354，ops-nn 7a71d54e→19614968，ops-math 81802185→361722c0。
+各仓保留原分支，当前源码以detached HEAD指向新提交。仅更新阅读参考，没有安装或替换固定Native/CANN基线。
+
+定向diff确认QLI/QLI V2 A3 kernel、QLI V2 AICPU metadata及SparseFlashMla arch22保持原实现；
+均衡leaf候选依据仍有效。新增QLI V2大改主要位于arch35及host重构，不能按更新日期直接套到A3。
+MhcPreSinkhorn另一通用Matmul路径补`SetHF32(false)`，不视作当前PTO性能改进或改动舍入策略的依据。
+所参考的ops-nn RMSNorm/动态量化与ops-math排序目录没有变化，没有为源码更新重复设备验收。
+
+后续incore优先以最新ops-transformer及其他AscendC仓为依据，pypto-lib作为PTO表达参考；
+每项分别记录来源/适用架构、采用部分、未采用原因及核内/CSA实测，不将源码推导混为新Native性能。
+当前均衡leaf单卡任务仍pending，继续源码核查，不产生设备加速结论。
+[当前版本与具体入口](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
