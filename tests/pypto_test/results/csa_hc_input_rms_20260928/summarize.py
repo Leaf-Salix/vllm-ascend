@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import math
 import statistics
 from pathlib import Path
 
@@ -16,7 +17,7 @@ def main():
     spec.loader.exec_module(worker)
     result = {
         "operator": "e58ddc94 vs HC widen+RMS fusion, atomic0/mode2/det1/layer4",
-        "task": "task_20260928_103131_11716825293",
+        "task": "task_20260928_131803_262469420227",
         "scope": "各档20次同轮图计时、各侧2个独立DFX窗口；核内累计工作不是墙钟耗时。",
         "limits": "输入是真实层权重与合成历史；8类状态不含idx_topk_scores，不代表整网token验收。",
         "cases": [],
@@ -26,20 +27,21 @@ def main():
     for history in (131072, 8192):
         folder = ROOT / f"h{history}_b16"
         comparison = json.loads((folder / "comparison.json").read_text())
+        if comparison["status"] != "PASS":
+            raise ValueError(f"{history}: 状态/图重放未通过，不能作保留依据")
         case = {"history": history, "batch": 16, "state_check": comparison, "measurements": {}}
         for side in ("baseline", "candidate"):
             timing_path = folder / side / "report.json"
             report = json.loads(timing_path.read_text())
             swimlane_path = folder / "swimlane" / side / "report.json"
-            reused = not swimlane_path.exists()
-            if reused:
-                if side != "baseline":
-                    raise FileNotFoundError(swimlane_path)
-                swimlane_path = ROOT.parent / f"csa_qr_k512_20260928/h{history}_b16/swimlane/baseline/report.json"
             swimlane = json.loads(swimlane_path.read_text())
             windows = [worker.summarize(Path(w["merged_swimlane"])) for w in swimlane["swimlane_windows"]]
             if len(windows) != 2 or report["timing"]["iters"] != 20:
                 raise ValueError(f"{history}/{side}: 样本不完整")
+            if any(c["status"] != "PASS" for c in report["timing"]["pto"]["eager_comparison"].values()):
+                raise ValueError(f"{history}/{side}: 计时图重放不一致")
+            if any(c["status"] != "PASS" for c in report["timing"]["pto"]["guards"].values()):
+                raise ValueError(f"{history}/{side}: 计时图保护区失败")
             hc = []
             names = ("hc_widen", "hc_pre_rms") if side == "baseline" else ("hc_widen_rms",)
             for window in windows:
@@ -53,17 +55,19 @@ def main():
                 })
             case["measurements"][side] = {
                 "timing_source": str(timing_path), "swimlane_source": str(swimlane_path),
-                "swimlane_reused": reused,
+                "swimlane_reused": False, "device": report["timing"]["device"],
                 "timing": {backend: {
                     "samples_us": report["timing"][backend]["samples_us"],
                     "mean_us": statistics.mean(report["timing"][backend]["samples_us"]),
-                    "p50_us": report["timing"][backend]["us_p50"],
-                    "p95_us": report["timing"][backend]["us_p95"],
-                    "max_us": report["timing"][backend]["us_max"],
+                    "p50_us": statistics.median(report["timing"][backend]["samples_us"]),
+                    "p95_us": sorted(report["timing"][backend]["samples_us"])[math.ceil(.95 * 20) - 1],
+                    "max_us": max(report["timing"][backend]["samples_us"]),
                 } for backend in ("native", "pto")},
                 "worker_windows": windows, "hc_windows": hc,
             }
         before, after = (case["measurements"][s] for s in ("baseline", "candidate"))
+        if before["device"] != after["device"]:
+            raise ValueError(f"{history}: 两侧非同卡")
         case["change_pct"] = {}
         values = [("本体 " + k, before["timing"]["pto"][k], after["timing"]["pto"][k])
                   for k in ("mean_us", "p50_us", "p95_us", "max_us")]

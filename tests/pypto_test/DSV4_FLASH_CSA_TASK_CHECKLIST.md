@@ -8,7 +8,7 @@
 已经明确要求优先核实的短档CSA长尾继续收尾。当前Native是性能/行为基线，pypto-lib是PTO实现参考。
 核内收益、完整CSA及P95分别记录，最终仍以真实权重EP16的forward、token与DSpark验收。
 
-当前性能算子在 **e58ddc94** 基础新增按实际cache长度分核的四路Top-K，长档merge核内已确认收益，
+当前性能算子在 **e58ddc94** 基础新增按实际cache长度分核的四路Top-K及HC输入/RMS融合，核内已确认收益，
 短档不退化及新增策略的EP16仍待确认；[最新单卡结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
 e58ddc94在30f2b228基础保留固定K的KV L1 K512，四档受影响场景已完成EP16；该证据不覆盖新增Top-K。
 保留长短Indexer分组，默认atomic0固定规约，删除冗余QR/KV清零种子，
@@ -89,8 +89,12 @@ TP1、DP=EP16、出5验6、mode2、det0、EPLB关闭；预热8步后连续10步�
    [分核源码、阈值及全部结果](results/csa_topk_fourway_adaptive_20260928/README.md)。
    HC输入加宽/RMS融合候选：性能版消除重复FP32读取，精度版保留原归约；
    两入口完整CPU编译已通过，原pending单卡任务因优先处理短档波动而取消；
-   已按最新AscendC输入复用思路恢复，task_20260928_131803_262469420227正在执行长短B16，
-   使用e58独立候选，不混入Top-K；之后以最终组合源码补必要EP16。
+   最新AscendC M分块的AIV加宽/RMS复用与本项直接对应，区别于另一路Cube A2平方和。
+   task_20260928_131803_262469420227完成，两档状态/重放通过，输入/RMS累计核时间下降27%～30%；
+   HC首尾却慢2.5～4.1μs，完整层未确认稳定收益，短档P95略升，取舍原样记录。
+   task_20260928_132736_2807752475已完成，T60性能版/精度版八类状态、保护区与A→B→A均通过；
+   输入/RMS融合按核内规则保留，共用函数保持精度版原算术。当前设备收益来自e58独立候选，
+   下一步以与Top-K组合后的最终源码补长短B16真实EP16/token/DSpark，不能把两个单变量均值相加预测模型收益。
    [候选及冻结脚本](results/csa_hc_input_rms_20260928/README.md)。
    [Simpler #2389](results/csa_mix_preload_20260928/README.md)已完成源码可用性评估，本轮不采用：
    存在采样被pending事件污染、跨callable估计复用及共享非原子表问题，长档Score的sync_start不直接受益。

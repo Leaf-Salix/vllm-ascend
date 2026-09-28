@@ -53,7 +53,8 @@ QLI V2的metadata和`ProcessDecode()`还带全核同步，当前PTO已有任务�
 | --- | --- | --- |
 | [QLI V2 Cube](../../../ops-transformer/attention/quant_lightning_indexer_v2/op_kernel/arch22/quant_lightning_indexer_v2_service_cube_arch22.h) | 与本仓Native QLI Cube的主体流程相同，主要为名称、布局枚举及stride字段差异；FIXPIPE的1/1024缩放、ReLU、FP16第二次Cube规约并非新发现，性能版已采用 | 对照Q/Key/S的实际驻留周期与流水等待；不要再次把已采用的Cube head规约当作新优化 |
 | [SparseFlashMla CSA Cube](../../../ops-transformer/attention/sparse_flash_mla/op_kernel/arch22/sparse_flash_mla_csa_block_cube.h) | Q/P四份L1区、KV三份L1区及DataCopyPA；当前Native Sharedkv已有同类配置 | 核对PTO QK/PV复用、跨query流水中实际等待的位置，再决定搬运/缓冲改动；旧16行UB双缓冲与成对DMA没有稳定收益，不原样重测 |
-| [MhcPreSinkhorn Cube](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_cube_compute.h) | `ComputeDecode/MmadA2/MmadAB`复用输入计算平方和及投影，与Native HC参考同类 | 先完成已有[HC输入加宽/RMS融合候选](results/csa_hc_input_rms_20260928/README.md)，不另造一份重复实验；纯AIC投影与精度版归约边界继续保持 |
+| [MhcPreSinkhorn M分块](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_m_split_core.h) | Stage1 AIV加宽输入，一份写给Cube，原UB值直接计算平方和；已据此保留性能版输入/RMS融合，精度版原归约不变 | 两档输入/RMS累计核时间下降27%～30%，但HC区间慢2.5～4.1μs；T60性能版及精度版共用函数回归通过，下一步组合源码EP16及Cube启动延迟 |
+| [MhcPreSinkhorn Cube](../../../ops-transformer/mhc/mhc_pre_sinkhorn/op_kernel/mhc_pre_sinkhorn_cube_compute.h) | 另一条M/K分块路径的`ComputeDecode/MmadA2/MmadAB`在L1/L0A复用输入，用Cube计算平方和及投影 | 与上述Vector RMS路线区分；当前PTO未采用Cube A2，不把读取复用候选称为原样移植此算法。后续须单独评估规约变化与纯AIC开销 |
 | [RmsNormDynamicQuant](../../../ops-nn/norm/rms_norm_dynamic_quant/op_kernel/rms_norm_dynamic_quant_normal_kernel.h) | A3支持，多行UB处理、权重驻留、归一化与量化融合；FP32→INT32 RINT→FP16→INT8 TRUNC链与当前PTO一致 | 检查QR的两遍输入/gamma读取能否减少，先算UB生命周期；当前性能版已把平方和与amax合在第一遍，不能把“融合”本身重复计为新改进 |
 
 RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及beta接口，
@@ -72,7 +73,8 @@ RMSNormDynamicQuant的新旧文件差异还包含单/双量化输出、smooth及
 
 短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
 [同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
-按用户修正后的源码优先级，当前先验证QLI V2四路Top-K，随后恢复已有HC输入复用候选，继续筛选最新AscendC差异。
+QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要单卡状态/尾块通过，
+下一步对组合源码补长短B16真实EP16/token/DSpark，记录完整forward及P95；继续筛选最新AscendC差异。
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。

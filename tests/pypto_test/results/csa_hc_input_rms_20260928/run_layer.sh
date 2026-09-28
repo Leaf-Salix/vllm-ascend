@@ -11,8 +11,6 @@ for shape in 131072:16 8192:16; do
     batch="${shape#*:}"
     for phase in timing swimlane; do
         for label in baseline candidate; do
-            # 同卡既有K256基线DFX仍有效，只复用它；无profiler计时始终同轮重测。
-            if [[ "$phase" == swimlane && "$label" == baseline && "$TASK_DEVICE" == 8 ]]; then continue; fi
             source_repo="$workspace/.cache/csa-kv-k512-ep16-d950ba3d"
             extra=()
             if [[ "$label" == candidate ]]; then
