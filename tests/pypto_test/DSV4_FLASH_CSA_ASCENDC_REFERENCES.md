@@ -121,8 +121,11 @@ WS Right位于8192起、占48KiB，尝试利用剩余8KiB提前加载下一Key�
 初版在SSA修正后仍因Mat分配638976>524288失败；改为独立prologue后完整CPU编译通过，Mat恢复96KiB。
 实际L0B确认两个8KiB Key槽交替、48KiB WS位于16384起，L0B合计64KiB；保持16次QK/WS。
 未启用预取的四组AIC/AIV及长S6 AIV共9份生成二进制一致，其他策略没有新增核内指令。
-单卡task_20260928_170324_293095832121已提交、结果待收；未修改工具链或生产路径。
-[来源、当前补丁和失败证据](results/csa_score_key_prefetch_20260928/README.md)。
+单卡task_20260928_170324_293095832121完成，两档状态/图重放通过，但长档Score AIC+14.87%，
+完整CSA七三+2.917%，本版不合入、不扩测EP16。L1复用产生MTE1→FIX保护，缺逐指令stall归因。
+进一步核对`InitBuffers`：Native分别分配双槽Key L1和双槽Score L1，当前PTO候选没有隔离两者。
+下一候选先表达持久Key L1池并核查分配/依赖，再决定是否上卡；不因L0B已双槽就宣称Native流水已复现。
+[来源、四窗口回退与状态证据](results/csa_score_key_prefetch_20260928/README.md)。
 
 ## 3. ops-math的适用边界
 
