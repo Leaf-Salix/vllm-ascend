@@ -631,6 +631,37 @@ Native TopK注入，仅把compressed KV读取改为Native `CopyInKv`的物理地
 `stage3-topk-pair-b16-t60`目录，属于前述`reports/dsv4-tnd-kernel-20260924/`。
 探针脚本、AST变换manifest、源码SHA256和独立复核报告与证据一同保存。
 
+### attention归约源码核验与后续诊断（10:44补充，设备待执行）
+
+核对227实际CANN9.2 SDK的`SoftmaxFlashV2` WITHOUT_BRC路径、PTO ISA
+`03e45c4bda48a6909feb239f0acc45f04176c2a1`和第五批生成的`qk_pv.cpp`，
+发现512列求和的外层分组不同：Native在当前M>1条件下执行三层连续8元
+`BlockReduceSum/vcgadd`，当前PTO通用路径先合并64列分组，再`vcadd64`。
+128列两边都先逐元素加前后64列，最后分别为两层`vcgadd`与`vcadd64`。
+这只是已确认的实现差异，尚未证明是剩余8个heads差异的根因。
+
+本轮新增两项独立诊断，均不修改正式源码：
+
+| 诊断 | 验证内容 | 静态结果和当前状态 |
+| --- | --- | --- |
+| `task_20260928_103646_133420325347` | 导出inverse RoPE前BF16 heads、最终FP32 m/l/o；Native重复同一只读attention op并切换LSE，检查输出不变 | 完整CPU编译通过；等待NPU。必须先通过所有原有阶段、cache、最终输出及guard与正式路径逐位一致的门槛。 |
+| `task_20260928_104327_150481722851` | 固定Native TopK，仅把128/512的chunk sum改成按8元分组归约，检查heads及最终输出 | AST逆变换、四组CPU分组测试、完整CPU编译通过；等待NPU。候选`cab8efeb…`，尚未合入正式路径。 |
+
+第二项候选使用masked `vcadd8`模拟原生连续8元分组；`vcadd8`与`vcgadd8`
+内部舍入尚未证明相同，不能只凭外层形状一致认定逐位等价。CPU正概率临界值
+证明改动会产生2 FP32 ULP差异，但它不是设备精度结果。
+
+诊断编译失败也保留：第一版m/l/o的3D外参reshape无法推导跨函数metadata，
+改成独立T×H维度的2D直接外参后编译成功；归约候选先遇到Tile参数被当作
+Tensor元数据，再遇到128分支仍检查512 reshape，最终生成显式128/512两个
+函数消除无效类型分支。数值主体均有可逆AST或文本检查，未修改编译器/环境。
+另有独立FP32 `Log(l)+m` helper已编译，只有来源报告的complete、probe_valid、
+native_lse_repeat_valid全部通过才允许读入，不从LSE反推Native sum的逐位结果。
+
+本节更新时227的16卡由另一任务占用，上述任务均未取得设备结果。
+完整源码出处、候选manifest及CPU检查保存在工作区
+`native-align-20260928/native-softmax-reduce/`，阶段探针在同级目录。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文
