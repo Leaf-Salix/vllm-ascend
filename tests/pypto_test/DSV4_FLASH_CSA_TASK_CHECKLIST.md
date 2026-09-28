@@ -22,6 +22,11 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 源码参考已于20:48 CST浅更新为ops-transformer 28f40354、ops-nn 19614968、ops-math 361722c0；
 优先采用其中适用于A3的策略，版本、入口及与当前Native二进制的区别见[AscendC参考](DSV4_FLASH_CSA_ASCENDC_REFERENCES.md)。
 
+当前长档均衡leaf候选完成B16长短单卡：八类状态/图重放通过，长档Score AIC最慢核−12.358%，
+但AIV均值+6.612%、merge+21.041%；完整CSA长档−0.888%、短档+0.707%，七三−0.410%，短档P95+9.18μs。
+继续保留均衡方向，先针对2560/3072被padding至4096的排序代价做独立优化，再补受影响B8；
+尚未合入生产、不重跑七档或EP16。[全部结果和反例](results/csa_score_balanced_leaves_20260928/README.md)。
+
 最近完成统一七档真实EP16的冻结组合为 **554b3bca**：包含四路Top-K及UB累计根、HC输入/RMS融合、
 QR输入/gamma驻留及尾行修复，以及长S6 Score的独立Key L1预取。
 task_20260928_182811_290034987已完成、退出0；七档573440个输出token零差异、112组rank DSpark一致，

@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--long-batch", type=int, default=16)
+    parser.add_argument("--title", default="均衡leaf")
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location(
         "worker", ROOT.parent / "csa_scheduling_20260927/upstream_725/compare.py"
@@ -34,7 +35,7 @@ def main():
     spec.loader.exec_module(worker)
     cases = []
     lines = [
-        "# 均衡leaf：核内分布与包络", "",
+        f"# {args.title}：核内分布与包络", "",
         "每格为基线→候选，单位μs；数值是四个独立DFX窗口指标的均值。",
         "kernel最大值是每窗口最慢任务，包含核内等待；包络含启动分散，不能视为纯调度耗时。",
         "无profiler CSA/P95、状态门禁和全部原始窗口另见各档evidence.json。", "",
@@ -43,7 +44,8 @@ def main():
     ]
     for history, batch in ((131072, args.long_batch), (8192, 16)):
         source = read(args.root / f"h{history}_b{batch}" / "summary.json")
-        case = {"history": history, "batch": batch, "state_status": source["status"], "sides": {}}
+        case = {"history": history, "batch": batch, "operator": source["operator"],
+                "state_status": source["status"], "sides": {}}
         for side, data in source["measurements"].items():
             windows = []
             for window in data["worker_windows"]:
@@ -76,7 +78,7 @@ def main():
                      f"{case['sides']['candidate']['means'][name][f]:.3f}" for f in FIELDS]
             lines.append("| " + " | ".join([f"{history // 1024}K/B{batch}", name, *cells]) + " |")
         cases.append(case)
-    result = {"scope": "同轮固定8e176285基线与独立均衡leaf候选；非Native/整网性能。", "cases": cases}
+    result = {"scope": "同轮独立DFX，具体源码见各档operator；非Native/整网性能。", "cases": cases}
     (args.root / "incore.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     (args.root / "INCORE.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

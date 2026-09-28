@@ -1,0 +1,44 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py
+@@ -265,6 +265,41 @@
+         pairs = pl.mrgsort(pairs, block_len=256)
+         pairs = pl.mrgsort(pairs, block_len=1024)
+         pl.store(pl.tile.slice(pairs, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++    elif valid_count <= 2560:
++        # QLI V2 aligns only the live sorting groups. Keep the existing
++        # later-2048-chunk priority while avoiding padding five groups to eight.
++        partial_indices = pl.add(pl.tile.arange(0, [1, 2560], dtype=pl.INT32), logical_begin_i32)
++        partial_raw = pl.load(score_arena, [score_row, 0], [1, 2560], valid_shape=[1, valid_count])
++        partial_scores = pl.tile.fillpad(partial_raw, pad_value=pl.PadValue.min)
++        partial_scores = pl.maximum(partial_scores, FP32_NEG_INF)
++        partial_pairs = pl.sort32(partial_scores, pl.reinterpret_view(partial_indices, pl.UINT32))
++        partial_pairs = pl.mrgsort(partial_pairs, block_len=64)
++        partial_pairs = pl.mrgsort(partial_pairs, block_len=256)
++        partial_prefix = pl.set_validshape(partial_pairs, 1, 4096)
++        partial_prefix = pl.mrgsort(partial_prefix, block_len=1024)
++        partial_left = pl.tile.slice(partial_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
++        partial_right = pl.tile.slice(partial_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++        partial_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        partial_merged = pl.tile.mrgsort(partial_right, partial_left, tmp=partial_tmp)
++        pl.store(pl.tile.slice(partial_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
++    elif valid_count <= 3072:
++        triple_indices = pl.add(pl.tile.arange(0, [1, 3072], dtype=pl.INT32), logical_begin_i32)
++        triple_raw = pl.load(score_arena, [score_row, 0], [1, 3072], valid_shape=[1, valid_count])
++        triple_scores = pl.tile.fillpad(triple_raw, pad_value=pl.PadValue.min)
++        triple_scores = pl.maximum(triple_scores, FP32_NEG_INF)
++        triple_pairs = pl.sort32(triple_scores, pl.reinterpret_view(triple_indices, pl.UINT32))
++        triple_pairs = pl.mrgsort(triple_pairs, block_len=64)
++        triple_pairs = pl.mrgsort(triple_pairs, block_len=256)
++        triple_prefix = pl.set_validshape(triple_pairs, 1, 4096)
++        triple_prefix = pl.mrgsort(triple_prefix, block_len=1024)
++        triple_left = pl.tile.slice(triple_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
++        triple_right0 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
++        triple_right1 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 5120])
++        triple_tmp = pl.tile.create([1, 3 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
++        # The two right runs retain their original order; both precede the
++        # first 2048 candidates, exactly as in the padded two-root merge.
++        triple_merged = pl.tile.mrgsort(triple_right0, triple_right1, triple_left, tmp=triple_tmp)
++        pl.store(pl.tile.slice(triple_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
+     elif valid_count <= 4096:
+         medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
+         medium_scores_raw = pl.load(score_arena, [score_row, 0], [1, 4096], valid_shape=[1, valid_count])
