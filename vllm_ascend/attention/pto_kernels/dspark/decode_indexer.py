@@ -605,12 +605,6 @@ def indexer_score_topk_forest_vllm(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_leaf_vllm",
         deps=[qh_quant_tid, weights_tid, cache_write_tid],
-        # Whole-group admission plus dropping both consumers' early
-        # placeholders: the two go together, either alone does nothing.
-        # Motivated by the bimodal PTO distribution under load (4 of 7 runs
-        # 9.6% slower; native shows no such split). Scheduling only -- no op,
-        # no reduction order and no quantization contract changes.
-        sync_start=True,
         allow_early_resolve=True,
         optimizations=[pl.cross_core_slot(slot_num=1)],
     ) as score_tid:
@@ -932,7 +926,7 @@ def indexer_score_topk_forest_vllm(
                 TOPK_QUERY_WORKERS,
                 name_hint="indexer_topk_single_leaf_publish_vllm",
                 deps=[score_tid],
-                allow_early_resolve=False,
+                allow_early_resolve=True,
             ) as publish_tid:
                 indexer_topk_single_leaf_publish_vllm(
                     position_ids,
@@ -948,7 +942,7 @@ def indexer_score_topk_forest_vllm(
                 TOPK_QUERY_WORKERS,
                 name_hint="indexer_topk_query_merge_vllm",
                 deps=[score_tid],
-                allow_early_resolve=False,
+                allow_early_resolve=True,
             ) as merge_tid:
                 indexer_topk_query_merge_vllm(
                     position_ids,
