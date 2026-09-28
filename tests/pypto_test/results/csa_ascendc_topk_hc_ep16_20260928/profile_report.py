@@ -1,4 +1,4 @@
-"""复用模型区间提取，保留相邻CSA差值及当前四份JSON下载入口。"""
+"""复用模型区间提取，保留相邻CSA差值及本轮JSON下载入口。"""
 
 import importlib.util
 import json
@@ -69,14 +69,14 @@ def focus_pair(case, root=ROOT):
     return lines
 
 
-def main(root=ROOT, revision="d1f170ff"):
+def main(root=ROOT, revision="d1f170ff", matrix_label="长短B16"):
     source = root.parent / "csa_qa_matrix_20260928/report.py"
     spec = importlib.util.spec_from_file_location("model_report", source)
     reporter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(reporter)
     reporter.ROOT = root
     reporter.REVISION = revision
-    reporter.model_report(matrix_label="长短B16")
+    reporter.model_report(matrix_label=matrix_label)
     data = json.loads((root / "model/model_gap_rank0.json").read_text())
     adjacent = []
     manifest = []
@@ -125,12 +125,12 @@ def main(root=ROOT, revision="d1f170ff"):
     short_case = next(case for case in data["cases"] if case["history"] == 8192 and case["batch"] == 16)
     lines += focus_pair(short_case, root)
     lines += ["", "[全部相邻对](adjacent_csa.json)、[模型分项](MODEL_GAP.md)、",
-              "[正式forward](RESULTS.md)、[四份PyTorch JSON](../download/README.md)。"]
+              f"[正式forward](RESULTS.md)、[{len(manifest)}份PyTorch JSON](../download/README.md)。"]
     (root / "model/ADJACENT_CSA.md").write_text("\n".join(lines) + "\n")
     (download / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     (download / "README.md").write_text(
-        f"# {revision}长短B16模型profile\n\n"
-        "四份真实EP16 rank0三步PyTorch JSON；未混入旧源码或单卡合成历史DFX。\n\n" +
+        f"# {revision}{matrix_label}模型profile\n\n"
+        f"{len(manifest)}份真实EP16 rank0三步PyTorch JSON；均来自本轮模型采集。\n\n" +
         "\n".join(f"- [{item['file']}]({item['file']})" for item in manifest) +
         "\n\n[原始路径与口径](manifest.json)、[相邻CSA](../model/ADJACENT_CSA.md)。\n"
     )

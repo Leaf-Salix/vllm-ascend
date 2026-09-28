@@ -8,6 +8,13 @@ workspace=/data/pyptouser/qinchuanyu/pto-eager
 repo="$workspace/vllm-ascend-dsv4-pto-0251rc1"
 source_repo="$workspace/.cache/csa-key-l1-seven-554b3bca"
 source "$workspace/env-dsv4-0251rc1.sh"
+python - "$repo/tests/pypto_test/results/csa_key_l1_seven_20260928/layer.json" <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1]))
+assert data['operator'] == '554b3bca' and data['all_cases_pass']
+assert len(data['cases']) == 7 and all(row['status'] == 'PASS' for row in data['cases'])
+PY
 export LD_LIBRARY_PATH="$repo/.cache/csa/native-install:$LD_LIBRARY_PATH"
 export PYTHONPATH="$workspace/.cache/migration-v0.25.1rc1/vllm:$source_repo:$source_repo/tests/pypto_test:${PYTHONPATH:-}"
 export PTO_CSA_VARIANT=performance
