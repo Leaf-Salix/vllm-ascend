@@ -8810,3 +8810,19 @@ task_20260928_074528_18466049204退出0。30f2b228算子未改，Native先、PTO
 为补齐前置状态差异，仅复现原同进程128K/B4→B8→B16顺序，两侧同样启用轻量观测；
 不重跑短档和完整七档。task_20260928_081648_96094015347已提交，源码冻结不变。
 [连续换档复现](results/csa_forward_sequence_20260928/README.md)。
+
+
+## 303. 连续换档复现非GC的主机准备入场延迟，追加可选分项观测（2026-09-28）
+
+task_20260928_081648_96094015347的PTO三档已完成、Native尚在执行；算子仍30f2b228。
+128K/B16 step11 rank3设备相对进入异常3.147ms，主机forward进入相对中位3.143ms，
+execute进入反而早0.809ms；准备墙钟59.778ms/线程CPU55.625ms，forward提交仅0.319ms。
+该rank自身forward69.701ms，其余rank约72～73ms；正式B16无GC。
+B8各rank有约9ms GC但发生在execute之间，没有对应>2ms入场异常。
+因此当前证据排除把这次异常归为GC或CSA图提交，仍须区分原有设备等待与CPU准备工作。
+
+仅测试工具的--forward-host-diagnostics追加现有input sync、输入准备、DP档位协调、
+attention metadata、预处理的起止时间；默认关闭、不新增同步、设备计时边界不变。
+CPU6项通过，确认forward边界、失败窗口拒绝及全部方法/GC回调恢复。
+没有改本轮正在运行的冻结源码，分项字段将在下一次必要模型验证中使用，不额外为它重跑七档。
+[范围与复现](results/csa_forward_sequence_20260928/README.md)。

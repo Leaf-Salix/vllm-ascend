@@ -2,6 +2,7 @@
 """CPU 回归：性能窗口拒绝错误档位，设备时间与主机时间分别记录。"""
 
 import gc
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -62,8 +63,18 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
         Event.clock += 100
         return "hidden"
 
+    @contextmanager
+    def synchronize_input_prep():
+        Event.clock += 9000  # Existing event wait stays outside forward.
+        yield
+
+    def prepare_inputs():
+        Event.clock += 1000
+        return "prepared"
+
     def execute(*_):
-        Event.clock += 10000  # metadata 等前置操作不属于 forward。
+        with observer.model_runner.synchronize_input_prep():
+            assert observer.model_runner._prepare_inputs() == "prepared"
         if host_diagnostics:
             gc.collect(0)
         if failure != "missing_forward":
@@ -73,6 +84,8 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
 
     observer.model_runner.execute_model = execute
     observer.model_runner._model_forward = forward
+    observer.model_runner.synchronize_input_prep = synchronize_input_prep
+    observer.model_runner._prepare_inputs = prepare_inputs
     observer.model_runner._dsa_positions_cpu_buf = torch.arange(24)
     monkeypatch.setattr(torch.npu, "Event", Event)
     monkeypatch.setattr(torch.npu, "reset_peak_memory_stats", Mock())
@@ -94,11 +107,17 @@ def test_forward_excludes_prepare_and_postprocess(observer, monkeypatch, failure
         assert result["forward"]["mean_us"] == 100
     assert observer.model_runner.execute_model is execute
     assert observer.model_runner._model_forward is forward
+    assert observer.model_runner.synchronize_input_prep is synchronize_input_prep
+    assert observer.model_runner._prepare_inputs is prepare_inputs
     assert gc.callbacks == callbacks_before
     if host_diagnostics:
         host = result["host_diagnostics"]
         assert len(host["steps"]) == 10
         assert any(e["phase"] == "stop" for e in host["gc_events"])
+        for step in host["steps"]:
+            assert step["input_sync_begin"]["monotonic_ns"] <= step["input_sync_end"]["monotonic_ns"]
+            assert step["inputs_begin"]["monotonic_ns"] <= step["inputs_end"]["monotonic_ns"]
+            assert step["inputs_end"]["monotonic_ns"] <= step["input_prep_end"]["monotonic_ns"]
         if failure != "missing_forward":
             for step in host["steps"]:
                 assert step["execute_entry"]["monotonic_ns"] <= step["forward_entry"]["monotonic_ns"]

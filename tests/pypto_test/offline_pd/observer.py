@@ -448,6 +448,7 @@ class OfflineCSAObserver:
             from offline_pd.forward_host import ForwardHostDiagnostics
 
             diagnostic = ForwardHostDiagnostics()
+            diagnostic.attach_runner(runner, lambda: active[0])
             state["_host_diagnostic_session"] = diagnostic
 
         def forward(*args, **kwargs):
