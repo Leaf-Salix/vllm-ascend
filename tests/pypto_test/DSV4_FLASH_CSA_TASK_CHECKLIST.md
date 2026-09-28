@@ -192,6 +192,10 @@ MTE1→FIX等待15→0，另外9份Score生成二进制一致；后续两档状�
 长档Score核内285.446→269.906μs、四窗口分布不重叠，完整CSA七三−1.682%；
 短档P95+1.96μs、原始核内七三+0.155%均记录，最终整模型效果待同一源码验收。
 [候选、生成地址与测试合同](results/csa_score_key_l1_20260928/README.md)。
+长档小batch后续候选已准备：仅双query/M128/N128启用同类Key L1/L0B双槽，CPU完整编译/load通过。
+双Key32KiB+WS32KiB恰为64KiB；三query需80KiB，不直接移植。尾段多一条MTE1→FIX等待，尚无实测收益。
+待七档模型阶段结束后，定向对照128K/B4与8K/B16；其他长档生成核不变，不额外重跑。
+[独立候选与CPU证据](results/csa_score_key_l1_pair_20260928/README.md)。
 
 后续核内方案主要参考最新AscendC：本地ops-transformer b5b33e14优先，
 ops-nn 7a71d54e、ops-math 81802185补充；每项先确认A3适用性和与当前PTO的实际差异。

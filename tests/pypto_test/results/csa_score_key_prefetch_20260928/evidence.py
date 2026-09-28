@@ -14,10 +14,13 @@ TASKS = (
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent)
+    parser.add_argument('--long-batch', type=int, default=16)
+    parser.add_argument('--short-batch', type=int, default=16)
+    parser.add_argument('--baseline', default='2d2f9ca0')
     args = parser.parse_args()
     cases = []
-    for history in (131072, 8192):
-        folder = args.root / f'h{history}_b16'
+    for history, batch in ((131072, args.long_batch), (8192, args.short_batch)):
+        folder = args.root / f'h{history}_b{batch}'
         source = json.loads((folder / 'summary.json').read_text())
         evidence = {key: value for key, value in source.items() if key != 'measurements'}
         measurements = {}
@@ -47,10 +50,10 @@ def main():
                 **values,
                 'change_pct': (values['candidate'] / values['baseline'] - 1) * 100,
             }
-        cases.append({'history': history, 'batch': 16, 'status': source['status'], 'metrics': metrics})
+        cases.append({'history': history, 'batch': batch, 'status': source['status'], 'metrics': metrics})
 
     result = {
-        'scope': '同轮候选对2d2f9ca0；无profiler完整CSA与独立四窗口DFX分别计算。',
+        'scope': f'同轮候选对{args.baseline}；无profiler完整CSA与独立四窗口DFX分别计算。',
         'limits': 'AIV核内包含等候AIC；未更改任务的波动不能归为候选收益。保留P95及所有原始样本。',
         'cases': cases,
         'weighted_change_pct': {
