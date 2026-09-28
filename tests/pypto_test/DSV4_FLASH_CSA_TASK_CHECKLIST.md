@@ -32,6 +32,8 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 [排序收益及B8结果](results/csa_score_balanced_sort_20260928/README.md)。
 下一项先减少重复计划计算：复用编排已算出的max_topk_cache_len，避免Score/长merge各worker重新扫描kv_seq_lens；
 仅在算子内部传现有标量，先确认生成码及图重放，不新增metadata executor，不改Native流程。
+Indexer保留提交51501f1f；本轮测量仍基于8e176285派生快照，未包含并行合入的664c69ce WO_A ND及4e830c32 arena配置。
+下一轮两侧统一新冻结基线，同时补该组合的必要集成检查；不将已有单项结果称为当前整个分支已验证。
 
 最近完成统一七档真实EP16的冻结组合为 **554b3bca**：包含四路Top-K及UB累计根、HC输入/RMS融合、
 QR输入/gamma驻留及尾行修复，以及长S6 Score的独立Key L1预取。
