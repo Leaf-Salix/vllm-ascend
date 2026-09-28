@@ -11,7 +11,7 @@ for shape in 131072:16 8192:16; do
     batch="${shape#*:}"
     for phase in timing swimlane; do
         for label in baseline candidate; do
-            if [[ "$phase" == swimlane && "$label" == baseline ]]; then continue; fi
+            if [[ "$phase" == swimlane && "$label" == baseline && "$TASK_DEVICE" == 0 ]]; then continue; fi
             source_repo="$workspace/.cache/csa-qa-adaptive-88d0744f"
             extra=()
             if [[ "$label" == candidate ]]; then

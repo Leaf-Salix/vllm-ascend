@@ -13,7 +13,7 @@ def main():
     spec = importlib.util.spec_from_file_location("worker", path)
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
-    result = {"operator": "30f2b228 + fixed-K KV K512; atomic0", "task": "task_20260928_082115_13519341598",
+    result = {"operator": "30f2b228 + fixed-K KV K512; atomic0", "task": "task_20260928_083347_173445228283",
               "scope": "两档同配置20次无profiler图计时、各2个独立DFX窗口；layer4真实权重、合成历史。",
               "limits": "核内时间包含DMA和等待，总核时间不是完整跨度；本体/Native控制与核内分别报告。"
                         "逐元素比较8类状态，不含idx_topk_scores；不是EP16验收。", "cases": []}
@@ -27,7 +27,7 @@ def main():
             timing_path = folder / side / "report.json"
             report = json.loads(timing_path.read_text())
             swimlane_path = folder / "swimlane" / side / "report.json"
-            if side == "baseline":
+            if side == "baseline" and not swimlane_path.exists():
                 swimlane_path = (ROOT.parent / "csa_qa_adaptive_20260928" /
                                  folder.name / "swimlane/candidate/report.json")
             swimlane = json.loads(swimlane_path.read_text())
