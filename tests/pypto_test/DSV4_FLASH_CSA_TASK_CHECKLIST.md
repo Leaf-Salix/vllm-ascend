@@ -79,6 +79,12 @@ PTO P95/P50为1.0143–1.0251，max/P50最高1.0465；累计0/140超过各自P50
 此前只改query分工却保留两个half根的失败候选不原样重试，不把结构上减少GM读写当作实测收益。
 精度迁移和整模型仍后置，保留长小batch Score、短Sparse的核内优化入口。
 
+下一项为[NZ O-B小中档激活L1复用](results/csa_ob_activation_l1_20260929/README.md)：
+参考最新ops-nn的AL1-full/N-first策略，只把ROW32/96输入完整K1024驻留并跨两个N256复用，
+权重仍K256双缓冲，ROW128/ND/量化/调度不改；区别于旧整B权重驻留失败版本。
+两入口解析、完整CPU编译/load及生成码容量通过；task_20260929_123150_61152813936正常auto运行，
+长B16受影响、短B24控制，按64份O-B核时、完整CSA/P95和八类状态决定，不提前采用。
+
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
 | 1 | Native新标准七档已完成 | dynamic=False/inplace=True/static+superkernel、显式named backend自管图；[七档实测](results/csa_native_inplace_seven_20260929/NATIVE_RESULTS.md)与八类同图状态通过，PTO配套采集不阻塞发布，不再试开关 |

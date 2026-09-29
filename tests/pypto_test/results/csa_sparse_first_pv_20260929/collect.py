@@ -84,7 +84,7 @@ def main():
                           "mix_x_rms_norm": (batch * 6 + 7) // 8,
                           "indexer_score_topk_native_pair_aic": 24,
                           "indexer_score_topk_native_pair_aiv": 48,
-                          "indexer_topk_query_merge": 48}[task_name]
+                          "indexer_topk_query_merge": 48, "proj_b_mm": 64}[task_name]
                 tasks = [w["tasks"][task_name] for w in side["windows"]]
                 if any(t["blocks"] != blocks for t in tasks):
                     raise ValueError(f"{task_name}核心覆盖改变")

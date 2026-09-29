@@ -11562,3 +11562,27 @@ README包含范围及正式性能表，SOURCES.tsv逐项记录原文件、任务
 [ZIP下载](results/csa_single_root_seven_20260929/PTO_CSA_7cases_2ed8ae2e_20260929.zip)、
 [性能与核内结果](results/csa_single_root_seven_20260929/RESULTS.md)、
 [当前差距及后续](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+
+## 428. 参考Native A全载/N优先复用，准备O-B激活L1候选并正常排队（2026-09-29）
+
+上一阶段为实质进展：七档计时/四窗泳道收齐并更新差距，七份原始JSON及ZIP已交付。
+本阶段从2ed8ae2e的已测私有整包重新复制baseline/candidate，生产和已发布泳道不改。
+先核对历史§110.2：完整K1024权重B驻留已撤回，不以相同方案重跑。
+
+最新ops-nn19614968 QuantBatchMatmulV3Tiling::GetIteratorOrder在A的K可全载、B非全载时选N优先，
+复用同一A跨多个N块。此处借鉴的是条件策略，不声称当前Native K8192实测分块能装下完整A。
+PTO性能版按组K1024，ROW32/96的O-B每worker处理两个N256，旧路径逐N再次搬A；
+候选显式Mat tile整A加载一次并跨N复用，B继续K256分段双缓冲。ROW128、ND、原权重指针/布局、
+INT8→INT32累加与量化/舍入、64份O-B任务及全部依赖/调度标志均保持。
+与pypto-lib2164563的区别为显式A生命周期跨N，而不是改变其组量化规则或照搬旧全B驻留。
+
+两入口依赖解析、完整PTOAS/CCE/link/load通过。最终IR的ROW96 A为96KiB，两个B槽各64KiB，
+Mat总224KiB、Left48KiB、Right64KiB、Acc96KiB；A的TLOAD位于N循环外。
+Ruff发现基底遗留的BF16_WEIGHT_LAYOUT未使用导入，编译结束后仅删除该导入，正文不再改变；
+Ruff/shell通过，不为这一导入清理重复完整编译。
+
+12:31正常auto提交task_20260929_123150_61152813936并确认running，最长5400秒。
+长128K/B16（ROW96受影响）及短8K/B24（ROW128不变控制），5预热20次正式设备事件、四窗DFX，
+八类完整状态零容差；按O-B核时/范围、CSA/P95及长短8:2评估，短档控制波动不归因新算法。
+若无真实核内收益停止扩测，有收益再补小档/尾行/padding。Native、精度版及EP16不新增测试。
+[实现、静态证据与设备入口](results/csa_ob_activation_l1_20260929/README.md)。

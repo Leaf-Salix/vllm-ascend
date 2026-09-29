@@ -1,0 +1,65 @@
+--- a/decode_o_proj.py
++++ b/decode_o_proj.py
+@@ -23,7 +23,6 @@
+     TP as TP_SIZE,
+ )
+ from .nz_mode import (
+-    BF16_WEIGHT_LAYOUT,
+     BF16_WEIGHT_NZ,
+     QUANT_WEIGHT_LAYOUT,
+     QUANT_WEIGHT_NZ,
+@@ -311,9 +310,33 @@
+ ):
+     # Keep Native [G*K,N] NZ storage; all group offsets remain inside this kernel.
+     d0 = pl.tile.get_block_idx() * PROJ_B_D_TILE
+-    for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
+-        n0 = d0 + nf * PROJ_B_MM_N_TILE
+-        if ROW_TILE > PROJ_B_MEDIUM_T_TILE:
++    if ROW_TILE <= PROJ_B_MEDIUM_T_TILE:
++        for tb in pl.range(proj_b_t_rows):
++            t0 = tb * ROW_TILE
++            # Native's AL1-full/N-first idea: one activation load serves both
++            # N256 outputs. Keep weights streamed at K256; no full B residency.
++            activation_l1 = pl.load(
++                o_r_i8_pad, [t0, col_g], [ROW_TILE, O_LORA], target_memory=pl.MemorySpace.Mat,
++            )
++            for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
++                n0 = d0 + nf * PROJ_B_MM_N_TILE
++                acc_b = pl.create_tile([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32,
++                                       target_memory=pl.MemorySpace.Acc)
++                for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
++                    k0 = kb * B_K_TILE
++                    wk0 = pl.max(g, 0) * O_LORA + k0
++                    b_weight_l1 = pl.load(
++                        wo_b, [wk0, n0], [B_K_TILE, PROJ_B_MM_N_TILE], target_memory=pl.MemorySpace.Mat,
++                    )
++                    b_act_left = pl.tile.extract(
++                        activation_l1, 0, k0, [ROW_TILE, B_K_TILE], target_memory=pl.MemorySpace.Left,
++                    )
++                    b_weight_right = pl.tile.move(b_weight_l1, target_memory=pl.MemorySpace.Right)
++                    acc_b = pl.tile.matmul_acc(acc_b, b_act_left, b_weight_right, init_cond=(kb == 0))
++                pl.store(acc_b, [t0, g * D + n0], partials)
++    else:
++        for nf in pl.range(PROJ_B_D_TILE // PROJ_B_MM_N_TILE):
++            n0 = d0 + nf * PROJ_B_MM_N_TILE
+             weight_k0 = pl.max(g, 0) * O_LORA
+             weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
+             for tb in pl.range(proj_b_t_rows):
+@@ -321,17 +344,6 @@
+                 b_act_full = o_r_i8_pad[t0 : t0 + ROW_TILE, col_g : col_g + O_LORA]
+                 full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
+                 partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = full_acc
+-        else:
+-            for tb in pl.range(proj_b_t_rows):
+-                t0 = tb * ROW_TILE
+-                acc_b = pl.create_tensor([ROW_TILE, PROJ_B_MM_N_TILE], dtype=pl.INT32)
+-                for kb in pl.pipeline(0, O_LORA // B_K_TILE, stage=2):
+-                    k0 = col_g + kb * B_K_TILE
+-                    b_act = o_r_i8_pad[t0 : t0 + ROW_TILE, k0 : k0 + B_K_TILE]
+-                    wk0 = pl.max(g, 0) * O_LORA + kb * B_K_TILE
+-                    b_weight = wo_b[wk0 : wk0 + B_K_TILE, n0 : n0 + PROJ_B_MM_N_TILE]
+-                    acc_b = pl.matmul_acc(acc_b, b_act, b_weight, init_cond=(kb == 0))
+-                partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = acc_b
+     return partials
+ 
+ 
