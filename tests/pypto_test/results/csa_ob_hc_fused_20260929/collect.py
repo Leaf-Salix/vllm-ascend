@@ -1,5 +1,6 @@
 """比较两级收尾与融合收尾的总核内工作量、包络、CSA和完整状态。"""
 
+import argparse
 import functools
 import json
 import re
@@ -13,6 +14,9 @@ ROOT = Path(__file__).resolve().parent
 def main():
     import importlib.util
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--long-only", action="store_true", help="仅收集失败后主动停止扩测的完整长档")
+    args = parser.parse_args()
     spec = importlib.util.spec_from_file_location(
         "fusion_common", ROOT.parent / "csa_sparse_first_pv_20260929/collect.py")
     common = importlib.util.module_from_spec(spec)
@@ -21,7 +25,8 @@ def main():
     read, load = common.read, common.load
     task = (ROOT / "task.txt").read_text().strip()
     status = subprocess.check_output(["task-submit", "--status", task], text=True).strip()
-    if status != "completed (exit=0)":
+    accepted = {"completed (exit=0)", "completed (exit=130)"} if args.long_only else {"completed (exit=0)"}
+    if status not in accepted:
         raise RuntimeError(f"等待同一任务终态：{status}")
     source = read(ROOT / "source.json")
     pair = load("fusion_pair", ROOT.parent / "csa_compiled_pair_20260929/analyze.py")
@@ -33,7 +38,11 @@ def main():
     helper = load("fusion_join", ROOT.parents[4] / "pypto-lib/.claude/skills/critical-path/scripts/report.py")
     result = {"task": task, "task_status": status, "source": source, "cases": [],
               "scope": "同卡两档局部A/B；不是Native、精度版CSA或模型token/DSpark验收"}
-    for history, batch in source["cases"]:
+    if args.long_only:
+        result["scope"] = "完整长B16回退后主动停止短档；没有完整8:2结果，也不是Native或模型验收"
+    cases = source["cases"][:1] if args.long_only else source["cases"]
+    prefix = "partial_" if args.long_only else ""
+    for history, batch in cases:
         folder = ROOT / f"h{history}_b{batch}"
         sides, states = {}, {}
         for side in ("baseline", "candidate"):
@@ -76,11 +85,13 @@ def main():
                                 "tail_change_pct": changes})
     result["state_status"] = "PASS" if all(v["status"] == "PASS" for c in result["cases"]
                                           for v in c["state_checks"].values()) else "FAIL"
-    result["weighted_8_2_csa_pct"] = sum(w * c["csa_change_pct"] for w, c in zip((.8, .2), result["cases"]))
-    result["weighted_8_2_tail_pct"] = {k: sum(w * c["tail_change_pct"][k]
+    result["weighted_8_2_csa_pct"] = (None if args.long_only else
+                                    sum(w * c["csa_change_pct"] for w, c in zip((.8, .2), result["cases"])))
+    result["weighted_8_2_tail_pct"] = (None if args.long_only else
+                                     {k: sum(w * c["tail_change_pct"][k]
                                              for w, c in zip((.8, .2), result["cases"]))
-                                     for k in ("tail_kernel_work_us", "tail_span_us")}
-    (ROOT / "evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+                                      for k in ("tail_kernel_work_us", "tail_span_us")})
+    (ROOT / (prefix + "evidence.json")).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     summary = {k: v for k, v in result.items() if k != "cases"}
     summary["cases"] = []
     for case in result["cases"]:
@@ -91,8 +102,8 @@ def main():
         for s, v in case["sides"].items():
             item["sides"][s]["windows"] = [{k: x for k, x in w.items() if k != "all_tasks"} for w in v["windows"]]
         summary["cases"].append(item)
-    (ROOT / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
-    lines = ["# O-B反量化与HC_post融合：两档对照", "",
+    (ROOT / (prefix + "summary.json")).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
+    lines = ["# O-B反量化与HC_post融合：" + ("长档否定结果" if args.long_only else "两档对照"), "",
              f"八类跨版本状态零容差：{result['state_status']}。单位μs，5预热20次正式事件，DFX独立四窗。", "",
              "| 档位 | CSA基线→候选 | 变化 | P95 | 总核内工作量 | 收尾跨度 |",
              "| --- | ---: | ---: | ---: | ---: | ---: |"]
@@ -103,13 +114,15 @@ def main():
         lines.append(f"| {case['history']//1024}K/B{case['batch']} | {a['mean_us']:.3f}→{b['mean_us']:.3f} "
                      f"| {case['csa_change_pct']:+.3f}% | {a['us_p95']:.3f}→{b['us_p95']:.3f} | "
                      + " | ".join(tail) + " |")
-    lines += ["", f"长短8:2 CSA变化{result['weighted_8_2_csa_pct']:+.3f}%；总核内工作量变化"
-              f"{result['weighted_8_2_tail_pct']['tail_kernel_work_us']:+.3f}%。",
+    weighted = ("长档回退后主动停止剩余采集，没有完整短档及8:2结论。" if args.long_only else
+                f"长短8:2 CSA变化{result['weighted_8_2_csa_pct']:+.3f}%；总核内工作量变化"
+                f"{result['weighted_8_2_tail_pct']['tail_kernel_work_us']:+.3f}%。")
+    lines += ["", weighted,
               "总核内工作量为全部相关worker核时之和，基线合并proj_b_act与hc_post；不跨不同worker数比较单核均值。",
               "收尾跨度为首个相关kernel start到最后end；包含波次与间隙，不等于核时总和或纯调度开销。",
               "独立DFX不与正式CSA样本直接相减。Native、精度版和整模型验收均未在本轮覆盖。",
-              "[完整样本与状态](summary.json)、[官方join和全部任务](evidence.json)。"]
-    (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")
+              f"[完整样本与状态]({prefix}summary.json)、[官方join和全部任务]({prefix}evidence.json)。"]
+    (ROOT / ("PARTIAL_RESULTS.md" if args.long_only else "RESULTS.md")).write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     if result["state_status"] != "PASS":
         raise SystemExit(1)

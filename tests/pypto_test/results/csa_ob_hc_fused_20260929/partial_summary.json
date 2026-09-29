@@ -1,0 +1,687 @@
+{
+  "task": "task_20260929_135654_65664815311",
+  "task_status": "completed (exit=130)",
+  "source": {
+    "baseline": "9a868d26",
+    "base_source": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-ob-activation-l1-k128-2ed8ae2e-candidate",
+    "source_prefix": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-ob-hc-fused-9a868d26",
+    "variant": "pkg:dsv4_csa_ob_hc_fused_9a868d26",
+    "cases": [
+      [
+        131072,
+        16
+      ],
+      [
+        8192,
+        24
+      ]
+    ],
+    "change": "O-B反量化与HC_post共用AIV任务，T16/N512工作块、内部T8；BF16边界和相加顺序保留",
+    "expected_workers": {
+      "128K/B16": 48,
+      "8K/B24": 72
+    },
+    "scope": "私有CPU候选；共享HC单行路径保留原算术，多行路径按行广播；未修改生产或工具链"
+  },
+  "scope": "完整长B16回退后主动停止短档；没有完整8:2结果，也不是Native或模型验收",
+  "state_status": "PASS",
+  "weighted_8_2_csa_pct": null,
+  "weighted_8_2_tail_pct": null,
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "state_checks": {
+        "compressed.0": {
+          "status": "PASS",
+          "shape": [
+            16417,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            16417,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 268976128,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "idx_topk": {
+          "status": "PASS",
+          "shape": [
+            96,
+            512
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            96,
+            512
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 49152,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "indexer.0": {
+          "status": "PASS",
+          "shape": [
+            16417,
+            32,
+            1,
+            128
+          ],
+          "dtype": "torch.int8",
+          "expected_shape": [
+            16417,
+            32,
+            1,
+            128
+          ],
+          "expected_dtype": "torch.int8",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 67244032,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "indexer.1": {
+          "status": "PASS",
+          "shape": [
+            16417,
+            32,
+            1,
+            1
+          ],
+          "dtype": "torch.float16",
+          "expected_shape": [
+            16417,
+            32,
+            1,
+            1
+          ],
+          "expected_dtype": "torch.float16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 525344,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "indexer_state.0": {
+          "status": "PASS",
+          "shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 148480,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "state.0": {
+          "status": "PASS",
+          "shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "dtype": "torch.float32",
+          "expected_shape": [
+            145,
+            2,
+            1,
+            2048
+          ],
+          "expected_dtype": "torch.float32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 593920,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "swa.0": {
+          "status": "PASS",
+          "shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            145,
+            32,
+            1,
+            512
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 2375680,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "x_out": {
+          "status": "PASS",
+          "shape": [
+            96,
+            4,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "expected_shape": [
+            96,
+            4,
+            4096
+          ],
+          "expected_dtype": "torch.bfloat16",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 1572864,
+          "comparison": "tolerance",
+          "nonfinite": 0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "mismatches": 0,
+          "first_mismatches": []
+        }
+      },
+      "csa_change_pct": 1.1729632693990633,
+      "tail_change_pct": {
+        "tail_kernel_work_us": 144.49441183298512,
+        "tail_span_us": 4.218172550019195
+      },
+      "sides": {
+        "baseline": {
+          "device": 1,
+          "cann": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+          "mean_us": 979.5700013637543,
+          "us_p50": 977.6799976825714,
+          "us_p95": 991.2999868392944,
+          "us_max": 1003.2600164413452,
+          "samples_us": [
+            982.7799797058105,
+            973.6400246620178,
+            991.2999868392944,
+            979.5600175857544,
+            969.3999886512756,
+            974.5399951934814,
+            971.0999727249146,
+            991.1400079727173,
+            973.2999801635742,
+            972.0199704170227,
+            978.5599708557129,
+            975.8599996566772,
+            976.0000109672546,
+            980.4400205612183,
+            963.2800221443176,
+            976.8000245094299,
+            983.680009841919,
+            990.2200102806091,
+            984.5200181007385,
+            1003.2600164413452
+          ],
+          "p95_over_p50": 1.013930927490597,
+          "over_p50_5pct": 0,
+          "guards": {
+            "PASS": 31
+          },
+          "profile_json": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/timing/baseline/profile/liteserver-hps-365a-00001_656970_20260929135836336_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json",
+          "windows": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/baseline/dfx/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act": {
+                  "blocks": 24,
+                  "first_receive_us": 879.26,
+                  "first_start_us": 886.74,
+                  "last_start_us": 887.26,
+                  "last_end_us": 903.1400000000001,
+                  "start_spread_us": 0.5199999999999818,
+                  "worker_envelope_us": 23.88000000000011,
+                  "kernel_mean_us": 15.05249999999999,
+                  "setup_mean_us": 6.789166666666664
+                },
+                "hc_post": {
+                  "blocks": 24,
+                  "first_receive_us": 890.94,
+                  "first_start_us": 908.2,
+                  "last_start_us": 908.8399999999999,
+                  "last_end_us": 926.76,
+                  "start_spread_us": 0.6399999999998727,
+                  "worker_envelope_us": 35.819999999999936,
+                  "kernel_mean_us": 16.420833333333334,
+                  "setup_mean_us": 16.83333333333333
+                }
+              },
+              "dependencies": {
+                "proj_b_act": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.7200000000000273
+                },
+                "hc_post": {
+                  "producers": [
+                    "proj_b_act",
+                    "split_pre_post",
+                    "comb_sinkhorn"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8199999999999363
+                }
+              },
+              "tail_kernel_work_us": 755.3599999999998,
+              "tail_span_us": 40.01999999999998,
+              "worker_span_us": 926.76
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/baseline/dfx/window_1/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act": {
+                  "blocks": 24,
+                  "first_receive_us": 869.2,
+                  "first_start_us": 877.5600000000001,
+                  "last_start_us": 878.0600000000001,
+                  "last_end_us": 894.02,
+                  "start_spread_us": 0.5,
+                  "worker_envelope_us": 24.819999999999936,
+                  "kernel_mean_us": 14.71083333333334,
+                  "setup_mean_us": 6.694166666666665
+                },
+                "hc_post": {
+                  "blocks": 24,
+                  "first_receive_us": 882.74,
+                  "first_start_us": 898.12,
+                  "last_start_us": 898.82,
+                  "last_end_us": 916.72,
+                  "start_spread_us": 0.7000000000000455,
+                  "worker_envelope_us": 33.98000000000002,
+                  "kernel_mean_us": 16.63083333333334,
+                  "setup_mean_us": 15.499166666666662
+                }
+              },
+              "dependencies": {
+                "proj_b_act": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8000000000000682
+                },
+                "hc_post": {
+                  "producers": [
+                    "proj_b_act",
+                    "split_pre_post",
+                    "comb_sinkhorn"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8600000000000136
+                }
+              },
+              "tail_kernel_work_us": 752.2000000000003,
+              "tail_span_us": 39.15999999999997,
+              "worker_span_us": 916.72
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/baseline/dfx/window_2/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act": {
+                  "blocks": 24,
+                  "first_receive_us": 865.18,
+                  "first_start_us": 876.02,
+                  "last_start_us": 876.42,
+                  "last_end_us": 892.4,
+                  "start_spread_us": 0.39999999999997726,
+                  "worker_envelope_us": 27.220000000000027,
+                  "kernel_mean_us": 15.08083333333333,
+                  "setup_mean_us": 9.837499999999986
+                },
+                "hc_post": {
+                  "blocks": 24,
+                  "first_receive_us": 879.78,
+                  "first_start_us": 896.36,
+                  "last_start_us": 896.98,
+                  "last_end_us": 914.9599999999999,
+                  "start_spread_us": 0.6200000000000045,
+                  "worker_envelope_us": 35.17999999999995,
+                  "kernel_mean_us": 16.65166666666666,
+                  "setup_mean_us": 15.901666666666676
+                }
+              },
+              "dependencies": {
+                "proj_b_act": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8600000000000136
+                },
+                "hc_post": {
+                  "producers": [
+                    "proj_b_act",
+                    "split_pre_post",
+                    "comb_sinkhorn"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8600000000000136
+                }
+              },
+              "tail_kernel_work_us": 761.5799999999998,
+              "tail_span_us": 38.93999999999994,
+              "worker_span_us": 914.9599999999999
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/baseline/dfx/window_3/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act": {
+                  "blocks": 24,
+                  "first_receive_us": 868.9399999999999,
+                  "first_start_us": 875.04,
+                  "last_start_us": 875.4599999999999,
+                  "last_end_us": 891.48,
+                  "start_spread_us": 0.4199999999999591,
+                  "worker_envelope_us": 22.540000000000077,
+                  "kernel_mean_us": 14.665000000000006,
+                  "setup_mean_us": 6.127499999999998
+                },
+                "hc_post": {
+                  "blocks": 24,
+                  "first_receive_us": 879.9,
+                  "first_start_us": 895.4,
+                  "last_start_us": 896.0,
+                  "last_end_us": 913.86,
+                  "start_spread_us": 0.6000000000000227,
+                  "worker_envelope_us": 33.960000000000036,
+                  "kernel_mean_us": 16.424999999999994,
+                  "setup_mean_us": 15.594166666666672
+                }
+              },
+              "dependencies": {
+                "proj_b_act": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.6599999999999682
+                },
+                "hc_post": {
+                  "producers": [
+                    "proj_b_act",
+                    "split_pre_post",
+                    "comb_sinkhorn"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.8000000000000682
+                }
+              },
+              "tail_kernel_work_us": 746.16,
+              "tail_span_us": 38.82000000000005,
+              "worker_span_us": 913.86
+            }
+          ]
+        },
+        "candidate": {
+          "device": 1,
+          "cann": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+          "mean_us": 991.059997677803,
+          "us_p50": 990.6800091266632,
+          "us_p95": 1003.0399560928345,
+          "us_max": 1003.2000541687012,
+          "samples_us": [
+            981.1400175094604,
+            991.599977016449,
+            995.3200221061707,
+            1003.2000541687012,
+            986.5599870681763,
+            982.8199744224548,
+            978.4799814224243,
+            995.9800243377686,
+            988.2199764251709,
+            998.4400272369385,
+            990.8000230789185,
+            987.7399802207947,
+            990.559995174408,
+            979.8600077629089,
+            997.6000189781189,
+            987.559974193573,
+            1003.0399560928345,
+            998.7999796867371,
+            988.1399869918823,
+            995.3399896621704
+          ],
+          "p95_over_p50": 1.0124762252718384,
+          "over_p50_5pct": 0,
+          "guards": {
+            "PASS": 31
+          },
+          "profile_json": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/timing/candidate/profile/liteserver-hps-365a-00001_780436_20260929140032749_ascend_pt/ASCEND_PROFILER_OUTPUT/trace_view.json",
+          "windows": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/candidate/dfx/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act_hc_post": {
+                  "blocks": 48,
+                  "first_receive_us": 891.5,
+                  "first_start_us": 896.62,
+                  "last_start_us": 897.7,
+                  "last_end_us": 935.58,
+                  "start_spread_us": 1.080000000000041,
+                  "worker_envelope_us": 44.08000000000004,
+                  "kernel_mean_us": 35.81916666666667,
+                  "setup_mean_us": 4.617083333333343
+                }
+              },
+              "dependencies": {
+                "proj_b_act_hc_post": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "comb_sinkhorn",
+                    "proj_b_mm",
+                    "split_pre_post",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.67999999999995
+                }
+              },
+              "tail_kernel_work_us": 1719.3200000000002,
+              "tail_span_us": 38.960000000000036,
+              "worker_span_us": 935.58
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/candidate/dfx/window_1/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act_hc_post": {
+                  "blocks": 48,
+                  "first_receive_us": 883.52,
+                  "first_start_us": 891.02,
+                  "last_start_us": 892.52,
+                  "last_end_us": 932.86,
+                  "start_spread_us": 1.5,
+                  "worker_envelope_us": 49.34000000000003,
+                  "kernel_mean_us": 39.86166666666667,
+                  "setup_mean_us": 5.5
+                }
+              },
+              "dependencies": {
+                "proj_b_act_hc_post": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "comb_sinkhorn",
+                    "proj_b_mm",
+                    "split_pre_post",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.7599999999999909
+                }
+              },
+              "tail_kernel_work_us": 1913.3600000000001,
+              "tail_span_us": 41.84000000000003,
+              "worker_span_us": 932.86
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/candidate/dfx/window_2/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act_hc_post": {
+                  "blocks": 48,
+                  "first_receive_us": 884.1,
+                  "first_start_us": 893.6800000000001,
+                  "last_start_us": 894.5,
+                  "last_end_us": 934.94,
+                  "start_spread_us": 0.8199999999999363,
+                  "worker_envelope_us": 50.84000000000003,
+                  "kernel_mean_us": 39.0475,
+                  "setup_mean_us": 8.110000000000014
+                }
+              },
+              "dependencies": {
+                "proj_b_act_hc_post": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "comb_sinkhorn",
+                    "proj_b_mm",
+                    "split_pre_post",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.82000000000005
+                }
+              },
+              "tail_kernel_work_us": 1874.28,
+              "tail_span_us": 41.25999999999999,
+              "worker_span_us": 934.94
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_ob_hc_fused_20260929/h131072_b16/swimlane/candidate/dfx/window_3/merged_swimlane.json",
+              "joined_rows": 977,
+              "tasks": {
+                "proj_b_act_hc_post": {
+                  "blocks": 48,
+                  "first_receive_us": 909.34,
+                  "first_start_us": 916.6,
+                  "last_start_us": 917.6400000000001,
+                  "last_end_us": 958.1,
+                  "start_spread_us": 1.0400000000000773,
+                  "worker_envelope_us": 48.75999999999999,
+                  "kernel_mean_us": 38.85999999999999,
+                  "setup_mean_us": 6.160000000000008
+                }
+              },
+              "dependencies": {
+                "proj_b_act_hc_post": {
+                  "producers": [
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "proj_b_mm",
+                    "comb_sinkhorn",
+                    "proj_b_mm",
+                    "split_pre_post",
+                    "proj_b_mm",
+                    "proj_b_mm"
+                  ],
+                  "last_producer_finish_to_first_start_us": 0.6599999999999682
+                }
+              },
+              "tail_kernel_work_us": 1865.2799999999997,
+              "tail_span_us": 41.5,
+              "worker_span_us": 958.1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
