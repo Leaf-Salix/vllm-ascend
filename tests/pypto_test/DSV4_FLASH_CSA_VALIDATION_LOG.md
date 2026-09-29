@@ -11154,3 +11154,43 @@ pypto-lib2164563的dspark仍保留独立merge_norm，当前偏离它的理由是
 Ruff与shell语法检查通过，设备结果待同一任务结束。
 [候选](results/csa_sparse_final_publish_20260929/README.md)、
 [CPU与UB](results/csa_sparse_final_publish_20260929/lowering.json)。
+
+## 409. Sparse融合首版输出检查失败，停止扩测并定位统计量切片（2026-09-29）
+
+task_20260929_083719_62875131423退出0，auto设备1，两档计时及各四窗DFX齐全。
+执行成功不代表跨版本正确：128K/B16的x_out有1013730/1572864元素不同，max_abs0.1640625、
+RMSE0.0139378；8K/B24为1528834/2359296，max_abs0.16064453125、RMSE0.0144307。
+其余七类Top-K/cache/state全部零容差一致，各自graph/eager与保护区亦通过。
+原候选禁止采用，已准备的边界/padding任务未提交，生产算子仍为4ffccb7b。
+
+失败实验观察：长CSA1043.531→1026.546μs，短982.682→934.703μs；不计为有效收益。
+Sparse加独立merge的AIV核·μs分别9231.580→7614.830、10484.415→8814.220，
+融合改变范围且数值失败，同样不能宣告优化通过。
+收集器改为显式支持发布任务边界，保留默认merge_norm；失败结果完整落盘并继续非零退出，
+允许只重排既有evidence，不重复大张量验证和原始DFX转换。
+[失败结果](results/csa_sparse_final_publish_20260929/RESULTS.md)。
+
+检查生成代码发现：每AIV处理32-head的后16-head时，mi/li本应偏移16×4=64字节，
+MemoryReuse IR有该偏移，但最终C++的slice/reshape仍指向前半块基址135424/135552；
+PV左右半块的非零行偏移则正确保留。先修此明确问题，不凭计时变化猜测算术或调度原因。
+在新私有副本尝试显式TEXTRACT；直接ColMajor Vec→Vec被现有A3指令限制拒绝，
+因此先把完整连续统计量reshape为[1,32]，按列显式extract为[1,16]后恢复[16,1]。
+不修改PyPTO/PTOAS/PTO-ISA，不改原已测候选；待编译及独立Sparse对照确认。
+诊断只取已有真实Q/cache/Top-K固定输入的前B16个序列，不恢复退役B40，也不运行整模型。
+
+## 410. 显式ND抽取修复通过独立Sparse，恢复完整CSA两档对照（2026-09-29）
+
+完整PTOAS/CCE/load通过，生成代码后半块明确执行从列16的TEXTRACT；两生产入口依赖图可解析。
+task_20260929_090812_141352622666退出0，auto设备12，同卡对比4ffccb7b、失败版、修正版。
+固定历史Q/cache/Top-K的前B16序列（T96，覆盖跨query流水），cos=1/sin=0，
+失败版与生产基线差异1556014/3145728，前16-head和32–47精确一致，
+差异仅在16–31与48–63，max_abs0.3974609375，符合统计量偏移丢失。
+仅修正mi/li抽取后，3145728个BF16输出与生产基线逐bit一致，四个head组全部通过。
+未把对历史Native本身的舍入/算法差异改为PASS；本轮不是完整CSA或模型验收。
+[补丁与诊断](results/csa_sparse_final_publish_fix_20260929/README.md)。
+
+09:10正常auto提交完整CSA task_20260929_091005_151620710198，仅长B16/短B24，
+同卡两侧5预热20次图事件，独立四窗DFX及八类完整状态；source/runner均冻结。
+修复后的完整输出、逆RoPE、O投影及性能待本任务完成；暂不合入生产。
+边界/padding脚本已准备但未提交，依赖完整状态通过。
+[新完整对照](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)。

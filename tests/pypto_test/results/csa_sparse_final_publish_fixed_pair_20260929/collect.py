@@ -25,7 +25,7 @@ def main():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     module.ROOT = ROOT
-    module.SOURCE_PREFIX = ROOT.parents[4] / ".cache/csa-sparse-final-publish-4ffccb7b"
+    module.SOURCE_PREFIX = ROOT.parents[4] / ".cache/csa-sparse-final-publish-fix-4ffccb7b"
     module.VARIANT = "pkg:dsv4_csa_sparse_final_publish_4ffccb7b"
     module.TITLE = "Sparse最后PV块融合归一化、逆RoPE及分组发布"
     module.CHANGE_DESCRIPTION = "Sparse最终输出在最后PV块内发布，现有算术、Indexer和cache布局保持。"

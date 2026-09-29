@@ -101,16 +101,21 @@ O_A/O_B各64份工作由24个AIC执行，必须多波；WO_A已经直接借用NZ
 
 ## 下一步
 
-1. Native显式npugraph_ex的superkernel对照已完成：长短均有收益，八类状态开关两侧零容差通过，后续开启。
-   新入口短档计时含待分辨的主机派发区间，先固定开启、校准backend已生成图的直接replay，再替换Native基线。
-2. 长S6 AIV按query分工候选已正常auto单卡入队：每AIV三query×完整候选段，TMUL调用减半，scale重复读取翻倍。
-   保持Cube/half根/排序，分别看核内、CSA、P95；若有效按核内收益保留，再处理调度。
-   [候选和CPU证据](results/csa_score_query_split_20260929/README.md)。
+1. Native显式npugraph_ex的superkernel和设备replay口径均已完成校准，后续固定开启。
+   长B16/短B24分别1122.652/940.762μs；阶段出口统一更新七档，不再试开关，也不替换旧表中的两行拼成新表。
+   新profile的QLI→Sparse融合SuperKernel为516.580/203.380μs，AIC参考510.308/193.084μs、AIV参考512.672/195.446μs。
+   这些是整段融合范围，不能作为单个QLI或Sparse PMU，也不能与各旧核均值直接相减归因。
+2. 长S6仅按query重排AIV的候选没有核内收益，已否定；当前评估Sparse最后PV块直接归一化、逆RoPE及发布。
+   首版两档A/B已结束，Top-K/cache/state一致，但x_out大量不一致，计时不作为采用依据。
+   生成代码后16-head的mi/li切片仍引用前半块地址；在新私有副本中修复，先独立Sparse定位，未合入生产。
+   [当前候选](results/csa_sparse_final_publish_20260929/README.md)、
+   [已否定的AIV分工](results/csa_score_query_split_20260929/RESULTS.md)。
 3. 按28个level-4窗口区分producer end→FIN、FIN→dispatch和dispatch→start；
    固定window_3，dummy无物理时戳时不作完整ready归因。Score提前派发不等于资源已就绪。
    [长B16](results/csa_coefficients_seven_20260929/h131072_b16/schedule/README.md)、
    [短B24](results/csa_coefficients_seven_20260929/h8192_b24/schedule/README.md)。
-4. 独立merge及scale依赖后续再优化；scale写回涉及64字节读改写，没有页面所有权证明不删依赖。
+4. Sparse融合的核内与CSA/P95结果分别判定；Indexer独立merge及scale依赖保留后续，
+   scale写回涉及64字节读改写，没有页面所有权证明不删依赖。
 5. 精度版数值中性优化迁移、CANN9.2/新B24真实EP16 token/DSpark与稳态10步forward仍未完成。
 
 ## 保留策略和已否定方向

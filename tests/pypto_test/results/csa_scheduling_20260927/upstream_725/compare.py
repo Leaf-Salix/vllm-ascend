@@ -30,7 +30,7 @@ def canonical(name):
     return name
 
 
-def summarize(path):
+def summarize(path, publication_task="merge_norm"):
     data = json.loads(path.read_text())
     events = data["traceEvents"]
     pids = {e["pid"] for e in events if e.get("ph") == "M" and e.get("name") == "process_name"
@@ -56,16 +56,18 @@ def summarize(path):
         }
     norm_end = tasks["mix_x_rms_norm"]["last_end_us"]
     sparse_receive = min(tasks[k]["first_receive_us"] for k in ("qk_pv_aic", "qk_pv_aiv"))
-    merge_end = tasks["merge_norm"]["last_end_us"]
-    assert 0 < norm_end < sparse_receive < merge_end <= end
+    publication_end = tasks[publication_task]["last_end_us"]
+    assert 0 < norm_end < sparse_receive < publication_end <= end
+    publication_key = "merge_end" if publication_task == "merge_norm" else "publication_end"
     phases = {
         "first_worker_to_norm_end": norm_end,
         "norm_end_to_sparse_receive": sparse_receive - norm_end,
-        "sparse_receive_to_merge_end": merge_end - sparse_receive,
-        "merge_end_to_last_worker": end - merge_end,
+        f"sparse_receive_to_{publication_key}": publication_end - sparse_receive,
+        f"{publication_key}_to_last_worker": end - publication_end,
     }
     return {"path": str(path), "metadata": data.get("metadata", {}), "worker_span_us": end,
-            "worker_instances": len(workers), "phases_us": phases, "tasks": tasks}
+            "worker_instances": len(workers), "phases_us": phases, "tasks": tasks,
+            "publication_task": publication_task}
 
 
 def load_timing():

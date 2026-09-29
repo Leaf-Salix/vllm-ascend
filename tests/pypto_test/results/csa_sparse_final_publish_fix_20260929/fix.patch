@@ -1,0 +1,13 @@
+--- a/decode_sparse_attn_csa.py
++++ b/decode_sparse_attn_csa.py
+@@ -617,8 +617,8 @@
+                         for pub_h in pl.unroll((H // 2) // FINAL_HEAD_TILE):
+                             pub_local_head = pub_h * FINAL_HEAD_TILE
+                             m_h0 = qk_lane_head + pub_local_head
+-                            m_mi = pl.slice(m_valid, [FINAL_HEAD_TILE, 1], [pub_local_head, 0])
+-                            m_li = pl.slice(l_valid, [FINAL_HEAD_TILE, 1], [pub_local_head, 0])
++                            m_mi = pl.reshape(pl.tile.extract(pl.reshape(m_valid, [1, H // 2]), 0, pub_local_head, [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec), [FINAL_HEAD_TILE, 1])
++                            m_li = pl.reshape(pl.tile.extract(pl.reshape(l_valid, [1, H // 2]), 0, pub_local_head, [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec), [FINAL_HEAD_TILE, 1])
+                             m_left = pl.slice(left_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
+                             m_right = pl.slice(right_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
+                             m_oi = pl.concat(m_left, m_right)
