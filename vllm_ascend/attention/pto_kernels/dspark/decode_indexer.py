@@ -108,6 +108,20 @@ TOPK_QUERY_WORKERS = 48  # Top-K query-merge workers
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
 SCORE_TILE = 384
+# vllm 路径 KV gather 的行粒度。同一个 lane 里 scale tile 已经在用
+# 2 * BLOCK_SIZE，那里的注释写明「candidate shards begin on 64-row
+# boundaries」；vllm 的逻辑页是 VLLM_INDEX_KEY_ROWS = 128 行物理连续，所以
+# 只要 safe_page_begin 是这个粒度的倍数，一次读就不跨页。SCORE_LANE_ROWS
+# = 192 和 lane_span 都是 64 的倍数，logical_begin 是 TOPK_CANDIDATES_PER_LEAF
+# 的倍数，所以 intra = candidate % 128 只会是 0 或 64，64 + 64 正好到页边界。
+# gather 原来用 BLOCK_SIZE = 32，是和 scale tile 不一致的保守值 —— 每个
+# score tile 发 12 个 DMA 和 12 次页表标量读，同样的行用 6 个就够，输出逐位
+# 不变（b16 实测 l2 与改前完全相同）。
+#
+# 只对 vllm 路径成立：非-vllm 的 indexer_score_topk_leaf 走
+# idx_block_table_flat，那里 BLOCK_SIZE = 32 是真正的物理页大小
+# （logical_page = candidate // BLOCK_SIZE），连续行超过 32 就不物理连续。
+SCORE_GATHER_ROWS = 2 * BLOCK_SIZE
 SCORE_LANE_ROWS = SCORE_TILE // 2
 SCORE_ARENA_ROWS = max(T_PAD, TOPK_SCORE_WORKERS * 2)
 SCORE_PIPELINE_STAGES = 2
@@ -696,15 +710,16 @@ def indexer_score_topk_forest_vllm(
                 ):
                     read_begin = score_begin * (1 + single_leaf)
                     kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], pl.INT8)
-                    for page in pl.unroll(SCORE_TILE // BLOCK_SIZE):
-                        page_begin = page * BLOCK_SIZE
+                    for page in pl.unroll(SCORE_TILE // SCORE_GATHER_ROWS):
+                        page_begin = page * SCORE_GATHER_ROWS
                         lane_page = (
                             (page_begin // SCORE_LANE_ROWS) * lane_stride
                             + page_begin % SCORE_LANE_ROWS
                         )
                         safe_page_begin = pl.min(
                             read_begin + lane_page,
-                            ((valid_count - 1) // BLOCK_SIZE) * BLOCK_SIZE,
+                            ((valid_count - 1) // SCORE_GATHER_ROWS)
+                            * SCORE_GATHER_ROWS,
                         )
                         candidate = logical_begin + safe_page_begin
                         logical_page = candidate // VLLM_INDEX_KEY_ROWS
@@ -723,7 +738,7 @@ def indexer_score_topk_forest_vllm(
                             index_pages_flat,
                             [page_begin, 0],
                             [physical_row, 0],
-                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                            [SCORE_GATHER_ROWS, IDX_HEAD_DIM],
                         )
 
                     score_i32 = pl.matmul(
