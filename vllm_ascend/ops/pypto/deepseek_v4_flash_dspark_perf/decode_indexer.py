@@ -403,7 +403,7 @@ def indexer_topk_query_merge_one(
     leaf_tiles: pl.Scalar[pl.INDEX],
     extra_leaves: pl.Scalar[pl.INDEX],
 ):
-    """Merge half-leaf roots and materialize one query's Top-512."""
+    """Merge the selected leaf roots and publish one query's Top-512."""
     batch_idx = query // S
     position = pl.read(position_ids, [query])
     cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
@@ -418,6 +418,9 @@ def indexer_topk_query_merge_one(
             remaining_tiles = pl.max(visible_tiles - larger_leaf_tiles, 0)
             leaf_count = larger_leaf_count + (remaining_tiles + leaf_tiles - 1) // leaf_tiles
         half_count = leaf_count * 2
+        if multiway:
+            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+                half_count = leaf_count
         arena_base = query * TOPK_ROWS_PER_QUERY
         if multiway:
             root_pairs = merge_top512_roots(pair_arena, arena_base, half_count)
@@ -743,6 +746,8 @@ def indexer_score_topk_native_cube(
                     if buf_score_step >= 2:
                         pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                     buf_score_begin = buf_score_step * (score_tile // 2)
+                    if balance_leaves:
+                        buf_score_begin = buf_score_step * score_tile
                     buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
                     buf_previous_l1 = pl.tile.create(
                         [query_group_size * IDX_N_HEADS, qk_panel_cols],
@@ -775,6 +780,11 @@ def indexer_score_topk_native_cube(
                                 + buf_prime_col % (score_tile // 2)
                                 + buf_prime_key_page * BLOCK_SIZE
                             )
+                            if balance_leaves:
+                                buf_prime_key_row = (
+                                    buf_logical_begin + buf_score_begin
+                                    + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
+                                )
                             buf_prime_safe_page = pl.min(
                                 buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
                             )
@@ -838,6 +848,9 @@ def indexer_score_topk_native_cube(
                                     + buf_load_col % (score_tile // 2)
                                     + buf_key_page * BLOCK_SIZE
                                 )
+                                if balance_leaves:
+                                    buf_key_row = (buf_logical_begin + buf_score_begin
+                                                   + buf_load_col + buf_key_page * BLOCK_SIZE)
                                 buf_safe_page = pl.min(
                                     buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
                                 )
@@ -951,162 +964,386 @@ def indexer_score_topk_native_cube(
                     pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
 
         for buf_score_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
-            for buf_item in pl.range(
-                buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
-            ):
-                if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
-                    buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
-                    buf_leaf = buf_item // (buf_query_count // query_group_size)
-                else:
-                    buf_query = buf_item // buf_max_leaves * query_group_size
-                    buf_leaf = buf_item % buf_max_leaves
-                buf_batch_idx = buf_query // S
-                buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
-                buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
-                buf_visible_count = pl.max(
-                    pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
-                )
-                buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
-                buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
-                if balance_leaves:
-                    buf_logical_begin = (
-                        buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
-                    ) * BUFFERED_LONG_SCORE_TILE
-                    buf_leaf_capacity = (
-                        buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
-                    ) * BUFFERED_LONG_SCORE_TILE
-                if buf_logical_begin < buf_visible_count:
-                    buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
-                    buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
-                    buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
-                    buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
-                    buf_lane_begin = buf_score_lane * buf_lane_span
-                    # QLI V2 retains the accumulated root in UB until publication.
-                    prefix_roots = pl.tile.full(
-                        [query_group_size, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF
+            if balance_leaves:
+                for single_item in pl.range(
+                    buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
+                ):
+                    if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                        single_query = single_item % (buf_query_count // query_group_size) * query_group_size
+                        single_leaf = single_item // (buf_query_count // query_group_size)
+                    else:
+                        single_query = single_item // buf_max_leaves * query_group_size
+                        single_leaf = single_item % buf_max_leaves
+                    single_batch = single_query // S
+                    single_cache_len = pl.read(kv_seq_lens, [single_batch]) // COMPRESS_RATIO
+                    single_last_position = pl.read(position_ids, [single_query + query_group_size - 1])
+                    single_visible = pl.max(
+                        pl.min(pl.min(single_cache_len, (single_last_position + 1) // COMPRESS_RATIO),
+                               TOPK_MAX_CANDIDATES), 0
                     )
-                    for buf_score_step in pl.range(buf_score_iters):
-                        buf_score_begin = buf_score_step * (score_tile // 2)
-                        buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
-                        # Native页内scale只依赖cache_write，不依赖Cube结果。
-                        # 在等待Score前加载scale，让独立分页读取与Cube执行交叠。
-                        buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
-                        for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
-                            buf_scale_row = (
-                                buf_logical_begin + buf_score_begin + buf_lane_begin + buf_scale_page * BLOCK_SIZE
-                            )
-                            buf_scale_safe_page = pl.min(
-                                buf_scale_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
-                            )
-                            buf_scale_physical_page = pl.max(
-                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
-                            )
-                            buf_scale_bytes = pl.gather_row(
-                                buf_scale_bytes,
-                                idx_native_kv_cache,
-                                [0, buf_scale_page * BLOCK_SIZE * 2],
-                                [buf_scale_physical_page, INDEXER_KEY_BYTES],
-                                [1, BLOCK_SIZE * 2],
-                            )
-                        buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
-                        buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
-                        pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                        buf_score_sums = pl.load(
-                            buf_score_transfer,
-                            [buf_transfer_row, buf_score_lane * (score_tile // 2)],
-                            [query_group_size, (score_tile // 2)],
+                    single_begin = (single_leaf * buf_leaf_tiles + pl.min(single_leaf, buf_extra_leaves)) * score_tile
+                    single_capacity = (buf_leaf_tiles + pl.cast(single_leaf < buf_extra_leaves, pl.INDEX)) * score_tile
+                    if single_begin < single_visible:
+                        single_valid = pl.min(single_capacity, single_visible - single_begin)
+                        single_steps = (single_valid + score_tile - 1) // score_tile
+                        # Native QLI ProcessVec1 assigns complete query rows to each AIV.
+                        # Keep one root per query and a two-step contiguous 2048-score segment.
+                        single_roots = pl.tile.full(
+                            [query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF
                         )
-                        pl.system.sync_set(
-                            SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+                        single_segments = pl.tile.full(
+                            [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
                         )
+                        for single_step in pl.range(single_steps):
+                            single_score_begin = single_begin + single_step * score_tile
+                            single_transfer_row = (
+                                buf_worker * 2 * query_group_size + single_step % 2 * query_group_size
+                                + buf_score_lane * (query_group_size // 2)
+                            )
+                            # Scales are shared across the three queries on one AIV. Reading
+                            # the complete candidate tile duplicates scale traffic across AIVs.
+                            single_scale_bytes = pl.tile.create([1, score_tile * 2], dtype=pl.INT8)
+                            for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
+                                single_scale_logical = pl.min(
+                                    single_score_begin // BLOCK_SIZE + single_scale_page,
+                                    pl.max((single_cache_len - 1) // BLOCK_SIZE, 0),
+                                )
+                                single_scale_physical = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX), 0
+                                )
+                                single_scale_bytes = pl.gather_row(
+                                    single_scale_bytes, idx_native_kv_cache,
+                                    [0, single_scale_page * BLOCK_SIZE * 2],
+                                    [single_scale_physical, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
+                                )
+                            single_scale_half = pl.tile.reinterpret_view(single_scale_bytes, pl.FP16)
+                            single_kv_scale = pl.cast(single_scale_half, pl.FP32)
+                            pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                            single_scores = pl.load(
+                                buf_score_transfer, [single_transfer_row, 0], [query_group_size // 2, score_tile]
+                            )
+                            pl.system.sync_set(
+                                SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+                            )
+                            for single_local in pl.unroll(query_group_size // 2):
+                                single_score_row = pl.tile.extract(
+                                    single_scores, single_local, 0, [1, score_tile], target_memory=pl.MemorySpace.Vec
+                                )
+                                single_scaled = pl.mul(single_score_row, single_kv_scale)
+                                # Full-width row assemble avoids a partial-column UB move.
+                                single_segments = pl.tile.assemble(
+                                    single_segments, single_scaled, [single_local * 2 + single_step % 2, 0]
+                                )
+                            if single_step % 2 == 1 or single_step + 1 == single_steps:
+                                single_segment_begin = single_begin + (single_step // 2) * (2 * score_tile)
+                                single_segment_span = (single_step % 2 + 1) * score_tile
+                                single_segment_rows = pl.tile.reshape(
+                                    single_segments, [query_group_size // 2, 2 * BUFFERED_LONG_SCORE_TILE]
+                                )
+                                for single_local in pl.unroll(query_group_size // 2):
+                                    single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                                    single_position = pl.read(position_ids, [single_query + single_query_lane])
+                                    single_query_visible = pl.max(
+                                        pl.min(pl.min(single_cache_len, (single_position + 1) // COMPRESS_RATIO),
+                                               TOPK_MAX_CANDIDATES), 0
+                                    )
+                                    single_segment_valid = pl.max(
+                                        pl.min(single_query_visible - single_segment_begin, single_segment_span), 0
+                                    )
+                                    if single_segment_valid > 0:
+                                        single_segment_data = pl.tile.extract(
+                                            single_segment_rows, single_local, 0, [1, 2 * BUFFERED_LONG_SCORE_TILE],
+                                            target_memory=pl.MemorySpace.Vec,
+                                        )
+                                        logical_i32 = pl.cast(single_segment_begin, pl.INT32)
+                                        if single_segment_valid <= 512:
+                                            tiny_indices = pl.add(
+                                                pl.tile.arange(0, [1, 512], dtype=pl.INT32),
+                                                logical_i32,
+                                            )
+                                            tiny_tile = pl.tile.extract(
+                                                single_segment_data,
+                                                0,
+                                                0,
+                                                [1, 512],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                            tiny_raw = pl.set_validshape(tiny_tile, 1, single_segment_valid)
+                                            tiny_scores = pl.maximum(
+                                                pl.tile.fillpad(tiny_raw, pad_value=pl.PadValue.min),
+                                                FP32_NEG_INF,
+                                            )
+                                            tiny_pairs = pl.sort32(
+                                                tiny_scores,
+                                                pl.reinterpret_view(tiny_indices, pl.UINT32),
+                                            )
+                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
+                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
+                                            single_new_root = pl.tile.extract(
+                                                tiny_pairs,
+                                                0,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                        elif single_segment_valid <= 1024:
+                                            small_indices = pl.add(
+                                                pl.tile.arange(0, [1, 1024], dtype=pl.INT32),
+                                                logical_i32,
+                                            )
+                                            small_tile = pl.tile.extract(
+                                                single_segment_data,
+                                                0,
+                                                0,
+                                                [1, 1024],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                            small_raw = pl.set_validshape(small_tile, 1, single_segment_valid)
+                                            small_scores = pl.maximum(
+                                                pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min),
+                                                FP32_NEG_INF,
+                                            )
+                                            small_pairs = pl.sort32(
+                                                small_scores,
+                                                pl.reinterpret_view(small_indices, pl.UINT32),
+                                            )
+                                            small_pairs = pl.mrgsort(small_pairs, block_len=64)
+                                            small_pairs = pl.mrgsort(small_pairs, block_len=256)
+                                            small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
+                                            small_right = pl.tile.slice(
+                                                small_pairs,
+                                                [1, TOPK_PAIR_WIDTH],
+                                                [0, 1024],
+                                            )
+                                            small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                                            small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
+                                            single_new_root = pl.tile.extract(
+                                                small_merged,
+                                                0,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                        else:
+                                            large_indices = pl.add(
+                                                pl.tile.arange(0, [1, 2048], dtype=pl.INT32),
+                                                logical_i32,
+                                            )
+                                            large_tile = pl.tile.extract(
+                                                single_segment_data,
+                                                0,
+                                                0,
+                                                [1, 2048],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                            large_raw = pl.set_validshape(large_tile, 1, single_segment_valid)
+                                            large_scores = pl.maximum(
+                                                pl.tile.fillpad(large_raw, pad_value=pl.PadValue.min),
+                                                FP32_NEG_INF,
+                                            )
+                                            large_pairs = pl.sort32(
+                                                large_scores,
+                                                pl.reinterpret_view(large_indices, pl.UINT32),
+                                            )
+                                            large_pairs = pl.mrgsort(large_pairs, block_len=64)
+                                            large_pairs = pl.mrgsort(large_pairs, block_len=256)
+                                            large_pairs = pl.mrgsort(large_pairs, block_len=1024)
+                                            single_new_root = pl.tile.extract(
+                                                large_pairs,
+                                                0,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                        if single_step < 2:
+                                            single_roots = pl.tile.assemble(
+                                                single_roots, single_new_root, [single_local, 0]
+                                            )
+                                        else:
+                                            single_old_root = pl.tile.extract(
+                                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                            single_merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                                            # Native merges each new contiguous 2048 segment
+                                            # before the accumulated root when scores tie.
+                                            single_merged = pl.tile.mrgsort(
+                                                single_new_root, single_old_root, tmp=single_merge_tmp
+                                            )
+                                            single_next_root = pl.tile.extract(
+                                                single_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
+                                                target_memory=pl.MemorySpace.Vec,
+                                            )
+                                            single_roots = pl.tile.assemble(
+                                                single_roots, single_next_root, [single_local, 0]
+                                            )
+                        for single_local in pl.unroll(query_group_size // 2):
+                            single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
+                            single_root = pl.tile.extract(
+                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
+                            )
+                            pl.store(
+                                single_root,
+                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0], pair_arena,
+                            )
+            else:
+                for buf_item in pl.range(
+                    buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
+                ):
+                    if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                        buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
+                        buf_leaf = buf_item // (buf_query_count // query_group_size)
+                    else:
+                        buf_query = buf_item // buf_max_leaves * query_group_size
+                        buf_leaf = buf_item % buf_max_leaves
+                    buf_batch_idx = buf_query // S
+                    buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
+                    buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
+                    buf_visible_count = pl.max(
+                        pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
+                    )
+                    buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
+                    buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
+                    if balance_leaves:
+                        buf_logical_begin = (
+                            buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
+                        ) * BUFFERED_LONG_SCORE_TILE
+                        buf_leaf_capacity = (
+                            buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
+                        ) * BUFFERED_LONG_SCORE_TILE
+                    if buf_logical_begin < buf_visible_count:
+                        buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                        buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                        buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                        buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+                        buf_lane_begin = buf_score_lane * buf_lane_span
+                        # QLI V2 retains the accumulated root in UB until publication.
+                        prefix_roots = pl.tile.full(
+                            [query_group_size, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF
+                        )
+                        for buf_score_step in pl.range(buf_score_iters):
+                            buf_score_begin = buf_score_step * (score_tile // 2)
+                            buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+                            # Native页内scale只依赖cache_write，不依赖Cube结果。
+                            # 在等待Score前加载scale，让独立分页读取与Cube执行交叠。
+                            buf_scale_bytes = pl.tile.create([1, score_tile], dtype=pl.INT8)
+                            for buf_scale_page in pl.range((score_tile // 2) // BLOCK_SIZE):
+                                buf_scale_row = (
+                                    buf_logical_begin + buf_score_begin + buf_lane_begin + buf_scale_page * BLOCK_SIZE
+                                )
+                                buf_scale_safe_page = pl.min(
+                                    buf_scale_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                buf_scale_physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_scale_safe_page]), pl.INDEX), 0
+                                )
+                                buf_scale_bytes = pl.gather_row(
+                                    buf_scale_bytes,
+                                    idx_native_kv_cache,
+                                    [0, buf_scale_page * BLOCK_SIZE * 2],
+                                    [buf_scale_physical_page, INDEXER_KEY_BYTES],
+                                    [1, BLOCK_SIZE * 2],
+                                )
+                            buf_scale_half = pl.tile.reinterpret_view(buf_scale_bytes, pl.FP16)
+                            buf_kv_scale = pl.cast(buf_scale_half, target_type=pl.FP32)
+                            pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                            buf_score_sums = pl.load(
+                                buf_score_transfer,
+                                [buf_transfer_row, buf_score_lane * (score_tile // 2)],
+                                [query_group_size, (score_tile // 2)],
+                            )
+                            pl.system.sync_set(
+                                SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
+                            )
+                            for buf_query_lane in pl.unroll(query_group_size):
+                                buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                                buf_query_visible = pl.max(
+                                    pl.min(
+                                        pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
+                                    ),
+                                    0,
+                                )
+                                buf_lane_valid_rows = pl.max(
+                                    pl.min(
+                                        buf_query_visible - buf_logical_begin - buf_score_begin - buf_lane_begin,
+                                        (score_tile // 2),
+                                    ),
+                                    0,
+                                )
+                                buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
+                                buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
+                                if buf_lane_valid_rows > 0:
+                                    pl.store(
+                                        pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
+                                        [
+                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                            buf_score_begin,
+                                        ],
+                                        score_arena,
+                                    )
+                            if balance_leaves:
+                                if buf_score_step == 3 and buf_score_iters > 4:
+                                    for stream_lane in pl.unroll(query_group_size):
+                                        stream_position = pl.read(position_ids, [buf_query + stream_lane])
+                                        stream_visible = pl.max(
+                                            pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
+                                                   TOPK_MAX_CANDIDATES), 0
+                                        )
+                                        stream_begin = buf_logical_begin + buf_lane_begin
+                                        stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
+                                        if stream_valid > 0:
+                                            stream_root = indexer_topk_segment_pairs(
+                                                score_arena,
+                                                buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
+                                                stream_begin, stream_valid, 0,
+                                            )
+                                            prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
                         for buf_query_lane in pl.unroll(query_group_size):
                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
                             buf_query_visible = pl.max(
-                                pl.min(
-                                    pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
-                                ),
-                                0,
+                                pl.min(pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO),
+                                       TOPK_MAX_CANDIDATES), 0
                             )
-                            buf_lane_valid_rows = pl.max(
-                                pl.min(
-                                    buf_query_visible - buf_logical_begin - buf_score_begin - buf_lane_begin,
-                                    (score_tile // 2),
-                                ),
-                                0,
+                            buf_half_begin = buf_logical_begin + buf_lane_begin
+                            buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
+                            buf_half_slot = (
+                                (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
                             )
-                            buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
-                            buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
-                            if buf_lane_valid_rows > 0:
-                                pl.store(
-                                    pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
-                                    [
+                            if balance_leaves and buf_score_iters > 4:
+                                if buf_half_valid > 2048:
+                                    tail = indexer_topk_segment_pairs(
+                                        score_arena,
                                         buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                        buf_score_begin,
-                                    ],
-                                    score_arena,
-                                )
-                        if balance_leaves:
-                            if buf_score_step == 3 and buf_score_iters > 4:
-                                for stream_lane in pl.unroll(query_group_size):
-                                    stream_position = pl.read(position_ids, [buf_query + stream_lane])
-                                    stream_visible = pl.max(
-                                        pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
-                                               TOPK_MAX_CANDIDATES), 0
+                                        buf_half_begin + 2048, buf_half_valid - 2048, 2048,
                                     )
-                                    stream_begin = buf_logical_begin + buf_lane_begin
-                                    stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
-                                    if stream_valid > 0:
-                                        stream_root = indexer_topk_segment_pairs(
-                                            score_arena,
-                                            buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
-                                            stream_begin, stream_valid, 0,
-                                        )
-                                        prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
-                    for buf_query_lane in pl.unroll(query_group_size):
-                        buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
-                        buf_query_visible = pl.max(
-                            pl.min(pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
-                        )
-                        buf_half_begin = buf_logical_begin + buf_lane_begin
-                        buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
-                        buf_half_slot = (
-                            (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
-                        )
-                        if balance_leaves and buf_score_iters > 4:
-                            if buf_half_valid > 2048:
-                                tail = indexer_topk_segment_pairs(
-                                    score_arena,
-                                    buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                    buf_half_begin + 2048, buf_half_valid - 2048, 2048,
-                                )
-                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
-                                merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                                # Preserve the later-2048-chunk priority of the
-                                # existing 2560/3072/4096 half-leaf paths.
-                                merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
-                                pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
-                                         [buf_half_slot, 0], pair_arena)
+                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
+                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+                                    merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                                    # Preserve the later-2048-chunk priority of the
+                                    # existing 2560/3072/4096 half-leaf paths.
+                                    merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
+                                    pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
+                                             [buf_half_slot, 0], pair_arena)
+                                else:
+                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
+                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+                                    pl.store(prefix, [buf_half_slot, 0], pair_arena)
                             else:
-                                prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                         [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
-                                pl.store(prefix, [buf_half_slot, 0], pair_arena)
-                        else:
-                            if buf_half_valid > 0:
-                                indexer_topk_half_leaf(
-                                    score_arena,
-                                    pair_arena,
-                                    buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                    buf_half_begin,
-                                    buf_half_valid,
-                                    buf_half_slot,
-                                )
-                            else:
-                                pl.store(
-                                    pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
-                                    [buf_half_slot, 0],
-                                    pair_arena,
-                                )
+                                if buf_half_valid > 0:
+                                    indexer_topk_half_leaf(
+                                        score_arena,
+                                        pair_arena,
+                                        buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                        buf_half_begin,
+                                        buf_half_valid,
+                                        buf_half_slot,
+                                    )
+                                else:
+                                    pl.store(
+                                        pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+                                        [buf_half_slot, 0],
+                                        pair_arena,
+                                    )
     return buffered_leaf_tid
 
 
@@ -1125,7 +1362,7 @@ def indexer_score_topk_forest(
     weights_tid: pl.Scalar[pl.TASK_ID],
     cache_write_tid: pl.Scalar[pl.TASK_ID],
 ):
-    """Score and select half-leaves, then merge their exact Top-K rows."""
+    """Score leaves and merge Top-K roots; long S6 publishes one root per leaf."""
     b_dim = pl.tensor.dim(idx_block_table, 0)
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
     # Zero-copy GM descriptors inside orchestration, as validation log §116.

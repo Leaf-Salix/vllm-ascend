@@ -11488,3 +11488,22 @@ B4/H65535使balanced leaf包含3072/2048候选，覆盖1024尾段和新单根con
 精度版迁移、真实EP16 token/DSpark和模型forward仍未完成，不能用本节单卡状态覆盖。
 [完整结果](results/csa_score_single_root_20260929/RESULTS.md)、
 [边界与实现说明](results/csa_score_single_root_20260929/README.md)。
+
+## 425. 单根方案尾段/padding通过，移入性能版单文件，七档只补五个缺口（2026-09-29）
+
+task_20260929_114611_3614404385 completed(exit=0)。B4/H65535的baseline/candidate八类完整状态零容差通过；
+active-B=4/3/1/4同一图重放，八类状态、compact metadata与保护区逐项通过，覆盖3072候选leaf的1024尾段。
+没有靠单纯编译或Top-K合法性替代真实输出验证。它仍不是模型token/DSpark验收。
+
+只将私有候选的decode_indexer.py移入生产性能包。复制前确认生产仍是该冻结基底，避免覆盖其他会话改动；
+采用正文与实测候选AST代码体一致，仅两处docstring说明由half根改为按路径选择的leaf根。
+Ruff与性能版decode_csa_tp1_layer/decode_csa_tp1_layer_test依赖解析通过；
+完整PTOAS/CCE/load和设备证据沿已测候选，不为复制正文重复占卡。
+精度版、Native及vLLM cache分配、PyPTO/Simpler/PTOAS/PTO-ISA不修改。
+
+长档核内收益成立且CSA 8:2改善2.924%，按用户规则保留；短档CSA/P95回退仍保留原值。
+下一步七档统一同一源码：复用本轮已测128K/B16、8K/B24，只补128K B4/B8/B24与8K B16/B32，
+每档仍有正式设备计时、PyTorch JSON和四窗泳道。Native复用已有最新标准七档，
+不同任务/轮次在报告中明确记录，不把这一汇总冒称新一轮同次Native/PTO A/B。
+[采用、实现及状态依据](results/csa_score_single_root_20260929/README.md)、
+[尾段/padding逐项覆盖](results/csa_score_single_root_20260929/boundary/summary.json)。

@@ -6,6 +6,9 @@ Native已采用最新标准：显式torch.compile/backend=npugraph_ex、dynamic=
 主性能SuperKernel开启；另采关闭SuperKernel的独立核内profile，不把诊断计时放入正式主表。
 PTO采用已有验证路径和数据，不要求复刻Native编译选项；版本、环境与测量边界逐项标明。
 本轮已有系数优化和Sparse末块发布；生产随后保留d93bba14的HC_post残差常驻，未倒写进七档。
+生产另已保留长S6完整query单根：长B16 Score AIC/AIV−8.555%/−9.484%、CSA−4.390%，
+短B24 CSA+2.941%、8:2−2.924%；两档及B4/H65535尾段/padding完整状态通过。
+这一局部A/B不倒写到55b89ee2七档；新源码复用已测两档、补其余五档，Native基线保持。
 [七档完整数据](results/csa_native_inplace_seven_20260929/RESULTS.md)、
 [实际任务明细](results/csa_native_inplace_seven_20260929/TASKS.md)、
 [当前核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
@@ -46,8 +49,8 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | WS归约粒度 | ProcessWs逐query循环，ComputeWs的M=16、K=gSize=64，N最大128；Brcb的16行重复结果只发布有效行 | S6以[16,384]对角系数同时规约六个query，N64，发布六个有效行 | 同六query/128候选的FP16 MAC数均为6×16×64×128=786432；不能只看到PTO的零系数就认定额外算力浪费。调用数与L0/流水布局不同，应连同QK分块评估 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
-| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | 仅改每AIV三query×完整候选、保留两个half根的候选已测：TMUL减半但scale读取翻倍，长B16 Score AIC/AIV约+1.134%/+1.049%，无核内收益，不采用 |
-| 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长档先排序前2048候选并将Top-512根留UB，尾段完成后合并；短档保留原路径 | PTO缩放后score仍经GM，最终归并仍独立；临时根GM往返已消除 |
+| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 长S6两个AIV各处理三个完整query，Cube传输连续候选；短档仍分候选半区 | 完整单根策略长B16 AIC/AIV−8.555%/−9.484%；scale每AIV全读的翻倍代价仍存在。旧只改query分工但留两根的失败候选不采用 |
+| 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长S6连续两次1024分数在UB组成2048段，保留Top-512根，每query/leaf发布一根 | 长S6已消除scaled-score GM暂存且consumer根数减半；短档仍沿原GM/half根路径，最终归并任务仍独立 |
 | 分片平衡 | metadata按工作成本切S1/S2并给最终归并核分工 | 长档按query组与24worker平衡leaf；B16从8/8/8/8/1分成6/6/6/5/5/5个tile | 最忙核下降已保留；新增root数量和AIV排序成本单列 |
 | 最终归并 | LocalTopK/Merge/MS式四路归并，可在同融合kernel结束 | 四路归并与UB累计根已采用，但仍独立merge task | 固定tie/量化规则需保持；任务融合是后续调度/结构调整，不能仅凭少一个任务声称收益 |
 
@@ -55,6 +58,8 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 最新本地pypto-lib 2164563的dspark Indexer也按页表读取独立key/scale cache，不能再描述成请求历史恒连续。
 它仍按单query×leaf分工，普通路径AIV做FP32 head规约，大batch长档用FP16双缓冲；
 当前PTO的S6复用、第二次Cube规约和Native交错cache视图需要分别评估，不能套用旧725μs泳道的输入假设。
+本轮长S6进一步按最新AscendC处理完整query及UB单根，不直接照搬pypto-lib的单query/leaf组织；
+这保留六query共享Key的Cube收益，并减少本接入原来的两根及scaled-score交接，取舍由同卡核内/CSA实测决定。
 已检查Native页指针式切片替代双视图的写法：当前PyPTO默认核内转换会把tensor.slice变为Tile，
 后续GM reshape/load链不能成立；该轻量探针未产生设备候选，保留原路径，见[表达限制](results/csa_key_page_view_20260929/README.md)。
 当前实际核时与七档Native对照见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)；
@@ -136,5 +141,5 @@ HC调度对照已完成且8:2回退1.380%，不采用。随后已实现[完整qu
 两入口解析/完整CPU编译通过，Vec地址覆盖88KiB；11:30正常auto提交两代表档
 task_20260929_113003_337101716086已退出0，源码冻结。长B16 Score AIC/AIV下降8.555%/9.484%，
 四窗均值范围不重叠；完整CSA长−4.390%、短+2.941%、8:2−2.924%，短档回退如实保留。
-两代表档八类完整状态跨版本零容差通过；正在B4/H65535尾段/padding边界验证，尚未采用或覆盖模型token/DSpark。
+两代表档及B4/H65535尾段/padding八类完整状态精确通过，已采用到性能版；七档缺少的五档待补，模型token/DSpark仍未覆盖。
 避免重复旧两half根版本，也不把理论少根数作为采用依据。

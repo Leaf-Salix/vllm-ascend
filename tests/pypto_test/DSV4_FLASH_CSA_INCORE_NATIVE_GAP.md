@@ -108,8 +108,9 @@ O_A/O_B各64份工作由24个AIC多波处理，Q_B/Indexer投影也有资源交�
    下一项[完整query单根策略](results/csa_score_single_root_20260929/README.md)已完成两档：
    连续S2、UB内2048分段排序与单根consumer一起调整，短档保持；不重复仅重排query而保留两个half根的失败方案。
    长B16 Score AIC/AIV−8.555%/−9.484%，四窗范围不重叠；CSA长−4.390%、短+2.941%、8:2−2.924%。
-   八类状态精确通过，正在唯一B4/H65535尾段/padding边界验证。短档核内范围重叠且算法未改，不归因新优化；
-   同分顺序的潜在变化仍按独立误差/token合同处理。
+   八类状态及唯一B4/H65535尾段/padding边界精确通过，已移入性能版Indexer单文件；
+   七档复用已测两档，只补其余五档。短档核内范围重叠且算法未改，不归因新优化；
+   同分顺序的潜在变化仍按独立误差/token合同处理，当前旧七档表不推算该项收益。
 3. 对照[上游725μs泳道](results/csa_scheduling_20260927/upstream_725/README.md)：其输入FP32、无BF16 widen，
    缺完整版本及Scheduler View，只作组织参考。上游pre/post亦可能晚于comb，不能声称新约束是照抄上游标志。
    Native在一个HcPre核内完成门控；本接入拆分后必须验证哪条任务交接影响attention关键链。

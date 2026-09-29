@@ -68,8 +68,16 @@ AIC基线241.594–257.034、候选224.494–228.133；AIV基线247.369–262.88
 两候选P95/P50为1.0232/1.0245，两侧各档均0/20超过自身P50的105%，不能关闭历史间歇长尾或EP16问题。
 [完整结果](RESULTS.md)、[逐项状态与样本](summary.json)。
 
-按长档核内收益与8:2规则进入必要边界检查，尚未移入生产。
+按长档核内收益与8:2规则进入必要边界检查，现已通过并移入生产性能版。
 11:46正常auto提交`task_20260929_114611_3614404385`：只测B4/H65535，
 覆盖六leaf的3072/2048候选、2048段后的1024尾段，以及active-B=4/3/1/4固定图padding。
 沿原私有冻结包、deterministic_level=1、八类完整状态/metadata/保护区；不计时、不重测Native性能。
-[边界入口](run_boundary.sh)、[边界收集](collect_boundary.py)。边界通过后采用并补齐七档PTO性能/泳道，复用已有Native基线。
+[边界入口](run_boundary.sh)、[边界收集](collect_boundary.py)。任务已completed(exit=0)，
+两侧八类状态跨版本零容差，四次padding重放的八类状态、compact metadata和保护区均通过，
+见[精简边界证据](boundary/summary.json)。
+
+生产只修改性能版`decode_indexer.py`，其代码体与实测私有候选一致，仅澄清两个函数的根描述docstring；
+Ruff及性能版两入口依赖解析通过，[采用检查](adoption_parse.json)。
+短档、精度版、Native/vLLM cache分配及三个工具链仓均不改。
+接下来复用本轮长B16/短B24，只补七档其余五档的PTO性能/泳道，Native复用已有最新基线，明确不同采样任务。
+完整模型token/DSpark与精度版迁移仍未覆盖；不把单卡状态零差异当作这些验收已完成。
