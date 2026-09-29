@@ -57,7 +57,7 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
 | 1 | Native后端图的设备重放计时校准 | superkernel两档有收益已采用，固定开启；仅长B16/短B24校准同图直接replay，要求与compiled callable的状态一致，不再调参 |
-| 2 | 长S6 AIV按query分工 | 已正常入队task_20260929_080014_945279030；私有源码与CPU编译通过，仅长B16/短B24，区分TMUL减少与scale重复读取代价 |
+| 2 | 长S6 AIV分工结果与后续核内方向 | query分工候选已否定：长档Score AIC/AIV增加约1%，没有核内收益；继续检查独立merge及归一化的数据交接，不重复单独query分工 |
 | 3 | 保留核内收益并处理CSA关键链 | 有真实核内收益即保留；CSA/P95单列，长短8:2，明显顾此失彼就在同一算子内分策略 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
 | 5 | 阶段七档出口、精度版迁移 | 新候选有收益后补受影响范围；保持精度版舍入/规约，不直接复制性能版算术 |
@@ -71,7 +71,7 @@ S6代表档与8K/B32双query的跨版本八类状态零容差、图/保护区已
 [AIV候选](results/csa_score_query_split_20260929/README.md)。
 
 已否定且无新依据不原样重试：Score矩阵scale广播、固定组Query/系数跨leaf驻留、系数直接融合Score、
-缩放Score分段驻留UB、纯去4个dummy、无dummy真实任务准入组合，以及旧短Score/Sparse/query整组准入。
+缩放Score分段驻留UB、仅按query重排AIV且保留两个half根、纯去4个dummy、无dummy真实任务准入组合，以及旧短Score/Sparse/query整组准入。
 其中Score分段UB首轮约2%没有反向复测支撑，真实准入8:2回退0.240%；不能仅以少GM或少dummy认定获益。
 [验证日志§390起及相关报告](DSV4_FLASH_CSA_VALIDATION_LOG.md)保留实现、失败原因和原始样本。
 

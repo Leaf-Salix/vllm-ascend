@@ -46,3 +46,17 @@ pypto-lib 2164563的dspark路径按单query×leaf执行，无法直接套用本�
 [候选补丁](candidate.patch)、[冻结来源](source.txt)、[CPU编译](compile.py)、
 [编译结果](compile_candidate.json)、[生成代码计数](lowering.json)、
 [设备入口](run.sh)、[采样入口](run_side.sh)、[复用的状态/官方泳道收集器](collect.py)。
+
+## 真机结论
+
+2026-09-29，同一任务退出0；本候选不合入生产。
+
+采用结论：不合入生产，也不扩测。长档完整CSA虽下降1.054%，Score AIC/AIV却分别增加约1.134%/1.049%，
+四窗分布重叠，没有证明本次分工带来核内收益；独立DFX的Worker跨度也未缩短。
+短档源码分支未改，正式CSA仍增加1.506%，反映跨进程/轮次波动，不能强行归因于未执行的长档分支。
+不以静态TMUL从6次降到3次或完整CSA 8:2下降0.542%替代核内收益判据。
+每AIV scale页读取16→32是已确认的实现代价，但当前采样不足以将约1%的核时变化精确归因给它。
+八类跨版本状态零容差通过；四窗原始AIC/AICPU/join与block数量均已通过官方解析核对。
+此结果只否定“保留两个half根、仅重排AIV query分工”的候选，不外推为Native的完整query内规约策略无效。
+
+[完整结果](RESULTS.md)、[精简证据](summary.json)、[Worker分项](TASKS.md)。
