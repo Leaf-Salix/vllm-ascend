@@ -1568,6 +1568,114 @@ DFX4与dep-gen分开采集并核对任务名。128K/B16最大模块差距是Inde
 完整环境、24轮范围、精度、模块表、失败记录和数值契约比较见
 [受控性能对比](PERFORMANCE_COMPARISON_20260929.md)。本次只提交测试文档，没有修改kernel。
 
+## 2026-09-29：Indexer FIXPIPE 与 Cube head reduction
+
+### 改动与验证边界
+
+基于 kernel `1ec096d7a` / 文档 HEAD `bb887dcda`，只修改 `decode_indexer.py`。
+参考原生 QLI 和 nalinaly 的 FIXPIPE→第二次 Cube matmul 编排：
+
+1. 保留 `half(weight)`、`half(query_scale * half(weight))` 两次系数舍入，
+   每 query 生成一个首行有效、其余行清零的 FP16 `[16,64]` tile。
+2. INT8 QK 保留完整 K128 累加；FIXPIPE 完成 ReLU、`2^-10` 和 FP16 舍入。
+3. 第二次 Cube matmul 完成跨 64 heads 加权求和；Vector 只乘原生 packed page 的
+   FP16 key scale，原来的 TND request/leaf/lane、排序和 TopK 合并结构不变。
+4. C2V 后用 `add(0)` 物化独立 UB 结果，再取有效首行；直接 view 的实验存在错误 score，
+   见下文。未改 adapter、量化权重、cache 所有权、O-proj 或外部 ABI。
+
+本次需要支持 Tile FIXPIPE 的 PyPTO `3e87a843619aca13af39755700513d26b402e924`、
+Simpler `a54c0509552b01e13fb0960e23ce409a01b5024f`、PTOAS **0.66**；
+复用227已有构建，未重装框架。旧默认 PyPTO549/PTOAS0.63不能直接编译此路径。
+CANN9.2.0-beta.2、Torch2.10.0+cpu/Torch-NPU2.10.0.post4、vLLM0.29，
+Native确定性level1/HCCL=true，TP1、页128。使用真实第2层C4权重，seed62合成
+hidden/history，三臂独立cache，同进程按三臂全部排列交错24轮、预热50次。
+
+**本表是 attention `impl.forward` 边界，NZ0，不含 HC pre/post。**
+上一节 nalinaly 四臂表是完整 HC 边界、NZ2，不能把两张表的绝对时间直接相除。
+128K B16/T96每轮100次，B16/T60及32K每轮150次，其余每轮200次Graph replay。
+重置cache在计时外；以下单位ms，变化为24轮配对变化的中位数。
+
+| 负载 | Native | 优化前 | Cube优化后 | 配对延迟变化 | 对Native输出relative L2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 8K B4/T18 | 0.569228 | 0.558956 | 0.556057 | -0.668% | 0.000000% |
+| 8K B16/T96 | 0.872573 | 1.024534 | 1.012557 | -1.152% | 0.138485% |
+| 32K B3/T13 | 0.579305 | 0.554567 | 0.548081 | -1.404% | 0.041290% |
+| 128K B4/T24 | 0.800350 | 0.871993 | 0.819222 | -6.228% | 0.027688% |
+| 128K B16/T60 | 0.977799 | 1.487777 | 1.269875 | -14.588% | 0.000000% |
+| 128K B16/T96 | 1.187528 | 2.025422 | 1.767360 | -12.746% | 0.148564% |
+
+六组 eager/Graph 输出、六类有效 cache/state 相对优化前逐位一致；Native重复稳定，
+计时后连续replay稳定，输出padding保护通过。表中Native误差为优化前已有差异，
+本次没有增加；**不能称为与Native完全无误差**。128K三组24轮全部更快。
+8K/32K收益较小，仅作为本轮测量结果，不据此宣称普遍显著收益。
+
+任务：首组 `task_20260929_165337_32665728221`；五组矩阵
+`task_20260929_165831_181032024605`，均exit=0。原始JSON的候选臂沿用
+runner旧名 `shared`，实际对应 `indexer-cube-copy-20260929`，不是共享Key实验。
+已测候选SHA256 `4e3009c286fee975954a1b1a1270dacdc782a5d6d111c3686defa27dde66cf6a`；
+正式合入文件仅增加说明/排版，AST保持相同。
+
+### DFX归因
+
+同B16/T96/128K，时间采样与dep-gen分开执行。按各自生成kernel表映射，
+候选新增系数producer也计入Indexer包络。
+
+| 阶段 | 优化前 μs | Cube优化后 μs |
+| --- | ---: | ---: |
+| Indexer score/TopK | 1094.78 | 890.00 |
+| Sparse attention QK/PV | 179.32 | 172.68 |
+| O-A | 89.78 | 90.26 |
+| O-B matmul | 84.60 | 85.00 |
+
+Indexer包络下降18.7%，与整层约12.7%的改善方向一致。单次DFX有额外开销，
+各阶段存在重叠，不把包络差简单相加当作Graph收益。
+DFX任务 `task_20260929_170623_199261616643`，依赖任务
+`task_20260929_170707_200936815816`，均exit=0；已导出Perfetto JSON。
+此前同硬件nalinaly的Indexer为264.66μs，当前仍有明显差距；本轮没有重跑nalinaly整层。
+
+### 独立score/TopK精度审计
+
+Cube归约不等于旧Vector `col_sum` 的浮点顺序。严格逐位probe
+`task_20260929_170730_20215805226` **失败，保留该结论**：B16/T96/128K
+共49152个输出score，28751个不同，最大绝对差4.6566e-10；18个索引位置不同。
+不能把六组整层逐位结果推广为任意输入的Indexer逐位等价。
+
+后续独立诊断 `task_20260929_170915_210697325523`，覆盖128K等长/非等长、
+32K/64K leaf边界、8K及全同分：每个query的512个选点集合完全一致；索引差异
+都是集合内排序。全同分score及索引逐位相同。按实际选点，用CPU INT32点积、
+原生FP16边界和FP64加权求和验证；候选最大绝对误差2.3283e-10，基线4.6566e-10。
+该诊断是观测报告，未把原来的逐位断言改成宽松通过。
+
+再补正负系数抵消诊断 `task_20260929_171315_225891212043`：两组集合仍全部相同，
+128K有4个排序位置变化，32K索引逐位相同；候选对FP64参考最大误差1.1642e-10。
+接近零时relative误差可能放大，1ppm统计候选14项、旧版27项超出；不宣称统一ULP上界。
+上述FP64参考用于排除数据损坏，不代替Native硬件精度验证。
+
+### 失败和未采用的候选
+
+- 两query共享Key：B16/128K 2.035689→2.021542ms，但DFX Indexer
+  1094.78→1093.94μs，目标模块无明确收益，未合入。
+- Cube归约直接取view：B16输出relative L2从0.148564%恶化为0.763673%，未合入。
+  随机probe发现集中在少数位置的错误score；不是仅凭浮点归约顺序可解释。
+  FIXPIPE边界微测逐位相同，小系数微测也未支持“FP16 subnormal丢失”猜测。
+- FIXPIPE+identity Cube+原Vector归约：128K B16约快3.2%，输出/cache逐位保持，
+  但8K B16慢约2.1%，未合入该路线。
+- 最终Cube+UB副本：生成代码确有独立12288字节UB结果，后续slice/extract读取副本。
+  A2/A3 Tile TFREE为空；实际TPOP负责GM→UB及通知。不能将改善简单归因于TFREE，
+  **直接view错误的编译器/运行库根因尚未确定**，当前保留显式物化并记录复现证据。
+- 诊断runner曾遇到stdlib `profile` 名称冲突、物理/逻辑device编号混用、
+  task_dummy/Out返回契约问题；已修正后重新测试，不计作kernel精度失败。
+  一次状态查询误用无`--`语法产生两个无设备无效任务，均exit127，未影响NPU任务。
+
+新增CPU回归执行实际系数producer，覆盖13/49个token、worker步进、正负/微小系数
+和15行zero padding；相关四文件 **53项通过**。生成代码和独立审查未发现新增地址或
+依赖错误，但不把静态审查作为未测场景的正确性证明。
+
+证据目录：`native-align-20260928/indexer-optimization-20260929-evidence/`；
+候选与runner在相邻各 `indexer-*-20260929/` 目录。
+当前仍未测整模型、DP16吞吐或接收率；128K/B16优化后仍比本组Native慢约48.8%。
+后续重点仍是Indexer的多query Cube布局与分页Key复用，保持已对齐的量化/舍入边界。
+
 ## 后续每次测试的记录方式
 
 在每次影响 CSA 的源码提交或实验后，先保存原始 JSON/日志，再在本文

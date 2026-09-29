@@ -610,10 +610,35 @@ def indexer_score_topk_forest_vllm(
     score_arena = pl.create_tensor(
         [SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], dtype=pl.FP32,
     )
+    # Preserve native QLI: half(weight), then half(query_scale * weight).
+    # Cube WS consumes the coefficients once per query, shared across leaves.
+    coefficients = pl.create_tensor([T_PAD * 16, IDX_N_HEADS], dtype=pl.FP16)
+    with pl.spmd(
+        TOPK_QUERY_WORKERS, name_hint="indexer_head_coefficients_vllm",
+        deps=[qh_quant_tid, weights_tid], allow_early_resolve=True,
+    ) as coefficients_tid:
+        coefficient_worker = pl.tile.get_block_idx()
+        for query in pl.range(
+            coefficient_worker, pl.tensor.dim(position_ids, 0), TOPK_QUERY_WORKERS,
+        ):
+            query_scale = pl.reshape(
+                pl.load(qr_hadamard_scale_dq, [query * IDX_N_HEADS, 0], [IDX_N_HEADS, 1]),
+                [1, IDX_N_HEADS],
+            )
+            half_weight = pl.cast(
+                pl.load(weights, [query, 0], [1, IDX_N_HEADS]),
+                pl.FP16, mode="rint",
+            )
+            coefficient = pl.cast(
+                pl.mul(query_scale, pl.cast(half_weight, pl.FP32)), pl.FP16, mode="rint",
+            )
+            padded = pl.tile.full([16, IDX_N_HEADS], dtype=pl.FP16, value=0.0)
+            padded = pl.tile.assemble(padded, coefficient, [0, 0])
+            pl.store(padded, [query * 16, 0], coefficients)
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_leaf_vllm",
-        deps=[qh_quant_tid, weights_tid, cache_write_tid],
+        deps=[coefficients_tid, cache_write_tid],
         allow_early_resolve=True,
         optimizations=[pl.cross_core_slot(slot_num=1)],
     ) as score_tid:
@@ -661,36 +686,16 @@ def indexer_score_topk_forest_vllm(
                     + (1 - single_leaf) * lane_span
                 )
                 query_head_begin = query * IDX_N_HEADS
-                query_vector = qr_hadamard_i8[
-                    query_head_begin : query_head_begin + IDX_N_HEADS,
-                    0:IDX_HEAD_DIM,
-                ]
-                for _aiv_coeff in pl.split_aiv(2, mode=pl.SplitMode.NONE):
-                    query_scale = pl.reshape(
-                        qr_hadamard_scale_dq[
-                            query_head_begin : query_head_begin + IDX_N_HEADS,
-                            0:1,
-                        ],
-                        [1, IDX_N_HEADS],
-                    )
-                    query_weight = weights[
-                        query : query + 1, 0:IDX_N_HEADS
-                    ]
-                    # Native passes half weights to QLI, whose ProcessVec0
-                    # stores the product with the half query scale as half.
-                    query_weight_fp16 = pl.cast(
-                        query_weight, target_type=pl.FP16, mode="rint",
-                    )
-                    head_product = pl.mul(
-                        query_scale, pl.cast(query_weight_fp16, target_type=pl.FP32),
-                    )
-                    head_product_fp16 = pl.cast(
-                        head_product, target_type=pl.FP16, mode="rint",
-                    )
-                    head_coefficient = pl.reshape(
-                        pl.cast(head_product_fp16, target_type=pl.FP32),
-                        [IDX_N_HEADS, 1],
-                    )
+                query_vector = pl.load(
+                    qr_hadamard_i8, [query_head_begin, 0], [IDX_N_HEADS, IDX_HEAD_DIM],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                query_left = pl.tile.move(query_vector, target_memory=pl.MemorySpace.Left)
+                coefficient_l1 = pl.load(
+                    coefficients, [query * 16, 0], [16, IDX_N_HEADS],
+                    target_memory=pl.MemorySpace.Mat,
+                )
+                coefficient_left = pl.tile.move(coefficient_l1, target_memory=pl.MemorySpace.Left)
                 for score_begin in pl.pipeline(
                     0,
                     lane_span,
@@ -698,7 +703,10 @@ def indexer_score_topk_forest_vllm(
                     stage=SCORE_PIPELINE_STAGES,
                 ):
                     read_begin = score_begin * (1 + single_leaf)
-                    kv_i8 = pl.create_l1([SCORE_TILE, IDX_HEAD_DIM], pl.INT8)
+                    kv_i8 = pl.tile.create(
+                        [SCORE_TILE, IDX_HEAD_DIM], dtype=pl.INT8,
+                        target_memory=pl.MemorySpace.Mat,
+                    )
                     for page in pl.unroll(SCORE_TILE // BLOCK_SIZE):
                         page_begin = page * BLOCK_SIZE
                         lane_page = (
@@ -729,8 +737,22 @@ def indexer_score_topk_forest_vllm(
                             [BLOCK_SIZE, IDX_HEAD_DIM],
                         )
 
-                    score_i32 = pl.matmul(
-                        query_vector, kv_i8, out_dtype=pl.INT32, b_trans=True,
+                    key_right = pl.tile.move(
+                        pl.tile.transpose_view(kv_i8),
+                        target_memory=pl.MemorySpace.Right,
+                    )
+                    score_i32 = pl.tile.matmul(query_left, key_right)
+                    score_l1 = pl.tile.create(
+                        [IDX_N_HEADS, SCORE_TILE], dtype=pl.FP16,
+                        target_memory=pl.MemorySpace.Mat,
+                    )
+                    score_l1 = pl.tile.assemble(
+                        score_l1, score_i32, [0, 0],
+                        pre_quant=SCORE_DEQUANT_SCALE, pre_relu=True,
+                    )
+                    reduced_score = pl.tile.matmul(
+                        coefficient_left,
+                        pl.tile.move(score_l1, target_memory=pl.MemorySpace.Right),
                     )
                     for aiv_id in pl.split_aiv(
                         2, mode=pl.SplitMode.LEFT_RIGHT,
@@ -743,33 +765,12 @@ def indexer_score_topk_forest_vllm(
                             ),
                             0,
                         )
-                        score_shard = pl.maximum(
-                            pl.cast(
-                                pl.aiv_shard(score_i32),
-                                target_type=pl.FP32,
-                                mode="none",
-                            ),
-                            0.0,
-                        )
-                        # QLI FixpSToL1 applies ReLU and 2^-10 before DEQF16.
-                        # The second matmul reads these half values, rather
-                        # than the full-precision INT32 dot products.
-                        score_fp16 = pl.cast(
-                            pl.mul(score_shard, SCORE_DEQUANT_SCALE),
-                            target_type=pl.FP16, mode="rint",
-                        )
-                        score_shard = pl.cast(score_fp16, target_type=pl.FP32)
-                        score_shard = pl.row_expand_mul(
-                            score_shard, head_coefficient,
-                        )
-                        # The packed page holds 128 FP16 scales.  Candidate
-                        # shards begin on 64-row boundaries, so 64 is the
-                        # largest fixed scale tile that never crosses a page.
-                        # Reduce the four heads once for the whole AIV shard,
-                        # then apply three page-local scale tiles.
-                        score_sum = pl.reshape(
-                            pl.col_sum(score_shard),
-                            [1, SCORE_LANE_ROWS],
+                        # Own the C2V result before taking row views. Direct
+                        # views produced incorrect scores with this toolchain;
+                        # retain the materialization across all scale chunks.
+                        reduced_shard = pl.add(pl.aiv_shard(reduced_score), 0.0)
+                        score_sum = pl.tile.slice(
+                            reduced_shard, [1, SCORE_LANE_ROWS], [0, 0],
                         )
                         for scale_tile in pl.unroll(
                             SCORE_LANE_ROWS // (2 * BLOCK_SIZE),
@@ -796,11 +797,11 @@ def indexer_score_topk_forest_vllm(
                             )
                             score_chunk = pl.add(
                                 pl.mul(
-                                    score_sum[
-                                        0:1,
-                                        scale_begin : scale_begin
-                                        + 2 * BLOCK_SIZE,
-                                    ],
+                                    pl.tile.extract(
+                                        score_sum, 0, scale_begin,
+                                        [1, 2 * BLOCK_SIZE],
+                                        target_memory=pl.MemorySpace.Vec,
+                                    ),
                                     0.0,
                                 ),
                                 FP32_NEG_INF,
@@ -816,27 +817,25 @@ def indexer_score_topk_forest_vllm(
                                     physical_page * VLLM_INDEX_PAGE_ROWS
                                     + VLLM_INDEX_KEY_ROWS
                                 )
-                                tail_i8 = pl.slice(
-                                    index_pages_flat,
+                                tail_i8 = pl.load(
+                                    index_pages_flat, [tail_row, 0],
                                     [2, IDX_HEAD_DIM],
-                                    [tail_row, 0],
                                 )
                                 scales_fp16 = pl.reinterpret_view(
                                     tail_i8,
                                     pl.FP16,
                                     shape=[1, VLLM_INDEX_KEY_ROWS],
                                 )
-                                scale_chunk = pl.slice(
-                                    scales_fp16,
-                                    [1, 2 * BLOCK_SIZE],
-                                    [0, intra],
+                                scale_chunk = pl.tile.extract(
+                                    scales_fp16, 0, intra, [1, 2 * BLOCK_SIZE],
+                                    target_memory=pl.MemorySpace.Vec,
                                 )
                                 score_chunk = pl.mul(
-                                    score_sum[
-                                        0:1,
-                                        scale_begin : scale_begin
-                                        + 2 * BLOCK_SIZE,
-                                    ],
+                                    pl.tile.extract(
+                                        score_sum, 0, scale_begin,
+                                        [1, 2 * BLOCK_SIZE],
+                                        target_memory=pl.MemorySpace.Vec,
+                                    ),
                                     pl.cast(
                                         scale_chunk, target_type=pl.FP32,
                                     ),
@@ -860,10 +859,7 @@ def indexer_score_topk_forest_vllm(
                                     + (1 - single_leaf)
                                     * (score_begin + scale_begin)
                                 )
-                                score_arena[
-                                    score_row_id : score_row_id + 1,
-                                    score_col : score_col + 2 * BLOCK_SIZE,
-                                ] = score_valid
+                                pl.store(score_valid, [score_row_id, score_col], score_arena)
 
                 if single_leaf == 0:
                     for sort_lane in pl.split_aiv(

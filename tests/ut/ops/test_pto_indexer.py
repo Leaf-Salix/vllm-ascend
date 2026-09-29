@@ -293,3 +293,75 @@ def test_weights_projection_preserves_one_accumulator_across_k(tokens):
     old = (old.bfloat16().float() * 0.125).bfloat16().float()
     assert old == 0.125
     assert old != expected[0]
+
+
+@pytest.mark.parametrize("tokens", [13, 49])
+def test_cube_coefficients_keep_native_half_boundaries_and_zero_padding(tokens):
+    # Execute the actual coefficient producer, including its worker-strided
+    # query loop. Compare against native QLI's two half storage boundaries.
+    path = KERNELS / "decode_indexer.py"
+    tree = ast.parse(path.read_text())
+    producer = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.With)
+        and any(
+            isinstance(item.optional_vars, ast.Name) and item.optional_vars.id == "coefficients_tid"
+            for item in node.items
+        )
+    )
+    code = compile(ast.Module(body=[producer], type_ignores=[]), str(path), "exec")
+    rng = torch.Generator().manual_seed(928)
+    scales = (torch.rand(tokens * 64, 1, generator=rng) * 0.01).half().float()
+    weights = torch.randn(tokens, 64, generator=rng) * 0.02
+    # Exercise half subnormals and signed coefficients as well as ordinary data.
+    scales[::3] = 2.0**-14
+    coefficients = torch.full((tokens * 16, 64), float("nan"), dtype=torch.float16)
+
+    def load(tensor, offset, shape):
+        row, col = offset
+        rows, cols = shape
+        return tensor[row : row + rows, col : col + cols].clone()
+
+    def assemble(target, value, offset):
+        row, col = offset
+        target[row : row + value.shape[0], col : col + value.shape[1]] = value
+        return target
+
+    for worker in range(48):
+        pl = SimpleNamespace(
+            spmd=lambda *args, **kwargs: nullcontext(0),
+            tile=SimpleNamespace(
+                get_block_idx=lambda worker=worker: worker,
+                full=lambda shape, dtype, value: torch.full(shape, value, dtype=dtype),
+                assemble=assemble,
+            ),
+            tensor=SimpleNamespace(dim=lambda tensor, axis: tensor.shape[axis]),
+            range=range,
+            reshape=torch.reshape,
+            load=load,
+            mul=torch.mul,
+            cast=lambda value, dtype, **kwargs: value.to(dtype),
+            store=lambda value, offset, target: assemble(target, value, offset),
+            FP16=torch.float16,
+            FP32=torch.float32,
+        )
+        exec(
+            code,
+            dict(
+                pl=pl,
+                TOPK_QUERY_WORKERS=48,
+                IDX_N_HEADS=64,
+                qh_quant_tid=0,
+                weights_tid=0,
+                qr_hadamard_scale_dq=scales,
+                weights=weights,
+                position_ids=torch.empty(tokens),
+                coefficients=coefficients,
+            ),
+        )
+    expected = (scales.view(tokens, 64) * weights.half().float()).half()
+    torch.testing.assert_close(coefficients[::16], expected, rtol=0, atol=0)
+    padded = coefficients.view(tokens, 16, 64)[:, 1:]
+    assert torch.count_nonzero(padded) == 0
+    assert torch.isfinite(coefficients).all()
