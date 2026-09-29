@@ -1,6 +1,6 @@
 # CSA核内优化：本地AscendC源码参考
 
-更新：2026-09-28。按用户修正后的目标，最新AscendC实现是后续核内优化的主要依据：
+更新：2026-09-29。按用户修正后的目标，最新AscendC实现是后续核内优化的主要依据：
 首先研究ops-transformer，结合ops-nn、ops-math等ops仓库；当前Native作性能/行为对照，pypto-lib作PTO实现参考。
 以下是本地已读取版本，不表示当前CANN二进制已包含这些实现，也不表示这些实现已测得比PTO快。
 
@@ -278,18 +278,14 @@ CSA七三−0.681%不能代替核内目标；短档P95+7.54μs，控制漂移与
 总体有收益即保留；单侧明显退化时在同一套算子内按场景分支，不要求所有档位同时加速。
 核内、完整CSA及最终forward各自计算，异常P95和功能约束单列，不能用权重掩盖。
 
-最新完整测量已更新为CANN9.2/e33d842a七档，全部CSA均值/P95/max低于同轮Native，
-但长B4/B8 Score核时仍高于Native PMU参考；不能用Native任务Duration代替核内参考而宣布差距关闭。
-[七档完整读数](results/csa_cann92_incore_seven_20260928/RESULTS.md)、
-[PMU/DFX定义](results/csa_cann92_incore_seven_20260928/METRICS.md)。
-主线3b27c7fd随后改变WO_A为Native实际NZ存储，旧矩阵不覆盖该项。局部长短B16及8K/B40已通过，
-O_A核时分别−25.778%/−26.636%/−20.317%，完整CSA及P95均改善，保留该修正。
-ops-nn19614968的A3 `transpose_batch_mat_mul/op_kernel/pp_matmul_ein_sum_kernel.h`
-中GetOffsetB/CopyTileB区分ND/NZ，NZ直接GM→L1；当前PTO同样保留根三维几何、直接借用格式29。
-完整读数见[三档验证](results/csa_wo_a_native_nz_20260928/README.md)。
-用户后续矩阵改为128K B4/8/16/24、8K B24/32/40；新增长B24已在私有包中完成9.2单卡对照，
-PTO完整CSA1362.396μs、比Native低8.548%，[证据](results/csa_b24_cann92_20260928/RESULTS.md)。
-后续代表档128K/B16与8K/B24，历史8K/B16记录不继续扩测。
+当前正式七档为128K B4/B8/B16/B24、8K B16/B24/B32，B40退役；筛选代表档是长B16/短B24。
+完整4ffccb7b/CANN9.2七档已包含WO_A原生NZ、长S6均衡排序、Key预取及三项系数优化，
+[当前CSA/核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)保留测量边界与原始证据。
+该七档Native仍属vLLM编译包装、static开启、superkernel关闭的旧入口。
+显式torch.compile backend=npugraph_ex的新Native已采用superkernel：设备直接replay长B16 1122.652μs、短B24 940.762μs，
+[校准证据](results/csa_native_graph_replay_20260929/RESULTS.md)。不再做开关试验，阶段出口统一更新七档。
+新profile中QLI→Sparse已经合成一个SuperKernel，不能把该PMU数字当成单个QLI核时。
+旧拆分profile仍可作已注明配置的核内参考，不能把它改名为新SuperKernel内部实测。
 
 短档Score及Sparse整组准入两项定向对照已结束，未证明整体收益，暂不采用；
 [同核串行证据](results/csa_short_score_sync_20260928/README.md)及[Sparse对照](results/csa_sparse_sync_20260928/README.md)保留。
@@ -305,3 +301,21 @@ QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要�
 按七档实际热点继续审查最新AscendC策略；不能因本次只找到一个新候选，就将整个核内阶段标完成。
 每项分别记录核内耗时、调度等待、完整CSA/P95与最终forward，解释与pypto-lib的任务和输入差异。
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。
+
+
+## 5. Sparse末块直接发布：新的核内候选
+
+来源为ops-transformer28f40354的
+[Sparse SCFA Vector](../../../ops-transformer/experimental/attention/sparse_attn_sharedkv/op_kernel/arch22/sparse_attn_sharedkv_scfa_block_vector.h)：
+DealBmm2ResBaseBlock的最后S2分支调用RowDivs后直接发布；RowDivs使用Div，不采用倒数乘假设。
+当前PTO已在QK/PV中完成累计规约，但仍把FP32 mi/li/oi发布到GM，让独立merge_norm读回归一化和逆RoPE。
+pypto-lib2164563的dspark仍使用该独立merge。新私有候选消除这一最终交接，把原16-head的归一化、
+逆RoPE、BF16转换与O_A分组发布移到每个query最后PV块，保留现有性能版算术。
+
+融合初版UB197632>188416字节，8-head版本仍189440，未降低工具链检查。
+MemoryReuse IR确认softmax临时区16KiB全循环常驻；缩短到softmax子阶段后，原16-head版本181248字节，
+完整PTOAS/CCE/load通过，独立merge_norm消失。不是重复旧累计softmax或PV L0B候选。
+正常auto单卡任务task_20260929_083719_62875131423已入队，冻结后不编辑源码。
+只测长B16/短B24，完整状态零容差、四窗官方DFX、CSA/P95；尚无真机收益结论，不合入生产。
+后续比较Sparse加原merge的总AIV核时和发布跨度，避免融合范围变化造成错误归因。
+[候选、缓冲证据与设备入口](results/csa_sparse_final_publish_20260929/README.md)。

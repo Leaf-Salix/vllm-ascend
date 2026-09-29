@@ -1,0 +1,7 @@
+Initial CPU compile rejected returning a nested tuple call directly.
+Use explicit packed, ready assignment and return both elements; no compiler changes.
+Explicit tuple unpacking also requires full tensor shape/dtype annotations on both helper returns.
+16-head final publication uses 197632 Vec bytes > 188416 limit. Publish one eight-head O_A group at a time; keep all elementwise arithmetic.
+8-head publication initially uses 189440 > 188416 bytes. Scope gather scratch to final publication rather than all QK/PV iterations.
+Moving gather scratch alone did not reduce the 189440-byte peak. Build lane indices only for final publication, and avoid the unused pre-RoPE BF16 cast.
+MemoryReuse IR shows qk_reduce_tmp reserves 16384 bytes across the full loop. Scope this scratch to softmax; restore original 16-head publication, map initialized once and original cast order.

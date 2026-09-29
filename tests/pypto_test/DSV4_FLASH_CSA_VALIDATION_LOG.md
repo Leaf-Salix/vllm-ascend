@@ -11131,3 +11131,26 @@ task_20260929_081604_23093924514退出0，auto设备1，CANN9.2/mode2/det0，sta
 当前PTO qk_pv先发布FP32 mi/li/oi，独立merge_norm再加载、归一化、逆RoPE及按O_A分组发布。
 Native的RowDivs仍用Div，不支持“Native通过倒数乘替代除法”的假设；可研究的是最终结果的数据交接与任务边界。
 末块融合可能增加QK/PV尾部和UB压力，需先检查缓冲生命周期及历史反例，不把少GM直接视为收益。
+
+## 408. Sparse末块直接发布私有候选通过编译并入队（2026-09-29）
+
+参考最新ops-transformer28f40354 Sparse SCFA Vector在最后S2块内RowDivs并发布的结构，
+保持PTO现有局部softmax/alpha/beta/分母/逆RoPE/舍入，将mi/li/oi的GM交接与48个merge_norm worker去除。
+O_A改为依赖最终QK/PV发布；rope_cs增加到QK/PV显式依赖，保留原早派发属性。
+任务边界改变是融合的一部分，不将全部CSA差额解释成纯算术时间。
+pypto-lib2164563的dspark仍保留独立merge_norm，当前偏离它的理由是吸收AscendC末块发布策略，
+不涉及Native cache布局、入口拆分或写回，精度版未动。
+
+前两次CPU表达修正分别为嵌套tuple返回改显式解包，以及补全helper返回Tensor的shape/dtype。
+16-head融合初版Vec197632字节超过188416上限；8-head189440仍超限，移动gather临时量无改善。
+检查MemoryReuse IR发现16KiB qk_reduce_tmp全循环常驻；它不携带跨块状态，缩短到softmax子阶段，
+恢复原16-head发布及转换顺序后Vec181248，完整PTOAS/CCE/load通过，生成图没有独立merge_norm。
+没有修改PyPTO/PTOAS/PTO-ISA、放宽容量限制或提前声明性能收益。
+
+08:37正常auto单卡提交task_20260929_083719_62875131423，完整私有副本以4ffccb7b为基线，
+只测128K/B16和8K/B24：5预热20次编译图事件、每侧四窗level-4、八类完整状态跨版本零容差及现有图/保护区检查。
+源码与设备runner入队后冻结；生产算子不变。比较Sparse加原merge的AIV核·μs、AIC核时和发布跨度，
+以及完整CSA长短8:2、P95/max，不能仅看融合后Sparse单task均值或任务数减少。
+Ruff与shell语法检查通过，设备结果待同一任务结束。
+[候选](results/csa_sparse_final_publish_20260929/README.md)、
+[CPU与UB](results/csa_sparse_final_publish_20260929/lowering.json)。
