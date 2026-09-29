@@ -15,6 +15,25 @@ STATES = {"x_out", "idx_topk", "swa.0", "compressed.0", "state.0",
           "indexer.0", "indexer.1", "indexer_state.0"}
 
 
+def compact_padding(padding, source):
+    """Keep coverage and outcomes; leave repeated tensor descriptions in raw reports."""
+    replays = []
+    for replay in padding["replays"]:
+        checks = replay["state_comparison"]
+        if set(checks) != STATES:
+            raise ValueError("Padding state coverage incomplete")
+        item = {"active_batch": replay["active_batch"], "reference": replay["reference"]}
+        for name in ("state_comparison", "compact_metadata", "guards"):
+            values = replay[name]
+            failures = {k: v for k, v in values.items() if v["status"] != "PASS"}
+            if failures:
+                raise ValueError(f"Padding {name} failed: {failures}")
+            item[name] = {"status": "PASS", "count": len(values), "names": sorted(values)}
+        replays.append(item)
+    return {"status": padding["status"], "bucket_batch": padding["bucket_batch"],
+            "scope": padding["scope"], "source": str(source), "replays": replays}
+
+
 def main():
     folder = ROOT / "boundary"
     task = (folder / "task.txt").read_text().strip()
@@ -58,7 +77,8 @@ def main():
         "scope": "B3/S6/T18, history127, active-B 3/2/1/3; no timing or EP16 claim",
         "checks": checks,
         "contexts": contexts,
-        "padding": {s: r["padding_graph"] for s, r in reports.items()},
+        "padding": {s: compact_padding(r["padding_graph"], folder / s / "report.json")
+                    for s, r in reports.items()},
         "status": "PASS" if all(c["status"] == "PASS" for c in checks.values()) else "FAIL",
     }
     (folder / "summary.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
