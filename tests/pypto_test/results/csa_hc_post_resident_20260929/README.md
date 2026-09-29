@@ -1,6 +1,6 @@
 # HC_post残差常驻UB
 
-任务`task_20260929_101809_3278473829`于2026-09-29 10:18正常auto提交；结果待完成。
+任务`task_20260929_101809_3278473829`及边界任务`task_20260929_103449_93614614346`均退出0；已保留。
 基线55b89ee2，独立于首PV候选，不把两个未验证改动叠加。
 
 参考最新ops-transformer 28f40354：
@@ -30,10 +30,28 @@ CPU首版被Tensor/Tile混用检查拒绝，尚未上卡；将x读取和y写出�
 Native核内profile与PTO不能只按单worker均值作比较：例如B4 Native使用24个Vector block，
 PTO为6个worker，每worker循环4个token。比较候选时保持分工不变，消除这项干扰。
 
-只修改私有性能包的hc_post.py，不改公共精度实现或生产文件。
+实验阶段只修改私有性能包的hc_post.py；完成下面的验证后移入公共hc_post，性能版继续复用。
 两侧CANN9.2/mode2/atomic0/det0、测试包装inplace=True，固定128K/B16与8K/B24。
 5预热20次正式设备事件、各四窗DFX、八类完整状态零容差，核内/CSA/P95分别判断，长短8:2。
 有明确核内收益且必要功能通过后才采用，不因内存访问减少就先宣称收益。
 
 [准备](prepare.py)、[补丁](candidate.patch)、[来源](source.json)、[编译](compile_candidate.json)、
 [生成码计数](lowering.json)、[两档入口](run.sh)、[复用收集器](collect.py)、[任务](task.txt)。
+
+## 实测与采用
+
+长B16/短B24的HC_post四窗核内均值分别19.954→16.477μs（−17.423%）、
+22.762→17.120μs（−24.785%）；各四窗范围不重叠，8:2核内−18.896%。
+完整CSA分别1017.247→1006.161μs（−1.090%）、941.039→949.127μs（+0.859%），8:2−0.700%。
+P95分别1031.820→1019.360、953.720→967.860μs；不隐藏短档区间/P95回退，
+候选P95/P50为1.0144/1.0197，各0/20超过P50的105%，不据此关闭历史长尾。
+两档八类完整状态零容差通过，图重放及保护区通过；官方16个DFX窗口的join/行数/block验证通过。
+
+仅补一个B3/H127/T18尾块，active-B=3→2→1→3同图padding；两版本八类状态及保护区全部PASS。
+依据用户“核内有收益即保留”的规则采用。四行FP32残差重用是数值中性实现，
+放入共享deepseek_v4_flash_dspark/hc_post.py，性能版原reexport保持，不复制一份长期代码。
+实测候选与采用正文AST一致；两版各两根依赖图解析通过，Ruff/shell通过。
+这不代表精度版完整模型或Native/PTO逐token/DSpark通过，也不替换尚在运行的55b89ee2七档基线。
+
+[完整两档](RESULTS.md)、[原样本及四窗](summary.json)、[边界结果](boundary/summary.json)、
+[边界入口](run_boundary.sh)、[边界收集](collect_boundary.py)、[采用解析](adoption_parse.json)。

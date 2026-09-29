@@ -122,7 +122,9 @@ O_A/O_B各64份工作由24个AIC执行，必须多波；WO_A已经直接借用NZ
    scale写回涉及64字节读改写，没有页面所有权证明不删依赖。
    AscendC式首PV特化已完成并否定：零容差状态通过，但Sparse AIV长/短+5.075%/+8.726%，
    CSA与P95也回退；[结果](results/csa_sparse_first_pv_20260929/RESULTS.md)，不原样重试。
-   当前独立验证[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)，保持乘加顺序及任务分工。
+   已保留[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)：
+   核内长/短−17.423%/−24.785%，CSA 8:2−0.700%；八类状态及B3/H127/padding通过。
+   乘加顺序与任务分工保持，短档CSA/P95回退单列；运行中的七档尚不含该项。
 5. 精度版数值中性优化迁移、CANN9.2/新B24真实EP16 token/DSpark与稳态10步forward仍未完成。
 
 ## 保留策略和已否定方向

@@ -326,3 +326,18 @@ B3/H127和active-B=3/2/1/3 padding亦通过。已保留在性能版Sparse单文�
 长/短CSA−2.960%/−1.495%，8:2−2.667%；Sparse加原merge的AIV总核时8:2−11.551%，P95均下降。
 它吸收AscendC的末块数据交接策略，保留PTO现有算术，与pypto-lib的独立merge边界仍有意不同。
 [保留结果](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)。
+
+## 6. HC_post残差常驻：吸收Permanent-X的数据重用
+
+ops-transformer28f40354的`mhc/mhc_post/op_kernel/arch22/mhc_post_arch22.h`
+在ComputeCopyOutAllX中按USE_PERMANENT_X复用UB残差，tiling按可用UB选择；
+release Native的HcPostDSplit同样先整组读取。PTO此前沿pypto-lib2164563每输出通道
+重读四行的循环；上游残差FP32，本接入为Native BF16，另多出重复的BF16→FP32转换。
+
+新实现每token四行残差load/cast各一次并复用，保留post*x后0/1/2/3顺序mul/add及BF16 RINT，
+未使用AscendC Axpy改变舍入。每token残差读取/转换16→4；任务分工和外层pipeline保持。
+两档核内长/短−17.423%/−24.785%，四窗范围不重叠；CSA长−1.090%/短+0.859%，8:2−0.700%。
+短档P95增加14.140μs，记录为区间回退；候选P95/P50最高1.0197，没有按异常点删除任何样本。
+八类完整状态零容差及T18尾块/同图padding通过，按核内收益规则保留共享实现；
+性能版继续reexport，两版依赖图通过。完整精度版/Native逐token及EP16验收仍后置。
+[测量、边界和采用证据](results/csa_hc_post_resident_20260929/README.md)。

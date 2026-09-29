@@ -62,14 +62,16 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | --- | --- | --- |
 | 1 | Native新基线已定，阶段出口更新七档 | static+superkernel开启、显式named backend自管图；两代表档直接replay/状态校准通过，旧七档不拼入两行凑新表，不再试开关 |
 | 2 | 最新AscendC末块发布已保留 | 修复mi/li偏移后，两档完整状态及B3/H127/padding精确通过；CSA 8:2−2.667%、AIV工作量−11.551%、P95下降，移入性能版单文件 |
-| 3 | 保留核内收益并处理CSA关键链 | 首PV特化已否定：两档Sparse AIV+5.075%/+8.726%、CSA/P95回退；[HC_post常驻残差](results/csa_hc_post_resident_20260929/README.md)独立对照继续。有真实核内收益即保留，CSA/P95单列、长短8:2 |
+| 3 | 保留核内收益并处理CSA关键链 | 首PV特化已否定：两档Sparse AIV+5.075%/+8.726%、CSA/P95回退；[HC_post常驻残差](results/csa_hc_post_resident_20260929/README.md)核内8:2−18.896%、CSA−0.700%，状态/尾块通过，已移入共享实现。有真实核内收益即保留，CSA/P95单列、长短8:2 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
 | 5 | 阶段七档出口、精度版迁移 | inplace关闭的task_20260929_093737_25396355997按新要求停止（exit130）；[新七档](results/csa_native_inplace_seven_20260929/README.md)统一inplace=True/dynamic=False。整体开SuperKernel，核内诊断关但保留static；保持精度版舍入/规约 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
-并行的独立核内候选：[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)，
+新增已保留的核内优化：[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)，
 参考最新AscendC Permanent-X；生成码每token残差加载/转换16→4，乘加/存储数量不变，
-任务task_20260929_101809_3278473829验证长B16/短B24。未叠加已否定的首PV候选，生产尚未采用。
+两代表档及B3/H127同图padding均退出0，八类状态精确一致；两版共用算术中性的HC实现。
+短档CSA+0.859%、P95增加14.140μs单列，不掩盖为噪声；七档运行快照尚不包含该项。
+未叠加已否定的首PV候选；两版依赖图解析通过不代表精度版整体验收。
 
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、
 HC/QR/KV/Sparse既有核内优化及三项系数优化。Native分配/cache不改，PTO内直接分页读写，无入口复制/外部写回。

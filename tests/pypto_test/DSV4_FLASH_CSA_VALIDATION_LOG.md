@@ -11321,3 +11321,30 @@ task_20260929_100643_249687018410确认completed(exit=0)，auto设备1，同卡�
 独立HC_post候选和新Native七档任务仍正常运行，不叠加失败改动。
 [完整结果](results/csa_sparse_first_pv_20260929/RESULTS.md)、
 [状态与四窗原值](results/csa_sparse_first_pv_20260929/summary.json)。
+
+## 417. HC_post残差重用核内收益成立，最小边界通过后移入共享实现（2026-09-29）
+
+任务task_20260929_101809_3278473829 completed(exit=0)，auto设备2。
+参考最新AscendC Permanent-X，固定原任务分工及乘加/RINT规则，残差load/cast每token16→4。
+官方16个DFX窗口原始join、行数与核心覆盖通过；长B16/短B24八类完整状态零容差通过。
+
+| 档位 | HC_post四窗核时μs | 核时变化 | 完整CSAμs | CSA变化 | P95μs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 19.954→16.477 | −17.423% | 1017.247→1006.161 | −1.090% | 1031.820→1019.360 |
+| 8K/B24 | 22.762→17.120 | −24.785% | 941.039→949.127 | +0.859% | 953.720→967.860 |
+
+长短8:2核内−18.896%、完整CSA−0.700%。两档核内各四窗范围不重叠；
+短档CSA和P95确实回退，不能据核内收益说它们也改善，后续调度单独处理。
+候选P95/P50为1.0144/1.0197，各0/20超过105%P50，不能关闭历史间歇长尾或EP16问题。
+
+只补一次B3/H127/T18边界：task_20260929_103449_93614614346 completed(exit=0)，auto设备3。
+最后HC_post worker只有两token，active-B=3/2/1/3同图padding，两版本八类状态及保护区PASS。
+遵循用户有核内收益即保留，移入共享deepseek_v4_flash_dspark/hc_post.py；
+性能版原reexport保持，精度版共用相同算术，不增加两份实现。采用正文与实测候选AST一致，
+Ruff及shell通过，性能/精度各两根依赖图解析通过；这不是精度版完整模型验收。
+
+55b89ee2/inplace=True七档仍沿原冻结包运行，不混入新HC。新基线截止本节已完整5档，
+8K/B24正在测Native，B32未开始；不把部分数据冒称全七档。
+[完整结果及原样本](results/csa_hc_post_resident_20260929/RESULTS.md)、
+[边界八类状态](results/csa_hc_post_resident_20260929/boundary/summary.json)、
+[采用与来源说明](results/csa_hc_post_resident_20260929/README.md)。

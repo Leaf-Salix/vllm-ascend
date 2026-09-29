@@ -12,7 +12,8 @@ prefill 入口与 standalone 用例不搬，本包只做 decode。
 
 import pypto.language as pl
 
-from .config import FLASH as M, DECODE_BATCH, DECODE_SEQ, TP
+from .config import DECODE_BATCH, DECODE_SEQ, TP
+from .config import FLASH as M
 
 # Dynamic shape variables.
 T_DYN = pl.dynamic("T_DYN")  # T = B * S
@@ -21,6 +22,7 @@ T_DYN = pl.dynamic("T_DYN")  # T = B * S
 D = M.hidden_size
 HC_MULT = M.hc_mult
 HC_DIM = M.hc_dim
+assert HC_MULT == 4
 
 # tiling
 T_TILE = 4
@@ -52,19 +54,30 @@ def _hc_post(
         for t in pl.pipeline(t0, t0 + T_TILE, stage=2):
             if t < t_dim:
                 # One cast per token: all HC_MULT outputs share the x row.
-                x_row = pl.cast(x[t : t + 1, 0:D], target_type=pl.FP32)
+                x_row = pl.cast(pl.load(x, [t, 0], [1, D]), target_type=pl.FP32)
+                # AscendC Permanent-X: keep four FP32 residual rows in UB.
+                # Reuse loads/casts while preserving the separate mul/add order.
+                res_0 = pl.cast(pl.load(residual_flat, [t, 0 * D], [1, D]), pl.FP32)
+                res_1 = pl.cast(pl.load(residual_flat, [t, 1 * D], [1, D]), pl.FP32)
+                res_2 = pl.cast(pl.load(residual_flat, [t, 2 * D], [1, D]), pl.FP32)
+                res_3 = pl.cast(pl.load(residual_flat, [t, 3 * D], [1, D]), pl.FP32)
                 for out_h in pl.unroll(HC_MULT):
                     post_w = pl.read(post, [t, out_h])
                     y_row = pl.mul(x_row, post_w)
-                    for in_h in pl.pipeline(HC_MULT, stage=4):
-                        comb_w = pl.read(comb, [t, in_h * HC_MULT + out_h])
-                        res_d = in_h * D
-                        # 本包的 hc 残差流是 BF16（与 Native 的 npu_hc_post 一致），读出后抬成 FP32 再累加。
-                        res_row = pl.cast(residual_flat[t : t + 1, res_d : res_d + D], pl.FP32)
-                        weighted = pl.mul(res_row, comb_w)
-                        y_row = pl.add(y_row, weighted)
+                    comb_0 = pl.read(comb, [t, 0 * HC_MULT + out_h])
+                    weighted_0 = pl.mul(res_0, comb_0)
+                    y_row = pl.add(y_row, weighted_0)
+                    comb_1 = pl.read(comb, [t, 1 * HC_MULT + out_h])
+                    weighted_1 = pl.mul(res_1, comb_1)
+                    y_row = pl.add(y_row, weighted_1)
+                    comb_2 = pl.read(comb, [t, 2 * HC_MULT + out_h])
+                    weighted_2 = pl.mul(res_2, comb_2)
+                    y_row = pl.add(y_row, weighted_2)
+                    comb_3 = pl.read(comb, [t, 3 * HC_MULT + out_h])
+                    weighted_3 = pl.mul(res_3, comb_3)
+                    y_row = pl.add(y_row, weighted_3)
                     # 写回下一层的 hc 残差流：与 Native 一致按 BF16 落盘。
-                    y_flat[t : t + 1, out_h * D : out_h * D + D] = pl.cast(y_row, pl.BF16, mode="rint")
+                    pl.store(pl.cast(y_row, pl.BF16, mode="rint"), [t, out_h * D], y_flat)
     return y
 
 
