@@ -1,0 +1,79 @@
+{
+  "decision": "ADOPTED",
+  "task": "task_20260929_125617_186453621969",
+  "task_status": "completed (exit=0)",
+  "cross_state_status": "PASS",
+  "weighted_8_2_csa_pct": -1.2956636518076659,
+  "weighted_8_2_incore_pct": -3.4058691160254693,
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "csa_change_pct": -1.393520163335915,
+      "ob_kernel_change_pct": -5.7202441946051845,
+      "ob_windows": {
+        "baseline": [
+          10.230624999999993,
+          10.917187500000006,
+          11.233125000000008,
+          10.9246875
+        ],
+        "candidate": [
+          10.18656250000001,
+          10.313750000000004,
+          10.34593749999999,
+          9.98218750000001
+        ]
+      },
+      "unchanged_context_tasks": {
+        "baseline": {
+          "proj_a_mm": 27.543515624999998,
+          "qproj_matmul": 41.530833333333334,
+          "indexer_score_topk_native_pair_aic": 224.8204166666667
+        },
+        "candidate": {
+          "proj_a_mm": 27.876718749999995,
+          "qproj_matmul": 40.824999999999996,
+          "indexer_score_topk_native_pair_aic": 225.074375
+        }
+      }
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "csa_change_pct": -0.9042376056946688,
+      "ob_kernel_change_pct": 5.851631198293394,
+      "ob_windows": {
+        "baseline": [
+          12.041249999999994,
+          11.989374999999992,
+          12.294687499999991,
+          11.722187499999997
+        ],
+        "candidate": [
+          12.386249999999993,
+          12.652812499999992,
+          12.6953125,
+          13.124687499999999
+        ]
+      },
+      "unchanged_context_tasks": {
+        "baseline": {
+          "proj_a_mm": 27.944140625000003,
+          "qproj_matmul": 36.691875,
+          "indexer_score_topk_native_pair_aic": 40.61354166666667
+        },
+        "candidate": {
+          "proj_a_mm": 29.36703125,
+          "qproj_matmul": 41.88875,
+          "indexer_score_topk_native_pair_aic": 41.934374999999996
+        }
+      }
+    }
+  ],
+  "interpretation": "长档O-B变化-5.720%，四窗范围有少量重叠；未改O-A与Score均值没有同步加速。短档O-B变化+5.852%，O-A/Q_B/Score同时变慢，记录原值，不单独归因为A驻留，也不抹去回退。按8:2同时改善核内与CSA，P95未异常，边界通过后采用。",
+  "boundary_task": "task_20260929_131204_257112126238",
+  "boundary_scope": "H127 B4/T24覆盖ROW32尾行；B8/T48覆盖ROW96尾行；同图padding。无新Native/EP16/七档重复。",
+  "boundary_status": "PASS",
+  "adopted_file": "vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_o_proj.py"
+}

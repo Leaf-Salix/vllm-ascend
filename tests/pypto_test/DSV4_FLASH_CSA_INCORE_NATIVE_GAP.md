@@ -103,6 +103,9 @@ O_A/O_B各64份工作由24个AIC多波处理，Q_B/Indexer投影也有资源交�
    [局部因果对照及边界](results/csa_score_single_root_20260929/README.md)。
 2. 下一轮按这份任务图研究Indexer归并、AIV数据交接与CSA关键链，同时保留长小batch Score和短Sparse入口。
    128K优先、长短8:2，有真实核内收益即保留；明显场景分化在同一套算子内分支。
+   后续已保留[O-B激活L1复用/K128双缓冲](results/csa_ob_activation_l1_k128_20260929/README.md)：
+   长/短B16核内−5.720%/+5.852%，8:2−3.406%，完整CSA8:2−1.296%，两档及两条尾行路径状态通过。
+   这组同卡A/B为auto设备9，与上方七档设备0的不同轮次数据分开；不将其增益外推更新七档表。
 3. HC门控优先已否定：CSA 8:2回退1.380%，独立DFX前段提前不能代替正式CSA收益；
    不原样重试HC widen开放预派发、短Score/Sparse整组准入、quant关early及纯去dummy组合。
 4. 对照[上游725μs泳道](results/csa_scheduling_20260927/upstream_725/README.md)，其输入FP32、无BF16 widen，
