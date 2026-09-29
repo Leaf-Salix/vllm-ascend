@@ -17,5 +17,11 @@
   "k_segments": 4,
   "k_segment_size": 256,
   "kernel_source_cleanup": "编译成功后仅移除基底中已未使用的BF16_WEIGHT_LAYOUT import，不改算子正文",
-  "scope": "静态生成码与编译/load证据；尚无设备性能结论"
+  "scope": "静态生成码与编译/load证据；尚无设备性能结论",
+  "baseline_l0_k": 128,
+  "candidate_l0_k": 256,
+  "baseline_right_buffers": "K128 ping-pong",
+  "candidate_right_buffers": "K256 shared Right buffer",
+  "arithmetic": "INT8×INT8→INT32，K总长及顺序保持；MMAD粒度和L0B重叠改变",
+  "interpretation": "这是A驻留加显式Tile lowering的组合；收益或回退不能单独归因减少GM读取"
 }
