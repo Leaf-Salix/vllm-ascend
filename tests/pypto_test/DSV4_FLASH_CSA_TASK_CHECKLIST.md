@@ -58,7 +58,10 @@ PTO保留custom-op图边界，不强制未来匹配Native编译选项；本轮�
 依据新七档图完成[HC关键门控优先对照](results/csa_hc_pre_priority_20260929/README.md)：
 长B16完整CSA+1.891%、短B24−0.665%、8:2回退1.380%，长档P95增加24.440μs，已否定。
 前门控/mix在独立DFX中提前不能替代整体收益；八类状态和实际新增依赖通过，不扩大测试。
-下一项回到Indexer核内，研究Native的按query分工与每leaf单根发布，必须一并处理consumer根数、tie规则和UB容量。
+下一项已形成[Indexer完整query单根候选](results/csa_score_single_root_20260929/README.md)：
+长S6改为连续候选、AIV按query分工、2048分数UB排序及单根发布，consumer同步减半根数；短档保持。
+已CPU完整编译通过，Vec静态覆盖88KiB，task_20260929_113003_337101716086已正常auto运行两代表档。
+同分排序可能变化，先报告完整状态差异并按既定误差/token合同处理，未提前采用。
 此前只改query分工却保留两个half根的失败候选不原样重试，不把结构上减少GM读写当作实测收益。
 精度迁移和整模型仍后置，保留长小batch Score、短Sparse的核内优化入口。
 

@@ -11436,3 +11436,30 @@ task_20260929_105848_277267824307 completed(exit=0)。两档八类完整状态�
 下一项回到Native QLI完整query单根策略；先解决当前Cube非连续半区次序、consumer根数和tie规则，再编译/测量。
 [正式结果与原样本](results/csa_hc_pre_priority_20260929/RESULTS.md)、
 [独立DFX交接与实际依赖](results/csa_hc_pre_priority_20260929/SCHEDULE.md)。
+
+## 423. 按最新QLI实现完整query单根策略，解决算子表达后进入长短两档筛选（2026-09-29）
+
+重新核对ops-transformer28f40354 QLI V2 ProcessVec1：按S1/query分工，每query连续处理S2，
+分数在UB乘scale、排序并更新globalTopkUb，最后每分片只发布一根。旧query-split仅改变分工，
+仍从两个不相邻半区读取/排序并发布两根，其失败证据不覆盖完整的此策略。
+
+从已验证d93bba14冻结baseline整包，创建独立candidate，生产不修改。
+仅长S6的balance_leaves路径：Cube保持M384/N64、FP16/FIXPIPE、Key预取及双槽，改成连续1024候选；
+两AIV各处理三个query，每核scale共享给三个query；两个1024块在UB组成2048段并排序，
+常驻Top-512根，最终每query/leaf一根；consumer有效根数同步减半，原arena容量和query跨度保持。
+短档与长B<4双query仍沿原路径，任务数/worker/调度标志不变。scale每AIV读全候选，流量翻倍的代价明确保留。
+
+分数算术不改；同分规则变为连续2048段中新段优先旧段、后leaf优先前leaf，段内沿既有排序。
+原half边界可能不是2048倍数，因此不能事先保证索引顺序/选择完全一致；按完整状态、逐元素和token/DSpark合同处理，
+不以保护区或合法Top-K结构替代精度。性能先筛选，不为无收益方案扩测。
+
+CPU预检中当前JIT不能保留Tile辅助入参，改为直接内联排序；短分支解析也校验形状，
+把UB段明确固定2048后解决1536→2048非法extract。两处均在算子私有包修复，无工具链仓修改。
+两入口依赖图、候选完整PTOAS/CCE/link/load、baseline解析、Ruff/shell通过。
+长S6 Vec静态地址覆盖90112字节（88KiB），根12KiB/分段24KiB，AIV仅三个最终根TSTORE站点；
+这些是静态证据，不是核内提速证据。
+
+11:30正常auto提交task_20260929_113003_337101716086，已确认running；最长5400秒。
+仅长128K/B16与短8K/B24：5预热20次正式设备事件、各四窗DFX、八类完整状态及保护区。
+分别记录Score AIC/AIV、merge、完整CSA/P95，长短8:2；不增加Native、全七档或EP16测试。
+[方案、唯一补丁及入口](results/csa_score_single_root_20260929/README.md)。
