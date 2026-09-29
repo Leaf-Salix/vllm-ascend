@@ -5,6 +5,27 @@
 及其[runtime/config.sh](../../../vllm-ascend-main/tests/dsv4_perf_accuracy_20260827/runtime/config.sh)。
 本次只改测试入口和证据说明，不改变生产Native算子、权重或已测结果。
 
+## 当前Native七档已完成
+
+新标准七档的正式计时与主性能profile已齐全：
+128K B4/B8/B16/B24为748.298/859.563/1130.853/1281.888μs，
+8K B16/B24/B32为757.482/915.371/1062.079μs。
+同一auto设备0、CANN9.2、mode2；每档5预热20次，实际static/SuperKernel及两stream通过。
+Native八类同图状态和保护区通过，不代表Native/PTO跨实现或模型验收。
+[七档均值/P95及计时范围](results/csa_native_inplace_seven_20260929/NATIVE_RESULTS.md)、
+[原样本及实际配置](results/csa_native_inplace_seven_20260929/native_summary.json)。
+后文早期入口/开关校准只作过程证据，不再作为当前基线；PTO配套采集不阻塞Native结果发布。
+
+## 两侧使用规则（2026-09-29最新补充）
+
+Native按当前标准：CANN9.2、显式torch.compile backend=npugraph_ex、dynamic=False、inplace_pass=True、static compile开启；
+完整CSA开SuperKernel，独立核内profile关SuperKernel但保持static。
+PTO使用已有已验证实现及适合它的执行路径和性能数据，不强制匹配上述Native编译配置。
+不为配置一致重测PTO；只有缺少对应档位或优化影响到证据时补测。
+对比必须明确源码、环境、硬件、计时边界及采样轮次；异轮已有数据可作状态对照，不能当作单项优化的因果A/B。
+下面表格中“两侧”或“本轮PTO包装”描述已有测试的实际设置，不是后续PTO的强制标准。
+正在执行的七档任务按原冻结包完成，不重启或篡改其配置记录。
+
 ## 核查结果与修正
 
 旧单层入口以enforce_eager构造Native对象，再手工捕获NPUGraph；这不是npugraph_ex/static kernel编译。

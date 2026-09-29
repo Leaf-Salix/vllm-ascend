@@ -11348,3 +11348,34 @@ Ruff及shell通过，性能/精度各两根依赖图解析通过；这不是精�
 [完整结果及原样本](results/csa_hc_post_resident_20260929/RESULTS.md)、
 [边界八类状态](results/csa_hc_post_resident_20260929/boundary/summary.json)、
 [采用与来源说明](results/csa_hc_post_resident_20260929/README.md)。
+
+## 418. Native遵循最新标准，PTO使用现有已验证路径与数据（2026-09-29）
+
+用户明确“native基线你用最新的标准，但是PTO你有啥就用啥”。
+后续Native保持CANN9.2/显式npugraph_ex/dynamic=False/inplace=True/static，主性能SuperKernel开。
+PTO不强制复刻Native编译选项，不为配置一致追加重测；现有对应档位的已验证数据直接使用并标注版本/环境/边界。
+负载与完整CSA设备范围仍需可比；异轮读数是现有结果对照，不归因单项改动收益。
+当前七档任务已在执行，沿原冻结包正常收尾，不重启、不向运行源码叠加d93bba14的HC_post。
+该规则同步清单和Native基线文档。核内候选保留必要单卡A/B，避免把“现有数据可用”误解成未经验证即采用。
+
+## 419. 最新标准Native七档正式基线齐全，先于PTO矩阵收尾发布（2026-09-29）
+
+task_20260929_095651_194851727802仍运行，但最后Native 8K/B32子进程已成功返回，
+随后PTO B32阶段开始；因此可以确认Native七档完整，不等待PTO及独立核内诊断/泳道。
+收集器只读已有报告，复用实际选项、安装静态包、SuperKernel、多stream、八类同图状态和保护区检查。
+
+| 档位 | Native均值μs | P95μs | 最大值μs |
+| --- | ---: | ---: | ---: |
+| 128K/B4 | 748.298 | 751.100 | 751.840 |
+| 128K/B8 | 859.563 | 861.620 | 864.720 |
+| 128K/B16 | 1130.853 | 1135.580 | 1139.520 |
+| 128K/B24 | 1281.888 | 1289.880 | 1290.440 |
+| 8K/B16 | 757.482 | 760.120 | 761.040 |
+| 8K/B24 | 915.371 | 920.340 | 920.900 |
+| 8K/B32 | 1062.079 | 1066.220 | 1070.680 |
+
+同auto设备0，CANN9.2/mode2/det0，显式npugraph_ex、dynamic=False、inplace=True、static和SuperKernel开启。
+每档5预热20次；唯一后端图直接replay，无主机更新节点，八类状态/保护区及真实两stream通过。
+范围HC_pre+norm+CSA+HC_post，不是整模型或跨实现精度验收。历史表不倒写配置，新旧轮不拼接。
+[独立Native报告](results/csa_native_inplace_seven_20260929/NATIVE_RESULTS.md)、
+[原样本、实际配置和profile](results/csa_native_inplace_seven_20260929/native_summary.json)。

@@ -1,7 +1,8 @@
 # dynamic固定关闭、inplace开启的七档对照
 
 任务：`task_20260929_095651_194851727802`，2026-09-29 09:56正常auto提交，同卡完成整个矩阵。
-当前正在执行，尚无完整七档新结论。
+Native七档正式计时与主性能profile已完成，见[NATIVE_RESULTS.md](NATIVE_RESULTS.md)；
+PTO/核内诊断/泳道矩阵仍继续收尾，尚不冒称整套任务已退出。
 
 用户进一步明确固定dynamic=False并开启inplace_pass。旧任务
 `task_20260929_093737_25396355997`的inplace为False，已主动停止并确认exit130；
@@ -37,3 +38,6 @@ PTO四窗继续使用官方原始join/行数/block检查；短B16/B32系数worke
 
 [准备入口](prepare.py)、[冻结来源](source.json)、[解析](parse.json)、[矩阵](run.sh)、
 [分侧入口](run_side.sh)、[收集器](collect.py)、[汇集器](bundle.py)、[任务](task.txt)。
+
+按用户后续补充，Native单独收集器`collect_native.py`在最后Native子进程成功返回后立即发布，
+不等待PTO采集。以后PTO使用现有已验证路径和数据，不为匹配Native编译选项重测。
