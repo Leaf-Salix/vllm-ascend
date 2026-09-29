@@ -11231,3 +11231,12 @@ static compile始终开启。该关闭组仅用于独立profile，不是再次�
 整体计时采用已校准显式npugraph_ex后端图直接replay，复用实际校准helper，避免旧外层capture混回Native。
 每档额外一份static开/SuperKernel关的核内profile，仅作QLI/Sparse拆解；主性能表只使用SuperKernel开数据。
 长短8:2，保留20次原样本/P95/max、两侧PyTorch JSON和PTO四窗泳道；实际融合范围明确标注。
+
+Sparse生产提交55b89ee2完成后，冻结整包到`.cache/csa-sparse-publish-seven-20260929`，
+selector=`pkg:dsv4_csa_sparse_publish_seven_20260929`。Native显式后端runner及实际直接replay的helper
+一起复制，避免只复制调用端却误用旧的外图capture辅助函数；PTO入口保持原生产自定义算子边界。
+核内关闭SuperKernel组仅做一次重放检查加独立profile，不产生可混入主表的正式均值。
+CPU依赖图、Python语法、Ruff/shell检查通过，收集器用已有两档Native profile核对实际融合范围。
+09:37正常auto提交完整矩阵task_20260929_093737_25396355997，最长9600秒；
+不嵌套排队、不固定设备、不修改已冻结源码。七档当前未收齐，不能提前宣称相对新Native的收益。
+[完整入口与口径](results/csa_sparse_publish_seven_20260929/README.md)。

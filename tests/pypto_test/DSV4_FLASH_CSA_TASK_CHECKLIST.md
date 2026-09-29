@@ -63,7 +63,7 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 2 | 最新AscendC末块发布已保留 | 修复mi/li偏移后，两档完整状态及B3/H127/padding精确通过；CSA 8:2−2.667%、AIV工作量−11.551%、P95下降，移入性能版单文件 |
 | 3 | 保留核内收益并处理CSA关键链 | 有真实核内收益即保留；CSA/P95单列，长短8:2，明显顾此失彼就在同一算子内分策略 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
-| 5 | 阶段七档出口、精度版迁移 | 当前准备新七档：主性能Native SuperKernel开；另采关SuperKernel但static开的核内profile。保持精度版舍入/规约，不直接复制性能版算术 |
+| 5 | 阶段七档出口、精度版迁移 | 55b89ee2新七档任务task_20260929_093737_25396355997已入队：主性能Native SuperKernel开；另采static开/SuperKernel关的核内profile。保持精度版舍入/规约 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、
