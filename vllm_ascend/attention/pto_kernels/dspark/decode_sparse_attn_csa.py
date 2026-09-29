@@ -253,11 +253,21 @@ def sparse_attn_csa(
             # exponentiate a compressed block until every compressed block's
             # maximum is known, and holding five KV tiles in L1 at once does not
             # fit, so the scores are all computed first and the KV of each block
-            # is staged into L1 a second time when its PV turn comes. The second
-            # staging is a GM-to-L1 copy of rows the AIV already gathered.
+            # is staged into L1 a second time when its PV turn comes.
+            #
+            # 窗口块例外：QK 走 1,2,3,4,0 的顺序把它排到最后。QK_L1_SLOTS = 1，五个块轮流
+            # 写同一个 L1 槽，所以 QK 阶段结束时槽里天然就是窗口块的 KV，它的 PV 不必再从
+            # GM 搬一次。核内 trace 实测每 query 的 cube 侧 MOV_OUT_TO_L1_MULTI_ND2NZ 合计
+            # 约 16 us，而 MMAD 只有约 6 us —— 这个 kernel 是搬运受限的，不是算力受限。
+            # 零额外 L1：给窗口块单独开一个 tile 会和压缩块的 pv_cmp_kv 同驻，实测 Mat 用量
+            # 655360B 超 524288B 上限。
+            #
+            # AIV 的极值循环必须用同一个顺序：那边按计数 1:1 配对旗标（第 i 次 wait 由第 i
+            # 次 set 满足），只改一侧会让它读到还没写的块。极值是 pl.maximum，可交换可结合，
+            # 重排逐位等价；对顺序敏感的 l 累加在另一个 softmax 循环里，没有动。
             for qk_tick in pl.range(SPARSE_BLOCKS + WIN_BLOCKS + 1):
                 if qk_tick < SPARSE_BLOCKS:
-                    qk_sb = qk_tick
+                    qk_sb = (qk_tick + 1) % SPARSE_BLOCKS
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                         qk_slot = qk_core * SPARSE_BLOCKS + qk_sb
                         qk_kv_row = qk_slot * ATTN_K_TILE
@@ -302,10 +312,8 @@ def sparse_attn_csa(
                         pv_kv_row = pv_slot * ATTN_K_TILE
                         pv_transfer_row = pv_slot * H
                         if pv_sb == 0:
-                            pv_l1_row = (pv_sb % QK_L1_SLOTS) * ATTN_K_TILE
-                            qk_l1 = pl.gather_row(
-                                qk_l1, kv_transfer, [pv_l1_row, 0], [pv_kv_row, 0], [ATTN_K_TILE, HEAD_DIM],
-                            )
+                            # QK 阶段最后做的就是窗口块，qk_l1 里还是它的 KV，不再重搬。
+                            pv_l1_row = 0
                             pv_probability = pl.load(
                                 probability_transfer, [qk_core * H, 0], [H, ATTN_K_TILE],
                                 target_memory=pl.MemorySpace.Mat,
@@ -353,8 +361,12 @@ def sparse_attn_csa(
                 sink_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1], target_memory=pl.MemorySpace.Vec)
                 # Stage one: stage every block's KV into GM so the cube can run
                 # all five QK matmuls back to back.
+                # 与 AIC 的 QK 阶段、AIV 的极值循环同一个顺序：这三处都是按计数 1:1
+                # 配对旗标的（QK_KV_READY_EVENT 在这里 set、在 QK 阶段 wait），只改其中
+                # 一两处会让消费者读到还没搬好的块 —— 实测漏掉这一处时整层输出直接变成
+                # 非有限值（replay did not write output）。
                 for kv_tick in pl.range(SPARSE_BLOCKS):
-                    qk_sb = kv_tick
+                    qk_sb = (kv_tick + 1) % SPARSE_BLOCKS
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                         qk_slot = qk_core * SPARSE_BLOCKS + qk_sb
                         qk_kv_row = qk_slot * ATTN_K_TILE
@@ -442,10 +454,12 @@ def sparse_attn_csa(
                 for max_tick, (win_iter, cmp_iter) in pl.range(
                     SPARSE_BLOCKS, init_values=(window_max, cmp_max),
                 ):
-                    if pl.read(valid_block_mask, [qk_t, max_tick]) > 0:
-                        max_slot = qk_core * SPARSE_BLOCKS + max_tick
+                    # 与 QK 阶段同一个顺序，见上面那段注释。
+                    max_sb = (max_tick + 1) % SPARSE_BLOCKS
+                    if pl.read(valid_block_mask, [qk_t, max_sb]) > 0:
+                        max_slot = qk_core * SPARSE_BLOCKS + max_sb
                         max_transfer_row = max_slot * H
-                        max_s0 = max_tick * ATTN_K_TILE
+                        max_s0 = max_sb * ATTN_K_TILE
                         pl.system.sync_wait(QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                         max_scores = pl.load(
                             score_transfer, [qk_core * H + qk_lane_head, max_s0], [H // 2, ATTN_K_TILE],
@@ -457,7 +471,7 @@ def sparse_attn_csa(
                         max_block = pl.row_max(
                             pl.col_expand_add(pl.mul(max_scores, SOFTMAX_SCALE), max_bias), qk_reduce_tmp,
                         )
-                        if max_tick * ATTN_K_TILE < WIN:
+                        if max_sb * ATTN_K_TILE < WIN:
                             win_valid, cmp_valid = pl.yield_(pl.maximum(win_iter, max_block), cmp_iter)
                         else:
                             win_valid, cmp_valid = pl.yield_(win_iter, pl.maximum(cmp_iter, max_block))
