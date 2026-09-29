@@ -2,8 +2,12 @@
 
 更新：2026-09-29。当前完整七档为 **4ffccb7b / CANN9.2**：
 128K B4/B8/B16/B24、8K B16/B24/B32，B40退役。已包含系数空worker、按组准备及UB一次发布。
-Native本轮走vLLM编译包装和static kernel，superkernel关闭；新显式torch.compile/backend=npugraph_ex
-入口另测，不倒写既有结果。长短8:2完整CSA为−10.853%，详细边界见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+该历史轮Native走vLLM编译包装和static kernel，superkernel关闭。长短8:2完整CSA为−10.853%，
+不能作为当前SuperKernel开启后的收益，详细边界见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+生产Sparse已采用55b89ee2的末块发布融合，Indexer保持；
+[新七档](results/csa_native_inplace_seven_20260929/README.md)按修正后的配置统一采集：
+Native显式torch.compile/backend=npugraph_ex、dynamic=False/inplace_pass=True/static开启，主性能SuperKernel开启；
+单独关闭SuperKernel的profile仅用于核内细节，不倒写既有结果。
 旧版本和局部A/B留在[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，不拼接为同轮七档。
 
 ## 实际接口与主路径
@@ -41,7 +45,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | WS归约粒度 | ProcessWs逐query循环，ComputeWs的M=16、K=gSize=64，N最大128；Brcb的16行重复结果只发布有效行 | S6以[16,384]对角系数同时规约六个query，N64，发布六个有效行 | 同六query/128候选的FP16 MAC数均为6×16×64×128=786432；不能只看到PTO的零系数就认定额外算力浪费。调用数与L0/流水布局不同，应连同QK分块评估 |
 | scale | Vector按物理页加载scale并解量化score | Vector直接从原cache物理页取scale | 两侧均有分页读取，不存在Native恒为单次连续scale读取的依据 |
-| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | 当前query分工候选先保持两个half根，只隔离分工：每AIV三query×完整候选段，TMUL调用减半、scale重复读翻倍；CPU通过，设备收益待测 |
+| Vector分工 | ProcessVec1的两个AIV分摊query/S1；每个query内处理整个S2段 | 两个AIV分摊候选范围，各自处理全部query并复用同一份scale | 仅改每AIV三query×完整候选、保留两个half根的候选已测：TMUL减半但scale读取翻倍，长B16 Score AIC/AIV约+1.134%/+1.049%，无核内收益，不采用 |
 | 本地Top-K | 2048候选分段排序，BASE_TOPK=2048的UB累计根，最终按sparseCount输出 | 长档先排序前2048候选并将Top-512根留UB，尾段完成后合并；短档保留原路径 | PTO缩放后score仍经GM，最终归并仍独立；临时根GM往返已消除 |
 | 分片平衡 | metadata按工作成本切S1/S2并给最终归并核分工 | 长档按query组与24worker平衡leaf；B16从8/8/8/8/1分成6/6/6/5/5/5个tile | 最忙核下降已保留；新增root数量和AIV排序成本单列 |
 | 最终归并 | LocalTopK/Merge/MS式四路归并，可在同融合kernel结束 | 四路归并与UB累计根已采用，但仍独立merge task | 固定tie/量化规则需保持；任务融合是后续调度/结构调整，不能仅凭少一个任务声称收益 |
@@ -105,6 +109,8 @@ FixpResToGm（552行）只发布各query的有效行。上述MAC计算不包含D
 - [当前PTO源码](../../vllm_ascend/ops/pypto/deepseek_v4_flash_dspark_perf/decode_indexer.py)、
   [Native调用接口](../../vllm_ascend/attention/dsa_v1.py)。
 
-当前[长S6 query分工候选](results/csa_score_query_split_20260929/README.md)已完成私有整包及CPU编译；
-不融合最终输出、不改根ABI和同分排序顺序。只有真机核内收益成立才进一步评估减少half根，
-不把这一候选当作已保留项，也不恢复B40或另开全矩阵。
+[长S6 query分工候选](results/csa_score_query_split_20260929/RESULTS.md)已完成真机验证，未采用。
+八类完整状态零容差通过；长B16 Score AIC/AIV为251.849→254.705、257.647→260.349μs，
+没有核内收益。长CSA−1.054%，未改代码路径的短CSA+1.506%，8:2仅−0.542%，
+不能用区间波动代替incore收益。该结果只否定保留两个half根的简单分工候选，
+不外推为Native完整query内规约无效，也不原样扩测。

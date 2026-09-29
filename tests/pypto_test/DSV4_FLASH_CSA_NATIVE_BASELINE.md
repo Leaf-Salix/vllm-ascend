@@ -16,6 +16,8 @@
 | --- | --- | --- |
 | enable_npugraph_ex | True | 两侧显式True；eager诊断False |
 | enable_static_kernel | True | 两侧显式True；eager诊断False |
+| torch.compile dynamic | 此处按用户新口径固定 | Native主性能与核内诊断均False |
+| inplace_pass | 此处按用户新口径固定 | True；Native显式入口与本轮PTO私有编译包装均开启 |
 | super_kernel_optimize | 模板未设置 | 当前Native整体对照True；核内诊断False，两者均保留static compile；不再做收益消融 |
 | fuse_norm_quant | 默认True | 两侧显式True，移除旧环境绕行 |
 | enable_cpu_binding | True | 两侧显式True；仍需设备日志确认绑核成功 |
@@ -89,6 +91,7 @@ npugraph_ex、static kernel与融合的组合收益；已有同进程CANN9.2对�
 4ffccb7b同源码新版七档已完成：128K B4/8/16/24及8K B16/24/32，长短8:2为−10.853%。
 该轮Native仍使用vLLM Ascend编译包装，force_eager后手工外图捕获，superkernel关闭。
 用户现在要求显式torch.compile(..., backend="npugraph_ex")；新对照由后端自行捕获/重放，
+后续固定dynamic=False、inplace_pass=True，主性能和核内诊断均一致。
 不再嵌套手工图。直接入口应用npugraph_ex自身passes，未走vLLM FX pass manager，二者须单列。
 多流沿用torch.npu.stream及event/wait显式依赖，DSA自定义算子内部在捕获时实际下发，
 结合profile检查真实stream；共享专家配置不代表单CSA包含MoE验收。

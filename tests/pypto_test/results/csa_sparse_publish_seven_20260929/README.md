@@ -1,9 +1,11 @@
-# Sparse末块融合后的七档阶段出口
+# 已停止：inplace_pass关闭的阶段七档
 
 生产优化55b89ee2已通过长B16/短B24完整状态、性能/P95以及B3/H127/padding边界。
 此目录统一重取七档，不把旧Native表与本轮PTO数据拼接。
 
-任务：`task_20260929_093737_25396355997`，整个矩阵正常auto分配同一张卡。
+任务：`task_20260929_093737_25396355997`，按用户修正口径主动终止，exit=130。
+原配置inplace_pass=False，不再继续；[新七档](../csa_native_inplace_seven_20260929/README.md)统一开启。
+[已完成档位的旧配置记录](STOPPED.json)保留，禁止与新轮拼成完整表。
 档位：128K×B4/B8/B16/B24＋8K×B16/B24/B32；B40退役。
 CANN9.2 / mode2 / det0，PTO atomic0，EPLB关闭；第二个CSA（layer4），固定真实权重与合成独立历史。
 Native cache布局保持；长短8:2，各上下文内batch等权。
@@ -24,7 +26,7 @@ PTO四窗使用官方原始join/行数/block检查，短B16/B32按双query路径
 
 最终保留七档两侧主性能PyTorch JSON、PTO四窗泳道、七个Native核内诊断JSON，
 均值/P95/max及所有原样本。20次正常样本不替代EP16稳定性，也不代替逐token/DSpark验收。
-当前任务进行中，尚未产生完整七档对比结论。
+任务已停止，没有完整七档对比结论；已完成的两档正式数据仍标明inplace关闭。
 
 [冻结准备](prepare.py)、[来源](source.json)、[依赖图](parse.json)、[完整矩阵](run.sh)、
 [分侧入口](run_side.sh)、[收集器](collect.py)、[任务](task.txt)。

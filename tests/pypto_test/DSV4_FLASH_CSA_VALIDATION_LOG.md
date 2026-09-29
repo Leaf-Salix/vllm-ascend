@@ -11240,3 +11240,23 @@ CPU依赖图、Python语法、Ruff/shell检查通过，收集器用已有两档N
 09:37正常auto提交完整矩阵task_20260929_093737_25396355997，最长9600秒；
 不嵌套排队、不固定设备、不修改已冻结源码。七档当前未收齐，不能提前宣称相对新Native的收益。
 [完整入口与口径](results/csa_sparse_publish_seven_20260929/README.md)。
+
+## 413. 固定dynamic=False并开启inplace_pass，停止旧配置矩阵后重取七档（2026-09-29）
+
+用户明确后续保持dynamic=False，并要求开启npugraph_ex的inplace_pass。
+核对旧冻结Native入口：原本已显式dynamic=False/fullgraph=True，但inplace_pass=False。
+旧矩阵task_20260929_093737_25396355997在128K/B4、B8正式两侧计时及Native核内profile完成后主动终止，
+队列确认completed(exit=130)；停止后核对B4/B8泳道也已有完整报告。没有推断超时失败，也未重启同一目录。
+旧读数只留为inplace关闭的历史，不拼入新七档；[停止记录](results/csa_sparse_publish_seven_20260929/STOPPED.json)。
+
+新整包`.cache/csa-native-inplace-seven-20260929`保留55b89ee2全部算子，仅修改私有测试入口。
+Native明确dynamic=False/fullgraph=True/inplace_pass=True/static=True，主性能SuperKernel开、核内诊断关。
+PTO私有编译包装同步inplace=True，并观察传入npugraph_ex的实际选项；公共vLLM编译代码未修改。
+两Native入口继续使用后端持有图，保持无主机更新节点与同初态八类状态校准。
+冻结两根依赖图、Python/Ruff和shell检查通过，09:56正常auto提交
+task_20260929_095651_194851727802，最长9600秒；不修改排队/运行中的源码。
+
+修正Indexer差异文档中已过时的“query分工候选待测”：该候选设备完成、无核内收益，未采用。
+新增本轮精简证据和28份原始JSON汇集入口，主性能与核内诊断标明SuperKernel开关，不挑最快DFX窗口。
+新完整七档尚未完成，不能提前给出inplace开启后的正式性能结论。
+[新配置、入口与任务](results/csa_native_inplace_seven_20260929/README.md)。

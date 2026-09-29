@@ -44,6 +44,7 @@ PTO自身编译图/eager、Top-K结构、metadata/保护区通过；不等于两
 本轮Native经vLLM Ascend编译包装进入npugraph_ex，static kernel开启、superkernel关闭，
 force_eager后由外层捕获。它是该入口下的有效测量，不能倒写为用户新指定的直接torch.compile结果。
 **最新Native要求**：显式torch.compile(..., backend="npugraph_ex")，多流遵循该后端用法，
+固定dynamic=False、inplace_pass=True；主性能与关闭SuperKernel的核内诊断均保持这两个选项。
 由后端管理图捕获/重放；GitCode资料直连、不加代理。保留torch.npu.stream和event/wait依赖，
 同一event不能跨graph break；fullgraph失败报错，不静默退回eager。
 Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%，八类状态各自开关两侧零容差通过。
@@ -63,7 +64,7 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 2 | 最新AscendC末块发布已保留 | 修复mi/li偏移后，两档完整状态及B3/H127/padding精确通过；CSA 8:2−2.667%、AIV工作量−11.551%、P95下降，移入性能版单文件 |
 | 3 | 保留核内收益并处理CSA关键链 | 有真实核内收益即保留；CSA/P95单列，长短8:2，明显顾此失彼就在同一算子内分策略 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
-| 5 | 阶段七档出口、精度版迁移 | 55b89ee2新七档任务task_20260929_093737_25396355997已入队：主性能Native SuperKernel开；另采static开/SuperKernel关的核内profile。保持精度版舍入/规约 |
+| 5 | 阶段七档出口、精度版迁移 | inplace关闭的task_20260929_093737_25396355997按新要求停止（exit130）；[新七档](results/csa_native_inplace_seven_20260929/README.md)统一inplace=True/dynamic=False。整体开SuperKernel，核内诊断关但保留static；保持精度版舍入/规约 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、
