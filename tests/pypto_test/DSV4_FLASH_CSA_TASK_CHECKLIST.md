@@ -95,6 +95,11 @@ O-B核时−5.720%/+5.852%；长短8:2为CSA−1.296%、核内−3.406%，八类
 已将已测O-B改动移入性能版单个decode_o_proj.py。最新七档仍是此前2ed8ae2e，未把两档收益外推。
 手写K128草案仅CPU容量检查失败，改用现有AutoTileMatmulL0通过，不修改工具链。
 
+收尾数据交接候选已完成CPU编译：[O-B反量化/HC_post融合](results/csa_ob_hc_fused_20260929/README.md)。
+保留组相加和BF16往返，移除attn_out GM中转；T16/N512分工，共享原单行HC算术。
+13:56正常auto提交task_20260929_135654_65664815311，设备1上跑长B16/短B24。
+按两级/融合总核内工作量、完整CSA与P95评估，不能直接比较不同worker数的单核均值；尚未采用。
+
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
 | 1 | Native新标准七档已完成 | dynamic=False/inplace=True/static+superkernel、显式named backend自管图；[七档实测](results/csa_native_inplace_seven_20260929/NATIVE_RESULTS.md)与八类同图状态通过，PTO配套采集不阻塞发布，不再试开关 |

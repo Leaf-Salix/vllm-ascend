@@ -11672,3 +11672,31 @@ O-B四窗均值长10.826→10.207μs（−5.720%），短12.012→12.715μs（+5
 先CPU构造并核对生成码，再决定上卡，不重做已否定的quant关early及全部O-A先登记。
 [保留决定与四窗](results/csa_ob_activation_l1_k128_20260929/decision.json)、
 [两档边界](results/csa_ob_activation_l1_k128_20260929/boundary/summary.json)。
+
+## 434. 收尾反量化/HC融合完成CPU预检，冻结并正常排队两档（2026-09-29）
+
+此前提交检查仅确认9a868d26和无新增生产改动，未推进性能；本轮继续未完成的融合实验。
+依据§431实测FIN→首start不足1μs，不盲关early，而合并O-B反量化和HC_post的两级数据交接。
+使用9a868d26对应的已测O-B候选重新复制两份私有整包，生产和已发布七档保持。
+原proj_b_act按T32/N512、HC按每worker四行；候选T16/N512、内部T8，
+长B16从24+24份变为48份，短B24从40+36份变为72份；总核内工作量和包络同口径比较。
+
+完整CSA两个入口依赖解析、PTOAS/CCE/link/load及共享原单行HC入口编译通过。
+早期草案的Tensor/Tile、分支类型、ND列加载、物理对齐和部分有效视图限制均在算子侧解决，
+没有修改PyPTO/Simpler/PTOAS/PTO-ISA，也未为失败CPU草案占卡。
+最终共享helper在原单行路径用标量门控，多行路径块加载后在UB内转置。
+门控放到输出通道循环外，三条行块特化均从8次转置降到2次；Vec上界117504字节，零TMOV。
+生成码保留FP32→BF16 RINT→FP32，以及post*x后四路逐项mul/add、最终BF16 RINT，
+无attn_out GM分配或独立HC任务。输出按有效行裁剪；门控只在UB内放宽padding范围。
+
+融合任务在O-B manual scope外，显式保留八组O-B，post/comb保持input自动依赖。
+运行时源码确认显式和自动依赖合并；真实DFX仍须验证八组O-B及两路门控前置。
+共享原HC CPU通过不替代精度版设备验收，若值得采用再补共享入口及尾行/padding。
+本轮继续已采用的最新AscendC Permanent-X残差复用；跨反量化/HC任务融合是PTO结构实验，
+不冒称Native现有算子已经如此。与pypto-lib的BF16残差/中间舍入差异明确保留。
+
+Ruff及shell语法通过，两份Python源设为只读。13:56正常auto提交
+task_20260929_135654_65664815311，确认running、设备1。
+只测128K/B16和8K/B24，5预热20次正式计时及独立四窗DFX、八类跨版本状态零容差，
+长短8:2，并观察P95。无设备结论，不预先保留、不扩到Native/七档/EP16。
+[私有差异、CPU证据和收集入口](results/csa_ob_hc_fused_20260929/README.md)。

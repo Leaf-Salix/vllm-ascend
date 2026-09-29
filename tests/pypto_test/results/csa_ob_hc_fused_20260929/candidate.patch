@@ -1,0 +1,367 @@
+--- a/dsv4_csa_ob_hc_fused_9a868d26/decode_o_proj.py
++++ b/dsv4_csa_ob_hc_fused_9a868d26/decode_o_proj.py
+@@ -22,6 +22,7 @@
+ from .config import (
+     TP as TP_SIZE,
+ )
++from .hc_post import hc_post_block
+ from .nz_mode import (
+     BF16_WEIGHT_NZ,
+     QUANT_WEIGHT_LAYOUT,
+@@ -91,6 +92,8 @@
+ PROJ_B_MM_T_TILE = 128
+ PROJ_B_MM_N_TILE = 256
+ 
++HC_MULT = M.hc_mult
++
+ PROJ_B_ACT_N_TILE = 512
+ 
+ QUANT_TOKEN_TILE = 8
+@@ -100,7 +103,7 @@
+ 
+ PROJ_B_ACT_T_TILE = 8
+ 
+-PROJ_B_ACT_TASK_T_TILE = 32  # proj_b_act token block per task
++PROJ_B_ACT_TASK_T_TILE = 16  # proj_b_act token block per task
+ 
+ O_A_T_TILE = 128
+ 
+@@ -374,13 +377,16 @@
+     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     wo_b_scale: pl.Tensor[[D], pl.FP32],
+-    attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
++    residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    x_out: pl.Out[pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16]],
+     heads_dep: pl.Scalar[pl.TASK_ID],
+     ROW_TILE: pl.constexpr,
+     A_COL_TILE: pl.constexpr,
+ ):
+     """Project local-token, full-group attention heads into BF16 hidden rows."""
+-    t_dim = pl.tensor.dim(attn_out, 0)
++    t_dim = pl.tensor.dim(x_out, 0)
+     act_t_blks = (t_dim + PROJ_B_ACT_TASK_T_TILE - 1) // PROJ_B_ACT_TASK_T_TILE
+     proj_a_rows = (t_dim + PROJ_A_ROW_TILE - 1) // PROJ_A_ROW_TILE
+     proj_b_t_rows = (t_dim + ROW_TILE - 1) // ROW_TILE
+@@ -448,10 +454,12 @@
+             )
+             proj_b_tids[g] = pb_tid
+ 
+-    # Dequantize each group with its own scale, then sum in FP32.
++    residual_flat = pl.reshape(residual, [t_dim, HC_MULT * D])
++    y_flat = pl.reshape(x_out, [t_dim, HC_MULT * D])
++    # Keep group dequantization and BF16 rounding before HC_post.
+     with pl.spmd(
+         act_t_blks * (D // PROJ_B_ACT_N_TILE),
+-        name_hint="proj_b_act",
++        name_hint="proj_b_act_hc_post",
+         deps=[proj_b_tids[i] for i in range(O_GROUPS)],
+         allow_early_resolve=True,
+     ) as _act_tid:
+@@ -473,11 +481,15 @@
+                 p_g_f32 = pl.cast(p_g, target_type=pl.FP32, mode="none")
+                 acc = pl.add(acc, pl.row_expand_mul(p_g_f32, g_scale))
+             out_t = pl.col_expand_mul(acc, wb_scale_chunk)
++            out_bf16 = pl.create_tensor([PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE], dtype=pl.BF16)
+             out_bf16 = pl.cast(out_t, target_type=pl.BF16, mode="rint")
+             output_rows = pl.min(PROJ_B_ACT_T_TILE, t_dim - b_tb)
+-            attn_out = pl.assemble(attn_out, pl.set_validshape(out_bf16, output_rows, PROJ_B_ACT_N_TILE), [b_tb, ob_n0])
+-
+-    return attn_out
++            y_flat = hc_post_block(
++                out_bf16, residual_flat, post, comb, y_flat, b_tb, ob_n0,
++                output_rows, PROJ_B_ACT_T_TILE, PROJ_B_ACT_N_TILE,
++            )
++
++    return x_out
+ 
+ 
+ @pl.jit.inline
+@@ -486,21 +498,27 @@
+     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
+     wo_b: pl.Tensor[[O_GROUPS * O_LORA, D], pl.INT8, QUANT_WEIGHT_LAYOUT],
+     wo_b_scale: pl.Tensor[[D], pl.FP32],
+-    attn_out: pl.Tensor[[T_DYN, D], pl.BF16],
++    residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
++    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
++    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
++    x_out: pl.Out[pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16]],
+     heads_dep: pl.Scalar[pl.TASK_ID],
+ ):
+     """Use upstream row/column tiles while retaining Native weight storage."""
+-    t_dim = pl.tensor.dim(attn_out, 0)
++    t_dim = pl.tensor.dim(x_out, 0)
+     if t_dim <= PROJ_B_SMALL_T_TILE:
+-        attn_out = _decode_o_proj_tp1_tiled(
+-            o_packed, wo_a, wo_b, wo_b_scale, attn_out, heads_dep, PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE,
++        x_out = _decode_o_proj_tp1_tiled(
++            o_packed, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep,
++            PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE,
+         )
+     elif t_dim <= PROJ_B_MEDIUM_T_TILE:
+-        attn_out = _decode_o_proj_tp1_tiled(
+-            o_packed, wo_a, wo_b, wo_b_scale, attn_out, heads_dep, PROJ_B_MEDIUM_T_TILE, PROJ_A_MM_N_TILE,
++        x_out = _decode_o_proj_tp1_tiled(
++            o_packed, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep,
++            PROJ_B_MEDIUM_T_TILE, PROJ_A_MM_N_TILE,
+         )
+     else:
+-        attn_out = _decode_o_proj_tp1_tiled(
+-            o_packed, wo_a, wo_b, wo_b_scale, attn_out, heads_dep, PROJ_B_MM_T_TILE, PROJ_A_LARGE_N_TILE,
++        x_out = _decode_o_proj_tp1_tiled(
++            o_packed, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep,
++            PROJ_B_MM_T_TILE, PROJ_A_LARGE_N_TILE,
+         )
+-    return attn_out
++    return x_out
+--- a/dsv4_csa_ob_hc_fused_9a868d26/decode_csa.py
++++ b/dsv4_csa_ob_hc_fused_9a868d26/decode_csa.py
+@@ -30,10 +30,17 @@
+ from .decode_indexer_compressor import indexer_compressor
+ from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
+ from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
+-from .hc_post import hc_post
+ from .hc_pre import (
+-    HC_DIM, HC_DIM_INV, HC_MULT, HC_PAD, LINEAR_T_TILE, MIX_HC, NORM_EPS,
+-    RMS_K_TILE, hc_mix_norm, hc_pre_gates_from_rms,
++    HC_DIM,
++    HC_DIM_INV,
++    HC_MULT,
++    HC_PAD,
++    LINEAR_T_TILE,
++    MIX_HC,
++    NORM_EPS,
++    RMS_K_TILE,
++    hc_mix_norm,
++    hc_pre_gates_from_rms,
+ )
+ from .layout import (
+     COMPRESSED_ROWS_DYN,
+@@ -331,9 +338,6 @@
+     qr = pl.create_tensor([t_dim, Q_LORA], dtype=pl.INT8)
+     qr_scale = pl.create_tensor([t_dim, 1], dtype=pl.FP32)
+     position_ids_t1 = pl.reshape(position_ids, [t_dim, 1])
+-    # attn_out 在大 scope 之外创建：它要跨到 scope 末尾喂 hc_post，在 scope 内
+-    # 创建会被判成 scope 局部张量而参与内存复用。上游 _decode_csa_tp1 也在这里创建。
+-    attn_out = pl.create_tensor([t_dim, D], dtype=pl.BF16)
+     with pl.scope():
+         # Projection-chain dependency marker.
+         late_dep = pl.system.task_dummy(deps=[rope_tid])
+@@ -453,8 +457,9 @@
+             o_packed_heads,
+         )
+         with pl.scope():
+-            attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
+-            hc_post(attn_out, x_hc, post_t, comb_t, x_out)
++            x_out = decode_o_proj_tp1(
++                o_packed_heads, wo_a, wo_b, wo_b_scale, x_hc, post_t, comb_t, x_out, heads_dep,
++            )
+     return x_out
+ 
+ 
+--- a/dsv4_csa_ob_hc_fused_9a868d26/hc_post.py
++++ b/dsv4_csa_ob_hc_fused_9a868d26/hc_post.py
+@@ -1,83 +1,4 @@
+ # SPDX-License-Identifier: Apache-2.0
+-"""从上游 pypto-lib `models/deepseek_v4_flash_dspark/hc_post.py` 移植。
+-
+-mHC 的收尾：y[t, out_h] = post[t, out_h] * x[t] + sum_in_h comb[t, in_h, out_h] * residual[t, in_h]。
+-其中只有 `post * x` 这一项依赖 attention 的输出，comb 与 residual 的组合
+-完全可以和 attention 并行——这正是把它搬进 PTO kernel 的理由。
+-
+-与上游一样按 dtype 说明：上游 hc 残差流是 FP32 端到端，这里改成与
+-vllm-ascend Native 一致的 BF16 收发，在行一级 cast 成 FP32 参与计算。
+-prefill 入口与 standalone 用例不搬，本包只做 decode。
+-"""
+-
+-import pypto.language as pl
+-
+-from .config import FLASH as M, DECODE_BATCH, DECODE_SEQ, TP
+-
+-# Dynamic shape variables.
+-T_DYN = pl.dynamic("T_DYN")  # T = B * S
+-
+-# model config
+-D = M.hidden_size
+-HC_MULT = M.hc_mult
+-HC_DIM = M.hc_dim
+-assert HC_MULT == 4
+-
+-# tiling
+-T_TILE = 4
+-INACTIVE_FILL_T_TILE = 16
+-INACTIVE_FILL_D_TILE = 256
+-assert (DECODE_BATCH // TP * DECODE_SEQ) % T_TILE == 0
+-
+-
+-def _hc_post(
+-    x: pl.Tensor[[T_DYN, D], pl.BF16],
+-    residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
+-    post: pl.Tensor[[T_DYN, HC_MULT], pl.FP32],
+-    comb: pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32],
+-    y: pl.Out[pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16]],
+-):
+-    x.bind_dynamic(0, T_DYN)
+-    residual.bind_dynamic(0, T_DYN)
+-    post.bind_dynamic(0, T_DYN)
+-    comb.bind_dynamic(0, T_DYN)
+-    y.bind_dynamic(0, T_DYN)
+-    t_dim = pl.tensor.dim(x, 0)
+-
+-    residual_flat = pl.reshape(residual, [t_dim, HC_DIM])
+-    y_flat = pl.reshape(y, [t_dim, HC_DIM])
+-
+-    token_tiles = (t_dim + T_TILE - 1) // T_TILE
+-    for token_block in pl.spmd(token_tiles, name_hint="hc_post"):
+-        t0 = token_block * T_TILE
+-        for t in pl.pipeline(t0, t0 + T_TILE, stage=2):
+-            if t < t_dim:
+-                # One cast per token: all HC_MULT outputs share the x row.
+-                x_row = pl.cast(pl.load(x, [t, 0], [1, D]), target_type=pl.FP32)
+-                # Native Permanent-X: each residual row is loaded/cast once per token.
+-                res_0 = pl.cast(pl.load(residual_flat, [t, 0 * D], [1, D]), pl.FP32)
+-                res_1 = pl.cast(pl.load(residual_flat, [t, 1 * D], [1, D]), pl.FP32)
+-                res_2 = pl.cast(pl.load(residual_flat, [t, 2 * D], [1, D]), pl.FP32)
+-                res_3 = pl.cast(pl.load(residual_flat, [t, 3 * D], [1, D]), pl.FP32)
+-                for out_h in pl.unroll(HC_MULT):
+-                    post_w = pl.read(post, [t, out_h])
+-                    y_row = pl.mul(x_row, post_w)
+-                    comb_0 = pl.read(comb, [t, 0 * HC_MULT + out_h])
+-                    weighted_0 = pl.mul(res_0, comb_0)
+-                    y_row = pl.add(y_row, weighted_0)
+-                    comb_1 = pl.read(comb, [t, 1 * HC_MULT + out_h])
+-                    weighted_1 = pl.mul(res_1, comb_1)
+-                    y_row = pl.add(y_row, weighted_1)
+-                    comb_2 = pl.read(comb, [t, 2 * HC_MULT + out_h])
+-                    weighted_2 = pl.mul(res_2, comb_2)
+-                    y_row = pl.add(y_row, weighted_2)
+-                    comb_3 = pl.read(comb, [t, 3 * HC_MULT + out_h])
+-                    weighted_3 = pl.mul(res_3, comb_3)
+-                    y_row = pl.add(y_row, weighted_3)
+-                    # 写回下一层的 hc 残差流：与 Native 一致按 BF16 落盘。
+-                    pl.store(pl.cast(y_row, pl.BF16, mode="rint"), [t, out_h * D], y_flat)
+-    return y
+-
+-
+-hc_post = pl.jit.inline(_hc_post)
+-hc_post_test = pl.jit(_hc_post)
++from ..deepseek_v4_flash_dspark.hc_post import hc_post as hc_post
++from ..deepseek_v4_flash_dspark.hc_post import hc_post_block as hc_post_block
++from ..deepseek_v4_flash_dspark.hc_post import hc_post_test as hc_post_test
+--- a/deepseek_v4_flash_dspark/hc_post.py
++++ b/deepseek_v4_flash_dspark/hc_post.py
+@@ -31,6 +31,78 @@
+ assert (DECODE_BATCH // TP * DECODE_SEQ) % T_TILE == 0
+ 
+ 
++@pl.jit.inline
++def hc_post_block(
++    x_block: pl.Tensor,
++    residual_flat: pl.Tensor,
++    post: pl.Tensor,
++    comb: pl.Tensor,
++    y_flat: pl.Out[pl.Tensor],
++    t0: pl.Scalar[pl.INDEX],
++    n0: pl.Scalar[pl.INDEX],
++    valid_rows: pl.Scalar[pl.INDEX],
++    ROWS: pl.constexpr,
++    COLS: pl.constexpr,
++):
++    # x_block is already BF16: retain the rounding boundary before HC math.
++    x_f32 = pl.cast(x_block, pl.FP32)
++    res_0 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, n0],
++                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
++    res_1 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, D + n0],
++                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
++    res_2 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, 2 * D + n0],
++                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
++    res_3 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, 3 * D + n0],
++                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
++    if ROWS == 1:
++        for out_h in pl.unroll(HC_MULT):
++            post_scalar = pl.read(post, [t0, out_h])
++            single_y = pl.mul(x_f32, post_scalar)
++            comb_scalar_0 = pl.read(comb, [t0, out_h])
++            single_weighted_0 = pl.mul(res_0, comb_scalar_0)
++            single_y = pl.add(single_y, single_weighted_0)
++            comb_scalar_1 = pl.read(comb, [t0, HC_MULT + out_h])
++            single_weighted_1 = pl.mul(res_1, comb_scalar_1)
++            single_y = pl.add(single_y, single_weighted_1)
++            comb_scalar_2 = pl.read(comb, [t0, 2 * HC_MULT + out_h])
++            single_weighted_2 = pl.mul(res_2, comb_scalar_2)
++            single_y = pl.add(single_y, single_weighted_2)
++            comb_scalar_3 = pl.read(comb, [t0, 3 * HC_MULT + out_h])
++            single_weighted_3 = pl.mul(res_3, comb_scalar_3)
++            single_y = pl.add(single_y, single_weighted_3)
++            single_result = pl.cast(single_y, pl.BF16, mode="rint")
++            y_flat[t0 : t0 + ROWS, out_h * D + n0 : out_h * D + n0 + COLS] = pl.set_validshape(
++                single_result, valid_rows, COLS)
++    else:
++        # Expose the loaded UB tile's full physical extent before taking
++        # views. Padded rows/columns never reach the masked output stores.
++        post_loaded = pl.slice(post, [ROWS, 8], [t0, 0],
++                               valid_shape=[valid_rows, HC_MULT], clamp=True)
++        comb_loaded = pl.slice(comb, [ROWS, HC_MULT * HC_MULT], [t0, 0],
++                               valid_shape=[valid_rows, HC_MULT * HC_MULT], clamp=True)
++        post_trans = pl.transpose(pl.set_validshape(post_loaded, ROWS, 8), 0, 1)
++        comb_trans = pl.transpose(pl.set_validshape(comb_loaded, ROWS, HC_MULT * HC_MULT), 0, 1)
++        for out_h in pl.unroll(HC_MULT):
++            post_w = pl.reshape(post_trans[out_h : out_h + 1, 0:ROWS], [ROWS, 1])
++            y_block = pl.row_expand_mul(x_f32, post_w)
++            comb_0 = pl.reshape(comb_trans[out_h : out_h + 1, 0:ROWS], [ROWS, 1])
++            weighted_0 = pl.row_expand_mul(res_0, comb_0)
++            y_block = pl.add(y_block, weighted_0)
++            comb_1 = pl.reshape(comb_trans[HC_MULT + out_h : HC_MULT + out_h + 1, 0:ROWS], [ROWS, 1])
++            weighted_1 = pl.row_expand_mul(res_1, comb_1)
++            y_block = pl.add(y_block, weighted_1)
++            comb_2 = pl.reshape(comb_trans[2 * HC_MULT + out_h : 2 * HC_MULT + out_h + 1, 0:ROWS], [ROWS, 1])
++            weighted_2 = pl.row_expand_mul(res_2, comb_2)
++            y_block = pl.add(y_block, weighted_2)
++            comb_3 = pl.reshape(comb_trans[3 * HC_MULT + out_h : 3 * HC_MULT + out_h + 1, 0:ROWS], [ROWS, 1])
++            weighted_3 = pl.row_expand_mul(res_3, comb_3)
++            y_block = pl.add(y_block, weighted_3)
++            multi_result = pl.cast(y_block, pl.BF16, mode="rint")
++            y_flat[t0 : t0 + ROWS, out_h * D + n0 : out_h * D + n0 + COLS] = pl.set_validshape(
++                multi_result, valid_rows, COLS)
++    return y_flat
++
++
+ def _hc_post(
+     x: pl.Tensor[[T_DYN, D], pl.BF16],
+     residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
+@@ -53,31 +125,8 @@
+         t0 = token_block * T_TILE
+         for t in pl.pipeline(t0, t0 + T_TILE, stage=2):
+             if t < t_dim:
+-                # One cast per token: all HC_MULT outputs share the x row.
+-                x_row = pl.cast(pl.load(x, [t, 0], [1, D]), target_type=pl.FP32)
+-                # AscendC Permanent-X: keep four FP32 residual rows in UB.
+-                # Reuse loads/casts while preserving the separate mul/add order.
+-                res_0 = pl.cast(pl.load(residual_flat, [t, 0 * D], [1, D]), pl.FP32)
+-                res_1 = pl.cast(pl.load(residual_flat, [t, 1 * D], [1, D]), pl.FP32)
+-                res_2 = pl.cast(pl.load(residual_flat, [t, 2 * D], [1, D]), pl.FP32)
+-                res_3 = pl.cast(pl.load(residual_flat, [t, 3 * D], [1, D]), pl.FP32)
+-                for out_h in pl.unroll(HC_MULT):
+-                    post_w = pl.read(post, [t, out_h])
+-                    y_row = pl.mul(x_row, post_w)
+-                    comb_0 = pl.read(comb, [t, 0 * HC_MULT + out_h])
+-                    weighted_0 = pl.mul(res_0, comb_0)
+-                    y_row = pl.add(y_row, weighted_0)
+-                    comb_1 = pl.read(comb, [t, 1 * HC_MULT + out_h])
+-                    weighted_1 = pl.mul(res_1, comb_1)
+-                    y_row = pl.add(y_row, weighted_1)
+-                    comb_2 = pl.read(comb, [t, 2 * HC_MULT + out_h])
+-                    weighted_2 = pl.mul(res_2, comb_2)
+-                    y_row = pl.add(y_row, weighted_2)
+-                    comb_3 = pl.read(comb, [t, 3 * HC_MULT + out_h])
+-                    weighted_3 = pl.mul(res_3, comb_3)
+-                    y_row = pl.add(y_row, weighted_3)
+-                    # 写回下一层的 hc 残差流：与 Native 一致按 BF16 落盘。
+-                    pl.store(pl.cast(y_row, pl.BF16, mode="rint"), [t, out_h * D], y_flat)
++                x_block = pl.slice(x, [1, D], [t, 0])
++                y_flat = hc_post_block(x_block, residual_flat, post, comb, y_flat, t, 0, 1, 1, D)
+     return y
+ 
+ 
