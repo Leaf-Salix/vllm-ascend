@@ -98,9 +98,9 @@ O_A/O_B各64份工作由24个AIC执行，必须多波；WO_A已经直接借用NZ
 
 ## 下一步
 
-1. 先完成Native显式torch.compile/backend=npugraph_ex、后端自管图、多流保留的superkernel开关对照。
-   仅长B16/短B24；无明确收益就关闭并结束该方向，之后不再调参或扩测。
-2. 已编译的长S6 AIV按query分工候选待设备：每AIV三query×完整候选段，TMUL调用减半，scale重复读取翻倍。
+1. Native显式npugraph_ex的superkernel对照已完成：长短均有收益，八类状态开关两侧零容差通过，后续开启。
+   新入口短档计时含待分辨的主机派发区间，先固定开启、校准backend已生成图的直接replay，再替换Native基线。
+2. 长S6 AIV按query分工候选已正常auto单卡入队：每AIV三query×完整候选段，TMUL调用减半，scale重复读取翻倍。
    保持Cube/half根/排序，分别看核内、CSA、P95；若有效按核内收益保留，再处理调度。
    [候选和CPU证据](results/csa_score_query_split_20260929/README.md)。
 3. 按28个level-4窗口区分producer end→FIN、FIN→dispatch和dispatch→start；

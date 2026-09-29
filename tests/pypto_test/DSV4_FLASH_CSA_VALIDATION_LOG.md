@@ -11045,3 +11045,38 @@ GitCode superkernel.md当时提示访问频次限制，未取得正文；运行�
 用户限定：本轮没有明确收益就关闭并结束superkernel方向，后续不调参、扩档或重复测试。
 CPU语法/Ruff及shell检查通过；设备结论待同一任务结束后记录。
 [实验入口与限制](results/csa_native_superkernel_20260929/README.md)。
+
+## 404. Native superkernel两代表档均有收益，后续保留开启（2026-09-29）
+
+task_20260929_074812_36535424506退出0，同一auto设备1，CANN9.2/mode2/det0，static kernel均开启。
+显式torch.compile backend=npugraph_ex，force_eager=False，多流由Native显式stream/event保持。
+
+| 档位 | 关闭/开启均值μs | 耗时变化 | 关闭/开启P95μs | 八类状态 |
+| --- | ---: | ---: | ---: | --- |
+| 128K/B16 | 1227.095/1117.058 | −8.967% | 1231.800/1123.260 | 全部零容差通过 |
+| 8K/B24 | 1209.602/1126.791 | −6.846% | 1228.140/1156.860 | 全部零容差通过 |
+
+长短8:2为−8.543%，每侧5预热20次事件样本，独立profile确认长/短14/12个SuperKernel，
+关闭组为0；开关两侧都仍有两条计算stream。静态编译参数与实际图优化API调用均确认生效。
+后续Native对照开启，不继续调参试探；这不是整模型token/DSpark验收，也没有修改生产模型执行。
+
+计时边界需先校准：短档新编译调用均值1209.602μs高于旧外图重放1018.715μs，
+各自独立profile首末kernel跨度却只有1036.250/1030.500μs，新开启组为957.500μs。
+因此不能把新入口图外事件直接当作旧CSA本体；推测短档暴露了编译包装参数处理/主机派发空闲，
+长档较大的图外cache恢复可能掩盖该区间，尚非完整因果证明，也不对不同采样直接相减。
+已准备独立校准副本：图仍由npugraph_ex真实生成并优化，只测固定地址/shape下该图的replay。
+唯一图、无主机更新节点才允许直接重放，持有owner/module/fixture；先恢复初态再通过已编译调用采reference，
+避免首次编译warmup反复改写状态；重放后八类状态要求与此reference零容差一致。
+仅长B16/短B24，superkernel固定开启，不再测关闭组；CPU语法/Ruff/shell通过，设备尚未提交。
+[完整A/B](results/csa_native_superkernel_20260929/RESULTS.md)、
+[精简证据](results/csa_native_superkernel_20260929/summary.json)、
+[计时校准](results/csa_native_graph_replay_20260929/README.md)。
+
+## 405. 长S6 AIV按query分工开始真机配对（2026-09-29）
+
+Native superkernel任务结束后，08:00正常auto单卡提交task_20260929_080014_945279030。
+使用§400已通过CPU编译的完整冻结副本，只比较4ffccb7b与query分工候选的长B16/短B24，
+保留四窗DFX和完整状态，不修改排队源码，不把静态TMUL调用减半预先称作真机收益。
+这是PTO内部A/B，不依赖Native开关选择；另一个Native计时校准待本任务结束后再入队，
+避免本会话两项编译/计时互相干扰。当前设备结论待同一任务完成。
+[候选、入口与证据](results/csa_score_query_split_20260929/README.md)。

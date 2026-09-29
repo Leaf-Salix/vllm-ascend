@@ -71,6 +71,11 @@ def main():
                            backend_options=options, super_kernel_graph_calls=calls,
                            superkernel_profile_rows=[row for row in kernels if "super" in
                                                      (row["Name"] + row["Type"]).lower()])
+            if flag and not metrics["superkernel_profile_rows"]:
+                raise ValueError("No SuperKernel execution observed in the enabled profile")
+            metrics["profile_device_span_us"] = (
+                max(float(row["Start Time(us)"]) + float(row["Duration(us)"]) for row in kernels)
+                - min(float(row["Start Time(us)"]) for row in kernels))
             sides[f"super{flag}"] = metrics
         for field in ("device", "cann", "requested", "multistream", "compilation_scope"):
             if reports[0][field] != reports[1][field]:
@@ -94,7 +99,7 @@ def main():
         weight * case["change_pct"] for weight, case in zip((.8, .2), result["cases"]))
     (ROOT / "evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     lines = ["# Native superkernel：显式npugraph_ex入口", "",
-             "CANN9.2，static kernel均开启；单位μs，5预热/20次正式计时，profile另采。", "",
+             "CANN9.2，static kernel均开启；单位μs，5预热/20次编译调用的图外事件计时，profile另采。", "",
              "| 档位 | 关闭 | 开启 | 耗时变化 | 关闭/开启P95 | 关闭/开启max | 状态零容差 |",
              "| --- | ---: | ---: | ---: | ---: | ---: | --- |"]
     for case in result["cases"]:
@@ -106,6 +111,7 @@ def main():
     lines += ["", f"长短8:2耗时变化：{result['weighted_8_2_change_pct']:+.3f}%。", "",
               "静态编译开关、实际图优化调用、profile kernel与stream、状态差异均见evidence.json。",
               "图优化API成功不等于所有Native自定义kernel均已融合；零容差差异须结合det0归约规则判断。",
+              "编译调用事件区间可能含主机参数处理/派发空闲，不与旧直接图重放均值拼表。",
               "依用户要求，无明确收益即结束此方向；不自动以微小均值变化宣布采用。",
               "本报告不是原vLLM包装基线的新标签，也不是PTO或整模型验收。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")

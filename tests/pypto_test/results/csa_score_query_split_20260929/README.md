@@ -39,7 +39,9 @@ pypto-lib 2164563的dspark路径按单query×leaf执行，无法直接套用本�
 
 核内实际收益、CSA 8:2变化及P95/max分别报告；短档源路径相同也保留实测回退。
 没有核内收益不扩大测试，长档明显收益/短档明显代价时再在同一算子内按场景处理。
-正式设备任务尚未提交；当前七档原任务继续执行，不修改其冻结源码。
+七档已完成，Native superkernel代表档A/B也已退出0。
+2026-09-29 08:00正常auto单卡提交task_20260929_080014_945279030，
+仅PTO现状/候选两代表档配对；不受Native superkernel选型影响，不修改冻结源码。
 
 [候选补丁](candidate.patch)、[冻结来源](source.txt)、[CPU编译](compile.py)、
 [编译结果](compile_candidate.json)、[生成代码计数](lowering.json)、

@@ -98,3 +98,12 @@ GitCode文档必须直连无代理，同event不得跨graph break，fullgraph编
 有明确收益且数值检查通过才采用、再更新受影响Native基线；无明确收益则后续不再碰superkernel。
 不将编译入口失败冒充superkernel有效负收益，不将API成功冒充所有kernel已融合。
 [源码、冻结方法及队列任务](results/csa_native_superkernel_20260929/README.md)。
+
+代表档开关对照已完成：长B16 1227.095→1117.058μs（−8.967%），
+短B24 1209.602→1126.791μs（−6.846%），8:2为−8.543%；八类状态开关两侧零容差一致。
+profile实际14/12个SuperKernel且保持两条计算stream，后续Native对照开启，不再进行开关调参。
+这些为编译调用的图外事件区间。短档独立profile设备span关闭1036.250μs、开启957.500μs，
+旧入口为1030.500μs；不能将新调用均值直接拼到旧CSA设备重放表。
+下一步仅校准同一个npugraph_ex已生成图的直接replay，superkernel固定开启。
+[结果及边界](results/csa_native_superkernel_20260929/RESULTS.md)、
+[校准方法](results/csa_native_graph_replay_20260929/README.md)。

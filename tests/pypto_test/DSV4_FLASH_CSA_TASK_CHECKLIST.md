@@ -46,15 +46,18 @@ force_eager后由外层捕获。它是该入口下的有效测量，不能倒写
 **最新Native要求**：显式torch.compile(..., backend="npugraph_ex")，多流遵循该后端用法，
 由后端管理图捕获/重放；GitCode资料直连、不加代理。保留torch.npu.stream和event/wait依赖，
 同一event不能跨graph break；fullgraph失败报错，不静默退回eager。
-Native superkernel长B16/短B24开关对照已正常排队，HCA先执行。
+Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%，八类状态各自开关两侧零容差通过。
+已决定后续Native对照开启；短档新编译调用事件有额外派发区间，先校准同一backend图的直接replay口径，
+不把新调用区间当作旧CSA本体均值，也不重测superkernel关闭组。
 有明确收益且输出检查通过才开启并更新Native基线；**无明确收益就结束该方向，后续不再调参或扩测**。
-[新Native入口与生效证据要求](results/csa_native_superkernel_20260929/README.md)、
+[Native开关结果](results/csa_native_superkernel_20260929/RESULTS.md)、
+[设备重放校准](results/csa_native_graph_replay_20260929/README.md)、
 [部署配置边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
 
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
-| 1 | Native显式npugraph_ex与superkernel开关验证 | 长B16/短B24，同static kernel；核对图优化实际调用、profile多流和均值/P95；无收益即结束该方向 |
-| 2 | 长S6 AIV按query分工 | 已完成两侧依赖图解析与候选CPU编译/load；仅代表长短档验证，区分TMUL减少与scale重复读取代价 |
+| 1 | Native后端图的设备重放计时校准 | superkernel两档有收益已采用，固定开启；仅长B16/短B24校准同图直接replay，要求与compiled callable的状态一致，不再调参 |
+| 2 | 长S6 AIV按query分工 | 已正常入队task_20260929_080014_945279030；私有源码与CPU编译通过，仅长B16/短B24，区分TMUL减少与scale重复读取代价 |
 | 3 | 保留核内收益并处理CSA关键链 | 有真实核内收益即保留；CSA/P95单列，长短8:2，明显顾此失彼就在同一算子内分策略 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
 | 5 | 阶段七档出口、精度版迁移 | 新候选有收益后补受影响范围；保持精度版舍入/规约，不直接复制性能版算术 |
