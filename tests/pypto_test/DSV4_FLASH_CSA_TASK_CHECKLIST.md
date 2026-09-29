@@ -49,7 +49,8 @@ force_eager后由外层捕获。它是该入口下的有效测量，不能倒写
 Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%，八类状态各自开关两侧零容差通过。
 已决定后续Native对照开启；同一backend图的直接replay校准已完成：长B16 1122.652μs、短B24 940.762μs。
 两档各八类同图状态零容差通过；短档编译包装的事件区间不能代表设备本体，
-不把新调用区间当作旧CSA本体均值，也不重测superkernel关闭组。
+不把新调用区间当作旧CSA本体均值。整体比较开SuperKernel；核内诊断关SuperKernel但保持static compile，
+关闭组仅用于独立kernel profile，不再做开关收益消融。
 有明确收益且输出检查通过才开启并更新Native基线；**无明确收益就结束该方向，后续不再调参或扩测**。
 旧PTO短B24约960–980μs，新Native为940.762μs；不能沿用旧Native表继续声称短档领先，也不将异轮结果算成正式加速比。
 [Native开关结果](results/csa_native_superkernel_20260929/RESULTS.md)、
@@ -59,10 +60,10 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
 | 1 | Native新基线已定，阶段出口更新七档 | static+superkernel开启、显式named backend自管图；两代表档直接replay/状态校准通过，旧七档不拼入两行凑新表，不再试开关 |
-| 2 | 最新AscendC的末块归一化策略 | 首版x_out失败禁止采用；修复mi/li切片偏移后，独立Sparse314万元素逐bit通过。完整两档task_20260929_091005_151620710198进行中，输出/CSA/P95通过后才补边界 |
+| 2 | 最新AscendC末块发布已保留 | 修复mi/li偏移后，两档完整状态及B3/H127/padding精确通过；CSA 8:2−2.667%、AIV工作量−11.551%、P95下降，移入性能版单文件 |
 | 3 | 保留核内收益并处理CSA关键链 | 有真实核内收益即保留；CSA/P95单列，长短8:2，明显顾此失彼就在同一算子内分策略 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
-| 5 | 阶段七档出口、精度版迁移 | 新候选有收益后补受影响范围；保持精度版舍入/规约，不直接复制性能版算术 |
+| 5 | 阶段七档出口、精度版迁移 | 当前准备新七档：主性能Native SuperKernel开；另采关SuperKernel但static开的核内profile。保持精度版舍入/规约，不直接复制性能版算术 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、

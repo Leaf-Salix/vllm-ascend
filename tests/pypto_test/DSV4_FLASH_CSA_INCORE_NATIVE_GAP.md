@@ -7,6 +7,8 @@ Native本轮经vLLM Ascend编译包装进入npugraph_ex，static kernel开启、
 force_eager后由外层捕获。用户新要求的显式torch.compile/backend=npugraph_ex和后端自行捕获另做对照，
 两代表档已完成superkernel选型和直接设备replay校准：长B16 1122.652μs、短B24 940.762μs。
 后续Native开启superkernel；下表仍属旧入口，不修改配置或拼接两行成新版七档。
+整体比较开SuperKernel；细化核内任务时另采关SuperKernel、static compile仍开的profile。
+生产性能版现已保留Sparse末块发布，两代表档及边界通过；下表尚未包含该优化，阶段出口统一重取七档。
 短档PTO领先旧Native的结论不能外推到新基线，阶段出口统一更新。
 [新Native口径](results/csa_native_graph_replay_20260929/RESULTS.md)。旧表与过程证据保留在Git和验证日志。
 
@@ -105,10 +107,10 @@ O_A/O_B各64份工作由24个AIC执行，必须多波；WO_A已经直接借用NZ
    长B16/短B24分别1122.652/940.762μs；阶段出口统一更新七档，不再试开关，也不替换旧表中的两行拼成新表。
    新profile的QLI→Sparse融合SuperKernel为516.580/203.380μs，AIC参考510.308/193.084μs、AIV参考512.672/195.446μs。
    这些是整段融合范围，不能作为单个QLI或Sparse PMU，也不能与各旧核均值直接相减归因。
-2. 长S6仅按query重排AIV的候选没有核内收益，已否定；当前评估Sparse最后PV块直接归一化、逆RoPE及发布。
-   首版两档A/B已结束，Top-K/cache/state一致，但x_out大量不一致，计时不作为采用依据。
-   生成代码后16-head的mi/li切片仍引用前半块地址；在新私有副本中修复，先独立Sparse定位，未合入生产。
-   [当前候选](results/csa_sparse_final_publish_20260929/README.md)、
+2. Sparse最后PV块直接归一化、逆RoPE及发布已保留：两代表档CSA 8:2−2.667%、
+   AIV总工作量−11.551%，完整状态与B3/H127/padding精确通过；两档P95下降。
+   首版后16-head统计量切片偏移丢失的失败证据仍保留为失败，显式ND抽取修复后才采用。
+   [已保留结果](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)、
    [已否定的AIV分工](results/csa_score_query_split_20260929/RESULTS.md)。
 3. 按28个level-4窗口区分producer end→FIN、FIN→dispatch和dispatch→start；
    固定window_3，dummy无物理时戳时不作完整ready归因。Score提前派发不等于资源已就绪。

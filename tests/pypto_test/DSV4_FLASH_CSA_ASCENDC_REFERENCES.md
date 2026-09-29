@@ -303,12 +303,12 @@ QLI V2四路Top-K及mHC M分块输入复用均已按核内规则保留，必要�
 先单卡代表档，明确收益后再补必要的真实权重EP16；没有新证据不重跑旧失败方案或整矩阵。
 
 
-## 5. Sparse末块直接发布：新的核内候选
+## 5. Sparse末块直接发布：已保留的核内优化
 
 来源为ops-transformer28f40354的
 [Sparse SCFA Vector](../../../ops-transformer/experimental/attention/sparse_attn_sharedkv/op_kernel/arch22/sparse_attn_sharedkv_scfa_block_vector.h)：
 DealBmm2ResBaseBlock的最后S2分支调用RowDivs后直接发布；RowDivs使用Div，不采用倒数乘假设。
-当前PTO已在QK/PV中完成累计规约，但仍把FP32 mi/li/oi发布到GM，让独立merge_norm读回归一化和逆RoPE。
+此前PTO已在QK/PV中完成累计规约，但仍把FP32 mi/li/oi发布到GM，让独立merge_norm读回归一化和逆RoPE。
 pypto-lib2164563的dspark仍使用该独立merge。新私有候选消除这一最终交接，把原16-head的归一化、
 逆RoPE、BF16转换与O_A分组发布移到每个query最后PV块，保留现有性能版算术。
 
@@ -320,3 +320,9 @@ MemoryReuse IR确认softmax临时区16KiB全循环常驻；缩短到softmax子�
 生成代码后16-head统计量切片丢失64字节偏移，先在独立Sparse中验证显式抽取修复，尚无有效收益结论。
 后续比较Sparse加原merge的总AIV核时和发布跨度，避免融合范围变化造成错误归因。
 [候选、缓冲证据与设备入口](results/csa_sparse_final_publish_20260929/README.md)。
+
+后续显式ND抽取修复在独立Sparse314万元素及完整两档八类状态中均逐bit通过；
+B3/H127和active-B=3/2/1/3 padding亦通过。已保留在性能版Sparse单文件，
+长/短CSA−2.960%/−1.495%，8:2−2.667%；Sparse加原merge的AIV总核时8:2−11.551%，P95均下降。
+它吸收AscendC的末块数据交接策略，保留PTO现有算术，与pypto-lib的独立merge边界仍有意不同。
+[保留结果](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)。

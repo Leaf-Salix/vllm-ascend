@@ -81,6 +81,8 @@ CMP_MAX_BLOCKS = (MAX_SEQ_LEN // COMPRESS_RATIO + BLOCK_SIZE - 1) // BLOCK_SIZE
 
 H_TILE = 16
 
+FINAL_HEAD_TILE = H_TILE
+
 MERGE_WORKERS = 48
 
 # QK/PV 软件流水：AIC 在第 k 拍算第 k 块的 QK、第 k-QK_PRE_LAUNCH 块的 PV，
@@ -182,8 +184,9 @@ def sparse_attn_csa(
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
-):
-    """Plan and run CSA QK/PV over sparse blocks, and build inverse-RoPE metadata."""
+    o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+) -> tuple[pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16], pl.Scalar[pl.TASK_ID]]:
+    """Run CSA QK/PV and publish its final normalized, inverse-RoPE packed heads."""
     # Compressed index contract.
     ori_block_num = pl.tensor.dim(ori_kv, 0)
     t_dim = pl.tensor.dim(q, 0)
@@ -340,14 +343,35 @@ def sparse_attn_csa(
                                 v_valid = pl.add(v_valid, pl.mul(v_ge, v_lt))
                     sparse_bias[bias_t : bias_t + 1, 0:WIN] = pl.mul(pl.sub(v_valid, 1.0), -NEG_INF)
 
+    # Native cosine rows already have the consumer's interleaved layout.
+    rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
+    # 不再依赖 rope_swap：本任务自己重算符号表（见下面的 cs_lane / cs_sign），
+    # 从不读那张 GM 索引表，原来的 deps 是一条假依赖。
+    with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
+                 allow_early_resolve=True) as rope_tid:
+        for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
+                              pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
+            cs_t0 = cs_rb * ROPE_CS_T_TILE
+            cs_rows = pl.min(ROPE_CS_T_TILE, t_dim - cs_t0)
+            # 符号表按块重算：SPMD 下每个 worker 要有自己的一份，不能在区外共享。
+            cs_ones = pl.tile.full([ROPE_CS_T_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
+            cs_idx_f = pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
+            cs_col = pl.col_expand_mul(cs_ones, cs_idx_f)
+            cs_dup_i32 = pl.cast(pl.mul(cs_col, 0.5), target_type=pl.INT32, mode="trunc")
+            cs_dup_f = pl.cast(cs_dup_i32, target_type=pl.FP32)
+            cs_lane = pl.sub(cs_col, pl.mul(cs_dup_f, 2.0))
+            cs_sign = pl.neg(pl.sub(pl.mul(cs_lane, 2.0), 1.0))
+            cs_sin = pl.load(freqs_sin, [cs_t0, 0], [ROPE_CS_T_TILE, ROPE_DIM],
+                             valid_shape=[cs_rows, ROPE_DIM])
+            # tile 绑定到 S 后 cs_rows 恒等于 ROPE_CS_T_TILE，保留 valid_shape 只作兜底。
+            cs_sign_rows = pl.set_validshape(cs_sign, cs_rows, ROPE_DIM)
+            pl.store(pl.mul(cs_sin, cs_sign_rows), [cs_t0, 0], rope_sin_signed)
+
     # QK/PV scratch tensors.
     cmp_block_num = pl.tensor.dim(cmp_kv, 0)
     cmp_kv_flat = pl.reshape(cmp_kv, [cmp_block_num * BLOCK_SIZE, HEAD_DIM])
     q_flat = pl.reshape(q, [t_heads, HEAD_DIM])
     attn_sink_col = pl.reshape(attn_sink, [H, 1])
-    attn_mi = pl.create_tensor([t_heads, 1], dtype=pl.FP32)
-    attn_li = pl.create_tensor([t_heads, 1], dtype=pl.FP32)
-    attn_oi = pl.create_tensor([t_heads, HEAD_DIM], dtype=pl.FP32)
 
     # 每核 QK_TRANSFER_SLOTS 个轮转槽：AIV 采下一块 KV 的同时，AIC 还能算本块 QK
     # 与更早一块的 PV。单槽时三者只能首尾相接，泳道上就是 qk_pv 单次 246.8us
@@ -362,7 +386,7 @@ def sparse_attn_csa(
     mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
     li_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
     ffts_workspace = pl.create_tensor([256], dtype=pl.INT64)
-    with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
+    with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid, rope_tid], allow_early_resolve=True) as qk_tid:
         qk_core = pl.tile.get_block_idx()
         pl.system.set_ffts(ffts_workspace)
         # Continue the software pipeline across this core's queries. The
@@ -437,9 +461,18 @@ def sparse_attn_csa(
             pl.system.set_ffts(ffts_workspace)
             qk_lane_head = qk_aiv * (H // 2)
             qk_lane_kv = qk_aiv * (ATTN_K_TILE // 2)
-            qk_reduce_tmp = pl.create_tile([H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
+            m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
+            m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
+            m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
+            m_swap_row = pl.tile.adds(
+                pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
+            )
+            m_swap_base = pl.create_tile([FINAL_HEAD_TILE, ROPE_DIM], dtype=pl.INT32)
+            m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
+            m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, FINAL_HEAD_TILE], dtype=pl.INT32), HEAD_DIM)
+            m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [FINAL_HEAD_TILE, 1]))
             running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
-            # 上游口径：l 从 0 起算，sink 的那一项留到 merge_norm 的分母里补。
+            # 上游口径：l 从 0 起算，sink 的那一项留到最终发布的分母里补。
             running_l = pl.tile.muls(running_m, 0.0)
             running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
             running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
@@ -521,6 +554,11 @@ def sparse_attn_csa(
                             )
                         # 整条 H//2 一次做完：原先按 SOFTMAX_HEAD_TILE=8 切成四段，
                         # 是 ATTN_K_TILE=512 时 UB 放不下留下的，现在 128 宽已无必要。
+                        # Scratch carries no state between softmax blocks. Keep it
+                        # inside this phase so final publication can reuse its UB.
+                        qk_reduce_tmp = pl.create_tile(
+                            [H // 2, ATTN_K_TILE], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec
+                        )
                         qk_scores_half = pl.load(
                             score_transfer, [qk_transfer_row + qk_lane_head, 0], [H // 2, ATTN_K_TILE]
                         )
@@ -576,11 +614,52 @@ def sparse_attn_csa(
                             m_iter, l_iter, left_iter, right_iter
                         )
                     if pv_sb == SPARSE_BLOCKS - 1:
-                        qk_output_row = pv_t * H + qk_lane_head
-                        pl.store(m_valid, [qk_output_row, 0], attn_mi)
-                        pl.store(l_valid, [qk_output_row, 0], attn_li)
-                        pl.store(left_valid, [qk_output_row, 0], attn_oi)
-                        pl.store(right_valid, [qk_output_row, HEAD_DIM // 2], attn_oi)
+                        # Native SCFA normalizes inside its last PV update. Keep
+                        # PTO arithmetic, but consume the live accumulators instead
+                        # of publishing FP32 mi/li/oi for a separate merge task.
+                        m_gather_tmp = pl.create_tile([FINAL_HEAD_TILE, ROPE_DIM], dtype=pl.INT32)
+                        for pub_h in pl.unroll((H // 2) // FINAL_HEAD_TILE):
+                            pub_local_head = pub_h * FINAL_HEAD_TILE
+                            m_h0 = qk_lane_head + pub_local_head
+                            # Explicit ND extraction preserves the second half's
+                            # offset; slice + column-to-row reshape loses it on
+                            # the validated PyPTO lowering. ColMajor TEXTRACT is
+                            # unsupported on A3, so reshape the complete tile first.
+                            m_mi = pl.reshape(
+                                pl.tile.extract(
+                                    pl.reshape(m_valid, [1, H // 2]), 0, pub_local_head,
+                                    [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec,
+                                ), [FINAL_HEAD_TILE, 1],
+                            )
+                            m_li = pl.reshape(
+                                pl.tile.extract(
+                                    pl.reshape(l_valid, [1, H // 2]), 0, pub_local_head,
+                                    [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec,
+                                ), [FINAL_HEAD_TILE, 1],
+                            )
+                            m_left = pl.slice(left_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
+                            m_right = pl.slice(right_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
+                            m_oi = pl.concat(m_left, m_right)
+                            n_sink_bias = pl.load(attn_sink_col, [m_h0, 0], [FINAL_HEAD_TILE, 1])
+                            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
+                            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
+                            n_full = pl.row_expand_div(m_oi, n_denom)
+                            n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
+                            m_rope = n_full[0:FINAL_HEAD_TILE, NOPE_DIM:HEAD_DIM]
+                            m_cos_il = pl.load(freqs_cos, [pv_t, 0], [1, ROPE_DIM])
+                            m_sin_signed = pl.load(rope_sin_signed, [pv_t, 0], [1, ROPE_DIM])
+                            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
+                            m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il),
+                                           pl.col_expand_mul(m_swapped, m_sin_signed))
+                            n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
+                            n_full_bf16 = pl.concat(n_bf16[0:FINAL_HEAD_TILE, 0:NOPE_DIM], n_rope_bf16)
+                            n_group_bf16 = pl.reshape(n_full_bf16, [PUBLISH_GROUPS, O_GROUP_IN])
+                            n_pack_first = n_group_bf16[0:1, 0:O_GROUP_IN]
+                            n_pack_second = n_group_bf16[1:2, 0:O_GROUP_IN]
+                            n_pack_row = (m_h0 // HEADS_PER_GROUP) * T_PAD + pv_t
+                            n_pack_row_second = n_pack_row + T_PAD
+                            pl.store(n_pack_first, [n_pack_row, 0], o_packed_heads)
+                            pl.store(n_pack_second, [n_pack_row_second, 0], o_packed_heads)
                         # Reset only the completed query's numerical state;
                         # KV/QK/softmax for the following query stay in flight.
                         reset_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
@@ -603,39 +682,7 @@ def sparse_attn_csa(
                     m_after, l_after, left_after, right_after
                 )
 
-    # Native cosine rows already have the consumer's interleaved layout.
-    rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
-    # 不再依赖 rope_swap：本任务自己重算符号表（见下面的 cs_lane / cs_sign），
-    # 从不读那张 GM 索引表，原来的 deps 是一条假依赖。
-    with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
-                 allow_early_resolve=True) as rope_tid:
-        for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
-                              pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
-            cs_t0 = cs_rb * ROPE_CS_T_TILE
-            cs_rows = pl.min(ROPE_CS_T_TILE, t_dim - cs_t0)
-            # 符号表按块重算：SPMD 下每个 worker 要有自己的一份，不能在区外共享。
-            cs_ones = pl.tile.full([ROPE_CS_T_TILE, ROPE_DIM], dtype=pl.FP32, value=1.0)
-            cs_idx_f = pl.cast(pl.tile.arange(0, [1, ROPE_DIM], dtype=pl.INT32), target_type=pl.FP32)
-            cs_col = pl.col_expand_mul(cs_ones, cs_idx_f)
-            cs_dup_i32 = pl.cast(pl.mul(cs_col, 0.5), target_type=pl.INT32, mode="trunc")
-            cs_dup_f = pl.cast(cs_dup_i32, target_type=pl.FP32)
-            cs_lane = pl.sub(cs_col, pl.mul(cs_dup_f, 2.0))
-            cs_sign = pl.neg(pl.sub(pl.mul(cs_lane, 2.0), 1.0))
-            cs_sin = pl.load(freqs_sin, [cs_t0, 0], [ROPE_CS_T_TILE, ROPE_DIM],
-                             valid_shape=[cs_rows, ROPE_DIM])
-            # tile 绑定到 S 后 cs_rows 恒等于 ROPE_CS_T_TILE，保留 valid_shape 只作兜底。
-            cs_sign_rows = pl.set_validshape(cs_sign, cs_rows, ROPE_DIM)
-            pl.store(pl.mul(cs_sin, cs_sign_rows), [cs_t0, 0], rope_sin_signed)
-
-    return (
-        attn_mi,
-        attn_li,
-        attn_oi,
-        freqs_cos,
-        rope_sin_signed,
-        qk_tid,
-        rope_tid,
-    )
+    return o_packed_heads, qk_tid
 
 
 @pl.jit.inline
@@ -652,98 +699,10 @@ def sparse_attn_csa_tp1(
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
-) -> tuple[pl.Tensor, pl.Scalar[pl.TASK_ID]]:
-    """Write CSA heads as ``[group, T_PAD, O_GROUP_IN]`` slabs.
-
-    Only the first runtime ``t_dim`` rows in each group are valid. The
-    returned task ID covers every write to the packed output tensor.
-    """
-    (
-        attn_mi,
-        attn_li,
-        attn_oi,
-        rope_cos_il,
-        rope_sin_signed,
-        qk_tid,
-        rope_tid,
-    ) = sparse_attn_csa(
-        q,
-        ori_kv,
-        ori_block_table,
-        cmp_kv,
-        cmp_block_table,
-        idx_topk,
-        position_ids,
-        seq_lens,
-        attn_sink,
-        freqs_cos,
-        freqs_sin,
+) -> tuple[pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16], pl.Scalar[pl.TASK_ID]]:
+    """Publish packed CSA heads from the final QK/PV vector update."""
+    packed, ready = sparse_attn_csa(
+        q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
+        position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads,
     )
-    t_dim = pl.tensor.dim(q, 0)
-    merge_sink = pl.reshape(attn_sink, [H, 1])
-
-    with pl.spmd(MERGE_WORKERS, name_hint="merge_norm", deps=[qk_tid, rope_tid]) as merge_tid:
-        m_worker = pl.tile.get_block_idx()
-        # 换算索引（j^1 的 lane swap）就地算：它与 t_dim 无关，是纯常量表。
-        # 原先由一个 CORE_GROUP 的 rope_swap 任务算好写进 GM，本任务再读回来——
-        # 关键路径实测那个任务 compute 只有 1.7us 却要 core-wait 72.1us（占 makespan
-        # 8.95%），因为它独占一个核、要等核空出来。本任务是 SPMD，每个 worker 自己
-        # 算这几条向量指令即可，与 rope_cs 里的做法一致。算式与原来逐字相同。
-        # lane swap 的索引就是 `j ^ 1`（偶数 +1、奇数 -1），一条 xors 即可，不必绕 FP32。
-        # 原先用 13 步 FP32（含 5 次 cast）算同一张表，SPMD 下**每个 block 都要重算
-        # 一遍**，于是整段进了 `local_setup_us`：实测 8.15µs/块，而上游从 GM 读表只要
-        # 0.54µs，48 块合计多 365 核·µs。in-core 也印证过这些指令本身很便宜
-        # （读表版 3.31µs vs 就地算 3.30µs，纯计算几乎不变），贵在落进了启动路径。
-        # 改成纯 INT32 之后 9 步、零 cast，且仍然不需要 rope_swap 那个独占一核的任务。
-        # 用整数取模算 `j + 1 - 2*(j % 2)`，与 `j ^ 1` 等值（偶数 +1、奇数 -1），全程
-        # INT32、零 cast。
-        # 试过两条更短的路都被硬件挡了，记下来免得再走：① `pl.tile.xors` 一步到位，
-        # 但 A2/A3 的 `pto.txors` 只接受 i8/i16 元素类型，i32 被 ptoas 拒；② 退成 i16
-        # 做异或再 cast 回 i32，而 `LegalizeTileCast` 说 a2a3 上 int16→int32 没有原生
-        # 路径（`pto.tcvt` 不支持）。取模这条虽然多两步，但仍是 INT32 域内、无 cast。
-        m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
-        m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
-        m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
-        m_swap_row = pl.tile.adds(
-            pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
-        )
-        m_swap_base = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
-        m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
-        m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, H_TILE], dtype=pl.INT32), HEAD_DIM)
-        m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [H_TILE, 1]))
-        m_gather_tmp = pl.create_tile([H_TILE, ROPE_DIM], dtype=pl.INT32)
-        for m_idx in pl.range(m_worker, t_dim * (H // H_TILE), MERGE_WORKERS):
-            m_t = m_idx // (H // H_TILE)
-            m_h_idx = m_idx - m_t * (H // H_TILE)
-            m_h0 = m_h_idx * H_TILE
-            m_row = m_idx * H_TILE
-            m_mi = pl.load(attn_mi, [m_row, 0], [H_TILE, 1])
-            m_li = pl.load(attn_li, [m_row, 0], [H_TILE, 1])
-            m_oi = pl.load(attn_oi, [m_row, 0], [H_TILE, HEAD_DIM])
-
-            # qk_pv 的 l 从 0 起算，sink 那一项在这里按当前最大值补进分母。
-            n_sink_bias = pl.load(merge_sink, [m_h0, 0], [H_TILE, 1])
-            n_sink_tile = pl.add(pl.sub(m_mi, m_mi), n_sink_bias)
-            n_denom = pl.add(m_li, pl.exp(pl.sub(n_sink_tile, m_mi)))
-            n_full = pl.row_expand_div(m_oi, n_denom)
-            n_bf16 = pl.cast(n_full, target_type=pl.BF16, mode="rint")
-
-            # Inverse-RoPE head tile. 性能版直接用 FP32 结果做逆 RoPE；精度版先过一次
-            # BF16 再回 FP32，是为了复刻 Native 在逆 RoPE 前先发布 BF16 的次序。
-            m_rope = n_full[0:H_TILE, NOPE_DIM:HEAD_DIM]
-            m_cos_il = pl.load(rope_cos_il, [m_t, 0], [1, ROPE_DIM])
-            m_sin_signed = pl.load(rope_sin_signed, [m_t, 0], [1, ROPE_DIM])
-            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
-            m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed))
-            n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
-            n_full_bf16 = pl.concat(n_bf16[0:H_TILE, 0:NOPE_DIM], n_rope_bf16)
-
-            n_group_bf16 = pl.reshape(n_full_bf16, [PUBLISH_GROUPS, O_GROUP_IN])
-            n_pack_first = n_group_bf16[0:1, 0:O_GROUP_IN]
-            n_pack_second = n_group_bf16[1:2, 0:O_GROUP_IN]
-            n_pack_row = (m_h0 // HEADS_PER_GROUP) * T_PAD + m_t
-            n_pack_row_second = n_pack_row + T_PAD
-            pl.store(n_pack_first, [n_pack_row, 0], o_packed_heads)
-            pl.store(n_pack_second, [n_pack_row_second, 0], o_packed_heads)
-
-    return o_packed_heads, merge_tid
+    return packed, ready

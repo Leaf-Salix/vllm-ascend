@@ -11194,3 +11194,40 @@ task_20260929_090812_141352622666退出0，auto设备12，同卡对比4ffccb7b�
 修复后的完整输出、逆RoPE、O投影及性能待本任务完成；暂不合入生产。
 边界/padding脚本已准备但未提交，依赖完整状态通过。
 [新完整对照](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)。
+
+## 411. 保留Sparse末块融合：完整状态、两档收益及边界均通过（2026-09-29）
+
+task_20260929_091005_151620710198退出0，auto设备12，CANN9.2/mode2/atomic0/det0；
+每侧5预热20次正式图事件，独立四窗DFX。两档八类完整输出/cache/state跨版本零容差全部通过，
+各自图/eager及保护区通过，16个DFX窗口官方原始join/行数/block核对通过。
+
+| 档位 | CSA基线→候选μs | 变化 | P95μs | maxμs | Sparse加merge AIV核·μs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1046.406→1015.430 | −2.960% | 1061.760→1029.860 | 1063.440→1038.820 | 8440.985→7559.500 |
+| 8K/B24 | 961.513→947.139 | −1.495% | 979.140→971.260 | 980.280→972.500 | 10296.225→8650.310 |
+
+CSA长短8:2−2.667%，AIV合计工作量8:2−11.551%。长Sparse单taskAIV152.561→157.490μs，
+但已吸收原23.293μs的独立merge；短181.014→180.215μs，原merge33.491μs消失。
+不能以融合后单task包含更多工作就判退化，也不把核·μs或发布跨度直接当作CSA节省。
+PTO P95/P50长1.0174、短1.0222，两档各0/20超过各自P50的105%；历史间歇拖尾与EP16仍开放。
+
+完整状态通过后才提交B3/H127边界：task_20260929_092709_222811513859退出0，auto设备9。
+mode2/atomic0/det1，T18包含空闲QK核、plan尾块和末Sparse块跳过；两侧active-B=3/2/1/3同图重放通过，
+padding/slot保护区通过，八类跨版本状态全部精确一致。没有重复全矩阵或新增整模型测试。
+
+采用到性能版decode_sparse_attn_csa.py：保留现有softmax/缩放/Div/BF16/逆RoPE算术，
+消除最终FP32 mi/li/oi交接与独立merge_norm，softmax临时区只在子阶段存活；
+后16-head统计量使用已验证的ND显式抽取。生产移入只增加注释/换行，AST与已测副本一致。
+Native cache、外层vLLM、精度版、PyPTO/PTOAS/PTO-ISA均未改。
+这是吸收最新AscendC末S2发布的核内改进；与仍保留独立merge的pypto-lib2164563差异和理由已记录。
+[完整两档与边界](results/csa_sparse_final_publish_fixed_pair_20260929/README.md)。
+
+## 412. 七档出口更新口径：整体开SuperKernel，核内诊断关但保留static（2026-09-29）
+
+用户明确：CSA算子性能比较使用SuperKernel；需要拆解Native kernel核内细节时关闭SuperKernel，
+static compile始终开启。该关闭组仅用于独立profile，不是再次做收益开关消融。
+现有最新完整七档仍为旧Native入口/SuperKernel关闭，不能拿两档校准或本轮PTO A/B拼成新七档。
+新阶段准备固定七档128K×B4/B8/B16/B24+8K×B16/B24/B32，B40继续退役。
+整体计时采用已校准显式npugraph_ex后端图直接replay，复用实际校准helper，避免旧外层capture混回Native。
+每档额外一份static开/SuperKernel关的核内profile，仅作QLI/Sparse拆解；主性能表只使用SuperKernel开数据。
+长短8:2，保留20次原样本/P95/max、两侧PyTorch JSON和PTO四窗泳道；实际融合范围明确标注。

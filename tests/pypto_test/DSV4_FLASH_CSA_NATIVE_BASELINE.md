@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | enable_npugraph_ex | True | 两侧显式True；eager诊断False |
 | enable_static_kernel | True | 两侧显式True；eager诊断False |
-| super_kernel_optimize | 模板未设置 | 本轮未启用；npugraph_ex默认False，static kernel不会自动开启该项 |
+| super_kernel_optimize | 模板未设置 | 当前Native整体对照True；核内诊断False，两者均保留static compile；不再做收益消融 |
 | fuse_norm_quant | 默认True | 两侧显式True，移除旧环境绕行 |
 | enable_cpu_binding | True | 两侧显式True；仍需设备日志确认绑核成功 |
 | multistream_overlap_shared_expert | True | 两侧显式True；实际回退须报错，不能静默比较 |
@@ -117,6 +117,8 @@ task_20260929_081604_23093924514正常auto单卡1退出0，保持显式named bac
 每侧5预热20次，独立profile仍有两条计算stream和SuperKernel；八类状态与同初态同图compiled callable零容差一致。
 
 后续单卡Native基线采用这套入口和设备重放边界，不再做superkernel开关试探。
+用户进一步明确：**CSA整体性能比较开SuperKernel；核内细节诊断关SuperKernel，保留static compile**。
+核内关闭组只采独立profile，其时间不填入主性能对比表，不重新进行开关收益消融。
 新短档本体时间明显低于原编译调用1126.791μs，表明该调用区间不能直接充当设备本体；
 异轮正式计时与独立profile不能相减得出精确主机开销。本轮不改变整模型动态输入执行接口。
 旧PTO短B24约960–980μs，不能继续依旧Native基线断言PTO领先；新版七档在阶段出口统一更新。
