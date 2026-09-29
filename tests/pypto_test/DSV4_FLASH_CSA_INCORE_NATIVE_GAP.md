@@ -101,10 +101,11 @@ O_A/O_B各64份工作由24个AIC多波处理，Q_B/Indexer投影也有资源交�
 
 1. 本轮核内已保留Sparse末块发布、HC_post残差常驻，首PV特化及多项Score候选无收益的证据保留，停止原样重试。
    当前开始按这份七档的新任务图做调度候选，保留后续长B4/B8 Score和短Sparse的核内研究入口。
-2. 首项假设是HC关键门控被非关键Sinkhorn更早派发。128K/B24四窗pre/post首次start为67.565μs，
-   comb为62.050μs；pre/post完成73.800μs后mix才启动82.755μs。单窗实际DAG确认comb不是mix前置，
-   两者都等linear_reduce；不能将同时出现视为已证明阻塞因果。用明确任务依赖验证优先完成pre/post，
-   同时检查长B16/短B24完整CSA、前段包络、P95和核内是否回退，不改变算术。
+2. HC关键门控优先假设已经完成对照并否定：给comb增加pre/post前置后，
+   长B16完整CSA+1.891%、短B24−0.665%，8:2回退1.380%，长P95增加24.440μs。
+   独立DFX的mix完成虽提前长4.360/短3.890μs，但不能解释为正式CSA收益；八类状态/保护区通过，
+   实际图确认唯一新增依赖。生产HC_pre不变，不扩大测试，[结果](results/csa_hc_pre_priority_20260929/README.md)。
+   下一项研究Native按query分工并发布单根的完整策略，不重复仅重排query而保留两个half根的失败方案。
 3. 对照[上游725μs泳道](results/csa_scheduling_20260927/upstream_725/README.md)：其输入FP32、无BF16 widen，
    缺完整版本及Scheduler View，只作组织参考。上游pre/post亦可能晚于comb，不能声称新约束是照抄上游标志。
    Native在一个HcPre核内完成门控；本接入拆分后必须验证哪条任务交接影响attention关键链。
