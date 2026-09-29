@@ -67,6 +67,10 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 5 | 阶段七档出口、精度版迁移 | inplace关闭的task_20260929_093737_25396355997按新要求停止（exit130）；[新七档](results/csa_native_inplace_seven_20260929/README.md)统一inplace=True/dynamic=False。整体开SuperKernel，核内诊断关但保留static；保持精度版舍入/规约 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
+并行的独立核内候选：[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)，
+参考最新AscendC Permanent-X；生成码每token残差加载/转换16→4，乘加/存储数量不变，
+任务task_20260929_101809_3278473829验证长B16/短B24。未与首PV候选叠加，生产均未采用。
+
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、
 HC/QR/KV/Sparse既有核内优化及三项系数优化。Native分配/cache不改，PTO内直接分页读写，无入口复制/外部写回。
 S6代表档与8K/B32双query的跨版本八类状态零容差、图/保护区已有证据；完整七档同源码性能已收齐。

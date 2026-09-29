@@ -58,7 +58,11 @@ def native_scope(report, csv_path, *, super_kernel=True):
     if (not report["multistream"]["dsa_overlap"] or len(streams) < 2
             or any(row["Type"] == "SuperKernel" for row in rows) != super_kernel):
         raise ValueError("Native profile缺少实际多流或超级核证据")
-    fields = ("Name", "Type", "Duration(us)", "aicore_time(us)", "aiv_time(us)", "Block Num", "Mix Block Num")
+    fields = ("Name", "Type", "Duration(us)", "aicore_time(us)", "aiv_time(us)", "Block Num", "Mix Block Num",
+              "Input Shapes", "Input Data Types", "Input Formats", "Stream ID", "Start Time(us)",
+              "aic_mac_time(us)", "aic_scalar_time(us)", "aic_mte1_time(us)", "aic_mte2_time(us)",
+              "aic_fixpipe_time(us)", "aiv_vec_time(us)", "aiv_scalar_time(us)",
+              "aiv_mte2_time(us)", "aiv_mte3_time(us)")
     kernels = [{key: row[key] for key in fields} for row in rows]
     attention = []
     for row in kernels:
@@ -180,6 +184,7 @@ def main():
     (ROOT / "evidence.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     write_summary(result)
     write_report(result)
+    write_task_details(result)
 
 
 def write_summary(result):
@@ -258,6 +263,56 @@ def write_report(result):
               "[evidence.json](evidence.json)。"]
     (ROOT / "RESULTS.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
+
+
+def write_task_details(result):
+    selected = ("hc_widen_rms", "hc_pre_linear", "comb_sinkhorn", "mix_x_rms_norm", "qr_proj_matmul",
+                "qr_rms_norm_quant", "kv_proj_matmul", "qproj_matmul", "qproj_dequant_rms_nope_rope",
+                "kv_score_proj", "kv_score_proj_0", "idx_qr_proj_matmul", "indexer_head_coefficients",
+                "idx_kv_scale_commit", "indexer_score_topk_native_pair_aic", "indexer_score_topk_native_pair_aiv",
+                "indexer_topk_query_merge", "qk_pv_aic", "qk_pv_aiv", "proj_a_mm", "quant", "proj_b_mm", "hc_post")
+    native_types = {"HcPre", "HcPost", "Compressor", "VllmQuantLightningIndexer", "SparseAttnSharedkv",
+                    "MatMulV2", "QuantBatchMatmulV3", "TransposeBatchMatMul", "RmsNormDynamicQuant"}
+    lines = ["# 七档核内与任务组织明细", "",
+             "Native使用dynamic=False/inplace=True/static=True、SuperKernel关闭的独立profile；",
+             "正式CSA比较仍用SuperKernel开启组，不能把此诊断的Duration放入主性能表。",
+             "Native各pipeline计数可重叠，不能相加；PTO核时包含核内等待，没有对应PMU时不声称纯算术差值。",
+             "两侧分工不同，先核对block数与每block工作量。特别是PTO HC_post每worker循环最多4个token，",
+             "Native可能按单token分工；O_A的64份PTO工作由24个AIC分多波处理，启动分散并非全是调度空隙。",
+             "PTO首次/末次时刻按各窗口首个Worker receive归零，下表为四窗均值，独立profile不拼成同一时间轴。", ""]
+    for case in result["cases"]:
+        lines += [f"## {case['history']//1024}K/B{case['batch']}", "",
+                  "### Native static核内profile", "",
+                  "| 算子 | block/mix | Duration | AIC/AIV | MAC/MTE1/MTE2/FIX | Vector/MTE2/MTE3 | 输入shape |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | --- |"]
+        for row in case["native_incore"]["kernels"]:
+            if row["Type"] not in native_types:
+                continue
+            aic = "/".join(row[k] for k in ("aic_mac_time(us)", "aic_mte1_time(us)", "aic_mte2_time(us)",
+                                           "aic_fixpipe_time(us)"))
+            aiv = "/".join(row[k] for k in ("aiv_vec_time(us)", "aiv_mte2_time(us)", "aiv_mte3_time(us)"))
+            shape = row["Input Shapes"].strip('"').replace("|", "\\|")
+            lines.append(f"| {row['Type']} | {row['Block Num']}/{row['Mix Block Num']} | {row['Duration(us)']} "
+                         f"| {row['aicore_time(us)']}/{row['aiv_time(us)']} | {aic} | {aiv} | `{shape}` |")
+        lines += ["", "### PTO四窗口", "",
+                  "| Task | worker数 | 核时四窗均值 | 各窗口均值范围 | 首次start | 末次end | 启动分散 | setup均值 |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for name in selected:
+            tasks = [w["tasks"][name] for w in case["worker_windows"] if name in w["tasks"]]
+            if not tasks:
+                continue
+            if len(tasks) != 4 or len({t["blocks"] for t in tasks}) != 1:
+                raise ValueError(f"当前固定shape的task覆盖发生变化：{name}")
+            kernels = [t["kernel_mean_us"] for t in tasks]
+            fields = [statistics.mean(t[k] for t in tasks) for k in
+                      ("first_start_us", "last_end_us", "start_spread_us", "setup_mean_us")]
+            lines.append(f"| {name} | {tasks[0]['blocks']} | {statistics.mean(kernels):.3f} "
+                         f"| {min(kernels):.3f}–{max(kernels):.3f} | "
+                         + " | ".join(f"{v:.3f}" for v in fields) + " |")
+        lines.append("")
+    lines += ["全部原始kernel名、shape、scalar/pipeline计数、窗口路径及调度前置见[evidence.json](evidence.json)。",
+              "无物理时戳的dummy前置不作完整ready归因；本表不通过Duration减核时推断可删除的调度开销。"]
+    (ROOT / "TASKS.md").write_text("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":

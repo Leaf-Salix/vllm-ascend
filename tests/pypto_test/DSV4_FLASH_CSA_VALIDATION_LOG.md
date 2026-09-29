@@ -11280,3 +11280,25 @@ Ruff、shell检查通过后10:06正常auto提交task_20260929_100643_24968701841
 只测128K/B16、8K/B24，5预热20次及独立四窗DFX，八类完整状态零容差、CSA/P95和核内分别判定。
 生产算子尚未改变；不增加整模型或全七档测试，不用指令数减少代替性能实测。
 [候选、最小补丁与收集器](results/csa_sparse_first_pv_20260929/README.md)。
+
+## 415. HC_post确认重复残差读取，按AscendC常驻策略隔离候选（2026-09-29）
+
+阅读最新ops-transformer 28f40354 mhc_post arch22的ComputeCopyOutAllX及tiling：
+UB足够时以USE_PERMANENT_X保留四行残差；release Native HcPostDSplit也整组加载后计算。
+当前PTO沿用pypto-lib2164563每输出通道重新读取四行的循环，但Native接入残差是BF16，
+因此四个输出既重复读取也重复转换。生成C++确认每token16次残差load/cast，不是高层源码臆测。
+
+私有候选先显式load并cast四行，四个输出复用，保留post*x后0/1/2/3依次mul/add及BF16 RINT。
+未照搬AscendC Axpy，也未改变token分工/pipeline/依赖；单worker核时不能忽略工作量差异：
+新B4 Native HcPost用24个Vector block、PTO仅6个worker且每个循环4个token。
+候选只改私有性能包，公共hc_post、精度版、生产算子不动，不与待测首PV改动叠加。
+
+CPU首版因Tensor/Tile混用被拒绝，统一显式Tile读写后完整PTOAS/CCE/链接/load通过。
+含pipeline展开的静态调用点TLOAD51→15、TCVT63→27，TMULS60/TADD48/TSTORE12保持；
+折合每token残差读取/转换16→4。该证据不宣称设备性能收益。两依赖图、Ruff及shell检查通过。
+10:18正常auto提交task_20260929_101809_3278473829，最长5400秒，长B16/短B24独立A/B。
+沿用inplace=True测试口径及八类完整状态/四窗DFX收集器，分别判断核内、CSA与P95。
+[候选、Native/pypto-lib差异及生成码](results/csa_hc_post_resident_20260929/README.md)。
+
+七档收集器补充Native实际shape、block数和各pipeline计数，以及完整PTO四窗task表，
+避免只看Indexer/Sparse均值或把任务分工差别当作纯计算差距；没有增加设备测试。

@@ -28,6 +28,8 @@ CANN9.2/mode2/det0、PTO atomic0、EPLB关；第二个CSA（layer4）真实权�
 冻结包两入口依赖图、生成runner的Python语法/Ruff和shell语法已通过。
 收集器同时检查冻结torch.compile参数和报告中的实际inplace配置，
 Native主性能完整SuperKernel范围与关SuperKernel的QLI/Sparse核时分别记录。
+另存Native实际输入shape、block数和MAC/MTE/FIX/Vector等pipeline计数，
+并生成七档TASKS明细；各pipeline可重叠，不能求和或拿不同worker工作量的核时直接相减。
 PTO四窗继续使用官方原始join/行数/block检查；短B16/B32系数worker为48，其余为batch。
 
 任务成功结束后依次运行`collect.py`和`bundle.py`。下载包保留28个原始JSON：

@@ -38,7 +38,7 @@ def main():
     for item in mapping:
         shutil.copyfile(item["original"], destination / item["file"])
     (destination / "sources.json").write_text(json.dumps(mapping, ensure_ascii=False, indent=2) + "\n")
-    for name in ("RESULTS.md", "evidence.json", "summary.json"):
+    for name in ("RESULTS.md", "TASKS.md", "evidence.json", "summary.json"):
         shutil.copyfile(ROOT / name, destination / name)
     commit = result["source"]["operator_commit"]
     (destination / "README.md").write_text(
@@ -51,7 +51,8 @@ def main():
         "范围为HC_pre+norm+CSA+HC_post；不是16卡模型forward或token/DSpark验收。\n"
         "主性能表来自5预热/20次无profiler设备事件，独立profile不能替代正式样本。\n"
         "Native主性能中的SuperKernel包含多个算子，不可标成单个QLI或Sparse核时。\n\n"
-        "[性能及核内对照](RESULTS.md)、[原文件映射](sources.json)、[精简证据](summary.json)。\n"
+        "[性能及核内对照](RESULTS.md)、[任务与pipeline明细](TASKS.md)、"
+        "[原文件映射](sources.json)、[精简证据](summary.json)。\n"
         "JSON直接复制，未修改或拼接事件，未把诊断组计时混入主性能表。\n"
     )
     print(f"Copied {len(mapping)} original JSON files into {destination}")
