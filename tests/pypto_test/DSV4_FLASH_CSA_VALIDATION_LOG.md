@@ -11507,3 +11507,20 @@ Ruff与性能版decode_csa_tp1_layer/decode_csa_tp1_layer_test依赖解析通过
 不同任务/轮次在报告中明确记录，不把这一汇总冒称新一轮同次Native/PTO A/B。
 [采用、实现及状态依据](results/csa_score_single_root_20260929/README.md)、
 [尾段/padding逐项覆盖](results/csa_score_single_root_20260929/boundary/summary.json)。
+
+## 426. 启动单根方案五个缺口，按用户要求单独汇集七份PTO泳道（2026-09-29）
+
+12:03正常auto提交task_20260929_120323_390116317823并确认running，最长7200秒。
+生产采用版本2ed8ae2e；执行沿本轮已测的冻结candidate整包，不在排队期间改kernel源码。
+仅补128K B4/B8/B24与8K B16/B32，各5次预热20次正式设备事件、独立PyTorch profile和四窗DFX；
+复用相同源码已完成的长B16和短B24。Native继续复用最新标准七档，不重复开关或全模型测试。
+
+用户要求本轮优化后提供七档PTO泳道集中下载。预先固定window_3，复制原始merged JSON，
+按01_128K_B4至07_8K_B32排序，并在文件名标明PTO_Swimlane、2ed8ae2e、SingleCSA_SyntheticHistory。
+单独download_pto_swimlanes目录仅含七份泳道JSON及README/来源TSV，同时生成ZIP；
+保留所有原窗口，不选最快的一个，不修改或拼接事件。完整收集通过前不发布不全的七档包。
+
+旧55b89ee2七档没有保存完整state快照，撤掉准备脚本中尚未执行的跨旧七档逐元素比较假设，
+不为补快照重跑旧实现。七档各自图状态/保护区继续核对；跨版本状态证据限于本轮两档A/B及尾段/padding，
+不能替代Native精度、真实EP16 token/DSpark。新补测也不落盘额外的大型state副本。
+Ruff与shell语法通过；未新增无关测试。[本轮入口、收集和打包](results/csa_single_root_seven_20260929/README.md)。
