@@ -11103,3 +11103,31 @@ TMUL静态调用6→3，但scale页读取16→32，Cube/排序顺序/两个half�
 
 本任务结束后08:16正常auto入队Native设备重放校准task_20260929_081604_23093924514；
 superkernel固定开启，仅长B16/短B24，不再做开关试探。整个冻结后端图与设备runner保持不动。
+
+## 407. Native显式后端图设备重放校准通过，固定开启superkernel（2026-09-29）
+
+task_20260929_081604_23093924514退出0，auto设备1，CANN9.2/mode2/det0，static+superkernel均开启。
+没有再测关闭组；图由显式torch.compile backend=npugraph_ex生成并优化，保留原多流依赖。
+观察实际AclGraph owner，唯一图且无主机更新节点才直接replay；持有module、fixture和图owner，
+固定输入地址/shape，不另捕获外图，不将此诊断接口推广为生产绕过backend参数更新。
+
+| 档位 | 均值μs | P50μs | P95μs | maxμs | 独立profile设备spanμs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128K/B16 | 1122.652 | 1122.490 | 1128.400 | 1131.380 | 1151.000 |
+| 8K/B24 | 940.762 | 940.520 | 945.280 | 945.740 | 997.500 |
+
+每档5预热20次图外设备事件；metadata/slot保护区通过，八类输出/cache/state各自与同初态同图compiled callable零容差一致。
+参考在初次编译warmup之后再次恢复初态、执行一次已编译调用后收集，避免把编译期多次状态更新当正确参考。
+保留报告legacy字段eager_comparison，但本轮明确它指同图compiled callable参考；未冒称新入口与原eager bit一致。
+实际profile确认两条计算stream及SuperKernel。Ruff、diff检查和CPU终态收集通过。
+
+后续单卡Native采用此计时边界；短档编译包装调用1126.791μs不当作设备本体，
+不同轮事件/独立profile不直接相减作精确开销归因。旧PTO短B24约960–980μs已不支持相对新Native领先的外推。
+旧七档保留其原配置，新版七档在阶段出口统一更新；当前不启动冗余开关、七档或16卡测量。
+[结果](results/csa_native_graph_replay_20260929/RESULTS.md)、
+[样本和完整状态检查](results/csa_native_graph_replay_20260929/summary.json)。
+
+下一项源码核对：最新ops-transformer28f40354的Sparse SCFA Vector Update在最后S2块内做RowDivs并发布；
+当前PTO qk_pv先发布FP32 mi/li/oi，独立merge_norm再加载、归一化、逆RoPE及按O_A分组发布。
+Native的RowDivs仍用Div，不支持“Native通过倒数乘替代除法”的假设；可研究的是最终结果的数据交接与任务边界。
+末块融合可能增加QK/PV尾部和UB压力，需先检查缓冲生命周期及历史反例，不把少GM直接视为收益。

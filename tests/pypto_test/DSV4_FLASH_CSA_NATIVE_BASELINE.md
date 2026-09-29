@@ -104,6 +104,21 @@ GitCode文档必须直连无代理，同event不得跨graph break，fullgraph编
 profile实际14/12个SuperKernel且保持两条计算stream，后续Native对照开启，不再进行开关调参。
 这些为编译调用的图外事件区间。短档独立profile设备span关闭1036.250μs、开启957.500μs，
 旧入口为1030.500μs；不能将新调用均值直接拼到旧CSA设备重放表。
-下一步仅校准同一个npugraph_ex已生成图的直接replay，superkernel固定开启。
+同一个npugraph_ex已生成图的直接replay校准现已完成，superkernel固定开启。
 [结果及边界](results/csa_native_superkernel_20260929/RESULTS.md)、
 [校准方法](results/csa_native_graph_replay_20260929/README.md)。
+
+## 当前采用的单卡计时口径
+
+task_20260929_081604_23093924514正常auto单卡1退出0，保持显式named backend、static和superkernel开启。
+固定地址/shape，唯一后端生成图、无主机更新节点，从实际owner取图直接replay；不新增外层capture。
+长B16：均值1122.652μs、P50 1122.490μs、P95 1128.400μs、max 1131.380μs。
+短B24：均值940.762μs、P50 940.520μs、P95 945.280μs、max 945.740μs。
+每侧5预热20次，独立profile仍有两条计算stream和SuperKernel；八类状态与同初态同图compiled callable零容差一致。
+
+后续单卡Native基线采用这套入口和设备重放边界，不再做superkernel开关试探。
+新短档本体时间明显低于原编译调用1126.791μs，表明该调用区间不能直接充当设备本体；
+异轮正式计时与独立profile不能相减得出精确主机开销。本轮不改变整模型动态输入执行接口。
+旧PTO短B24约960–980μs，不能继续依旧Native基线断言PTO领先；新版七档在阶段出口统一更新。
+[本轮结果](results/csa_native_graph_replay_20260929/RESULTS.md)、
+[样本、检查与profile路径](results/csa_native_graph_replay_20260929/summary.json)。

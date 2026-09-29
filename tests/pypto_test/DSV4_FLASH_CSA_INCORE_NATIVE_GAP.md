@@ -5,7 +5,10 @@
 已包含系数空worker删除、按组准备和UB一次发布；未合入否定的分数UB或无dummy准入组合。
 Native本轮经vLLM Ascend编译包装进入npugraph_ex，static kernel开启、superkernel关闭，
 force_eager后由外层捕获。用户新要求的显式torch.compile/backend=npugraph_ex和后端自行捕获另做对照，
-未完成前不修改本表配置或拼接新旧入口结果。旧表与过程证据保留在Git和验证日志。
+两代表档已完成superkernel选型和直接设备replay校准：长B16 1122.652μs、短B24 940.762μs。
+后续Native开启superkernel；下表仍属旧入口，不修改配置或拼接两行成新版七档。
+短档PTO领先旧Native的结论不能外推到新基线，阶段出口统一更新。
+[新Native口径](results/csa_native_graph_replay_20260929/RESULTS.md)。旧表与过程证据保留在Git和验证日志。
 
 ## 范围和读数
 
