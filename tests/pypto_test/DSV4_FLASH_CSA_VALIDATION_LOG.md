@@ -11524,3 +11524,41 @@ Ruff与性能版decode_csa_tp1_layer/decode_csa_tp1_layer_test依赖解析通过
 不为补快照重跑旧实现。七档各自图状态/保护区继续核对；跨版本状态证据限于本轮两档A/B及尾段/padding，
 不能替代Native精度、真实EP16 token/DSpark。新补测也不落盘额外的大型state副本。
 Ruff与shell语法通过；未新增无关测试。[本轮入口、收集和打包](results/csa_single_root_seven_20260929/README.md)。
+
+## 427. 单根Indexer七档收齐，原始PTO泳道统一命名并提供下载（2026-09-29）
+
+task_20260929_120323_390116317823 completed(exit=0)，设备0已释放。
+补测五档与本轮已测长B16/短B24沿同一冻结candidate，生产对应2ed8ae2e；Native复用最新标准七档。
+两侧均为CANN9.2、mode2/det0、真实layer4权重及独立合成历史，完整HC_pre+norm+CSA+HC_post，
+5次预热20次正式设备事件；PTO atomic0。Native显式npugraph_ex、dynamic=False/fullgraph=True、
+inplace_pass/static/SuperKernel开启，核内另用已有SuperKernel关/static开profile。
+虽均为auto设备0，采样分属不同任务，以下不是同次Native/PTO A/B，也不归因某项优化。
+
+| 档位 | Native均值μs | PTO均值μs | PTO变化 | PTO P95μs |
+| --- | ---: | ---: | ---: | ---: |
+| 128K/B4 | 748.298 | 650.226 | −13.106% | 662.620 |
+| 128K/B8 | 859.563 | 746.698 | −13.131% | 760.540 |
+| 128K/B16 | 1130.853 | 976.950 | −13.609% | 998.520 |
+| 128K/B24 | 1281.888 | 1249.672 | −2.513% | 1271.480 |
+| 8K/B16 | 757.482 | 781.510 | +3.172% | 799.360 |
+| 8K/B24 | 915.371 | 956.560 | +4.500% | 981.440 |
+| 8K/B32 | 1062.079 | 1065.568 | +0.329% | 1087.720 |
+
+各上下文内batch等权，长−10.590%、短+2.667%、8:2−7.938%。短档回退原值保留，未按源码相同抹去。
+PTO P95/P50范围1.0143–1.0251，max/P50最高1.0465，0/140超过各自P50的105%；
+仍不足以关闭历史间歇拖尾或真实EP16问题。七档八类自身图状态、Top-K结构和保护区通过；
+跨版本八类完整状态只沿已测两代表档与尾段/padding，不声称七档跨版本或Native/模型精度通过。
+
+28个DFX窗口的官方raw join、行数与worker block核对通过。长B8/B16/B24 Score AIV为
+119.761/229.177/336.322μs，低于Native独立QLI参考126.021/241.730/376.063μs；
+长B4为72.661对64.369μs，仍有差距。PTO系数、scale提交和最终merge独立，Native QLI边界更宽且计时方法不同，
+不将这组差值当成纯算术或可回收时长。短Sparse及长B24 Sparse仍是后续研究入口。
+
+按用户要求将七份原始window_3 merged JSON复制到单独目录，01至07按长短/batch排序，
+文件名带PTO_Swimlane_2ed8ae2e_SingleCSA_SyntheticHistory；未改事件、未挑最快窗口。
+README包含范围及正式性能表，SOURCES.tsv逐项记录原文件、任务、复用标记和PyTorch profile路径，另提供ZIP。
+不重跑已经成功的两档或Native，不新增EP16及哈希校验。
+[七份泳道目录](results/csa_single_root_seven_20260929/download_pto_swimlanes/README.md)、
+[ZIP下载](results/csa_single_root_seven_20260929/PTO_CSA_7cases_2ed8ae2e_20260929.zip)、
+[性能与核内结果](results/csa_single_root_seven_20260929/RESULTS.md)、
+[当前差距及后续](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。

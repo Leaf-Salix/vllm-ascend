@@ -1,18 +1,17 @@
 # Indexer：当前PTO与最新AscendC的差异
 
-更新：2026-09-29。当前完整七档为 **55b89ee2 / CANN9.2**，任务已退出0：
-128K B4/B8/B16/B24、8K B16/B24/B32。长短8:2完整CSA为−6.498%，长档−8.536%、短档+1.653%。
-Native已采用最新标准：显式torch.compile/backend=npugraph_ex、dynamic=False/inplace_pass=True/static开启，
-主性能SuperKernel开启；另采关闭SuperKernel的独立核内profile，不把诊断计时放入正式主表。
-PTO采用已有验证路径和数据，不要求复刻Native编译选项；版本、环境与测量边界逐项标明。
-本轮已有系数优化和Sparse末块发布；生产随后保留d93bba14的HC_post残差常驻，未倒写进七档。
-生产另已保留长S6完整query单根：长B16 Score AIC/AIV−8.555%/−9.484%、CSA−4.390%，
-短B24 CSA+2.941%、8:2−2.924%；两档及B4/H65535尾段/padding完整状态通过。
-这一局部A/B不倒写到55b89ee2七档；新源码复用已测两档、补其余五档，Native基线保持。
-[七档完整数据](results/csa_native_inplace_seven_20260929/RESULTS.md)、
-[实际任务明细](results/csa_native_inplace_seven_20260929/TASKS.md)、
+更新：2026-09-29。当前PTO性能版 **2ed8ae2e / CANN9.2**，包含HC_post残差常驻与长S6单根Indexer。
+七档统一冻结源码：128K B4/B8/B16/B24、8K B16/B24/B32；复用本轮长B16/短B24，补测其余五档。
+Native沿用已完成的最新标准七档，各侧都是auto设备0，但采样分属不同任务；
+这是当前已有结果对照，不是同次A/B，不能据此归因单项优化收益。
+
+Native显式torch.compile/backend=npugraph_ex、dynamic=False/inplace_pass=True/static开启，
+主性能SuperKernel开启；独立核内profile只关闭SuperKernel。PTO采用已有验证路径，不强制复刻Native编译设置。
+当前七档完整CSA长档-10.590%、短档+2.667%、8:2 -7.938%。
+[七档结果](results/csa_single_root_seven_20260929/RESULTS.md)、
+[任务明细](results/csa_single_root_seven_20260929/TASKS.md)、
 [当前核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
-旧版本和局部A/B留在[验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，不拼接为同轮七档。
+单根策略的因果收益仍以两档同卡A/B为准，历史留在验证日志，不将跨轮变化归因单项修改。
 
 ## 实际接口与主路径
 
@@ -44,7 +43,7 @@ PTO保持Native分配与更新：一个可写物理cache根入参，在编排里
 | --- | --- | --- | --- |
 | query/Key复用 | L1 query最多256行，L0按128行M面板；同一Key L1面板跨M子块复用 | 长B≥4用S6 M384/N64；更小长档保留双query | 长B4/B8 S6已取得明显核时收益；分组相似仍不等于L1/L0流水相同，旧4+2拼接退化不重试 |
 | Query/系数驻留 | ComputeMm1只在isFirstS2InnerLoop加载Query及Weight，后续S2块复用L1 | 每个leaf重新加载Q和系数，再移至L0A；leaf内部多个N面板已复用 | B24固定组跨leaf驻留已测，AIC约+3.72%、AIV持平；当前候选不采用，不能把少读字节直接当收益 |
-| Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为70.539/139.297μs，后续按当前核时继续看等待与重复move |
+| Key读取 | ProcessQk首个M子块加载Key，末个M子块后释放；独立buffer事件 | 长档独立Key L1槽及提前一个面板预取，连到L0B | 本轮B4/B8 AIC均值为65.798/115.626μs，后续按当前核时继续看等待与重复move |
 | 系数生成 | ProcessVec0在QLI内由偶数AIV成块加载FP16 weight/qScale，相乘、Brcb后GM交接 | 独立SPMD成块加载FP32输入，分别转FP16相乘；在UB补入对角行后一次GM写回，提交min(48,query组数)，stride48不变 | 空worker、批量准备和UB一次发布已保留；独立任务/转换/对角布局开销仍在，朴素融合失败；Native QLI不含Query Hadamard量化 |
 | QK→WS | FIXPIPE把QK INT32缩放转FP16入L1；Cube完成head加权 | 同样采用FP16 QK和Cube WS | 此项已经采用，不再把旧Vector head规约写成当前差异 |
 | WS归约粒度 | ProcessWs逐query循环，ComputeWs的M=16、K=gSize=64，N最大128；Brcb的16行重复结果只发布有效行 | S6以[16,384]对角系数同时规约六个query，N64，发布六个有效行 | 同六query/128候选的FP16 MAC数均为6×16×64×128=786432；不能只看到PTO的零系数就认定额外算力浪费。调用数与L0/流水布局不同，应连同QK分块评估 |
@@ -63,7 +62,7 @@ PTO Native cache适配没有device重排，但页内Key/scale错位、动态有�
 已检查Native页指针式切片替代双视图的写法：当前PyPTO默认核内转换会把tensor.slice变为Tile，
 后续GM reshape/load链不能成立；该轻量探针未产生设备候选，保留原路径，见[表达限制](results/csa_key_page_view_20260929/README.md)。
 当前实际核时与七档Native对照见[核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)；
-[完整四窗口、最慢核与包络](results/csa_native_inplace_seven_20260929/TASKS.md)保留全部原始读数。
+[完整四窗口、最慢核与包络](results/csa_single_root_seven_20260929/TASKS.md)保留全部原始读数。
 
 WS粒度的源码依据为同目录`quant_lightning_indexer_v2_service_cube_arch22.h`：
 ProcessWs（179行）逐gSize调用，ComputeWs（496行）设置M/N/K，
@@ -73,9 +72,10 @@ FixpResToGm（552行）只发布各query的有效行。上述MAC计算不包含D
 ## 下一步按依赖推进
 
 1. 已保留的S6 Key复用、2048分段排序、UB中间根和WO_A NZ已由同源码七档覆盖。
-   当前长B16 Score AIC/AIV为250.640/256.646μs，merge9.677μs；
-   长B24为349.266/365.861μs、merge10.844μs。Native独立QLI的PMU参考分别为
-   242.293/241.730和376.467/376.063μs；不能忽略PTO独立系数、scale提交与merge。
+   当前长B16 Score AIC/AIV为226.253/229.177μs，merge9.696μs；
+   长B24为328.753/336.322μs、merge9.008μs。
+   Native独立QLI的PMU参考为242.293/241.730与376.467/376.063μs；
+   不能忽略PTO独立系数、scale提交与merge，也不把PMU与worker核时机械相减。
 2. 系数任务仅取消空worker已保留：固定stride48，提交数min(48, query组数)。
    长B16/短B24真实编译A/B的8:2均值−1.885%、两档P95下降；短档一次最大值和连续诊断分别保留。
    这是任务提交优化，不能把Score核时略升隐去或称为算术加速。
@@ -121,25 +121,23 @@ FixpResToGm（552行）只发布各query的有效行。上述MAC计算不包含D
 不能用区间波动代替incore收益。该结果只否定保留两个half根的简单分工候选，
 不外推为Native完整query内规约无效，也不原样扩测。
 
-## 尚未验证的结构差异：每query的候选根数
+## 已采用的结构调整：完整query与单根发布
 
 重新对照当前ops-transformer28f40354 `quant_lightning_indexer_v2_service_vector_arch22.h`：
 ProcessVec1按query/S1分摊两个AIV（约328–365行），每个query对完整S2段执行缩放、SortAll，
 再合入自己的globalTopkUb（约395–416行）；无跨核归约需求时直接提取最终索引（约419–432行）。
-当前PTO每个AIV处理全部六query的一个候选半区，每query/leaf产生两份Top-512根，
-独立merge再消费这些根。新版七档长B4/B8 Score AIV80.560/146.302μs，
-Native独立QLI参考64.369/126.021μs；这只是不同边界的差异，不是根数造成差距的因果证据。
-
-此前query分工候选仍保留两份half根，且每AIV读取scale翻倍，因此其约+1%负收益
-只否定那一版，不能外推为Native的完整query内排序/单根组织无效。
-后续若进一步试验，必须成套处理完整候选排序、单根写入和consumer根数，不能只改AIV分工；
-还须保持固定tie规则或明确记录Top-K规则变化、UB容量、scale额外读取与跨leaf合并工作量。
+性能版2ed8ae2e已将长S6的两个候选半区根改为每query/leaf一个Top-512根，
+同时处理连续候选、AIV query分工、UB排序和consumer有效根数，原arena容量/query跨度保持。
+短档继续原路径；独立merge task仍存在，不把根数减半写成整个Indexer融合完成。
+每AIV读取全候选scale的额外流量和跨leaf合并工作量仍存在。
 Native的BASE_TOPK=2048与本接入Top-512不同，也不直接照搬UB大小或声称相同MAC就等速。
 
 HC调度对照已完成且8:2回退1.380%，不采用。随后已实现[完整query单根候选](results/csa_score_single_root_20260929/README.md)：
 长S6使用Cube连续候选、AIV各三个query、UB内2048排序和单根consumer；短档原路径保持。
-两入口解析/完整CPU编译通过，Vec地址覆盖88KiB；11:30正常auto提交两代表档
-task_20260929_113003_337101716086已退出0，源码冻结。长B16 Score AIC/AIV下降8.555%/9.484%，
+两入口解析/完整CPU编译通过，Vec地址覆盖88KiB；两代表档任务
+task_20260929_113003_337101716086已退出0。长B16 Score AIC/AIV下降8.555%/9.484%，
 四窗均值范围不重叠；完整CSA长−4.390%、短+2.941%、8:2−2.924%，短档回退如实保留。
-两代表档及B4/H65535尾段/padding八类完整状态精确通过，已采用到性能版；七档缺少的五档待补，模型token/DSpark仍未覆盖。
-避免重复旧两half根版本，也不把理论少根数作为采用依据。
+两代表档及B4/H65535尾段/padding八类完整状态精确通过，已采用到性能版；模型token/DSpark仍未覆盖。
+连续2048段按新段优先旧根、后leaf优先前leaf处理同分；原半区边界可能不是2048倍数，
+已测输入零差异不能推导任意输入索引全等。精度版尚未迁移这项改变。
+旧只改query分工而留两根的失败候选已与本轮完整方案区分，不原样重试。

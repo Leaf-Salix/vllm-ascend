@@ -144,6 +144,8 @@ def main():
         text = p.read_text()
         if name == "RESULTS.md":
             text = text.replace("# 新Native基线与Sparse融合后的七档", "# 单根Indexer采用后的PTO七档与现有Native")
+            text = text.replace("主性能21个JSON及7个Native核内诊断JSON",
+                                "两侧正式路径的14个PyTorch JSON及7个Native核内诊断JSON")
         title, body = text.split("\n\n", 1)
         p.write_text(title + "\n\n" + provenance + body)
     compact = read(ROOT / "summary.json")

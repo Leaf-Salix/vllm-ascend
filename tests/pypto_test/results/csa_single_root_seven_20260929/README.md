@@ -17,12 +17,18 @@ inplace_pass/static/SuperKernel开启；核内参考沿已有static开/SuperKern
 旧七档没有保存完整state，不能声称七档跨版本零差异，也不为补存快照重跑旧版本。
 跨版本逐元素依据仍限于已完成的两档A/B和尾段/padding；不能替代Native精度或真实EP16 token/DSpark验收。
 
-完成后将七档PTO固定window_3的原始merged泳道汇集到download_pto_swimlanes，
+七档PTO固定window_3的原始merged泳道已汇集到download_pto_swimlanes，
 按01_128K_B4至07_8K_B32编号，文件名包含PTO_Swimlane、算子版本与SingleCSA_SyntheticHistory。
 不改事件，不选最快窗口；全部四窗和独立PyTorch profile仍留原目录，并在来源表中列出。
 同时生成一个ZIP便于一次下载；原始事件保持不变。
 
-任务task_20260929_120323_390116317823，2026-09-29 12:03正常auto提交，最长7200秒。
-尚未完成时不提前填性能结论或发布不完整的七档包。
+任务task_20260929_120323_390116317823已完成（exit=0），auto设备0已释放。
+五档补测加两档同源码复用全部收齐；28个DFX窗口官方join/行数/block核对、
+七档自身图重放状态/Top-K结构/保护区通过。Native与PTO均在设备0，但采样轮次不同。
+对现有Native：128K均值变化−10.590%、8K +2.667%、8:2 −7.938%；短档仍慢，结果不隐藏。
+PTO各档0/20超过自身P50的105%；本轮不关闭历史间歇尾部或EP16问题。
+
+[正式结果](RESULTS.md)、[任务明细](TASKS.md)、[精简证据](summary.json)、
+[七份泳道目录](download_pto_swimlanes/README.md)、[ZIP下载](PTO_CSA_7cases_2ed8ae2e_20260929.zip)。
 
 [入口](run.sh)、[收集](collect.py)、[七档打包](bundle.py)、[来源](source.json)。
