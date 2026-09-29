@@ -74,7 +74,8 @@ def main():
             windows = dfx["swimlane_windows"]
             if len(windows) != 4 or any(not w["exported"] or w["execution"] != "graph_replay" for w in windows):
                 raise ValueError("缺少独立四窗图重放")
-            side["windows"] = [metrics.schedule_window(Path(w["merged_swimlane"]), batch, helper, worker)
+            coefficient_workers = 48 if history == 8192 and batch in (16, 32) else batch
+            side["windows"] = [metrics.schedule_window(Path(w["merged_swimlane"]), coefficient_workers, helper, worker)
                                for w in windows]
             side["kernel_us"] = {}
             for core, task_name in TARGETS.items():

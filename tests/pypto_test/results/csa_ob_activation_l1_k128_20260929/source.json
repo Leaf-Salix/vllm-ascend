@@ -1,0 +1,20 @@
+{
+  "baseline": "2ed8ae2e",
+  "base_source": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-ob-activation-l1-2ed8ae2e-baseline",
+  "source_prefix": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-ob-activation-l1-k128-2ed8ae2e",
+  "variant": "pkg:dsv4_csa_ob_activation_l1_k128_2ed8ae2e",
+  "cases": [
+    [
+      131072,
+      16
+    ],
+    [
+      8192,
+      16
+    ]
+  ],
+  "change": "只改ROW32/96的A加载复用；Mat切片交由原AutoTileMatmulL0恢复K128双缓冲",
+  "reason": "第一版连带改变L0流水并使长档O-B核时回退15.190%；二版隔离这一因素",
+  "short_case": "改用8K/B16，使长短两档均覆盖受影响的ROW96，避免只测不变路径",
+  "scope": "性能版NZ O-B；Native、精度版、ND、ROW128及量化/任务/调度保持"
+}

@@ -11605,3 +11605,23 @@ O-B 64份worker核时四窗均值10.035→11.559μs，+15.190%；范围9.949–1
 预检通过后改用长短B16均覆盖ROW96的两档筛选，不把ROW128不变控制当作新策略短档收益。
 [第一版结果](results/csa_ob_activation_l1_20260929/RESULTS.md)、
 [完整状态与全部长档样本](results/csa_ob_activation_l1_20260929/partial_summary.json)。
+
+## 430. O-B二版恢复K128双缓冲，CPU生成码通过并排队实测（2026-09-29）
+
+上一轮七档交付已完成；本阶段继续推进核内目标，生产基底仍为2ed8ae2e。
+手写两个K128的草案被外层stage2展开为四份Right，128KiB超过64KiB，CPU检查即拒绝，未占卡。
+在未排队私有副本改用常驻A的Mat切片和Mat B，沿现有AutoTileMatmulL0自动分块，
+不改PyPTO/Simpler/PTOAS/PTO-ISA。两个入口解析、完整PTOAS/CCE/link/load、Ruff及shell通过。
+
+最终IR/C++确认ROW96 A的96KiB TLOAD位于N循环外；B仍两个64KiB Mat槽，Mat总224KiB；
+Left四个12KiB、Right两个32KiB、Acc96KiB。中间Mat切片已折叠为对常驻A的直接K128提取，
+无额外Mat搬运。恢复的是K128粒度和Right交替缓冲，不声称完整自动同步与基底逐条相同。
+参考ops-nn19614968的AL1-full/N-first条件策略；pypto-lib2164563的小中档原路径逐N重读A，
+本候选仅改变A生命周期，ROW128/ND、量化/整数累加、64份任务及依赖保持。
+
+12:56正常auto提交task_20260929_125617_186453621969并确认running。
+本轮改用128K/B16与8K/B16，两档均覆盖ROW96；5预热20次正式事件及独立四窗DFX，
+八类完整状态零容差，核内/完整CSA/P95分别记录，长短8:2。无收益不扩测，有收益才补小档与尾行。
+收集器补足短B16/B32的48份系数worker覆盖口径，不改变测量或算子行为。
+尚无设备性能或精度结论，已交付七档JSON/ZIP不被未验收候选替换。
+[二版实现和静态依据](results/csa_ob_activation_l1_k128_20260929/README.md)。
