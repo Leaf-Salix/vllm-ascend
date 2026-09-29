@@ -108,6 +108,9 @@ O_A/O_B各64份工作由24个AIC多波处理，Q_B/Indexer投影也有资源交�
 4. 对照[上游725μs泳道](results/csa_scheduling_20260927/upstream_725/README.md)，其输入FP32、无BF16 widen，
    缺完整版本及Scheduler View，只作组织参考。分开producer end→FIN、FIN→dispatch、dispatch→start与必要多波；
    无物理时戳的dummy不作完整ready归因，不把启动分散全部当成软件调度开销。
+   [收尾预派发复核](results/csa_single_root_seven_20260929/TAIL_SCHEDULE_REVIEW.md)表明，
+   固定window_3的长B16/B24、短B24中proj_b_act/hc_post在全部前置FIN后0.58–0.84μs即启动；
+   其较大的setup包含必要输入等待，当前不据此盲目关闭early。后续融合需保留BF16边界及组/HC相加顺序。
 5. 当前精度版迁移、CANN9.2/新B24真实EP16 token/DSpark与10步forward未完成且后置。
    单根改变同分分段规则，已测状态零差异不能覆盖任意输入；异常P95不能用均值收益抵消。
 

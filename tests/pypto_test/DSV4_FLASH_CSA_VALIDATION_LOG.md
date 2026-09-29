@@ -11625,3 +11625,14 @@ Left四个12KiB、Right两个32KiB、Acc96KiB。中间Mat切片已折叠为对�
 收集器补足短B16/B32的48份系数worker覆盖口径，不改变测量或算子行为。
 尚无设备性能或精度结论，已交付七档JSON/ZIP不被未验收候选替换。
 [二版实现和静态依据](results/csa_ob_activation_l1_k128_20260929/README.md)。
+
+## 431. 复用七档现有泳道核对收尾预派发，不把必要等待当成可删调度（2026-09-29）
+
+O-B二版上卡期间，只读复用2ed8ae2e固定window_3的128K/B16、128K/B24和8K/B24。
+官方raw join恢复proj_b_act的八组O-B前置及HC_post的act/comb/post前置，均无缺失物理时间的前置。
+两类任务全部worker提前派发，首dispatch到start存在等待，但全部前置FIN后仅0.58–0.84μs即启动。
+当前证据不支持把setup直接列成可回收软件开销，也不支持仅凭该等待去关闭early。
+对照725μs上游图，proj_b_act本就有20.80μs平均setup；旧图缺Scheduler View及完整输入，不能同口径归因。
+因此不新增无明确依据的开关试验。若后续研究尾部两级融合，必须保留组相加、BF16舍入及HC逐项顺序，
+并核对UB及任务分块；尚无融合实现或收益结论。
+[六行真实时间、直接前置及来源](results/csa_single_root_seven_20260929/TAIL_SCHEDULE_REVIEW.md)。
