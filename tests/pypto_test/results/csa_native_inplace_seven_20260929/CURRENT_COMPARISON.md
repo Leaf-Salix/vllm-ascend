@@ -1,6 +1,6 @@
 # 最新Native与现有PTO七档对比
 
-正式计时七档已齐，完整核内诊断/泳道矩阵仍在收尾。
+正式计时、完整核内诊断和泳道矩阵均已完成，任务退出0。
 单卡HC_pre+norm+CSA+HC_post，第二个CSA层真实权重/独立合成历史；5预热20次设备事件，单位μs。
 Native：CANN9.2、npugraph_ex、dynamic=False、inplace=True、static compile及SuperKernel开启。
 PTO：同轮同卡55b89ee2性能版，已有Sparse末块发布，尚不含d93bba14的HC_post残差重用；不推算未测收益。

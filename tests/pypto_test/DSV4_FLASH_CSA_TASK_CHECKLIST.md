@@ -38,31 +38,28 @@ incore与完整CSA分别报告加权结果，核内收益仍按已有规则保�
 
 **正式七档：128K×B4/B8/B16/B24＋8K×B16/B24/B32，B40退役，长短权重8:2。**
 
-**当前完整实测：4ffccb7b / CANN9.2。** task_20260929_070256_21859435951退出0，
-同一auto单卡、同一冻结源码，5次预热＋20次无profiler计时；含系数空worker删除、按组准备与UB一次发布。
-长档均值变化−12.186%、短档−5.520%，8:2为−10.853%；128K/B16 Native/PTO为1225.289/1052.786μs。
-七档PTO P95/P50为1.0143–1.0292、max/P50最高1.0456，未重现大拖尾，不能关闭历史间歇尾部或EP16问题。
-PTO自身编译图/eager、Top-K结构、metadata/保护区通过；不等于两侧逐元素或模型token/DSpark验收。
-[七档CSA/核内](results/csa_coefficients_seven_20260929/RESULTS.md)、
-[21份原始JSON](results/csa_coefficients_seven_20260929/download/README.md)、
-[当前核内差距](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+**当前完整实测：55b89ee2 / CANN9.2，新Native标准七档。**
+task_20260929_095651_194851727802退出0；同auto设备0、冻结源码、每档5预热20次完整设备事件。
+Native显式npugraph_ex、dynamic=False/fullgraph=True/inplace=True、static compile及SuperKernel开启；
+核内诊断仅关闭SuperKernel，实际静态包、图优化、多stream、八类同图状态和保护区通过。
+PTO保留custom-op图边界，不强制未来匹配Native编译选项；本轮尚不含新HC_post d93bba14。
 
-本轮Native经vLLM Ascend编译包装进入npugraph_ex，static kernel开启、superkernel关闭，
-force_eager后由外层捕获。它是该入口下的有效测量，不能倒写为用户新指定的直接torch.compile结果。
-**最新Native要求**：显式torch.compile(..., backend="npugraph_ex")，多流遵循该后端用法，
-固定dynamic=False、inplace_pass=True；主性能与关闭SuperKernel的核内诊断均保持这两个选项。
-由后端管理图捕获/重放；GitCode资料直连、不加代理。保留torch.npu.stream和event/wait依赖，
-同一event不能跨graph break；fullgraph失败报错，不静默退回eager。
-Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%，八类状态各自开关两侧零容差通过。
-已决定后续Native对照开启；同一backend图的直接replay校准已完成：长B16 1122.652μs、短B24 940.762μs。
-两档各八类同图状态零容差通过；短档编译包装的事件区间不能代表设备本体，
-不把新调用区间当作旧CSA本体均值。整体比较开SuperKernel；核内诊断关SuperKernel但保持static compile，
-关闭组仅用于独立kernel profile，不再做开关收益消融。
-有明确收益且输出检查通过才开启并更新Native基线；**无明确收益就结束该方向，后续不再调参或扩测**。
-旧PTO短B24约960–980μs，新Native为940.762μs；不能沿用旧Native表继续声称短档领先，也不将异轮结果算成正式加速比。
-[Native开关结果](results/csa_native_superkernel_20260929/RESULTS.md)、
-[设备重放校准](results/csa_native_graph_replay_20260929/README.md)、
-[部署配置边界](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
+长档均值变化−8.536%、短档+1.653%，8:2为−6.498%；128K/B16 Native/PTO为1130.853/1028.167μs。
+128K四档均领先，B24只领先1.15%；8K三档慢约1%–3%，且P95均高于Native。
+七档PTO P95/P50为1.0137–1.0400，max/P50最高1.0468，各0/20超过P50的105%；
+不据此关闭历史间歇尾部或EP16问题。自身图重放/保护区通过不是Native/PTO精度验收。
+28个DFX窗口官方join/行数/block验证通过，28份原始JSON已汇集；不混入诊断组的计时。
+[七档CSA及核内](results/csa_native_inplace_seven_20260929/RESULTS.md)、
+[28份原始JSON](results/csa_native_inplace_seven_20260929/download/README.md)、
+[当前核内差距及下步](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)、
+[Native标准](DSV4_FLASH_CSA_NATIVE_BASELINE.md)。
+
+本轮核内已保留Sparse末块发布和后续HC_post残差常驻；首PV、Score分段UB等负收益不重试。
+下一阶段依据新七档图验证HC关键门控优先：非关键Sinkhorn增加pre/post任务前置，计算与任务数不变。
+[HC关键门控优先候选](results/csa_hc_pre_priority_20260929/README.md)已CPU完整编译通过，
+task_20260929_105848_277267824307正常auto排队，仅长B16/短B24。
+分别看前段包络、完整CSA、P95和状态；不因为两个task同时出现就直接认定阻塞。
+精度迁移和整模型仍后置，保留长小batch Score、短Sparse的核内优化入口。
 
 | 顺序 | 近期工作 | 完成证据/判据 |
 | --- | --- | --- |
@@ -70,13 +67,13 @@ Native superkernel代表档对照已退出0：长B16−8.967%、短B24−6.846%�
 | 2 | 最新AscendC末块发布已保留 | 修复mi/li偏移后，两档完整状态及B3/H127/padding精确通过；CSA 8:2−2.667%、AIV工作量−11.551%、P95下降，移入性能版单文件 |
 | 3 | 保留核内收益并处理CSA关键链 | 首PV特化已否定：两档Sparse AIV+5.075%/+8.726%、CSA/P95回退；[HC_post常驻残差](results/csa_hc_post_resident_20260929/README.md)核内8:2−18.896%、CSA−0.700%，状态/尾块通过，已移入共享实现。有真实核内收益即保留，CSA/P95单列、长短8:2 |
 | 4 | 独立merge、数据交接及调度 | 分开producer end→FIN、FIN→派发、派发→start与必要多波；不重复已否定sync_start/准入组合 |
-| 5 | 阶段七档出口、精度版迁移 | inplace关闭的task_20260929_093737_25396355997按新要求停止（exit130）；[新七档](results/csa_native_inplace_seven_20260929/README.md)统一inplace=True/dynamic=False。整体开SuperKernel，核内诊断关但保留static；保持精度版舍入/规约 |
+| 5 | 七档出口完成，精度版迁移待推进 | [新七档](results/csa_native_inplace_seven_20260929/README.md)及28份JSON齐全；主性能SuperKernel开、核内诊断关且static保持。HC_post共享更新，其他精度版迁移保持原舍入/规约 |
 | 6 | 最终真实EP16验收 | 逐token、DSpark、稳态10步decode forward及尾部，优先级后置 |
 
 新增已保留的核内优化：[HC_post残差常驻UB](results/csa_hc_post_resident_20260929/README.md)，
 参考最新AscendC Permanent-X；生成码每token残差加载/转换16→4，乘加/存储数量不变，
 两代表档及B3/H127同图padding均退出0，八类状态精确一致；两版共用算术中性的HC实现。
-短档CSA+0.859%、P95增加14.140μs单列，不掩盖为噪声；七档运行快照尚不包含该项。
+短档CSA+0.859%、P95增加14.140μs单列，不掩盖为噪声；本轮七档冻结快照不包含该项。
 未叠加已否定的首PV候选；两版依赖图解析通过不代表精度版整体验收。
 
 已保留长B≥4 S6 Key复用、B<4双query、Key独立L1预取、均衡leaf、尾排序、四路Top-K/UB根、

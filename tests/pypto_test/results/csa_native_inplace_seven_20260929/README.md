@@ -2,7 +2,8 @@
 
 任务：`task_20260929_095651_194851727802`，2026-09-29 09:56正常auto提交，同卡完成整个矩阵。
 Native七档正式计时与主性能profile已完成，见[NATIVE_RESULTS.md](NATIVE_RESULTS.md)；
-PTO/核内诊断/泳道矩阵仍继续收尾，尚不冒称整套任务已退出。
+完整矩阵现已completed(exit=0)，七档计时、独立核内诊断及28个DFX窗口齐全。
+[完整比较](RESULTS.md)、[逐任务核内与pipeline](TASKS.md)、[28份原始JSON下载](download/README.md)。
 
 用户进一步明确固定dynamic=False并开启inplace_pass。旧任务
 `task_20260929_093737_25396355997`的inplace为False，已主动停止并确认exit130；

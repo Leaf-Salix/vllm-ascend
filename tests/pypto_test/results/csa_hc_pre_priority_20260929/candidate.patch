@@ -1,0 +1,24 @@
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/hc_pre.py
+@@ -126,7 +126,9 @@
+     # lives in comb_sinkhorn.
+     # Only the final partial token tile uses these fixed-size staging buffers.
+     post_tail_store = pl.create_tensor([T_TILE, HC_PAD], dtype=pl.FP32)
+-    for ob_worker in pl.spmd(pl.min(token_tiles, PRE_POST_WORKERS), name_hint="split_pre_post", allow_early_resolve=True):
++    with pl.spmd(pl.min(token_tiles, PRE_POST_WORKERS), name_hint="split_pre_post",
++                 allow_early_resolve=True) as pre_post_tid:
++        ob_worker = pl.tile.get_block_idx()
+         for ob in pl.range(ob_worker, token_tiles, pl.min(token_tiles, PRE_POST_WORKERS)):
+             t0 = ob * T_TILE
+             valid_rows = pl.min(T_TILE, t_dim - t0)
+@@ -154,7 +156,9 @@
+     # comb_sinkhorn: comb gate from mixes_raw cols 8/12/16/20, softmax, then a
+     # column-first 20-iteration Sinkhorn -> comb.
+     comb_tail_store = pl.create_tensor([COMB_T_TILE, HC_PAD * HC_MULT], dtype=pl.FP32)
+-    for ob in pl.spmd(token_tiles, name_hint="comb_sinkhorn", allow_early_resolve=True):
++    # Prioritize the attention pre-gate before the independent post-only Sinkhorn.
++    for ob in pl.spmd(token_tiles, name_hint="comb_sinkhorn",
++                      deps=[pre_post_tid], allow_early_resolve=True):
+         t0 = ob * COMB_T_TILE
+         valid_rows = pl.min(COMB_T_TILE, t_dim - t0)
+         inv_col_t = pl.load(inv_rms, [t0, 0], [COMB_T_TILE, 1], valid_shape=[valid_rows, 1], target_memory=pl.MemorySpace.Vec)

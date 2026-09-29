@@ -78,7 +78,10 @@ def main():
                                for w in windows]
             side["kernel_us"] = {}
             for core, task_name in TARGETS.items():
-                blocks = {"qk_pv_aic": 24, "qk_pv_aiv": 48, "hc_post": (batch * 6 + 3) // 4}[task_name]
+                blocks = {"qk_pv_aic": 24, "qk_pv_aiv": 48, "hc_post": (batch * 6 + 3) // 4,
+                          "split_pre_post": min(16, (batch * 6 + 7) // 8),
+                          "comb_sinkhorn": (batch * 6 + 7) // 8,
+                          "mix_x_rms_norm": (batch * 6 + 7) // 8}[task_name]
                 tasks = [w["tasks"][task_name] for w in side["windows"]]
                 if any(t["blocks"] != blocks for t in tasks):
                     raise ValueError(f"{task_name}核心覆盖改变")

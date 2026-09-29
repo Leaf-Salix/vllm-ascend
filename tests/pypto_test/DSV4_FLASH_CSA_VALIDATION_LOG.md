@@ -11379,3 +11379,42 @@ task_20260929_095651_194851727802仍运行，但最后Native 8K/B32子进程已�
 范围HC_pre+norm+CSA+HC_post，不是整模型或跨实现精度验收。历史表不倒写配置，新旧轮不拼接。
 [独立Native报告](results/csa_native_inplace_seven_20260929/NATIVE_RESULTS.md)、
 [原样本、实际配置和profile](results/csa_native_inplace_seven_20260929/native_summary.json)。
+
+## 420. 七档全矩阵退出0并汇集28份JSON，核内数据更新后转入明确依赖的调度候选（2026-09-29）
+
+task_20260929_095651_194851727802 completed(exit=0)。完整收集器通过七档实际配置、
+Native静态包/SuperKernel/多stream/唯一图、PTO实际私有包、自身图状态与保护区检查。
+28个level4窗口官方原始join/行数/block通过，固定window_3，未挑最快窗口。
+28份原始JSON直接复制到download，每档两侧主性能、PTO泳道、Native static开/SuperKernel关核内诊断各一份。
+
+本轮完整CSA8:2−6.498%，长平均−8.536%、短+1.653%；短档三组P95高于Native。
+128K/B16 Score AIC/AIV为250.640/256.646，Native独立QLI为242.293/241.730；
+B24 Score349.266/365.861低于Native376.467/376.063，但PTO独立系数3.935和merge10.844仍存在。
+Sparse已融合末块发布，PTO含逆RoPE；短B16 AIV132.855比Native98.084高，仍是核内候选入口。
+不能从不同融合/计时边界直接相减宣称可回收时长。P95/P50最高1.0400，max/P50最高1.0468，
+各0/20超过105%P50，不关闭历史间歇尾部。整网/跨实现精度验收仍未覆盖新版本。
+
+HC_post收益已独立保留d93bba14，不倒写到本轮55b89ee2七档。
+下一项依据HC前段图检验调度：长B24四窗comb启动62.050、pre/post67.565μs；
+固定window_3实际DAG表明两者共享linear_reduce，comb不是mix前置。
+候选给comb显式pre/post前置，优先推进attention所需门控；只是假设，不将共现当作阻塞证明。
+对照历史725μs图：上游输入FP32，没有BF16 widen，且旧图缺配置/Scheduler，不作严格A/B。
+此前单独开放widen预派发无收益，不原样重试；新候选不改算术、分块或task数量。
+[全部结果](results/csa_native_inplace_seven_20260929/RESULTS.md)、
+[任务明细](results/csa_native_inplace_seven_20260929/TASKS.md)、
+[下载目录](results/csa_native_inplace_seven_20260929/download/README.md)、
+[更新后的差距和执行顺序](DSV4_FLASH_CSA_INCORE_NATIVE_GAP.md)。
+
+## 421. 冻结HC前门控优先调度对照，只验证一条新增任务依赖（2026-09-29）
+
+基底是已保留HC_post的d93bba14，复制其已测私有整包，baseline/candidate独立且原数据不覆盖。
+只在candidate共享HC_pre把split_pre_post改为具名SPMD TaskId，并加入comb_sinkhorn的deps。
+pre/post每worker的token循环、所有算术、分块/worker数、early标志、缓存布局保持；
+不是重新尝试hc_widen的早派发，也不是修改Native或将短档失败的整组准入换名重试。
+
+两入口依赖图、候选完整PTOAS/CCE/链接/load通过，baseline依赖图解析通过；Ruff/shell通过。
+10:58正常auto提交task_20260929_105848_277267824307，最长5400秒，不修改排队源码。
+只测PTO长B16/短B24，5预热20次/独立四窗DFX/八类完整状态零容差，沿现有inplace=True包装。
+新版收集器核对固定window_3中实际pre/post→comb直接依赖，报告前段包络及完整CSA/P95；
+必须由实测决定保留，新增依赖也可能减少重叠。Native最新基线不重测，不提前推算收益。
+[冻结、唯一补丁和入口](results/csa_hc_pre_priority_20260929/README.md)。
