@@ -66,6 +66,7 @@ H_TILE = 16
 MERGE_WORKERS = 48
 FLASH_CHUNKS = 2  # Native SCFA: sliding window, then compressed keys.
 SOFTMAX_HEAD_TILE = 8
+assert H // 2 == 4 * SOFTMAX_HEAD_TILE
 PV_N_TILE = 128
 QK_KV_READY_EVENT = 0
 QK_SCORE_READY_EVENT = 1
@@ -143,70 +144,6 @@ def _flash_chunk_pv(
         QK_PV_READY_EVENT, pipe=pl.PipeType.FIX,
         ffts_mode=2, core_type=pl.KernelType.AIC,
     )
-
-
-@pl.jit.inline(auto_scope=False)
-def _flash_chunk_softmax_merge(
-    score_transfer: pl.Tensor,
-    sparse_bias: pl.Tensor,
-    probability_transfer: pl.Tensor,
-    pv_transfer: pl.Tensor,
-    mi_transfer: pl.Tensor,
-    li_transfer: pl.Tensor,
-    attn_oi: pl.Tensor,
-    qk_core: pl.Scalar[pl.INDEX],
-    qk_t: pl.Scalar[pl.INDEX],
-    qk_lane_head: pl.Scalar[pl.INDEX],
-    flash_chunk: pl.constexpr,
-    chunk_width: pl.constexpr,
-) -> None:
-    """Advance the native flash state once, then consume the matching cube PV."""
-    chunk_start = flash_chunk * WIN
-    for head_tile in pl.unroll((H // 2) // SOFTMAX_HEAD_TILE):
-        head_start = qk_lane_head + head_tile * SOFTMAX_HEAD_TILE
-        state_before = (qk_core * (FLASH_CHUNKS + 1) + flash_chunk) * H + head_start
-        state_after = state_before + H
-        old_m = pl.load(mi_transfer, [state_before, 0], [SOFTMAX_HEAD_TILE, 1])
-        old_l = pl.load(li_transfer, [state_before, 0], [SOFTMAX_HEAD_TILE, 1])
-        scores = pl.load(
-            score_transfer, [qk_core * H + head_start, chunk_start],
-            [SOFTMAX_HEAD_TILE, chunk_width],
-        )
-        bias = pl.load(sparse_bias, [qk_t, chunk_start], [1, chunk_width])
-        masked_scores = pl.col_expand_add(pl.mul(scores, SOFTMAX_SCALE), bias)
-        reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, chunk_width], dtype=pl.FP32)
-        new_m = pl.maximum(old_m, pl.row_max(masked_scores, reduce_tmp))
-        probabilities_fp32 = pl.exp(pl.row_expand_sub(masked_scores, new_m))
-        # SCFA SoftmaxFlashV2 receives the complete logical chunk.
-        # Keep one fixed-width reduction here. Its internal CANN
-        # reduction tree has not yet been proved identical to PTO.
-        chunk_l = pl.row_sum(probabilities_fp32, reduce_tmp)
-        alpha = pl.exp(pl.sub(old_m, new_m))
-        new_l = pl.add(chunk_l, pl.mul(old_l, alpha))
-        probabilities_bf16 = pl.cast(probabilities_fp32, target_type=pl.BF16, mode="round")
-        pl.store(
-            probabilities_bf16, [qk_core * H + head_start, chunk_start], probability_transfer,
-        )
-        pl.store(new_m, [state_after, 0], mi_transfer)
-        pl.store(new_l, [state_after, 0], li_transfer)
-    pl.system.sync_set(
-        QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
-        ffts_mode=2, core_type=pl.KernelType.AIV,
-    )
-    pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-    for merge_head in pl.unroll((H // 2) // SOFTMAX_HEAD_TILE):
-        merge_h0 = qk_lane_head + merge_head * SOFTMAX_HEAD_TILE
-        merge_before = (qk_core * (FLASH_CHUNKS + 1) + flash_chunk) * H + merge_h0
-        merge_old_m = pl.load(mi_transfer, [merge_before, 0], [SOFTMAX_HEAD_TILE, 1])
-        merge_new_m = pl.load(mi_transfer, [merge_before + H, 0], [SOFTMAX_HEAD_TILE, 1])
-        merge_alpha = pl.exp(pl.sub(merge_old_m, merge_new_m))
-        previous_o = pl.load(attn_oi, [qk_t * H + merge_h0, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
-        chunk_o = pl.load(
-            pv_transfer, [(qk_core * FLASH_CHUNKS + flash_chunk) * H + merge_h0, 0],
-            [SOFTMAX_HEAD_TILE, HEAD_DIM],
-        )
-        merged_o = pl.add(chunk_o, pl.row_expand_mul(previous_o, merge_alpha))
-        pl.store(merged_o, [qk_t * H + merge_h0, 0], attn_oi)
 
 
 @pl.jit.inline(auto_scope=False)
@@ -318,9 +255,6 @@ def sparse_attn_csa(
     score_transfer = pl.create_tensor([NUM_QK_CORES * H, PADDED_TOPK], dtype=pl.FP32)
     probability_transfer = pl.create_tensor([NUM_QK_CORES * H, PADDED_TOPK], dtype=pl.BF16)
     pv_transfer = pl.create_tensor([NUM_QK_CORES * FLASH_CHUNKS * H, HEAD_DIM], dtype=pl.FP32)
-    # Slot 0 holds the sink seed; slots 1 and 2 hold cumulative flash state.
-    mi_transfer = pl.create_tensor([NUM_QK_CORES * (FLASH_CHUNKS + 1) * H, 1], dtype=pl.FP32)
-    li_transfer = pl.create_tensor([NUM_QK_CORES * (FLASH_CHUNKS + 1) * H, 1], dtype=pl.FP32)
     ffts_workspace = pl.create_tensor([256], dtype=pl.INT64)
     with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid], allow_early_resolve=True) as qk_tid:
         qk_core = pl.tile.get_block_idx()
@@ -416,36 +350,177 @@ def sparse_attn_csa(
                     if pl.read(valid_block_mask, [qk_t, score_block]) > 0:
                         pl.system.sync_wait(QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
 
-                for seed_head in pl.unroll((H // 2) // SOFTMAX_HEAD_TILE):
-                    seed_h0 = qk_lane_head + seed_head * SOFTMAX_HEAD_TILE
-                    seed_m = pl.load(attn_sink_col, [seed_h0, 0], [SOFTMAX_HEAD_TILE, 1])
-                    seed_l = pl.tile.adds(pl.tile.muls(seed_m, 0.0), 1.0)
-                    state_row = qk_core * (FLASH_CHUNKS + 1) * H + seed_h0
-                    pl.store(seed_m, [state_row, 0], mi_transfer)
-                    pl.store(seed_l, [state_row, 0], li_transfer)
-                    seed_o = pl.tile.full([SOFTMAX_HEAD_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
-                    pl.store(seed_o, [qk_t * H + seed_h0, 0], attn_oi)
+                # Four separate eight-head states avoid partial-tile assemble.
+                head_0 = qk_lane_head + 0 * SOFTMAX_HEAD_TILE
+                m_0 = pl.load(attn_sink_col, [head_0, 0], [SOFTMAX_HEAD_TILE, 1])
+                l_0 = pl.tile.adds(pl.tile.muls(m_0, 0.0), 1.0)
+                o_0 = pl.tile.full([SOFTMAX_HEAD_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
+                head_1 = qk_lane_head + 1 * SOFTMAX_HEAD_TILE
+                m_1 = pl.load(attn_sink_col, [head_1, 0], [SOFTMAX_HEAD_TILE, 1])
+                l_1 = pl.tile.adds(pl.tile.muls(m_1, 0.0), 1.0)
+                o_1 = pl.tile.full([SOFTMAX_HEAD_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
+                head_2 = qk_lane_head + 2 * SOFTMAX_HEAD_TILE
+                m_2 = pl.load(attn_sink_col, [head_2, 0], [SOFTMAX_HEAD_TILE, 1])
+                l_2 = pl.tile.adds(pl.tile.muls(m_2, 0.0), 1.0)
+                o_2 = pl.tile.full([SOFTMAX_HEAD_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
+                head_3 = qk_lane_head + 3 * SOFTMAX_HEAD_TILE
+                m_3 = pl.load(attn_sink_col, [head_3, 0], [SOFTMAX_HEAD_TILE, 1])
+                l_3 = pl.tile.adds(pl.tile.muls(m_3, 0.0), 1.0)
+                o_3 = pl.tile.full([SOFTMAX_HEAD_TILE, HEAD_DIM], dtype=pl.FP32, value=0.0)
 
-                # There are exactly two probability/PV handshakes per token,
-                # including empty chunks. No compressed block is privileged as
-                # the validity gate for the other compressed blocks.
-                _flash_chunk_softmax_merge(
-                    score_transfer, sparse_bias, probability_transfer, pv_transfer,
-                    mi_transfer, li_transfer, attn_oi, qk_core, qk_t, qk_lane_head,
-                    0, WIN,
+                # Native flash chunk 0: probabilities first, then cube PV.
+                flash_1_scores = pl.load(score_transfer, [qk_core * H + head_0, 0], [SOFTMAX_HEAD_TILE, WIN])
+                flash_1_bias = pl.load(sparse_bias, [qk_t, 0], [1, WIN])
+                flash_1_masked_scores = pl.col_expand_add(pl.mul(flash_1_scores, SOFTMAX_SCALE), flash_1_bias)
+                flash_1_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, WIN], dtype=pl.FP32)
+                flash_1_new_m = pl.maximum(m_0, pl.row_max(flash_1_masked_scores, flash_1_reduce_tmp))
+                flash_1_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_1_masked_scores, flash_1_new_m))
+                flash_1_chunk_l = pl.row_sum(flash_1_probabilities_fp32, flash_1_reduce_tmp)
+                flash_1_alpha = pl.exp(pl.sub(m_0, flash_1_new_m))
+                flash_1_new_l = pl.add(flash_1_chunk_l, pl.mul(l_0, flash_1_alpha))
+                flash_1_probabilities_bf16 = pl.cast(flash_1_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_1_probabilities_bf16, [qk_core * H + head_0, 0], probability_transfer)
+                m_0 = flash_1_new_m
+                l_0 = flash_1_new_l
+                alpha_0 = flash_1_alpha
+                flash_2_scores = pl.load(score_transfer, [qk_core * H + head_1, 0], [SOFTMAX_HEAD_TILE, WIN])
+                flash_2_bias = pl.load(sparse_bias, [qk_t, 0], [1, WIN])
+                flash_2_masked_scores = pl.col_expand_add(pl.mul(flash_2_scores, SOFTMAX_SCALE), flash_2_bias)
+                flash_2_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, WIN], dtype=pl.FP32)
+                flash_2_new_m = pl.maximum(m_1, pl.row_max(flash_2_masked_scores, flash_2_reduce_tmp))
+                flash_2_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_2_masked_scores, flash_2_new_m))
+                flash_2_chunk_l = pl.row_sum(flash_2_probabilities_fp32, flash_2_reduce_tmp)
+                flash_2_alpha = pl.exp(pl.sub(m_1, flash_2_new_m))
+                flash_2_new_l = pl.add(flash_2_chunk_l, pl.mul(l_1, flash_2_alpha))
+                flash_2_probabilities_bf16 = pl.cast(flash_2_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_2_probabilities_bf16, [qk_core * H + head_1, 0], probability_transfer)
+                m_1 = flash_2_new_m
+                l_1 = flash_2_new_l
+                alpha_1 = flash_2_alpha
+                flash_3_scores = pl.load(score_transfer, [qk_core * H + head_2, 0], [SOFTMAX_HEAD_TILE, WIN])
+                flash_3_bias = pl.load(sparse_bias, [qk_t, 0], [1, WIN])
+                flash_3_masked_scores = pl.col_expand_add(pl.mul(flash_3_scores, SOFTMAX_SCALE), flash_3_bias)
+                flash_3_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, WIN], dtype=pl.FP32)
+                flash_3_new_m = pl.maximum(m_2, pl.row_max(flash_3_masked_scores, flash_3_reduce_tmp))
+                flash_3_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_3_masked_scores, flash_3_new_m))
+                flash_3_chunk_l = pl.row_sum(flash_3_probabilities_fp32, flash_3_reduce_tmp)
+                flash_3_alpha = pl.exp(pl.sub(m_2, flash_3_new_m))
+                flash_3_new_l = pl.add(flash_3_chunk_l, pl.mul(l_2, flash_3_alpha))
+                flash_3_probabilities_bf16 = pl.cast(flash_3_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_3_probabilities_bf16, [qk_core * H + head_2, 0], probability_transfer)
+                m_2 = flash_3_new_m
+                l_2 = flash_3_new_l
+                alpha_2 = flash_3_alpha
+                flash_4_scores = pl.load(score_transfer, [qk_core * H + head_3, 0], [SOFTMAX_HEAD_TILE, WIN])
+                flash_4_bias = pl.load(sparse_bias, [qk_t, 0], [1, WIN])
+                flash_4_masked_scores = pl.col_expand_add(pl.mul(flash_4_scores, SOFTMAX_SCALE), flash_4_bias)
+                flash_4_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, WIN], dtype=pl.FP32)
+                flash_4_new_m = pl.maximum(m_3, pl.row_max(flash_4_masked_scores, flash_4_reduce_tmp))
+                flash_4_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_4_masked_scores, flash_4_new_m))
+                flash_4_chunk_l = pl.row_sum(flash_4_probabilities_fp32, flash_4_reduce_tmp)
+                flash_4_alpha = pl.exp(pl.sub(m_3, flash_4_new_m))
+                flash_4_new_l = pl.add(flash_4_chunk_l, pl.mul(l_3, flash_4_alpha))
+                flash_4_probabilities_bf16 = pl.cast(flash_4_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_4_probabilities_bf16, [qk_core * H + head_3, 0], probability_transfer)
+                m_3 = flash_4_new_m
+                l_3 = flash_4_new_l
+                alpha_3 = flash_4_alpha
+                pl.system.sync_set(
+                    QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
+                    ffts_mode=2, core_type=pl.KernelType.AIV,
                 )
-                _flash_chunk_softmax_merge(
-                    score_transfer, sparse_bias, probability_transfer, pv_transfer,
-                    mi_transfer, li_transfer, attn_oi, qk_core, qk_t, qk_lane_head,
-                    1, CMP_TOPK,
+                pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                flash_5_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 0) * H + head_0, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_0 = pl.add(flash_5_chunk_o, pl.row_expand_mul(o_0, alpha_0))
+                flash_6_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 0) * H + head_1, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_1 = pl.add(flash_6_chunk_o, pl.row_expand_mul(o_1, alpha_1))
+                flash_7_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 0) * H + head_2, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_2 = pl.add(flash_7_chunk_o, pl.row_expand_mul(o_2, alpha_2))
+                flash_8_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 0) * H + head_3, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_3 = pl.add(flash_8_chunk_o, pl.row_expand_mul(o_3, alpha_3))
+
+                # Native flash chunk 1: probabilities first, then cube PV.
+                flash_9_scores = pl.load(score_transfer, [qk_core * H + head_0, WIN], [SOFTMAX_HEAD_TILE, CMP_TOPK])
+                flash_9_bias = pl.load(sparse_bias, [qk_t, WIN], [1, CMP_TOPK])
+                flash_9_masked_scores = pl.col_expand_add(pl.mul(flash_9_scores, SOFTMAX_SCALE), flash_9_bias)
+                flash_9_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, CMP_TOPK], dtype=pl.FP32)
+                flash_9_new_m = pl.maximum(m_0, pl.row_max(flash_9_masked_scores, flash_9_reduce_tmp))
+                flash_9_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_9_masked_scores, flash_9_new_m))
+                flash_9_chunk_l = pl.row_sum(flash_9_probabilities_fp32, flash_9_reduce_tmp)
+                flash_9_alpha = pl.exp(pl.sub(m_0, flash_9_new_m))
+                flash_9_new_l = pl.add(flash_9_chunk_l, pl.mul(l_0, flash_9_alpha))
+                flash_9_probabilities_bf16 = pl.cast(flash_9_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_9_probabilities_bf16, [qk_core * H + head_0, WIN], probability_transfer)
+                m_0 = flash_9_new_m
+                l_0 = flash_9_new_l
+                alpha_0 = flash_9_alpha
+                flash_10_scores = pl.load(score_transfer, [qk_core * H + head_1, WIN], [SOFTMAX_HEAD_TILE, CMP_TOPK])
+                flash_10_bias = pl.load(sparse_bias, [qk_t, WIN], [1, CMP_TOPK])
+                flash_10_masked_scores = pl.col_expand_add(pl.mul(flash_10_scores, SOFTMAX_SCALE), flash_10_bias)
+                flash_10_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, CMP_TOPK], dtype=pl.FP32)
+                flash_10_new_m = pl.maximum(m_1, pl.row_max(flash_10_masked_scores, flash_10_reduce_tmp))
+                flash_10_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_10_masked_scores, flash_10_new_m))
+                flash_10_chunk_l = pl.row_sum(flash_10_probabilities_fp32, flash_10_reduce_tmp)
+                flash_10_alpha = pl.exp(pl.sub(m_1, flash_10_new_m))
+                flash_10_new_l = pl.add(flash_10_chunk_l, pl.mul(l_1, flash_10_alpha))
+                flash_10_probabilities_bf16 = pl.cast(flash_10_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_10_probabilities_bf16, [qk_core * H + head_1, WIN], probability_transfer)
+                m_1 = flash_10_new_m
+                l_1 = flash_10_new_l
+                alpha_1 = flash_10_alpha
+                flash_11_scores = pl.load(score_transfer, [qk_core * H + head_2, WIN], [SOFTMAX_HEAD_TILE, CMP_TOPK])
+                flash_11_bias = pl.load(sparse_bias, [qk_t, WIN], [1, CMP_TOPK])
+                flash_11_masked_scores = pl.col_expand_add(pl.mul(flash_11_scores, SOFTMAX_SCALE), flash_11_bias)
+                flash_11_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, CMP_TOPK], dtype=pl.FP32)
+                flash_11_new_m = pl.maximum(m_2, pl.row_max(flash_11_masked_scores, flash_11_reduce_tmp))
+                flash_11_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_11_masked_scores, flash_11_new_m))
+                flash_11_chunk_l = pl.row_sum(flash_11_probabilities_fp32, flash_11_reduce_tmp)
+                flash_11_alpha = pl.exp(pl.sub(m_2, flash_11_new_m))
+                flash_11_new_l = pl.add(flash_11_chunk_l, pl.mul(l_2, flash_11_alpha))
+                flash_11_probabilities_bf16 = pl.cast(flash_11_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_11_probabilities_bf16, [qk_core * H + head_2, WIN], probability_transfer)
+                m_2 = flash_11_new_m
+                l_2 = flash_11_new_l
+                alpha_2 = flash_11_alpha
+                flash_12_scores = pl.load(score_transfer, [qk_core * H + head_3, WIN], [SOFTMAX_HEAD_TILE, CMP_TOPK])
+                flash_12_bias = pl.load(sparse_bias, [qk_t, WIN], [1, CMP_TOPK])
+                flash_12_masked_scores = pl.col_expand_add(pl.mul(flash_12_scores, SOFTMAX_SCALE), flash_12_bias)
+                flash_12_reduce_tmp = pl.create_tile([SOFTMAX_HEAD_TILE, CMP_TOPK], dtype=pl.FP32)
+                flash_12_new_m = pl.maximum(m_3, pl.row_max(flash_12_masked_scores, flash_12_reduce_tmp))
+                flash_12_probabilities_fp32 = pl.exp(pl.row_expand_sub(flash_12_masked_scores, flash_12_new_m))
+                flash_12_chunk_l = pl.row_sum(flash_12_probabilities_fp32, flash_12_reduce_tmp)
+                flash_12_alpha = pl.exp(pl.sub(m_3, flash_12_new_m))
+                flash_12_new_l = pl.add(flash_12_chunk_l, pl.mul(l_3, flash_12_alpha))
+                flash_12_probabilities_bf16 = pl.cast(flash_12_probabilities_fp32, target_type=pl.BF16, mode='round')
+                pl.store(flash_12_probabilities_bf16, [qk_core * H + head_3, WIN], probability_transfer)
+                m_3 = flash_12_new_m
+                l_3 = flash_12_new_l
+                alpha_3 = flash_12_alpha
+                pl.system.sync_set(
+                    QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
+                    ffts_mode=2, core_type=pl.KernelType.AIV,
                 )
-                for final_head in pl.unroll((H // 2) // SOFTMAX_HEAD_TILE):
-                    final_h0 = qk_lane_head + final_head * SOFTMAX_HEAD_TILE
-                    final_state_row = (qk_core * (FLASH_CHUNKS + 1) + FLASH_CHUNKS) * H + final_h0
-                    final_m = pl.load(mi_transfer, [final_state_row, 0], [SOFTMAX_HEAD_TILE, 1])
-                    final_l = pl.load(li_transfer, [final_state_row, 0], [SOFTMAX_HEAD_TILE, 1])
-                    pl.store(final_m, [qk_t * H + final_h0, 0], attn_mi)
-                    pl.store(final_l, [qk_t * H + final_h0, 0], attn_li)
+                pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
+                flash_13_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 1) * H + head_0, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_0 = pl.add(flash_13_chunk_o, pl.row_expand_mul(o_0, alpha_0))
+                flash_14_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 1) * H + head_1, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_1 = pl.add(flash_14_chunk_o, pl.row_expand_mul(o_1, alpha_1))
+                flash_15_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 1) * H + head_2, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_2 = pl.add(flash_15_chunk_o, pl.row_expand_mul(o_2, alpha_2))
+                flash_16_chunk_o = pl.load(pv_transfer, [(qk_core * FLASH_CHUNKS + 1) * H + head_3, 0], [SOFTMAX_HEAD_TILE, HEAD_DIM])
+                o_3 = pl.add(flash_16_chunk_o, pl.row_expand_mul(o_3, alpha_3))
+                pl.store(m_0, [qk_t * H + head_0, 0], attn_mi)
+                pl.store(l_0, [qk_t * H + head_0, 0], attn_li)
+                pl.store(o_0, [qk_t * H + head_0, 0], attn_oi)
+                pl.store(m_1, [qk_t * H + head_1, 0], attn_mi)
+                pl.store(l_1, [qk_t * H + head_1, 0], attn_li)
+                pl.store(o_1, [qk_t * H + head_1, 0], attn_oi)
+                pl.store(m_2, [qk_t * H + head_2, 0], attn_mi)
+                pl.store(l_2, [qk_t * H + head_2, 0], attn_li)
+                pl.store(o_2, [qk_t * H + head_2, 0], attn_oi)
+                pl.store(m_3, [qk_t * H + head_3, 0], attn_mi)
+                pl.store(l_3, [qk_t * H + head_3, 0], attn_li)
+                pl.store(o_3, [qk_t * H + head_3, 0], attn_oi)
 
     return attn_mi, attn_li, attn_oi, qk_tid
 
