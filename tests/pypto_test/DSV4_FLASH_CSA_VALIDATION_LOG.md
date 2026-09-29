@@ -11260,3 +11260,23 @@ task_20260929_095651_194851727802，最长9600秒；不修改排队/运行中的
 新增本轮精简证据和28份原始JSON汇集入口，主性能与核内诊断标明SuperKernel开关，不挑最快DFX窗口。
 新完整七档尚未完成，不能提前给出inplace开启后的正式性能结论。
 [新配置、入口与任务](results/csa_native_inplace_seven_20260929/README.md)。
+
+## 414. Native首档inplace生效；继续隔离首PV零初态的核内候选（2026-09-29）
+
+新七档task_20260929_095651_194851727802正常运行。128K/B4 Native已完成，实际报告
+dynamic=False/fullgraph=True、inplace_pass=True/static=True/SuperKernel=True；
+唯一后端图、无主机更新节点、两条计算stream，八类同初态同图状态全部精确通过。
+PTO同档也确认实际传入inplace_pass=True。该部分证据不替代完整七档验收，也不和旧轮设备8混算开关收益。
+
+继续参考ops-transformer 28f40354 Sparse SCFA的DealBmm2ResBaseBlock：
+Native仅在!isFirstSInnerLoop时读取/缩放旧PV并累加。当前PTO首块仍执行alpha×0+beta×PV。
+新候选仅对有效pv_sb=0省略零初态乘法和加法；beta必须保留，因为局部softmax最大值可能低于sink。
+后续块、概率生成、BF16舍入、最后归一化/逆RoPE/发布保持。不是此前累计最大值候选的重试。
+
+完整私有A/B包基于55b89ee2及inplace开启的测试入口；未编辑正在执行的七档源码。
+PTOAS/CCE/链接/load和两入口依赖图通过；生成AIV代码首块分支只保留beta对应统计量乘法和
+左右输出缩放，alpha的TEXP、旧累加值缩放和加法都在else分支。CPU证据不是设备收益。
+Ruff、shell检查通过后10:06正常auto提交task_20260929_100643_249687018410，最长5400秒。
+只测128K/B16、8K/B24，5预热20次及独立四窗DFX，八类完整状态零容差、CSA/P95和核内分别判定。
+生产算子尚未改变；不增加整模型或全七档测试，不用指令数减少代替性能实测。
+[候选、最小补丁与收集器](results/csa_sparse_first_pv_20260929/README.md)。

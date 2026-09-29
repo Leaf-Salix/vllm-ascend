@@ -6,6 +6,8 @@
 Native本轮经vLLM Ascend编译包装进入npugraph_ex，static kernel开启、superkernel关闭，
 force_eager后由外层捕获。用户新要求的显式torch.compile/backend=npugraph_ex和后端自行捕获另做对照，
 两代表档已完成superkernel选型和直接设备replay校准：长B16 1122.652μs、短B24 940.762μs。
+该校准轮inplace_pass关闭；当前要求固定dynamic=False/inplace_pass=True，
+[新完整七档](results/csa_native_inplace_seven_20260929/README.md)正在运行，不能沿用旧配置数字作新基线。
 后续Native开启superkernel；下表仍属旧入口，不修改配置或拼接两行成新版七档。
 整体比较开SuperKernel；细化核内任务时另采关SuperKernel、static compile仍开的profile。
 生产性能版现已保留Sparse末块发布，两代表档及边界通过；下表尚未包含该优化，阶段出口统一重取七档。
@@ -118,6 +120,8 @@ O_A/O_B各64份工作由24个AIC执行，必须多波；WO_A已经直接借用NZ
    [短B24](results/csa_coefficients_seven_20260929/h8192_b24/schedule/README.md)。
 4. Sparse融合的核内与CSA/P95结果分别判定；Indexer独立merge及scale依赖保留后续，
    scale写回涉及64字节读改写，没有页面所有权证明不删依赖。
+   正在单独验证AscendC式首PV特化：省去零初态的alpha乘法/加法，仍保留beta与sink；
+   CPU生成代码通过，[长B16/短B24候选](results/csa_sparse_first_pv_20260929/README.md)设备收益待测。
 5. 精度版数值中性优化迁移、CANN9.2/新B24真实EP16 token/DSpark与稳态10步forward仍未完成。
 
 ## 保留策略和已否定方向

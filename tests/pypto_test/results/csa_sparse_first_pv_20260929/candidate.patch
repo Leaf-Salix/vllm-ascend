@@ -1,0 +1,36 @@
+--- a/vllm_ascend/ops/pypto/dsv4_csa_sparse_first_pv_55b89ee2/decode_sparse_attn_csa.py
++++ b/vllm_ascend/ops/pypto/dsv4_csa_sparse_first_pv_55b89ee2/decode_sparse_attn_csa.py
+@@ -595,17 +595,29 @@
+                         pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                         pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                         next_m = pl.maximum(m_iter, pv_m)
+-                        alpha = pl.exp(pl.sub(m_iter, next_m))
+                         beta = pl.exp(pl.sub(pv_m, next_m))
+-                        next_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
+                         pv_left = pl.load(
+                             pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2]
+                         )
+-                        next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pl.row_expand_mul(pv_left, beta))
+                         pv_right = pl.load(
+                             pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2]
+                         )
+-                        next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pl.row_expand_mul(pv_right, beta))
++                        if pv_sb == 0:
++                            # AscendC DealBmm2ResBaseBlock skips the previous-PV
++                            # rescale on the first S2 block. PTO still needs beta:
++                            # its local maximum may be below the attention sink.
++                            first_l = pl.mul(beta, pv_l)
++                            first_left = pl.row_expand_mul(pv_left, beta)
++                            first_right = pl.row_expand_mul(pv_right, beta)
++                            next_l, next_left, next_right = pl.yield_(first_l, first_left, first_right)
++                        else:
++                            alpha = pl.exp(pl.sub(m_iter, next_m))
++                            update_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
++                            update_left = pl.add(pl.row_expand_mul(left_iter, alpha),
++                                                 pl.row_expand_mul(pv_left, beta))
++                            update_right = pl.add(pl.row_expand_mul(right_iter, alpha),
++                                                  pl.row_expand_mul(pv_right, beta))
++                            next_l, next_left, next_right = pl.yield_(update_l, update_left, update_right)
+                         m_valid, l_valid, left_valid, right_valid = pl.yield_(
+                             next_m, next_l, next_left, next_right
+                         )
