@@ -31,6 +31,51 @@ INACTIVE_FILL_D_TILE = 256
 assert (DECODE_BATCH // TP * DECODE_SEQ) % T_TILE == 0
 
 
+@pl.jit.inline
+def hc_post_block(
+    x_block: pl.Tensor,
+    residual_flat: pl.Tensor,
+    post: pl.Tensor,
+    comb: pl.Tensor,
+    y_flat: pl.Out[pl.Tensor],
+    t0: pl.Scalar[pl.INDEX],
+    n0: pl.Scalar[pl.INDEX],
+    valid_rows: pl.Scalar[pl.INDEX],
+    ROWS: pl.constexpr,
+    COLS: pl.constexpr,
+):
+    # Both callers use ROWS=1: scalar gates apply to this single token row.
+    # x_block is already BF16: retain the rounding boundary before HC math.
+    x_f32 = pl.cast(x_block, pl.FP32)
+    res_0 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, n0],
+                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
+    res_1 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, D + n0],
+                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
+    res_2 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, 2 * D + n0],
+                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
+    res_3 = pl.cast(pl.slice(residual_flat, [ROWS, COLS], [t0, 3 * D + n0],
+                            valid_shape=[valid_rows, COLS], clamp=True), pl.FP32)
+    for out_h in pl.unroll(HC_MULT):
+        post_scalar = pl.read(post, [t0, out_h])
+        single_y = pl.mul(x_f32, post_scalar)
+        comb_scalar_0 = pl.read(comb, [t0, out_h])
+        single_weighted_0 = pl.mul(res_0, comb_scalar_0)
+        single_y = pl.add(single_y, single_weighted_0)
+        comb_scalar_1 = pl.read(comb, [t0, HC_MULT + out_h])
+        single_weighted_1 = pl.mul(res_1, comb_scalar_1)
+        single_y = pl.add(single_y, single_weighted_1)
+        comb_scalar_2 = pl.read(comb, [t0, 2 * HC_MULT + out_h])
+        single_weighted_2 = pl.mul(res_2, comb_scalar_2)
+        single_y = pl.add(single_y, single_weighted_2)
+        comb_scalar_3 = pl.read(comb, [t0, 3 * HC_MULT + out_h])
+        single_weighted_3 = pl.mul(res_3, comb_scalar_3)
+        single_y = pl.add(single_y, single_weighted_3)
+        single_result = pl.cast(single_y, pl.BF16, mode="rint")
+        y_flat[t0 : t0 + ROWS, out_h * D + n0 : out_h * D + n0 + COLS] = pl.set_validshape(
+            single_result, valid_rows, COLS)
+    return y_flat
+
+
 def _hc_post(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     residual: pl.Tensor[[T_DYN, HC_MULT, D], pl.BF16],
@@ -53,31 +98,8 @@ def _hc_post(
         t0 = token_block * T_TILE
         for t in pl.pipeline(t0, t0 + T_TILE, stage=2):
             if t < t_dim:
-                # One cast per token: all HC_MULT outputs share the x row.
-                x_row = pl.cast(pl.load(x, [t, 0], [1, D]), target_type=pl.FP32)
-                # AscendC Permanent-X: keep four FP32 residual rows in UB.
-                # Reuse loads/casts while preserving the separate mul/add order.
-                res_0 = pl.cast(pl.load(residual_flat, [t, 0 * D], [1, D]), pl.FP32)
-                res_1 = pl.cast(pl.load(residual_flat, [t, 1 * D], [1, D]), pl.FP32)
-                res_2 = pl.cast(pl.load(residual_flat, [t, 2 * D], [1, D]), pl.FP32)
-                res_3 = pl.cast(pl.load(residual_flat, [t, 3 * D], [1, D]), pl.FP32)
-                for out_h in pl.unroll(HC_MULT):
-                    post_w = pl.read(post, [t, out_h])
-                    y_row = pl.mul(x_row, post_w)
-                    comb_0 = pl.read(comb, [t, 0 * HC_MULT + out_h])
-                    weighted_0 = pl.mul(res_0, comb_0)
-                    y_row = pl.add(y_row, weighted_0)
-                    comb_1 = pl.read(comb, [t, 1 * HC_MULT + out_h])
-                    weighted_1 = pl.mul(res_1, comb_1)
-                    y_row = pl.add(y_row, weighted_1)
-                    comb_2 = pl.read(comb, [t, 2 * HC_MULT + out_h])
-                    weighted_2 = pl.mul(res_2, comb_2)
-                    y_row = pl.add(y_row, weighted_2)
-                    comb_3 = pl.read(comb, [t, 3 * HC_MULT + out_h])
-                    weighted_3 = pl.mul(res_3, comb_3)
-                    y_row = pl.add(y_row, weighted_3)
-                    # 写回下一层的 hc 残差流：与 Native 一致按 BF16 落盘。
-                    pl.store(pl.cast(y_row, pl.BF16, mode="rint"), [t, out_h * D], y_flat)
+                x_block = pl.slice(x, [1, D], [t, 0])
+                y_flat = hc_post_block(x_block, residual_flat, post, comb, y_flat, t, 0, 1, 1, D)
     return y
 
 

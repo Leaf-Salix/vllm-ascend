@@ -30,10 +30,17 @@ from .decode_indexer import indexer
 from .decode_indexer_compressor import indexer_compressor
 from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
 from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
-from .hc_post import hc_post
 from .hc_pre import (
-    HC_DIM, HC_DIM_INV, HC_MULT, HC_PAD, LINEAR_T_TILE, MIX_HC, NORM_EPS,
-    RMS_K_TILE, hc_mix_norm, hc_pre_gates_from_rms,
+    HC_DIM,
+    HC_DIM_INV,
+    HC_MULT,
+    HC_PAD,
+    LINEAR_T_TILE,
+    MIX_HC,
+    NORM_EPS,
+    RMS_K_TILE,
+    hc_mix_norm,
+    hc_pre_gates_from_rms,
 )
 from .layout import (
     COMPRESSED_ROWS_DYN,
@@ -331,9 +338,6 @@ def _decode_csa_tp1_layer(
     qr = pl.create_tensor([t_dim, Q_LORA], dtype=pl.INT8)
     qr_scale = pl.create_tensor([t_dim, 1], dtype=pl.FP32)
     position_ids_t1 = pl.reshape(position_ids, [t_dim, 1])
-    # attn_out 在大 scope 之外创建：它要跨到 scope 末尾喂 hc_post，在 scope 内
-    # 创建会被判成 scope 局部张量而参与内存复用。上游 _decode_csa_tp1 也在这里创建。
-    attn_out = pl.create_tensor([t_dim, D], dtype=pl.BF16)
     with pl.scope():
         # Projection-chain dependency marker.
         late_dep = pl.system.task_dummy(deps=[rope_tid])
@@ -453,8 +457,9 @@ def _decode_csa_tp1_layer(
             o_packed_heads,
         )
         with pl.scope():
-            attn_out = decode_o_proj_tp1(o_packed_heads, wo_a, wo_b, wo_b_scale, attn_out, heads_dep)
-            hc_post(attn_out, x_hc, post_t, comb_t, x_out)
+            x_out = decode_o_proj_tp1(
+                o_packed_heads, wo_a, wo_b, wo_b_scale, x_hc, post_t, comb_t, x_out, heads_dep,
+            )
     return x_out
 
 
