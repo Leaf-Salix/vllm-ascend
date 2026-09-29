@@ -11722,3 +11722,25 @@ task_20260929_135654_65664815311的长B16两侧20次正式计时和各四窗DFX�
 私有副本隔离，不修改失败任务的冻结源码。没有该新分工的收益结论。
 [长档完整结果](results/csa_ob_hc_fused_20260929/PARTIAL_RESULTS.md)、
 [状态、四窗和真实前置](results/csa_ob_hc_fused_20260929/partial_summary.json)。
+
+## 436. 整D单行收尾融合CPU通过，消除多行广播后再做两档筛选（2026-09-29）
+
+首版长档核内回退且状态/依赖通过，下一步针对分工与广播这一可见差异。
+重新从9a868d26对应的O-B已测副本复制新baseline/candidate，不修改首版冻结源或生产。
+恢复HC原每worker四token、单token完整D4096及标量门控，反量化也按T1/N4096处理。
+每组scale用标量读取/乘法，八组按原顺序FP32相加，再乘权重scale并RINT为BF16；
+同UB进入原HC单行路径，BF16→FP32、post*x后四路mul/add与最终RINT全部保留。
+长B16从两级24+24份变为24份，短B24从40+36份变为36份，按总核内工作量比较。
+
+两入口依赖解析、完整PTOAS/CCE/link/load及共享HC单行入口CPU编译通过。
+三条行块特化均Vec131072字节，零TROWEXPANDMUL/TTRANS/TMOV，四次最终TSTORE；
+生成码确认BF16往返保留，没有attn_out GM缓冲或独立HC任务。
+八组O-B显式依赖和门控input自动依赖保持，真实DFX仍须核对。
+算术沿既有性能版组量化及共享HC，最新AscendC Permanent-X的残差复用继续保留；
+不能把本轮PTO尾部融合冒称为Native已有实现，也不能用首版PASS替代新分工状态验证。
+
+Ruff与shell通过、两份Python源只读。14:14正常auto提交task_20260929_141413_142108726634，
+已确认设备1上running；长B16/短B24同卡反序，5预热20次计时、四窗DFX和八类状态零容差。
+完整CSA/P95、总核内工作量与跨度单列、长短8:2。若明确回退停止扩测，有收益才补边界/共享HC。
+生产仍为已验证O-B版本，没有此候选的设备收益或采用结论。
+[新副本、CPU生成码和采集入口](results/csa_ob_hc_scalar_fused_20260929/README.md)。
