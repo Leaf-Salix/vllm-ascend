@@ -718,7 +718,7 @@ def indexer_score_topk_native_cube(
             else:
                 buf_query = buf_item // buf_max_leaves * query_group_size
                 buf_leaf = buf_item % buf_max_leaves
-            buf_batch_idx = buf_query // S
+            buf_batch_idx = pl.cast(pl.read(token_request, [buf_query]), pl.INDEX)
             buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
             buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
             buf_visible_count = pl.max(
@@ -984,7 +984,7 @@ def indexer_score_topk_native_cube(
                     else:
                         single_query = single_item // buf_max_leaves * query_group_size
                         single_leaf = single_item % buf_max_leaves
-                    single_batch = single_query // S
+                    single_batch = pl.cast(pl.read(token_request, [single_query]), pl.INDEX)
                     single_cache_len = pl.read(kv_seq_lens, [single_batch]) // COMPRESS_RATIO
                     single_last_position = pl.read(position_ids, [single_query + query_group_size - 1])
                     single_visible = pl.max(
@@ -1206,7 +1206,7 @@ def indexer_score_topk_native_cube(
                     else:
                         buf_query = buf_item // buf_max_leaves * query_group_size
                         buf_leaf = buf_item % buf_max_leaves
-                    buf_batch_idx = buf_query // S
+                    buf_batch_idx = pl.cast(pl.read(token_request, [buf_query]), pl.INDEX)
                     buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
                     buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
                     buf_visible_count = pl.max(

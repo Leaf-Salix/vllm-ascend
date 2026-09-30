@@ -58,6 +58,8 @@ def build_compact_row_offsets(
 def load_compact_rope_rows(
     cos: pl.Tensor[[COMPACT_ROWS, ROPE_DIM], pl.FP32],
     sin: pl.Tensor[[COMPACT_ROWS, ROPE_DIM], pl.FP32],
+    # TND：token 的请求号来自查表，不能用 token // DECODE_SEQ。
+    token_request: pl.Tensor[[TOKENS], pl.INT32],
     positions: pl.Tensor[[TOKENS], pl.INT64],
     offsets: pl.Tensor[[REQUESTS], pl.INT32],
     begin: pl.Scalar[pl.INDEX],
@@ -70,7 +72,8 @@ def load_compact_rope_rows(
         token = begin + row
         position = pl.read(positions, [token])
         if (position + 1) % COMPRESS_RATIO == 0:
-            compact_row = pl.cast(pl.read(offsets, [token // DECODE_SEQ]), pl.INDEX) + pl.cast(
+            token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+            compact_row = pl.cast(pl.read(offsets, [token_req]), pl.INDEX) + pl.cast(
                 (position + 1) // COMPRESS_RATIO, pl.INDEX
             )
             # 这两张 RoPE 表和 compact slot mapping 同高，只有 Native 算好的

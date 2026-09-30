@@ -296,6 +296,8 @@ def compressor_ratio4_cache_write(
     cos: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     cmp_kv_cache: pl.Tensor[[CMP_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16],
     cmp_slot_mapping: pl.Tensor[[COMPRESSED_ROWS_DYN, 2], pl.INT32],
     compress_state: pl.Tensor[[COMPRESS_STATE_BLOCK_NUM_DYN, STATE_PAGE_ELEMENTS_DYN], pl.FP32],
@@ -357,7 +359,9 @@ def compressor_ratio4_cache_write(
         rms_blk = pl.tile.get_block_idx()
         b0 = rms_blk * RMS_PAD_TILE
         rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
-        cos_b, sin_b = load_compact_rope_rows(cos, sin, position_ids, compact_offsets, b0, rms_blk_rows)
+        cos_b, sin_b = load_compact_rope_rows(
+            cos, sin, token_request, position_ids, compact_offsets, b0, rms_blk_rows,
+        )
         # 平方和先折半到 64 列再做一次 row_sum，比逐 64 列各做一次 row_sum 指令更少。
         rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0 : HEAD_DIM // 2]
         rms_high = pooled_kv[b0 : b0 + RMS_PAD_TILE, HEAD_DIM // 2 : HEAD_DIM]
@@ -395,8 +399,9 @@ def compressor_ratio4_cache_write(
             token_pos = pl.read(position_ids, [token])
             # compact metadata 按当前步的实际 token 数分配，补位请求用陈旧 position
             # 推出的行号会远超其行数（实测 84 vs 8 行），必须先按 seq_lens 排除。
-            if pl.read(seq_lens, [token // S]) > 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
-                metadata_row = pl.cast(pl.read(compact_offsets, [token // S]), pl.INDEX) + pl.cast(
+            token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+            if pl.read(seq_lens, [token_req]) > 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
+                metadata_row = pl.cast(pl.read(compact_offsets, [token_req]), pl.INDEX) + pl.cast(
                     (token_pos + 1) // COMPRESS_RATIO, pl.INDEX
                 )
                 # compact 表只有 Native 算好的 num_compressed_tokens 行，超出即无效。
@@ -431,6 +436,8 @@ def compressor_ratio4(
     cos: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[COMPRESSED_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     cmp_kv_cache: pl.Tensor[[CMP_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
@@ -462,6 +469,7 @@ def compressor_ratio4(
         cos,
         sin,
         compact_offsets,
+        token_request,
         cmp_kv_cache,
         cmp_slot_mapping,
         compress_state,

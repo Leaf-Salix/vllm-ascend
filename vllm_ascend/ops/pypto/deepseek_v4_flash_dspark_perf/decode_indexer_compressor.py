@@ -169,6 +169,8 @@ def indexer_compressor_pool_projected(
     cos: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     pooled_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.FP32]],
@@ -310,7 +312,9 @@ def indexer_compressor_pool_projected(
             # Padded token block and interleaved inverse-RoPE rows.
             b0 = rms_blk * RMS_PAD_TILE
             rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
-            cos_b, sin_b = load_compact_rope_rows(cos, sin, position_ids, compact_offsets, b0, rms_blk_rows)
+            cos_b, sin_b = load_compact_rope_rows(
+            cos, sin, token_request, position_ids, compact_offsets, b0, rms_blk_rows,
+        )
             # 平方和先把两段 64 列折到一起再做一次 row_sum。
             kv_rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0:HEAD_TILE]
             kv_rms_high = pooled_kv[b0 : b0 + RMS_PAD_TILE, HEAD_TILE:HEAD_DIM]
@@ -359,6 +363,8 @@ def indexer_compressor_pool(
     cos: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     normed_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16]],
@@ -388,6 +394,7 @@ def indexer_compressor_pool(
         cos,
         sin,
         compact_offsets,
+        token_request,
         position_ids,
         inner_state_slot_mapping,
         pooled_kv,
@@ -406,6 +413,8 @@ def indexer_compressor_write(
     idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     rms_tid: pl.Scalar[pl.TASK_ID],
@@ -585,6 +594,7 @@ def indexer_compressor(
         cos,
         sin,
         compact_offsets,
+        token_request,
         position_ids,
         inner_state_slot_mapping,
         normed_kv,
@@ -598,6 +608,7 @@ def indexer_compressor(
         idx_native_kv_cache,
         idx_slot_mapping,
         compact_offsets,
+        token_request,
         position_ids,
         seq_lens,
         rms_tid,
