@@ -284,6 +284,24 @@ Native 保留实际逐层执行路径。首层 metadata 生产成本单独记录
   `3e87a843` 再移植 main `ab8e10fc`（#2876）的 Acc→Mat 缩放写回，
   23 项定向单测和一个 A3 L1 写回后接第二次矩阵乘的用例通过。
   v0/v1/v2 与移植前参考属于旧工具链，不混称严格同环境 A/B。
+
+  **TND 适配分支（dev/pypto-dsv4-csa-nalinaly-tnd-20260930）改用另一套工具链**：
+  上面这套 `88f60598` 是 hw-native-sys/pypto 的 main 支，而我们全部测量基建
+  （screen.sh、空对照、n=8 协议、level-4 泳道）都绑在 **kernel-mode** 支上，
+  两者是不同产品线不是版本新旧（kernel-mode 的 `assemble` 只有三个形参，
+  整个 language 层没有 fixpipe/pre_quant 概念）。本分支用
+  `Leaf-Salix/pypto` 的 `feat/kernel-mode-fixpipe-epilogue-20260930`：
+  公共 `feat/kernel-mode-integration-test`（`54957491e`，#2867）之上
+  逐行照搬 main 的 `b9240c182`（#2838）与 `ab8e10fc3`（#2876），两次都零冲突、
+  与上游 diff 逐行一致，没有为适配改过任何一行。
+  两个都要：#2838 只开 Acc→GM，`backend_910b_handler.h` 对 `kMat` 直接
+  `return false`；而 `decode_indexer.py` 的两处 `tile.assemble` 写的是 L1(Mat)
+  再喂第二次矩阵乘，靠 #2876 才把 `kMat` 放开成 `INT32 -> FP16`
+  （正是这两处的 dtype 组合：INT8×INT8 累加成 INT32，目标 tile 是 FP16 Mat）。
+  `pl.manual_scope` 在 kernel-mode 上本来就有（`language/__init__.py` 从 `.scope`
+  导出），不是缺口。
+  **尚未确认**：main 的 `8a944cf2`、`1d7890e9`（NZ 堆叠权重 / NZ kernel param
+  逻辑 stride）在 kernel-mode 分支上没有同主题提交，需不需要等 lower 闸门定。
   PyPTO 已移植主线标量读写与 NZ 视图/调度修复，同步 Simpler SDK/子模块版本；
   新 NZ 移植的 CPU 验证见 C，设备验证完成前不把旧 `f9b24ceb` 基线外推到新组合。
 - 现有 Native 扩展和 custom OPP 已具备，除非具体失败指向它们，不重复编译。
