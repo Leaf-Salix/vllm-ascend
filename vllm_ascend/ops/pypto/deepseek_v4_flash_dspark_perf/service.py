@@ -49,25 +49,36 @@ class CSAServiceRuntime:
         if hidden.ndim != 3 or tuple(hidden.shape[1:]) != (4, 4096) or hidden.dtype != torch.bfloat16:
             return False
         tokens = hidden.shape[0]
-        if tokens % QUERY_TOKENS or not 1 <= tokens // QUERY_TOKENS <= self.batch_capacity:
+        # TND：tokens 是**档位容量**，不再等于 batch * QUERY_TOKENS。请求数只能从
+        # metadata 取，不能由 token 数反推。容量上界仍是满档。
+        if not 1 <= tokens <= self.batch_capacity * QUERY_TOKENS:
             return False
         if not hidden.is_contiguous() or positions.dtype != torch.int64 or positions.shape != (tokens,):
             return False
-        batch = tokens // QUERY_TOKENS
+        batch = None
         for prefix in self.prefixes.values():
             item = metadata.get(prefix)
             # 补位档位下这两个计数不再相等：num_actual_tokens 是**实际** token 数，
             # num_decodes 是**补齐后**的请求数（实测 18 与 4，整档 24）。补位请求
-            # 由 kernel 内的 seq_lens 判据屏蔽，这里只要求真实部分是完整六行请求。
+            # 由 kernel 内的 seq_lens 判据屏蔽。
             if item is None or item.num_prefills or item.num_actual_tokens > tokens:
                 return False
-            if item.num_actual_tokens % QUERY_TOKENS or item.num_decodes != batch:
+            if batch is None:
+                batch = item.num_decodes
+                # 每请求至少一行，档位必须放得下。
+                if not 1 <= batch <= self.batch_capacity or batch > tokens:
+                    return False
+            elif item.num_decodes != batch:
+                # 各 cache group 必须看到同一批请求，否则 query_start_loc 无法共用。
                 return False
             req = item.decode
             if req is None or req.seq_lens.numel() != batch or req.query_start_loc.numel() != batch + 1:
                 return False
-            actual = item.num_actual_tokens // QUERY_TOKENS
-            if req.max_seqlen_q != QUERY_TOKENS or req.num_reqs_actual not in (None, actual):
+            # 变长下每请求的 token 数在 [1, QUERY_TOKENS]；num_reqs_actual 是真实请求数，
+            # 不能再由 num_actual_tokens // QUERY_TOKENS 推（那是等长才成立的式子）。
+            if not 1 <= req.max_seqlen_q <= QUERY_TOKENS:
+                return False
+            if req.num_reqs_actual is not None and not 0 <= req.num_reqs_actual <= batch:
                 return False
             if req.ori_win_right not in (None, 0) or req.dspark_swa_indices is not None:
                 return False
@@ -122,10 +133,7 @@ class CSAServiceRuntime:
         # Release Native creates compact rows at the consumer on this stream.
         # Pass those exact device tensors to CSA, without expanding them or
         # introducing the main-branch DeviceMetadataExecutor API.
-        compact = {
-            name: self._compact_metadata(context, metadata[name].decode)
-            for name in ("compressed", "indexer")
-        }
+        compact = {name: self._compact_metadata(context, metadata[name].decode) for name in ("compressed", "indexer")}
         compressed, swa, state, indexer_state, indexer_key, indexer_scale = kv_cache
         groups = {
             "swa": (metadata["swa"], (swa,)),
@@ -136,7 +144,12 @@ class CSAServiceRuntime:
         }
         tokens = hidden.shape[0]
         call = NativeCSACall(
-            self.operators, self.weights, hidden, positions, groups, layer_name=self.layer_name,
+            self.operators,
+            self.weights,
+            hidden,
+            positions,
+            groups,
+            layer_name=self.layer_name,
             compact_metadata=compact,
             buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "x_out": output},
         )

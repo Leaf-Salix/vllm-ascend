@@ -65,7 +65,8 @@ def _unpack_nz(value: "torch.Tensor") -> "torch.Tensor":
     unpacked = (
         value.reshape(-1, cols // c0, rows // _NZ_FRACTAL_ROWS, _NZ_FRACTAL_ROWS, c0)
         .permute(0, 2, 3, 1, 4)
-        .contiguous().reshape(value.shape)
+        .contiguous()
+        .reshape(value.shape)
     )
     return _base_weight_format(unpacked)
 
@@ -119,8 +120,9 @@ _ACL_FORMAT_NCHW = 0
 _ACL_FORMAT_ND = 2
 
 
-def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
-                    root_function=_decode_csa_tp1_layer) -> dict[str, torch.Tensor]:
+def prepare_weights(
+    attention, hadamard: torch.Tensor | None, layer=None, *, root_function=_decode_csa_tp1_layer
+) -> dict[str, torch.Tensor]:
     """Prepare the TP1 ABI from already-loaded Native parameters exactly once."""
     import torch_npu
 
@@ -137,7 +139,10 @@ def prepare_weights(attention, hadamard: torch.Tensor | None, layer=None, *,
         logger.warning(
             "PTO_CSA_WEIGHT_RECAST %s: kernel 声明 %s 但 Native 存的是 format=%d，"
             "复制一份私有副本 %.2f MiB/层；请核对 nz_mode 的布局判据是否还跟得上当前 CANN",
-            name, layouts[name], current, value.numel() * value.element_size() / (1 << 20),
+            name,
+            layouts[name],
+            current,
+            value.numel() * value.element_size() / (1 << 20),
         )
         return torch_npu.npu_format_cast(value, target)
 
@@ -224,8 +229,24 @@ class NativeCSACall:
     this descriptor binds them without materializing an expanded buffer.
     """
 
-    def __init__(self, ops, weights, hidden, positions, groups, *, layer_name: str, compact_metadata, buffers=None,
-                 kernel=decode_csa_tp1_layer_test):
+    # 每请求固定的 query 行数。None 表示变长（TND）：请求的 token 数由
+    # query_start_loc 给出，行数校验交给 kernel 内的区间判据。
+    # 精度版 kernel 没做 TND 适配，保持等长约束；性能版覆写成 None。
+    query_tokens_per_request: int | None = 6
+
+    def __init__(
+        self,
+        ops,
+        weights,
+        hidden,
+        positions,
+        groups,
+        *,
+        layer_name: str,
+        compact_metadata,
+        buffers=None,
+        kernel=decode_csa_tp1_layer_test,
+    ):
         # Each entry contains its own metadata and Native cache views. No shared
         # synthetic page table can stand in for another cache group.
         self.ops = ops
@@ -235,8 +256,15 @@ class NativeCSACall:
         self.views = {name: value[1] for name, value in groups.items()}
         batch = self.req["swa"].seq_lens.numel()
         tokens = hidden.shape[0]
-        if not 1 <= batch <= DECODE_BATCH or tokens != batch * 6:
-            raise ValueError(f"CSA requires 1 <= batch <= {DECODE_BATCH} and six unpadded rows per request")
+        uniform = self.query_tokens_per_request
+        if not 1 <= batch <= DECODE_BATCH:
+            raise ValueError(f"CSA requires 1 <= batch <= {DECODE_BATCH}")
+        if uniform is not None and tokens != batch * uniform:
+            raise ValueError(f"CSA requires {uniform} unpadded rows per request")
+        # 变长下 hidden 是档位容量，真实行数由 query_start_loc[batch] 给出，
+        # 只能要求容量放得下每请求至少一行、至多 DECODE_SEQ 行。
+        if uniform is None and not batch <= tokens <= DECODE_BATCH * 6:
+            raise ValueError("CSA requires the padded bucket to cover one row per request")
         # kernel 现在从 mHC 的残差流进、也从它出，入参是层间的 [T, HC_MULT, D]。
         if tuple(hidden.shape[1:]) != (4, 4096) or hidden.dtype != torch.bfloat16 or not hidden.is_contiguous():
             raise ValueError("CSA expects a contiguous BF16 hc residual stream [T, 4, 4096]")
@@ -248,8 +276,8 @@ class NativeCSACall:
             # 这里只要求真实部分是完整的六行请求。
             if metadata.num_prefills or metadata.num_actual_tokens > tokens:
                 raise ValueError(f"{name}: requires target decode metadata without prefill rows")
-            if metadata.num_actual_tokens % 6:
-                raise ValueError(f"{name}: CSA requires whole six-token target requests")
+            if uniform is not None and metadata.num_actual_tokens % uniform:
+                raise ValueError(f"{name}: CSA requires whole {uniform}-token target requests")
             req = self.req[name]
             if req.query_start_loc.numel() != batch + 1 or req.seq_lens.numel() != batch:
                 raise ValueError(f"{name}: inconsistent Native request capacity")
@@ -303,6 +331,13 @@ class NativeCSACall:
         self.args["cmp_query_start_loc"] = self.req["compressed"].query_start_loc
         self.args["cmp_seq_lens"] = self.req["compressed"].seq_lens
         self.args["idx_query_start_loc"] = self.req["indexer"].query_start_loc
+        # token 级请求边界。上面两个是各自 cache group 的压缩行/indexer 行边界，
+        # 语义不同不能复用。取 swa 组：ori_slot_mapping 与 position_ids 都按这条
+        # 目标 token 流索引。定长 kernel 不声明这个形参，多出来的键不会被取走。
+        swa_bounds = self.req["swa"].query_start_loc
+        if swa_bounds.dtype != torch.int32 or tuple(swa_bounds.shape) != (batch + 1,):
+            raise ValueError("CSA expects Native INT32 token-level query bounds covering the batch")
+        self.args["query_start_loc"] = swa_bounds
         for name in ("kv_cache", "cmp_kv"):
             if not self.args[name].is_contiguous() or self.args[name].dtype != torch.bfloat16:
                 raise ValueError(f"{name}: Native BF16 32-token pages must have no additional page padding")

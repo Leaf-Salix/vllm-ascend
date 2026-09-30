@@ -19,6 +19,11 @@ def prepare_weights(attention, hadamard, layer=None):
 
 
 class NativeCSACall(_NativeCSACall):
+    # TND：性能版 kernel 按 query_start_loc 取每请求的 token 区间，
+    # 不再要求每请求恰好六行。见 decode_csa 的 build_token_request /
+    # decode_indexer 的 indexer_build_query_groups。
+    query_tokens_per_request = None
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, kernel=decode_csa_tp1_layer_test, **kwargs)
 
