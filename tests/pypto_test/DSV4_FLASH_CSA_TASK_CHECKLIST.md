@@ -300,8 +300,20 @@ Native 保留实际逐层执行路径。首层 metadata 生产成本单独记录
   （正是这两处的 dtype 组合：INT8×INT8 累加成 INT32，目标 tile 是 FP16 Mat）。
   `pl.manual_scope` 在 kernel-mode 上本来就有（`language/__init__.py` 从 `.scope`
   导出），不是缺口。
-  **尚未确认**：main 的 `8a944cf2`、`1d7890e9`（NZ 堆叠权重 / NZ kernel param
-  逻辑 stride）在 kernel-mode 分支上没有同主题提交，需不需要等 lower 闸门定。
+  两个 NZ 修复也已带上：main 的 `1d7890e9`（#2819，NZ kernel param 的逻辑
+  stride，零冲突）与 `8a944cf2`（#2860，NZ 堆叠权重跨切分/派发）。
+  #2860 在 kernel-mode 上有**未移植的前置** `46675fc48`（#2794，调用实参
+  layout 检查）：上游父版本里 `TypeChecker` 已带 `ProgramPtr` 和
+  `VisitExpr_(Call/Submit)`，kernel-mode 没有，单独 cherry-pick #2860 会留下
+  有定义无声明、`program_` 恒空的坏状态（检查静默失效）。补上 #2794 后
+  #2860 的冲突从 5 个文件降到 2 个，且都是「两边各加各的」（一处 import 列表、
+  一处各自新增的单测），保留双方即可。五个 cherry-pick 最终与上游 diff
+  **逐行一致**。
+  注意 #2794 往 verifier 加了一条新检查，是一种新的 lower 失败方式；
+  另外 perf 路径本身没有用 stacked 权重（`StackedDeviceTensor` 在
+  `vllm_ascend/ops/pypto/` 下零命中），#2860 对本分支多半是冗余的，
+  带上是为了和 nalinaly 的工具链对齐。
+  他清单第 640 行还提到的 `0c8a2753` 在 origin 上取不到，未带。
   PyPTO 已移植主线标量读写与 NZ 视图/调度修复，同步 Simpler SDK/子模块版本；
   新 NZ 移植的 CPU 验证见 C，设备验证完成前不把旧 `f9b24ceb` 基线外推到新组合。
 - 现有 Native 扩展和 custom OPP 已具备，除非具体失败指向它们，不重复编译。
