@@ -16,6 +16,27 @@ ROPE_TILE_ROWS = 16
 
 
 @pl.jit.inline(auto_scope=False)
+def build_token_request(
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    requests: pl.Scalar[pl.INDEX],
+    token_request: pl.Out[pl.Tensor[[TOKENS], pl.INT32]],
+):
+    """把 query_start_loc 展开成逐 token 的请求号表。
+
+    TND（变长请求）下 token // DECODE_SEQ 不再等于请求号：每个请求的 token 数
+    各不相同。宿主侧已经有 query_start_loc（每请求的 token 起止，长度
+    requests + 1），这里一次性展开成逐 token 的表，后面所有 kernel 直接查，
+    不必各自重算。和 build_compact_row_offsets 一样跑在已有的单属主任务里。
+    """
+    for request in pl.range(requests):
+        begin = pl.cast(pl.read(bounds, [request]), pl.INDEX)
+        end = pl.cast(pl.read(bounds, [request + 1]), pl.INDEX)
+        for token in pl.range(begin, end):
+            pl.write(token_request, [token], pl.cast(request, pl.INT32))
+    return token_request
+
+
+@pl.jit.inline(auto_scope=False)
 def build_compact_row_offsets(
     bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     lengths: pl.Tensor[[REQUESTS], pl.INT32],

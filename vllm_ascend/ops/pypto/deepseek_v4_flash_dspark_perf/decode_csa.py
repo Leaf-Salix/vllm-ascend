@@ -11,7 +11,7 @@
 
 import pypto.language as pl
 
-from .compact_metadata import build_compact_row_offsets
+from .compact_metadata import build_compact_row_offsets, build_token_request
 from .config import (
     BLOCK_SIZE,
     C4A_COMPRESSOR_BLOCK_SIZE,
@@ -181,6 +181,9 @@ def _decode_csa_tp1_layer(
     cmp_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     cmp_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     idx_query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    # TND：token 级的每请求起止（宿主 service.py 已有 req.query_start_loc）。
+    # 现有那两个是压缩行/indexer 行的边界，语义不同，不能复用。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, WO_A_WEIGHT_LAYOUT],
     # 保持 Native 加载后的 K×N 矩阵，分组仅体现为核内 K 偏移。
@@ -234,6 +237,7 @@ def _decode_csa_tp1_layer(
     cmp_query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
     cmp_seq_lens.bind_dynamic(0, B_DYN)
     idx_query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
+    query_start_loc.bind_dynamic(0, QUERY_BOUNDS_DYN)
     cmp_block_table.bind_dynamic(0, B_DYN)
     cmp_block_table.bind_dynamic(1, COMPRESSED_TABLE_COLUMNS_DYN)
     idx_block_table.bind_dynamic(0, B_DYN)
@@ -308,9 +312,15 @@ def _decode_csa_tp1_layer(
     # 原先两件事共用一个 CORE_GROUP 任务，整段被前缀和拖成串行——泳道实测
     # csa_rope_sign count=1、Exec 13.42us 却独占一个串行窗口。拆成两个任务，
     # 符号那段走 SPMD，靠 deps 保证偏移先算好。
+    # TND 的逐 token 请求号表：和 compact 偏移一样是逐请求的串行前缀工作，
+    # 搭同一个单属主任务，不额外起 task。
+    token_request = pl.create_tensor([t_dim], dtype=pl.INT32)
     with pl.at(level=pl.Level.CORE_GROUP, name_hint="csa_row_offsets") as offsets_tid:
         build_compact_row_offsets(cmp_query_start_loc, cmp_seq_lens, cmp_row_offsets)
         build_compact_row_offsets(idx_query_start_loc, kv_seq_lens, idx_row_offsets)
+        build_token_request(
+            query_start_loc, pl.tensor.dim(kv_seq_lens, 0), token_request,
+        )
 
     # 向上取整分块并保留 valid_shape：t_dim = batch*6 不保证是 4 的倍数，
     # 上游 csa_rope_interleave 用的 t_dim // 4 会丢掉尾行（batch=1 时 t_dim=6 只覆盖 0~3）。
@@ -435,6 +445,7 @@ def _decode_csa_tp1_layer(
                 idx_topk,
                 position_ids,
                 kv_seq_lens,
+                token_request,
                 late_dep,
                 idx_cache_write_tid,
             )
@@ -451,6 +462,7 @@ def _decode_csa_tp1_layer(
             idx_topk,
             position_ids_t1,
             kv_seq_lens,
+            token_request,
             attn_sink,
             freqs_cos,
             freqs_sin,

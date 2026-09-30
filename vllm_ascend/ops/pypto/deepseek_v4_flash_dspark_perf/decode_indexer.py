@@ -396,6 +396,8 @@ def indexer_topk_query_merge_one(
     query: pl.Scalar[pl.INDEX],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
@@ -404,7 +406,7 @@ def indexer_topk_query_merge_one(
     extra_leaves: pl.Scalar[pl.INDEX],
 ):
     """Merge the selected leaf roots and publish one query's Top-512."""
-    batch_idx = query // S
+    batch_idx = pl.cast(pl.read(token_request, [query]), pl.INDEX)
     position = pl.read(position_ids, [query])
     cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
     cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -448,6 +450,8 @@ def indexer_topk_query_merge_one(
 def indexer_topk_query_merge(
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
@@ -473,6 +477,7 @@ def indexer_topk_query_merge(
             query,
             position_ids,
             kv_seq_lens,
+            token_request,
             pair_arena,
             topk_scores,
             topk_indices,
@@ -557,6 +562,8 @@ def indexer_topk_leaf_publish(
 def indexer_topk_single_leaf_publish(
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
@@ -566,7 +573,8 @@ def indexer_topk_single_leaf_publish(
     query_count = pl.tensor.dim(position_ids, 0)
     for query in pl.range(worker, query_count, TOPK_QUERY_WORKERS):
         position = pl.read(position_ids, [query])
-        cache_len = pl.read(kv_seq_lens, [query // S]) // COMPRESS_RATIO
+        query_request = pl.cast(pl.read(token_request, [query]), pl.INDEX)
+        cache_len = pl.read(kv_seq_lens, [query_request]) // COMPRESS_RATIO
         visible_count = pl.max(pl.min(cache_len, (position + 1) // COMPRESS_RATIO), 0)
         if visible_count > 0:
             indexer_topk_leaf_publish(score_arena, query, visible_count, topk_scores, topk_indices)
@@ -643,6 +651,8 @@ def indexer_score_topk_native_cube(
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1356,6 +1366,8 @@ def indexer_score_topk_forest(
     idx_block_table: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1397,6 +1409,7 @@ def indexer_score_topk_forest(
                     idx_block_table,
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1420,6 +1433,7 @@ def indexer_score_topk_forest(
                     idx_block_table,
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1454,6 +1468,7 @@ def indexer_score_topk_forest(
                     idx_block_table,
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1477,6 +1492,7 @@ def indexer_score_topk_forest(
                     idx_block_table,
                     position_ids,
                     kv_seq_lens,
+                    token_request,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1513,7 +1529,7 @@ def indexer_score_topk_forest(
             for item in pl.range(worker, query_count * max_leaves, TOPK_SCORE_WORKERS):
                 query = item // max_leaves
                 leaf = item % max_leaves
-                batch_idx = query // S
+                batch_idx = pl.cast(pl.read(token_request, [query]), pl.INDEX)
                 position = pl.read(position_ids, [query])
                 cache_len = pl.read(kv_seq_lens, [batch_idx]) // COMPRESS_RATIO
                 cache_bound = pl.min(cache_len, (position + 1) // COMPRESS_RATIO)
@@ -1633,19 +1649,19 @@ def indexer_score_topk_forest(
                 deps=[score_tid],
                 allow_early_resolve=True,
             ):
-                indexer_topk_single_leaf_publish(position_ids, kv_seq_lens, score_arena, topk_scores, topk_idxs)
+                indexer_topk_single_leaf_publish(position_ids, kv_seq_lens, token_request, score_arena, topk_scores, topk_idxs)
         elif max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
             # Keep the single-leaf kernel free of the multiway branches and
             # their larger UB temporaries. The choice follows actual length.
             with pl.spmd(
                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
             ):
-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, False)
+                indexer_topk_query_merge(position_ids, kv_seq_lens, token_request, pair_arena, topk_scores, topk_idxs, False)
         else:
             with pl.spmd(
                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
             ):
-                indexer_topk_query_merge(position_ids, kv_seq_lens, pair_arena, topk_scores, topk_idxs, True)
+                indexer_topk_query_merge(position_ids, kv_seq_lens, token_request, pair_arena, topk_scores, topk_idxs, True)
 
     return topk_scores, topk_idxs, score_tid
 
@@ -1916,6 +1932,8 @@ def indexer_weights_score(
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
     weights_gate_dep: pl.Scalar[pl.TASK_ID],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1932,6 +1950,7 @@ def indexer_weights_score(
         idx_block_table,
         position_ids,
         kv_seq_lens,
+        token_request,
         topk_scores,
         topk_idxs,
         qh_quant_tid,
@@ -1958,6 +1977,8 @@ def indexer(
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：变长请求下 query // S 不再等于请求号。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
 ):
@@ -1987,6 +2008,7 @@ def indexer(
         topk_idxs,
         position_ids,
         kv_seq_lens,
+        token_request,
         cache_write_dep,
         weights_gate_dep,
         qh_quant_tid,

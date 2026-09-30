@@ -181,6 +181,9 @@ def sparse_attn_csa(
     idx_topk: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
     position_ids: pl.Tensor[[T_DYN, 1], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：请求号不能再用 token // S 推。变长下每个请求的 token 数不同，
+    # 由宿主侧按 query_start_loc 展开成逐 token 的请求号表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -263,7 +266,7 @@ def sparse_attn_csa(
             v_len_col = pl.create_tensor([BIAS_T_TILE, 1], dtype=pl.FP32)
             for bias_len_dt in pl.range(BIAS_T_TILE):
                 v_len_t = bias_t0 + pl.min(bias_len_dt, bias_rows - 1)
-                v_len_request = v_len_t // S
+                v_len_request = pl.cast(pl.read(token_request, [v_len_t]), pl.INDEX)
                 v_len_position = pl.cast(pl.read(position_ids, [v_len_t, 0]), pl.INDEX)
                 v_len_value = pl.min(v_len_position + 1, WIN)
                 # 补位请求的 position 是上一步残留，用它推出的页表列号可能越界。
@@ -297,7 +300,7 @@ def sparse_attn_csa(
 
             for bias_dt in pl.range(bias_rows):
                 bias_t = bias_t0 + bias_dt
-                bias_request = bias_t // S
+                bias_request = pl.cast(pl.read(token_request, [bias_t]), pl.INDEX)
                 c_position = pl.cast(pl.read(position_ids, [bias_t, 0]), pl.INDEX)
                 v_length = pl.min(c_position + 1, WIN)
                 if pl.read(seq_lens, [bias_request]) <= 0:
@@ -481,7 +484,7 @@ def sparse_attn_csa(
                 init_values=(running_m, running_l, running_left, running_right),
             ):
                 qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * NUM_QK_CORES
-                qk_b = qk_t // S
+                qk_b = pl.cast(pl.read(token_request, [qk_t]), pl.INDEX)
                 qk_sb = qk_tick % SPARSE_BLOCKS
                 if qk_tick < qk_block_count:
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
@@ -695,6 +698,9 @@ def sparse_attn_csa_tp1(
     idx_topk: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
     position_ids: pl.Tensor[[T_DYN, 1], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：请求号不能再用 token // S 推。变长下每个请求的 token 数不同，
+    # 由宿主侧按 query_start_loc 展开成逐 token 的请求号表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
@@ -703,6 +709,7 @@ def sparse_attn_csa_tp1(
     """Publish packed CSA heads from the final QK/PV vector update."""
     packed, ready = sparse_attn_csa(
         q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
-        position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads,
+        position_ids, seq_lens, token_request, attn_sink, freqs_cos, freqs_sin,
+        o_packed_heads,
     )
     return packed, ready
