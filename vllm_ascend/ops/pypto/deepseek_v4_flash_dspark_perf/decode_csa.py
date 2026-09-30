@@ -461,6 +461,7 @@ def _decode_csa_tp1_layer(
                 position_ids,
                 kv_seq_lens,
                 token_request,
+                query_start_loc,
                 late_dep,
                 idx_cache_write_tid,
             )

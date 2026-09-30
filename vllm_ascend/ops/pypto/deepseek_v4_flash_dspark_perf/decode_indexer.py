@@ -9,6 +9,8 @@
 
 """CSA integration dependency adapted from pypto-lib 205255b4/decode_indexer.py."""
 
+import math
+
 import pypto.language as pl
 
 from .config import (
@@ -29,6 +31,7 @@ from .layout import (
     INDEXER_KEY_BYTES,
     INDEXER_PAGE_BYTES_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
+    QUERY_BOUNDS_DYN,
 )
 
 B_DYN = pl.dynamic("B_DYN")
@@ -92,14 +95,19 @@ Q_TILE = 256
 
 Q_OUT_TILE = 1024  # Query-projection output tile
 
-T_PAD = ((T + 16 - 1) // 16) * 16
+# TND：组不跨请求，末组可能不满，但仍按 query_group_size 行整块取。
+# 首行最大是 t_dim - 1，于是要多读至多 S - 1 行；而 t_dim 可能正好等于原来的
+# T_PAD（bucket 命中 B*S 时），那时就真越界了。给容量留一整组尾巴，越界读落进
+# 填充区。尾巴按 lcm(16, S) 取，保持 T_PAD 对 16 和 S 的既有整除性质（见下方 assert）。
+T_PAD_ALIGN = 16 * S // math.gcd(16, S)
+T_PAD = ((T + S + T_PAD_ALIGN - 1) // T_PAD_ALIGN) * T_PAD_ALIGN
 # query 投影专用的分块：上游 e68e091 "Reuse full-K indexer query weights across row
 # tiles"。原来按（行块 × 输出块）循环、每个行块都把整条 K 的权重重载一遍，decode 下
 # 行数少而 K 大，权重重载就是主要开销。改成按输出列循环、整条 K 的权重只加载一次，
 # 再在其上遍历行块。weights 投影仍用 MM_ROW_TILE，两者分开，故另起名字。
 QR_MM_ROW_TILE = 64
 QR_MM_N_TILE = 256
-QR_MM_T_PAD = ((T + QR_MM_ROW_TILE - 1) // QR_MM_ROW_TILE) * QR_MM_ROW_TILE
+QR_MM_T_PAD = ((T_PAD + QR_MM_ROW_TILE - 1) // QR_MM_ROW_TILE) * QR_MM_ROW_TILE
 
 MM_ROW_TILE = 16
 
@@ -151,7 +159,9 @@ TOPK_MERGE_FAN_IN = 4  # QLI V2: accumulated Top-512 plus three incoming roots.
 TOPK_ARENA_ROWS = T_PAD * TOPK_ROWS_PER_QUERY
 
 TOPK_SCORE_WORKERS = 24  # Top-K score workers
-LONG_S6_MIN_QUERY_ROWS = 4 * S  # Four requests can fill 24 workers with six balanced leaves.
+# 原来按 query 行数写成 4 * S（四个满长请求）。变长下请求长度不等，
+# 这个门只能按「整请求组的个数」算，见 indexer_query_group_count。
+LONG_S6_MIN_REQUEST_GROUPS = 4  # Four requests can fill 24 workers with six balanced leaves.
 
 SCORE_TILE = 384
 
@@ -404,6 +414,9 @@ def indexer_topk_query_merge_one(
     multiway: pl.constexpr,
     leaf_tiles: pl.Scalar[pl.INDEX],
     extra_leaves: pl.Scalar[pl.INDEX],
+    # 分派侧是否走了整请求分组。必须和 indexer_score_topk_forest 用同一个判据：
+    # 整请求分组每个 leaf 只发布一个 root，双 query 分组发布两个半区 root。
+    use_request_groups: pl.Scalar[pl.INDEX],
 ):
     """Merge the selected leaf roots and publish one query's Top-512."""
     batch_idx = pl.cast(pl.read(token_request, [query]), pl.INDEX)
@@ -421,7 +434,7 @@ def indexer_topk_query_merge_one(
             leaf_count = larger_leaf_count + (remaining_tiles + leaf_tiles - 1) // leaf_tiles
         half_count = leaf_count * 2
         if multiway:
-            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+            if use_request_groups == 1:
                 half_count = leaf_count
         arena_base = query * TOPK_ROWS_PER_QUERY
         if multiway:
@@ -452,6 +465,8 @@ def indexer_topk_query_merge(
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     # TND：变长请求下 query // S 不再等于请求号。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
+    # TND：组不跨请求，组数要按请求区间算。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     topk_scores: pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32],
     topk_indices: pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32],
@@ -460,15 +475,18 @@ def indexer_topk_query_merge(
     """Merge query roots on one persistent worker per physical AIV."""
     worker = pl.tile.get_block_idx()
     query_count = pl.tensor.dim(position_ids, 0)
+    merge_requests = pl.tensor.dim(kv_seq_lens, 0)
+    merge_request_groups = indexer_query_group_count(query_start_loc, merge_requests, S)
+    merge_use_request = pl.cast(merge_request_groups >= LONG_S6_MIN_REQUEST_GROUPS, pl.INDEX)
     merge_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
     merge_extra_leaves = 0
     if multiway:
         max_cache_count = 0
         for batch in pl.range(pl.tensor.dim(kv_seq_lens, 0)):
             max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
-        query_groups = query_count // 2
-        if query_count >= LONG_S6_MIN_QUERY_ROWS:
-            query_groups = query_count // S
+        query_groups = indexer_query_group_count(query_start_loc, merge_requests, 2)
+        if merge_use_request == 1:
+            query_groups = merge_request_groups
         _merge_leaf_count, merge_leaf_tiles, merge_extra_leaves = indexer_long_leaf_plan(
             pl.min(max_cache_count, TOPK_MAX_CANDIDATES), query_groups
         )
@@ -484,6 +502,7 @@ def indexer_topk_query_merge(
             multiway,
             merge_leaf_tiles,
             merge_extra_leaves,
+            merge_use_request,
         )
 
 
@@ -584,10 +603,63 @@ def indexer_topk_single_leaf_publish(
 
 
 @pl.jit.inline(auto_scope=False)
+def indexer_build_query_groups(
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    requests: pl.Scalar[pl.INDEX],
+    group_row: pl.Out[pl.Tensor[[T_PAD], pl.INT32]],
+    group_rows: pl.Out[pl.Tensor[[T_PAD], pl.INT32]],
+    group_count: pl.Out[pl.Tensor[[1], pl.INT32]],
+    group_size: pl.constexpr,
+):
+    """把 query 切成不跨请求的组：每请求 ceil(len / group_size) 组，末组按实际行数收尾。
+
+    定长下每请求恰好 S 行，组边界与原来的 `g * group_size` 完全重合，
+    所以这张表在定长输入上退化成原式，不改变任何编排。
+    变长下全局对齐的组会跨请求，而组内共用一份 Key、共用组内最后一行的可见范围，
+    跨请求时两者分属不同请求 —— 是错误不是次优，所以必须按请求切。
+    """
+    count = pl.cast(0, pl.INDEX)
+    for request in pl.range(requests):
+        begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+        end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+        # 空的补位请求 begin == end，groups_here 为 0，自然不占组号。
+        groups_here = (end - begin + group_size - 1) // group_size
+        for local in pl.range(groups_here):
+            row = begin + local * group_size
+            pl.write(group_row, [count + local], pl.cast(row, pl.INT32))
+            pl.write(group_rows, [count + local], pl.cast(pl.min(group_size, end - row), pl.INT32))
+        count = count + groups_here
+    pl.write(group_count, [0], pl.cast(count, pl.INT32))
+    return group_count
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_query_group_count(
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    requests: pl.Scalar[pl.INDEX],
+    group_size: pl.constexpr,
+):
+    """与 indexer_build_query_groups 同一套切法，只要组数、不建表。
+
+    分派门和 merge 侧只需要组数；单独算一遍 O(B) 标量，省掉把表传过去。
+    """
+    count = pl.cast(0, pl.INDEX)
+    for request in pl.range(requests):
+        begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+        end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+        count = count + (end - begin + group_size - 1) // group_size
+    return count
+
+
+@pl.jit.inline(auto_scope=False)
 def indexer_head_coefficients(
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
     weights: pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+    # TND：组号 -> 首行 / 有效行数，由 indexer_build_query_groups 建好。
+    group_row: pl.Tensor[[T_PAD], pl.INT32],
+    group_count_t: pl.Tensor[[1], pl.INT32],
+    groups_tid: pl.Scalar[pl.TASK_ID],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
     weights_tid: pl.Scalar[pl.TASK_ID],
     query_group_size: pl.constexpr,
@@ -599,18 +671,18 @@ def indexer_head_coefficients(
     coefficient_scales = pl.reshape(qr_hadamard_scale_dq, [T_PAD, IDX_N_HEADS])
     # Trim only workers whose original stride-48 loop has no iteration.
     # Keep every nonempty worker's query groups and arithmetic unchanged.
-    coefficient_workers = pl.min(
-        TOPK_QUERY_WORKERS, pl.tensor.dim(position_ids, 0) // query_group_size
-    )
+    # spmd 宽度不能是数据相关标量，只能用形状推出的上界：组数 <= query 行数。
+    # 放宽只会多起几个空转 worker，不影响正确性。
+    coefficient_workers = pl.min(TOPK_QUERY_WORKERS, pl.tensor.dim(position_ids, 0))
     with pl.spmd(
         coefficient_workers,
         name_hint="indexer_head_coefficients",
-        deps=[qh_quant_tid, weights_tid],
+        deps=[groups_tid, qh_quant_tid, weights_tid],
         allow_early_resolve=True,
     ) as coefficients_tid:
         coefficient_worker = pl.tile.get_block_idx()
-        coefficient_count = pl.tensor.dim(position_ids, 0)
-        for coefficient_pair in pl.range(coefficient_worker, coefficient_count // query_group_size, TOPK_QUERY_WORKERS):
+        coefficient_count = pl.cast(pl.read(group_count_t, [0]), pl.INDEX)
+        for coefficient_pair in pl.range(coefficient_worker, coefficient_count, TOPK_QUERY_WORKERS):
             # Equal-width UB rows avoid A3's partial-column TMOV restriction.
             # Block row lane*(group+1) is the original diagonal [lane, lane*64].
             coefficient_rows = pl.tile.full(
@@ -618,10 +690,10 @@ def indexer_head_coefficients(
             )
             # Native ProcessVec0 loads and multiplies the complete S1 group.
             # Keep the original FP16 rounding order and diagonal publication.
-            coefficient_begin = coefficient_pair * query_group_size
-            query_scales = pl.load(
-                coefficient_scales, [coefficient_begin, 0], [query_group_size, IDX_N_HEADS]
-            )
+            # 末组不满时这里会多读至多 query_group_size - 1 行；多出来的 lane
+            # 在回写侧被守卫挡掉，容量由 T_PAD 的整组尾巴兜住。
+            coefficient_begin = pl.cast(pl.read(group_row, [coefficient_pair]), pl.INDEX)
+            query_scales = pl.load(coefficient_scales, [coefficient_begin, 0], [query_group_size, IDX_N_HEADS])
             query_weights = pl.load(weights, [coefficient_begin, 0], [query_group_size, IDX_N_HEADS])
             query_scale_half = pl.cast(query_scales, pl.FP16, mode="rint")
             query_weight_half = pl.cast(query_weights, pl.FP16, mode="rint")
@@ -653,6 +725,11 @@ def indexer_score_topk_native_cube(
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     # TND：变长请求下 query // S 不再等于请求号。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
+    # TND：组不跨请求。表在 forest 层按组大小各建一份，这里只消费。
+    group_row: pl.Tensor[[T_PAD], pl.INT32],
+    group_rows: pl.Tensor[[T_PAD], pl.INT32],
+    group_count_t: pl.Tensor[[1], pl.INT32],
+    groups_tid: pl.Scalar[pl.TASK_ID],
     score_arena: pl.Tensor[[SCORE_ARENA_ROWS, TOPK_CANDIDATES_PER_LEAF], pl.FP32],
     pair_arena: pl.Tensor[[TOPK_ARENA_ROWS, TOPK_PAIR_WIDTH], pl.FP32],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -681,6 +758,9 @@ def indexer_score_topk_native_cube(
         qr_hadamard_scale_dq,
         weights,
         position_ids,
+        group_row,
+        group_count_t,
+        groups_tid,
         qh_quant_tid,
         weights_tid,
         query_group_size,
@@ -691,12 +771,11 @@ def indexer_score_topk_native_cube(
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_native_pair",
-        deps=[coefficients_tid, cache_write_tid],
+        deps=[groups_tid, coefficients_tid, cache_write_tid],
         sync_start=score_sync_start,
         allow_early_resolve=score_early_resolve,
     ) as buffered_leaf_tid:
         buf_worker = pl.tile.get_block_idx()
-        buf_query_count = pl.tensor.dim(position_ids, 0)
         buf_max_cache_len = 0
         for buf_batch in pl.range(pl.tensor.dim(kv_seq_lens, 0)):
             buf_max_cache_len = pl.max(buf_max_cache_len, pl.read(kv_seq_lens, [buf_batch]) // COMPRESS_RATIO)
@@ -704,22 +783,27 @@ def indexer_score_topk_native_cube(
         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
         buf_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
         buf_extra_leaves = 0
+        buf_group_count = pl.cast(pl.read(group_count_t, [0]), pl.INDEX)
         if balance_leaves:
             buf_max_leaves, buf_leaf_tiles, buf_extra_leaves = indexer_long_leaf_plan(
-                buf_capped_history, buf_query_count // query_group_size
+                buf_capped_history, buf_group_count
             )
         pl.system.set_ffts(buf_score_ffts)
-        # S=6可作为一整组或三组2，均不跨请求；共享Key用组内最后query可见范围。
-        for buf_item in pl.range(buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS):
-            if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+        # 组不跨请求（见 indexer_build_query_groups）；共享Key用组内最后query可见范围。
+        for buf_item in pl.range(buf_worker, buf_group_count * buf_max_leaves, TOPK_SCORE_WORKERS):
+            if buf_group_count < TOPK_SCORE_WORKERS:
                 # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
-                buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
-                buf_leaf = buf_item // (buf_query_count // query_group_size)
+                buf_group = buf_item % buf_group_count
+                buf_leaf = buf_item // buf_group_count
             else:
-                buf_query = buf_item // buf_max_leaves * query_group_size
+                buf_group = buf_item // buf_max_leaves
                 buf_leaf = buf_item % buf_max_leaves
+            buf_query = pl.cast(pl.read(group_row, [buf_group]), pl.INDEX)
+            buf_group_rows = pl.cast(pl.read(group_rows, [buf_group]), pl.INDEX)
             buf_batch_idx = pl.cast(pl.read(token_request, [buf_query]), pl.INDEX)
-            buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
+            # 组内最后一个**有效**query；末组不满时不能用 query_group_size - 1，
+            # 那会读到下一个请求的 position（position_ids 只有 t_dim 行，还可能越界）。
+            buf_last_position = pl.read(position_ids, [buf_query + buf_group_rows - 1])
             buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
             buf_visible_count = pl.max(
                 pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
@@ -746,7 +830,7 @@ def indexer_score_topk_native_cube(
                 )
                 buf_coefficients_l1 = pl.load(
                     coefficients,
-                    [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
+                    [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
                     [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
                     target_memory=pl.MemorySpace.Mat,
                 )
@@ -792,8 +876,10 @@ def indexer_score_topk_native_cube(
                             )
                             if balance_leaves:
                                 buf_prime_key_row = (
-                                    buf_logical_begin + buf_score_begin
-                                    + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
+                                    buf_logical_begin
+                                    + buf_score_begin
+                                    + buf_prime_col
+                                    + buf_prime_key_page * BLOCK_SIZE
                                 )
                             buf_prime_safe_page = pl.min(
                                 buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
@@ -859,8 +945,9 @@ def indexer_score_topk_native_cube(
                                     + buf_key_page * BLOCK_SIZE
                                 )
                                 if balance_leaves:
-                                    buf_key_row = (buf_logical_begin + buf_score_begin
-                                                   + buf_load_col + buf_key_page * BLOCK_SIZE)
+                                    buf_key_row = (
+                                        buf_logical_begin + buf_score_begin + buf_load_col + buf_key_page * BLOCK_SIZE
+                                    )
                                 buf_safe_page = pl.min(
                                     buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
                                 )
@@ -975,21 +1062,23 @@ def indexer_score_topk_native_cube(
 
         for buf_score_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
             if balance_leaves:
-                for single_item in pl.range(
-                    buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
-                ):
-                    if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
-                        single_query = single_item % (buf_query_count // query_group_size) * query_group_size
-                        single_leaf = single_item // (buf_query_count // query_group_size)
+                for single_item in pl.range(buf_worker, buf_group_count * buf_max_leaves, TOPK_SCORE_WORKERS):
+                    if buf_group_count < TOPK_SCORE_WORKERS:
+                        single_group = single_item % buf_group_count
+                        single_leaf = single_item // buf_group_count
                     else:
-                        single_query = single_item // buf_max_leaves * query_group_size
+                        single_group = single_item // buf_max_leaves
                         single_leaf = single_item % buf_max_leaves
+                    single_query = pl.cast(pl.read(group_row, [single_group]), pl.INDEX)
+                    single_group_rows = pl.cast(pl.read(group_rows, [single_group]), pl.INDEX)
                     single_batch = pl.cast(pl.read(token_request, [single_query]), pl.INDEX)
                     single_cache_len = pl.read(kv_seq_lens, [single_batch]) // COMPRESS_RATIO
-                    single_last_position = pl.read(position_ids, [single_query + query_group_size - 1])
+                    single_last_position = pl.read(position_ids, [single_query + single_group_rows - 1])
                     single_visible = pl.max(
-                        pl.min(pl.min(single_cache_len, (single_last_position + 1) // COMPRESS_RATIO),
-                               TOPK_MAX_CANDIDATES), 0
+                        pl.min(
+                            pl.min(single_cache_len, (single_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
+                        ),
+                        0,
                     )
                     single_begin = (single_leaf * buf_leaf_tiles + pl.min(single_leaf, buf_extra_leaves)) * score_tile
                     single_capacity = (buf_leaf_tiles + pl.cast(single_leaf < buf_extra_leaves, pl.INDEX)) * score_tile
@@ -1007,7 +1096,8 @@ def indexer_score_topk_native_cube(
                         for single_step in pl.range(single_steps):
                             single_score_begin = single_begin + single_step * score_tile
                             single_transfer_row = (
-                                buf_worker * 2 * query_group_size + single_step % 2 * query_group_size
+                                buf_worker * 2 * query_group_size
+                                + single_step % 2 * query_group_size
                                 + buf_score_lane * (query_group_size // 2)
                             )
                             # Scales are shared across the three queries on one AIV. Reading
@@ -1022,9 +1112,11 @@ def indexer_score_topk_native_cube(
                                     pl.cast(pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX), 0
                                 )
                                 single_scale_bytes = pl.gather_row(
-                                    single_scale_bytes, idx_native_kv_cache,
+                                    single_scale_bytes,
+                                    idx_native_kv_cache,
                                     [0, single_scale_page * BLOCK_SIZE * 2],
-                                    [single_scale_physical, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
+                                    [single_scale_physical, INDEXER_KEY_BYTES],
+                                    [1, BLOCK_SIZE * 2],
                                 )
                             single_scale_half = pl.tile.reinterpret_view(single_scale_bytes, pl.FP16)
                             single_kv_scale = pl.cast(single_scale_half, pl.FP32)
@@ -1052,17 +1144,30 @@ def indexer_score_topk_native_cube(
                                 )
                                 for single_local in pl.unroll(query_group_size // 2):
                                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
-                                    single_position = pl.read(position_ids, [single_query + single_query_lane])
+                                    # TND：末组不满时越界 lane 的行属于下一个请求。
+                                    # 夹逼读取避免越过 position_ids 的 t_dim，结果再由守卫丢弃；
+                                    # 不丢弃就会和那个请求自己的组抢写 pair_arena 同一行。
+                                    single_lane_live = single_query_lane < single_group_rows
+                                    single_position = pl.read(
+                                        position_ids,
+                                        [single_query + pl.min(single_query_lane, single_group_rows - 1)],
+                                    )
                                     single_query_visible = pl.max(
-                                        pl.min(pl.min(single_cache_len, (single_position + 1) // COMPRESS_RATIO),
-                                               TOPK_MAX_CANDIDATES), 0
+                                        pl.min(
+                                            pl.min(single_cache_len, (single_position + 1) // COMPRESS_RATIO),
+                                            TOPK_MAX_CANDIDATES,
+                                        ),
+                                        0,
                                     )
                                     single_segment_valid = pl.max(
                                         pl.min(single_query_visible - single_segment_begin, single_segment_span), 0
                                     )
-                                    if single_segment_valid > 0:
+                                    if single_segment_valid > 0 and single_lane_live:
                                         single_segment_data = pl.tile.extract(
-                                            single_segment_rows, single_local, 0, [1, 2 * BUFFERED_LONG_SCORE_TILE],
+                                            single_segment_rows,
+                                            single_local,
+                                            0,
+                                            [1, 2 * BUFFERED_LONG_SCORE_TILE],
                                             target_memory=pl.MemorySpace.Vec,
                                         )
                                         logical_i32 = pl.cast(single_segment_begin, pl.INT32)
@@ -1171,7 +1276,10 @@ def indexer_score_topk_native_cube(
                                             )
                                         else:
                                             single_old_root = pl.tile.extract(
-                                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH],
+                                                single_roots,
+                                                single_local,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
                                                 target_memory=pl.MemorySpace.Vec,
                                             )
                                             single_merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
@@ -1181,7 +1289,10 @@ def indexer_score_topk_native_cube(
                                                 single_new_root, single_old_root, tmp=single_merge_tmp
                                             )
                                             single_next_root = pl.tile.extract(
-                                                single_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
+                                                single_merged,
+                                                0,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
                                                 target_memory=pl.MemorySpace.Vec,
                                             )
                                             single_roots = pl.tile.assemble(
@@ -1189,25 +1300,31 @@ def indexer_score_topk_native_cube(
                                             )
                         for single_local in pl.unroll(query_group_size // 2):
                             single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
-                            single_root = pl.tile.extract(
-                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
-                            )
-                            pl.store(
-                                single_root,
-                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0], pair_arena,
-                            )
+                            if single_query_lane < single_group_rows:
+                                single_root = pl.tile.extract(
+                                    single_roots,
+                                    single_local,
+                                    0,
+                                    [1, TOPK_PAIR_WIDTH],
+                                    target_memory=pl.MemorySpace.Vec,
+                                )
+                                pl.store(
+                                    single_root,
+                                    [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
+                                    pair_arena,
+                                )
             else:
-                for buf_item in pl.range(
-                    buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
-                ):
-                    if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
-                        buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
-                        buf_leaf = buf_item // (buf_query_count // query_group_size)
+                for buf_item in pl.range(buf_worker, buf_group_count * buf_max_leaves, TOPK_SCORE_WORKERS):
+                    if buf_group_count < TOPK_SCORE_WORKERS:
+                        buf_group = buf_item % buf_group_count
+                        buf_leaf = buf_item // buf_group_count
                     else:
-                        buf_query = buf_item // buf_max_leaves * query_group_size
+                        buf_group = buf_item // buf_max_leaves
                         buf_leaf = buf_item % buf_max_leaves
+                    buf_query = pl.cast(pl.read(group_row, [buf_group]), pl.INDEX)
+                    buf_group_rows = pl.cast(pl.read(group_rows, [buf_group]), pl.INDEX)
                     buf_batch_idx = pl.cast(pl.read(token_request, [buf_query]), pl.INDEX)
-                    buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
+                    buf_last_position = pl.read(position_ids, [buf_query + buf_group_rows - 1])
                     buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
                     buf_visible_count = pl.max(
                         pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
@@ -1266,7 +1383,11 @@ def indexer_score_topk_native_cube(
                                 SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, ffts_mode=2, core_type=pl.KernelType.AIV
                             )
                             for buf_query_lane in pl.unroll(query_group_size):
-                                buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                                # TND：同上，越界 lane 夹逼读取 + 守卫丢弃。
+                                buf_lane_live = buf_query_lane < buf_group_rows
+                                buf_position = pl.read(
+                                    position_ids, [buf_query + pl.min(buf_query_lane, buf_group_rows - 1)]
+                                )
                                 buf_query_visible = pl.max(
                                     pl.min(
                                         pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
@@ -1282,7 +1403,7 @@ def indexer_score_topk_native_cube(
                                 )
                                 buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
                                 buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
-                                if buf_lane_valid_rows > 0:
+                                if buf_lane_valid_rows > 0 and buf_lane_live:
                                     pl.store(
                                         pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
                                         [
@@ -1294,66 +1415,95 @@ def indexer_score_topk_native_cube(
                             if balance_leaves:
                                 if buf_score_step == 3 and buf_score_iters > 4:
                                     for stream_lane in pl.unroll(query_group_size):
-                                        stream_position = pl.read(position_ids, [buf_query + stream_lane])
+                                        stream_position = pl.read(
+                                            position_ids,
+                                            [buf_query + pl.min(stream_lane, buf_group_rows - 1)],
+                                        )
                                         stream_visible = pl.max(
-                                            pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
-                                                   TOPK_MAX_CANDIDATES), 0
+                                            pl.min(
+                                                pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
+                                                TOPK_MAX_CANDIDATES,
+                                            ),
+                                            0,
                                         )
                                         stream_begin = buf_logical_begin + buf_lane_begin
                                         stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
-                                        if stream_valid > 0:
+                                        if stream_valid > 0 and stream_lane < buf_group_rows:
                                             stream_root = indexer_topk_segment_pairs(
                                                 score_arena,
                                                 buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
-                                                stream_begin, stream_valid, 0,
+                                                stream_begin,
+                                                stream_valid,
+                                                0,
                                             )
                                             prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
                         for buf_query_lane in pl.unroll(query_group_size):
-                            buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
-                            buf_query_visible = pl.max(
-                                pl.min(pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO),
-                                       TOPK_MAX_CANDIDATES), 0
-                            )
-                            buf_half_begin = buf_logical_begin + buf_lane_begin
-                            buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
-                            buf_half_slot = (
-                                (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
-                            )
-                            if balance_leaves and buf_score_iters > 4:
-                                if buf_half_valid > 2048:
-                                    tail = indexer_topk_segment_pairs(
-                                        score_arena,
-                                        buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                        buf_half_begin + 2048, buf_half_valid - 2048, 2048,
-                                    )
-                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
-                                    merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                                    # Preserve the later-2048-chunk priority of the
-                                    # existing 2560/3072/4096 half-leaf paths.
-                                    merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
-                                    pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
-                                             [buf_half_slot, 0], pair_arena)
+                            # TND：末组不满时越界 lane 的行属于下一个请求，那一行由
+                            # 那个请求自己的组负责发布；这里不挡就会抢写 pair_arena 同一行
+                            # （else 分支还会写 NEG_INF 把真值覆盖掉）。
+                            if buf_query_lane < buf_group_rows:
+                                buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                                buf_query_visible = pl.max(
+                                    pl.min(
+                                        pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
+                                    ),
+                                    0,
+                                )
+                                buf_half_begin = buf_logical_begin + buf_lane_begin
+                                buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
+                                buf_half_slot = (
+                                    (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
+                                )
+                                if balance_leaves and buf_score_iters > 4:
+                                    if buf_half_valid > 2048:
+                                        tail = indexer_topk_segment_pairs(
+                                            score_arena,
+                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                            buf_half_begin + 2048,
+                                            buf_half_valid - 2048,
+                                            2048,
+                                        )
+                                        prefix = pl.tile.extract(
+                                            prefix_roots,
+                                            buf_query_lane,
+                                            0,
+                                            [1, TOPK_PAIR_WIDTH],
+                                            target_memory=pl.MemorySpace.Vec,
+                                        )
+                                        merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                                        # Preserve the later-2048-chunk priority of the
+                                        # existing 2560/3072/4096 half-leaf paths.
+                                        merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
+                                        pl.store(
+                                            pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
+                                            [buf_half_slot, 0],
+                                            pair_arena,
+                                        )
+                                    else:
+                                        prefix = pl.tile.extract(
+                                            prefix_roots,
+                                            buf_query_lane,
+                                            0,
+                                            [1, TOPK_PAIR_WIDTH],
+                                            target_memory=pl.MemorySpace.Vec,
+                                        )
+                                        pl.store(prefix, [buf_half_slot, 0], pair_arena)
                                 else:
-                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
-                                    pl.store(prefix, [buf_half_slot, 0], pair_arena)
-                            else:
-                                if buf_half_valid > 0:
-                                    indexer_topk_half_leaf(
-                                        score_arena,
-                                        pair_arena,
-                                        buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                        buf_half_begin,
-                                        buf_half_valid,
-                                        buf_half_slot,
-                                    )
-                                else:
-                                    pl.store(
-                                        pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
-                                        [buf_half_slot, 0],
-                                        pair_arena,
-                                    )
+                                    if buf_half_valid > 0:
+                                        indexer_topk_half_leaf(
+                                            score_arena,
+                                            pair_arena,
+                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                            buf_half_begin,
+                                            buf_half_valid,
+                                            buf_half_slot,
+                                        )
+                                    else:
+                                        pl.store(
+                                            pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+                                            [buf_half_slot, 0],
+                                            pair_arena,
+                                        )
     return buffered_leaf_tid
 
 
@@ -1368,6 +1518,8 @@ def indexer_score_topk_forest(
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     # TND：变长请求下 query // S 不再等于请求号。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
+    # TND：组不跨请求，组边界从这里推。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
     topk_idxs: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1375,6 +1527,31 @@ def indexer_score_topk_forest(
     cache_write_tid: pl.Scalar[pl.TASK_ID],
 ):
     """Score leaves and merge Top-K roots; long S6 publishes one root per leaf."""
+    # 组表只跟 query_start_loc 和组大小有关，与走哪个分档无关。四个 native_cube
+    # 调用点共用这一个任务，避免每个点各起一个（整请求组 / 双 query 组各一份）。
+    rgroup_row = pl.create_tensor([T_PAD], dtype=pl.INT32)
+    rgroup_rows = pl.create_tensor([T_PAD], dtype=pl.INT32)
+    rgroup_count = pl.create_tensor([1], dtype=pl.INT32)
+    pgroup_row = pl.create_tensor([T_PAD], dtype=pl.INT32)
+    pgroup_rows = pl.create_tensor([T_PAD], dtype=pl.INT32)
+    pgroup_count = pl.create_tensor([1], dtype=pl.INT32)
+    with pl.at(level=pl.Level.CORE_GROUP, name_hint="indexer_query_groups") as groups_tid:
+        indexer_build_query_groups(
+            query_start_loc,
+            pl.tensor.dim(kv_seq_lens, 0),
+            rgroup_row,
+            rgroup_rows,
+            rgroup_count,
+            S,
+        )
+        indexer_build_query_groups(
+            query_start_loc,
+            pl.tensor.dim(kv_seq_lens, 0),
+            pgroup_row,
+            pgroup_rows,
+            pgroup_count,
+            2,
+        )
     b_dim = pl.tensor.dim(idx_block_table, 0)
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
     # Zero-copy GM descriptors inside orchestration, as validation log §116.
@@ -1400,7 +1577,12 @@ def indexer_score_topk_forest(
             # 短档沿用原调度；sync_start不代表各核硬件同时起跑。
             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
             # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
-            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+            # 空的补位请求不产生组，组数天然排除了它们；
+            # 直接用 B_DYN 当请求数会把补位算进来，判据就偏了。
+            if (
+                indexer_query_group_count(query_start_loc, pl.tensor.dim(kv_seq_lens, 0), S)
+                >= LONG_S6_MIN_REQUEST_GROUPS
+            ):
                 score_tid = indexer_score_topk_native_cube(
                     qr_hadamard_i8,
                     qr_hadamard_scale_dq,
@@ -1410,6 +1592,10 @@ def indexer_score_topk_forest(
                     position_ids,
                     kv_seq_lens,
                     token_request,
+                    rgroup_row,
+                    rgroup_rows,
+                    rgroup_count,
+                    groups_tid,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1434,6 +1620,10 @@ def indexer_score_topk_forest(
                     position_ids,
                     kv_seq_lens,
                     token_request,
+                    pgroup_row,
+                    pgroup_rows,
+                    pgroup_count,
+                    groups_tid,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1450,13 +1640,16 @@ def indexer_score_topk_forest(
                     False,
                 )
         else:
-            short_queries = pl.tensor.dim(position_ids, 0)
-            short_pair_waves = (short_queries // 2 + TOPK_SCORE_WORKERS - 1) // TOPK_SCORE_WORKERS
-            short_request_waves = (short_queries // S + TOPK_SCORE_WORKERS - 1) // TOPK_SCORE_WORKERS
+            short_requests = pl.tensor.dim(kv_seq_lens, 0)
+            short_pair_groups = indexer_query_group_count(query_start_loc, short_requests, 2)
+            short_request_groups = indexer_query_group_count(query_start_loc, short_requests, S)
+            short_pair_waves = (short_pair_groups + TOPK_SCORE_WORKERS - 1) // TOPK_SCORE_WORKERS
+            short_request_waves = (short_request_groups + TOPK_SCORE_WORKERS - 1) // TOPK_SCORE_WORKERS
             # 先保证整请求分组覆盖所有worker；最忙核query工作量增幅上限25%。
             # S6的B24/B40满足，B16/B32保留双query；不按脚本切换源码。
             short_use_request = pl.cast(0, pl.INT32)
-            if short_queries >= S * TOPK_SCORE_WORKERS:
+            # 原判据 short_queries >= S * WORKERS 等价于「整请求组能铺满所有 worker」。
+            if short_request_groups >= TOPK_SCORE_WORKERS:
                 if 4 * S * short_request_waves <= 5 * 2 * short_pair_waves:
                     short_use_request = pl.cast(1, pl.INT32)
             if short_use_request == 1:
@@ -1469,6 +1662,10 @@ def indexer_score_topk_forest(
                     position_ids,
                     kv_seq_lens,
                     token_request,
+                    rgroup_row,
+                    rgroup_rows,
+                    rgroup_count,
+                    groups_tid,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1493,6 +1690,10 @@ def indexer_score_topk_forest(
                     position_ids,
                     kv_seq_lens,
                     token_request,
+                    pgroup_row,
+                    pgroup_rows,
+                    pgroup_count,
+                    groups_tid,
                     score_arena,
                     pair_arena,
                     qh_quant_tid,
@@ -1649,19 +1850,39 @@ def indexer_score_topk_forest(
                 deps=[score_tid],
                 allow_early_resolve=True,
             ):
-                indexer_topk_single_leaf_publish(position_ids, kv_seq_lens, token_request, score_arena, topk_scores, topk_idxs)
+                indexer_topk_single_leaf_publish(
+                    position_ids, kv_seq_lens, token_request, score_arena, topk_scores, topk_idxs
+                )
         elif max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
             # Keep the single-leaf kernel free of the multiway branches and
             # their larger UB temporaries. The choice follows actual length.
             with pl.spmd(
                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
             ):
-                indexer_topk_query_merge(position_ids, kv_seq_lens, token_request, pair_arena, topk_scores, topk_idxs, False)
+                indexer_topk_query_merge(
+                    position_ids,
+                    kv_seq_lens,
+                    token_request,
+                    query_start_loc,
+                    pair_arena,
+                    topk_scores,
+                    topk_idxs,
+                    False,
+                )
         else:
             with pl.spmd(
                 TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
             ):
-                indexer_topk_query_merge(position_ids, kv_seq_lens, token_request, pair_arena, topk_scores, topk_idxs, True)
+                indexer_topk_query_merge(
+                    position_ids,
+                    kv_seq_lens,
+                    token_request,
+                    query_start_loc,
+                    pair_arena,
+                    topk_scores,
+                    topk_idxs,
+                    True,
+                )
 
     return topk_scores, topk_idxs, score_tid
 
@@ -1934,6 +2155,8 @@ def indexer_weights_score(
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     # TND：变长请求下 query // S 不再等于请求号。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
+    # TND：组不跨请求，组边界从这里推。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
     weights_gate_dep: pl.Scalar[pl.TASK_ID],
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
@@ -1951,6 +2174,7 @@ def indexer_weights_score(
         position_ids,
         kv_seq_lens,
         token_request,
+        query_start_loc,
         topk_scores,
         topk_idxs,
         qh_quant_tid,
@@ -1979,6 +2203,8 @@ def indexer(
     kv_seq_lens: pl.Tensor[[B_DYN], pl.INT32],
     # TND：变长请求下 query // S 不再等于请求号。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
+    # TND：组不跨请求，组边界从这里推。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
 ):
@@ -2009,6 +2235,7 @@ def indexer(
         position_ids,
         kv_seq_lens,
         token_request,
+        query_start_loc,
         cache_write_dep,
         weights_gate_dep,
         qh_quant_tid,
