@@ -464,7 +464,7 @@ def indexer_topk_query_merge(
     merge_extra_leaves = 0
     if multiway:
         max_cache_count = 0
-        for batch in pl.range(query_count // S):
+        for batch in pl.range(pl.tensor.dim(kv_seq_lens, 0)):
             max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
         query_groups = query_count // 2
         if query_count >= LONG_S6_MIN_QUERY_ROWS:
@@ -698,7 +698,7 @@ def indexer_score_topk_native_cube(
         buf_worker = pl.tile.get_block_idx()
         buf_query_count = pl.tensor.dim(position_ids, 0)
         buf_max_cache_len = 0
-        for buf_batch in pl.range(buf_query_count // S):
+        for buf_batch in pl.range(pl.tensor.dim(kv_seq_lens, 0)):
             buf_max_cache_len = pl.max(buf_max_cache_len, pl.read(kv_seq_lens, [buf_batch]) // COMPRESS_RATIO)
         buf_capped_history = pl.min(buf_max_cache_len, TOPK_MAX_CANDIDATES)
         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
@@ -1518,7 +1518,7 @@ def indexer_score_topk_forest(
             worker = pl.tile.get_block_idx()
             query_count = pl.tensor.dim(position_ids, 0)
             max_cache_len = 0
-            for batch in pl.range(query_count // S):
+            for batch in pl.range(pl.tensor.dim(kv_seq_lens, 0)):
                 batch_cache_len = pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO
                 max_cache_len = pl.max(max_cache_len, batch_cache_len)
             max_leaves = pl.max(
