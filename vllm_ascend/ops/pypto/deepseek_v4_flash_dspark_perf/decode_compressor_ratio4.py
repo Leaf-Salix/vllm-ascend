@@ -24,7 +24,12 @@ from .config import (
 from .config import (
     FLASH as M,
 )
-from .layout import COMPRESSED_ROWS_DYN, STATE_PAGE_ELEMENTS_DYN, STATE_TABLE_COLUMNS_DYN
+from .layout import (
+    COMPRESSED_ROWS_DYN,
+    QUERY_BOUNDS_DYN,
+    STATE_PAGE_ELEMENTS_DYN,
+    STATE_TABLE_COLUMNS_DYN,
+)
 
 B_DYN = pl.dynamic("DECODE_CSA_C4_B_DYN")
 
@@ -164,6 +169,8 @@ def compressor_ratio4_pool_projected(
     ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     pooled_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.FP32]],
     kv_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
     score_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
@@ -171,8 +178,6 @@ def compressor_ratio4_pool_projected(
 ):
     """Pool full-stream projected values and scores against Native paged state."""
     b_dim = pl.tensor.dim(state_table, 0)
-    bs = pl.tensor.dim(position_ids, 0)
-    s_dim = bs // b_dim
     cmp4_kv_proj_pad = kv_proj_pad
     cmp4_score_proj_pad = score_proj_pad
 
@@ -187,13 +192,19 @@ def compressor_ratio4_pool_projected(
     ) as pool_tid:
         pool_worker = pl.tile.get_block_idx()
         for c_idx in pl.range(pool_worker, b_dim, pool_workers):
-            first_pos_b = pl.read(position_ids, [c_idx * s_dim])
+            # TND：本请求的 token 区间来自 query_start_loc，不再是 c_idx * s_dim。
+            # 空请求（begin == end）下读 position_ids[begin] 会串到下一个请求，
+            # 所以 first_pos_b 先给定值，再按条件覆盖。
+            request_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
+            first_pos_b = pl.cast(0, pl.INDEX)
+            if request_begin < request_end:
+                first_pos_b = pl.read(position_ids, [request_begin])
             # Native 把补位请求的 seq_lens 清零（model_runner_v1.py:1162），真实 decode
             # 请求恒 >= S，故此处可无歧义识别补位。补位 token 的 position 是上一步的
             # 陈旧残留，用它推算的 state 列号会落到本请求页表之外，必须跳过。
             c_len = pl.read(seq_lens, [c_idx])
-            for s_idx in pl.range(s_dim):
-                token = c_idx * s_dim + s_idx
+            for token in pl.range(request_begin, request_end):
                 token_pos = pl.read(position_ids, [token])
                 # 置零保持无条件：补位 token 的 pooled_kv 仍要有确定值，
                 # 否则后续 RMSNorm 会在未初始化数据上产生非有限值。
@@ -226,17 +237,24 @@ def compressor_ratio4_pool_projected(
                                 if history_page >= 0:
                                     history_column = (
                                         pl.cast(logical_pos % COMPRESS_STATE_BLOCK_SIZE, pl.INDEX) * COMPRESS_STATE_DIM
-                                        + state_half + h0
+                                        + state_half
+                                        + h0
                                     )
                                     value = pl.load(compress_state, [history_page, history_column], [1, POOL_HEAD_TILE])
-                                    score = pl.load(compress_state, [history_page, history_column + OUT_DIM], [1, POOL_HEAD_TILE])
+                                    score = pl.load(
+                                        compress_state, [history_page, history_column + OUT_DIM], [1, POOL_HEAD_TILE]
+                                    )
                             if logical_pos >= first_pos_b:
                                 if logical_pos <= token_pos:
-                                    overlay_token = c_idx * s_dim + logical_pos - first_pos_b
+                                    overlay_token = request_begin + logical_pos - first_pos_b
                                     ape_row = pl.cast(logical_pos % COMPRESS_RATIO, target_type=pl.INDEX)
-                                    value = pl.load(cmp4_kv_proj_pad, [overlay_token, state_half + h0], [1, POOL_HEAD_TILE])
+                                    value = pl.load(
+                                        cmp4_kv_proj_pad, [overlay_token, state_half + h0], [1, POOL_HEAD_TILE]
+                                    )
                                     score = pl.add(
-                                        pl.load(cmp4_score_proj_pad, [overlay_token, state_half + h0], [1, POOL_HEAD_TILE]),
+                                        pl.load(
+                                            cmp4_score_proj_pad, [overlay_token, state_half + h0], [1, POOL_HEAD_TILE]
+                                        ),
                                         pl.load(ape, [ape_row, state_half + h0], [1, POOL_HEAD_TILE]),
                                     )
                             mi_next = pl.maximum(mi, score)
@@ -260,6 +278,8 @@ def compressor_ratio4_pool(
     ape: pl.Tensor[[COMPRESS_RATIO, OUT_DIM], pl.FP32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     pooled_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.FP32]],
     kv_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
     score_proj_pad: pl.Out[pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32]],
@@ -280,6 +300,7 @@ def compressor_ratio4_pool(
         ape,
         position_ids,
         seq_lens,
+        query_start_loc,
         pooled_kv,
         kv_proj_pad,
         score_proj_pad,
@@ -307,6 +328,8 @@ def compressor_ratio4_cache_write(
     score_proj_pad: pl.Tensor[[BS_PAD, OUT_DIM], pl.FP32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     pool_tid: pl.Scalar[pl.TASK_ID],
     late_write_dep: pl.Scalar[pl.TASK_ID],
@@ -314,7 +337,6 @@ def compressor_ratio4_cache_write(
     """State commit, RMSNorm + RoPE over the pooled rows, and the compressed KV cache write."""
     b_dim = pl.tensor.dim(state_table, 0)
     bs = pl.tensor.dim(position_ids, 0)
-    s_dim = bs // b_dim
     rms_blocks = (bs + RMS_PAD_TILE - 1) // RMS_PAD_TILE
     cmp_block_num = pl.tensor.dim(cmp_kv_cache, 0)
     kv_flat = kv
@@ -327,8 +349,10 @@ def compressor_ratio4_cache_write(
     with pl.spmd(commit_workers, name_hint="compress_state_commit", deps=[pool_tid, late_write_dep]):
         commit_worker = pl.tile.get_block_idx()
         for c_idx in pl.range(commit_worker, b_dim, commit_workers):
-            for s_idx in pl.range(s_dim):
-                token = c_idx * s_dim + s_idx
+            # TND：同上，按 query_start_loc 取本请求的 token 区间。
+            commit_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
+            commit_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
+            for token in pl.range(commit_begin, commit_end):
                 state_page = pl.read(state_slot_mapping, [token, 0])
                 state_offset = pl.read(state_slot_mapping, [token, 1])
                 if state_page >= 0 and state_offset >= 0:
@@ -336,17 +360,13 @@ def compressor_ratio4_cache_write(
                     native_page = pl.cast(state_page, pl.INDEX)
                     native_column = pl.cast(state_offset, pl.INDEX) * COMPRESS_STATE_DIM
                     ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
-                    compress_state[
-                        native_page : native_page + 1, native_column : native_column + OUT_DIM
-                    ] = cmp4_kv_proj_pad[
-                        token : token + 1, 0:OUT_DIM
-                    ]
+                    compress_state[native_page : native_page + 1, native_column : native_column + OUT_DIM] = (
+                        cmp4_kv_proj_pad[token : token + 1, 0:OUT_DIM]
+                    )
                     compress_state[
                         native_page : native_page + 1,
                         native_column + OUT_DIM : native_column + COMPRESS_STATE_DIM,
-                    ] = pl.add(
-                        cmp4_score_proj_pad[token : token + 1, 0:OUT_DIM], ape[ape_row : ape_row + 1, 0:OUT_DIM]
-                    )
+                    ] = pl.add(cmp4_score_proj_pad[token : token + 1, 0:OUT_DIM], ape[ape_row : ape_row + 1, 0:OUT_DIM])
 
     normed_kv = pl.create_tensor([BS_PAD, HEAD_DIM], dtype=pl.FP32)
     norm_w_2d = pl.reshape(norm_w, [1, HEAD_DIM])
@@ -360,7 +380,13 @@ def compressor_ratio4_cache_write(
         b0 = rms_blk * RMS_PAD_TILE
         rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
         cos_b, sin_b = load_compact_rope_rows(
-            cos, sin, token_request, position_ids, compact_offsets, b0, rms_blk_rows,
+            cos,
+            sin,
+            token_request,
+            position_ids,
+            compact_offsets,
+            b0,
+            rms_blk_rows,
         )
         # 平方和先折半到 64 列再做一次 row_sum，比逐 64 列各做一次 row_sum 指令更少。
         rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0 : HEAD_DIM // 2]
@@ -418,7 +444,9 @@ def compressor_ratio4_cache_write(
                     cache_row = pl.cast(cache_page, pl.INDEX) * BLOCK_SIZE + cache_offset
                     kv_row_fp32 = normed_kv[token : token + 1, 0:HEAD_DIM]
                     kv_flat[token : token + 1, :] = kv_row_fp32
-                    cmp_kv_cache_flat[cache_row : cache_row + 1, :] = pl.cast(kv_row_fp32, target_type=pl.BF16, mode="rint")
+                    cmp_kv_cache_flat[cache_row : cache_row + 1, :] = pl.cast(
+                        kv_row_fp32, target_type=pl.BF16, mode="rint"
+                    )
 
     return cache_write_tid
 
@@ -441,6 +469,8 @@ def compressor_ratio4(
     cmp_kv_cache: pl.Tensor[[CMP_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     cmp_slot_mapping: pl.Tensor[[COMPRESSED_ROWS_DYN, 2], pl.INT32],
     state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
@@ -457,6 +487,7 @@ def compressor_ratio4(
         ape,
         position_ids,
         seq_lens,
+        query_start_loc,
         pooled_kv,
         kv_proj_pad,
         score_proj_pad,
@@ -479,6 +510,7 @@ def compressor_ratio4(
         score_proj_pad,
         position_ids,
         seq_lens,
+        query_start_loc,
         state_slot_mapping,
         pool_tid,
         pool_tid,

@@ -117,9 +117,9 @@ CSA_PROJECTION_PACK_ROW_TILE = 8
 CSA_PROJECTION_PACK_WORKERS = 16
 CSA_ALL_VISIBLE_WORKERS = 16
 CSA_WB_TOKEN_TILE = 8
-HC_WIDEN_T_TILE = 8    # hc 残差流 BF16->FP32 的行块
+HC_WIDEN_T_TILE = 8  # hc 残差流 BF16->FP32 的行块
 HC_WIDEN_D_TILE = RMS_K_TILE  # 与原RMS的512列归约分段一致。
-HC_WIDEN_WORKERS = 48   # 同上，AIV 通道数
+HC_WIDEN_WORKERS = 48  # 同上，AIV 通道数
 CSA_ROPE_SIGN_T_TILE = 4  # RoPE 符号行块，沿用上游 csa_rope_interleave 的 4 行
 CSA_ROPE_WORKERS = 16
 CSA_WB_WORKERS = 48  # CSA cache-write workers
@@ -264,18 +264,18 @@ def _decode_csa_tp1_layer(
     inv_rms = pl.create_tensor([hc_padded_rows, 1], dtype=pl.FP32)
     widen_tail = pl.create_tensor([HC_WIDEN_T_TILE, HC_MULT * D], dtype=pl.FP32)
     with pl.spmd(pl.min(widen_rows, HC_WIDEN_WORKERS), name_hint="hc_widen_rms") as _widen_tid:
-        for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows,
-                                  pl.min(widen_rows, HC_WIDEN_WORKERS)):
+        for widen_blk in pl.range(pl.tile.get_block_idx(), widen_rows, pl.min(widen_rows, HC_WIDEN_WORKERS)):
             w_t0 = widen_blk * HC_WIDEN_T_TILE
             w_rows = pl.min(HC_WIDEN_T_TILE, t_dim - w_t0)
             w_sq_sum = pl.full([1, HC_WIDEN_T_TILE], dtype=pl.FP32, value=0.0)
             for w_db in pl.pipeline(HC_MULT * D // HC_WIDEN_D_TILE, stage=4):
                 w_d0 = w_db * HC_WIDEN_D_TILE
-                w_src = pl.slice(x_hc_flat, [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE], [w_t0, w_d0],
-                                 valid_shape=[w_rows, HC_WIDEN_D_TILE])
+                w_src = pl.slice(
+                    x_hc_flat, [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE], [w_t0, w_d0], valid_shape=[w_rows, HC_WIDEN_D_TILE]
+                )
                 w_val = pl.cast(w_src, pl.FP32)
                 if w_rows == HC_WIDEN_T_TILE:
-                    x_hc32_flat[w_t0:w_t0 + HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
+                    x_hc32_flat[w_t0 : w_t0 + HC_WIDEN_T_TILE, w_d0 : w_d0 + HC_WIDEN_D_TILE] = w_val
                     w_sq = pl.mul(w_val, w_val)
                     w_sq_row = pl.reshape(pl.row_sum(w_sq), [1, HC_WIDEN_T_TILE])
                     w_sq_sum = pl.add(w_sq_sum, w_sq_row)
@@ -286,21 +286,31 @@ def _decode_csa_tp1_layer(
                     w_sq_tail = pl.mul(w_clean, w_clean)
                     w_sq_row_tail = pl.reshape(pl.row_sum(w_sq_tail), [1, HC_WIDEN_T_TILE])
                     w_sq_sum = pl.add(w_sq_sum, w_sq_row_tail)
-                    widen_tail[0:HC_WIDEN_T_TILE, w_d0:w_d0 + HC_WIDEN_D_TILE] = w_val
+                    widen_tail[0:HC_WIDEN_T_TILE, w_d0 : w_d0 + HC_WIDEN_D_TILE] = w_val
                     w_out = pl.load(
-                        widen_tail, [0, w_d0], [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE],
-                        valid_shape=[w_rows, HC_WIDEN_D_TILE], target_memory=pl.MemorySpace.Vec,
+                        widen_tail,
+                        [0, w_d0],
+                        [HC_WIDEN_T_TILE, HC_WIDEN_D_TILE],
+                        valid_shape=[w_rows, HC_WIDEN_D_TILE],
+                        target_memory=pl.MemorySpace.Vec,
                     )
                     pl.store(w_out, [w_t0, w_d0], x_hc32_flat)
             w_mean = pl.add(pl.mul(w_sq_sum, HC_DIM_INV), NORM_EPS)
             w_inv = pl.reshape(pl.rsqrt(w_mean, high_precision=True), [HC_WIDEN_T_TILE, 1])
-            inv_rms[w_t0:w_t0 + HC_WIDEN_T_TILE, 0:1] = w_inv
+            inv_rms[w_t0 : w_t0 + HC_WIDEN_T_TILE, 0:1] = w_inv
 
     with pl.scope():
         pre_val_store = pl.create_tensor([hc_padded_rows, HC_PAD], dtype=pl.FP32)
         hc_pre_gates_from_rms(
-            x_hc32, hc_attn_fn, hc_attn_scale, hc_attn_base,
-            pre_val_store, post_t, comb_t, False, inv_rms,
+            x_hc32,
+            hc_attn_fn,
+            hc_attn_scale,
+            hc_attn_base,
+            pre_val_store,
+            post_t,
+            comb_t,
+            False,
+            inv_rms,
         )
         hc_mix_norm(x_hc32, pre_val_store, attn_norm_w, x_normed_t)
     wb_blocks = (t_dim + CSA_WB_TOKEN_TILE - 1) // CSA_WB_TOKEN_TILE
@@ -319,16 +329,16 @@ def _decode_csa_tp1_layer(
         build_compact_row_offsets(cmp_query_start_loc, cmp_seq_lens, cmp_row_offsets)
         build_compact_row_offsets(idx_query_start_loc, kv_seq_lens, idx_row_offsets)
         build_token_request(
-            query_start_loc, pl.tensor.dim(kv_seq_lens, 0), token_request,
+            query_start_loc,
+            pl.tensor.dim(kv_seq_lens, 0),
+            token_request,
         )
 
     # 向上取整分块并保留 valid_shape：t_dim = batch*6 不保证是 4 的倍数，
     # 上游 csa_rope_interleave 用的 t_dim // 4 会丢掉尾行（batch=1 时 t_dim=6 只覆盖 0~3）。
     rope_sign_blocks = (t_dim + CSA_ROPE_SIGN_T_TILE - 1) // CSA_ROPE_SIGN_T_TILE
-    with pl.spmd(pl.min(rope_sign_blocks, CSA_ROPE_WORKERS), name_hint="csa_rope_sign",
-                 deps=[offsets_tid]) as rope_tid:
-        for rope_rb in pl.range(pl.tile.get_block_idx(), rope_sign_blocks,
-                                pl.min(rope_sign_blocks, CSA_ROPE_WORKERS)):
+    with pl.spmd(pl.min(rope_sign_blocks, CSA_ROPE_WORKERS), name_hint="csa_rope_sign", deps=[offsets_tid]) as rope_tid:
+        for rope_rb in pl.range(pl.tile.get_block_idx(), rope_sign_blocks, pl.min(rope_sign_blocks, CSA_ROPE_WORKERS)):
             rope_t0 = rope_rb * CSA_ROPE_SIGN_T_TILE
             rope_rows = pl.min(CSA_ROPE_SIGN_T_TILE, t_dim - rope_t0)
             # 符号表按块重算：SPMD 下每个 worker 要有自己的一份。
@@ -338,8 +348,9 @@ def _decode_csa_tp1_layer(
             il_dup_f = pl.cast(pl.cast(pl.mul(il_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32)
             il_lane = pl.sub(il_col, pl.mul(il_dup_f, 2.0))
             il_sign = pl.sub(pl.mul(il_lane, 2.0), 1.0)
-            rope_sin_rows = pl.load(freqs_sin, [rope_t0, 0], [CSA_ROPE_SIGN_T_TILE, ROPE_HEAD_DIM],
-                                    valid_shape=[rope_rows, ROPE_HEAD_DIM])
+            rope_sin_rows = pl.load(
+                freqs_sin, [rope_t0, 0], [CSA_ROPE_SIGN_T_TILE, ROPE_HEAD_DIM], valid_shape=[rope_rows, ROPE_HEAD_DIM]
+            )
             rope_sign_rows = pl.set_validshape(il_sign, rope_rows, ROPE_HEAD_DIM)
             pl.store(pl.mul(rope_sin_rows, rope_sign_rows), [rope_t0, 0], idx_sin_signed)
 
@@ -402,6 +413,7 @@ def _decode_csa_tp1_layer(
             cmp_kv,
             position_ids,
             cmp_seq_lens,
+            query_start_loc,
             cmp_slot_mapping,
             state_slot_mapping,
             compressor_dep,
@@ -424,6 +436,7 @@ def _decode_csa_tp1_layer(
             idx_native_kv_cache,
             position_ids,
             kv_seq_lens,
+            query_start_loc,
             idx_slot_mapping,
             inner_state_slot_mapping,
             late_dep,
@@ -472,7 +485,15 @@ def _decode_csa_tp1_layer(
         )
         with pl.scope():
             x_out = decode_o_proj_tp1(
-                o_packed_heads, wo_a, wo_b, wo_b_scale, x_hc, post_t, comb_t, x_out, heads_dep,
+                o_packed_heads,
+                wo_a,
+                wo_b,
+                wo_b_scale,
+                x_hc,
+                post_t,
+                comb_t,
+                x_out,
+                heads_dep,
             )
     return x_out
 

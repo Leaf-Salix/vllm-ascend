@@ -31,6 +31,7 @@ from .layout import (
     INDEXER_ROWS_DYN,
     INNER_STATE_PAGE_ELEMENTS_DYN,
     INNER_STATE_TABLE_COLUMNS_DYN,
+    QUERY_BOUNDS_DYN,
 )
 
 B_DYN = pl.dynamic("DECODE_IDX_C4_B_DYN")
@@ -172,6 +173,8 @@ def indexer_compressor_pool_projected(
     # TND：token 的请求号来自查表。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     pooled_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.FP32]],
     normed_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16]],
@@ -181,7 +184,6 @@ def indexer_compressor_pool_projected(
     """Pool projected rows, commit state, and normalize boundary KV rows."""
     b_dim = pl.tensor.dim(state_table, 0)
     bs = pl.tensor.dim(position_ids, 0)
-    s_dim = bs // b_dim
     rms_blocks = (bs + RMS_PAD_TILE - 1) // RMS_PAD_TILE
 
     _kv_score_tid = late_dep
@@ -191,9 +193,15 @@ def indexer_compressor_pool_projected(
     with pl.spmd(pool_workers, name_hint="scatter_softmax_pool", deps=[_kv_score_tid]) as pool_tid:
         pool_worker = pl.tile.get_block_idx()
         for c_idx in pl.range(pool_worker, b_dim, pool_workers):
-            first_pos_b = pl.read(position_ids, [c_idx * s_dim])
-            for s_idx in pl.range(s_dim):
-                token = c_idx * s_dim + s_idx
+            # TND：本请求的 token 区间来自 query_start_loc，不再是 c_idx * s_dim。
+            # 空请求（begin == end）下读 position_ids[begin] 会串到下一个请求，
+            # 所以 first_pos_b 先给定值，再按条件覆盖。
+            request_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
+            first_pos_b = pl.cast(0, pl.INDEX)
+            if request_begin < request_end:
+                first_pos_b = pl.read(position_ids, [request_begin])
+            for token in pl.range(request_begin, request_end):
                 token_pos = pl.read(position_ids, [token])
                 pooled_kv[token : token + 1, :] = pl.full([1, HEAD_DIM], dtype=pl.FP32, value=0.0)
                 if (token_pos + 1) % COMPRESS_RATIO == 0:
@@ -238,7 +246,7 @@ def indexer_compressor_pool_projected(
                                     ]
                             if logical_pos >= first_pos_b:
                                 if logical_pos <= token_pos:
-                                    overlay_token = c_idx * s_dim + logical_pos - first_pos_b
+                                    overlay_token = request_begin + logical_pos - first_pos_b
                                     ape_row = pl.cast(logical_pos % COMPRESS_RATIO, target_type=pl.INDEX)
                                     value = kv_proj_pad[
                                         overlay_token : overlay_token + 1,
@@ -267,8 +275,10 @@ def indexer_compressor_pool_projected(
     with pl.spmd(commit_workers, name_hint="compress_state_commit", deps=[pool_tid]):
         commit_worker = pl.tile.get_block_idx()
         for c_idx in pl.range(commit_worker, b_dim, commit_workers):
-            for s_idx in pl.range(s_dim):
-                token = c_idx * s_dim + s_idx
+            # TND：同上，按 query_start_loc 取本请求的 token 区间。
+            commit_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
+            commit_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
+            for token in pl.range(commit_begin, commit_end):
                 state_page = pl.read(inner_state_slot_mapping, [token, 0])
                 state_offset = pl.read(inner_state_slot_mapping, [token, 1])
                 if state_page >= 0 and state_offset >= 0:
@@ -276,11 +286,9 @@ def indexer_compressor_pool_projected(
                     native_page = pl.cast(state_page, pl.INDEX)
                     native_column = pl.cast(state_offset, pl.INDEX) * COMPRESS_STATE_DIM
                     ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
-                    compress_state[
-                        native_page : native_page + 1, native_column : native_column + OUT_DIM
-                    ] = kv_proj_pad[
-                        token : token + 1, 0:OUT_DIM
-                    ]
+                    compress_state[native_page : native_page + 1, native_column : native_column + OUT_DIM] = (
+                        kv_proj_pad[token : token + 1, 0:OUT_DIM]
+                    )
                     compress_state[
                         native_page : native_page + 1,
                         native_column + OUT_DIM : native_column + COMPRESS_STATE_DIM,
@@ -313,8 +321,14 @@ def indexer_compressor_pool_projected(
             b0 = rms_blk * RMS_PAD_TILE
             rms_blk_rows = pl.min(RMS_PAD_TILE, bs - b0)
             cos_b, sin_b = load_compact_rope_rows(
-            cos, sin, token_request, position_ids, compact_offsets, b0, rms_blk_rows,
-        )
+                cos,
+                sin,
+                token_request,
+                position_ids,
+                compact_offsets,
+                b0,
+                rms_blk_rows,
+            )
             # 平方和先把两段 64 列折到一起再做一次 row_sum。
             kv_rms_low = pooled_kv[b0 : b0 + RMS_PAD_TILE, 0:HEAD_TILE]
             kv_rms_high = pooled_kv[b0 : b0 + RMS_PAD_TILE, HEAD_TILE:HEAD_DIM]
@@ -339,10 +353,16 @@ def indexer_compressor_pool_projected(
                 token = b0 + inner
                 token_pos = pl.read(position_ids, [token])
                 if (token_pos + 1) % COMPRESS_RATIO == 0:
-                    request = token // S
-                    first_pos = pl.read(position_ids, [request * S])
+                    # TND：请求号查表，请求内偏移用 token - request_begin 代替 token % S。
+                    # 内部紧凑缓冲仍按每请求 BOUNDARY_ROWS_PER_REQUEST 容量分槽，
+                    # 变长下单请求 token 数不超过 S，容量上界不变，布局无需改动。
+                    request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+                    request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+                    first_pos = pl.read(position_ids, [request_begin])
                     first_boundary = COMPRESS_RATIO - 1 - first_pos % COMPRESS_RATIO
-                    compact_token = request * BOUNDARY_ROWS_PER_REQUEST + (token % S - first_boundary) // COMPRESS_RATIO
+                    compact_token = (
+                        request * BOUNDARY_ROWS_PER_REQUEST + (token - request_begin - first_boundary) // COMPRESS_RATIO
+                    )
                     normed_kv[compact_token : compact_token + 1, 0:NOPE_HEAD_DIM] = normed_nope[inner : inner + 1, :]
                     normed_kv[compact_token : compact_token + 1, NOPE_HEAD_DIM:HEAD_DIM] = normed_rope[
                         inner : inner + 1, :
@@ -366,6 +386,8 @@ def indexer_compressor_pool(
     # TND：token 的请求号来自查表。
     token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     normed_kv: pl.Out[pl.Tensor[[BS_PAD, HEAD_DIM], pl.BF16]],
     late_dep: pl.Scalar[pl.TASK_ID],
@@ -396,6 +418,7 @@ def indexer_compressor_pool(
         compact_offsets,
         token_request,
         position_ids,
+        query_start_loc,
         inner_state_slot_mapping,
         pooled_kv,
         normed_kv,
@@ -417,12 +440,13 @@ def indexer_compressor_write(
     token_request: pl.Tensor[[T_DYN], pl.INT32],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 request * S，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     rms_tid: pl.Scalar[pl.TASK_ID],
     hadamard_dep: pl.Scalar[pl.TASK_ID],
 ):
     """Rotate compact boundary rows and write their quantized indexer KV cache."""
-    bs = pl.tensor.dim(position_ids, 0)
-    compact_rows = (bs // S) * BOUNDARY_ROWS_PER_REQUEST
+    compact_rows = pl.tensor.dim(seq_lens, 0) * BOUNDARY_ROWS_PER_REQUEST
     rms_blocks = (compact_rows + RMS_PAD_TILE - 1) // RMS_PAD_TILE
     kv_flat = kv
     idx_kv_scale_values = pl.create_tensor([BS_PAD, 1], dtype=pl.FP32)
@@ -479,7 +503,12 @@ def indexer_compressor_write(
         for inner in pl.range(wr_blk_rows):
             compact_token = wr_b0 + inner
             request = compact_token // BOUNDARY_ROWS_PER_REQUEST
-            first_pos = pl.read(position_ids, [request * S])
+            # TND：本请求的 token 区间来自 query_start_loc。
+            request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+            first_pos = pl.cast(0, pl.INDEX)
+            if request_begin < request_end:
+                first_pos = pl.read(position_ids, [request_begin])
             local_token = (
                 (compact_token % BOUNDARY_ROWS_PER_REQUEST) * COMPRESS_RATIO
                 + COMPRESS_RATIO
@@ -489,8 +518,8 @@ def indexer_compressor_write(
             # compact metadata 按本步实际 token 数分配；补位请求的 position 是上一步残留，
             # 据此推出的行号会越界（实测 84 vs 8 行）。Native 把补位请求 seq_lens 清零，
             # 真实 decode 请求恒 >= S，故可无歧义排除。
-            if pl.read(seq_lens, [request]) > 0 and local_token < S:
-                token = request * S + local_token
+            if pl.read(seq_lens, [request]) > 0 and local_token < request_end - request_begin:
+                token = request_begin + local_token
                 token_pos = pl.read(position_ids, [token])
                 metadata_row = pl.cast(pl.read(compact_offsets, [request]), pl.INDEX) + pl.cast(
                     (token_pos + 1) // COMPRESS_RATIO, pl.INDEX
@@ -521,7 +550,12 @@ def indexer_compressor_write(
     ) as scale_commit_tid:
         for compact_token in pl.range(compact_rows):
             request = compact_token // BOUNDARY_ROWS_PER_REQUEST
-            first_pos = pl.read(position_ids, [request * S])
+            # TND：本请求的 token 区间来自 query_start_loc。
+            request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
+            request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
+            first_pos = pl.cast(0, pl.INDEX)
+            if request_begin < request_end:
+                first_pos = pl.read(position_ids, [request_begin])
             local_token = (
                 (compact_token % BOUNDARY_ROWS_PER_REQUEST) * COMPRESS_RATIO
                 + COMPRESS_RATIO
@@ -531,8 +565,8 @@ def indexer_compressor_write(
             # compact metadata 按本步实际 token 数分配；补位请求的 position 是上一步残留，
             # 据此推出的行号会越界（实测 84 vs 8 行）。Native 把补位请求 seq_lens 清零，
             # 真实 decode 请求恒 >= S，故可无歧义排除。
-            if pl.read(seq_lens, [request]) > 0 and local_token < S:
-                token = request * S + local_token
+            if pl.read(seq_lens, [request]) > 0 and local_token < request_end - request_begin:
+                token = request_begin + local_token
                 token_pos = pl.read(position_ids, [token])
                 metadata_row = pl.cast(pl.read(compact_offsets, [request]), pl.INDEX) + pl.cast(
                     (token_pos + 1) // COMPRESS_RATIO, pl.INDEX
@@ -573,10 +607,14 @@ def indexer_compressor(
     cos: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[INDEXER_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32],
     compact_offsets: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：token 的请求号来自查表。
+    token_request: pl.Tensor[[T_DYN], pl.INT32],
     hadamard: pl.Tensor[[HEAD_DIM, HEAD_DIM], pl.BF16],
     idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
     position_ids: pl.Tensor[[T_DYN], pl.INT64],
     seq_lens: pl.Tensor[[B_DYN], pl.INT32],
+    # TND：每请求的 token 起止。定长下等于 c_idx * s_dim，变长下必须查表。
+    query_start_loc: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
     idx_slot_mapping: pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32],
     inner_state_slot_mapping: pl.Tensor[[T_DYN, 2], pl.INT32],
     late_dep: pl.Scalar[pl.TASK_ID],
@@ -596,6 +634,7 @@ def indexer_compressor(
         compact_offsets,
         token_request,
         position_ids,
+        query_start_loc,
         inner_state_slot_mapping,
         normed_kv,
         late_dep,
@@ -611,6 +650,7 @@ def indexer_compressor(
         token_request,
         position_ids,
         seq_lens,
+        query_start_loc,
         rms_tid,
         hadamard_dep,
     )
