@@ -239,8 +239,8 @@ def prepare_weights(
 class NativeCSACall:
     """Fixed-address eager/graph call for packed target requests.
 
-    整档中可以含补位请求：它们由 kernel 内的 seq_lens 判据屏蔽，此处只校验真实
-    部分仍是完整六行请求。模型前向的派发仍由各自的闸门决定。
+    真实请求按 Native query_start_loc 保留各自1～6行边界；整档中的补位请求
+    由 kernel 内的 seq_lens 判据屏蔽。模型前向的派发仍由服务闸门决定。
     compact_metadata contains the release Native producer's device tensors;
     this descriptor binds them without materializing an expanded buffer.
     """
@@ -277,8 +277,8 @@ class NativeCSACall:
             raise ValueError("CSA expects the Native INT64 target position vector")
         for name, (metadata, _) in groups.items():
             # 补位档位下 num_actual_tokens 是**实际** token 数，小于 hidden 的整档
-            # 行数（实测 18/24）；补位请求本身由 kernel 内的 seq_lens 判据屏蔽，
-            # 这里只要求真实部分是完整的六行请求。
+            # 行数（实测 18/24）；补位请求由 kernel 内的 seq_lens 判据屏蔽，
+            # 真实请求长度由服务入口检查，kernel 按原生 query_start_loc 分组。
             if metadata.num_prefills or metadata.num_actual_tokens > tokens:
                 raise ValueError(f"{name}: requires target decode metadata without prefill rows")
             req = self.req[name]

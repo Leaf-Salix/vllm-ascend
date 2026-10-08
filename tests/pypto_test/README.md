@@ -1,5 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+本分支2026-10-08的变长TND移植、CANN9.2同场性能与精度记录见
+[TND验证文档](DSV4_FLASH_CSA_TND_20261008.md)，含固定参考SHA、失败修复及原始轮次样本。
+
 任务、约束和验收状态以 [任务清单](DSV4_FLASH_CSA_TASK_CHECKLIST.md) 为准。
 历史与当前执行过程持续记录在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，
 本轮从 [第 99 节](DSV4_FLASH_CSA_VALIDATION_LOG.md#log-20260926) 开始。
