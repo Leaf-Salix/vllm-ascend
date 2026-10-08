@@ -285,35 +285,26 @@ Native 保留实际逐层执行路径。首层 metadata 生产成本单独记录
   23 项定向单测和一个 A3 L1 写回后接第二次矩阵乘的用例通过。
   v0/v1/v2 与移植前参考属于旧工具链，不混称严格同环境 A/B。
 
-  **TND 适配分支（dev/pypto-dsv4-csa-nalinaly-tnd-20260930）改用另一套工具链**：
+  **TND 适配分支（dev/pypto-dsv4-csa-nalinaly-tnd-20260930）用 kernel-mode 支**：
   上面这套 `88f60598` 是 hw-native-sys/pypto 的 main 支，而我们全部测量基建
-  （screen.sh、空对照、n=8 协议、level-4 泳道）都绑在 **kernel-mode** 支上，
-  两者是不同产品线不是版本新旧（kernel-mode 的 `assemble` 只有三个形参，
-  整个 language 层没有 fixpipe/pre_quant 概念）。本分支用
-  `Leaf-Salix/pypto` 的 `feat/kernel-mode-fixpipe-epilogue-20260930`：
-  公共 `feat/kernel-mode-integration-test`（`54957491e`，#2867）之上
-  逐行照搬 main 的 `b9240c182`（#2838）与 `ab8e10fc3`（#2876），两次都零冲突、
-  与上游 diff 逐行一致，没有为适配改过任何一行。
-  两个都要：#2838 只开 Acc→GM，`backend_910b_handler.h` 对 `kMat` 直接
-  `return false`；而 `decode_indexer.py` 的两处 `tile.assemble` 写的是 L1(Mat)
-  再喂第二次矩阵乘，靠 #2876 才把 `kMat` 放开成 `INT32 -> FP16`
-  （正是这两处的 dtype 组合：INT8×INT8 累加成 INT32，目标 tile 是 FP16 Mat）。
-  `pl.manual_scope` 在 kernel-mode 上本来就有（`language/__init__.py` 从 `.scope`
-  导出），不是缺口。
-  两个 NZ 修复也已带上：main 的 `1d7890e9`（#2819，NZ kernel param 的逻辑
-  stride，零冲突）与 `8a944cf2`（#2860，NZ 堆叠权重跨切分/派发）。
-  #2860 在 kernel-mode 上有**未移植的前置** `46675fc48`（#2794，调用实参
-  layout 检查）：上游父版本里 `TypeChecker` 已带 `ProgramPtr` 和
-  `VisitExpr_(Call/Submit)`，kernel-mode 没有，单独 cherry-pick #2860 会留下
-  有定义无声明、`program_` 恒空的坏状态（检查静默失效）。补上 #2794 后
-  #2860 的冲突从 5 个文件降到 2 个，且都是「两边各加各的」（一处 import 列表、
-  一处各自新增的单测），保留双方即可。五个 cherry-pick 最终与上游 diff
-  **逐行一致**。
-  注意 #2794 往 verifier 加了一条新检查，是一种新的 lower 失败方式；
-  另外 perf 路径本身没有用 stacked 权重（`StackedDeviceTensor` 在
-  `vllm_ascend/ops/pypto/` 下零命中），#2860 对本分支多半是冗余的，
-  带上是为了和 nalinaly 的工具链对齐。
-  他清单第 640 行还提到的 `0c8a2753` 在 origin 上取不到，未带。
+  （screen.sh、空对照、n=8 协议、level-4 泳道）都绑在 **kernel-mode** 支上。
+  用 **纯上游 `origin/feat/kernel-mode-integration-test`**（2026-10-08 为
+  `e3ed3a0c8` #2940），**零私有 commit**。
+  它已官方带齐我们需要的东西：`fa26199e2`（#2932，缩放/ReLU 写回 +
+  INT32 Acc → FP16 L1，等于 main 的 #2838 + #2876）、`a46ac71db`（#2930，
+  Call/Submit 布局合同）、`c418f6af8`（#2929，NZ 视图与物理步长传播）、
+  `a2f53a92b`（#2931，零拷贝借原生 NZ 权重）、`6a076736d`（#2927，PTOAS 0.66）、
+  `484b3cc84`（#2928，把 Simpler gitlink 同步到 `a54c05095` —— 正是本清单钉的那版）。
+  `decode_indexer.py` 两处 `tile.assemble` 写的是 L1(Mat) 再喂第二次矩阵乘，
+  需要 `kMat -> INT32 && FP16`，上游 910B handler 已放开。
+  `pl.manual_scope` 在 kernel-mode 上本来就有，不是缺口。
+  **注意两件**：①上游 `toolchain/versions.env` 声明 `PTOAS_VERSION=v0.66`，
+  但机器上 0.66 的 wheel 对本用户不可读，闸门用的是 0.64；真机 codegen 必须换回
+  0.66。②simpler 在我们 venv 里是 editable 装的、指向基线那棵 runtime
+  （patched 32dff95），meta-path finder 盖过 PYTHONPATH；真机跑之前要把
+  submodule 里的 `a54c05095` 装进我们的 venv。
+  （2026-09-30 曾在 Leaf-Salix/pypto 上自己 cherry-pick 过 5 个 main commit，
+  上游官方移植后已作废，不再使用。）
   PyPTO 已移植主线标量读写与 NZ 视图/调度修复，同步 Simpler SDK/子模块版本；
   新 NZ 移植的 CPU 验证见 C，设备验证完成前不把旧 `f9b24ceb` 基线外推到新组合。
 - 现有 Native 扩展和 custom OPP 已具备，除非具体失败指向它们，不重复编译。
