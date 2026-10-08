@@ -198,7 +198,7 @@ def indexer_compressor_pool_projected(
             # 所以 first_pos_b 先给定值，再按条件覆盖。
             request_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
             request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
-            first_pos_b = pl.cast(0, pl.INDEX)
+            first_pos_b = pl.cast(0, pl.INT64)
             if request_begin < request_end:
                 first_pos_b = pl.read(position_ids, [request_begin])
             for token in pl.range(request_begin, request_end):
@@ -506,7 +506,7 @@ def indexer_compressor_write(
             # TND：本请求的 token 区间来自 query_start_loc。
             request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
             request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
-            first_pos = pl.cast(0, pl.INDEX)
+            first_pos = pl.cast(0, pl.INT64)
             if request_begin < request_end:
                 first_pos = pl.read(position_ids, [request_begin])
             local_token = (
@@ -553,7 +553,7 @@ def indexer_compressor_write(
             # TND：本请求的 token 区间来自 query_start_loc。
             request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
             request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
-            first_pos = pl.cast(0, pl.INDEX)
+            first_pos = pl.cast(0, pl.INT64)
             if request_begin < request_end:
                 first_pos = pl.read(position_ids, [request_begin])
             local_token = (

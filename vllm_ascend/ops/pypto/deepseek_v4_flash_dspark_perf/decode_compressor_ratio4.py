@@ -197,7 +197,7 @@ def compressor_ratio4_pool_projected(
             # 所以 first_pos_b 先给定值，再按条件覆盖。
             request_begin = pl.cast(pl.read(query_start_loc, [c_idx]), pl.INDEX)
             request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
-            first_pos_b = pl.cast(0, pl.INDEX)
+            first_pos_b = pl.cast(0, pl.INT64)
             if request_begin < request_end:
                 first_pos_b = pl.read(position_ids, [request_begin])
             # Native 把补位请求的 seq_lens 清零（model_runner_v1.py:1162），真实 decode

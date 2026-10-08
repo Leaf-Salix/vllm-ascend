@@ -1579,10 +1579,10 @@ def indexer_score_topk_forest(
             # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
             # 空的补位请求不产生组，组数天然排除了它们；
             # 直接用 B_DYN 当请求数会把补位算进来，判据就偏了。
-            if (
-                indexer_query_group_count(query_start_loc, pl.tensor.dim(kv_seq_lens, 0), S)
-                >= LONG_S6_MIN_REQUEST_GROUPS
-            ):
+            # inline 的拼接是语句级的：写在 if 的条件表达式里会留下 dangling Call
+            # （InlineFunctionsEliminated 报错），必须先落到独立语句。
+            long_request_groups = indexer_query_group_count(query_start_loc, pl.tensor.dim(kv_seq_lens, 0), S)
+            if long_request_groups >= LONG_S6_MIN_REQUEST_GROUPS:
                 score_tid = indexer_score_topk_native_cube(
                     qr_hadamard_i8,
                     qr_hadamard_scale_dq,
