@@ -1,5 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+metadata + QR组合的七档对拍见
+[组合效率记录](DSV4_FLASH_CSA_TND_COMBINATION_20261008.md)：保持逐位结果，等长仍未持平BSH，未合入正式kernel。
+
 2026-10-08 的TND单因素效率A/B、独立复测及回退记录见
 [效率A/B文档](DSV4_FLASH_CSA_TND_EFFICIENCY_AB_20261008.md)，包含可复现补丁和全部计时样本。
 
