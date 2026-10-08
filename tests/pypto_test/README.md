@@ -1,5 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+最新的Native SK1、nalinaly BSH、TND九档及变长性能/精度结果见
+[三方完整矩阵](DSV4_FLASH_CSA_THREEWAY_20261008.md)。
+
 本分支2026-10-08的变长TND移植、CANN9.2同场性能与精度记录见
 [TND验证文档](DSV4_FLASH_CSA_TND_20261008.md)，含固定参考SHA、失败修复及原始轮次样本。
 
