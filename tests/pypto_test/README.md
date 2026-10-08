@@ -1,5 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+2026-10-08 的TND单因素效率A/B、独立复测及回退记录见
+[效率A/B文档](DSV4_FLASH_CSA_TND_EFFICIENCY_AB_20261008.md)，包含可复现补丁和全部计时样本。
+
 最新的Native SK1、nalinaly BSH、TND九档及变长性能/精度结果见
 [三方完整矩阵](DSV4_FLASH_CSA_THREEWAY_20261008.md)。
 
