@@ -11,8 +11,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.service import CSAServiceRuntime
-from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.service_config import QUERY_TOKENS
+from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.service import CSAServiceRuntime
 
 GROUPS = ("swa", "compressed", "state", "indexer", "indexer_state")
 LAYER = "model.layers.2.attn"
@@ -156,15 +155,15 @@ def _release_groups(lengths, bucket):
 
 def test_perf_abi_binds_token_level_query_start_loc():
     """token 级边界绑的是 swa 组：ori_slot_mapping 与 position_ids 都按这条流索引。"""
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.decode_csa import decode_csa_tp1_layer_test
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf.native_adapter import NativeCSACall
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.decode_csa import decode_csa_tp1_layer_test
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.native_adapter import NativeCSACall
 
     lengths, bucket = [6, 3, 1], 24
     groups, compact, bounds, positions = _release_groups(lengths, bucket)
     hidden = torch.empty((bucket, 4, 4096), dtype=torch.bfloat16)
     weights = dict.fromkeys(decode_csa_tp1_layer_test.param_names, torch.empty(0))
     call = NativeCSACall(
-        NS(attention=Mock()), weights, hidden, positions, groups, layer_name=LAYER, compact_metadata=compact
+        NS(attention=Mock(_schema=None)), weights, hidden, positions, groups, layer_name=LAYER, compact_metadata=compact
     )
     assert call.args["query_start_loc"] is bounds
     # 三个边界张量语义不同，不能互相顶替：这两个是压缩行/indexer 行的边界。
@@ -173,15 +172,18 @@ def test_perf_abi_binds_token_level_query_start_loc():
     assert "query_start_loc" in decode_csa_tp1_layer_test.param_names
 
 
-def test_precision_abi_still_requires_uniform_requests():
-    """性能版放开的是它自己那条路；精度版 kernel 没做 TND，约束必须还在。"""
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_adapter import NativeCSACall as PrecisionCall
+def test_shared_hca_gate_still_requires_uniform_requests():
+    """HCA 未改 TND，继承的默认入口仍必须拒绝不等长批次。"""
+    runtime, context = _context([6, 3, 1], 24)
+    runtime.variable_query_lengths = False
+    assert runtime.eligible(context, *_hidden(24)) is False
 
-    lengths, bucket = [6, 3, 1], 24
-    groups, compact, _, positions = _release_groups(lengths, bucket)
-    hidden = torch.empty((bucket, 4, 4096), dtype=torch.bfloat16)
-    weights = {}
-    with pytest.raises(ValueError, match=f"{QUERY_TOKENS} unpadded rows per request"):
-        PrecisionCall(
-            NS(attention=Mock()), weights, hidden, positions, groups, layer_name=LAYER, compact_metadata=compact
-        )
+
+def test_perf_gate_accepts_large_inactive_graph_dummy():
+    runtime, context = _context([1, 1, 22], 24)
+    for item in context.attn_metadata.values():
+        item.num_actual_tokens = 2
+        item.decode.num_reqs_actual = 2
+        item.decode.query_start_loc_cpu = _bounds([1, 1, 22])
+        item.decode.seq_lens[-1] = 0
+    assert runtime.eligible(context, *_hidden(24)) is True

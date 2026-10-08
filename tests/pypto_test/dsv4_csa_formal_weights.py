@@ -24,7 +24,8 @@ def load_formal_layer_weights(attention, checkpoint: Path, layer_index=2):
     description = json.loads((checkpoint / "quant_model_description.json").read_text())
     if description["model_quant_type"] != "W8A8_DYNAMIC":
         raise ValueError("This CSA validation expects a W8A8_DYNAMIC ModelSlim checkpoint")
-    for suffix in ("wq_b", "wo_b", "indexer.wq_b"):
+    quantized = ("wq_b", "wo_b", "indexer.wq_b") if attention.compress_ratio == 4 else ("wq_b", "wo_b")
+    for suffix in quantized:
         if description[f"layers.{layer_index}.attn.{suffix}.weight"] != "W8A8_DYNAMIC":
             raise ValueError(f"Unexpected formal CSA quantization for {suffix}")
     prefix = f"layers.{layer_index}.attn."

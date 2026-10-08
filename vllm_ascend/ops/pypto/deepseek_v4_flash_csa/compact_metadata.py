@@ -3,7 +3,6 @@
 
 import pypto.language as pl
 
-from .config import DECODE_SEQ
 from .config import FLASH as M
 from .layout import QUERY_BOUNDS_DYN
 
@@ -18,7 +17,7 @@ ROPE_TILE_ROWS = 16
 @pl.jit.inline(auto_scope=False)
 def build_token_request(
     bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
-    requests: pl.Scalar[pl.INDEX],
+    seq_lens: pl.Tensor[[REQUESTS], pl.INT32],
     token_request: pl.Out[pl.Tensor[[TOKENS], pl.INT32]],
 ):
     """把 query_start_loc 展开成逐 token 的请求号表。
@@ -28,11 +27,14 @@ def build_token_request(
     requests + 1），这里一次性展开成逐 token 的表，后面所有 kernel 直接查，
     不必各自重算。和 build_compact_row_offsets 一样跑在已有的单属主任务里。
     """
-    for request in pl.range(requests):
+    for token in pl.range(pl.tensor.dim(token_request, 0)):
+        pl.write(token_request, [token], pl.cast(-1, pl.INT32))
+    for request in pl.range(pl.tensor.dim(seq_lens, 0)):
         begin = pl.cast(pl.read(bounds, [request]), pl.INDEX)
         end = pl.cast(pl.read(bounds, [request + 1]), pl.INDEX)
-        for token in pl.range(begin, end):
-            pl.write(token_request, [token], pl.cast(request, pl.INT32))
+        if pl.read(seq_lens, [request]) > 0:
+            for token in pl.range(begin, end):
+                pl.write(token_request, [token], pl.cast(request, pl.INT32))
     return token_request
 
 
@@ -71,15 +73,15 @@ def load_compact_rope_rows(
     for row in pl.range(rows):
         token = begin + row
         position = pl.read(positions, [token])
-        if (position + 1) % COMPRESS_RATIO == 0:
-            token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+        token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+        if token_req >= 0 and (position + 1) % COMPRESS_RATIO == 0:
             compact_row = pl.cast(pl.read(offsets, [token_req]), pl.INDEX) + pl.cast(
                 (position + 1) // COMPRESS_RATIO, pl.INDEX
             )
             # 这两张 RoPE 表和 compact slot mapping 同高，只有 Native 算好的
             # num_compressed_tokens 行。图捕获的 dummy run 把 position 填成 127，
             # 推出的行号会远超该档行数，必须按真实行数兜住。
-            if compact_row < pl.tensor.dim(cos, 0):
+            if compact_row >= 0 and compact_row < pl.tensor.dim(cos, 0):
                 cosine = pl.gather_row(cosine, cos, [row, 0], [compact_row, 0], [1, ROPE_DIM])
                 sine = pl.gather_row(sine, sin, [row, 0], [compact_row, 0], [1, ROPE_DIM])
     return cosine, sine

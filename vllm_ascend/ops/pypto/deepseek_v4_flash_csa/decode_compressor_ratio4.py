@@ -126,6 +126,7 @@ def compressor_ratio4_project(
     with pl.spmd(
         KV_SCORE_WORKERS,
         name_hint="kv_score_proj",
+        allow_early_resolve=True,
         deps=[late_dep],
     ) as _kv_score_tid:
         kv_worker = pl.tile.get_block_idx()
@@ -199,7 +200,7 @@ def compressor_ratio4_pool_projected(
             request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
             first_pos_b = pl.cast(0, pl.INDEX)
             if request_begin < request_end:
-                first_pos_b = pl.read(position_ids, [request_begin])
+                first_pos_b = pl.cast(pl.read(position_ids, [request_begin]), pl.INDEX)
             # Native 把补位请求的 seq_lens 清零（model_runner_v1.py:1162），真实 decode
             # 请求恒 >= S，故此处可无歧义识别补位。补位 token 的 position 是上一步的
             # 陈旧残留，用它推算的 state 列号会落到本请求页表之外，必须跳过。
@@ -213,7 +214,7 @@ def compressor_ratio4_pool_projected(
                     window_start = token_pos - STATE_LEN + 1
                     for h0 in pl.range(0, HEAD_DIM, POOL_HEAD_TILE):
                         # 在线 softmax（上游写法）：以本 token 自己这一格起步，再把窗口里其余
-                        # STATE_LEN-1 格逐个并入。精度版把 8 格按 Native 的交错次序拼成
+                        # STATE_LEN-1 格逐个并入。已封存的精度版把 8 格按 Native 的交错次序拼成
                         # [8, tile]、先归一化概率再按 8->4->2->1 规约，只为复刻 Native 的舍入次序。
                         last_ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
                         mi = pl.add(
@@ -426,7 +427,7 @@ def compressor_ratio4_cache_write(
             # compact metadata 按当前步的实际 token 数分配，补位请求用陈旧 position
             # 推出的行号会远超其行数（实测 84 vs 8 行），必须先按 seq_lens 排除。
             token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
-            if pl.read(seq_lens, [token_req]) > 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
+            if token_req >= 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
                 metadata_row = pl.cast(pl.read(compact_offsets, [token_req]), pl.INDEX) + pl.cast(
                     (token_pos + 1) // COMPRESS_RATIO, pl.INDEX
                 )
@@ -437,16 +438,16 @@ def compressor_ratio4_cache_write(
                 # Native 不会遇到：它的 compressor_metadata 算子按 num_compressed_tokens
                 # 产出行，消费端从不用 position 反推行号。这里按张量真实行数兜住。
                 compact_rows = pl.tensor.dim(cmp_slot_mapping, 0)
-                safe_row = pl.min(metadata_row, compact_rows - 1)
-                cache_page = pl.read(cmp_slot_mapping, [safe_row, 0])
-                cache_offset = pl.read(cmp_slot_mapping, [safe_row, 1])
-                if metadata_row < compact_rows and cache_page >= 0 and cache_offset >= 0:
-                    cache_row = pl.cast(cache_page, pl.INDEX) * BLOCK_SIZE + cache_offset
-                    kv_row_fp32 = normed_kv[token : token + 1, 0:HEAD_DIM]
-                    kv_flat[token : token + 1, :] = kv_row_fp32
-                    cmp_kv_cache_flat[cache_row : cache_row + 1, :] = pl.cast(
-                        kv_row_fp32, target_type=pl.BF16, mode="rint"
-                    )
+                if metadata_row >= 0 and metadata_row < compact_rows:
+                    cache_page = pl.read(cmp_slot_mapping, [metadata_row, 0])
+                    cache_offset = pl.read(cmp_slot_mapping, [metadata_row, 1])
+                    if cache_page >= 0 and cache_offset >= 0:
+                        cache_row = pl.cast(cache_page, pl.INDEX) * BLOCK_SIZE + cache_offset
+                        kv_row_fp32 = normed_kv[token : token + 1, 0:HEAD_DIM]
+                        kv_flat[token : token + 1, :] = kv_row_fp32
+                        cmp_kv_cache_flat[cache_row : cache_row + 1, :] = pl.cast(
+                            kv_row_fp32, target_type=pl.BF16, mode="rint"
+                        )
 
     return cache_write_tid
 

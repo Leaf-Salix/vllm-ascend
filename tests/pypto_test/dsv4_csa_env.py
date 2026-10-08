@@ -48,7 +48,28 @@ def activate() -> Path:
     sys.meta_path[:] = [finder for finder in sys.meta_path if not is_other_editable(finder)]
     version = f"python{sys.version_info.major}.{sys.version_info.minor}"
     site = root / ".venv-dsv4-0251rc1/lib" / version / "site-packages"
+    # HCA_SIMPLER_ROOT：把 simpler 指到一个独立 worktree，用于在不影响共用 checkout
+    # （CSA 会话正在用它）的前提下试改运行时。不设置时行为与以前完全一致。
+    # 必须在这里处理：本函数下面会重新执行 venv 里的 editable 钩子，把 simpler 钉回
+    # 共用目录，因此任何在 site 阶段（sitecustomize）做的重定向都会被覆盖。
+    # simpler_setup 也要一起指过去——它的 PROJECT_ROOT 按模块位置解析，
+    # get_pto_isa_clone_path() 与 .pto-isa.lock 都挂在其下，只重定向 simpler 会让锁
+    # 仍然写进共用的 simpler/build。
+    simpler_root_text = os.environ.get("HCA_SIMPLER_ROOT")
+    simpler_root = Path(simpler_root_text).resolve() if simpler_root_text else None
+    if simpler_root is not None:
+        if not (simpler_root / "python/simpler").is_dir() or not (simpler_root / "simpler_setup").is_dir():
+            raise RuntimeError(f"HCA_SIMPLER_ROOT 不是 simpler 仓库：{simpler_root}")
+        for loaded_name in ("simpler", "simpler_setup"):
+            loaded = sys.modules.get(loaded_name)
+            if loaded is not None and simpler_root not in Path(loaded.__file__).resolve().parents:
+                raise RuntimeError(f"{loaded_name} 已从 {loaded.__file__} 加载，无法改指 {simpler_root}")
+        sys.path.insert(0, str(simpler_root))
+        sys.path.insert(0, str(simpler_root / "python"))
     for name in ("pypto", "simpler"):
+        if name == "simpler" and simpler_root is not None:
+            # 不重装 simpler 的 editable 钩子，否则它会把 simpler 钉回共用目录。
+            continue
         candidates = [site / f"_{name}_editable.py", site / f"_editable_skbc_{name}.py"]
         installed = [candidate for candidate in candidates if candidate.is_file()]
         if len(installed) != 1:
@@ -60,6 +81,17 @@ def activate() -> Path:
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+    if simpler_root is not None:
+        # 钩子重装后再摘一次：上面的 exec_module 可能又插回 simpler 的 finder。
+        sys.meta_path[:] = [
+            finder
+            for finder in sys.meta_path
+            if not (
+                type(finder).__name__ == "ScikitBuildRedirectingFinder"
+                and any("/simpler/" in str(source) for source in getattr(finder, "known_source_files", {}).values())
+            )
+        ]
+        os.environ["HCA_SIMPLER_ROOT_ACTIVE"] = str(simpler_root)
     return repo
 
 

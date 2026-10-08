@@ -44,9 +44,9 @@ def make_cache_groups(config, device, attention):
         "swa": attention.dsa_attn.swa_cache_layer,
         "compressed": attention.dsa_attn.dsa_attn,
         "state": attention.compressor.state_cache,
-        "indexer": attention.indexer.k_cache,
-        "indexer_state": attention.indexer.compressor.state_cache,
     }
+    if attention.compress_ratio == 4:
+        owners.update(indexer=attention.indexer.k_cache, indexer_state=attention.indexer.compressor.state_cache)
     groups = {}
     for kind, owner in owners.items():
         prefix = owner.layer_name if kind == "compressed" else owner.prefix

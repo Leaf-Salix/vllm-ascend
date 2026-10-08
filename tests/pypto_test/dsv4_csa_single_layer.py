@@ -82,7 +82,7 @@ def make_layer(config, checkpoint, device, layer_index=2):
     return layer, {"weights": records, "quant_methods": methods}
 
 
-def make_fixture(config, attention, batch, history, seed, device):
+def make_fixture(config, attention, batch, history, seed, device, table_history=None, reverse_pages=False):
     import torch
     from dsv4_csa_native_case import allocate_native_cache, make_cache_groups
 
@@ -103,9 +103,16 @@ def make_fixture(config, attention, batch, history, seed, device):
     for name, group in groups.items():
         spec = group["spec"]
         ratio = getattr(spec, "compress_ratio", 1)
-        columns = (history + 6 + spec.block_size * ratio - 1) // (spec.block_size * ratio) + 1
+        # table_history 固定页表宽度与分配页数，使不同历史长度的两份 fixture 形状相同，
+        # 供同地址 metadata A→B→A 图重放；默认按本次历史计算，行为不变。
+        width_history = history if table_history is None else table_history
+        if width_history < history:
+            raise ValueError("table_history 不能小于 history")
+        columns = (width_history + 6 + spec.block_size * ratio - 1) // (spec.block_size * ratio) + 1
         # 非压缩历史仅需保留滑窗/近期 state；页表保留完整逻辑列并循环映射独占物理页。
         per_request = columns if name in ("compressed", "indexer") else 9
+        if name == "state" and attention.compress_ratio == 128:
+            per_request = 18
         pages = batch * per_request + 1
         group["layout"] = allocate_native_cache(group, pages, device)
         for i, view in enumerate(group["views"]):
@@ -118,8 +125,9 @@ def make_fixture(config, attention, batch, history, seed, device):
         group["owner"].kv_cache = [group["views"]] if name == "indexer" else group["views"]
         table = BlockTable(spec.block_size, 40, columns, 256, True, device, num_speculative_tokens=5)
         for row in range(batch):
+            owner = batch - 1 - row if reverse_pages else row
             table.add_row(
-                [1 + row * per_request + (per_request - 1 - col) % per_request for col in range(columns)], row
+                [1 + owner * per_request + (per_request - 1 - col) % per_request for col in range(columns)], row
             )
         table.commit_block_table(batch)
         table.compute_slot_mapping(batch, bounds, positions // ratio)
@@ -153,6 +161,7 @@ def make_fixture(config, attention, batch, history, seed, device):
     compact = {
         name: attention.dsa_attn.dsa_attn.impl._compute_compressor_metadata(metadata[groups[name]["prefix"]].decode)
         for name in ("compressed", "indexer")
+        if name in groups
     }
     for name, group in groups.items():
         slots = compact[name][2] if name in compact else metadata[group["prefix"]].decode.slot_mapping
@@ -269,9 +278,10 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
     }
     original_readonly = fixture["readonly"]
     result = {
-        "status": "RUNNING", "bucket_batch": batch,
+        "status": "RUNNING",
+        "bucket_batch": batch,
         "scope": "单卡 PTO 同一图的满档→补位→满档；Native builder 在图外更新、"
-                 "Native compact producer 在图内执行；不代表 Native 整图或空 rank 验收",
+        "Native compact producer 在图内执行；不代表 Native 整图或空 rank 验收",
         "padding": "seq_lens=0、slot=-1、页表=0；positions 与尾部 RoPE 保留旧值",
         "replays": [],
     }
@@ -296,11 +306,14 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
             common.seq_lens.copy_(common._seq_lens_cpu)
             common.num_actual_tokens = active * 6
             common.slot_mapping.copy_(original["slots"])
-            common.slot_mapping[active * 6:].fill_(-1)
+            common.slot_mapping[active * 6 :].fill_(-1)
             common.block_table_tensor.copy_(original["table"])
             common.block_table_tensor[active:].zero_()
             current = group["builder"].build(
-                0, common, num_reqs_actual=active, block_size=group["spec"].block_size,
+                0,
+                common,
+                num_reqs_actual=active,
+                block_size=group["spec"].block_size,
                 common_ratio_to_sas_metadata=common_cache,
                 prefill_ratio_to_sas_metadata=prefill_cache,
                 decode_ratio_to_sas_metadata=decode_cache,
@@ -324,9 +337,10 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
         for active in counts:
             metadata = update_metadata(active)
             # 按实际请求数生成独立的 Native oracle，只用其有效行规定写区与期望 metadata。
-            oracle = {name: impl._compute_compressor_metadata(metadata[name].decode)
-                      for name in ("compressed", "indexer")}
-            expected = {name: eager[name][:active * 6] for name in ("x_out", "idx_topk")}
+            oracle = {
+                name: impl._compute_compressor_metadata(metadata[name].decode) for name in ("compressed", "indexer")
+            }
+            expected = {name: eager[name][: active * 6] for name in ("x_out", "idx_topk")}
             compact_checks = {}
             for name, group in groups.items():
                 slots = oracle[name][2] if name in oracle else metadata[name].decode.slot_mapping
@@ -334,8 +348,12 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
                 group["allowed"] = writable_bytes(group["allocation"], group["views"], slots)
                 for index, view in enumerate(group["views"]):
                     key = f"{name}.{index}"
-                    initial = group["initial"].view(view.dtype).as_strided(
-                        view.shape, view.stride(), view.storage_offset()).clone()
+                    initial = (
+                        group["initial"]
+                        .view(view.dtype)
+                        .as_strided(view.shape, view.stride(), view.storage_offset())
+                        .clone()
+                    )
                     for page, row in slots_cpu.tolist():
                         if page >= 0 and row >= 0:
                             initial[page, row] = eager[key][page, row]
@@ -347,19 +365,23 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
             graph.replay()
             torch.npu.synchronize()
             actual = collect_state(fixture, call.args["x_out"], call.args["idx_topk"])
-            actual.update({name: actual[name][:active * 6] for name in ("x_out", "idx_topk")})
+            actual.update({name: actual[name][: active * 6] for name in ("x_out", "idx_topk")})
             for name, values in oracle.items():
                 valid = (values[2].cpu() >= 0).all(dim=1)
                 rows = valid.nonzero().flatten()
                 for field, value, reference in zip(("cos", "sin", "slots"), captured[name], values):
-                    compact_checks[f"{name}.{field}"] = compare_tensor(
-                        value.cpu()[rows], reference.cpu()[rows], 0, 0)
+                    compact_checks[f"{name}.{field}"] = compare_tensor(value.cpu()[rows], reference.cpu()[rows], 0, 0)
             checks = {key: compare_tensor(actual[key], value, 0, 0) for key, value in expected.items()}
             guards = guard_checks(fixture)
-            result["replays"].append({
-                "active_batch": active, "reference": "同一实现满档有效请求前缀；补位 cache/state 保持初态",
-                "state_comparison": checks, "compact_metadata": compact_checks, "guards": guards,
-            })
+            result["replays"].append(
+                {
+                    "active_batch": active,
+                    "reference": "同一实现满档有效请求前缀；补位 cache/state 保持初态",
+                    "state_comparison": checks,
+                    "compact_metadata": compact_checks,
+                    "guards": guards,
+                }
+            )
             all_checks = (*checks.values(), *compact_checks.values(), *guards.values())
             if any(value["status"] != "PASS" for value in all_checks):
                 raise ValueError(f"有效请求数 {active}/{batch} 的图重放输出、metadata 或保护区失败")
@@ -375,15 +397,11 @@ def check_padding_graph(fixture, call, eager, make_call, impl, report):
         restore(fixture)
 
 
-def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact,
-                           profile_dir=None):
+def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warmup, require_exact, profile_dir=None):
     """图外事件包住一次整层重放；初态恢复与输出毒化均在计时区间外。"""
     import torch
 
-    initial = {
-        name: group["initial"].to(group["allocation"].device)
-        for name, group in fixture["groups"].items()
-    }
+    initial = {name: group["initial"].to(group["allocation"].device) for name, group in fixture["groups"].items()}
 
     def reset():
         for name, group in fixture["groups"].items():
@@ -436,9 +454,13 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
         with torch_npu.profiler.profile(
             activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
             schedule=torch_npu.profiler.schedule(wait=0, warmup=0, active=1, repeat=1),
-            record_shapes=False, profile_memory=False, with_stack=False, with_modules=False,
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=False,
+            with_modules=False,
             experimental_config=torch_npu.profiler._ExperimentalConfig(
-                profiler_level=torch_npu.profiler.ProfilerLevel.Level1),
+                profiler_level=torch_npu.profiler.ProfilerLevel.Level1
+            ),
             on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(profile_dir)),
         ) as trace:
             start.record()
@@ -446,17 +468,24 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
             end.record()
             torch.npu.synchronize()
             trace.step()
-        profile = {"directory": str(profile_dir), "event_envelope_us": start.elapsed_time(end) * 1000,
-                   "scope": "独立一次图重放，核对设备区间和热点；不混入无 profiler 的采样"}
+        profile = {
+            "directory": str(profile_dir),
+            "event_envelope_us": start.elapsed_time(end) * 1000,
+            "scope": "独立一次图重放，核对设备区间和热点；不混入无 profiler 的采样",
+        }
     ordered = sorted(samples)
     return {
         "samples_us": samples,
         # recorded_time 的原始计数只用于检查更新；耗时单位由 elapsed_time 给出。
         "start_timestamps_raw": timestamps[warmup:],
-        "us_min": ordered[0], "us_p50": statistics.median(samples),
-        "us_p95": ordered[math.ceil(0.95 * len(ordered)) - 1], "us_max": ordered[-1],
-        "eager_comparison": checks, "exact_comparison_required": require_exact,
-        "topk_selection": selection, "guards": guards,
+        "us_min": ordered[0],
+        "us_p50": statistics.median(samples),
+        "us_p95": ordered[math.ceil(0.95 * len(ordered)) - 1],
+        "us_max": ordered[-1],
+        "eager_comparison": checks,
+        "exact_comparison_required": require_exact,
+        "topk_selection": selection,
+        "guards": guards,
         "profile": profile,
     }
 
@@ -464,6 +493,7 @@ def measure_graph_interval(fixture, run, output, topk, reference, *, iters, warm
 def run(args, report):
     report["execution_config"] = {
         "path": "manual_npu_graph",
+        "pto_runtime": args.runtime,
         "enable_npugraph_ex": False,
         "enable_static_kernel": False,
         "worker_cpu_binding": False,
@@ -479,7 +509,9 @@ def run(args, report):
 
     from vllm_ascend.ascend_forward_context import set_ascend_forward_context
     from vllm_ascend.ops.dsv4_csa import _native_attention_half
+    from vllm_ascend.ops.pypto.variant import selected_variant
 
+    selected_variant()  # 激活指定源码后，在权重加载/NPU初始化前拒绝已封存入口。
     current_platform.pre_register_and_update()
     torch.npu.set_device(args.device)
     # 与 Native NPUModelRunner 一致：必须在权重后处理前启用，否则 NZ 转换静默退回 ND。
@@ -510,7 +542,15 @@ def run(args, report):
     with native_session(config, args.device), torch.inference_mode():
         layer, details = make_layer(config, args.checkpoint, device, args.layer_index)
         report.update(details)
-        fixture = make_fixture(config, layer.self_attn, args.batch, args.history, args.seed, device)
+        fixture = make_fixture(
+            config,
+            layer.self_attn,
+            args.batch,
+            args.history,
+            args.seed,
+            device,
+            table_history=8200 if args.hbg_metadata_replay else None,
+        )
         report["layouts"] = {name: group["layout"] for name, group in fixture["groups"].items()}
         from vllm_ascend.ascend_config import get_ascend_config
 
@@ -522,8 +562,10 @@ def run(args, report):
         from vllm_ascend.utils import ACL_FORMAT_FRACTAL_NZ, _should_trans_nz
 
         expected_formats = {
-            name: "NZ" if not getattr(getattr(layer.self_attn, name), "keep_weight_nd", False)
-            and _should_trans_nz(dict(layer.self_attn.named_parameters())[f"{name}.weight"]) else "ND"
+            name: "NZ"
+            if not getattr(getattr(layer.self_attn, name), "keep_weight_nd", False)
+            and _should_trans_nz(dict(layer.self_attn.named_parameters())[f"{name}.weight"])
+            else "ND"
             for name in report["native_weight_formats"]
         }
         report["native_expected_layouts"] = expected_formats
@@ -533,8 +575,10 @@ def run(args, report):
                 raise ValueError(f"Native 权重实际格式与 mode 不一致：{name} expected={expected}, actual={actual}")
         report["native_compressor_weight_formats"] = {
             f"{prefix}.{name}": torch_npu.get_npu_format(getattr(compressor, name).weight)
-            for prefix, compressor in (("compressor", layer.self_attn.compressor),
-                                       ("indexer.compressor", layer.self_attn.indexer.compressor))
+            for prefix, compressor in (
+                ("compressor", layer.self_attn.compressor),
+                ("indexer.compressor", layer.self_attn.indexer.compressor),
+            )
             for name in ("wkv", "wgate")
         }
         if any(value not in (0, 2) for value in report["native_compressor_weight_formats"].values()):
@@ -548,13 +592,25 @@ def run(args, report):
             value = original_sparse(q, **kwargs)
             if args.save_sparse_case and "sparse_case" not in captured:
                 # 在 Native 逆 RoPE 原地修改输出之前保存，用于隔离 QK/softmax/PV。
-                payload = {name: kwargs[name].detach().cpu() for name in (
-                    "ori_kv", "cmp_kv", "ori_block_table", "cmp_block_table",
-                    "cmp_sparse_indices", "seqused_kv", "sinks",
-                )}
-                payload.update(q=q.detach().cpu(), expected=value[0].detach().cpu(),
-                               position_ids=fixture["positions"].detach().cpu(),
-                               batch=args.batch, history=args.history)
+                payload = {
+                    name: kwargs[name].detach().cpu()
+                    for name in (
+                        "ori_kv",
+                        "cmp_kv",
+                        "ori_block_table",
+                        "cmp_block_table",
+                        "cmp_sparse_indices",
+                        "seqused_kv",
+                        "sinks",
+                    )
+                }
+                payload.update(
+                    q=q.detach().cpu(),
+                    expected=value[0].detach().cpu(),
+                    position_ids=fixture["positions"].detach().cpu(),
+                    batch=args.batch,
+                    history=args.history,
+                )
                 torch.save(payload, args.output / "native_sparse.pt")
                 captured["sparse_case"] = True
             return value
@@ -611,11 +667,19 @@ def run(args, report):
 
             torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = profile_qli
             try:
-                report["timing"] = {"native": measure_graph_interval(
-                    fixture, profile_native_call, output, lambda: captured["profile_topk"], native[0],
-                    iters=args.timing_iters, warmup=args.timing_warmup,
-                    require_exact=bool(args.deterministic_level), profile_dir=args.output / "profile/native",
-                )}
+                report["timing"] = {
+                    "native": measure_graph_interval(
+                        fixture,
+                        profile_native_call,
+                        output,
+                        lambda: captured["profile_topk"],
+                        native[0],
+                        iters=args.timing_iters,
+                        warmup=args.timing_warmup,
+                        require_exact=bool(args.deterministic_level),
+                        profile_dir=args.output / "profile/native",
+                    )
+                }
             finally:
                 torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
             report.update(status="MEASURED", scope="仅 Native 图重放与分算子 trace；不含 PTO 对照或整模型验收")
@@ -623,17 +687,19 @@ def run(args, report):
 
         import pypto.torch
 
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.nz_mode import root_weight_layouts
         from vllm_ascend.ops.pypto.variant import variant_package
 
         package = variant_package()
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import ATOMIC_ADD
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.reduction import ATOMIC_ADD
 
         reduction = importlib.import_module(f"{package}.qkv_proj_rope")
         report["pto_reduction"] = {
-            "atomic_add": ATOMIC_ADD, "qr_split_k": reduction.QR_OK, "kv_split_k": reduction.KV_OK,
+            "atomic_add": ATOMIC_ADD,
+            "qr_split_k": reduction.QR_OK,
+            "kv_split_k": reduction.KV_OK,
         }
-        if (args.graph or args.padding_graph) and ATOMIC_ADD:
+        if (args.graph or args.padding_graph or args.hbg_metadata_replay) and ATOMIC_ADD:
             raise ValueError("图正确性检查使用逐元素精确比较，须设置 --atomic-add 0 排除跨核规约波动")
         adapter = importlib.import_module(f"{package}.native_adapter")
         module = importlib.import_module(f"{package}.decode_csa")
@@ -644,17 +710,22 @@ def run(args, report):
         from pypto._torch_npu import storage_shape
 
         report["weight_storage_binding"] = {}
-        for name, layout in layouts.items():
+        # 四张同方向根权重要求复用；其余投影权重允许加载期转置。
+        for name in ("wq_a", "wq_b", "wo_a", "wo_b"):
+            layout = layouts[name]
             original = getattr(layer.self_attn, name).weight
             prepared = weights[name]
             source_format = int(torch_npu.get_npu_format(original))
             reused = prepared.data_ptr() == original.data_ptr()
             report["weight_storage_binding"][name] = {
-                "shape": list(prepared.shape), "native_format": source_format,
-                "native_shape": list(original.shape), "native_stride": list(original.stride()),
+                "shape": list(prepared.shape),
+                "native_format": source_format,
+                "native_shape": list(original.shape),
+                "native_stride": list(original.stride()),
                 "native_storage_shape": storage_shape(original),
                 "pto_format": int(torch_npu.get_npu_format(prepared)),
-                "same_data_ptr": reused, "root_layout": layout,
+                "same_data_ptr": reused,
+                "root_layout": layout,
             }
             already_matches = source_format == 29 if layout == "NZ" else source_format in (0, 2)
             if already_matches and not reused:
@@ -662,29 +733,48 @@ def run(args, report):
         groups = {
             name: (fixture["metadata"][group["prefix"]], group["views"]) for name, group in fixture["groups"].items()
         }
-        call = adapter.NativeCSACall(
-            adapter.CSAOperators.register(),
+        call_type = adapter.NativeCSACall
+        operators_type = adapter.CSAOperators
+        host_kwargs = {}
+        if args.runtime == "host_build_graph":
+            from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.host_metadata import CSAHostMetadata
+
+            if args.variant not in ("performance", "perf"):
+                raise ValueError("CSA HBG 单卡入口当前要求 --variant performance")
+            call_type = adapter.HBGNativeCSACall
+            operators_type = adapter.HBGCSAOperators
+            host = CSAHostMetadata.from_native(groups["indexer"][0].decode)
+            host_kwargs = {"host_metadata": host}
+            report["hbg_host_metadata"] = {"max_seq_len": host.max_seq_len, "graph_key": host.graph_key()}
+        call = call_type(
+            operators_type.register(),
             weights,
             fixture["hidden"],
             fixture["positions"],
             groups,
             layer_name=fixture["groups"]["compressed"]["prefix"],
             compact_metadata=fixture["compact"],
+            **host_kwargs,
         )
         report["indexer_cache_binding"] = {
             "history_copy_before_csa": hasattr(call, "prepare_indexer_cache"),
             "native_storage_ptr": groups["indexer"][1][0].untyped_storage().data_ptr(),
             "root_views": {
-                name: {"shape": list(value.shape), "stride": list(value.stride()),
-                       "storage_offset": value.storage_offset(),
-                       "storage_ptr": value.untyped_storage().data_ptr()}
+                name: {
+                    "shape": list(value.shape),
+                    "stride": list(value.stride()),
+                    "storage_offset": value.storage_offset(),
+                    "storage_ptr": value.untyped_storage().data_ptr(),
+                }
                 for name, value in call.args.items()
                 if name in ("idx_kv_cache", "idx_kv_cache_shift64", "idx_native_kv_cache", "idx_kv_scale")
             },
         }
         restore(fixture)
         if args.save_case:
-            ordered = {name: call.args[name] for name in module.decode_csa_tp1_layer_test.param_names}
+            if host_kwargs:
+                raise ValueError("当前快照格式仅支持 Tensor；HBG Host 标量请通过报告与单卡入口复现")
+            ordered = {name: call.args[name] for name in call.param_names}
             meta, payload = capture_tensors(
                 ordered,
                 argument_roles(root),
@@ -702,11 +792,17 @@ def run(args, report):
         # 与生产路径 (vllm_ascend/models/pypto_deepseek_v4.py) 共用同一个开关，
         # 用来验证收窄 ring heap 之后 CSA 算子还能不能跑。
         from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
+
         pypto.torch.init(
-            device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer",
+            device=args.device,
+            platform="a2a3",
+            runtime=args.runtime,
             **ring_sizing_kwargs(),  # 取证用：只认 PTO_CSA_RING_* 环境变量
-            **({"enable_chip_swimlane": 4, "enable_dep_gen": True,
-                "output_dir": str((args.output / "dfx").resolve())} if args.swimlane else {}),
+            **(
+                {"enable_chip_swimlane": 4, "enable_dep_gen": True, "output_dir": str((args.output / "dfx").resolve())}
+                if args.swimlane
+                else {}
+            ),
         )
         pto = []
         report.update(pto_guards=[], root_layouts=layouts)
@@ -724,12 +820,16 @@ def run(args, report):
             torch.save({"native": native[0], "pto": pto[0]}, args.output / "states.pt")
             report["saved_states"] = "states.pt"
         if args.save_case:
-            torch.save({"state": native[0], "indexer_inputs": captured["indexer_inputs"]},
-                       args.output / "native_reference.pt")
-            torch.save({"idx_topk": pto[0]["idx_topk"], "idx_topk_scores": call.args["idx_topk_scores"].cpu()},
-                       args.output / "pto_topk.pt")
+            torch.save(
+                {"state": native[0], "indexer_inputs": captured["indexer_inputs"]}, args.output / "native_reference.pt"
+            )
+            torch.save(
+                {"idx_topk": pto[0]["idx_topk"], "idx_topk_scores": call.args["idx_topk_scores"].cpu()},
+                args.output / "pto_topk.pt",
+            )
             report["saved_reference"] = {
-                "native": "native_reference.pt", "pto_topk": "pto_topk.pt",
+                "native": "native_reference.pt",
+                "pto_topk": "pto_topk.pt",
                 "scope": "逻辑 cache/state、层输出和 QLI 输入；不是单卡 bench 的根 ABI 参考",
             }
         report["status"] = "MEASURED"
@@ -780,7 +880,9 @@ def run(args, report):
                     directory /= f"window_{window}"
                 exported = _export_swimlane(directory)
                 exported.update(
-                    window=window, layer_index=args.layer_index, compact_metadata_policy="reuse",
+                    window=window,
+                    layer_index=args.layer_index,
+                    compact_metadata_policy="reuse",
                     input_source="formal_layer_weights_synthetic_history",
                     execution="graph_replay" if args.swimlane_graph else "eager",
                     profiled_event_us=start.elapsed_time(end) * 1000,
@@ -793,28 +895,41 @@ def run(args, report):
             report["swimlane"] = windows[0]
         if args.graph:
             check_graph_replay(fixture, call, pto[0], report)
+        if args.hbg_metadata_replay:
+            from csa_hbg_integration_20260930.metadata_replay import check_metadata_replay
+
+            check_metadata_replay(config, layer, fixture, weights, call, args, report)
         if args.padding_graph:
+
             def make_call(compact):
-                return adapter.NativeCSACall(
-                    call.ops, weights, fixture["hidden"], fixture["positions"], groups,
-                    layer_name=fixture["groups"]["compressed"]["prefix"], compact_metadata=compact,
+                return call_type(
+                    call.ops,
+                    weights,
+                    fixture["hidden"],
+                    fixture["positions"],
+                    groups,
+                    layer_name=fixture["groups"]["compressed"]["prefix"],
+                    compact_metadata=compact,
                     buffers={name: call.args[name] for name in ("x_out", "idx_topk", "idx_topk_scores")},
+                    **host_kwargs,
                 )
 
             check_padding_graph(fixture, call, pto[0], make_call, layer.self_attn.dsa_attn.dsa_attn.impl, report)
         if args.timing_iters:
             timing = {
-                "status": "RUNNING", "iters": args.timing_iters, "warmup": args.timing_warmup,
+                "status": "RUNNING",
+                "iters": args.timing_iters,
+                "warmup": args.timing_warmup,
                 "scope": "单卡正式层权重、合成历史的 HC_pre→norm→CSA→HC_post 图重放设备区间；"
-                         "含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
+                "含内部间隙，不是 16 卡 FULL_DECODE_ONLY 验收",
                 "method": "图外 NPU Event 包住一次重放，含图派发可能留下的设备间隙；"
-                          "每次在区间外恢复相同初态并毒化输出，无诊断拷贝；检查事件时间戳逐次更新",
+                "每次在区间外恢复相同初态并毒化输出，无诊断拷贝；检查事件时间戳逐次更新",
                 "order": ["native", "pto"],
                 "compact_metadata_policy": args.timing_metadata,
                 "pto_compact_metadata": (
                     "同一步第二个 CSA 层：复用首层已生成的两组 compact metadata，生成在区间外"
-                    if args.timing_metadata == "reuse" else
-                    "同一步首个 CSA 层：每次在图内生成两组 compact metadata"
+                    if args.timing_metadata == "reuse"
+                    else "同一步首个 CSA 层：每次在图内生成两组 compact metadata"
                 ),
                 "native_compact_metadata": "Native 各层仍实际调用生产算子，计时保留原路径",
                 "device": os.environ.get("TASK_DEVICE", str(args.device)),
@@ -840,27 +955,43 @@ def run(args, report):
                     name: impl._compute_compressor_metadata(groups[name][0].decode)
                     for name in ("compressed", "indexer")
                 }
-                prepared = adapter.NativeCSACall(
-                    call.ops, weights, fixture["hidden"], fixture["positions"], groups,
-                    layer_name=fixture["groups"]["compressed"]["prefix"], compact_metadata=compact,
+                prepared = call_type(
+                    call.ops,
+                    weights,
+                    fixture["hidden"],
+                    fixture["positions"],
+                    groups,
+                    layer_name=fixture["groups"]["compressed"]["prefix"],
+                    compact_metadata=compact,
                     buffers={name: call.args[name] for name in ("x_out", "idx_topk", "idx_topk_scores")},
+                    **host_kwargs,
                 )
                 prepared()
 
             torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = timed_qli
             try:
                 timing["native"] = measure_graph_interval(
-                    fixture, native_call, output, lambda: captured["timed_topk"], native[0],
-                    iters=args.timing_iters, warmup=args.timing_warmup,
+                    fixture,
+                    native_call,
+                    output,
+                    lambda: captured["timed_topk"],
+                    native[0],
+                    iters=args.timing_iters,
+                    warmup=args.timing_warmup,
                     require_exact=bool(args.deterministic_level),
                     profile_dir=args.output / "profile/native" if args.profile else None,
                 )
             finally:
                 torch.ops._C_ascend.npu_vllm_quant_lightning_indexer = original_qli
             timing["pto"] = measure_graph_interval(
-                fixture, call if args.timing_metadata == "reuse" else pto_call,
-                call.args["x_out"], lambda: call.args["idx_topk"], pto[0],
-                iters=args.timing_iters, warmup=args.timing_warmup, require_exact=not ATOMIC_ADD,
+                fixture,
+                call if args.timing_metadata == "reuse" else pto_call,
+                call.args["x_out"],
+                lambda: call.args["idx_topk"],
+                pto[0],
+                iters=args.timing_iters,
+                warmup=args.timing_warmup,
+                require_exact=not ATOMIC_ADD,
                 profile_dir=args.output / "profile/pto" if args.profile else None,
             )
             timing["native_over_pto_p50"] = timing["native"]["us_p50"] / timing["pto"]["us_p50"]
@@ -873,35 +1004,79 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--history", type=int, default=8192)
-    parser.add_argument("--layer-index", type=int, default=2, choices=range(2, 43, 2),
-                        help="正式 C4 层权重序号；4 对应模型第二个 CSA 层")
+    parser.add_argument(
+        "--layer-index",
+        type=int,
+        default=2,
+        choices=range(2, 43, 2),
+        help="正式 C4 层权重序号；4 对应模型第二个 CSA 层",
+    )
     parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--device", type=int, default=0)
+    parser.add_argument(
+        "--runtime",
+        choices=("tensormap_and_ringbuffer", "host_build_graph"),
+        default="tensormap_and_ringbuffer",
+        help="HBG 使用独立 Host 标量入口",
+    )
     parser.add_argument("--weight-nz-mode", type=int, choices=(0, 1, 2), default=0)
-    parser.add_argument("--variant", default="precision",
-                        help="precision / performance，或 pkg:<包名> 指定实验包")
+    parser.add_argument(
+        "--variant", default="performance", help="performance（唯一维护实现），或 pkg:<包名> 指定性能实验副本"
+    )
     parser.add_argument("--save-case", action="store_true")
     parser.add_argument("--save-state", action="store_true", help="保存两侧 8 类逻辑输出/状态，供跨布局逐元素比较")
-    parser.add_argument("--save-sparse-case", action="store_true",
-                        help="保存 Native 稀疏注意力的实际输入和逆 RoPE 前输出")
+    parser.add_argument(
+        "--save-sparse-case", action="store_true", help="保存 Native 稀疏注意力的实际输入和逆 RoPE 前输出"
+    )
     parser.add_argument("--atomic-add", type=int, choices=(0, 1), help="0 为固定规约诊断；未指定时遵循环境配置")
     parser.add_argument("--graph", action="store_true", help="固定规约下验证同地址 A/B/A 输入的图重放")
-    parser.add_argument("--padding-graph", action="store_true",
-                        help="固定规约下，Native metadata 更新同一个图的满档/补位请求；batch 至少为 2")
-    parser.add_argument("--deterministic-level", type=int, choices=(0, 1), default=1,
-                        help="Native 确定性：默认 1 诊断，0 为性能部署；HCCL_DETERMINISTIC 同步设置")
+    parser.add_argument(
+        "--hbg-metadata-replay",
+        action="store_true",
+        help="HBG B4/8K 同址 metadata 与 Host 长度更新、跨 Score 分支重新捕获",
+    )
+    parser.add_argument(
+        "--padding-graph",
+        action="store_true",
+        help="固定规约下，Native metadata 更新同一个图的满档/补位请求；batch 至少为 2",
+    )
+    parser.add_argument(
+        "--deterministic-level",
+        type=int,
+        choices=(0, 1),
+        default=1,
+        help="Native 确定性：默认 1 诊断，0 为性能部署；HCCL_DETERMINISTIC 同步设置",
+    )
     parser.add_argument("--timing-iters", type=int, default=0, help="两侧完整图重放设备区间采样次数；0 不计时")
     parser.add_argument("--timing-warmup", type=int, default=5, help="每侧计时图预热次数")
-    parser.add_argument("--timing-metadata", choices=("reuse", "produce"), default="reuse",
-                        help="默认 reuse 按同一步第二个 CSA 层复用 metadata；produce 单独测首层成本")
+    parser.add_argument(
+        "--timing-metadata",
+        choices=("reuse", "produce"),
+        default="reuse",
+        help="默认 reuse 按同一步第二个 CSA 层复用 metadata；produce 单独测首层成本",
+    )
     parser.add_argument("--profile", action="store_true", help="计时后每侧单独采一次设备 profiler 核对区间与热点")
-    parser.add_argument("--native-profile-only", action="store_true",
-                        help="仅补采 Native 图重放及分算子 trace，不编译或执行 PTO")
-    parser.add_argument("--swimlane", action="store_true",
-                        help="单独采一次完整 PTO 根的 DFX 泳道，复用前层 metadata；在新的工作目录执行")
+    parser.add_argument(
+        "--native-profile-only", action="store_true", help="仅补采 Native 图重放及分算子 trace，不编译或执行 PTO"
+    )
+    parser.add_argument(
+        "--swimlane",
+        action="store_true",
+        help="单独采一次完整 PTO 根的 DFX 泳道，复用前层 metadata；在新的工作目录执行",
+    )
     parser.add_argument("--swimlane-windows", type=int, default=1, help="每个 DFX 窗口只执行一次根调用")
     parser.add_argument("--swimlane-graph", action="store_true", help="DFX 采 ACL Graph 重放；不采 eager 调用")
     args = parser.parse_args()
+    if args.hbg_metadata_replay and (
+        args.runtime != "host_build_graph"
+        or args.history != 8192
+        or args.batch != 4
+        or args.native_profile_only
+        or args.timing_iters
+        or args.swimlane
+        or args.padding_graph
+    ):
+        parser.error("--hbg-metadata-replay 使用 HBG B4/8K，单独验证 metadata，不与计时/泳道/padding 混跑")
     if not 1 <= args.batch <= 40 or args.history < 0:
         parser.error("batch 必须为 1～40，history 不得为负")
     if args.padding_graph and args.batch < 2:
@@ -910,8 +1085,9 @@ def main():
         parser.error("timing-iters 不得为负，timing-warmup 至少为 1")
     if (args.profile or args.native_profile_only) and not args.timing_iters:
         parser.error("--profile/native-profile-only 须配合正数 --timing-iters")
-    if args.native_profile_only and (args.profile or args.swimlane or args.graph or args.padding_graph
-                                     or args.save_case or args.save_state):
+    if args.native_profile_only and (
+        args.profile or args.swimlane or args.graph or args.padding_graph or args.save_case or args.save_state
+    ):
         parser.error("--native-profile-only 不与 PTO 测量、正确性或状态保存选项混用")
     if args.swimlane and (args.timing_iters or args.profile or args.graph or args.padding_graph):
         parser.error("--swimlane 单独采集，不与图计时或图正确性窗口混用")

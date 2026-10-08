@@ -37,6 +37,8 @@ def _pto_csa_atomic_add() -> int:
 # begin-env-vars-definition
 
 env_variables: dict[str, Callable[[], Any]] = {
+    # CSA execution runtime; TND currently accepts the ringbuffer path.
+    "PTO_CSA_RUNTIME": lambda: os.getenv("PTO_CSA_RUNTIME", "tensormap_and_ringbuffer"),
     # max compile thread number for package building. Usually, it is set to
     # the number of CPU cores. If not set, the default value is None, which
     # means all number of CPU cores will be used.

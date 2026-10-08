@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """在 CSA 的精度版与性能版之间选择实现。
 
-两套算子并存：性能版（`deepseek_v4_flash_dspark_perf`）改用 pypto-lib 上游的数值
+两套算子并存：性能版（`deepseek_v4_flash_csa`）改用 pypto-lib 上游的数值
 写法以追平其性能，精度版（`deepseek_v4_flash_dspark`）以 Native 的规约、量化次序为准。
 逐元素差异以验证记录为准，不承诺所有浮点状态逐 bit 一致。
 
@@ -21,13 +21,21 @@
 import os
 
 _PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_dspark"
-_PERFORMANCE = "vllm_ascend.ops.pypto.deepseek_v4_flash_dspark_perf"
+_PERFORMANCE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
 _ENV = "PTO_CSA_VARIANT"
-_ALIASES = {"precision": "precision", "prec": "precision",
-            "performance": "performance", "perf": "performance"}
+_ALIASES = {"precision": "precision", "prec": "precision", "performance": "performance", "perf": "performance"}
 
 
 _BISECT_PREFIX = "pkg:"
+
+
+def csa_runtime() -> str:
+    from vllm_ascend import envs
+
+    runtime = envs.PTO_CSA_RUNTIME
+    if runtime not in ("tensormap_and_ringbuffer", "host_build_graph"):
+        raise ValueError(f"Unsupported PTO_CSA_RUNTIME={runtime!r}")
+    return runtime
 
 
 def selected_variant() -> str:
@@ -50,7 +58,7 @@ def variant_package() -> str:
     """
     value = os.environ.get(_ENV, "precision").strip()
     if value.lower().startswith(_BISECT_PREFIX):
-        name = value[len(_BISECT_PREFIX):].strip()
+        name = value[len(_BISECT_PREFIX) :].strip()
         if not name.isidentifier():
             raise ValueError(f"{_ENV}={value!r} 的包名不合法")
         return f"vllm_ascend.ops.pypto.{name}"
@@ -136,6 +144,10 @@ def ring_sizing_kwargs(additional_config=None) -> dict:
         kwargs["ring_heap"] = _per_ring(raw, source, 1024 * 1024)
     raw = os.environ.get(_RING_TASK_WINDOW_ENV, "").strip() or config.get("task_window")
     if raw is not None and raw != "":
-        source = _RING_TASK_WINDOW_ENV if os.environ.get(_RING_TASK_WINDOW_ENV, "").strip() else f"{_RING_CONFIG_KEY}.task_window"
+        source = (
+            _RING_TASK_WINDOW_ENV
+            if os.environ.get(_RING_TASK_WINDOW_ENV, "").strip()
+            else f"{_RING_CONFIG_KEY}.task_window"
+        )
         kwargs["ring_task_window"] = _per_ring(raw, source)
     return kwargs

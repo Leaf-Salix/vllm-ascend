@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from dsv4_csa_env import activate, write_json
+from dsv4_csa_replay import argument_roles
 
 
 def main() -> None:
@@ -17,18 +18,22 @@ def main() -> None:
     activate()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     argv_before = tuple(sys.argv)
-    report = {"scope": "CPU full-chain compilation; no device execution" if args.build
-              else "CPU full-chain lowering; no device execution"}
+    report = {
+        "scope": "CPU full-chain compilation; no device execution"
+        if args.build
+        else "CPU full-chain lowering; no device execution"
+    }
     try:
         from pypto.runtime import RunConfig
 
         from vllm_ascend.ops.pypto.variant import selected_variant, variant_package
+
         package = variant_package()
         config = __import__(f"{package}.config", fromlist=["config"])
         report["variant"] = selected_variant()
 
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import root_weight_layouts
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.reduction import ATOMIC_ADD
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.nz_mode import root_weight_layouts
+        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.reduction import ATOMIC_ADD
 
         assert tuple(sys.argv) == argv_before, "kernel import changed service argv"
         assert config.TP == 1 and config.DECODE_SEQ == 6
@@ -40,9 +45,11 @@ def main() -> None:
         report["kernels"] = []
         for kernel in kernels:
             if args.build:
-                compiled = kernel.warmup(config=RunConfig(
-                    platform="a2a3", save_kernels=True,
-                    save_kernels_dir=str((args.output_dir / "build").resolve())))
+                compiled = kernel.warmup(
+                    config=RunConfig(
+                        platform="a2a3", save_kernels=True, save_kernels_dir=str((args.output_dir / "build").resolve())
+                    )
+                )
                 program = compiled.program
                 report["device_binaries"] = "built_without_device_execution"
             else:
@@ -50,7 +57,11 @@ def main() -> None:
             name = kernel.__name__
             (args.output_dir / f"{name}_lowered.py").write_text(str(program))
             report["kernels"].append(
-                {"name": name, "parameters": kernel.param_names, "mutable_and_output": kernel.output_param_names}
+                {
+                    "name": name,
+                    "parameters": list(argument_roles(getattr(module, name))),
+                    "mutable_and_output": kernel.output_param_names,
+                }
             )
         report.update(
             status="PASS",

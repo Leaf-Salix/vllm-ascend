@@ -3,7 +3,10 @@
 
 import torch
 
-from .native_adapter import NativeCSACall, prepare_weights
+from vllm_ascend.ops.pypto.variant import csa_runtime
+
+from .host_metadata import CSAHostMetadata
+from .native_adapter import HBGNativeCSACall, NativeCSACall, prepare_weights
 from .service_config import MAX_BATCH_SIZE, QUERY_TOKENS
 
 # 同一个 decode step 里，compressor_metadata 的入参只跟 KV cache group 有关、与层无关：
@@ -17,29 +20,10 @@ from .service_config import MAX_BATCH_SIZE, QUERY_TOKENS
 _COMPACT_METADATA_CACHE = "pto_csa_compact_compressor_metadata"
 
 
-class CSAServiceRuntime:
-    def __init__(self, attention, operators, max_num_seqs, layer=None):
-        self.wrapper = attention.dsa_attn
-        self.layer_name = self.wrapper.dsa_attn.layer_name
-        self.operators = operators
-        # layer 提供 mHC 的门控权重与 attention 的 input_layernorm：
-        # 这两段现在也在 PTO kernel 里，见 decode_csa._decode_csa_tp1_layer。
-        self.weights = prepare_weights(attention, None, layer)
-        self.prefixes = {
-            "swa": self.wrapper.swa_cache_layer.prefix,
-            "compressed": self.layer_name,
-            "state": attention.compressor.state_cache.prefix,
-            "indexer": attention.indexer.k_cache.prefix,
-            "indexer_state": attention.indexer.compressor.state_cache.prefix,
-        }
-        self.batch_capacity = min(max_num_seqs, MAX_BATCH_SIZE)
-        tokens = self.batch_capacity * QUERY_TOKENS
-        device = attention.wq_a.weight.device
-        # Allocate once after weight loading; these buffers are private to one
-        # layer. Output belongs to the Native forward call / captured graph.
-        self.scores = torch.empty((tokens, 512), dtype=torch.float32, device=device)
-        self.topk = torch.empty((tokens, 512), dtype=torch.int32, device=device)
-        self._hadamard = None
+class AttentionServiceBase:
+    """CSA性能版与HCA共用的入口判定和metadata缓存；不注册算术实现。"""
+
+    variable_query_lengths = False
 
     def eligible(self, context, hidden, positions):
         metadata = context.attn_metadata
@@ -49,6 +33,8 @@ class CSAServiceRuntime:
         if hidden.ndim != 3 or tuple(hidden.shape[1:]) != (4, 4096) or hidden.dtype != torch.bfloat16:
             return False
         tokens = hidden.shape[0]
+        if not self.variable_query_lengths and tokens % QUERY_TOKENS:
+            return False
         # TND：tokens 是**档位容量**，不再等于 batch * QUERY_TOKENS。请求数只能从
         # metadata 取，不能由 token 数反推。容量上界仍是满档。
         if not 1 <= tokens <= self.batch_capacity * QUERY_TOKENS:
@@ -63,10 +49,14 @@ class CSAServiceRuntime:
             # 由 kernel 内的 seq_lens 判据屏蔽。
             if item is None or item.num_prefills or item.num_actual_tokens > tokens:
                 return False
+            if not self.variable_query_lengths and (
+                item.num_actual_tokens % QUERY_TOKENS or item.num_decodes != tokens // QUERY_TOKENS
+            ):
+                return False
             if batch is None:
                 batch = item.num_decodes
                 # 每请求至少一行，档位必须放得下。
-                if not 1 <= batch <= self.batch_capacity or batch > tokens:
+                if not 1 <= batch <= self.batch_capacity:
                     return False
             elif item.num_decodes != batch:
                 # 各 cache group 必须看到同一批请求，否则 query_start_loc 无法共用。
@@ -76,7 +66,19 @@ class CSAServiceRuntime:
                 return False
             # 变长下每请求的 token 数在 [1, QUERY_TOKENS]；num_reqs_actual 是真实请求数，
             # 不能再由 num_actual_tokens // QUERY_TOKENS 推（那是等长才成立的式子）。
-            if not 1 <= req.max_seqlen_q <= QUERY_TOKENS:
+            if not self.variable_query_lengths and req.max_seqlen_q != QUERY_TOKENS:
+                return False
+            if req.max_seqlen_q > QUERY_TOKENS and self.variable_query_lengths:
+                bounds_cpu = getattr(req, "query_start_loc_cpu", None)
+                actual = req.num_reqs_actual
+                if bounds_cpu is None or bounds_cpu.device.type != "cpu" or actual is None:
+                    return False
+                real_bounds = bounds_cpu[: actual + 1].tolist()
+                if len(real_bounds) != actual + 1 or any(
+                    not 1 <= end - begin <= QUERY_TOKENS for begin, end in zip(real_bounds, real_bounds[1:])
+                ):
+                    return False
+            elif not 1 <= req.max_seqlen_q <= QUERY_TOKENS:
                 return False
             if req.num_reqs_actual is not None and not 0 <= req.num_reqs_actual <= batch:
                 return False
@@ -108,6 +110,36 @@ class CSAServiceRuntime:
         value = self.wrapper.dsa_attn.impl._compute_compressor_metadata(req)
         cache[id(req)] = (req, value)
         return value
+
+
+class CSAServiceRuntime(AttentionServiceBase):
+    variable_query_lengths = True
+
+    def __init__(self, attention, operators, max_num_seqs, layer=None):
+        self.wrapper = attention.dsa_attn
+        self.layer_name = self.wrapper.dsa_attn.layer_name
+        self.operators = operators
+        self.is_hbg = csa_runtime() == "host_build_graph"
+        if self.is_hbg:
+            raise ValueError("TND CSA currently requires PTO_CSA_RUNTIME=tensormap_and_ringbuffer")
+        # layer 提供 mHC 的门控权重与 attention 的 input_layernorm：
+        # 这两段现在也在 PTO kernel 里，见 decode_csa._decode_csa_tp1_layer。
+        self.weights = prepare_weights(attention, None, layer)
+        self.prefixes = {
+            "swa": self.wrapper.swa_cache_layer.prefix,
+            "compressed": self.layer_name,
+            "state": attention.compressor.state_cache.prefix,
+            "indexer": attention.indexer.k_cache.prefix,
+            "indexer_state": attention.indexer.compressor.state_cache.prefix,
+        }
+        self.batch_capacity = min(max_num_seqs, MAX_BATCH_SIZE)
+        tokens = self.batch_capacity * QUERY_TOKENS
+        device = attention.wq_a.weight.device
+        # Allocate once after weight loading; these buffers are private to one
+        # layer. Output belongs to the Native forward call / captured graph.
+        self.scores = torch.empty((tokens, 512), dtype=torch.float32, device=device)
+        self.topk = torch.empty((tokens, 512), dtype=torch.int32, device=device)
+        self._hadamard = None
 
     def __call__(self, context, hidden, positions, output, kv_cache):
         from vllm_ascend.attention.utils import (
@@ -143,7 +175,16 @@ class CSAServiceRuntime:
             "indexer_state": (metadata["indexer_state"], (indexer_state,)),
         }
         tokens = hidden.shape[0]
-        call = NativeCSACall(
+        call_type = HBGNativeCSACall if self.is_hbg else NativeCSACall
+        host_kwargs = {}
+        if self.is_hbg:
+            host = CSAHostMetadata.from_native(metadata["indexer"].decode)
+            host_kwargs["host_metadata"] = host
+            # An enclosing NPUGraph freezes the Host scalar. Record precisely
+            # which Native CPU value its replay guard must check; per-request
+            # lengths remain live device inputs inside the captured tasks.
+            context.additional_kwargs.setdefault("pto_csa_hbg_graph_metadata", {})[self.prefixes["indexer"]] = host
+        call = call_type(
             self.operators,
             self.weights,
             hidden,
@@ -152,6 +193,7 @@ class CSAServiceRuntime:
             layer_name=self.layer_name,
             compact_metadata=compact,
             buffers={"idx_topk_scores": self.scores[:tokens], "idx_topk": self.topk[:tokens], "x_out": output},
+            **host_kwargs,
         )
         # A single fused call publishes all KV writes. Notify the connector on
         # the same stream after that call; no global synchronization is needed.

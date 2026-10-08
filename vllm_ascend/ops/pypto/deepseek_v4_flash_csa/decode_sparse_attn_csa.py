@@ -100,7 +100,7 @@ QK_PROB_READY_EVENT = 2
 
 QK_PV_READY_EVENT = 3
 
-# 性能版取 128，与上游一致。精度版取 512 是为了复刻 Native A3 每 512 个候选更新一次
+# 性能版取 128，与上游一致。已封存的精度版取 512 是为了复刻 Native A3 每 512 个候选更新一次
 # softmax 的舍入节奏，块内再用一个常驻 FP32 累加器把四个 128 子块串起来；本版本放弃
 # 该性质。
 # 派生量与上游对齐：SPARSE_BLOCKS = 1 + ceil(512/128) = 5、PADDED_TOPK = 640，
@@ -218,21 +218,20 @@ def sparse_attn_csa(
             # runtime token 数不保证整除 8（如 B1/S6）。切片不会自动截断，
             # 显式限制读写行数，避免尾块覆盖相邻 scratch。
             c_raw_tile = pl.cast(
-                pl.slice(idx_topk, [BIAS_T_TILE, IDX_TOPK], [bias_t0, 0],
-                         valid_shape=[bias_rows, IDX_TOPK], clamp=True), target_type=pl.FP32
+                pl.slice(
+                    idx_topk, [BIAS_T_TILE, IDX_TOPK], [bias_t0, 0], valid_shape=[bias_rows, IDX_TOPK], clamp=True
+                ),
+                target_type=pl.FP32,
             )
             c_pos = pl.cast(
-                pl.slice(position_ids, [BIAS_T_TILE, 1], [bias_t0, 0],
-                         valid_shape=[bias_rows, 1], clamp=True),
+                pl.slice(position_ids, [BIAS_T_TILE, 1], [bias_t0, 0], valid_shape=[bias_rows, 1], clamp=True),
                 target_type=pl.FP32,
             )
             c_pos_q = pl.cast(
                 pl.cast(pl.mul(pl.add(c_pos, 1.0), COMPRESS_RATIO_INV), target_type=pl.INT32, mode="trunc"),
                 target_type=pl.FP32,
             )
-            c_upper_b = pl.row_expand_mul(
-                pl.full([BIAS_T_TILE, IDX_TOPK], dtype=pl.FP32, value=1.0), c_pos_q
-            )
+            c_upper_b = pl.row_expand_mul(pl.full([BIAS_T_TILE, IDX_TOPK], dtype=pl.FP32, value=1.0), c_pos_q)
             c_ge_tile = pl.minimum(pl.maximum(pl.add(c_raw_tile, CSA_CMP_GE_BIAS), 0.0), 1.0)
             c_lt_tile = pl.minimum(pl.maximum(pl.sub(c_upper_b, c_raw_tile), 0.0), 1.0)
             c_mask_tile = pl.mul(c_ge_tile, c_lt_tile)
@@ -250,10 +249,14 @@ def sparse_attn_csa(
             # 每块的有效位直接由 c_mask_tile 归约得到，不再回读 cmp_sparse_indices。
             for c_sb in pl.range(1, SPARSE_BLOCKS):
                 c_s0 = (c_sb - 1) * ATTN_K_TILE
-                c_blk_valid = pl.row_max(pl.slice(
-                    c_mask_tile, [BIAS_T_TILE, ATTN_K_TILE], [0, c_s0],
-                    valid_shape=[bias_rows, ATTN_K_TILE],
-                ))
+                c_blk_valid = pl.row_max(
+                    pl.slice(
+                        c_mask_tile,
+                        [BIAS_T_TILE, ATTN_K_TILE],
+                        [0, c_s0],
+                        valid_shape=[bias_rows, ATTN_K_TILE],
+                    )
+                )
                 for c_dt in pl.range(bias_rows):
                     c_valid = pl.cast(pl.read(c_blk_valid, [c_dt, 0]), pl.INT32)
                     pl.write(valid_block_mask, [bias_t0 + c_dt, c_sb], c_valid)
@@ -273,16 +276,12 @@ def sparse_attn_csa(
                 # Native 把补位请求的 seq_lens 清零，真实 decode 请求恒 >= S。
                 # 窗口长度压到 0 后该 token 的 SWA 偏置全是 NEG_INF，
                 # attention 退化为只剩 sink，输出有限且与真实请求无关。
-                if pl.read(seq_lens, [v_len_request]) <= 0:
+                if pl.read(seq_lens, [pl.max(v_len_request, 0)]) <= 0 or v_len_request < 0:
                     v_len_value = pl.cast(0, pl.INDEX)
                 pl.write(v_len_col, [bias_len_dt, 0], pl.cast(pl.cast(v_len_value, pl.INT32), pl.FP32))
-            v_col_tile = pl.col_expand_mul(
-                pl.full([BIAS_T_TILE, WIN], dtype=pl.FP32, value=1.0), v_columns
-            )
+            v_col_tile = pl.col_expand_mul(pl.full([BIAS_T_TILE, WIN], dtype=pl.FP32, value=1.0), v_columns)
             # clamp(v_length[t] - j, 0, 1)：j < v_length[t] 时为 1
-            v_valid_tile = pl.minimum(
-                pl.maximum(pl.neg(pl.row_expand_sub(v_col_tile, v_len_col)), 0.0), 1.0
-            )
+            v_valid_tile = pl.minimum(pl.maximum(pl.neg(pl.row_expand_sub(v_col_tile, v_len_col)), 0.0), 1.0)
             sparse_bias = pl.assemble(
                 sparse_bias,
                 pl.set_validshape(pl.mul(pl.sub(v_valid_tile, 1.0), -NEG_INF), bias_rows, WIN),
@@ -293,7 +292,8 @@ def sparse_attn_csa(
                     sparse_bias,
                     pl.set_validshape(
                         pl.full([BIAS_T_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=NEG_INF),
-                        bias_rows, ATTN_K_TILE - WIN,
+                        bias_rows,
+                        ATTN_K_TILE - WIN,
                     ),
                     [bias_t0, WIN],
                 )
@@ -303,7 +303,7 @@ def sparse_attn_csa(
                 bias_request = pl.cast(pl.read(token_request, [bias_t]), pl.INDEX)
                 c_position = pl.cast(pl.read(position_ids, [bias_t, 0]), pl.INDEX)
                 v_length = pl.min(c_position + 1, WIN)
-                if pl.read(seq_lens, [bias_request]) <= 0:
+                if pl.read(seq_lens, [pl.max(bias_request, 0)]) <= 0 or bias_request < 0:
                     v_length = pl.cast(0, pl.INDEX)
                 v_start = c_position - v_length + 1
                 v_head = v_start % BLOCK_SIZE
@@ -331,18 +331,12 @@ def sparse_attn_csa(
                         v_hole_lo = pl.max(v_hole_run * BLOCK_SIZE - v_head, 0)
                         v_hole_hi = pl.min((v_hole_run + 1) * BLOCK_SIZE - v_head, v_length)
                         if v_hole_hi > v_hole_lo:
-                            v_hole_page = pl.read(
-                                ori_block_table, [bias_request, (v_start + v_hole_lo) // BLOCK_SIZE]
-                            )
+                            v_hole_page = pl.read(ori_block_table, [bias_request, (v_start + v_hole_lo) // BLOCK_SIZE])
                             if v_hole_page >= 0:
                                 v_lo_fp32 = pl.cast(pl.cast(v_hole_lo, pl.INT32), pl.FP32)
                                 v_hi_fp32 = pl.cast(pl.cast(v_hole_hi, pl.INT32), pl.FP32)
-                                v_ge = pl.minimum(
-                                    pl.maximum(pl.add(pl.sub(v_columns_row, v_lo_fp32), 1.0), 0.0), 1.0
-                                )
-                                v_lt = pl.minimum(
-                                    pl.maximum(pl.add(pl.neg(v_columns_row), v_hi_fp32), 0.0), 1.0
-                                )
+                                v_ge = pl.minimum(pl.maximum(pl.add(pl.sub(v_columns_row, v_lo_fp32), 1.0), 0.0), 1.0)
+                                v_lt = pl.minimum(pl.maximum(pl.add(pl.neg(v_columns_row), v_hi_fp32), 0.0), 1.0)
                                 v_valid = pl.add(v_valid, pl.mul(v_ge, v_lt))
                     sparse_bias[bias_t : bias_t + 1, 0:WIN] = pl.mul(pl.sub(v_valid, 1.0), -NEG_INF)
 
@@ -350,10 +344,8 @@ def sparse_attn_csa(
     rope_sin_signed = pl.create_tensor([T_PAD, ROPE_DIM], dtype=pl.FP32)
     # 不再依赖 rope_swap：本任务自己重算符号表（见下面的 cs_lane / cs_sign），
     # 从不读那张 GM 索引表，原来的 deps 是一条假依赖。
-    with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs",
-                 allow_early_resolve=True) as rope_tid:
-        for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks,
-                              pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
+    with pl.spmd(pl.min(rope_cs_blocks, ROPE_CS_WORKERS), name_hint="rope_cs", allow_early_resolve=True) as rope_tid:
+        for cs_rb in pl.range(pl.tile.get_block_idx(), rope_cs_blocks, pl.min(rope_cs_blocks, ROPE_CS_WORKERS)):
             cs_t0 = cs_rb * ROPE_CS_T_TILE
             cs_rows = pl.min(ROPE_CS_T_TILE, t_dim - cs_t0)
             # 符号表按块重算：SPMD 下每个 worker 要有自己的一份，不能在区外共享。
@@ -364,8 +356,7 @@ def sparse_attn_csa(
             cs_dup_f = pl.cast(cs_dup_i32, target_type=pl.FP32)
             cs_lane = pl.sub(cs_col, pl.mul(cs_dup_f, 2.0))
             cs_sign = pl.neg(pl.sub(pl.mul(cs_lane, 2.0), 1.0))
-            cs_sin = pl.load(freqs_sin, [cs_t0, 0], [ROPE_CS_T_TILE, ROPE_DIM],
-                             valid_shape=[cs_rows, ROPE_DIM])
+            cs_sin = pl.load(freqs_sin, [cs_t0, 0], [ROPE_CS_T_TILE, ROPE_DIM], valid_shape=[cs_rows, ROPE_DIM])
             # tile 绑定到 S 后 cs_rows 恒等于 ROPE_CS_T_TILE，保留 valid_shape 只作兜底。
             cs_sign_rows = pl.set_validshape(cs_sign, cs_rows, ROPE_DIM)
             pl.store(pl.mul(cs_sin, cs_sign_rows), [cs_t0, 0], rope_sin_signed)
@@ -415,9 +406,7 @@ def sparse_attn_csa(
                     qk_transfer_row = qk_slot * H
                     pl.system.sync_wait(QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                     qk_l1_row = (qk_tick % QK_TRANSFER_SLOTS) * ATTN_K_TILE
-                    qk_l1 = pl.gather_row(
-                        qk_l1, kv_transfer, [qk_l1_row, 0], [qk_kv_row, 0], [ATTN_K_TILE, HEAD_DIM]
-                    )
+                    qk_l1 = pl.gather_row(qk_l1, kv_transfer, [qk_l1_row, 0], [qk_kv_row, 0], [ATTN_K_TILE, HEAD_DIM])
                     qk_l1_t = pl.tile.transpose_view(qk_l1)
                     qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_K_TILE], [0, qk_l1_row])
                     qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
@@ -434,7 +423,9 @@ def sparse_attn_csa(
                     pv_transfer_row = pv_slot * H
                     pl.system.sync_wait(QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                     pv_probability = pl.load(
-                        probability_transfer, [pv_transfer_row, 0], [H, ATTN_K_TILE],
+                        probability_transfer,
+                        [pv_transfer_row, 0],
+                        [H, ATTN_K_TILE],
                         target_memory=pl.MemorySpace.Mat,
                     )
                     pv_l1_row = (pv_work % QK_TRANSFER_SLOTS) * ATTN_K_TILE
@@ -447,8 +438,11 @@ def sparse_attn_csa(
                     pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
                     for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
                         pv_next_right = pl.tile.extract(
-                            qk_l1, pv_l1_row, pv_n * PV_N_TILE,
-                            [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right,
+                            qk_l1,
+                            pv_l1_row,
+                            pv_n * PV_N_TILE,
+                            [ATTN_K_TILE, PV_N_TILE],
+                            target_memory=pl.MemorySpace.Right,
                         )
                         # Keep two accumulators live so the preceding result's
                         # FIX write can overlap the following Cube operation.
@@ -467,13 +461,14 @@ def sparse_attn_csa(
             m_idx = pl.tile.ci(0, [1, ROPE_DIM], dtype=pl.INT32)
             m_rem_tmp = pl.create_tile([1, ROPE_DIM], dtype=pl.INT32)
             m_lane = pl.tile.rems(m_idx, 2, m_rem_tmp)
-            m_swap_row = pl.tile.adds(
-                pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1
-            )
+            m_swap_row = pl.tile.adds(pl.tile.sub(m_idx, pl.tile.muls(m_lane, 2)), NOPE_DIM + 1)
             m_swap_base = pl.create_tile([FINAL_HEAD_TILE, ROPE_DIM], dtype=pl.INT32)
             m_swap_source = pl.col_expand(m_swap_base, m_swap_row)
             m_row_offsets = pl.tile.muls(pl.tile.ci(0, [1, FINAL_HEAD_TILE], dtype=pl.INT32), HEAD_DIM)
-            m_swap_idx = pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [FINAL_HEAD_TILE, 1]))
+            m_swap_idx = pl.reshape(
+                pl.row_expand_add(m_swap_source, pl.reshape(m_row_offsets, [FINAL_HEAD_TILE, 1])),
+                [1, FINAL_HEAD_TILE * ROPE_DIM],
+            )
             running_m = pl.load(attn_sink_col, [qk_lane_head, 0], [H // 2, 1])
             # 上游口径：l 从 0 起算，sink 的那一项留到最终发布的分母里补。
             running_l = pl.tile.muls(running_m, 0.0)
@@ -484,9 +479,9 @@ def sparse_attn_csa(
                 init_values=(running_m, running_l, running_left, running_right),
             ):
                 qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * NUM_QK_CORES
-                qk_b = pl.cast(pl.read(token_request, [qk_t]), pl.INDEX)
                 qk_sb = qk_tick % SPARSE_BLOCKS
                 if qk_tick < qk_block_count:
+                    qk_b = pl.max(pl.cast(pl.read(token_request, [qk_t]), pl.INDEX), 0)
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                         qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
                         qk_kv_row = qk_slot * ATTN_K_TILE
@@ -508,7 +503,10 @@ def sparse_attn_csa(
                                             pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
                                         )
                                         qk_kv_half = pl.gather_row(
-                                            qk_kv_half, ori_kv_flat, [qk_lo, 0], [qk_raw_row, 0],
+                                            qk_kv_half,
+                                            ori_kv_flat,
+                                            [qk_lo, 0],
+                                            [qk_raw_row, 0],
                                             [ATTN_K_TILE // 2, HEAD_DIM],
                                             valid_shape=[qk_hi - qk_lo, HEAD_DIM],
                                         )
@@ -531,10 +529,16 @@ def sparse_attn_csa(
                 # the Cube before running the preceding block's softmax.
                 if t_dim >= EARLY_KV_MIN_TOKENS:
                     if qk_tick > 0 and qk_tick <= qk_block_count:
-                        if pl.read(valid_block_mask, [
-                            qk_core + ((qk_tick - 1) // SPARSE_BLOCKS) * NUM_QK_CORES,
-                            (qk_tick - 1) % SPARSE_BLOCKS,
-                        ]) > 0:
+                        if (
+                            pl.read(
+                                valid_block_mask,
+                                [
+                                    qk_core + ((qk_tick - 1) // SPARSE_BLOCKS) * NUM_QK_CORES,
+                                    (qk_tick - 1) % SPARSE_BLOCKS,
+                                ],
+                            )
+                            > 0
+                        ):
                             pl.system.sync_wait(
                                 QK_SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV
                             )
@@ -572,7 +576,7 @@ def sparse_attn_csa(
                         qk_mi = pl.row_max(qk_masked, qk_reduce_tmp)
                         qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
                         qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
-                        # 性能版用 rint（就近偶数），与上游一致。精度版用 round
+                        # 性能版用 rint（就近偶数），与上游一致。已封存的精度版用 round
                         # 是为了复刻 Native SAS 的 CAST_ROUND——半数远离零。
                         qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
                         pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
@@ -601,26 +605,20 @@ def sparse_attn_csa(
                         alpha = pl.exp(pl.sub(m_iter, next_m))
                         beta = pl.exp(pl.sub(pv_m, next_m))
                         next_l = pl.add(pl.mul(alpha, l_iter), pl.mul(beta, pv_l))
-                        pv_left = pl.load(
-                            pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2]
-                        )
+                        pv_left = pl.load(pv_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, HEAD_DIM // 2])
                         next_left = pl.add(pl.row_expand_mul(left_iter, alpha), pl.row_expand_mul(pv_left, beta))
                         pv_right = pl.load(
                             pv_transfer, [pv_transfer_row + qk_lane_head, HEAD_DIM // 2], [H // 2, HEAD_DIM // 2]
                         )
                         next_right = pl.add(pl.row_expand_mul(right_iter, alpha), pl.row_expand_mul(pv_right, beta))
-                        m_valid, l_valid, left_valid, right_valid = pl.yield_(
-                            next_m, next_l, next_left, next_right
-                        )
+                        m_valid, l_valid, left_valid, right_valid = pl.yield_(next_m, next_l, next_left, next_right)
                     else:
-                        m_valid, l_valid, left_valid, right_valid = pl.yield_(
-                            m_iter, l_iter, left_iter, right_iter
-                        )
+                        m_valid, l_valid, left_valid, right_valid = pl.yield_(m_iter, l_iter, left_iter, right_iter)
                     if pv_sb == SPARSE_BLOCKS - 1:
                         # Native SCFA normalizes inside its last PV update. Keep
                         # PTO arithmetic, but consume the live accumulators instead
                         # of publishing FP32 mi/li/oi for a separate merge task.
-                        m_gather_tmp = pl.create_tile([FINAL_HEAD_TILE, ROPE_DIM], dtype=pl.INT32)
+                        m_gather_tmp = pl.create_tile([1, FINAL_HEAD_TILE * ROPE_DIM], dtype=pl.INT32)
                         for pub_h in pl.unroll((H // 2) // FINAL_HEAD_TILE):
                             pub_local_head = pub_h * FINAL_HEAD_TILE
                             m_h0 = qk_lane_head + pub_local_head
@@ -630,15 +628,23 @@ def sparse_attn_csa(
                             # unsupported on A3, so reshape the complete tile first.
                             m_mi = pl.reshape(
                                 pl.tile.extract(
-                                    pl.reshape(m_valid, [1, H // 2]), 0, pub_local_head,
-                                    [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec,
-                                ), [FINAL_HEAD_TILE, 1],
+                                    pl.reshape(m_valid, [1, H // 2]),
+                                    0,
+                                    pub_local_head,
+                                    [1, FINAL_HEAD_TILE],
+                                    target_memory=pl.MemorySpace.Vec,
+                                ),
+                                [FINAL_HEAD_TILE, 1],
                             )
                             m_li = pl.reshape(
                                 pl.tile.extract(
-                                    pl.reshape(l_valid, [1, H // 2]), 0, pub_local_head,
-                                    [1, FINAL_HEAD_TILE], target_memory=pl.MemorySpace.Vec,
-                                ), [FINAL_HEAD_TILE, 1],
+                                    pl.reshape(l_valid, [1, H // 2]),
+                                    0,
+                                    pub_local_head,
+                                    [1, FINAL_HEAD_TILE],
+                                    target_memory=pl.MemorySpace.Vec,
+                                ),
+                                [FINAL_HEAD_TILE, 1],
                             )
                             m_left = pl.slice(left_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
                             m_right = pl.slice(right_valid, [FINAL_HEAD_TILE, HEAD_DIM // 2], [pub_local_head, 0])
@@ -651,9 +657,17 @@ def sparse_attn_csa(
                             m_rope = n_full[0:FINAL_HEAD_TILE, NOPE_DIM:HEAD_DIM]
                             m_cos_il = pl.load(freqs_cos, [pv_t, 0], [1, ROPE_DIM])
                             m_sin_signed = pl.load(rope_sin_signed, [pv_t, 0], [1, ROPE_DIM])
-                            m_swapped = pl.tile.gather(n_full, m_swap_idx, m_gather_tmp)
-                            m_rot = pl.add(pl.col_expand_mul(m_rope, m_cos_il),
-                                           pl.col_expand_mul(m_swapped, m_sin_signed))
+                            # The indices already contain the absolute head-row offset.
+                            # One contiguous Gather avoids A3's per-row vector barriers.
+                            m_swapped_flat = pl.tile.gather(
+                                pl.reshape(n_full, [1, FINAL_HEAD_TILE * HEAD_DIM]),
+                                m_swap_idx,
+                                m_gather_tmp,
+                            )
+                            m_swapped = pl.reshape(m_swapped_flat, [FINAL_HEAD_TILE, ROPE_DIM])
+                            m_rot = pl.add(
+                                pl.col_expand_mul(m_rope, m_cos_il), pl.col_expand_mul(m_swapped, m_sin_signed)
+                            )
                             n_rope_bf16 = pl.cast(m_rot, target_type=pl.BF16, mode="rint")
                             n_full_bf16 = pl.concat(n_bf16[0:FINAL_HEAD_TILE, 0:NOPE_DIM], n_rope_bf16)
                             n_group_bf16 = pl.reshape(n_full_bf16, [PUBLISH_GROUPS, O_GROUP_IN])
@@ -681,9 +695,7 @@ def sparse_attn_csa(
                     )
                 else:
                     m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-                running_m, running_l, running_left, running_right = pl.yield_(
-                    m_after, l_after, left_after, right_after
-                )
+                running_m, running_l, running_left, running_right = pl.yield_(m_after, l_after, left_after, right_after)
 
     return o_packed_heads, qk_tid
 
@@ -708,8 +720,18 @@ def sparse_attn_csa_tp1(
 ) -> tuple[pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16], pl.Scalar[pl.TASK_ID]]:
     """Publish packed CSA heads from the final QK/PV vector update."""
     packed, ready = sparse_attn_csa(
-        q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
-        position_ids, seq_lens, token_request, attn_sink, freqs_cos, freqs_sin,
+        q,
+        ori_kv,
+        ori_block_table,
+        cmp_kv,
+        cmp_block_table,
+        idx_topk,
+        position_ids,
+        seq_lens,
+        token_request,
+        attn_sink,
+        freqs_cos,
+        freqs_sin,
         o_packed_heads,
     )
     return packed, ready

@@ -12,9 +12,16 @@ SCHEMA_VERSION = 2
 
 
 def argument_roles(root_function):
+    from pypto.language import constexpr
+
     definition = ast.parse(textwrap.dedent(inspect.getsource(root_function))).body[0]
+    signature = inspect.signature(root_function)
     roles = {}
     for arg in definition.args.args:
+        # constexpr parameters specialize source but never appear in the
+        # runtime ABI or a device tensor snapshot.
+        if signature.parameters[arg.arg].annotation is constexpr:
+            continue
         annotation = arg.annotation
         marker = annotation.value if isinstance(annotation, ast.Subscript) else None
         roles[arg.arg] = {"Out": "out", "InOut": "inout"}.get(getattr(marker, "attr", None), "in")
@@ -45,9 +52,14 @@ def capture_tensors(tensors, roles, weight_layouts, source):
         if source_format not in (0, 2, 29):
             raise ValueError(f"快照尚不支持 Native 格式 {source_format}：{names}")
         if source_format == 29:
-            if (len(names) != 1 or roles[names[0]] != "in" or weight_layouts.get(names[0]) != "NZ"
-                    or first.storage_offset() != 0 or not first.is_contiguous()
-                    or first.untyped_storage().nbytes() != first.numel() * first.element_size()):
+            if (
+                len(names) != 1
+                or roles[names[0]] != "in"
+                or weight_layouts.get(names[0]) != "NZ"
+                or first.storage_offset() != 0
+                or not first.is_contiguous()
+                or first.untyped_storage().nbytes() != first.numel() * first.element_size()
+            ):
                 raise ValueError(f"NZ 快照要求完整、只读、无 padding 的独占权重：{names}")
         ranges = []
         for name in names:
@@ -71,21 +83,39 @@ def capture_tensors(tensors, roles, weight_layouts, source):
                 raise RuntimeError(f"Native NZ 快照 D2H 失败：{code}")
             payload[sid] = raw
         else:
-            raw = first.as_strided((1,), (1,), 0).view(torch.uint8).as_strided(
-                (first.untyped_storage().nbytes(),), (1,), 0)
+            raw = (
+                first.as_strided((1,), (1,), 0)
+                .view(torch.uint8)
+                .as_strided((first.untyped_storage().nbytes(),), (1,), 0)
+            )
             payload[sid] = raw[start:stop].to("cpu", copy=True)
-        stores[sid] = {"source_byte_offset": start, "source_nbytes": first.untyped_storage().nbytes(),
-                       "nbytes": stop - start, "parameters": names}
+        stores[sid] = {
+            "source_byte_offset": start,
+            "source_nbytes": first.untyped_storage().nbytes(),
+            "nbytes": stop - start,
+            "parameters": names,
+        }
         for name in names:
             value = tensors[name]
-            specs[name] = {"storage": sid, "shape": list(value.shape), "stride": list(value.stride()),
-                           "dtype": str(value.dtype), "role": roles[name],
-                           "layout": weight_layouts.get(name, "ND"),
-                           "source_format": source_format,
-                           "source_storage_offset": value.storage_offset(),
-                           "storage_offset": value.storage_offset() - start // value.element_size()}
-    meta = {"schema_version": SCHEMA_VERSION, "source": dict(source), "param_names": list(tensors),
-            "tensors": specs, "storages": stores, "weight_layouts": dict(weight_layouts)}
+            specs[name] = {
+                "storage": sid,
+                "shape": list(value.shape),
+                "stride": list(value.stride()),
+                "dtype": str(value.dtype),
+                "role": roles[name],
+                "layout": weight_layouts.get(name, "ND"),
+                "source_format": source_format,
+                "source_storage_offset": value.storage_offset(),
+                "storage_offset": value.storage_offset() - start // value.element_size(),
+            }
+    meta = {
+        "schema_version": SCHEMA_VERSION,
+        "source": dict(source),
+        "param_names": list(tensors),
+        "tensors": specs,
+        "storages": stores,
+        "weight_layouts": dict(weight_layouts),
+    }
     return meta, payload
 
 
@@ -119,14 +149,17 @@ def materialize(meta, payload, device="cpu"):
         dtype = getattr(torch, spec["dtype"].removeprefix("torch."))
         raw = backings[spec["storage"]]
         size = torch.empty((), dtype=dtype).element_size()
-        tensors[name] = raw[:raw.numel() // size * size].view(dtype).as_strided(
-            spec["shape"], spec["stride"], spec["storage_offset"])
+        tensors[name] = (
+            raw[: raw.numel() // size * size]
+            .view(dtype)
+            .as_strided(spec["shape"], spec["stride"], spec["storage_offset"])
+        )
     return tensors, backings
 
 
 def convert_weight_layouts(tensors, meta, target_layouts, target_shapes=None):
     """来源布局/形状相同则不动字节；只转换独占的只读权重。"""
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_adapter import repack_weights
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa.native_adapter import repack_weights
 
     converted = []
     for name, target in target_layouts.items():
@@ -155,9 +188,13 @@ def capture_written_pages(tensors):
     """在线数值诊断只备份声明会写的页；越界与保护区需独立检查，不能由此证明。"""
     import torch
 
-    slots = {"kv_cache": "ori_slot_mapping", "cmp_kv": "cmp_slot_mapping",
-             "idx_kv_cache": "idx_slot_mapping", "compress_state": "state_slot_mapping",
-             "inner_compress_state": "inner_state_slot_mapping"}
+    slots = {
+        "kv_cache": "ori_slot_mapping",
+        "cmp_kv": "cmp_slot_mapping",
+        "idx_kv_cache": "idx_slot_mapping",
+        "compress_state": "state_slot_mapping",
+        "inner_compress_state": "inner_state_slot_mapping",
+    }
     saved = []
     for name, slot_name in slots.items():
         value = tensors[name]

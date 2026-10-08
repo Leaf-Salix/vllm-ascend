@@ -128,10 +128,11 @@ def indexer_compressor_project(
     t_matmul = ((bs + MM_B_TILE - 1) // MM_B_TILE) * MM_B_TILE
     x_flat = x
 
-    # Caller-ordered KV and score projections.
+    # 各生产者允许消费者预派发，计算开始仍由原tensor和TaskId依赖保护。
     with pl.spmd(
         KV_SCORE_WORKERS,
         name_hint="kv_score_proj",
+        allow_early_resolve=True,
         deps=[late_dep, chain_dep],
     ) as _kv_score_tid:
         kv_worker = pl.tile.get_block_idx()
@@ -190,7 +191,9 @@ def indexer_compressor_pool_projected(
 
     # Ratio-4 pooling reads Native historical state and current projections.
     pool_workers = pl.min(b_dim, POOL_WORKERS)
-    with pl.spmd(pool_workers, name_hint="scatter_softmax_pool", deps=[_kv_score_tid]) as pool_tid:
+    with pl.spmd(
+        pool_workers, name_hint="scatter_softmax_pool", allow_early_resolve=True, deps=[_kv_score_tid]
+    ) as pool_tid:
         pool_worker = pl.tile.get_block_idx()
         for c_idx in pl.range(pool_worker, b_dim, pool_workers):
             # TND：本请求的 token 区间来自 query_start_loc，不再是 c_idx * s_dim。
@@ -200,15 +203,15 @@ def indexer_compressor_pool_projected(
             request_end = pl.cast(pl.read(query_start_loc, [c_idx + 1]), pl.INDEX)
             first_pos_b = pl.cast(0, pl.INDEX)
             if request_begin < request_end:
-                first_pos_b = pl.read(position_ids, [request_begin])
+                first_pos_b = pl.cast(pl.read(position_ids, [request_begin]), pl.INDEX)
             for token in pl.range(request_begin, request_end):
                 token_pos = pl.read(position_ids, [token])
                 pooled_kv[token : token + 1, :] = pl.full([1, HEAD_DIM], dtype=pl.FP32, value=0.0)
-                if (token_pos + 1) % COMPRESS_RATIO == 0:
+                if pl.read(token_request, [token]) >= 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
                     window_start = token_pos - STATE_LEN + 1
                     for h0 in pl.range(0, HEAD_DIM, HEAD_TILE):
                         # 在线 softmax（上游写法）：以本 token 自己这一格起步，再把其余
-                        # STATE_LEN-1 格逐个并入。精度版先把 8 格按 Native 的交错次序写进
+                        # STATE_LEN-1 格逐个并入。已封存的精度版先把 8 格按 Native 的交错次序写进
                         # GM 暂存、读回后先归一化概率再做 8->4->2->1 规约，只为复刻 Native 的舍入次序。
                         last_ape_row = pl.cast(token_pos % COMPRESS_RATIO, target_type=pl.INDEX)
                         mi = pl.add(
@@ -300,14 +303,18 @@ def indexer_compressor_pool_projected(
     norm_w_2d = pl.reshape(norm_w, [1, HEAD_DIM])
     # S=6 intervals can close one or two compression groups. Reserve the
     # maximum per request, and initialize unused rows before Hadamard reads.
-    with pl.spmd(b_dim, name_hint="indexer_boundary_init", deps=[pool_tid]) as boundary_init_tid:
+    with pl.spmd(
+        b_dim, name_hint="indexer_boundary_init", allow_early_resolve=True, deps=[pool_tid]
+    ) as boundary_init_tid:
         init_request = pl.tile.get_block_idx()
         compact_begin = init_request * BOUNDARY_ROWS_PER_REQUEST
         normed_kv[compact_begin : compact_begin + BOUNDARY_ROWS_PER_REQUEST, :] = pl.full(
             [BOUNDARY_ROWS_PER_REQUEST, HEAD_DIM], dtype=pl.BF16, value=0.0
         )
     rms_workers = pl.min(rms_blocks, RMS_WORKERS)
-    with pl.spmd(rms_workers, name_hint="rmsnorm_rope", deps=[pool_tid, boundary_init_tid]) as rms_tid:
+    with pl.spmd(
+        rms_workers, name_hint="rmsnorm_rope", allow_early_resolve=True, deps=[pool_tid, boundary_init_tid]
+    ) as rms_tid:
         rms_worker = pl.tile.get_block_idx()
         rope_ones = pl.full([RMS_PAD_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
         rope_index = pl.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32)
@@ -352,13 +359,13 @@ def indexer_compressor_pool_projected(
             for inner in pl.range(rms_blk_rows):
                 token = b0 + inner
                 token_pos = pl.read(position_ids, [token])
-                if (token_pos + 1) % COMPRESS_RATIO == 0:
+                request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+                if request >= 0 and (token_pos + 1) % COMPRESS_RATIO == 0:
                     # TND：请求号查表，请求内偏移用 token - request_begin 代替 token % S。
                     # 内部紧凑缓冲仍按每请求 BOUNDARY_ROWS_PER_REQUEST 容量分槽，
                     # 变长下单请求 token 数不超过 S，容量上界不变，布局无需改动。
-                    request = pl.cast(pl.read(token_request, [token]), pl.INDEX)
                     request_begin = pl.cast(pl.read(query_start_loc, [request]), pl.INDEX)
-                    first_pos = pl.read(position_ids, [request_begin])
+                    first_pos = pl.cast(pl.read(position_ids, [request_begin]), pl.INDEX)
                     first_boundary = COMPRESS_RATIO - 1 - first_pos % COMPRESS_RATIO
                     compact_token = (
                         request * BOUNDARY_ROWS_PER_REQUEST + (token - request_begin - first_boundary) // COMPRESS_RATIO
@@ -456,6 +463,7 @@ def indexer_compressor_write(
     with pl.at(
         level=pl.Level.CORE_GROUP,
         name_hint="kv_hadamard",
+        allow_early_resolve=True,
         deps=[rms_tid, hadamard_dep],
     ) as hadamard_tid:
         # Hadamard column tiles.
@@ -508,7 +516,7 @@ def indexer_compressor_write(
             request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
             first_pos = pl.cast(0, pl.INDEX)
             if request_begin < request_end:
-                first_pos = pl.read(position_ids, [request_begin])
+                first_pos = pl.cast(pl.read(position_ids, [request_begin]), pl.INDEX)
             local_token = (
                 (compact_token % BOUNDARY_ROWS_PER_REQUEST) * COMPRESS_RATIO
                 + COMPRESS_RATIO
@@ -555,7 +563,7 @@ def indexer_compressor_write(
             request_end = pl.cast(pl.read(query_start_loc, [request + 1]), pl.INDEX)
             first_pos = pl.cast(0, pl.INDEX)
             if request_begin < request_end:
-                first_pos = pl.read(position_ids, [request_begin])
+                first_pos = pl.cast(pl.read(position_ids, [request_begin]), pl.INDEX)
             local_token = (
                 (compact_token % BOUNDARY_ROWS_PER_REQUEST) * COMPRESS_RATIO
                 + COMPRESS_RATIO
@@ -581,7 +589,7 @@ def indexer_compressor_write(
                     scale_value = pl.cast(pl.read(idx_kv_scale_values, [compact_token, 0]), pl.FP16)
                     # Native packs 32 FP16 scales into one aligned 64-byte
                     # region. Serialize read-modify-write to preserve the
-                    # neighboring history slots, just as the precision path.
+                    # neighboring history slots, as in the archived precision path.
                     native_scale_page = pl.cast(native_page, pl.INDEX)
                     native_scale_bytes = pl.tile.load(
                         idx_native_kv_cache, [native_scale_page, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2]
