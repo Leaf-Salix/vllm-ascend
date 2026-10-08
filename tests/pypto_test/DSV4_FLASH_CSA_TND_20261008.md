@@ -72,3 +72,17 @@ BSH 固定为参考 SHA，新 TND 单独注册；两侧独立且相同初态的 
 系数 producer 的 worker 上界改为 `min(48, B*ceil(6/group_size))`，仍以设备端
 实际组数决定循环范围；S6时恢复参考的worker数量，避免按总token数派发空worker。
 独立审查确认该形状上界覆盖所有活跃请求的组，不漏组；性能影响仍待同场测量。
+
+## 第一项设备任务与编排修复
+
+实现提交 `916b39396` 的 B4/S6、history8192 对拍未产出性能结果：
+参考 BSH 已执行，随后 TND 编排 C++ 编译失败，Indexer 返回的 TopK SSA
+别名声明在子 scope 内，attention 在外部消费，导致未声明标识符。
+完整 lower 和关键核 CCEC 未覆盖此编排编译错误。
+
+修复在父 scope 保存根 TopK 描述符，Indexer 继续写入同一 Out 缓冲，
+attention 读取父级描述符。保留 Indexer 子 scope 的临时内存生命周期。
+修复后的 v7 完整 lower 与编排共享库编译通过；生成代码中 merge 使用
+`add_inout(ext_idx_topk)`，attention plan 使用 `add_input(ext_idx_topk)`。
+TensorMap 按缓冲地址与重叠区间建立 RAW 依赖；不把 scope 退出当成同步屏障。
+设备端正确性与延迟仍需重跑验证，首次任务失败不记为精度失败。

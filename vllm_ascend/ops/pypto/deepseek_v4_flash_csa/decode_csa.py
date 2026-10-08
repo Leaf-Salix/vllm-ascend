@@ -481,9 +481,12 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 late_dep,
                 cmp_kv_score_tid,
             )
+            # Keep the root descriptor in the parent scope. Indexer writes this
+            # same Out allocation; its returned SSA alias belongs to the child.
+            attention_topk = idx_topk
             # Bound indexer scratch to its own runtime scope.
             with pl.scope():
-                _index_scores, index_indices = indexer(
+                _index_scores, _index_indices = indexer(
                     x_normed_t,
                     qr,
                     qr_scale,
@@ -515,7 +518,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 ori_block_table,
                 cmp_kv,
                 cmp_block_table,
-                index_indices,
+                attention_topk,
                 position_ids_t1,
                 kv_seq_lens,
                 token_request,
