@@ -213,7 +213,50 @@ Q导出预检最初因inline reshape无法推断参数metadata失败；改为显
 
 ## 结构化历史证据
 
-[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录21组已完成阶段：
+[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录26组已完成阶段：
 真实T、请求长度、Native对照的逐状态精度、100次重放检查、延迟统计、SK设备事件计数、
 各臂源码SHA及原始报告SHA。省略重复的设备事件长名称和计时样本数组，原始报告仍保留在实验目录。
 正式精度包源码SHA和性能包23文件SHA同时归档；后续结果追加新stage，不改写旧stage数字。
+
+
+## v18：softmax 分层求和单因素与四档回归
+
+只修改 FP32 block sum：连续8元素求和得到64个partial，再分组求和得到8个partial，最后求和。
+max、exp、alpha更新、BF16 probability舍入、PV与最终division全部保持v13不变。
+生成CPP确认三层reshape无padding混入、head内flatten顺序正确、workspace不覆盖尚需读取的exp。
+这是有源码依据的经验性数值对齐；Native raw128与compressed512的实际归约边界不同，
+不能宣称该统一树与所有Native指令逐位等价。
+
+| 用例 | v13 final差异数 / 最大ULP | v18 final差异数 / 最大ULP | v18 heads差异数 / 最大ULP | v18 final relative L2 |
+| --- | --- | --- | --- | --- |
+| 8K/B4/T11，长度6,3,1,1 | 89 / 19 | 0 / 0 | 0 / 0 | 0 |
+| 8K/B4/T24，等长6 | 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| 8K/B16/T60，非等长 | 1172 / 106 | 55 / 30 | 1 / 1 | 1.824205835e-5 |
+| 128K/B4/T24，等长6 | 224 / 55 | 57 / 138 | 1 / 1 | 1.911754277e-5 |
+
+全部四档完成ACLGraph、compiled/raw、A/B/A、100连续replay、reset、guards及实际Native SK profile。
+Native观察臂与未修改Native八类状态逐bit一致；同组heads经Native O-proj helper逐bit复现实际captured输出。
+四档TopK及六类cache/state均与Native全tensor逐bit一致。
+T11实际heads360448元素、等长B4实际heads786432元素全部逐bit一致。
+
+仍未达标的两点已从保存的BF16原始位型定位：
+
+- T60：`[token14,head38,dim500]`，PTO=-0.0108642578125，Native=-0.01092529296875。
+- 128K：`[token8,head18,dim501]`，PTO=-0.0198974609375，Native=-0.019775390625。
+
+两点都在ROPE区域，heads各差1ULP/1bit，经动态O-proj量化后被放大。
+128K的final不同元素更少，但最大ULP由55升到138；不能仅按relative L2下降宣布全面精度收益。
+**v18尚未合入正式精度包**，接下来导出inverse RoPE之前的实际BF16边界继续归因。
+
+同轮延迟均值（μs），precision包含Native HC/norm/O-proj，当前精度优先，不表示速度收益：
+
+| 用例 | Native | 性能对照 | v18 precision |
+| --- | --- | --- | --- |
+| 8K/B4/T11 | 399.56 | 449.48 | 681.25 |
+| 8K/B4/T24 | 415.56 | 478.82 | 748.61 |
+| 8K/B16/T60 | 584.76 | 698.85 | 1136.21 |
+| 128K/B4/T24 | 645.99 | 577.06 | 839.38 |
+
+测试条件仍是单个真实C4层和合成输入，不能外推整模型或DP/EP16吞吐。
+正收益首项runner的归档SHA为74e1f44f00f50ed9238c028f6b93423f31ce43360c9bda9d4adedf5c2400f1d1；
+四档heads runner的实际SHA保存在每份结构化记录，运行脚本、冻结candidate与profile均独立复核。
