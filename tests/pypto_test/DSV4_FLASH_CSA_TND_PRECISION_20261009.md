@@ -213,7 +213,7 @@ Q导出预检最初因inline reshape无法推断参数metadata失败；改为显
 
 ## 结构化历史证据
 
-[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录28组已完成阶段：
+[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录30组已完成阶段：
 真实T、请求长度、Native对照的逐状态精度、100次重放检查、延迟统计、SK设备事件计数、
 各臂源码SHA及原始报告SHA。省略重复的设备事件长名称和计时样本数组，原始报告仍保留在实验目录。
 正式精度包源码SHA和性能包23文件SHA同时归档；后续结果追加新stage，不改写旧stage数字。
@@ -285,3 +285,30 @@ preinverse与postinverse均仅一个元素差1ULP/1bit，final结果保持v18的
 所选SCFA路径的实际源码 `Init` 与host `SplitBalanced` 都使用 `mBaseSize=gSize`，
 每块仅一个query，两个首差点的raw window都是128 key，不存在多query union宽度。
 后续只有在这些用例的实际Q逐bit一致、真实op attrs符合该路径后，才测试raw128专用规约因素。
+
+
+## v21：扩展实际 Q 观察到 B16 与 128K
+
+Native在真实attention调用前复制实际Q到独立持久缓冲，复制前验证实际source为NPU/BF16/[T,64,512]，
+避免copy的隐式类型转换或广播伪造对齐。PTO在同一Q根分配上增加只读导出；
+生成orchestration确认Q生产task与导出task建立真实RAW且父scope在导出结束前存活。
+两侧Q均通过compiled/raw、hidden A/B/A、100/reset更新与恢复检查。
+Native观察臂与未修改Native、PTO导出臂与v18的heads及完整八类状态逐bit一致。
+
+| 用例 | 实际Q元素 | Q不同元素 | Q最大ULP | preinverse不同元素/ULP |
+| --- | --- | --- | --- | --- |
+| B16/T60/8K | 1966080 | 0 | 0 | 1 / 1 |
+| B4/T24/128K | 786432 | 0 | 0 | 1 / 1 |
+
+真实调用参数两档一致：`layout_q=TND`、`layout_kv=PA_ND`、`cmp_ratio=4`、
+`ori_mask_mode=4`、`cmp_mask_mode=3`、`ori_win_left=127`、`ori_win_right=0`，
+没有ori_sparse_indices，softmax_scale=0.04419417382415922。
+因此这两档剩余误差位于attention本体，实际Q/cache/state/TopK均已逐bit对齐。
+
+Native设备profile的SK事件为14/15，观察臂为15/16；额外观测改变了SK分组，
+不能声称dispatch完全相同。严格heads/全状态fidelity通过，真实static+SK资格仍保留。
+
+下一候选v22仅对raw128分母先逐元素相加两个64列半区，再做两级8元素规约；
+compressed512以及max/exp/alpha/PV/probability cast/div全部保持v18。
+候选只通过无设备编译与生成代码门禁，NPU结果尚待完成，未进入正式包；
+它当前只针对已核对的长context raw128资格，不泛化短context或其他attention模式。
