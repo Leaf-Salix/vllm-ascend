@@ -24,10 +24,10 @@ from typing import Any
 
 
 def _pto_csa_atomic_add() -> int:
-    """Performance defaults to the EP16-validated reduction; precision keeps its policy."""
+    """TND variants default to fixed reduction; legacy BSH keeps its policy."""
     variant = os.getenv("PTO_CSA_VARIANT", "precision").strip().lower()
-    performance = variant in ("performance", "perf") or variant.startswith("pkg:")
-    default = "0" if performance else "1"
+    fixed_reduction = variant in ("performance", "perf", "tnd_precision") or variant.startswith("pkg:")
+    default = "0" if fixed_reduction else "1"
     return int(os.getenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", default))
 
 

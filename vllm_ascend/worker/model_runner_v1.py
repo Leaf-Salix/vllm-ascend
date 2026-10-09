@@ -2731,7 +2731,7 @@ class NPUModelRunner(GPUModelRunner):
                 if not can_replay_csa_graph(
                     num_tokens=csa_actual_tokens, num_reqs=num_reqs,
                     uniform_decode=uniform_decode, padded_tokens=descriptor.num_tokens,
-                    variable_queries=selected_variant() == "performance",
+                    variable_queries=selected_variant() in ("performance", "tnd_precision"),
                     max_query_tokens=max_num_scheduled_tokens,
                 ):
                     return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)

@@ -8,6 +8,9 @@
 选择走环境变量而不是 `additional_config`：切换的用途是对照实验，环境变量最不侵入
 生产配置结构，测试驱动也便于按轮次切换。
 
+TND精度版通过 `PTO_CSA_VARIANT=tnd_precision` 单独选择，保留真实变长请求，
+当前精度验收状态以测试文档为准。
+
 **默认是精度版**。不设该变量时走的就是与 Native 对齐的那一套，行为与引入本模块
 之前一致；性能对照必须显式 `PTO_CSA_VARIANT=performance`。
 
@@ -22,8 +25,15 @@ import os
 
 _PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_dspark"
 _PERFORMANCE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
+_TND_PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision"
 _ENV = "PTO_CSA_VARIANT"
-_ALIASES = {"precision": "precision", "prec": "precision", "performance": "performance", "perf": "performance"}
+_ALIASES = {
+    "precision": "precision",
+    "prec": "precision",
+    "performance": "performance",
+    "perf": "performance",
+    "tnd_precision": "tnd_precision",
+}
 
 
 _BISECT_PREFIX = "pkg:"
@@ -39,7 +49,7 @@ def csa_runtime() -> str:
 
 
 def selected_variant() -> str:
-    """返回 "precision" 或 "performance"；无法识别的取值必须报错而不是静默回退。"""
+    """返回BSH精度版、TND性能版或TND精度版；非法值不静默回退。"""
     value = os.environ.get(_ENV, "precision").strip().lower()
     if value.startswith(_BISECT_PREFIX):
         return "performance"
@@ -62,7 +72,7 @@ def variant_package() -> str:
         if not name.isidentifier():
             raise ValueError(f"{_ENV}={value!r} 的包名不合法")
         return f"vllm_ascend.ops.pypto.{name}"
-    return _PRECISION if selected_variant() == "precision" else _PERFORMANCE
+    return {"precision": _PRECISION, "performance": _PERFORMANCE, "tnd_precision": _TND_PRECISION}[selected_variant()]
 
 
 _RING_CONFIG_KEY = "pto_csa_ring_config"

@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Inline addressing of Native compact metadata; no token-sized GM expansion."""
+
+import pypto.language as pl
+
+from .config import FLASH as M
+from .layout import QUERY_BOUNDS_DYN
+
+REQUESTS = pl.dynamic("CSA_COMPACT_REQUESTS")
+TOKENS = pl.dynamic("CSA_COMPACT_TOKENS")
+COMPACT_ROWS = pl.dynamic("CSA_COMPACT_ROWS")
+COMPRESS_RATIO = 4
+ROPE_DIM = M.qk_rope_head_dim
+ROPE_TILE_ROWS = 16
+
+
+@pl.jit.inline(auto_scope=False)
+def build_token_request(
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    seq_lens: pl.Tensor[[REQUESTS], pl.INT32],
+    token_request: pl.Out[pl.Tensor[[TOKENS], pl.INT32]],
+):
+    """把 query_start_loc 展开成逐 token 的请求号表。
+
+    TND（变长请求）下 token // DECODE_SEQ 不再等于请求号：每个请求的 token 数
+    各不相同。宿主侧已经有 query_start_loc（每请求的 token 起止，长度
+    requests + 1），这里一次性展开成逐 token 的表，后面所有 kernel 直接查，
+    不必各自重算。和 build_compact_row_offsets 一样跑在已有的单属主任务里。
+    """
+    for token in pl.range(pl.tensor.dim(token_request, 0)):
+        pl.write(token_request, [token], pl.cast(-1, pl.INT32))
+    for request in pl.range(pl.tensor.dim(seq_lens, 0)):
+        begin = pl.cast(pl.read(bounds, [request]), pl.INDEX)
+        end = pl.cast(pl.read(bounds, [request + 1]), pl.INDEX)
+        if pl.read(seq_lens, [request]) > 0:
+            for token in pl.range(begin, end):
+                pl.write(token_request, [token], pl.cast(request, pl.INT32))
+    return token_request
+
+
+@pl.jit.inline(auto_scope=False)
+def build_compact_row_offsets(
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    lengths: pl.Tensor[[REQUESTS], pl.INT32],
+    offsets: pl.Out[pl.Tensor[[REQUESTS], pl.INT32]],
+):
+    """Run in an existing single-owner task; one offset per Native request."""
+    prefix = pl.cast(0, pl.INDEX)
+    for request in pl.range(pl.tensor.dim(lengths, 0)):
+        begin = pl.read(bounds, [request])
+        end = pl.read(bounds, [request + 1])
+        length = pl.read(lengths, [request])
+        start = length - (end - begin)
+        pl.write(offsets, [request], pl.cast(prefix - start // COMPRESS_RATIO - 1, pl.INT32))
+        prefix = prefix + length // COMPRESS_RATIO - start // COMPRESS_RATIO
+    return offsets
+
+
+@pl.jit.inline(auto_scope=False)
+def load_compact_rope_rows(
+    cos: pl.Tensor[[COMPACT_ROWS, ROPE_DIM], pl.FP32],
+    sin: pl.Tensor[[COMPACT_ROWS, ROPE_DIM], pl.FP32],
+    # TND：token 的请求号来自查表，不能用 token // DECODE_SEQ。
+    token_request: pl.Tensor[[TOKENS], pl.INT32],
+    positions: pl.Tensor[[TOKENS], pl.INT64],
+    offsets: pl.Tensor[[REQUESTS], pl.INT32],
+    begin: pl.Scalar[pl.INDEX],
+    rows: pl.Scalar[pl.INDEX],
+):
+    """Gather only closing rows into the consumer's existing 16-row UB tile."""
+    cosine = pl.full([ROPE_TILE_ROWS, ROPE_DIM], dtype=pl.FP32, value=1.0)
+    sine = pl.full([ROPE_TILE_ROWS, ROPE_DIM], dtype=pl.FP32, value=0.0)
+    for row in pl.range(rows):
+        token = begin + row
+        position = pl.read(positions, [token])
+        token_req = pl.cast(pl.read(token_request, [token]), pl.INDEX)
+        if token_req >= 0 and (position + 1) % COMPRESS_RATIO == 0:
+            compact_row = pl.cast(pl.read(offsets, [token_req]), pl.INDEX) + pl.cast(
+                (position + 1) // COMPRESS_RATIO, pl.INDEX
+            )
+            # 这两张 RoPE 表和 compact slot mapping 同高，只有 Native 算好的
+            # num_compressed_tokens 行。图捕获的 dummy run 把 position 填成 127，
+            # 推出的行号会远超该档行数，必须按真实行数兜住。
+            if compact_row >= 0 and compact_row < pl.tensor.dim(cos, 0):
+                cosine = pl.gather_row(cosine, cos, [row, 0], [compact_row, 0], [1, ROPE_DIM])
+                sine = pl.gather_row(sine, sin, [row, 0], [compact_row, 0], [1, ROPE_DIM])
+    return cosine, sine
+
+
+@pl.jit.inline(auto_scope=False)
+def native_compressor_column_group(
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32], tokens: pl.Scalar[pl.INDEX], head_dim: pl.Scalar[pl.INDEX]
+):
+    # Native arch32 CompressorKernelPerf::SetBaseSize, A3 with 24 Cube cores.
+    # Test equality from live device bounds; do not freeze it at graph capture.
+    first = pl.read(bounds, [1]) - pl.read(bounds, [0])
+    deviation = pl.cast(0, pl.INT32)
+    for request in pl.range(1, pl.tensor.dim(bounds, 0) - 1):
+        length = pl.read(bounds, [request + 1]) - pl.read(bounds, [request])
+        delta = length - first
+        deviation = deviation + delta * delta
+    group = pl.cast(64, pl.INDEX)
+    capacity = 128 * (24 // (head_dim // 64))
+    if deviation == 0 and tokens <= capacity:
+        if head_dim == 512:
+            group = pl.cast(32, pl.INDEX)
+        else:
+            group = pl.cast(16, pl.INDEX)
+    return group
