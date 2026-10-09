@@ -204,13 +204,16 @@ Q导出预检最初因inline reshape无法推断参数metadata失败；改为显
 - 基线PV的N512使编译器实际生成Left64×32/Right32×512；Native MM2使用N128/K128。
 - v17只拆PV输出为4段N128，生成CPP已确认Left64×128/Right128×128，
   每段FP32 accumulator跨4个K块保留，全部输出写回后才发PV_READY；完整ABI/C++和独立审查通过。
-  实测仍pending，不加入正式包，也不预判精度效果。
+  实测已完成，T11 全部 cache/state、TopK 逐bit一致，最终输出仍为89元素不同、
+  最大19ULP、relative L2 5.329045244e-5，与v13相同。该单因素没有精度收益，不合入正式包。
+  同轮均值：Native397.16μs、性能对照438.09μs、精度候选656.62μs；
+  不将跨轮基线漂移解释为该修改的性能收益。
 
 正式精度包仍执行PTO attention、Native O-proj；性能包与原SHA备份保持独立。
 
 ## 结构化历史证据
 
-[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录20组已完成阶段：
+[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录21组已完成阶段：
 真实T、请求长度、Native对照的逐状态精度、100次重放检查、延迟统计、SK设备事件计数、
 各臂源码SHA及原始报告SHA。省略重复的设备事件长名称和计时样本数组，原始报告仍保留在实验目录。
 正式精度包源码SHA和性能包23文件SHA同时归档；后续结果追加新stage，不改写旧stage数字。
