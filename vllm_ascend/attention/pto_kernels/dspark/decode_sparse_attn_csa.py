@@ -75,6 +75,15 @@ QK_SCORE_READY_EVENT = 1
 QK_PROB_READY_EVENT = 2
 QK_PV_READY_EVENT = 3
 ATTN_K_TILE = 128
+# Native reduces the compressed block's l with the three-level radix-8
+# vcgadd of ReduceOptFP32_16x512 (TRowReduceOps.hpp:79-95): level 2 folds
+# the 512 keys into eight consecutive 64-wide sub-sums, level 3 does
+# vcgadd(8->1) over those. A balanced binary tree over 64 consecutive
+# elements equals vcgadd(64->8) + vcgadd(8->1), and pl.row_sum on a
+# 64-wide FP32 tile takes OneRepeatProc's `validCol == elemPerRpt` branch
+# (same file :217-221), which emits a single unmasked vcadd. So two
+# 64-wide row_sums plus one add reproduce native's blocking bitwise.
+L_REDUCE_CHUNK = ATTN_K_TILE // 2
 NUM_QK_CORES = 24  # qk_pv dispatch lanes
 CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
 T_PAD = ((T + 16 - 1) // 16) * 16  # Cube M floor
@@ -521,7 +530,28 @@ def sparse_attn_csa(
                         else:
                             qk_mi = cmp_max
                         qk_exp = pl.exp(pl.row_expand_sub(qk_masked, qk_mi))
-                        qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
+                        # Take the compressed block's sub-sums the way native
+                        # does: two 64-wide row_sums and one add per block,
+                        # leaving the outer (L1+L2)+(L3+L4) four-way balanced
+                        # merge untouched, which is bitwise native's
+                        # 512->64->8->1. The window block stays as it is --
+                        # our row_sum(128) (same-lane fold plus vcadd64) is
+                        # already bitwise equal to native's fold plus
+                        # vcgadd(64->8) + vcgadd(8->1). Each row_sum writes its
+                        # own dst and qk_reduce_tmp is only scratch, so reusing
+                        # it twice in sequence is fine; do not create a tile
+                        # inside the branch, SSAVerify rejects it as used
+                        # outside its defining scope.
+                        if qk_s0 < WIN:
+                            qk_li = pl.row_sum(qk_exp, qk_reduce_tmp)
+                        else:
+                            qk_li_lo = pl.row_sum(
+                                qk_exp[0:H // 2, 0:L_REDUCE_CHUNK], qk_reduce_tmp,
+                            )
+                            qk_li_hi = pl.row_sum(
+                                qk_exp[0:H // 2, L_REDUCE_CHUNK:ATTN_K_TILE], qk_reduce_tmp,
+                            )
+                            qk_li = pl.add(qk_li_lo, qk_li_hi)
                         # Native publishes the BF16 probability with
                         # CAST_ROUND -- midpoint away from zero -- at
                         # sparse_attn_sharedkv_scfa_block_vector.h:482,

@@ -248,3 +248,56 @@ GBS=16×4 或 DP=EP=16 的结果必须另立负载记录，不能复用这里的
       可比较记录：本文 2026-09-24 各节；完整排除清单与方法论见
       docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md。
 ```
+
+## 2026-10-09（第二节）：压缩块的 l 按 native 的 radix-8 取分块和 —— output 达成 18/18 逐位
+
+```text
+日期与源码：2026-10-09。分支 dev/pypto-dsv4-csa-tnd-opus55-20261008，
+              本次改动 vllm_ascend/attention/pto_kernels/dspark/decode_sparse_attn_csa.py
+              两处（新增常量 L_REDUCE_CHUNK = ATTN_K_TILE // 2；压缩块的
+              qk_li = pl.row_sum(qk_exp, qk_reduce_tmp) 换成两条 64 宽 row_sum
+              加一条 add，窗口块不动）。不新建 tile，复用 :342 的 qk_reduce_tmp。
+              PyPTO、Simpler 同本文开头所述 TND 环境。
+环境：227 单卡，CANN 9.2.0-beta.2、Torch 2.10.0、Torch-NPU 2.10.0.post4、
+      vLLM 0.29.0；native 侧 set_deterministic_level(1) 与 HCCL_DETERMINISTIC=true。
+负载：DeepSeek-V4-Flash-0731-w8a8 真实第 2 层 C4 权重，TP=1，S=6，block=128，
+      seed=62 合成 hidden/history。精度覆盖全部 18 个验收配置
+      （uniform-b4 / varlen-b4 / cfg-eq5 / cfg-uneq2 / cfg-mixed 加 phase-8184..8196）。
+精度：整层 output 在 18/18 个配置上对 native relative_l2 = 0.0。
+      heads 元素级 17/18 个配置零失配；phase-8196 余 2 个元素
+      （t=14 h=41 dim=352、t=14 h=58 dim=348），是既有残差、不传导到 output。
+      本次合计修好 6 个元素、新增 0 个：phase-8189 的 t18h6 dim266、
+      phase-8194 的 t17h25 dim42 与 t23h42 dim359、uniform-b4 的 t2h57 dim151、
+      phase-8196 的 t3h39 dim330 与 t15h53 dim271。
+      改动前 phase-8189 = 3.6052e-04、phase-8194 = 3.3952e-04，现均为 0.0。
+      m_oi 变化 0/688128 维（三配置），l 变化 261/299/255 行（主机预测 262/295/237）。
+      四个 flip 行的设备 Δl 为 +2.000 / −2.000 / −1.000 / −2.000；
+      窗口段 slot0 四行全 +0.000、全层 1536/1536 对旧 dump 逐位相同。
+      phase-8196 的「既有而非新增」靠同一棵树只翻开关的 off 基线判定
+      （OFF 失配 4 → 改后 2，修好 2、新增 0）。
+性能：没测出可信代价。臂树 cp -al 建、候选文件先断链再打补丁、空对照是两份完全相同的
+      shipped 树；同卡配对、按 rep 奇偶换先后、n=16，只比 graph.pto.median_ms 绝对中位数。
+      uniform：空对照 +0.0011 ms (+0.17%)、候选 +0.0082 ms (+1.31%)、
+               候选−空对照 +0.0072 ms (+1.14%)，候选符号一致 9/16；
+      varlen： 空对照 −0.0047 ms (−0.75%)、候选 −0.0036 ms (−0.59%)、
+               候选−空对照 +0.0010 ms (+0.16%)，候选符号一致 6/16。
+      两形状符号一致性都没过门槛；逐样本跨度 ±0.02 ms ≈ ±3%，远大于 +0.007 ms 的中位位移；
+      空对照自己在 varlen 上就是 −0.75%（两条臂同一份代码），所以地板不是零中心。
+      两形状 +1.1% 与 +0.2% 不自洽 ⇒ 仍在噪声里。算术上 16 条向量指令对 0.63 ms 内核
+      应在 0.1% 量级；要分辨 ±1% 需 n ≥ 64 或更安静的机器。
+      全部 128 次 run 两条臂 accuracy_pass = True、relative_l2 = 0.0。
+执行：task_20261009_155621_40405646273（kvrs5-*，三配置，2m31s，exit=0）、
+      task_20261009_160406_8827347453 起的 kvrs6 分批（其余 15 配置，exit=0）、
+      task_20261009_170241_40733052266（kvrs6off-phase-8196，off 基线）。
+      生成码在 shipped 路径上核对：pto.sync.set 6→6、pto.sync.wait 9→9、
+      pto.tload 30→30、pto.tstore 17→17 全不变，只有 pto.trowsum 1→3、pto.tadd 8→9。
+      踩到的工具坑：队列有约 5 分钟的运行时自动终止，而 task-submit --list 的 Done 行
+      duration 含排队时间；整趟 15 配置 sweep 与整趟 perf 都因此被砍，改小批并行后才通过。
+结论：通过了什么——l 的归约树是精度残差的唯一贡献者（窗口 PV 与 mm2 的 tile K 贡献经
+      实测均为精确的 0），改成 native 的 radix-8 分块后 output 达成 18/18 逐位，新增 0。
+      未通过什么——phase-8196 的 2 个既有元素级残差未攻；b16、128K、整模型、
+      动态 padding、DP16 全部未测，本节数值不可外推。
+      可比较记录：本文 2026-10-09 第一节（同环境、同负载、改动前状态）。
+      完整定位过程、排除清单与方法论见
+      docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md（已随本次修订）。
+```
