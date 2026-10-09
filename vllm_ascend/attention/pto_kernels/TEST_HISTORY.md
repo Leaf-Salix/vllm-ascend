@@ -205,3 +205,46 @@ seed=62 的合成 hidden/history，测试请求长度 `[3,4,5,6]`、T18、
 每轮 replay 次数，再根据轮间波动判断方向。精度未通过时，性能结果标为
 “实验性能”，不能当作等价替换收益。未来 B32/B40、128K、整模型、
 GBS=16×4 或 DP=EP=16 的结果必须另立负载记录，不能复用这里的单层数值。
+
+## 2026-10-09：逐位精度攻坚（opus55-20261008，纯诊断，未改算法）
+
+```text
+日期与源码：2026-10-09。vllm-ascend dev/pypto-dsv4-csa-tnd-opus55-20261008，
+              起点 04724c0e5，工作树无算法改动（shipped decode_sparse_attn_csa.py
+              md5 b2f741093838241be81daae21ecf7e0b、decode_csa.py
+              md5 6295507b28b3387788186315a392b8d3）。探针仅存在于 227 未入库的
+              probe 副本（KV 行和 / 分子 / mm2 的 k=128 显式拆分，三个开关）。
+              PyPTO、Simpler 同本文开头所述 TND 环境。
+环境：227 单卡，CANN 9.2.0-beta.2、Torch 2.10.0、Torch-NPU 2.10.0.post4、
+      vLLM 0.29.0；native 侧 set_deterministic_level(1) 与 HCCL_DETERMINISTIC=true。
+负载：DeepSeek-V4-Flash-0731-w8a8 真实第 2 层 C4 权重，TP=1，S=6，block=128，
+      seed=62 合成 hidden/history。本节上板配置为 phase-8189、phase-8194、
+      uniform-b4；margin 全量统计枚举出 18 个配置（见精度文档的口径说明）。
+精度：整层 output 验收口径 17 个配置，15 个对 native 逐位一致，2 个失败，
+      各只有 1 个元素（786432 分之一）落到 BF16 边界另一侧：
+      phase-8189 relative_l2 = 3.6052e-04、phase-8194 = 3.3952e-04。
+      新增探针首次拿到设备 fp32 分子 m_oi 与商 n_full；
+      bf16_rint(n_full) 对 heads 的 448 个 nope 列 0/688128 失配（三配置）。
+      输入侧全部实测关闭：q 0/786432（×4 配置）；mm1/mm2 实吃的 640 行压缩 KV
+      行和 15360/15360 全部对上（判别力已标定，换相邻行的相对偏差中位 1.62/1.75/1.35，
+      比 fp32 归约噪声高 4 个数量级）；topk 槽位含顺序 0/12288（两个失败配置）；
+      逐行 actCmpS2Size == 512、有效槽 512。
+性能：未测。本节全部为诊断，无算法改动，不产生性能结论。
+执行：task_20261009_122812_26017125597（kvrs-*，KV 行和探针，三配置 exit 0）、
+      task_20261009_123707_276557120222（kvrs2-*，加分子探针，三配置 exit 0）、
+      task_20261009_132219_393162810449（kvrs3-*，mm2 显式 4×k=128，三配置 exit 0）。
+      每配置跑前 rm -rf build-<name> 强制重编。失败两次均为主机侧脚本 bug
+      （未导出属性引用、名字守卫的 shell 展开），非 kernel 问题。
+结论：mm2 压缩块的 K 粒度与 native 同构——ptoas 自己把一次 K=512 下成 4 条
+      k=128 累加进 fp32 L0C，显式手写 4×k=128 后设备实测 0/688128 维变化、
+      probe_vs_csa_output = 0.0，该通道关闭。
+      剩余 2 个失败元素的机制已定性为 BF16 栅格的选择效应：flip 维恒为该行 448 维中
+      离格边界最近的那一个（27/27 的 flip 维 margin ≤ 3.0 fp32 ULP，非 flip 维中位约
+      16000），所需分子位移仅 0.3–1.7 fp32 ULP。
+      风险曲线给出硬结论：每配置有 46–66 个维 margin < 3，所以任何
+      「只是不同、不等于 native」的改动都会修好 1 个、打坏约 50 个，净变差；
+      只有与 native 结构完全一致（残差精确为 0）的改动才可能有净收益。
+      未通过：两个失败配置的 output 仍未逐位一致。
+      可比较记录：本文 2026-09-24 各节；完整排除清单与方法论见
+      docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md。
+```
