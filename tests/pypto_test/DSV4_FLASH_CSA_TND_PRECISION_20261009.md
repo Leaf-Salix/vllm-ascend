@@ -213,7 +213,7 @@ Q导出预检最初因inline reshape无法推断参数metadata失败；改为显
 
 ## 结构化历史证据
 
-[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录26组已完成阶段：
+[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录28组已完成阶段：
 真实T、请求长度、Native对照的逐状态精度、100次重放检查、延迟统计、SK设备事件计数、
 各臂源码SHA及原始报告SHA。省略重复的设备事件长名称和计时样本数组，原始报告仍保留在实验目录。
 正式精度包源码SHA和性能包23文件SHA同时归档；后续结果追加新stage，不改写旧stage数字。
@@ -260,3 +260,28 @@ T11实际heads360448元素、等长B4实际heads786432元素全部逐bit一致�
 测试条件仍是单个真实C4层和合成输入，不能外推整模型或DP/EP16吞吐。
 正收益首项runner的归档SHA为74e1f44f00f50ed9238c028f6b93423f31ce43360c9bda9d4adedf5c2400f1d1；
 四档heads runner的实际SHA保存在每份结构化记录，运行脚本、冻结candidate与profile均独立复核。
+
+
+## v20：实际 inverse RoPE 前边界定位
+
+Native观察臂在真实 `npu_sparse_attn_sharedkv` 返回后，将实际BF16结果立即复制到独立持久缓冲。
+PTO诊断副本导出已存在的 `n_bf16`，未改变division、CAST_RINT或inverse算术。
+生成CPP确认该原始BF16值在导出前未被inverse写覆盖，MTE3存活期及任务依赖正确。
+正式precision/control与v18源码一致，probe仅增加外部Out导出。
+
+Native两臂heads及八类状态逐bit一致；PTO导出臂与候选heads及八类状态逐bit一致。
+Native/PTO preinverse引用均通过compiled/raw、hidden A/B/A与100/reset检查，Native probe实际SK保留。
+Native preinverse缓冲与postinverse不共址，NOPE部分逐bit相同，ROPE部分实际不同，排除了错取postinverse的引用。
+
+| 用例 | preinverse不同元素 / 最大ULP | 首差坐标 | PTO BF16值 | Native BF16值 |
+| --- | --- | --- | --- | --- |
+| B16/T60/8K | 1 / 1 | [14,38,500] | -0.0115966796875 | -0.01165771484375 |
+| B4/T24/128K | 1 / 1 | [8,18,501] | -0.0030364990234375 | -0.003021240234375 |
+
+preinverse与postinverse均仅一个元素差1ULP/1bit，final结果保持v18的55/57个差异。
+因此inverse不是首次误差来源；此证据不单独证明两边inverse的所有算术逐bit等价。
+继续检查实际Q与attention内部，暂不修改inverse RoPE。
+
+所选SCFA路径的实际源码 `Init` 与host `SplitBalanced` 都使用 `mBaseSize=gSize`，
+每块仅一个query，两个首差点的raw window都是128 key，不存在多query union宽度。
+后续只有在这些用例的实际Q逐bit一致、真实op attrs符合该路径后，才测试raw128专用规约因素。
