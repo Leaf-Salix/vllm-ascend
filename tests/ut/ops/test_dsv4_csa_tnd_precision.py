@@ -170,14 +170,14 @@ def test_compressor_native_column_group_uses_live_bounds(lengths, head_dim, expe
 
 
 @pytest.mark.parametrize(
-    "block,positions,expected_shapes",
+    "block,positions",
     [
-        (0, [126, 127, 126], [[(8, 512)], [(64, 8), (8, 8)], [(8, 512)]]),
-        (1, [126, 127, 126], [[(8, 512)], [(512, 8), (64, 8), (8, 8)], [(8, 512)]]),
+        (0, [62, 63, 64, 126, 127, 62]),
+        (1, [251, 255, 259, 503, 507, 511, 515, 1019, 1023, 1027, 2043, 2047, 251]),
     ],
 )
-def test_native_sum_guard_reads_live_window_boundary(block, positions, expected_shapes):
-    """Execute the real guard across updates; hardware validates reduction bits."""
+def test_native_sum_reads_live_actual_key_count(block, positions):
+    """Replay the actual AST across all length tiers, including backward updates."""
     import ast
     from pathlib import Path
     from types import SimpleNamespace
@@ -187,49 +187,156 @@ def test_native_sum_guard_reads_live_window_boundary(block, positions, expected_
     from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision import decode_sparse_attn_csa
 
     tree = ast.parse(Path(decode_sparse_attn_csa.__file__).read_text())
-    guards = [
-        node
+    body = next(
+        node.body
         for node in ast.walk(tree)
-        if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Compare)
-        and isinstance(node.test.left, ast.Call)
-        and isinstance(node.test.left.func, ast.Attribute)
-        and node.test.left.func.attr == "read"
-        and isinstance(node.test.left.args[0], ast.Name)
-        and node.test.left.args[0].id == "position_ids"
-    ]
-    assert len(guards) == 1
-    code = compile(ast.fix_missing_locations(ast.Module(body=guards, type_ignores=[])), "live_sum_guard.py", "exec")
-    reductions = []
+        if isinstance(node, ast.For) and isinstance(node.target, ast.Name) and node.target.id == "sm_part"
+    )
+    start = next(
+        i for i, node in enumerate(body) if isinstance(node, ast.Assign) and node.targets[0].id == "sm_position"
+    )
+    end = next(i for i, node in enumerate(body) if isinstance(node, ast.Assign) and node.targets[0].id == "sm_sum")
+    code = compile(ast.fix_missing_locations(ast.Module(body=body[start:end], type_ignores=[])), "live_sum.py", "exec")
+    reductions, masks, folds = [], [], []
 
     def row_sum(value, temporary):
         reductions.append(value.shape)
         return value.sum(axis=1, keepdims=True, dtype=np.float32)
 
+    def tile_slice(value, shape, offset, valid_shape=None):
+        if valid_shape is not None:
+            masks.append(valid_shape[1])
+        cols = valid_shape[1] if valid_shape is not None else shape[1]
+        return value[:, offset[1] : offset[1] + cols]
+
+    def store(value, offset, target):
+        target[:] = value
+        return target
+
+    def add(left, right):
+        folds.append(right.copy())
+        return np.add(left, right)
+
     scalar_api = SimpleNamespace(
         read=lambda tensor, indices: int(tensor[tuple(indices)]),
-        add=np.add,
+        cast=lambda value, dtype: value.astype(dtype)
+        if isinstance(value, np.ndarray)
+        else dtype(value)
+        if dtype
+        else int(value),
+        min=min,
+        add=add,
         reshape=np.reshape,
         row_sum=row_sum,
+        unroll=range,
+        col_expand_add=np.add,
+        store=store,
+        load=lambda tensor, offset, shape: tensor.copy(),
+        arange=lambda start, shape, dtype: np.arange(start, start + shape[1], dtype=dtype).reshape(shape),
         create_tile=lambda shape, dtype: np.empty(shape, dtype=dtype),
+        tile=SimpleNamespace(
+            arange=lambda start, shape, dtype: np.arange(start, start + shape[1], dtype=dtype).reshape(shape),
+            slice=tile_slice,
+            assemble=lambda target, source, offset: source.copy(),
+            full=lambda shape, dtype, value: np.full(shape, value, dtype=dtype),
+            cmps=lambda value, scalar, cmp_type: value < scalar,
+            sel=lambda mask, left, right, tmp: np.where(mask, left, right),
+        ),
+        MemorySpace=SimpleNamespace(Vec=None),
         FP32=np.float32,
+        INT32=np.int32,
+        UINT32=np.uint32,
+        INDEX=None,
     )
-    values = np.zeros((8, 512), dtype=np.float32)
-    values[:, : 128 if block == 0 else 512] = 1
     live_positions = np.zeros((1, 1), dtype=np.int64)
     namespace = {
         "pl": scalar_api,
         "WIN": 128,
+        "CMP_TOPK": 512,
+        "COMPRESS_RATIO": 4,
         "SOFTMAX_HEAD_TILE": 8,
         "position_ids": live_positions,
         "qk_t": 0,
         "qk_sb": block,
-        "sm_exp": values,
-        "qk_reduce_tmp": np.empty_like(values),
+        "sm_row": 0,
+        "softmax_copy64": np.zeros((8, 64), dtype=np.float32),
     }
-    for position, shapes in zip(positions, expected_shapes):
+    for position in positions:
+        count = min(position + 1, 128) if block == 0 else min((position + 1) // 4, 512)
+        values = np.full((8, 512), np.nan, dtype=np.float32)
+        values[:, :count] = 1
+        namespace["sm_exp"] = values
         live_positions[0, 0] = position
         reductions.clear()
+        masks.clear()
+        folds.clear()
         exec(code, namespace)
-        assert reductions == shapes
-        np.testing.assert_array_equal(namespace["sm_block_sum"], values.sum(axis=1, keepdims=True))
+        if count < 64:
+            assert masks == [count]
+            assert reductions == [(8, count)]
+            assert not folds
+        elif count < 512:
+            assert reductions == [(64, 8), (8, 8)]
+            assert len(folds) == (count - 1) // 64
+            for i, folded in enumerate(folds, 1):
+                np.testing.assert_array_equal(folded, values[:, i * 64 : (i + 1) * 64])
+        else:
+            assert reductions == [(512, 8), (64, 8), (8, 8)]
+            assert not folds
+        np.testing.assert_array_equal(namespace["sm_block_sum"], np.full((8, 1), count, dtype=np.float32))
+
+
+@pytest.mark.parametrize(
+    "table,first,second,limit,expected",
+    [
+        ([1, 2], 7, 2, 64, True),
+        ([1, 2], 2, 7, 64, False),
+        ([6, 5, 4, 3], 23, 59, 127, True),
+        ([6, 5, 4, 3], 59, 23, 127, False),
+        ([6, 5, 4, 3], 23, 126, 127, False),
+        ([6, 5, 4, 3], 126, 23, 127, False),
+        ([1, 1], 39, 7, 64, False),
+        ([1, 2], 7, 7, 64, False),
+        ([1, 2], -1, 7, 64, False),
+        ([1, 2], 7, -1, 64, False),
+        ([1, 2], -1, -1, 0, False),
+        ([65537, 1], 0, 32, 64, True),
+        ([65538, 1], 0, 32, 64, False),
+    ],
+)
+def test_native_compressed_pair_order_uses_physical_pages(table, first, second, limit, expected):
+    """Native CopyInKv's merge order includes strict last-index/stride fallbacks."""
+    import ast
+    import copy
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision import decode_sparse_attn_csa
+
+    tree = ast.parse(Path(decode_sparse_attn_csa.__file__).read_text())
+    function = copy.deepcopy(
+        next(node for node in tree.body if getattr(node, "name", None) == "native_compressed_pair_swap")
+    )
+    function.decorator_list = []
+    for arg in function.args.args:
+        arg.annotation = None
+    namespace = {
+        "pl": SimpleNamespace(
+            cast=lambda value, dtype: int(value),
+            read=lambda value, index: int(value[tuple(index)]),
+            INT32=int,
+            INDEX=int,
+        ),
+        "BLOCK_SIZE": decode_sparse_attn_csa.BLOCK_SIZE,
+        "HEAD_DIM": decode_sparse_attn_csa.HEAD_DIM,
+        "KV_ELEMENT_BYTES": decode_sparse_attn_csa.KV_ELEMENT_BYTES,
+        "KV_PAIR_MAX_STRIDE_BYTES": decode_sparse_attn_csa.KV_PAIR_MAX_STRIDE_BYTES,
+    }
+    exec(
+        compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), "native_pair.py", "exec"),
+        namespace,
+    )
+    actual = namespace["native_compressed_pair_swap"](first, second, 0, limit, np.asarray([table], dtype=np.int32))
+    assert bool(actual) is expected

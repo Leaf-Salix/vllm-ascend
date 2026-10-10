@@ -132,6 +132,9 @@ VALID_BLOCK_MASK_COLS = ((SPARSE_BLOCKS + MASK_LINE_ELEMS - 1) // MASK_LINE_ELEM
 
 PADDED_TOPK = SPARSE_BLOCKS * ATTN_K_TILE
 
+KV_PAIR_MAX_STRIDE_BYTES = (1 << 31) - 1
+KV_ELEMENT_BYTES = 2  # This CSA path requires Native BF16 KV.
+
 SWA_TILE_WIN_ROWS = min(ATTN_K_TILE, WIN)
 
 SWA_RUNS = (min(ATTN_CUBE_KV_TILE, WIN) + 2 * (BLOCK_SIZE - 1)) // BLOCK_SIZE
@@ -177,6 +180,32 @@ def checked_compressed_index(
 
 
 @pl.jit.inline(auto_scope=False)
+def native_compressed_pair_swap(
+    first: pl.Scalar[pl.INT32],
+    second: pl.Scalar[pl.INT32],
+    request: pl.Scalar[pl.INT32],
+    limit: pl.Scalar[pl.INDEX],
+    table: pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32],
+):
+    # Native SCFA CopyInKv merges a pair from the lower physical address.
+    # Its overflow/duplicate/final-index fallback preserves input slot order.
+    swap = pl.cast(0, pl.INT32)
+    first_index = pl.cast(first, pl.INDEX)
+    second_index = pl.cast(second, pl.INDEX)
+    if first >= 0 and second >= 0:
+        if first_index + 1 < limit and second_index + 1 < limit:
+            first_page = pl.cast(pl.read(table, [request, first_index // BLOCK_SIZE]), pl.INDEX)
+            second_page = pl.cast(pl.read(table, [request, second_index // BLOCK_SIZE]), pl.INDEX)
+            first_row = first_page * BLOCK_SIZE + first_index % BLOCK_SIZE
+            second_row = second_page * BLOCK_SIZE + second_index % BLOCK_SIZE
+            if first_row > second_row:
+                stride_bytes = (first_row - second_row - 1) * HEAD_DIM * KV_ELEMENT_BYTES
+                if stride_bytes < KV_PAIR_MAX_STRIDE_BYTES:
+                    swap = pl.cast(1, pl.INT32)
+    return swap
+
+
+@pl.jit.inline(auto_scope=False)
 def sparse_attn_csa(
     q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
     ori_kv: pl.Tensor[[ORI_BLOCK_NUM_DYN, BLOCK_SIZE, 1, HEAD_DIM], pl.BF16],
@@ -205,6 +234,10 @@ def sparse_attn_csa(
 
     # Sparse slot indices, additive softmax bias, and per-block validity.
     sparse_bias = pl.create_tensor([t_dim, PADDED_TOPK], dtype=pl.FP32)
+    # Exact strided-to-compact copy: current ISA TMOV/TSEL require matching
+    # physical tile types. One row belongs to one core/head and is reused only
+    # after its preceding block sum has been consumed.
+    softmax_copy64 = pl.create_tensor([NUM_QK_CORES * H, 64], dtype=pl.FP32)
     cmp_sparse_indices = pl.create_tensor([t_dim, CMP_TOPK], dtype=pl.INT32)
     valid_block_mask = pl.create_tensor([t_dim, VALID_BLOCK_MASK_COLS], dtype=pl.INT32)
     # Scalar stores are flushed at task exit before the Vector planner reads GM.
@@ -216,10 +249,23 @@ def sparse_attn_csa(
                 checked_t = checked_t0 + checked_dt
                 c_position = pl.cast(pl.read(position_ids, [checked_t, 0]), pl.INDEX)
                 c_request = pl.read(token_request, [checked_t])
-                for c_slot in pl.range(IDX_TOPK):
-                    candidate = pl.read(idx_topk, [checked_t, c_slot])
-                    checked = checked_compressed_index(candidate, c_request, c_position, seq_lens, cmp_block_table)
-                    pl.write(cmp_sparse_indices, [checked_t, c_slot], checked)
+                for c_pair in pl.range(IDX_TOPK // 2):
+                    c_slot = c_pair * 2
+                    first = checked_compressed_index(
+                        pl.read(idx_topk, [checked_t, c_slot]), c_request, c_position, seq_lens, cmp_block_table
+                    )
+                    second = checked_compressed_index(
+                        pl.read(idx_topk, [checked_t, c_slot + 1]), c_request, c_position, seq_lens, cmp_block_table
+                    )
+                    swap = native_compressed_pair_swap(
+                        first, second, c_request, (c_position + 1) // COMPRESS_RATIO, cmp_block_table
+                    )
+                    if swap > 0:
+                        pl.write(cmp_sparse_indices, [checked_t, c_slot], second)
+                        pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], first)
+                    else:
+                        pl.write(cmp_sparse_indices, [checked_t, c_slot], first)
+                        pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], second)
 
     # Read Native positions/page tables at the consumer. No expanded SWA index
     # matrix or intermediate INT32 position buffer is needed.
@@ -431,40 +477,74 @@ def sparse_attn_csa(
                             sm_max = pl.maximum(sm_old_m, sm_block_max)
                             sm_alpha = pl.exp(pl.sub(sm_old_m, sm_max))
                             sm_exp = pl.exp(pl.row_expand_sub(sm_masked, sm_max))
-                            # Preserve the original precision path for short
-                            # windows; calibrated native trees require 128 keys.
-                            if pl.read(position_ids, [qk_t, 0]) >= WIN - 1:
-                                if qk_sb == 0:
-                                    # Native NewReduceSumLastNDImpl for raw128:
-                                    # pair the two 64-column halves, then reduce 8s.
-                                    sm_raw64 = pl.add(
-                                        sm_exp[0:SOFTMAX_HEAD_TILE, 0:64], sm_exp[0:SOFTMAX_HEAD_TILE, 64:128]
-                                    )
-                                    sm_raw_groups = pl.reshape(sm_raw64, [SOFTMAX_HEAD_TILE * 8, 8])
-                                    sm_raw_sum8 = pl.row_sum(
-                                        sm_raw_groups, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
-                                    )
-                                    sm_raw_final = pl.reshape(sm_raw_sum8, [SOFTMAX_HEAD_TILE, 8])
-                                    sm_block_sum = pl.row_sum(
-                                        sm_raw_final, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
-                                    )
-                                else:
-                                    # Native FP32 BigBlockReduceSum: contiguous groups
-                                    # of 8, then groups of 8 partials, then 8 final values.
-                                    sm_groups8 = pl.reshape(sm_exp, [SOFTMAX_HEAD_TILE * 64, 8])
-                                    sm_sum64 = pl.row_sum(
-                                        sm_groups8, pl.create_tile([SOFTMAX_HEAD_TILE * 64, 8], dtype=pl.FP32)
-                                    )
-                                    sm_groups64 = pl.reshape(sm_sum64, [SOFTMAX_HEAD_TILE * 8, 8])
-                                    sm_sum8 = pl.row_sum(
-                                        sm_groups64, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
-                                    )
-                                    sm_final8 = pl.reshape(sm_sum8, [SOFTMAX_HEAD_TILE, 8])
-                                    sm_block_sum = pl.row_sum(
-                                        sm_final8, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
-                                    )
+                            # Native selects the reduction tree from the live actual K,
+                            # not the padded 512-column probability storage. Empty
+                            # blocks are skipped by valid_block_mask before this point.
+                            sm_position = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                            if qk_sb == 0:
+                                sm_key_count = pl.min(sm_position + 1, WIN)
                             else:
-                                sm_block_sum = pl.row_sum(sm_exp, qk_reduce_tmp)
+                                sm_key_count = pl.min((sm_position + 1) // COMPRESS_RATIO, CMP_TOPK)
+                            if sm_key_count < 64:
+                                # WholeReduceSum uses actual K as its vector mask.
+                                sm_short = pl.tile.slice(
+                                    sm_exp,
+                                    [SOFTMAX_HEAD_TILE, 64],
+                                    [0, 0],
+                                    valid_shape=[SOFTMAX_HEAD_TILE, sm_key_count],
+                                )
+                                sm_block_sum = pl.row_sum(
+                                    sm_short, pl.create_tile([SOFTMAX_HEAD_TILE, 64], dtype=pl.FP32)
+                                )
+                            elif sm_key_count < 512:
+                                # Copy into compact64 storage, then fold blocks in
+                                # Native's sequential order. Masked-off tail channels
+                                # retain their original bits, including subnormals.
+                                sm_columns = pl.col_expand_add(
+                                    pl.tile.full([SOFTMAX_HEAD_TILE, 64], dtype=pl.FP32, value=0.0),
+                                    pl.cast(pl.tile.arange(0, [1, 64], dtype=pl.INT32), pl.FP32),
+                                )
+                                pl.store(sm_exp[0:SOFTMAX_HEAD_TILE, 0:64], [sm_row, 0], softmax_copy64)
+                                sm_fold64 = pl.load(softmax_copy64, [sm_row, 0], [SOFTMAX_HEAD_TILE, 64])
+                                for sm_chunk in pl.unroll(1, 8):
+                                    if sm_key_count > sm_chunk * 64:
+                                        sm_added = pl.add(
+                                            sm_fold64,
+                                            pl.tile.slice(sm_exp, [SOFTMAX_HEAD_TILE, 64], [0, sm_chunk * 64]),
+                                        )
+                                        if sm_key_count < (sm_chunk + 1) * 64:
+                                            sm_tail = pl.cast(pl.cast(sm_key_count - sm_chunk * 64, pl.INT32), pl.FP32)
+                                            sm_tail_mask = pl.tile.cmps(sm_columns, sm_tail, cmp_type=2)  # LT
+                                            sm_fold64 = pl.tile.sel(
+                                                sm_tail_mask,
+                                                sm_added,
+                                                sm_fold64,
+                                                pl.create_tile([1, 16], dtype=pl.UINT32),
+                                            )
+                                        else:
+                                            sm_fold64 = sm_added
+                                sm_groups64 = pl.reshape(sm_fold64, [SOFTMAX_HEAD_TILE * 8, 8])
+                                sm_sum8 = pl.row_sum(
+                                    sm_groups64, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
+                                )
+                                sm_final8 = pl.reshape(sm_sum8, [SOFTMAX_HEAD_TILE, 8])
+                                sm_block_sum = pl.row_sum(
+                                    sm_final8, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
+                                )
+                            else:
+                                # Native BigBlockReduceSum for the full K512 block.
+                                sm_groups8 = pl.reshape(sm_exp, [SOFTMAX_HEAD_TILE * 64, 8])
+                                sm_sum64 = pl.row_sum(
+                                    sm_groups8, pl.create_tile([SOFTMAX_HEAD_TILE * 64, 8], dtype=pl.FP32)
+                                )
+                                sm_groups64 = pl.reshape(sm_sum64, [SOFTMAX_HEAD_TILE * 8, 8])
+                                sm_sum8 = pl.row_sum(
+                                    sm_groups64, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
+                                )
+                                sm_final8 = pl.reshape(sm_sum8, [SOFTMAX_HEAD_TILE, 8])
+                                sm_block_sum = pl.row_sum(
+                                    sm_final8, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
+                                )
                             sm_sum = pl.add(pl.mul(sm_old_l, sm_alpha), sm_block_sum)
                             # Native SAS uses CAST_ROUND for probabilities: ties
                             # round away from zero, unlike the final output cast.
