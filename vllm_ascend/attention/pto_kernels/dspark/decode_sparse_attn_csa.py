@@ -75,15 +75,65 @@ QK_SCORE_READY_EVENT = 1
 QK_PROB_READY_EVENT = 2
 QK_PV_READY_EVENT = 3
 ATTN_K_TILE = 128
-# Native reduces the compressed block's l with the three-level radix-8
-# vcgadd of ReduceOptFP32_16x512 (TRowReduceOps.hpp:79-95): level 2 folds
-# the 512 keys into eight consecutive 64-wide sub-sums, level 3 does
-# vcgadd(8->1) over those. A balanced binary tree over 64 consecutive
-# elements equals vcgadd(64->8) + vcgadd(8->1), and pl.row_sum on a
-# 64-wide FP32 tile takes OneRepeatProc's `validCol == elemPerRpt` branch
-# (same file :217-221), which emits a single unmasked vcadd. So two
-# 64-wide row_sums plus one add reproduce native's blocking bitwise.
+# At actCmpS2Size == 512 native reduces the compressed chunk with
+# BigBlockReduceSum (softmax_common_reduce.h:95-105): 8 consecutive
+# columns per partial, giving 64 lanes, then BasicBlockReduceSumImpl
+# folds 64->8->1. Two 64-wide row_sums plus the four-way merge below
+# reproduce that blocking, and pl.row_sum on a 64-wide FP32 tile takes
+# OneRepeatProc's `validCol == elemPerRpt` branch (TRowReduceOps.hpp:
+# 217-221), one unmasked vcadd.
+# NB the basic-block family is NOT what runs: isBasicBlock is a hard-coded
+# `false` template argument at the call site
+# (sparse_attn_sharedkv_scfa_block_vector.h:442) and every branch on it is
+# `if constexpr`, so SoftmaxFlashV2BasicBlockImpl, SpecialBasicBlockAddImpl
+# and the NDExt family are all compiled out. The live path is
+# NewReduceSumLastNDImpl, and it keys on the UNALIGNED key count
+# (softmax_common_nd_reduce.h:301-303) while splitK only sets the row
+# stride -- do not derive the blocking from any aligned width.
 L_REDUCE_CHUNK = ATTN_K_TILE // 2
+# ...but only when native's compressed block really is 512 keys.  Native's
+# blocking is chosen by actCmpS2Size alone, and
+#   actCmpS2Size = Min(sparseBlockCount * sparseBlockSize, thresHold)
+#   thresHold    = (cmpMaskRight + s1EndIdx + 1) / cmpRatio
+# (sparse_attn_sharedkv_scfa_kernel.h:373-374).  sparseBlockSize is pinned
+# to 1 (same file :235, host op_host/sparse_attn_sharedkv_tiling.cpp:825),
+# sparseBlockCount is the K axis of cmp_sparse_indices = CMP_TOPK
+# (tiling.cpp:695), cmpMaskRight = actOriS2Size - actS1Size (:724), and
+# mBaseSize == gSize (tiling.cpp:1626) so mBaseSize/gSize == 1 and
+# s1EndIdx == s1StartIdx -- the length is per token:
+#     actCmpS2Size == Min(CMP_TOPK, (pos + 1) // COMPRESS_RATIO)
+# which takes every integer in {0..512} and only saturates at
+# pos + 1 >= 2048.  NewReduceSumLastNDImpl
+# (softmax_common_nd_reduce.h:297-333) then picks one of four shapes:
+#   K == 512       BigBlockReduceSum (softmax_common_reduce.h:95-113) plus
+#                  BasicBlockReduceSumImpl 64->8->1 == one fully balanced
+#                  binary tree over the 512 columns.
+#   128 <= K < 512 Add(tmp, src, src[64]) then NextBlockAddImpl
+#                  (softmax_common_arithmetic.h:140-163) folds 64-column
+#                  blocks 2..nb-1 into the SAME 64 lanes in block order,
+#                  then TailAddImpl (:84-106) adds the K%64 tail into lanes
+#                  0..tail-1, then ONE 64-lane balanced tree.
+#   64 <= K < 128  FirstBlockCopyImpl + TailAddImpl + 64-lane tree.
+#   K < 64         a single masked WholeReduceSum(64).
+# The lower three are all "chain the 64-column blocks lane by lane, reduce
+# once at the end", and the 64-lane tree lands AFTER the cross-block sum,
+# so no amount of per-block scalar bookkeeping can reproduce them -- the
+# partial sums have to survive across blocks at lane granularity.  Hence
+# L_CHAIN_LANES below and the dispatch on l_cmp_keys.
+# What is established: the shapes above are a literal read of the live
+# path, and a host fp32 replay driven by the device's own dumped fp32
+# qk_exp reproduces this kernel's l bitwise on 6/6 probed rows, so the
+# code matches the shape it claims.  What is NOT established: that the
+# shape is bitwise native's.  Reconstructing native's l from its BF16
+# output has +/-1 ULP of slack (vdiv is not correctly rounded: +0 ULP
+# 94.372%, -1 ULP 3.071%, +1 ULP 2.556%) against intervals up to 96 ULP
+# wide, so every candidate blocking lands inside it -- that test has no
+# resolution.  The open structural risk is whether the hardware's
+# vcgadd/BlockReduceSum is balanced or sequential within each group of 8;
+# if it is sequential, one vcadd(64->1) is not equal to the two-level
+# form.  That risk predates this change -- the K == 512 path ends in the
+# same vcadd -- so it is not introduced here, but it is not closed.
+L_CHAIN_LANES = L_REDUCE_CHUNK
 NUM_QK_CORES = 24  # qk_pv dispatch lanes
 CSA_PLAN_WORKERS = 16  # csa_slots_build_valid_qk_plan token-tile lanes
 T_PAD = ((T + 16 - 1) // 16) * 16  # Cube M floor
@@ -507,9 +557,26 @@ def sparse_attn_csa(
                 running_l_win = pl.tile.muls(l_win_seed, 0.0)
                 running_l_cmp = pl.tile.muls(l_cmp_seed, 0.0)
                 running_l_cmp_hi = pl.tile.muls(l_cmp_hi_seed, 0.0)
+                # The reduction shape native uses for the compressed chunk is a
+                # function of this scalar only (see L_REDUCE_CHUNK above).  Read
+                # it once per token; pl.read + pl.cast is the same form the
+                # window gather already uses for position_ids.
+                l_cmp_keys = (
+                    pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX) + 1
+                ) // COMPRESS_RATIO
+                # The K < 512 lane accumulator.  pl.tile.full is how
+                # running_left / running_right seed their own loop, so it needs
+                # no attn_sink_col load of its own.
+                running_l_cmp_lane = pl.tile.full(
+                    [H // 2, L_CHAIN_LANES], dtype=pl.FP32, value=0.0,
+                )
                 CMP_MID = WIN_BLOCKS + (SPARSE_BLOCKS - WIN_BLOCKS) // 2
-                for exp_tick, (ex_w, ex_c, ex_d) in pl.range(
-                    SPARSE_BLOCKS, init_values=(running_l_win, running_l_cmp, running_l_cmp_hi),
+                for exp_tick, (ex_w, ex_c, ex_d, ex_n) in pl.range(
+                    SPARSE_BLOCKS,
+                    init_values=(
+                        running_l_win, running_l_cmp, running_l_cmp_hi,
+                        running_l_cmp_lane,
+                    ),
                 ):
                     softmax_sb = exp_tick
                     if pl.read(valid_block_mask, [qk_t, softmax_sb]) > 0:
@@ -552,6 +619,34 @@ def sparse_attn_csa(
                                 qk_exp[0:H // 2, L_REDUCE_CHUNK:ATTN_K_TILE], qk_reduce_tmp,
                             )
                             qk_li = pl.add(qk_li_lo, qk_li_hi)
+                        # Separate IfStmt on purpose: the scalar reduce above and
+                        # the four-way CMP_MID merge below stay exactly as they
+                        # are, so the K == 512 path emits the identical
+                        # instruction sequence and the chain costs it only a
+                        # scalar branch.  Strictly lo then hi, in column order.
+                        # ex_n starts at +0.0, so the first compressed block
+                        # yields (0 + b0) + b1 -- native's
+                        # Add(tmp, src, src[64]) -- and every later block's two
+                        # adds continue NextBlockAddImpl's block order.  Masked
+                        # slots carry exp(NEG_INF - m) == +0.0 and adding +0.0 is
+                        # exact, which is what makes zero fill equivalent to
+                        # TailAddImpl's mask; a 128 block with no valid slot at
+                        # all is skipped by valid_block_mask and would have added
+                        # +0.0 anyway.
+                        if qk_s0 < WIN:
+                            ex_lane = pl.yield_(ex_n)
+                        else:
+                            if l_cmp_keys >= CMP_TOPK:
+                                ex_lane_k = pl.yield_(ex_n)
+                            else:
+                                ex_lane_lo = pl.add(
+                                    ex_n, qk_exp[0:H // 2, 0:L_CHAIN_LANES],
+                                )
+                                ex_lane_k = pl.yield_(pl.add(
+                                    ex_lane_lo,
+                                    qk_exp[0:H // 2, L_CHAIN_LANES:ATTN_K_TILE],
+                                ))
+                            ex_lane = pl.yield_(ex_lane_k)
                         # Native publishes the BF16 probability with
                         # CAST_ROUND -- midpoint away from zero -- at
                         # sparse_attn_sharedkv_scfa_block_vector.h:482,
@@ -577,7 +672,9 @@ def sparse_attn_csa(
                             else:
                                 ex_w2, ex_c2, ex_d2 = pl.yield_(ex_w, ex_c, pl.add(ex_d, qk_li))
                             ex_wv, ex_cv, ex_dv = pl.yield_(ex_w2, ex_c2, ex_d2)
-                        ex_wa, ex_ca, ex_da = pl.yield_(ex_wv, ex_cv, ex_dv)
+                        ex_wa, ex_ca, ex_da, ex_na = pl.yield_(
+                            ex_wv, ex_cv, ex_dv, ex_lane,
+                        )
                     else:
                         exp_zero = pl.tile.full(
                             [H // 2, ATTN_K_TILE], dtype=pl.BF16, value=0.0,
@@ -591,9 +688,26 @@ def sparse_attn_csa(
                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3,
                             ffts_mode=2, core_type=pl.KernelType.AIV,
                         )
-                        ex_wa, ex_ca, ex_da = pl.yield_(ex_w, ex_c, ex_d)
-                    running_l_win, running_l_cmp, running_l_cmp_hi = pl.yield_(ex_wa, ex_ca, ex_da)
-                running_l_cmp = pl.add(running_l_cmp, running_l_cmp_hi)
+                        ex_wa, ex_ca, ex_da, ex_na = pl.yield_(
+                            ex_w, ex_c, ex_d, ex_n,
+                        )
+                    (
+                        running_l_win, running_l_cmp, running_l_cmp_hi,
+                        running_l_cmp_lane,
+                    ) = pl.yield_(ex_wa, ex_ca, ex_da, ex_na)
+                # K == 512 keeps the balanced tree: ((u1+u2)+(u3+u4)) over the
+                # four 128 blocks, bitwise BigBlockReduceSum's 512->64->8->1.
+                # K < 512 takes the chained lanes and reduces them once --
+                # pl.row_sum on a 64-wide FP32 tile is OneRepeatProc's
+                # validCol == elemPerRpt branch (TRowReduceOps.hpp:217-221),
+                # one unmasked vcadd, which is bitwise
+                # BasicBlockReduceSumImpl's vcgadd(64->8) + vcgadd(8->1).
+                if l_cmp_keys >= CMP_TOPK:
+                    l_cmp_sat = pl.add(running_l_cmp, running_l_cmp_hi)
+                    running_l_cmp = pl.yield_(l_cmp_sat)
+                else:
+                    l_cmp_chain = pl.row_sum(running_l_cmp_lane, qk_reduce_tmp)
+                    running_l_cmp = pl.yield_(l_cmp_chain)
                 # Publish the chunk sums where the merge reads them: the window
                 # chunk in block 0's slot, the compressed chunk in block
                 # WIN_BLOCKS's. 2..4 的槽位不再写零 —— merge 也不再读它们。

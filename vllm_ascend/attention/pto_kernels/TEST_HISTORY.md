@@ -342,3 +342,58 @@ GBS=16×4 或 DP=EP=16 的结果必须另立负载记录，不能复用这里的
       可比较记录：本文 2026-10-09 两节（同环境、同负载）。
       完整定位与方法论见 docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md。
 ```
+
+## 2026-10-10：压缩块 l 的低档归约改成 64 通道升序链（门 K == 512）—— output 修好 2 档
+
+```text
+日期与源码：2026-10-10。分支 dev/pypto-dsv4-csa-tnd-opus55-20261008（起点 5b92a3ecb）。
+              本次改动只有 vllm_ascend/attention/pto_kernels/dspark/decode_sparse_attn_csa.py：
+              新增常量 L_CHAIN_LANES = L_REDUCE_CHUNK（= 64），逐 token 读
+              l_cmp_keys = (position_ids + 1) // COMPRESS_RATIO，并把压缩块的 l 归约按
+              l_cmp_keys >= CMP_TOPK 分档：== 512 保持现有 radix-8 平衡树（两条 64 宽
+              row_sum + 四路平衡合并，一位不动）；< 512 改走 [H//2, 64] FP32 通道累加器，
+              按 chunk 升序每块两条 pl.add，循环后一条 pl.row_sum(64)。通道累加器是
+              紧跟标量归约之后的独立 IfStmt，所以 K == 512 侧的分支 region 在 IR 里是
+              字面空的。窗口块一行未动。patch 不含任何探针代码。
+环境：227 单卡，CANN 9.2.0-beta.2、Torch 2.10.0、Torch-NPU 2.10.0.post4、vLLM 0.29.0；
+      native 侧 set_deterministic_level(1) 与 HCCL_DETERMINISTIC=true。
+负载：DeepSeek-V4-Flash-0731-w8a8 真实第 2 层 C4 权重，TP=1，block=128，seed=62 合成
+      hidden/history。覆盖 18 个验收配置（全 K=512）+ 12 个短历史/单一 K 档
+      K ∈ {100,384,385,416,447,448,449,460,480,481,510,512}。
+精度：18 个验收配置（off 基线对同 HEAD 取）heads 两臂都 18/18 零失配、output
+      relative_l2 全 0.0；两臂 heads/output/topk/scores 逐位相同，新增 0。
+      12 个短历史档 output：base 有 2 档不为 0（k384 = 4.4910e-04 / 908 个元素、
+      t1k481 = 3.5386e-04），链式后 12 档全部 0.0 / 0 个元素 ⇒ 修好 2 档、回退 0 档。
+      12 个短历史档 heads 元素级：base 合计 20 个失配，链式后 7 个（修好 18、新增 5）。
+      新增 5 个坐标：k384 (6,19,163)、k384 (8,58,424)、k448 (10,40,485)、
+      t0k480 (5,61,291)、t62k510 (9,19,247)；残留 2 个：t1k385 (7,26,10)、
+      t62k510 (9,36,321)。这 7 个都不传导到 output（同一批 dump 里 output 逐位
+      失配 0、relative_l2 = 0.0）。s2047 标定档两臂都 0 失配。
+      生成码：36 个 kernel 里只有 qk_pv.pto 变，规范化指令序列逐条 diff 为
+      tadd +2（K<512 的 else region 内，region 深度 5）、trowsum +1（循环后 else，深度 2）、
+      load_scalar +1 与 texpands +1（深度 1，无条件：读 position_ids 与 [32,64] FP32 清零
+      seed）；sync.set 6、sync.wait 9、tload 30、tstore 17、tmatmul 12、tmatmul.acc 12、
+      texp 2、tcvt 1、tmov 16 等全部不变。
+      主机侧（用 va-lane64 臂 dump 的 fp32 qk_exp 当被加数，零 vexp 噪声）：升序链实现
+      在 6 个可查行上逐位复现设备 l（6/6），逐块 qk_li 自校验 6/6，掩码列实测精确 +0.0。
+性能：未测（用户指示精度完整解决前不跑性能 AB，含空对照）。
+执行：kvrs9 共 108 个 task 全 exit=0（base/chain × 31 档 + 449/481 两个已作废的门）；
+      臂树 src/vllm-ascend-h5b92（off 基线）与 src/vllm-ascend-h5b92-lk（候选），
+      两者只差 decode_sparse_attn_csa.py 及其探针副本，其余文件 diff -rq 为空。
+      判定脚本 bin/opus55-ab/{lk8_accept.py,lk_final.py,exact12.py,tkorder7.py}。
+      ⚠️ 本轮纠正两个主机复刻口径错误，两次都会把「逐位相同」判成假通过：
+      (1) probe_lp 的槽距必须取 T_PAD*H = 24576，不是 attn_lp.numel() // 8
+          —— _PROBE_KV_ROWSUM = True 后 _PROBE_LP_ROWS = 8*T_PAD*H + T_PAD*640 = 442368，
+          用 numel()//8 会读到 KV 行和区的未初始化值，l 读出来是 0x7fc00000(NaN)，
+          而 NaN == NaN 在按位比较下会假通过。lsim.py / val.py 都要改。
+      (2) valid_block_mask 整块跳过的压缩块，探针从未写过那 128 列，dump 里是未初始化值；
+          主机模型必须跟内核一样跳过这些 chunk，不能当 +0.0 累加。K=384 上会直接得 NaN。
+结论：通过了什么——按整层 output 口径，12 个短历史档从 2 档不为 0 变成全 0.0，
+      18 个验收配置逐位不变、新增 0；升序链实现已被精确被加数证明忠于规格（6/6 逐位）。
+      未通过什么——heads 元素级新增 5 个坐标（见上），所以「零新增」这条硬门槛未过；
+      native 在 K ≤ 480 的真实结合方式尚未判定（8 个候选在 native 的 l 可行区间上
+      全部落在 ±1 ULP 不确定度内，该方法无判别力）；t0k480 档缺 fp32 qk_exp dump，
+      该行未查。b16、128K、整模型、动态 padding、DP16 全部未测，本节数值不可外推。
+      可比较记录：本文 2026-10-10 前一节（同环境、同负载、同 HEAD 的 off 基线）。
+      完整定位与方法论见 docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md。
+```
