@@ -340,3 +340,43 @@ def test_native_compressed_pair_order_uses_physical_pages(table, first, second, 
     )
     actual = namespace["native_compressed_pair_swap"](first, second, 0, limit, np.asarray([table], dtype=np.int32))
     assert bool(actual) is expected
+
+
+@pytest.mark.parametrize("group_visible", [1, 64, 512, 1024, 2047, 2048, 2049, 4096, 8191, 8192])
+@pytest.mark.parametrize("query_tail", [0, 1, 3])
+def test_short_topk_query_scores_have_one_writer_per_candidate(group_visible, query_tail):
+    """Exercise actual store clipping: K8192 has a partial 384-column half tile."""
+    import ast
+    from collections import Counter
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision import decode_indexer
+
+    tree = ast.parse(Path(decode_indexer.__file__).read_text())
+    clip = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "buf_lane_valid_rows" for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and len(node.value.args) == 2
+        and isinstance(node.value.args[1], ast.Call)
+        and isinstance(node.value.args[1].func, ast.Attribute)
+        and node.value.args[1].func.attr == "max"
+    )
+    code = compile(ast.fix_missing_locations(ast.Module(body=[clip], type_ignores=[])), "score_store.py", "exec")
+    namespace = {"pl": SimpleNamespace(min=min, max=max)}
+    query_visible = max(group_visible - query_tail, 0)
+    lane_span = min(((group_visible + 767) // 768) * 384, 4096)
+    writes = Counter()
+    for lane in range(2):
+        for begin in range(0, lane_span, 384):
+            valid = max(min(query_visible - lane * lane_span - begin, 384), 0)
+            namespace.update(buf_lane_valid_rows=valid, buf_lane_span=lane_span, buf_score_begin=begin)
+            exec(code, namespace)
+            columns = range(lane * lane_span + begin, lane * lane_span + begin + namespace["buf_lane_valid_rows"])
+            assert all(lane * lane_span <= column < (lane + 1) * lane_span for column in columns)
+            writes.update(columns)
+    assert sorted(writes) == list(range(query_visible))
+    assert all(count == 1 for count in writes.values())

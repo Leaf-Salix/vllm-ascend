@@ -8,7 +8,7 @@
     "config.py": "975c79434d5548c621eaa2cf1b72d9564f4effc05e8248646257555bac09c62e",
     "decode_compressor_ratio4.py": "23347a3d9491d086373114c9a053ba85559eab57dd02450c8c84a5934b81a553",
     "decode_csa.py": "abc8d97619968c8a8aeea1b675f1fa4b59b691dbcd535d3c3b5ea84d42cc242a",
-    "decode_indexer.py": "5de3075e7b9c345297112ccb6216aaa94ee29286e7aa8838c4dfe92f802085eb",
+    "decode_indexer.py": "5eafa101ab287cf9c575f9a6ba7bf9cae0da60f97a97bd7e6092739ec0fca08b",
     "decode_indexer_compressor.py": "7b7ca834eae1d4414cd500058d2916d02c68fcde19bc4f11a601ba8984d6fe98",
     "decode_o_proj.py": "271a9b21a0439f5ea49b785c2a1e10043b7e691a632b7cd7166fd148787188c7",
     "decode_sparse_attn_csa.py": "fdff08278cd8d19b3821cc8120e95a52b82f42b968ec4893eb7a04c1ed425412",
@@ -16739,6 +16739,1424 @@
       "diagnostic_completion_alone_is_precision_pass": false
     },
     {
+      "label": "fx46eq5",
+      "task": "task_20261010_154746_345415414166",
+      "kind": "fix_with_diagnostic",
+      "purpose": "short complete-query Native 2048-candidate sort boundaries; strict A/B selected scores and full precision pass",
+      "raw_sha256": "1e3973339091411ca597e6d58bd2bc979aca362a55a87b272fbb044f86d75e16",
+      "measurements": {
+        "complete": true,
+        "batch": 4,
+        "history": 8186,
+        "lengths": [
+          5,
+          5,
+          5,
+          5
+        ],
+        "tokens": 20,
+        "layer": 4,
+        "seed": 62,
+        "scope": "HC pre + norm + CSA + HC post; real layer4 weights, synthetic hidden/history; no MoE/DP16/EPLB/acceptance-rate evidence",
+        "environment": {
+          "torch": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/env/lib/python3.12/site-packages/torch/__init__.py",
+            "version": "2.10.0+cpu"
+          },
+          "torch_npu": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/env/lib/python3.12/site-packages/torch_npu/__init__.py",
+            "version": "2.10.0.post2"
+          },
+          "vllm": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/src/vllm/vllm/__init__.py",
+            "version": "0.25.1"
+          },
+          "vllm_ascend": {
+            "path": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-ab/src/vllm_ascend/__init__.py",
+            "version": null
+          },
+          "pypto": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/experiments/nalinaly-71153bb3/pypto-reference/python/pypto/__init__.py",
+            "version": "0.1.0"
+          },
+          "simpler": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/experiments/nalinaly-71153bb3/pypto-reference/runtime/python/simpler/__init__.py",
+            "version": null
+          },
+          "npugraph_ex": {
+            "path": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/env/lib/python3.12/site-packages/torch_npu/dynamo/npugraph_ex/__init__.py",
+            "version": null
+          }
+        },
+        "runtime_env": {
+          "ASCEND_HOME_PATH": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+          "ATB_HOME_PATH": "/data/pyptouser/yejia/vllm-cann92-dsv4-tnd-main-20260924/Ascend/nnal/atb/9.2.0-beta.2/atb/cxx_abi_1",
+          "ASCEND_OPP_PATH": "/data/pyptouser/yejia/p12/fx46eq5/opp_env/opp",
+          "ASCEND_CUSTOM_OPP_PATH": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-ab/native-qli-score-v45/install/packages/vendors/yejia_qli_score45_transformer:/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/src/vllm-ascend/vllm_ascend/_cann_ops_custom/vendors/custom_transformer",
+          "PTOAS_ROOT": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/experiments/nalinaly-71153bb3/reference-env/bin",
+          "HCCL_DETERMINISTIC": "true",
+          "VLLM_ASCEND_PTO_CSA_ATOMIC_ADD": "0",
+          "PTO_CSA_RUNTIME": "tensormap_and_ringbuffer",
+          "OMP_NUM_THREADS": "10"
+        },
+        "ab_manifest": {
+          "diagnostic_only": true,
+          "control": "boundary507-native-pair-v43",
+          "change": "short unbalanced score rows are contiguous by query; final sort uses Native contiguous 2048-candidate chunks; QK/WS/scale math unchanged",
+          "variants": {
+            "precision": {
+              "rmsnorm.py": "76e12003bb147cf7ae0148fb8824aa7818aa663e6f4658699ec25e3175a52aa0",
+              "decode_csa.py": "abc8d97619968c8a8aeea1b675f1fa4b59b691dbcd535d3c3b5ea84d42cc242a",
+              "decode_indexer.py": "5eafa101ab287cf9c575f9a6ba7bf9cae0da60f97a97bd7e6092739ec0fca08b",
+              "service.py": "09491221d77065c22ddd7b49942b34a639fc576f3bfb33a7f7f0142ef0be8a15",
+              "native_adapter.py": "9ec4cec8dfddaad274951d904c6af7d93318deba740137e9b77676f713b07970",
+              "config.py": "975c79434d5548c621eaa2cf1b72d9564f4effc05e8248646257555bac09c62e",
+              "q_projection.py": "6185fd98ff300b8a18254de27820c253023b7e577e1b053f1f609e360e88ea5c",
+              "reduction.py": "91561136ab409fda2bcafe3417d7723b4da4e1956c94717732fd6a6a39fafb89",
+              "decode_o_proj.py": "271a9b21a0439f5ea49b785c2a1e10043b7e691a632b7cd7166fd148787188c7",
+              "nz_mode.py": "c1ca5fed922d28b1b48d0a38c1a0db2ecfe1d0be2c7e1b225f56a3922f72b924",
+              "hc_pre.py": "bcc0396b6f88363f5ad4b9fe0ca43fe74ff3c235bc5132921143fed9087b9622",
+              "hc_post.py": "31619000061a8048c53ac2f7bdef3c294cb619db89dbc67f987876d0abf41aa4",
+              "layout.py": "a06da524db66a95689bd320e9a90eca800672631f1460fb3df2646f2a2a15016",
+              "decode_sparse_attn_csa.py": "57efc511bc6bde77d7bbf46831ce99004833cda659734dd116118e4ed7d75166",
+              "compact_metadata.py": "e6a2a3c55f8535ba2aa71c0f1ce82b316d87c01e9edcdb71eeb4832ef5778cea",
+              "__init__.py": "7f73d3d3c1ab5e28ae9b956f6021b208ce81c0056487c37b5d02c251aaec312d",
+              "decode_indexer_compressor.py": "7b7ca834eae1d4414cd500058d2916d02c68fcde19bc4f11a601ba8984d6fe98",
+              "nz_args.py": "74b8fcae0fe32b2a35b7e9b6f4cc68962dc7df82dbca2a4e1bf1db78a5c2e4c5",
+              "qkv_proj_rope.py": "4cc7c46f4321ca65271c729f33faf6b275591ecfc0b0cfe46e7053ddd1e90cd9",
+              "decode_compressor_ratio4.py": "23347a3d9491d086373114c9a053ba85559eab57dd02450c8c84a5934b81a553",
+              "service_config.py": "e937db95c096e88a190c3e051231b33a332d2ad0461008e93f41a27deea8ef10",
+              "native_storage.py": "ab338ab47d89f7d6af2c4b65051dc9fe6d1ad44606901cb1efb99080bc9a752a",
+              "host_metadata.py": "5813c18ead5ef529369a2e766b051661546f6f63fff8d955a6d85feda604a9cf"
+            }
+          }
+        },
+        "stages": {
+          "heads": {
+            "elements": 655360,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "oproj_from_each_heads": {
+            "elements": 81920,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "helper_matches_pto_graph": {
+            "elements": 81920,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "helper_matches_native_graph": {
+            "elements": 81920,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "heads_origin": "Actual deterministic Native SK argument to _forward_o_proj; persistent PTO exported heads"
+        },
+        "perturbed_heads": {
+          "elements": 655360,
+          "nonfinite": 0,
+          "different": 0,
+          "max_abs": 0.0,
+          "relative_l2": 0.0,
+          "ulp": {
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+            "max": 0.0
+          },
+          "ulp_counts": {
+            "0": 0,
+            "1": 0,
+            "2": 0,
+            "4": 0,
+            "100": 0
+          },
+          "changed_bits_max": 0,
+          "sign_changed": 0,
+          "bitwise_different": 0,
+          "exact": true
+        },
+        "native_bitwise_pass": true,
+        "perturbed_native_bitwise_pass": true,
+        "protocol": {
+          "rounds": 18,
+          "replays_per_round": 100,
+          "single_samples": {
+            "native": 60,
+            "native_probe": 60,
+            "precision": 60
+          },
+          "warmup": 20,
+          "orders": [
+            [
+              "native",
+              "native_probe",
+              "precision"
+            ],
+            [
+              "native_probe",
+              "precision",
+              "native"
+            ],
+            [
+              "precision",
+              "native",
+              "native_probe"
+            ],
+            [
+              "precision",
+              "native_probe",
+              "native"
+            ],
+            [
+              "native_probe",
+              "native",
+              "precision"
+            ],
+            [
+              "native",
+              "precision",
+              "native_probe"
+            ],
+            [
+              "native",
+              "native_probe",
+              "precision"
+            ],
+            [
+              "native_probe",
+              "precision",
+              "native"
+            ],
+            [
+              "precision",
+              "native",
+              "native_probe"
+            ],
+            [
+              "precision",
+              "native_probe",
+              "native"
+            ],
+            [
+              "native_probe",
+              "native",
+              "precision"
+            ],
+            [
+              "native",
+              "precision",
+              "native_probe"
+            ],
+            [
+              "native",
+              "native_probe",
+              "precision"
+            ],
+            [
+              "native_probe",
+              "precision",
+              "native"
+            ],
+            [
+              "precision",
+              "native",
+              "native_probe"
+            ],
+            [
+              "precision",
+              "native_probe",
+              "native"
+            ],
+            [
+              "native_probe",
+              "native",
+              "precision"
+            ],
+            [
+              "native",
+              "precision",
+              "native_probe"
+            ]
+          ],
+          "same_process": true,
+          "private_opp": true,
+          "native_deterministic": 1,
+          "pto_second_csa_compact_reuse": true,
+          "latency_samples": "performance=100-replay round means; single_replay_performance=individual reset/replays; do not mix their P95"
+        },
+        "profiles": {
+          "native": {
+            "file": "native-profile.json",
+            "superkernel_events": 15,
+            "hardware_pids": [
+              3995523520
+            ]
+          },
+          "native_probe": {
+            "file": "native_probe-profile.json",
+            "superkernel_events": 16,
+            "hardware_pids": [
+              3995523520
+            ]
+          },
+          "precision": {
+            "file": "precision-profile.json",
+            "superkernel_events": 0,
+            "hardware_pids": [
+              3995523520
+            ]
+          }
+        },
+        "performance": {
+          "native": {
+            "min_us": 403.93699645996094,
+            "mean_us": 407.04611672295465,
+            "max_us": 410.82298278808594,
+            "p50_us": 404.9333953857422,
+            "p95_us": 410.68939208984375,
+            "samples_us": [
+              404.7966003417969,
+              404.9375915527344,
+              404.15260314941406,
+              410.82298278808594,
+              410.0843811035156,
+              404.6775817871094,
+              410.19779205322266,
+              404.0129852294922,
+              404.73079681396484,
+              410.4597854614258,
+              410.1205825805664,
+              404.27581787109375,
+              410.6658172607422,
+              404.92919921875,
+              403.93699645996094,
+              409.99080657958984,
+              410.0727844238281,
+              403.9649963378906
+            ]
+          },
+          "native_probe": {
+            "min_us": 414.3196105957031,
+            "mean_us": 417.8946007622613,
+            "max_us": 427.1968078613281,
+            "p50_us": 417.4245071411133,
+            "p95_us": 422.03407859802246,
+            "samples_us": [
+              421.12300872802734,
+              414.6577835083008,
+              420.85559844970703,
+              414.5363998413086,
+              420.17940521240234,
+              414.42638397216797,
+              420.3104019165039,
+              414.3196105957031,
+              420.8639907836914,
+              414.5943832397461,
+              420.4249954223633,
+              414.50721740722656,
+              427.1968078613281,
+              414.6696090698242,
+              420.34778594970703,
+              414.45560455322266,
+              420.2220153808594,
+              414.4118118286133
+            ]
+          },
+          "precision": {
+            "min_us": 757.7777862548828,
+            "mean_us": 760.5220116509331,
+            "max_us": 763.1981658935547,
+            "p50_us": 760.700798034668,
+            "p95_us": 762.4643249511719,
+            "samples_us": [
+              760.4193878173828,
+              763.1981658935547,
+              760.4808044433594,
+              760.9207916259766,
+              761.0045623779297,
+              759.2394256591797,
+              762.3348236083984,
+              759.7914123535156,
+              761.082763671875,
+              762.0143890380859,
+              758.62060546875,
+              761.2888336181641,
+              759.5173645019531,
+              758.5800170898438,
+              761.5804290771484,
+              759.6784210205078,
+              761.8662261962891,
+              757.7777862548828
+            ]
+          }
+        },
+        "paired_percent": {
+          "native_probe_vs_native": {
+            "median": 2.4937576488222923,
+            "min": 0.9038971062478529,
+            "max": 4.132843675911668,
+            "samples": [
+              4.033237525326294,
+              2.400417288573853,
+              4.132843675911668,
+              0.9038971062478529,
+              2.4616943668328783,
+              2.4090294653849043,
+              2.4653009009783178,
+              2.5510628972374327,
+              3.9861542775412317,
+              1.0073088582045475,
+              2.5125324793404236,
+              2.530796818372938,
+              4.025411881332697,
+              2.4054599840828583,
+              4.062710183411666,
+              1.0889995341312853,
+              2.474982818304161,
+              2.5860694826104647
+            ]
+          },
+          "precision_vs_native": {
+            "median": 87.46073466202606,
+            "min": 84.94779272551827,
+            "max": 88.53940979695278,
+            "samples": [
+              87.8522169344579,
+              88.4730343179721,
+              88.16674654999359,
+              85.21865219465606,
+              85.57267661111749,
+              87.61588480050678,
+              85.84566723106262,
+              88.06113667904263,
+              88.04666451456322,
+              85.64897610650304,
+              84.97501410325397,
+              88.30926807027237,
+              84.94779272551827,
+              87.33645747291374,
+              88.53940979695278,
+              85.29157454974165,
+              85.78804913053364,
+              87.58501185113836
+            ]
+          }
+        },
+        "single_replay_performance": {
+          "native": {
+            "min_us": 423.26000332832336,
+            "mean_us": 439.8846670985222,
+            "max_us": 484.10001397132874,
+            "p50_us": 438.60000371932983,
+            "p95_us": 462.7239987254143,
+            "samples_us": [
+              484.10001397132874,
+              434.70001220703125,
+              423.26000332832336,
+              429.98000979423523,
+              439.46000933647156,
+              434.1999888420105,
+              436.9199872016907,
+              439.39998745918274,
+              439.2400085926056,
+              440.6999945640564,
+              465.84001183509827,
+              446.9999969005585,
+              440.4999911785126,
+              438.4399950504303,
+              438.32001090049744,
+              439.3399953842163,
+              437.5799894332886,
+              435.68000197410583,
+              434.83999371528625,
+              437.90000677108765,
+              455.48000931739807,
+              439.42001461982727,
+              424.93999004364014,
+              441.33999943733215,
+              436.599999666214,
+              434.17999148368835,
+              433.97998809814453,
+              431.16000294685364,
+              435.5599880218506,
+              438.76001238822937,
+              465.939998626709,
+              448.5799968242645,
+              441.4199888706207,
+              437.62001395225525,
+              440.53998589515686,
+              434.21998620033264,
+              434.6800148487091,
+              439.4800066947937,
+              438.14000487327576,
+              441.9200122356415,
+              446.1599886417389,
+              443.91998648643494,
+              446.399986743927,
+              436.6399943828583,
+              442.09998846054077,
+              434.9200129508972,
+              433.1200122833252,
+              444.2000091075897,
+              441.540002822876,
+              441.2199854850769,
+              462.5599980354309,
+              440.12001156806946,
+              441.72000885009766,
+              440.6599998474121,
+              434.9600076675415,
+              432.7400028705597,
+              430.42001128196716,
+              428.9799928665161,
+              428.8400113582611,
+              430.50000071525574
+            ]
+          },
+          "native_probe": {
+            "min_us": 439.0600025653839,
+            "mean_us": 461.32400035858154,
+            "max_us": 1065.440058708191,
+            "p50_us": 449.8499929904938,
+            "p95_us": 475.0449940562248,
+            "samples_us": [
+              476.37999057769775,
+              458.51999521255493,
+              450.219988822937,
+              454.58000898361206,
+              457.3200047016144,
+              446.2200105190277,
+              447.5800096988678,
+              445.279985666275,
+              448.81999492645264,
+              455.90001344680786,
+              475.89999437332153,
+              455.5000066757202,
+              447.60000705718994,
+              449.1199851036072,
+              446.4600086212158,
+              446.7400014400482,
+              445.499986410141,
+              445.360004901886,
+              446.260005235672,
+              446.8800127506256,
+              467.3599898815155,
+              464.9600088596344,
+              454.89999651908875,
+              453.2800018787384,
+              452.4199962615967,
+              444.7399973869324,
+              452.87999510765076,
+              1065.440058708191,
+              457.4800133705139,
+              444.9000060558319,
+              466.8799936771393,
+              459.34000611305237,
+              439.15998935699463,
+              440.5600130558014,
+              439.53999876976013,
+              440.2199983596802,
+              448.6199915409088,
+              439.0600025653839,
+              447.80001044273376,
+              450.2600133419037,
+              450.8199989795685,
+              455.52000403404236,
+              458.3599865436554,
+              456.03999495506287,
+              456.64000511169434,
+              451.73999667167664,
+              451.0200023651123,
+              452.45999097824097,
+              442.55998730659485,
+              451.70000195503235,
+              474.9999940395355,
+              449.47999715805054,
+              448.199987411499,
+              451.200008392334,
+              439.1399919986725,
+              444.599986076355,
+              440.16000628471375,
+              439.8599863052368,
+              448.5200047492981,
+              440.47999382019043
+            ]
+          },
+          "precision": {
+            "min_us": 764.0600204467773,
+            "mean_us": 801.6833335161209,
+            "max_us": 893.5400247573853,
+            "p50_us": 796.3300049304962,
+            "p95_us": 871.2779879570007,
+            "samples_us": [
+              871.2599873542786,
+              815.8599734306335,
+              781.3799977302551,
+              771.2399959564209,
+              802.3599982261658,
+              772.8800177574158,
+              810.5199933052063,
+              764.0600204467773,
+              789.4200086593628,
+              777.999997138977,
+              845.0400233268738,
+              809.9200129508972,
+              798.5399961471558,
+              794.0199971199036,
+              790.6399965286255,
+              793.7399744987488,
+              798.3800172805786,
+              816.1600232124329,
+              796.94002866745,
+              801.9000291824341,
+              866.159975528717,
+              805.3200244903564,
+              800.2600073814392,
+              779.1200280189514,
+              774.1000056266785,
+              809.6799850463867,
+              795.7199811935425,
+              778.3600091934204,
+              769.599974155426,
+              790.3599739074707,
+              885.2800130844116,
+              815.6800270080566,
+              803.1799793243408,
+              784.5199704170227,
+              795.0199842453003,
+              806.3200116157532,
+              806.2999844551086,
+              784.1799855232239,
+              784.5199704170227,
+              793.2800054550171,
+              893.5400247573853,
+              810.1000189781189,
+              817.3199892044067,
+              777.5800228118896,
+              791.1800146102905,
+              773.0000019073486,
+              798.6599802970886,
+              800.4999756813049,
+              791.9399738311768,
+              786.9799733161926,
+              871.6199994087219,
+              810.1199865341187,
+              802.619993686676,
+              791.2200093269348,
+              781.1200022697449,
+              788.100004196167,
+              772.5600004196167,
+              815.9000277519226,
+              802.9400110244751,
+              794.7800159454346
+            ]
+          }
+        },
+        "post_timing_checks": {
+          "native": {
+            "x_out": {
+              "elements": 327680,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "idx_topk": {
+              "elements": 10240,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "swa.0": {
+              "elements": 606208,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "compressed.0": {
+              "elements": 4276224,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "state.0": {
+              "elements": 151552,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer.0": {
+              "elements": 1069056,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "indexer.1": {
+              "elements": 8352,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer_state.0": {
+              "elements": 37888,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            }
+          },
+          "native_probe": {
+            "x_out": {
+              "elements": 327680,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "idx_topk": {
+              "elements": 10240,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "swa.0": {
+              "elements": 606208,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "compressed.0": {
+              "elements": 4276224,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "state.0": {
+              "elements": 151552,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer.0": {
+              "elements": 1069056,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "indexer.1": {
+              "elements": 8352,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer_state.0": {
+              "elements": 37888,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            }
+          },
+          "precision": {
+            "x_out": {
+              "elements": 327680,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "idx_topk": {
+              "elements": 10240,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "swa.0": {
+              "elements": 606208,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "compressed.0": {
+              "elements": 4276224,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "state.0": {
+              "elements": 151552,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer.0": {
+              "elements": 1069056,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "exact": true
+            },
+            "indexer.1": {
+              "elements": 8352,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            },
+            "indexer_state.0": {
+              "elements": 37888,
+              "nonfinite": 0,
+              "different": 0,
+              "max_abs": 0.0,
+              "relative_l2": 0.0,
+              "ulp": {
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+                "max": 0.0
+              },
+              "ulp_counts": {
+                "0": 0,
+                "1": 0,
+                "2": 0,
+                "4": 0,
+                "100": 0
+              },
+              "changed_bits_max": 0,
+              "sign_changed": 0,
+              "bitwise_different": 0,
+              "exact": true
+            }
+          }
+        },
+        "post_timing_owned_heads": {
+          "native_probe": {
+            "elements": 655360,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "precision": {
+            "elements": 655360,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          }
+        },
+        "diagnostic_only": true,
+        "topk_score_observation": {
+          "private_native_clone_topk_fidelity": true,
+          "positions_different": 0,
+          "score_by_index": {
+            "elements": 10240,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "examples": [],
+          "A_scores": {
+            "elements": 10240,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "B_scores": {
+            "elements": 10240,
+            "nonfinite": 0,
+            "different": 0,
+            "max_abs": 0.0,
+            "relative_l2": 0.0,
+            "ulp": {
+              "p50": 0.0,
+              "p95": 0.0,
+              "p99": 0.0,
+              "max": 0.0
+            },
+            "ulp_counts": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "4": 0,
+              "100": 0
+            },
+            "changed_bits_max": 0,
+            "sign_changed": 0,
+            "bitwise_different": 0,
+            "exact": true
+          },
+          "compiled_raw_exact": true,
+          "hidden_update_live": true,
+          "other_states_and_heads_exact_AB": true
+        },
+        "native_score_debug_provenance": {
+          "diagnostic_only": true,
+          "source": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/src/vllm-ascend",
+          "unchanged_score_math": true,
+          "source_files": {
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/README.md": "a1e8b73a8ba51b834c4e0e271ad5bcbc4b6cd3beefde818f585fd156dfe1dc9b",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/CMakeLists.txt": "a78050c3423d37a87fa7e2cecaaae8b6786addbbfe567e49bdea4f1840f62afe",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_host/vllm_quant_lightning_indexer_debug_score_tiling.h": "451ba0e04ae144a43cae1e5435eee3351d9cfd1d59761e7ef2bbc6726644dbf5",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_host/CMakeLists.txt": "9e36bf30a4fbb8c477eddd070caca0983002fe050e4c72988d64779731f6f4d0",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_host/vllm_quant_lightning_indexer_debug_score_tiling.cpp": "d3022dab6e0f823b6178622054904749f1cfd954cc1f4d25168c70938f30ecf5",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_host/vllm_quant_lightning_indexer_debug_score_def.cpp": "0d605ba418516fbdfff08018b4038948de15262ab1b796c8b629464226cf238f",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_host/vllm_quant_lightning_indexer_debug_score_infershape.cpp": "c9cedf5d019e3ad7659e0768881d7485e5fbdaa9a79e73ec85d6942fcdb8048e",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/vllm_quant_lightning_indexer_debug_score.cpp": "a9c43b82d1503569b0323a6d2817251eaa37b51b16d099764373ab736fb9dbb7",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/vllm_quant_lightning_indexer_debug_score_metadata.h": "2e1283241447ffe96eb4319cd61032e1d360454f6964ec617428efb7aa4241c7",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/vllm_quant_lightning_indexer_debug_score_template_tiling_key.h": "467ad67a5e6562be65c20357993ef87da04a655596f40d0c03ef167044bd8420",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/quant_lightning_indexer_kernel.h": "83d7aece106be50192e250201de565146f6336b2685d160d755608b0e8de72e8",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/quant_lightning_indexer_service_cube.h": "f809bc813242a0c3c385a47687c825297e67b0d98916ca3b9ab170dd5fa0b7f6",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/quant_lightning_indexer_common.h": "d76a2b477e6ab7ae32527cd99ae7e6c6e3711a4b3bda8c0afaa9a8004d5f421a",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/quant_lightning_indexer_service_vector.h": "497fac3500548e2b5308c6147765692956e1417794caf026b57ecee8bef5be60",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch32/quant_lightning_indexer_kernel.h": "92f51585da20ed1b880cbc3d1402f8f0b2c311106556744a622280c0b31654a4",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch32/quant_lightning_indexer_service_cube.h": "0cecc5aed7d1678322e1a4d213b9439407d7f7b2bd0edf449708097ee9fad500",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch32/quant_lightning_indexer_common.h": "dcdf2db8d771364d37b3f9e629b06784a55c58d8945ac1fec28e1d09dbe6752f",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch32/quant_lightning_indexer_service_vector.h": "3e4c0cea99d396c3729b708b6e95e8f3c5bc7240b77037db71be81babbc8ed5b",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch32/quant_lightning_indexer_vector.h": "d29aad3c66fc4c774801d225e0d172c7e8c0873e32064937381068889d946098",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/vf/vf_topk.h": "a291836b87f94d15c10865927ec19b2ce8fbb84f4eedb17f76c7c239e1aa5c51",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/vf/quant_lightning_indexer_topk.h": "04f84a62ac184446af463c037db993b6be87d40acda9d2d1e9782de595605220",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/vf/vf_topk_16_gather.h": "4026aca3a4d70553f962abe93dc60f90e8aeea06fce45c81c67b56a91ef5c976",
+            "csrc/attention/vllm_quant_lightning_indexer_debug_score/op_kernel/arch35/vf/quant_lightning_indexer_vector1.h": "92a1fa6bc04c5a14b44011b73d8c92306686e810bcb3a7fe187c7b8cbb5d2303"
+          },
+          "bridge_sha": "09066b2904355f99dd85edaf34e506b2ad0ed7abac252d526434c369e42a1557",
+          "bridge_library_sha256": "3e012f3fff2982de0dc0538dd2354aeb53e9f0e71873ac0af22ff92776f7a697"
+        },
+        "native_score_debug_artifacts": {
+          "files": {
+            "bridge-build/qli_score45_bridge.so": "3e012f3fff2982de0dc0538dd2354aeb53e9f0e71873ac0af22ff92776f7a697",
+            "install/packages/vendors/yejia_qli_score45_transformer/version.info": "7e5200644e61a2732438bd2fac2c3447ea8325e71ea36513499db8858bcb1b4b",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_proto/inc/vllm_quant_lightning_indexer_debug_score_proto.h": "3e36de91681fb31b82650b9fbf13e9f827802734996dc52fd833c0ffcb161510",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_proto/lib/linux/aarch64/libcust_opsproto_rt2.0.so": "de994e839074d499dbf5c6d3e65cb01cd1b360b0fc2053ef8d92cc18e4e4efb3",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_api/lib/libcust_opapi.so": "3328bdd41c47149fa887ed0b22f76518e7897447c03152a734429cc26596bdcc",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_api/include/aclnnop/aclnn_ops_transformer_yejia_qli_score45.h": "e75aef8d972590862c866562c2377a53102373322475c7dc3fdde02442108694",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_api/include/aclnnop/aclnn_vllm_quant_lightning_indexer_debug_score.h": "b35c14b59bdbdabdfe3e5649b049321ddd9112e760da304b708118d89465380f",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/op_tiling/liboptiling.so": "f59712d891fa511e6fa27635f613f411ad3c4449d44865fbe2468ca98e7f900a",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/dynamic/vllm_quant_lightning_indexer_debug_score.py": "de13dba76368884a9d516377546a2c16a16c8e2409a955c3ad74eba3480e7aee",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/vllm_quant_lightning_indexer_debug_score.cpp": "a9c43b82d1503569b0323a6d2817251eaa37b51b16d099764373ab736fb9dbb7",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/vllm_quant_lightning_indexer_debug_score_metadata.h": "2e1283241447ffe96eb4319cd61032e1d360454f6964ec617428efb7aa4241c7",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/vllm_quant_lightning_indexer_debug_score_template_tiling_key.h": "467ad67a5e6562be65c20357993ef87da04a655596f40d0c03ef167044bd8420",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/mma.h": "1d307e242c4d39c668668f254bb696b421326efbb6117ed9df704876fa6d877d",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/common_func.h": "1de03871c582d97e9ed1814763e65f30381bdaaa0dae6705a74ea0281ffa809b",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l1_to_ub_iterator.h": "3b4b7e08af1ed4d82b13e4994916c4d2fdd3ebe906cb3c406295b04e410d111a",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/hardware.h": "05a8bf30e465e22ea13b71f0eb2b71075de4396da35e3d95c80ba086ae5f42a8",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l1_to_l0_iterator.h": "81308eebcfcdabc041d129af63e7de1655f94c232e24b2e360cfb8c5dad4ca90",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/dropmask.h": "b93b07a2d06c590243cd1ba757c281a6b268d03ff819b311fb5aa088e06a7654",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/gm_to_l1_iterator.h": "4e7e3b9b489e8b60ae356aa8f95d088ed2ddf1013a4518032312f4e13eefa7f9",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l1_to_bt_iterator.h": "45ae57cd939a7a30e74b33dbfd088f8998445648cee71c8d291d449808233440",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/mem.h": "e240841f845f8343bf01e06cf1528c011986504a6da80fe54615f01b2a4428c5",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/iterator.h": "70535c8c9c01aa935d45aed44d977f69f0ed2eeebeea1d80f060e4b1d1fbd39f",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/util.h": "9fb33460a503ce4da050613618efcf5e0c3de775231832f17a775b9ec83c531e",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/gm_to_ub_iterator.h": "a28634b12f044aad50eca3a46af52e3d0eb1a024b6301d1a948d917d3095a508",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l0c_to_ub_iterator.h": "ede17f84df3f67a7063792f190b6b66cd328213af0d55ffd9997255988ab73f8",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l0c_to_gm_iterator.h": "a3eea68d194669fb7db53a3b38d3117cb1584f6637d22085081e4c0768a2429e",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l1_to_fb_iterator.h": "db7c233466609cf1b46c94b7d72f2b9d73ab6cc2167ed27f6809e2a097d06d1c",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/simd.h": "88519d7abc601dc4fc6c36de52814901b407d549912c8b51d69b55ef070a5d31",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/l0c_to_l1_iterator.h": "2b73136bb76f3ef99649406fdba15c8dc7f50b606d728ab005e2417860ea7d06",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/pse.h": "0b1ec227c944e430a8ec354d4b40830626e2282ac06a5192439619b11833cde4",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/layout.h": "29815798a7238d674b649dbf97b48a250e58ca2b8ff6dc09a5667a2e973fdbde",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/common/common.h": "d26d042b297cf862c584e05b2625136e7ee99de3be53be2e32fb28efe62d60d9",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/arch32/quant_lightning_indexer_kernel.h": "92f51585da20ed1b880cbc3d1402f8f0b2c311106556744a622280c0b31654a4",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/arch32/quant_lightning_indexer_service_cube.h": "0cecc5aed7d1678322e1a4d213b9439407d7f7b2bd0edf449708097ee9fad500",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/arch32/quant_lightning_indexer_common.h": "dcdf2db8d771364d37b3f9e629b06784a55c58d8945ac1fec28e1d09dbe6752f",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/arch32/quant_lightning_indexer_service_vector.h": "3e4c0cea99d396c3729b708b6e95e8f3c5bc7240b77037db71be81babbc8ed5b",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/yejia_qli_score45_transformer_impl/ascendc/vllm_quant_lightning_indexer_debug_score/arch32/quant_lightning_indexer_vector.h": "d29aad3c66fc4c774801d225e0d172c7e8c0873e32064937381068889d946098",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/kernel/ascend910_93/vllm_quant_lightning_indexer_debug_score/VllmQuantLightningIndexerDebugScore_d40891330721b71bb47c2e26f290075d.json": "06df8f821692c7295b23c4ac56b53cc2356c817638d2474f7352601bfd35c0a7",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/kernel/ascend910_93/vllm_quant_lightning_indexer_debug_score/VllmQuantLightningIndexerDebugScore_d40891330721b71bb47c2e26f290075d.o": "e4649152eae3b3c734c9a289719a3ff911f4a05a0d3117503ad57c01b12a2605",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/kernel/config/ascend910_93/binary_info_config.json": "9c210a92bf6280ebe82c6586080f720dfd536d94e117dcdd5756f752957675fc",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/kernel/config/ascend910_93/vllm_quant_lightning_indexer_debug_score.json": "f68ebc7021c36a8ea21c09c6719e8af91b9ea8772f078ede87d928c85c112f63",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64/libcust_opmaster_rt2.0.so": "f59712d891fa511e6fa27635f613f411ad3c4449d44865fbe2468ca98e7f900a",
+            "install/packages/vendors/yejia_qli_score45_transformer/op_impl/ai_core/tbe/config/ascend910_93/aic-ascend910_93-ops-info.json": "c6df61f23cbe12ba8cb6d926951f334fb5866b41a9f4a06a495ef9d262ce8414"
+          },
+          "meta_shape_check": "PASS",
+          "no_hardware_used": true
+        },
+        "observer_lifecycle": {
+          "native": {
+            "compiled_raw": true,
+            "ABA_restore": true,
+            "continuous100_before_reset": true,
+            "after_reset": true,
+            "final": true
+          },
+          "native_probe": {
+            "compiled_raw": true,
+            "ABA_restore": true,
+            "continuous100_before_reset": true,
+            "after_reset": true,
+            "final": true
+          },
+          "precision": {
+            "compiled_raw": true,
+            "ABA_restore": true,
+            "continuous100_before_reset": true,
+            "after_reset": true,
+            "final": true
+          }
+        }
+      },
+      "diagnostic_completion_alone_is_precision_pass": false
+    },
+    {
       "label": "fx45eq5",
       "task": "task_20261010_153331_27882291554",
       "kind": "diagnostic",
@@ -32781,7 +34199,7 @@
   },
   "lossless_raw_archive": {
     "file": "native_sum_raw_20261010.json.gz",
-    "sha256": "7a5493f6705d08289c98a35832189b0397073fa66b0a498a0d004f7518806487",
+    "sha256": "fff9d4fa0ee4a4132f7e920d6aa926ecce16dcd71f86429a276095c0406226ba",
     "format": "gzip JSON; files maps raw filename to unchanged UTF-8 JSON text; verify original raw_sha256 before parsing"
   }
 }

@@ -1416,14 +1416,19 @@ def indexer_score_topk_native_cube(
                                     ),
                                     0,
                                 )
+                                # Short query rows share GM between AIVs. Clip each
+                                # store to its half; 4096 is not divisible by 384.
+                                buf_lane_valid_rows = pl.min(
+                                    buf_lane_valid_rows, pl.max(buf_lane_span - buf_score_begin, 0)
+                                )
                                 buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
                                 buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
                                 if buf_lane_valid_rows > 0 and buf_lane_live:
                                     pl.store(
                                         pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
                                         [
-                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                            buf_score_begin,
+                                            buf_query + buf_query_lane,
+                                            buf_score_begin + buf_lane_begin,
                                         ],
                                         score_arena,
                                     )
@@ -1452,73 +1457,6 @@ def indexer_score_topk_native_cube(
                                                 0,
                                             )
                                             prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
-                        for buf_query_lane in pl.unroll(query_group_size):
-                            # TND：末组不满时越界 lane 的行属于下一个请求，那一行由
-                            # 那个请求自己的组负责发布；这里不挡就会抢写 pair_arena 同一行
-                            # （else 分支还会写 NEG_INF 把真值覆盖掉）。
-                            if buf_query_lane < buf_group_rows:
-                                buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
-                                buf_query_visible = pl.max(
-                                    pl.min(
-                                        pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
-                                    ),
-                                    0,
-                                )
-                                buf_half_begin = buf_logical_begin + buf_lane_begin
-                                buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
-                                buf_half_slot = (
-                                    (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY + buf_leaf * 2 + buf_score_lane
-                                )
-                                if balance_leaves and buf_score_iters > 4:
-                                    if buf_half_valid > 2048:
-                                        tail = indexer_topk_segment_pairs(
-                                            score_arena,
-                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                            buf_half_begin + 2048,
-                                            buf_half_valid - 2048,
-                                            2048,
-                                        )
-                                        prefix = pl.tile.extract(
-                                            prefix_roots,
-                                            buf_query_lane,
-                                            0,
-                                            [1, TOPK_PAIR_WIDTH],
-                                            target_memory=pl.MemorySpace.Vec,
-                                        )
-                                        merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                                        # Preserve the later-2048-chunk priority of the
-                                        # existing 2560/3072/4096 half-leaf paths.
-                                        merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
-                                        pl.store(
-                                            pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
-                                            [buf_half_slot, 0],
-                                            pair_arena,
-                                        )
-                                    else:
-                                        prefix = pl.tile.extract(
-                                            prefix_roots,
-                                            buf_query_lane,
-                                            0,
-                                            [1, TOPK_PAIR_WIDTH],
-                                            target_memory=pl.MemorySpace.Vec,
-                                        )
-                                        pl.store(prefix, [buf_half_slot, 0], pair_arena)
-                                else:
-                                    if buf_half_valid > 0:
-                                        indexer_topk_half_leaf(
-                                            score_arena,
-                                            pair_arena,
-                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                            buf_half_begin,
-                                            buf_half_valid,
-                                            buf_half_slot,
-                                        )
-                                    else:
-                                        pl.store(
-                                            pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
-                                            [buf_half_slot, 0],
-                                            pair_arena,
-                                        )
     return buffered_leaf_tid
 
 
@@ -1855,7 +1793,7 @@ def indexer_score_topk_forest(
         score_tid = direct_leaf_tid
 
     with pl.scope():
-        if max_topk_cache_len < INDEXER_NATIVE_CUBE_MIN_ROWS:
+        if max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
             with pl.spmd(
                 TOPK_QUERY_WORKERS,
                 name_hint="indexer_topk_single_leaf_publish",
@@ -1864,22 +1802,6 @@ def indexer_score_topk_forest(
             ):
                 indexer_topk_single_leaf_publish(
                     position_ids, kv_seq_lens, token_request, score_arena, topk_scores, topk_idxs
-                )
-        elif max_topk_cache_len <= TOPK_CANDIDATES_PER_LEAF:
-            # Keep the single-leaf kernel free of the multiway branches and
-            # their larger UB temporaries. The choice follows actual length.
-            with pl.spmd(
-                TOPK_QUERY_WORKERS, name_hint="indexer_topk_query_merge", deps=[score_tid], allow_early_resolve=True
-            ):
-                indexer_topk_query_merge(
-                    position_ids,
-                    kv_seq_lens,
-                    token_request,
-                    query_start_loc,
-                    pair_arena,
-                    topk_scores,
-                    topk_idxs,
-                    False,
                 )
         else:
             with pl.spmd(
