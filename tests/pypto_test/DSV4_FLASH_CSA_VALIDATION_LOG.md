@@ -15217,3 +15217,26 @@ CSA冻结普通/候选包仅`decode_o_proj.py`增加两行局部语句，原计�
 PyPTO `b32ee10ff`、PTOAS `75615d31`、Simpler `a1a25dc33`、私有CSA `46597692`。
 公共生产算子不应用本实验协议。详见[过程036](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#38-过程-036局部语句路径单卡功能通过csa性能单独记录)
 和[精简结果/原始样本/两行patch](superkernel_local_boundaries_20261010/README.md)。
+
+## 551. 2026-10-10：CSA其余单核task局部交接三组对照
+
+私有vLLM `2cd33a9a`在原O-A标记之上十文件新增104行；PTOAS `f556407f`补齐普通Vector指令校验。
+原数学、tiling、流水及sync_start不变；当前128K/B16仍73个kernel，其中59个Set/Wait、2个仅Wait、
+12个MIX成员保持原协议。完整CPU编译及五项编译正反例通过。
+
+队列任务`task_20261010_192303_125266920291`在0卡完成，exit=0；CANN9.2/TMR/NZ2/atomic关闭，
+第二层真实权重，单次HC_pre+norm+CSA+HC_post图重放，无profiler，各30次循环改变三组顺序。
+两候选的9项输出/缓存状态和更换输入图重放均与普通版逐bit一致，三组各31项保护区/metadata检查通过。
+
+| 路径 | min（μs） | mean（μs） | max（μs） | mean相对普通版 |
+| --- | ---: | ---: | ---: | ---: |
+| 普通PTO | 954.34 | 974.90 | 1004.82 | 基线 |
+| 仅NZ O-A加入Set/Wait | 955.92 | 970.49 | 1011.26 | -0.45% |
+| 全部可接入单核task | 975.56 | 989.89 | 1007.46 | +1.54% |
+
+扩展版均值增加14.99 μs（+1.54%），26/30配对轮次较慢，min增加21.22 μs；功能通过但整体性能回退。
+P95依次996.17/981.22/1006.24 μs，未见显著孤立长尾证据。只接O-A的轻微均值改善不视为稳定收益。
+本轮没有新增机制trace，尚未定位到具体回退task；私有代码保留，不把全量标记合入公共生产性能路径。
+
+[实施过程037](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#39-过程-037扩展到-csa-全部可接入单核-task再做同卡三组对照)、
+[结果与完整90个样本](superkernel_all_boundaries_20261010/README.md)。

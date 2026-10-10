@@ -2076,7 +2076,96 @@ AIV/AIC独立任务用例各跑两轮，不通过固定A+B函数入口合组；�
 本goal限定的原位局部语句demo已实现并验证。全自动寻找插入点（第5.7节）、
 扩大到所有CSA task/其他形状、HBG、16卡，以及稳定性能收益均未纳入本阶段完成声明。
 
-## 39. 后续记录要求
+## 39. 过程 037：扩展到 CSA 全部可接入单核 task，再做同卡三组对照
+
+用户要求将其余能接入的 InCore task 都加上局部边界，再比较完整 CSA。继续限定私有环境、
+CANN9.2、TMR、单卡128K/B16、第二层真实权重；不改变算术、tiling、任务身份或原有sync_start。
+
+原CSA十个文件共新增104行局部语句（私有提交`2cd33a9a`），结合原先NZ O-A的两行，共52处Set/Wait和2处仅Wait。
+逐文件移除这两种调用后，AST与修改前完全一致；没有抽取helper、增加作者能力属性或改写计算。
+函数已有独立InCore入口时（NZ O-B、Top-K merge/publish），标记插在该原入口，避免在调用层重复插入。
+候选整包冻结为私有`deepseek_v4_flash_csa_all_boundaries`，普通和旧O-A候选继续使用既有冻结包。
+
+CPU编译后，三组完整CSA仍各73个kernel，普通版与扩展版任务名集合一致。扩展版覆盖如下：
+
+| 当前128K/B16中的kernel | 数量 | 处理 |
+| --- | ---: | --- |
+| 独立AIC/AIV，支持异步尾部 | 59 | 局部Wait和Set |
+| row_offsets、valid_qk_plan | 2 | 仅Wait，Scalar GM写回仍由正常尾部处理 |
+| Indexer Score及QK/PV的混合核成员 | 12 | 保持原协议；对应6个MIX模块，尚未接入本次局部交接机制，正常组完成统计已存在 |
+
+原有sync_start保持：这类后继不触发当前runtime的提前Scalar交接，但仍可作为异步收尾的前驱。
+编译能力标记不代表每个实例都会发生重叠。
+
+初版PTOAS只放行少量AIV算术；本次按CSA实际指令扩展普通Vector归约、指数、重排、排序、Vec搬运和
+Scalar UB元素访问，保留InsertSync内部依赖。GM Scalar读取只允许在Wait之后；GM写回、跨核通信和
+显式流水同步仍不直接放行。首轮CPU编译仅sort32漏在白名单外，补齐后第二轮完成全部二进制编译。
+五个PTOAS正反例通过，其中新增“GM Scalar读不能越过Wait”反例；未重跑无关UT或基础设备用例。
+PTOAS代码、文档与反例已提交为`f556407f`；本次PyPTO和Simpler没有新增修改。
+
+设备入口`artifacts/run_csa_all_boundaries_v2.sh`使用普通/仅O-A/全部可接入三组，
+每组三十次单次完整图重放，循环改变执行顺序，状态恢复在计时外；无profiler。
+脚本修正原来只支持两组的循环，并逐候选记录eager和更换输入重放的精确比较。
+任务`task_20261010_192303_125266920291`正常排队后在0卡完成，exit=0。
+三组eager与图重放均完成，两种候选与普通版的`x_out`、Top-K/score、SWA、compressed、state、
+indexer key/scale及indexer_state共9项逐bit一致；更换hidden输入后仍一致。
+三组各31项保护区/metadata检查通过。
+
+| 路径 | min（μs） | mean（μs） | max（μs） | mean相对普通版 |
+| --- | ---: | ---: | ---: | ---: |
+| 普通PTO | 954.34 | 974.90 | 1004.82 | 基线 |
+| 仅NZ O-A加入Set/Wait | 955.92 | 970.49 | 1011.26 | -0.45% |
+| 全部可接入单核task | 975.56 | 989.89 | 1007.46 | +1.54% |
+
+扩展版均值增加14.99 μs（+1.537%），相对仅O-A增加19.40 μs（+2.00%）。
+仅O-A版18/30轮更快，扩展版仅4/30轮更快；扩展版min也增加21.22 μs，
+不能归因于某一个最大值样本。P95依次996.17/981.22/1006.24 μs，扩展版相对普通版约+1.01%。
+本轮未出现明显孤立长尾证据。仅O-A版小幅收益与之前不同轮次正负摆动并存，不宣称稳定收益。
+
+结论：原位局部语句可扩展至上述单核task，功能通过；全量接入未带来净性能收益，当前配置反而回退。
+本次没有新增机制trace，具体哪个task的接续开销或调度变化占主因仍待定位；不能仅凭全量标记推断
+实际重叠次数。代码保留在私有实验环境，公共生产路径不应用。结果齐备后不重复占卡。
+[精简结果、全部90个样本及源码/编译覆盖清单](superkernel_all_boundaries_20261010/README.md)。
+
+产物均在私有根目录`artifacts/`：
+`csa_all_boundaries_source_inventory_v1.json`、`csa_all_boundaries_compiled_inventory_v2.json`、
+`csa_all_boundaries_ptoas_checks.json`、`csa_all_boundaries_cpu_v{1,2}.log`、
+`csa_all_boundaries_compile_v2/`和`csa_all_boundaries_device_v2/`。
+
+## 40. 过程 038：澄清 MIX 未接入的原因和实际缺口
+
+用户询问为什么MIX不能使用`wait_pre_task_end`/`set_next_task_start`。
+修正表述：原理上没有排除MIX；本轮只实现、验证了独立AIC/AIV的交接路径，不能把原型限制说成算子限制。
+本节只审查代码和修正文档，没有改动MIX实现，也没有新占卡测试。
+
+私有代码依据：
+
+- PyPTO `b32ee10ff`的`src/codegen/orchestration/orchestration_codegen.cpp`：
+  `BuildSingleKernelSubmit`会按局部标记生成`set_scalar_prefix`和`set_allow_early_resolve`；
+  `BuildMixedGroupDispatchPlan`目前仅生成普通`MixedKernels`提交，没有对应能力传递。
+  双AIV入口还显式拒绝当前scalar-prefix原型。
+- PTOAS `f556407f`的`tools/ptoas/ptoas_pipeline.cpp`：`validateAutoSyncTailHints`只放行已审查的
+  单核运算集合，显式同步/跨核操作尚未纳入异步尾部协议。实际Score及QK/PV使用`set_ffts`、
+  `sync_set`/`sync_wait`，不是增加两个Python调用就能通过现有后端。
+- Simpler `a1a25dc33`的`runtime/scheduler/scheduler_dispatch.cpp`：
+  `is_scalar_prefix_wait_producer`、ready-prefix分支和`try_scalar_prefix_on_ack`明确要求
+  `ResourceShape::AIC`或`ResourceShape::AIV`，MIX无法进入新交接路径。
+  同仓`aicore/aicore_executor.cpp`当前按本核M/FIX或V/MTE3事件收尾；
+  `runtime/scheduler/scheduler_completion.cpp::complete_slot_task`已经调用`on_subtask_complete`
+  汇总成员完成，只有逻辑任务完成后才释放其下游依赖，正常MIX完成统计并不缺失。
+
+应当区分两件事：成员核的Scalar控制交接，以及整个MIX任务的真实完成。
+例如AIC已发完矩阵乘指令时，AIV仍可能处理它的输出；AIC可以在满足同核资源和调度条件时先进入后继的安全Scalar前缀，
+但不能因此将AIV尚未完成的输出发布为就绪。后继到Wait边界时仍须满足本核尾部完成和自身全部输入依赖；
+各成员的真实FIN继续汇总到原组完成统计，跨核同步标志和共享缓冲的使用期必须保留。
+这并不等于“必须等整个MIX结束，才能开始后继Scalar”。
+
+后续MIX适配应保留原task、tiling和核间流水：编译器在拆分出的各成员函数里生成适用的局部边界与尾部事件，
+调度器支持组内成员的提前Scalar交接，完成处理复用已有聚合逻辑，并检查跨核事件与资源复用。
+作者仍使用局部Set/Wait语句，不要求拆helper或给整个incore函数加新的能力属性。
+不能仅删除上述白名单/shape判断，就声称MIX功能已实现；过程037的性能数据也不能用于推断MIX交接的收益。
+
+## 41. 后续记录要求
 
 每次有意义的修改/实验追加一节，至少包含：目的、修改仓与文件、与上一候选的差异、
 命令及版本、任务 ID/设备、实际结果、失败定性、产物路径、结论边界和下一步。
