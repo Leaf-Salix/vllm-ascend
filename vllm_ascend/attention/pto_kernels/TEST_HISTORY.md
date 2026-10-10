@@ -301,3 +301,44 @@ GBS=16×4 或 DP=EP=16 的结果必须另立负载记录，不能复用这里的
       完整定位过程、排除清单与方法论见
       docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md（已随本次修订）。
 ```
+
+## 2026-10-10：weights 投影的 K 切分改回单累加器（WEIGHTS_OK 4→1）—— heads 达成 18/18
+
+```text
+日期与源码：2026-10-10。分支 dev/pypto-dsv4-csa-tnd-opus55-20261008（起点 05e5d7c23）。
+              本次改动只有 vllm_ascend/attention/pto_kernels/dspark/decode_indexer.py:86
+              的 WEIGHTS_OK = 4 -> 1（含注释）。WEIGHTS_K_TILE = D // WEIGHTS_OK 随之
+              由 1024 变 4096。不需要 if WEIGHTS_OK > 1 守卫。
+环境：227 单卡，CANN 9.2.0-beta.2、Torch 2.10.0、Torch-NPU 2.10.0.post4、vLLM 0.29.0；
+      native 侧 set_deterministic_level(1) 与 HCCL_DETERMINISTIC=true。
+负载：DeepSeek-V4-Flash-0731-w8a8 真实第 2 层 C4 权重，TP=1，S=6，block=128，
+      seed=62 合成 hidden/history。精度覆盖全部 18 个验收配置。
+精度：heads 对 native：ON 18/18 全零失配；OFF 仅 phase-8196 的 t=14 h=41 dim=352 与
+      t=14 h=58 dim=348 ⇒ 修好 2、新增 0。output relative_l2 两臂都 18/18 = 0.0。
+      其余行实测一动不动：410 行逐位比，只有 phase-8196 的 t=14 变（512 槽里 301 个，
+      ULP 差 -8..-6392），其余 409 行一位不动。集合 18/18 零坏行；8196 t=14 对 native 的
+      topk 顺序失配 20 -> 0。两臂 native_stages 与 q 逐位相同，配对有效。
+      主机门槛（全 18 配置 26240 个系数）：WEIGHTS_OK=1 对 native 26240/26240 逐位；
+      WEIGHTS_OK=4 为 26238/26240，只差 phase-8195 与 phase-8196 的同一个 t=14 h=24。
+      根因：native 的 weights_proj 是单一 fp32 累加器 256 步 k=16；4 段切分使该点偏高
+      40 个 fp32 ULP（0x3df68028 对 0x3df68000），而 0x3df68000 恰好是 bf16 中点，
+      两边取了不同格点。经 fp16 次正规 coef（1 ULP = 1.80%）放大，分数最多偏 6392 fp32 ULP。
+性能：测不出可信代价。空对照 = off vs off2、候选 = off vs on，同卡配对、REP 奇偶换先后、
+      n=10/形状；uniform 空对照 -0.0102 ms(-1.48%)、候选 +0.0008 ms(+0.12%)，符号一致 5/10；
+      varlen 空对照 +0.0038 ms(+0.65%)、候选 -0.0045 ms(-0.72%)，符号一致 4/10。
+      两形状「候选-空对照」符号相反，80 个绝对中位数跨 0.5826-0.7203 ms(22%)。
+      但预言的 +4.5% 被排除：那在 uniform 上应是 +0.029 ms，实测配对差中位 +0.0008 ms。
+      80 次 run 全部 accuracy_pass=True、relative_l2=0。
+执行：36 个 task 全 exit=0，判定脚本 bin/opus55-ab/wokab_chk.py；臂树 src/va-wok1-{on,off,off2}。
+      ⚠️ 先纠正了一趟无效数据：2026-10-09 那趟 wok1-* 的 18 配置里，补丁只进了 shipped 程序、
+      没进 decode_indexer_probe.py 编出的探针程序（weights_proj_reduce_vllm.pto 仍 tadd=3），
+      所以那趟「scores 一行没动、8196 残 2」是假象。本轮两份一起改。
+      这是 probe_sync 盲区的又一个实例，新增 pl_check_idxtest_arm.sh 覆盖非 vllm 的
+      indexer_test 入口（此前没有这道 lower 检查）。
+结论：通过了什么——weights 投影改回单累加器后 heads 元素级达成 18/18，output 维持 18/18。
+      未通过什么——短历史档（actCmpS2Size < 512）的 l 归约仍未对齐，k384 上现状
+      output relative_l2 = 4.4910e-04，另立一节处理；b16、128K、整模型、动态 padding、
+      DP16 全部未测，本节数值不可外推。
+      可比较记录：本文 2026-10-09 两节（同环境、同负载）。
+      完整定位与方法论见 docs/source/developer_guide/DSV4_CSA_PRECISION_20261009.md。
+```

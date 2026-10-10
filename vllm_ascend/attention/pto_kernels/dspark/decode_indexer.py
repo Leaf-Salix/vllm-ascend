@@ -83,7 +83,17 @@ MM_N_TILE = min(512, (128 * 1024) // (MM_ROW_TILE * 4))
 DEQUANT_T_TILE = min(T, 8)
 HEAD_DIM_TILE = 32
 D_TILE = 512
-WEIGHTS_OK = 4  # Weights-projection K tile count
+# Native's weights_proj is a single K=4096 BF16 Linear: one FP32 accumulator
+# walking K in the cube's k=16 fractal order, 256 steps.  Cutting K into
+# WEIGHTS_OK segments and merging them with extra FP32 adds is just as legal
+# an FP32 accumulation, but it lands elsewhere: with 4 segments the probe
+# case at start-pos 8195/8196 comes out 40 FP32 ULP high (0x3df68028 against
+# native's 0x3df68000), and 0x3df68000 is exactly a BF16 midpoint, so the two
+# sides take different BF16 grid points.  That one BF16 ULP survives the FP16
+# head-coefficient cast in indexer_score_topk_forest_vllm and moves a score
+# by up to 6392 FP32 ULP, which swaps 10 top-k pairs and flips 2 BF16 elements
+# of `heads`.  Keep it at 1 so the accumulation matches native.
+WEIGHTS_OK = 1  # Weights-projection K tile count (must be 1 to match native)
 WEIGHTS_K_TILE = D // WEIGHTS_OK
 QH_QUANT_TILE = 64
 QH_QUANT_WORKERS = 48  # Query Hadamard quantization workers
