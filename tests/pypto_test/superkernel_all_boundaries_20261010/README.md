@@ -34,6 +34,11 @@ P95为996.17/981.22/1006.24 μs，扩展版比普通版高约1.01%，没有本�
 修改保留在私有实验环境；没有继续重复占卡。
 源码提交：私有vLLM `2cd33a9a`，PTOAS `f556407f`；PyPTO/Simpler沿用`b32ee10ff`/`a1a25dc33`。
 
+后续只读分析（过程039）确认两项实现退化：异步尾部预留event7使独立AIV的`mix_x_rms_norm`计算循环
+新增PIPE_ALL；Scalar-prefix预派发限定同类型前驱，挡住O-A→quant→O-B等跨核边原本可用的普通预派发。
+另有无交接时的固定协议开销及sync_start/MIX覆盖限制。见[分析数据](performance_diagnosis.json)与
+[内部同步差异](mix_x_rms_norm_internal_sync.diff)。以上不等于已量化各项对14.99 μs的贡献，也没有新增设备测量。
+
 私有根目录：/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009。
 队列入口artifacts/run_csa_all_boundaries_v2.sh；预编译目录artifacts/csa_all_boundaries_compile_v2；
 原始设备报告artifacts/csa_all_boundaries_device_v2/results.json。

@@ -1,0 +1,24 @@
+--- baseline/mix_x_rms_norm internal sync
+
++++ all/mix_x_rms_norm internal sync
+
+@@ -18,7 +18,6 @@
+
+ set_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
+ set_flag(PIPE_MTE2, PIPE_V, EVENT_ID6);
+ wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
+-set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
+ set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+ wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);
+ wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+@@ -38,8 +37,8 @@
+
+ set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+ wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
+ wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID6);
+-wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
+ wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
++pipe_barrier(PIPE_ALL);
+ pipe_barrier(PIPE_V);
+ pipe_barrier(PIPE_V);
+ pipe_barrier(PIPE_V);

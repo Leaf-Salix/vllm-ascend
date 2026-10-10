@@ -2165,7 +2165,74 @@ indexer key/scale及indexer_state共9项逐bit一致；更换hidden输入后仍�
 作者仍使用局部Set/Wait语句，不要求拆helper或给整个incore函数加新的能力属性。
 不能仅删除上述白名单/shape判断，就声称MIX功能已实现；过程037的性能数据也不能用于推断MIX交接的收益。
 
-## 41. 后续记录要求
+## 41. 过程 039：已有产物解释全量接入为何没有净性能收益
+
+用户要求分析普通974.90、仅O-A 970.49、扩展989.89 μs的差异。本过程只读已有90个样本、
+生成C++和私有编译器/运行时代码，不新占卡、不重新编译，也没有修改算子或运行时实现。
+结构化证据见[performance_diagnosis.json](superkernel_all_boundaries_20261010/performance_diagnosis.json)。
+
+### 41.1 回退不是一个异常最大值导致
+
+扩展版相对普通版均值+14.99 μs，配对差值中位数+16.01 μs，26/30轮更慢；
+三种轮换次序下均值分别+18.20/+11.33/+15.44 μs，方向相同。
+仅O-A版本轮均值-4.41 μs，但过程036同口径为+2.57 μs，因此仍不认定稳定收益。
+这些是同SDK单层数据，不是Native、整模型或七档比较。
+
+### 41.2 确认一处内部流水退化：预留event7导致PIPE_ALL
+
+此前“原内部流水不变”仅依据源码表达，现修正为“源码表达未改，生成同步需要单独检查”。
+扫描59个异步kernel的生成函数体，排除尾部helper并归一化event编号后，
+58个内部同步调用序列一致；`mix_x_rms_norm`发生变化。它是HC_pre的独立AIV task，不是MIX task。
+
+普通版此处使用MTE2→V的event0至event7。实验PTOAS的
+`SyncEventIdAllocation::GetCompilerAvailableEventIdNum`为异步尾部预留event7，
+该流水对的内部可用数量从8变7；`ChangeNoEventIdSyncToPipeAll`在分配失败时删除对应Set并将Wait降级为PIPE_ALL。
+生成C++与该降级一致：原event7同步对消失，计算循环中出现`pipe_barrier(PIPE_ALL)`。
+精确差异见[内部同步差异](superkernel_all_boundaries_20261010/mix_x_rms_norm_internal_sync.diff)。
+
+新增barrier在`all/build/kernels/aiv/mix_x_rms_norm.cpp:948`，位于0到16、步长2的循环体，
+每个执行该路径的block新增8次，位置在两次row-expand计算之间，不是任务末尾的正常排空。
+这是已确认的生成代码退化；尚无该task的本轮计时，不能将14.99 μs全部归因于它。
+尾部事件策略必须避免挤占内部流水导致这种退化，同时保留事件使用期和真实完成保证。
+
+### 41.3 Scalar-prefix标记改变了原有预派发，而非单纯增加重叠机会
+
+Simpler `scheduler_dispatch.cpp::early_dispatch_shape`的`prefix_pending`分支要求：
+消费者有WAIT前驱、无predicate、无sync_start，且仅在同类型前驱所在的pending核上预派发。
+该分支会覆盖原先的idle/pending候选集合；找不到匹配前驱时，候选被放回队列，不能继续普通提前派发。
+
+当前T=96的O投影使用MANUAL依赖：`proj_a_mm_0(AIC) → quant_0(AIV) → _proj_b_mm_nz_kernel__2(AIC)`。
+这两条边的生产者和消费者类型不同，无法满足`is_scalar_prefix_wait_producer`的同类型条件。
+普通版可以在依赖未就绪时预备后继、等待doorbell；扩展版给这些后继加标记后会丧失上述资格，
+未预派发的部分只能等依赖完成后走普通ready路径。应保留原预派发，只有可用时才附加同核交接。
+此处确认的是代码路径/资格变化；具体本轮延迟多少仍需要实际时序证据。
+
+生成orchestration还显示3处此前未开启的`allow_early_resolve`被Set能力推导开启：
+`qproj_matmul`、两个`compress_state_commit`提交点。原来的提前释放策略也发生了变化，
+不能将此次A/B解释为只替换末尾等待。清单是包含条件分支的静态提交点，不代表实际task实例数。
+
+### 41.4 固定开销存在，可隐藏的工作和命中机会有限
+
+- 无交接仍支付协议开销：Wait读取回调并判断；Set写入`async_tail_kind`；生成尾部事件链；
+  executor探测后继，失败则就地等待计算/写回事件、清零状态并DCCI写回控制行。
+  这些动作发生在异步标记task的实际执行中，不只发生在成功重叠时。
+- `build_payload`会为标记消费者在AICPU填参数，即使该次最终未发生同核交接。
+  这是对原来可在gated AICore等待期间准备参数的策略改变，成本目前未分项计时。
+- 本次61个带Wait的独立kernel中，跨Wait保留的显式Scalar值数量为0/1/2/3/4时，kernel数分别为7/37/12/1/4。
+  例如`hc_pre_linear_reduce`的显式前缀只有block_idx×16；这不包括wrapper参数展开，
+  也不能将活跃值数直接换成指令数或时间，但不能假设所有task都存在足够长的可隐藏Scalar。
+- `kv_rms_norm_rope`和T=96分支的`proj_b_act_hc_post_0`带sync_start，当前不能作为提前Scalar后继。
+  后者还处于本次CSA区间末尾；不能仅以它带Set就认为能为本次CSA带来后继重叠收益。
+- Score和QK/PV的MIX仍未接入；同核交接只在函数返回时尝试一次，后继未及时到达则立即正常收尾。
+  59个具备Set/Wait的编译产物并不是59次有效重叠，更不能按kernel数量推断关键路径收益。
+
+结论：现有实现同时引入内部同步退化、预派发限制和固定开销，扩展标记没有带来净收益是可以解释的；
+不能据此判定同核Scalar/计算重叠方向无价值。优先修正event分配退化与跨类型依赖的普通预派发回退，
+再压缩无交接路径成本。之后只对128K/B16补轻量trace，统计成功交接、后继入口时旧计算剩余量及关键路径变化。
+当前常规swimlane/PMU会禁用实验交接，不能用打开该模式后的时序证明优化运行时的命中率。
+本过程没有作上述修复、没有新增性能结果；各原因对14.99 μs的定量贡献仍未测得。
+
+## 42. 后续记录要求
 
 每次有意义的修改/实验追加一节，至少包含：目的、修改仓与文件、与上一候选的差异、
 命令及版本、任务 ID/设备、实际结果、失败定性、产物路径、结论边界和下一步。

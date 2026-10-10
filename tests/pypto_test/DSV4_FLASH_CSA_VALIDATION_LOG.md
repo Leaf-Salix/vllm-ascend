@@ -15221,7 +15221,8 @@ PyPTO `b32ee10ff`、PTOAS `75615d31`、Simpler `a1a25dc33`、私有CSA `46597692
 ## 551. 2026-10-10：CSA其余单核task局部交接三组对照
 
 私有vLLM `2cd33a9a`在原O-A标记之上十文件新增104行；PTOAS `f556407f`补齐普通Vector指令校验。
-原数学、tiling、流水及sync_start不变；当前128K/B16仍73个kernel，其中59个Set/Wait、2个仅Wait、
+原源码数学、tiling、流水表达及sync_start设置不变；生成内部同步的后续修正见第552节。
+当前128K/B16仍73个kernel，其中59个Set/Wait、2个仅Wait、
 12个MIX成员保持原协议。完整CPU编译及五项编译正反例通过。
 
 队列任务`task_20261010_192303_125266920291`在0卡完成，exit=0；CANN9.2/TMR/NZ2/atomic关闭，
@@ -15240,3 +15241,14 @@ P95依次996.17/981.22/1006.24 μs，未见显著孤立长尾证据。只接O-A�
 
 [实施过程037](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#39-过程-037扩展到-csa-全部可接入单核-task再做同卡三组对照)、
 [结果与完整90个样本](superkernel_all_boundaries_20261010/README.md)。
+
+## 552. 2026-10-10：只读分析局部交接扩展版的性能回退
+
+未新增设备测试。已有样本显示扩展版配对差值中位数+16.01 μs，三种轮换顺序下均值均更慢。
+生成代码确认独立AIV的`mix_x_rms_norm`因异步尾部预留event7，从内部MTE2→V事件同步降级到PIPE_ALL，
+每block对应8次新增全流水barrier；因此撤回“生成内部流水完全未变”的解读，源码表达未变不能证明这一点。
+调度代码另确认Scalar-prefix消费者的预派发限定同类型前驱pending核，挡住O-A(AIC)→quant(AIV)→O-B(AIC)
+等跨核边原有的普通提前派发资格；还有未交接时的固定协议开销、sync_start后继限制和MIX尚未覆盖。
+各因素对14.99 μs的贡献尚未分项计时，不能将全部回退归因于单个task。
+详见[过程039](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#41-过程-039已有产物解释全量接入为何没有净性能收益)
+及[结构化分析](superkernel_all_boundaries_20261010/performance_diagnosis.json)。

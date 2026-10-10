@@ -545,7 +545,8 @@ with pl.spmd(...):  # 原有task与依赖
 ### 5.9 扩展到其余可接入的 CSA task（2026-10-10）
 
 按用户要求，将局部语句扩展到完整CSA的独立AIC/AIV任务。私有vLLM提交`2cd33a9a`
-在原O-A版本之上十文件新增104行；原算术、tiling、流水和sync_start不变。
+在原O-A版本之上十文件新增104行；原源码的算术、tiling、流水表达和sync_start设置不变。
+这不等于生成代码的内部同步不变：后续过程039发现异步尾部预留event7使一个AIV计算循环退化为PIPE_ALL。
 PTOAS `f556407f`补齐本次普通Vector指令的校验范围，GM Scalar读只允许在Wait之后。
 
 本次128K/B16共编译73个kernel：59个Set/Wait、2个仅Wait、12个MIX成员保持原协议。
@@ -565,6 +566,12 @@ Simpler的新交接入口只放行独立AIC/AIV。后续应保持原MIX任务和
 本轮保留私有实验改动，不将全量标记视作默认性能优化；未追加无关设备测试。
 详见[全量接入实验记录](superkernel_all_boundaries_20261010/README.md)
 和实施日志过程037。
+
+已有产物进一步解释了为什么尚无净收益（过程039，无新占卡）：`mix_x_rms_norm`的内部MTE2→V同步
+因event7预留发生PIPE_ALL降级，每block对应8次；Scalar-prefix预派发强制寻找同类型前驱所在pending核，
+使O-A(AIC)→quant(AIV)→O-B(AIC)等跨核边失去原本可用的普通提前派发资格。
+此外无交接时也有事件链、上下文写回等开销，两个带sync_start的单核后继仍被排除，MIX关键计算尚未接入。
+以上代码证据不能分摊14.99 μs的回退；应先消除内部流水和预派发退化，再用轻量机制trace量化真实命中与收益。
 
 ## 6. 按动态交接目标分阶段执行
 
