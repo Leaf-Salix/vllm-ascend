@@ -1,0 +1,12 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py
+index cb05362b..712e9eb1 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py
+@@ -207,2 +207,3 @@ def _proj_a_mm_nz(
+         n0 = pl.max(nf, 0) * A_COL_TILE
++        pl.system.wait_pre_task_end()
+         if PIPELINE_OA and A_COL_TILE == PROJ_A_PIPE_N_TILE:
+@@ -251,2 +252,3 @@ def _proj_a_mm_nz(
+             o_r_pad = pl.yield_(stored)
++        pl.system.set_next_task_start()
+     return o_r_pad, pa_tid

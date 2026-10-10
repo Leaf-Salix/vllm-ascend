@@ -14647,6 +14647,113 @@ CPU日志：`/tmp/csa-single-impl-final-cpu.log`；
 四根lowering记录：`results/csa_single_implementation_20261001/cpu_lower.json`、同目录`cpu_lower.log`。
 [当前入口说明](README.md)、[封存索引及恢复](archive/csa_precision_20261001/README.md)。
 
+## 520. 2026-10-09：先复核Native SuperKernel实现，再制定同核Scalar重叠方案
+
+按用户澄清，目标是PTO内部相邻task在同一物理核上，让前驱Vector/Cube异步工作与后继纯Scalar重叠。
+读取CANN9.2安装包的AscendC同步头文件与编译代码，并通过无代理、depth=1只读下载graph-autofusion
+`0dc84872fc20015953ea12c0c7622dbcd23f2c2a`，追踪npugraph_ex对应的AOT图优化、能力位、Early-Start同步改写及设备任务队列。
+
+确认Native利用同核连续子函数调用，把符合条件的边界同步移到子算子内部，并为少核子算子补齐同步。
+此前提出的“前驱中途调用后继Scalar回调再返回”不代表Native实现，撤回其首选方案定位。
+当前allow_early_resolve只解决提前派发的部分条件；executor仍在用户kernel之前等gate，普通FIN还承担依赖与回收语义。
+开发步骤改为先证明两task局部连续执行，再用“原task／连续执行保留前置等待／Scalar后等待”区分派发收益与重叠收益。
+动态调度扩展须处理真实完成、不同核数、多前驱、sync_start和TMR/HBG，不允许直接提前FIN或删除所有同步。
+
+当前安装torch_npu的NPUGraph参数白名单不含early_start；历史SK=1摘要也无该选项生效证据，不能把历史SK收益归因于Scalar重叠。
+上游最新AOT源码与本地运行二进制版本没有直接等同。本轮无NPU任务、无基线重测、无生产算子或工具链修改。
+此前仅做CPU PTOAS0.66代码生成探针，两份PTO输入均编译成功，证明外部调用可保留在TADD后；未完成CCEC或设备验证，不算性能结论。
+
+[实现复核、证据和开发步骤](DSV4_FLASH_CSA_SUPERKERNEL_ANALYSIS.md)、
+[本地代码生成探针](results/csa_scalar_overlap_feasibility_20261009/probe_results.json)。
+
+## 521. 2026-10-09：补充当前Native SuperKernel最小复现并修订执行参考
+
+按用户要求，从源码阅读推进到实际调用链复现。新增独立AscendC/ACL程序，使用当前CANN9.2安装的
+`libascendsk.so`，通过捕获图、SK scope、`aclskOptimize`及图重放运行两个AIV子算子。
+不依赖PyPTO，不更换torch_npu/CANN，不修改生产CSA及Simpler调度。
+
+A执行Vector加法并写GM，B先执行可校验的独立Scalar整数递推，然后等待并读取A输出。
+四组对照为普通图、SK且early_start关、SK且early_start开/Wait前置、相同SK且Wait后移。
+记录实际物理核、同步配置、Scalar及Wait时间戳和完整图重放min/mean/max；
+另在计时外更换输入并将中间及最终输出填NaN后重放校验，避免旧结果掩盖依赖错误。
+
+CPU编译已通过；直接接口采用`SetNextTaskStart<PIPE_MTE3, PIPE_FIX, true>()`、`WaitPreTaskEnd<true>()`。
+文档补齐SK_BIND能力位与运行时配置位的区别、实际复现命令、Python白名单与底层C++能力的边界。
+本机设备反汇编返回`<not available>`，设备`-S`和`-print-after`被编译器拒绝，明确不将源码或符号表作为设备汇编证明。
+脚本语法、汇总脚本Ruff及diff检查通过。
+
+实际单卡任务`task_20261009_165431_362034525498`在物理卡2完成，exit=0。四组分别5次预热、20次计时及1次独立校验，
+全部16384个输出元素精确一致。SK scope的8项捕获任务融合为1项；Early-Start开启两组的A/B物理核分别为62/62、40/40，
+设备同步配置均为0x10/0x20，确认本机安装库的真实协议执行。
+
+最后一次计时重放中，Wait前置为Scalar22/Wait85 tick，Wait后移为Scalar22/Wait64 tick，B入口到可读输入107→86 tick。
+这支持独立Scalar与前驱异步流水重叠；尚未分离Vector与末尾MTE3的占比，没有验证AIC或真实CSA。
+ACL event的min/mean/max依次为：普通图44.280/62.379/70.940 μs，SK早启动关38.760/63.640/83.540 μs，
+SK早启动开且Wait前置33.220/61.367/70.020 μs，Wait后移39.960/58.965/72.240 μs。
+该区间有Host提交/图调度空隙，波动明显，不以这些均值宣称稳定性能收益。
+
+启动时发现task-submit自动追加`--device N`，脚本原先误当作输出目录；已修正，早期失败均未进入设备计算。
+原始产物：`results/native_superkernel_repro_20261009/`；随源码保留四组完整样本和trace。
+本轮已释放设备，不重测七档或整模型。
+
+[最小用例及命令](superkernel_repro_20261009/README.md)、
+[实际结果与全部样本](superkernel_repro_20261009/results.json)、
+[更新的实现分析与执行参考](DSV4_FLASH_CSA_SUPERKERNEL_ANALYSIS.md)。
+
+## 522. 2026-10-09：PyPTO 两 task 基础功能通过，建立独立实现过程记录
+
+PyPTO 新增 `tests/st/runtime/scheduling/test_scalar_overlap.py`，使用正常 JIT/TMR 路径执行
+两个单 block AIV task：mid=x+1、out=mid+2。完整设备二进制编译通过后，单卡任务
+`task_20261009_173158_215808217987` 在物理卡8完成，pytest 1 passed、0 skipped、exit=0。
+两次更换输入、把中间及最终输出填NaN后，输入未变，两个1024元素输出精确一致。
+未采性能，也未声称该基线有同核重叠；设备已释放。
+
+过程修正包括：不以编译前IR函数类型统计最终AIV task数；队列COMMAND按行存储，
+多行命令只执行source的任务不计通过，改用单行完整命令后才完成真实设备验证。
+下一步在独立PyPTO用例中构造局部链并分别验证前置等待/Scalar后等待；生产CSA及Simpler调度尚未修改。
+以上是本节记录时的安排；固定合组不满足动态交接目标，后续路线及失败状态已在第523节修正。
+
+按用户要求新增 [独立实现过程文档](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md)，
+统一保留本项的源码复核、Native实操、PyPTO修改、失败原因、任务和证据路径，并持续追加。
+
+## 523. 2026-10-09：纠正固定合组路线，改为独立编译task与动态同核交接
+
+按用户指出的静态任务重组与PyPTO动态调度差异，重写SuperKernel执行方案。
+每个task独立编译，仅声明自身安全Scalar前缀、等待边界和完成能力；Simpler在运行时决定同核接续对象。
+不预编译A+B/A+C组合入口，不把减少task数量当作动态交接通过。
+异步返回、真实block/task完成、正常FIN、事件/slot生命周期和无后继收尾是必经工作，不能只打开allow_early_resolve。
+
+当前首要缺口是独立PyPTO入口的异步返回合同：已查看PTOAS尾部仍会等待，尚未证明现有工具链可表达目标。
+计划先恢复源码/扩展一致性并核实能力，再以独立A/B/C入口验证运行时选择及同核交接，最后扩展到CSA。
+固定合组仅保留历史机制对照，不继续作为主路线，也不以其编译通过推断动态重叠已实现。
+
+补齐此前尝试结果：固定local_task_chain的两个等待形式及普通基线CPU检查3 passed，包含设备二进制编译；
+单卡任务task_20261009_173748_25502084348最终在物理卡1以exit=4结束，conftest导入时报
+`Operator 'system.read_clock' not found in registry`，没有进入设备计算，设备已释放。
+原因是排队期间共享PyPTO Python包增加诊断操作，而实际加载C++扩展尚无对应注册。
+新的诊断草稿虽完成C++构建，定向UT/ST仍在导入阶段失败，不能计为可用能力；仅冻结测试文件不足以冻结实际运行依赖。
+
+本轮只修改方案、独立过程记录和本日志，没有安装扩展、修复/回滚源码或恢复设备测试。
+生产CSA及Simpler未改，独立task动态交接尚未实现；历史正常A→B基线及Native参考复现的通过范围不变。
+
+[修订后的执行方案](DSV4_FLASH_CSA_SUPERKERNEL_ANALYSIS.md)、
+[过程005～006及当前进度](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md)。
+
+## 524. 2026-10-09：参考NVIDIA PDL完善动态协议，PTOAS必要修改纳入范围
+
+按用户要求复核CUDA Programming Guide、Runtime API及PTX的PDL机制，补充到
+[独立过程记录第9节](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#9-过程-007复核-nvidia-pdl分开启动许可与数据完成允许改造-ptoas)。
+核心修正是将提前调度许可与真实完成/内存可见性分开；trigger不能当作FIN，后继独立Scalar之后仍需等待前驱输出真正可用。
+PDL不保证同SM放置或实际重叠；本项目的同一AIV/AIC目标仍需自己的Scalar交接、资源保护和完成协议。
+Native继续提供Ascend侧同步及状态处理参考，静态队列不能替代Simpler的动态选择。
+
+用户已授权“PTOAS该改就改”，撤回第523节之前的PTOAS不修改限制。
+本地只读源码确认当前tail仍会等待、显式同步会跳过自动同步、Scalar GM写回还有单独出口处理；
+执行方案将协议IR/验证、内部同步与异步出口的分离、事件生命周期、内存可见性及普通入口兼容纳入PTOAS必要改造。
+PTO-ISA仍使用上游能力。同步修订当前分析及过程文档，保留历史复现和失败记录。
+
+本轮无代码修改、构建/安装或NPU任务；PDL研究不等于动态交接已经实现，旧诊断导入失败仍未修复。
+
 ## 525. 2026-10-09：独立完整 HC_pre 入口与单卡性能基线
 
 按用户要求在 `vllm_ascend/ops/pypto/hc_pre.py` 增加独立动态 T 的 JIT 入口，
@@ -14718,3 +14825,395 @@ PTO执行区间并集30.40、73.44μs。新增六份trace，每组两份PyTorch 
 证据：`results/hc_pre_standalone_copy_20261009/`，包含migration_comparison.json、CPU编译报告、
 两个真机report.json及各自traces/；[独立说明](HC_PRE_STANDALONE.md)已区分旧14场景基线与搬入后的验证。
 本次提交源码、脚本、说明和可读报告/trace JSON，权重、二进制及原始大体积采集文件不入Git。
+
+## 528. 2026-10-09：Scalar 重叠 demo 恢复，转移到私有开发环境
+
+用户要求按最小 demo 推进，并避免影响另一会话的 PyPTO 算子优化。
+执行约束已放入 goal 引用的[独立过程记录](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md)第1节；
+本轮过程和隔离路径见该文档第10节（过程008）。
+
+此前新诊断操作的导入不一致已通过安装同源扩展修复，定向 UT 3 passed；修复发生在隔离指令前。
+新增独立 A/B/C 运行时选择基线，首次 CPU 解析发现 trace 标记常量 INDEX/INT64 不匹配，私有副本已修正。
+尚未取得该动态选择用例的设备结果，也未实现提前返回/同核交接。
+
+PyPTO、Simpler、PTOAS 已各自建立私有 worktree，位于工作空间
+`.worktrees/scalar-overlap-demo-20261009/`，并创建私有 `.venv`、`env.sh`、构建与测试产物目录。
+后续不再安装到公共 venv，也不改另一会话使用的共享工具链源码；NPU 仍经统一队列单卡测试。
+
+## 529. 2026-10-09：Scalar 动态同核重叠原型单卡通过
+
+全部修改和安装位于 `.worktrees/scalar-overlap-demo-20261009/`，未修改生产 CSA/HCA。
+普通 A/B/C 动态选择基线任务 `task_20261009_231035_382005015310` 通过，证明普通调度不保证同核。
+独立 AIV 异步返回任务 `task_20261009_232737_2932955117` 通过：
+入口返回仍有181/207 tick流水工作，由executor等待真实完成后发布FIN；换输入逐元素精确一致。
+
+动态同核交接任务 `task_20261009_233917_74379513109` 和补充真实wait计时的
+`task_20261009_234139_83933231932` 均单卡 **1 passed**。
+同一注册句柄在独立B/C入口间运行时选择，后者8/8同核、输出及Scalar结果精确一致；
+后移等待时Scalar执行19～33 tick，随后硬件wait仍为15～88 tick，支撑异步流水重叠；
+当时未区分Vector计算与末尾搬运，更强的计算重叠证据见下一节。
+ACK在前驱真实完成后才发布，没有将入口返回冒充任务完成。
+
+这些证据来自PyPTO external-source入口与修改后的私有TMR；
+DSL/PTOAS自动生成路径尚在实施，AIC、多block、HBG、CSA和公平性能对照均未通过。
+详细改动、时序表、限制和产物见[独立过程记录](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md)过程009～010。
+
+## 530. 2026-10-10：单独证明Vector计算重叠，并验证无后继收尾
+
+私有demo在异步A的尾部追加V→S事件标记，executor分别计时Vector与MTE3完成；
+后继Scalar起点增加运行时模数1的数据依赖，避免无关算术越过开始时钟。
+128×128初始候选八次功能正确，但Scalar结束后的Vector等待均为0，新增重叠断言失败，
+不能把末尾MTE3等待继续解释为Vector计算尚未完成。
+
+tile扩到128×256，保持64轮Scalar和运行时选择独立B/C入口；
+任务 `task_20261010_001224_207913213299`，物理卡0，**1 passed**，8/8同核且逐元素精确一致。
+四次后移等待中Scalar运行20～21 tick后，Vector仍需73～78 tick完成，明确证明计算重叠。
+V→S等待min/mean/max：前置81/94.25/107 tick，后置73/76.25/78 tick；
+不是公平整体性能结论，不外推CSA收益。
+
+新增事件后的无后继收尾任务 `task_20261010_001857_233220211273` 同样 **1 passed**；
+四次换输入精确一致，两次异步返回后的Vector实际等待均187 tick，普通等待对照均0 tick。
+两次任务的卡均已释放。私有LLVM/MLIR依赖已构建，PTOAS CLI完整构建继续进行；
+编译器DSL路径、AIC、多block与生产CSA仍未验收。
+原始trace、失败和通过记录见[独立过程记录](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md)过程011。
+
+## 531. 2026-10-10：纯PyPTO DSL动态同核Scalar/Vector重叠通过
+
+私有PTOAS CLI构建完成；完整DSL编译暴露`InitMemRef`重建参数后未更新函数属性引用，
+已在私有PyPTO补齐引用重映射，定向回归及既有load/add/store共 **2 passed**。
+完整设备二进制编译通过，PTOAS对不安全Scalar前缀与异步A中未支持的GM写入均按预期拒绝。
+
+任务`task_20261010_090008_334195597`，物理卡0，**1 passed**；
+A/B/C全由DSL/PTOAS生成独立入口，同一注册句柄运行时选择B/C/B/C，4/4同核。
+每次32,768个mid/out元素、输入保护和Scalar结果精确一致；Scalar均19 tick，
+其后V→S实际等待min/mean/max为313/324.75/331 tick，证明同核Vector计算重叠。
+
+任务`task_20261010_090221_1213099353`补充 **1 passed**：无后继A正常完成，
+普通同步A接B/C正确回退，随后同句柄恢复异步交接仍正确。两次卡均已释放。
+产物位于私有`artifacts/dsl_device_v1/`、`dsl_fallback_device_v1/`及对应XML、任务日志；
+细节见[过程012](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#14-过程-012纯-pypto-dsl-的动态同核重叠通过)。
+仍不宣称端到端性能收益；多block、AIC/Cube、HBG、graph replay和生产CSA尚未验收。
+
+## 532. 2026-10-10：多block动态Scalar/Vector接续与整项完成验证
+
+私有TMR放开多block唯一前驱接续，保留前驱全体block已发布的许可门禁；
+后继Scalar可与本核前驱Vector重叠，数据读取仍等前驱整项task的完成聚合。
+PyPTO诊断trace改为每block独占一条cache line，PTOAS无本轮新增修改。
+
+CPU两档编译通过；任务`task_20261010_091746_84074625444`，**2 passed**，队列锁已释放。
+设备标注后续更正：队列分配2但pytest默认0，原“物理卡2”标注撤回；正确选卡补测见第534节。
+4 blocks两次各观察4组同核重叠；96 blocks使用48个物理AIV、两次各观察48组重叠。
+后者Scalar为19～20 tick，其后Vector实际等待分别303～351、277～366 tick。
+各block工作长度错开，后继读取其他block的数据；全部等待返回均不早于全体前驱真实完成。
+输入、逐元素数据、115行尾块、padding、16行保护区及trace保护行均通过。
+
+证据位于私有`artifacts/multiblock_device_v1/blocks_4/`和`blocks_96/`，
+完整时序及min/mean/max见[过程013](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#15-过程-013多-block尾块与整项-task-完成依赖)。
+多前驱、fan-out、sync_start、AIC/Cube、HBG、graph replay和公平性能对照继续分步推进。
+
+## 533. 2026-10-10：双前驱与双后继动态同核接续通过
+
+私有Simpler支持从真实WAIT前驱中选择本核接续对象，继续保留全部前驱的发布门禁和
+整项完成门禁；同时检查当前producer的fan-out，避免仅凭复用slot地址判断依赖。
+PyPTO新增`A、B → C、D`的纯DSL小用例，独立入口，不编译配对组合。
+
+任务`task_20261010_092940_154350625597`，物理卡0，**2 passed，0 skipped**，卡已释放。
+新图四个task均4 blocks，两次交换A/B工作量，各有8组实际同核重叠，C/D各4组。
+Scalar min/mean/max均19/19.12/20 tick，之后Vector等待分别276/324.75/358及304/346.38/366 tick。
+各次有4组在Scalar结束时另一路前驱仍未完成；全部后继都等齐全部A/B block后才读取数据。
+逐元素、整数状态、跨block输入、padding与保护区精确，另一个既有单前驱用例也通过。
+
+完整实现、原始trace字段和复现方式见[过程014](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#16-过程-014多前驱与-fan-out-的动态接续)。
+产物为私有`artifacts/fanin_fanout_device_v1/`及同名前缀XML、任务日志。
+仅证明动态复杂依赖图的功能和计算重叠，不作为端到端加速或CSA验收结论。
+
+随后任务`task_20261010_093502_181053721032`补充 **1 passed**，物理卡0已释放：
+A/B各4 blocks、C/D各2 blocks并开启sync_start，全部后继Scalar均在所有前驱完成后才启动，
+两次均无提前重叠，结果和未用输出/trace保护区域精确。只证明普通回退正确，未放开sync_start重叠。
+产物为私有`artifacts/sync_fallback_device_v1/`及同名前缀XML、任务日志。
+
+## 534. 2026-10-10：连续动态交接、窗口复用及设备选择更正
+
+私有PTOAS支持同一task组合Scalar前缀与异步尾部；对校验通过的早期Scalar写入就地刷写cache，
+避免普通函数尾部的隐式全流水等待抵消异步返回。长链用例用显式TaskId依赖串边。
+四个不安全编译反例仍按预期拒绝。
+
+任务`task_20261010_095812_342714219743`，实际设备与队列均为5，**1 passed**，卡已释放。
+task window=8，同一句柄运行时执行3/33/7-task链，分别2/32/6条相邻边全部同核重叠；
+每阶段有效元素、Scalar结果、未用输出和保护区精确。33-task的Scalar min/mean/max为
+19/19.03/20 tick，其后前驱Vector实际等待321/333.38/340 tick。
+无后继的末尾任务返回后仍等待474～476 tick才真实完成，长链后的短链复用正确。
+产物：私有`artifacts/chain_device_v4/chain/chain_results.json`及同名前缀XML/任务日志。
+
+本轮同时更正两个诊断问题：复合队列命令必须显式给pytest传`--device "$TASK_DEVICE"`；
+runtime trace需与PyPTO一致保留raw COREID的die位。撤回第532节旧“物理卡2”标注。
+正确选卡的96-block补测为`task_20261010_095150_298433212395`中的spmd子项，卡5通过，
+两次各48组同核重叠；同一任务的旧长链子项当时失败，不将整个任务标为通过。
+各失败、修复、核号例子、完整min/mean/max及复现命令见[过程015](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#17-过程-015连续交接窗口复用与设备选择更正)。
+graph replay、独立分支公平性、Cube/HBG及端到端收益仍待继续。
+
+## 535. 2026-10-10：动态Scalar前缀的kernel模式图重放通过
+
+继续在独立worktree验证基础小图，未修改生产CSA/HCA或公共安装包。
+私有Simpler原型固定为本地提交`7078fc45f`（9文件，详细中文及Signed-off-by），
+私有PyPTO更新SDK引用并重建binding/TMR/torch接口；kernel模式的干净SDK检查保持有效。
+首次CPU编译因未提交SDK被拒绝，版本固定后完整设备编译1 passed。
+
+任务`task_20261010_101904_49575923354`，队列/实际设备均为7，单卡 **1 passed、0 skipped、exit=0**，已释放。
+复用既有PrefixChain独立node，按KernelABI编译并注册一次，捕获length=3/33两图，
+按3→33→3重放；task window=8。36/36相邻边都证明同核Scalar/Vector重叠，
+Scalar分别为19/19.50/20、19/19.16/20、19/19.00/19 tick（min/mean/max）；
+Scalar后前驱Vector剩余等待分别323/330.50/338、315/325.50/334、321/323.50/326 tick。
+全部阶段输出、Scalar状态、保护区精确，换输入/毒化后无旧结果；PTO之后图内PyTorch copy/add亦精确，
+最后一个异步node不会提前向caller stream报完成。图销毁及Worker drain/close正常。
+
+产物：私有`artifacts/capture_device_v1/capture/capture_results.json`及三份原始replay trace，
+同前缀XML/任务日志；完整命令与版本失败过程见
+[过程016](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#18-过程-016kernel-模式图捕获与重放通过)。
+原始tick不代表算子微秒性能；该结果不外推到JIT语法扩展、一般分支公平性、AIC/Cube、HBG或CSA。
+
+## 536. 2026-10-10：Scalar交接长链中的独立支线推进通过
+
+私有环境复用同一node IR，33-task依赖链在提交stage=8时插入一个无依赖独立node，window=8。
+完整CPU编译1 passed；任务`task_20261010_102351_80709110225`在卡6单卡 **1 passed、0 skipped**，已释放。
+主链31/32条边同核交接、1条普通调度，支线使用另一物理核；全部数据、Scalar状态及保护区精确。
+支线完成时主链还有28个task未完成，没有被连续交接阻塞至链尾。
+Scalar min/mean/max为19/19.23/20 tick；前驱Vector剩余等待为323/336.26/345 tick。
+这里只验证一个基本图，不宣称一般调度公平性或端到端收益。
+产物`artifacts/branch_device_v1/branch/branch_results.json`（私有根）及同名前缀XML/任务日志，
+详情见[过程017](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#19-过程-017长链中的独立分支可以继续推进)。
+
+## 537. 2026-10-10：动态AIC任务间Scalar/Cube重叠单卡通过
+
+私有PyPTO新增`async_aic_return`及AIC前缀支持，PTOAS新增Cube异步尾部并保留所需event 7，
+Simpler按AIV/AIC分别消费V/MTE3或M/FIX事件，同核资格只允许相同核类型。
+仍未修改生产CSA或公共安装；AIC扩展是Simpler `7078fc45f`之上的私有未提交改动。
+三仓构建及完整AIC设备代码编译通过。
+
+任务`task_20261010_104658_21401368904`，队列/实际卡6，**2 passed、0 skipped、exit=0**，已释放。
+两个独立AIC入口分别做FP16 `[128,128]@[128,256]`的17次累加与后继matmul，输出FP32；
+后继先执行64轮Scalar，wait之后再读前驱数据。两次A/B均为raw核19，
+Scalar执行20 tick后Cube仍需370/417 tick，其后的FIX等待为177/39 tick，
+证明这两个样本有Scalar/Cube计算重叠，而非仅写回重叠。
+全部矩阵结果、依赖读值-51/-102、Scalar状态及保护区精确；无后继路径也完成真实排空。
+共用executor的AIV 3/33/7-task回归40/40相邻边重叠，数据与保护区通过。
+
+当前仅是单block AIC的基础机制证据，不外推AIC复杂图/图重放、HBG、整体性能或CSA。
+产物：私有`artifacts/aic_device_v1/aic/aic_results.json`、`aic_device_v1/chain/chain_results.json`，
+同前缀XML/任务日志及三仓构建日志；完整数据与复现命令见
+[过程018](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#20-过程-018独立-aic-task-的-scalarcube-重叠通过)。
+
+## 538. 2026-10-10：仅推进TMR，完成无trace三组图重放计时
+
+按用户“先做TMR就可以”“HBG先不管”修订范围，HBG暂缓且未修改。
+私有Simpler固定本地提交 `242654f89`，PyPTO私有SDK pin和torch接口同步；公共安装及CSA/HCA保持原状。
+可省略async_return_trace，wrapper/executor跳过诊断读时钟和输出，完成协议保持有效。
+
+回归 `task_20261010_110655_338163520891`（卡6）为1通过1失败：
+AIV 40/40边重叠；17次matmul的AIC两次走普通路径，矩阵/Scalar/保护区正确，但重叠断言失败。
+扩大诊断窗口为65次matmul后，`task_20261010_111021_364898732167`（卡6）1通过，
+两次Scalar/Cube重叠，Scalar 19/21 tick后Cube仍需387/382 tick。这是机会性边界和机制观测，不是性能结论。
+
+正式计时 `task_20261010_111513_392863712979`，队列/实际卡5，1 passed、0 skipped、exit=0，已释放。
+同一artifact运行时选择三个独立入口；17-task链、window=8，每task相同1024轮Vector add，
+三组均allow_early_resolve，无trace/profiler，各30个warmup后样本，用NPU event测完整图重放。
+全部阶段、输入、16行保护区精确。单位μs/一次17-task重放，**不是CSA时间**：
+
+| Scalar轮数/task | 路径 | min | mean | max |
+| --- | --- | ---: | ---: | ---: |
+| 64 | 普通完成 | 9681.58 | 9703.63 | 9713.48 |
+| 64 | 交接后先等待 | 9674.24 | 9695.10 | 9705.92 |
+| 64 | Scalar后等待 | 9669.84 | 9691.28 | 9710.18 |
+| 1024 | 普通完成 | 9785.56 | 9793.23 | 9802.00 |
+| 1024 | 交接后先等待 | 9772.84 | 9785.56 | 9794.54 |
+| 1024 | Scalar后等待 | 9667.52 | 9687.11 | 9698.40 |
+
+长Scalar等待后移相对普通完成少106.12 μs/1.084%，相对等待前置少98.46 μs/1.006%，
+均30/30相邻采样轮更快，min/max同时降低。短Scalar相对等待前置仅少3.82 μs/0.039%，
+分布重叠、max略高，不宣称稳定收益。不能将人工递推收益外推CSA；普通基线仍用同一实验SDK。
+
+完整180个样本：私有根 `artifacts/tmr_timing_device_v1/timing/timing_results.json`，同名前缀XML/任务日志。
+实现、回退记录、详细比较和命令见[过程019](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#21-过程-019聚焦-tmr关闭诊断后做公平计时)。
+下一步只核对TMR真实候选的安全Scalar和剩余流水，不因小图通过就改动整套CSA。
+
+## 539. 2026-10-10：TMR 首个真实 CSA gate 任务对未触发重叠
+
+私有worktree冻结 `fc6d201b`，整包副本依赖图解析通过；未改生产CSA及公共安装。
+任务 `task_20261010_113554_109022332617`，队列/实际卡8，exit=0，卡已释放。
+T=96 的 linear_reduce→split_pre_post 两轮普通/async+prefix结果逐bit一致，
+CPU参考和保护区通过；但同核交接及可证明的计算重叠均为0，不能据此宣称CSA性能收益。
+下一步检查真实Indexer量化→head系数任务对，保留原算术与worker划分。
+完整过程及证据见[过程020](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#22-过程-020冻结真实-csa-源码首个-gate-任务对只通过功能)。
+
+## 540. 2026-10-10：TMR 真实 Indexer 任务对功能通过，但派发未赶上交接窗口
+
+私有PTOAS补齐量化所需Vector运算的异步尾部合同，保留内部同步；构建、完整CPU编译和两项非法合同拒绝检查通过。
+任务 `task_20261010_115351_19908766867`，队列/实际卡6，exit=0，卡已释放。
+T=96、48-worker真实 qr_hadamard_quant→indexer_head_coefficients，两轮普通/异步版本
+INT8量化、FP32 scale及FP16系数逐bit一致；CPU参考及保护区通过，未加人工运算。
+但同核交接仍为0，首个后继函数前缀晚于最后前驱完成606/440 tick，
+前驱返回后的Vector剩余等待均值仅19.29/18.60 tick。没有真实CSA性能收益结论。
+下一步核对TMR候选传播/ACK/参数预备时机；HBG继续暂缓。
+完整min/mean/max、合同边界及产物见[过程021](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#23-过程-021支持实际-indexer-量化指令确认真实任务的交接机会尚未形成)。
+
+## 541. 2026-10-10：TMR真实Indexer从未交接推进到动态同核交接
+
+私有Simpler在ACK释放pending后立即尝试匹配的Scalar-prefix后继，随后补CPU参数预填与去除重复DCCI。
+任务 `task_20261010_120723_253107030889` / 卡6：真实T=96两轮3/18次交接，3项回归通过。
+任务 `task_20261010_121245_272761723638` / 卡10：真实T=96两轮14/13次交接，4项回归通过。
+两任务均exit=0，卡已释放；量化、scale、系数与普通路径逐bit一致，CPU参考及保护区通过。
+最终入口间隔两轮为41/50.07/72、35/42.77/58 tick（min/mean/max），
+但同核Vector剩余等待均0，尚未证明真实计算重叠或净性能收益；不能把跨卡诊断小样本当正式A/B。
+AIV链40/40条边、双前驱、sync_start回退及AIC仍通过；AIC两次Scalar之后还有422/438 tick Cube计算。
+源代码快照、全部证据及下一步见[过程022](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#24-过程-022ack后即时预派发使真实indexer能够交接入口进一步去冗余)。
+
+## 542. 2026-10-10：TMR已ready独立后继的Scalar/Vector与Scalar/Cube重叠通过
+
+私有Simpler扩展普通ready任务接续，保持gated消费者的真实WAIT边与全fan-in等待。
+同一卡6旧版对照 `task_20261010_123406_402518025413`：数据/保护区精确，两个最终重叠断言按预期失败，重叠0。
+候选 `task_20261010_123707_419287226709`：**6 passed**，AIV两轮48/48、AIC两轮24/24同核计算重叠；
+独立后继可在无关block仍运行时通过边界，所有本核资源则等旧任务真实完成后才使用。
+AIV长链40条边、双前驱、sync_start回退和有依赖AIC及末尾排空均通过，两任务都正常释放卡。
+私有commit `2e09ec353`，未push、未改变共享安装；HBG继续暂缓。
+这是人工小图机制验证，不代表CSA收益。各时段min/mean/max原始tick、完整产物与边界见
+[过程023](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#25-过程-023先在小图扩展已ready的独立后继)。
+
+## 543. 2026-10-10：真实形状NZ O-A证明自然Cube重叠，原表达对照阻止错误推广
+
+私有TMR探针保留T=96、8组×8块、Native NZ借用和K4096算术，无人工Scalar或矩阵循环。
+`task_20261010_125718_13213544895` / 卡8：两轮各40/40条接续边证明同核Cube计算重叠，
+普通/异步、CPU参考、padding与trace保护区精确一致。
+无诊断连续16次图重放 `task_20261010_130440_163280731359` / 卡8：
+同tile表达普通121.2763/125.3783/127.8675→异步119.6175/122.5314/125.2975 μs（min/mean/max），
+均值少2.27%，29/30对更快；仅为批次折算的隔离投影收益。
+
+补原tensor表达三路对照 `task_20261010_142900_16597412433` / 卡1：
+普通tile均值127.4395、异步tile125.4575、原tensor113.5393 μs，三路结果/保护区通过。
+**异步tile仍比原表达慢10.50%，不能作为原CSA优化接入**。
+生成代码确认原表达使用K128 L0拆分和两个缓冲，探针K256整块TMOV改变了核内流水；下一步先恢复该分块。
+以上任务都已正常释放卡；共享SDK及生产CSA未修改，HBG暂缓。
+用户最新要求完整CSA性能只测128K/B16，已同步方案与过程记录。
+详细min/mean/max、失败定性及证据见实现日志[过程024](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#26-过程-024准备真实nz-o投影的独立cube接续探针)
+与[过程025](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#27-过程-025原tensor表达对照发现探针改写的l0流水损失)。
+
+## 544. 2026-10-10：保留原O-A tensor lowering后，动态接续隔离图均值改善1.43%
+
+撤回手工tile改写，采用原tensor算术及已有内部cache属性，让编译器保留K128 L0流水。
+私有PTOAS仅补允许局部Cube tile有效行列元数据更新；wait之前的负例仍正确拒绝。
+CPU编译/加载通过；同卡任务 `task_20261010_143841_681878510` / 卡9，exit=0并释放卡。
+两轮各40条接续，其中37/40、40/40证明自然Cube重叠；结果、padding及trace保护区精确一致。
+
+无trace/profiler，连续16次折算的min/mean/max（μs）：
+原tensor scope **105.1300 / 111.9365 / 115.9837**；
+相同算术的独立普通入口 **105.6825 / 111.9240 / 116.2925**；
+异步Scalar-first **103.5037 / 110.3405 / 114.0938**。
+异步相对原scope均值少1.4258%，22/30配对样本更快；三路图重放、换输入与保护区检查通过。
+当前仅为T=96隔离O-A收益，未测完整CSA；下一步只测用户限定的 **128K/B16**。
+全部证据及失败尝试见[过程026](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#28-过程-026保留原tensor-lowering后证明o-a自然重叠与局部收益)。
+
+## 545. 2026-10-10：动态Scalar接续接入私有完整128K/B16 CSA，首轮功能通过
+
+仅改私有NZ O-A的T=96分支，保留原tensor算术/核内流水、heads依赖及其他任务。
+完整CPU编译/加载通过。首轮fixture因未加载Native扩展而失败（未执行CSA），
+补只读绑定加载后，任务 `task_20261010_145725_151890513849` / 卡2，exit=0并释放卡。
+第2层真实权重、Native cache/metadata、NZ mode=2、atomic关闭、CANN9.2、TMR；
+两路径输出、Top-K、6个缓存/状态视图和保护区通过，改输入的图重放也逐bit一致。
+
+无profiler，30次完整单层图各一次replay、交替A/B次序：
+原路径 **944.56 / 969.94 / 997.56 μs**，
+接续路径 **937.32 / 965.70 / 985.80 μs**（min/mean/max）。
+均值少4.24 μs / 0.44%，17/30配对样本更快，暂不认定稳定净收益。
+这是同一实验SDK内对照；完整图实际重叠时序和原SDK公共开销仍待补证。
+只测用户指定的128K/B16，HBG暂缓；没有将此结果当Native精度或整网性能验收。
+完整命令、失败定性和产物见[过程027](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#29-过程-027私有完整128kb16-csa首轮功能与计时)。
+
+## 546. 2026-10-10：完整128K/B16 CSA的动态同核Scalar/Cube重叠通过
+
+独立诊断包CPU编译通过；任务 `task_20261010_150632_176227614666` / 卡8，exit=0并释放卡。
+两轮各40条同核接续边，36/40、39/40证明后继安全Scalar执行后前驱Cube仍在计算；
+无固定A+B入口，无人工Scalar循环。后继第一次不安全操作等待旧任务真实完成。
+两轮不同hidden输入，相对原路径的输出、Top-K、score、6个缓存状态视图逐bit一致，保护区通过。
+诊断数据不混入§545的性能样本；原始clock/核号及汇总保存到私有artifacts下
+`csa_full_128k_b16_trace_device_v1/{results,mechanism_summary}.json`。
+同核机制现已在完整CSA中验证，稳定净收益及未改SDK公共开销尚未证明。
+过程及原SDK隔离环境准备见[过程028](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#30-过程-028完整csa诊断包与原sdk对照准备)。
+
+## 547. 2026-10-10：完整CSA原SDK括号对照完成，尚无稳定性能收益
+
+私有原SDK从PyPTO `cb2484471` / Simpler `ef6812891`独立构建，冻结CSA与实验SDK相同。
+首次任务因私有环境遗漏CANN Python路径而在权重NZ转换失败，未执行CSA；补回路径即可。
+复核任务`task_20261010_153414_284637034` / 卡9，exit=0并释放卡。
+仅128K/B16、每路30次单次完整CSA，无trace/profiler，min/mean/max（μs）：
+
+| 路径 | min | mean | max |
+| --- | ---: | ---: | ---: |
+| 原SDK前测 | 960.04 | 977.55 | 1004.66 |
+| 实验SDK普通 | 951.96 | 979.67 | 1014.14 |
+| 实验SDK接续 | 960.94 | 980.68 | 1002.78 |
+| 原SDK后测 | 944.38 | 959.08 | 986.30 |
+
+接续相对实验普通均值高0.10%，11/30对更快，§545的0.44%改善未复现。
+原SDK前后均值漂移1.89%，大于新旧SDK约1.2%的括号均值差，暂不能定量归因公共开销。
+各路径输出/Top-K/score跨SDK逐bit一致；实验两路径全部缓存状态、保护区与改输入图重放通过。
+机制证明仍有效，完整CSA稳定收益与16卡最终验收尚未完成。完整结果位于私有artifacts下
+`csa_full_128k_b16_sdk_pair_v2/summary.json`及各子目录；失败和版本细节见
+[过程029](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#31-过程-029原sdk括号对照通过功能完整csa小幅收益未复现)。
+
+## 548. 2026-10-10：精简普通task控制字段写回，功能通过、性能继续独立优化
+
+私有Simpler `4cd49d3a7`让普通AICore任务不再写零并写回交接上下文；
+真实异步任务和接续后继仍在FIN前写回，等待与ACK/FIN协议不变。
+第一项任务6个基础设备检查通过；图重放先后因未提交SDK、PyPTO桥接模块旧revision
+在执行前被拒绝，保留检查并完成私有增量构建后补测，未绕过版本约束。
+
+`task_20261010_161813_727410715` / 卡0，exit=0并释放卡：kernel图捕获/重放通过，
+完整128K/B16的普通/接续CSA输出、Top-K、score、全部缓存状态及改输入重放逐bit一致，保护区通过。
+同一SDK、每路30次单次完整CSA、无profiler，min/mean/max（μs）：
+普通 **954.08 / 970.17 / 1001.80**；接续 **964.66 / 983.01 / 1003.88**。
+本轮接续均值高1.32%，仅6/30对更快，不能声称没有性能回退；功能结论独立保留，继续优化交接开销。
+已有payload padding可用于把实际交接写回集中到单条缓存线，此候选尚未实现或验证。
+16卡对照`task_20261010_162022_87419315499`按用户最新“CSA仅用单卡”要求在pending时取消，
+没有分配或占用卡。后续功能和性能都只做单卡，不再以整模型验收为本项门槛。
+完整失败原因、版本和证据见[过程030](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#32-过程-030精简普通任务的交接上下文写回)
+和[过程031](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#33-过程-031普通任务写回精简通过功能接续路径开销仍需优化)。
+
+## 549. 2026-10-10：原task内局部Set/Wait接口完成CPU编译，单卡验收排队
+
+按用户修正，不再要求算子整体函数属性、拆helper或`if ready`。
+PyPTO从`pl.system.wait_pre_task_end()` / `pl.system.set_next_task_start()`推导能力，
+PTOAS生成等待、退出及异步尾部；自动寻找插入点留作后续方向。
+私有Simpler已到`a1a25dc33`单控制缓存线版本，本阶段未再修改运行时。
+
+CSA冻结普通/候选包仅`decode_o_proj.py`增加两行局部语句，原计算与流水保持；
+两侧均73个kernel、任务名一致。解析用例1项、PTOAS正反例4项通过，
+三个基础用例和128K/B16完整CSA两侧均完成CCEC二进制编译，尚不等于设备验证通过。
+
+首次单卡任务`task_20261010_181057_117862815002`因环境加载前未进入Git工作目录，
+在pytest之前退出128；未执行算子。修正启动顺序并做CPU初始化检查后，
+重提`task_20261010_181636_150374113561`，当前排队。
+后续先验证原位SPMD的动态分支、末尾收尾、真实AIV/AIC同核重叠，
+通过后仅在单卡128K/B16比较完整CSA数值状态、图重放及min/mean/max。
+旧整体属性接口的设备结果不能替代此轮局部语句验收。
+
+实现、失败定性、命令和产物见[过程035](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#37-过程-035以原task内setwait替代整体函数属性完成编译并排队单卡)。
+
+## 550. 2026-10-10：局部Set/Wait单卡验收通过，完整CSA均值尚无改善
+
+`task_20261010_181636_150374113561` / 0卡，exit=0并释放卡。
+原位局部语句的三个基础设备用例通过；同一二进制动态A→B/A→C、无后继及改输入重复执行正确。
+两轮AIV各观察到48/48计算重叠，AIC分别8/24、24/24，真实核号/时间戳、输出和保护区均通过。
+
+原NZ O-A仅加两行，完整CSA仍73个相同任务；128K/B16、第二层真实权重、CANN9.2、NZ2、atomic关闭。
+输出/Top-K/score及全部六个缓存状态视图逐bit一致，图捕获/重放和改输入重放通过。
+双方各31项保护区/metadata检查通过，slot范围外改写字节均为零。
+30次交替单次完整CSA图重放，min/mean/max（μs）：
+
+| 路径 | min | mean | max |
+| --- | ---: | ---: | ---: |
+| 同SDK普通CSA | 946.68 | 967.64 | 990.48 |
+| 局部Set/Wait | 950.50 | 970.21 | 986.74 |
+
+候选均值慢0.266%，14/30对更快；功能与同核机制通过，尚无稳定性能收益。
+PyPTO `b32ee10ff`、PTOAS `75615d31`、Simpler `a1a25dc33`、私有CSA `46597692`。
+公共生产算子不应用本实验协议。详见[过程036](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#38-过程-036局部语句路径单卡功能通过csa性能单独记录)
+和[精简结果/原始样本/两行patch](superkernel_local_boundaries_20261010/README.md)。
