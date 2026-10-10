@@ -167,3 +167,69 @@ def test_compressor_native_column_group_uses_live_bounds(lengths, head_dim, expe
     exec(compile(module, "native_compressor_column_group.py", "exec"), namespace)
     bounds = np.array([0, *np.cumsum(lengths)], dtype=np.int32)
     assert namespace["native_compressor_column_group"](bounds, sum(lengths), head_dim) == expected
+
+
+@pytest.mark.parametrize(
+    "block,positions,expected_shapes",
+    [
+        (0, [126, 127, 126], [[(8, 512)], [(64, 8), (8, 8)], [(8, 512)]]),
+        (1, [126, 127, 126], [[(8, 512)], [(512, 8), (64, 8), (8, 8)], [(8, 512)]]),
+    ],
+)
+def test_native_sum_guard_reads_live_window_boundary(block, positions, expected_shapes):
+    """Execute the real guard across updates; hardware validates reduction bits."""
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision import decode_sparse_attn_csa
+
+    tree = ast.parse(Path(decode_sparse_attn_csa.__file__).read_text())
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Call)
+        and isinstance(node.test.left.func, ast.Attribute)
+        and node.test.left.func.attr == "read"
+        and isinstance(node.test.left.args[0], ast.Name)
+        and node.test.left.args[0].id == "position_ids"
+    ]
+    assert len(guards) == 1
+    code = compile(ast.fix_missing_locations(ast.Module(body=guards, type_ignores=[])), "live_sum_guard.py", "exec")
+    reductions = []
+
+    def row_sum(value, temporary):
+        reductions.append(value.shape)
+        return value.sum(axis=1, keepdims=True, dtype=np.float32)
+
+    scalar_api = SimpleNamespace(
+        read=lambda tensor, indices: int(tensor[tuple(indices)]),
+        add=np.add,
+        reshape=np.reshape,
+        row_sum=row_sum,
+        create_tile=lambda shape, dtype: np.empty(shape, dtype=dtype),
+        FP32=np.float32,
+    )
+    values = np.zeros((8, 512), dtype=np.float32)
+    values[:, : 128 if block == 0 else 512] = 1
+    live_positions = np.zeros((1, 1), dtype=np.int64)
+    namespace = {
+        "pl": scalar_api,
+        "WIN": 128,
+        "SOFTMAX_HEAD_TILE": 8,
+        "position_ids": live_positions,
+        "qk_t": 0,
+        "qk_sb": block,
+        "sm_exp": values,
+        "qk_reduce_tmp": np.empty_like(values),
+    }
+    for position, shapes in zip(positions, expected_shapes):
+        live_positions[0, 0] = position
+        reductions.clear()
+        exec(code, namespace)
+        assert reductions == shapes
+        np.testing.assert_array_equal(namespace["sm_block_sum"], values.sum(axis=1, keepdims=True))

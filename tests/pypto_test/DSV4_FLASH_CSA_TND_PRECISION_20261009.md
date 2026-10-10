@@ -1,5 +1,13 @@
 # 独立 TND 精度版（2026-10-09）
 
+## 当前结果（v23）
+
+- 8K/B4/T11、8K/B4/T24、8K/B16/T60、128K/B4/T24：actual heads、最终输出与全部cache/state、TopK均与确定性Native逐bit一致。
+- history96/B4：与原v13精度版的独立heads及完整状态逐bit一致，保留短窗口原计算。
+- 正式精度包仍显式复用Native HC/norm/O-proj，PTO执行Q/KV、compressors、Indexer与attention；保持真实TND，不要求补到S6。
+- 性能包23文件逐字节未改；当前精度版较Native慢，仅验证单个C4层，未外推整模型或DP/EP16吞吐。
+- 增量UT26项通过。下文按阶段保留历史失败、定位与改进；早期“未对齐”描述仅对应当时阶段。
+
 ## 身份、备份与目标
 
 工作分支：`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`。
@@ -62,7 +70,7 @@ vLLM 0.25.1，vLLM-Ascend 0.25.1rc1 lineage；PyPTO `3e87a843`、Simpler `a54c05
    v3c 拆成独立 checked-index task，任务末尾 flush 后，planner 显式依赖并读取。
    生成代码、独立审查和完整 NPU reset 门禁均通过。
 
-## 待完成的精度检查
+## 早期阶段待完成的精度检查
 
 8K/B4 的 HC+Indexer、Compressor 修正已完成；继续检查 O-proj 及真正变长/128K。
 当前上述阶段尚未达到整层逐 bit 对齐，不以 allclose 或百分比阈值替代目标。
@@ -213,7 +221,7 @@ Q导出预检最初因inline reshape无法推断参数metadata失败；改为显
 
 ## 结构化历史证据
 
-[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录30组已完成阶段：
+[history_20261009.json](evidence_tnd_precision/history_20261009.json)记录37组已完成阶段：
 真实T、请求长度、Native对照的逐状态精度、100次重放检查、延迟统计、SK设备事件计数、
 各臂源码SHA及原始报告SHA。省略重复的设备事件长名称和计时样本数组，原始报告仍保留在实验目录。
 正式精度包源码SHA和性能包23文件SHA同时归档；后续结果追加新stage，不改写旧stage数字。
@@ -310,5 +318,59 @@ Native设备profile的SK事件为14/15，观察臂为15/16；额外观测改变�
 
 下一候选v22仅对raw128分母先逐元素相加两个64列半区，再做两级8元素规约；
 compressed512以及max/exp/alpha/PV/probability cast/div全部保持v18。
-候选只通过无设备编译与生成代码门禁，NPU结果尚待完成，未进入正式包；
+该阶段当时只完成无设备编译与生成代码门禁，NPU结果尚待完成、尚未进入正式包；
 它当前只针对已核对的长context raw128资格，不泛化短context或其他attention模式。
+
+
+## v22/v23：按 Native raw128 与 compressed512 分别规约
+
+前置实测确认Q、cache/state、TopK全部逐bit一致，真实参数满足SCFA路径。
+v22仅把raw128的分母改为：先逐元素Add两段64列，再规约为8元素partial和最终sum。
+compressed512保留v18的三层8元素规约；max、exp、alpha、probability舍入、PV、division均不改。
+T60与128K的actual heads、最终输出及其余状态全部逐bit一致，原来的两处1ULP差消失。
+
+v23增加读取本次真实position的运行时保护：position>=127才使用校准规约；
+短窗口的raw与compressed都保持原正式v13的generic row_sum，不把未测路径自动迁移。
+这项条件不是按B、S6或capture时常量选择，继续支持真实非等长TND。
+
+### 带保护版本的完整 NPU 回归
+
+| 用例 | 实际heads元素 | heads不同元素 / 最大ULP | final不同元素 / 最大ULP | cache/state与TopK | 门禁 |
+| --- | --- | --- | --- | --- | --- |
+| 8K/B4/T11，6,3,1,1 | 360448 | 0 / 0 | 0 / 0 | 全逐bit | 全通过 |
+| 8K/B4/T24，等长6 | 786432 | 0 / 0 | 0 / 0 | 全逐bit | 全通过 |
+| 8K/B16/T60，非等长 | 1966080 | 0 / 0 | 0 / 0 | 全逐bit | 全通过 |
+| 128K/B4/T24，等长6 | 786432 | 0 / 0 | 0 / 0 | 全逐bit | 全通过 |
+
+四档使用hard assertion要求precision与Native全八状态及actual heads逐bit一致。
+另测history96/B4/T24，hard assertion验证v23与原v13完整八状态及各自独立heads逐bit一致，
+compiled/raw、100连续重放与reset后owned heads均一致。该短case的actual Native heads也一致，
+但不能据单点推广所有短context精度。
+所有case均保留真实Native static/SK、观察臂fidelity、保护区与非有限值检查。
+
+### 同轮 Graph Replay 延迟均值
+
+单位μs，precision显式复用Native HC/norm/O-proj；性能对照为未修改的性能包。
+
+| 用例 | Native | 性能对照 | 带保护精度版 |
+| --- | --- | --- | --- |
+| 8K/B4/T11 | 402.04 | 439.68 | 672.99 |
+| 8K/B4/T24 | 415.66 | 483.57 | 753.26 |
+| 8K/B16/T60 | 615.48 | 689.81 | 1140.94 |
+| 128K/B4/T24 | 618.94 | 575.16 | 834.49 |
+
+当前目标为精度，精度版比Native慢，不能把性能包优化成果误称为精度版加速。
+这仍是单个真实C4层权重+合成输入对拍，未验收整模型、多层误差累积或DP/EP16/EPLB吞吐。
+正式precision的数值源码AST与通过硬件回归的v23一致，性能包23文件SHA仍与98eadc516一致。
+
+### 预检失败记录与修复
+
+最初的保护候选生成器命中较早的重复 `if qk_sb==0`，误将gather/同步包含在窗口条件内，
+短分支引用未定义sm_exp。独立审查与完整无设备lowering均阻止了该候选上卡，正式源码未被修改。
+改用唯一sm_exp锚点后，断言求和区域前后源码保持原样；重新编译与生成CPP检查通过才上卡。
+回归driver最初对control访问native_heads，独立审查发现其不存在；改为只检查precision/probe。
+上述失败未作为NPU数值结果，不跳过或弱化验证门禁。
+
+正式precision增量UT共26项通过（227选定框架、CPU测试，无新增NPU分配），
+新增测试在同一输入表上更新position 126→127→126，执行真实guard AST验证两类块的分支切换与覆盖。
+该CPU测试不代替FP32硬件数值对拍，后者由上述五档完整Graph回归证明。

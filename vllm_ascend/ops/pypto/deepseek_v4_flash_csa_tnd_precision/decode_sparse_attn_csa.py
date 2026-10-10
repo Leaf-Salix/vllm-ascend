@@ -431,7 +431,41 @@ def sparse_attn_csa(
                             sm_max = pl.maximum(sm_old_m, sm_block_max)
                             sm_alpha = pl.exp(pl.sub(sm_old_m, sm_max))
                             sm_exp = pl.exp(pl.row_expand_sub(sm_masked, sm_max))
-                            sm_sum = pl.add(pl.mul(sm_old_l, sm_alpha), pl.row_sum(sm_exp, qk_reduce_tmp))
+                            # Preserve the original precision path for short
+                            # windows; calibrated native trees require 128 keys.
+                            if pl.read(position_ids, [qk_t, 0]) >= WIN - 1:
+                                if qk_sb == 0:
+                                    # Native NewReduceSumLastNDImpl for raw128:
+                                    # pair the two 64-column halves, then reduce 8s.
+                                    sm_raw64 = pl.add(
+                                        sm_exp[0:SOFTMAX_HEAD_TILE, 0:64], sm_exp[0:SOFTMAX_HEAD_TILE, 64:128]
+                                    )
+                                    sm_raw_groups = pl.reshape(sm_raw64, [SOFTMAX_HEAD_TILE * 8, 8])
+                                    sm_raw_sum8 = pl.row_sum(
+                                        sm_raw_groups, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
+                                    )
+                                    sm_raw_final = pl.reshape(sm_raw_sum8, [SOFTMAX_HEAD_TILE, 8])
+                                    sm_block_sum = pl.row_sum(
+                                        sm_raw_final, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
+                                    )
+                                else:
+                                    # Native FP32 BigBlockReduceSum: contiguous groups
+                                    # of 8, then groups of 8 partials, then 8 final values.
+                                    sm_groups8 = pl.reshape(sm_exp, [SOFTMAX_HEAD_TILE * 64, 8])
+                                    sm_sum64 = pl.row_sum(
+                                        sm_groups8, pl.create_tile([SOFTMAX_HEAD_TILE * 64, 8], dtype=pl.FP32)
+                                    )
+                                    sm_groups64 = pl.reshape(sm_sum64, [SOFTMAX_HEAD_TILE * 8, 8])
+                                    sm_sum8 = pl.row_sum(
+                                        sm_groups64, pl.create_tile([SOFTMAX_HEAD_TILE * 8, 8], dtype=pl.FP32)
+                                    )
+                                    sm_final8 = pl.reshape(sm_sum8, [SOFTMAX_HEAD_TILE, 8])
+                                    sm_block_sum = pl.row_sum(
+                                        sm_final8, pl.create_tile([SOFTMAX_HEAD_TILE, 8], dtype=pl.FP32)
+                                    )
+                            else:
+                                sm_block_sum = pl.row_sum(sm_exp, qk_reduce_tmp)
+                            sm_sum = pl.add(pl.mul(sm_old_l, sm_alpha), sm_block_sum)
                             # Native SAS uses CAST_ROUND for probabilities: ties
                             # round away from zero, unlike the final output cast.
                             sm_probability = pl.cast(sm_exp, target_type=pl.BF16, mode="round")
