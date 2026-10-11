@@ -1,0 +1,15 @@
+commit 5085a6ce0452fec8c19f3c7149db7365a1034d25
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 21:17:59 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 21:17:59 2026 +0800
+
+    试验(TMR): 用原任务元数据声明后到回调并省去Set控制行写回
+
+    为AIC/AIV物理成员增加独立compiled-poll能力，仅在已有runtime tail与该成员能力同时存在时选择干净尾部协议8；不改变原dispatch、核分配、early-resolve与ACK处理。
+
+    干净尾部由编译器保证Set不写GM，无诊断时免除末尾控制缓存行写回；诊断与旧协议7保留原有flush，可在同SDK内进行旧写入版/新版本对照。DispatchPayload和通知区尺寸不变。
+
+    调度CPU测试12项通过，覆盖成员掩码隔离、无尾部禁止回调、槽位复用与诊断位清零，并继续检查early-resolve未隐式改变。设备与128K/B16性能验证待使用此干净SDK完成。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

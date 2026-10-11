@@ -1,0 +1,77 @@
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -24 +24 @@
+-SIMPLER_KERNEL_REVISION = "1c258b0412e73a916f4f4af707816f76ab2aa4cf"
++SIMPLER_KERNEL_REVISION = "5085a6ce0452fec8c19f3c7149db7365a1034d25"
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1079,15 +1078,0 @@
+-    )
+-
+-
+-def _late_handoff_adapter(adapter: str, func: _ir_core.Function) -> str:
+-    scratch_base = dict(func.attrs).get("task_boundary_scratch_base")
+-    if scratch_base is None:
+-        return adapter
+-    return adapter.replace(
+-        "    // The compiler transfers the ordinary tail PIPE_ALL to the executor.\n"
+-        "    // No signal or mutable GM completion state is needed at this boundary.\n"
+-        "    (void)args;",
+-        "    // Scratch and event IDs were reserved by the compiler.\n"
+-        "    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);\n"
+-        f"    ctx->late_handoff_scratch = {scratch_base};\n"
+-        "    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::RuntimeCompiledPoll);",
+@@ -1337 +1322,2 @@
+-    local_boundary_adapter = _late_handoff_adapter(local_boundary_adapter, func)
++    # Immutable callback capability is part of the original task metadata.
++    # Local Set stays free of per-task GM stores; no new AICPU dispatch is added.
+--- a/src/codegen/orchestration/orchestration_codegen.cpp
++++ b/src/codegen/orchestration/orchestration_codegen.cpp
+@@ -3132,0 +3133,3 @@
++      if (kernel_func->GetAttr<int>("task_boundary_scratch_base", -1) >= 0) {
++        overlap_lines.push_back(task_var + ".set_runtime_compiled_poll(true);");
++      }
+@@ -3214,0 +3218,3 @@
++    const int poll_mask =
++        (aic_boundaries.signal && aic_func->GetAttr<int>("task_boundary_scratch_base", -1) >= 0 ? kAicMask : 0) |
++        (aiv_boundaries.signal && aiv_func->GetAttr<int>("task_boundary_scratch_base", -1) >= 0 ? aiv_mask : 0);
+@@ -3217,0 +3224,3 @@
++    }
++    if (poll_mask != 0) {
++      pre_lines.push_back(task_var + ".set_runtime_compiled_poll_mask(" + std::to_string(poll_mask) + ");");
+--- a/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+@@ -9,0 +10 @@
++import re
+@@ -10,0 +12 @@
++from types import SimpleNamespace
+@@ -21,0 +24,18 @@
++    original_orch = pto_backend._codegen_core.generate_orchestration
++
++    def orch_without_poll(*args, **kwargs):
++        r = original_orch(*args, **kwargs)
++        fields = {
++            key: getattr(r, key)
++            for key in (
++                "code",
++                "func_name_to_id",
++                "func_name_to_core_type",
++                "func_name_to_signature",
++                "orchestration_signature",
++            )
++        }
++        fields["code"] = re.sub(
++            r"^.*\.set_runtime_compiled_poll(?:_mask)?\([^\n]*\);\n", "", r.code, flags=re.M
++        )
++        return SimpleNamespace(**fields)
+@@ -74,0 +95,2 @@
++    if mode == "once":
++        pto_backend._codegen_core.generate_orchestration = orch_without_poll
+@@ -78,0 +101 @@
++        pto_backend._codegen_core.generate_orchestration = original_orch
+--- a/tests/ut/codegen/test_orchestration_task_deps.py
++++ b/tests/ut/codegen/test_orchestration_task_deps.py
+@@ -1120,0 +1121 @@
++        assert "params_t0.set_runtime_compiled_poll_mask(7);" in code, code
+@@ -1213,0 +1215 @@
++    assert code.count("set_runtime_compiled_poll(true)") == 3, code

@@ -1,0 +1,103 @@
+bringing up nodes...
+bringing up nodes...
+
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________ test_local_boundaries_preserve_submit_early_resolve ______________
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/.venv/bin/python
+
+    def test_local_boundaries_preserve_submit_early_resolve():
+        @pl.program
+        class P:
+            @pl.function(type=pl.FunctionType.InCore)
+            def k(
+                self, x: pl.Tensor[[128], pl.FP32], out: pl.Out[pl.Tensor[[128], pl.FP32]]
+            ) -> pl.Tensor[[128], pl.FP32]:
+                pl.system.wait_pre_task_end()
+                value = pl.load(x, [0], [128])
+                out = pl.store(value, [0], out)
+                pl.system.set_next_task_start()
+                return out
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def main(
+                self, x: pl.Tensor[[128], pl.FP32], out: pl.Out[pl.Tensor[[128], pl.FP32]]
+            ) -> pl.Tensor[[128], pl.FP32]:
+                with pl.manual_scope():
+                    first = pl.create_tensor([128], dtype=pl.FP32)
+                    second = pl.create_tensor([128], dtype=pl.FP32)
+                    first, a = pl.submit(self.k, x, first, allow_early_resolve=False)
+                    second, b = pl.submit(self.k, first, second, deps=[a], allow_early_resolve=True)
+                    out, _ = pl.submit(self.k, second, out, deps=[b])
+                return out
+
+>       code = _generate_orch_full_pipeline(P)
+
+tests/ut/codegen/test_orchestration_task_deps.py:1211:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+program_cls = <pypto.pypto_core.ir.Program object at 0xfffd86ad65b0>
+
+    def _generate_orch_full_pipeline(
+        program_cls,
+        *,
+        analyze_auto_scopes_for_deps: bool = False,
+        allow_relaxed_verification: bool = False,
+    ) -> str:
+        """Run the Default pass pipeline + orchestration codegen on the orch func.
+
+        The issue #1577 witnesses use ``pl.submit`` against ``@pl.function(InCore)``
+        kernels, which only reach orchestration form after the full Default pipeline
+        (inline / outline / SSA / materialize scopes). Mirrors
+        ``test_array_codegen._generate_pto`` but targets the Orchestration function.
+        """
+        backend.reset_for_testing()
+        backend.set_backend_type(BackendType.Ascend910B)
+        pm = PassManager.get_strategy(
+            OptimizationStrategy.Default,
+            analyze_auto_scopes_for_deps=analyze_auto_scopes_for_deps,
+        )
+        if allow_relaxed_verification:
+            # Scope to BASIC (property) verification for tests that hit the known
+            # ``pl.submit(..., deps=[...])`` print->parse roundtrip gap after
+            # DeriveCallDirections. Property verification still runs so real IR
+            # invariant violations are caught.
+            with passes.PassContext([passes.VerificationInstrument(passes.VerificationMode.BEFORE_AND_AFTER)]):
+                optimized = pm.run_passes(program_cls)
+        else:
+            optimized = pm.run_passes(program_cls)
+        for func in optimized.functions.values():
+            if func.func_type == ir.FunctionType.Orchestration:
+>               return codegen.generate_orchestration(optimized, func).code
+E               TypeError: Invalid type for func attr key: task_boundary_scratch_base, expected long, but got int
+
+tests/ut/codegen/_orchestration_codegen_common.py:216: TypeError
+----------------------------- Captured stderr call -----------------------------
+2026-10-11 21:16:37.117 W | [warning] [UnusedVariableCheck] (pipeline_input) Unused variable '_' in function 'main' at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_orchestration_task_deps.py:1208:26
+=============================== warnings summary ===============================
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: 42 warnings
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/ut/codegen/test_orchestration_task_deps.py::test_local_boundaries_preserve_submit_early_resolve
+1 failed, 54 warnings in 9.48s

@@ -1,0 +1,15 @@
+commit 16e3d7c51596e9d44b9ccc6c226ced789e079f4e
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 21:20:47 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 21:20:47 2026 +0800
+
+    测试(CSA): 同SDK隔离局部Set写入与不可变回调能力的代价
+
+    保留普通与单次探测路径，新增written路径重现原GM写入与保守flush，新mixed路径使用原提交元数据声明干净回调；四路共享冻结算子包、scratch/事件规则及运行时。
+
+    对once和written同时去除新回调元数据，避免仅关闭入口却仍被运行时调用；written在测试wrapper局部恢复旧Set写入，不污染算子源码。顺序编译后在单卡128K/B16轮换测量min/mean/max与输出状态。
+
+    Ruff检查通过，预编译及设备验证进行中；本提交仅为私有对照工具，不改变公共CSA或Native路径。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

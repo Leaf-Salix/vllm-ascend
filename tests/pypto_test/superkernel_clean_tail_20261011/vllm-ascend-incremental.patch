@@ -1,0 +1,88 @@
+--- a/tests/pypto_test/tmr_csa_late_poll_compile.py
++++ b/tests/pypto_test/tmr_csa_late_poll_compile.py
+@@ -2 +2 @@
+-"""Compile ordinary, one-shot and late-poll CSA with one private SDK."""
++"""Compile ordinary, one-shot, mutable-Set and clean-tail CSA on one SDK."""
+@@ -4,0 +5,2 @@
++import re
++from contextlib import contextmanager
+@@ -5,0 +8 @@
++from types import SimpleNamespace
+@@ -8,0 +12,55 @@
++
++
++@contextmanager
++def old_tail(mode):
++    original_poll = pto_backend._compiled_late_poll
++    original_orch = pto_backend._codegen_core.generate_orchestration
++    original_wrapper = pto_backend._generate_kernel_wrapper
++
++    def orch_without_poll(*args, **kwargs):
++        result = original_orch(*args, **kwargs)
++        fields = {
++            key: getattr(result, key)
++            for key in (
++                "code",
++                "func_name_to_id",
++                "func_name_to_core_type",
++                "func_name_to_signature",
++                "orchestration_signature",
++            )
++        }
++        fields["code"] = re.sub(r"^.*\.set_runtime_compiled_poll(?:_mask)?\([^\n]*\);\n", "", result.code, flags=re.M)
++        return SimpleNamespace(**fields)
++
++    def mutable_wrapper(func, *args, **kwargs):
++        code = original_wrapper(func, *args, **kwargs)
++        scratch = dict(func.attrs).get("task_boundary_scratch_base")
++        if scratch is None:
++            return code
++        marker = (
++            "    // The compiler transfers the ordinary tail PIPE_ALL to the executor.\n"
++            "    // No signal or mutable GM completion state is needed at this boundary.\n"
++            "    (void)args;"
++        )
++        assert code.count(marker) == 1
++        return code.replace(
++            marker,
++            (
++                "    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);\n"
++                f"    ctx->late_handoff_scratch = {scratch};\n"
++                "    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::RuntimeCompiledPoll);"
++            ),
++        )
++
++    try:
++        pto_backend._codegen_core.generate_orchestration = orch_without_poll
++        if mode == "once":
++            pto_backend._compiled_late_poll = lambda func: ("", "")
++        else:
++            assert mode == "written"
++            pto_backend._generate_kernel_wrapper = mutable_wrapper
++        yield
++    finally:
++        pto_backend._compiled_late_poll = original_poll
++        pto_backend._codegen_core.generate_orchestration = original_orch
++        pto_backend._generate_kernel_wrapper = original_wrapper
+@@ -16,12 +74,5 @@
+-    # Same frozen MIX program and memory reservation. Suppress only the tail
+-    # adapter/sub-entry for the once variant, isolating the polling protocol.
+-    compile_demo.PACKAGES["once"] = compile_demo.PACKAGES["mixed"]
+-    original = pto_backend._compiled_late_poll
+-    original_adapter = pto_backend._late_handoff_adapter
+-    try:
+-        pto_backend._compiled_late_poll = lambda func: ("", "")
+-        pto_backend._late_handoff_adapter = lambda adapter, func: adapter
+-        compile_demo.compile_variant("once", args.output / "once")
+-    finally:
+-        pto_backend._compiled_late_poll = original
+-        pto_backend._late_handoff_adapter = original_adapter
++    # Same frozen MIX program and scratch/events. Change only tail protocol.
++    for mode in ("once", "written"):
++        compile_demo.PACKAGES[mode] = compile_demo.PACKAGES["mixed"]
++        with old_tail(mode):
++            compile_demo.compile_variant(mode, args.output / mode)
+--- a/tests/pypto_test/tmr_csa_late_poll_demo.py
++++ b/tests/pypto_test/tmr_csa_late_poll_demo.py
+@@ -7,0 +8 @@
++    demo.PACKAGES["written"] = demo.PACKAGES["mixed"]
