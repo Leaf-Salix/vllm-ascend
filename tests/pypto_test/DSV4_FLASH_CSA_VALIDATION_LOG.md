@@ -15884,3 +15884,20 @@ MIX两次输入均24/24 AIC、48/48 AIV前缀早于生产组完成，生产者AI
 两个设备任务均退出0并释放卡0。恢复此前PyPTO/PTOAS源码并重建PTOAS，Simpler与公共默认未改。
 [180条样本、patch、编译检查及复现](superkernel_tail_joins_20261012/README.md)，
 [实现日志过程075](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#77-过程075省去已被原同步覆盖的通知流水两轮无实质收益撤下)。
+
+## 588. 2026-10-12：放开已判真、正常派发的predicate任务本核Scalar交接
+
+过程076保留手工局部Wait及诊断模式串行回退，移除准备任务时额外的`has_predicate`交接排除。
+只影响条件已判真、经过原就绪路由、正常排到忙核后的任务；未就绪predicate仍不early_dispatch，
+假条件仍由dummy完成，原派发/ACK/核选择/early-resolve保持。
+私有Simpler `52d0ac5dc`、PyPTO `ef76af347`及SDK已对齐；PTOAS/PTO-ISA和公共算子不改。
+
+16项CPU调度器测试、两项代码生成、卡0两项设备测试通过。
+同一注册入口真→假→真并改变输入，两次真条件AIC均24/24、AIV均48/48发生可验证的本核重叠；
+假条件全部后继输出与trace未写，输出、Scalar结果、保护区和尾部时序通过。
+CPU首次编译的测试变量Acc/Vec类型冲突已修正，失败日志保留；设备任务
+`task_20261012_041357_98065922947`退出0并释放卡。
+
+这是功能扩展，不是性能收益结论。MIX本轮仅CPU逐成员检查，当前CSA没有predicate，因此不重复CSA计时。
+手工Wait与chip swimlane/PMU/参数dump回退按用户确认保留；剩余GM前缀别名依据和事件不足限制继续记录。
+[过程076源码、版本、原始trace及复现](superkernel_ready_predicate_20261012/README.md)。

@@ -1,0 +1,112 @@
+commit 52d0ac5dca4fe668af8a8ebb9a5a5a46bef0cdf7
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 04:11:22 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 04:11:22 2026 +0800
+
+    修复(TMR): 允许已判真的就绪任务交接本核 Scalar 前缀
+    
+    就绪路由已经求值 predicate，条件为假时任务只进入 dummy 完成队列。因此准备已派发任务时再次按 has_predicate 整体关闭 Scalar 交接是多余限制。移除此限制，使已判真、排在忙核后面的任务复用现有局部 Wait 协议。
+    
+    保留未满足 fanin 的 predicate 任务不得 early_dispatch 的原规则，保持派发队列、核选择、门铃、ACK 和用户 allow_early_resolve 不变。新增生产调度器回归覆盖真条件的 AIC/AIV/MIX 逐成员交接，以及假条件与 sync_start 的 dummy 路由。16 项 CPU 调度器测试通过；设备功能验证随后记录。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index c7e25ebb6..7e3bdadfc 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -227,7 +227,9 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+     // dependencies. Gated successors retain their full-fanin doorbell wait
+     // after draining the local tail and before entering dependent computation.
+     auto &source = *slot_state.payload;
+-    if ((source.scalar_prefix & member) != 0 && !slot_state.task_attrs.has_predicate()) {
++    // Ready routing has already evaluated predicates and retired false tasks.
++    // Predicated tasks remain excluded from unresolved-fanin early dispatch.
++    if ((source.scalar_prefix & member) != 0) {
+         ChipTaskSlotState *previous = core_exec_state.running_slot_state;
+         const bool local_predecessor = to_pending && previous != nullptr;
+         const bool ready_prefix = payload.src_payload == 0;
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index 86800bd2f..dbfc165d5 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -188,6 +188,78 @@ TEST_F(TmrSchedulerExecutionInputsTest, ExplicitTableBuildsEarlyPayloadAcrossABA
+ }
+ 
+ #if defined(TEST_TMR_SCALAR_PREFIX)
++TEST_F(TmrSchedulerExecutionInputsTest, ReadyTruePredicateAllowsEachMembersLocalHandoff) {
++    for (const bool mixed : {false, true}) {
++        for (const int core_offset : {0, 1, 2}) {
++            init_slot();
++            initialize({table_a.data(), table_a.size()});
++            const auto subslot = static_cast<SubtaskSlot>(core_offset);
++            const uint8_t member = 1u << core_offset;
++            ChipTaskSlotState local{};
++            TaskDescriptor local_task{};
++            TaskPayload local_payload{};
++            local.task = &local_task;
++            local.payload = &local_payload;
++            local.active_mask = ActiveMask(member);
++            local.logical_block_num = 1;
++            local.total_required_subtasks = 1;
++            const auto previous = context->prepare_subtask_to_core(0, core_offset, local, subslot, false, 0, false);
++            ASSERT_TRUE(previous.valid);
++            context->core_trackers_[0].clear_pending_occupied(core_offset);
++
++            slot.active_mask = ActiveMask(mixed ? SUBTASK_MASK_ALL : member);
++            slot.task_attrs.set_predicate();
++            int32_t gate = 1;
++            payload.predicate = {reinterpret_cast<uint64_t>(&gate), 0, sizeof(gate), PredicateOp::GT};
++            payload.scalar_prefix = SUBTASK_MASK_ALL;
++            payload.scalar_prefix_tagged_args = SUBTASK_MASK_ALL;
++            sched.try_enqueue_early_dispatch_candidate(slot);
++            EXPECT_EQ(payload.early_dispatch_state.load(), EARLY_DISPATCH_NONE);
++            ASSERT_TRUE(sched.route_ready_once(slot));
++            ChipTaskSlotState *ready = nullptr;
++            const int shape = static_cast<int>(slot.active_mask.to_shape());
++            ASSERT_EQ(sched.ready_queues[shape].pop_batch(&ready, 1), 1);
++            ASSERT_EQ(ready, &slot);
++            EXPECT_FALSE(sched.route_ready_once(slot));
++
++            const auto handle = context->prepare_subtask_to_core(0, core_offset, *ready, subslot, true, 0, false);
++            ASSERT_TRUE(handle.valid);
++            const auto &dispatch = context->payload_per_core_[core_offset][handle.reg_task_id & 1u];
++            EXPECT_EQ(dispatch.global_context.scalar_prefix, SCALAR_PREFIX_TAGGED_ARGS | SCALAR_PREFIX_CAN_HANDOFF);
++            EXPECT_EQ(dispatch.global_context.predecessor_reg_task_id, previous.reg_task_id);
++            EXPECT_EQ(dispatch.src_payload, 0u);
++            EXPECT_EQ(context->core_exec_states_[core_offset].running_slot_state, &local);
++            EXPECT_EQ(context->core_exec_states_[core_offset].pending_slot_state, &slot);
++            EXPECT_EQ(register_writes, 0);
++            EXPECT_FALSE(slot.task_attrs.allow_early_resolve());
++        }
++    }
++}
++
++TEST_F(TmrSchedulerExecutionInputsTest, FalsePredicateRetiresWithoutPublishingScalarPrefix) {
++    initialize({table_a.data(), table_a.size()});
++    for (const bool sync_start : {false, true}) {
++        init_slot();
++        slot.active_mask = ActiveMask(SUBTASK_MASK_ALL);
++        slot.task_attrs.set_predicate();
++        if (sync_start) slot.task_attrs.set_sync_start();
++        int32_t gate = 0;
++        payload.predicate = {reinterpret_cast<uint64_t>(&gate), 0, sizeof(gate), PredicateOp::GT};
++        payload.scalar_prefix = SUBTASK_MASK_ALL;
++        sched.try_enqueue_early_dispatch_candidate(slot);
++        EXPECT_EQ(payload.early_dispatch_state.load(), EARLY_DISPATCH_NONE);
++        ASSERT_TRUE(sched.route_ready_once(slot));
++        ChipTaskSlotState *ready = nullptr;
++        ASSERT_EQ(sched.dummy_ready_queue.pop_batch(&ready, 1), 1);
++        EXPECT_EQ(ready, &slot);
++        EXPECT_EQ(sched.ready_queues[static_cast<int>(ResourceShape::MIX)].pop_batch(&ready, 1), 0);
++        EXPECT_EQ(sched.ready_sync_queues[static_cast<int>(ResourceShape::MIX)].pop_batch(&ready, 1), 0);
++        EXPECT_EQ(register_writes, 0);
++        EXPECT_EQ(context->core_exec_states_[0].running_slot_state, nullptr);
++        EXPECT_EQ(context->core_exec_states_[0].pending_slot_state, nullptr);
++    }
++}
++
+ TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixKeepsIdleCoreAheadOfMatchingBusyProducer) {
+     initialize({table_a.data(), table_a.size()});
+     ChipTaskSlotState producer{};
