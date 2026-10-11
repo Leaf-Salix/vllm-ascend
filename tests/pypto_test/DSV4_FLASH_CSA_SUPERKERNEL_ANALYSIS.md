@@ -12,6 +12,8 @@
 6. 参考AscendC的局部Set/Wait和最小编译边界约束；区分空asm的编译约束与真正设备指令，不以源码没有指令证明零运行成本。
 7. 本核流水前驱不必是后继的数据生产者；对已正常派发的gated pending后继，局部Wait分别保证本核流水完成和完整fanin就绪，不能用直接WAIT边附加限制其安全Scalar交接。
 8. 覆盖目标是让所有已early_dispatch且存在安全Scalar前缀的task获得提前执行机会；MIX、sync_start和idle路径的缺失必须标为当前实现限制，不能当作理论禁止或隐含验收范围缩减。提前派发本身不允许读取未就绪数据，也不保证仍有可重叠的本核流水。
+9. 本轮使用局部`wait_pre_task_end()`标识安全前缀，不做自动识别；这是用户确认的接口范围，不列为待消除限制。
+10. 开启chip swimlane、PMU或参数dump时保留串行回退；用户确认此行为合理，性能验收使用关闭这些诊断的正常路径。
 
 基础方案选择见[实现日志过程046](DSV4_FLASH_CSA_SUPERKERNEL_IMPLEMENTATION_LOG.md#48-过程-046接受固定开销保留指针交接位方案)。
 当时保留PyPTO `320beb494`、Simpler `66d6ce63e`、PTOAS `4a5ce22a`：单block核内额外均值0.067 μs，
@@ -38,6 +40,11 @@ Simpler为`5c8418a02`。跨核数据依赖最小用例两轮均48/48发生无关
 128K/B16普通/early_start均值987.81/979.30μs，减少0.86%，但max由1012.80增至1017.04μs；
 结果及状态逐bit一致。新goal继续扩大所有已提前派发任务的安全前缀覆盖，性能优先看128K/B16。
 [该阶段证据及MIX下一步](superkernel_prefix_coverage_20261011/README.md)。
+
+过程053已接入MIX成员能力：连续MIX两轮24/24 AIC及48/48 AIV前缀提前，数值/保护区通过。
+128K/B16同SDK三路均值为普通989.03、原early_start981.37、增加MIX992.01μs，
+新增MIX暂回退10.64μs；下一步去除gated交接额外的AICPU参数准备。
+[证据与结论边界](superkernel_mixed_prefix_20261011/README.md)。
 
 截至Simpler `8171b78c5`，覆盖情况如下，后续须与真正的安全条件区分：
 

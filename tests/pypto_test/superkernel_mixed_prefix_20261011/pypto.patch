@@ -1,0 +1,651 @@
+diff --git a/docs/en/api/system.md b/docs/en/api/system.md
+index 50de3905b..2e654f298 100644
+--- a/docs/en/api/system.md
++++ b/docs/en/api/system.md
+@@ -58,15 +58,17 @@ This prototype does **not** automatically choose the statement positions.
+ 
+ Current restrictions:
+ 
+-- Use the matching private PyPTO/PTOAS/TMR builds. HBG, A5, MIX groups and paired
+-  AIV dispatch are unsupported and rejected.
++- Use the matching private PyPTO/PTOAS/TMR builds. HBG and A5 are unsupported.
++  MIX and paired AIV dispatch use separate capabilities for each physical member;
++  legacy whole-function async attributes remain unsupported for these shapes.
+ - Wait must appear once, unconditionally at task top level. Its prefix may only
+   contain checked Scalar arithmetic, control flow and view metadata.
+ - Set must appear once at task tail after the last submitted store. Further
+   computation, conditional Set and repeated Set are rejected. Mid-function
+   yield/resume is not implemented.
+-- Async tails only support the checked AIV operations or AIC
+-  load/move/matmul/store subset, with compiler-owned internal synchronization.
++- Async tails support the checked AIV and AIC operations, including cross-core
++  pipes under runtime-owned PIPE_ALL. Internal synchronization remains enabled.
++  Compiler-generated parameter loads and pipe initialization stay after Wait.
+   A checked Scalar store is allowed after Wait and before the first tile work,
+   outside repeating regions, and is flushed there. Other Scalar stores in an
+   asynchronous body remain rejected.
+diff --git a/docs/zh/api/system.md b/docs/zh/api/system.md
+index 9b5d37d02..f88d6524c 100644
+--- a/docs/zh/api/system.md
++++ b/docs/zh/api/system.md
+@@ -46,11 +46,13 @@ with pl.spmd(blocks, name_hint="projection"):
+ 
+ 当前限制：
+ 
+-- 配套使用私有 PyPTO/PTOAS/TMR 构建；拒绝 HBG、A5、MIX group 和双 AIV 派发。
++- 配套使用私有 PyPTO/PTOAS/TMR 构建；拒绝 HBG、A5。MIX 和双 AIV 按物理成员核分别传递能力，
++  这两种派发形状仍拒绝旧的整函数异步属性。
+ - Wait 须在 task 顶层无条件出现一次；之前仅允许经过检查的 Scalar 算术、控制流和视图元数据。
+ - Set 须在最后一次写回提交后、task 尾部出现一次；拒绝其后继续计算、条件 Set 或重复 Set。
+   尚未实现函数中途交还执行权再恢复。
+-- 异步尾部仅支持经过检查的 AIV 操作或 AIC load/move/matmul/store 子集，内部同步仍由编译器负责。
++- 异步尾部支持经过检查的 AIV/AIC 操作，以及运行时 PIPE_ALL 协议下的跨核 pipe；保留原内部同步。
++  编译器自动生成的参数加载和 pipe 初始化放在 Wait 之后。
+   Scalar 写入仅可位于 Wait 后、首次 tile 工作前的非重复区域，并在该处刷写；异步主体中其他 Scalar 写入仍拒绝。
+ 
+ ## 运行时依赖与诊断规则
+diff --git a/include/pypto/ir/transforms/utils/task_boundary_utils.h b/include/pypto/ir/transforms/utils/task_boundary_utils.h
+index d13fa6a44..18d648a81 100644
+--- a/include/pypto/ir/transforms/utils/task_boundary_utils.h
++++ b/include/pypto/ir/transforms/utils/task_boundary_utils.h
+@@ -11,6 +11,10 @@
+ #ifndef PYPTO_IR_TRANSFORMS_UTILS_TASK_BOUNDARY_UTILS_H_
+ #define PYPTO_IR_TRANSFORMS_UTILS_TASK_BOUNDARY_UTILS_H_
+ 
++#include <algorithm>
++#include <iterator>
++#include <vector>
++
+ #include "pypto/ir/function.h"
+ #include "pypto/ir/op_registry.h"
+ #include "pypto/ir/transforms/base/visitor.h"
+@@ -22,6 +26,24 @@ struct TaskBoundaryMarkers {
+   bool signal = false;
+ };
+ 
++// Compiler-generated loads and pipe initialization must not cross the local
++// predecessor boundary. Preserve the author's Scalar prefix before that wait.
++inline std::vector<StmtPtr> InsertAfterLocalTaskWait(const std::vector<StmtPtr>& setup,
++                                                   const std::vector<StmtPtr>& body) {
++  if (setup.empty()) return body;
++  auto wait = std::find_if(body.begin(), body.end(), [](const StmtPtr& stmt) {
++    auto eval = As<EvalStmt>(stmt);
++    return eval && IsOp(As<Call>(eval->expr_), "system.wait_pre_task_end");
++  });
++  auto insertion = wait == body.end() ? body.begin() : std::next(wait);
++  std::vector<StmtPtr> result;
++  result.reserve(setup.size() + body.size());
++  result.insert(result.end(), body.begin(), insertion);
++  result.insert(result.end(), setup.begin(), setup.end());
++  result.insert(result.end(), insertion, body.end());
++  return result;
++}
++
+ // These are local InCore operations, not task submissions. Both device and
+ // orchestration codegen derive capabilities from the same outlined body.
+ inline TaskBoundaryMarkers GetTaskBoundaryMarkers(const FunctionPtr& function) {
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 0d7437546..8d6cd600b 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "8171b78c5b9368fbfed668f9a58647de69ea0c2c"
++SIMPLER_KERNEL_REVISION = "a2df6bf24a3b2c21cfc32121de995660186fbad0"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index c26e96a5a..d37ddad14 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -2261,15 +2261,17 @@ def _validate_task_boundary_dispatch(
+     ):
+         raise ValueError("experimental async return/scalar_prefix requires the matching TMR executor")
+ 
+-    # The experimental protocol joins one physical compute core. A MIX group
+-    # or paired AIV dispatch needs a group completion contract of its own.
+-    local_ops = _LOCAL_TASK_WAIT_OPS | _LOCAL_TASK_SIGNAL_OPS
++    # MIX uses per-member capabilities derived from local statements. Legacy
++    # whole-function attributes do not describe that member-level contract.
++    legacy_attrs = ("async_aiv_return", "async_aic_return", "scalar_prefix")
+     for members in groups.values():
+-        if len(members) > 1 and any(_function_uses_ops(f, local_ops) for f in members):
+-            raise ValueError("local task boundaries do not support MIX kernel groups")
++        if len(members) > 1 and any(dict(f.attrs).get(a, False) for f in members for a in legacy_attrs):
++            raise ValueError("MIX task boundaries require local Wait/Set statements")
+     for func in transformed_program.functions.values():
+-        if _function_uses_ops(func, local_ops) and dict(func.attrs).get("dual_aiv_dispatch", False):
+-            raise ValueError("local task boundaries require single-AIC or single-AIV dispatch")
++        if dict(func.attrs).get("dual_aiv_dispatch", False) and any(
++            dict(func.attrs).get(a, False) for a in legacy_attrs
++        ):
++            raise ValueError("paired AIV task boundaries require local Wait/Set statements")
+ 
+ 
+ def _generate_single_chip(
+diff --git a/runtime b/runtime
+index 8171b78c5..a2df6bf24 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit 8171b78c5b9368fbfed668f9a58647de69ea0c2c
++Subproject commit a2df6bf24a3b2c21cfc32121de995660186fbad0
+diff --git a/src/codegen/orchestration/orchestration_codegen.cpp b/src/codegen/orchestration/orchestration_codegen.cpp
+index c1bf2c6cd..2b34405f8 100644
+--- a/src/codegen/orchestration/orchestration_codegen.cpp
++++ b/src/codegen/orchestration/orchestration_codegen.cpp
+@@ -3132,17 +3132,17 @@ class OrchestrationStmtCodegen : public CodegenBase {
+       overlap_lines.push_back(task_var + ".set_runtime_barrier_tail(true);");
+     }
+     if (kernel_func->GetAttr<bool>("scalar_prefix", false) || boundaries.wait) {
+-      INTERNAL_CHECK(core_type == CoreType::CUBE ||
+-                     (core_type == CoreType::VECTOR && !RequiresDualAivDispatch(kernel_func)))
+-          << "scalar_prefix prototype only supports single-AIC or single-AIV kernels";
++      INTERNAL_CHECK(core_type == CoreType::CUBE || core_type == CoreType::VECTOR)
++          << "Scalar prefix requires an AIC or AIV entry";
+       overlap_lines.push_back(task_var + ".set_scalar_prefix(true);");
+       if (boundaries.wait) overlap_lines.push_back(task_var + ".set_scalar_prefix_tagged_args(true);");
+     }
+     if (core_type == CoreType::VECTOR && RequiresDualAivDispatch(kernel_func)) {
+       const std::string mixed_var = "mixed_" + std::to_string(task_counter_);
+       const std::string id = std::to_string(func_id);
+-      return {"rt_submit_task(" + mixed_var + ", " + task_var + ")",
+-              {"MixedKernels " + mixed_var + " = {INVALID_KERNEL_ID, " + id + ", " + id + "};"}};
++      overlap_lines.insert(overlap_lines.begin(),
++                           "MixedKernels " + mixed_var + " = {INVALID_KERNEL_ID, " + id + ", " + id + "};");
++      return {"rt_submit_task(" + mixed_var + ", " + task_var + ")", std::move(overlap_lines)};
+     }
+     return {CoreTypeToSubmitPrefix(core_type) + std::to_string(func_id) + ", " + task_var + ")",
+             std::move(overlap_lines)};
+@@ -3194,7 +3194,8 @@ class OrchestrationStmtCodegen : public CodegenBase {
+ 
+   TaskDispatchPlan BuildMixedGroupDispatchPlan(const CallPtr& call, const FunctionPtr& launch_func,
+                                                const std::string& group_name, int aic_id, int aiv_id,
+-                                               const FunctionPtr& aiv_func, std::vector<ParamEntry>&& params,
++                                               const FunctionPtr& aic_func, const FunctionPtr& aiv_func,
++                                               std::vector<ParamEntry>&& params,
+                                                bool capture_plain_task_id) {
+     std::string task_var = CurrentTaskVarName();
+     auto [launch_core_num, launch_sync_start] = EffectiveLaunchSpec(call, launch_func);
+@@ -3204,6 +3205,20 @@ class OrchestrationStmtCodegen : public CodegenBase {
+     std::vector<std::string> pre_lines{"MixedKernels mixed_" + std::to_string(task_counter_) + " = {" +
+                                        std::to_string(aic_id) + ", " + std::to_string(aiv_id) + ", " +
+                                        third_id + "};"};
++    const auto aic_boundaries = GetTaskBoundaryMarkers(aic_func);
++    const auto aiv_boundaries = GetTaskBoundaryMarkers(aiv_func);
++    // These bits follow the runtime's AIC/AIV0/AIV1 SubtaskSlot order.
++    constexpr int kAicMask = 1;
++    const int aiv_mask = RequiresDualAivDispatch(aiv_func) ? 6 : 2;
++    const int wait_mask = (aic_boundaries.wait ? kAicMask : 0) | (aiv_boundaries.wait ? aiv_mask : 0);
++    const int tail_mask = (aic_boundaries.signal ? kAicMask : 0) | (aiv_boundaries.signal ? aiv_mask : 0);
++    if (wait_mask != 0) {
++      pre_lines.push_back(task_var + ".set_scalar_prefix_mask(" + std::to_string(wait_mask) + ");");
++      pre_lines.push_back(task_var + ".set_scalar_prefix_tagged_args_mask(" + std::to_string(wait_mask) + ");");
++    }
++    if (tail_mask != 0) {
++      pre_lines.push_back(task_var + ".set_runtime_barrier_tail_mask(" + std::to_string(tail_mask) + ");");
++    }
+     return BuildTaskDispatchPlan("// Group " + group_name + ": MixedKernels (AIC + AIV lanes)", call,
+                                  std::move(params), launch_core_num, launch_sync_start, submit_expr,
+                                  ShouldCaptureTaskOutputs(call, capture_plain_task_id), std::move(pre_lines));
+@@ -3751,7 +3766,7 @@ class OrchestrationStmtCodegen : public CodegenBase {
+     int aic_id = GetOrCreateFuncId(info.aic_name, func_name_to_id_, next_func_id_);
+     int aiv_id = GetOrCreateFuncId(info.aiv_name, func_name_to_id_, next_func_id_);
+ 
+-    BuildMixedGroupDispatchPlan(call, launch_func, group_name, aic_id, aiv_id, aiv_func, std::move(params),
++    BuildMixedGroupDispatchPlan(call, launch_func, group_name, aic_id, aiv_id, aic_func, aiv_func, std::move(params),
+                                 capture_plain_task_id)
+         .Emit(*this);
+   }
+diff --git a/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp b/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
+index 41e16aac1..08513a465 100644
+--- a/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
++++ b/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
+@@ -47,6 +47,7 @@
+ #include "pypto/ir/transforms/utils/narrow_loop_carry.h"
+ #include "pypto/ir/transforms/utils/op_predicates.h"
+ #include "pypto/ir/transforms/utils/result_alias_utils.h"
++#include "pypto/ir/transforms/utils/task_boundary_utils.h"
+ #include "pypto/ir/transforms/utils/tile_conversion_utils.h"
+ #include "pypto/ir/transforms/utils/transform_utils.h"
+ #include "pypto/ir/transforms/utils/var_collectors.h"
+@@ -2669,7 +2670,7 @@ IncoreTransformResult TransformIncoreFunction(const FunctionPtr& func) {
+   auto body_to_transform = SeqStmts::Flatten(std::move(non_return_stmts), span);
+   auto mutated = mutator.VisitStmt(body_to_transform);
+   auto transformed = FlattenToStmts(mutated);
+-  new_stmts.insert(new_stmts.end(), transformed.begin(), transformed.end());
++  new_stmts = InsertAfterLocalTaskWait(new_stmts, transformed);
+ 
+   // Phase 3: Add output params + tile.store for return values
+   std::vector<VarPtr> new_params = func->params_;
+diff --git a/src/ir/transforms/expand_mixed_kernel_pass.cpp b/src/ir/transforms/expand_mixed_kernel_pass.cpp
+index db7e3c38a..ed0412111 100644
+--- a/src/ir/transforms/expand_mixed_kernel_pass.cpp
++++ b/src/ir/transforms/expand_mixed_kernel_pass.cpp
+@@ -349,10 +349,10 @@ std::vector<StmtPtr> PrependPipeSetupKeepingSubblockIdx(const std::vector<StmtPt
+     return PrependPipeSetup(prologue, body);
+   }
+   std::vector<StmtPtr> result;
+-  result.reserve(prologue.size() + body.size());
++  auto tail = PrependPipeSetup(prologue, std::vector<StmtPtr>(body.begin() + 1, body.end()));
++  result.reserve(tail.size() + 1);
+   result.push_back(body.front());
+-  result.insert(result.end(), prologue.begin(), prologue.end());
+-  result.insert(result.end(), body.begin() + 1, body.end());
++  result.insert(result.end(), tail.begin(), tail.end());
+   return result;
+ }
+ 
+diff --git a/src/ir/transforms/utils/cross_core_pipe.cpp b/src/ir/transforms/utils/cross_core_pipe.cpp
+index a6fae36a7..d5a8ed258 100644
+--- a/src/ir/transforms/utils/cross_core_pipe.cpp
++++ b/src/ir/transforms/utils/cross_core_pipe.cpp
+@@ -30,6 +30,7 @@
+ #include "pypto/ir/stmt.h"
+ #include "pypto/ir/transforms/utils/core_affinity.h"
+ #include "pypto/ir/transforms/utils/core_side_ops.h"
++#include "pypto/ir/transforms/utils/task_boundary_utils.h"
+ #include "pypto/ir/transforms/utils/transform_utils.h"
+ #include "pypto/ir/type.h"
+ 
+@@ -355,12 +356,7 @@ AutomaticPipeSetup BuildAutomaticPipeSetup(const std::string& func_name, const s
+ 
+ std::vector<StmtPtr> PrependPipeSetup(const std::vector<StmtPtr>& prologue,
+                                       const std::vector<StmtPtr>& body) {
+-  if (prologue.empty()) return body;
+-  std::vector<StmtPtr> result;
+-  result.reserve(prologue.size() + body.size());
+-  result.insert(result.end(), prologue.begin(), prologue.end());
+-  result.insert(result.end(), body.begin(), body.end());
+-  return result;
++  return InsertAfterLocalTaskWait(prologue, body);
+ }
+ 
+ std::string FormatObservedSlotSizes(const std::vector<int64_t>& slot_sizes) {
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+new file mode 100644
+index 000000000..4c0c750c0
+--- /dev/null
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+@@ -0,0 +1,241 @@
++# Copyright (c) PyPTO Contributors.
++# Licensed under CANN Open Software License Agreement Version 2.0.
++"""Local boundary propagation through a mixed Cube/Vector task."""
++
++import json
++from dataclasses import replace
++from pathlib import Path
++
++import pypto.language as pl
++import pytest
++import torch
++from pypto import ir
++from pypto.backend import pto_backend
++from pypto.pypto_core.passes import RuntimeKind
++from pypto.runtime import ChipWorker, RunConfig
++
++
++@pl.jit
++def mixed_boundary_probe(
++    x: pl.Tensor[[128, 128], pl.FP16],
++    w: pl.Tensor[[128, 128], pl.FP16],
++    bias: pl.Tensor[[128, 128], pl.FP32],
++    out: pl.Out[pl.Tensor[[128, 128], pl.FP32]],
++):
++    with pl.spmd(
++        1,
++        name_hint="mixed_boundary",
++        optimizations=[pl.split(pl.SplitMode.UP_DOWN)],
++        allow_early_resolve=True,
++    ):
++        block = pl.tile.get_block_idx()
++        pl.system.wait_pre_task_end()
++        acc = pl.matmul(x, w, out_dtype=pl.FP32)
++        out[:] = pl.add(acc, pl.add(bias, pl.cast(pl.cast(block, pl.INT64), pl.FP32)))
++        pl.system.set_next_task_start()
++    return out
++
++
++@pytest.mark.platforms("a2a3")
++def test_mixed_local_boundaries(test_config: RunConfig, tmp_path: Path):
++    output = Path(test_config.save_kernels_dir or tmp_path) / "mixed_boundary"
++    compiled = mixed_boundary_probe.compile(
++        config=replace(test_config, save_kernels_dir=str(output)),
++        runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
++    )
++    compiled.load()
++    if test_config.codegen_only:
++        return
++    x = (torch.arange(128 * 128) % 3 - 1).to(torch.float16).reshape(128, 128)
++    w = (torch.arange(128 * 128) % 5 - 2).to(torch.float16).reshape(128, 128)
++    bias = torch.ones((128, 128), dtype=torch.float32)
++    out = torch.full_like(bias, float("nan"))
++    hosts = [x, w, bias, out]
++    with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
++        tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
++        try:
++            handle = worker.register(compiled)
++            for host, device in zip(hosts, tensors):
++                worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
++            handle(*tensors, config=test_config)
++            worker.copy_from(out.data_ptr(), tensors[-1].data_ptr, tensors[-1].nbytes)
++        finally:
++            for tensor in reversed(tensors):
++                worker.free_tensor(tensor)
++    assert torch.equal(out, x.float() @ w.float() + bias)
++
++
++@pl.jit
++def mixed_chain_probe(
++    x: pl.Tensor[[3200, 128], pl.FP16],
++    w: pl.Tensor[[128, 256], pl.FP16],
++    middle: pl.Out[pl.Tensor[[3200, 128], pl.FP16]],
++    out: pl.Out[pl.Tensor[[3200, 128], pl.FP32]],
++    ac_trace: pl.Tensor[[49, 8], pl.INT64],
++    av_trace: pl.Tensor[[73, 8], pl.INT64],
++    bc_trace: pl.Tensor[[49, 8], pl.INT64],
++    bv_trace: pl.Tensor[[73, 8], pl.INT64],
++    seed: pl.Scalar[pl.INT64],
++    steps: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(
++        24,
++        name_hint="mixed_producer",
++        optimizations=[pl.split(pl.SplitMode.UP_DOWN)],
++        allow_early_resolve=True,
++    ):
++        block = pl.tile.get_block_idx()
++        pl.system.wait_pre_task_end()
++        # Read untouched guard rows to retain diagnostic pointers in both
++        # outlined member signatures. Each sum is zero in the device test.
++        guard = pl.tensor.read(ac_trace, [24 + block, 0]) + pl.tensor.read(av_trace, [48 + block, 0]) + 2
++        row = block * 128 + pl.cast(guard, pl.INDEX)
++        lhs = pl.load(x, [row, 0], [128, 128], target_memory=pl.MemorySpace.Mat)
++        rhs = pl.load(w, [0, 0], [128, 128], target_memory=pl.MemorySpace.Mat)
++        acc = pl.matmul(
++            pl.move(lhs, target_memory=pl.MemorySpace.Left), pl.move(rhs, target_memory=pl.MemorySpace.Right)
++        )
++        value = pl.add(acc, 0.0)
++        for _ in pl.range(1024 + (block % 3) * 256):
++            value = pl.add(value, 1.0)
++        pl.store(pl.cast(value, pl.FP16), [block * 128, 0], middle)
++        pl.system.set_next_task_start()
++    with pl.spmd(
++        24,
++        name_hint="mixed_consumer",
++        optimizations=[pl.split(pl.SplitMode.UP_DOWN)],
++        allow_early_resolve=True,
++        sync_start=True,
++    ):
++        block = pl.tile.get_block_idx()
++        state = seed + pl.cast(block, pl.INT64)
++        for _ in pl.range(steps):
++            state = (state * 17 + 3) % 65521
++        col = pl.cast(state % 2, pl.INDEX) * 128
++        pl.system.wait_pre_task_end()
++        guard = pl.tensor.read(bc_trace, [24 + block, 0]) + pl.tensor.read(bv_trace, [48 + block, 0]) + 2
++        lhs = pl.load(
++            middle, [block * 128 + pl.cast(guard, pl.INDEX), 0], [128, 128], target_memory=pl.MemorySpace.Mat
++        )
++        rhs = pl.load(w, [0, col], [128, 128], target_memory=pl.MemorySpace.Mat)
++        acc = pl.matmul(
++            pl.move(lhs, target_memory=pl.MemorySpace.Left), pl.move(rhs, target_memory=pl.MemorySpace.Right)
++        )
++        value = pl.add(acc, pl.cast(state, pl.FP32))
++        pl.store(value, [block * 128, 0], out)
++        pl.system.set_next_task_start()
++    return middle, out
++
++
++@pytest.mark.platforms("a2a3")
++def test_mixed_members_enter_prefix_before_group_completion(
++    test_config: RunConfig, tmp_path: Path, monkeypatch
++):
++    output = Path(test_config.save_kernels_dir or tmp_path) / "mixed_chain"
++    original_wrapper = pto_backend._generate_kernel_wrapper
++    names = {
++        "mixed_producer_aic": "ac_trace",
++        "mixed_producer_aiv": "av_trace",
++        "mixed_consumer_aic": "bc_trace",
++        "mixed_consumer_aiv": "bv_trace",
++    }
++    traced = set()
++
++    def instrument(func, *args, **kwargs):
++        if func.name not in names:
++            return original_wrapper(func, *args, **kwargs)
++        trace = next(p for p in func.params if p.name_hint.startswith(names[func.name]))
++        traced.add(func.name)
++        func = ir.Function(
++            func.name,
++            list(zip(func.params, func.param_directions)),
++            func.return_types,
++            func.body,
++            func.span,
++            type=func.func_type,
++            level=func.level,
++            role=func.role,
++            attrs={**dict(func.attrs), "async_return_trace": trace},
++            requires_runtime_binding=func.requires_runtime_binding,
++            ir_stage=func.ir_stage,
++        )
++        code = original_wrapper(func, *args, **kwargs)
++        if func.name.endswith("_aiv"):
++            code = code.replace(
++                "const int32_t __async_trace_block = get_block_idx(args);",
++                "const int32_t __async_trace_block = 2 * get_block_idx(args) + get_sub_block_id(args);",
++            )
++        return code
++
++    monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument)
++    compiled = mixed_chain_probe.compile(
++        config=replace(test_config, save_kernels_dir=str(output)),
++        runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
++    )
++    assert traced == set(names)
++    compiled.load()
++    if test_config.codegen_only:
++        return
++    source = (torch.arange(3200 * 128) % 3 - 1).to(torch.float16).reshape(3200, 128)
++    weight = torch.cat((torch.eye(128), 2 * torch.eye(128)), dim=1).half()
++    hosts = [
++        source.clone(),
++        weight,
++        torch.empty_like(source),
++        torch.empty(source.shape),
++        torch.empty((49, 8), dtype=torch.int64),
++        torch.empty((73, 8), dtype=torch.int64),
++        torch.empty((49, 8), dtype=torch.int64),
++        torch.empty((73, 8), dtype=torch.int64),
++    ]
++    samples = []
++    with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
++        tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
++        try:
++            handle = worker.register(compiled)
++            for repeat in range(2):
++                hosts[0].copy_(source + repeat)
++                for host in hosts[2:]:
++                    host.fill_(-1 if host.dtype == torch.int64 else float("nan"))
++                for host, device in zip(hosts, tensors):
++                    worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
++                seed, steps = 7 + repeat, 4
++                handle(*tensors, seed, steps, config=test_config)
++                for host, device in zip(hosts[2:], tensors[2:]):
++                    worker.copy_from(host.data_ptr(), device.data_ptr, device.nbytes)
++                for block in range(24):
++                    region = slice(block * 128, (block + 1) * 128)
++                    expected = (hosts[0][region].float() + 1024 + (block % 3) * 256).half()
++                    state = seed + block
++                    for _ in range(steps):
++                        state = (state * 17 + 3) % 65521
++                    assert torch.equal(hosts[2][region], expected)
++                    assert torch.equal(hosts[3][region], expected.float() * (1 + state % 2) + state)
++                assert torch.isnan(hosts[2][3072:]).all() and torch.isnan(hosts[3][3072:]).all()
++                traces = [h[:n].tolist() for h, n in zip(hosts[4:], (24, 48, 24, 48))]
++                for host, size in zip(hosts[4:], (24, 48, 24, 48)):
++                    assert torch.equal(host[size:], torch.full_like(host[size:], -1))
++                for rows in traces:
++                    assert all(0 < r[1] <= r[2] <= r[5] <= r[7] <= r[3] and r[4] == 7 for r in rows)
++                producer_end = max(r[3] for rows in traces[:2] for r in rows)
++                early = [sum(r[1] < producer_end for r in rows) for rows in traces[2:]]
++                samples.append(
++                    {
++                        "repeat": repeat,
++                        "early_members_aic_aiv": early,
++                        "traces": dict(
++                            zip(("producer_aic", "producer_aiv", "consumer_aic", "consumer_aiv"), traces)
++                        ),
++                    }
++                )
++        finally:
++            for tensor in reversed(tensors):
++                worker.free_tensor(tensor)
++    (output / "mixed_chain_results.json").write_text(json.dumps({"samples": samples}, indent=2) + "\n")
++    assert all(all(count > 0 for count in s["early_members_aic_aiv"]) for s in samples), (
++        "both physical member types must enter a checked prefix before the producer group completes"
++    )
++
++
++if __name__ == "__main__":
++    pytest.main([__file__, "-v"])
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+index 7b074c495..d42e698e5 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+@@ -78,17 +78,23 @@ def _program(local_work: bool, sync_start: bool):
+ 
+ def _validate_local_handoffs(local, consumer, remote, sync_start: bool):
+     overlaps = []
++    local_predecessor_ends = []
+     for prior_block, prior in enumerate(local):
+         assert 0 < prior[1] <= prior[2] <= prior[5] <= prior[7] <= prior[3]
+         assert prior[4] == 7
+         for block, row in enumerate(consumer):
+             if prior[0] == row[0] and prior[2] <= row[1]:
++                local_predecessor_ends.append(prior[3])
+                 assert row[3] >= prior[3], "consumer reused its core before the local tail drained"
+                 if row[2] <= prior[5] and prior[7] - prior[5] > 5 and row[1] < remote[3]:
+                     overlaps.append({"local_block": prior_block, "consumer_block": block})
+-    if sync_start and local:
+-        assert min(row[3] for row in consumer) >= max(row[3] for row in local), (
+-            "sync_start computation began before every local core drained"
++    if sync_start and local_predecessor_ends:
++        # X and B have no data edge. An unrelated X block can be scheduled
++        # after B; sync_start waits for the predecessors on B's selected cores,
++        # not every block of every unrelated task in the graph.
++        assert len({row[0] for row in consumer}) == len(consumer)
++        assert min(row[3] for row in consumer) >= max(local_predecessor_ends), (
++            "sync_start computation began before its selected cores drained"
+         )
+     return overlaps
+ 
+@@ -189,6 +195,11 @@ def test_gated_prefix_with_unrelated_local_task(
+                 if not local_work:
+                     assert torch.isnan(hosts[2]).all()
+                     assert torch.equal(hosts[5], torch.full_like(hosts[5], -1))
++                # Keep the full timing evidence even if an ordering assertion
++                # fails; pytest's abbreviated locals cannot identify the cohort.
++                (output / f"remote_dependency_round{repeat}.json").write_text(
++                    json.dumps({"local": local, "remote": remote, "consumer": consumer}, indent=2) + "\n"
++                )
+                 overlaps = _validate_local_handoffs(local if local_work else [], consumer, remote, sync_start)
+                 early_prefixes = sum(row[2] < remote[3] for row in consumer)
+                 for host in (hosts[2], hosts[4]):
+diff --git a/tests/ut/codegen/test_orchestration_task_deps.py b/tests/ut/codegen/test_orchestration_task_deps.py
+index cb2f6ddff..0d941d56d 100644
+--- a/tests/ut/codegen/test_orchestration_task_deps.py
++++ b/tests/ut/codegen/test_orchestration_task_deps.py
+@@ -1066,7 +1066,8 @@ def test_spmd_submit_emits_launch_spec_and_captures_task_id():
+     assert deps_pos < launch_pos, code
+ 
+ 
+-def test_spmd_submit_group_emits_mixed_kernels_and_launch_spec():
++@pytest.mark.parametrize("local_boundaries", [False, True])
++def test_spmd_submit_group_emits_mixed_kernels_and_launch_spec(local_boundaries):
+     """``pl.spmd_submit`` of a split (cube+vector) kernel routes through the
+     Group dispatch path and still emits the SPMD launch spec.
+     """
+@@ -1081,6 +1082,8 @@ def test_spmd_submit_group_emits_mixed_kernels_and_launch_spec():
+             bias: pl.Tensor[[64, 64], pl.FP32],
+             out: pl.Out[pl.Tensor[[64, 64], pl.FP32]],
+         ) -> pl.Tensor[[64, 64], pl.FP32]:
++            if local_boundaries:
++                pl.system.wait_pre_task_end()
+             tile_a_l1 = pl.load(a, [0, 0], [64, 64], target_memory=pl.MemorySpace.Mat)
+             tile_b_l1 = pl.load(b, [0, 0], [64, 64], target_memory=pl.MemorySpace.Mat)
+             tile_a_l0a = pl.move(tile_a_l1, target_memory=pl.MemorySpace.Left)
+@@ -1089,6 +1092,8 @@ def test_spmd_submit_group_emits_mixed_kernels_and_launch_spec():
+             tile_bias = pl.load(bias, [0, 0], [64, 64])
+             tile_out = pl.add(tile_mm, tile_bias)
+             out = pl.store(tile_out, [0, 0], out)
++            if local_boundaries:
++                pl.system.set_next_task_start()
+             return out
+ 
+         @pl.function(type=pl.FunctionType.Orchestration)
+@@ -1109,6 +1114,12 @@ def test_spmd_submit_group_emits_mixed_kernels_and_launch_spec():
+     assert "params_t0.launch_spec.set_block_num(4);" in code, code
+     assert "params_t0.launch_spec.set_require_sync_start(true);" in code, code
+ 
++    if local_boundaries:
++        assert "params_t0.set_scalar_prefix_mask(7);" in code, code
++        assert "params_t0.set_scalar_prefix_tagged_args_mask(7);" in code, code
++        assert "params_t0.set_runtime_barrier_tail_mask(7);" in code, code
++    assert "set_allow_early_resolve(true)" not in code, code
++
+ 
+ def test_plain_submit_emits_no_launch_spec():
+     """Regression: a plain ``pl.submit`` (no SPMD launch spec) must not emit
+diff --git a/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py b/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
+index 545e9abdd..6de48d2fd 100644
+--- a/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
++++ b/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
+@@ -3821,6 +3821,44 @@ class TestGmLocalTensorConversion:
+ 
+         _assert_convert_equal(Before, Expected)
+ 
++    def test_local_wait_precedes_implicit_parameter_load(self):
++        """A shared entry load must not reuse the predecessor's UB before Wait."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                x: pl.Tensor[[16, 32], pl.FP32],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP32]],
++                seed: pl.Scalar[pl.FP32],
++            ):
++                value = seed * 3.0
++                pl.system.wait_pre_task_end()
++                result = pl.add(x, value)
++                out[0:16, 0:32] = result
++                pl.system.set_next_task_start()
++                return  # noqa: PLR1711 (DSL return terminator)
++
++        @pl.program
++        class Expected:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                x: pl.Tensor[[16, 32], pl.FP32],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP32]],
++                seed: pl.Scalar[pl.FP32],
++            ):
++                value = seed * 3.0
++                pl.system.wait_pre_task_end()
++                tile = pl.load(x, [0, 0], [16, 32])
++                result = pl.tile.adds(tile, value)
++                _stored = pl.store(result, [0, 0], out)
++                pl.system.set_next_task_start()
++                return  # noqa: PLR1711 (DSL return terminator)
++
++        _assert_convert_equal(Before, Expected)
++
+     def test_gm_write_before_computation_is_not_preloaded(self):
+         """A write's returned alias stays GM and is loaded after the write."""
+ 
