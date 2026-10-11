@@ -15674,3 +15674,23 @@ MIX两项通过，每轮24个AIC和48个AIV成员提前进入前缀，实际通�
 预热5次后各30次轮换单次图重放，reset在计时外；9项状态及换输入逐bit一致，各31项保护区通过。
 设备退出0并释放卡，公共默认未改，没有新Native、七档或16卡结果。
 [过程067完整链接/功能/计时证据](superkernel_runtime_dma_entry_20261012/README.md)。
+
+## 580. 2026-10-12：直接通知metadata化，功能通过但不作为默认性能优化
+
+Simpler `6174ec5db`、PyPTO `44b4ffe76`、私有vLLM `15d44c45`。原TaskPayload的4字节padding
+携带AIC/AIV scratch，原派发下发资源；局部Set不写GM、普通收尾不额外flush，payload不增大。
+原队列/派发/ACK/early-resolve不变；非默认事件继续原编译回调，未增加用户标识。
+CPU调度14项及原代码生成3项通过，动态事件0/7编译检查继续保留event6回调。
+
+单卡0任务`task_20261012_005911_200591512733`完成AIC/AIV、MIX及128K/B16 CSA，退出0并释放卡。
+两组输入、真实fanin、保护区及重放通过；72/137次AIC/AIV通知全部核型正确，MIX两项通过。
+第2层HC_pre+norm+CSA+HC_post、CANN9.2/TMR/NZ2/atomic0、关闭诊断，四路同SDK新编译，
+预热5次后各30次轮换单次图重放，reset在计时外。普通/现行回调/带Set直接/metadata直接的
+min/mean/max分别为966.72/987.82/1013.12、972.16/990.22/1007.46、
+960.24/988.55/1012.04、968.30/994.75/1018.26μs。
+
+metadata候选较现行回调mean多4.53μs、max多10.80μs，9/30配对更快；较带Set路径mean多6.20μs。
+9项状态和换输入重放逐bit一致，各31项保护区通过。没有整体性能收益，不切默认，不追加重复搜索。
+差值未分离到单条指令或某一调度环节，不能据此判定early_start本身无效。
+没有新Native、七档或16卡结果，公共默认未变。
+[过程068功能、120条计时、补丁与复现](superkernel_clean_direct_metadata_20261012/README.md)。

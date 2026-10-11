@@ -2,8 +2,8 @@
 
 起始日期：2026-10-09；更新：2026-10-12。状态：局部Set/Wait及单卡CSA功能已有证据，完整CSA稳定净收益尚未成立。此前原型改变核选择、ACK后派发及用户early-resolve表达，已被用户明确否定；当前按下列约束收敛，历史结果不能作为新实现验收。仅做TMR；当前迭代优先单卡128K/B16，已完成的七档历史对照保留。HBG与16卡不在本轮范围。
 
-当前到过程067：默认通知协议保持过程059；PyPTO生产改动`21a3fbcfe`和PTOAS `0c21f984`
-在编译期为显式同步任务选择空闲通知事件，Simpler更新为`e6b6ca49a`。
+当前到过程068：默认通知协议保持过程059；PyPTO生产改动`21a3fbcfe`和PTOAS `0c21f984`
+在编译期为显式同步任务选择空闲通知事件，Simpler更新为`6174ec5db`。
 新修复旧直接通知的弱符号核类型混用，以独立强符号和真实worker核型选择DMA函数，AIC/AIV及MIX功能通过。
 AIC/AIV/MIX、idle与sync_start前缀及原首次探测后的后到交接已有分项功能证据。
 局部Wait/Set保持手工标识，调试模式回退保留；Set能力已改由原任务元数据传递。
@@ -12,11 +12,13 @@ AIC/AIV/MIX、idle与sync_start前缀及原首次探测后的后到交接已有�
 584/588个gated实例全部进入安全前缀，通知成本值得优先研究，插桩计数不当作净性能。
 新32B候选较64B通知mean多33.65μs，配对中位差+0.45μs且有1870.62μs长尾，也不采用。
 过程066的小入口虽降低静态栈，128K/B16 mean反而比原通知多1.59μs，max多0.42μs，也不采用。
-过程067直接实验仍含Set写入和保守flush，mean比现行回调多8.18μs、max多99.54μs，不切默认。
-最新普通PTO/现行编译回调/直接实验mean为991.13/986.42/994.61μs；正常路径仍为64B编译回调。
+过程067修复直接通知核型混用，过程068进一步把scratch放入原任务metadata，Set无GM写入、
+普通收尾无额外flush，功能通过但没有净收益；默认继续64B编译回调。
+最新普通/现行回调/带Set直接通知/metadata直接通知mean为987.82/990.22/988.55/994.75μs。
+metadata候选比现行回调mean多4.53μs、max多10.80μs，比带Set路径mean多6.20μs，不采用。
 9项状态及换输入逐bit一致、各31项保护区通过。
-动态0/7同步任务使用event6通知的AIC/AIV单卡功能通过；尚未形成稳定CSA净收益，公共默认未切换。
-[最新min/mean/max、功能修复及候选取舍](superkernel_runtime_dma_entry_20261012/README.md)。
+动态0/7同步任务仍保留event6通知回调；尚未形成稳定CSA净收益，公共默认未切换。
+[最新min/mean/max、功能及候选取舍](superkernel_clean_direct_metadata_20261012/README.md)。
 [真实CSA覆盖与逐成员计数](superkernel_csa_late_coverage_20261011/README.md)。
 [事件覆盖、剩余限制及单卡证据](superkernel_allocated_events_20261011/README.md)。
 
@@ -138,7 +140,11 @@ QK/PV AIC作为前驱向O-A交接两轮共48次，不能混淆接收与发出两
 直接实验的scratch仍由Set写入且有保守flush，完整CSA无净收益；保留修复，默认继续编译回调。
 [链接证据、功能与性能分项](superkernel_runtime_dma_entry_20261012/README.md)。
 
-截至过程067，保留的实现覆盖情况如下，须与真正的安全条件区分：
+过程068把直接通知scratch压入原metadata的4字节padding，payload不增大，事件非7保留原回调。
+功能通过但完整CSA未改善；去掉Set写入和flush不足以形成净收益，默认不切换。
+[metadata合同及同SDK四路对照](superkernel_clean_direct_metadata_20261012/README.md)。
+
+截至过程068，保留的实现覆盖情况如下，须与真正的安全条件区分：
 
 | 条件 | 当前行为与性质 |
 | --- | --- |

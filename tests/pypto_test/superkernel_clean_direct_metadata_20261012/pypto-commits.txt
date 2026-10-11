@@ -1,0 +1,13 @@
+commit 44b4ffe76befa88803bedb7ae52c6004c12a7803
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    试验(PyPTO): 按编译资源合同下发直接通知 scratch 并保留事件回退
+
+    在单核、SPMD 及 MIX 的原 submit metadata 中支持内部 task_boundary_direct_scratch 属性；该属性仅由独立实验 hook 在 PTOAS 完成后写入，不增加算子作者参数，不修改原 task 算术、局部 Wait/Set 或 early_resolve。
+
+    实验根据实际生成的通知 helper 判断事件与 scratch：只有所有通知事件均为 7 且地址可编码时选择直接运行时通知，其他资源分配继续使用现有编译回调；普通生成器默认不启用。AIC 与 AIV 分别传入资源，双 AIV 共享同一内核地址。
+
+    同步 Simpler gitlink 和 Python ABI 常量至 6174ec5db，完成匹配 SDK 重建；CPU 原调度代码生成 3 项通过，小型 AIC/AIV 的编译产物正确下发零地址资源且 once 对照不下发。单卡 MIX 和 128K/B16 同 SDK 四路实测单独归档。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
