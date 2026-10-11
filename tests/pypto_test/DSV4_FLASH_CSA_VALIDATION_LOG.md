@@ -15368,3 +15368,17 @@ dispatch和用户early-resolve语义不变。失败候选的cache策略及trace�
 输出/保护区及重放正常，AIV/AIC实际同核交接通过；退出0、设备释放。
 私有运行时与适配器重建且版本一致，公共环境未切换。本轮未新测CSA性能，不宣称量化加速。
 [测试摘要及证据目录](superkernel_handoff_cleanup_20261011/summary.json)。
+
+## 561. 2026-10-11：局部交接清理后的七档 CSA 同 SDK 对照
+
+按最新要求，单卡测试128K×B4/B8/B16/B24与8K×B16/B24/B32。
+普通版不插入局部Wait/Set，候选启用全部既有边界；两版均使用PyPTO `1f8206d09`、
+Simpler `d00f8f421`、PTOAS `4a5ce22a`，63处early-resolve设置一致。
+任务`task_20261011_154838_375836631548`，设备2，CANN9.2/TMR/NZ2/atomic关闭、profiler关闭；
+第2层真实权重，区间含HC_pre+norm+CSA+HC_post，warmup后交错各30次。
+
+七档mean耗时减少依次为−0.45%、+0.25%、+1.50%、−1.01%、+1.26%、−0.63%、+0.85%。
+均值四快三慢，最大值五降两升；按长短档8:2汇总仅改善0.1569%，不定性为稳定整体加速。
+七档9项输出/缓存/状态、改变输入后的重放逐bit一致，各版每档31项保护区通过。
+任务退出0、设备释放。本轮未修改kernel、运行时或公共默认，也未测Native/整模型。
+[min/mean/max完整表、420次原始样本及复现脚本](superkernel_csa_seven_handoff_cleanup_20261011/README.md)。
