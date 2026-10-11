@@ -1,0 +1,52 @@
+bringing up nodes...
+bringing up nodes...
+
+.......F..................                                               [100%]
+=================================== FAILURES ===================================
+__ test_dispatch_notification_keeps_wrap_fallback_and_full_pipe_join[vector] ___
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/.venv/bin/python
+
+cube = False
+
+    @pytest.mark.parametrize("cube", [False, True], ids=["vector", "cube"])
+    def test_dispatch_notification_keeps_wrap_fallback_and_full_pipe_join(cube):
+        kind = ir.FunctionType.AIC if cube else ir.FunctionType.AIV
+        helper, entry = _compiled_late_poll(
+            SimpleNamespace(attrs={"task_boundary_scratch_base": 0}, func_type=kind)
+        )
+        assert "uint32_t expected = own | uint32_t{0x80000000}" in helper
+        assert "ctx->late_handoff_scratch & COMPILED_POLL_ID_REUSED" in helper
+        assert "expected = *value == 0 ? ~uint32_t{0} : 0" in helper
+        assert helper.index("const uint32_t own") < helper.index("COMPILED_POLL_ID_REUSED")
+>       assert "set_vector_mask(0, 16)" in helper if not cube else "__cbuf__ uint32_t*" in helper
+E       assert False
+
+tests/ut/backend/test_task_boundary_events.py:61: AssertionError
+=============================== warnings summary ===============================
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: 42 warnings
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/artifacts/normal_notice_diagnostics_20261012/backend.xml -
+=========================== short test summary info ============================
+FAILED tests/ut/backend/test_task_boundary_events.py::test_dispatch_notification_keeps_wrap_fallback_and_full_pipe_join[vector]
+1 failed, 25 passed, 54 warnings in 8.26s
