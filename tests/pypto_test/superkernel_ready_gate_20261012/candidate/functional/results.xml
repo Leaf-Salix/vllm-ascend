@@ -1,0 +1,349 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="6" time="21.774" timestamp="2026-10-12T02:46:03.915838+08:00" hostname="liteserver-hps-365a-00001"><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_remote_dependency" name="test_gated_prefix_with_unrelated_local_task[regular-pending]" time="2.541"><failure message="assert 263 == 7">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-156/popen-gw0/test_gated_prefix_with_unrelat0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffd92a4d900&gt;
+local_work = True, sync_start = False
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("local_work", [True, False], ids=["pending", "idle"])
+    @pytest.mark.parametrize("sync_start", [False, True], ids=["regular", "sync_start"])
+    def test_gated_prefix_with_unrelated_local_task(
+        test_config: RunConfig, tmp_path: Path, monkeypatch, local_work: bool, sync_start: bool
+    ):
+        case = f"remote_dependency_local{int(local_work)}_sync{int(sync_start)}"
+        output = Path(test_config.save_kernels_dir or tmp_path) / case
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        trace_params = {"unrelated_local_task": "local_trace", "remote_data_producer": "remote_trace"}
+        if not local_work:
+            del trace_params["unrelated_local_task"]
+        traced = []
+
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name in trace_params:
+                trace = next(p for p in func.params if p.name_hint.startswith(trace_params[func.name]))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+        compiled = _program(local_work, sync_start).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+        assert set(traced) == set(trace_params)
+        compiled.load()
+        if test_config.codegen_only:
+            return
+        assert os.environ.get("TASK_DEVICE", str(test_config.device_id)) == str(test_config.device_id), (
+            "use the queue-assigned card"
+        )
+
+        source = (torch.arange(3088 * 256) % 7 - 3).to(torch.float16).reshape(3088, 256)
+        weight = (torch.arange(128 * 256) % 5 - 2).to(torch.float16).reshape(128, 256)
+        hosts = [
+            source.clone(),
+            weight,
+            torch.empty((3088, 256)),
+            torch.empty((128, 256)),
+            torch.empty((3088, 256)),
+            torch.empty((49, 8), dtype=torch.int64),
+            torch.empty((2, 8), dtype=torch.int64),
+            torch.empty((49, 8), dtype=torch.int64),
+        ]
+        samples = []
+        with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
+            tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
+            try:
+                handle = worker.register(compiled)
+                for repeat in range(2):
+                    hosts[0].copy_(source + repeat)
+                    for host in hosts[2:]:
+                        host.fill_(float("nan") if host.dtype == torch.float32 else -1)
+                    for host, device in zip(hosts, tensors):
+                        worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
+                    seed, steps = 7 + repeat, 64
+                    handle(*tensors, seed, steps, 1, config=test_config)
+                    for host, device in zip(hosts[2:], tensors[2:]):
+                        worker.copy_from(host.data_ptr(), device.data_ptr, device.nbytes)
+                    expected_remote = (hosts[0][:128, :128].float() @ weight.float()) * 4097
+                    assert torch.equal(hosts[3], expected_remote)
+                    local = hosts[5][:-1].tolist()
+                    remote = hosts[6][0].tolist()
+                    consumer = hosts[7][:-1].tolist()
+                    assert 0 &lt; remote[1] &lt;= remote[2] &lt;= remote[5] &lt;= remote[7] &lt;= remote[3]
+&gt;                   assert remote[4] == 7
+E                   assert 263 == 7
+
+tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py:181: AssertionError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_remote_dependency" name="test_gated_prefix_with_unrelated_local_task[regular-idle]" time="1.912"><failure message="assert 263 == 7">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-156/popen-gw0/test_gated_prefix_with_unrelat1')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffd90c73f10&gt;
+local_work = False, sync_start = False
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("local_work", [True, False], ids=["pending", "idle"])
+    @pytest.mark.parametrize("sync_start", [False, True], ids=["regular", "sync_start"])
+    def test_gated_prefix_with_unrelated_local_task(
+        test_config: RunConfig, tmp_path: Path, monkeypatch, local_work: bool, sync_start: bool
+    ):
+        case = f"remote_dependency_local{int(local_work)}_sync{int(sync_start)}"
+        output = Path(test_config.save_kernels_dir or tmp_path) / case
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        trace_params = {"unrelated_local_task": "local_trace", "remote_data_producer": "remote_trace"}
+        if not local_work:
+            del trace_params["unrelated_local_task"]
+        traced = []
+
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name in trace_params:
+                trace = next(p for p in func.params if p.name_hint.startswith(trace_params[func.name]))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+        compiled = _program(local_work, sync_start).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+        assert set(traced) == set(trace_params)
+        compiled.load()
+        if test_config.codegen_only:
+            return
+        assert os.environ.get("TASK_DEVICE", str(test_config.device_id)) == str(test_config.device_id), (
+            "use the queue-assigned card"
+        )
+
+        source = (torch.arange(3088 * 256) % 7 - 3).to(torch.float16).reshape(3088, 256)
+        weight = (torch.arange(128 * 256) % 5 - 2).to(torch.float16).reshape(128, 256)
+        hosts = [
+            source.clone(),
+            weight,
+            torch.empty((3088, 256)),
+            torch.empty((128, 256)),
+            torch.empty((3088, 256)),
+            torch.empty((49, 8), dtype=torch.int64),
+            torch.empty((2, 8), dtype=torch.int64),
+            torch.empty((49, 8), dtype=torch.int64),
+        ]
+        samples = []
+        with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
+            tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
+            try:
+                handle = worker.register(compiled)
+                for repeat in range(2):
+                    hosts[0].copy_(source + repeat)
+                    for host in hosts[2:]:
+                        host.fill_(float("nan") if host.dtype == torch.float32 else -1)
+                    for host, device in zip(hosts, tensors):
+                        worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
+                    seed, steps = 7 + repeat, 64
+                    handle(*tensors, seed, steps, 1, config=test_config)
+                    for host, device in zip(hosts[2:], tensors[2:]):
+                        worker.copy_from(host.data_ptr(), device.data_ptr, device.nbytes)
+                    expected_remote = (hosts[0][:128, :128].float() @ weight.float()) * 4097
+                    assert torch.equal(hosts[3], expected_remote)
+                    local = hosts[5][:-1].tolist()
+                    remote = hosts[6][0].tolist()
+                    consumer = hosts[7][:-1].tolist()
+                    assert 0 &lt; remote[1] &lt;= remote[2] &lt;= remote[5] &lt;= remote[7] &lt;= remote[3]
+&gt;                   assert remote[4] == 7
+E                   assert 263 == 7
+
+tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py:181: AssertionError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_remote_dependency" name="test_gated_prefix_with_unrelated_local_task[sync_start-pending]" time="1.947"><failure message="assert 263 == 7">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-156/popen-gw0/test_gated_prefix_with_unrelat2')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffd9018b6d0&gt;
+local_work = True, sync_start = True
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("local_work", [True, False], ids=["pending", "idle"])
+    @pytest.mark.parametrize("sync_start", [False, True], ids=["regular", "sync_start"])
+    def test_gated_prefix_with_unrelated_local_task(
+        test_config: RunConfig, tmp_path: Path, monkeypatch, local_work: bool, sync_start: bool
+    ):
+        case = f"remote_dependency_local{int(local_work)}_sync{int(sync_start)}"
+        output = Path(test_config.save_kernels_dir or tmp_path) / case
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        trace_params = {"unrelated_local_task": "local_trace", "remote_data_producer": "remote_trace"}
+        if not local_work:
+            del trace_params["unrelated_local_task"]
+        traced = []
+
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name in trace_params:
+                trace = next(p for p in func.params if p.name_hint.startswith(trace_params[func.name]))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+        compiled = _program(local_work, sync_start).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+        assert set(traced) == set(trace_params)
+        compiled.load()
+        if test_config.codegen_only:
+            return
+        assert os.environ.get("TASK_DEVICE", str(test_config.device_id)) == str(test_config.device_id), (
+            "use the queue-assigned card"
+        )
+
+        source = (torch.arange(3088 * 256) % 7 - 3).to(torch.float16).reshape(3088, 256)
+        weight = (torch.arange(128 * 256) % 5 - 2).to(torch.float16).reshape(128, 256)
+        hosts = [
+            source.clone(),
+            weight,
+            torch.empty((3088, 256)),
+            torch.empty((128, 256)),
+            torch.empty((3088, 256)),
+            torch.empty((49, 8), dtype=torch.int64),
+            torch.empty((2, 8), dtype=torch.int64),
+            torch.empty((49, 8), dtype=torch.int64),
+        ]
+        samples = []
+        with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
+            tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
+            try:
+                handle = worker.register(compiled)
+                for repeat in range(2):
+                    hosts[0].copy_(source + repeat)
+                    for host in hosts[2:]:
+                        host.fill_(float("nan") if host.dtype == torch.float32 else -1)
+                    for host, device in zip(hosts, tensors):
+                        worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
+                    seed, steps = 7 + repeat, 64
+                    handle(*tensors, seed, steps, 1, config=test_config)
+                    for host, device in zip(hosts[2:], tensors[2:]):
+                        worker.copy_from(host.data_ptr(), device.data_ptr, device.nbytes)
+                    expected_remote = (hosts[0][:128, :128].float() @ weight.float()) * 4097
+                    assert torch.equal(hosts[3], expected_remote)
+                    local = hosts[5][:-1].tolist()
+                    remote = hosts[6][0].tolist()
+                    consumer = hosts[7][:-1].tolist()
+                    assert 0 &lt; remote[1] &lt;= remote[2] &lt;= remote[5] &lt;= remote[7] &lt;= remote[3]
+&gt;                   assert remote[4] == 7
+E                   assert 263 == 7
+
+tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py:181: AssertionError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_remote_dependency" name="test_gated_prefix_with_unrelated_local_task[sync_start-idle]" time="1.927"><failure message="assert 263 == 7">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-156/popen-gw0/test_gated_prefix_with_unrelat3')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffd90c806a0&gt;
+local_work = False, sync_start = True
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("local_work", [True, False], ids=["pending", "idle"])
+    @pytest.mark.parametrize("sync_start", [False, True], ids=["regular", "sync_start"])
+    def test_gated_prefix_with_unrelated_local_task(
+        test_config: RunConfig, tmp_path: Path, monkeypatch, local_work: bool, sync_start: bool
+    ):
+        case = f"remote_dependency_local{int(local_work)}_sync{int(sync_start)}"
+        output = Path(test_config.save_kernels_dir or tmp_path) / case
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        trace_params = {"unrelated_local_task": "local_trace", "remote_data_producer": "remote_trace"}
+        if not local_work:
+            del trace_params["unrelated_local_task"]
+        traced = []
+
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name in trace_params:
+                trace = next(p for p in func.params if p.name_hint.startswith(trace_params[func.name]))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+        compiled = _program(local_work, sync_start).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+        assert set(traced) == set(trace_params)
+        compiled.load()
+        if test_config.codegen_only:
+            return
+        assert os.environ.get("TASK_DEVICE", str(test_config.device_id)) == str(test_config.device_id), (
+            "use the queue-assigned card"
+        )
+
+        source = (torch.arange(3088 * 256) % 7 - 3).to(torch.float16).reshape(3088, 256)
+        weight = (torch.arange(128 * 256) % 5 - 2).to(torch.float16).reshape(128, 256)
+        hosts = [
+            source.clone(),
+            weight,
+            torch.empty((3088, 256)),
+            torch.empty((128, 256)),
+            torch.empty((3088, 256)),
+            torch.empty((49, 8), dtype=torch.int64),
+            torch.empty((2, 8), dtype=torch.int64),
+            torch.empty((49, 8), dtype=torch.int64),
+        ]
+        samples = []
+        with ChipWorker(config=test_config, runtime=compiled.runtime_name) as worker:
+            tensors = [worker.alloc_tensor(t.shape, t.dtype) for t in hosts]
+            try:
+                handle = worker.register(compiled)
+                for repeat in range(2):
+                    hosts[0].copy_(source + repeat)
+                    for host in hosts[2:]:
+                        host.fill_(float("nan") if host.dtype == torch.float32 else -1)
+                    for host, device in zip(hosts, tensors):
+                        worker.copy_to(device.data_ptr, host.data_ptr(), device.nbytes)
+                    seed, steps = 7 + repeat, 64
+                    handle(*tensors, seed, steps, 1, config=test_config)
+                    for host, device in zip(hosts[2:], tensors[2:]):
+                        worker.copy_from(host.data_ptr(), device.data_ptr, device.nbytes)
+                    expected_remote = (hosts[0][:128, :128].float() @ weight.float()) * 4097
+                    assert torch.equal(hosts[3], expected_remote)
+                    local = hosts[5][:-1].tolist()
+                    remote = hosts[6][0].tolist()
+                    consumer = hosts[7][:-1].tolist()
+                    assert 0 &lt; remote[1] &lt;= remote[2] &lt;= remote[5] &lt;= remote[7] &lt;= remote[3]
+&gt;                   assert remote[4] == 7
+E                   assert 263 == 7
+
+tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py:181: AssertionError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_mix" name="test_mixed_local_boundaries" time="1.855" /><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_mix" name="test_mixed_members_enter_prefix_before_group_completion" time="2.187" /></testsuite></testsuites>

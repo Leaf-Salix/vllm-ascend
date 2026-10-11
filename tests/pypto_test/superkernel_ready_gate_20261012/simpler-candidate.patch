@@ -1,0 +1,11 @@
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index d18b11361..695c8c3bc 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -388,0 +389,2 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
++                // A gate already open at pickup needs neither a callback nor
++                // delayed ACK: the ordinary path rechecks readiness and EXIT.
+@@ -390 +392,2 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+-                    (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_CAN_EARLY_START) != 0) {
++                    (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_CAN_EARLY_START) != 0 &&
++                    read_dmb_high32() != task_id) {

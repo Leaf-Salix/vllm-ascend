@@ -1,0 +1,33 @@
+commit 7a084029d6df7370f4cecd0719bfe4c7fd95ea28
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    维护(SDK): 对齐撤下门铃探测候选后的私有运行时
+
+    Simpler 恢复原 gated 前缀回调流程，运行时代码与 6174ec5db 等价。同步更新 runtime gitlink 与 PyTorch 适配器 ABI 修订，避免候选二进制与恢复后的源码混用。
+
+    候选的单卡功能与覆盖证据保留，性能未形成收益而撤下。后续从当前私有 worktree 重建绑定、TMR 运行时与 Torch 适配器，不借用公共环境的二进制。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit a3d8465935bfb4e68922da517895ab1581a5a702
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    测试(交接): 按字段解析跨核依赖用例的尾部通知标志
+
+    尾部 trace 的低八位仍为完成类型 7，高位现在记录通知提交与回调后交接。旧用例将整个字段与 7 比较，遇到合法的 263 时误报。分别检查类型和允许的标志位，保留本核尾部、跨核完整 fanin、sync_start、数值和保护区断言。
+
+    验证：私有 CANN 9.2 / TMR 单卡任务 task_20261012_025337_21671581309 中四项 idle/pending × regular/sync_start 用例通过；首次失败日志保留。Ruff 检查通过，不重复运行此前已通过的两项 MIX 用例。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit 0935c1745d49c42f3505ac503b26f757d2157343
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    试验(SDK): 对齐已就绪门铃直接执行的私有 TMR 候选
+
+    将 runtime gitlink 与 SIMPLER_KERNEL_REVISION 同步到26550cfd4，保证候选的绑定、运行时与Torch适配按同一提交重建。该候选只让无同核前驱且门铃已开的任务沿原ACK路径执行，未就绪及本核交接仍保留安全前缀；不绕过任何SDK版本校验。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

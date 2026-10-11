@@ -1,0 +1,27 @@
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 1627cfbb8..7b501ea07 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -24 +24 @@ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "6174ec5dbdd788b4db0f9436cbbdc21840c4d4a4"
++SIMPLER_KERNEL_REVISION = "9fddae626ee891ab5ed77ee3601038169241c424"
+diff --git a/runtime b/runtime
+index 6174ec5db..9fddae626 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit 6174ec5dbdd788b4db0f9436cbbdc21840c4d4a4
++Subproject commit 9fddae626ee891ab5ed77ee3601038169241c424
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+index d42e698e5..600a4b37b 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+@@ -84 +84,3 @@ def _validate_local_handoffs(local, consumer, remote, sync_start: bool):
+-        assert prior[4] == 7
++        # The low byte identifies the tail; bits 8/9 record notification and late handoff.
++        assert prior[4] & 0xFF == 7
++        assert prior[4] >> 8 in (0, 1, 2, 3)
+@@ -181 +183,2 @@ def test_gated_prefix_with_unrelated_local_task(
+-                assert remote[4] == 7
++                assert remote[4] & 0xFF == 7
++                assert remote[4] >> 8 in (0, 1, 2, 3)
