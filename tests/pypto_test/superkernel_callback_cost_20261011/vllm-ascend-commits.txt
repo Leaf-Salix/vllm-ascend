@@ -1,0 +1,15 @@
+commit 342faa9b8281f8b9c4cfb12fde72da7805e4831e
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 21:48:04 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 21:48:04 2026 +0800
+
+    test(CSA): 隔离尾部回调与通知成本并复用同SDK已有产物
+
+    新增空回调诊断、内联完整通知、DMA前重查三个私有编译候选；普通版、单次探测及原完整通知路径复用当前worktree相同SDK产物，避免重复编译，保持冻结MIX算子包与相同scratch/事件预留。
+
+    空回调只用于净路径成本观察，不作为替代完整后到观察的方案；内联与重查候选均完成单卡128K/B16轮换计时，分别30条样本，保留min/mean/max及配对差值。
+
+    两轮所有输出/缓存/状态及换输入重放逐bit一致，每路31项保护区通过。内联与重查均回退，不改变公共默认或私有生产编译器；没有16卡或七档重复测试。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

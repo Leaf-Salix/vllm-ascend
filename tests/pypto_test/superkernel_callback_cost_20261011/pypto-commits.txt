@@ -1,0 +1,15 @@
+commit dd63f37d2ffc7f987960a3a905f46ea56692ec95
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 21:47:50 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 21:47:50 2026 +0800
+
+    test(TMR): 验证尾部回调内联和DMA前重查的后到任务行为
+
+    复用既有两任务驱动，分别在编译wrapper内构造内联回调和通知DMA前检查既有派发寄存器的候选。重查命中只交回原运行时验证，未命中继续完整通知与轮询，不改变调度、ACK或early-resolve。
+
+    新增late_without_notice诊断，从既有trace识别原首次探测之后、未提交通知就成功交接的成员；不增加生产诊断写入，不把通知尾等待混同于原计算重叠。
+
+    两个候选均完成单卡AIC/AIV两种长度、两组输入、输出/fanin/保护区和图重放检查。128K/B16同SDK内联回退10.51微秒、重查回退6.02微秒，均仅归档为实验驱动，生产编译器保持原实现。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
