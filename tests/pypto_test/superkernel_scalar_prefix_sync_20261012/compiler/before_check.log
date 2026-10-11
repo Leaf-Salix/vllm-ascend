@@ -1,0 +1,33 @@
+test/lit/pto/local_task_wait_scalar_control_sync.pto:8:15: error: CHECK-NOT: excluded string found in input
+// CHECK-NOT: set_flag(
+              ^
+<stdin>:152:2: note: found here
+ set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+ ^~~~~~~~~
+
+Input file: <stdin>
+Check file: test/lit/pto/local_task_wait_scalar_control_sync.pto
+
+-dump-input=help explains the following input dump.
+
+Input was:
+<<<<<<
+       .
+       .
+       .
+     147:  // pto: %tile
+     148:  Tile<TileType::Vec, float, 1, 32, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v35 = Tile<TileType::Vec, float, 1, 32, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v7, v9);
+     149:  // pto: %tile
+     150:  uint64_t v36 = (uint64_t) v10;
+     151:  TASSIGN(v35, v36);
+     152:  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+not:8      !~~~~~~~~                                  error: no match expected
+     153:  // pto: %positive, %limit
+     154:  // pto: %work
+     155:  int64_t v37;
+     156:  v37 = v7;
+     157:  for (int64_t v38 = v6; v38 < (v5 > v6 ? v5 : v7); v38 += v7) {
+       .
+       .
+       .
+>>>>>>

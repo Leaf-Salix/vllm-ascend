@@ -42,6 +42,11 @@ Simpler按AIC/AIV0/AIV1传递能力，保留原选核、队列、ACK和组完成
 PyPTO让自动参数加载和pipe初始化位于Wait之后；PTOAS仅为runtime-owned
 PIPE_ALL扩展MIX操作，旧event7合同保持受限。
 
+2026-10-12过程070补充：上述检查遗漏了PTOAS后续插入的自动事件初始化。
+真实CSA的Q反量化有12条Set被放在Wait前的Scalar分支之前，不能从当轮数值通过推断所有前缀安全。
+已在[过程070](../superkernel_scalar_prefix_sync_20261012/README.md)修复并重新验证；本目录保留历史证据，
+旧early-start编译产物不再用作新对照。
+
 使用私有环境`../.worktrees/scalar-overlap-demo-20261009/env.sh`及目录内的
 运行脚本；所有设备命令仍通过`task-submit --device auto --device-num 1`执行。
 先CPU编译三条路径，再运行`run_csa_mixed_prefix_128k_b16.sh`。

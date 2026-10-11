@@ -1,0 +1,13 @@
+commit 1e2c652544b4b397365f86e4dd6d64e1df8069a1
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    试验(CSA): 扩大手工 Scalar 前缀并核对生成的同步边界
+
+    从冻结的混合边界包构建独立候选，仅把 O-B 的权重和输出组偏移、Q 反量化循环范围、QK/PV 循环次数前移到局部 Wait 之前；浮点算术、任务依赖、核心配置和 early-resolve 表达保持原样，MIX 的 FFTS 初始化留在 Wait 后。
+
+    生成代码审查发现旧 PTOAS 在 Q 反量化的 Scalar if 之前放置 12 条自动 Set，故对照不再复用旧 early-start 二进制：原边界和新前缀均用修复后的 PTOAS 重编译，只复用同 SDK 的普通 PTO 对照。新增 73 个成员的生成代码检查，验证两条路径的流水初始化均在 Wait 后。
+
+    Ruff 通过，冻结包依赖图及两条完整 CSA 编译通过；驱动使用既有逐元素、状态、保护区、换输入重放及 30 次轮换单次计时流程。性能结论和设备任务结果另记实现日志，不在此提交宣称收益。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
