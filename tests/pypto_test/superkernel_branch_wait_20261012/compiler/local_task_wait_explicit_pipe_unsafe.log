@@ -1,0 +1,2 @@
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/ptoas-src/test/lit/pto/local_task_wait_explicit_pipe_unsafe.pto":9:5): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/ptoas-src/test/lit/pto/local_task_wait_explicit_pipe_unsafe.pto":10:5): error: unsafe operation before Scalar-prefix wait boundary
