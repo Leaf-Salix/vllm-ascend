@@ -1,0 +1,132 @@
+commit 8171b78c5b9368fbfed668f9a58647de69ea0c2c
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 17:34:13 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 17:34:13 2026 +0800
+
+    Support: 让已提前派发的idle及sync_start任务执行安全Scalar前缀
+
+    为已带编译器检查边界的gated任务增加提前执行能力位，空闲核完成原有
+    参数准备后即可进入算子Scalar前缀，并在局部Wait保留完整fanin等待。
+    有本核前驱时仍先排空流水并发布真实FIN，随后由原有pending晋升流程
+    推动sync_start整组doorbell；计算、ACK及资源释放均不越过原就绪条件。
+
+    保持核选择、派发队列、ACK后处理、用户allow_early_resolve及sync_start
+    计算同步语义不变；没有标记的入口和诊断模式保留原流程。MIX及单次
+    探测时机仍待扩展，本提交不宣称已覆盖全部提前派发场景。
+
+    验证：新增idle能力和sync_start pending回归在旧逻辑下失败，修改后
+    相关10项C++调度单测通过。单卡任务task_20261011_173025_10211416583
+    通过7项功能回归；四种idle/pending与sync_start组合两轮均48/48前缀
+    先于远端数据完成，pending组48/48与本核尾部重叠，数值、等待、保护区正常。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/docs/a3-tmr-local-task-boundaries.md b/docs/a3-tmr-local-task-boundaries.md
+index 5d3fd9ee2..592d67078 100644
+--- a/docs/a3-tmr-local-task-boundaries.md
++++ b/docs/a3-tmr-local-task-boundaries.md
+@@ -18,4 +18,12 @@ Core selection, early-resolve marks, dispatch queues, and ACK handling are
+-unchanged. Predicated, sync-start, MIX, idle, and unmarked entries retain their
+-existing fallback. Only a selected gated handoff prepares arguments on AICPU;
+-other gated tasks prepare them on the waiting AICore as usual. Ready tasks
+-retain their CPU-prepared arguments.
++unchanged. A gated idle core may execute its checked Scalar prefix before its
++full-fanin doorbell; its local Wait has no predecessor to drain. A `sync_start`
++successor also permits the prefix, while the unchanged cohort doorbell still
++holds computation until every member owns its running slot and all inputs are
++ready. Pending handoffs publish the local FIN before waiting for that doorbell,
++so the original pending-to-running promotion can complete the rendezvous.
++
++Predicated, MIX, and unmarked entries retain their existing fallback. Only a
++selected gated pending handoff prepares arguments on AICPU; other gated tasks
++prepare them on the waiting AICore as usual. Ready tasks retain their
++CPU-prepared arguments. Neither idle prefix execution nor sync-start coverage
++adds a dispatch trigger or makes an ACK visible ahead of the existing gate.
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index fef0aef04..e27a10f1d 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -93,3 +93,3 @@ __aicore__ __attribute__((always_inline)) static void drain_async_tail(__gm__ Gl
+-// Called from an independently compiled successor, after its safe Scalar
+-// prefix. Delaying its ACK is essential: existing scheduler completion treats
+-// pending ACK as evidence that the predecessor has finished.
++// Called after a checked Scalar prefix to consume its local tail, if any, and
++// its input/cohort gate. Delayed ACK preserves the scheduler's occupied slot;
++// a pending ACK is evidence that the local predecessor has finished.
+@@ -99 +99 @@ __aicore__ static int wait_scalar_prefix_predecessor(__gm__ int64_t *args) {
+-    drain_async_tail(previous);
++    if (previous != nullptr) drain_async_tail(previous);
+@@ -104 +104 @@ __aicore__ static int wait_scalar_prefix_predecessor(__gm__ int64_t *args) {
+-    // Only an actual handoff dirties these fields. Flush before either task
++    // Only a deferred boundary dirties these fields. Flush before either task
+@@ -116 +116 @@ __aicore__ static int wait_scalar_prefix_predecessor(__gm__ int64_t *args) {
+-    write_reg(RegId::COND, MAKE_FIN_VALUE(predecessor_id));
++    if (previous != nullptr) write_reg(RegId::COND, MAKE_FIN_VALUE(predecessor_id));
+@@ -244 +244 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+-            const bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
++            bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
+@@ -278,0 +279,12 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
++                // An idle core can run the same checked prefix without a local
++                // predecessor. The callback retains the full-fanin/cohort gate
++                // and delayed ACK, so no pending slot is released prematurely.
++                if (!scalar_prefix_handoff && !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
++                    (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_CAN_EARLY_START) != 0) {
++                    exec_payload->global_context.wait_predecessor_fn =
++                        reinterpret_cast<uint64_t>(&wait_scalar_prefix_predecessor);
++                    if ((exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_TAGGED_ARGS) == 0) {
++                        exec_payload->local_context.async_ctx.local_predecessor_pending = 1;
++                    }
++                    scalar_prefix_handoff = true;
++                }
+@@ -315 +327 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+-                // performs no ABI lookup. Only a real handoff may tag the
++                // performs no ABI lookup. Only a deferred boundary may tag the
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 73b8039ec..fcc6497d3 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -156,2 +156,2 @@ struct GlobalContext {
+-// Independent bits: entry ABI never grants handoff eligibility. On a genuine
+-// handoff only, the executor uses bit 0 of the aligned args pointer; the marked
++// Independent bits: entry ABI never grants early execution. Only when a Wait
++// owns a deferred gate/tail does the executor tag the aligned args pointer; the marked
+@@ -160,0 +161,3 @@ static constexpr uint32_t SCALAR_PREFIX_TAGGED_ARGS = 2u;
++// A gated entry may execute its checked prefix before the full-fanin doorbell,
++// including when it has no unfinished task on this physical core.
++static constexpr uint32_t SCALAR_PREFIX_CAN_EARLY_START = 4u;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index 3323097ae..60de7ca38 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -219,2 +219 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+-    if (to_pending && source.scalar_prefix && !slot_state.task_attrs.has_predicate() &&
+-        !slot_state.task_attrs.requires_sync_start()) {
++    if (source.scalar_prefix && !slot_state.task_attrs.has_predicate()) {
+@@ -223 +222,2 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+-        const bool local_predecessor = (shape == ResourceShape::AIV || shape == ResourceShape::AIC) &&
++        const bool single_core = shape == ResourceShape::AIV || shape == ResourceShape::AIC;
++        const bool local_predecessor = to_pending && single_core &&
+@@ -226,0 +227 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
++        if (single_core && gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index 93176c453..25dc92335 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -16,0 +17 @@
++#include <utility>
+@@ -254 +255 @@ TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixWithoutLocalProducerRetainsI
+-    EXPECT_EQ(dispatch.global_context.scalar_prefix, SCALAR_PREFIX_TAGGED_ARGS);
++    EXPECT_EQ(dispatch.global_context.scalar_prefix, SCALAR_PREFIX_TAGGED_ARGS | SCALAR_PREFIX_CAN_EARLY_START);
+@@ -264 +265,2 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
+-    for (const int core_offset : {0, 1}) {
++    const std::array<std::pair<int, bool>, 4> placements{{{0, false}, {1, false}, {0, true}, {1, true}}};
++    for (const auto &[core_offset, sync_start] : placements) {
+@@ -298,0 +301 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
++        if (sync_start) slot.task_attrs.set_sync_start();
+@@ -313 +316,2 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
+-        EXPECT_EQ(dispatch.global_context.scalar_prefix, SCALAR_PREFIX_TAGGED_ARGS | SCALAR_PREFIX_CAN_HANDOFF);
++        EXPECT_EQ(dispatch.global_context.scalar_prefix,
++                  SCALAR_PREFIX_TAGGED_ARGS | SCALAR_PREFIX_CAN_HANDOFF | SCALAR_PREFIX_CAN_EARLY_START);
+@@ -318,0 +323 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
++        EXPECT_EQ(slot.task_attrs.requires_sync_start(), sync_start);

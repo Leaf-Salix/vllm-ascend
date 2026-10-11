@@ -15415,3 +15415,18 @@ HC_pre+norm+CSA+HC_post区间含调度，warmup后交错各30次，420次样本�
 这些是原型限制，应与完整fanin和流水等待的安全条件分开。未采集实际CSA交接命中数。
 本轮没有新测Native或整模型，未改变公共默认或继续修改运行时。
 [完整min/mean/max表、原始样本及复现](superkernel_csa_seven_unrelated_pending_20261011/README.md)，详见实施过程051。
+
+## 564. 2026-10-11：idle / sync_start 安全前缀接入及 128K/B16 验证
+
+Simpler `8171b78c5`、PyPTO `19f2c091a`、PTOAS `4a5ce22a`，保持原派发与整组doorbell语义。
+新增能力的回归先在旧代码失败，修改后10项CPU调度检查通过。任务`task_20261011_173025_10211416583`
+于单卡0通过7项设备检查；idle/pending×普通/sync_start四组两轮均48/48前缀早于远端完成，
+pending两组均48/48与本核尾部重叠；计算等待、数值及保护区通过。
+
+任务`task_20261011_173903_4357828989`于单卡2完成同新SDK的128K/B16对照，
+普通min/mean/max为971.10/987.81/1012.80μs，early_start为955.02/979.30/1017.04μs。
+均值减少0.86%，max增加4.24μs；9项输出/缓存/状态与改输入重放逐bit一致，各版31项保护区通过。
+区间含HC_pre+norm+CSA+HC_post；CANN9.2/TMR/NZ2/atomic关闭、profiler关闭，交错各30次。
+首次加载因未提交SDK被拒，未执行CSA；提交同步版本并CPU预编译后完成上述测量。
+全部设备已释放；MIX只完成编译入口拒绝的复现，后续继续，不宣称全范围目标完成。
+[完整记录与原始证据](superkernel_prefix_coverage_20261011/README.md)，实施过程052。

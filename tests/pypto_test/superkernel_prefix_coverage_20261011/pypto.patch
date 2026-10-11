@@ -1,0 +1,297 @@
+commit 19f2c091a48556745e2bd71ac7bfb9debcf9ac64
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 17:34:58 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 17:34:58 2026 +0800
+
+    test: 验证空闲核与sync_start任务的安全Scalar提前执行并同步私有SDK
+
+    将私有Simpler pin与gitlink同步至8171b78c5。扩展局部边界的跨核数据依赖
+    用例，覆盖idle/pending与sync_start关闭/开启的四种组合，记录实际前缀、
+    本核流水及远端生产者时序，检查完整数据等待、整组计算启动、数值和保护区。
+
+    单卡设备0任务task_20261011_173025_10211416583全部7项通过；四种组合
+    两次改变输入均48/48前缀先于远端数据完成，pending两组均48/48与本核
+    尾部重叠。编译检查4项通过，已有分支/无后继及AIC/AIV交接回归通过。
+
+    同步中英文边界文档，撤回本核前驱必须为直接WAIT生产者及sync_start
+    必须回退的旧说明。保留MIX、诊断路径和单次探测等未实现范围。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/docs/en/api/system.md b/docs/en/api/system.md
+index 19c40efd3..50de3905b 100644
+--- a/docs/en/api/system.md
++++ b/docs/en/api/system.md
+@@ -40 +40,2 @@ not wrap the compute body in a status check. Vector/atomic initialization occurs
+-only after the wait. Without an early predecessor, execution proceeds normally.
++only after the wait. An early-dispatched idle task uses the same boundary for
++its input/cohort gate without requiring a local predecessor.
+@@ -45,2 +46,3 @@ infers AIV or AIC from the outlined task, preserves internal pipeline sync and
+-emits the corresponding tail events. The runtime drains those events before
+-true completion, FIN and resource release. With no successor it drains normally.
++transfers its final full-pipeline wait to the executor. The executor performs
++that wait before true completion, FIN and resource release. With no successor
++it drains normally.
+@@ -48,2 +50 @@ This statement does not mean that outputs are complete or visible to consumers.
+-The local-boundary tail signals each active engine directly to Scalar, retaining
+-all eight internal event IDs. Advertising a prefix does not require placement on
++The local-boundary tail keeps the original internal event allocation. Advertising a prefix does not require placement on
+@@ -75,6 +76,6 @@ Current restrictions:
+-A gated handoff chooses one live WAIT predecessor on the same core. All WAIT
+-producers must already be launch-visible or complete; the boundary still waits
+-for every block of every required producer. A ready task with all inputs already
+-available may also inherit the previous same-kind task on its physical core;
+-its boundary only drains that local tail. RETAIN edges alone cannot authorize
+-a gated handoff. This mechanism does not invent missing data dependencies.
++A gated prefix waits for every required input producer at its local boundary.
++If its physical core has unfinished prior work, that local tail is drained
++first; the local predecessor need not be a data producer. An idle core may run
++the prefix before the input doorbell, without inventing a local predecessor.
++A ready task with all inputs available may also inherit the previous task on
++its physical core. This mechanism does not invent missing data dependencies.
+@@ -83,4 +84,7 @@ Within `manual_scope`, provide the original explicit dependency edges.
+-Predicated or `sync_start` consumers and runtime profiling fall back to ordinary
+-execution. Thus a profiling trace alone is not proof of Scalar overlap. Use
+-separate device-clock diagnostics and distinguish function return, compute
+-completion, store completion, and successor prefix execution.
++`sync_start` prefixes may execute early, but computation and ACK remain behind
++the original cohort doorbell. Local FIN precedes that wait so the scheduler can
++promote every pending member through its existing completion flow. Core
++selection, dispatch policy and user `allow_early_resolve` remain unchanged.
++Predicated consumers retain the original scheduler restriction. Runtime
++profiling still falls back to ordinary execution; use separate device-clock
++diagnostics to distinguish return, true completion and prefix overlap.
+diff --git a/docs/zh/api/system.md b/docs/zh/api/system.md
+index 4b6e764bb..9b5d37d02 100644
+--- a/docs/zh/api/system.md
++++ b/docs/zh/api/system.md
+@@ -58,8 +58,10 @@ with pl.spmd(blocks, name_hint="projection"):
+-gated 交接选择同核的一个真实 WAIT 前驱；所有 WAIT 前驱都须已可启动或已完成，
+-边界仍等待所有必需前驱的全部 block。输入已就绪的 ready task 也可承接本核上一同类 task，
+-此时仅排空本核旧尾部。仅有 RETAIN 边不能授权 gated 交接；本机制不补充缺失的数据依赖。
+-`manual_scope` 中仍需保留原有显式依赖边。
+-
+-带 predicate、`sync_start` 的后继以及运行时 profiling 退回普通执行。
+-因此不能仅凭 profiling 泳道证明 Scalar 重叠；应使用独立设备时钟诊断，
+-分别观察函数返回、计算完成、写回完成和后继前缀执行。
++gated 任务在局部 Wait 等待全部输入生产者；若本核还有未完成的前序任务，则先排空本核流水。
++本核前序任务无需是数据生产者。idle 核也可以先运行安全 Scalar，再等输入 doorbell，
++无需虚构本核前驱；输入已经就绪的后继仍可与本核前序任务交接。
++机制不补造数据依赖，`manual_scope` 内仍需原有显式依赖边。
++
++`sync_start` 的 Scalar 可以提前执行，计算和 ACK 仍等待原有整组 doorbell。
++本核真实 FIN 在等待整组之前发布，原调度器通过既有完成流程晋升 pending 成员，
++不改变核选择、派发策略或用户的 `allow_early_resolve`。
++predicate 消费者仍受原调度器限制；运行时 profiling 仍回退到普通执行。
++实际重叠使用独立设备时钟诊断，区分函数返回、真实完成和前缀执行。
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 448d94c1c..0d7437546 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -24 +24 @@ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "5c8418a02de8dce7f0f4e477a3f1d8fde2bf26e9"
++SIMPLER_KERNEL_REVISION = "8171b78c5b9368fbfed668f9a58647de69ea0c2c"
+diff --git a/runtime b/runtime
+index 5c8418a02..8171b78c5 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit 5c8418a02de8dce7f0f4e477a3f1d8fde2bf26e9
++Subproject commit 8171b78c5b9368fbfed668f9a58647de69ea0c2c
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+index 6e8b6c412..7b074c495 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_remote_dependency.py
+@@ -19,54 +19,75 @@ from pypto.runtime import ChipWorker, RunConfig
+-@pl.jit
+-def remote_dependency_probe(  # noqa: PLR0913 -- Independent data and trace buffers expose cross-core ordering.
+-    x: pl.Tensor[[3088, 256], pl.FP16],
+-    w: pl.Tensor[[128, 256], pl.FP16],
+-    local_out: pl.Out[pl.Tensor[[3088, 256], pl.FP32]],
+-    remote_out: pl.Out[pl.Tensor[[128, 256], pl.FP32]],
+-    out: pl.Out[pl.Tensor[[3088, 256], pl.FP32]],
+-    local_trace: pl.Out[pl.Tensor[[49, 8], pl.INT64]],
+-    remote_trace: pl.Out[pl.Tensor[[2, 8], pl.INT64]],
+-    trace: pl.Out[pl.Tensor[[49, 8], pl.INT64]],
+-    seed: pl.Scalar[pl.INT64],
+-    steps: pl.Scalar[pl.INT64],
+-    clock_modulus: pl.Scalar[pl.INT64],
+-):
+-    with pl.spmd(48, name_hint="unrelated_local_task", allow_early_resolve=True):
+-        block = pl.tile.get_block_idx()
+-        pl.system.wait_pre_task_end()
+-        pl.tensor.write(local_trace, [block, 0], pl.cast(block, pl.INT64))
+-        value = pl.cast(pl.load(x, [block * 64, 0], [64, 256]), pl.FP32)
+-        for _ in pl.range(1024 + (block % 4) * 512):
+-            value = pl.add(value, 1.0)
+-        pl.store(value, [block * 64, 0], local_out)
+-        pl.system.set_next_task_start()
+-    with pl.spmd(1, name_hint="remote_data_producer", allow_early_resolve=True):
+-        block = pl.tile.get_block_idx()
+-        pl.system.wait_pre_task_end()
+-        pl.tensor.write(remote_trace, [block, 0], pl.cast(block, pl.INT64))
+-        lhs_l1 = pl.load(x, [block * 128, 0], [128, 128], target_memory=pl.MemorySpace.Mat)
+-        rhs_l1 = pl.load(w, [0, 0], [128, 256], target_memory=pl.MemorySpace.Mat)
+-        lhs = pl.move(lhs_l1, target_memory=pl.MemorySpace.Left)
+-        rhs = pl.move(rhs_l1, target_memory=pl.MemorySpace.Right)
+-        acc = pl.matmul(lhs, rhs)
+-        for _ in pl.range(4096):
+-            acc = pl.matmul_acc(acc, lhs, rhs)
+-        pl.store(acc, [0, 0], remote_out)
+-        pl.system.set_next_task_start()
+-    with pl.spmd(48, name_hint="remote_data_consumer", allow_early_resolve=True):
+-        block = pl.tile.get_block_idx()
+-        core = pl.system.physical_core_id()
+-        begin = pl.system.read_clock()
+-        state = seed + pl.cast(block, pl.INT64) + begin % clock_modulus
+-        for _ in pl.range(steps):
+-            state = (state * 17 + 3) % 65521
+-        end = pl.system.read_clock(state)
+-        pl.system.wait_pre_task_end()
+-        after_wait = pl.system.read_clock()
+-        value = pl.load(remote_out, [0, 0], [64, 256])
+-        pl.store(pl.add(value, pl.cast(state, pl.FP32)), [block * 64, 0], out)
+-        pl.tensor.write(trace, [block, 0], core)
+-        pl.tensor.write(trace, [block, 1], begin)
+-        pl.tensor.write(trace, [block, 2], end)
+-        pl.tensor.write(trace, [block, 3], after_wait)
+-        pl.tensor.write(trace, [block, 4], state)
+-    return local_out, remote_out, out
++def _program(local_work: bool, sync_start: bool):
++    @pl.jit
++    def remote_dependency_probe(  # noqa: PLR0913 -- Independent data and trace buffers expose cross-core ordering.
++        x: pl.Tensor[[3088, 256], pl.FP16],
++        w: pl.Tensor[[128, 256], pl.FP16],
++        local_out: pl.Out[pl.Tensor[[3088, 256], pl.FP32]],
++        remote_out: pl.Out[pl.Tensor[[128, 256], pl.FP32]],
++        out: pl.Out[pl.Tensor[[3088, 256], pl.FP32]],
++        local_trace: pl.Out[pl.Tensor[[49, 8], pl.INT64]],
++        remote_trace: pl.Out[pl.Tensor[[2, 8], pl.INT64]],
++        trace: pl.Out[pl.Tensor[[49, 8], pl.INT64]],
++        seed: pl.Scalar[pl.INT64],
++        steps: pl.Scalar[pl.INT64],
++        clock_modulus: pl.Scalar[pl.INT64],
++    ):
++        if local_work:
++            with pl.spmd(48, name_hint="unrelated_local_task", allow_early_resolve=True):
++                block = pl.tile.get_block_idx()
++                pl.system.wait_pre_task_end()
++                pl.tensor.write(local_trace, [block, 0], pl.cast(block, pl.INT64))
++                value = pl.cast(pl.load(x, [block * 64, 0], [64, 256]), pl.FP32)
++                for _ in pl.range(1024 + (block % 4) * 512):
++                    value = pl.add(value, 1.0)
++                pl.store(value, [block * 64, 0], local_out)
++                pl.system.set_next_task_start()
++        with pl.spmd(1, name_hint="remote_data_producer", allow_early_resolve=True):
++            block = pl.tile.get_block_idx()
++            pl.system.wait_pre_task_end()
++            pl.tensor.write(remote_trace, [block, 0], pl.cast(block, pl.INT64))
++            lhs_l1 = pl.load(x, [block * 128, 0], [128, 128], target_memory=pl.MemorySpace.Mat)
++            rhs_l1 = pl.load(w, [0, 0], [128, 256], target_memory=pl.MemorySpace.Mat)
++            lhs = pl.move(lhs_l1, target_memory=pl.MemorySpace.Left)
++            rhs = pl.move(rhs_l1, target_memory=pl.MemorySpace.Right)
++            acc = pl.matmul(lhs, rhs)
++            for _ in pl.range(4096):
++                acc = pl.matmul_acc(acc, lhs, rhs)
++            pl.store(acc, [0, 0], remote_out)
++            pl.system.set_next_task_start()
++        with pl.spmd(48, name_hint="remote_data_consumer", allow_early_resolve=True, sync_start=sync_start):
++            block = pl.tile.get_block_idx()
++            core = pl.system.physical_core_id()
++            begin = pl.system.read_clock()
++            state = seed + pl.cast(block, pl.INT64) + begin % clock_modulus
++            for _ in pl.range(steps):
++                state = (state * 17 + 3) % 65521
++            end = pl.system.read_clock(state)
++            pl.system.wait_pre_task_end()
++            after_wait = pl.system.read_clock()
++            value = pl.load(remote_out, [0, 0], [64, 256])
++            pl.store(pl.add(value, pl.cast(state, pl.FP32)), [block * 64, 0], out)
++            pl.tensor.write(trace, [block, 0], core)
++            pl.tensor.write(trace, [block, 1], begin)
++            pl.tensor.write(trace, [block, 2], end)
++            pl.tensor.write(trace, [block, 3], after_wait)
++            pl.tensor.write(trace, [block, 4], state)
++        return local_out, remote_out, out
++
++    return remote_dependency_probe
++
++
++def _validate_local_handoffs(local, consumer, remote, sync_start: bool):
++    overlaps = []
++    for prior_block, prior in enumerate(local):
++        assert 0 < prior[1] <= prior[2] <= prior[5] <= prior[7] <= prior[3]
++        assert prior[4] == 7
++        for block, row in enumerate(consumer):
++            if prior[0] == row[0] and prior[2] <= row[1]:
++                assert row[3] >= prior[3], "consumer reused its core before the local tail drained"
++                if row[2] <= prior[5] and prior[7] - prior[5] > 5 and row[1] < remote[3]:
++                    overlaps.append({"local_block": prior_block, "consumer_block": block})
++    if sync_start and local:
++        assert min(row[3] for row in consumer) >= max(row[3] for row in local), (
++            "sync_start computation began before every local core drained"
++        )
++    return overlaps
+@@ -76,2 +97,7 @@ def remote_dependency_probe(  # noqa: PLR0913 -- Independent data and trace buff
+-def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path: Path, monkeypatch):
+-    output = Path(test_config.save_kernels_dir or tmp_path) / "remote_dependency"
++@pytest.mark.parametrize("local_work", [True, False], ids=["pending", "idle"])
++@pytest.mark.parametrize("sync_start", [False, True], ids=["regular", "sync_start"])
++def test_gated_prefix_with_unrelated_local_task(
++    test_config: RunConfig, tmp_path: Path, monkeypatch, local_work: bool, sync_start: bool
++):
++    case = f"remote_dependency_local{int(local_work)}_sync{int(sync_start)}"
++    output = Path(test_config.save_kernels_dir or tmp_path) / case
+@@ -79,0 +106,2 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
++    if not local_work:
++        del trace_params["unrelated_local_task"]
+@@ -102 +130 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-    compiled = remote_dependency_probe.compile(
++    compiled = _program(local_work, sync_start).compile(
+@@ -110,2 +138,3 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-    if os.environ.get("TASK_DEVICE") is not None:
+-        assert str(test_config.device_id) == os.environ["TASK_DEVICE"], "use the queue-assigned card"
++    assert os.environ.get("TASK_DEVICE", str(test_config.device_id)) == str(test_config.device_id), (
++        "use the queue-assigned card"
++    )
+@@ -147 +175,0 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-                overlaps = []
+@@ -153 +181,4 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-                    assert torch.equal(hosts[2][region], hosts[0][region].float() + 1024 + block % 4 * 512)
++                    if local_work:
++                        assert torch.equal(
++                            hosts[2][region], hosts[0][region].float() + 1024 + block % 4 * 512
++                        )
+@@ -158,9 +189,5 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-                    for prior_block, prior in enumerate(local):
+-                        assert 0 < prior[1] <= prior[2] <= prior[5] <= prior[7] <= prior[3]
+-                        assert prior[4] == 7
+-                        if prior[0] == row[0] and prior[2] <= row[1]:
+-                            assert row[3] >= prior[3], (
+-                                "consumer reused its core before the local tail drained"
+-                            )
+-                            if row[2] <= prior[5] and prior[7] - prior[5] > 5 and row[1] < remote[3]:
+-                                overlaps.append({"local_block": prior_block, "consumer_block": block})
++                if not local_work:
++                    assert torch.isnan(hosts[2]).all()
++                    assert torch.equal(hosts[5], torch.full_like(hosts[5], -1))
++                overlaps = _validate_local_handoffs(local if local_work else [], consumer, remote, sync_start)
++                early_prefixes = sum(row[2] < remote[3] for row in consumer)
+@@ -177,0 +205 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
++                        "prefixes_before_remote_completion": early_prefixes,
+@@ -187 +215,3 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-                "graph": "AIC A -> AIV B; AIV X independent",
++                "graph": "AIC A -> AIV B; optional unrelated AIV X",
++                "local_work": local_work,
++                "sync_start": sync_start,
+@@ -195,2 +225,2 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
+-    assert any(s["unrelated_local_overlaps"] for s in samples), (
+-        "no gated prefix overlapped unrelated local work"
++    assert all(s["prefixes_before_remote_completion"] > 0 for s in samples), (
++        "no checked prefix executed ahead of the full-fanin gate"
+@@ -197,0 +228,4 @@ def test_gated_prefix_with_unrelated_local_task(test_config: RunConfig, tmp_path
++    if local_work:
++        assert any(s["unrelated_local_overlaps"] for s in samples), (
++            "no gated prefix overlapped unrelated local work"
++        )
