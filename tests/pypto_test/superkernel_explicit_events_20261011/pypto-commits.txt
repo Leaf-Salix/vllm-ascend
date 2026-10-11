@@ -1,0 +1,17 @@
+commit 555d0fffeb520c9f6504542f9ccde48c7b85df56
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    test(runtime): 复用真实显式同步 IR 验证同核提前交接
+
+    将两任务小例子的正常同步插入结果序列化为 PTO IR，再经显式同步入口
+    编译执行，保留所有 load/compute/store 依赖，不用删除同步造虚假重叠。
+    仅移除需由前端重新生成的 keep-prefix 与尾部包装，生成前后的 IR 均保存。
+    沿用局部 Wait/Set、原派发、完整通知、输出保护区和改变输入后的重放检查。
+
+    单卡0任务 task_20261011_223620_61477522673 退出0：AIC两组后到交接15/14次，
+    重放19次；AIV 有正常同核交接，本轮未观测后到命中。
+    完整输出、fanin、保护区及重放通过。本项验证编译覆盖，不提供新性能结论，
+    不重测CSA七档或16卡，不更改生产PyPTO生成器。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

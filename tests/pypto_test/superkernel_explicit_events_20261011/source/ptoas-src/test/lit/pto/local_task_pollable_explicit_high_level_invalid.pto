@@ -1,0 +1,11 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// Licensed under the CANN Open Software License Agreement Version 2.0.
+// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+// CHECK: late task handoff reserves EVENT_ID7 on this notification pipe pair
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @manual_high_level_conflict() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
+    pto.record_event [#pto.pipe_event_type<TLOAD>, #pto.pipe_event_type<TSTORE_VEC>, #pto.event<EVENT_ID7>]
+    pto.wait_event [#pto.pipe_event_type<TLOAD>, #pto.pipe_event_type<TSTORE_VEC>, #pto.event<EVENT_ID7>]
+    return
+  }
+}

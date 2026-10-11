@@ -1,0 +1,59 @@
+module attributes {pto.backend = "emitc", pto.kernel_kind = #pto.kernel_kind<cube>, pto.target_arch = "a3"} {
+  func.func @late_producer(%arg0: !pto.ptr<i64, gm>, %arg1: !pto.ptr<f16, gm>, %arg2: !pto.ptr<f16, gm>, %arg3: !pto.ptr<f32, gm>, %arg4: i64, %arg5: !pto.ptr<i64, gm>, %arg6: i64, %arg7: i32, %arg8: i32) attributes {pto.auto_sync_tail_hint = "runtime_barrier_all", pto.kernel_kind = #pto.kernel_kind<cube>, pto.runtime_late_handoff, pto.scalar_prefix} {
+    %c64_i64 = arith.constant 64 : i64
+    %c32832_i64 = arith.constant 32832 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %c32 = arith.constant 32 : index
+    %c1 = arith.constant 1 : index
+    %c3088 = arith.constant 3088 : index
+    %c256 = arith.constant 256 : index
+    %c128 = arith.constant 128 : index
+    %c23 = arith.constant 23 : index
+    %c0 = arith.constant 0 : index
+    %0 = pto.make_tensor_view %arg1, shape = [%c3088, %c256], strides = [%c256, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf16>
+    %1 = pto.make_tensor_view %arg2, shape = [%c128, %c256], strides = [%c256, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf16>
+    %2 = pto.make_tensor_view %arg3, shape = [%c3088, %c256], strides = [%c256, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>
+    %3 = arith.index_cast %arg7 : i32 to index
+    %4 = arith.index_cast %3 : index to i64
+    call @pypto_wait_pre_task_end(%arg5, %arg6) : (!pto.ptr<i64, gm>, i64) -> ()
+    %5 = arith.index_cast %3 : index to i64
+    %6 = arith.muli %3, %c32 : index
+    %7 = arith.addi %6, %c23 : index
+    pto.store %5, %arg0[%7] {pto.scalar_prefix_store} : !pto.ptr<i64, gm>, i64
+    %8 = pto.alloc_tile addr = %c64_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>
+    %9 = arith.muli %3, %c128 : index
+    %10 = arith.maxsi %9, %c0 : index
+    %11 = pto.partition_view %0, offsets = [%10, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xf16>
+    pto.tload ins(%11 : !pto.partition_tensor_view<128x128xf16>) outs(%8 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) {layout = #pto.layout<nd>}
+    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]
+    %12 = pto.alloc_tile addr = %c32832_i64 valid_row = %c128 valid_col = %c256 : !pto.tile_buf<mat, 128x256xf16, valid=?x?, blayout=col_major, slayout=row_major>
+    %13 = pto.partition_view %1, offsets = [%c0, %c0], sizes = [%c128, %c256] : !pto.tensor_view<?x?xf16>
+    pto.tload ins(%13 : !pto.partition_tensor_view<128x256xf16>) outs(%12 : !pto.tile_buf<mat, 128x256xf16, valid=?x?, blayout=col_major, slayout=row_major>) {layout = #pto.layout<nd>}
+    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID1>]
+    %14 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]
+    pto.tmov ins(%8 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) outs(%14 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>)
+    %15 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c256 : !pto.tile_buf<right, 128x256xf16, valid=?x?, slayout=col_major>
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID1>]
+    pto.tmov ins(%12 : !pto.tile_buf<mat, 128x256xf16, valid=?x?, blayout=col_major, slayout=row_major>) outs(%15 : !pto.tile_buf<right, 128x256xf16, valid=?x?, slayout=col_major>)
+    pto.set_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID0>]
+    %16 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c256 : !pto.tile_buf<acc, 128x256xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>
+    pto.wait_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID0>]
+    pto.tmatmul ins(%14, %15 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>, !pto.tile_buf<right, 128x256xf16, valid=?x?, slayout=col_major>) outs(%16 : !pto.tile_buf<acc, 128x256xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>)
+    %17 = arith.index_cast %arg4 : i64 to index
+    scf.for %arg9 = %c0 to %17 step %c1 {
+      pto.barrier <PIPE_M>
+      pto.tmatmul.acc ins(%16, %14, %15 : !pto.tile_buf<acc, 128x256xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>, !pto.tile_buf<right, 128x256xf16, valid=?x?, slayout=col_major>) outs(%16 : !pto.tile_buf<acc, 128x256xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>)
+    }
+    pto.set_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]
+    %18 = arith.muli %3, %c128 : index
+    %19 = arith.maxsi %18, %c0 : index
+    %20 = pto.partition_view %2, offsets = [%19, %c0], sizes = [%c128, %c256] : !pto.tensor_view<?x?xf32>
+    pto.wait_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]
+    pto.tstore ins(%16 : !pto.tile_buf<acc, 128x256xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>) outs(%20 : !pto.partition_tensor_view<128x256xf32>) {layout = #pto.layout<nd>}
+    call @pypto_set_next_task_start(%arg5) : (!pto.ptr<i64, gm>) -> ()
+    return
+  }
+  func.func private @pypto_wait_pre_task_end(!pto.ptr<i64, gm>, i64)
+  func.func private @pypto_set_next_task_start(!pto.ptr<i64, gm>)
+}
