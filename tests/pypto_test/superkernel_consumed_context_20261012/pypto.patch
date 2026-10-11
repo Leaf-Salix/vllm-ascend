@@ -1,0 +1,27 @@
+commit 2b10dfa655e88ea30c3e22b0023aea2f2f0761e5
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 07:03:45 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 07:03:45 2026 +0800
+
+    build(TMR): 对齐省去边界指针清零的 Simpler 私有运行时
+    
+    将 kernel 模式的 Simpler revision 固定到 7043f8c1b，与已通过 AIC/AIV/MIX 及 128K/B16 图重放验证的单次边界消费实现一致。仅更新私有 SDK 引用，描述符布局、局部 Wait/Set 接口及生成的算子算术均不改变。
+    
+    Simpler 仍在 FIN 前刷新控制缓存行，并在新派发代次初始化两个指针；此依赖更新不放宽尾部等待、fan-in/cohort 或早解析语义。同步重建私有 binding、运行时、torch 桥接与后续 CSA 产物，保留严格 revision 一致性检查。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 361f3e447..57582fc03 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "1d09ecd3411ca9ba8046f28fea131186a013d446"
++SIMPLER_KERNEL_REVISION = "7043f8c1b71ba5dad1f8ea70fb2e4703d8b9368d"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
