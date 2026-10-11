@@ -1,0 +1,94 @@
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1183,0 +1184,42 @@
++def _apply_task_boundary_joins(func_name: str, helper: str, ptoas_code: str) -> tuple[str, str, set[str]]:
++    """Use only compiler-proved tail joins, retaining the notification fill pipe."""
++    marker = "// PYPTO_TASK_BOUNDARY_JOINS_V1 "
++    pattern = re.compile(r"// PYPTO_TASK_BOUNDARY_JOINS_V1 ([A-Za-z_][A-Za-z0-9_]*) mask=([0-9]+)")
++    masks = {}
++    for line in ptoas_code.splitlines():
++        if not line.startswith(marker):
++            continue
++        match = pattern.fullmatch(line)
++        if not match or match[1] in masks or not 0 < int(match[2]) < 32:
++            raise ValueError(f"invalid or duplicate PTOAS tail-join contract: {line}")
++        masks[match[1]] = int(match[2])
++    if not masks:
++        return helper, "", set()
++    if func_name in masks:
++        if not helper:
++            raise ValueError(f"PTOAS reduced joins for {func_name} without a tail callback")
++        cube = "create_cbuf_matrix" in helper
++        pipes = ("MTE2", "MTE1", "M", "FIX", "V")
++        original = 0x0F if cube else 0x11
++        fill = 0x01 if cube else 0x10
++        mask = masks[func_name]
++        if mask & ~original or not mask & fill:
++            raise ValueError(f"tail-join mask {mask} does not preserve the physical core's fill pipe")
++        old = "\n".join(
++            f"    {op}_flag(PIPE_{pipe}, PIPE_MTE3, EVENT_ID7);"
++            for op in ("set", "wait")
++            for i, pipe in enumerate(pipes)
++            if original & (1 << i)
++        )
++        new = "\n".join(
++            f"    {op}_flag(PIPE_{pipe}, PIPE_MTE3, EVENT_ID7);"
++            for op in ("set", "wait")
++            for i, pipe in enumerate(pipes)
++            if mask & (1 << i)
++        )
++        if helper.count(old) != 1:
++            raise ValueError("incomplete direct notification joins for compiler-proved reduction")
++        helper = helper.replace(old, new)
++    return helper, "#define PYPTO_TASK_BOUNDARY_JOINS_V1 1\n", set(masks)
++
++
+@@ -1191 +1233,3 @@
+-    helper, contract, relays = _apply_task_boundary_relay(func_name, helper, ptoas_code)
++    helper, contract, joins = _apply_task_boundary_joins(func_name, helper, ptoas_code)
++    helper, relay_contract, relays = _apply_task_boundary_relay(func_name, helper, ptoas_code)
++    contract += relay_contract
+@@ -1230,0 +1275 @@
++        or joins.intersection(blocking | relays | set(allocations))
+diff --git a/tests/ut/backend/test_task_boundary_events.py b/tests/ut/backend/test_task_boundary_events.py
+--- a/tests/ut/backend/test_task_boundary_events.py
++++ b/tests/ut/backend/test_task_boundary_events.py
+@@ -149,0 +150,37 @@
++@pytest.mark.parametrize("cube,mask,removed", [(True, 7, "FIX"), (False, 16, "MTE2")])
++def test_proved_joins_keep_local_fill_and_notification_order(cube, mask, removed):
++    kind = ir.FunctionType.AIC if cube else ir.FunctionType.AIV
++    helper = _compiled_late_poll(SimpleNamespace(attrs={"task_boundary_scratch_base": 0}, func_type=kind))[0]
++    marker = f"// PYPTO_TASK_BOUNDARY_JOINS_V1 producer mask={mask}"
++    updated, contract = _apply_task_boundary_events("producer", helper, marker)
++    assert f"PIPE_{removed}, PIPE_MTE3" not in updated
++    fill = "MTE2" if cube else "V"
++    assert updated.index("create_cbuf_matrix" if cube else "vector_dup") < updated.index(
++        f"set_flag(PIPE_{fill}, PIPE_MTE3"
++    ) < updated.index(f"wait_flag(PIPE_{fill}, PIPE_MTE3") < updated.index("copy_")
++    assert "pipe_barrier(PIPE_MTE3)" in updated
++    assert contract == "#define PYPTO_TASK_BOUNDARY_JOINS_V1 1\n"
++
++
++@pytest.mark.parametrize("mask", [0, 1, 15, 32])
++def test_join_mask_cannot_drop_fill_or_add_wrong_core_pipes(mask):
++    with pytest.raises(ValueError, match="invalid|physical core"):
++        _apply_task_boundary_events(
++            "producer", vector_helper(), f"// PYPTO_TASK_BOUNDARY_JOINS_V1 producer mask={mask}"
++        )
++
++
++def test_reduced_joins_are_per_member_and_conflict_with_other_contracts():
++    marker = "// PYPTO_TASK_BOUNDARY_JOINS_V1 producer mask=16"
++    original = vector_helper()
++    assert _apply_task_boundary_events("other", original, marker)[0] == original
++    with pytest.raises(ValueError, match="duplicate"):
++        _apply_task_boundary_events("producer", original, f"{marker}\n{marker}")
++    with pytest.raises(ValueError, match="without a tail callback"):
++        _apply_task_boundary_events("producer", "", marker)
++    with pytest.raises(ValueError, match="both"):
++        _apply_task_boundary_events(
++            "producer", original, f"{marker}\n// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer"
++        )
++
++

@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+// CHECK-LABEL: case PTOAutoSyncTailMode::kRuntimeBarrierAll:
+// CHECK-NEXT: {{.*}}dynamic caller{{.*}}
+// CHECK: break;
+// CHECK: // PYPTO_TASK_BOUNDARY_JOINS_V1 runtime_pollable_vector mask=16
+// CHECK-LABEL: AICORE void runtime_pollable_vector(
+// CHECK-NOT: pipe_barrier(PIPE_ALL)
+// CHECK-NOT: EVENT_ID7
+// CHECK: TSTORE(
+// CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kRuntimeBarrierAll);
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @runtime_pollable_vector(%src: !pto.ptr<f32>, %dst: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff, pto.auto_sync_tail_hint = "runtime_barrier_all"} {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %cols = arith.constant 32 : index
+    %addr = arith.constant 0 : i64
+    %shape_src = pto.make_tensor_view %src, shape = [%one, %cols], strides = [%cols, %one] : !pto.tensor_view<1x32xf32>
+    %shape_dst = pto.make_tensor_view %dst, shape = [%one, %cols], strides = [%cols, %one] : !pto.tensor_view<1x32xf32>
+    %view_src = pto.partition_view %shape_src, offsets = [%zero, %zero], sizes = [%one, %cols] : !pto.tensor_view<1x32xf32> -> !pto.partition_tensor_view<1x32xf32>
+    %view_dst = pto.partition_view %shape_dst, offsets = [%zero, %zero], sizes = [%one, %cols] : !pto.tensor_view<1x32xf32> -> !pto.partition_tensor_view<1x32xf32>
+    %tile = pto.alloc_tile addr = %addr valid_row = %one valid_col = %cols : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%view_src : !pto.partition_tensor_view<1x32xf32>) outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%view_dst : !pto.partition_tensor_view<1x32xf32>)
+    return
+  }
+}

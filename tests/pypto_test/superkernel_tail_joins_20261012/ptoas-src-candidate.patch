@@ -1,0 +1,223 @@
+diff --git a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+--- a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
++++ b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+@@ -15,0 +16,2 @@
++inline constexpr const char *kTaskBoundaryJoinMask = "pto.runtime_late_join_mask";
++inline constexpr const char *kTaskBoundaryJoinMarker = "PYPTO_TASK_BOUNDARY_JOINS_V1";
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -246,0 +247,124 @@
++// A tail Wait can already cover a different pipeline's complete instruction
++// stream. Track its last Set, including empty loops and both branch outcomes.
++// This is deliberately limited to our own automatic synchronization: it does
++// not assume manually supplied event sequences are balanced.
++struct TailSetter {
++  int dst = -1;
++  int id = -1;
++  bool touched = false;
++};
++
++static TailSetter meetTailSetter(TailSetter a, TailSetter b) {
++  return {a.dst == b.dst && a.id == b.id ? a.dst : -1,
++          a.dst == b.dst && a.id == b.id ? a.id : -1,
++          a.touched || b.touched};
++}
++
++static TailSetter trackTailSetter(Operation *op, PIPE pipe, TailSetter state);
++
++static TailSetter trackTailRegion(Region &region, PIPE pipe, TailSetter state) {
++  if (region.empty()) return state;
++  if (!region.hasOneBlock()) return {-1, -1, true};
++  for (Operation &op : region.front()) state = trackTailSetter(&op, pipe, state);
++  return state;
++}
++
++static TailSetter trackTailSetter(Operation *op, PIPE pipe, TailSetter state) {
++  if (auto set = dyn_cast<SetFlagOp>(op)) {
++    if (set.getSrcPipe().getPipe() == pipe)
++      return {static_cast<int>(set.getDstPipe().getPipe()),
++              static_cast<int>(set.getEventId().getEvent()), true};
++    return state;
++  }
++  if (auto wait = dyn_cast<WaitFlagOp>(op))
++    return wait.getDstPipe().getPipe() == pipe ? TailSetter{-1, -1, true} : state;
++  if (auto set = dyn_cast<SetFlagDynOp>(op))
++    return set.getSrcPipe().getPipe() == pipe ? TailSetter{-1, -1, true} : state;
++  if (auto wait = dyn_cast<WaitFlagDynOp>(op))
++    return wait.getDstPipe().getPipe() == pipe ? TailSetter{-1, -1, true} : state;
++  if (auto branch = dyn_cast<scf::IfOp>(op))
++    return meetTailSetter(trackTailRegion(branch.getThenRegion(), pipe, state),
++                          trackTailRegion(branch.getElseRegion(), pipe, state));
++  if (auto loop = dyn_cast<scf::ForOp>(op)) {
++    // Meet with the zero-trip path. Once the incoming exact token is lost,
++    // another iteration cannot restore a fact common to *all* trip counts.
++    return meetTailSetter(state, trackTailRegion(loop.getRegion(), pipe, state));
++  }
++  if (op->hasAttr("pto.auto_sync_tail_barrier")) return state;
++  if (auto model = getSyncMacroModel(op)) {
++    for (auto &phase : model->phases)
++      if (static_cast<int>(phase.pipe) == static_cast<int>(pipe)) return {-1, -1, true};
++    for (auto &event : model->hiddenEvents)
++      if (static_cast<int>(event.srcPipe) == static_cast<int>(pipe) ||
++          static_cast<int>(event.dstPipe) == static_cast<int>(pipe)) return {-1, -1, true};
++    return state;
++  }
++  if (auto barrier = dyn_cast<BarrierOp>(op))
++    return barrier.getPipe().getPipe() == pipe || barrier.getPipe().getPipe() == PIPE::PIPE_ALL
++               ? TailSetter{-1, -1, true} : state;
++  if (auto piped = dyn_cast<OpPipeInterface>(op))
++    return piped.getPipe() == pipe || piped.getPipe() == PIPE::PIPE_ALL
++               ? TailSetter{-1, -1, true} : state;
++  StringRef name = op->getName().getStringRef();
++  if (name.starts_with("arith.") || isa<scf::YieldOp, func::ReturnOp>(op) ||
++      name == "pto.make_tensor_view" || name == "pto.partition_view" ||
++      name == "pto.alloc_tile" || name == "pto.declare_tile") return state;
++  if (auto call = dyn_cast<func::CallOp>(op)) {
++    if (call.getCallee() == "pypto_set_next_task_start" ||
++        call.getCallee() == "pypto_keep_prefix" ||
++        call.getCallee() == "pypto_read_device_clock" ||
++        call.getCallee() == "pypto_read_physical_core_id") return state;
++  }
++  // Unknown helper, communication macro, region, or pipeline: retain the join.
++  return {-1, -1, true};
++}
++
++static void coalesceAutomaticTailJoins(func::FuncOp func) {
++  if (!func->hasAttr("pto.runtime_late_handoff") || !func.getBody().hasOneBlock()) return;
++  auto hint = func->getAttrOfType<StringAttr>("pto.auto_sync_tail_hint");
++  auto kind = func->getAttrOfType<FunctionKernelKindAttr>(FunctionKernelKindAttr::name);
++  if (!hint || hint.getValue() != "runtime_barrier_all" || !kind) return;
++  bool cube = kind.getKernelKind() == FunctionKernelKind::Cube;
++  if (!cube && kind.getKernelKind() != FunctionKernelKind::Vector) return;
++  bool communication = false;
++  func.walk([&](Operation *op) {
++    StringRef name = op->getName().getStringRef();
++    communication |= name.starts_with("pto.tpush") || name.starts_with("pto.tpop") ||
++                     name.starts_with("pto.tfree") || name.starts_with("pto.sync.");
++  });
++  // FIFO macros have additional implementation-local flags. Their original
++  // completion contract remains intact until those effects have a full model.
++  if (communication) return;
++  const std::array<PIPE, 5> pipes = {
++      PIPE::PIPE_MTE2, PIPE::PIPE_MTE1, PIPE::PIPE_M, PIPE::PIPE_FIX, PIPE::PIPE_V};
++  unsigned mask = cube ? 0x0f : 0x11;
++  const unsigned originalMask = mask;
++  const unsigned fillPipe = cube ? 0 : 4;
++  std::array<int, 5> coveredBy;
++  coveredBy.fill(-1);
++  for (unsigned i = 0; i < pipes.size(); ++i) {
++    if (!(mask & (1u << i)) || i == fillPipe) continue;
++    TailSetter state;
++    for (Operation &op : func.front()) {
++      state.touched = false;
++      if (auto wait = dyn_cast<WaitFlagOp>(&op)) {
++        if (wait.getSrcPipe().getPipe() == pipes[i] &&
++            state.dst == static_cast<int>(wait.getDstPipe().getPipe()) &&
++            state.id == static_cast<int>(wait.getEventId().getEvent())) {
++          auto dst = wait.getDstPipe().getPipe();
++          coveredBy[i] = dst == PIPE::PIPE_MTE3 ? 5 : taskBoundaryEventIndex(dst);
++        }
++      }
++      state = trackTailSetter(&op, pipes[i], state);
++      if (state.touched) coveredBy[i] = -1;
++    }
++  }
++  for (unsigned i = 0; i < pipes.size(); ++i) {
++    int dst = coveredBy[i];
++    if (dst == 5 || (dst >= 0 && dst != static_cast<int>(i) && (mask & (1u << dst))))
++      mask &= ~(1u << i);
++  }
++  if (mask != originalMask)
++    func->setAttr(kTaskBoundaryJoinMask, IntegerAttr::get(IntegerType::get(func.getContext(), 32), mask));
++}
++
+@@ -268,0 +393 @@
++      func->removeAttr(kTaskBoundaryJoinMask);
+@@ -356,0 +482 @@
++    coalesceAutomaticTailJoins(func);
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -692,0 +693,8 @@
++        if (auto mask = func->getAttrOfType<IntegerAttr>(kTaskBoundaryJoinMask)) {
++          std::string metadata = "// ";
++          metadata += kTaskBoundaryJoinMarker;
++          metadata += " " + func.getSymName().str() + " mask=" + std::to_string(mask.getInt());
++          metadata += "\n#ifndef PYPTO_TASK_BOUNDARY_JOINS_V1\n"
++                      "#error reduced tail joins require a matching PyPTO wrapper\n#endif";
++          builder.create<emitc::VerbatimOp>(func.getLoc(), builder.getStringAttr(metadata));
++        }
+diff --git a/test/lit/pto/local_task_tail_pollable.pto b/test/lit/pto/local_task_tail_pollable.pto
+--- a/test/lit/pto/local_task_tail_pollable.pto
++++ b/test/lit/pto/local_task_tail_pollable.pto
+@@ -12,0 +13 @@
++// CHECK: // PYPTO_TASK_BOUNDARY_JOINS_V1 runtime_pollable_vector mask=16
+diff --git a/test/lit/pto/local_task_tail_proved_joins.pto b/test/lit/pto/local_task_tail_proved_joins.pto
+new file mode 100644
+--- /dev/null
++++ b/test/lit/pto/local_task_tail_proved_joins.pto
+@@ -0,0 +1,63 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// Dynamic trip count includes zero. The generated initial and loop-tail FIX
++// tokens must agree, and a subsequent conditional store invalidates the proof.
++// CHECK: // PYPTO_TASK_BOUNDARY_JOINS_V1 loop_join mask=7
++// CHECK-NOT: // PYPTO_TASK_BOUNDARY_JOINS_V1 later_fix_work
++// CHECK: #error reduced tail joins require a matching PyPTO wrapper
++// CHECK: void loop_join
++// CHECK: wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0)
++// CHECK: void later_fix_work
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @loop_join(%src: !pto.ptr<f16>, %dst: !pto.ptr<f32>, %count: index, %condition: i1)
++      attributes {pto.kernel_kind = #pto.kernel_kind<cube>, pto.runtime_late_handoff, pto.auto_sync_tail_hint = "runtime_barrier_all"} {
++    %zero = arith.constant 0 : index
++    %one = arith.constant 1 : index
++    %n = arith.constant 16 : index
++    %addr = arith.constant 512 : i64
++    %sv = pto.make_tensor_view %src, shape = [%n, %n], strides = [%n, %one] : !pto.tensor_view<16x16xf16>
++    %dv = pto.make_tensor_view %dst, shape = [%n, %n], strides = [%n, %one] : !pto.tensor_view<16x16xf32>
++    %s = pto.partition_view %sv, offsets = [%zero, %zero], sizes = [%n, %n] : !pto.tensor_view<16x16xf16> -> !pto.partition_tensor_view<16x16xf16>
++    %d = pto.partition_view %dv, offsets = [%zero, %zero], sizes = [%n, %n] : !pto.tensor_view<16x16xf32> -> !pto.partition_tensor_view<16x16xf32>
++    %l1 = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
++    %a = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
++    %b = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>
++    %c = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
++    scf.for %i = %zero to %count step %one {
++      pto.tload ins(%s : !pto.partition_tensor_view<16x16xf16>) outs(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
++      pto.tmov ins(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%a : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
++      pto.tmov ins(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%b : !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
++      pto.tmatmul ins(%a, %b : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%c : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
++      pto.tstore ins(%c : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%d : !pto.partition_tensor_view<16x16xf32>)
++    }
++
++    return
++  }
++  func.func @later_fix_work(%src: !pto.ptr<f16>, %dst: !pto.ptr<f32>, %count: index, %condition: i1)
++      attributes {pto.kernel_kind = #pto.kernel_kind<cube>, pto.runtime_late_handoff, pto.auto_sync_tail_hint = "runtime_barrier_all"} {
++    %zero = arith.constant 0 : index
++    %one = arith.constant 1 : index
++    %n = arith.constant 16 : index
++    %addr = arith.constant 512 : i64
++    %sv = pto.make_tensor_view %src, shape = [%n, %n], strides = [%n, %one] : !pto.tensor_view<16x16xf16>
++    %dv = pto.make_tensor_view %dst, shape = [%n, %n], strides = [%n, %one] : !pto.tensor_view<16x16xf32>
++    %s = pto.partition_view %sv, offsets = [%zero, %zero], sizes = [%n, %n] : !pto.tensor_view<16x16xf16> -> !pto.partition_tensor_view<16x16xf16>
++    %d = pto.partition_view %dv, offsets = [%zero, %zero], sizes = [%n, %n] : !pto.tensor_view<16x16xf32> -> !pto.partition_tensor_view<16x16xf32>
++    %l1 = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
++    %a = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
++    %b = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>
++    %c = pto.alloc_tile addr = %addr : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
++    scf.for %i = %zero to %count step %one {
++      pto.tload ins(%s : !pto.partition_tensor_view<16x16xf16>) outs(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
++      pto.tmov ins(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%a : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
++      pto.tmov ins(%l1 : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%b : !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
++      pto.tmatmul ins(%a, %b : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%c : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
++      pto.tstore ins(%c : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%d : !pto.partition_tensor_view<16x16xf32>)
++    }
++    scf.if %condition {
++      pto.tstore ins(%c : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%d : !pto.partition_tensor_view<16x16xf32>)
++    }
++    return
++  }
++}
