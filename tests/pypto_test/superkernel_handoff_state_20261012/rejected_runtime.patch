@@ -1,0 +1,16 @@
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -347,10 +347,11 @@
+             // handoff_scalar_prefix already invalidated this exact generation.
+             // Its ACK is withheld, so AICPU cannot recycle the slot meanwhile.
+             // Do not flush/reload the entire cache a second time on the handoff.
+-            if (task_id != prepared_prefix_task_id) dcci(exec_payload, ENTIRE_DATA_CACHE);
++            // Only this recorded generation has an installed local predecessor.
++            bool scalar_prefix_handoff = task_id == prepared_prefix_task_id;
++            if (!scalar_prefix_handoff) dcci(exec_payload, ENTIRE_DATA_CACHE);
+             prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+             prepared_predecessor = nullptr;
+-            bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
+ 
+             // Early-dispatch gate. A gated task was staged on this core before its
+             // dependencies resolved; wait until AICPU rings the doorbell

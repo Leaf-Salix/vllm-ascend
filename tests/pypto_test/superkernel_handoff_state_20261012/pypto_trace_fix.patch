@@ -1,0 +1,35 @@
+commit 5c0a87310dc1f75dc2c20f95b8ce5506d3ccc0fc
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 07:41:11 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 07:41:11 2026 +0800
+
+    test(TMR): 按低字节校验完成标志并保留通知路径信息
+    
+    同核交接诊断的 trace[4] 低8位表示完整完成，高位记录是否发送通知
+    以及后续交接等路径。纯 AIC/AIV 的断言把整字段限定为7，合法值
+    263（7加通知标记256）也会失败；MIX 夹具已经按低字节检查。
+    
+    统一纯核夹具的完成标志口径，不改变运行时、不忽略输入输出或保护区，
+    保留前驱返回/等待/完成、后继前缀和等待结束的所有顺序断言。
+    
+    验证：候选运行时单卡 AIC/AIV/MIX 三项通过、每项两次输入；CPU检查
+    确认合法通知标记被接受，但缺失完成位与提前越过前驱完成仍会失败。
+    Ruff、格式与diff检查通过。该修改只修复诊断夹具，不构成性能收益。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+index 262fcfebb..9e5fb86d8 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+@@ -207,7 +207,8 @@ def _program(cube: bool, branch_wait: bool | str = False):
+ def _trace_sample(a, b, repeat: int):
+     overlaps = []
+     for ai, row in enumerate(a):
+-        assert 0 < row[1] <= row[2] <= row[5] <= row[7] <= row[3] and row[4] == 7
++        # The low byte records completion; upper bits describe optional notification paths.
++        assert 0 < row[1] <= row[2] <= row[5] <= row[7] <= row[3] and row[4] & 255 == 7
+         for bi, successor in enumerate(b):
+             assert 0 < successor[1] <= successor[2] <= successor[3]
+             if row[0] != successor[0] or row[2] > successor[1]:
