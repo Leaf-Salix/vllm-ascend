@@ -1,0 +1,636 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_nested_branch_requires_one_wait_per_path[missing_wait] __________
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0')
+repeat_wait = False
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                block = pl.tile.get_block_idx()
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [block], value)
+                pl.system.set_next_task_start()
+    
+        with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+>           invalid_boundary.compile(
+                config=replace(test_config, save_kernels_dir=str(tmp_path / "invalid_boundary")),
+                runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+            )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3727: in _compile
+    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)
+python/pypto/ir/compile.py:385: in compile
+    return _compile_impl(
+python/pypto/ir/compile.py:509: in _compile_impl
+    files = generate(
+python/pypto/backend/pto_backend.py:2154: in generate
+    return _generate_single_chip(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+transformed_program = <pypto.pypto_core.ir.Program object at 0xfffdb0a23890>
+output_dir = '/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0/invalid_boundary'
+skip_ptoas = False
+
+    def _generate_single_chip(
+        transformed_program: _ir_core.Program,
+        output_dir: str,
+        skip_ptoas: bool = False,
+        *,
+        memory_planner: _passes.MemoryPlanner = _passes.MemoryPlanner.PYPTO,
+        emit_source_loc: bool = True,
+        dump_ptoas_passes: bool = False,
+        runtime: _passes.RuntimeKind = _passes.RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+    ) -> dict[str, str]:
+        """Generate artifacts for a single-chip (L0-L2) program.
+    
+        Assumes the program contains at most one Orchestration function.
+        Multi-orch programs are pre-split by :func:`_generate_multi_chip`
+        (called from the top-level :func:`generate` dispatcher), so each
+        sub-program reaching this function has exactly one orch.
+        """
+        result_files: dict[str, str] = {}
+        errors: list[tuple[str, Exception]] = []
+        prof = CompileProfiler.current()
+    
+        orch_func = next(
+            (
+                f
+                for f in transformed_program.functions.values()
+                if f.func_type == _ir_core.FunctionType.Orchestration
+            ),
+            None,
+        )
+    
+        groups, ungrouped = _build_group_mapping(transformed_program)
+    
+        _validate_task_boundary_dispatch(transformed_program, runtime, groups)
+    
+        # Builtin-template kernels are generated from a template rather than by
+        # PyPTO codegen, so they are skipped in the same places external kernels are
+        # — but their source is written into this artifact, not referenced in place.
+        def _skips_pto_codegen(func: _ir_core.Function) -> bool:
+            return _external_source_of(func) is not None or _builtin_template_of(func) is not None
+    
+        result_files.update(_render_builtin_kernel_sources(transformed_program))
+    
+        emitted_incore_funcs = [
+            func for members in groups.values() for func in members if not _skips_pto_codegen(func)
+        ] + [func for func in ungrouped if not _skips_pto_codegen(func)]
+    
+        # External kernels are referenced at their original path in the manifest
+        # (kept beside their sibling sources so relative #include "../..." resolve),
+        # so PyPTO neither codegens nor copies them.
+        func_name_to_external_source: dict[str, str] = {
+            f.name: src
+            for f in transformed_program.functions.values()
+            if (src := _external_source_of(f)) is not None
+        }
+        func_name_to_external_include_dirs: dict[str, tuple[str, ...]] = {
+            f.name: include_dirs
+            for f in transformed_program.functions.values()
+            if _external_source_of(f) is not None
+            if (include_dirs := _external_include_dirs_of(f))
+        }
+    
+        # ── Phase 1: IR → MLIR (sequential, fast) ────────────────────────
+        # PTOCodegen converts IR to MLIR strings. This is cheap (pure string
+        # generation) and runs sequentially so that we don't contend on the GIL.
+        # When ptoas owns memory planning, omit the physical `pto.alloc_tile addr`
+        # so ptoas runs at --pto-level=level2 (which rejects any addr operand).
+        emit_tile_addr = memory_planner != _passes.MemoryPlanner.PTOAS
+        # Source locations let ptoas name the user's .py line instead of a line in
+        # the generated artifact (which, under @pl.jit, the user never sees).
+        units: list[_CodegenUnit] = []
+    
+        # Grouped functions: one MLIR module per group
+        for group_name, members in groups.items():
+            try:
+                # External kernels are referenced in place (see the manifest map);
+                # skip PyPTO codegen for them. A group must be all-external or
+                # all-DSL — mixing is rejected (the DSL members would need cross-core
+                # protocol wiring the external source can't participate in).
+                ext_members = [m for m in members if _external_source_of(m) is not None]
+                if ext_members:
+                    if len(ext_members) != len(members):
+                        dsl = ", ".join(m.name for m in members if _external_source_of(m) is None)
+                        raise RuntimeError(
+                            f"Group '{group_name}' mixes external and DSL kernels "
+                            f"(DSL members: {dsl}). A group must be all-external or all-DSL."
+                        )
+                    continue
+                grouped_program = _ir_core.Program(members, group_name, transformed_program.span)
+                stage = StageRecord(name=f"kernel_codegen:{group_name}", start=time.perf_counter())
+                ir_record = StageRecord(name="ir_to_mlir", start=time.perf_counter())
+                pto_code = _codegen_core.PTOCodegen().generate(
+                    grouped_program, emit_tile_addr=emit_tile_addr, emit_source_loc=emit_source_loc
+                )
+                ir_record.end = time.perf_counter()
+                stage.children.append(ir_record)
+                units.append(_CodegenUnit(group_name, pto_code, members, is_group=True, stage_record=stage))
+            except Exception as e:
+                func_names = ", ".join(m.name for m in members)
+                logger.error("Failed to compile group '%s' [%s]: %s", group_name, func_names, e)
+                errors.append((group_name, e))
+    
+        for func in ungrouped:
+            try:
+                # External kernel: referenced in place (see the manifest map).
+                # Builtin-template kernel: already rendered into this artifact.
+                # Either way, skip PyPTO codegen.
+                if _skips_pto_codegen(func):
+                    continue
+                peer_names = _extract_peer_function_names(func)
+                peer_funcs: list[_ir_core.Function] = []
+                for name in peer_names:
+                    peer_func = transformed_program.get_function(name)
+                    if peer_func is not None:
+                        peer_funcs.append(peer_func)
+                single_program = _ir_core.Program([*peer_funcs, func], func.name, transformed_program.span)
+                stage = StageRecord(name=f"kernel_codegen:{func.name}", start=time.perf_counter())
+                ir_record = StageRecord(name="ir_to_mlir", start=time.perf_counter())
+                pto_code = _codegen_core.PTOCodegen().generate(
+                    single_program, emit_tile_addr=emit_tile_addr, emit_source_loc=emit_source_loc
+                )
+                ir_record.end = time.perf_counter()
+                stage.children.append(ir_record)
+                units.append(_CodegenUnit(func.name, pto_code, [func], is_group=False, stage_record=stage))
+            except Exception as e:
+                logger.error("Failed to compile function '%s': %s", func.name, e)
+                errors.append((func.name, e))
+    
+        # ── Phase 2: ptoas (parallel, slow) ──────────────────────────────
+        # Each _emit_unit call runs the ptoas subprocess and generates the
+        # kernel wrapper.  These are data-independent and subprocess-heavy, so
+        # a thread pool gives real parallelism (subprocess.run releases the GIL).
+        _run_ptoas_phase(
+            units,
+            output_dir,
+            skip_ptoas,
+            prof,
+            result_files,
+            errors,
+            memory_planner=memory_planner,
+            dump_ptoas_passes=dump_ptoas_passes,
+        )
+    
+        # Orchestration + config
+        if orch_func is not None:
+            try:
+                with _profiling_stage(prof, "orchestration_codegen"):
+                    orch_result = _codegen_core.generate_orchestration(transformed_program, orch_func)
+                result_files[f"orchestration/{orch_func.name}.cpp"] = (
+                    f"// Orchestration Function: {orch_func.name}\n"
+                    f"// Generated by PyPTO IR Compiler\n\n"
+                    f"{orch_result.code}"
+                )
+                # A graph with no PyPTO-generated kernel has no PTOAS phase to skip.
+                # It still needs the manifest so the runtime can compile those
+                # sources with CCEC and assemble the orchestration.
+                codegen_free_kernels = {
+                    f.name for f in transformed_program.functions.values() if _skips_pto_codegen(f)
+                }
+                all_kernels_external = all(name in codegen_free_kernels for name in orch_result.func_name_to_id)
+                if not skip_ptoas or all_kernels_external:
+                    result_files["kernel_config.py"] = _generate_config_file(
+                        orch_func.name,
+                        orch_result.func_name_to_id,
+                        orch_result.func_name_to_core_type,
+                        orch_result.func_name_to_signature,
+                        orch_result.orchestration_signature,
+                        func_name_to_external_source,
+                        func_name_to_external_include_dirs,
+                        enable_sdma=any(_uses_sdma_workspace(func) for func in emitted_incore_funcs),
+                        runtime=runtime,
+                    )
+            except Exception as e:
+                logger.error("Failed to generate orchestration '%s': %s", orch_func.name, e)
+                errors.append((orch_func.name, e))
+    
+        if errors:
+            report = _format_error_report(errors, output_dir)
+            if result_files:
+>               raise PartialCodegenError(report, result_files)
+E               pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+E               
+E                 Function             | Error
+E                 ---------------------+--------------------------------------------------------------
+E                 invalid_nested_wait  | ptoas compilation failed:
+E                                      | loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-
+E                                      | overlap-demo-
+E                                      | 20261009/pypto/tests/st/runtime/scheduling/test_local_task_b
+E                                      | oundary_overlap.py":79:21): error: unsafe operation before
+E                                      | Scalar-prefix wait boundary
+E                 ---------------------+--------------------------------------------------------------
+E               
+E                 Full details: /tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0/invalid_boundary/report/codegen_errors.txt
+
+python/pypto/backend/pto_backend.py:2651: PartialCodegenError
+
+During handling of the above exception, another exception occurred:
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0')
+repeat_wait = False
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                block = pl.tile.get_block_idx()
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [block], value)
+                pl.system.set_next_task_start()
+    
+>       with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'Scalar-prefix entry requires exactly one unconditional top-level predecessor wait'
+E        Input: '1 function(s) failed to compile:\n\n  Function             | Error\n  ---------------------+--------------------------------------------------------------\n  invalid_nested_wait  | ptoas compilation failed:\n                       | loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-\n                       | overlap-demo-\n                       | 20261009/pypto/tests/st/runtime/scheduling/test_local_task_b\n                       | oundary_overlap.py":79:21): error: unsafe operation before\n                       | Scalar-prefix wait boundary\n  ---------------------+--------------------------------------------------------------\n\n  Full details: /tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0/invalid_boundary/report/codegen_errors.txt'
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:93: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    pypto.backend.pto_backend:pto_backend.py:1983 Failed to compile function 'invalid_nested_wait': ptoas compilation failed: loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":79:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":80:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":86:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":89:17): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":90:17): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":91:13): error: unsafe operation before Scalar-prefix wait boundary
+loc("/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0/invalid_boundary/ptoas/invalid_nested_wait.pto":29:3): error: unsafe operation before Scalar-prefix wait boundary
+loc("/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on0/invalid_boundary/ptoas/invalid_nested_wait.pto":2:3): error: Scalar-prefix entry requires exactly one unconditional top-level predecessor wait
+_________ test_nested_branch_requires_one_wait_per_path[repeated_wait] _________
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1')
+repeat_wait = True
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                block = pl.tile.get_block_idx()
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [block], value)
+                pl.system.set_next_task_start()
+    
+        with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+>           invalid_boundary.compile(
+                config=replace(test_config, save_kernels_dir=str(tmp_path / "invalid_boundary")),
+                runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+            )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3727: in _compile
+    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)
+python/pypto/ir/compile.py:385: in compile
+    return _compile_impl(
+python/pypto/ir/compile.py:509: in _compile_impl
+    files = generate(
+python/pypto/backend/pto_backend.py:2154: in generate
+    return _generate_single_chip(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+transformed_program = <pypto.pypto_core.ir.Program object at 0xfffdb008ef30>
+output_dir = '/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1/invalid_boundary'
+skip_ptoas = False
+
+    def _generate_single_chip(
+        transformed_program: _ir_core.Program,
+        output_dir: str,
+        skip_ptoas: bool = False,
+        *,
+        memory_planner: _passes.MemoryPlanner = _passes.MemoryPlanner.PYPTO,
+        emit_source_loc: bool = True,
+        dump_ptoas_passes: bool = False,
+        runtime: _passes.RuntimeKind = _passes.RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+    ) -> dict[str, str]:
+        """Generate artifacts for a single-chip (L0-L2) program.
+    
+        Assumes the program contains at most one Orchestration function.
+        Multi-orch programs are pre-split by :func:`_generate_multi_chip`
+        (called from the top-level :func:`generate` dispatcher), so each
+        sub-program reaching this function has exactly one orch.
+        """
+        result_files: dict[str, str] = {}
+        errors: list[tuple[str, Exception]] = []
+        prof = CompileProfiler.current()
+    
+        orch_func = next(
+            (
+                f
+                for f in transformed_program.functions.values()
+                if f.func_type == _ir_core.FunctionType.Orchestration
+            ),
+            None,
+        )
+    
+        groups, ungrouped = _build_group_mapping(transformed_program)
+    
+        _validate_task_boundary_dispatch(transformed_program, runtime, groups)
+    
+        # Builtin-template kernels are generated from a template rather than by
+        # PyPTO codegen, so they are skipped in the same places external kernels are
+        # — but their source is written into this artifact, not referenced in place.
+        def _skips_pto_codegen(func: _ir_core.Function) -> bool:
+            return _external_source_of(func) is not None or _builtin_template_of(func) is not None
+    
+        result_files.update(_render_builtin_kernel_sources(transformed_program))
+    
+        emitted_incore_funcs = [
+            func for members in groups.values() for func in members if not _skips_pto_codegen(func)
+        ] + [func for func in ungrouped if not _skips_pto_codegen(func)]
+    
+        # External kernels are referenced at their original path in the manifest
+        # (kept beside their sibling sources so relative #include "../..." resolve),
+        # so PyPTO neither codegens nor copies them.
+        func_name_to_external_source: dict[str, str] = {
+            f.name: src
+            for f in transformed_program.functions.values()
+            if (src := _external_source_of(f)) is not None
+        }
+        func_name_to_external_include_dirs: dict[str, tuple[str, ...]] = {
+            f.name: include_dirs
+            for f in transformed_program.functions.values()
+            if _external_source_of(f) is not None
+            if (include_dirs := _external_include_dirs_of(f))
+        }
+    
+        # ── Phase 1: IR → MLIR (sequential, fast) ────────────────────────
+        # PTOCodegen converts IR to MLIR strings. This is cheap (pure string
+        # generation) and runs sequentially so that we don't contend on the GIL.
+        # When ptoas owns memory planning, omit the physical `pto.alloc_tile addr`
+        # so ptoas runs at --pto-level=level2 (which rejects any addr operand).
+        emit_tile_addr = memory_planner != _passes.MemoryPlanner.PTOAS
+        # Source locations let ptoas name the user's .py line instead of a line in
+        # the generated artifact (which, under @pl.jit, the user never sees).
+        units: list[_CodegenUnit] = []
+    
+        # Grouped functions: one MLIR module per group
+        for group_name, members in groups.items():
+            try:
+                # External kernels are referenced in place (see the manifest map);
+                # skip PyPTO codegen for them. A group must be all-external or
+                # all-DSL — mixing is rejected (the DSL members would need cross-core
+                # protocol wiring the external source can't participate in).
+                ext_members = [m for m in members if _external_source_of(m) is not None]
+                if ext_members:
+                    if len(ext_members) != len(members):
+                        dsl = ", ".join(m.name for m in members if _external_source_of(m) is None)
+                        raise RuntimeError(
+                            f"Group '{group_name}' mixes external and DSL kernels "
+                            f"(DSL members: {dsl}). A group must be all-external or all-DSL."
+                        )
+                    continue
+                grouped_program = _ir_core.Program(members, group_name, transformed_program.span)
+                stage = StageRecord(name=f"kernel_codegen:{group_name}", start=time.perf_counter())
+                ir_record = StageRecord(name="ir_to_mlir", start=time.perf_counter())
+                pto_code = _codegen_core.PTOCodegen().generate(
+                    grouped_program, emit_tile_addr=emit_tile_addr, emit_source_loc=emit_source_loc
+                )
+                ir_record.end = time.perf_counter()
+                stage.children.append(ir_record)
+                units.append(_CodegenUnit(group_name, pto_code, members, is_group=True, stage_record=stage))
+            except Exception as e:
+                func_names = ", ".join(m.name for m in members)
+                logger.error("Failed to compile group '%s' [%s]: %s", group_name, func_names, e)
+                errors.append((group_name, e))
+    
+        for func in ungrouped:
+            try:
+                # External kernel: referenced in place (see the manifest map).
+                # Builtin-template kernel: already rendered into this artifact.
+                # Either way, skip PyPTO codegen.
+                if _skips_pto_codegen(func):
+                    continue
+                peer_names = _extract_peer_function_names(func)
+                peer_funcs: list[_ir_core.Function] = []
+                for name in peer_names:
+                    peer_func = transformed_program.get_function(name)
+                    if peer_func is not None:
+                        peer_funcs.append(peer_func)
+                single_program = _ir_core.Program([*peer_funcs, func], func.name, transformed_program.span)
+                stage = StageRecord(name=f"kernel_codegen:{func.name}", start=time.perf_counter())
+                ir_record = StageRecord(name="ir_to_mlir", start=time.perf_counter())
+                pto_code = _codegen_core.PTOCodegen().generate(
+                    single_program, emit_tile_addr=emit_tile_addr, emit_source_loc=emit_source_loc
+                )
+                ir_record.end = time.perf_counter()
+                stage.children.append(ir_record)
+                units.append(_CodegenUnit(func.name, pto_code, [func], is_group=False, stage_record=stage))
+            except Exception as e:
+                logger.error("Failed to compile function '%s': %s", func.name, e)
+                errors.append((func.name, e))
+    
+        # ── Phase 2: ptoas (parallel, slow) ──────────────────────────────
+        # Each _emit_unit call runs the ptoas subprocess and generates the
+        # kernel wrapper.  These are data-independent and subprocess-heavy, so
+        # a thread pool gives real parallelism (subprocess.run releases the GIL).
+        _run_ptoas_phase(
+            units,
+            output_dir,
+            skip_ptoas,
+            prof,
+            result_files,
+            errors,
+            memory_planner=memory_planner,
+            dump_ptoas_passes=dump_ptoas_passes,
+        )
+    
+        # Orchestration + config
+        if orch_func is not None:
+            try:
+                with _profiling_stage(prof, "orchestration_codegen"):
+                    orch_result = _codegen_core.generate_orchestration(transformed_program, orch_func)
+                result_files[f"orchestration/{orch_func.name}.cpp"] = (
+                    f"// Orchestration Function: {orch_func.name}\n"
+                    f"// Generated by PyPTO IR Compiler\n\n"
+                    f"{orch_result.code}"
+                )
+                # A graph with no PyPTO-generated kernel has no PTOAS phase to skip.
+                # It still needs the manifest so the runtime can compile those
+                # sources with CCEC and assemble the orchestration.
+                codegen_free_kernels = {
+                    f.name for f in transformed_program.functions.values() if _skips_pto_codegen(f)
+                }
+                all_kernels_external = all(name in codegen_free_kernels for name in orch_result.func_name_to_id)
+                if not skip_ptoas or all_kernels_external:
+                    result_files["kernel_config.py"] = _generate_config_file(
+                        orch_func.name,
+                        orch_result.func_name_to_id,
+                        orch_result.func_name_to_core_type,
+                        orch_result.func_name_to_signature,
+                        orch_result.orchestration_signature,
+                        func_name_to_external_source,
+                        func_name_to_external_include_dirs,
+                        enable_sdma=any(_uses_sdma_workspace(func) for func in emitted_incore_funcs),
+                        runtime=runtime,
+                    )
+            except Exception as e:
+                logger.error("Failed to generate orchestration '%s': %s", orch_func.name, e)
+                errors.append((orch_func.name, e))
+    
+        if errors:
+            report = _format_error_report(errors, output_dir)
+            if result_files:
+>               raise PartialCodegenError(report, result_files)
+E               pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+E               
+E                 Function             | Error
+E                 ---------------------+--------------------------------------------------------------
+E                 invalid_nested_wait  | ptoas compilation failed:
+E                                      | loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-
+E                                      | overlap-demo-
+E                                      | 20261009/pypto/tests/st/runtime/scheduling/test_local_task_b
+E                                      | oundary_overlap.py":79:21): error: unsafe operation before
+E                                      | Scalar-prefix wait boundary
+E                 ---------------------+--------------------------------------------------------------
+E               
+E                 Full details: /tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1/invalid_boundary/report/codegen_errors.txt
+
+python/pypto/backend/pto_backend.py:2651: PartialCodegenError
+
+During handling of the above exception, another exception occurred:
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1')
+repeat_wait = True
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                block = pl.tile.get_block_idx()
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [block], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [block], value)
+                pl.system.set_next_task_start()
+    
+>       with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'Scalar-prefix entry requires exactly one unconditional top-level predecessor wait'
+E        Input: '1 function(s) failed to compile:\n\n  Function             | Error\n  ---------------------+--------------------------------------------------------------\n  invalid_nested_wait  | ptoas compilation failed:\n                       | loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-\n                       | overlap-demo-\n                       | 20261009/pypto/tests/st/runtime/scheduling/test_local_task_b\n                       | oundary_overlap.py":79:21): error: unsafe operation before\n                       | Scalar-prefix wait boundary\n  ---------------------+--------------------------------------------------------------\n\n  Full details: /tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1/invalid_boundary/report/codegen_errors.txt'
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:93: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    pypto.backend.pto_backend:pto_backend.py:1983 Failed to compile function 'invalid_nested_wait': ptoas compilation failed: loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":79:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":80:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":84:25): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":85:25): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":86:21): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":89:17): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":90:17): error: unsafe operation before Scalar-prefix wait boundary
+loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":91:13): error: unsafe operation before Scalar-prefix wait boundary
+loc("/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1/invalid_boundary/ptoas/invalid_nested_wait.pto":31:3): error: unsafe operation before Scalar-prefix wait boundary
+loc("/tmp/pytest-of-qinchuanyu/pytest-194/test_nested_branch_requires_on1/invalid_boundary/ptoas/invalid_nested_wait.pto":2:3): error: Scalar-prefix entry requires exactly one unconditional top-level predecessor wait
+=============================== warnings summary ===============================
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: 14 warnings
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/st/runtime/scheduling/test_local_task_boundary_overlap.py::test_nested_branch_requires_one_wait_per_path[missing_wait]
+FAILED tests/st/runtime/scheduling/test_local_task_boundary_overlap.py::test_nested_branch_requires_one_wait_per_path[repeated_wait]
+2 failed, 8 deselected, 18 warnings in 1.01s

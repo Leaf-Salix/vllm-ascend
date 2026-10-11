@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="5.235" timestamp="2026-10-12T07:23:04.503782+08:00" hostname="liteserver-hps-365a-00001"><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_overlap" name="test_local_boundary_overlap[nested_wait-aiv]" time="0.066"><failure message="pypto.language.parser.diagnostics.exceptions.ParserTypeError: Unsupported constant type: &lt;class 'str'&gt;">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-195/test_local_boundary_overlap_ne0')
+cube = False, branch_wait = 'nested'
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffda29f0fa0&gt;
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("cube", [False, True], ids=["aiv", "aic"])
+    @pytest.mark.parametrize(
+        "branch_wait", [False, True, "nested"], ids=["flat_wait", "branch_wait", "nested_wait"]
+    )
+    def test_local_boundary_overlap(
+        test_config: RunConfig, tmp_path: Path, cube: bool, branch_wait: bool | str, monkeypatch
+    ):
+        blocks = 24 if cube else 48
+        tile_rows = 128 if cube else 64
+        rows = blocks * tile_rows + 16
+        name = "local_aic" if cube else "local_aiv"
+        suffix = "_nested" if branch_wait == "nested" else "_branch" if branch_wait else ""
+        output = Path(test_config.save_kernels_dir or tmp_path) / f"{name}{suffix}"
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        traced = []
+    
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name == "boundary_probe_producer":
+                trace = next(p for p in func.params if p.name_hint.startswith("a_trace"))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+    
+        # Only the test harness selects a diagnostic buffer. Task capabilities
+        # still come entirely from the local Set/Wait operations.
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+&gt;       compiled = _program(cube, branch_wait).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3721: in _compile
+    parsed = pl.parse(source, filename=self._diagnostic_filename, source_map=specializer.source_map)
+python/pypto/language/parser/text_parser.py:261: in parse
+    exec(compiled_code, exec_ns)
+&lt;jit:boundary_probe&gt;:4: in &lt;module&gt;
+    ???
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1380: in parse_statement
+    self.parse_with_statement(stmt)
+python/pypto/language/parser/ast_parser.py:6161: in parse_with_statement
+    self._parse_legacy_scope(
+python/pypto/language/parser/ast_parser.py:4322: in _parse_legacy_scope
+    self._parse_spmd_scope(stmt, context_expr, scope_kind_map, optional_vars=optional_vars)
+python/pypto/language/parser/ast_parser.py:5040: in _parse_spmd_scope
+    self._emit_spmd_body(
+python/pypto/language/parser/ast_parser.py:4955: in _emit_spmd_body
+    self._parse_body_siblings(stmt.body)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1378: in parse_statement
+    self.parse_if_statement(stmt)
+python/pypto/language/parser/ast_parser.py:3786: in parse_if_statement
+    condition = self.parse_expression(stmt.test)
+python/pypto/language/parser/ast_parser.py:6338: in parse_expression
+    return self.parse_constant(expr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffda295aaa0&gt;
+const = &lt;ast.Constant object at 0xfffda299e890&gt;
+
+    def parse_constant(self, const: ast.Constant) -&gt; ir.Expr:
+        """Parse constant value.
+    
+        Args:
+            const: Constant AST node
+    
+        Returns:
+            IR constant expression
+        """
+        span = self.span_tracker.get_span(const)
+        value = const.value
+    
+        if isinstance(value, bool):
+            return ir.ConstBool(value, span)
+        elif isinstance(value, int):
+            return ir.ConstInt(value, DataType.INDEX, span)
+        elif isinstance(value, float):
+            return ir.ConstFloat(value, DataType.DEFAULT_CONST_FLOAT, span)
+        elif value is None:
+            # ``None`` is the "no producer yet" TaskId sentinel — the Pythonic
+            # spelling of an invalid TaskId. Used to seed a TaskId loop
+            # carry (``prev_tid = None``) or as a ``deps=[None]`` entry.
+            # Lowers to ``system.task_invalid`` -&gt; Scalar[TASK_ID]; codegen
+            # emits ``TaskId::invalid()`` and downstream ``set_dependencies``
+            # skips it via an ``is_valid()`` guard.
+            return ir.create_op_call("system.task_invalid", [], {}, span)
+        else:
+&gt;           raise ParserTypeError(
+                f"Unsupported constant type: {type(value)}",
+                span=self.span_tracker.get_span(const),
+                hint="Use int, float, bool, or None (TaskId sentinel) constants",
+            )
+E           pypto.language.parser.diagnostics.exceptions.ParserTypeError: Unsupported constant type: &lt;class 'str'&gt;
+
+python/pypto/language/parser/ast_parser.py:6420: ParserTypeError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_overlap" name="test_local_boundary_overlap[nested_wait-aic]" time="0.053"><failure message="pypto.language.parser.diagnostics.exceptions.ParserTypeError: Unsupported constant type: &lt;class 'str'&gt;">test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=&lt;ExecutionMode.ONBOARD: 1&gt;, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-195/test_local_boundary_overlap_ne1')
+cube = True, branch_wait = 'nested'
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0xfffda2442350&gt;
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("cube", [False, True], ids=["aiv", "aic"])
+    @pytest.mark.parametrize(
+        "branch_wait", [False, True, "nested"], ids=["flat_wait", "branch_wait", "nested_wait"]
+    )
+    def test_local_boundary_overlap(
+        test_config: RunConfig, tmp_path: Path, cube: bool, branch_wait: bool | str, monkeypatch
+    ):
+        blocks = 24 if cube else 48
+        tile_rows = 128 if cube else 64
+        rows = blocks * tile_rows + 16
+        name = "local_aic" if cube else "local_aiv"
+        suffix = "_nested" if branch_wait == "nested" else "_branch" if branch_wait else ""
+        output = Path(test_config.save_kernels_dir or tmp_path) / f"{name}{suffix}"
+        original_wrapper = pto_backend._generate_kernel_wrapper
+        traced = []
+    
+        def instrument_wrapper(func, *args, **kwargs):
+            if func.name == "boundary_probe_producer":
+                trace = next(p for p in func.params if p.name_hint.startswith("a_trace"))
+                func = ir.Function(
+                    func.name,
+                    list(zip(func.params, func.param_directions)),
+                    func.return_types,
+                    func.body,
+                    func.span,
+                    type=func.func_type,
+                    level=func.level,
+                    role=func.role,
+                    attrs={**dict(func.attrs), "async_return_trace": trace},
+                    requires_runtime_binding=func.requires_runtime_binding,
+                    ir_stage=func.ir_stage,
+                )
+                traced.append(func.name)
+            return original_wrapper(func, *args, **kwargs)
+    
+        # Only the test harness selects a diagnostic buffer. Task capabilities
+        # still come entirely from the local Set/Wait operations.
+        monkeypatch.setattr(pto_backend, "_generate_kernel_wrapper", instrument_wrapper)
+&gt;       compiled = _program(cube, branch_wait).compile(
+            config=replace(test_config, save_kernels_dir=str(output)),
+            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+        )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3721: in _compile
+    parsed = pl.parse(source, filename=self._diagnostic_filename, source_map=specializer.source_map)
+python/pypto/language/parser/text_parser.py:261: in parse
+    exec(compiled_code, exec_ns)
+&lt;jit:boundary_probe&gt;:4: in &lt;module&gt;
+    ???
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1380: in parse_statement
+    self.parse_with_statement(stmt)
+python/pypto/language/parser/ast_parser.py:6161: in parse_with_statement
+    self._parse_legacy_scope(
+python/pypto/language/parser/ast_parser.py:4322: in _parse_legacy_scope
+    self._parse_spmd_scope(stmt, context_expr, scope_kind_map, optional_vars=optional_vars)
+python/pypto/language/parser/ast_parser.py:5040: in _parse_spmd_scope
+    self._emit_spmd_body(
+python/pypto/language/parser/ast_parser.py:4955: in _emit_spmd_body
+    self._parse_body_siblings(stmt.body)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1378: in parse_statement
+    self.parse_if_statement(stmt)
+python/pypto/language/parser/ast_parser.py:3786: in parse_if_statement
+    condition = self.parse_expression(stmt.test)
+python/pypto/language/parser/ast_parser.py:6338: in parse_expression
+    return self.parse_constant(expr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdf9205870&gt;
+const = &lt;ast.Constant object at 0xfffda2986dd0&gt;
+
+    def parse_constant(self, const: ast.Constant) -&gt; ir.Expr:
+        """Parse constant value.
+    
+        Args:
+            const: Constant AST node
+    
+        Returns:
+            IR constant expression
+        """
+        span = self.span_tracker.get_span(const)
+        value = const.value
+    
+        if isinstance(value, bool):
+            return ir.ConstBool(value, span)
+        elif isinstance(value, int):
+            return ir.ConstInt(value, DataType.INDEX, span)
+        elif isinstance(value, float):
+            return ir.ConstFloat(value, DataType.DEFAULT_CONST_FLOAT, span)
+        elif value is None:
+            # ``None`` is the "no producer yet" TaskId sentinel — the Pythonic
+            # spelling of an invalid TaskId. Used to seed a TaskId loop
+            # carry (``prev_tid = None``) or as a ``deps=[None]`` entry.
+            # Lowers to ``system.task_invalid`` -&gt; Scalar[TASK_ID]; codegen
+            # emits ``TaskId::invalid()`` and downstream ``set_dependencies``
+            # skips it via an ``is_valid()`` guard.
+            return ir.create_op_call("system.task_invalid", [], {}, span)
+        else:
+&gt;           raise ParserTypeError(
+                f"Unsupported constant type: {type(value)}",
+                span=self.span_tracker.get_span(const),
+                hint="Use int, float, bool, or None (TaskId sentinel) constants",
+            )
+E           pypto.language.parser.diagnostics.exceptions.ParserTypeError: Unsupported constant type: &lt;class 'str'&gt;
+
+python/pypto/language/parser/ast_parser.py:6420: ParserTypeError</failure></testcase><testcase classname="tests.st.runtime.scheduling.test_local_task_boundary_mix" name="test_mixed_members_enter_prefix_before_group_completion[nested_wait]" time="2.844" /></testsuite></testsuites>

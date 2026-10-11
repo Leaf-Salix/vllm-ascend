@@ -1,0 +1,368 @@
+..FF                                                                     [100%]
+=================================== FAILURES ===================================
+_________ test_nested_branch_requires_one_wait_per_path[missing_wait] __________
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-193/test_nested_branch_requires_on0')
+repeat_wait = False
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [0], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [0], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [0], value)
+                pl.system.set_next_task_start()
+    
+        with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+>           invalid_boundary.compile(
+                config=replace(test_config, save_kernels_dir=str(tmp_path / "invalid_boundary")),
+                runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+            )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:96: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3721: in _compile
+    parsed = pl.parse(source, filename=self._diagnostic_filename, source_map=specializer.source_map)
+python/pypto/language/parser/text_parser.py:261: in parse
+    exec(compiled_code, exec_ns)
+<jit:invalid_boundary>:4: in <module>
+    ???
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1380: in parse_statement
+    self.parse_with_statement(stmt)
+python/pypto/language/parser/ast_parser.py:6161: in parse_with_statement
+    self._parse_legacy_scope(
+python/pypto/language/parser/ast_parser.py:4322: in _parse_legacy_scope
+    self._parse_spmd_scope(stmt, context_expr, scope_kind_map, optional_vars=optional_vars)
+python/pypto/language/parser/ast_parser.py:5040: in _parse_spmd_scope
+    self._emit_spmd_body(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffd87355b40>
+stmt = <ast.With object at 0xfffd87357190>
+span = /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:74:9
+scope_kind = ScopeKind.Spmd
+core_num = <pypto.pypto_core.ir.ConstInt object at 0xfffd87373210>
+sync_start = False, name_hint = 'invalid_nested_wait', split_mode = None
+split_slot_num = None, scope_attrs = []
+
+    def _emit_spmd_body(  # noqa: PLR0913 — args map 1:1 to the SpmdScopeStmt fields
+        self,
+        stmt: ast.With,
+        span: "ir.Span",
+        scope_kind: "ir.ScopeKind",
+        core_num: "ir.Expr",
+        sync_start: bool,
+        name_hint: str,
+        split_mode: "ir.SplitMode | None",
+        split_slot_num: "int | None",
+        scope_attrs: "list[tuple[str, Any]]",
+    ) -> None:
+        """Emit the ``SpmdScopeStmt`` body shared by the plain and ``as tid`` with-forms.
+    
+        The two forms differ only in ``scope_attrs`` (the ``as tid`` form adds
+        ``task_id_var`` / ``manual_dep_edges``); the body dispatch is identical:
+    
+        The body shape decides whether an inner ``InCoreScopeStmt`` carrier is
+        synthesised. The test is semantic — does the body do per-block work
+        itself, or dispatch it? — not a statement count: a dispatch body may
+        legally hold several statements once ``FlattenCallExpr`` has hoisted a
+        nested call arg, or the multi-output tuple desugar has split an assign
+        into a temp plus projections.
+    
+        * an explicit ``with pl.at(<CORE_GROUP level>, ...):`` body → that nested
+          scope already *is* the carrier; parse it as an ordinary nested scope
+          (see :meth:`_is_explicit_incore_carrier`). This is the form the printer
+          emits, so recognising it here is what makes ``Spmd(InCore(...))``
+          round-trip.
+        * dispatch body (does not read the per-block index), no split and no slot
+          count → ``SpmdScopeStmt(body=<stmts>)`` with no inner InCore wrapper —
+          the callee is a pre-defined kernel that reads the block index
+          internally. This is also the shape ``OutlineIncoreScopes`` leaves behind
+          once an inline body is outlined, so the IR round-trips identically
+          across passes.
+        * inline body (reads the per-block index), or any body carrying an
+          ``optimizations=`` entry → wrap in ``InCoreScopeStmt(split, <body>)`` for
+          ``OutlineIncoreScopes`` to outline into a synthetic per-block kernel,
+          exactly like ``for i in pl.spmd(n):``. Both entries lower onto the InCore
+          scope (``split_`` and the ``slot_num`` attr), so either one forces the
+          wrapper.
+    
+        A body that neither reads the index nor dispatches a kernel does no
+        per-block differentiation at all and is rejected (see below). An explicit
+        carrier is exempt from that check: the user wrote the InCore scope
+        themselves, so the body is taken as deliberate.
+        """
+        # ``split_slot_num`` is weighed alongside ``split_mode`` throughout: the
+        # slot count lands on the *InCore* scope (OutlineIncoreScopes reads
+        # ``slot_num`` off InCoreScopeStmt only), so either entry alone is enough
+        # to require a carrier — and enough to collide with one the body already
+        # provides. Before pl.cross_core_slot existed the two were coupled:
+        # slot_num could only arrive via pl.split(mode, slot_num=N), which always
+        # set a mode.
+        has_optimization_entry = split_mode is not None or split_slot_num is not None
+        carrier = self._explicit_incore_carrier(stmt.body)
+        if carrier is not None:
+            # The nested ``pl.at(CORE_GROUP)`` already is the carrier, and an
+            # ``optimizations=`` entry has to land on it. One on the
+            # ``pl.spmd(...)`` line as well is either a duplicate or would have to
+            # be pushed into a scope the user wrote by hand — reject both rather
+            # than silently picking one or dropping it.
+            if has_optimization_entry:
+                carrier_has_entry = carrier.split_mode is not None or carrier.split_slot_num is not None
+                where = (
+                    "is specified twice: on `pl.spmd(...)` and on the inner"
+                    if carrier_has_entry
+                    else "belongs on the InCore scope, but the body already provides one as the inner"
+                )
+                raise ParserSyntaxError(
+                    f"`optimizations=` {where} `pl.at(level=pl.Level.CORE_GROUP, ...)`",
+                    span=span,
+                    hint="Keep `optimizations=[...]` on the inner `pl.at(...)` carrier only.",
+                )
+            needs_incore = False
+        else:
+            is_inline_body = self._spmd_body_reads_block_idx(stmt.body)
+            dispatch_count = 0 if is_inline_body else self._spmd_body_kernel_dispatch_count(stmt.body)
+            if not is_inline_body and dispatch_count == 0:
+>               raise ParserSyntaxError(
+                    "`with pl.spmd(...)` body neither reads the per-block index via "
+                    "`pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, "
+                    "so every block would run identical work.",
+                    span=span,
+                    hint="Add `i = pl.tile.get_block_idx()` inside the scope, dispatch a kernel "
+                    "that reads it, or use `for i in pl.spmd(n):` to bind the block index "
+                    "automatically.",
+                )
+E               pypto.language.parser.diagnostics.exceptions.ParserSyntaxError: `with pl.spmd(...)` body neither reads the per-block index via `pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, so every block would run identical work.
+
+python/pypto/language/parser/ast_parser.py:4873: ParserSyntaxError
+_________ test_nested_branch_requires_one_wait_per_path[repeated_wait] _________
+
+test_config = RunConfig(arch=BackendType.Ascend910B, execution_mode=<ExecutionMode.ONBOARD: 1>, device_id=0, rtol=1e-05, atol=1e-05,...config=None, distributed_config=None, analyze_auto_scopes_for_deps=False, memory_planner=None, dump_ptoas_passes=False)
+tmp_path = PosixPath('/tmp/pytest-of-qinchuanyu/pytest-193/test_nested_branch_requires_on1')
+repeat_wait = True
+
+    @pytest.mark.platforms("a2a3")
+    @pytest.mark.parametrize("repeat_wait", [False, True], ids=["missing_wait", "repeated_wait"])
+    def test_nested_branch_requires_one_wait_per_path(test_config: RunConfig, tmp_path: Path, repeat_wait: bool):
+        @pl.jit
+        def invalid_boundary(out: pl.Out[pl.Tensor[[64], pl.FP32]], choose: pl.Scalar[pl.INT64]):
+            with pl.spmd(1, name_hint="invalid_nested_wait"):
+                if choose > 0:
+                    if choose % 2 == 0:
+                        value = pl.const(1.0, pl.FP32)
+                        pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [0], value)
+                    else:
+                        value = pl.const(2.0, pl.FP32)
+                        if repeat_wait:
+                            pl.system.wait_pre_task_end()
+                            pl.system.wait_pre_task_end()
+                        pl.tensor.write(out, [0], value)
+                else:
+                    value = pl.const(3.0, pl.FP32)
+                    pl.system.wait_pre_task_end()
+                    pl.tensor.write(out, [0], value)
+                pl.system.set_next_task_start()
+    
+        with pytest.raises(
+            pto_backend.PartialCodegenError,
+            match=r"Scalar-prefix entry requires exactly one unconditional top-level predecessor wait",
+        ):
+>           invalid_boundary.compile(
+                config=replace(test_config, save_kernels_dir=str(tmp_path / "invalid_boundary")),
+                runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
+            )
+
+tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:96: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+python/pypto/jit/decorator.py:3721: in _compile
+    parsed = pl.parse(source, filename=self._diagnostic_filename, source_map=specializer.source_map)
+python/pypto/language/parser/text_parser.py:261: in parse
+    exec(compiled_code, exec_ns)
+<jit:invalid_boundary>:4: in <module>
+    ???
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1380: in parse_statement
+    self.parse_with_statement(stmt)
+python/pypto/language/parser/ast_parser.py:6161: in parse_with_statement
+    self._parse_legacy_scope(
+python/pypto/language/parser/ast_parser.py:4322: in _parse_legacy_scope
+    self._parse_spmd_scope(stmt, context_expr, scope_kind_map, optional_vars=optional_vars)
+python/pypto/language/parser/ast_parser.py:5040: in _parse_spmd_scope
+    self._emit_spmd_body(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffd870f3370>
+stmt = <ast.With object at 0xfffd870f0160>
+span = /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py:74:9
+scope_kind = ScopeKind.Spmd
+core_num = <pypto.pypto_core.ir.ConstInt object at 0xfffd86bfb2f0>
+sync_start = False, name_hint = 'invalid_nested_wait', split_mode = None
+split_slot_num = None, scope_attrs = []
+
+    def _emit_spmd_body(  # noqa: PLR0913 — args map 1:1 to the SpmdScopeStmt fields
+        self,
+        stmt: ast.With,
+        span: "ir.Span",
+        scope_kind: "ir.ScopeKind",
+        core_num: "ir.Expr",
+        sync_start: bool,
+        name_hint: str,
+        split_mode: "ir.SplitMode | None",
+        split_slot_num: "int | None",
+        scope_attrs: "list[tuple[str, Any]]",
+    ) -> None:
+        """Emit the ``SpmdScopeStmt`` body shared by the plain and ``as tid`` with-forms.
+    
+        The two forms differ only in ``scope_attrs`` (the ``as tid`` form adds
+        ``task_id_var`` / ``manual_dep_edges``); the body dispatch is identical:
+    
+        The body shape decides whether an inner ``InCoreScopeStmt`` carrier is
+        synthesised. The test is semantic — does the body do per-block work
+        itself, or dispatch it? — not a statement count: a dispatch body may
+        legally hold several statements once ``FlattenCallExpr`` has hoisted a
+        nested call arg, or the multi-output tuple desugar has split an assign
+        into a temp plus projections.
+    
+        * an explicit ``with pl.at(<CORE_GROUP level>, ...):`` body → that nested
+          scope already *is* the carrier; parse it as an ordinary nested scope
+          (see :meth:`_is_explicit_incore_carrier`). This is the form the printer
+          emits, so recognising it here is what makes ``Spmd(InCore(...))``
+          round-trip.
+        * dispatch body (does not read the per-block index), no split and no slot
+          count → ``SpmdScopeStmt(body=<stmts>)`` with no inner InCore wrapper —
+          the callee is a pre-defined kernel that reads the block index
+          internally. This is also the shape ``OutlineIncoreScopes`` leaves behind
+          once an inline body is outlined, so the IR round-trips identically
+          across passes.
+        * inline body (reads the per-block index), or any body carrying an
+          ``optimizations=`` entry → wrap in ``InCoreScopeStmt(split, <body>)`` for
+          ``OutlineIncoreScopes`` to outline into a synthetic per-block kernel,
+          exactly like ``for i in pl.spmd(n):``. Both entries lower onto the InCore
+          scope (``split_`` and the ``slot_num`` attr), so either one forces the
+          wrapper.
+    
+        A body that neither reads the index nor dispatches a kernel does no
+        per-block differentiation at all and is rejected (see below). An explicit
+        carrier is exempt from that check: the user wrote the InCore scope
+        themselves, so the body is taken as deliberate.
+        """
+        # ``split_slot_num`` is weighed alongside ``split_mode`` throughout: the
+        # slot count lands on the *InCore* scope (OutlineIncoreScopes reads
+        # ``slot_num`` off InCoreScopeStmt only), so either entry alone is enough
+        # to require a carrier — and enough to collide with one the body already
+        # provides. Before pl.cross_core_slot existed the two were coupled:
+        # slot_num could only arrive via pl.split(mode, slot_num=N), which always
+        # set a mode.
+        has_optimization_entry = split_mode is not None or split_slot_num is not None
+        carrier = self._explicit_incore_carrier(stmt.body)
+        if carrier is not None:
+            # The nested ``pl.at(CORE_GROUP)`` already is the carrier, and an
+            # ``optimizations=`` entry has to land on it. One on the
+            # ``pl.spmd(...)`` line as well is either a duplicate or would have to
+            # be pushed into a scope the user wrote by hand — reject both rather
+            # than silently picking one or dropping it.
+            if has_optimization_entry:
+                carrier_has_entry = carrier.split_mode is not None or carrier.split_slot_num is not None
+                where = (
+                    "is specified twice: on `pl.spmd(...)` and on the inner"
+                    if carrier_has_entry
+                    else "belongs on the InCore scope, but the body already provides one as the inner"
+                )
+                raise ParserSyntaxError(
+                    f"`optimizations=` {where} `pl.at(level=pl.Level.CORE_GROUP, ...)`",
+                    span=span,
+                    hint="Keep `optimizations=[...]` on the inner `pl.at(...)` carrier only.",
+                )
+            needs_incore = False
+        else:
+            is_inline_body = self._spmd_body_reads_block_idx(stmt.body)
+            dispatch_count = 0 if is_inline_body else self._spmd_body_kernel_dispatch_count(stmt.body)
+            if not is_inline_body and dispatch_count == 0:
+>               raise ParserSyntaxError(
+                    "`with pl.spmd(...)` body neither reads the per-block index via "
+                    "`pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, "
+                    "so every block would run identical work.",
+                    span=span,
+                    hint="Add `i = pl.tile.get_block_idx()` inside the scope, dispatch a kernel "
+                    "that reads it, or use `for i in pl.spmd(n):` to bind the block index "
+                    "automatically.",
+                )
+E               pypto.language.parser.diagnostics.exceptions.ParserSyntaxError: `with pl.spmd(...)` body neither reads the per-block index via `pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, so every block would run identical work.
+
+python/pypto/language/parser/ast_parser.py:4873: ParserSyntaxError
+=============================== warnings summary ===============================
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: 14 warnings
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/st/runtime/scheduling/test_local_task_boundary_overlap.py::test_nested_branch_requires_one_wait_per_path[missing_wait]
+FAILED tests/st/runtime/scheduling/test_local_task_boundary_overlap.py::test_nested_branch_requires_one_wait_per_path[repeated_wait]
+2 failed, 2 passed, 6 deselected, 18 warnings in 1.99s

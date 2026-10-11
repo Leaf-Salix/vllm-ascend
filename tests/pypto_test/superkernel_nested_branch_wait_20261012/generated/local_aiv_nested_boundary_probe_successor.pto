@@ -1,0 +1,134 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @boundary_probe_successor(%arg0: !pto.ptr<f16>, %arg1: !pto.ptr<i64>, %arg2: !pto.ptr<f32>, %arg3: i64, %arg4: i64, %arg5: i64, %__pypto_deferred_raw_args: !pto.ptr<i64>, %__pypto_boundary_handoff: i64, %__pypto_spmd_block_idx: i32, %__pypto_spmd_block_num: i32) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.scalar_prefix} {
+  %c0_i64 = arith.constant 0 : i64
+  %c32768_i64 = arith.constant 32768 : i64
+  %c3088_index = arith.constant 3088 : index
+  %c256_index = arith.constant 256 : index
+  %c1_index = arith.constant 1 : index
+  %c49_index = arith.constant 49 : index
+  %c8_index = arith.constant 8 : index
+  %c0_index = arith.constant 0 : index
+  %c17_i64 = arith.constant 17 : i64
+  %c3_i64 = arith.constant 3 : i64
+  %c65521_i64 = arith.constant 65521 : i64
+  %c2_index = arith.constant 2 : index
+  %c4_index = arith.constant 4 : index
+  %c1_i64 = arith.constant 1 : i64
+  %c7_i64 = arith.constant 7 : i64
+  %c4_i64 = arith.constant 4 : i64
+  %c5_i64 = arith.constant 5 : i64
+  %c2_i64 = arith.constant 2 : i64
+  %c64_index = arith.constant 64 : index
+  %c3_index = arith.constant 3 : index
+  %c5_index = arith.constant 5 : index
+  %c6_index = arith.constant 6 : index
+  %y__ssa_v0_view = pto.make_tensor_view %arg0, shape = [%c3088_index, %c256_index], strides = [%c256_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf16> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":146:9)
+  %b_trace__ssa_v0_view = pto.make_tensor_view %arg1, shape = [%c49_index, %c8_index], strides = [%c8_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xi64> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":146:9)
+  %b_out__ssa_v0_view = pto.make_tensor_view %arg2, shape = [%c3088_index, %c256_index], strides = [%c256_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":146:9)
+  %block_v1__ssa_v0 = arith.index_cast %__pypto_spmd_block_idx : i32 to index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":147:13)
+  %core__ssa_v0 = func.call @pypto_read_physical_core_id(%c0_i64) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":148:13)
+  %begin__ssa_v0 = func.call @pypto_read_device_clock(%c0_i64) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":149:13)
+  %0 = arith.index_cast %block_v1__ssa_v0 : index to i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":150:13)
+  %1 = arith.addi %arg3, %0 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":150:13)
+  %2 = arith.remsi %begin__ssa_v0, %arg4 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":150:13)
+  %3 = arith.addi %1, %2 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":150:13)
+  %steps__ssa_v0_idx = arith.index_cast %arg5 : i64 to index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":151:13)
+  %state__rv_v2 = scf.for %___idx_v0 = %c0_index to %steps__ssa_v0_idx step %c1_index iter_args(%state__iter_v1 = %3) -> (i64) {
+    %4 = arith.muli %state__iter_v1, %c17_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":152:17)
+    %5 = arith.addi %4, %c3_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":152:17)
+    %6 = arith.remsi %5, %c65521_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":152:17)
+    scf.yield %6 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":151:13)
+  }
+  %7 = arith.remsi %block_v1__ssa_v0, %c2_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  %8 = arith.cmpi eq, %7, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  %task_wait_value_4, %task_wait_value_5, %task_wait_value_6 = scf.if %8 -> (i1, i64, i64) {
+    %9 = arith.remsi %block_v1__ssa_v0, %c4_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    %10 = arith.cmpi eq, %9, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    %task_wait_value_1, %task_wait_value_2 = scf.if %10 -> (i64, i64) {
+      %11 = arith.muli %state__rv_v2, %c3_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":157:29)
+      %12 = arith.addi %11, %c1_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":157:29)
+      %end__ssa_v0 = func.call @pypto_read_device_clock(%12) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":158:29)
+      scf.yield %12, %end__ssa_v0 : i64, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    } else {
+      %13 = arith.muli %state__rv_v2, %c7_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":163:29)
+      %14 = arith.addi %13, %c4_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":163:29)
+      %end__ssa_v1 = func.call @pypto_read_device_clock(%14) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":164:29)
+      scf.yield %14, %end__ssa_v1 : i64, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    }
+    scf.yield %10, %task_wait_value_1, %task_wait_value_2 : i1, i64, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  } else {
+    %15 = arith.muli %state__rv_v2, %c5_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":175:21)
+    %16 = arith.addi %15, %c2_i64 : i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":175:21)
+    %end__ssa_v5 = func.call @pypto_read_device_clock(%16) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":176:21)
+    %17 = arith.constant 0 : i1 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+    scf.yield %17, %16, %end__ssa_v5 : i1, i64, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  }
+  func.call @pypto_wait_pre_task_end(%__pypto_deferred_raw_args, %__pypto_boundary_handoff) : (!pto.ptr<i64>, i64) -> () loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":159:29)
+  %after_wait__phi_v6, %end__phi_v6, %observed__phi_v6, %state__phi_v10 = scf.if %8 -> (i64, i64, f16, i64) {
+    %after_wait__phi_v2, %end__phi_v2, %observed__phi_v2, %state__phi_v6 = scf.if %task_wait_value_4 -> (i64, i64, f16, i64) {
+      %after_wait__ssa_v0 = func.call @pypto_read_device_clock(%c0_i64) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":160:29)
+      %18 = arith.muli %block_v1__ssa_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":161:29)
+      %flat_offset_mul = arith.muli %18, %c256_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":161:29)
+      %flat_offset = arith.addi %flat_offset_mul, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":161:29)
+      %observed__tile = pto.load %arg0[%flat_offset] : !pto.ptr<f16> -> f16 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":161:29)
+      scf.yield %after_wait__ssa_v0, %task_wait_value_6, %observed__tile, %task_wait_value_5 : i64, i64, f16, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    } else {
+      %after_wait__ssa_v1 = func.call @pypto_read_device_clock(%c0_i64) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":166:29)
+      %20 = arith.muli %block_v1__ssa_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":167:29)
+      %21 = arith.muli %20, %c256_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":167:29)
+      %22 = arith.addi %21, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":167:29)
+      %19 = pto.load %arg0[%22] : !pto.ptr<f16> -> f16 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":167:29)
+      scf.yield %after_wait__ssa_v1, %task_wait_value_6, %19, %task_wait_value_5 : i64, i64, f16, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":156:25)
+    }
+    scf.yield %after_wait__phi_v2, %end__phi_v2, %observed__phi_v2, %state__phi_v6 : i64, i64, f16, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  } else {
+    %after_wait__ssa_v5 = func.call @pypto_read_device_clock(%c0_i64) : (i64) -> i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":178:21)
+    %24 = arith.muli %block_v1__ssa_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":179:21)
+    %25 = arith.muli %24, %c256_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":179:21)
+    %26 = arith.addi %25, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":179:21)
+    %23 = pto.load %arg0[%26] : !pto.ptr<f16> -> f16 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":179:21)
+    scf.yield %after_wait__ssa_v5, %task_wait_value_6, %23, %task_wait_value_5 : i64, i64, f16, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":154:17)
+  }
+  %27 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":185:13)
+  %28 = arith.addi %27, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":185:13)
+  pto.store %core__ssa_v0, %arg1[%28] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":185:13)
+  %29 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":186:13)
+  %30 = arith.addi %29, %c1_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":186:13)
+  pto.store %begin__ssa_v0, %arg1[%30] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":186:13)
+  %31 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":187:13)
+  %32 = arith.addi %31, %c2_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":187:13)
+  pto.store %end__phi_v6, %arg1[%32] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":187:13)
+  %33 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":188:13)
+  %34 = arith.addi %33, %c3_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":188:13)
+  pto.store %after_wait__phi_v6, %arg1[%34] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":188:13)
+  %35 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":189:13)
+  %36 = arith.addi %35, %c4_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":189:13)
+  pto.store %state__phi_v10, %arg1[%36] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":189:13)
+  %37 = arith.fptosi %observed__phi_v6 : f16 to i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":190:13)
+  %38 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":190:13)
+  %39 = arith.addi %38, %c5_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":190:13)
+  pto.store %37, %arg1[%39] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":190:13)
+  %40 = arith.index_cast %c1_index : index to i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":191:13)
+  %41 = arith.muli %block_v1__ssa_v0, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":191:13)
+  %42 = arith.addi %41, %c6_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":191:13)
+  pto.store %40, %arg1[%42] : !pto.ptr<i64>, i64 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":191:13)
+  %t__tmp_v1 = pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  %43 = arith.muli %block_v1__ssa_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  %44 = arith.maxsi %43, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  %y__ssa_v0_pview = pto.partition_view %y__ssa_v0_view, offsets = [%44, %c0_index], sizes = [%c64_index, %c256_index] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<64x256xf16> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  pto.tload ins(%y__ssa_v0_pview : !pto.partition_tensor_view<64x256xf16>) outs(%t__tmp_v1 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  %value_v2__ssa_v0 = pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  pto.tcvt ins(%t__tmp_v1 {rmode = #pto<round_mode ROUND>} : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%value_v2__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":200:17)
+  %t__tmp_v2 = pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  %45 = arith.sitofp %state__phi_v10 : i64 to f32 loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  pto.tadds ins(%value_v2__ssa_v0, %45 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32) outs(%t__tmp_v2 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  %46 = arith.muli %block_v1__ssa_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  %47 = arith.maxsi %46, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  %b_out__ssa_v0_pview = pto.partition_view %b_out__ssa_v0_view, offsets = [%47, %c0_index], sizes = [%c64_index, %c256_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x256xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  pto.tstore ins(%t__tmp_v2 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%b_out__ssa_v0_pview : !pto.partition_tensor_view<64x256xf32>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py":201:17)
+  return
+  }
+  func.func private @pypto_wait_pre_task_end(!pto.ptr<i64>, i64)
+  func.func private @pypto_read_device_clock(i64) -> i64
+  func.func private @pypto_read_physical_core_id(i64) -> i64
+}
