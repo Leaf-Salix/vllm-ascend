@@ -1,0 +1,55 @@
+--- a/decode_indexer.py
++++ b/decode_indexer.py
+@@ -654,6 +654,7 @@
+     qh_quant_tid: pl.Scalar[pl.TASK_ID],
+     weights_tid: pl.Scalar[pl.TASK_ID],
+     cache_write_tid: pl.Scalar[pl.TASK_ID],
++    max_topk_cache_len: pl.Scalar[pl.INDEX],
+     query_group_size: pl.constexpr,
+     qk_panel_cols: pl.constexpr,
+     score_tile: pl.constexpr,
+@@ -694,9 +695,9 @@
+         buf_worker = pl.tile.get_block_idx()
+         buf_query_count = pl.tensor.dim(position_ids, 0)
+         pl.system.wait_pre_task_end()
+-        buf_max_cache_len = 0
+-        for buf_batch in pl.range(buf_query_count // S):
+-            buf_max_cache_len = pl.max(buf_max_cache_len, pl.read(kv_seq_lens, [buf_batch]) // COMPRESS_RATIO)
++        # The entry already scans these immutable lengths for shape dispatch.
++        # Reuse that maximum: max(floor(length / R)) == floor(max(length) / R).
++        buf_max_cache_len = pl.max(max_topk_cache_len, 0)
+         buf_capped_history = pl.min(buf_max_cache_len, TOPK_MAX_CANDIDATES)
+         buf_max_leaves = pl.max((buf_capped_history + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
+         buf_leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
+@@ -1408,6 +1409,7 @@
+                     qh_quant_tid,
+                     weights_tid,
+                     cache_write_tid,
++                    max_topk_cache_len,
+                     S,
+                     64,
+                     BUFFERED_LONG_SCORE_TILE,
+@@ -1431,6 +1433,7 @@
+                     qh_quant_tid,
+                     weights_tid,
+                     cache_write_tid,
++                    max_topk_cache_len,
+                     2,
+                     NATIVE_QLI_QK_COLS,
+                     BUFFERED_LONG_SCORE_TILE,
+@@ -1465,6 +1468,7 @@
+                     qh_quant_tid,
+                     weights_tid,
+                     cache_write_tid,
++                    max_topk_cache_len,
+                     S,
+                     64,
+                     BUFFERED_SCORE_TILE,
+@@ -1488,6 +1492,7 @@
+                     qh_quant_tid,
+                     weights_tid,
+                     cache_write_tid,
++                    max_topk_cache_len,
+                     2,
+                     NATIVE_QLI_QK_COLS,
+                     BUFFERED_SCORE_TILE,

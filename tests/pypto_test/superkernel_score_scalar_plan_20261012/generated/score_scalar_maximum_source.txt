@@ -1,0 +1,21 @@
+    const Tensor& qr = alloc_0.get_ref(10);
+    const Tensor& qr_scale = alloc_0.get_ref(11);
+    int64_t t = (int64_t)orch_args.tensor(45).ref().shapes[0];
+    int64_t maximum_inline378__rv_v2 = 0;
+    for (int64_t batch_inline377 = 0; batch_inline377 < t; batch_inline377 += 1) {
+        uint32_t indices_t__tmp_v1[1] = {static_cast<uint32_t>(batch_inline377)};
+        int32_t t__tmp_v1 = get_tensor_data<int32_t>(ext_kv_seq_lens, 1, indices_t__tmp_v1);
+        int64_t maximum_inline378 = std::max<int64_t>(maximum_inline378__rv_v2, static_cast<int64_t>(t__tmp_v1));
+        maximum_inline378__rv_v2 = maximum_inline378;
+    }
+    int64_t max_seq_len = maximum_inline378__rv_v2;
+    uint32_t x_hc_flat_shapes[2] = {static_cast<uint32_t>(T_DYN), 16384};
+            int64_t max_topk_cache_len_inline3233_inline4196 = (static_cast<int64_t>(max_seq_len) / 4);
+            if ((2048 <= max_topk_cache_len_inline3233_inline4196)) {
+                if ((8192 < max_topk_cache_len_inline3233_inline4196)) {
+                        params_t37.add_scalar(max_topk_cache_len_inline3233_inline4196);
+                        params_t39.add_scalar(max_topk_cache_len_inline3233_inline4196);
+                        params_t41.add_scalar(max_topk_cache_len_inline3233_inline4196);
+                        params_t43.add_scalar(max_topk_cache_len_inline3233_inline4196);
+                if ((max_topk_cache_len_inline3233_inline4196 < 2048)) {
+                    if ((max_topk_cache_len_inline3233_inline4196 <= 8192)) {
