@@ -1,0 +1,46 @@
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_late_poll_compile.py
+@@ -0,0 +1,32 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Compile ordinary, one-shot and late-poll CSA with one private SDK."""
++
++import argparse
++from pathlib import Path
++
++import tmr_csa_full_128k_b16_compile as compile_demo
++from pypto.backend import pto_backend
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--output", type=Path, required=True)
++    args = parser.parse_args()
++    compile_demo.compile_variant("baseline", args.output / "baseline")
++    # Same frozen MIX program and memory reservation. Suppress only the tail
++    # adapter/sub-entry for the once variant, isolating the polling protocol.
++    compile_demo.PACKAGES["once"] = compile_demo.PACKAGES["mixed"]
++    original = pto_backend._compiled_late_poll
++    original_adapter = pto_backend._late_handoff_adapter
++    try:
++        pto_backend._compiled_late_poll = lambda func: ("", "")
++        pto_backend._late_handoff_adapter = lambda adapter, func: adapter
++        compile_demo.compile_variant("once", args.output / "once")
++    finally:
++        pto_backend._compiled_late_poll = original
++        pto_backend._late_handoff_adapter = original_adapter
++    compile_demo.compile_variant("mixed", args.output / "mixed")
++
++
++if __name__ == "__main__":
++    main()
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_late_poll_demo.py
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Replay the same frozen CSA under ordinary, one-shot and late-poll protocols."""
++
++import tmr_csa_full_128k_b16_demo as demo
++
++if __name__ == "__main__":
++    demo.PACKAGES["once"] = demo.PACKAGES["mixed"]
++    demo.main()

@@ -1,0 +1,335 @@
+--- a/include/pypto/ir/transforms/utils/reserve_buffer_utils.h
++++ b/include/pypto/ir/transforms/utils/reserve_buffer_utils.h
+@@ -68,0 +69 @@
++  [[nodiscard]] bool HasTaskBoundarySignal() const { return has_task_boundary_signal_; }
+@@ -70,0 +72 @@
++    if (IsOp(op, "system.set_next_task_start")) has_task_boundary_signal_ = true;
+@@ -82,0 +85 @@
++  bool has_task_boundary_signal_ = false;
+@@ -87,0 +91 @@
++  int64_t task_boundary_scratch_base = -1;
+@@ -99 +103 @@
+-  if (collector.GetReserveBuffers().empty()) return resolution;
++  if (collector.GetReserveBuffers().empty() && !collector.HasTaskBoundarySignal()) return resolution;
+@@ -147,0 +152,11 @@
++  if (collector.HasTaskBoundarySignal()) {
++    // A late-arrival completion notification needs one private DMA cache line.
++    // Reserve it after explicit cross-core FIFOs and before tile allocation.
++    // MemoryReuse and both in-tree allocators consume this same footprint.
++    auto& reserved_end = resolution.reserved_end_by_space[reserve_space];
++    const uint64_t base = policy.AlignAddress(reserved_end, reserve_space);
++    INTERNAL_CHECK_SPAN(base <= static_cast<uint64_t>(std::numeric_limits<int>::max()), func->span_)
++        << "task-boundary scratch address exceeds the internal attribute range";
++    resolution.task_boundary_scratch_base = static_cast<int64_t>(base);
++    reserved_end = policy.AlignAddress(base + 64, reserve_space);
++  }
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -24 +24 @@
+-SIMPLER_KERNEL_REVISION = "3f86962a72b090335f530cb6c71993cb42e204fa"
++SIMPLER_KERNEL_REVISION = "1c258b0412e73a916f4f4af707816f76ab2aa4cf"
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1079,0 +1080,71 @@
++
++
++def _late_handoff_adapter(adapter: str, func: _ir_core.Function) -> str:
++    scratch_base = dict(func.attrs).get("task_boundary_scratch_base")
++    if scratch_base is None:
++        return adapter
++    return adapter.replace(
++        "    // The compiler transfers the ordinary tail PIPE_ALL to the executor.\n"
++        "    // No signal or mutable GM completion state is needed at this boundary.\n"
++        "    (void)args;",
++        "    // Scratch and event IDs were reserved by the compiler.\n"
++        "    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);\n"
++        f"    ctx->late_handoff_scratch = {scratch_base};\n"
++        "    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::RuntimeCompiledPoll);",
++    )
++
++
++def _compiled_late_poll(func: _ir_core.Function) -> tuple[str, str]:
++    """Keep DMA code in the task image, reachable through a private entry tag."""
++    scratch = dict(func.attrs).get("task_boundary_scratch_base")
++    if scratch is None:
++        return "", ""
++    cube = func.func_type == _ir_core.FunctionType.AIC
++    copy_in = (
++        f"auto* scratch = reinterpret_cast<__cbuf__ uint16_t*>({scratch});\n"
++        "    copy_gm_to_cbuf(scratch, source, 0, 1, 2, 0, 0, (pad_t)0);"
++        if cube
++        else f"auto* scratch = reinterpret_cast<__ubuf__ uint16_t*>({scratch});\n"
++        "    copy_gm_to_ubuf(scratch, source, 0, 1, 2, 0, 0);"
++    )
++    engines = ("MTE2", "MTE1", "M", "FIX") if cube else ("MTE2", "V")
++    joins = "\n".join(
++        f"    {op}_flag(PIPE_{engine}, PIPE_MTE3, EVENT_ID7);"
++        for op in ("set", "wait")
++        for engine in engines
++    )
++    copy_out = "copy_cbuf_to_gm" if cube else "copy_ubuf_to_gm"
++    helper = f"""
++static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ int64_t* args) {{
++    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
++    auto* notice = reinterpret_cast<__gm__ TaskBoundaryNotification*>(ctx->task_boundary_notification);
++    auto* value = reinterpret_cast<volatile __gm__ uint64_t*>(notice->value);
++    dcci(notice->value, SINGLE_CACHE_LINE);
++    const uint64_t expected = *value == 1 ? ~uint64_t{{0}} : 1;
++    auto* source = reinterpret_cast<__gm__ uint16_t*>(expected == 1 ? notice->positive : notice->negative);
++    {copy_in}
++{joins}
++    pipe_barrier(PIPE_MTE3);
++    {copy_out}(reinterpret_cast<__gm__ uint16_t*>(notice->value), scratch, 0, 1, 2, 0, 0);
++    const uint32_t own = ctx->reg_task_id;
++    const bool trace = ctx->scalar_overlap_trace != 0;
++    if (trace) ctx->late_handoff_scratch |= uint64_t{{1}} << 32;
++    for (;;) {{
++        uint32_t next;
++        asm volatile("MOV %0, DATA_MAIN_BASE" : "=l"(next) : : "memory");
++        if (next != own && next != 0x7ffffffdu) {{
++            return;
++        }}
++        dcci(notice->value, SINGLE_CACHE_LINE);
++        if (*value == expected) return;
++    }}
++}}
++"""
++    entry = """    // Internal tail callback; this tag never executes the task body twice.
++    if ((reinterpret_cast<uint64_t>(args) & uint64_t{2}) != 0) {
++        auto* tail_args = reinterpret_cast<__gm__ int64_t*>(reinterpret_cast<uint64_t>(args) & ~uint64_t{3});
++        pypto_poll_local_tail(tail_args);
++        return;
++    }
++"""
++    return helper, entry
+@@ -1237,0 +1309 @@
++    late_poll_helper, late_poll_entry = _compiled_late_poll(func)
+@@ -1242,0 +1315 @@
++        f"{late_poll_entry}"
+@@ -1263,0 +1337 @@
++    local_boundary_adapter = _late_handoff_adapter(local_boundary_adapter, func)
+@@ -1265 +1339,2 @@
+-        f"{header}\n{deferred_completion_adapter}{diagnostic_adapters}{prefix_wait_adapter}{local_boundary_adapter}{fifo_lane_arg_bridge}"
++        f"{header}\n{deferred_completion_adapter}{diagnostic_adapters}{prefix_wait_adapter}{local_boundary_adapter}"
++        f"{late_poll_helper}{fifo_lane_arg_bridge}"
+--- a/src/codegen/pto/pto_codegen.cpp
++++ b/src/codegen/pto/pto_codegen.cpp
+@@ -1192,0 +1193 @@
++      if (func->HasAttr("task_boundary_scratch_base")) stream_ << ", pto.runtime_late_handoff";
+@@ -1201,0 +1203 @@
++      if (func->HasAttr("task_boundary_scratch_base")) stream_ << ", pto.runtime_late_handoff";
+--- a/src/ir/transforms/allocate_memory_addr_pass.cpp
++++ b/src/ir/transforms/allocate_memory_addr_pass.cpp
+@@ -602 +602,2 @@
+-  if (memref_pairs.empty() && reserve_resolution.resolved_bases.empty()) {
++  if (memref_pairs.empty() && reserve_resolution.resolved_bases.empty() &&
++      reserve_resolution.task_boundary_scratch_base < 0) {
+@@ -631,0 +633,4 @@
++  if (reserve_resolution.task_boundary_scratch_base >= 0) {
++    new_func->attrs_.emplace_back("task_boundary_scratch_base",
++                                 static_cast<int>(reserve_resolution.task_boundary_scratch_base));
++  }
+--- /dev/null
++++ b/tests/st/runtime/scheduling/task_boundary_reserved_scratch_probe.py
+@@ -0,0 +1,44 @@
++# Copyright (c) PyPTO Contributors.
++# Licensed under the CANN Open Software License Agreement Version 2.0.
++"""Isolate allocator-selected scratch from the runtime notification call site."""
++
++from contextlib import contextmanager
++
++import task_boundary_completion_probe as probe
++from pypto import ir
++from pypto.backend import pto_backend
++
++original_adapter = probe.completion_adapter
++
++
++@contextmanager
++def reserved_scratch_adapter(mode, cube):
++    with original_adapter(mode, cube):
++        wrapped = pto_backend._generate_kernel_wrapper
++
++        def generate(func, *args, **kwargs):
++            attrs = dict(func.attrs)
++            scratch = attrs.pop("task_boundary_scratch_base")
++            plain = ir.Function(
++                func.name,
++                list(zip(func.params, func.param_directions)),
++                func.return_types,
++                func.body,
++                func.span,
++                type=func.func_type,
++                level=func.level,
++                role=func.role,
++                attrs=attrs,
++                requires_runtime_binding=func.requires_runtime_binding,
++                ir_stage=func.ir_stage,
++            )
++            code = wrapped(plain, *args, **kwargs)
++            return code.replace("524224", str(scratch)).replace("196544", str(scratch))
++
++        pto_backend._generate_kernel_wrapper = generate
++        yield
++
++
++if __name__ == "__main__":
++    probe.completion_adapter = reserved_scratch_adapter
++    probe.main()
+--- /dev/null
++++ b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+@@ -0,0 +1,117 @@
++# Copyright (c) PyPTO Contributors.
++# Licensed under the CANN Open Software License Agreement Version 2.0.
++"""Exercise runtime-owned late polling after the original handoff probe misses.
++
++Reuse the two-task inputs, guard checks and graph replay driver. Instrumentation
++records dispatch generations and the existing eight-word tail trace only; it
++does not supply notification memory, insert DMA or alter dispatch decisions.
++"""
++
++from contextlib import contextmanager
++
++import task_boundary_late_arrival_probe as probe
++import torch
++from pypto import ir
++from pypto.backend import pto_backend
++from pypto.ir import TensorType
++
++
++@contextmanager
++def instrument(mode, cube):
++    original = pto_backend._generate_kernel_wrapper
++
++    def wrap(func, *args, **kwargs):
++        if mode == "once":
++            attrs = dict(func.attrs)
++            attrs.pop("task_boundary_scratch_base", None)
++            func = ir.Function(
++                func.name,
++                list(zip(func.params, func.param_directions)),
++                func.return_types,
++                func.body,
++                func.span,
++                type=func.func_type,
++                level=func.level,
++                role=func.role,
++                attrs=attrs,
++                requires_runtime_binding=func.requires_runtime_binding,
++                ir_stage=func.ir_stage,
++            )
++        code = original(func, *args, **kwargs)
++        tensors = [p for p in func.params if isinstance(p.type, TensorType)]
++        marker = "    // Forward to ptoas-generated function\n"
++        assert code.count(marker) == 1
++        if func.name == "late_producer":
++            trace = next(p for p in tensors if p.name_hint.startswith("a_trace")).name_hint
++            setup = f"""    auto* row = reinterpret_cast<__gm__ uint64_t*>({trace})
++        + get_block_idx(args) * 32;
++    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
++    ctx->scalar_overlap_trace = reinterpret_cast<uint64_t>(row + 24);
++    ctx->scalar_overlap_start = get_sys_cnt();
++    row[3] = ctx->reg_task_id;
++    dcci(row, SINGLE_CACHE_LINE, CACHELINE_OUT);
++"""
++            return code.replace(marker, setup + marker)
++        assert func.name == "late_consumer"
++        trace = next(p for p in tensors if p.name_hint.startswith("b_trace")).name_hint
++        setup = """    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
++    const uint64_t own = ctx->reg_task_id;
++    const uint64_t prior = ctx->predecessor_reg_task_id;
++    const uint64_t flags = ctx->scalar_prefix;
++    const uint64_t local_handoff = ctx->predecessor_context != 0;
++"""
++        code = code.replace(marker, setup + marker)
++        insert = f"""    auto* row = reinterpret_cast<__gm__ uint64_t*>({trace}) + get_block_idx(args) * 16;
++    row[8] = own;
++    row[9] = prior;
++    row[10] = flags;
++    row[11] = local_handoff;
++    dcci(row + 8, SINGLE_CACHE_LINE, CACHELINE_OUT);
++"""
++        end = code.rfind("}\n")
++        return code[:end] + insert + code[end:]
++
++    pto_backend._generate_kernel_wrapper = wrap
++    try:
++        yield
++    finally:
++        pto_backend._generate_kernel_wrapper = original
++
++
++def validate(a, b, expected_a, expected_b, at, bt, tile_rows, seed, steps):
++    blocks = len(at) - 1
++    assert torch.equal(a[: blocks * tile_rows], expected_a), "producer output"
++    assert torch.equal(b[: blocks * tile_rows], expected_b), "consumer output"
++    assert torch.isnan(a[blocks * tile_rows :]).all() and torch.isnan(b[blocks * tile_rows :]).all()
++    assert at[-1] == [-1] * 32 and bt[-1] == [-1] * 16
++    producers = {(v[24], v[3]): (i, v) for i, v in enumerate(at[:-1])}
++    assert len(producers) == blocks
++    handoffs, late, polled = [], [], []
++    for i, v in enumerate(at[:-1]):
++        assert 0 < v[25] <= v[26] <= v[29] <= v[31] <= v[27]
++        assert v[28] & 255 == 7
++        if v[28] & 256:
++            polled.append(i)
++    for i, v in enumerate(bt[:-1]):
++        state = seed + i
++        for _ in range(steps):
++            state = (state * 17 + 3) % 65521
++        assert v[4] == state and v[5] == int(expected_a[i * tile_rows, 0])
++        assert 0 < v[1] <= v[2] <= v[3]
++        if v[11]:
++            ai, prev = producers[v[0], v[9]]
++            assert v[1] >= prev[26] and v[3] >= prev[27]
++            entry = {"producer": ai, "consumer": i, "remaining_full_tail_ticks": prev[30]}
++            handoffs.append(entry)
++            if prev[28] & 512:
++                late.append(entry)
++    # Every reported late handoff must be tied to the same core/generation's
++    # successor. Tail duration includes notification DMA, not only old compute.
++    assert len(late) == sum(bool(v[28] & 512) for v in at[:-1])
++    return {"handoffs": handoffs, "late_handoffs": late, "polled_after_first_miss": polled}
++
++
++if __name__ == "__main__":
++    probe.instrument = instrument
++    probe.validate = validate
++    probe.main()
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+@@ -219 +219 @@
+-                    assert all(0 < r[1] <= r[2] <= r[5] <= r[7] <= r[3] and r[4] == 7 for r in rows)
++                    assert all(0 < r[1] <= r[2] <= r[5] <= r[7] <= r[3] and r[4] & 255 == 7 for r in rows)
+--- a/tests/ut/ir/transforms/test_allocate_memory_addr_pass.py
++++ b/tests/ut/ir/transforms/test_allocate_memory_addr_pass.py
+@@ -155,0 +156,29 @@
++
++
++@pytest.mark.parametrize("reuse", [False, True])
++def test_local_tail_scratch_does_not_alias_fifo_or_tiles(reuse):
++    """A local tail owns a cache line after explicit FIFO storage on both planner paths."""
++
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.AIV)
++        def main(self, x: pl.Tensor[[8, 32], pl.FP32], out: pl.Out[pl.Tensor[[8, 32], pl.FP32]]):
++            pl.system.wait_pre_task_end()
++            _fifo = pl.reserve_buffer(name="shared_fifo", size=4096)
++            value = pl.load(x, [0, 0], [8, 32], target_memory=pl.Mem.Vec)
++            pl.store(pl.add(value, 1.0), [0, 0], out)
++            pl.system.set_next_task_start()
++
++    program = passes.init_mem_ref()(Before)
++    if reuse:
++        program = passes.memory_reuse()(program)
++    program = passes.allocate_memory_addr()(program)
++    func = next(iter(program.functions.values()))
++    assert dict(func.attrs)["task_boundary_scratch_base"] == 4096
++    assert isinstance(func.body, ir.SeqStmts)
++    addresses = [
++        stmt.var.type.memref.byte_offset_.value
++        for stmt in func.body.stmts
++        if isinstance(stmt, ir.AssignStmt) and isinstance(stmt.var.type, ir.TileType)
++    ]
++    assert addresses and all(offset >= 4160 for offset in addresses)

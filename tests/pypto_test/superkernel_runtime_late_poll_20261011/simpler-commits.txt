@@ -1,0 +1,59 @@
+commit 1c258b0412e73a916f4f4af707816f76ab2aa4cf
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 20:56:36 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 20:56:36 2026 +0800
+
+    试验(TMR): 通过编译器生成的尾部入口执行后到通知
+
+    HBM 通知区未消除原运行时 DMA 辅助函数的 AIV 超时，撤回内存位置即根因的推断；独立 kernel 探针已证明新分配的 scratch（含地址零）在 AIC/AIV 通知与轮询中可用。
+
+    新增 RuntimeCompiledPoll 私有协议：原探测落空后，以参数指针 bit1 调用编译器生成的尾部入口，该入口直接跳过算子主体；返回后仍由原运行时验证 pending 资格，Wait/PIPE_ALL 负责真实完成、FIN 和后继完整输入依赖。旧 RuntimePollable 实验仅保留完整等待回退。
+
+    保留每物理核 HBM 通知区、诊断模式回退和原 AICPU 派发语义。此提交只形成候选协议，不宣称已通过真机或获得 CSA 性能收益。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit 3ea4375fe4a9e3233be275486955cc90f687d2a0
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 20:38:48 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 20:41:42 2026 +0800
+
+    试验(TMR): 将交接完成通知迁入运行时 HBM 共享内存
+
+    AIV 超时日志确认 Scalar 到达 DMA 提交前但未到达提交后，常驻 SO 通知源值正确，显式缓存刷新亦未解决。把通知区从 AICPU 私有对象迁到共享 HBM，避免将普通控制内存直接当作 DMA 缓冲。
+
+    统一调整共享内存首个 ring 的偏移与容量计算，每个物理核占三条缓存行，A3 共 13.5 KiB；保留原 header 与 DispatchPayload 布局以及调度规则。CPU 调度 11 项和共享内存回归通过，真机验证随配套 SDK 重建继续。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit 62663a299142e2270260ff70abe78f6e55617cf8
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 20:33:56 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 20:33:56 2026 +0800
+
+    诊断(TMR): 刷新后到交接通知区并记录超时停留阶段
+
+    首次 RuntimePollable 真机验证中普通路径通过，AIV 候选在完成通知处超时；先显式刷新 AICPU 冷启动初始化的三条通知缓存行，排查 Scalar 与 DMA 对该内存的可见性差异。
+
+    仅在显式 trace 下记录 DMA 提交前后阶段；调度超时时输出卡住核的尾部类型、scratch 状态及通知值。上述诊断不改变派发与 ACK 决策，尚不宣称超时已修复。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit 6b338d9bf214588de61b2798f159a0489eef6f47
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Sun Oct 11 20:23:42 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Sun Oct 11 20:23:42 2026 +0800
+
+    试验(TMR): 在原始交接探测落空后用运行时通知区接收后到任务
+
+    保持 AICPU 派发、pending 队列、核选择、early_resolve 与 ACK 提升规则不变；只有编译器声明 RuntimePollable 尾部且原始探测落空时，AICore 才提交完成通知并等待后到派发。后继仍通过局部 Wait 等待真实尾部和完整输入依赖。
+
+    运行时为每个物理核管理三条独立缓存行，交替通知值避免每任务 Scalar 清零；沿用双缓冲槽，DispatchPayload 保持 576 字节。新增尾部模式继续以 PIPE_ALL 保护 FIN 和资源复用；chip swimlane、PMU、参数 dump 保留串行回退。
+
+    CPU 调度回归 11 项通过；AICore 编译、真机 AIC/AIV/MIX 及 CSA 性能验证将在配套编译器资源预留接入后记录。此提交为私有实验，不宣称性能收益。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

@@ -1,0 +1,90 @@
+--- a/include/PTO/Transforms/InsertSync/SyncEventIdAllocation.h
++++ b/include/PTO/Transforms/InsertSync/SyncEventIdAllocation.h
+@@ -44 +44,2 @@
+-                        bool reserveAsyncTailEvent7 = false)
++                        bool reserveAsyncTailEvent7 = false,
++                        bool reserveLateHandoffEvent7 = false)
+@@ -46 +47,2 @@
+-        reserveAsyncTailEvent7_(reserveAsyncTailEvent7) {
++        reserveAsyncTailEvent7_(reserveAsyncTailEvent7),
++        reserveLateHandoffEvent7_(reserveLateHandoffEvent7) {
+@@ -125,0 +128 @@
++  bool reserveLateHandoffEvent7_;
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -88,0 +89,4 @@
++      if (func->hasAttr("pto.runtime_late_handoff")) {
++        func.emitError("late task handoff requires compiler-owned event allocation; explicit pipe events are unsupported");
++        signalPassFailure();
++      }
+@@ -150 +154,3 @@
+-    SyncEventIdAllocation eventIdAllocation(syncIR, syncOpsStorage, asyncReturn);
++    SyncEventIdAllocation eventIdAllocation(
++        syncIR, syncOpsStorage, asyncReturn,
++        func->hasAttr("pto.runtime_late_handoff"));
+--- a/lib/PTO/Transforms/InsertSync/SyncEventIdAllocation.cpp
++++ b/lib/PTO/Transforms/InsertSync/SyncEventIdAllocation.cpp
+@@ -143,0 +144,9 @@
++  }
++  if (reserveLateHandoffEvent7_ &&
++      sync->GetDstPipe() == PipelineType::PIPE_MTE3 &&
++      (sync->GetSrcPipe() == PipelineType::PIPE_MTE2 ||
++       sync->GetSrcPipe() == PipelineType::PIPE_MTE1 ||
++       sync->GetSrcPipe() == PipelineType::PIPE_M ||
++       sync->GetSrcPipe() == PipelineType::PIPE_FIX ||
++       sync->GetSrcPipe() == PipelineType::PIPE_V)) {
++    return kTotalEventIdNum - 1;
+--- /dev/null
++++ b/test/lit/pto/local_task_pollable_explicit_sync_invalid.pto
+@@ -0,0 +1,13 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: late task handoff requires compiler-owned event allocation
++
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @manual_tail() attributes {
++      pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID7>]
++    return
++  }
++}
+--- /dev/null
++++ b/test/lit/pto/local_task_tail_pollable.pto
+@@ -0,0 +1,35 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++// CANN Open Software License Agreement Version 2.0 (the "License").
++// Please refer to the License for details. You may not use this file except in compliance with the License.
++// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++// See LICENSE in the root of the software repository for the full text of the License.
++
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK-LABEL: case PTOAutoSyncTailMode::kRuntimeBarrierAll:
++// CHECK-NEXT: {{.*}}dynamic caller{{.*}}
++// CHECK: break;
++// CHECK-LABEL: AICORE void runtime_pollable_vector(
++// CHECK-NOT: pipe_barrier(PIPE_ALL)
++// CHECK-NOT: EVENT_ID7
++// CHECK: TSTORE(
++// CHECK: ptoas_auto_sync_tail(PTOAutoSyncTailMode::kRuntimeBarrierAll);
++
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @runtime_pollable_vector(%src: !pto.ptr<f32>, %dst: !pto.ptr<f32>)
++      attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff, pto.auto_sync_tail_hint = "runtime_barrier_all"} {
++    %zero = arith.constant 0 : index
++    %one = arith.constant 1 : index
++    %cols = arith.constant 32 : index
++    %addr = arith.constant 0 : i64
++    %shape_src = pto.make_tensor_view %src, shape = [%one, %cols], strides = [%cols, %one] : !pto.tensor_view<1x32xf32>
++    %shape_dst = pto.make_tensor_view %dst, shape = [%one, %cols], strides = [%cols, %one] : !pto.tensor_view<1x32xf32>
++    %view_src = pto.partition_view %shape_src, offsets = [%zero, %zero], sizes = [%one, %cols] : !pto.tensor_view<1x32xf32> -> !pto.partition_tensor_view<1x32xf32>
++    %view_dst = pto.partition_view %shape_dst, offsets = [%zero, %zero], sizes = [%one, %cols] : !pto.tensor_view<1x32xf32> -> !pto.partition_tensor_view<1x32xf32>
++    %tile = pto.alloc_tile addr = %addr valid_row = %one valid_col = %cols : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++    pto.tload ins(%view_src : !pto.partition_tensor_view<1x32xf32>) outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
++    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%view_dst : !pto.partition_tensor_view<1x32xf32>)
++    return
++  }
++}

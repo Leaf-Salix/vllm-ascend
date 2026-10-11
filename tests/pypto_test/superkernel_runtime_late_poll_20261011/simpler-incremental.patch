@@ -1,0 +1,189 @@
+--- a/docs/a3-tmr-local-task-boundaries.md
++++ b/docs/a3-tmr-local-task-boundaries.md
+@@ -39,2 +39,2 @@
+-context layout. Local Set uses RuntimeBarrierAll; legacy event modes remain
+-distinct. Event-based kinds use ID 7 and target Scalar:
++context layout. Local Set uses RuntimeCompiledPoll when the compiler reserved its scratch and
++event resources; otherwise it keeps RuntimeBarrierAll. Legacy event modes remain distinct. Event-based kinds use ID 7 and target Scalar:
+@@ -49 +49,3 @@
+-| RuntimeBarrierAll | 6 | Runtime-owned PIPE_ALL after the successor's prefix, or on fallback |
++| RuntimeBarrierAll | 5 | Runtime-owned PIPE_ALL after the successor's prefix, or on fallback |
++| RuntimePollable | 6 | Retired runtime-DMA experiment; retains full-wait fallback |
++| RuntimeCompiledPoll | 7 | Compiler-owned notification callback after the first handoff miss |
+@@ -71,2 +73,25 @@
+-currently probes pending work once at producer return; a task published later
+-can still miss the local overlap window.
++first probes pending work once at producer return. A RuntimeCompiledPoll tail
++that misses re-enters a compiler-generated tail callback using argument tag
++bit 1. This branch bypasses the operator body, so it neither repeats arithmetic
++nor resets predecessor pipeline state. It enqueues an ordered 64-byte DMA token
++and observes normal late dispatches until that token completes. The helper never publishes FIN or ACK;
++the unchanged local Wait or fallback drains PIPE_ALL first.
++
++The compiler reserves scratch after existing cross-core FIFO storage and before
++tiles, using the shared MemoryReuse/allocation resolver. PTOAS excludes event 7
++from MTE2/MTE1/M/FIX/V-to-MTE3 allocations. Manually allocated pipe-event
++functions are rejected for this experimental contract. The runtime owns three
++cache lines per physical core (destination and immutable positive/negative
++sources) in the DMA-visible HBM shared-memory allocation, before the first
++ring segment. This adds 13.5 KiB on A3. Sources are flushed at cold start and
++shared by the two dispatch slots. The first implementation stalled with both private SO storage and this HBM
++allocation, so those failures do not establish an allocation-specific cause.
++A separate kernel-side probe passed with allocator-selected scratch. The
++compiled callback is the next isolated candidate; it requires device validation.
++Alternating tokens need no per-task Scalar reset. DispatchPayload remains 576
++bytes; neither argument preparation nor scheduler dispatch policy changes.
++
++Diagnostic trace word 4 retains 7 in its low byte. Bit 8 records entry into
++post-miss polling; bit 9 records a successful handoff observed during that
++poll. Reported tail duration includes notification DMA and cannot by itself
++prove overlap with the predecessor's original computation.
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -46 +46,3 @@
+-    if (kind == AsyncTailKind::RuntimeBarrierAll) {
++    const bool runtime_tail = kind == AsyncTailKind::RuntimeBarrierAll ||
++                              kind == AsyncTailKind::RuntimePollable || kind == AsyncTailKind::RuntimeCompiledPoll;
++    if (runtime_tail) {
+@@ -75,0 +78,3 @@
++        if (kind == AsyncTailKind::RuntimePollable || kind == AsyncTailKind::RuntimeCompiledPoll) {
++            trace[4] |= (ctx->late_handoff_scratch >> 32) << 8;
++        }
+@@ -81 +86 @@
+-    if (kind != AsyncTailKind::RuntimeBarrierAll) {
++    if (!runtime_tail) {
+@@ -84 +89 @@
+-    } else if (trace_addr != 0) {
++    } else if (trace_addr != 0 || kind != AsyncTailKind::RuntimeBarrierAll) {
+@@ -144,0 +150,20 @@
++}
++
++// The task image owns its reserved scratch and DMA instruction sequence.
++// Re-enter only its private tail callback after the original probe misses;
++// argument bit 1 bypasses the entire operator body. No FIN/ACK is emitted here.
++__aicore__ __attribute__((noinline)) static uint32_t poll_late_handoff(
++    __gm__ DispatchPayload *base, __gm__ DispatchPayload *current, uint32_t task_id
++) {
++    const uint32_t dispatched = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
++    if (dispatched != task_id && dispatched != AICPU_IDLE_TASK_ID) {
++        return handoff_scalar_prefix(base, current, task_id);
++    }
++    auto kernel = reinterpret_cast<UnifiedKernelFunc>(current->function_bin_addr);
++    auto *callback_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(current->args) | 2u);
++    kernel(callback_args);
++    const uint32_t candidate = handoff_scalar_prefix(base, current, task_id);
++    if (candidate != AICPU_IDLE_TASK_ID && current->global_context.scalar_overlap_trace != 0) {
++        current->global_context.late_handoff_scratch |= uint64_t{2} << 32;
++    }
++    return candidate;
+@@ -349 +374,4 @@
+-                    const uint32_t next_id = handoff_scalar_prefix(payload, exec_payload, task_id);
++                    uint32_t next_id = handoff_scalar_prefix(payload, exec_payload, task_id);
++                    if (next_id == AICPU_IDLE_TASK_ID && tail_kind == AsyncTailKind::RuntimeCompiledPoll) {
++                        next_id = poll_late_handoff(payload, exec_payload, task_id);
++                    }
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -126 +126,13 @@
+-};
++    RuntimePollable = 6,
++    RuntimeCompiledPoll = 7,
++};
++
++// Runtime-owned cache lines: Scalar never writes the DMA destination during
++// execution. A core alternates the two immutable sources after its previous
++// local tail has drained, including across dispatch-slot and graph replay reuse.
++struct alignas(64) TaskBoundaryNotification {
++    uint64_t value[8];
++    uint64_t positive[8];
++    uint64_t negative[8];
++};
++static_assert(sizeof(TaskBoundaryNotification) == 192);
+@@ -137 +149,2 @@
+-    uint64_t overlap_cache_padding[3];
++    uint64_t task_boundary_notification;
++    uint64_t overlap_cache_padding[2];
+@@ -153,0 +167,3 @@
++    // Low 32 bits: compiler-reserved local scratch base. High bits are used
++    // only by explicit diagnostic traces, never by the normal polling path.
++    volatile uint64_t late_handoff_scratch;
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -136,2 +136,2 @@
+-static_assert(alignof(DispatchPayload) >= 2 && offsetof(DispatchPayload, args) % 2 == 0,
+-              "local boundary ABI reserves the aligned argument pointer's low bit");
++static_assert(alignof(DispatchPayload) >= 4 && offsetof(DispatchPayload, args) % 4 == 0,
++              "local boundary ABI reserves two aligned argument pointer bits");
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -425,0 +426,14 @@
++    if (cls.stuck_core >= 0 && cls.stuck_core < RUNTIME_MAX_WORKER) {
++        auto &notice = *sm_layout::task_boundary_notification_addr(header, cls.stuck_core);
++        cache_invalidate_range(&notice, sizeof(notice));
++        for (int buf = 0; buf < 2; ++buf) {
++            auto &ctx = payload_per_core_[cls.stuck_core][buf].global_context;
++            cache_invalidate_range(&ctx, sizeof(ctx));
++            if (ctx.async_tail_kind != static_cast<uint32_t>(AsyncTailKind::RuntimePollable) &&
++                ctx.async_tail_kind != static_cast<uint32_t>(AsyncTailKind::RuntimeCompiledPoll)) continue;
++            LOG_ERROR("[LATE_POLL core=%d buf=%d] kind=%u scratch=%" PRIu64 " notification=%" PRIu64
++                      " value=%" PRIu64 " positive=%" PRIu64 " negative=%" PRIu64,
++                      cls.stuck_core, buf, ctx.async_tail_kind, ctx.late_handoff_scratch,
++                      ctx.task_boundary_notification, notice.value[0], notice.positive[0], notice.negative[0]);
++        }
++    }
+@@ -987,0 +1002,7 @@
++            auto &notification = *sm_layout::task_boundary_notification_addr(sched_->sm_header, core_id);
++            for (int word = 0; word < 8; ++word) {
++                notification.value[word] = 1;
++                notification.positive[word] = 1;
++                notification.negative[word] = ~uint64_t{0};
++            }
++            cache_flush_range(&notification, sizeof(notification));
+@@ -989,0 +1011 @@
++                dp.global_context.task_boundary_notification = reinterpret_cast<uint64_t>(&notification);
+@@ -1339,0 +1362,7 @@
++        auto &notification = *sm_layout::task_boundary_notification_addr(sched_->sm_header, core_id);
++        for (int word = 0; word < 8; ++word) {
++            notification.value[word] = 1;
++            notification.positive[word] = 1;
++            notification.negative[word] = ~uint64_t{0};
++        }
++        cache_flush_range(&notification, sizeof(notification));
+@@ -1341,0 +1371 @@
++            dp.global_context.task_boundary_notification = reinterpret_cast<uint64_t>(&notification);
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/shared/shared_memory.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/shared/shared_memory.cpp
+@@ -146 +146 @@
+-    uint64_t offset = CHIP_ALIGN_UP(sizeof(SharedMemoryHeader), CHIP_ALIGN_SIZE);
++    uint64_t offset = sm_layout::first_ring_offset();
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/shared_memory.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/shared_memory.h
+@@ -19,0 +20,2 @@
++ *   | TaskBoundaryNotification[]   |  (runtime-owned DMA-visible cache lines)
++ *   +-------------------------------+
+@@ -43,0 +46 @@
++#include "common/platform_config.h"
+@@ -241,0 +245,15 @@
++inline constexpr uint64_t task_boundary_notifications_offset() noexcept {
++    return CHIP_ALIGN_UP(sizeof(SharedMemoryHeader), CHIP_ALIGN_SIZE);
++}
++
++inline constexpr uint64_t first_ring_offset() noexcept {
++    return task_boundary_notifications_offset() +
++           CHIP_ALIGN_UP(PLATFORM_MAX_CORES * sizeof(TaskBoundaryNotification), CHIP_ALIGN_SIZE);
++}
++
++inline TaskBoundaryNotification *task_boundary_notification_addr(void *sm_dev_base, int core_id) noexcept {
++    return reinterpret_cast<TaskBoundaryNotification *>(
++        static_cast<char *>(sm_dev_base) + task_boundary_notifications_offset()
++    ) + core_id;
++}
++
+@@ -288 +306 @@
+-    uint64_t off = CHIP_ALIGN_UP(sizeof(SharedMemoryHeader), CHIP_ALIGN_SIZE);
++    uint64_t off = first_ring_offset();
+--- a/tests/ut/cpp/a2a3/test_shared_memory.cpp
++++ b/tests/ut/cpp/a2a3/test_shared_memory.cpp
+@@ -296 +296 @@
+-    uint64_t header_size = CHIP_ALIGN_UP(sizeof(SharedMemoryHeader), CHIP_ALIGN_SIZE);
++    uint64_t header_size = sm_layout::first_ring_offset();
