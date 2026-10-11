@@ -15994,3 +15994,19 @@ AIC均24/24、AIV均48/48同核重叠；MIX均24个AIC和48个AIV成员在前驱
 PyPTO两文件恢复`f6edfc1fd`，其他工具链与公共默认不变，临时候选驱动仅存归档。
 手工Wait和诊断串行回退继续保留；没有新Native、七档、token或16卡结果。
 [过程081补丁、90条样本、诊断trace及复现](superkernel_normal_mask_notification_20261012/README.md)。
+
+## 594. 2026-10-12：真实CSA派发与Scalar前缀关联，pending未交接不等于漏掉计算窗口
+
+过程082仅增加私有诊断驱动`7c7ecb41`，以GlobalContext地址和代次关联AICPU发布与AICore逐成员trace。
+临时Simpler插桩构建到独立目录后恢复源码，正常运行时、派发/ACK/early-resolve和公共CSA默认保持。
+手工局部Wait及chip swimlane/PMU/参数dump串行回退按用户要求保留。
+
+卡0/CANN9.2/TMR、128K/B16第2层完整CSA，两次各973条记录全部关联；558/530个gated成员全部进入前缀。
+pending后继264/269，实际交接168/144，未交接96/125；其中96/124在前驱完整等待结束后才开始AICPU发布。
+285个在前驱函数返回前已完成发布的后继全部交接。余下1次O-B发生于收尾间隙，最后完整等待仅20ns，
+没有证据证明当时仍有原始Cube计算可重叠，不为它新增热路径检查。
+
+两次9项输出/cache状态逐bit一致，各31项保护区通过；第二次改变hidden输入。
+任务`task_20261012_064423_24027093905`退出0并释放卡。
+插桩会扰动调度，寄存器发布采样不等于AICore可见时刻；本轮没有新性能、七档、token或16卡结果。
+[过程082结果、源码、原始关联及复现](superkernel_dispatch_coverage_20261012/README.md)。
