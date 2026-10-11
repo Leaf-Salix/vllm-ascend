@@ -1,0 +1,192 @@
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 3061c4deb..1168435a7 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1097,3 +1097 @@ def _compiled_late_poll(func: _ir_core.Function) -> tuple[str, str]:
+-        f"    {op}_flag(PIPE_{engine}, PIPE_MTE3, EVENT_ID7);"
+-        for op in ("set", "wait")
+-        for engine in engines
++        f"    {op}_flag(PIPE_{engine}, PIPE_MTE3, EVENT_ID7);" for op in ("set", "wait") for engine in engines
+@@ -1137,0 +1136,36 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
++def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) -> tuple[str, str]:
++    """Use PTOAS-selected notification events without changing the task's flags.
++
++    Unchanged automatic allocation emits no metadata and keeps the original
++    wrapper byte-for-byte. The compile guard rejects an older wrapper when
++    explicit synchronization requires an event other than the default seven.
++    """
++    marker = "// PYPTO_TASK_BOUNDARY_EVENTS_V1 "
++    if marker not in ptoas_code:
++        return helper, ""
++    pattern = re.compile(
++        r"// PYPTO_TASK_BOUNDARY_EVENTS_V1 ([A-Za-z_][A-Za-z0-9_]*) "
++        r"MTE2=([0-7]) MTE1=([0-7]) M=([0-7]) FIX=([0-7]) V=([0-7])"
++    )
++    allocations = {}
++    for line in ptoas_code.splitlines():
++        if not line.startswith(marker):
++            continue
++        match = pattern.fullmatch(line)
++        if not match or match[1] in allocations:
++            raise ValueError("invalid or duplicate PTOAS task-boundary event allocation")
++        allocations[match[1]] = match.groups()[1:]
++    if not allocations:
++        return helper, ""
++    if func_name in allocations:
++        if not helper:
++            raise ValueError("PTOAS allocated notification events for a task without a tail callback")
++        for pipe, event in zip(("MTE2", "MTE1", "M", "FIX", "V"), allocations[func_name]):
++            old = f"_flag(PIPE_{pipe}, PIPE_MTE3, EVENT_ID7);"
++            count = helper.count(old)
++            if count not in (0, 2):
++                raise ValueError(f"incomplete notification Set/Wait pair for {pipe}")
++            helper = helper.replace(old, f"_flag(PIPE_{pipe}, PIPE_MTE3, EVENT_ID{event});")
++    return helper, "#define PYPTO_TASK_BOUNDARY_EVENTS_V1 1\n"
++
++
+@@ -1294,0 +1329,3 @@ def _generate_kernel_wrapper(
++    late_poll_helper, late_event_contract = _apply_task_boundary_events(
++        func.name, late_poll_helper, ptoas_code
++    )
+@@ -1326 +1363 @@ def _generate_kernel_wrapper(
+-        f"{late_poll_helper}{fifo_lane_arg_bridge}"
++        f"{late_event_contract}{late_poll_helper}{fifo_lane_arg_bridge}"
+diff --git a/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+new file mode 100644
+index 000000000..8f43a0f2a
+--- /dev/null
++++ b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+@@ -0,0 +1,73 @@
++# Copyright (c) PyPTO Contributors.
++# Licensed under the CANN Open Software License Agreement Version 2.0.
++"""Validate notification allocation around static and bounded dynamic event7 use."""
++
++import argparse
++import re
++import sys
++from contextlib import contextmanager
++from pathlib import Path
++
++import task_boundary_explicit_event_probe as explicit_probe
++from pypto.backend import pto_backend
++
++
++def make_instrument(event_id):
++    @contextmanager
++    def instrument(mode, cube):
++        original = pto_backend._run_ptoas
++
++        def compile_events(pto_path, output_path, ptoas_flags=None):
++            source = Path(pto_path)
++            if source.name == "late_producer.pto":
++                text = source.read_text()
++                # The fixture has no previous user of this pair. Keep all
++                # original data dependencies and add a balanced manual pair.
++                assert "_flag[<PIPE_MTE2>, <PIPE_MTE3>" not in text
++                marker = "    call @pypto_set_next_task_start("
++                assert text.count(marker) == 1 and "%__notice_" not in text
++                if event_id == "static":
++                    events = (
++                        "    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID7>]\n"
++                        "    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID7>]\n"
++                    )
++                else:
++                    # The first i32 entry argument is this fixture's SPMD block
++                    # index. Even/odd blocks exercise both alternatives on NPU.
++                    block = re.findall(r"(%\w+): i32", text)[0]
++                    events = f"""    %__notice_block = arith.index_cast {block} : i32 to index
++    %__notice_zero = arith.constant 0 : index
++    %__notice_one = arith.constant 1 : index
++    %__notice_seven = arith.constant 7 : index
++    %__notice_bit = arith.andi %__notice_block, %__notice_one : index
++    %__notice_even = arith.cmpi eq, %__notice_bit, %__notice_zero : index
++    %__notice_id = arith.select %__notice_even, %__notice_zero, %__notice_seven : index
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %__notice_id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %__notice_id]
++"""
++                text = text.replace(marker, events + marker)
++                if mode == "once":
++                    # The reference wrapper and orchestration omit the polling
++                    # callback, so its compiler input requests no notification.
++                    text = text.replace(", pto.runtime_late_handoff", "")
++                source.write_text(text)
++            return original(pto_path, output_path, ptoas_flags)
++
++        try:
++            pto_backend._run_ptoas = compile_events
++            with explicit_probe.instrument(mode, cube):
++                yield
++        finally:
++            pto_backend._run_ptoas = original
++
++    return instrument
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser(add_help=False)
++    parser.add_argument("--event-id", choices=("static", "dynamic"), default="dynamic")
++    options, remaining = parser.parse_known_args()
++    sys.argv = [sys.argv[0], *remaining]
++    explicit_probe.runtime_probe.probe.instrument = make_instrument(options.event_id)
++    explicit_probe.runtime_probe.probe.validate = explicit_probe.runtime_probe.validate
++    explicit_probe.runtime_probe.probe.main()
+diff --git a/tests/ut/backend/test_task_boundary_events.py b/tests/ut/backend/test_task_boundary_events.py
+new file mode 100644
+index 000000000..d96efb38f
+--- /dev/null
++++ b/tests/ut/backend/test_task_boundary_events.py
+@@ -0,0 +1,54 @@
++# Copyright (c) PyPTO Contributors.
++# Licensed under the CANN Open Software License Agreement Version 2.0.
++"""Compiler-selected notification events must reach both sides of each flag."""
++
++from types import SimpleNamespace
++
++import pytest
++from pypto import ir
++from pypto.backend.pto_backend import _apply_task_boundary_events, _compiled_late_poll
++
++
++def vector_helper():
++    func = SimpleNamespace(attrs={"task_boundary_scratch_base": 0}, func_type=ir.FunctionType.AIV)
++    return _compiled_late_poll(func)[0]
++
++
++def test_no_allocation_keeps_existing_callback():
++    helper = vector_helper()
++    assert _apply_task_boundary_events("producer", helper, "") == (helper, "")
++
++
++def test_allocated_ids_reach_both_notification_endpoints():
++    metadata = "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=6 MTE1=7 M=7 FIX=7 V=5"
++    helper, contract = _apply_task_boundary_events("producer", vector_helper(), metadata)
++    for pipe, event in (("MTE2", 6), ("V", 5)):
++        for operation in ("set", "wait"):
++            assert f"{operation}_flag(PIPE_{pipe}, PIPE_MTE3, EVENT_ID{event});" in helper
++        assert f"PIPE_{pipe}, PIPE_MTE3, EVENT_ID7" not in helper
++    assert contract == "#define PYPTO_TASK_BOUNDARY_EVENTS_V1 1\n"
++
++
++@pytest.mark.parametrize(
++    "metadata",
++    [
++        "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=8 MTE1=7 M=7 FIX=7 V=5",
++        "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=6 MTE1=7 M=7 FIX=7 V=5\n" * 2,
++    ],
++)
++def test_invalid_contract_is_not_silently_ignored(metadata):
++    with pytest.raises(ValueError, match="invalid or duplicate"):
++        _apply_task_boundary_events("producer", vector_helper(), metadata)
++
++
++def test_metadata_requires_the_matching_callback():
++    metadata = "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=6 MTE1=7 M=7 FIX=7 V=5"
++    with pytest.raises(ValueError, match="without a tail callback"):
++        _apply_task_boundary_events("producer", "", metadata)
++
++
++def test_other_member_allocation_does_not_change_current_callback():
++    metadata = "// PYPTO_TASK_BOUNDARY_EVENTS_V1 other MTE2=6 MTE1=7 M=7 FIX=7 V=5"
++    helper = vector_helper()
++    updated, contract = _apply_task_boundary_events("producer", helper, metadata)
++    assert updated == helper and contract

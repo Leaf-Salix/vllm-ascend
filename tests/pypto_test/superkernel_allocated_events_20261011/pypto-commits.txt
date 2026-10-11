@@ -1,0 +1,11 @@
+commit 21a3fbcfef307af606e10ae3e37c2c0ea57a676f
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    feat: 对接PTOAS通知事件分配并保留任务原有同步
+
+    新增编译期事件合同解析，将PTOAS选出的空闲事件同时用于尾部通知的Set/Wait；没有合同的自动同步路径保持原生成逻辑，不新增运行时分支。缺少回调、非法事件号或重复合同直接拒绝，避免旧包装器静默使用event7。
+
+    补充合同解析单测及显式同步单卡驱动：任务按block奇偶动态使用event0/event7，新增通知使用event6，AIC/AIV输出、完整fanin、保护区和换输入重放通过。128K/B16三路对照完成，9项状态逐bit一致，各31项保护区通过；本提交扩大功能覆盖，不宣称稳定性能提升。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

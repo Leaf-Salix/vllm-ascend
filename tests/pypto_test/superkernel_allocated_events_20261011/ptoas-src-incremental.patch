@@ -1,0 +1,354 @@
+diff --git a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+index bd1a1008..98167759 100644
+--- a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
++++ b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+@@ -9,0 +10,14 @@ namespace pto {
++inline constexpr const char *kTaskBoundaryEventIds = "pto.runtime_late_event_ids";
++inline constexpr const char *kTaskBoundaryEventMarker = "PYPTO_TASK_BOUNDARY_EVENTS_V1";
++inline constexpr const char *kTaskBoundaryEventPipes[] = {"MTE2", "MTE1", "M", "FIX", "V"};
++
++template <typename Pipe>
++constexpr int taskBoundaryEventIndex(Pipe src) {
++  if (src == Pipe::PIPE_MTE2) return 0;
++  if (src == Pipe::PIPE_MTE1) return 1;
++  if (src == Pipe::PIPE_M) return 2;
++  if (src == Pipe::PIPE_FIX) return 3;
++  if (src == Pipe::PIPE_V) return 4;
++  return -1;
++}
++
+@@ -14,3 +28 @@ constexpr bool usesTaskBoundaryEvent7(Pipe src, Pipe dst) {
+-  return dst == Pipe::PIPE_MTE3 &&
+-         (src == Pipe::PIPE_MTE2 || src == Pipe::PIPE_MTE1 ||
+-          src == Pipe::PIPE_M || src == Pipe::PIPE_FIX || src == Pipe::PIPE_V);
++  return dst == Pipe::PIPE_MTE3 && taskBoundaryEventIndex(src) >= 0;
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+index e4930a81..ee67259b 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -23,0 +24,3 @@
++#include "PTO/Transforms/InsertSync/SyncMacroModel.h"
++#include "mlir/Dialect/Arith/IR/Arith.h"
++#include "mlir/Dialect/SCF/IR/SCF.h"
+@@ -26,0 +30 @@
++#include <array>
+@@ -65,10 +69,69 @@ static bool hasGatherScatterLikeOps(func::FuncOp func) {
+-static LogicalResult checkTaskBoundaryEvent(Operation *op, PIPE src, PIPE dst,
+-                                            std::optional<int64_t> event) {
+-  if (!usesTaskBoundaryEvent7(src, dst))
+-    return success();
+-  if (!event)
+-    return op->emitError("late task handoff requires a statically known event ID "
+-                         "on notification pipe pairs; EVENT_ID7 must remain free");
+-  if (*event == 7)
+-    return op->emitError("late task handoff reserves EVENT_ID7 on this notification pipe pair");
+-  return success();
++// Possible hardware event IDs, proved from the expression itself. Never use a
++// single observed path or speculate a range for an unbounded argument.
++static std::optional<uint8_t> possibleEventIds(Value value, unsigned depth = 0) {
++  if (depth > 32) return std::nullopt;
++  APInt constant;
++  if (matchPattern(value, m_ConstantInt(&constant))) {
++    if (constant.ugt(7)) return std::nullopt;
++    return uint8_t(1u << constant.getZExtValue());
++  }
++  Operation *def = value.getDefiningOp();
++  if (!def) return std::nullopt;
++  if (auto mask = dyn_cast<arith::AndIOp>(def)) {
++    Value other = mask.getRhs();
++    if (!matchPattern(other, m_ConstantInt(&constant)))
++      other = mask.getLhs();
++    if (matchPattern(other, m_ConstantInt(&constant)) && constant.ule(7)) {
++      uint8_t ids = 0;
++      unsigned bits = constant.getZExtValue();
++      for (unsigned id = 0; id < 8; ++id)
++        if ((id & bits) == id) ids |= 1u << id;
++      return ids;
++    }
++  }
++  if (auto rem = dyn_cast<arith::RemUIOp>(def)) {
++    if (matchPattern(rem.getRhs(), m_ConstantInt(&constant)) &&
++        !constant.isZero() && constant.ule(8))
++      return uint8_t((1u << constant.getZExtValue()) - 1);
++  }
++  if (auto select = dyn_cast<arith::SelectOp>(def)) {
++    auto a = possibleEventIds(select.getTrueValue(), depth + 1);
++    auto b = possibleEventIds(select.getFalseValue(), depth + 1);
++    if (a && b) return uint8_t(*a | *b);
++    return std::nullopt;
++  }
++  if (isa<arith::IndexCastOp, arith::IndexCastUIOp>(def)) {
++    auto width = [](Type t) { return t.isIndex() ? 64u : t.getIntOrFloatBitWidth(); };
++    // Proved values 0..7 survive both signed and unsigned casts at these widths.
++    if (width(value.getType()) >= 4 && width(def->getOperand(0).getType()) >= 4)
++      return possibleEventIds(def->getOperand(0), depth + 1);
++  }
++  if (isa<arith::AddIOp, arith::SubIOp, arith::OrIOp, arith::XOrIOp>(def)) {
++    auto a = possibleEventIds(def->getOperand(0), depth + 1);
++    auto b = possibleEventIds(def->getOperand(1), depth + 1);
++    if (!a || !b) return std::nullopt;
++    uint8_t ids = 0;
++    for (int x = 0; x < 8; ++x) {
++      if (!(*a & (1u << x))) continue;
++      for (int y = 0; y < 8; ++y) {
++        if (!(*b & (1u << y))) continue;
++        int id = isa<arith::AddIOp>(def) ? x + y :
++                 isa<arith::SubIOp>(def) ? x - y :
++                 isa<arith::OrIOp>(def) ? x | y : x ^ y;
++        if (id < 0 || id > 7) return std::nullopt;
++        ids |= 1u << id;
++      }
++    }
++    return ids;
++  }
++  // Include both branch outcomes, including branches not taken by a sample run.
++  if (auto branch = dyn_cast<scf::IfOp>(def)) {
++    auto result = dyn_cast<OpResult>(value);
++    if (!result || branch.getThenRegion().empty() || branch.getElseRegion().empty())
++      return std::nullopt;
++    unsigned index = result.getResultNumber();
++    auto a = possibleEventIds(branch.thenYield().getOperand(index), depth + 1);
++    auto b = possibleEventIds(branch.elseYield().getOperand(index), depth + 1);
++    if (a && b) return uint8_t(*a | *b);
++  }
++  return std::nullopt;
+@@ -77,6 +140,11 @@ static LogicalResult checkTaskBoundaryEvent(Operation *op, PIPE src, PIPE dst,
+-template <typename Op>
+-static LogicalResult checkStaticTaskBoundaryEvent(Op op) {
+-  return checkTaskBoundaryEvent(op, op.getSrcPipe().getPipe(),
+-                                op.getDstPipe().getPipe(),
+-                                static_cast<int64_t>(op.getEventId().getEvent()));
+-}
++class ExplicitTaskBoundaryEvents {
++public:
++  LogicalResult record(Operation *op, PIPE src, PIPE dst,
++                       std::optional<uint8_t> ids) {
++    if (!usesTaskBoundaryEvent7(src, dst)) return success();
++    if (!ids)
++      return op->emitError("late task handoff cannot prove a free notification event "
++                           "for this dynamic event ID");
++    used[taskBoundaryEventIndex(src)] |= *ids;
++    return success();
++  }
+@@ -84,9 +152,16 @@ static LogicalResult checkStaticTaskBoundaryEvent(Op op) {
+-template <typename Op>
+-static LogicalResult checkDynamicTaskBoundaryEvent(Op op) {
+-  APInt value;
+-  std::optional<int64_t> event;
+-  if (matchPattern(op.getEventId(), m_ConstantInt(&value)))
+-    event = value.getSExtValue();
+-  return checkTaskBoundaryEvent(op, op.getSrcPipe().getPipe(),
+-                                op.getDstPipe().getPipe(), event);
+-}
++  template <typename Op> LogicalResult low(Op op) {
++    return record(op, op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
++                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())));
++  }
++  template <typename Op> LogicalResult dynamic(Op op) {
++    return record(op, op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
++                  possibleEventIds(op.getEventId()));
++  }
++  template <typename Op> LogicalResult high(Op op) {
++    auto src = parseSyncOpTypeLikeAttr(op.getSrcOpAttr());
++    auto dst = parseSyncOpTypeLikeAttr(op.getDstOpAttr());
++    if (failed(src) || failed(dst))
++      return op.emitError("cannot resolve explicit task-boundary event pipe pair");
++    return record(op, mapSyncOpTypeToPipe(*src), mapSyncOpTypeToPipe(*dst),
++                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())));
++  }
+@@ -94,10 +169,31 @@ static LogicalResult checkDynamicTaskBoundaryEvent(Op op) {
+-template <typename Op>
+-static LogicalResult checkHighLevelTaskBoundaryEvent(Op op) {
+-  auto src = parseSyncOpTypeLikeAttr(op.getSrcOpAttr());
+-  auto dst = parseSyncOpTypeLikeAttr(op.getDstOpAttr());
+-  if (failed(src) || failed(dst))
+-    return op.emitError("cannot resolve explicit task-boundary event pipe pair");
+-  return checkTaskBoundaryEvent(op, mapSyncOpTypeToPipe(*src),
+-                                mapSyncOpTypeToPipe(*dst),
+-                                static_cast<int64_t>(op.getEventId().getEvent()));
+-}
++  void recordHidden(Operation *op) {
++    if (auto model = getSyncMacroModel(op)) {
++      for (const auto &event : model->hiddenEvents) {
++        if (!usesTaskBoundaryEvent7(event.srcPipe, event.dstPipe)) continue;
++        auto &mask = used[taskBoundaryEventIndex(event.srcPipe)];
++        for (unsigned id : event.eventIds)
++          mask |= id < 8 ? (1u << id) : 0xffu;
++      }
++    }
++  }
++
++  LogicalResult allocate(func::FuncOp func) {
++    SmallVector<int32_t, 5> chosen;
++    bool adaptive = false;
++    for (unsigned pair = 0; pair < used.size(); ++pair) {
++      int id = 7;
++      while (id >= 0 && (used[pair] & (1u << id))) --id;
++      if (id < 0)
++        return func.emitError("late task handoff has no provably free notification event on ")
++               << kTaskBoundaryEventPipes[pair] << "->MTE3";
++      chosen.push_back(id);
++      adaptive |= id != 7;
++    }
++    if (adaptive)
++      func->setAttr(kTaskBoundaryEventIds, DenseI32ArrayAttr::get(func.getContext(), chosen));
++    return success();
++  }
++
++private:
++  std::array<uint8_t, 5> used{};
++};
+@@ -105 +201,2 @@ static LogicalResult checkHighLevelTaskBoundaryEvent(Op op) {
+-static LogicalResult checkExplicitTaskBoundaryEvents(func::FuncOp func) {
++static LogicalResult allocateExplicitTaskBoundaryEvents(func::FuncOp func) {
++  ExplicitTaskBoundaryEvents events;
+@@ -108,12 +205,7 @@ static LogicalResult checkExplicitTaskBoundaryEvents(func::FuncOp func) {
+-    if (auto set = dyn_cast<SetFlagOp>(op))
+-      status = checkStaticTaskBoundaryEvent(set);
+-    else if (auto wait = dyn_cast<WaitFlagOp>(op))
+-      status = checkStaticTaskBoundaryEvent(wait);
+-    else if (auto set = dyn_cast<SetFlagDynOp>(op))
+-      status = checkDynamicTaskBoundaryEvent(set);
+-    else if (auto wait = dyn_cast<WaitFlagDynOp>(op))
+-      status = checkDynamicTaskBoundaryEvent(wait);
+-    else if (auto record = dyn_cast<RecordEventOp>(op))
+-      status = checkHighLevelTaskBoundaryEvent(record);
+-    else if (auto wait = dyn_cast<WaitEventOp>(op))
+-      status = checkHighLevelTaskBoundaryEvent(wait);
++    if (auto set = dyn_cast<SetFlagOp>(op)) status = events.low(set);
++    else if (auto wait = dyn_cast<WaitFlagOp>(op)) status = events.low(wait);
++    else if (auto set = dyn_cast<SetFlagDynOp>(op)) status = events.dynamic(set);
++    else if (auto wait = dyn_cast<WaitFlagDynOp>(op)) status = events.dynamic(wait);
++    else if (auto record = dyn_cast<RecordEventOp>(op)) status = events.high(record);
++    else if (auto wait = dyn_cast<WaitEventOp>(op)) status = events.high(wait);
++    events.recordHidden(op);
+@@ -122 +214,2 @@ static LogicalResult checkExplicitTaskBoundaryEvents(func::FuncOp func) {
+-  return failure(result.wasInterrupted());
++  if (result.wasInterrupted()) return failure();
++  return events.allocate(func);
+@@ -142,0 +236 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
++    if (lateHandoff) func->removeAttr(kTaskBoundaryEventIds);
+@@ -154,3 +248,3 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
+-      // Manual synchronization remains authoritative. Only notification event
+-      // conflicts are rejected; do not add or reorder the author's pipe flags.
+-      if (lateHandoff && failed(checkExplicitTaskBoundaryEvents(func))) {
++      // Keep the author's flags and IDs. Select unused notification events at
++      // compile time; no run-time remapping or new Scalar instructions.
++      if (lateHandoff && failed(allocateExplicitTaskBoundaryEvents(func))) {
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index 4ceeda07..a49af7b0 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -12,0 +13 @@
++#include "PTO/Transforms/InsertSync/TaskBoundaryEvent.h"
+@@ -688,0 +690,14 @@ struct EmitPTOManualPass
++      // Compile-time handshake with the PyPTO wrapper. Old wrappers must fail
++      // closed instead of silently continuing to use EVENT_ID7 after allocation.
++      mop.walk([&](func::FuncOp func) {
++        auto ids = func->getAttrOfType<DenseI32ArrayAttr>(kTaskBoundaryEventIds);
++        if (!ids) return;
++        std::string metadata = "// ";
++        metadata += kTaskBoundaryEventMarker;
++        metadata += " " + func.getSymName().str();
++        for (unsigned i = 0; i < 5; ++i)
++          metadata += " " + std::string(kTaskBoundaryEventPipes[i]) + "=" + std::to_string(ids[i]);
++        metadata += "\n#ifndef PYPTO_TASK_BOUNDARY_EVENTS_V1\n"
++                    "#error allocated task boundary events require a matching PyPTO wrapper\n#endif";
++        builder.create<emitc::VerbatimOp>(func.getLoc(), builder.getStringAttr(metadata));
++      });
+diff --git a/test/lit/pto/local_task_pollable_dynamic_range.pto b/test/lit/pto/local_task_pollable_dynamic_range.pto
+new file mode 100644
+index 00000000..d3d5e8ea
+--- /dev/null
++++ b/test/lit/pto/local_task_pollable_dynamic_range.pto
+@@ -0,0 +1,34 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 upper_half MTE2=3 MTE1=7 M=7 FIX=7 V=7
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 either_edge MTE2=6 MTE1=7 M=7 FIX=7 V=7
++// CHECK-LABEL: AICORE void upper_half(
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
++// CHECK-LABEL: AICORE void either_edge(
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @upper_half(%input: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    %mask = arith.constant 3 : index
++    %four = arith.constant 4 : index
++    %low = arith.andi %input, %mask : index
++    %id = arith.addi %low, %four : index
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    return
++  }
++  func.func @either_edge(%cond: i1) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    %zero = arith.constant 0 : index
++    %seven = arith.constant 7 : index
++    %id = scf.if %cond -> (index) {
++      scf.yield %zero : index
++    } else {
++      scf.yield %seven : index
++    }
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    return
++  }
++}
+diff --git a/test/lit/pto/local_task_pollable_events_exhausted.pto b/test/lit/pto/local_task_pollable_events_exhausted.pto
+new file mode 100644
+index 00000000..f94274d5
+--- /dev/null
++++ b/test/lit/pto/local_task_pollable_events_exhausted.pto
+@@ -0,0 +1,13 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: late task handoff has no provably free notification event on MTE2->MTE3
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @all_ids(%input: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    %eight = arith.constant 8 : index
++    %id = arith.remui %input, %eight : index
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    return
++  }
++}
+diff --git a/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto b/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto
+index 6549b957..c2ec13e5 100644
+--- a/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto
++++ b/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto
+@@ -4 +4 @@
+-// CHECK: late task handoff requires a statically known event ID on notification pipe pairs; EVENT_ID7 must remain free
++// CHECK: late task handoff cannot prove a free notification event for this dynamic event ID
+diff --git a/test/lit/pto/local_task_pollable_explicit_high_level_invalid.pto b/test/lit/pto/local_task_pollable_explicit_high_level_allocated.pto
+similarity index 59%
+rename from test/lit/pto/local_task_pollable_explicit_high_level_invalid.pto
+rename to test/lit/pto/local_task_pollable_explicit_high_level_allocated.pto
+index 0ecada52..2840b73c 100644
+--- a/test/lit/pto/local_task_pollable_explicit_high_level_invalid.pto
++++ b/test/lit/pto/local_task_pollable_explicit_high_level_allocated.pto
+@@ -3,2 +3,5 @@
+-// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+-// CHECK: late task handoff reserves EVENT_ID7 on this notification pipe pair
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: // PYPTO_TASK_BOUNDARY_EVENTS_V1 manual_high_level_conflict MTE2=6 MTE1=7 M=7 FIX=7 V=7
++// CHECK: #error allocated task boundary events require a matching PyPTO wrapper
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
+diff --git a/test/lit/pto/local_task_pollable_explicit_sync_invalid.pto b/test/lit/pto/local_task_pollable_explicit_sync_allocated.pto
+similarity index 54%
+rename from test/lit/pto/local_task_pollable_explicit_sync_invalid.pto
+rename to test/lit/pto/local_task_pollable_explicit_sync_allocated.pto
+index 1b5fd937..fd5d16be 100644
+--- a/test/lit/pto/local_task_pollable_explicit_sync_invalid.pto
++++ b/test/lit/pto/local_task_pollable_explicit_sync_allocated.pto
+@@ -3,2 +3,5 @@
+-// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+-// CHECK: late task handoff reserves EVENT_ID7 on this notification pipe pair
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: // PYPTO_TASK_BOUNDARY_EVENTS_V1 manual_tail MTE2=6 MTE1=7 M=7 FIX=7 V=7
++// CHECK: #error allocated task boundary events require a matching PyPTO wrapper
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);

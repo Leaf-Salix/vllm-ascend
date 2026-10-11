@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// Licensed under the CANN Open Software License Agreement Version 2.0.
+// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 upper_half MTE2=3 MTE1=7 M=7 FIX=7 V=7
+// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 either_edge MTE2=6 MTE1=7 M=7 FIX=7 V=7
+// CHECK-LABEL: AICORE void upper_half(
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
+// CHECK-LABEL: AICORE void either_edge(
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @upper_half(%input: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
+    %mask = arith.constant 3 : index
+    %four = arith.constant 4 : index
+    %low = arith.andi %input, %mask : index
+    %id = arith.addi %low, %four : index
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
+    return
+  }
+  func.func @either_edge(%cond: i1) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
+    %zero = arith.constant 0 : index
+    %seven = arith.constant 7 : index
+    %id = scf.if %cond -> (index) {
+      scf.yield %zero : index
+    } else {
+      scf.yield %seven : index
+    }
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
+    return
+  }
+}

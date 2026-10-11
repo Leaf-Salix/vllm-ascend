@@ -1,0 +1,48 @@
+diff --git a/tests/pypto_test/tmr_csa_event_contract_compile.py b/tests/pypto_test/tmr_csa_event_contract_compile.py
+new file mode 100644
+index 00000000..834150ae
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_event_contract_compile.py
+@@ -0,0 +1,28 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Check the event-allocation compiler against the retained CSA notification binary."""
++
++import argparse
++import json
++from pathlib import Path
++
++import tmr_csa_full_128k_b16_compile as demo
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument("--previous", type=Path, required=True)
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=True)
++    previous = args.previous.resolve(strict=True)
++    target = args.output / "previous"
++    if not target.exists():
++        target.symlink_to(previous, target_is_directory=True)
++    assert target.resolve() == previous
++    (args.output / "reused_artifacts.json").write_text(json.dumps({"previous": str(previous)}, indent=2) + "\n")
++    for variant in ("baseline", "mixed"):
++        demo.compile_variant(variant, args.output / variant)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/pypto_test/tmr_csa_event_contract_demo.py b/tests/pypto_test/tmr_csa_event_contract_demo.py
+new file mode 100644
+index 00000000..624c8891
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_event_contract_demo.py
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Replay current ordinary/MIX CSA and the retained same-SDK notification binary."""
++
++import tmr_csa_full_128k_b16_demo as demo
++
++if __name__ == "__main__":
++    demo.PACKAGES["previous"] = demo.PACKAGES["mixed"]
++    demo.main()
