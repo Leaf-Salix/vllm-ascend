@@ -1,0 +1,72 @@
+diff --git a/docs/en/api/system.md b/docs/en/api/system.md
+index 19c40efd3..0c282c1ac 100644
+--- a/docs/en/api/system.md
++++ b/docs/en/api/system.md
+@@ -51,0 +52,5 @@ pre-dispatch and argument preparation on the waiting core remain available.
++For a verified unconditional Set, the compiler also prearms the completion
++kind through submission metadata. Normal execution does not write that GM
++marker; a cancelled Wait clears it before returning without tail events.
++The runtime can skip the control-line clear/writeback only when it was not
++modified by prefix handoff or diagnostic instrumentation.
+diff --git a/docs/zh/api/system.md b/docs/zh/api/system.md
+index 4b6e764bb..fa96ad2e5 100644
+--- a/docs/zh/api/system.md
++++ b/docs/zh/api/system.md
+@@ -41,0 +42,3 @@ with pl.spmd(blocks, name_hint="projection"):
++对于通过无条件尾部校验的 Set，编译器还通过提交元数据预置完成类型，正常执行不再写入
++该 GM 标记；Wait 取消执行时先清零，再从不发出尾部事件的路径返回。
++仅当控制行未被前缀交接或诊断插桩修改时，运行时才省去清零与写回。
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index b91333470..c211f759a 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -24 +24 @@ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "58f6581eb0774edf8acee5898aae1a21253fcc24"
++SIMPLER_KERNEL_REVISION = "2fb78a6ee9cdc7f365a5ebf926e146ce6cb34b26"
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 26d6759eb..c1a142394 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -705,0 +706,4 @@ int64_t pypto_wait_predecessor(__gm__ int64_t* args, int64_t dependency) {
++    } else {
++        // The compiler's cancellation return precedes the tail markers. A
++        // prearmed task must not make the executor wait on unissued events.
++        ctx->async_tail_kind = 0;
+@@ -722,6 +726,3 @@ void pypto_set_next_task_start(__gm__ int64_t* args) {
+-    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
+-#if defined(__DAV_CUBE__)
+-    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::AicAllPipes);
+-#else
+-    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::AivAllPipes);
+-#endif
++    // The compiler also supplies the prearmed capability on submission. Keep
++    // the local scheduling boundary without dirtying the GM control line.
++    asm volatile("" : : : "memory");
+diff --git a/src/codegen/orchestration/orchestration_codegen.cpp b/src/codegen/orchestration/orchestration_codegen.cpp
+index d76b20760..411d50d00 100644
+--- a/src/codegen/orchestration/orchestration_codegen.cpp
++++ b/src/codegen/orchestration/orchestration_codegen.cpp
+@@ -3130,0 +3131,6 @@ class OrchestrationStmtCodegen : public CodegenBase {
++    if (boundaries.signal) {
++      INTERNAL_CHECK(core_type == CoreType::CUBE ||
++                     (core_type == CoreType::VECTOR && !RequiresDualAivDispatch(kernel_func)))
++          << "local task tails only support single-AIC or single-AIV kernels";
++      overlap_lines.push_back(task_var + ".set_prearmed_async_tail(true);");
++    }
+diff --git a/tests/st/runtime/scheduling/test_task_boundary_statements.py b/tests/st/runtime/scheduling/test_task_boundary_statements.py
+index 42a39d691..47a6ae0f2 100644
+--- a/tests/st/runtime/scheduling/test_task_boundary_statements.py
++++ b/tests/st/runtime/scheduling/test_task_boundary_statements.py
+@@ -80 +80,2 @@ def test_local_task_boundaries(test_config: RunConfig, tmp_path: Path):
+-    assert "AsyncTailKind::AivAllPipes" in producer
++    assert "ctx->async_tail_kind =" not in producer
++    assert all("ctx->async_tail_kind = 0;" in text for text in consumers)
+diff --git a/tests/ut/codegen/test_pto_codegen.py b/tests/ut/codegen/test_pto_codegen.py
+index 4f8e40274..8b94d8d0b 100644
+--- a/tests/ut/codegen/test_pto_codegen.py
++++ b/tests/ut/codegen/test_pto_codegen.py
+@@ -1774,2 +1774,2 @@ class TestGenerateKernelWrapper:
+-        assert "AsyncTailKind::AicAllPipes" in wrapper
+-        assert "AsyncTailKind::AivAllPipes" in wrapper
++        assert "void pypto_set_next_task_start" in wrapper
++        assert "ctx->async_tail_kind =" not in wrapper
