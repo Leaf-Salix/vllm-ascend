@@ -1,0 +1,181 @@
+commit 7f9f82133dfe243e2f3e1f2573b39039ce4bda4a
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 05:35:46 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 05:35:46 2026 +0800
+
+    test(CSA): 记录尾部诊断判断消除的三路公平对照并保留插桩计数
+    
+    新增128K/B16私有编译和运行入口，对照普通PTO、原代次通知和去诊断
+    判断三条路径。复用同SDK的已有控制产物，只重编候选；检查程序IR
+    相同，73个成员在Wait前无流水操作。生成代码在内联实例编号的一一
+    重命名之外，仅71个通知回调删除诊断读取和高位计数更新。
+    
+    更新CSA逐成员覆盖插桩，显式保留通知计数，避免随PyPTO默认优化
+    而误报后到观察次数。驱动同时支持优化前后编译器，公共算子入口、
+    权重、cache和数学表达没有改动。
+    
+    验证：两轮单卡CANN9.2/TMR、NZ2、atomic0、profiler关闭，三路各5次
+    预热和30次轮换单次图重放，reset在计时外。候选mean为986.21和
+    986.52微秒，较原通知减少3.71和3.59微秒；max减少0.70和2.20微秒，
+    min仍多0.86和0.22微秒。每轮9项状态及换输入重放逐bit一致，每路
+    31项保护区通过。此结果只支持该档小幅改善，不外推所有场景。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py b/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
+index 5997747e..4fbc94d1 100644
+--- a/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
++++ b/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
+@@ -107,6 +107,7 @@ def instrument_wrappers(address, functions):
+         has_tail = pto_backend._function_uses_ops(func, pto_backend._LOCAL_TASK_SIGNAL_OPS)
+         function_id = len(functions)
+         source = original(func, *args, **kwargs)
++        source = pto_backend._with_compiled_poll_trace(source)
+         functions.append(
+             {
+                 "id": function_id,
+diff --git a/tests/pypto_test/tmr_csa_untraced_notice_compile.py b/tests/pypto_test/tmr_csa_untraced_notice_compile.py
+new file mode 100644
+index 00000000..1662cb05
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_untraced_notice_compile.py
+@@ -0,0 +1,121 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Measure removing diagnostic accounting from an uninstrumented CSA callback."""
++
++import argparse
++import json
++import re
++from contextlib import contextmanager
++from pathlib import Path
++
++import tmr_csa_full_128k_b16_compile as demo
++from pypto.backend import pto_backend
++from tmr_csa_scalar_prefix_layout_audit import inspect_kernels
++from tmr_csa_score_fair_compile import PACKAGES as SCORE_PACKAGES
++from tmr_csa_score_fair_compile import prepare_plain
++
++PACKAGES = {
++    "plain_score": SCORE_PACKAGES["plain_score"],
++    "dispatch_notice": SCORE_PACKAGES["early_score"],
++    "untraced_notice": SCORE_PACKAGES["early_score"],
++}
++TRACE_ACCOUNTING = (
++    "    const bool trace = ctx->scalar_overlap_trace != 0;\n"
++    "    if (trace) ctx->late_handoff_scratch |= uint64_t{1} << 32;\n"
++)
++
++
++@contextmanager
++def untraced_notice():
++    """Experiment only: the frozen CSA supplies no diagnostic trace pointer."""
++    original = pto_backend._compiled_late_poll
++
++    def without_trace_accounting(func):
++        helper, entry = original(func)
++        if helper:
++            if TRACE_ACCOUNTING in helper:
++                assert helper.count(TRACE_ACCOUNTING) == 1, func.name
++                helper = helper.replace(TRACE_ACCOUNTING, "")
++            else:
++                # The retained compiler now omits it by default. Keep this
++                # experiment usable with both the pre-change and new base.
++                assert "scalar_overlap_trace" not in helper, func.name
++        return helper, entry
++
++    pto_backend._compiled_late_poll = without_trace_accounting
++    try:
++        yield
++    finally:
++        pto_backend._compiled_late_poll = original
++
++
++def canonical_inline_names(code):
++    """Ignore bijective inline-instance renaming across compiler processes."""
++    names = {}
++
++    def rename(match):
++        name = match.group()
++        if name not in names:
++            names[name] = re.sub(r"_inline[0-9]+", "_inline", name) + str(len(names))
++        return names[name]
++
++    return re.sub(r"\b[A-Za-z_]\w*_inline[0-9]+", rename, code)
++
++
++def audit_compiled(output, controls):
++    candidate = output / "untraced_notice"
++    baseline = output / "dispatch_notice"
++    assert (candidate / "program.py").read_text() == (baseline / "program.py").read_text()
++    audit = inspect_kernels(candidate / "build")
++    assert all(not row["unsafe_pipe_ops"] for row in audit)
++    (output / "untraced_prefix_audit.json").write_text(json.dumps(audit, indent=2) + "\n")
++    files = []
++    for path in sorted((candidate / "build/kernels").rglob("*.cpp")):
++        relative = path.relative_to(candidate / "build")
++        before = (baseline / "build" / relative).read_text()
++        after = path.read_text()
++        removed = before.count(TRACE_ACCOUNTING)
++        assert canonical_inline_names(before.replace(TRACE_ACCOUNTING, "")) == canonical_inline_names(after), relative
++        assert "->scalar_overlap_trace =" not in after, relative
++        files.append({"file": str(relative), "trace_clauses_removed": removed})
++    assert len(files) == 73
++    assert sum(row["trace_clauses_removed"] for row in files) == 71
++    (output / "source_comparison.json").write_text(
++        json.dumps(
++            {
++                "same_program_ir": True,
++                "only_generated_change": "remove optional trace load and flag update from callback",
++                "ignored": "bijective compiler-generated inline-instance renaming",
++                "controls": str(controls.resolve()),
++                "files": files,
++            },
++            indent=2,
++        )
++        + "\n"
++    )
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--output", type=Path, required=True)
++    parser.add_argument(
++        "--controls", type=Path, required=True, help="Stage077 artifacts built with the same Simpler SDK"
++    )
++    args = parser.parse_args()
++    args.output.mkdir(parents=True, exist_ok=True)
++    prepare_plain(args.output)
++    demo.PACKAGES.update(PACKAGES)
++    for name in ("plain_score", "dispatch_notice"):
++        source = (args.controls / name).resolve()
++        assert (source / "build").is_dir(), source
++        target = args.output / name
++        if target.exists():
++            assert target.resolve() == source
++        else:
++            target.symlink_to(source, target_is_directory=True)
++    with untraced_notice():
++        demo.compile_variant("untraced_notice", args.output / "untraced_notice")
++    audit_compiled(args.output, args.controls)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/pypto_test/tmr_csa_untraced_notice_demo.py b/tests/pypto_test/tmr_csa_untraced_notice_demo.py
+new file mode 100644
+index 00000000..bc577241
+--- /dev/null
++++ b/tests/pypto_test/tmr_csa_untraced_notice_demo.py
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: Apache-2.0
++"""Compare the diagnostic-free notification experiment on one frozen CSA."""
++
++import tmr_csa_full_128k_b16_demo as demo
++from tmr_csa_score_scalar_plan_demo import check_metadata_contract
++from tmr_csa_untraced_notice_compile import PACKAGES
++
++if __name__ == "__main__":
++    demo.PACKAGES.update(PACKAGES)
++    with check_metadata_contract():
++        demo.main()

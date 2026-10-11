@@ -1,0 +1,143 @@
+commit dfe35bc31ee221eb0d5f58d807ac216b57e0a9df
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 05:35:29 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 05:35:29 2026 +0800
+
+    perf(TMR): 在未插桩的尾部通知回调中省去诊断状态读取
+    
+    正常CSA此前在每次编译通知回调中读取scalar_overlap_trace，即使没有
+    诊断缓冲也执行判断。现在默认不生成这段读取和高位计数更新；原有
+    async_return_trace诊断属性及显式插桩通过内部生成器保留同样的计数。
+    同步更新AIC/AIV后到交接探针，避免优化后把通知次数错误记录为零。
+    
+    不改局部Wait/Set写法、通知值与DMA、完整流水等待、ACK、派发或
+    allow_early_resolve语义；chip swimlane、PMU和参数dump回退保持。
+    没有新增算子作者必须填写的整函数属性，也不做边界自动识别。
+    
+    验证：26项后端单测通过；单卡AIC/AIV两次输入及图重放检查通过，
+    诊断回调计数分别为22/24和24/47，输出、Scalar依赖和保护区正确。
+    128K/B16同SDK三路轮换对照两轮各30次，去诊断候选较原通知mean
+    减少3.71/3.59微秒，max减少0.70/2.20微秒；三路9项状态和换输入
+    重放逐bit一致，每路31项保护区通过。不泛化为七档或整网收益。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 997773bc5..72c60afef 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1079,6 +1079,22 @@ def _generate_kernel_header(
+     )
+ 
+ 
++def _with_compiled_poll_trace(code: str) -> str:
++    """Enable notification accounting only in explicitly instrumented code."""
++    accounting = (
++        "    const bool trace = ctx->scalar_overlap_trace != 0;\n"
++        "    if (trace) ctx->late_handoff_scratch |= uint64_t{1} << 32;\n"
++    )
++    if accounting in code:
++        return code
++    marker = "    for (;;) {\n        uint32_t next;\n"
++    if code.count(marker) > 1:
++        raise ValueError("expected at most one compiled local-tail poll in a kernel wrapper")
++    # A task without a callback, or with the blocking resource fallback, has
++    # no notification to account for. Preserve those paths unchanged.
++    return code.replace(marker, accounting + marker, 1)
++
++
+ def _compiled_late_poll(func: _ir_core.Function) -> tuple[str, str]:
+     """Keep DMA code in the task image, reachable through a private entry tag."""
+     scratch = dict(func.attrs).get("task_boundary_scratch_base")
+@@ -1121,8 +1137,6 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
+ {joins}
+     pipe_barrier(PIPE_MTE3);
+     {copy_out}(reinterpret_cast<__gm__ uint32_t*>(notice->value), scratch, 0, 1, 2, 0, 0);
+-    const bool trace = ctx->scalar_overlap_trace != 0;
+-    if (trace) ctx->late_handoff_scratch |= uint64_t{{1}} << 32;
+     for (;;) {{
+         uint32_t next;
+         asm volatile("MOV %0, DATA_MAIN_BASE" : "=l"(next) : : "memory");
+@@ -1134,6 +1148,8 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
+     }}
+ }}
+ """
++    if dict(func.attrs).get("async_return_trace") is not None:
++        helper = _with_compiled_poll_trace(helper)
+     entry = """    // Internal tail callback; this tag never executes the task body twice.
+     if ((reinterpret_cast<uint64_t>(args) & uint64_t{2}) != 0) {
+         auto* tail_args = reinterpret_cast<__gm__ int64_t*>(reinterpret_cast<uint64_t>(args) & ~uint64_t{3});
+diff --git a/tests/st/runtime/scheduling/task_boundary_late_arrival_probe.py b/tests/st/runtime/scheduling/task_boundary_late_arrival_probe.py
+index 51102be7a..eda5e1010 100644
+--- a/tests/st/runtime/scheduling/task_boundary_late_arrival_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_late_arrival_probe.py
+@@ -151,6 +151,7 @@ def instrument(mode, cube):
+         assert code.count(call_marker) == 1
+         code = code.replace('extern "C" {', _CLOCK + '\nextern "C" {', 1)
+         if func.name == "late_producer":
++            code = pto_backend._with_compiled_poll_trace(code)
+             # Diagnostic-only compute marker: distinguish original M/V work
+             # from the notification's added MTE3 tail. Existing executor kinds
+             # record compute completion separately and consume every event.
+diff --git a/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+index 29da20049..f726a4f16 100644
+--- a/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+@@ -66,6 +66,7 @@ def instrument(mode, cube):
+         marker = "    // Forward to ptoas-generated function\n"
+         assert code.count(marker) == 1
+         if func.name == "late_producer":
++            code = pto_backend._with_compiled_poll_trace(code)
+             trace = next(p for p in tensors if p.name_hint.startswith("a_trace")).name_hint
+             setup = f"""    auto* row = reinterpret_cast<__gm__ uint64_t*>({trace})
+         + get_block_idx(args) * 32;
+diff --git a/tests/ut/backend/test_task_boundary_events.py b/tests/ut/backend/test_task_boundary_events.py
+index c6c1213e5..1601223d9 100644
+--- a/tests/ut/backend/test_task_boundary_events.py
++++ b/tests/ut/backend/test_task_boundary_events.py
+@@ -6,7 +6,11 @@ from types import SimpleNamespace
+ 
+ import pytest
+ from pypto import ir
+-from pypto.backend.pto_backend import _apply_task_boundary_events, _compiled_late_poll
++from pypto.backend.pto_backend import (
++    _apply_task_boundary_events,
++    _compiled_late_poll,
++    _with_compiled_poll_trace,
++)
+ 
+ 
+ def vector_helper():
+@@ -19,6 +23,31 @@ def test_no_allocation_keeps_existing_callback():
+     assert _apply_task_boundary_events("producer", helper, "") == (helper, "")
+ 
+ 
++@pytest.mark.parametrize("cube", [False, True], ids=["vector", "cube"])
++def test_normal_callback_omits_optional_trace_but_instrumentation_keeps_it(cube):
++    kind = ir.FunctionType.AIC if cube else ir.FunctionType.AIV
++    attrs = {"task_boundary_scratch_base": 0}
++    plain, entry = _compiled_late_poll(SimpleNamespace(attrs=attrs, func_type=kind))
++    traced, traced_entry = _compiled_late_poll(
++        SimpleNamespace(attrs={**attrs, "async_return_trace": object()}, func_type=kind)
++    )
++    assert "scalar_overlap_trace" not in plain
++    assert "late_handoff_scratch |= uint64_t{1} << 32" in traced
++    assert _with_compiled_poll_trace(plain) == traced
++    assert _with_compiled_poll_trace(traced) == traced
++    assert traced_entry == entry
++    assert traced.index("pipe_barrier(PIPE_MTE3)") < traced.index("const bool trace")
++    assert traced.index("const bool trace") < traced.index("for (;;)")
++
++
++def test_optional_trace_does_not_invent_a_notification_for_blocking_fallback():
++    marker = "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer"
++    helper, _ = _apply_task_boundary_events("producer", vector_helper(), marker)
++    assert "pipe_barrier(PIPE_ALL)" in helper
++    assert _with_compiled_poll_trace(helper) == helper
++    assert _with_compiled_poll_trace("") == ""
++
++
+ @pytest.mark.parametrize("cube", [False, True], ids=["vector", "cube"])
+ def test_dispatch_notification_keeps_wrap_fallback_and_full_pipe_join(cube):
+     kind = ir.FunctionType.AIC if cube else ir.FunctionType.AIV
