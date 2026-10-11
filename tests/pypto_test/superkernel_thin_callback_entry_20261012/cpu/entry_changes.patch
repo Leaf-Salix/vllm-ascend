@@ -1,0 +1,220 @@
+--- original/csa_cache_writeback.cpp
++++ thin/csa_cache_writeback.cpp
+@@ -349,6 +349,47 @@
+   return;
+ }
+ // --- Kernel entry point ---
++static __aicore__ __attribute__((noinline)) void pypto_execute_local_task(__gm__ int64_t* args)
++{
++    // The executor tags only a genuine same-core handoff.
++    uint64_t __pypto_args_word = reinterpret_cast<uint64_t>(args);
++    int64_t __pypto_boundary_handoff = __pypto_args_word & uint64_t{1};
++    args = reinterpret_cast<__gm__ int64_t*>(__pypto_args_word & ~uint64_t{1});
++    // Read logical SPMD block identity from runtime dispatch payload
++    int32_t __pypto_spmd_block_idx = get_block_idx(args);
++    int32_t __pypto_spmd_block_num = get_block_num(args);
++
++    // Unpack tensor: kv_cache_flat__ssa_v0
++    __gm__ Tensor* kv_cache_flat__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[0]);
++    __gm__ bfloat16_t* kv_cache_flat__ssa_v0 = reinterpret_cast<__gm__ bfloat16_t*>(kv_cache_flat__ssa_v0_tensor->buffer.addr) + kv_cache_flat__ssa_v0_tensor->start_offset;
++
++    // Unpack tensor: ori_slot_mapping__ssa_v0
++    __gm__ Tensor* ori_slot_mapping__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[1]);
++    __gm__ int32_t* ori_slot_mapping__ssa_v0 = reinterpret_cast<__gm__ int32_t*>(ori_slot_mapping__ssa_v0_tensor->buffer.addr) + ori_slot_mapping__ssa_v0_tensor->start_offset;
++
++    // Unpack tensor: kv__ssa_v0
++    __gm__ Tensor* kv__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[2]);
++    __gm__ bfloat16_t* kv__ssa_v0 = reinterpret_cast<__gm__ bfloat16_t*>(kv__ssa_v0_tensor->buffer.addr) + kv__ssa_v0_tensor->start_offset;
++
++    // Unpack scalar: wb_blocks__ssa_v0
++    union { uint64_t u64; int64_t val; } wb_blocks__ssa_v0_conv;
++    wb_blocks__ssa_v0_conv.u64 = args[3];
++    int64_t wb_blocks__ssa_v0 = wb_blocks__ssa_v0_conv.val;
++
++    // Unpack scalar: T_DYN
++    union { uint64_t u64; int64_t val; } T_DYN_conv;
++    T_DYN_conv.u64 = args[4];
++    int64_t T_DYN = T_DYN_conv.val;
++
++    // Extract dynamic dim: ORI_BLOCK_NUM_DYN
++    int64_t ORI_BLOCK_NUM_DYN = (static_cast<int64_t>(kv_cache_flat__ssa_v0_tensor->shapes[0]) / 32);
++
++    // Extract dynamic dim: T_DYN_1
++    int64_t T_DYN_1 = static_cast<int64_t>(ori_slot_mapping__ssa_v0_tensor->shapes[0]);
++
++    // Forward to ptoas-generated function
++    csa_cache_writeback(kv_cache_flat__ssa_v0, ori_slot_mapping__ssa_v0, kv__ssa_v0, wb_blocks__ssa_v0, T_DYN, ORI_BLOCK_NUM_DYN, T_DYN_1, args, __pypto_boundary_handoff, __pypto_spmd_block_idx, __pypto_spmd_block_num);
++}
+ extern "C" __aicore__ __attribute__((always_inline)) void kernel_entry(__gm__ int64_t* args)
+ {
+     // Internal tail callback; this tag never executes the task body twice.
+@@ -357,42 +398,5 @@
+         pypto_poll_local_tail(tail_args);
+         return;
+     }
+-    // The executor tags only a genuine same-core handoff.
+-    uint64_t __pypto_args_word = reinterpret_cast<uint64_t>(args);
+-    int64_t __pypto_boundary_handoff = __pypto_args_word & uint64_t{1};
+-    args = reinterpret_cast<__gm__ int64_t*>(__pypto_args_word & ~uint64_t{1});
+-    // Read logical SPMD block identity from runtime dispatch payload
+-    int32_t __pypto_spmd_block_idx = get_block_idx(args);
+-    int32_t __pypto_spmd_block_num = get_block_num(args);
+-
+-    // Unpack tensor: kv_cache_flat__ssa_v0
+-    __gm__ Tensor* kv_cache_flat__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[0]);
+-    __gm__ bfloat16_t* kv_cache_flat__ssa_v0 = reinterpret_cast<__gm__ bfloat16_t*>(kv_cache_flat__ssa_v0_tensor->buffer.addr) + kv_cache_flat__ssa_v0_tensor->start_offset;
+-
+-    // Unpack tensor: ori_slot_mapping__ssa_v0
+-    __gm__ Tensor* ori_slot_mapping__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[1]);
+-    __gm__ int32_t* ori_slot_mapping__ssa_v0 = reinterpret_cast<__gm__ int32_t*>(ori_slot_mapping__ssa_v0_tensor->buffer.addr) + ori_slot_mapping__ssa_v0_tensor->start_offset;
+-
+-    // Unpack tensor: kv__ssa_v0
+-    __gm__ Tensor* kv__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[2]);
+-    __gm__ bfloat16_t* kv__ssa_v0 = reinterpret_cast<__gm__ bfloat16_t*>(kv__ssa_v0_tensor->buffer.addr) + kv__ssa_v0_tensor->start_offset;
+-
+-    // Unpack scalar: wb_blocks__ssa_v0
+-    union { uint64_t u64; int64_t val; } wb_blocks__ssa_v0_conv;
+-    wb_blocks__ssa_v0_conv.u64 = args[3];
+-    int64_t wb_blocks__ssa_v0 = wb_blocks__ssa_v0_conv.val;
+-
+-    // Unpack scalar: T_DYN
+-    union { uint64_t u64; int64_t val; } T_DYN_conv;
+-    T_DYN_conv.u64 = args[4];
+-    int64_t T_DYN = T_DYN_conv.val;
+-
+-    // Extract dynamic dim: ORI_BLOCK_NUM_DYN
+-    int64_t ORI_BLOCK_NUM_DYN = (static_cast<int64_t>(kv_cache_flat__ssa_v0_tensor->shapes[0]) / 32);
+-
+-    // Extract dynamic dim: T_DYN_1
+-    int64_t T_DYN_1 = static_cast<int64_t>(ori_slot_mapping__ssa_v0_tensor->shapes[0]);
+-
+-    // Forward to ptoas-generated function
+-    csa_cache_writeback(kv_cache_flat__ssa_v0, ori_slot_mapping__ssa_v0, kv__ssa_v0, wb_blocks__ssa_v0, T_DYN, ORI_BLOCK_NUM_DYN, T_DYN_1, args, __pypto_boundary_handoff, __pypto_spmd_block_idx, __pypto_spmd_block_num);
+-}
++    pypto_execute_local_task(args);
++}
+--- original/indexer_score_topk_native_pair_aiv.cpp
++++ thin/indexer_score_topk_native_pair_aiv.cpp
+@@ -7942,14 +7942,8 @@
+   return;
+ }
+ // --- Kernel entry point ---
+-extern "C" __aicore__ __attribute__((always_inline)) void kernel_entry(__gm__ int64_t* args)
++static __aicore__ __attribute__((noinline)) void pypto_execute_local_task(__gm__ int64_t* args)
+ {
+-    // Internal tail callback; this tag never executes the task body twice.
+-    if ((reinterpret_cast<uint64_t>(args) & uint64_t{2}) != 0) {
+-        auto* tail_args = reinterpret_cast<__gm__ int64_t*>(reinterpret_cast<uint64_t>(args) & ~uint64_t{3});
+-        pypto_poll_local_tail(tail_args);
+-        return;
+-    }
+     // The executor tags only a genuine same-core handoff.
+     uint64_t __pypto_args_word = reinterpret_cast<uint64_t>(args);
+     int64_t __pypto_boundary_handoff = __pypto_args_word & uint64_t{1};
+@@ -8034,3 +8028,13 @@
+     // Forward to ptoas-generated function
+     indexer_score_topk_native_pair_aiv(position_ids__ssa_v0, kv_seq_lens__ssa_v0, buf_score_ffts_inline19301__ssa_v0, qr_hadamard_i8_inline11145__rv_v2, coefficients_inline19296__ssa_v0, idx_block_table__ssa_v0, idx_kv_cache_inline19388__ssa_v0, idx_kv_cache_shift64_inline19381__ssa_v0, buf_score_transfer_inline19364__ssa_v0, idx_native_kv_cache__rv_v2, pair_arena_inline13790_inline14730__ssa_v0, native_page_bytes_inline19253__ssa_v0, T_DYN, B_DYN, INDEXER_TABLE_COLUMNS_DYN, key_rows_inline19302__ssa_v0, shifted_rows_inline19456__ssa_v0, IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN, args, __pypto_boundary_handoff, __pypto_spmd_block_idx, __pypto_spmd_block_num, __pypto_spmd_subblock_idx);
+ }
++extern "C" __aicore__ __attribute__((always_inline)) void kernel_entry(__gm__ int64_t* args)
++{
++    // Internal tail callback; this tag never executes the task body twice.
++    if ((reinterpret_cast<uint64_t>(args) & uint64_t{2}) != 0) {
++        auto* tail_args = reinterpret_cast<__gm__ int64_t*>(reinterpret_cast<uint64_t>(args) & ~uint64_t{3});
++        pypto_poll_local_tail(tail_args);
++        return;
++    }
++    pypto_execute_local_task(args);
++}
+--- original/_proj_b_mm_nz_kernel__2.cpp
++++ thin/_proj_b_mm_nz_kernel__2.cpp
+@@ -613,6 +613,46 @@
+   return;
+ }
+ // --- Kernel entry point ---
++static __aicore__ __attribute__((noinline)) void pypto_execute_local_task(__gm__ int64_t* args)
++{
++    // The executor tags only a genuine same-core handoff.
++    uint64_t __pypto_args_word = reinterpret_cast<uint64_t>(args);
++    int64_t __pypto_boundary_handoff = __pypto_args_word & uint64_t{1};
++    args = reinterpret_cast<__gm__ int64_t*>(__pypto_args_word & ~uint64_t{1});
++    // Read logical SPMD block identity from runtime dispatch payload
++    int32_t __pypto_spmd_block_idx = get_block_idx(args);
++    int32_t __pypto_spmd_block_num = get_block_num(args);
++
++    // Unpack tensor: o_r_i8_pad__ssa_v0
++    __gm__ Tensor* o_r_i8_pad__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[0]);
++    __gm__ int8_t* o_r_i8_pad__ssa_v0 = reinterpret_cast<__gm__ int8_t*>(o_r_i8_pad__ssa_v0_tensor->buffer.addr) + o_r_i8_pad__ssa_v0_tensor->start_offset;
++
++    // Unpack tensor: wo_b__ssa_v0
++    __gm__ Tensor* wo_b__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[1]);
++    __gm__ int8_t* wo_b__ssa_v0 = reinterpret_cast<__gm__ int8_t*>(wo_b__ssa_v0_tensor->buffer.addr) + wo_b__ssa_v0_tensor->start_offset;
++
++    // Unpack tensor: partials__ssa_v0
++    __gm__ Tensor* partials__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[2]);
++    __gm__ int32_t* partials__ssa_v0 = reinterpret_cast<__gm__ int32_t*>(partials__ssa_v0_tensor->buffer.addr) + partials__ssa_v0_tensor->start_offset;
++
++    // Unpack scalar: g__ssa_v0
++    union { uint64_t u64; int64_t val; } g__ssa_v0_conv;
++    g__ssa_v0_conv.u64 = args[3];
++    int64_t g__ssa_v0 = g__ssa_v0_conv.val;
++
++    // Unpack scalar: col_g__ssa_v0
++    union { uint64_t u64; int64_t val; } col_g__ssa_v0_conv;
++    col_g__ssa_v0_conv.u64 = args[4];
++    int64_t col_g__ssa_v0 = col_g__ssa_v0_conv.val;
++
++    // Unpack scalar: proj_b_t_rows__ssa_v0
++    union { uint64_t u64; int64_t val; } proj_b_t_rows__ssa_v0_conv;
++    proj_b_t_rows__ssa_v0_conv.u64 = args[5];
++    int64_t proj_b_t_rows__ssa_v0 = proj_b_t_rows__ssa_v0_conv.val;
++
++    // Forward to ptoas-generated function
++    _proj_b_mm_nz_kernel__2(o_r_i8_pad__ssa_v0, wo_b__ssa_v0, partials__ssa_v0, g__ssa_v0, col_g__ssa_v0, proj_b_t_rows__ssa_v0, args, __pypto_boundary_handoff, __pypto_spmd_block_idx, __pypto_spmd_block_num);
++}
+ extern "C" __aicore__ __attribute__((always_inline)) void kernel_entry(__gm__ int64_t* args)
+ {
+     // Internal tail callback; this tag never executes the task body twice.
+@@ -621,41 +661,5 @@
+         pypto_poll_local_tail(tail_args);
+         return;
+     }
+-    // The executor tags only a genuine same-core handoff.
+-    uint64_t __pypto_args_word = reinterpret_cast<uint64_t>(args);
+-    int64_t __pypto_boundary_handoff = __pypto_args_word & uint64_t{1};
+-    args = reinterpret_cast<__gm__ int64_t*>(__pypto_args_word & ~uint64_t{1});
+-    // Read logical SPMD block identity from runtime dispatch payload
+-    int32_t __pypto_spmd_block_idx = get_block_idx(args);
+-    int32_t __pypto_spmd_block_num = get_block_num(args);
+-
+-    // Unpack tensor: o_r_i8_pad__ssa_v0
+-    __gm__ Tensor* o_r_i8_pad__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[0]);
+-    __gm__ int8_t* o_r_i8_pad__ssa_v0 = reinterpret_cast<__gm__ int8_t*>(o_r_i8_pad__ssa_v0_tensor->buffer.addr) + o_r_i8_pad__ssa_v0_tensor->start_offset;
+-
+-    // Unpack tensor: wo_b__ssa_v0
+-    __gm__ Tensor* wo_b__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[1]);
+-    __gm__ int8_t* wo_b__ssa_v0 = reinterpret_cast<__gm__ int8_t*>(wo_b__ssa_v0_tensor->buffer.addr) + wo_b__ssa_v0_tensor->start_offset;
+-
+-    // Unpack tensor: partials__ssa_v0
+-    __gm__ Tensor* partials__ssa_v0_tensor = reinterpret_cast<__gm__ Tensor*>(args[2]);
+-    __gm__ int32_t* partials__ssa_v0 = reinterpret_cast<__gm__ int32_t*>(partials__ssa_v0_tensor->buffer.addr) + partials__ssa_v0_tensor->start_offset;
+-
+-    // Unpack scalar: g__ssa_v0
+-    union { uint64_t u64; int64_t val; } g__ssa_v0_conv;
+-    g__ssa_v0_conv.u64 = args[3];
+-    int64_t g__ssa_v0 = g__ssa_v0_conv.val;
+-
+-    // Unpack scalar: col_g__ssa_v0
+-    union { uint64_t u64; int64_t val; } col_g__ssa_v0_conv;
+-    col_g__ssa_v0_conv.u64 = args[4];
+-    int64_t col_g__ssa_v0 = col_g__ssa_v0_conv.val;
+-
+-    // Unpack scalar: proj_b_t_rows__ssa_v0
+-    union { uint64_t u64; int64_t val; } proj_b_t_rows__ssa_v0_conv;
+-    proj_b_t_rows__ssa_v0_conv.u64 = args[5];
+-    int64_t proj_b_t_rows__ssa_v0 = proj_b_t_rows__ssa_v0_conv.val;
+-
+-    // Forward to ptoas-generated function
+-    _proj_b_mm_nz_kernel__2(o_r_i8_pad__ssa_v0, wo_b__ssa_v0, partials__ssa_v0, g__ssa_v0, col_g__ssa_v0, proj_b_t_rows__ssa_v0, args, __pypto_boundary_handoff, __pypto_spmd_block_idx, __pypto_spmd_block_num);
+-}
++    pypto_execute_local_task(args);
++}
