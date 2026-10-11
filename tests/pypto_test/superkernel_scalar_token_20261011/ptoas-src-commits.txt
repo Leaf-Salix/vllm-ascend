@@ -1,0 +1,26 @@
+commit 658401d2156994a990a1a7e00acc8bd9fe2705a6
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    revert(PTOAS): 撤回未获收益的 Scalar 通知专用事件预留
+
+    八字与单字 UB 通知源候选在同 SDK 的 128K/B16 CSA 对照中均未形成净收益，
+    不向生产编译路径保留仅为这些候选增加的 S 到 MTE3 event7 资源占用。
+    恢复原后到通知所需的 MTE2/MTE1/M/FIX/V 到 MTE3 预留，其余协议不变。
+
+    实验提交 2d3b6d14、生成代码、FileCheck 证据和同事件规则的两轮结果已归档，
+    可以据此复现实验；撤回不抹除历史，也不将回退解释成硬件能力不成立。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit 2d3b6d14f32befb931122ce0c8061358a03f1ac1
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    fix(PTOAS): 为Scalar填写的后到通知预留S到MTE3事件
+
+    扩展runtime_late_handoff的event7排除范围到S→MTE3，使AIV可直接向编译器独占UB scratch写token，再用MTE3发出有序完成通知；原MTE2/V/M/FIX汇合与普通函数的事件资源不变。
+
+    增加Scalar SetValue→TSTORE的编译用例，检查S→MTE3依赖位于写值和搬运之间，使用0到6事件且继续保留runtime-owned尾部。现有小图已在卡0验证Scalar填64B通知、两组输入、后到交接及图重放；通用CSA性能尚未验证。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
