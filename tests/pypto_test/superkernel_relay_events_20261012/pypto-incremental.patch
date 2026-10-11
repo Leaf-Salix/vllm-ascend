@@ -1,0 +1,301 @@
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 2302be393..983ed56f0 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1141,0 +1142,42 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
++def _apply_task_boundary_relay(func_name: str, helper: str, ptoas_code: str) -> tuple[str, str, set[str]]:
++    """Join the full tail through free compute-pipe events when direct IDs run out."""
++    marker = "// PYPTO_TASK_BOUNDARY_RELAY_V1 "
++    vector = ("MTE2_TO_V", "V_TO_MTE3")
++    cube = ("MTE2_TO_MTE1", "MTE1_TO_M", "M_TO_FIX", "FIX_TO_MTE3")
++    allocations = {}
++    for line in ptoas_code.splitlines():
++        if not line.startswith(marker):
++            continue
++        fields = line[len(marker) :].split()
++        if not fields or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", fields[0]) or fields[0] in allocations:
++            raise ValueError(f"invalid or duplicate PTOAS tail-relay contract: {line}")
++        pairs = [re.fullmatch(r"([A-Z0-9_]+)=([0-7])", field) for field in fields[1:]]
++        if not all(pairs) or tuple(pair[1] for pair in pairs) not in (vector, cube):
++            raise ValueError(f"invalid PTOAS tail-relay pipe chain: {line}")
++        allocations[fields[0]] = [(pair[1], pair[2]) for pair in pairs]
++    if func_name in allocations:
++        if not helper:
++            raise ValueError(f"PTOAS requested a tail relay for {func_name} without a tail callback")
++        is_cube = "copy_cbuf_to_gm(" in helper
++        expected = cube if is_cube else vector
++        if tuple(pair for pair, _ in allocations[func_name]) != expected:
++            raise ValueError(f"PTOAS tail relay does not match the physical core of {func_name}")
++        engines = ("MTE2", "MTE1", "M", "FIX") if is_cube else ("MTE2", "V")
++        original = "\n".join(
++            f"    {op}_flag(PIPE_{engine}, PIPE_MTE3, EVENT_ID7);"
++            for op in ("set", "wait")
++            for engine in engines
++        )
++        if helper.count(original) != 1:
++            raise ValueError(f"incomplete direct notification joins for {func_name}")
++        relay = []
++        for pair, event in allocations[func_name]:
++            src, dst = pair.split("_TO_")
++            # Wait executes on dst, not Scalar. Each following Set on dst
++            # carries the prior joins forward to the final MTE3 notification.
++            relay.extend(f"    {op}_flag(PIPE_{src}, PIPE_{dst}, EVENT_ID{event});" for op in ("set", "wait"))
++        helper = helper.replace(original, "\n".join(relay))
++    contract = "#define PYPTO_TASK_BOUNDARY_RELAY_V1 1\n" if allocations else ""
++    return helper, contract, set(allocations)
++
++
+@@ -1149 +1191 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
+-    contract = ""
++    helper, contract, relays = _apply_task_boundary_relay(func_name, helper, ptoas_code)
+@@ -1160 +1202 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
+-        contract = "#define PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 1\n"
++        contract += "#define PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 1\n"
+@@ -1184,0 +1227,8 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
++    if (
++        blocking.intersection(allocations)
++        or blocking.intersection(relays)
++        or relays.intersection(allocations)
++    ):
++        raise ValueError(
++            "PTOAS requested both blocking, direct, or relayed notification contracts for one task"
++        )
+@@ -1187,2 +1236,0 @@ static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ in
+-    if blocking.intersection(allocations):
+-        raise ValueError("PTOAS requested both blocking poll and notification events for the same task")
+diff --git a/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+index 610a74333..ecf8b3019 100644
+--- a/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+@@ -3 +3 @@
+-"""Validate free-event allocation and event-free fallback around explicit flags."""
++"""Validate free-event allocation and relay routes around explicit flags."""
+@@ -21 +21 @@ def make_instrument(event_id):
+-        def observe_blocking_callback(func_name, helper, ptoas_code):
++        def check_relay_callback(func_name, helper, ptoas_code):
+@@ -24,14 +24,3 @@ def make_instrument(event_id):
+-                # Diagnostic-only marker, no timings are claimed for this
+-                # probe. The existing trace reserves word 8 for such markers.
+-                assert "PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1" in contract
+-                helper = helper.replace("__gm__ int64_t*)", "__gm__ int64_t* args)")
+-                assert helper.count("    pipe_barrier(PIPE_ALL);") == 1
+-                helper = helper.replace(
+-                    "    pipe_barrier(PIPE_ALL);",
+-                    "    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>("
+-                    "args[SPMD_GLOBAL_CONTEXT_INDEX]);\n"
+-                    "    auto* tail_trace = reinterpret_cast<__gm__ uint64_t*>(ctx->scalar_overlap_trace);\n"
+-                    "    tail_trace[-16] = 1;\n"
+-                    "    dcci(tail_trace - 16, SINGLE_CACHE_LINE, CACHELINE_OUT);\n"
+-                    "    pipe_barrier(PIPE_ALL);",
+-                )
++                assert "PYPTO_TASK_BOUNDARY_RELAY_V1" in contract
++                assert "pipe_barrier(PIPE_ALL)" not in helper
++                assert "set_flag(PIPE_MTE2, PIPE_MTE3" not in helper
+@@ -46 +35 @@ def make_instrument(event_id):
+-                assert "_flag[<PIPE_MTE2>, <PIPE_MTE3>" not in text
++                assert not re.search(r"pto\.(?:set|wait)_flag(?:_dyn)?[^\n]*PIPE_MTE2[^\n]*PIPE_MTE3", text)
+@@ -56 +45,2 @@ def make_instrument(event_id):
+-                    # The backend must preserve this pair without borrowing it.
++                    # Preserve this pair and relay the notification through
++                    # unused compute-pipe events instead of borrowing an ID.
+@@ -88 +78 @@ def make_instrument(event_id):
+-            pto_backend._apply_task_boundary_events = observe_blocking_callback
++            pto_backend._apply_task_boundary_events = check_relay_callback
+@@ -98,9 +87,0 @@ def make_instrument(event_id):
+-def validate_exhausted(*args):
+-    result = explicit_probe.runtime_probe.validate(*args)
+-    assert not result["polled_after_first_miss"], "blocking fallback must not submit notification DMA"
+-    # Freshly cleared for each eager input. Replays keep these diagnostic
+-    # markers, so their counts mean "seen since reset", not calls per replay.
+-    result["blocking_callbacks"] = [i for i, row in enumerate(args[4][:-1]) if row[8] == 1]
+-    return result
+-
+-
+@@ -113,3 +94 @@ if __name__ == "__main__":
+-    explicit_probe.runtime_probe.probe.validate = (
+-        validate_exhausted if options.event_id == "exhausted" else explicit_probe.runtime_probe.validate
+-    )
++    explicit_probe.runtime_probe.probe.validate = explicit_probe.runtime_probe.validate
+diff --git a/tests/st/runtime/scheduling/task_boundary_explicit_event_probe.py b/tests/st/runtime/scheduling/task_boundary_explicit_event_probe.py
+index a3380e31b..cfc3d1abe 100644
+--- a/tests/st/runtime/scheduling/task_boundary_explicit_event_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_explicit_event_probe.py
+@@ -14 +13,0 @@ from pathlib import Path
+-import task_boundary_runtime_poll_probe as runtime_probe
+@@ -16,0 +16,5 @@ from pypto.backend import pto_backend
++if __package__:
++    from . import task_boundary_runtime_poll_probe as runtime_probe
++else:
++    import task_boundary_runtime_poll_probe as runtime_probe
++
+@@ -19 +23 @@ from pypto.backend import pto_backend
+-def instrument(mode, cube):
++def explicit_sync(unit_names=("late_producer",), transform=None):
+@@ -23 +27 @@ def instrument(mode, cube):
+-        if unit_name != "late_producer":
++        if unit_name not in unit_names:
+@@ -25 +29 @@ def instrument(mode, cube):
+-        root = Path(output_dir) / "explicit_sync"
++        root = Path(output_dir) / "explicit_sync" / unit_name
+@@ -39 +43 @@ def instrument(mode, cube):
+-        assert tails == 1
++        assert tails == explicit.count("pto.runtime_late_handoff")
+@@ -41,0 +46,2 @@ def instrument(mode, cube):
++        if transform is not None:
++            explicit = transform(explicit)
+@@ -47,2 +53 @@ def instrument(mode, cube):
+-        with runtime_probe.instrument(mode, cube):
+-            yield
++        yield
+@@ -52,0 +58,6 @@ def instrument(mode, cube):
++@contextmanager
++def instrument(mode, cube):
++    with explicit_sync(), runtime_probe.instrument(mode, cube):
++        yield
++
++
+diff --git a/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+index 30a7c9aa3..29da20049 100644
+--- a/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_runtime_poll_probe.py
+@@ -14 +13,0 @@ from types import SimpleNamespace
+-import task_boundary_late_arrival_probe as probe
+@@ -19,0 +19,5 @@ from pypto.ir import TensorType
++if __package__:
++    from . import task_boundary_late_arrival_probe as probe
++else:
++    import task_boundary_late_arrival_probe as probe
++
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+index d26067201..5daf3dae6 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+@@ -5,0 +6,2 @@ import json
++import re
++from contextlib import nullcontext
+@@ -16,0 +19,2 @@ from pypto.runtime import ChipWorker, RunConfig
++from .task_boundary_explicit_event_probe import explicit_sync
++
+@@ -129,0 +134,19 @@ def mixed_chain_probe(
++def _exhaust_direct_notification_pair(explicit):
++    # This pair is unused by the fixture's original scheduled body. Adding
++    # eight distinct balanced events cannot consume its existing live flags.
++    assert not re.search(r"pto\.(?:set|wait)_flag(?:_dyn)?[^\n]*PIPE_MTE2[^\n]*PIPE_MTE3", explicit)
++    events = "\n".join(
++        f"    pto.{op}_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID{event}>]"
++        for event in range(8)
++        for op in ("set", "wait")
++    )
++    explicit, count = re.subn(
++        r"^[ \t]*(?:func\.)?call @pypto_set_next_task_start\(",
++        lambda match: events + "\n" + match[0],
++        explicit,
++        flags=re.M,
++    )
++    assert count == 2, "both MIX physical member functions must receive the explicit flags"
++    return explicit
++
++
+@@ -130,0 +154 @@ def mixed_chain_probe(
++@pytest.mark.parametrize("relay_events", [False, True], ids=["default_events", "relay_events"])
+@@ -132 +156 @@ def test_mixed_members_enter_prefix_before_group_completion(
+-    test_config: RunConfig, tmp_path: Path, monkeypatch
++    test_config: RunConfig, tmp_path: Path, monkeypatch, relay_events: bool
+@@ -134 +158,3 @@ def test_mixed_members_enter_prefix_before_group_completion(
+-    output = Path(test_config.save_kernels_dir or tmp_path) / "mixed_chain"
++    output = Path(test_config.save_kernels_dir or tmp_path) / (
++        "mixed_chain_relay" if relay_events else "mixed_chain"
++    )
+@@ -162,0 +189,3 @@ def test_mixed_members_enter_prefix_before_group_completion(
++        if relay_events:
++            assert f"// PYPTO_TASK_BOUNDARY_RELAY_V1 {func.name} " in code
++            assert "#define PYPTO_TASK_BOUNDARY_RELAY_V1 1" in code
+@@ -171,3 +200,4 @@ def test_mixed_members_enter_prefix_before_group_completion(
+-    compiled = mixed_chain_probe.compile(
+-        config=replace(test_config, save_kernels_dir=str(output)),
+-        runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
++    synchronization = (
++        explicit_sync(("mixed_producer", "mixed_consumer"), _exhaust_direct_notification_pair)
++        if relay_events
++        else nullcontext()
+@@ -174,0 +205,5 @@ def test_mixed_members_enter_prefix_before_group_completion(
++    with synchronization:
++        compiled = mixed_chain_probe.compile(
++            config=replace(test_config, save_kernels_dir=str(output)),
++            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
++        )
+@@ -225,0 +261 @@ def test_mixed_members_enter_prefix_before_group_completion(
++                        "notifications_by_member": [sum(bool(r[4] & 256) for r in rows) for rows in traces],
+@@ -237,0 +274,4 @@ def test_mixed_members_enter_prefix_before_group_completion(
++    if relay_events:
++        assert all(any(s["notifications_by_member"][core::2]) for core in (0, 1) for s in samples), (
++            "each physical core type must actually execute its relay callback"
++        )
+diff --git a/tests/ut/backend/test_task_boundary_events.py b/tests/ut/backend/test_task_boundary_events.py
+index e03541dcd..c48ed9ec0 100644
+--- a/tests/ut/backend/test_task_boundary_events.py
++++ b/tests/ut/backend/test_task_boundary_events.py
+@@ -88,0 +89,63 @@ def test_blocking_contract_requires_callback():
++
++
++@pytest.mark.parametrize("cube", [False, True], ids=["vector", "cube"])
++def test_relay_joins_every_pipe_before_notification(cube):
++    kind = ir.FunctionType.AIC if cube else ir.FunctionType.AIV
++    helper = _compiled_late_poll(SimpleNamespace(attrs={"task_boundary_scratch_base": 0}, func_type=kind))[0]
++    pairs = (
++        (("MTE2", "MTE1"), ("MTE1", "M"), ("M", "FIX"), ("FIX", "MTE3"))
++        if cube
++        else (
++            ("MTE2", "V"),
++            ("V", "MTE3"),
++        )
++    )
++    marker = "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer " + " ".join(
++        f"{src}_TO_{dst}={i}" for i, (src, dst) in enumerate(pairs)
++    )
++    updated, contract = _apply_task_boundary_events("producer", helper, marker)
++    previous = updated.index("create_cbuf_matrix" if cube else "vector_dup")
++    for event, (src, dst) in enumerate(pairs):
++        for op in ("set", "wait"):
++            position = updated.index(f"{op}_flag(PIPE_{src}, PIPE_{dst}, EVENT_ID{event});")
++            assert previous < position
++            previous = position
++    assert previous < updated.index("pipe_barrier(PIPE_MTE3)") < updated.index("copy_")
++    assert "PIPE_ALL" not in updated
++    assert updated.count("set_flag(") == updated.count("wait_flag(") == len(pairs)
++    assert contract == "#define PYPTO_TASK_BOUNDARY_RELAY_V1 1\n"
++
++
++@pytest.mark.parametrize(
++    "metadata",
++    [
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_V=8 V_TO_MTE3=7",
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer V_TO_MTE3=7",
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_V=7 V_TO_MTE3=7\n" * 2,
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_MTE1=7 MTE1_TO_M=7 M_TO_FIX=7 FIX_TO_MTE3=7",
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_V=7 V_TO_MTE3=7\n"
++        "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer",
++        "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_V=7 V_TO_MTE3=7\n"
++        "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=6 MTE1=7 M=7 FIX=7 V=7",
++    ],
++)
++def test_malformed_or_conflicting_relay_is_rejected(metadata):
++    with pytest.raises(ValueError, match="invalid|duplicate|physical core|both"):
++        _apply_task_boundary_events("producer", vector_helper(), metadata)
++
++
++def test_relay_applies_only_to_its_member_and_requires_complete_callback():
++    marker = "// PYPTO_TASK_BOUNDARY_RELAY_V1 producer MTE2_TO_V=6 V_TO_MTE3=7"
++    original = vector_helper()
++    updated, contract = _apply_task_boundary_events("other", original, marker)
++    assert updated == original and contract
++    with pytest.raises(ValueError, match="without a tail callback"):
++        _apply_task_boundary_events("producer", "", marker)
++    with pytest.raises(ValueError, match="incomplete direct"):
++        _apply_task_boundary_events(
++            "producer", original.replace("    set_flag(PIPE_V,", "    invalid("), marker
++        )
++
++
++if __name__ == "__main__":
++    pytest.main([__file__, "-v"])

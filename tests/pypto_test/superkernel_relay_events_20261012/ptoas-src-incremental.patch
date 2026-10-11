@@ -1,0 +1,189 @@
+diff --git a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+index 64d91e99..cff8d52b 100644
+--- a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
++++ b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+@@ -13,0 +14,2 @@ inline constexpr const char *kTaskBoundaryBlockingMarker = "PYPTO_TASK_BOUNDARY_
++inline constexpr const char *kTaskBoundaryRelayIds = "pto.runtime_late_relay_event_ids";
++inline constexpr const char *kTaskBoundaryRelayMarker = "PYPTO_TASK_BOUNDARY_RELAY_V1";
+@@ -14,0 +17,3 @@ inline constexpr const char *kTaskBoundaryEventPipes[] = {"MTE2", "MTE1", "M", "
++inline constexpr const char *kTaskBoundaryCubeRelayPairs[] = {
++    "MTE2_TO_MTE1", "MTE1_TO_M", "M_TO_FIX", "FIX_TO_MTE3"};
++inline constexpr const char *kTaskBoundaryVectorRelayPairs[] = {"MTE2_TO_V", "V_TO_MTE3"};
+@@ -32,0 +38,12 @@ constexpr bool usesTaskBoundaryEvent7(Pipe src, Pipe dst) {
++// Explicit synchronization can occupy every direct notification event. Track
++// the ordinary load/compute chain as well, without borrowing an author's ID.
++template <typename Pipe>
++constexpr int taskBoundaryEventPairIndex(Pipe src, Pipe dst) {
++  if (dst == Pipe::PIPE_MTE3) return taskBoundaryEventIndex(src);
++  if (src == Pipe::PIPE_MTE2 && dst == Pipe::PIPE_MTE1) return 5;
++  if (src == Pipe::PIPE_MTE1 && dst == Pipe::PIPE_M) return 6;
++  if (src == Pipe::PIPE_M && dst == Pipe::PIPE_FIX) return 7;
++  if (src == Pipe::PIPE_MTE2 && dst == Pipe::PIPE_V) return 8;
++  return -1;
++}
++
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+index 30507c9b..23ceda17 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -143 +143,2 @@ public:
+-    if (!usesTaskBoundaryEvent7(src, dst)) return success();
++    int pair = taskBoundaryEventPairIndex(src, dst);
++    if (pair < 0) return success();
+@@ -146 +147 @@ public:
+-    used[taskBoundaryEventIndex(src)] |= ids.value_or(0xffu);
++    used[pair] |= ids.value_or(0xffu);
+@@ -170,2 +171,3 @@ public:
+-        if (!usesTaskBoundaryEvent7(event.srcPipe, event.dstPipe)) continue;
+-        auto &mask = used[taskBoundaryEventIndex(event.srcPipe)];
++        int pair = taskBoundaryEventPairIndex(event.srcPipe, event.dstPipe);
++        if (pair < 0) continue;
++        auto &mask = used[pair];
+@@ -181,3 +183,2 @@ public:
+-    for (unsigned pair = 0; pair < used.size(); ++pair) {
+-      int id = 7;
+-      while (id >= 0 && (used[pair] & (1u << id))) --id;
++    for (unsigned pair = 0; pair < 5; ++pair) {
++      int id = freeId(pair);
+@@ -184,0 +186 @@ public:
++        if (allocateRelay(func)) return success();
+@@ -199 +201,27 @@ private:
+-  std::array<uint8_t, 5> used{};
++  int freeId(unsigned pair) const {
++    int id = 7;
++    while (id >= 0 && (used[pair] & (1u << id))) --id;
++    return id;
++  }
++
++  bool allocateRelay(func::FuncOp func) {
++    auto kind = func->getAttrOfType<FunctionKernelKindAttr>(FunctionKernelKindAttr::name);
++    if (!kind) return false;
++    SmallVector<unsigned, 4> pairs;
++    if (kind.getKernelKind() == FunctionKernelKind::Cube)
++      pairs = {5, 6, 7, 3};
++    else if (kind.getKernelKind() == FunctionKernelKind::Vector)
++      pairs = {8, 4};
++    else
++      return false;
++    SmallVector<int32_t, 4> chosen;
++    for (unsigned pair : pairs) {
++      int id = freeId(pair);
++      if (id < 0) return false;
++      chosen.push_back(id);
++    }
++    func->setAttr(kTaskBoundaryRelayIds, DenseI32ArrayAttr::get(func.getContext(), chosen));
++    return true;
++  }
++
++  std::array<uint8_t, 9> used{};
+@@ -239,0 +268 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
++      func->removeAttr(kTaskBoundaryRelayIds);
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index 358ada2b..3d402e9d 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -692,0 +693,14 @@ struct EmitPTOManualPass
++        if (auto ids = func->getAttrOfType<DenseI32ArrayAttr>(kTaskBoundaryRelayIds)) {
++          const bool cube = ids.size() == 4;
++          std::string metadata = "// ";
++          metadata += kTaskBoundaryRelayMarker;
++          metadata += " " + func.getSymName().str();
++          for (unsigned i = 0; i < ids.size(); ++i) {
++            const char *pair = cube ? kTaskBoundaryCubeRelayPairs[i] : kTaskBoundaryVectorRelayPairs[i];
++            metadata += " " + std::string(pair) + "=" + std::to_string(ids[i]);
++          }
++          metadata += "\n#ifndef PYPTO_TASK_BOUNDARY_RELAY_V1\n"
++                      "#error relayed tail notification requires a matching PyPTO wrapper\n#endif";
++          builder.create<emitc::VerbatimOp>(func.getLoc(), builder.getStringAttr(metadata));
++          return;
++        }
+diff --git a/test/lit/pto/local_task_pollable_events_exhausted.pto b/test/lit/pto/local_task_pollable_events_exhausted.pto
+index b87ae489..8361e485 100644
+--- a/test/lit/pto/local_task_pollable_events_exhausted.pto
++++ b/test/lit/pto/local_task_pollable_events_exhausted.pto
+@@ -4,2 +4,2 @@
+-// CHECK: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 all_ids
+-// CHECK: #error blocking tail poll requires a matching PyPTO wrapper
++// CHECK: // PYPTO_TASK_BOUNDARY_RELAY_V1 all_ids MTE2_TO_V=7 V_TO_MTE3=7
++// CHECK: #error relayed tail notification requires a matching PyPTO wrapper
+diff --git a/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto b/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
+index a14b90db..6b4a6e9c 100644
+--- a/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
++++ b/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
+@@ -4,2 +4,2 @@
+-// CHECK: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 manual_dynamic
+-// CHECK: #error blocking tail poll requires a matching PyPTO wrapper
++// CHECK: // PYPTO_TASK_BOUNDARY_RELAY_V1 manual_dynamic MTE2_TO_V=7 V_TO_MTE3=7
++// CHECK: #error relayed tail notification requires a matching PyPTO wrapper
+diff --git a/test/lit/pto/local_task_pollable_relay_events.pto b/test/lit/pto/local_task_pollable_relay_events.pto
+new file mode 100644
+index 00000000..a8e2c072
+--- /dev/null
++++ b/test/lit/pto/local_task_pollable_relay_events.pto
+@@ -0,0 +1,53 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// Licensed under the CANN Open Software License Agreement Version 2.0.
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: // PYPTO_TASK_BOUNDARY_RELAY_V1 vector_relay MTE2_TO_V=6 V_TO_MTE3=7
++// CHECK: // PYPTO_TASK_BOUNDARY_RELAY_V1 cube_relay MTE2_TO_MTE1=6 MTE1_TO_M=5 M_TO_FIX=4 FIX_TO_MTE3=3
++// CHECK: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 no_free_route
++// CHECK: #error blocking tail poll requires a matching PyPTO wrapper
++// CHECK: void vector_relay
++// CHECK: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7)
++// CHECK: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7)
++// CHECK: void cube_relay
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID7)
++// CHECK: void no_free_route
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @vector_relay(%id: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID7>]
++    return
++  }
++  func.func @cube_relay(%id: index) attributes {pto.kernel_kind = #pto.kernel_kind<cube>, pto.runtime_late_handoff} {
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID7>]
++    pto.set_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID7>]
++    pto.set_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID6>]
++    // Include every possible branch outcome when reserving the relay IDs.
++    %c4 = arith.constant 4 : index
++    %c5 = arith.constant 5 : index
++    %c6 = arith.constant 6 : index
++    %c0 = arith.constant 0 : index
++    %c1 = arith.constant 1 : index
++    %bit = arith.andi %id, %c1 : index
++    %cond = arith.cmpi eq, %bit, %c0 : index
++    %f = arith.addi %bit, %c6 : index
++    %m = arith.select %cond, %c5, %f : index
++    %fix = arith.select %cond, %c4, %m : index
++    pto.set_flag_dyn [#pto.pipe<PIPE_M>, #pto.pipe<PIPE_FIX>, %m]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_M>, #pto.pipe<PIPE_FIX>, %m]
++    pto.set_flag_dyn [#pto.pipe<PIPE_FIX>, #pto.pipe<PIPE_MTE3>, %fix]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_FIX>, #pto.pipe<PIPE_MTE3>, %fix]
++    return
++  }
++  func.func @no_free_route(%id: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_MTE3>, %id]
++    return
++  }
++}
+diff --git a/tools/ptoas/ptoas_pipeline.cpp b/tools/ptoas/ptoas_pipeline.cpp
+index 3e37d95c..92c4b0b0 100644
+--- a/tools/ptoas/ptoas_pipeline.cpp
++++ b/tools/ptoas/ptoas_pipeline.cpp
+@@ -1249,0 +1250,2 @@ static bool isRuntimeTailPipeOp(StringRef name) {
++         name == "pto.initialize_l2g2l_pipe" || name == "pto.declare_tile" ||
++         name == "pto.tpush" || name == "pto.tpop" || name == "pto.tfree" ||
+@@ -1314 +1316,2 @@ static LogicalResult validateAutoSyncTailHints(ModuleOp module) {
+-          (runtimeBarrierAll && (name == "pto.tpush_to_aic" || name == "pto.tpush_to_aiv")))
++          (runtimeBarrierAll && (name == "pto.tpush_to_aic" || name == "pto.tpush_to_aiv" ||
++                                 name == "pto.tpush")))
+@@ -1317,0 +1321 @@ static LogicalResult validateAutoSyncTailHints(ModuleOp module) {
++          (runtimeBarrierAll && (name == "pto.tpush" || name == "pto.tpop")) ||

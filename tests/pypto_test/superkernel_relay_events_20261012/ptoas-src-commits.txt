@@ -1,0 +1,13 @@
+commit 6dee5a694984b99ef3911cec8d5c976575f9a18f
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    扩展(PTOAS): 通知事件不足时使用空闲计算流水事件中转
+
+    显式同步原本占满一个直达 MTE3 的事件对时，整个尾回调只能阻塞。新增按 pipe pair 收集的空闲事件选择：AIV 经 MTE2→V→MTE3，AIC 经 MTE2→MTE1→M→FIX→MTE3 汇合后通知，不借用作者的事件 ID，不改变原 Set/Wait 顺序。正常直达路径优先，现有直达和中转路径均不足时保留原阻塞回退。
+
+    发出逐函数的中转事件合同与旧包装器编译保护。补齐 runtime_barrier_all 对降级后的 MIX 初始化、declare_tile、push/pop/free 的接受范围；推送计入尾部输出，push/pop 计入流水工作，Wait 前仍拒绝不安全操作。
+
+    验证：八项定向 FileCheck、补齐 MIX 后的三项边界检查通过。21 项配套 PyPTO 后端测试通过。单卡 AIC/AIV 输出、状态、保护区与图重放通过；MIX 两次输入各 24 个 AIC、48 个 AIV 前缀提前，物理成员实际执行通知。默认 CSA 路径未改变，本提交不声明性能收益。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
