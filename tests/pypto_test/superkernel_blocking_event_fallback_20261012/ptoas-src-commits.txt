@@ -1,0 +1,11 @@
+commit 9ddc2e254e0e3b3cde73736fadc0dbf5d10d3448
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    修复(PTOAS): 事件不足时保留即时交接并声明阻塞尾回调
+
+    显式事件的可选集合占满全部八个槽位、或动态范围尚不可证明时，不再仅因无法分配通知事件而拒绝整个函数。保留作者原有同步及事件编号，通过逐函数元数据要求 PyPTO 在原首次交接探测失败之后只执行完整流水等待；已经派发的同核后继仍可走原即时交接。
+
+    新握手宏使旧包装器拒绝不匹配产物，资源充足时的事件分配不变。更新耗尽和未知范围用例，六项 FileCheck 覆盖耗尽、未知、原分配、有限范围、Scalar 控制流边界及不安全前缀拒绝；设备验证由私有 PyPTO 小用例继续完成。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

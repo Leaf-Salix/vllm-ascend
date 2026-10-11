@@ -1,0 +1,139 @@
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index eeb5f72e7..2302be393 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -1148,0 +1149,23 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
++    contract = ""
++    blocking = set()
++    blocking_marker = "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 "
++    for line in ptoas_code.splitlines():
++        if not line.startswith(blocking_marker):
++            continue
++        name = line[len(blocking_marker) :]
++        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in blocking:
++            raise ValueError(f"invalid or duplicate PTOAS blocking-tail contract: {line}")
++        blocking.add(name)
++    if blocking:
++        contract = "#define PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 1\n"
++    if func_name in blocking:
++        if not helper:
++            raise ValueError(f"PTOAS requested blocking poll for {func_name} without a tail callback")
++        # The runtime still attempts the original immediate handoff first.
++        # If no notification event is free, only its miss callback must drain.
++        # This helper cannot claim to observe a successor during that drain.
++        helper = """
++static __aicore__ __attribute__((noinline)) void pypto_poll_local_tail(__gm__ int64_t*) {
++    pipe_barrier(PIPE_ALL);
++}
++"""
+@@ -1150,2 +1172,0 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
+-    if marker not in ptoas_code:
+-        return helper, ""
+@@ -1165 +1186,3 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
+-        return helper, ""
++        return helper, contract
++    if blocking.intersection(allocations):
++        raise ValueError("PTOAS requested both blocking poll and notification events for the same task")
+@@ -1175 +1198 @@ def _apply_task_boundary_events(func_name: str, helper: str, ptoas_code: str) ->
+-    return helper, "#define PYPTO_TASK_BOUNDARY_EVENTS_V1 1\n"
++    return helper, contract + "#define PYPTO_TASK_BOUNDARY_EVENTS_V1 1\n"
+diff --git a/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+index 8f43a0f2a..610a74333 100644
+--- a/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
++++ b/tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py
+@@ -3 +3 @@
+-"""Validate notification allocation around static and bounded dynamic event7 use."""
++"""Validate free-event allocation and event-free fallback around explicit flags."""
+@@ -18,0 +19,20 @@ def make_instrument(event_id):
++        original_events = pto_backend._apply_task_boundary_events
++
++        def observe_blocking_callback(func_name, helper, ptoas_code):
++            helper, contract = original_events(func_name, helper, ptoas_code)
++            if event_id == "exhausted" and func_name == "late_producer" and mode != "once":
++                # Diagnostic-only marker, no timings are claimed for this
++                # probe. The existing trace reserves word 8 for such markers.
++                assert "PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1" in contract
++                helper = helper.replace("__gm__ int64_t*)", "__gm__ int64_t* args)")
++                assert helper.count("    pipe_barrier(PIPE_ALL);") == 1
++                helper = helper.replace(
++                    "    pipe_barrier(PIPE_ALL);",
++                    "    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>("
++                    "args[SPMD_GLOBAL_CONTEXT_INDEX]);\n"
++                    "    auto* tail_trace = reinterpret_cast<__gm__ uint64_t*>(ctx->scalar_overlap_trace);\n"
++                    "    tail_trace[-16] = 1;\n"
++                    "    dcci(tail_trace - 16, SINGLE_CACHE_LINE, CACHELINE_OUT);\n"
++                    "    pipe_barrier(PIPE_ALL);",
++                )
++            return helper, contract
+@@ -33,0 +54,10 @@ def make_instrument(event_id):
++                elif event_id == "exhausted":
++                    # All eight IDs are possible across the existing blocks.
++                    # The backend must preserve this pair without borrowing it.
++                    block = re.findall(r"(%\w+): i32", text)[0]
++                    events = f"""    %__notice_block = arith.index_cast {block} : i32 to index
++    %__notice_seven = arith.constant 7 : index
++    %__notice_id = arith.andi %__notice_block, %__notice_seven : index
++    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %__notice_id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %__notice_id]
++"""
+@@ -57,0 +88 @@ def make_instrument(event_id):
++            pto_backend._apply_task_boundary_events = observe_blocking_callback
+@@ -61,0 +93 @@ def make_instrument(event_id):
++            pto_backend._apply_task_boundary_events = original_events
+@@ -65,0 +98,9 @@ def make_instrument(event_id):
++def validate_exhausted(*args):
++    result = explicit_probe.runtime_probe.validate(*args)
++    assert not result["polled_after_first_miss"], "blocking fallback must not submit notification DMA"
++    # Freshly cleared for each eager input. Replays keep these diagnostic
++    # markers, so their counts mean "seen since reset", not calls per replay.
++    result["blocking_callbacks"] = [i for i, row in enumerate(args[4][:-1]) if row[8] == 1]
++    return result
++
++
+@@ -68 +109 @@ if __name__ == "__main__":
+-    parser.add_argument("--event-id", choices=("static", "dynamic"), default="dynamic")
++    parser.add_argument("--event-id", choices=("static", "dynamic", "exhausted"), default="dynamic")
+@@ -72 +113,3 @@ if __name__ == "__main__":
+-    explicit_probe.runtime_probe.probe.validate = explicit_probe.runtime_probe.validate
++    explicit_probe.runtime_probe.probe.validate = (
++        validate_exhausted if options.event_id == "exhausted" else explicit_probe.runtime_probe.validate
++    )
+diff --git a/tests/ut/backend/test_task_boundary_events.py b/tests/ut/backend/test_task_boundary_events.py
+index d96efb38f..e03541dcd 100644
+--- a/tests/ut/backend/test_task_boundary_events.py
++++ b/tests/ut/backend/test_task_boundary_events.py
+@@ -54,0 +55,34 @@ def test_other_member_allocation_does_not_change_current_callback():
++
++
++def test_no_free_event_uses_event_free_drain_only_in_callback():
++    marker = "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer"
++    helper, contract = _apply_task_boundary_events("producer", vector_helper(), marker)
++    assert "pipe_barrier(PIPE_ALL)" in helper
++    assert "_flag(" not in helper and "copy_" not in helper and "dcci(" not in helper
++    assert "#define PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 1" in contract
++
++
++def test_blocking_poll_is_scoped_to_its_member():
++    marker = "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 other"
++    original = vector_helper()
++    helper, contract = _apply_task_boundary_events("producer", original, marker)
++    assert helper == original and contract
++
++
++@pytest.mark.parametrize(
++    "metadata",
++    [
++        "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer\n" * 2,
++        "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer extra",
++        "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer\n"
++        "// PYPTO_TASK_BOUNDARY_EVENTS_V1 producer MTE2=6 MTE1=7 M=7 FIX=7 V=5",
++    ],
++)
++def test_malformed_or_conflicting_blocking_contract_fails_closed(metadata):
++    with pytest.raises(ValueError, match="invalid|duplicate|both"):
++        _apply_task_boundary_events("producer", vector_helper(), metadata)
++
++
++def test_blocking_contract_requires_callback():
++    with pytest.raises(ValueError, match="without a tail callback"):
++        _apply_task_boundary_events("producer", "", "// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 producer")

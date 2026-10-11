@@ -1,0 +1,23 @@
+commit cbaf0e88f7408b7ae63eb73aa4887bd9f89303d2
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    测试(交接): 用短计算证明事件耗尽回退实际执行
+
+    在独立诊断构建的阻塞尾回调中记录保留 trace 槽位，区分编译支持与实际命中。长计算保留 AIV 48/48、AIC 24/24 即时交接；短计算两轮分别执行 AIV 41/44 次和 AIC 17/24 次阻塞回调，通知 DMA 计数为零。
+
+    两种核型、原单次探测和回退候选均通过换输入逐元素结果、输出与 trace 保护区以及图重放检查。诊断标记在图重放之间不清零，重放计数仅代表自 reset 以来见过，不能当作每次调用数；不采性能样本，不声称阻塞完成后的交接仍有计算重叠。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+commit fd46868756da36db519ee7fbb9e94b6d4cbf6727
+Author: nalinaly <nalinaly@163.com>
+Commit: nalinaly <nalinaly@163.com>
+
+    修复(后端): 通知事件耗尽时生成无事件的完整等待回调
+
+    消费 PTOAS 的逐函数 blocking-tail 合同，仅将资源不足函数的内部尾回调替换为 PIPE_ALL，不借用作者事件，不提交通知 DMA，也不改变原 Set/Wait、即时交接和调度 metadata。资源充足及同模块其他成员保持原回调。
+
+    非法、重复、相互冲突或缺少对应回调的合同明确报错；12项后端单测通过，Ruff通过。扩展显式事件小用例以覆盖全八个动态事件 ID，后续用单卡 AIC/AIV 验证真实输出、保护区和图重放；此提交不宣称 CSA 性能收益。
+
+    Signed-off-by: nalinaly <nalinaly@163.com>

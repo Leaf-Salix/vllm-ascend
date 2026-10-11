@@ -1,0 +1,21 @@
+diff --git a/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py b/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
+index 1aeceb88..ae509f13 100644
+--- a/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
++++ b/tests/pypto_test/tmr_csa_prefix_coverage_instrument.py
+@@ -108,0 +109 @@ def instrument_wrappers(address, functions):
++        source = original(func, *args, **kwargs)
+@@ -114,0 +116 @@ def instrument_wrappers(address, functions):
++                "blocking_tail_poll": f"// PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 {func.name}\n" in source,
+@@ -117 +119 @@ def instrument_wrappers(address, functions):
+-        return instrument_source(original(func, *args, **kwargs), function_id, address, has_tail)
++        return instrument_source(source, function_id, address, has_tail)
+@@ -131,0 +134 @@ def analyze_trace(tensor, functions):
++    blocking_poll = {f["id"]: f.get("blocking_tail_poll", False) for f in functions}
+@@ -152,0 +156 @@ def analyze_trace(tensor, functions):
++        counts["handoff_after_blocking_drain"] += late_handoff and blocking_poll[fn]
+@@ -157,2 +161,3 @@ def analyze_trace(tensor, functions):
+-            # The retained callback always submits its ordered notification.
+-            assert notification, row
++            # Resource-exhausted functions can only hand off after their
++            # callback's full drain. This is not evidence of compute overlap.
++            assert notification or blocking_poll[fn], row

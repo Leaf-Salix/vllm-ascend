@@ -1,0 +1,89 @@
+diff --git a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+index 98167759..64d91e99 100644
+--- a/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
++++ b/include/PTO/Transforms/InsertSync/TaskBoundaryEvent.h
+@@ -11,0 +12,2 @@ inline constexpr const char *kTaskBoundaryEventMarker = "PYPTO_TASK_BOUNDARY_EVE
++inline constexpr const char *kTaskBoundaryBlockingPoll = "pto.runtime_blocking_tail_poll";
++inline constexpr const char *kTaskBoundaryBlockingMarker = "PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1";
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+index ee67259b..30507c9b 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -142,2 +142 @@ public:
+-  LogicalResult record(Operation *op, PIPE src, PIPE dst,
+-                       std::optional<uint8_t> ids) {
++  LogicalResult record(PIPE src, PIPE dst, std::optional<uint8_t> ids) {
+@@ -145,4 +144,3 @@ public:
+-    if (!ids)
+-      return op->emitError("late task handoff cannot prove a free notification event "
+-                           "for this dynamic event ID");
+-    used[taskBoundaryEventIndex(src)] |= *ids;
++    // An unknown ID may use any slot. Preserve the author's flags, and let
++    // allocation fall back to an event-free full drain only on a probe miss.
++    used[taskBoundaryEventIndex(src)] |= ids.value_or(0xffu);
+@@ -153 +151 @@ public:
+-    return record(op, op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
++    return record(op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
+@@ -157 +155 @@ public:
+-    return record(op, op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
++    return record(op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
+@@ -165 +163 @@ public:
+-    return record(op, mapSyncOpTypeToPipe(*src), mapSyncOpTypeToPipe(*dst),
++    return record(mapSyncOpTypeToPipe(*src), mapSyncOpTypeToPipe(*dst),
+@@ -186,3 +184,6 @@ public:
+-      if (id < 0)
+-        return func.emitError("late task handoff has no provably free notification event on ")
+-               << kTaskBoundaryEventPipes[pair] << "->MTE3";
++      if (id < 0) {
++        // This does not disable the ordinary immediate pending handoff. Only
++        // the optional callback used after that probe misses must block.
++        func->setAttr(kTaskBoundaryBlockingPoll, UnitAttr::get(func.getContext()));
++        return success();
++      }
+@@ -236 +237,4 @@ struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSy
+-    if (lateHandoff) func->removeAttr(kTaskBoundaryEventIds);
++    if (lateHandoff) {
++      func->removeAttr(kTaskBoundaryEventIds);
++      func->removeAttr(kTaskBoundaryBlockingPoll);
++    }
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index a49af7b0..358ada2b 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -692,0 +693,9 @@ struct EmitPTOManualPass
++        if (func->hasAttr(kTaskBoundaryBlockingPoll)) {
++          std::string metadata = "// ";
++          metadata += kTaskBoundaryBlockingMarker;
++          metadata += " " + func.getSymName().str();
++          metadata += "\n#ifndef PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1\n"
++                      "#error blocking tail poll requires a matching PyPTO wrapper\n#endif";
++          builder.create<emitc::VerbatimOp>(func.getLoc(), builder.getStringAttr(metadata));
++          return;
++        }
+diff --git a/test/lit/pto/local_task_pollable_events_exhausted.pto b/test/lit/pto/local_task_pollable_events_exhausted.pto
+index f94274d5..b87ae489 100644
+--- a/test/lit/pto/local_task_pollable_events_exhausted.pto
++++ b/test/lit/pto/local_task_pollable_events_exhausted.pto
+@@ -3,2 +3,5 @@
+-// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+-// CHECK: late task handoff has no provably free notification event on MTE2->MTE3
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 all_ids
++// CHECK: #error blocking tail poll requires a matching PyPTO wrapper
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
+diff --git a/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto b/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
+similarity index 60%
+rename from test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto
+rename to test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
+index c2ec13e5..a14b90db 100644
+--- a/test/lit/pto/local_task_pollable_explicit_dynamic_invalid.pto
++++ b/test/lit/pto/local_task_pollable_explicit_dynamic_unknown.pto
+@@ -3,2 +3,5 @@
+-// RUN: not ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
+-// CHECK: late task handoff cannot prove a free notification event for this dynamic event ID
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s
++// CHECK: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 manual_dynamic
++// CHECK: #error blocking tail poll requires a matching PyPTO wrapper
++// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3,
++// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE3,
