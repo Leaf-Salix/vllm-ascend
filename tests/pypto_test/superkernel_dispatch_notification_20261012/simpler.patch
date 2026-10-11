@@ -1,0 +1,125 @@
+commit 1d09ecd3411ca9ba8046f28fea131186a013d446
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 04:35:22 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 04:35:22 2026 +0800
+
+    实验(TMR): 为派发代次通知保留回绕后的翻转回退
+    
+    在CoreExecState原有padding中记录寄存器任务ID是否已经复用，首次跳过保留哨兵并回绕时置位，后续32位计数器回绕仍保持，原冷初始化清零。CoreExecState和DispatchPayload大小及派发ID、队列、ACK和核选择不变。
+    
+    编译通知通过现有上下文低32位的专用标志获知是否必须读取旧通知再翻转，直接通知继续保留原scratch地址而不混入标志。该合同用于验证32位派发代次通知能否减少每次通知前的GM旧值读取，尚无设备性能收益结论。
+    
+    17项CPU调度器检查通过，新增覆盖首次ID回绕、之后整数回绕、直接通知地址隔离和冷启动重置。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index b278072dc..b03feea01 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -129,6 +129,10 @@ enum class AsyncTailKind : uint32_t {
+     RuntimeDirectPollClean = 9,
+ };
+ 
++// Compiled callbacks may use the unique register ID as their completion value
++// until the scheduler wraps it; subsequent callbacks read and invert the value.
++static constexpr uint32_t COMPILED_POLL_ID_REUSED = uint32_t{1} << 31;
++
+ // Runtime-owned cache lines: Scalar never writes the DMA destination during
+ // execution. A core alternates the two immutable sources after its previous
+ // local tail has drained, including across dispatch-slot and graph replay reuse.
+@@ -166,8 +170,8 @@ struct GlobalContext {
+     // before touching dependent data or reusing local pipeline resources.
+     volatile uint64_t wait_predecessor_fn;
+     volatile uint64_t predecessor_context;
+-    // Low 32 bits: compiler-reserved local scratch base. High bits are used
+-    // only by explicit diagnostic traces, never by the normal polling path.
++    // Low 32 bits: direct-poll scratch base, or COMPILED_POLL_ID_REUSED for
++    // compiled callbacks. High bits belong to explicit diagnostic traces.
+     volatile uint64_t late_handoff_scratch;
+ };
+ 
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index 7e3bdadfc..7183139d0 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -185,6 +185,7 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+         (TASK_ID_MASK - AICORE_EXIT_SIGNAL + 1) % 2 == 0, "Sentinel skip must be even to preserve dual-buffer parity"
+     );
+     if (reg_task_id >= AICORE_EXIT_SIGNAL) {
++        core_exec_state.dispatch_id_reused = true;
+         core_exec_state.dispatch_seq += (TASK_ID_MASK - reg_task_id + 1);
+         reg_task_id = core_exec_state.dispatch_seq & TASK_ID_MASK;
+     }
+@@ -215,7 +216,8 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+         compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
+     // Original dispatch owns this resource metadata; Set performs no GM store.
+     // High diagnostic bits are always reset before slot reuse.
+-    overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u : 0u;
++    overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
++        compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
+     overlap.scalar_overlap_trace = 0;
+     overlap.wait_predecessor_fn = 0;
+     overlap.predecessor_context = 0;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
+index d98c25ff1..f49817916 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
+@@ -102,7 +102,8 @@ struct alignas(64) CoreExecState {
+     uint32_t dispatch_seq;                  // offset 32: monotonic dispatch counter
+     SubtaskSlot running_subslot;            // offset 36: which subtask slot is running
+     SubtaskSlot pending_subslot;            // offset 37: which subtask slot is pending
+-    uint8_t pad0_[2];                       // offset 38: alignment padding
++    bool dispatch_id_reused;               // offset 38: sticky after the first register-ID wrap
++    uint8_t pad0_;                          // offset 39: alignment padding
+     // Precomputed COND register pointer; resolved once in handshake so the
+     // hot completion poll does a single volatile load instead of recomputing
+     // reg_base + reg_offset(COND) on every iteration.
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index dbfc165d5..baea88e3f 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -333,6 +333,42 @@ TEST_F(TmrSchedulerExecutionInputsTest, CompiledPollRequiresEachMembersTailAndRe
+     }
+ }
+ 
++TEST_F(TmrSchedulerExecutionInputsTest, CompiledNotificationFallsBackAfterRegisterIdReuse) {
++    initialize({table_a.data(), table_a.size()});
++    auto &core = context->core_exec_states_[0];
++    core.dispatch_seq = AICORE_EXIT_SIGNAL - 2;
++    for (const uint32_t expected_id : {AICORE_EXIT_SIGNAL - 1, 0u, 1u}) {
++        init_slot();
++        payload.runtime_barrier_tail = SUBTASK_MASK_ALL;
++        payload.runtime_compiled_poll = SUBTASK_MASK_ALL;
++        const auto handle = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
++        ASSERT_TRUE(handle.valid);
++        EXPECT_EQ(handle.reg_task_id, expected_id);
++        const auto &ctx = context->payload_per_core_[0][handle.reg_task_id & 1u].global_context;
++        const bool reused = expected_id < 2;
++        EXPECT_EQ(core.dispatch_id_reused, reused);
++        EXPECT_EQ(ctx.late_handoff_scratch, reused ? COMPILED_POLL_ID_REUSED : 0u);
++    }
++    // A later 32-bit counter rollover must not clear the sticky fallback.
++    core.dispatch_seq = UINT32_MAX;
++    const auto wrapped = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
++    ASSERT_TRUE(wrapped.valid);
++    EXPECT_EQ(wrapped.reg_task_id, 0u);
++    EXPECT_EQ(context->payload_per_core_[0][0].global_context.late_handoff_scratch, COMPILED_POLL_ID_REUSED);
++
++    CoreTaskArgs args;
++    args.set_runtime_direct_poll_scratch(64, -1);
++    payload.runtime_direct_poll_scratch = args.runtime_direct_poll_scratch();
++    const auto direct = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
++    ASSERT_TRUE(direct.valid);
++    const auto &ctx = context->payload_per_core_[0][direct.reg_task_id & 1u].global_context;
++    EXPECT_EQ(ctx.async_tail_kind, static_cast<uint32_t>(AsyncTailKind::RuntimeDirectPollClean));
++    EXPECT_EQ(ctx.late_handoff_scratch, 64u);
++
++    initialize({table_a.data(), table_a.size()});
++    EXPECT_FALSE(core.dispatch_id_reused);
++}
++
+ TEST_F(TmrSchedulerExecutionInputsTest, DirectPollResourcesRequireEachMembersCallbackAndResetOnReuse) {
+     for (int core_offset = 0; core_offset < 3; ++core_offset) {
+         initialize({table_a.data(), table_a.size()});
