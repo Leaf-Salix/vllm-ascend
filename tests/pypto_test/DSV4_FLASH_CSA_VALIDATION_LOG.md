@@ -15382,3 +15382,17 @@ Simpler `d00f8f421`、PTOAS `4a5ce22a`，63处early-resolve设置一致。
 七档9项输出/缓存/状态、改变输入后的重放逐bit一致，各版每档31项保护区通过。
 任务退出0、设备释放。本轮未修改kernel、运行时或公共默认，也未测Native/整模型。
 [min/mean/max完整表、420次原始样本及复现脚本](superkernel_csa_seven_handoff_cleanup_20261011/README.md)。
+
+
+## 562. 2026-10-11：解除本核交接必须存在直接 WAIT 数据边的额外限制
+
+Simpler `5c8418a02`以真实running槽确定本核前驱，不再要求其属于后继的直接WAIT生产者集合；
+消费者的完整fanin gate、本核全流水完成、FIN和原ACK/dispatch语义保留。
+PyPTO `fdac65f66`同步私有SDK并补充局部Wait/Set单卡回归，PTOAS未改。
+
+10项调度单测通过。单卡任务`task_20261011_164849_237931830320`的既有3项回归通过，
+新用例因遗漏单block索引解析失败；修正后单独重跑任务`task_20261011_165028_24449843490`退出0。
+在`AIC A → AIV B`且另一组AIV X无数据依赖的构造中，两轮均48/48个B前缀与本核X尾部重叠，
+并全部在A真实完成后才越过Wait；两轮输出精确一致、保护区不变。设备任务均结束。
+本轮没有新测CSA性能；七档历史仍对应`d00f8f421`，不能与本轮版本混淆。
+[详细证据](superkernel_unrelated_pending_20261011/README.md)，实施过程见独立日志过程050。
