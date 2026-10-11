@@ -1,0 +1,329 @@
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 0709a22b7..9573bc330 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "a9edc8455167e447955524eea4843b4542bdb8b2"
++SIMPLER_KERNEL_REVISION = "0de0c4c623ce4bf340817c71acf46df442675b2a"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 423a4beb1..7a91b7c05 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -690,10 +690,14 @@ extern "C" {
+ static __aicore__ __attribute__((always_inline)) inline
+ int64_t pypto_wait_local_boundary(__gm__ int64_t* args) {
+     asm volatile("" : : : "memory");
+-    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
+-    using WaitFn = int (*)(__gm__ int64_t*);
+-    auto wait = reinterpret_cast<WaitFn>(ctx->wait_predecessor_fn);
+-    const int64_t ready = wait == nullptr ? 1 : wait(args);
++    auto* local = reinterpret_cast<__gm__ LocalContext*>(args[SPMD_LOCAL_CONTEXT_INDEX]);
++    int64_t ready = 1;
++    if (local->async_ctx.local_predecessor_pending != 0) {
++        auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
++        using WaitFn = int (*)(__gm__ int64_t*);
++        auto wait = reinterpret_cast<WaitFn>(ctx->wait_predecessor_fn);
++        ready = wait(args);
++    }
+     // The Scalar prefix must not change state inherited by the predecessor.
+     // PTOAS suppresses its normal prologue on marked functions; initialize the
+     // vector/atomic modes only after the runtime completed the predecessor.
+diff --git a/runtime b/runtime
+index a9edc8455..0de0c4c62 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit a9edc8455167e447955524eea4843b4542bdb8b2
++Subproject commit 0de0c4c623ce4bf340817c71acf46df442675b2a
+diff --git a/tests/st/runtime/scheduling/task_boundary_overhead_analysis.py b/tests/st/runtime/scheduling/task_boundary_overhead_analysis.py
+new file mode 100644
+index 000000000..c6fc7dab3
+--- /dev/null
++++ b/tests/st/runtime/scheduling/task_boundary_overhead_analysis.py
+@@ -0,0 +1,280 @@
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++
++"""Factorial Wait/Set comparison with single and batched graph timing."""
++
++import argparse
++import json
++import os
++from pathlib import Path
++from statistics import mean, median
++
++import pypto.language as pl
++import torch
++from pypto.backend import pto_backend
++from task_boundary_no_successor_demo import artifact
++
++BLOCKS = int(os.environ.get("PYPTO_BOUNDARY_DIAG_BLOCKS", "48"))
++assert BLOCKS in (1, 48)
++
++
++@pl.jit
++def ordinary(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(BLOCKS, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++    return out
++
++
++@pl.jit
++def marked(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(BLOCKS, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        pl.system.wait_pre_task_end()
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++        pl.system.set_next_task_start()
++    return out
++
++
++@pl.jit
++def wait_only(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(BLOCKS, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        pl.system.wait_pre_task_end()
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++    return out
++
++
++@pl.jit
++def set_only(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(BLOCKS, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++        pl.system.set_next_task_start()
++    return out
++
++
++PROGRAMS = {
++    "ordinary": ordinary,
++    "wait_only": wait_only,
++    "set_only": set_only,
++    "marked": marked,
++    "wait_cold": wait_only,
++    "marked_cold": marked,
++    "marked_inline_wait": marked,
++    "marked_no_head_barrier": marked,
++    # Diagnostic controls are safe only in this graph, which has no successor.
++    "wait_nullcheck": wait_only,
++    "wait_no_callback": wait_only,
++}
++
++
++def compile_control(name, fn, directory, compile_only):
++    original = pto_backend._SCALAR_PREFIX_WAIT_ADAPTER
++    original_includes = None
++    try:
++        # Reconstruct the preceding implementation for same-SDK A/B; only
++        # the adapter differs. In particular, never alter the dispatch graph.
++        start = original.index("    auto* local =") if "    auto* local =" in original else -1
++        if start >= 0:
++            end = original.index("    // The Scalar prefix", start)
++            cold = (
++                original[:start]
++                + """    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
++    using WaitFn = int (*)(__gm__ int64_t*);
++    auto wait = reinterpret_cast<WaitFn>(ctx->wait_predecessor_fn);
++    const int64_t ready = wait == nullptr ? 1 : wait(args);
++"""
++                + original[end:]
++            )
++        else:
++            cold = original
++        if "pypto_wait_local_boundary(__gm__ int64_t* args) {\n    asm volatile" not in cold:
++            cold = cold.replace(
++                "pypto_wait_local_boundary(__gm__ int64_t* args) {\n",
++                'pypto_wait_local_boundary(__gm__ int64_t* args) {\n    asm volatile("" : : : "memory");\n',
++            )
++        if name == "marked_inline_wait":
++            import simpler_setup.kernel_compiler as kc  # noqa: PLC0415
++
++            sdk = kc.KernelCompiler(platform="a2a3").project_root
++            original_includes = kc.KernelCompiler.get_incore_include_dirs
++            kc.KernelCompiler.get_incore_include_dirs = lambda self: original_includes(self) + [
++                str(sdk / "src/a2a3/platform/include")
++            ]
++            executor = (
++                sdk / "src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp"
++            ).read_text()
++            helpers = executor[
++                executor.index(
++                    "__aicore__ __attribute__((always_inline)) static void flush_overlap_context"
++                ) : executor.index("__aicore__ static uint32_t handoff_scalar_prefix")
++            ]
++            helpers = helpers.replace(
++                "__aicore__ static int wait_scalar_prefix_predecessor",
++                "__aicore__ __attribute__((always_inline)) static inline int wait_scalar_prefix_predecessor",
++            )
++            includes = (
++                f'#include "{sdk}/src/a2a3/platform/onboard/aicore/inner_kernel.h"\n'
++                '#include "dispatch_payload.h"\n'
++            )
++            pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = (
++                includes
++                + helpers
++                + original.replace("ready = wait(args);", "ready = wait_scalar_prefix_predecessor(args);")
++            )
++        elif compile_only and name == "marked_no_head_barrier":
++            pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = original.replace(
++                '    asm volatile("" : : : "memory");\n', "", 1
++            )
++        elif compile_only and name in ("wait_cold", "marked_cold"):
++            pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = cold
++        elif compile_only and name == "wait_nullcheck":
++            pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = cold.replace(
++                "wait == nullptr ? 1 : wait(args)", "wait == nullptr ? 1 : 0"
++            )
++        elif compile_only and name == "wait_no_callback":
++            start = cold.index("    auto* ctx =")
++            end = cold.index("    // The Scalar prefix", start)
++            pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = (
++                cold[:start] + "    const int64_t ready = 1;\n" + cold[end:]
++            )
++        return artifact(fn, directory, compile_only)
++    finally:
++        pto_backend._SCALAR_PREFIX_WAIT_ADAPTER = original
++        if original_includes is not None:
++            kc.KernelCompiler.get_incore_include_dirs = original_includes
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--compile", action="store_true")
++    parser.add_argument("--compiled", type=Path, required=True)
++    parser.add_argument("--output", type=Path)
++    parser.add_argument("--device", type=int)
++    parser.add_argument("--batches", nargs="+", type=int, default=[1, 32])
++    parser.add_argument("--repeats", type=int, default=30)
++    parser.add_argument("--profile", action="store_true")
++    parser.add_argument("--variants", nargs="+", choices=tuple(PROGRAMS), default=list(PROGRAMS))
++    args = parser.parse_args()
++    names = tuple(args.variants)
++    artifacts = [compile_control(name, PROGRAMS[name], args.compiled / name, args.compile) for name in names]
++    if args.compile:
++        return
++    assert os.environ.get("TASK_DEVICE") == str(args.device)
++    # Keep device imports out of CPU compilation.
++    import torch_npu  # noqa: PLC0415
++    from pypto.runtime.kernel.context import get_process_kernel_state  # noqa: PLC0415
++    from pypto.torch import begin_dfx, end_dfx, init  # noqa: PLC0415
++    from pypto.torch.launch import enqueue  # noqa: PLC0415
++
++    torch.set_num_threads(2)
++    torch_npu.npu.set_device(args.device)
++    init(
++        device=args.device,
++        platform="a2a3",
++        runtime="tensormap_and_ringbuffer",
++        enable_chip_swimlane=1 if args.profile else 0,
++        output_dir=args.output / "profile" if args.profile else None,
++    )
++    runtime = get_process_kernel_state()
++    registrations = [runtime.ensure_callable(a, runtime.require_config()) for a in artifacts]
++    source = (torch.arange(1536 * 256, dtype=torch.float32) % 31).reshape(1536, 256).npu(args.device)
++    outputs = [torch.zeros_like(source) for _ in names]
++    report = {"scope": f"One {BLOCKS}-block AIV task, loops=1", "blocks": BLOCKS, "measurements": []}
++    args.output.mkdir(parents=True, exist_ok=True)
++    try:
++        for batch in args.batches:
++            graphs = []
++            for registration, out in zip(registrations, outputs):
++                enqueue(registration, (source, out, 1))
++                torch_npu.npu.synchronize()
++                cpu_out = out.cpu()
++                assert torch.equal(cpu_out[: BLOCKS * 32], source.cpu()[: BLOCKS * 32] + 1)
++                assert torch.count_nonzero(cpu_out[BLOCKS * 32 :]).item() == 0
++                graph = torch_npu.npu.NPUGraph()
++                with torch_npu.npu.graph(graph):
++                    for _ in range(batch):
++                        enqueue(registration, (source, out, 1))
++                graphs.append(graph)
++                for _ in range(5):
++                    graph.replay()
++            torch_npu.npu.synchronize()
++            start, end = (torch_npu.npu.Event(enable_timing=True) for _ in range(2))
++            start.record()
++            end.record()
++            end.synchronize()
++            samples = []
++            if args.profile:
++                begin_dfx()
++            for repeat in range(args.repeats):
++                for offset in range(len(names)):
++                    mode = (repeat + offset) % len(names)
++                    start.record()
++                    graphs[mode].replay()
++                    end.record()
++                    end.synchronize()
++                    samples.append(
++                        {
++                            "repeat": repeat,
++                            "variant": names[mode],
++                            "us": start.elapsed_time(end) * 1000 / batch,
++                        }
++                    )
++            stats = {}
++            if args.profile:
++                end_dfx()
++            for name in names:
++                times = [s["us"] for s in samples if s["variant"] == name]
++                stats[name] = {
++                    "min": min(times),
++                    "mean": mean(times),
++                    "median": median(times),
++                    "max": max(times),
++                }
++            report["measurements"].append({"batch": batch, "exact": True, "stats": stats, "samples": samples})
++            (args.output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
++            print(json.dumps({"batch": batch, "stats": stats}), flush=True)
++            for graph in graphs:
++                graph.reset()
++    finally:
++        runtime.drain()
++        runtime.close()
++
++
++if __name__ == "__main__":
++    main()
