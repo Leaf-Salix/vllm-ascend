@@ -2623,7 +2623,40 @@ B24长档21/30配对更慢，不能把全面加标记定性为普遍加速。
 零开销goal仍暂停；本次仅完成最新授权的七档测量与归档，不额外增加优化轮次。
 [完整报告、420次样本及复现脚本](superkernel_csa_seven_handoff_cleanup_20261011/README.md)。
 
-## 51. 后续记录要求
+## 51. 过程 049：只读分析 early_dispatch 到 early_start 的覆盖缺口
+
+用户要求先从理论分析有多少提前派发task应产生Scalar重叠收益。本轮没有占卡或修改运行时。
+明确此前七档只测了整体耗时，没有记录实际early_dispatch、handoff及有效重叠次数；
+不能用63处early-resolve设置或73个kernel定义替代实际命中数。
+
+按128K/B16、T=96实际分支展开生成orchestration，并展开8个O projection组：
+共66个AICore任务组、973个单核block调用（MIX一block按1AIC+2AIV计），不含AICPU dummy。
+其中64组有Wait；2组MIX未接入，144个单核调用被排除。
+当前runtime还排除sync_start后继，当前分支中的kv_rms_norm_rope和HC_post共51个block，
+所以入口能力层最多剩62组、778个单核调用可作为后继。以上是静态资格上界，非实际交接数。
+
+源码确认更强的额外限制：gated pending后继要求本核前驱恰好是它同类型的直接WAIT生产者，
+仅“后继已经正常dispatch到本核”仍不足。该条件比用户所要求的范围窄；
+安全Scalar可先执行、在Wait先完成本核前驱再等自己的完整fanin，从原理上不必要求数据生产者
+就是本核前驱。O-A→quant→O-B等跨资源链因此不能天然转化为当前gated交接收益。
+实际fanin可能含额外依赖，不仅凭显式链断言整类task全部未交接。
+
+进一步核对pending选槽：`CoreTracker::get_pending_core_offset_states`按核类型、忙闲及槽位选择，
+`stage_consumer_blocks`从可用槽取`pop_first()`，均未要求本核当前task是消费者的数据生产者。
+因此“排在本核X之后、数据依赖另一核A”是源码允许的情况，不能混同排队次序与数据依赖。
+修正交流中“主要等待另一核就被挡”的表述：只有X不属于直接WAIT生产者集合时才被此条件拒绝；
+若X与A均是直接生产者，等待A本身不触发此拒绝。没有将源码允许的情况冒充本轮实测命中。
+
+另有idle预派发不进入算子Scalar前缀、MIX前驱不支持异步交接，以及只在前驱返回时一次探测后继的限制。
+这些是覆盖与窗口问题，不能当作early_start本身收益上限，也没有证据认定任何CSA task为Scalar-bound。
+理想局部节省为min(剩余前驱流水时间,安全Scalar前缀时间)减协议成本；
+多核同时节省的时间不能直接相加为CSA终点收益。
+
+下一项所缺证据是idle/pending提前派发、资格拒绝原因、真实handoff、有效重叠窗口与关键路径覆盖的计数。
+本轮只记录缺口与理论判断，没有新测试，也未改用户的dispatch、ACK、sync_start或early-resolve。
+[详细清单、源码位置及静态展开数据](superkernel_csa_seven_handoff_cleanup_20261011/early_dispatch_coverage.md)。
+
+## 52. 后续记录要求
 
 每次有意义的修改/实验追加一节，至少包含：目的、修改仓与文件、与上一候选的差异、
 命令及版本、任务 ID/设备、实际结果、失败定性、产物路径、结论边界和下一步。

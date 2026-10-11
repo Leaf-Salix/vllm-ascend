@@ -92,3 +92,7 @@ python artifacts/summarize_csa_seven_handoff_cleanup.py \
 
 预编译产物和逐档完整 stdout 保留在上述私有 `artifacts/csa_seven_handoff_cleanup_20261011/`。
 本轮完整保留 420 次计时样本，未按性能好坏删样本或追加筛选轮次。
+
+后续只读审查见[early_dispatch到early_start的静态覆盖分析](early_dispatch_coverage.md)：
+128K/B16展开为66组、973个单核block调用；入口及sync_start限制后最多剩62组、778个调用有后继资格，
+实际early_dispatch/handoff命中数尚未记录。直接WAIT生产者限制、MIX和sync_start覆盖缺口需要单独审视。
