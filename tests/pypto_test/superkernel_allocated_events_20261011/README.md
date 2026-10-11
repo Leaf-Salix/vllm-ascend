@@ -78,7 +78,8 @@ python tests/st/runtime/scheduling/task_boundary_allocated_event_probe.py \
 
 CSA编译先切到私有vLLM仓并重新source `../env.sh`，执行本轮`tmr_csa_event_contract_compile.py`，
 `--previous`指向过程059的mixed产物，`--output`指向本轮compiled目录。
-两份[repro/](repro/)脚本经task-submit单卡执行。增量patch使用`git apply --unidiff-zero`；
+将两份[repro/](repro/)脚本复制回私有根目录的`artifacts/`，再经task-submit单卡执行；
+脚本依赖该相对位置。增量patch使用`git apply --unidiff-zero`；
 PTOAS需按版本重建，Simpler SDK不变。
 
 本轮先修正Ruff行长问题，设备任务没有失败。保留事件分配能力；后续回到128K/B16中
