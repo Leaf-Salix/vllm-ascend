@@ -1,0 +1,40 @@
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -819 +819,6 @@
+-    PTOAutoSyncTailMode mode = PTOAutoSyncTailMode::kBarrierAll) {
++    PTOAutoSyncTailMode mode = PTOAutoSyncTailMode::kBarrierAll,
++    bool asyncTailSelected = true) {
++  if (!asyncTailSelected) {
++    pipe_barrier(PIPE_ALL);
++    return;
++  }
+--- a/lib/PTO/Transforms/PTOToEmitC/SyncComm/FuncCall.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/SyncComm/FuncCall.cpp
+@@ -32,2 +32,22 @@
+-        auto args = rewriter.getArrayAttr(
+-            {emitc::OpaqueAttr::get(ctx, modeAttr.getValue())});
++        SmallVector<Attribute> args{
++            emitc::OpaqueAttr::get(ctx, modeAttr.getValue())};
++        SmallVector<Value> operands;
++        if (modeAttr.getValue() == kAutoSyncTailModeAsyncAivAllPipesEvent7Token ||
++            modeAttr.getValue() == kAutoSyncTailModeAsyncAicAllPipesEvent7Token) {
++          Value rawArgs;
++          emitcFunc.walk([&](Operation *candidate) {
++            auto callee = candidate->getAttrOfType<FlatSymbolRefAttr>("callee");
++            if (callee && callee.getValue() == "pypto_set_next_task_start" &&
++                candidate->getNumOperands() == 1)
++              rawArgs = candidate->getOperand(0);
++          });
++          if (rawArgs) {
++            if (auto mapped = rewriter.getRemappedValue(rawArgs)) rawArgs = mapped;
++            auto selected = rewriter.create<emitc::CallOpaqueOp>(
++                op.getLoc(), TypeRange{rewriter.getI1Type()},
++                "pypto_async_tail_selected", ArrayAttr{}, ArrayAttr{},
++                ValueRange{rawArgs});
++            operands.push_back(selected.getResult(0));
++            args.push_back(rewriter.getIndexAttr(0));
++          }
++        }
+@@ -36 +56 @@
+-            args, ArrayAttr{}, ValueRange{});
++            rewriter.getArrayAttr(args), ArrayAttr{}, operands);

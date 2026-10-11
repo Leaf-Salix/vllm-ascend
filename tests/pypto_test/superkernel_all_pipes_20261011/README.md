@@ -36,5 +36,8 @@
 
 [全部 90 个样本与状态](results.json)、[统计与配对差值](analysis.json)、
 [测试及构建记录](checks.json)、[59 个函数内部同步检查](all_internal_sync_checks.json)、
-[事件分配修复证据](internal_sync_checks.json)、[修复前派发失败](predispatch_before.log)、
-[修复前重复填参](argument_preparation_before.log)。
+[事件分配修复证据](internal_sync_checks.json)、[修复前派发失败](predispatch_before.txt)、
+[修复前重复填参](argument_preparation_before.txt)。
+
+结果文件保留全部计时样本、配置和功能检查；重复的完整形状/权重格式列表留在其
+`full_private_result` 指向的原始产物，避免在Git中重复堆积。
