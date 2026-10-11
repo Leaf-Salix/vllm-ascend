@@ -1,0 +1,367 @@
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index e18d6377e..0709a22b7 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "9d67572694e760be3ffe67f8b6847be62ebc9168"
++SIMPLER_KERNEL_REVISION = "a9edc8455167e447955524eea4843b4542bdb8b2"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 26d6759eb..423a4beb1 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -688,8 +688,8 @@ _SCALAR_PREFIX_WAIT_OPS = _LOCAL_TASK_WAIT_OPS | frozenset({_ir_core.get_op("sys
+ _SCALAR_PREFIX_WAIT_ADAPTER = r"""
+ extern "C" {
+ static __aicore__ __attribute__((always_inline)) inline
+-int64_t pypto_wait_predecessor(__gm__ int64_t* args, int64_t dependency) {
+-    asm volatile("" : "+l"(dependency) : : "memory");
++int64_t pypto_wait_local_boundary(__gm__ int64_t* args) {
++    asm volatile("" : : : "memory");
+     auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
+     using WaitFn = int (*)(__gm__ int64_t*);
+     auto wait = reinterpret_cast<WaitFn>(ctx->wait_predecessor_fn);
+@@ -707,6 +707,11 @@ int64_t pypto_wait_predecessor(__gm__ int64_t* args, int64_t dependency) {
+     asm volatile("" : : : "memory");
+     return ready;
+ }
++static __aicore__ __attribute__((always_inline)) inline
++int64_t pypto_wait_predecessor(__gm__ int64_t* args, int64_t dependency) {
++    asm volatile("" : "+l"(dependency) : : "memory");
++    return pypto_wait_local_boundary(args);
++}
+ }
+ """
+ 
+@@ -715,16 +720,14 @@ _LOCAL_TASK_BOUNDARY_ADAPTER = r"""
+ extern "C" {
+ static __aicore__ __attribute__((always_inline)) inline
+ void pypto_keep_prefix(int64_t dependency) {
+-    asm volatile("" : : "l"(dependency) : "memory");
++    // Only retain the register dependency; the Wait itself owns memory order.
++    asm volatile("" : : "l"(dependency));
+ }
+ static __aicore__ __attribute__((always_inline)) inline
+ void pypto_set_next_task_start(__gm__ int64_t* args) {
+-    auto* ctx = reinterpret_cast<__gm__ GlobalContext*>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
+-#if defined(__DAV_CUBE__)
+-    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::AicAllPipes);
+-#else
+-    ctx->async_tail_kind = static_cast<uint32_t>(AsyncTailKind::AivAllPipes);
+-#endif
++    // The compiler transfers the ordinary tail PIPE_ALL to the executor.
++    // No signal or mutable GM completion state is needed at this boundary.
++    (void)args;
+ }
+ }
+ """
+diff --git a/runtime b/runtime
+index 9d6757269..a9edc8455 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit 9d67572694e760be3ffe67f8b6847be62ebc9168
++Subproject commit a9edc8455167e447955524eea4843b4542bdb8b2
+diff --git a/src/codegen/orchestration/orchestration_codegen.cpp b/src/codegen/orchestration/orchestration_codegen.cpp
+index d76b20760..863e749b3 100644
+--- a/src/codegen/orchestration/orchestration_codegen.cpp
++++ b/src/codegen/orchestration/orchestration_codegen.cpp
+@@ -3128,9 +3128,8 @@ class OrchestrationStmtCodegen : public CodegenBase {
+                                          const std::string& task_var) {
+     std::vector<std::string> overlap_lines;
+     const auto boundaries = GetTaskBoundaryMarkers(kernel_func);
+-    if (kernel_func->GetAttr<bool>("async_aiv_return", false) ||
+-        kernel_func->GetAttr<bool>("async_aic_return", false) || boundaries.signal) {
+-      overlap_lines.push_back(task_var + ".set_allow_early_resolve(true);");
++    if (boundaries.signal) {
++      overlap_lines.push_back(task_var + ".set_runtime_barrier_tail(true);");
+     }
+     if (kernel_func->GetAttr<bool>("scalar_prefix", false) || boundaries.wait) {
+       INTERNAL_CHECK(core_type == CoreType::CUBE ||
+diff --git a/src/codegen/pto/pto_codegen.cpp b/src/codegen/pto/pto_codegen.cpp
+index bda798c07..fe9f9fa30 100644
+--- a/src/codegen/pto/pto_codegen.cpp
++++ b/src/codegen/pto/pto_codegen.cpp
+@@ -1187,7 +1187,7 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+       stream_ << " attributes {pto.kernel_kind = #pto.kernel_kind<cube>";
+       if (async_aic_return) {
+         stream_ << ", pto.auto_sync_tail_hint = \""
+-                << (boundaries.signal ? "async_aic_all_pipes_event7" : "async_aic_event7") << "\"";
++                << (boundaries.signal ? "runtime_barrier_all" : "async_aic_event7") << "\"";
+       }
+       if (func->GetAttr<bool>("scalar_prefix", false) || boundaries.wait) stream_ << ", pto.scalar_prefix";
+       stream_ << "}";
+@@ -1196,7 +1196,7 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+       stream_ << " attributes {pto.kernel_kind = #pto.kernel_kind<vector>";
+       if (async_aiv_return) {
+         stream_ << ", pto.auto_sync_tail_hint = \""
+-                << (boundaries.signal ? "async_aiv_all_pipes_event7" : "async_aiv_event7") << "\"";
++                << (boundaries.signal ? "runtime_barrier_all" : "async_aiv_event7") << "\"";
+       }
+       if (func->GetAttr<bool>("scalar_prefix", false) || boundaries.wait) stream_ << ", pto.scalar_prefix";
+       stream_ << "}";
+diff --git a/tests/st/runtime/scheduling/task_boundary_no_successor_demo.py b/tests/st/runtime/scheduling/task_boundary_no_successor_demo.py
+new file mode 100644
+index 000000000..761905ba6
+--- /dev/null
++++ b/tests/st/runtime/scheduling/task_boundary_no_successor_demo.py
+@@ -0,0 +1,145 @@
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++
++"""Compare ordinary and marked single-task graphs: no core has a successor."""
++
++import argparse
++import json
++import os
++from pathlib import Path
++from statistics import mean
++
++import pypto.language as pl
++import torch
++from pypto.ir._kernel_compile import kernel_abi_for_program
++from pypto.ir.compile import _compile_impl
++from pypto.pypto_core.passes import RuntimeKind
++from pypto.runtime import RunConfig
++from pypto.runtime._kernel_artifact import KernelArtifact
++
++
++@pl.jit
++def ordinary(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(48, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++    return out
++
++
++@pl.jit
++def marked(
++    x: pl.Tensor[[1536, 256], pl.FP32],
++    out: pl.Out[pl.Tensor[[1536, 256], pl.FP32]],
++    loops: pl.Scalar[pl.INT64],
++):
++    with pl.spmd(48, name_hint="only_task"):
++        offset = pl.tile.get_block_idx() * 32
++        pl.system.wait_pre_task_end()
++        value = pl.load(x, [offset, 0], [32, 256])
++        for _ in pl.range(loops):
++            value = pl.add(value, 1.0)
++        pl.store(value, [offset, 0], out)
++        pl.system.set_next_task_start()
++    return out
++
++
++def artifact(fn, directory, compile_only):
++    meta = torch.empty((1536, 256), dtype=torch.float32, device="meta")
++    program = fn.specialize(meta, meta, 1)
++    abi = kernel_abi_for_program(program, platform="a2a3", runtime="tensormap_and_ringbuffer")
++    if compile_only:
++        opts = RunConfig(platform="a2a3").compile_kwargs()
++        opts.update(output_dir=str(directory / "build"), runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER)
++        result = _compile_impl(program, _kernel_abi=abi, **opts)
++    else:
++        result = KernelArtifact(directory / "build", abi)
++    result.load()
++    return result
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--compile", action="store_true")
++    parser.add_argument("--compiled", type=Path, required=True)
++    parser.add_argument("--output", type=Path)
++    parser.add_argument("--device", type=int)
++    args = parser.parse_args()
++    names = ("ordinary", "marked")
++    artifacts = [
++        artifact(fn, args.compiled / name, args.compile) for name, fn in zip(names, (ordinary, marked))
++    ]
++    if args.compile:
++        return
++    assert os.environ.get("TASK_DEVICE") == str(args.device)
++    # Keep device imports out of CPU compilation.
++    import torch_npu  # noqa: PLC0415
++    from pypto.runtime.kernel.context import get_process_kernel_state  # noqa: PLC0415
++    from pypto.torch import init  # noqa: PLC0415
++    from pypto.torch.launch import enqueue  # noqa: PLC0415
++
++    torch_npu.npu.set_device(args.device)
++    init(device=args.device, platform="a2a3", runtime="tensormap_and_ringbuffer")
++    runtime = get_process_kernel_state()
++    registrations = [runtime.ensure_callable(a, runtime.require_config()) for a in artifacts]
++    source = (torch.arange(1536 * 256, dtype=torch.float32) % 31).reshape(1536, 256).npu(args.device)
++    outputs = [torch.empty_like(source) for _ in names]
++    report = {"scope": "one 48-block AIV task, one block per core, no following task", "shapes": []}
++    try:
++        for loops in (1, 64):
++            graphs = []
++            for registration, out in zip(registrations, outputs):
++                enqueue(registration, (source, out, loops))
++                torch_npu.npu.synchronize()
++                assert torch.equal(out.cpu(), source.cpu() + loops)
++                graph = torch_npu.npu.NPUGraph()
++                with torch_npu.npu.graph(graph):
++                    enqueue(registration, (source, out, loops))
++                graphs.append(graph)
++                for _ in range(5):
++                    graph.replay()
++            torch_npu.npu.synchronize()
++            start, end = (torch_npu.npu.Event(enable_timing=True) for _ in range(2))
++            start.record()
++            end.record()
++            end.synchronize()
++            samples = []
++            for repeat in range(30):
++                for offset in range(2):
++                    mode = (repeat + offset) % 2
++                    start.record()
++                    graphs[mode].replay()
++                    end.record()
++                    end.synchronize()
++                    samples.append(
++                        {"repeat": repeat, "variant": names[mode], "us": start.elapsed_time(end) * 1000}
++                    )
++            stats = {}
++            for name in names:
++                times = [s["us"] for s in samples if s["variant"] == name]
++                stats[name] = {"min": min(times), "mean": mean(times), "max": max(times)}
++            report["shapes"].append({"loops": loops, "exact": True, "stats": stats, "samples": samples})
++            print(json.dumps({"loops": loops, "stats": stats}), flush=True)
++            for graph in graphs:
++                graph.reset()
++    finally:
++        runtime.drain()
++        runtime.close()
++    args.output.mkdir(parents=True, exist_ok=True)
++    (args.output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+index 7f07a55de..858dda771 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+@@ -202,7 +202,16 @@ def test_local_boundary_overlap(test_config: RunConfig, tmp_path: Path, cube: bo
+             for tensor in reversed(tensors):
+                 worker.free_tensor(tensor)
+     (output / "ready_results.json").write_text(
+-        json.dumps({"device_id": test_config.device_id, "cube": cube, "samples": samples}, indent=2) + "\n"
++        json.dumps(
++            {
++                "device_id": test_config.device_id,
++                "cube": cube,
++                "completion_scope": "all_local_pipelines",
++                "samples": samples,
++            },
++            indent=2,
++        )
++        + "\n"
+     )
+-    assert any(s["overlaps"] for s in samples), "correct outputs, but no ready-successor compute overlap"
++    assert any(s["overlaps"] for s in samples), "correct outputs, but no ready-successor pipeline overlap"
+     assert any(s["successors_before_last_a_complete"] for s in samples), "independent tasks waited for all A"
+diff --git a/tests/st/runtime/scheduling/test_task_boundary_statements.py b/tests/st/runtime/scheduling/test_task_boundary_statements.py
+index 42a39d691..b93121eeb 100644
+--- a/tests/st/runtime/scheduling/test_task_boundary_statements.py
++++ b/tests/st/runtime/scheduling/test_task_boundary_statements.py
+@@ -76,8 +76,8 @@ def test_local_task_boundaries(test_config: RunConfig, tmp_path: Path):
+     assert "pypto_set_next_task_start" in producer
+     assert all("pypto_wait_predecessor" in text and "pypto_keep_prefix" in text for text in consumers)
+     # Ordinary inner-pipeline sync and compiler-owned cancellation both survive.
+-    assert "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kAsyncAivAllPipesEvent7)" in producer
+-    assert "AsyncTailKind::AivAllPipes" in producer
++    assert "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kRuntimeBarrierAll)" in producer
++    assert "ctx->async_tail_kind =" not in producer
+     assert all("return;" in text for text in consumers)
+     if test_config.codegen_only:
+         return
+diff --git a/tests/ut/codegen/test_orchestration_task_deps.py b/tests/ut/codegen/test_orchestration_task_deps.py
+index 4bb2d3e2c..3d9295a9c 100644
+--- a/tests/ut/codegen/test_orchestration_task_deps.py
++++ b/tests/ut/codegen/test_orchestration_task_deps.py
+@@ -1171,6 +1171,38 @@ def test_submit_allow_early_resolve_emits_hint():
+     assert code.count("set_allow_early_resolve(true)") == 1, code
+ 
+ 
++def test_local_boundaries_preserve_submit_early_resolve():
++    @pl.program
++    class P:
++        @pl.function(type=pl.FunctionType.InCore)
++        def k(
++            self, x: pl.Tensor[[128], pl.FP32], out: pl.Out[pl.Tensor[[128], pl.FP32]]
++        ) -> pl.Tensor[[128], pl.FP32]:
++            pl.system.wait_pre_task_end()
++            value = pl.load(x, [0], [128])
++            out = pl.store(value, [0], out)
++            pl.system.set_next_task_start()
++            return out
++
++        @pl.function(type=pl.FunctionType.Orchestration)
++        def main(
++            self, x: pl.Tensor[[128], pl.FP32], out: pl.Out[pl.Tensor[[128], pl.FP32]]
++        ) -> pl.Tensor[[128], pl.FP32]:
++            with pl.manual_scope():
++                first = pl.create_tensor([128], dtype=pl.FP32)
++                second = pl.create_tensor([128], dtype=pl.FP32)
++                first, a = pl.submit(self.k, x, first, allow_early_resolve=False)
++                second, b = pl.submit(self.k, first, second, deps=[a], allow_early_resolve=True)
++                out, _ = pl.submit(self.k, second, out, deps=[b])
++            return out
++
++    code = _generate_orch_full_pipeline(P)
++    assert code.count("set_allow_early_resolve(true)") == 1, code
++    assert "params_t1.set_allow_early_resolve(true);" in code, code
++    assert code.count("set_runtime_barrier_tail(true)") == 3, code
++    assert code.count("set_scalar_prefix(true)") == 3, code
++
++
+ def test_plain_submit_emits_no_allow_early_resolve():
+     """Regression: a plain ``pl.submit`` (no hint) must not emit any
+     ``set_allow_early_resolve`` call — the feature is fully opt-in.
+diff --git a/tests/ut/codegen/test_pto_codegen.py b/tests/ut/codegen/test_pto_codegen.py
+index 4f8e40274..267bdbdf1 100644
+--- a/tests/ut/codegen/test_pto_codegen.py
++++ b/tests/ut/codegen/test_pto_codegen.py
+@@ -1751,7 +1751,7 @@ class TestGenerateKernelWrapper:
+     """Tests for _generate_kernel_wrapper."""
+ 
+     @pytest.mark.parametrize("cube", [False, True], ids=["aiv", "aic"])
+-    def test_local_signal_uses_all_pipes_tail_without_legacy_override(self, cube):
++    def test_local_signal_transfers_tail_without_runtime_state_writes(self, cube):
+         @pl.program
+         class LocalAiv:
+             @pl.function(type=pl.FunctionType.AIV)
+@@ -1767,12 +1767,10 @@ class TestGenerateKernelWrapper:
+                 return out
+ 
+         program = LocalAic if cube else LocalAiv
+-        mode = "aic" if cube else "aiv"
+         mlir = _generate_mlir(program)
+-        assert f'pto.auto_sync_tail_hint = "async_{mode}_all_pipes_event7"' in mlir
++        assert 'pto.auto_sync_tail_hint = "runtime_barrier_all"' in mlir
+         wrapper = _generate_kernel_wrapper(program.get_function("node"), SAMPLE_PTOAS_OUTPUT)
+-        assert "AsyncTailKind::AicAllPipes" in wrapper
+-        assert "AsyncTailKind::AivAllPipes" in wrapper
++        assert "ctx->async_tail_kind =" not in wrapper
+         assert "__async_ctx->async_tail_kind =" not in wrapper
+ 
+     def test_async_return_without_diagnostic_tensor(self):

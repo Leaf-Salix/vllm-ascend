@@ -1,0 +1,297 @@
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index bb340705c..cca518d98 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -42,7 +42,11 @@ __aicore__ __attribute__((always_inline)) static void drain_async_tail(__gm__ Gl
+     const auto kind = static_cast<AsyncTailKind>(ctx->async_tail_kind);
+     uint64_t wait_started_at;
+     uint64_t compute_completed_at;
+-    if (kind == AsyncTailKind::AicJoined || kind == AsyncTailKind::AicAllPipes) {
++    if (kind == AsyncTailKind::RuntimeBarrierAll) {
++        wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
++        pipe_barrier(PIPE_ALL);
++        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
++    } else if (kind == AsyncTailKind::AicJoined || kind == AsyncTailKind::AicAllPipes) {
+         wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+         wait_flag(PIPE_M, PIPE_S, EVENT_ID7);
+         compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+@@ -73,8 +77,12 @@ __aicore__ __attribute__((always_inline)) static void drain_async_tail(__gm__ Gl
+         trace[7] = compute_completed_at;
+         dcci(trace, SINGLE_CACHE_LINE, CACHELINE_OUT);
+     }
+-    ctx->async_tail_kind = 0;
+-    flush_overlap_context(ctx);
++    if (kind != AsyncTailKind::RuntimeBarrierAll) {
++        ctx->async_tail_kind = 0;
++        flush_overlap_context(ctx);
++    } else if (trace_addr != 0) {
++        flush_overlap_context(ctx);
++    }
+ }
+ 
+ // Called from an independently compiled successor, after its safe Scalar
+@@ -88,6 +96,9 @@ __aicore__ static int wait_scalar_prefix_predecessor(__gm__ int64_t *args) {
+     const uint32_t own_id = ctx->reg_task_id;
+     ctx->predecessor_context = 0;
+     ctx->wait_predecessor_fn = 0;
++    // Only an actual handoff dirties these fields. Flush before either task
++    // can publish FIN; ordinary runtime-owned tails keep the control line clean.
++    flush_overlap_context(ctx);
+     auto *own = reinterpret_cast<__gm__ DispatchPayload *>(
+         reinterpret_cast<__gm__ char *>(ctx) - offsetof(DispatchPayload, global_context));
+     const bool gated = own->src_payload != 0;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 413786901..1b0c37bd3 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -122,6 +122,7 @@ enum class AsyncTailKind : uint32_t {
+     AicJoined = 2,
+     AivAllPipes = 3,
+     AicAllPipes = 4,
++    RuntimeBarrierAll = 5,
+ };
+ 
+ struct GlobalContext {
+@@ -136,7 +137,8 @@ struct GlobalContext {
+     uint64_t overlap_cache_padding[3];
+     // AsyncTailKind selects the compiler/runtime completion protocol.
+     // AllPipes includes every local engine -> S marker; Joined retains the
+-    // legacy compute/store pair. All events must drain before real FIN.
++    // legacy compute/store pair. RuntimeBarrierAll transfers the ordinary
++    // tail PIPE_ALL to the executor without allocating completion events.
+     volatile uint32_t async_tail_kind;
+     uint32_t predecessor_reg_task_id;
+     uint32_t reg_task_id;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
+index 22ecd9dea..291d7cb3a 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
+@@ -728,6 +728,7 @@ static bool prepare_task(
+     out->task = &orch->sm_header->rings[ring_id].task_descriptors[out->alloc_result.slot];
+     out->payload = &orch->sm_header->rings[ring_id].task_payloads[out->alloc_result.slot];
+     out->payload->scalar_prefix = args.scalar_prefix();
++    out->payload->runtime_barrier_tail = args.runtime_barrier_tail();
+ 
+     // Reset the fanout/fanin bookkeeping for this reuse. The allocator only
+     // returns a slot whose previous occupant is CONSUMED and quiescent (alloc
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+index d9edd5b51..610a89791 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+@@ -360,6 +360,7 @@ struct TaskPayload {
+     // Explicit demo capability, written by the orchestrator before publication.
+     // Fits the remaining alignment padding before the predicate cache line.
+     bool scalar_prefix{false};
++    bool runtime_barrier_tail{false};
+     // The count dispatch_fanin must hit for this task to be an early-dispatch
+     // candidate. Only producers linked onto a fanout_head ever bump
+     // dispatch_fanin, so it can reach at most fanin_wait_count: a nonzero
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_completion.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_completion.cpp
+index 2dbcc7fef..578f90779 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_completion.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_completion.cpp
+@@ -480,9 +480,6 @@ void SchedulerContext::check_running_cores_for_completion(
+             // when no pending task is currently held. Otherwise pending slot is occupied
+             // by a pre-loaded task and must stay protected.
+             tracker.clear_pending_occupied(bit_pos);
+-            if (try_scalar_prefix_on_ack(thread_idx, bit_pos)) {
+-                made_progress = true;
+-            }
+         }
+ 
+         // 4. Progress signal (only when running task completes)
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_context.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_context.h
+index 743cc71d9..2e2318d8b 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_context.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_context.h
+@@ -392,7 +392,6 @@ private:
+ 
+     // An acknowledged producer has just freed its pending slot. Try one
+     // matching checked Scalar prefix before polling the remaining cores.
+-    bool try_scalar_prefix_on_ack(int32_t thread_idx, int32_t core_offset);
+ 
+     // One pass of "Phase 4" in the resolve_and_dispatch loop: IDLE-stage dispatch
+     // for MIX then (if no mix residual) AIC/AIV; then PENDING-stage dispatch with
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index e3e0fa6fc..ebcc6d797 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -229,7 +229,8 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+         return {};
+     }
+     auto &overlap = payload.global_context;
+-    overlap.async_tail_kind = 0;
++    overlap.async_tail_kind = static_cast<uint32_t>(slot_state.payload->runtime_barrier_tail ?
++                                                      AsyncTailKind::RuntimeBarrierAll : AsyncTailKind::None);
+     overlap.scalar_overlap_trace = 0;
+     overlap.wait_predecessor_fn = 0;
+     overlap.predecessor_context = 0;
+@@ -774,49 +775,6 @@ int32_t SchedulerContext::stage_consumer_blocks(
+     return staged;
+ }
+ 
+-bool SchedulerContext::try_scalar_prefix_on_ack(int32_t thread_idx, int32_t core_offset) {
+-#if SIMPLER_DFX
+-    if (chip_swimlane_level_ != ChipSwimlaneLevel::DISABLED || is_pmu_enabled() || is_dump_args_enabled()) return false;
+-#endif
+-    CoreTracker &tracker = core_trackers_[thread_idx];
+-    int32_t core_id = tracker.get_core_id_by_offset(core_offset);
+-    ChipTaskSlotState *producer = core_exec_states_[core_id].running_slot_state;
+-    if (producer == nullptr || !producer->task_attrs.allow_early_resolve()) return false;
+-    ResourceShape shape = producer->active_mask.to_shape();
+-    if (shape != ResourceShape::AIV && shape != ResourceShape::AIC) return false;
+-    int32_t s = static_cast<int32_t>(shape);
+-    auto &queue = sched_->early_dispatch_queues[s];
+-    if (queue.size() == 0) return false;
+-
+-    // Preserve normal work and cohort priority; this shortcut only consumes
+-    // an otherwise spare pending slot owned by the acknowledged producer.
+-    if (drain_state_.sync_start_pending.load(std::memory_order_acquire) != 0 ||
+-        sched_->dummy_ready_queue.size() > 0 || sched_->early_sync_start_queue.size() > 0 ||
+-        has_residual_early_mix()) return false;
+-    for (int i = 0; i < NUM_RESOURCE_SHAPES; i++) {
+-        if (sched_->ready_sync_queues[i].size() > 0 || sched_->ready_queues[i].size() > 0) return false;
+-    }
+-
+-    ChipTaskSlotState *consumer = nullptr;
+-    uint64_t task_id = 0;
+-    if (queue.pop_batch_tagged(&consumer, &task_id, 1) == 0) return false;
+-    if (static_cast<uint64_t>(consumer->task->task_id.raw) != task_id ||
+-        consumer->payload->early_dispatch_state.load(std::memory_order_acquire) != EARLY_DISPATCH_STAGING) {
+-        return false;
+-    }
+-    if (!consumer->payload->scalar_prefix || consumer->task_attrs.has_predicate() ||
+-        consumer->task_attrs.requires_sync_start() || !is_scalar_prefix_wait_producer(*consumer, producer)) {
+-        queue.push_tagged(consumer, task_id);
+-        return false;
+-    }
+-    int32_t start = 0;
+-    if (consumer->claim_block_range(consumer->logical_block_num, 1, start) == 0) return false;
+-    if (start + 1 < consumer->logical_block_num) queue.push_tagged(consumer, task_id);
+-    CoreTracker::BitStates idle(0ULL);
+-    CoreTracker::BitStates pending(1ULL << core_offset);
+-    return stage_consumer_blocks(thread_idx, consumer, shape, start, 1, idle, pending) == 1;
+-}
+-
+ // Early-dispatch analog of dispatch_shape: drain early_dispatch_queues[shape] and
+ // pre-stage claimed block ranges onto this thread's `shape` cores for `phase`. IDLE
+ // stages onto idle cores (RUNNING slot, gated); PENDING stages onto a running core's
+@@ -878,30 +836,6 @@ SchedulerContext::early_dispatch_shape(int32_t thread_idx, ResourceShape shape,
+         } else {
+             bucket = tracker.get_dispatchable_cores(shape, phase);
+         }
+-        bool prefix_pending = false;
+-        if (c->payload->scalar_prefix && !c->task_attrs.has_predicate() &&
+-            !c->task_attrs.requires_sync_start() &&
+-            (shape == ResourceShape::AIV || shape == ResourceShape::AIC) && c->payload->fanin_wait_count > 0) {
+-            // A matching producer permits same-core Scalar overlap. Without
+-            // one, retain ordinary gated pre-dispatch, including cross-type
+-            // dependencies whose producer can never occupy this kind of core.
+-            CoreTracker::BitStates candidates = tracker.get_dispatchable_cores(shape, CoreTracker::DispatchPhase::PENDING);
+-            CoreTracker::BitStates prefix_bucket;
+-            while (candidates.has_value()) {
+-                int32_t offset = candidates.pop_first();
+-                int32_t cid = tracker.get_core_id_by_offset(offset);
+-                // Every producer block must already be launch-visible before
+-                // any successor can occupy a core while waiting for the whole
+-                // producer. Otherwise remaining producer blocks could starve.
+-                if (is_scalar_prefix_wait_producer(*c, core_exec_states_[cid].running_slot_state)) {
+-                    prefix_bucket |= CoreTracker::BitStates(1ULL << offset);
+-                }
+-            }
+-            if (prefix_bucket.has_value()) {
+-                bucket = prefix_bucket;
+-                prefix_pending = true;
+-            }
+-        }
+         int32_t freecores = bucket.has_value() ? bucket.count() : 0;
+         if (freecores == 0) {  // no cores for this shape+phase — give this + the unprocessed rest back
+             // A dropped candidate keeps its STAGING claim and is recovered by the
+@@ -930,7 +864,7 @@ SchedulerContext::early_dispatch_shape(int32_t thread_idx, ResourceShape shape,
+         // bucket (gated pending); pass this phase's bucket in the matching slot and an
+         // empty other so only the phase's cores are staged.
+         CoreTracker::BitStates empty(0ULL);
+-        total_staged += (is_idle && !prefix_pending) ? stage_consumer_blocks(thread_idx, c, shape, start, claim, bucket, empty) :
++        total_staged += is_idle ? stage_consumer_blocks(thread_idx, c, shape, start, claim, bucket, empty) :
+                                   stage_consumer_blocks(thread_idx, c, shape, start, claim, empty, bucket);
+     }
+     return total_staged;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+index ab6fc2a01..5f1a1ebde 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+@@ -299,6 +299,12 @@ struct Arg : TaskArgsTpl<TensorRef, uint64_t, MaxT, MaxS, TensorArgType> {
+     void set_scalar_prefix(bool v = true) { scalar_prefix_ = v; }
+     bool scalar_prefix() const { return scalar_prefix_; }
+ 
++    // Compiler contract only: the executor owns this entry's tail PIPE_ALL.
++    // This does not enable early resolve or change dispatch eligibility.
++    bool runtime_barrier_tail_{false};
++    void set_runtime_barrier_tail(bool v = true) { runtime_barrier_tail_ = v; }
++    bool runtime_barrier_tail() const { return runtime_barrier_tail_; }
++
+     // Dispatch predicate (codegen-author set; default op == NONE = always
+     // dispatch). A FALSE result at the dispatch point retires the task inline
+     // through the dep-only path — never dispatched to an AICore — while still
+@@ -333,6 +339,7 @@ struct Arg : TaskArgsTpl<TensorRef, uint64_t, MaxT, MaxS, TensorArgType> {
+         explicit_dep_kinds_ = nullptr;
+         allow_early_resolve_ = false;
+         scalar_prefix_ = false;
++        runtime_barrier_tail_ = false;
+         predicate_ = CoreTaskPredicate{};
+         task_timing_slot_ = TASK_TIMING_SLOT_NONE;
+     }
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index 4f6d23405..5fcb9e5f7 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -187,6 +187,49 @@ TEST_F(TmrSchedulerExecutionInputsTest, ExplicitTableBuildsEarlyPayloadAcrossABA
+ }
+ 
+ #if defined(TEST_TMR_SCALAR_PREFIX)
++TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixKeepsIdleCoreAheadOfMatchingBusyProducer) {
++    initialize({table_a.data(), table_a.size()});
++    ChipTaskSlotState producer{};
++    TaskDescriptor producer_task{};
++    TaskPayload producer_payload{};
++    producer.task = &producer_task;
++    producer.payload = &producer_payload;
++    producer.active_mask = ActiveMask(SUBTASK_MASK_AIV0);
++    producer.logical_block_num = 1;
++    producer.total_required_subtasks = 1;
++    producer_payload.published_block_count.store(1);
++    DepListEntry fanout{&slot, nullptr};
++    producer.fanout_head = &fanout;
++    ASSERT_TRUE(context->prepare_subtask_to_core(0, 1, producer, SubtaskSlot::AIV0, false, 0, false).valid);
++    context->core_trackers_[0].clear_pending_occupied(1);
++
++    slot.active_mask = ActiveMask(SUBTASK_MASK_AIV0);
++    payload.scalar_prefix = true;
++    payload.fanin_actual_count = 1;
++    payload.fanin_inline_edges[0].set(&producer, DEP_WAIT);
++    payload.fanin_wait_count = 1;
++    payload.early_dispatch_state.store(EARLY_DISPATCH_STAGING);
++    slot.fanin_count = 1;
++    ASSERT_TRUE(sched.early_dispatch_queues[static_cast<int>(ResourceShape::AIV)].push_tagged(&slot, 0));
++    ASSERT_EQ(context->early_dispatch_shape(0, ResourceShape::AIV, CoreTracker::DispatchPhase::IDLE), 1);
++    EXPECT_EQ(context->core_exec_states_[1].pending_slot_state, nullptr);
++    EXPECT_EQ(context->core_exec_states_[2].running_slot_state, &slot);
++}
++
++TEST_F(TmrSchedulerExecutionInputsTest, RuntimeTailIsIndependentOfEarlyResolveAndResetsAcrossReuse) {
++    initialize({table_a.data(), table_a.size()});
++    for (const bool enabled : {true, false, true}) {
++        init_slot();
++        payload.runtime_barrier_tail = enabled;
++        const auto handle = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
++        ASSERT_TRUE(handle.valid);
++        const auto &dispatch = context->payload_per_core_[0][handle.reg_task_id & 1u];
++        EXPECT_EQ(dispatch.global_context.async_tail_kind, static_cast<uint32_t>(
++            enabled ? AsyncTailKind::RuntimeBarrierAll : AsyncTailKind::None));
++        EXPECT_FALSE(slot.task_attrs.allow_early_resolve());
++    }
++}
++
+ TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixWithoutLocalProducerRetainsIdlePreDispatch) {
+     initialize({table_a.data(), table_a.size()});
+     for (int i = 0; i < 2; ++i) context->payload_per_core_[0][i].args[0] = 0xfeed;
