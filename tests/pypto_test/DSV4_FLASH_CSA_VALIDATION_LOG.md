@@ -15450,3 +15450,20 @@ MIX按物理成员声明能力；自动参数加载及pipe初始化置于Wait后
 9项输出/缓存/状态及换输入重放逐bit一致，保护区通过。已释放设备，不涉及16卡。
 用户确认保留显式Wait标记与诊断模式回退；继续检查gated交接额外的AICPU参数准备。
 [过程053与原始证据](superkernel_mixed_prefix_20261011/README.md)。
+
+## 566. 2026-10-11：gated交接参数回到AICore，128K/B16三路对照
+
+Simpler `3f86962a7`、PyPTO `58ccfcc72`、PTOAS `52b8eaf1`，去掉交接新增的AICPU参数写入，
+保持原调度和用户early_resolve表达。11项CPU及单卡任务`task_20261011_183716_274484923248`
+的9项功能检查通过；MIX、idle/pending、sync_start、无本核直接数据边均覆盖。
+
+单卡0任务`task_20261011_183915_2833602685`，普通min/mean/max为960.10/982.46/1004.46μs，
+原early_start标记范围为959.00/982.22/1001.40μs，扩展MIX为959.30/979.16/1002.42μs。
+CANN9.2/TMR/NZ2/atomic0/诊断关闭，HC_pre+norm+CSA+HC_post，warmup5后各30次轮换。
+MIX较普通均值减少0.34%、max少2.04μs，18/30配对更快；不能据此声称稳定加速，
+也不能将上一轮另一张卡的绝对时间差都归于本项。9项状态和换输入图重放逐bit一致，
+各31项保护区通过，设备已释放。
+
+用户接受显式局部Wait与诊断回退；单次探测窗口仍待处理。CPU探针确认CANN9.2
+的try_wait两参数调用不支持dav-c220-vec，尚未修改runtime收尾策略。
+[过程054完整证据及复现](superkernel_aicore_args_20261011/README.md)。
