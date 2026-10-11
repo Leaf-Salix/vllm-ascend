@@ -15356,3 +15356,15 @@ Simpler `66d6ce63e`；保持原派发、ACK、early-resolve及算子作者的局
 功能通过，原dispatch、ACK及用户early-resolve不变。零开销goal已暂停，未宣称零成本已经实现。
 公共环境未切换，本次不重复上卡；下一步优先审查重复控制行写回、探测cache操作和重复状态读取。
 [完整记录与候选选择依据](superkernel_no_successor_handoff_abi_20261011/README.md)。
+
+## 560. 2026-10-11：跳过历史已有优化，补两处协议冗余清理
+
+按用户要求先核对历史：普通控制行写回和成功交接的全D-cache去重已做，本轮不重复。
+仅在已选定指针交接位实现上，跳过同步后继无trace时的重复控制行写回，并复用主循环已读的tail kind。
+Simpler `d00f8f421`、PyPTO `1f8206d09`、PTOAS `4a5ce22a`；所有流水等待、FIN、ACK、
+dispatch和用户early-resolve语义不变。失败候选的cache策略及trace读取未扩展。
+
+任务`task_20261011_153654_318500013205`在0卡通过3项现有基础功能检查，
+输出/保护区及重放正常，AIV/AIC实际同核交接通过；退出0、设备释放。
+私有运行时与适配器重建且版本一致，公共环境未切换。本轮未新测CSA性能，不宣称量化加速。
+[测试摘要及证据目录](superkernel_handoff_cleanup_20261011/summary.json)。
