@@ -15960,3 +15960,21 @@ CANN9.2/TMR、128K/B16第二层完整区间、NZ2/atomic0、关闭profiler，两
 保护区和图重放通过。三个任务均卡0退出0并释放，本轮没有新增Native、token或DSpark结果。
 
 [过程079源码、失败修正、测试及复现](superkernel_optional_trace_20261012/README.md)。
+
+## 592. 2026-10-12：分支内Wait后继续计算的AIC/AIV/MIX单卡验证
+
+过程080在私有PyPTO `f6edfc1fd`保留顶层双分支局部Wait拆分：选中分支的Scalar先执行，
+共享Wait后再执行原后半段，同类型Scalar复用跨边界传递槽，隐式加载和MIX初始化留在Wait之后。
+边界仍由作者显式标识；不自动识别，不改变派发/ACK/early-resolve或诊断串行回退。
+Simpler、PTOAS、PTO-ISA和公共CSA默认不改。
+
+3项结构测试、1项不安全Wait前输入读取负例及3项单卡用例通过。
+最终任务`task_20261012_060137_81638327947`卡0退出0并释放；两次输入下，
+AIC均24/24、AIV均48/48同核重叠；MIX均24个AIC和48个AIV成员在前驱组完成前进入前缀。
+输出、Scalar结果、Wait后读取、保护区及本核完整尾部等待通过；MIX保留FIFO及sync_start。
+最终8个生成成员Wait前无流水操作，未知输入读取仍被拒绝；MIX组级计数不冒充同核计算重叠证明。
+
+记录了旧扩展未安装、预期SSA返回值遗漏及负例构造错误的修正；同类型槽复用后才形成最终验收。
+现有CSA的73个Wait均在顶层，不命中新规则，故未重复性能测试，最新min/mean/max仍见过程079。
+更一般的嵌套/循环、Tensor描述符跨边界、只读GM别名依据和事件耗尽观察窗口尚未解决。
+[过程080提交、失败摘录、设备trace及复现](superkernel_branch_fission_20261012/README.md)。

@@ -1,0 +1,369 @@
+commit f6edfc1fdfb847c60fbba7d5e6b375ef76e436d6
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 06:04:38 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 06:04:38 2026 +0800
+
+    feat(TMR): 将双分支局部等待拆成共享边界并保留 Scalar 前缀
+    
+    此前仅支持位于分支末尾的Wait。两臂在手工Wait之后继续读取数据或
+    计算时，不能简单将Wait移到分支外。本次在Tensor转Tile前将顶层
+    双分支拆成前缀If、公共Wait和后缀If；条件只求值一次，原来的输出
+    与SSA返回值保持，隐式加载和后续MIX初始化沿用公共边界之后的位置。
+    
+    仅重组作者明确写出的两臂直接Wait，不做边界自动发现。跨边界的
+    Scalar值按类型配对，使互斥分支共享传递槽；只有未配对的槽在不执行
+    该后缀的一侧填零，避免把跨Wait存活值无谓翻倍。非Scalar描述符、
+    一般嵌套或循环中的Wait继续由已有合同处理，没有伪造设备缓冲。
+    不改变派发、ACK、核选择、early-resolve及诊断串行回退。
+    
+    验证：三项结构对照测试通过，包含同类型合并、单侧额外Scalar及
+    共享输入的隐式加载；未知输入在Wait前读取仍被PTOAS拒绝。最终
+    单卡AIC/AIV/MIX三个用例各两次输入均通过，AIC两次24/24、AIV两次
+    48/48同核Scalar与前驱流水重叠；MIX两次24个AIC与48个AIV在前驱
+    组完成前进入前缀，sync_start及真实FIFO/数据依赖保持。8个生成
+    成员各一次有效Wait，前面没有流水指令。已检查输出、Scalar结果、
+    保护区和本核完整尾部等待。
+    
+    现有冻结CSA的73个Wait都是顶层边界，未命中新规则，因此本次只
+    报告功能覆盖扩展，不重复CSA、七档或16卡性能测试。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp b/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
+index 08513a465..5c53c92fa 100644
+--- a/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
++++ b/src/ir/transforms/convert_tensor_to_tile_ops_pass.cpp
+@@ -14,6 +14,7 @@
+ #include <cctype>
+ #include <cstddef>
+ #include <cstdint>
++#include <iterator>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -2600,6 +2601,161 @@ struct IncoreTransformResult {
+   size_t num_added_outputs;
+ };
+ 
++// Split a top-level, two-arm manual boundary without speculating either arm.
++// Each arm must contain one direct statement Wait. Nested boundary regions and
++// loop boundaries remain subject to PTOAS's existing verifier. This visits
++// disjoint top-level branch bodies a constant number of times (O(N)), apart
++// from fresh-name lookups; it does not repeatedly rescan nested subtrees.
++StmtPtr NormalizeBranchTaskWaits(const FunctionPtr& function) {
++  const auto& body = function->body_;
++  if (!GetTaskBoundaryMarkers(function).wait) return body;
++  struct Arm {
++    std::vector<StmtPtr> prefix;
++    StmtPtr suffix;
++    StmtPtr wait;
++    std::vector<VarPtr> captures;
++  };
++  auto split = [](const StmtPtr& region) -> std::optional<Arm> {
++    class WaitCounter : public IRVisitor {
++     public:
++      size_t count = 0;
++      void VisitExpr_(const CallPtr& call) override {
++        count += IsOp(call, "system.wait_pre_task_end");
++        IRVisitor::VisitExpr_(call);
++      }
++    } waits;
++    waits.VisitStmt(region);
++    if (waits.count != 1) return std::nullopt;
++    auto statements = FlattenToStmts(region);
++    auto boundary = std::find_if(statements.begin(), statements.end(), [](const StmtPtr& stmt) {
++      auto eval = As<EvalStmt>(stmt);
++      auto call = eval ? As<Call>(eval->expr_) : nullptr;
++      return IsOp(call, "system.wait_pre_task_end") && call->args_.empty() && call->kwargs_.empty() &&
++             call->attrs_.empty();
++    });
++    if (boundary == statements.end()) return std::nullopt;
++    Arm arm{{statements.begin(), boundary},
++            SeqStmts::Flatten({std::next(boundary), statements.end()}, region->span_),
++            *boundary,
++            {}};
++    var_collectors::VarDefUseCollector uses;
++    uses.VisitStmt(arm.suffix);
++    // Shapes/strides can reference a prefix Scalar without using it as an
++    // explicit call operand. Include those references before selecting captures.
++    for (const auto* var : uses.GetAllVarRefs()) {
++      var_collectors::VisitTypeExprFields(uses, var->GetType());
++    }
++    auto capture = [&](const VarPtr& var) {
++      if (uses.var_uses.count(var.get())) arm.captures.push_back(var);
++    };
++    for (const auto& stmt : arm.prefix) {
++      if (auto assign = As<AssignStmt>(stmt))
++        capture(assign->var_);
++      else if (auto branch = As<IfStmt>(stmt)) {
++        for (const auto& var : branch->return_vars_) capture(var);
++      } else if (auto loop = As<ForStmt>(stmt)) {
++        for (const auto& var : loop->return_vars_) capture(var);
++      } else if (auto loop = As<WhileStmt>(stmt)) {
++        for (const auto& var : loop->return_vars_) capture(var);
++      }
++    }
++    for (const auto& var : arm.captures) {
++      // Unchosen arms supply inert Scalar values. Tensor/tile descriptors
++      // need a separate representation; never invent a dummy device buffer.
++      auto scalar = As<ScalarType>(var->GetType());
++      if (!scalar || !(scalar->dtype_ == DataType::BOOL || scalar->dtype_.IsFloat() ||
++                       scalar->dtype_.IsInt() || scalar->dtype_.IsIndexLike()))
++        return std::nullopt;
++    }
++    return arm;
++  };
++  auto zero = [](const VarPtr& var) -> ExprPtr {
++    auto dtype = As<ScalarType>(var->GetType())->dtype_;
++    if (dtype == DataType::BOOL) return std::make_shared<ConstBool>(false, var->span_);
++    if (dtype.IsFloat()) return std::make_shared<ConstFloat>(0.0, dtype, var->span_);
++    return std::make_shared<ConstInt>(0, dtype, var->span_);
++  };
++  var_collectors::VarDefUseCollector all_vars;
++  all_vars.VisitStmt(body);
++  std::unordered_set<std::string> names;
++  for (const auto& param : function->params_) names.insert(param->name_hint_);
++  for (auto* var : all_vars.GetAllVarRefs()) names.insert(var->name_hint_);
++  size_t next_name = 0;
++  auto fresh = [&](const TypePtr& type, const Span& span) {
++    std::string name;
++    do {
++      name = "task_wait_value_" + std::to_string(next_name++);
++    } while (!names.insert(name).second);
++    return std::make_shared<Var>(name, type, span);
++  };
++  std::vector<StmtPtr> result;
++  for (const auto& stmt : FlattenToStmts(body)) {
++    auto branch = As<IfStmt>(stmt);
++    if (!branch || !branch->else_body_ || EndsWithLocalTaskWait(stmt)) {
++      result.push_back(stmt);
++      continue;
++    }
++    auto left = split(branch->then_body_);
++    auto right = split(*branch->else_body_);
++    if (!left || !right) {
++      result.push_back(stmt);
++      continue;
++    }
++    ExprPtr condition = branch->condition_;
++    if (!As<Var>(condition) && !As<ConstBool>(condition)) {
++      auto choice = fresh(condition->GetType(), condition->span_);
++      result.push_back(std::make_shared<AssignStmt>(choice, condition, condition->span_));
++      condition = choice;  // Evaluate even a complex condition exactly once.
++    }
++    std::vector<VarPtr> carried;
++    std::vector<ExprPtr> left_yields, right_yields;
++    std::unordered_map<const Var*, VarPtr> replacements;
++    auto join = [&](const VarPtr& lhs, const VarPtr& rhs) {
++      auto sample = lhs ? lhs : rhs;
++      auto joined = fresh(sample->GetType(), sample->span_);
++      carried.push_back(joined);
++      if (lhs) replacements[lhs.get()] = joined;
++      if (rhs) replacements[rhs.get()] = joined;
++      left_yields.push_back(lhs ? ExprPtr(lhs) : zero(sample));
++      right_yields.push_back(rhs ? ExprPtr(rhs) : zero(sample));
++    };
++    // Mutually exclusive suffixes can share a carrier of the same Scalar type.
++    // Keep max(left_count, right_count) per dtype, not their sum: the latter
++    // needlessly doubles values that must remain live across the runtime Wait.
++    std::unordered_map<uint8_t, std::vector<size_t>> right_by_dtype;
++    std::unordered_map<uint8_t, size_t> next_right;
++    std::vector<bool> paired(right->captures.size(), false);
++    for (size_t i = 0; i < right->captures.size(); ++i) {
++      right_by_dtype[As<ScalarType>(right->captures[i]->GetType())->dtype_.Code()].push_back(i);
++    }
++    for (const auto& lhs : left->captures) {
++      auto dtype = As<ScalarType>(lhs->GetType())->dtype_.Code();
++      const auto& candidates = right_by_dtype[dtype];
++      auto& index = next_right[dtype];
++      if (index == candidates.size())
++        join(lhs, nullptr);
++      else {
++        auto slot = candidates[index++];
++        paired[slot] = true;
++        join(lhs, right->captures[slot]);
++      }
++    }
++    for (size_t i = 0; i < right->captures.size(); ++i) {
++      if (!paired[i]) join(nullptr, right->captures[i]);
++    }
++    left->prefix.push_back(std::make_shared<YieldStmt>(left_yields, branch->span_));
++    right->prefix.push_back(std::make_shared<YieldStmt>(right_yields, branch->span_));
++    result.push_back(std::make_shared<IfStmt>(condition, SeqStmts::Flatten(left->prefix, branch->span_),
++                                              SeqStmts::Flatten(right->prefix, branch->span_), carried,
++                                              branch->span_, branch->leading_comments_));
++    result.push_back(left->wait);
++    result.push_back(std::make_shared<IfStmt>(
++        condition, transform_utils::Substitute(left->suffix, replacements),
++        transform_utils::Substitute(right->suffix, replacements), branch->return_vars_, branch->span_));
++  }
++  return SeqStmts::Flatten(std::move(result), body->span_);
++}
++
+ IncoreTransformResult TransformIncoreFunction(const FunctionPtr& func) {
+   auto& conv_registry = OpConversionRegistry::GetInstance();
+   auto& op_registry = OpRegistry::GetInstance();
+@@ -2610,7 +2766,7 @@ IncoreTransformResult TransformIncoreFunction(const FunctionPtr& func) {
+   // lines instead of the `def` line.
+   const auto& span = func->span_;
+ 
+-  auto staged_body = CanonicalizeFullTensorScalarUpdates(func->body_, func->params_);
++  auto staged_body = CanonicalizeFullTensorScalarUpdates(NormalizeBranchTaskWaits(func), func->params_);
+   ConstantScalarFillLoopCanonicalizer scalar_fill_canonicalizer;
+   auto canonical_body = scalar_fill_canonicalizer.VisitStmt(staged_body);
+ 
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+index c9b6e8889..37cd9da3d 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_mix.py
+@@ -118,10 +118,11 @@ def mixed_chain_probe(
+         if state % 2 == 0:
+             col = pl.cast(0, pl.INDEX)
+             pl.system.wait_pre_task_end()
++            guard = pl.tensor.read(bc_trace, [24 + block, 0]) + pl.tensor.read(bv_trace, [48 + block, 0]) + 2
+         else:
+             col = pl.cast(128, pl.INDEX)
+             pl.system.wait_pre_task_end()
+-        guard = pl.tensor.read(bc_trace, [24 + block, 0]) + pl.tensor.read(bv_trace, [48 + block, 0]) + 2
++            guard = pl.tensor.read(bc_trace, [24 + block, 0]) + pl.tensor.read(bv_trace, [48 + block, 0]) + 2
+         lhs = pl.load(
+             middle, [block * 128 + pl.cast(guard, pl.INDEX), 0], [128, 128], target_memory=pl.MemorySpace.Mat
+         )
+diff --git a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+index 45edcab89..7104ae573 100644
+--- a/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
++++ b/tests/st/runtime/scheduling/test_local_task_boundary_overlap.py
+@@ -23,6 +23,38 @@ from pypto.pypto_core.passes import RuntimeKind
+ from pypto.runtime import ChipWorker, RunConfig
+ 
+ 
++@pytest.mark.platforms("a2a3")
++def test_branch_wait_rejects_pre_wait_input_read(test_config: RunConfig, tmp_path: Path):
++    """Fission must not turn a branch's unsafe input read into an approved prefix."""
++
++    @pl.jit
++    def unsafe_branch(
++        x: pl.Tensor[[64], pl.FP32],
++        out: pl.Out[pl.Tensor[[64], pl.FP32]],
++        choose: pl.Scalar[pl.INT64],
++    ):
++        with pl.spmd(1, name_hint="unsafe_branch_wait"):
++            block = pl.tile.get_block_idx()
++            if choose > 0:
++                value = pl.tensor.read(x, [block])
++                pl.system.wait_pre_task_end()
++                pl.tensor.write(out, [block], value + 1.0)
++            else:
++                value = pl.const(3.0, pl.FP32)
++                pl.system.wait_pre_task_end()
++                pl.tensor.write(out, [block], value + 2.0)
++            pl.system.set_next_task_start()
++
++    with pytest.raises(
++        pto_backend.PartialCodegenError,
++        match=r"unsafe operation before[\s|]*Scalar-prefix wait boundary",
++    ):
++        unsafe_branch.compile(
++            config=replace(test_config, save_kernels_dir=str(tmp_path / "unsafe_branch")),
++            runtime=RuntimeKind.TENSORMAP_AND_RINGBUFFER,
++        )
++
++
+ def _program(cube: bool, branch_wait: bool = False):
+     blocks = 24 if cube else 48
+     tile_rows = 128 if cube else 64
+@@ -74,15 +106,19 @@ def _program(cube: bool, branch_wait: bool = False):
+                     state = state * 3 + 1
+                     end = pl.system.read_clock(state)
+                     pl.system.wait_pre_task_end()
++                    after_wait = pl.system.read_clock()
++                    observed = pl.tensor.read(y, [block * tile_rows, 0])
+                 else:
+                     state = state * 5 + 2
+                     end = pl.system.read_clock(state)
+                     pl.system.wait_pre_task_end()
++                    after_wait = pl.system.read_clock()
++                    observed = pl.tensor.read(y, [block * tile_rows, 0])
+             else:
+                 end = pl.system.read_clock(state)
+                 pl.system.wait_pre_task_end()
+-            after_wait = pl.system.read_clock()
+-            observed = pl.tensor.read(y, [block * tile_rows, 0])
++                after_wait = pl.system.read_clock()
++                observed = pl.tensor.read(y, [block * tile_rows, 0])
+             pl.tensor.write(b_trace, [block, 0], core)
+             pl.tensor.write(b_trace, [block, 1], begin)
+             pl.tensor.write(b_trace, [block, 2], end)
+diff --git a/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py b/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
+index f913aa156..e04585b85 100644
+--- a/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
++++ b/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py
+@@ -3908,6 +3908,67 @@ class TestGmLocalTensorConversion:
+ 
+         _assert_convert_equal(passes.convert_to_ssa()(Before), passes.convert_to_ssa()(Expected))
+ 
++    def test_branch_wait_with_work_keeps_captures_and_entry_load_after_join(self):
++        """Each selected Scalar prefix runs before one Wait; tile work stays after it."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                x: pl.Tensor[[16, 32], pl.FP32],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP32]],
++                seed: pl.Scalar[pl.FP32],
++                choose: pl.Scalar[pl.BOOL],
++            ):
++                if choose:
++                    value = seed * 3.0
++                    bias = seed + 1.0
++                    pl.system.wait_pre_task_end()
++                    result = pl.add(x, value)
++                    result = pl.add(result, bias)
++                    out[0:16, 0:32] = result
++                else:
++                    value = seed * 5.0
++                    pl.system.wait_pre_task_end()
++                    result = pl.mul(x, value)
++                    out[0:16, 0:32] = result
++                pl.system.set_next_task_start()
++                return  # noqa: PLR1711 (DSL return terminator)
++
++        @pl.program
++        class Expected:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                x: pl.Tensor[[16, 32], pl.FP32],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP32]],
++                seed: pl.Scalar[pl.FP32],
++                choose: pl.Scalar[pl.BOOL],
++            ):
++                if choose:
++                    value = seed * 3.0
++                    bias = seed + 1.0
++                    joined_value, joined_bias = pl.yield_(value, bias)
++                else:
++                    value = seed * 5.0
++                    joined_value, joined_bias = pl.yield_(value, 0.0)
++                pl.system.wait_pre_task_end()
++                tile = pl.load(x, [0, 0], [16, 32])
++                if choose:
++                    result = pl.tile.adds(tile, joined_value)
++                    result = pl.tile.adds(result, joined_bias)
++                    _stored = pl.store(result, [0, 0], out)
++                    out_join, result_join, value_join = pl.yield_(_stored, result, joined_value)
++                else:
++                    result = pl.tile.muls(tile, joined_value)
++                    _stored = pl.store(result, [0, 0], out)
++                    out_join, result_join, value_join = pl.yield_(_stored, result, joined_value)
++                pl.system.set_next_task_start()
++                return  # noqa: PLR1711 (DSL return terminator)
++
++        _assert_convert_equal(passes.convert_to_ssa()(Before), passes.convert_to_ssa()(Expected))
++
+     def test_gm_write_before_computation_is_not_preloaded(self):
+         """A write's returned alias stays GM and is loaded after the write."""
+ 
