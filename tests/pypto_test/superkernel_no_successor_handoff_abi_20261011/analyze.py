@@ -7,7 +7,7 @@ from statistics import mean
 
 root = Path(__file__).resolve().parent
 report = {}
-for name in ("register", "tagged"):
+for name in ("register", "tagged", "cold_entry"):
     samples = json.loads((root / f"{name}_single_events.json").read_text())["measurements"][0]["samples"]
     capture = json.loads((root / f"{name}_single_profile.json").read_text())
     bounds = [item[1] for item in capture["metadata"]["run_boundaries"]]
