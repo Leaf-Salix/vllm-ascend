@@ -1,0 +1,558 @@
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
+@@ -103,7 +103,7 @@
+     SubtaskSlot running_subslot;            // offset 36: which subtask slot is running
+     SubtaskSlot pending_subslot;            // offset 37: which subtask slot is pending
+     bool dispatch_id_reused;               // offset 38: sticky after the first register-ID wrap
+-    uint8_t pad0_;                          // offset 39: alignment padding
++    uint8_t ordinary_context_clean;         // offset 39: clean dual-slot bitmask
+     // Precomputed COND register pointer; resolved once in handshake so the
+     // hot completion poll does a single volatile load instead of recomputing
+     // reg_base + reg_offset(COND) on every iteration.
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -204,50 +204,63 @@
+         );
+         return {};
+     }
+-    auto &overlap = payload.global_context;
+     const uint8_t member = 1u << static_cast<uint32_t>(subslot);
+-    const bool runtime_tail = (slot_state.payload->runtime_barrier_tail & member) != 0;
+-    const bool compiled_poll = (slot_state.payload->runtime_compiled_poll & member) != 0;
+-    const uint32_t scratch_contract = (slot_state.payload->runtime_direct_poll_scratch >>
+-        (subslot == SubtaskSlot::AIC ? 0 : 16)) & 0xffffu;
+-    const bool direct_poll = runtime_tail && compiled_poll && scratch_contract != 0;
+-    overlap.async_tail_kind = static_cast<uint32_t>(!runtime_tail ? AsyncTailKind::None :
+-        direct_poll ? AsyncTailKind::RuntimeDirectPollClean :
+-        compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
+-    // Original dispatch owns this resource metadata; Set performs no GM store.
+-    // High diagnostic bits are always reset before slot reuse.
+-    overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
+-        compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
+-    overlap.scalar_overlap_trace = 0;
+-    overlap.wait_predecessor_fn = 0;
+-    overlap.predecessor_context = 0;
+-    overlap.predecessor_reg_task_id = 0;
+-    overlap.reg_task_id = reg_task_id;
+-    overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
+-                               SCALAR_PREFIX_TAGGED_ARGS : 0u;
+-    // Only compiler-advertised wrappers may consume source descriptors directly.
+-    if (overlap.scalar_prefix != 0 &&
+-        (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
+-        overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
+-    }
+-    // The local predecessor protects pipeline reuse, independently of input
+-    // dependencies. Gated successors retain their full-fanin doorbell wait
+-    // after draining the local tail and before entering dependent computation.
+-    auto &source = *slot_state.payload;
+-    // Ready routing has already evaluated predicates and retired false tasks.
+-    // Predicated tasks remain excluded from unresolved-fanin early dispatch.
+-    if ((source.scalar_prefix & member) != 0) {
+-        ChipTaskSlotState *previous = core_exec_state.running_slot_state;
+-        const bool local_predecessor = to_pending && previous != nullptr;
+-        const bool ready_prefix = payload.src_payload == 0;
+-        const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
+-        if (gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
+-        if (local_predecessor && (ready_prefix || gated_prefix)) {
+-            overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
+-            overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
+-            // Argument preparation remains on AICore; compatible wrappers may
+-            // read source metadata without materializing an intermediate vector.
+-        }
++    const auto &source_contract = *slot_state.payload;
++    // Bits 3..5 are a compiler proof that the member never writes overlap state.
++    // Legacy entries have no proof and retain their per-dispatch initialization.
++    const bool ordinary =
++        (source_contract.scalar_prefix_tagged_args & (member << 3)) != 0 &&
++        ((source_contract.scalar_prefix | source_contract.runtime_barrier_tail |
++          source_contract.runtime_compiled_poll) & member) == 0;
++    payload.local_context.async_ctx.local_predecessor_pending = ordinary ? DISPATCH_ORDINARY_ENTRY : 0u;
++    const uint8_t buffer_bit = 1u << buf_idx;
++    if (!ordinary || (core_exec_state.ordinary_context_clean & buffer_bit) == 0) {
++        auto &overlap = payload.global_context;
++        const bool runtime_tail = (slot_state.payload->runtime_barrier_tail & member) != 0;
++        const bool compiled_poll = (slot_state.payload->runtime_compiled_poll & member) != 0;
++        const uint32_t scratch_contract = (slot_state.payload->runtime_direct_poll_scratch >>
++            (subslot == SubtaskSlot::AIC ? 0 : 16)) & 0xffffu;
++        const bool direct_poll = runtime_tail && compiled_poll && scratch_contract != 0;
++        overlap.async_tail_kind = static_cast<uint32_t>(!runtime_tail ? AsyncTailKind::None :
++            direct_poll ? AsyncTailKind::RuntimeDirectPollClean :
++            compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
++        // Original dispatch owns this resource metadata; Set performs no GM store.
++        // High diagnostic bits are always reset before slot reuse.
++        overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
++            compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
++        overlap.scalar_overlap_trace = 0;
++        overlap.wait_predecessor_fn = 0;
++        overlap.predecessor_context = 0;
++        overlap.predecessor_reg_task_id = 0;
++        overlap.reg_task_id = reg_task_id;
++        overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
++                                   SCALAR_PREFIX_TAGGED_ARGS : 0u;
++        // Only compiler-advertised wrappers may consume source descriptors directly.
++        if (overlap.scalar_prefix != 0 &&
++            (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
++            overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
++        }
++        // The local predecessor protects pipeline reuse, independently of input
++        // dependencies. Gated successors retain their full-fanin doorbell wait
++        // after draining the local tail and before entering dependent computation.
++        auto &source = *slot_state.payload;
++        // Ready routing has already evaluated predicates and retired false tasks.
++        // Predicated tasks remain excluded from unresolved-fanin early dispatch.
++        if ((source.scalar_prefix & member) != 0) {
++            ChipTaskSlotState *previous = core_exec_state.running_slot_state;
++            const bool local_predecessor = to_pending && previous != nullptr;
++            const bool ready_prefix = payload.src_payload == 0;
++            const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
++            if (gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
++            if (local_predecessor && (ready_prefix || gated_prefix)) {
++                overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
++                overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
++                // Argument preparation remains on AICore; compatible wrappers may
++                // read source metadata without materializing an intermediate vector.
++            }
++        }
++        if (ordinary) core_exec_state.ordinary_context_clean |= buffer_bit;
++        else core_exec_state.ordinary_context_clean &= ~buffer_bit;
+     }
+ 
+     if (to_pending) {
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -83,6 +83,10 @@
+  * The struct is cache-line aligned to prevent false sharing across
+  * concurrently dispatched cores.
+  */
++// A compiler-proven synchronous entry does not consume overlap metadata.
++// This value occupies the existing hot local-context flag only on such entries.
++inline constexpr uint32_t DISPATCH_ORDINARY_ENTRY = 2u;
++
+ struct alignas(64) DispatchPayload {
+     // === Cache line 0 (64B): the base per-dispatch control block ===
+     // function_bin_addr, local_context.{block_idx,block_num,async_ctx.task_token}
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -28,231 +28,6 @@
+  */
+ typedef void (*UnifiedKernelFunc)(__gm__ int64_t *);
+ 
+-__aicore__ __attribute__((always_inline)) static void flush_overlap_context(__gm__ GlobalContext *ctx) {
+-    // The CPU reuses this dual-buffer slot after FIN. Leave no dirty AICore
+-    // control line that a later invalidation could write over its next header.
+-    dcci(
+-        reinterpret_cast<__gm__ char *>(ctx) + offsetof(GlobalContext, async_tail_kind),
+-        SINGLE_CACHE_LINE, CACHELINE_OUT
+-    );
+-}
+-
+-__aicore__ __attribute__((always_inline)) static void drain_async_tail(
+-    __gm__ GlobalContext *ctx, AsyncTailKind kind
+-) {
+-    const uint64_t trace_addr = ctx->scalar_overlap_trace;
+-    uint64_t wait_started_at;
+-    uint64_t compute_completed_at;
+-    const bool runtime_tail = kind == AsyncTailKind::RuntimeBarrierAll ||
+-                              kind == AsyncTailKind::RuntimePollable || kind == AsyncTailKind::RuntimeCompiledPoll ||
+-                              kind == AsyncTailKind::RuntimeCompiledPollClean ||
+-                              kind == AsyncTailKind::RuntimeDirectPollClean;
+-    if (runtime_tail) {
+-        wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-        pipe_barrier(PIPE_ALL);
+-        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-    } else if (kind == AsyncTailKind::AicJoined || kind == AsyncTailKind::AicAllPipes) {
+-        wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-        wait_flag(PIPE_M, PIPE_S, EVENT_ID7);
+-        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-        wait_flag(PIPE_FIX, PIPE_S, EVENT_ID7);
+-        if (kind == AsyncTailKind::AicAllPipes) {
+-            wait_flag(PIPE_MTE1, PIPE_S, EVENT_ID7);
+-            wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID7);
+-        }
+-    } else {
+-        wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-        wait_flag(PIPE_V, PIPE_S, EVENT_ID7);
+-        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+-        wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID7);
+-        if (kind == AsyncTailKind::AivAllPipes) {
+-            wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID7);
+-        }
+-    }
+-    if (trace_addr != 0) {
+-        const uint64_t completed_at = get_sys_cnt_aicore();
+-        auto *trace = reinterpret_cast<__gm__ uint64_t *>(trace_addr);
+-        trace[0] = get_raw_core_id();
+-        trace[1] = ctx->scalar_overlap_start;
+-        trace[2] = ctx->scalar_overlap_returned;
+-        trace[3] = completed_at;
+-        trace[4] = 7;
+-        if (kind == AsyncTailKind::RuntimePollable || kind == AsyncTailKind::RuntimeCompiledPoll ||
+-            kind == AsyncTailKind::RuntimeCompiledPollClean || kind == AsyncTailKind::RuntimeDirectPollClean) {
+-            trace[4] |= (ctx->late_handoff_scratch >> 32) << 8;
+-        }
+-        trace[5] = wait_started_at;
+-        trace[6] = completed_at - wait_started_at;
+-        trace[7] = compute_completed_at;
+-        dcci(trace, SINGLE_CACHE_LINE, CACHELINE_OUT);
+-    }
+-    if (!runtime_tail) {
+-        ctx->async_tail_kind = 0;
+-        flush_overlap_context(ctx);
+-    } else if (trace_addr != 0 ||
+-               (kind != AsyncTailKind::RuntimeBarrierAll && kind != AsyncTailKind::RuntimeCompiledPollClean &&
+-                kind != AsyncTailKind::RuntimeDirectPollClean)) {
+-        flush_overlap_context(ctx);
+-    }
+-}
+-
+-__aicore__ __attribute__((always_inline)) static void drain_async_tail(__gm__ GlobalContext *ctx) {
+-    drain_async_tail(ctx, static_cast<AsyncTailKind>(ctx->async_tail_kind));
+-}
+-
+-// Called after a checked Scalar prefix to consume its local tail, if any, and
+-// its input/cohort gate. Delayed ACK preserves the scheduler's occupied slot;
+-// a pending ACK is evidence that the local predecessor has finished.
+-__aicore__ static int wait_scalar_prefix_predecessor(__gm__ int64_t *args) {
+-    auto *ctx = reinterpret_cast<__gm__ GlobalContext *>(args[SPMD_GLOBAL_CONTEXT_INDEX]);
+-    auto *previous = reinterpret_cast<__gm__ GlobalContext *>(ctx->predecessor_context);
+-    if (previous != nullptr) drain_async_tail(previous);
+-    const uint32_t predecessor_id = ctx->predecessor_reg_task_id;
+-    const uint32_t own_id = ctx->reg_task_id;
+-    // Tagged entries have one Wait; legacy entries clear their pending bit.
+-    // Dispatch initializes both pointers before publishing a new generation.
+-    // The control line must be clean before FIN permits AICPU buffer reuse.
+-    flush_overlap_context(ctx);
+-    auto *own = reinterpret_cast<__gm__ DispatchPayload *>(
+-        reinterpret_cast<__gm__ char *>(ctx) - offsetof(DispatchPayload, global_context));
+-    if ((ctx->scalar_prefix & SCALAR_PREFIX_TAGGED_ARGS) == 0) {
+-        // Legacy entries still consume a GM flag. Register-argument entries
+-        // never dirty the hot header, so they need no additional writeback.
+-        own->local_context.async_ctx.local_predecessor_pending = 0;
+-        dcci(own, SINGLE_CACHE_LINE, CACHELINE_OUT);
+-    }
+-    const bool gated = own->src_payload != 0;
+-    if (previous != nullptr) write_reg(RegId::COND, MAKE_FIN_VALUE(predecessor_id));
+-    // Gated consumers still wait for every input producer. An already-ready
+-    // successor has no doorbell to await: its inputs preceded normal dispatch.
+-    if (gated) {
+-        while (read_dmb_high32() != own_id) {
+-            if (static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE)) == AICORE_EXIT_SIGNAL) return 0;
+-            SPIN_WAIT_HINT();
+-        }
+-    }
+-    if (static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE)) == AICORE_EXIT_SIGNAL) return 0;
+-    write_reg(RegId::COND, MAKE_ACK_VALUE(own_id));
+-    return 1;
+-}
+-
+-__aicore__ static uint32_t handoff_scalar_prefix(
+-    __gm__ DispatchPayload *base, __gm__ DispatchPayload *current, uint32_t task_id
+-) {
+-    const uint32_t next_id = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
+-    if (next_id == task_id || next_id == AICPU_IDLE_TASK_ID || next_id == AICORE_EXIT_SIGNAL) return AICPU_IDLE_TASK_ID;
+-    auto *next = base + (next_id & 1u);
+-    dcci(next, ENTIRE_DATA_CACHE);
+-    if ((next->global_context.scalar_prefix & SCALAR_PREFIX_CAN_HANDOFF) == 0 ||
+-        next->global_context.predecessor_reg_task_id != task_id) return AICPU_IDLE_TASK_ID;
+-    next->global_context.predecessor_context = reinterpret_cast<uint64_t>(&current->global_context);
+-    next->global_context.wait_predecessor_fn = reinterpret_cast<uint64_t>(&wait_scalar_prefix_predecessor);
+-    if ((next->global_context.scalar_prefix & SCALAR_PREFIX_TAGGED_ARGS) == 0) {
+-        next->local_context.async_ctx.local_predecessor_pending = 1;
+-    }
+-    return next_id;
+-}
+-
+-// The task image owns its reserved scratch and DMA instruction sequence.
+-// Re-enter only its private tail callback after the original probe misses;
+-// argument bit 1 bypasses the entire operator body. No FIN/ACK is emitted here.
+-__aicore__ __attribute__((noinline)) static uint32_t poll_late_handoff(
+-    __gm__ DispatchPayload *base, __gm__ DispatchPayload *current, uint32_t task_id
+-) {
+-    const uint32_t dispatched = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
+-    if (dispatched != task_id && dispatched != AICPU_IDLE_TASK_ID) {
+-        return handoff_scalar_prefix(base, current, task_id);
+-    }
+-    auto kernel = reinterpret_cast<UnifiedKernelFunc>(current->function_bin_addr);
+-    auto *callback_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(current->args) | 2u);
+-    kernel(callback_args);
+-    const uint32_t candidate = handoff_scalar_prefix(base, current, task_id);
+-    if (candidate != AICPU_IDLE_TASK_ID && current->global_context.scalar_overlap_trace != 0) {
+-        current->global_context.late_handoff_scratch |= uint64_t{2} << 32;
+-    }
+-    return candidate;
+-}
+-
+-#if defined(__DAV_CUBE__) || defined(__DAV_VEC__)
+-// aicore_execute{,_kernel} are weak and shared by the two compiled targets.
+-// Target-specific instructions must therefore live in uniquely named strong
+-// functions, selected using the actual worker type, not this TU's arch macro.
+-extern "C" __aicore__ void tmr_poll_local_tail_aic(__gm__ GlobalContext *ctx);
+-extern "C" __aicore__ void tmr_poll_local_tail_aiv(__gm__ GlobalContext *ctx);
+-
+-#if defined(__DAV_CUBE__)
+-extern "C" __aicore__ __attribute__((noinline)) void tmr_poll_local_tail_aic(__gm__ GlobalContext *ctx) {
+-#else
+-extern "C" __aicore__ __attribute__((noinline)) void tmr_poll_local_tail_aiv(__gm__ GlobalContext *ctx) {
+-#endif
+-    auto *notice = reinterpret_cast<__gm__ TaskBoundaryNotification *>(ctx->task_boundary_notification);
+-    auto *value = reinterpret_cast<volatile __gm__ uint64_t *>(notice->value);
+-    dcci(notice->value, SINGLE_CACHE_LINE);
+-    const uint64_t expected = *value == 1 ? ~uint64_t{0} : 1;
+-    auto *source = reinterpret_cast<__gm__ uint16_t *>(expected == 1 ? notice->positive : notice->negative);
+-    const uint32_t scratch_base = static_cast<uint32_t>(ctx->late_handoff_scratch);
+-    const bool trace = ctx->scalar_overlap_trace != 0;
+-    if (trace) {
+-#if defined(__DAV_CUBE__)
+-        ctx->late_handoff_scratch |= uint64_t{16} << 32;
+-#else
+-        ctx->late_handoff_scratch |= uint64_t{32} << 32;
+-#endif
+-        flush_overlap_context(ctx);
+-    }
+-#if defined(__DAV_CUBE__)
+-    auto *scratch = reinterpret_cast<__cbuf__ uint16_t *>(scratch_base);
+-    copy_gm_to_cbuf(scratch, source, 0, 1, 2, 0, 0, (pad_t)0);
+-    set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
+-    set_flag(PIPE_MTE1, PIPE_MTE3, EVENT_ID7);
+-    set_flag(PIPE_M, PIPE_MTE3, EVENT_ID7);
+-    set_flag(PIPE_FIX, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_MTE1, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_M, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_FIX, PIPE_MTE3, EVENT_ID7);
+-    pipe_barrier(PIPE_MTE3);
+-    copy_cbuf_to_gm(reinterpret_cast<__gm__ uint16_t *>(notice->value), scratch, 0, 1, 2, 0, 0);
+-#else
+-    auto *scratch = reinterpret_cast<__ubuf__ uint16_t *>(scratch_base);
+-    copy_gm_to_ubuf(scratch, source, 0, 1, 2, 0, 0);
+-    set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
+-    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID7);
+-    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID7);
+-    pipe_barrier(PIPE_MTE3);
+-    copy_ubuf_to_gm(reinterpret_cast<__gm__ uint16_t *>(notice->value), scratch, 0, 1, 2, 0, 0);
+-#endif
+-    if (trace) ctx->late_handoff_scratch |= uint64_t{1} << 32;
+-    const uint32_t own = ctx->reg_task_id;
+-    for (;;) {
+-        const uint32_t next = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
+-        if (next != own && next != AICPU_IDLE_TASK_ID) return;
+-        dcci(notice->value, SINGLE_CACHE_LINE);
+-        if (*value == expected) return;
+-    }
+-}
+-
+-__aicore__ __attribute__((noinline)) static uint32_t poll_late_handoff_direct(
+-    __gm__ DispatchPayload *base, __gm__ DispatchPayload *current, uint32_t task_id, CoreType worker_type
+-) {
+-    const uint32_t dispatched = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
+-    if (dispatched != task_id && dispatched != AICPU_IDLE_TASK_ID) {
+-        return handoff_scalar_prefix(base, current, task_id);
+-    }
+-    if (worker_type == CoreType::AIC) {
+-        tmr_poll_local_tail_aic(&current->global_context);
+-    } else {
+-        tmr_poll_local_tail_aiv(&current->global_context);
+-    }
+-    const uint32_t candidate = handoff_scalar_prefix(base, current, task_id);
+-    if (candidate != AICPU_IDLE_TASK_ID && current->global_context.scalar_overlap_trace != 0) {
+-        current->global_context.late_handoff_scratch |= uint64_t{2} << 32;
+-    }
+-    return candidate;
+-}
+-#endif
+-
+ /**
+  * Execute task from DispatchPayload.
+  *
+@@ -260,18 +35,13 @@
+  *
+  * @param payload Pointer to DispatchPayload in global memory
+  */
+-__aicore__ __attribute__((always_inline)) static void execute_task(
+-    __gm__ DispatchPayload *payload, __gm__ int64_t *args
+-) {
++__aicore__ __attribute__((always_inline)) static void execute_task(__gm__ DispatchPayload *payload) {
+     if (payload == nullptr || payload->function_bin_addr == 0) {
+         return;
+     }
+ 
+-    auto kernel = reinterpret_cast<UnifiedKernelFunc>(payload->function_bin_addr);
+-    kernel(args);
+-    if (payload->global_context.scalar_overlap_trace != 0) {
+-        payload->global_context.scalar_overlap_returned = get_sys_cnt_aicore();
+-    }
++    UnifiedKernelFunc kernel = (UnifiedKernelFunc)payload->function_bin_addr;
++    kernel(reinterpret_cast<__gm__ int64_t *>(payload->args));
+     OUT_OF_ORDER_STORE_BARRIER();
+ }
+ 
+@@ -298,16 +68,11 @@
+     // Register encoding: AICPU_IDLE_TASK_ID=idle, task_id=task, AICORE_EXIT_SIGNAL=exit
+     uint32_t reg_val = AICPU_IDLE_TASK_ID;
+     uint32_t last_reg_val = AICPU_IDLE_TASK_ID;
+-    uint32_t prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+-    __gm__ GlobalContext *prepared_predecessor = nullptr;
+     bool exiting = false;
+ 
+     while (true) {
+         reg_val = static_cast<uint32_t>(read_reg(RegId::DATA_MAIN_BASE));
+         if (reg_val == AICORE_EXIT_SIGNAL) {
+-            // Teardown may race the handoff before the successor enters its
+-            // boundary. The previous task still owns unconsumed tail events.
+-            if (prepared_predecessor != nullptr) drain_async_tail(prepared_predecessor);
+             // Signal exit acknowledgment to AICPU
+             write_reg(RegId::COND, AICORE_EXITED_VALUE);
+             break;
+@@ -344,14 +109,8 @@
+             // Select dual-buffer slot: same bit as AICPU used when writing payload
+             __gm__ DispatchPayload *exec_payload = payload + (task_id & 1u);
+ 
+-            // handoff_scalar_prefix already invalidated this exact generation.
+-            // Its ACK is withheld, so AICPU cannot recycle the slot meanwhile.
+-            // Do not flush/reload the entire cache a second time on the handoff.
+-            if (task_id != prepared_prefix_task_id) dcci(exec_payload, ENTIRE_DATA_CACHE);
+-            prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+-            prepared_predecessor = nullptr;
+-            bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
+-            bool source_args = false;
++            // Invalidate payload buffer (AICPU updates its content each dispatch)
++            dcci(exec_payload, ENTIRE_DATA_CACHE);
+ 
+             // Early-dispatch gate. A gated task was staged on this core before its
+             // dependencies resolved; wait until AICPU rings the doorbell
+@@ -364,42 +123,27 @@
+             // src_payload == 0 (the common ready path) skips this; a non-zero
+             // src_payload is both the gate flag and the source TaskPayload.
+             if (exec_payload->src_payload != 0) {
+-                // Source metadata is coherent after the entry invalidation.
+-                // Compatible wrappers consume it directly; legacy entries and
+-                // diagnostics still materialize the argument vector here.
+-                // Context arguments remain the AICPU's per-buffer constants.
++                // AICPU staged only src_payload, not the arg vector — fill
++                // args[0..num_args) ourselves now, while we are idle waiting for
++                // the doorbell. The whole-cache dcci(ENTIRE_DATA_CACHE) above
++                // already invalidated src's lines, so tensor_count/scalar_count/
++                // scalars read coherently with the orchestrator's submit writes.
++                // args[SPMD_LOCAL_CONTEXT_INDEX]/[SPMD_GLOBAL_CONTEXT_INDEX] are
++                // still written by the AICPU (num_args <= 48 never reaches them).
+                 __gm__ char *src = reinterpret_cast<__gm__ char *>(exec_payload->src_payload);
+-                source_args = !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
+-                              (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_SOURCE_ARGS) != 0;
+-                if (!source_args) {
+-                    int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
+-                    int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
+-                    __gm__ uint64_t *src_scalars =
+-                        reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
+-                    int n = 0;
+-                    for (int32_t i = 0; i < tensor_count; i++) {
+-                        exec_payload->args[n++] = reinterpret_cast<uint64_t>(
+-                            src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE
+-                        );
+-                    }
+-                    for (int32_t i = 0; i < scalar_count; i++) {
+-                        exec_payload->args[n++] = src_scalars[i];
+-                    }
+-                    OUT_OF_ORDER_STORE_BARRIER();
+-                }
+-                // An idle core can run the same checked prefix without a local
+-                // predecessor. The callback retains the full-fanin/cohort gate
+-                // and delayed ACK, so no pending slot is released prematurely.
+-                if (!scalar_prefix_handoff && !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
+-                    (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_CAN_EARLY_START) != 0) {
+-                    exec_payload->global_context.wait_predecessor_fn =
+-                        reinterpret_cast<uint64_t>(&wait_scalar_prefix_predecessor);
+-                    if ((exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_TAGGED_ARGS) == 0) {
+-                        exec_payload->local_context.async_ctx.local_predecessor_pending = 1;
+-                    }
+-                    scalar_prefix_handoff = true;
+-                }
+-                while (!scalar_prefix_handoff) {
++                int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
++                int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
++                __gm__ uint64_t *src_scalars = reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
++                int n = 0;
++                for (int32_t i = 0; i < tensor_count; i++) {
++                    exec_payload->args[n++] =
++                        reinterpret_cast<uint64_t>(src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE);
++                }
++                for (int32_t i = 0; i < scalar_count; i++) {
++                    exec_payload->args[n++] = src_scalars[i];
++                }
++                OUT_OF_ORDER_STORE_BARRIER();
++                while (true) {
+                     // Honor teardown: shutdown overwrites the low half with EXIT.
+                     // Check it on the doorbell-match iteration too, so an EXIT that
+                     // races in right after the matching doorbell still wins over
+@@ -430,25 +174,7 @@
+                     chip_swimlane_aicore_reserve_task_record(chip_swimlane_head, &chip_swimlane_local);
+             }
+ 
+-            auto *call_args = reinterpret_cast<__gm__ int64_t *>(exec_payload->args);
+-            if (!scalar_prefix_handoff) {
+-                write_reg(RegId::COND, MAKE_ACK_VALUE(task_id));
+-            } else {
+-                // Reuse the existing ACK/handoff branch. An ordinary task
+-                // performs no ABI lookup. Only a deferred boundary may tag the
+-                // aligned argument pointer, which the generated wrapper
+-                // decodes before any dereference. Keep this lookup volatile
+-                // so the compiler cannot speculate it onto the normal path.
+-                auto *flags = reinterpret_cast<volatile __gm__ uint32_t *>(
+-                    &exec_payload->global_context.scalar_prefix);
+-                if ((*flags & SCALAR_PREFIX_TAGGED_ARGS) != 0) {
+-                    call_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(call_args) | 1u);
+-                }
+-            }
+-
+-            if (source_args) {
+-                call_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(call_args) | 4u);
+-            }
++            write_reg(RegId::COND, MAKE_ACK_VALUE(task_id));
+ 
+             // PMU window brackets kernel execution.
+             if (pmu_enabled) {
+@@ -457,43 +183,7 @@
+ 
+             uint64_t start_time = chip_swimlane_enabled ? get_sys_cnt_aicore() : 0;
+ 
+-            execute_task(exec_payload, call_args);
+-
+-            const auto tail_kind = static_cast<AsyncTailKind>(exec_payload->global_context.async_tail_kind);
+-            if (tail_kind != AsyncTailKind::None) {
+-                // Prototype observation uses explicit trace tensors; existing
+-                // PMU/swimlane ownership remains serial until separately extended.
+-                if (!chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled) {
+-                    uint32_t next_id = handoff_scalar_prefix(payload, exec_payload, task_id);
+-                    if (next_id == AICPU_IDLE_TASK_ID &&
+-                        (tail_kind == AsyncTailKind::RuntimeCompiledPoll ||
+-                         tail_kind == AsyncTailKind::RuntimeCompiledPollClean)) {
+-                        next_id = poll_late_handoff(payload, exec_payload, task_id);
+-                    }
+-#if defined(__DAV_CUBE__) || defined(__DAV_VEC__)
+-                    if (next_id == AICPU_IDLE_TASK_ID &&
+-                        (tail_kind == AsyncTailKind::RuntimePollable ||
+-                         tail_kind == AsyncTailKind::RuntimeDirectPollClean)) {
+-                        next_id = poll_late_handoff_direct(payload, exec_payload, task_id, my_hank->core_type);
+-                    }
+-#endif
+-                    if (next_id != AICPU_IDLE_TASK_ID) {
+-                        prepared_prefix_task_id = next_id;
+-                        prepared_predecessor = &exec_payload->global_context;
+-                        last_reg_val = reg_val;
+-                        continue;  // successor boundary will publish the real A FIN
+-                    }
+-                }
+-                drain_async_tail(&exec_payload->global_context, tail_kind);
+-            } else if (scalar_prefix_handoff) {
+-                // The local Wait callback has already flushed its
+-                // fields. Only diagnostics can dirty this line after it returns.
+-                // Keep the conservative writeback for legacy prefix entries.
+-                if (exec_payload->global_context.scalar_overlap_trace != 0 ||
+-                    (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_TAGGED_ARGS) == 0) {
+-                    flush_overlap_context(&exec_payload->global_context);
+-                }
+-            }
++            execute_task(exec_payload);
+ 
+             // Keep start_time -> end_time scoped to AICore execution.
+             uint64_t end_time = chip_swimlane_enabled ? get_sys_cnt_aicore() : 0;
