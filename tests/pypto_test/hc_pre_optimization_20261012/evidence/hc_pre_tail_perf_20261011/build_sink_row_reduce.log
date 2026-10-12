@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: Cannot reassign 'cur' with a different type: was pl.Tile[[32, 8], pl.FP32, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)], got pl.Tile[[1, 256], pl.FP32, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/sink_row_reduce.py:298:21
+    |
+296 |                         col_sum = pl.add(pl.row_sum(norm_t, reduce_tmp), HC_EPS)
+297 |                         cur_t = pl.row_expand_div(norm_t, col_sum)
+298 |                     cur = pl.reshape(pl.tile.gather(pl.reshape(cur_t, [1, TAIL_MAX_ROWS * 32]), transpose_ids, padded_tmp), [1, TAIL_MAX_ROWS * 32])
+    |                     ^^^
+299 |                     out_ids_f = pl.cast(pl.tile.arange(0, [1, TAIL_MAX_ROWS * 16], dtype=pl.INT32), pl.FP32)
+300 |                     out_rows = pl.cast(pl.cast(pl.mul(out_ids_f, 0.25), pl.INT32, mode="floor"), pl.FP32)
+    |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

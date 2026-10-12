@@ -1,0 +1,59 @@
+{
+  "goal_status": "paused",
+  "objective": "完整HC_pre的多规格20us；14场景、真实L1 incore首尾、原精度门禁",
+  "formal_source": "adopted_l0_interleave_exact96.py",
+  "candidates": [
+    {
+      "source": "aligned_stage1_rows_v4.py",
+      "change": "第一阶段8行对齐均分及动态M",
+      "build": "COMPILED",
+      "device_precision": "NOT_RUN",
+      "full_L1_performance": "NOT_RUN"
+    },
+    {
+      "source": "token_major_projection_v2.py",
+      "change": "第二阶段token优先临时布局与按角色窄列读取",
+      "build": "COMPILED",
+      "device_precision": "NOT_RUN",
+      "full_L1_performance": "NOT_RUN"
+    },
+    {
+      "source": "aligned_rows_token_major_v1.py",
+      "change": "上述两项组合",
+      "build": "COMPILED",
+      "device_precision": "NOT_RUN",
+      "full_L1_performance": "NOT_RUN"
+    }
+  ],
+  "latest_evidence": "compact_acc_contract_audit.json",
+  "scope_statement": "静态布局、生成代码和CPU构建不等同于设备正确性或性能通过。",
+  "required_device_evidence": [
+    "正式权重、原阈值下mixed/post/comb的Native对比",
+    "图重放、同地址换输入与输出保护区",
+    "Native profiling之后测PTO，真实L1三个step，完整incore首尾包含内部空隙",
+    "候选产生收益后覆盖14个B/S场景并检查回退，不能用T相同代替不同输入种子的场景"
+  ],
+  "test_scope_question": "用户的“不需要测试”是只取消旧版复测，还是也暂停新候选设备验证？",
+  "test_scope_answer": "用户明确澄清：仅停止此前旧版全量测试，当前优化目标及新候选精度、性能验证继续。",
+  "new_device_tasks_submitted": [],
+  "blocking_condition": "现有候选的必要代码与静态审查已完成；设备验证范围尚未澄清，没有新设备证据可用于性能取舍。",
+  "blocking_condition_first_audit_turn": 1,
+  "goal_20us_verified": false,
+  "blocking_condition_consecutive_goal_turns": 3,
+  "latest_revalidation": {
+    "candidate_device_reports": 0,
+    "live_candidate_processes": 0,
+    "formal_source_unchanged": true,
+    "test_scope_answer": null
+  },
+  "testing_scope_question_pending": false,
+  "next_action": "按用户要求停止下一轮调测；当前仅整理本轮修改、中文提交与推送。",
+  "scope_correction_20261012": "撤销对停止测试范围的错误理解；不恢复旧版 full14 ABBA。",
+  "latest_all14_report": "latest14_20261012_summary.json",
+  "latest_all14_status": "PASS",
+  "current_candidate": "aligned_stage1_rows_v5.py",
+  "current_task": null,
+  "latest_candidate_evidence": "aligned_stage1_rows_v5_initial_device_evidence.json",
+  "pending_device_tasks": [],
+  "stop_reason": "用户于 2026-10-12 明确要求停止下一轮调测。"
+}

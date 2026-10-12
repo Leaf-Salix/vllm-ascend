@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: Cannot reassign 'logits' with a different type: was pl.Tile[[1, 64], pl.FP32, pl.Mem.Vec], got pl.Tile[[8, 16], pl.FP32, pl.Mem.Vec]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/tail_fused48_v1.py:411:25
+    |
+409 |                         raw = pl.add(pl.slice(c_total, [T_TILE, 16], [0, HC_MULT * 2]), 0.0)
+410 |                         base = pl.load(hc_base_2d, [0, HC_MULT * 2], [1, 16], target_memory=pl.MemorySpace.Vec)
+411 |                         logits = pl.add(pl.mul(pl.row_expand_mul(raw, comb_inv), scale2), pl.col_expand(raw, base))
+    |                         ^^^^^^
+412 |                         # 只保留本轮最多 TAIL_MAX_ROWS 个矩阵，再展平做 Sinkhorn；
+413 |                         # 这里缩小实际计算 tile，避免把8行对齐用的补零全带进20轮迭代。
+    |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

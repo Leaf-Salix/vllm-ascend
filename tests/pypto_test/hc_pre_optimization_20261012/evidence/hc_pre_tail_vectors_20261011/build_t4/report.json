@@ -1,0 +1,34 @@
+{
+  "status": "FAIL",
+  "scope": "单卡独立 HC_pre；正式 HC 权重、合成输入；不代表整模型性能",
+  "implementation": "standalone_local_hc_pre",
+  "native_backend": "recipes",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "layer": 2,
+  "branch": "attn",
+  "batch_size": [
+    2,
+    4,
+    8,
+    16,
+    20,
+    24,
+    28
+  ],
+  "seqlen": [
+    5,
+    6
+  ],
+  "seed": 20261009,
+  "case_seed_rule": "seed + batch_size * 100 + seqlen",
+  "warmup": 5,
+  "replay_iters": 20,
+  "timing": "incore",
+  "swimlane_level": 1,
+  "timing_scope": "PTO L1 incore 首次开始至最后结束；另列并行区间并集和无 incore 空隙；Native HcPre 设备事件",
+  "runtime": "tensormap_and_ringbuffer",
+  "cases": [],
+  "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/tail_t4.py",
+  "pypto_core": "/data/pyptouser/qinchuanyu/pto-eager/pypto/build/python/bindings/pypto_core.cpython-310-aarch64-linux-gnu.so",
+  "error": "PartialCodegenError('4 function(s) failed to compile:\\n\\n  Function     | Error\\n  -------------+--------------------------------------------------------------\\n  hc_large     | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_2026101\\n               | 1/tail_t4.py\":233:21): error: \\'pto.alloc_tile\\' op expects\\n               | result row-major none_box tile row byte size (cols *\\n               | sizeof(dtype)) to be 32-byte aligned, but got 16 bytes\\n  -------------+--------------------------------------------------------------\\n  hc_medium48  | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_2026101\\n               | 1/tail_t4.py\":233:21): error: \\'pto.alloc_tile\\' op expects\\n               | result row-major none_box tile row byte size (cols *\\n               | sizeof(dtype)) to be 32-byte aligned, but got 16 bytes\\n  -------------+--------------------------------------------------------------\\n  hc_medium96  | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_2026101\\n               | 1/tail_t4.py\":233:21): error: \\'pto.alloc_tile\\' op expects\\n               | result row-major none_box tile row byte size (cols *\\n               | sizeof(dtype)) to be 32-byte aligned, but got 16 bytes\\n  -------------+--------------------------------------------------------------\\n  hc_small     | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_2026101\\n               | 1/tail_t4.py\":233:21): error: \\'pto.alloc_tile\\' op expects\\n               | result row-major none_box tile row byte size (cols *\\n               | sizeof(dtype)) to be 32-byte aligned, but got 16 bytes\\n  -------------+--------------------------------------------------------------\\n\\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/build_t4/build/report/codegen_errors.txt')"
+}

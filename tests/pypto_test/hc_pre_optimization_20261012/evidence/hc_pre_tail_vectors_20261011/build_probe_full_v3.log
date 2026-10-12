@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.tile operation 'write': tile.write requires first argument to be a TileType, but got TensorType
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_v3.py:428:13
+    |
+426 |             probe_vector_id = worker * 2 + tail_lane
+427 |             trace_tile = pl.full([1, 16], dtype=pl.INT32, value=-1)
+428 |             pl.tile.write(trace_tile, [0, 0], pl.cast(pl.system.physical_core_id(), pl.INT32))
+    |             ^^^^^^^^^^^^^
+429 |             pl.tile.write(trace_tile, [0, 1], pl.cast(phase_start % 2147483648, pl.INT32))
+430 |             pl.tile.write(trace_tile, [0, 2], pl.cast(phase_end % 2147483648, pl.INT32))
+    |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

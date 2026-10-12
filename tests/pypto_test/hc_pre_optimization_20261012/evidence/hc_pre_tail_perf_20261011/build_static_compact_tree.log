@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: Cannot reassign 'c_parts_load' with a different type: was pl.Tile[[11, 256], pl.FP32, pl.Mem.Vec], got pl.Tile[[11, 256], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[11, valid_rows * pl.const(32, pl.INDEX)])]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/static_compact_tree.py:311:25
+    |
+309 |                         pl.store(valid, [t0, 0], comb)
+310 |                     else:
+311 |                         c_parts_load = pl.load(parts_2d, [0, t0 * MIX_PAD], [LINEAR_OK, TAIL_MAX_ROWS * MIX_PAD], valid_shape=[LINEAR_OK, valid_rows * MIX_PAD], target_memory=pl.MemorySpace.Vec)
+    |                         ^^^^^^^^^^^^
+312 |                         c_parts = pl.set_validshape(pl.fillpad(c_parts_load, pad_value=pl.PadValue.zero), LINEAR_OK, TAIL_MAX_ROWS * MIX_PAD)
+313 |                         c_reduced = pl.tile.col_sum(c_parts, pl.create_tile([LINEAR_OK, TAIL_MAX_ROWS * MIX_PAD], dtype=pl.FP32))
+    |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

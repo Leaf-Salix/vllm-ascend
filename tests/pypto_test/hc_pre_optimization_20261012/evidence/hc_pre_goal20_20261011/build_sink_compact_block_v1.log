@@ -1,0 +1,24 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.tile operation 'full': __init__(): incompatible function arguments. The following argument types are supported:
+    1. __init__(self, value: float, dtype: pypto.pypto_core.DataType, span: pypto.pypto_core.ir.Span) -> None
+
+Invoked with types: pypto.pypto_core.ir.ConstFloat, pypto.pypto_core.ir.ConstInt, pypto.pypto_core.DataType, pypto.pypto_core.ir.Span
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/sink_compact_block_v1.py:360:21
+    |
+358 |                     block_ids16 = pl.reinterpret_view(block_ids, pl.INT16)
+359 |                     block_tmp16 = pl.create_tile([1, TAIL_MAX_ROWS * 4], dtype=pl.INT16)
+360 |                     ri1_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32, value=TAIL_MAX_ROWS * 1), pl.INT16)
+    |                     ^^^^^^^^
+361 |                     ri1 = pl.reinterpret_view(pl.tile.xor(ids16, ri1_mask, xor_tmp16), pl.INT32)
+362 |                     ri1_block_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 2], dtype=pl.INT32, value=TAIL_MAX_ROWS * 4), pl.INT16)
+    |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

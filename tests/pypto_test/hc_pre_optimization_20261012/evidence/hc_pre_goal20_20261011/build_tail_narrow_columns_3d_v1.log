@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl operation 'set_validshape': set_validshape() takes 3 positional arguments but 4 were given
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/tail_narrow_columns_3d_v1.py:394:25
+    |
+392 |                         # 只读取本角色所需的投影列。三维边界补齐必须在压平之前完成。
+393 |                         c_narrow_load = pl.load(parts_3d, [0, t0, HC_MULT * 2], [LINEAR_OK, T_TILE, 16], valid_shape=[LINEAR_OK, valid_rows, 16], target_memory=pl.MemorySpace.Vec)
+394 |                         c_narrow_full = pl.set_validshape(pl.fillpad(c_narrow_load, pad_value=pl.PadValue.zero), LINEAR_OK, T_TILE, 16)
+    |                         ^^^^^^^^^^^^^
+395 |                         c_narrow_flat = pl.reshape(c_narrow_full, [LINEAR_OK, T_TILE * 16])
+396 |                         c_needed = pl.reshape(pl.col_sum(c_narrow_flat), [T_TILE, 16])
+    |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

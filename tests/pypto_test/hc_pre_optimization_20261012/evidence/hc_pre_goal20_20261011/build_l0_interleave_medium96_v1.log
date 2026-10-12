@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.tile operation 'extract': tile.extract index_col=512 + shape[1]=256 exceeds src col 512
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/l0_interleave_medium96_v1.py:272:21
+    |
+270 |                     interleaved_right1 = pl.tile.extract(interleaved_weight_transposed, 256, 0, [256, MIX_PAD], target_memory=pl.MemorySpace.Right)
+271 |                     interleaved_stream_product = pl.tile.matmul_acc(interleaved_stream_product, interleaved_left0, interleaved_right0, init_cond=(kk == 0))
+272 |                     interleaved_left2 = pl.tile.extract(interleaved_gathered_chunk, 0, 512, [LINEAR_T_TILE, 256], target_memory=pl.MemorySpace.Left)
+    |                     ^^^^^^^^^^^^^^^^^
+273 |                     interleaved_right2 = pl.tile.extract(interleaved_weight_transposed, 512, 0, [256, MIX_PAD], target_memory=pl.MemorySpace.Right)
+274 |                     interleaved_stream_product = pl.tile.matmul_acc(interleaved_stream_product, interleaved_left1, interleaved_right1, init_cond=False)
+    |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

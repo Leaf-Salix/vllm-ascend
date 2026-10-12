@@ -1,0 +1,1024 @@
+{
+  "status": "PASS",
+  "scope": "只运行 PTO；没有 Native 调用或 PyTorch profiler",
+  "physical_device": "2",
+  "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/mixed_fused_compact.py",
+  "weights": [
+    {
+      "name": "layers.2.hc_attn_fn",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        24,
+        16384
+      ],
+      "dtype": "torch.float32"
+    },
+    {
+      "name": "layers.2.hc_attn_scale",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        3
+      ],
+      "dtype": "torch.float32"
+    },
+    {
+      "name": "layers.2.hc_attn_base",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        24
+      ],
+      "dtype": "torch.float32"
+    }
+  ],
+  "probe": false,
+  "cases": [
+    {
+      "name": "B02_S6_T012",
+      "tokens": 12,
+      "old_pto": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "l1": {
+        "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/run_mixed_fused_compact_representative/dfx/merged_swimlane.json",
+        "level": 1,
+        "steps": 3,
+        "samples": [
+          {
+            "launch_epoch": 0,
+            "first_start_us": 28.18,
+            "last_end_us": 59.900000000000006,
+            "span_us": 31.720000000000006,
+            "active_union_us": 31.720000000000006,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_small_aic": {
+                "first_start_us": 28.32,
+                "last_end_us": 47.160000000000004,
+                "span_us": 18.840000000000003,
+                "active_union_us": 18.840000000000003,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 342.67999999999995
+              },
+              "hc_small_aiv": {
+                "first_start_us": 28.18,
+                "last_end_us": 59.900000000000006,
+                "span_us": 31.720000000000006,
+                "active_union_us": 31.720000000000006,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1150.2600000000002
+              }
+            }
+          },
+          {
+            "launch_epoch": 1,
+            "first_start_us": 244.76,
+            "last_end_us": 274.86,
+            "span_us": 30.100000000000023,
+            "active_union_us": 30.100000000000023,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_small_aic": {
+                "first_start_us": 244.76,
+                "last_end_us": 261.46,
+                "span_us": 16.69999999999999,
+                "active_union_us": 16.69999999999999,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 282.61999999999983
+              },
+              "hc_small_aiv": {
+                "first_start_us": 244.9,
+                "last_end_us": 274.86,
+                "span_us": 29.960000000000008,
+                "active_union_us": 29.960000000000008,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1088.0600000000002
+              }
+            }
+          },
+          {
+            "launch_epoch": 2,
+            "first_start_us": 457.46000000000004,
+            "last_end_us": 488.12,
+            "span_us": 30.659999999999968,
+            "active_union_us": 30.659999999999968,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_small_aic": {
+                "first_start_us": 457.48,
+                "last_end_us": 474.8,
+                "span_us": 17.319999999999993,
+                "active_union_us": 17.319999999999993,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 305.3800000000001
+              },
+              "hc_small_aiv": {
+                "first_start_us": 457.46000000000004,
+                "last_end_us": 488.12,
+                "span_us": 30.659999999999968,
+                "active_union_us": 30.659999999999968,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1125.44
+              }
+            }
+          }
+        ],
+        "span_p50_us": 30.659999999999968,
+        "active_union_p50_us": 30.659999999999968,
+        "no_incore_gap_p50_us": 0.0
+      },
+      "old_pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            12,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "status": "PASS",
+      "output_guards": true
+    },
+    {
+      "name": "B08_S6_T048",
+      "tokens": 48,
+      "old_pto": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "l1": {
+        "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/run_mixed_fused_compact_representative/dfx/window_1/merged_swimlane.json",
+        "level": 1,
+        "steps": 3,
+        "samples": [
+          {
+            "launch_epoch": 0,
+            "first_start_us": 27.919999999999995,
+            "last_end_us": 63.75999999999999,
+            "span_us": 35.839999999999996,
+            "active_union_us": 35.839999999999996,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium48_aic": {
+                "first_start_us": 27.96,
+                "last_end_us": 50.38,
+                "span_us": 22.42,
+                "active_union_us": 22.42,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 450.16000000000014
+              },
+              "hc_medium48_aiv": {
+                "first_start_us": 27.919999999999995,
+                "last_end_us": 63.75999999999999,
+                "span_us": 35.839999999999996,
+                "active_union_us": 35.839999999999996,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1325.12
+              }
+            }
+          },
+          {
+            "launch_epoch": 1,
+            "first_start_us": 267.94,
+            "last_end_us": 302.76,
+            "span_us": 34.81999999999999,
+            "active_union_us": 34.81999999999999,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium48_aic": {
+                "first_start_us": 267.94,
+                "last_end_us": 289.88,
+                "span_us": 21.939999999999998,
+                "active_union_us": 21.939999999999998,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 423.2
+              },
+              "hc_medium48_aiv": {
+                "first_start_us": 267.94,
+                "last_end_us": 302.76,
+                "span_us": 34.81999999999999,
+                "active_union_us": 34.81999999999999,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1311.9199999999996
+              }
+            }
+          },
+          {
+            "launch_epoch": 2,
+            "first_start_us": 468.18,
+            "last_end_us": 504.16,
+            "span_us": 35.98000000000002,
+            "active_union_us": 35.98000000000002,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium48_aic": {
+                "first_start_us": 468.18,
+                "last_end_us": 490.40000000000003,
+                "span_us": 22.220000000000027,
+                "active_union_us": 22.220000000000027,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 431.92
+              },
+              "hc_medium48_aiv": {
+                "first_start_us": 468.3,
+                "last_end_us": 504.16,
+                "span_us": 35.860000000000014,
+                "active_union_us": 35.860000000000014,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1338.1200000000001
+              }
+            }
+          }
+        ],
+        "span_p50_us": 35.839999999999996,
+        "active_union_p50_us": 35.839999999999996,
+        "no_incore_gap_p50_us": 0.0
+      },
+      "old_pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            48,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "status": "PASS",
+      "output_guards": true
+    },
+    {
+      "name": "B16_S6_T096",
+      "tokens": 96,
+      "old_pto": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "l1": {
+        "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/run_mixed_fused_compact_representative/dfx/window_2/merged_swimlane.json",
+        "level": 1,
+        "steps": 3,
+        "samples": [
+          {
+            "launch_epoch": 0,
+            "first_start_us": 22.06,
+            "last_end_us": 57.800000000000004,
+            "span_us": 35.74000000000001,
+            "active_union_us": 35.74000000000001,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium96_aic": {
+                "first_start_us": 22.06,
+                "last_end_us": 43.06,
+                "span_us": 21.000000000000004,
+                "active_union_us": 21.000000000000004,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 403.32
+              },
+              "hc_medium96_aiv": {
+                "first_start_us": 22.48,
+                "last_end_us": 57.800000000000004,
+                "span_us": 35.32000000000001,
+                "active_union_us": 35.32000000000001,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1304.2
+              }
+            }
+          },
+          {
+            "launch_epoch": 1,
+            "first_start_us": 227.0,
+            "last_end_us": 263.12,
+            "span_us": 36.120000000000005,
+            "active_union_us": 36.120000000000005,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium96_aic": {
+                "first_start_us": 227.0,
+                "last_end_us": 248.20000000000002,
+                "span_us": 21.200000000000017,
+                "active_union_us": 21.200000000000017,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 409.52
+              },
+              "hc_medium96_aiv": {
+                "first_start_us": 227.14000000000001,
+                "last_end_us": 263.12,
+                "span_us": 35.97999999999999,
+                "active_union_us": 35.97999999999999,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1328.9800000000002
+              }
+            }
+          },
+          {
+            "launch_epoch": 2,
+            "first_start_us": 460.76,
+            "last_end_us": 494.40000000000003,
+            "span_us": 33.64000000000004,
+            "active_union_us": 33.64000000000004,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_medium96_aic": {
+                "first_start_us": 460.76,
+                "last_end_us": 480.98,
+                "span_us": 20.220000000000027,
+                "active_union_us": 20.220000000000027,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 369.38000000000005
+              },
+              "hc_medium96_aiv": {
+                "first_start_us": 460.92,
+                "last_end_us": 494.40000000000003,
+                "span_us": 33.48000000000002,
+                "active_union_us": 33.48000000000002,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1269.0400000000004
+              }
+            }
+          }
+        ],
+        "span_p50_us": 35.74000000000001,
+        "active_union_p50_us": 35.74000000000001,
+        "no_incore_gap_p50_us": 0.0
+      },
+      "old_pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "status": "PASS",
+      "output_guards": true
+    },
+    {
+      "name": "B28_S6_T168",
+      "tokens": 168,
+      "old_pto": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "l1": {
+        "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/run_mixed_fused_compact_representative/dfx/window_3/merged_swimlane.json",
+        "level": 1,
+        "steps": 3,
+        "samples": [
+          {
+            "launch_epoch": 0,
+            "first_start_us": 27.480000000000004,
+            "last_end_us": 73.28,
+            "span_us": 45.8,
+            "active_union_us": 45.8,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_large_aic": {
+                "first_start_us": 27.6,
+                "last_end_us": 54.64,
+                "span_us": 27.04,
+                "active_union_us": 27.04,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 541.1
+              },
+              "hc_large_aiv": {
+                "first_start_us": 27.480000000000004,
+                "last_end_us": 73.28,
+                "span_us": 45.8,
+                "active_union_us": 45.8,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1805.9
+              }
+            }
+          },
+          {
+            "launch_epoch": 1,
+            "first_start_us": 249.98000000000002,
+            "last_end_us": 295.7,
+            "span_us": 45.71999999999997,
+            "active_union_us": 45.71999999999997,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_large_aic": {
+                "first_start_us": 249.98000000000002,
+                "last_end_us": 277.14,
+                "span_us": 27.159999999999968,
+                "active_union_us": 27.159999999999968,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 530.4399999999998
+              },
+              "hc_large_aiv": {
+                "first_start_us": 250.1,
+                "last_end_us": 295.7,
+                "span_us": 45.599999999999994,
+                "active_union_us": 45.599999999999994,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1772.98
+              }
+            }
+          },
+          {
+            "launch_epoch": 2,
+            "first_start_us": 482.96000000000004,
+            "last_end_us": 528.6,
+            "span_us": 45.639999999999986,
+            "active_union_us": 45.639999999999986,
+            "no_incore_gap_us": 0.0,
+            "blocks": 72,
+            "tasks": {
+              "hc_large_aic": {
+                "first_start_us": 483.08,
+                "last_end_us": 510.3,
+                "span_us": 27.220000000000027,
+                "active_union_us": 27.220000000000027,
+                "no_incore_gap_us": 0.0,
+                "blocks": 24,
+                "core_time_sum_us": 546.96
+              },
+              "hc_large_aiv": {
+                "first_start_us": 482.96000000000004,
+                "last_end_us": 528.6,
+                "span_us": 45.639999999999986,
+                "active_union_us": 45.639999999999986,
+                "no_incore_gap_us": 0.0,
+                "blocks": 48,
+                "core_time_sum_us": 1821.2600000000004
+              }
+            }
+          }
+        ],
+        "span_p50_us": 45.71999999999997,
+        "active_union_p50_us": 45.71999999999997,
+        "no_incore_gap_p50_us": 0.0
+      },
+      "old_pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "status": "PASS",
+      "output_guards": true
+    }
+  ]
+}

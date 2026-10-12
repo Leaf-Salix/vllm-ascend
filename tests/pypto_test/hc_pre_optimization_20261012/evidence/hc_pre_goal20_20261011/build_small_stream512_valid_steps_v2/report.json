@@ -1,0 +1,36 @@
+{
+  "status": "FAIL",
+  "scope": "单卡独立 HC_pre；正式 HC 权重、合成输入；不代表整模型性能",
+  "implementation": "standalone_local_hc_pre",
+  "native_backend": "recipes",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "layer": 2,
+  "branch": "attn",
+  "batch_size": [
+    2,
+    4,
+    8,
+    16,
+    20,
+    24,
+    28
+  ],
+  "seqlen": [
+    5,
+    6
+  ],
+  "seed": 20261009,
+  "case_seed_rule": "seed + batch_size * 100 + seqlen",
+  "warmup": 5,
+  "replay_iters": 20,
+  "timing": "incore",
+  "pto_pytorch_profile": false,
+  "pto_warmup_after_native_profile": 5,
+  "swimlane_level": 1,
+  "timing_scope": "PTO L1 incore 首次开始至最后结束；另列并行区间并集和无 incore 空隙；Native HcPre 设备事件",
+  "runtime": "tensormap_and_ringbuffer",
+  "cases": [],
+  "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/small_stream512_valid_steps_v2.py",
+  "pypto_core": "/data/pyptouser/qinchuanyu/pto-eager/pypto/build/python/bindings/pypto_core.cpython-310-aarch64-linux-gnu.so",
+  "error": "InternalError('Internal error: MemoryReuse cannot reconcile divergent L0C accumulator buffers with tile.move; accumulator control-flow values must be coalesced before YieldFixup. [/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/small_stream512_valid_steps_v2.py:212:17]\\nCheck failed: !(source_tile->GetMemorySpace() == MemorySpace::Acc && target_memory.value() == MemorySpace::Acc) at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/transforms/memory_reuse_pass.cpp:186\\n\\nC++ Traceback (most recent call last):\\n File \"./src/ir/transforms/passes.cpp\", line 270\\n File \"./src/ir/transforms/passes.cpp\", line 55\\n File \"./src/ir/transforms/passes.cpp\", line 141\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 5409\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 4113\\n File \"./src/ir/transforms/mutator.cpp\", line 198\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\\n File \"./src/ir/transforms/mutator.cpp\", line 1056\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 223\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 4127\\n File \"./src/ir/transforms/mutator.cpp\", line 781\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\\n File \"./src/ir/transforms/mutator.cpp\", line 1056\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 220\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 4237\\n File \"./src/ir/transforms/mutator.cpp\", line 648\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\\n File \"./src/ir/transforms/mutator.cpp\", line 1056\\n File \"./include/pypto/ir/transforms/base/functor.h\", line 220\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 4290\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 4870\\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 186\\n')"
+}

@@ -143,6 +143,11 @@ def measure_incore(graphs, args, case_name, window, variant=None):
             graph.replay()
     torch.npu.synchronize()
     native_trace = profile_graph(graphs["native"], args.output / "profile" / case_name / "native")
+    # Native profiler 退出及解析后重新预热 PTO，避免早先预热与 L1 采集相隔过久。
+    # 预热放在 DFX 窗口外，泳道仍只记录正式的三个 step，不按耗时事后挑样。
+    for _ in range(args.warmup):
+        graphs["pto"].replay()
+        torch.npu.synchronize()
     pypto.torch.begin_dfx()
     try:
         if args.profile:
@@ -392,6 +397,8 @@ def main():
               "batch_size": args.batch_size, "seqlen": args.seqlen,
               "seed": args.seed, "case_seed_rule": "seed + batch_size * 100 + seqlen",
               "warmup": args.warmup, "replay_iters": args.iters, "timing": args.timing,
+              "pto_pytorch_profile": args.profile,
+              "pto_warmup_after_native_profile": args.warmup if args.timing == "incore" else 0,
               "swimlane_level": args.swimlane_level if args.timing == "incore" else 0,
               "timing_scope": (f"PTO L{args.swimlane_level} incore 首次开始至最后结束；另列并行区间并集和无 incore 空隙；Native HcPre 设备事件"
                                if args.timing == "incore" else "图外 NPU Event 包含一次完整图重放"),

@@ -1,0 +1,1695 @@
+{
+  "status": "PASS",
+  "scope": "单卡独立 HC_pre；正式 HC 权重、合成输入；不代表整模型性能",
+  "implementation": "standalone_local_hc_pre",
+  "native_backend": "recipes",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "layer": 2,
+  "branch": "attn",
+  "batch_size": [
+    16,
+    28
+  ],
+  "seqlen": [
+    5,
+    6
+  ],
+  "seed": 20261009,
+  "case_seed_rule": "seed + batch_size * 100 + seqlen",
+  "warmup": 5,
+  "replay_iters": 20,
+  "timing": "incore",
+  "swimlane_level": 1,
+  "timing_scope": "PTO L1 incore 首次开始至最后结束；另列并行区间并集和无 incore 空隙；Native HcPre 设备事件",
+  "runtime": "tensormap_and_ringbuffer",
+  "cases": [
+    {
+      "batch_size": 16,
+      "seqlen": 5,
+      "tokens": 80,
+      "name": "B16_S5_T080",
+      "variant": {
+        "name": "hc_medium96",
+        "m_tile": 96,
+        "k_tile": 512,
+        "selection": "动态 T=B×S；由 tensor shape 分派",
+        "required_tasks": [
+          "hc_medium96_aic",
+          "hc_medium96_aiv"
+        ],
+        "all_compiled_tasks": [
+          "hc_small_aic",
+          "hc_small_aiv",
+          "hc_medium48_aic",
+          "hc_medium48_aiv",
+          "hc_medium96_aic",
+          "hc_medium96_aiv",
+          "hc_large_aic",
+          "hc_large_aiv"
+        ]
+      },
+      "pto_native": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.000161639807629399,
+          "different": 1925,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.7181038856506348e-05,
+          "rmse": 2.500027676433092e-06,
+          "different": 243,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 7.212162017822266e-06,
+          "rmse": 1.2685892443187186e-06,
+          "different": 1274,
+          "out_of_tolerance": 0
+        }
+      },
+      "native_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "incore_timing": {
+        "scope": "Native HcPre 设备事件与 PTO incore 起止；不计调用外层 AICPU 区间",
+        "native": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B16_S5_T080_Native_PyTorch_3steps.json",
+          "steps": 3,
+          "p50_us": 57.24,
+          "samples_us": [
+            57.08,
+            57.24,
+            58.82
+          ]
+        },
+        "pto": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B16_S5_T080_PTO_L1_3steps.json",
+          "level": 1,
+          "steps": 3,
+          "samples": [
+            {
+              "launch_epoch": 0,
+              "first_start_us": 61.120000000000005,
+              "last_end_us": 113.92,
+              "span_us": 52.8,
+              "active_union_us": 52.8,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 61.120000000000005,
+                  "last_end_us": 89.12,
+                  "span_us": 28.0,
+                  "active_union_us": 28.0,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 587.68
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 61.36,
+                  "last_end_us": 113.92,
+                  "span_us": 52.56,
+                  "active_union_us": 52.56,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1637.1600000000003
+                }
+              }
+            },
+            {
+              "launch_epoch": 1,
+              "first_start_us": 352.58,
+              "last_end_us": 404.46000000000004,
+              "span_us": 51.88000000000005,
+              "active_union_us": 51.88000000000005,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 352.58,
+                  "last_end_us": 380.56,
+                  "span_us": 27.980000000000018,
+                  "active_union_us": 27.980000000000018,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 605.7400000000002
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 353.0,
+                  "last_end_us": 404.46000000000004,
+                  "span_us": 51.460000000000036,
+                  "active_union_us": 51.460000000000036,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1615.6800000000005
+                }
+              }
+            },
+            {
+              "launch_epoch": 2,
+              "first_start_us": 607.72,
+              "last_end_us": 640.44,
+              "span_us": 32.72000000000003,
+              "active_union_us": 32.72000000000003,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 607.72,
+                  "last_end_us": 626.64,
+                  "span_us": 18.91999999999996,
+                  "active_union_us": 18.91999999999996,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 386.15999999999985
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 607.98,
+                  "last_end_us": 640.44,
+                  "span_us": 32.460000000000036,
+                  "active_union_us": 32.460000000000036,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 976.6999999999998
+                }
+              }
+            }
+          ],
+          "span_p50_us": 51.88000000000005,
+          "active_union_p50_us": 51.88000000000005,
+          "no_incore_gap_p50_us": 0.0
+        },
+        "dfx": {
+          "exported": true,
+          "kernel_config": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/kernel_config_source.py",
+          "merged_swimlane": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/merged_swimlane.json",
+          "name_map": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/name_map.json"
+        },
+        "native_over_pto_span": 1.1033153430994591,
+        "native_over_pto_active_union": 1.1033153430994591,
+        "variant": {
+          "name": "hc_medium96",
+          "m_tile": 96,
+          "k_tile": 512,
+          "selection": "动态 T=B×S；由 tensor shape 分派",
+          "required_tasks": [
+            "hc_medium96_aic",
+            "hc_medium96_aiv"
+          ],
+          "all_compiled_tasks": [
+            "hc_small_aic",
+            "hc_small_aiv",
+            "hc_medium48_aic",
+            "hc_medium48_aiv",
+            "hc_medium96_aic",
+            "hc_medium96_aiv",
+            "hc_large_aic",
+            "hc_large_aiv"
+          ]
+        }
+      },
+      "native_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.00015714715118519962,
+          "different": 1892,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.576542854309082e-05,
+          "rmse": 2.360851340199588e-06,
+          "different": 242,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            80,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 8.940696716308594e-06,
+          "rmse": 1.3507789162758854e-06,
+          "different": 1269,
+          "out_of_tolerance": 0
+        }
+      },
+      "output_guards": true,
+      "status": "PASS"
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 6,
+      "tokens": 96,
+      "name": "B16_S6_T096",
+      "variant": {
+        "name": "hc_medium96",
+        "m_tile": 96,
+        "k_tile": 512,
+        "selection": "动态 T=B×S；由 tensor shape 分派",
+        "required_tasks": [
+          "hc_medium96_aic",
+          "hc_medium96_aiv"
+        ],
+        "all_compiled_tasks": [
+          "hc_small_aic",
+          "hc_small_aiv",
+          "hc_medium48_aic",
+          "hc_medium48_aiv",
+          "hc_medium96_aic",
+          "hc_medium96_aiv",
+          "hc_large_aic",
+          "hc_large_aiv"
+        ]
+      },
+      "pto_native": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.0001560999808134511,
+          "different": 2330,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.5720725059509277e-05,
+          "rmse": 2.4626838239782955e-06,
+          "different": 292,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.3731420040130615e-05,
+          "rmse": 1.40065924369992e-06,
+          "different": 1528,
+          "out_of_tolerance": 0
+        }
+      },
+      "native_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "incore_timing": {
+        "scope": "Native HcPre 设备事件与 PTO incore 起止；不计调用外层 AICPU 区间",
+        "native": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B16_S6_T096_Native_PyTorch_3steps.json",
+          "steps": 3,
+          "p50_us": 59.56,
+          "samples_us": [
+            59.56,
+            60.0,
+            58.34
+          ]
+        },
+        "pto": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B16_S6_T096_PTO_L1_3steps.json",
+          "level": 1,
+          "steps": 3,
+          "samples": [
+            {
+              "launch_epoch": 0,
+              "first_start_us": 43.0,
+              "last_end_us": 97.62,
+              "span_us": 54.620000000000005,
+              "active_union_us": 54.620000000000005,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 43.18,
+                  "last_end_us": 72.94,
+                  "span_us": 29.759999999999998,
+                  "active_union_us": 29.759999999999998,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 630.64
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 43.0,
+                  "last_end_us": 97.62,
+                  "span_us": 54.620000000000005,
+                  "active_union_us": 54.620000000000005,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1771.4599999999994
+                }
+              }
+            },
+            {
+              "launch_epoch": 1,
+              "first_start_us": 318.32,
+              "last_end_us": 370.5,
+              "span_us": 52.18000000000001,
+              "active_union_us": 52.18000000000001,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 318.32,
+                  "last_end_us": 347.0,
+                  "span_us": 28.680000000000007,
+                  "active_union_us": 28.680000000000007,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 633.7
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 318.58,
+                  "last_end_us": 370.5,
+                  "span_us": 51.920000000000016,
+                  "active_union_us": 51.920000000000016,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1722.46
+                }
+              }
+            },
+            {
+              "launch_epoch": 2,
+              "first_start_us": 573.94,
+              "last_end_us": 607.92,
+              "span_us": 33.979999999999905,
+              "active_union_us": 33.979999999999905,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_medium96_aic": {
+                  "first_start_us": 573.94,
+                  "last_end_us": 594.0600000000001,
+                  "span_us": 20.120000000000005,
+                  "active_union_us": 20.120000000000005,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 396.86
+                },
+                "hc_medium96_aiv": {
+                  "first_start_us": 574.16,
+                  "last_end_us": 607.92,
+                  "span_us": 33.75999999999999,
+                  "active_union_us": 33.75999999999999,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1080.8600000000006
+                }
+              }
+            }
+          ],
+          "span_p50_us": 52.18000000000001,
+          "active_union_p50_us": 52.18000000000001,
+          "no_incore_gap_p50_us": 0.0
+        },
+        "dfx": {
+          "exported": true,
+          "kernel_config": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_1/kernel_config_source.py",
+          "merged_swimlane": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_1/merged_swimlane.json",
+          "name_map": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_1/name_map.json"
+        },
+        "native_over_pto_span": 1.141433499425067,
+        "native_over_pto_active_union": 1.141433499425067,
+        "variant": {
+          "name": "hc_medium96",
+          "m_tile": 96,
+          "k_tile": 512,
+          "selection": "动态 T=B×S；由 tensor shape 分派",
+          "required_tasks": [
+            "hc_medium96_aic",
+            "hc_medium96_aiv"
+          ],
+          "all_compiled_tasks": [
+            "hc_small_aic",
+            "hc_small_aiv",
+            "hc_medium48_aic",
+            "hc_medium48_aiv",
+            "hc_medium96_aic",
+            "hc_medium96_aiv",
+            "hc_large_aic",
+            "hc_large_aiv"
+          ]
+        }
+      },
+      "native_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.00016285598394460976,
+          "different": 2285,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.3262033462524414e-05,
+          "rmse": 2.5653896500443807e-06,
+          "different": 291,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            96,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 9.410083293914795e-06,
+          "rmse": 1.4532683962897863e-06,
+          "different": 1532,
+          "out_of_tolerance": 0
+        }
+      },
+      "output_guards": true,
+      "status": "PASS"
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 5,
+      "tokens": 140,
+      "name": "B28_S5_T140",
+      "variant": {
+        "name": "hc_large",
+        "m_tile": 32,
+        "k_tile": 1536,
+        "selection": "动态 T=B×S；由 tensor shape 分派",
+        "required_tasks": [
+          "hc_large_aic",
+          "hc_large_aiv"
+        ],
+        "all_compiled_tasks": [
+          "hc_small_aic",
+          "hc_small_aiv",
+          "hc_medium48_aic",
+          "hc_medium48_aiv",
+          "hc_medium96_aic",
+          "hc_medium96_aiv",
+          "hc_large_aic",
+          "hc_large_aiv"
+        ]
+      },
+      "pto_native": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.0001635334047023207,
+          "different": 3511,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 2.0295381546020508e-05,
+          "rmse": 2.4676860448380467e-06,
+          "different": 422,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.5795230865478516e-05,
+          "rmse": 1.5644097857148154e-06,
+          "different": 2221,
+          "out_of_tolerance": 0
+        }
+      },
+      "native_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "incore_timing": {
+        "scope": "Native HcPre 设备事件与 PTO incore 起止；不计调用外层 AICPU 区间",
+        "native": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B28_S5_T140_Native_PyTorch_3steps.json",
+          "steps": 3,
+          "p50_us": 70.46,
+          "samples_us": [
+            70.16,
+            70.46,
+            70.5
+          ]
+        },
+        "pto": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B28_S5_T140_PTO_L1_3steps.json",
+          "level": 1,
+          "steps": 3,
+          "samples": [
+            {
+              "launch_epoch": 0,
+              "first_start_us": 38.12,
+              "last_end_us": 98.74000000000001,
+              "span_us": 60.62000000000001,
+              "active_union_us": 60.62000000000001,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 38.12,
+                  "last_end_us": 74.38,
+                  "span_us": 36.26,
+                  "active_union_us": 36.26,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 792.26
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 38.300000000000004,
+                  "last_end_us": 98.74000000000001,
+                  "span_us": 60.440000000000005,
+                  "active_union_us": 60.440000000000005,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 2330.3
+                }
+              }
+            },
+            {
+              "launch_epoch": 1,
+              "first_start_us": 322.7,
+              "last_end_us": 380.34000000000003,
+              "span_us": 57.64000000000004,
+              "active_union_us": 57.64000000000004,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 322.7,
+                  "last_end_us": 356.22,
+                  "span_us": 33.52000000000004,
+                  "active_union_us": 33.52000000000004,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 725.54
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 323.0,
+                  "last_end_us": 380.34000000000003,
+                  "span_us": 57.34000000000003,
+                  "active_union_us": 57.34000000000003,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 2231.96
+                }
+              }
+            },
+            {
+              "launch_epoch": 2,
+              "first_start_us": 587.46,
+              "last_end_us": 627.14,
+              "span_us": 39.67999999999995,
+              "active_union_us": 39.67999999999995,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 587.46,
+                  "last_end_us": 611.82,
+                  "span_us": 24.360000000000014,
+                  "active_union_us": 24.360000000000014,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 513.0800000000002
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 587.66,
+                  "last_end_us": 627.14,
+                  "span_us": 39.48000000000002,
+                  "active_union_us": 39.48000000000002,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1489.1600000000003
+                }
+              }
+            }
+          ],
+          "span_p50_us": 57.64000000000004,
+          "active_union_p50_us": 57.64000000000004,
+          "no_incore_gap_p50_us": 0.0
+        },
+        "dfx": {
+          "exported": true,
+          "kernel_config": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_2/kernel_config_source.py",
+          "merged_swimlane": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_2/merged_swimlane.json",
+          "name_map": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_2/name_map.json"
+        },
+        "native_over_pto_span": 1.2224149895905612,
+        "native_over_pto_active_union": 1.2224149895905612,
+        "variant": {
+          "name": "hc_large",
+          "m_tile": 32,
+          "k_tile": 1536,
+          "selection": "动态 T=B×S；由 tensor shape 分派",
+          "required_tasks": [
+            "hc_large_aic",
+            "hc_large_aiv"
+          ],
+          "all_compiled_tasks": [
+            "hc_small_aic",
+            "hc_small_aiv",
+            "hc_medium48_aic",
+            "hc_medium48_aiv",
+            "hc_medium96_aic",
+            "hc_medium96_aiv",
+            "hc_large_aic",
+            "hc_large_aiv"
+          ]
+        }
+      },
+      "native_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.00016345058975275606,
+          "different": 3342,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.1876225471496582e-05,
+          "rmse": 2.3541279006167315e-06,
+          "different": 420,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            140,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.677870750427246e-05,
+          "rmse": 1.5611207118126913e-06,
+          "different": 2219,
+          "out_of_tolerance": 0
+        }
+      },
+      "output_guards": true,
+      "status": "PASS"
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 6,
+      "tokens": 168,
+      "name": "B28_S6_T168",
+      "variant": {
+        "name": "hc_large",
+        "m_tile": 32,
+        "k_tile": 1536,
+        "selection": "动态 T=B×S；由 tensor shape 分派",
+        "required_tasks": [
+          "hc_large_aic",
+          "hc_large_aiv"
+        ],
+        "all_compiled_tasks": [
+          "hc_small_aic",
+          "hc_small_aiv",
+          "hc_medium48_aic",
+          "hc_medium48_aiv",
+          "hc_medium96_aic",
+          "hc_medium96_aiv",
+          "hc_large_aic",
+          "hc_large_aiv"
+        ]
+      },
+      "pto_native": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.00016000754840206355,
+          "different": 4299,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.11311674118042e-05,
+          "rmse": 2.5620854557928396e-06,
+          "different": 508,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.1295080184936523e-05,
+          "rmse": 1.4726571180290193e-06,
+          "different": 2664,
+          "out_of_tolerance": 0
+        }
+      },
+      "native_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_graph_eager": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "incore_timing": {
+        "scope": "Native HcPre 设备事件与 PTO incore 起止；不计调用外层 AICPU 区间",
+        "native": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B28_S6_T168_Native_PyTorch_3steps.json",
+          "steps": 3,
+          "p50_us": 77.16,
+          "samples_us": [
+            77.44,
+            76.8,
+            77.16
+          ]
+        },
+        "pto": {
+          "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/traces/B28_S6_T168_PTO_L1_3steps.json",
+          "level": 1,
+          "steps": 3,
+          "samples": [
+            {
+              "launch_epoch": 0,
+              "first_start_us": 39.480000000000004,
+              "last_end_us": 100.54,
+              "span_us": 61.06,
+              "active_union_us": 61.06,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 39.64,
+                  "last_end_us": 76.22,
+                  "span_us": 36.58,
+                  "active_union_us": 36.58,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 797.9
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 39.480000000000004,
+                  "last_end_us": 100.54,
+                  "span_us": 61.06,
+                  "active_union_us": 61.06,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 2505.74
+                }
+              }
+            },
+            {
+              "launch_epoch": 1,
+              "first_start_us": 319.34000000000003,
+              "last_end_us": 379.64,
+              "span_us": 60.299999999999955,
+              "active_union_us": 60.299999999999955,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 319.34000000000003,
+                  "last_end_us": 355.48,
+                  "span_us": 36.139999999999986,
+                  "active_union_us": 36.139999999999986,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 801.88
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 319.56,
+                  "last_end_us": 379.64,
+                  "span_us": 60.079999999999984,
+                  "active_union_us": 60.079999999999984,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 2495.819999999999
+                }
+              }
+            },
+            {
+              "launch_epoch": 2,
+              "first_start_us": 551.9,
+              "last_end_us": 592.7,
+              "span_us": 40.80000000000007,
+              "active_union_us": 40.80000000000007,
+              "no_incore_gap_us": 0.0,
+              "blocks": 72,
+              "tasks": {
+                "hc_large_aic": {
+                  "first_start_us": 551.9,
+                  "last_end_us": 577.04,
+                  "span_us": 25.139999999999986,
+                  "active_union_us": 25.139999999999986,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 24,
+                  "core_time_sum_us": 525.9399999999998
+                },
+                "hc_large_aiv": {
+                  "first_start_us": 552.12,
+                  "last_end_us": 592.7,
+                  "span_us": 40.58000000000004,
+                  "active_union_us": 40.58000000000004,
+                  "no_incore_gap_us": 0.0,
+                  "blocks": 48,
+                  "core_time_sum_us": 1602.5200000000002
+                }
+              }
+            }
+          ],
+          "span_p50_us": 60.299999999999955,
+          "active_union_p50_us": 60.299999999999955,
+          "no_incore_gap_p50_us": 0.0
+        },
+        "dfx": {
+          "exported": true,
+          "kernel_config": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_3/kernel_config_source.py",
+          "merged_swimlane": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_3/merged_swimlane.json",
+          "name_map": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/paired_baseline_edges/dfx/window_3/name_map.json"
+        },
+        "native_over_pto_span": 1.2796019900497522,
+        "native_over_pto_active_union": 1.2796019900497522,
+        "variant": {
+          "name": "hc_large",
+          "m_tile": 32,
+          "k_tile": 1536,
+          "selection": "动态 T=B×S；由 tensor shape 分派",
+          "required_tasks": [
+            "hc_large_aic",
+            "hc_large_aiv"
+          ],
+          "all_compiled_tasks": [
+            "hc_small_aic",
+            "hc_small_aiv",
+            "hc_medium48_aic",
+            "hc_medium48_aiv",
+            "hc_medium96_aic",
+            "hc_medium96_aiv",
+            "hc_large_aic",
+            "hc_large_aiv"
+          ]
+        }
+      },
+      "native_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0,
+          "atol": 0.0,
+          "max_abs": 0.0,
+          "rmse": 0.0,
+          "different": 0,
+          "out_of_tolerance": 0
+        }
+      },
+      "pto_updated_input": {
+        "mixed": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4096
+          ],
+          "dtype": "torch.bfloat16",
+          "rtol": 0.01,
+          "atol": 0.01,
+          "max_abs": 0.015625,
+          "rmse": 0.00015840440755710006,
+          "different": 4039,
+          "out_of_tolerance": 0
+        },
+        "post": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 1.064687967300415e-05,
+          "rmse": 2.4234286684077233e-06,
+          "different": 506,
+          "out_of_tolerance": 0
+        },
+        "comb": {
+          "passed": true,
+          "finite": true,
+          "shape": [
+            168,
+            4,
+            4
+          ],
+          "dtype": "torch.float32",
+          "rtol": 0.0001,
+          "atol": 1e-05,
+          "max_abs": 8.702278137207031e-06,
+          "rmse": 1.2976656762475614e-06,
+          "different": 2671,
+          "out_of_tolerance": 0
+        }
+      },
+      "output_guards": true,
+      "status": "PASS"
+    }
+  ],
+  "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/baseline.py",
+  "native_opp": "/data/pyptouser/qinchuanyu/pto-eager/.cache/hc-pre-recipes-20261009/ops/ascendc/build/_CPack_Packages/Linux/External/CANN-custom_ops-none-linux.aarch64.run/packages/vendors/customize",
+  "pypto_core": "/data/pyptouser/qinchuanyu/pto-eager/pypto/build/python/bindings/pypto_core.cpython-310-aarch64-linux-gnu.so",
+  "native_reference": {
+    "recipe_root": "/data/pyptouser/qinchuanyu/pto-eager/.cache/hc-pre-recipes-20261009",
+    "revision": "4c3d1e1258053c4d810322198a7fd1722c89897e",
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/.cache/hc-pre-recipes-20261009/ops/ascendc/torch_ops_extension/custom_ops/csrc/npu_hc_pre.cpp",
+    "library": "/data/pyptouser/qinchuanyu/pto-eager/.cache/hc-pre-recipes-20261009/torch-hc-pre-build/hc_pre_recipes_reference.so",
+    "operator": "custom::npu_hc_pre",
+    "scope": "上游融合 HcPre；pre_mix=None、pre_out=None，仅三份输出"
+  },
+  "weights": [
+    {
+      "name": "layers.2.hc_attn_fn",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        24,
+        16384
+      ],
+      "dtype": "torch.float32"
+    },
+    {
+      "name": "layers.2.hc_attn_scale",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        3
+      ],
+      "dtype": "torch.float32"
+    },
+    {
+      "name": "layers.2.hc_attn_base",
+      "shard": "quant_model_weights-00030-of-00075.safetensors",
+      "shape": [
+        24
+      ],
+      "dtype": "torch.float32"
+    }
+  ],
+  "device_execution": true,
+  "physical_device": "0",
+  "pypto_path": "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/__init__.py",
+  "torch_version": "2.10.0+cpu",
+  "torch_npu_version": "2.10.0.post2",
+  "native_loaded_api": "/data/pyptouser/qinchuanyu/pto-eager/.cache/hc-pre-recipes-20261009/ops/ascendc/build/_CPack_Packages/Linux/External/CANN-custom_ops-none-linux.aarch64.run/packages/vendors/customize/op_api/lib/libcust_opapi.so"
+}

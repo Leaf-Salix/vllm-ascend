@@ -1,0 +1,20 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.row_sum: Tile inputs require tmp_tile with the same dtype and rank as the input, and every dimension at least as large as the corresponding input dimension
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/stage1_explicit_l0_v1.py:183:25
+    |
+181 |                         stream_widened = pl.cast(stream_source, pl.FP32)
+182 |                         gathered_chunk = pl.aic_gather(stream_widened)
+183 |                         stream_sq = pl.row_sum(pl.mul(stream_widened, stream_widened))
+    |                         ^^^^^^^^^
+184 |                         stream_rms_row = (split * (LINEAR_K_PER_SPLIT // STAGE1_K_TILE) + kk) * t_linear + lane_row
+185 |                         rms_partials[stream_rms_row:stream_rms_row + LINEAR_T_TILE // 2, 0:1] = stream_sq
+    |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

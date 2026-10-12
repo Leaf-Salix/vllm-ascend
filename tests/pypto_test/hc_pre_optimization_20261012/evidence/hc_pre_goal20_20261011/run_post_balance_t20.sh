@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -eo pipefail
+bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/run_case.sh adopted_small_stream_acc 4 5 post_balance_control_t20
+bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/run_case.sh small_post_work_balance_v1 4 5 post_balance_t20

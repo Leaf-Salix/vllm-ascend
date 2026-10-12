@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -eo pipefail
+bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/run_case.sh scalar_mix_preload_bf16_v1 28 6 scalar_preload_reverse_t168
+bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/run_case.sh adopted_small_stream_acc 28 6 scalar_preload_reverse_control_t168

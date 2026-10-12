@@ -1,0 +1,168 @@
+{
+  "status": "CPU_COMPILED_ONLY",
+  "device_execution": false,
+  "production_adopted": false,
+  "candidate": "small_spare_rms_v1.py",
+  "cpp_comparison": {
+    "hc_large144": {
+      "equal": true,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_large144.cpp"
+    },
+    "hc_large": {
+      "equal": true,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_large.cpp"
+    },
+    "hc_small": {
+      "equal": false,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_small.cpp"
+    },
+    "hc_medium48": {
+      "equal": true,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_medium48.cpp"
+    },
+    "hc_medium96": {
+      "equal": true,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_medium96.cpp"
+    },
+    "hc_exact96": {
+      "equal": true,
+      "reference": "build_small_sink_selected_v1/build/ptoas/hc_exact96.cpp"
+    }
+  },
+  "small_kernel_argument_count_before": {
+    "hc_small_aic": 32,
+    "hc_small_aiv": 33
+  },
+  "small_kernel_argument_count_after": {
+    "hc_small_aic": 33,
+    "hc_small_aiv": 34
+  },
+  "static_a3_24_clusters": [
+    {
+      "batch_size": 2,
+      "seqlen": 5,
+      "tokens": 10,
+      "changed": true,
+      "projection_clusters": 11,
+      "rms_assigned_aivs": 22,
+      "rms_aivs_with_real_tokens": 11,
+      "projection_aivs_with_real_tokens": 11,
+      "stage1_aivs_with_real_tokens": 22,
+      "rms_rows_written_once": 352,
+      "rms_real_rows": 110,
+      "rms_padding_rows": 242,
+      "second_stage_unchanged": true
+    },
+    {
+      "batch_size": 2,
+      "seqlen": 6,
+      "tokens": 12,
+      "changed": true,
+      "projection_clusters": 11,
+      "rms_assigned_aivs": 22,
+      "rms_aivs_with_real_tokens": 11,
+      "projection_aivs_with_real_tokens": 11,
+      "stage1_aivs_with_real_tokens": 22,
+      "rms_rows_written_once": 352,
+      "rms_real_rows": 132,
+      "rms_padding_rows": 220,
+      "second_stage_unchanged": true
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 5,
+      "tokens": 20,
+      "changed": true,
+      "projection_clusters": 11,
+      "rms_assigned_aivs": 22,
+      "rms_aivs_with_real_tokens": 22,
+      "projection_aivs_with_real_tokens": 22,
+      "stage1_aivs_with_real_tokens": 44,
+      "rms_rows_written_once": 352,
+      "rms_real_rows": 220,
+      "rms_padding_rows": 132,
+      "second_stage_unchanged": true
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 6,
+      "tokens": 24,
+      "changed": true,
+      "projection_clusters": 11,
+      "rms_assigned_aivs": 22,
+      "rms_aivs_with_real_tokens": 22,
+      "projection_aivs_with_real_tokens": 22,
+      "stage1_aivs_with_real_tokens": 44,
+      "rms_rows_written_once": 352,
+      "rms_real_rows": 264,
+      "rms_padding_rows": 88,
+      "second_stage_unchanged": true
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 5,
+      "tokens": 40,
+      "changed": false
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 6,
+      "tokens": 48,
+      "changed": false
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 5,
+      "tokens": 80,
+      "changed": false
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 6,
+      "tokens": 96,
+      "changed": false
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 5,
+      "tokens": 100,
+      "changed": false
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 6,
+      "tokens": 120,
+      "changed": false
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 5,
+      "tokens": 120,
+      "changed": false
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 6,
+      "tokens": 144,
+      "changed": false
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 5,
+      "tokens": 140,
+      "changed": false
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 6,
+      "tokens": 168,
+      "changed": false
+    }
+  ],
+  "notes": [
+    "第一阶段原11个投影核组的RMS搬到空闲核组；归约仍为K512三次按序相加。",
+    "该静态核映射并非设备核号，未证明实际重叠或性能提升。",
+    "T10/T12有22个AIV包含真实输入工作，其余参与补零或会合；T20/T24为44个。",
+    "核组不足时原路径负责RMS，独立路径互斥且全部在同一Mix屏障前完成。"
+  ]
+}

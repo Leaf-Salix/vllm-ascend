@@ -1,0 +1,116 @@
+{
+  "task_id": "task_20261011_145130_10888668758",
+  "scope": "B16/S6，T96；三版依次在同一队列任务同一卡执行，之后旧版在同一物理卡 0 回测；正式 HC 权重；单卡独立算子",
+  "timing": "L1 incore 最早 start 到最晚 end，不计 local_setup 或 Simpler/Orchestrator 外层头尾",
+  "profiling": {
+    "pto_pytorch_profile": false,
+    "swimlane_level": 1,
+    "warmup_before_native": 5,
+    "pto_warmup_after_native_profile": 5,
+    "measured_steps": 3
+  },
+  "variants": [
+    {
+      "variant": "旧版",
+      "tag": "baseline",
+      "status": "PASS",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_baseline/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_baseline/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "l1_incore_samples_us": [
+        30.94,
+        34.04,
+        33.5
+      ],
+      "l1_incore_p50_us": 33.5,
+      "native_samples_us": [
+        54.34,
+        54.0,
+        53.36
+      ],
+      "native_p50_us": 54.0,
+      "blocks_per_step": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "variant": "4 行分块候选",
+      "tag": "compact4",
+      "status": "PASS",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_compact4/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_compact4/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "l1_incore_samples_us": [
+        34.12,
+        35.2,
+        35.06
+      ],
+      "l1_incore_p50_us": 35.06,
+      "native_samples_us": [
+        52.24,
+        54.38,
+        55.52
+      ],
+      "native_p50_us": 54.38,
+      "blocks_per_step": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "variant": "均衡分工候选 v2",
+      "tag": "balanced_v2",
+      "status": "PASS",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_balanced_v2/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_balanced_v2/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "l1_incore_samples_us": [
+        34.2,
+        37.04,
+        37.16
+      ],
+      "l1_incore_p50_us": 37.04,
+      "native_samples_us": [
+        59.66,
+        60.34,
+        58.84
+      ],
+      "native_p50_us": 59.66,
+      "blocks_per_step": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "variant": "旧版回测",
+      "tag": "baseline_check",
+      "status": "PASS",
+      "task_id": "task_20261011_145404_12223886226",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_baseline_check/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/retest_b16_baseline_check/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "l1_incore_samples_us": [
+        35.8,
+        35.92,
+        36.98
+      ],
+      "l1_incore_p50_us": 35.92,
+      "native_samples_us": [
+        59.64,
+        59.64,
+        58.62
+      ],
+      "native_p50_us": 59.64,
+      "blocks_per_step": [
+        72,
+        72,
+        72
+      ]
+    }
+  ],
+  "conclusion": "旧版两轮中位数 33.50/35.92 μs；52 μs 未再现。4 行分块与均衡 v2 本轮为 35.06/37.04 μs。Native 同期也有 54.00→59.64 μs 变化，存在运行状态波动，两个候选尚无确定性能收益；不替换生产旧版。",
+  "limitations": [
+    "不同版本为依次运行，尚不能完全排除运行状态漂移；不把相对首轮的百分比当成真实优化收益或退化幅度。",
+    "本轮只验证 B16/S6，不能外推全部十四档。"
+  ]
+}

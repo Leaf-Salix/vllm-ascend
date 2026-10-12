@@ -1,0 +1,20 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl operation 'row_sum': tensor.row_sum: input valid extent on axis 1 is 0 (valid_shape [16, 0]), so the reduction has no real data to consume. The backend reduction kernels require a non-empty valid region on every axis and assert on an empty one, and an empty region also leaves max/min with no value to return. Widen the valid region, or guard the reduction so it does not run when the axis can be empty.
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/balanced_stage1_v1.py:184:25
+    |
+182 |                         stream_full = pl.set_validshape(stream_clean, LINEAR_T_TILE // 2, STREAM_K)
+183 |                         gathered_chunk = pl.aic_gather(stream_full)
+184 |                         stream_sq = pl.reshape(pl.row_sum(pl.mul(stream_full, stream_full)), [1, LINEAR_T_TILE // 2])
+    |                         ^^^^^^^^^
+185 |                         stream_rms_total = pl.add(stream_rms_total, stream_sq)
+186 |                     if kk == 0:
+    |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

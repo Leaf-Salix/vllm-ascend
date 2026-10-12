@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: Cannot reassign 'scalar_x0' with a different type: was pl.Tile[[1, 4096], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, scalar_cols])], got pl.Tile[[1, 4096], pl.FP32, pl.Mem.Vec]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/small_scalar_partition_v1.py:512:29
+    |
+510 |                             scalar_pre2 = pl.tile.read(gate_sigmoid, [scalar_tr, 2]) + HC_EPS
+511 |                             scalar_pre3 = pl.tile.read(gate_sigmoid, [scalar_tr, 3]) + HC_EPS
+512 |                             scalar_x0 = pl.cast(pl.load(x_flat, [scalar_row, 0], [1, D], target_memory=pl.MemorySpace.Vec), pl.FP32)
+    |                             ^^^^^^^^^
+513 |                             scalar_y0 = pl.mul(scalar_x0, scalar_pre0)
+514 |                             scalar_x1 = pl.cast(pl.load(x_flat, [scalar_row, D], [1, D], target_memory=pl.MemorySpace.Vec), pl.FP32)
+    |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

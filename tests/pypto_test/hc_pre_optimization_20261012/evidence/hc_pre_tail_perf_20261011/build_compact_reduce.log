@@ -1,0 +1,20 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.assemble: cannot mix Tensor and Tile arguments (Tensor, Tile). All operands must be the same type level — either all Tensor or all Tile
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/compact_reduce.py:251:21
+    |
+249 |                     c_reduced = pl.reshape(pl.col_sum(c_parts), [TAIL_MAX_ROWS, MIX_PAD])
+250 |                     c_total = pl.full([T_TILE, MIX_PAD], dtype=pl.FP32, value=0.0)
+251 |                     c_total = pl.assemble(c_total, c_reduced, [0, 0])
+    |                     ^^^^^^^
+252 |                     c_sq_load = pl.load(rms_2d, [0, t0], [LINEAR_OK, T_TILE], valid_shape=[LINEAR_OK, valid_rows], target_memory=pl.MemorySpace.Vec)
+253 |                     c_sq = pl.set_validshape(pl.fillpad(c_sq_load, pad_value=pl.PadValue.zero), LINEAR_OK, T_TILE)
+    |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

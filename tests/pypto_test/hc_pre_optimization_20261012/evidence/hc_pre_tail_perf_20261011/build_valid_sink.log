@@ -1,0 +1,20 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl operation 'reshape': tile.reshape: cannot reshape [1, 128] to [8, 16] because its real data extends a runtime number of rows (valid_rows * 16) and no dimension of [8, 16] has the matching row size of 1 elements. Keep that dimension intact in the target shape, or copy the real data out first (pl.slice / pl.store).
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_perf_20261011/valid_sink.py:306:21
+    |
+304 |                         cur = pl.div(norm, col4)
+305 |                     # 只回写真实 token 行，最后不足8行的补齐部分不会写到输出外部。
+306 |                     valid = pl.set_validshape(pl.reshape(cur, [TAIL_MAX_ROWS, 16]), valid_rows, 16)
+    |                     ^^^^^
+307 |                     pl.store(valid, [t0, 0], comb)
+308 | 
+    |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

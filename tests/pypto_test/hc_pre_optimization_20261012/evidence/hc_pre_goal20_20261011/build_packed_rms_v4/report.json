@@ -1,0 +1,36 @@
+{
+  "status": "FAIL",
+  "scope": "单卡独立 HC_pre；正式 HC 权重、合成输入；不代表整模型性能",
+  "implementation": "standalone_local_hc_pre",
+  "native_backend": "recipes",
+  "checkpoint": "/data/model/DeepSeek-V4-Flash-0731-w8a8",
+  "layer": 2,
+  "branch": "attn",
+  "batch_size": [
+    2,
+    4,
+    8,
+    16,
+    20,
+    24,
+    28
+  ],
+  "seqlen": [
+    5,
+    6
+  ],
+  "seed": 20261009,
+  "case_seed_rule": "seed + batch_size * 100 + seqlen",
+  "warmup": 5,
+  "replay_iters": 20,
+  "timing": "incore",
+  "pto_pytorch_profile": false,
+  "pto_warmup_after_native_profile": 5,
+  "swimlane_level": 1,
+  "timing_scope": "PTO L1 incore 首次开始至最后结束；另列并行区间并集和无 incore 空隙；Native HcPre 设备事件",
+  "runtime": "tensormap_and_ringbuffer",
+  "cases": [],
+  "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/packed_rms_v4.py",
+  "pypto_core": "/data/pyptouser/qinchuanyu/pto-eager/pypto/build/python/bindings/pypto_core.cpython-310-aarch64-linux-gnu.so",
+  "error": "PartialCodegenError('5 function(s) failed to compile:\\n\\n  Function     | Error\\n  -------------+--------------------------------------------------------------\\n  hc_exact96   | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/buil\\n               | d_packed_rms_v4/build/ptoas/hc_exact96.pto\":271:35): error:\\n               | use of value \\'%transpose_tmp\\' expects different type than\\n               | prior uses: \\'!pto.tile_buf<vec, 8x8xf32>\\' vs\\n               | \\'!pto.tile_buf<vec, 8x8xf32, valid=?x?>\\'\\n  -------------+--------------------------------------------------------------\\n  hc_large     | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/buil\\n               | d_packed_rms_v4/build/ptoas/hc_large.pto\":280:35): error:\\n               | use of value \\'%transpose_tmp\\' expects different type than\\n               | prior uses: \\'!pto.tile_buf<vec, 8x8xf32>\\' vs\\n               | \\'!pto.tile_buf<vec, 8x8xf32, valid=?x?>\\'\\n  -------------+--------------------------------------------------------------\\n  hc_medium48  | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/buil\\n               | d_packed_rms_v4/build/ptoas/hc_medium48.pto\":270:35): error:\\n               | use of value \\'%transpose_tmp\\' expects different type than\\n               | prior uses: \\'!pto.tile_buf<vec, 8x8xf32>\\' vs\\n               | \\'!pto.tile_buf<vec, 8x8xf32, valid=?x?>\\'\\n  -------------+--------------------------------------------------------------\\n  hc_medium96  | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/buil\\n               | d_packed_rms_v4/build/ptoas/hc_medium96.pto\":266:35): error:\\n               | use of value \\'%transpose_tmp\\' expects different type than\\n               | prior uses: \\'!pto.tile_buf<vec, 8x8xf32>\\' vs\\n               | \\'!pto.tile_buf<vec, 8x8xf32, valid=?x?>\\'\\n  -------------+--------------------------------------------------------------\\n  hc_small     | ptoas compilation failed:\\n               | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\\n               | pto-\\n               | 0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/buil\\n               | d_packed_rms_v4/build/ptoas/hc_small.pto\":277:35): error:\\n               | use of value \\'%transpose_tmp\\' expects different type than\\n               | prior uses: \\'!pto.tile_buf<vec, 8x8xf32>\\' vs\\n               | \\'!pto.tile_buf<vec, 8x8xf32, valid=?x?>\\'\\n  -------------+--------------------------------------------------------------\\n\\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/build_packed_rms_v4/build/report/codegen_errors.txt')"
+}

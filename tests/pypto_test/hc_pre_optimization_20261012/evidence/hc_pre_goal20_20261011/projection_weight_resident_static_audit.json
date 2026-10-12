@@ -1,0 +1,111 @@
+{
+  "candidate": "projection_weight_resident_v1.py",
+  "generated_aic_allocations": {
+    "hc_small": {
+      "allocations": [
+        {
+          "space": "Acc",
+          "rows": 32,
+          "cols": 32,
+          "byte_offset": 0
+        },
+        {
+          "space": "Mat",
+          "rows": 32,
+          "cols": 1536,
+          "byte_offset": 131072
+        },
+        {
+          "space": "Mat",
+          "rows": 1536,
+          "cols": 32,
+          "byte_offset": 131072
+        },
+        {
+          "space": "Left",
+          "rows": 32,
+          "cols": 256,
+          "byte_offset": 0
+        },
+        {
+          "space": "Right",
+          "rows": 256,
+          "cols": 32,
+          "byte_offset": 0
+        },
+        {
+          "space": "Left",
+          "rows": 32,
+          "cols": 256,
+          "byte_offset": 32768
+        },
+        {
+          "space": "Right",
+          "rows": 256,
+          "cols": 32,
+          "byte_offset": 32768
+        }
+      ],
+      "TPipe_declaration": [
+        "auto v71 = TPipe<0, Direction::DIR_V2C, 65536, 2, 2, false>(v13, v70, v33);"
+      ]
+    },
+    "hc_exact96": {
+      "allocations": [
+        {
+          "space": "Mat",
+          "rows": 32,
+          "cols": 2048,
+          "byte_offset": 262144
+        },
+        {
+          "space": "Mat",
+          "rows": 2048,
+          "cols": 32,
+          "byte_offset": 262144
+        },
+        {
+          "space": "Acc",
+          "rows": 32,
+          "cols": 32,
+          "byte_offset": 0
+        },
+        {
+          "space": "Left",
+          "rows": 32,
+          "cols": 256,
+          "byte_offset": 0
+        },
+        {
+          "space": "Right",
+          "rows": 256,
+          "cols": 32,
+          "byte_offset": 0
+        },
+        {
+          "space": "Left",
+          "rows": 32,
+          "cols": 256,
+          "byte_offset": 32768
+        },
+        {
+          "space": "Right",
+          "rows": 256,
+          "cols": 32,
+          "byte_offset": 32768
+        }
+      ],
+      "TPipe_declaration": [
+        "auto v65 = TPipe<0, Direction::DIR_V2C, 131072, 2, 2, false>(v13, v64, v32);"
+      ]
+    }
+  },
+  "expected_l1_total_bytes": {
+    "hc_small": 327680,
+    "hc_exact96": 524288
+  },
+  "other_four_branches_cpp_equal": true,
+  "accumulation_order": "仍K256顺序累加同一个FP32 Acc，RMS顺序/段数和第二阶段均未改变",
+  "source_weight_bytes": "每段实际总读取字节未减少；合并小档2/3次、T96两次读取为一次，可能影响首块就绪与L1占用",
+  "device_submitted": false
+}

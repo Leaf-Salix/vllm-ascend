@@ -1,0 +1,20 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.add: cannot mix Tensor and Tile arguments (Tensor, Tile). All operands must be the same type level — either all Tensor or all Tile
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/small_stream512_tile_acc_v3.py:199:25
+    |
+197 |                         small_rms_tmp = pl.create_tile([LINEAR_T_TILE // 2, 512], dtype=pl.FP32)
+198 |                         small_sq = pl.tile.row_sum(pl.mul(small_full, small_full), small_rms_tmp)
+199 |                         small_rms_total = pl.add(small_rms_total, pl.reshape(small_sq, [1, LINEAR_T_TILE // 2]))
+    |                         ^^^^^^^^^^^^^^^
+200 |                     # L0 K256两级流水共用同一个Acc，只在第一块初始化。
+201 |                     for small_l0k in pl.pipeline(0, 512, 256, stage=2):
+    |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

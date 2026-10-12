@@ -1,0 +1,21 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+Error: pl.tile operation 'arange': The operator tile.ci requires 'start' dtype (index) to match destination dtype (int32)
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/exact96_rms_blocks_v1.py:405:25
+    |
+403 |                         # 把本核的起始行移到第0列；多余列循环回块内，避免无效索引越界。
+404 |                         # T96/24核组只用前4列，且t0为4的倍数，不跨块读取真实行。
+405 |                         c_rms_ids = pl.tile.arange(t0 % T_TILE, [1, T_TILE], dtype=pl.INT32)
+    |                         ^^^^^^^^^
+406 |                         c_rms_wrapped = pl.sub(c_rms_ids, pl.tile.shls(pl.tile.shrs(c_rms_ids, 3), 3))
+407 |                         c_rms_idx_tmp = pl.create_tile([1, T_TILE], dtype=pl.INT32)
+    |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

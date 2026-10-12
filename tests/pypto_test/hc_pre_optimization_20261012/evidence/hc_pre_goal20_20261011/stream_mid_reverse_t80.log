@@ -1,0 +1,22 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+[mono_ns=976885501966588][T0xfffd5cb26120][TIMING] clock_anchor: [CLOCK_ANCHOR] v=1 pid=3731866 mono_ns=976885501966108 wall_ns=1791721561744487918
+Error: Cannot reassign 'weight_chunk' with a different type: was pl.Tensor[[32, 1024], pl.FP32, pl.TensorView(valid_shape=[24, 1024], stride=[], layout=pl.TensorLayout.ND, pad=pl.PadValue.zero)], got pl.Tensor[[32, 1536], pl.FP32, pl.TensorView(valid_shape=[24, kvalid], stride=[], layout=pl.TensorLayout.ND, pad=pl.PadValue.zero)]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_goal20_20261011/stage1_stream_medium_only_v2.py:205:21
+    |
+203 |                     kc = kbase + kk * STREAM_K
+204 |                     kvalid = pl.max(0, pl.min(STREAM_K, HC_DIM - kc))
+205 |                     weight_chunk = pl.slice(hc_fn, [MIX_PAD, STREAM_K], [0, kc], valid_shape=[MIX_HC, kvalid], pad_value=pl.PadValue.zero)
+    |                     ^^^^^^^^^^^^
+206 |                     for lane in pl.split_aiv(2, mode=pl.SplitMode.UP_DOWN):
+207 |                         lane_row = t0 + lane * (LINEAR_T_TILE // 2)
+    |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

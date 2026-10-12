@@ -1,0 +1,89 @@
+{
+  "scope": "只核对B16/S6今天优化前与当前的净收益；不代表全部档位",
+  "order": [
+    "A1",
+    "B1",
+    "B2",
+    "A2"
+  ],
+  "A": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/baseline.py",
+  "B": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/merged_hc_pre.py",
+  "process_isolation": "四次均独立进程、单实现注册；一个队列任务持续持有同一张卡",
+  "measurement": "Native profiling前置，PTO预热5次，固定3次L1首尾样本，不丢弃慢样本",
+  "status": "PASS",
+  "task": "task_20261011_180306_134660430511",
+  "physical_device": "0",
+  "results": [
+    {
+      "run": "A1",
+      "variant": "今天优化前",
+      "samples_us": [
+        36.22,
+        35.32,
+        36.16
+      ],
+      "p50_us": 36.16,
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/A1/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/A1/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "status": "PASS"
+    },
+    {
+      "run": "B1",
+      "variant": "当前移植版",
+      "samples_us": [
+        32.52,
+        32.52,
+        32.92
+      ],
+      "p50_us": 32.52,
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/B1/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/B1/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "status": "PASS"
+    },
+    {
+      "run": "B2",
+      "variant": "当前移植版",
+      "samples_us": [
+        31.22,
+        31.64,
+        31.36
+      ],
+      "p50_us": 31.36,
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/B2/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/B2/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "status": "PASS"
+    },
+    {
+      "run": "A2",
+      "variant": "今天优化前",
+      "samples_us": [
+        36.22,
+        35.78,
+        35.54
+      ],
+      "p50_us": 35.78,
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/A2/report.json",
+      "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_stage1_merge_20261011/before_today_abba_b16s6/A2/traces/B16_S6_T096_PTO_L1_3steps.json",
+      "status": "PASS"
+    }
+  ],
+  "pairs": [
+    {
+      "baseline_run": "A1",
+      "current_run": "B1",
+      "baseline_us": 36.16,
+      "current_us": 32.52,
+      "reduction_us": 3.64,
+      "reduction_percent": 10.07
+    },
+    {
+      "baseline_run": "A2",
+      "current_run": "B2",
+      "baseline_us": 35.78,
+      "current_us": 31.36,
+      "reduction_us": 4.42,
+      "reduction_percent": 12.35
+    }
+  ],
+  "conclusion": "本次同卡独立进程ABBA在B16/S6确认约10%~12%的合并净收益；仍未达到28us；不推断其他档位，不将收益全部归因于48核分工"
+}

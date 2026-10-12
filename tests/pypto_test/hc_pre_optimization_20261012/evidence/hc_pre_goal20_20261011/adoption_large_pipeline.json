@@ -1,0 +1,119 @@
+{
+  "source": "vllm_ascend/ops/pypto/hc_pre.py",
+  "candidate": "stage1_large_wave_pipeline_v1.py",
+  "snapshot": "adopted_large_pipeline.py",
+  "executable_ast_matches": true,
+  "coverage": [
+    {
+      "batch_size": 2,
+      "seqlen": 5,
+      "tokens": 10,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 2,
+      "seqlen": 6,
+      "tokens": 12,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 5,
+      "tokens": 20,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 6,
+      "tokens": 24,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 5,
+      "tokens": 40,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 6,
+      "tokens": 48,
+      "report": "scalar_medium_v2_14/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 5,
+      "tokens": 80,
+      "report": "balanced_reverse_t80/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 6,
+      "tokens": 96,
+      "report": "l0_db_reverse_t96/report.json",
+      "validation": "复用上一采用清单；本次四个未改分支的完整生成C++一致，未重测性能。"
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 5,
+      "tokens": 100,
+      "report": "large_pipe_low_t100/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 32.620000000000005
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 6,
+      "tokens": 120,
+      "report": "large_pipe_low_b20s6/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 35.839999999999975
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 5,
+      "tokens": 120,
+      "report": "large_pipe_low_b24s5/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 34.68000000000001
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 6,
+      "tokens": 144,
+      "report": "large_pipeline_m48/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 33.91999999999996
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 5,
+      "tokens": 140,
+      "report": "large_pipe_t140/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 33.139999999999986
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 6,
+      "tokens": 168,
+      "report": "large_pipeline_m64/report.json",
+      "validation": "本次改变分支的新设备精度、图重放、同址输入与保护区全部通过；T140使用生成C++相同的选择性候选。",
+      "incore_p50_us": 37.89999999999998
+    }
+  ],
+  "cpp_comparison": "large_pipeline_cpp_comparison.json",
+  "device_evidence": "large_pipeline_device_evidence.json",
+  "full14_rerun": false,
+  "new_cases": 6,
+  "reused_cases": 8,
+  "goal_achieved": false,
+  "comment": "保留有收益的大档两级供数流水；T96仍使用原有显式L0双缓冲。收益随对照条件波动，不宣称固定加速比。"
+}

@@ -1,0 +1,116 @@
+{
+  "source": "vllm_ascend/ops/pypto/hc_pre.py",
+  "candidate": "compact_sink_exact96_slim_v1.py",
+  "snapshot": "adopted_compact_exact96_slim.py",
+  "source_bytes_equal": true,
+  "cpu_status": "COMPILED",
+  "cpp_comparison": "compact_exact96_cpp_comparison.json",
+  "device_evidence": "compact_sink_rms_device_evidence.json",
+  "coverage": [
+    {
+      "batch_size": 2,
+      "seqlen": 5,
+      "tokens": 10,
+      "report": "sink_scalar_t10/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 2,
+      "seqlen": 6,
+      "tokens": 12,
+      "report": "sink_scalar_t12/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 5,
+      "tokens": 20,
+      "report": "sink_scalar_t20/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 4,
+      "seqlen": 6,
+      "tokens": 24,
+      "report": "sink_scalar_t24/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 5,
+      "tokens": 40,
+      "report": "small_scalar_t40/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 8,
+      "seqlen": 6,
+      "tokens": 48,
+      "report": "small_scalar_t48/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 5,
+      "tokens": 80,
+      "report": "balanced_reverse_t80/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 16,
+      "seqlen": 6,
+      "tokens": 96,
+      "report": "compact_reverse_t96/report.json",
+      "validation": "生成C++与已测紧凑候选完全相同；正向及反向对照均通过原门禁且有收益。"
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 5,
+      "tokens": 100,
+      "report": "large_pipe_low_t100/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 20,
+      "seqlen": 6,
+      "tokens": 120,
+      "report": "large_pipe_low_b20s6/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 5,
+      "tokens": 120,
+      "report": "large_pipe_low_b24s5/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 24,
+      "seqlen": 6,
+      "tokens": 144,
+      "report": "large_pipeline_m48/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 5,
+      "tokens": 140,
+      "report": "large_pipe_t140/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    },
+    {
+      "batch_size": 28,
+      "seqlen": 6,
+      "tokens": 168,
+      "report": "large_scalar_m64/report.json",
+      "validation": "未改变分支的生成C++与上一采用版本相同，继承其已有证据，没有重新采样。"
+    }
+  ],
+  "changed_cases": 1,
+  "unchanged_cases": 13,
+  "full14_rerun": false,
+  "goal_achieved": false,
+  "note": "只采用精确T96的4行分量优先布局；完整20轮Sinkhorn、48 AIV角色及精度门禁均保留。",
+  "slim_cpp_comparison": "compact_exact96_slim_cpp_comparison.json",
+  "source_simplification": "只保留T96需要的静态gather/gatherb路径，删除八个无用索引中间量；六分支生成C++与原组合完全相同。"
+}
