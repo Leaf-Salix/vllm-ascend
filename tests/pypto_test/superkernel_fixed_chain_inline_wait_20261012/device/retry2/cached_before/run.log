@@ -1,0 +1,75 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+[mono_ns=1047727955532952][T0xfffd67fff120][TIMING] clock_anchor: [CLOCK_ANCHOR] v=1 pid=1696474 mono_ns=1047727955532462 wall_ns=1791792404198054072
+{"phase": "initial_enqueue", "work": 5, "length": 1, "mode": "plain"}
+{"phase": "initial_enqueue", "work": 5, "length": 1, "mode": "early"}
+{"phase": "initial_enqueue", "work": 5, "length": 17, "mode": "plain"}
+{"phase": "initial_enqueue", "work": 5, "length": 17, "mode": "early"}
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 244, in run
+    torch_npu.npu.synchronize()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/npu/utils.py", line 72, in synchronize
+    return torch_npu._C._npu_synchronize()
+RuntimeError: npuSynchronizeDevice:../torch_npu/csrc/core/npu/NPUStream.cpp:576 NPU function error: AclrtSynchronizeDeviceWithTimeout, error code is 507011
+[ERROR] 2026-10-12-16:06:48 (PID:1696474, Device:9, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: Model execution failed. 
+        Rectify the fault based on the error information in the ascend log.
+E39999: Internal error!
+E39999[PID: 1696474] 2026-10-12-16:06:48.387.974 (E39999):  The error from device(chipId:4, dieId:1), serial number is 10, an exception occurred during AICPU execution, stream_id:1, task_id:4, errcode:0, msg:aicpu execute failed.[FUNC:ProcessStarsAicpuErrorInfo][FILE:device_error_proc.cc][LINE:1247]
+TraceBack (most recent call last):
+       AI CPU kernel execution failed, device_id=9, stream_id=1, task_id=4, soName=simpler_inner_5f3f8eb1ba40fb64_9.so, funcName=simpler_aicpu_kernel_exec, kernelName=simpler_aicpu_kernel_exec_5f3f8eb1ba40fb64, errorCode=0x91, paramAddr=0x12c100031000, argsSize=280, soNameDevAddr=0x12c0c0018000, funcNameDevAddr=0x12c0c001b000, headParamOffset=0, aicpuKernelType=2.[FUNC:PrintAicpuErrorInfo][FILE:davinci_kernel_task.cc][LINE:709]
+       rtDeviceSynchronizeWithTimeout execution failed, reason=the model stream execute failed[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:69]
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_contract_cache_probe.py", line 85, in <module>
+    normal.main()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_normal_state_probe.py", line 104, in main
+    acceptance.main()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 292, in main
+    run(args)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 267, in run
+    graph.reset()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/torch/capture.py", line 61, in reset
+    framework.npu.synchronize(state.config.device_id)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/npu/utils.py", line 72, in synchronize
+    return torch_npu._C._npu_synchronize()
+RuntimeError: npuSynchronizeDevice:../torch_npu/csrc/core/npu/NPUStream.cpp:576 NPU function error: AclrtSynchronizeDeviceWithTimeout, error code is 507011
+[ERROR] 2026-10-12-16:06:48 (PID:1696474, Device:9, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: Model execution failed. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 1696474] 2026-10-12-16:06:48.389.713 (EE9999):  rtDeviceSynchronizeWithTimeout execution failed, reason=the model stream execute failed[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:69]
+TraceBack (most recent call last):
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/torch/shutdown.py:76: RuntimeWarning: PyPTO kernel shutdown did not complete safely; resources retained until process exit: npuSynchronizeDevice:../torch_npu/csrc/core/npu/NPUStream.cpp:576 NPU function error: AclrtSynchronizeDeviceWithTimeout, error code is 507011
+[ERROR] 2026-10-12-16:06:48 (PID:1696474, Device:9, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: Model execution failed. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 1696474] 2026-10-12-16:06:48.392.283 (EE9999):  rtDeviceSynchronizeWithTimeout execution failed, reason=the model stream execute failed[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:69]
+TraceBack (most recent call last):
+
+  self._close()
+[W1012 16:06:48.150795636 NPUStream.cpp:596] Warning: NPU warning, error code is 507011[Error]: 
+[Error]: Model execution failed. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 1696474] 2026-10-12-16:06:48.393.023 (EE9999):  rtDeviceSynchronizeWithTimeout execution failed, reason=the model stream execute failed[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:69]
+TraceBack (most recent call last):
+ (function npuSynchronizeUsedDevices)
+[W1012 16:06:48.151856127 NPUStream.cpp:578] Warning: NPU warning, error code is 507011[Error]: 
+[Error]: Model execution failed. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 1696474] 2026-10-12-16:06:48.394.082 (EE9999):  rtDeviceSynchronizeWithTimeout execution failed, reason=the model stream execute failed[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:69]
+TraceBack (most recent call last):
+ (function npuSynchronizeDevice)

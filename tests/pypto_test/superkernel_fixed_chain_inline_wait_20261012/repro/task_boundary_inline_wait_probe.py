@@ -92,8 +92,10 @@ def main():
     runtime = args.runtime_root.resolve()
     RuntimeBuilder._CACHE_DIR = runtime / "runtime/cache"
     RuntimeBuilder._LIB_DIR = runtime / "runtime/lib"
+    # KernelArtifact.load() also checks the compiler inputs during replay.
+    # Keep the process-local include path identical to the compile process.
+    install_adapter()
     if args.action in ("compile", "diagnostics"):
-        install_adapter()
         (root / "wait_adapter.cpp").write_text(pto_backend._SCALAR_PREFIX_WAIT_ADAPTER)
     if args.action == "compile":
         acceptance.artifact(root / "compiled", "early", compile_now=True)
