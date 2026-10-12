@@ -1,4 +1,4 @@
-# 过程103：固定链AICPU派发与AICore启动关联，已编译并排队
+# 过程103：固定链关联诊断通过，逐核日志写回有明显扰动
 
 2026-10-12。只诊断同一17×48任务链，5/50μs两档各一次，保持256轮Scalar、原数据计算和依赖，
 保留early_start、原派发/ACK/选核/early-resolve。没有启用会串行回退的chip swimlane、PMU或参数dump。
@@ -21,7 +21,7 @@ AICore行保留物理核、前缀入口、函数返回、最终尾部记录等�
 离线构建已通过，Python检查通过。初次C++构建的整数窄化错误已修正；
 两次离线编译的SDK提交号不一致已通过恢复冻结SDK解决，原失败日志保留。未因此占卡或重提原队列任务。
 
-任务`task_20261012_140105_357792024852`当前pending，单卡，尚无设备记录或性能结论。
+任务`task_20261012_140105_357792024852`卡2退出0，两档各816条完整记录，输出及保护区精确通过。
 私有输出：`artifacts/boundary_dispatch_trace_20261012/`。
 [完整补丁](candidate.patch)、[仅插桩补丁](instrumentation_only.patch)、[驱动](repro/task_boundary_dispatch_trace.py)、[排队脚本](repro/run.sh)。
 
@@ -39,7 +39,17 @@ AICore行保留物理核、前缀入口、函数返回、最终尾部记录等�
 
 入口要求5/50μs两档、每档17×48条唯一记录以及输出/保护区通过标志；
 还检查核映射与同核派发代次，报告时间顺序矛盾。已用合成数据验证四类区分、负值保留和重复身份拒绝，
-[CPU检查记录](analyzer_cpu.log)不包含设备测量。实际数据尚在排队。
+[CPU检查记录](analyzer_cpu.log)不包含设备测量。[实际数据及解析](device/)已回收。
 
 数据产生后运行：`python task_boundary_dispatch_analysis.py <本次目录>/results.json`，
 默认写入同目录`dispatch_analysis.json`。
+
+## 已回收结果及纠正
+
+短档424对pending且可交接的同核相邻任务：418对在前驱尾部记录后才开始发布，6对观察到重叠；长档768对均重叠。
+准备结束至发布的均值分别6.56/6.19μs，但发布循环里每个trace行都执行了cache clean、dsb/isb，
+逐核发布间隔约0.6μs明显包含新增采集成本，**不能把这一时长归因于原运行时批量派发**。
+
+[过程104](../superkernel_fixed_chain_deferred_trace_20261012/README.md)将日志cache clean移到调度循环退出，
+并去掉仅用于采样的逐核wmb，保留运行时原有发布屏障；用修正版进一步判断时序。
+两版诊断都不能替代无插桩的min/mean/max验收。
