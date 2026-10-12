@@ -170,3 +170,36 @@ CPU命中仍不能证明NPU真实特殊化全部命中；后续逐rank核查cach
 已提交同环境仅CSA精度版任务；使用CPU准备好的同一官方READY缓存，
 逐rank核查实际替换、FULL重放、模块路径和cache_stats。
 每项仍max-time780秒，约五分钟监控。尚无新环境Native/PTO精度结论。
+
+## 2026-10-12：整模型 CSA 精度版首档失配，暂停扩展
+
+同一运行包环境的仅 CSA 精度替换任务完成（exit0），16rank结果完整。
+40题各生成192token，DP16各自重复同一40题；性能版与HCA未修改。
+Native两次独立重复已逐token/逐接受事件一致。
+
+| 检查 | 结果 |
+| --- | --- |
+| 输出token分歧 | 26/40个不同问题（416/640条DP请求） |
+| 接受事件分歧 | 32/40个不同问题（512/640条DP请求） |
+| 最早分歧 | q09、q38的第0个输出token |
+| q09首token：Native / PTO | 46543 / 24313 |
+| q38首token：Native / PTO | 3648 / 9854 |
+| 平均接受：Native / PTO | 3.703591 / 3.656043 |
+| PTO内部16DP复现 | token与接受事件一致，抢占0 |
+| 每rank官方cache_stats | requests105、object_hits62、ready_hits1 |
+| 重建/旁路/身份或存储错误 | 所有rank均0 |
+
+[完整比较记录](evidence_tnd_precision/low_acceptance_package_precision_fail_20261012.json)。
+首个token不同后生成上下文已分叉，后续45824个不同位置是轨迹差异，不能解释为同输入的浮点误差计数。
+此前17项单层逐bit一致不能推广为本次真实整模型通过。
+
+独立复核另发现测试overlay的观测缺陷：CSA与已缺失的HCA包处于同一个import异常分支，
+HCA导入失败导致CSA捕获计数器也未安装。因此空capture_time_selection不证明未执行PTO。
+声明的21CSA精度runtime、实际PyPTO缓存调用与FULL重放均存在；真实token失配仍成立。
+修复为独立安装CSA计数器、仅允许可选HCA模块本身缺失、真实依赖错误向上传播；
+无NPU回归覆盖缺失HCA、继承HCA不重复计数、缺失真实依赖三种情况。
+
+按首个失配即暂停规则，不提交128K或后续大配置。
+下一项只对首步T40/B40、首个CSA层2的同一实际hidden/positions/cache初态进行模块对拍，
+恢复声明会写的物理页后执行Native参考，保留PTO原输出和PTO cache继续执行。
+诊断仍保持短任务、复用已编译产物，优先定位最早算术或接口差异。

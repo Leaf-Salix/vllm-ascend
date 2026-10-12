@@ -57,30 +57,32 @@ _CSA_SELECTION = {}
 
 
 def _enable_selection_counter():
-    """在模型加载前给 CSAServiceRuntime.eligible 打补丁，统计其判定结果。
+    """捕获期独立观测 CSA；缺失可选 HCA 包不能导致 CSA 观测失效。"""
+    from vllm_ascend.ops.pypto.variant import variant_package
 
-    worker extension 在 load_model 之前就被解析导入，所以只有在模块导入时打补丁
-    才覆盖得到捕获期。Native 后端没有这个模块，import 失败即跳过。
-    """
+    CSAServiceRuntime = __import__(f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+    classes = [CSAServiceRuntime]
+    hca_module = "vllm_ascend.ops.pypto.deepseek_v4_flash_hca.service"
     try:
-        # 钩子必须补到实际在跑的那一套算子上，否则 PTO_CSA_VARIANT 一切换就全落空。
-        from vllm_ascend.ops.pypto.variant import variant_package
-        CSAServiceRuntime = __import__(
-            f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
-    except Exception:
-        return
+        HCAServiceRuntime = __import__(hca_module, fromlist=["HCAServiceRuntime"]).HCAServiceRuntime
+    except ModuleNotFoundError as error:
+        if error.name not in (hca_module, hca_module.rsplit(".", 1)[0]):
+            raise
+    else:
+        classes.append(HCAServiceRuntime)
+    # 先取出继承前的函数，避免 HCA 继承 CSA 时重复套上计数器。
+    originals = [(cls, cls.eligible) for cls in classes]
+    for cls, origin in originals:
 
-    origin = CSAServiceRuntime.eligible
+        def counted(runtime, context, hidden, positions, _origin=origin):
+            verdict = _origin(runtime, context, hidden, positions)
+            layer = getattr(runtime, "layer_name", "?")
+            key = f"{'pto' if verdict else 'native'}_tokens{int(hidden.shape[0])}"
+            bucket = _CSA_SELECTION.setdefault(layer, {})
+            bucket[key] = bucket.get(key, 0) + 1
+            return verdict
 
-    def counted(runtime, context, hidden, positions):
-        verdict = origin(runtime, context, hidden, positions)
-        layer = getattr(runtime, "layer_name", "?")
-        key = f"{'pto' if verdict else 'native'}_tokens{int(hidden.shape[0])}"
-        bucket = _CSA_SELECTION.setdefault(layer, {})
-        bucket[key] = bucket.get(key, 0) + 1
-        return verdict
-
-    CSAServiceRuntime.eligible = counted
+        cls.eligible = counted
 
 
 _enable_selection_counter()
@@ -102,12 +104,16 @@ class OfflineCSAObserver:
         from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.native_storage import indexer_storage, physical_pages
 
         def describe(tensor):
-            return {"shape": list(tensor.shape), "stride": list(tensor.stride()),
-                    "dtype": str(tensor.dtype), "pointer": tensor.data_ptr(),
-                    "storage_pointer": tensor.untyped_storage().data_ptr(),
-                    "storage_offset": tensor.storage_offset(),
-                    "storage_bytes": tensor.untyped_storage().nbytes(),
-                    "view_bytes": tensor.numel() * tensor.element_size()}
+            return {
+                "shape": list(tensor.shape),
+                "stride": list(tensor.stride()),
+                "dtype": str(tensor.dtype),
+                "pointer": tensor.data_ptr(),
+                "storage_pointer": tensor.untyped_storage().data_ptr(),
+                "storage_offset": tensor.storage_offset(),
+                "storage_bytes": tensor.untyped_storage().nbytes(),
+                "view_bytes": tensor.numel() * tensor.element_size(),
+            }
 
         layers = {}
         for index, layer in enumerate(self.model_runner.get_model().model.layers):
@@ -115,25 +121,33 @@ class OfflineCSAObserver:
             if attention.compress_ratio != 4:
                 continue
             cmp_kv, swa, state, inner_state, key, scale = _build_kv_cache(
-                attention.dsa_attn, SimpleNamespace(virtual_engine=None))
-            tensors = {"cmp_kv": cmp_kv, "kv_cache": swa,
-                       "compress_state": physical_pages(state),
-                       "inner_compress_state": physical_pages(inner_state),
-                       "idx_kv_cache": indexer_storage(key, scale)}
+                attention.dsa_attn, SimpleNamespace(virtual_engine=None)
+            )
+            tensors = {
+                "cmp_kv": cmp_kv,
+                "kv_cache": swa,
+                "compress_state": physical_pages(state),
+                "inner_compress_state": physical_pages(inner_state),
+                "idx_kv_cache": indexer_storage(key, scale),
+            }
             views = {name: describe(tensor) for name, tensor in tensors.items()}
             overlaps = []
             names = list(views)
             for i, left in enumerate(names):
-                for right in names[i + 1:]:
+                for right in names[i + 1 :]:
                     a, b = views[left], views[right]
                     begin = max(a["pointer"], b["pointer"])
                     end = min(a["pointer"] + a["view_bytes"], b["pointer"] + b["view_bytes"])
                     if begin < end:
-                        overlaps.append({"left": left, "right": right, "overlap_bytes": end - begin,
-                                         "same_byte_range": (a["pointer"], a["view_bytes"]) ==
-                                                            (b["pointer"], b["view_bytes"]),
-                                         "same_descriptor": all(a[k] == b[k] for k in
-                                                                ("pointer", "shape", "stride", "dtype"))})
+                        overlaps.append(
+                            {
+                                "left": left,
+                                "right": right,
+                                "overlap_bytes": end - begin,
+                                "same_byte_range": (a["pointer"], a["view_bytes"]) == (b["pointer"], b["view_bytes"]),
+                                "same_descriptor": all(a[k] == b[k] for k in ("pointer", "shape", "stride", "dtype")),
+                            }
+                        )
             layers[str(index)] = {"views": views, "overlaps": overlaps}
         return {"scope": "仅采集描述符，无PTO计算或精度结论", "layers": layers}
 
@@ -163,8 +177,10 @@ class OfflineCSAObserver:
             self._offline_csa_handles.append(attention.register_forward_hook(completed, with_kwargs=True))
         if len(self._offline_csa_counts) != 21:
             raise RuntimeError(f"Expected 21 target CSA layers, got {len(self._offline_csa_counts)}")
-        return {"target_csa_layers": list(self._offline_csa_counts),
-                "dp_rank": self.vllm_config.parallel_config.data_parallel_rank}
+        return {
+            "target_csa_layers": list(self._offline_csa_counts),
+            "dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
+        }
 
     def offline_end_observation(self):
         for handle in self._offline_csa_handles:
@@ -172,14 +188,15 @@ class OfflineCSAObserver:
         self._offline_csa_handles = []
         # forward hook 在图重放下不触发，窗口内的计数通常全是空的；
         # per-layer 命中以捕获期的 capture_time_selection 为准。
-        return {"forward_hook_counts": {layer: dict(counts)
-                                        for layer, counts in self._offline_csa_counts.items()},
-                "capture_time_selection": {layer: dict(counts)
-                                           for layer, counts in _CSA_SELECTION.items()},
-                "note": "图重放不触发 forward hook，per-layer 命中看 capture_time_selection"}
+        return {
+            "forward_hook_counts": {layer: dict(counts) for layer, counts in self._offline_csa_counts.items()},
+            "capture_time_selection": {layer: dict(counts) for layer, counts in _CSA_SELECTION.items()},
+            "note": "图重放不触发 forward hook，per-layer 命中看 capture_time_selection",
+        }
 
-    def offline_begin_profile(self, directory, start_step, steps, expected_tokens, expected_requests,
-                              level=1, forward_events=False):
+    def offline_begin_profile(
+        self, directory, start_step, steps, expected_tokens, expected_requests, level=1, forward_events=False
+    ):
         """从指定稳态 step 起采集连续 CPU+NPU 数据，不采 Python stack。
 
         只统计达到稳态构成的 step，窗口两端各做一次同步，确保设备任务完整落在窗口内。
@@ -193,23 +210,37 @@ class OfflineCSAObserver:
         rank = self.vllm_config.parallel_config.data_parallel_rank
         target = os.path.join(directory, f"rank{rank}")
         profiler = torch_npu.profiler.profile(
-            activities=[torch_npu.profiler.ProfilerActivity.CPU,
-                        torch_npu.profiler.ProfilerActivity.NPU],
-            record_shapes=False, profile_memory=False, with_stack=False, with_modules=False,
+            activities=[torch_npu.profiler.ProfilerActivity.CPU, torch_npu.profiler.ProfilerActivity.NPU],
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=False,
+            with_modules=False,
             experimental_config=torch_npu.profiler._ExperimentalConfig(
-                profiler_level=(torch_npu.profiler.ProfilerLevel.Level0 if level == 0
-                                else torch_npu.profiler.ProfilerLevel.Level1)),
+                profiler_level=(
+                    torch_npu.profiler.ProfilerLevel.Level0 if level == 0 else torch_npu.profiler.ProfilerLevel.Level1
+                )
+            ),
             on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(target),
         )
         runner = self.model_runner
         original = runner.execute_model
         original_forward = runner._model_forward if forward_events else None
         forward_records, active_forward = [], [None]
-        state = {"dp_rank": rank, "trace_dir": target, "start_step": start_step,
-                 "requested_steps": steps, "expected_tokens": expected_tokens,
-                 "expected_requests": expected_requests, "seen_steady_steps": 0,
-                 "profiled_steps": 0, "closed": False, "window": [], "observed": {},
-                 "profiler_level": level, "forward_events_enabled": forward_events}
+        state = {
+            "dp_rank": rank,
+            "trace_dir": target,
+            "start_step": start_step,
+            "requested_steps": steps,
+            "expected_tokens": expected_tokens,
+            "expected_requests": expected_requests,
+            "seen_steady_steps": 0,
+            "profiled_steps": 0,
+            "closed": False,
+            "window": [],
+            "observed": {},
+            "profiler_level": level,
+            "forward_events_enabled": forward_events,
+        }
 
         def measured_forward(*args, **kwargs):
             import torch
@@ -241,8 +272,9 @@ class OfflineCSAObserver:
             index = state["seen_steady_steps"]
             if steady:
                 state["seen_steady_steps"] += 1
-            active = (state["profiled_steps"] < steps and
-                      (state["profiled_steps"] > 0 or (steady and index >= start_step)))
+            active = state["profiled_steps"] < steps and (
+                state["profiled_steps"] > 0 or (steady and index >= start_step)
+            )
             if active and state["profiled_steps"] == 0:
                 torch.npu.synchronize()
                 profiler.start()
@@ -256,8 +288,9 @@ class OfflineCSAObserver:
                     active_forward[0] = None
                 if active:
                     state["profiled_steps"] += 1
-                    state["window"].append({"steady_step_index": index, "scheduled_tokens": tokens,
-                                            "requests": requests})
+                    state["window"].append(
+                        {"steady_step_index": index, "scheduled_tokens": tokens, "requests": requests}
+                    )
                     if state["profiled_steps"] == steps:
                         torch.npu.synchronize()
                         profiler.stop()
@@ -293,17 +326,20 @@ class OfflineCSAObserver:
                 "start_timestamps_raw": timestamps,
                 "step_indices": [entry["steady_step_index"] for entry in valid],
                 "positions_cpu": [entry["positions_cpu"] for entry in valid],
-                "sufficient": (len(valid) == len(forward_records) == state["requested_steps"]
-                               and all(math.isfinite(v) and v > 0 for v in values)
-                               and all(b > a for a, b in zip(timestamps, timestamps[1:]))),
+                "sufficient": (
+                    len(valid) == len(forward_records) == state["requested_steps"]
+                    and all(math.isfinite(v) and v > 0 for v in values)
+                    and all(b > a for a, b in zip(timestamps, timestamps[1:]))
+                ),
             }
         # 采不到足够样本时**不要抛异常**：异常会让整个 rank 的 json 落不了盘，
         # 连同 observed 里的诊断信息一起丢失——T2.1 前两轮就是这样，失败了却
         # 拿不到"实际每步调度了多少 token"，只能另想办法查。这里如实记进报告，
         # 由调用方按 profiled_steps 判断是否可用。
         state["sufficient"] = state["profiled_steps"] == state["requested_steps"] and all(
-            item["scheduled_tokens"] == state["expected_tokens"] and
-            item["requests"] == state["expected_requests"] for item in state["window"])
+            item["scheduled_tokens"] == state["expected_tokens"] and item["requests"] == state["expected_requests"]
+            for item in state["window"]
+        )
         return state
 
     def offline_begin_bitcompare(self, layer_index, expected_tokens, max_samples, mode):
@@ -323,10 +359,8 @@ class OfflineCSAObserver:
 
         from vllm_ascend.ops.pypto.variant import variant_package
 
-        CSAServiceRuntime = __import__(
-            f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
-        NativeCSACall = __import__(
-            f"{variant_package()}.native_adapter", fromlist=["NativeCSACall"]).NativeCSACall
+        CSAServiceRuntime = __import__(f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+        NativeCSACall = __import__(f"{variant_package()}.native_adapter", fromlist=["NativeCSACall"]).NativeCSACall
 
         if getattr(self, "_offline_bitcompare", None) is not None:
             raise RuntimeError("Bit comparison is already active")
@@ -342,10 +376,17 @@ class OfflineCSAObserver:
         original = CSAServiceRuntime.__call__
         if mode not in ("native", "self"):
             raise ValueError(f"mode must be 'native' or 'self', got {mode!r}")
-        state = {"dp_rank": rank, "layer_index": layer_index, "layer_name": wanted.layer_name,
-                 "native_prefix": native_prefix, "mode": mode,
-                 "expected_tokens": expected_tokens, "max_samples": max_samples,
-                 "samples": [], "seen": 0}
+        state = {
+            "dp_rank": rank,
+            "layer_index": layer_index,
+            "layer_name": wanted.layer_name,
+            "native_prefix": native_prefix,
+            "mode": mode,
+            "expected_tokens": expected_tokens,
+            "max_samples": max_samples,
+            "samples": [],
+            "seen": 0,
+        }
 
         def compared(runtime, context, hidden, positions, output, kv_cache, *args, **kwargs):
             if runtime is not wanted or hidden.shape[0] != expected_tokens:
@@ -381,31 +422,42 @@ class OfflineCSAObserver:
                 # attention + mHC post），hidden 是层间的 [T, HC_MULT, D] 残差流，
                 # 不再是归一化后的 [T, D]，所以对照侧也必须走同样范围的 Native 链路。
                 from vllm_ascend.ops.dsv4_csa import _native_attention_half
+
                 _native_attention_half(attention.dsa_attn, hidden, positions, output)
             native = output.detach().clone()
             comparison = compare_tensor(pto, native, 0, 0)
             equal = bool(torch.equal(pto.contiguous().view(torch.uint8), native.contiguous().view(torch.uint8)))
-            record = {"step": state["seen"], "shape": list(pto.shape), "dtype": str(pto.dtype),
-                      "mode": mode, "bit_equal": equal, "elementwise": comparison}
+            record = {
+                "step": state["seen"],
+                "shape": list(pto.shape),
+                "dtype": str(pto.dtype),
+                "mode": mode,
+                "bit_equal": equal,
+                "elementwise": comparison,
+            }
             if not equal and comparison.get("nonfinite") == 0:
                 diff = (pto.float() - native.float()).abs()
                 mismatch = pto.ne(native)
                 scale = float(native.float().abs().max())
-                record.update({
-                    "mismatches": int(mismatch.sum()), "elements": int(pto.numel()),
-                    "max_abs": float(diff.max()), "mean_abs": float(diff.mean()),
-                    # 量级上下文：光有绝对差看不出相对多大。
-                    "native_max_abs": scale,
-                    "max_abs_over_scale": float(diff.max()) / scale if scale else None,
-                    # ULP 必须在单调序下算：BF16 位模式按有符号整数直接相减时，
-                    # 正负跨零的两个数会得到约 32768 的巨大差值，那是假象不是差距
-                    # （上一版就因此报出 max_ulp=32307）。近零值上 ULP 本身也不可靠，
-                    # 所以同时给出只在"两侧同号且绝对值不低于 scale 的千分之一"的
-                    # 元素上统计的 ULP，那部分才有解释力。
-                    "max_ulp_monotonic": _monotonic_ulp(pto, native, torch),
-                    "max_ulp_significant": _monotonic_ulp(pto, native, torch, floor=scale / 1000.0),
-                    "first_mismatch": mismatch.nonzero()[:4].tolist(),
-                })
+                record.update(
+                    {
+                        "mismatches": int(mismatch.sum()),
+                        "elements": int(pto.numel()),
+                        "max_abs": float(diff.max()),
+                        "mean_abs": float(diff.mean()),
+                        # 量级上下文：光有绝对差看不出相对多大。
+                        "native_max_abs": scale,
+                        "max_abs_over_scale": float(diff.max()) / scale if scale else None,
+                        # ULP 必须在单调序下算：BF16 位模式按有符号整数直接相减时，
+                        # 正负跨零的两个数会得到约 32768 的巨大差值，那是假象不是差距
+                        # （上一版就因此报出 max_ulp=32307）。近零值上 ULP 本身也不可靠，
+                        # 所以同时给出只在"两侧同号且绝对值不低于 scale 的千分之一"的
+                        # 元素上统计的 ULP，那部分才有解释力。
+                        "max_ulp_monotonic": _monotonic_ulp(pto, native, torch),
+                        "max_ulp_significant": _monotonic_ulp(pto, native, torch, floor=scale / 1000.0),
+                        "first_mismatch": mismatch.nonzero()[:4].tolist(),
+                    }
+                )
             state["samples"].append(record)
             return result
 
@@ -422,14 +474,15 @@ class OfflineCSAObserver:
         state["all_bit_equal"] = bool(samples) and all(s["bit_equal"] for s in samples)
         # 样本为 0 要如实记录，不能让空集合的 all() 为真而误判通过。
         state["sufficient"] = bool(samples) and len(samples) >= state["max_samples"]
-        state["status"] = "MEASURED" if state["sufficient"] and all(
-            s["elementwise"].get("nonfinite") == 0 for s in samples
-        ) else "FAIL"
+        state["status"] = (
+            "MEASURED"
+            if state["sufficient"] and all(s["elementwise"].get("nonfinite") == 0 for s in samples)
+            else "FAIL"
+        )
         state["scope"] = "零容差逐元素诊断；算术差异另按精度合同验收，不代表独立整模型通过"
         return state
 
-    def offline_begin_forward(self, warmup_steps, expected_tokens, expected_requests, steps=10,
-                              host_diagnostics=False):
+    def offline_begin_forward(self, warmup_steps, expected_tokens, expected_requests, steps=10, host_diagnostics=False):
         """只包围 Native _model_forward；execute_model 仅用于辨认实际 decode 档位。"""
         import torch
 
@@ -439,10 +492,17 @@ class OfflineCSAObserver:
             raise RuntimeError("Forward/steady measurement is already active")
         runner = self.model_runner
         original_execute, original_forward = runner.execute_model, runner._model_forward
-        state = {"schema": 3, "kind": "model_forward",
-                 "dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
-                 "warmup_steps": warmup_steps, "requested_steps": steps, "seen_steps": 0,
-                 "all_execute_calls": 0, "observed": {}, "timing_event_setup": TIMING_EVENT_SETUP}
+        state = {
+            "schema": 3,
+            "kind": "model_forward",
+            "dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
+            "warmup_steps": warmup_steps,
+            "requested_steps": steps,
+            "seen_steps": 0,
+            "all_execute_calls": 0,
+            "observed": {},
+            "timing_event_setup": TIMING_EVENT_SETUP,
+        }
         events, active = [], [None]
         torch.npu.reset_peak_memory_stats()
         event_pairs = prewarm_timing_events(steps)
@@ -524,21 +584,31 @@ class OfflineCSAObserver:
         valid = [entry for entry in events if entry["forward_calls"] == 1]
         values = [entry["begin"].elapsed_time(entry["end"]) * 1000 for entry in valid]
         stamps = [entry["begin"].recorded_time() for entry in valid]
-        state.update(measured_steps=len(events), step_tokens=[entry["tokens"] for entry in events],
-                     step_requests=[entry["requests"] for entry in events],
-                     steady_step_indices=[entry["index"] for entry in events],
-                     step_positions_cpu=[entry.get("request_positions", []) for entry in events])
-        state["forward"] = {"samples_us": values, "start_timestamps_raw": stamps,
-                            "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
-                                     "DSpark 草稿或步间调度等待；不逐步同步"}
+        state.update(
+            measured_steps=len(events),
+            step_tokens=[entry["tokens"] for entry in events],
+            step_requests=[entry["requests"] for entry in events],
+            steady_step_indices=[entry["index"] for entry in events],
+            step_positions_cpu=[entry.get("request_positions", []) for entry in events],
+        )
+        state["forward"] = {
+            "samples_us": values,
+            "start_timestamps_raw": stamps,
+            "scope": "_model_forward 调用前后设备事件；不含 metadata 准备、logits、采样、"
+            "DSpark 草稿或步间调度等待；不逐步同步",
+        }
         if values:
-            state["forward"].update(mean_us=statistics.mean(values), p50_us=statistics.median(values),
-                                     p95_us=sorted(values)[math.ceil(len(values) * .95) - 1])
+            state["forward"].update(
+                mean_us=statistics.mean(values),
+                p50_us=statistics.median(values),
+                p95_us=sorted(values)[math.ceil(len(values) * 0.95) - 1],
+            )
         state["sufficient"] = (
             len(valid) == len(events) == state["requested_steps"]
             and all(math.isfinite(v) and v > 0 for v in values)
             and all(b > a for a, b in zip(stamps, stamps[1:]))
-            and all(b["call"] == a["call"] + 1 for a, b in zip(events, events[1:])))
+            and all(b["call"] == a["call"] + 1 for a, b in zip(events, events[1:]))
+        )
         return state
 
     def offline_begin_steady(self, warmup_steps, expected_tokens, expected_requests, cycles=10):
@@ -550,11 +620,21 @@ class OfflineCSAObserver:
         rank = self.vllm_config.parallel_config.data_parallel_rank
         runner = self.model_runner
         original, original_sample = runner.execute_model, runner.sample_tokens
-        state = {"dp_rank": rank, "schema": 2, "warmup_steps": warmup_steps, "seen_steps": 0,
-                 "expected_tokens": expected_tokens, "expected_requests": expected_requests,
-                 "requested_cycles": cycles,
-                 "observed": {}, "step_seconds": [], "step_tokens": [], "step_requests": [],
-                 "all_execute_calls": 0, "incomplete_sample_steps": 0}
+        state = {
+            "dp_rank": rank,
+            "schema": 2,
+            "warmup_steps": warmup_steps,
+            "seen_steps": 0,
+            "expected_tokens": expected_tokens,
+            "expected_requests": expected_requests,
+            "requested_cycles": cycles,
+            "observed": {},
+            "step_seconds": [],
+            "step_tokens": [],
+            "step_requests": [],
+            "all_execute_calls": 0,
+            "incomplete_sample_steps": 0,
+        }
         events = []
         pending = [None]
         torch.npu.reset_peak_memory_stats()
@@ -577,8 +657,14 @@ class OfflineCSAObserver:
             if index < warmup_steps or len(events) >= cycles + 1:
                 return original(scheduler_output, *args, **kwargs)
             begin, end, sample_end = (torch.npu.Event(enable_timing=True) for _ in range(3))
-            entry = {"begin": begin, "execute_end": end, "sample_end": sample_end,
-                     "call_index": call_index, "steady_index": index, "sample_complete": False}
+            entry = {
+                "begin": begin,
+                "execute_end": end,
+                "sample_end": sample_end,
+                "call_index": call_index,
+                "steady_index": index,
+                "sample_complete": False,
+            }
             begin.record()
             start = time.perf_counter()
             entry["host_start"] = start
@@ -624,47 +710,66 @@ class OfflineCSAObserver:
         torch.npu.synchronize()
         stamps = [e["begin"].recorded_time() for e in events]
         device_us = [e["begin"].elapsed_time(e["execute_end"]) * 1000 for e in events]
-        valid_events = bool(stamps) and all(b > a for a, b in zip(stamps, stamps[1:])) and all(
-            math.isfinite(value) and value > 0 for value in device_us)
+        valid_events = (
+            bool(stamps)
+            and all(b > a for a, b in zip(stamps, stamps[1:]))
+            and all(math.isfinite(value) and value > 0 for value in device_us)
+        )
 
         def distribution(values):
             if not values:
                 return {}
             ordered = sorted(values)
-            return {"mean_us": statistics.mean(values), "p50_us": statistics.median(values),
-                    "p95_us": ordered[math.ceil(len(values) * 0.95) - 1]}
+            return {
+                "mean_us": statistics.mean(values),
+                "p50_us": statistics.median(values),
+                "p95_us": ordered[math.ceil(len(values) * 0.95) - 1],
+            }
 
-        state["device"] = {"samples_us": device_us, "start_timestamps_raw": stamps,
-                           "valid_events": valid_events,
-                           "scope": "execute_model 设备区间；完整周期见 decode_cycle",
-                           **distribution(device_us)}
+        state["device"] = {
+            "samples_us": device_us,
+            "start_timestamps_raw": stamps,
+            "valid_events": valid_events,
+            "scope": "execute_model 设备区间；完整周期见 decode_cycle",
+            **distribution(device_us),
+        }
         complete = [e for e in events if e["sample_complete"]]
         state["execute_sample_device"] = {
             "samples_us": [e["begin"].elapsed_time(e["sample_end"]) * 1000 for e in complete],
-            "scope": "execute_model 起点至 sample_tokens 返回前，包含采样与 DSpark 草稿"}
+            "scope": "execute_model 起点至 sample_tokens 返回前，包含采样与 DSpark 草稿",
+        }
         cycles, host_cycles, output_counts, indices = [], [], [], []
         for left, right in zip(events, events[1:]):
-            if not (left["sample_complete"] and right["sample_complete"] and
-                    right["call_index"] == left["call_index"] + 1):
+            if not (
+                left["sample_complete"] and right["sample_complete"] and right["call_index"] == left["call_index"] + 1
+            ):
                 continue
             rows = getattr(left["output"], "sampled_token_ids", None)
             count = None
-            if isinstance(rows, list) and len(rows) == state["expected_requests"] and all(
-                    isinstance(row, list) and row and all(type(t) is int and t >= 0 for t in row) for row in rows):
+            if (
+                isinstance(rows, list)
+                and len(rows) == state["expected_requests"]
+                and all(isinstance(row, list) and row and all(type(t) is int and t >= 0 for t in row) for row in rows)
+            ):
                 count = sum(map(len, rows))
             cycles.append(left["begin"].elapsed_time(right["begin"]) * 1000)
             host_cycles.append(right["host_start"] - left["host_start"])
             output_counts.append(count)
             indices.append(left["steady_index"])
         valid_cycles = bool(cycles) and all(math.isfinite(v) and v > 0 for v in cycles)
-        cycle_sufficient = (len(cycles) == state["requested_cycles"] and valid_cycles and
-                            all(v is not None for v in output_counts))
+        cycle_sufficient = (
+            len(cycles) == state["requested_cycles"] and valid_cycles and all(v is not None for v in output_counts)
+        )
         state["decode_cycle"] = {
-            "samples_us": cycles, "host_samples_seconds": host_cycles, "steady_step_indices": indices,
-            "actual_output_tokens": output_counts, "sufficient": cycle_sufficient,
+            "samples_us": cycles,
+            "host_samples_seconds": host_cycles,
+            "steady_step_indices": indices,
+            "actual_output_tokens": output_counts,
+            "sufficient": cycle_sufficient,
             "scope": "连续满档 execute_model 起点间隔，已确认中间 sample_tokens 完成；"
-                     "含采样、DSpark 草稿与引擎调度间隙，不含加载/前缀恢复",
-            **distribution(cycles)}
+            "含采样、DSpark 草稿与引擎调度间隙，不含加载/前缀恢复",
+            **distribution(cycles),
+        }
         if cycle_sufficient:
             state["decode_cycle"]["actual_output_tokens_per_second"] = sum(output_counts) / (sum(cycles) * 1e-6)
         samples = state["step_seconds"]
@@ -693,10 +798,17 @@ class OfflineCSAObserver:
         profiler = cProfile.Profile()
         runner = self.model_runner
         original = runner.execute_model
-        state = {"dp_rank": rank, "start_step": start_step, "requested_steps": steps,
-                 "expected_tokens": expected_tokens, "expected_requests": expected_requests,
-                 "seen_steady_steps": 0, "profiled_steps": 0, "closed": False,
-                 "path": os.path.join(directory, f"rank{rank}.prof")}
+        state = {
+            "dp_rank": rank,
+            "start_step": start_step,
+            "requested_steps": steps,
+            "expected_tokens": expected_tokens,
+            "expected_requests": expected_requests,
+            "seen_steady_steps": 0,
+            "profiled_steps": 0,
+            "closed": False,
+            "path": os.path.join(directory, f"rank{rank}.prof"),
+        }
 
         def profiled(scheduler_output, *args, **kwargs):
             tokens = scheduler_output.total_num_scheduled_tokens
@@ -731,15 +843,22 @@ class OfflineCSAObserver:
             profiler.disable()
             state["closed"] = True
         if state["profiled_steps"] != state["requested_steps"]:
-            raise RuntimeError(f"Host-profiled {state['profiled_steps']} steady steps, "
-                               f"requested {state['requested_steps']}")
+            raise RuntimeError(
+                f"Host-profiled {state['profiled_steps']} steady steps, requested {state['requested_steps']}"
+            )
         os.makedirs(os.path.dirname(state["path"]), exist_ok=True)
         profiler.dump_stats(state["path"])
         rows = []
         for func, (calls, primitive, total, cumulative, _) in pstats.Stats(profiler).stats.items():
-            rows.append({"function": f"{func[0]}:{func[1]}({func[2]})", "calls": calls,
-                         "primitive_calls": primitive, "tottime_seconds": round(total, 4),
-                         "cumtime_seconds": round(cumulative, 4)})
+            rows.append(
+                {
+                    "function": f"{func[0]}:{func[1]}({func[2]})",
+                    "calls": calls,
+                    "primitive_calls": primitive,
+                    "tottime_seconds": round(total, 4),
+                    "cumtime_seconds": round(cumulative, 4),
+                }
+            )
         state["top_by_tottime"] = sorted(rows, key=lambda r: r["tottime_seconds"], reverse=True)[:30]
         state["top_by_cumtime"] = sorted(rows, key=lambda r: r["cumtime_seconds"], reverse=True)[:30]
         return state
@@ -764,16 +883,29 @@ class OfflineCSAObserver:
             raise RuntimeError("Padding capture is already active")
         rank = self.vllm_config.parallel_config.data_parallel_rank
         original = AscendDSAMetadataBuilder.build
-        state = {"dp_rank": rank, "layer_index": layer_index,
-                 "captured": 0, "builds_seen": 0, "padded_builds": 0,
-                 "dummy_runs": 0, "dummy_tokens": [],
-                 "step_probes": 0, "step_probe_results": [],
-                 "in_dummy": False, "slot_samples": 0, "slot_probe_results": [],
-                 "recaptures": 0,
-                 "compact_samples": 0, "compact_probe_results": [],
-                 "replay_calls": 0, "replay_padded": 0,
-                 "replay_padded_allowed": 0, "replay_rejected": 0,
-                 "records": [], "directory": str(directory)}
+        state = {
+            "dp_rank": rank,
+            "layer_index": layer_index,
+            "captured": 0,
+            "builds_seen": 0,
+            "padded_builds": 0,
+            "dummy_runs": 0,
+            "dummy_tokens": [],
+            "step_probes": 0,
+            "step_probe_results": [],
+            "in_dummy": False,
+            "slot_samples": 0,
+            "slot_probe_results": [],
+            "recaptures": 0,
+            "compact_samples": 0,
+            "compact_probe_results": [],
+            "replay_calls": 0,
+            "replay_padded": 0,
+            "replay_padded_allowed": 0,
+            "replay_rejected": 0,
+            "records": [],
+            "directory": str(directory),
+        }
         self._offline_replay_probe(state)
         self._offline_dummy_probe(state)
         self._offline_slot_probe(state)
@@ -823,8 +955,9 @@ class OfflineCSAObserver:
             return
 
         def counted(*, num_tokens, num_reqs, uniform_decode, padded_tokens):
-            verdict = origin(num_tokens=num_tokens, num_reqs=num_reqs,
-                             uniform_decode=uniform_decode, padded_tokens=padded_tokens)
+            verdict = origin(
+                num_tokens=num_tokens, num_reqs=num_reqs, uniform_decode=uniform_decode, padded_tokens=padded_tokens
+            )
             state["replay_calls"] += 1
             if num_tokens < padded_tokens:
                 state["replay_padded"] += 1
@@ -869,13 +1002,15 @@ class OfflineCSAObserver:
             flat = slots.reshape(-1, slots.shape[-1]) if slots.dim() > 1 else slots.reshape(-1, 1)
             pages = flat[:, 0]
             state["compact_samples"] += 1
-            state["compact_probe_results"].append({
-                "num_tokens": int(num_tokens),
-                "rows": int(flat.shape[0]),
-                "non_negative_pages": int((pages >= 0).sum().item()),
-                "max_page": int(pages.max().item()),
-                "min_page": int(pages.min().item()),
-            })
+            state["compact_probe_results"].append(
+                {
+                    "num_tokens": int(num_tokens),
+                    "rows": int(flat.shape[0]),
+                    "non_negative_pages": int((pages >= 0).sum().item()),
+                    "max_page": int(pages.max().item()),
+                    "min_page": int(pages.min().item()),
+                }
+            )
         except Exception as error:
             state.setdefault("compact_probe_error", repr(error))
 
@@ -913,8 +1048,10 @@ class OfflineCSAObserver:
         try:
             # 钩子必须补到实际在跑的那一套算子上，否则 PTO_CSA_VARIANT 一切换就全落空。
             from vllm_ascend.ops.pypto.variant import variant_package
+
             CSAServiceRuntime = __import__(
-                f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+                f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]
+            ).CSAServiceRuntime
         except Exception as error:
             state["slot_probe"] = f"unavailable: {error!r}"
             return
@@ -932,9 +1069,11 @@ class OfflineCSAObserver:
                         if slots is None:
                             continue
                         flat = slots.reshape(-1)
-                        record[name] = {"count": int(flat.numel()),
-                                        "non_negative": int((flat >= 0).sum().item()),
-                                        "max": int(flat.max().item())}
+                        record[name] = {
+                            "count": int(flat.numel()),
+                            "non_negative": int((flat >= 0).sum().item()),
+                            "max": int(flat.max().item()),
+                        }
                     state["slot_samples"] += 1
                     state["slot_probe_results"].append(record)
                 except Exception as error:
@@ -961,8 +1100,7 @@ class OfflineCSAObserver:
             import torch
 
             torch.npu.synchronize()
-            record = {"dummy_index": state["dummy_runs"], "num_tokens": int(num_tokens),
-                      "groups": {}}
+            record = {"dummy_index": state["dummy_runs"], "num_tokens": int(num_tokens), "groups": {}}
             for gid in range(len(runner.kv_cache_config.kv_cache_groups)):
                 table = runner.input_batch.block_table[gid]
                 flat = table.slot_mapping.gpu.reshape(-1)
@@ -1040,7 +1178,8 @@ class OfflineCSAObserver:
             "query_start_loc": decode.query_start_loc.tolist(),
             "block_table_shape": list(decode.block_table.shape),
             "block_table_nonzero_per_row": torch.count_nonzero(
-                decode.block_table.reshape(decode.block_table.shape[0], -1), dim=-1).tolist(),
+                decode.block_table.reshape(decode.block_table.shape[0], -1), dim=-1
+            ).tolist(),
         }
         start_pos = getattr(decode, "start_pos", None)
         if start_pos is not None:
@@ -1057,7 +1196,6 @@ class OfflineCSAObserver:
         if rows is not None:
             entry["num_compressed_tokens"] = int(rows)
         return entry
-
 
     def _offline_padding_write(self, directory, rank, records):
         import pathlib
@@ -1077,24 +1215,29 @@ class OfflineCSAObserver:
         origin = getattr(self, "_offline_replay_origin", None)
         if origin is not None:
             from vllm_ascend.worker import model_runner_v1
+
             model_runner_v1.can_replay_csa_graph = origin
             self._offline_replay_origin = None
         recapture_origin = getattr(self, "_offline_recapture_origin", None)
         if recapture_origin is not None:
             import torch
+
             torch.npu.NPUGraph = recapture_origin
             self._offline_recapture_origin = None
         slot_origin = getattr(self, "_offline_slot_origin", None)
         if slot_origin is not None:
             # 钩子必须补到实际在跑的那一套算子上，否则 PTO_CSA_VARIANT 一切换就全落空。
             from vllm_ascend.ops.pypto.variant import variant_package
+
             CSAServiceRuntime = __import__(
-                f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+                f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]
+            ).CSAServiceRuntime
             CSAServiceRuntime.__call__ = slot_origin
             self._offline_slot_origin = None
         dummy_origin = getattr(self, "_offline_dummy_origin", None)
         if dummy_origin is not None:
             from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
+
             NPUModelRunner._dummy_run = dummy_origin
             self._offline_dummy_origin = None
         self._offline_padding = None
@@ -1133,9 +1276,16 @@ class OfflineCSAObserver:
         wanted = getattr(attention.dsa_attn, "_pto_csa_runtime", None)
         if wanted is None:
             raise ValueError(f"Layer {layer_index} has no PTO CSA runtime")
-        state = {"dp_rank": rank, "layer_index": layer_index, "layer_name": wanted.layer_name,
-                 "expected_tokens": expected_tokens, "enabled": rank == 0, "dumped": 0, "path": None,
-                 "seen": {}}
+        state = {
+            "dp_rank": rank,
+            "layer_index": layer_index,
+            "layer_name": wanted.layer_name,
+            "expected_tokens": expected_tokens,
+            "enabled": rank == 0,
+            "dumped": 0,
+            "path": None,
+            "seen": {},
+        }
         original_init, original_call = NativeCSACall.__init__, NativeCSACall.__call__
         selected = {}
 
@@ -1148,12 +1298,24 @@ class OfflineCSAObserver:
             if selected or tokens != expected_tokens:
                 return
             values = {name: call.args[name] for name in kernel.param_names}
-            source = {"variant": selected_variant(), "package": package, "weight_nz_mode": WEIGHT_NZ_MODE,
-                      "state_timing": "before_call", "root": kernel.__name__}
+            source = {
+                "variant": selected_variant(),
+                "package": package,
+                "weight_nz_mode": WEIGHT_NZ_MODE,
+                "state_timing": "before_call",
+                "root": kernel.__name__,
+            }
             meta, payload = capture_tensors(values, roles, root_weight_layouts(root), source)
-            meta.update(layer_index=layer_index, layer_name=wanted.layer_name, tokens=tokens,
-                        reference={"file": "csa_reference.pt", "kind": "source_PTO_after_one_call",
-                                   "outputs": list(kernel.output_param_names)})
+            meta.update(
+                layer_index=layer_index,
+                layer_name=wanted.layer_name,
+                tokens=tokens,
+                reference={
+                    "file": "csa_reference.pt",
+                    "kind": "source_PTO_after_one_call",
+                    "outputs": list(kernel.output_param_names),
+                },
+            )
             save_snapshot(out_dir, meta, payload)
             selected["call"] = call
 
@@ -1163,8 +1325,7 @@ class OfflineCSAObserver:
                 import torch
 
                 # 参考值只用于逐元素对照；回放初态与别名来自独立的原始存储快照。
-                reference = {name: call.args[name].detach().to("cpu", copy=True)
-                             for name in kernel.output_param_names}
+                reference = {name: call.args[name].detach().to("cpu", copy=True) for name in kernel.output_param_names}
                 torch.save(reference, Path(out_dir) / "csa_reference.pt")
                 state.update(dumped=1, path=str(Path(out_dir) / "csa_args.pt"))
             return result
@@ -1188,8 +1349,8 @@ class OfflineCSAObserver:
 
         # 钩子必须补到实际在跑的那一套算子上，否则 PTO_CSA_VARIANT 一切换就全落空。
         from vllm_ascend.ops.pypto.variant import variant_package
-        CSAServiceRuntime = __import__(
-            f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+
+        CSAServiceRuntime = __import__(f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
 
         if getattr(self, "_offline_swimlane", None) is not None:
             raise RuntimeError("Swimlane capture is already active")
@@ -1202,8 +1363,14 @@ class OfflineCSAObserver:
         if wanted is None:
             raise ValueError(f"Layer {layer_index} has no PTO CSA runtime")
         original = CSAServiceRuntime.__call__
-        state = {"dp_rank": rank, "enabled": True, "layer_index": layer_index,
-                 "layer_name": wanted.layer_name, "expected_tokens": expected_tokens, "captured": 0}
+        state = {
+            "dp_rank": rank,
+            "enabled": True,
+            "layer_index": layer_index,
+            "layer_name": wanted.layer_name,
+            "expected_tokens": expected_tokens,
+            "captured": 0,
+        }
 
         def traced(runtime, context, hidden, *args, **kwargs):
             if runtime is not wanted or state["captured"] or hidden.shape[0] != expected_tokens:
@@ -1222,12 +1389,11 @@ class OfflineCSAObserver:
     def offline_end_swimlane(self):
         # 钩子必须补到实际在跑的那一套算子上，否则 PTO_CSA_VARIANT 一切换就全落空。
         from vllm_ascend.ops.pypto.variant import variant_package
-        CSAServiceRuntime = __import__(
-            f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
+
+        CSAServiceRuntime = __import__(f"{variant_package()}.service", fromlist=["CSAServiceRuntime"]).CSAServiceRuntime
 
         if self._offline_swimlane is None:
-            return {"dp_rank": self.vllm_config.parallel_config.data_parallel_rank,
-                    "enabled": False, "captured": 0}
+            return {"dp_rank": self.vllm_config.parallel_config.data_parallel_rank, "enabled": False, "captured": 0}
         state, original = self._offline_swimlane
         CSAServiceRuntime.__call__ = original
         self._offline_swimlane = None
