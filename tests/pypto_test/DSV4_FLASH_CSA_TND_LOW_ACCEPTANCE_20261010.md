@@ -110,3 +110,21 @@ Native固定容量第一轮已重新提交，正在排队；每项max-time780秒
 不把本轮宣称为变长TND整模型覆盖。
 独立Native第二轮已提交，保持共同源码、固定状态、静态缓存和运行参数；
 通过后才执行CSA精度版，HCA继续Native。
+
+## 2026-10-12：独立Native重复通过
+
+第二个独立Native进程也exit0完成。冻结源码、固定bank、容量参数、静态缓存SHA、
+实际worker配置及启动参数核验相同；仅排除通信运行ID和观察输出目录。
+两轮各640条请求、122880输出token，逐token差异0，逐请求逐轮接收事件差异0；
+接收统计同样一致，全部0…5类别覆盖，平均接受3.7035909921，零抢占。
+逐请求证据与运行条件见
+[独立Native重复结果](evidence_tnd_precision/low_acceptance_native_repeat_20261012.json)。
+
+两轮的原始rank结果、request_stats JSONL和日志均已另行保存。
+第一轮独立复核也确认逐轮事件与Prometheus汇总对账一致。
+第一轮每rank观察84或87个query样本，包含收尾请求数减少及graph padding；
+有效请求query长度仍全为6，没有不等长请求覆盖。
+
+在此Native基线通过后，已提交TND精度版CSA单独替换任务，HCA仍Native，
+复用相同固定状态和官方缓存。任务max-time780秒，按约五分钟间隔监控。
+本段只证明Native自身重复稳定，尚无本轮Native/PTO误差结论。
