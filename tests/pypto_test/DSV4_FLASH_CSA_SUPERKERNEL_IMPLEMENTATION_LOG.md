@@ -4411,7 +4411,7 @@ PyPTO同步ABI pin和runtime gitlink，并从本工作区重建torch_npu适配�
 旧的3d0b9c820产物只可在匹配的旧私有SDK中重放，不改写旧manifest来适配新版本；公共安装未改。
 
 
-## 114. 过程110进行中：提前预取非普通任务的交接描述行
+## 114. 过程110：即时预取交接描述行，短链回退撤下
 
 2026-10-12。独立detached工作区从b5a358b88出发，只将普通入口判定提前到build_payload之前，
 非普通入口对submitted_overlap所在缓存行发出写预取；仍在原位置写字段并按原批次发布。
@@ -4421,6 +4421,19 @@ PyPTO同步ABI pin和runtime gitlink，并从本工作区重建torch_npu适配�
 首次源码路径检查发现editable安装仍解析到活动目录；外层未设置set -e，之后误构建了未修改版本。
 该版本未提交设备，已隔离保留；修正为显式指定builder/compiler/platform源码根，并在构建前断言。
 重新构建完成，compile_commands确认scheduler来自候选工作区，Ruff和diff --check通过。
-单卡任务165632：当前正常版→候选→当前正常版，固定原1/17级、5/50μs负载，尚无结果。
+单卡任务165632卡0退出0，三组精确检查通过。5μs标记前/候选/后mean300.46/304.74/302.11μs，
+候选较前后中点慢1.15%，max也升高，不保留；普通前/候选/后mean291.47/294.46/294.21μs。
+原prefetch_block_dst仅用于sync_start，固定链没有使用它；110只是在本块准备时即时预取。
+用户收窄后续范围为5μs，不再新测50μs，保留既有记录。
 由于只新增CPU预取提示，复用原计算产物；固定链仍检查逐级数值、换输入和保护区，未重复三项局部诊断。
 [候选与复现](superkernel_descriptor_prefetch_20261012/README.md)。
+
+
+## 115. 过程111进行中：只测5μs，在原early-dispatch批次内前视预取下一块
+
+独立从b5a358b88构建，未叠加失败的110。stage_consumer_blocks查看下一核，提前预取
+本核状态、派发头和非普通成员的描述行；保持同一位图弹出顺序及同一wmb/发布批次。
+普通成员不预取描述行，gated路径不预取未写的args；现有sync_start调用默认不变。
+不改选核、依赖、ACK后续行为、early-resolve或AICore代码。19项原有CPU检查及构建通过。
+单卡任务190920：当前版→候选→当前版，只用原标定work5/Scalar256，其他固定口径不变。
+[候选、复现和结果状态](superkernel_lookahead_prefetch_20261012/README.md)。
