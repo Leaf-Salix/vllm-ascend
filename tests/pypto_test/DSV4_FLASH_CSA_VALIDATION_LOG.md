@@ -16330,3 +16330,18 @@ Simpler b5a358b88已接入107，PyPTO 4a2651638同步版本，普通入口修复
 这是当前正常版本的最后一组成绩，不能把候选最低值当作已接入成绩；250μs仍未达到。
 [111两轮全部结果](superkernel_lookahead_prefetch_20261012/README.md)、
 [112及最后正常基线](superkernel_state_prefetch_20261012/README.md)。
+
+
+## 617. 2026-10-12：读钟候选未确认收益，完成派发头压缩的私有SDK准备
+
+113任务192439卡8退出0，固定5μs三组精确。普通mean前/候选/后292.30/295.72/294.97μs，
+标记300.36/303.40/303.77μs；无确认收益，撤下。该读钟在旧SDK已存在，不误归为新增成本。
+
+114独立Simpler 05220c71e压缩派发内部slab引用，保留公开AsyncCtx与延迟完成能力，
+使不可变交接描述复用原64B头；不改派发、依赖、ACK与完整流水等待。20项CPU检查通过。
+独立PyPTO 845909ca3同步版本，新venv内重建binding/runtime/torch_npu适配器，
+两路任务匹配重编，Python与计算C++保持不变。环境问题及精确版本拒绝已留档，均未上卡。
+194040单卡任务pending，16卡正被其他作业占用，尚无候选功能或性能验收。
+当前已保留SDK仍b5a358b88/4a2651638；50μs暂停，295/250μs双目标未完成。
+[113实测](superkernel_dispatch_clock_20261012/README.md)、
+[114补丁、SDK与排队状态](superkernel_compact_dispatch_20261012/README.md)。
