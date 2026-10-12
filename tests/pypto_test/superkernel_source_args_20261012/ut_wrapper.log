@@ -1,0 +1,62 @@
+.......................F................                                 [100%]
+=================================== FAILURES ===================================
+_ TestGenerateKernelWrapper.test_clears_atomic_mode_before_argument_unpacking __
+
+self = <test_pto_codegen.TestGenerateKernelWrapper object at 0xfffda029d6c0>
+
+    def test_clears_atomic_mode_before_argument_unpacking(self):
+        func = _make_func("my_kernel", [("a", "tensor"), ("s", "scalar"), ("out", "tensor")])
+        wrapper = _generate_kernel_wrapper(func, SAMPLE_PTOAS_OUTPUT)
+        entry = wrapper[wrapper.index("void kernel_entry(__gm__ int64_t* args)") :]
+    
+        assert "AscendC::" not in wrapper
+        assert "kernel_operator_common_intf.h" not in wrapper
+        assert entry.count("set_atomic_none();") == 1
+>       assert (
+            "#if !defined(__CPU_SIM) && !defined(__COSTMODEL)\n"
+            "    // Reset AI Core atomic mode inherited from a prior kernel.\n"
+            "    set_atomic_none();\n"
+            "#endif"
+        ) in entry
+E       AssertionError: assert '#if !defined(__CPU_SIM) && !defined(__COSTMODEL)\n    // Reset AI Core atomic mode inherited from a prior kernel.\n    set_atomic_none();\n#endif' in 'void kernel_entry(__gm__ int64_t* args)\n{\n#if !defined(__CPU_SIM) && !defined(__COSTMODEL)\n    set_atomic_none();\...64 = args[2];\n    float s = s_conv.val;\n\n    // Forward to ptoas-generated function\n    my_kernel(a, out, s);\n}\n'
+
+tests/ut/codegen/test_pto_codegen.py:1872: AssertionError
+=============================== warnings summary ===============================
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: 14 warnings
+  /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_split_aiv_wrapper_uses_runtime_subblock_bridge_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_pto_codegen.py:1974: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_no_split_dual_dispatch_wrapper_uses_runtime_subblock_bridge_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_pto_codegen.py:2013: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"dual_aiv_dispatch": True})
+
+tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_split_aiv_wrapper_uses_runtime_subblock_bridge_in_group_output_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_pto_codegen.py:2176: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIC, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_split_aiv_wrapper_uses_runtime_subblock_bridge_in_group_output_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_pto_codegen.py:2187: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_subblock_wrapper_reads_runtime_lane_and_appends_subblock_arg
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/ut/codegen/test_pto_codegen.py:2299: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"dual_aiv_dispatch": True})
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/ut/codegen/test_pto_codegen.py::TestGenerateKernelWrapper::test_clears_atomic_mode_before_argument_unpacking
+1 failed, 39 passed, 85 deselected, 23 warnings in 4.01s

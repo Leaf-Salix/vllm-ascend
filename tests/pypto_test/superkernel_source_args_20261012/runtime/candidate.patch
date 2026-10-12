@@ -1,0 +1,72 @@
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -351,6 +351,7 @@
+             prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+             prepared_predecessor = nullptr;
+             bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
++            bool source_args = false;
+ 
+             // Early-dispatch gate. A gated task was staged on this core before its
+             // dependencies resolved; wait until AICPU rings the doorbell
+@@ -370,18 +371,23 @@
+                 // the source metadata coherent before any kernel prefix runs.
+                 // Context arguments remain the AICPU's per-buffer constants.
+                 __gm__ char *src = reinterpret_cast<__gm__ char *>(exec_payload->src_payload);
+-                int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
+-                int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
+-                __gm__ uint64_t *src_scalars = reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
+-                int n = 0;
+-                for (int32_t i = 0; i < tensor_count; i++) {
+-                    exec_payload->args[n++] =
+-                        reinterpret_cast<uint64_t>(src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE);
+-                }
+-                for (int32_t i = 0; i < scalar_count; i++) {
+-                    exec_payload->args[n++] = src_scalars[i];
+-                }
+-                OUT_OF_ORDER_STORE_BARRIER();
++                // Only wrappers explicitly advertising the source ABI may skip args stores.
++                source_args = !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
++                    (exec_payload->global_context.scalar_prefix & 8u) != 0;
++                if (!source_args) {
++                    int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
++                    int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
++                    __gm__ uint64_t *src_scalars = reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
++                    int n = 0;
++                    for (int32_t i = 0; i < tensor_count; i++) {
++                        exec_payload->args[n++] =
++                            reinterpret_cast<uint64_t>(src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE);
++                    }
++                    for (int32_t i = 0; i < scalar_count; i++) {
++                        exec_payload->args[n++] = src_scalars[i];
++                    }
++                    OUT_OF_ORDER_STORE_BARRIER();
++                }
+                 // An idle core can run the same checked prefix without a local
+                 // predecessor. The callback retains the full-fanin/cohort gate
+                 // and delayed ACK, so no pending slot is released prematurely.
+@@ -439,6 +445,11 @@
+                 if ((*flags & SCALAR_PREFIX_TAGGED_ARGS) != 0) {
+                     call_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(call_args) | 1u);
+                 }
++            }
++
++            if (source_args) {
++                call_args = reinterpret_cast<__gm__ int64_t *>(
++                    reinterpret_cast<uint64_t>(call_args) | 4u);
+             }
+ 
+             // PMU window brackets kernel execution.
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -225,6 +225,11 @@
+     overlap.reg_task_id = reg_task_id;
+     overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
+                                SCALAR_PREFIX_TAGGED_ARGS : 0u;
++    // High metadata bit is an internal compiler capability, not a dispatch policy.
++    if (overlap.scalar_prefix != 0 &&
++        (slot_state.payload->scalar_prefix_tagged_args & 128u) != 0) {
++        overlap.scalar_prefix |= 8u;
++    }
+     // The local predecessor protects pipeline reuse, independently of input
+     // dependencies. Gated successors retain their full-fanin doorbell wait
+     // after draining the local tail and before entering dependent computation.

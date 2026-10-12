@@ -1,0 +1,221 @@
+diff --git a/docs/a3-tmr-local-task-boundaries.md b/docs/a3-tmr-local-task-boundaries.md
+index 1b5b700ce..5f5d8863e 100644
+--- a/docs/a3-tmr-local-task-boundaries.md
++++ b/docs/a3-tmr-local-task-boundaries.md
+@@ -26,10 +26,16 @@ so the original pending-to-running promotion can complete the rendezvous.
+ Predicated and unmarked entries retain their existing fallback. MIX capability
+ masks follow SubtaskSlot (AIC=1, AIV0=2, AIV1=4); one member's Wait or tail
+ never enables another member. Local boundaries are explicit; automatic prefix
+-recognition is not part of this demo. All gated tasks prepare arguments on the
+-receiving AICore as in ordinary early dispatch, including pending handoffs.
+-This Scalar preparation precedes the checked prefix and can overlap a local
+-predecessor's pipeline; it does not read the input tensors' data. Ready tasks
++recognition is not part of this demo. Gated argument preparation remains on
++the receiving AICore. Compatible wrappers read immutable descriptors and Scalar
++values directly from TaskPayload, avoiding a copied argument vector. Metadata
++bit 7 of scalar_prefix_tagged_args advertises this ABI for its marked members;
++legacy member bits alone never enable it. Entry pointer bit 2 selects source
++arguments independently of deferred-Wait bit 0 and tail-callback bit 1. The
++wrapper removes both data-entry tags before accessing the unchanged contexts.
++Tensor order, scalar bits, descriptor lifetime and layout remain unchanged;
++offsets are checked against TaskPayload on the AICPU side. This preparation
++does not read input tensor data. Ready tasks
+ retain their CPU-prepared arguments. Neither idle prefix execution nor sync-start coverage
+ adds a dispatch trigger or makes an ACK visible ahead of the existing gate.
+ 
+@@ -65,15 +71,17 @@ wait for events they never issued. AIV/AIC device probes and a full CSA run are
+ required to establish functionality and performance separately; successful
+ compilation or a capability marker alone proves neither overlap nor a gain.
+ 
+-For compiler-checked local Wait entries, the predecessor callback clears and
+-flushes the handoff fields before publishing completion. A synchronous successor
++For compiler-checked local Wait entries, the predecessor callback consumes the
++handoff and flushes the control line before publishing completion. Dispatch
++initializes the next generation; consumed pointers need no redundant clearing.
++A synchronous successor
+ without tracing does not write back the same clean control line again. Legacy
+ entries and diagnostic writes retain their conservative writeback. The normal
+ tail path passes its already-read completion kind into the drain helper; the
+ completion waits, ACK flow, dispatch order, and early-resolve settings are unchanged.
+ 
+-Chip swimlane, PMU and argument dumping deliberately retain serial execution
+-and reporting. They are not used to measure the overlap path. The executor
++Chip swimlane, PMU and argument dumping deliberately retain serial execution,
++materialized argument vectors and reporting. They are not used to measure the overlap path. The executor
+ first probes pending work once at producer return. A compiled-poll tail
+ that misses re-enters a compiler-generated tail callback using argument tag
+ bit 1. This branch bypasses the operator body, so it neither repeats arithmetic
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index c1e80c7bd..fa30265e0 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -351,6 +351,7 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+             prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+             prepared_predecessor = nullptr;
+             bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
++            bool source_args = false;
+ 
+             // Early-dispatch gate. A gated task was staged on this core before its
+             // dependencies resolved; wait until AICPU rings the doorbell
+@@ -363,25 +364,29 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+             // src_payload == 0 (the common ready path) skips this; a non-zero
+             // src_payload is both the gate flag and the source TaskPayload.
+             if (exec_payload->src_payload != 0) {
+-                // AICPU staged only src_payload, not the arg vector. Prepare
+-                // args here for both ordinary gates and local-tail handoffs;
+-                // in the latter case this work can overlap the predecessor's
+-                // pipeline. The cache invalidation above (or in handoff) makes
+-                // the source metadata coherent before any kernel prefix runs.
++                // Source metadata is coherent after the entry invalidation.
++                // Compatible wrappers consume it directly; legacy entries and
++                // diagnostics still materialize the argument vector here.
+                 // Context arguments remain the AICPU's per-buffer constants.
+                 __gm__ char *src = reinterpret_cast<__gm__ char *>(exec_payload->src_payload);
+-                int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
+-                int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
+-                __gm__ uint64_t *src_scalars = reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
+-                int n = 0;
+-                for (int32_t i = 0; i < tensor_count; i++) {
+-                    exec_payload->args[n++] =
+-                        reinterpret_cast<uint64_t>(src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE);
+-                }
+-                for (int32_t i = 0; i < scalar_count; i++) {
+-                    exec_payload->args[n++] = src_scalars[i];
++                source_args = !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
++                              (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_SOURCE_ARGS) != 0;
++                if (!source_args) {
++                    int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
++                    int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
++                    __gm__ uint64_t *src_scalars =
++                        reinterpret_cast<__gm__ uint64_t *>(src + TASKPAYLOAD_SCALARS_OFFSET);
++                    int n = 0;
++                    for (int32_t i = 0; i < tensor_count; i++) {
++                        exec_payload->args[n++] = reinterpret_cast<uint64_t>(
++                            src + TASKPAYLOAD_TENSORS_OFFSET + i * TASKPAYLOAD_TENSOR_STRIDE
++                        );
++                    }
++                    for (int32_t i = 0; i < scalar_count; i++) {
++                        exec_payload->args[n++] = src_scalars[i];
++                    }
++                    OUT_OF_ORDER_STORE_BARRIER();
+                 }
+-                OUT_OF_ORDER_STORE_BARRIER();
+                 // An idle core can run the same checked prefix without a local
+                 // predecessor. The callback retains the full-fanin/cohort gate
+                 // and delayed ACK, so no pending slot is released prematurely.
+@@ -441,6 +446,10 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+                 }
+             }
+ 
++            if (source_args) {
++                call_args = reinterpret_cast<__gm__ int64_t *>(reinterpret_cast<uint64_t>(call_args) | 4u);
++            }
++
+             // PMU window brackets kernel execution.
+             if (pmu_enabled) {
+                 pmu_aicore_begin();
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index b03feea01..76cb34f91 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -183,6 +183,10 @@ static constexpr uint32_t SCALAR_PREFIX_TAGGED_ARGS = 2u;
+ // A gated entry may execute its checked prefix before the full-fanin doorbell,
+ // including when it has no unfinished task on this physical core.
+ static constexpr uint32_t SCALAR_PREFIX_CAN_EARLY_START = 4u;
++// The wrapper may read immutable TaskPayload metadata instead of a copied args vector.
++static constexpr uint32_t SCALAR_PREFIX_SOURCE_ARGS = 8u;
++// Low three metadata bits still select AIC/AIV0/AIV1; this bit advertises their entry ABI.
++static constexpr uint8_t SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY = 128u;
+ 
+ struct AsyncCtx {
+     volatile __gm__ uint32_t *completion_count;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+index ce29ee3db..1baa35ccc 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -90,7 +90,8 @@ struct alignas(64) DispatchPayload {
+     // capacity are cold (prefilled once at init) but ride this hot line for free.
+     // Sized to exactly 64B so the base control fields occupy one line. The
+     // ready path (src_payload = 0) then also fills args[0..num_args); the gated
+-    // path (src_payload = &TaskPayload) leaves args[] to the idle AICore.
++    // path (src_payload = &TaskPayload) leaves preparation to AICore. Compatible
++    // wrappers read this source directly instead of materializing args[].
+     // Experimental overlap fields are in a separate control line at the tail.
+     uint64_t function_bin_addr; /**< Kernel entry address in GM (set by Scheduler). */
+ 
+@@ -101,9 +102,10 @@ struct alignas(64) DispatchPayload {
+ 
+     /** Early-dispatch gate AND source pointer, folded into one field. 0 = ready:
+      *  AICore executes on pickup (args[] already filled by the AICPU). Non-zero =
+-     *  gated: the value is the source TaskPayload address; the AICore fills
+-     *  args[0..num_args) from it, then waits for the doorbell (DATA_MAIN_BASE
+-     *  high 32 == this dispatch's reg_task_id) before executing. A payload address
++     *  gated: the value is the source TaskPayload address; AICore either fills
++     *  args[0..num_args) or passes it to a compatible wrapper. The doorbell
++     *  (DATA_MAIN_BASE high 32 == this dispatch's reg_task_id) guards dependent
++     *  execution. A payload address
+      *  is never 0, so the gate flag is lossless. */
+     volatile uint64_t src_payload;
+ 
+@@ -111,7 +113,7 @@ struct alignas(64) DispatchPayload {
+     /** [0..num_args) = GM tensor pointers + scalar values; [SPMD_LOCAL_CONTEXT_INDEX]
+      *  = &local_context, [SPMD_GLOBAL_CONTEXT_INDEX] = &global_context (both prefilled
+      *  once at init). On the gated path the AICPU leaves [0..num_args) unwritten and
+-     *  the idle AICore fills them from src_payload during its gate wait. */
++     *  AICore fills them unless the wrapper advertises direct source access. */
+     uint64_t args[DISPATCH_MAX_ARGS];
+ 
+     /** Context tail addressed by args[SPMD_GLOBAL_CONTEXT_INDEX]. The AIV lane
+@@ -133,8 +135,10 @@ struct alignas(64) DispatchPayload {
+ static_assert(sizeof(DispatchPayload) == 576, "DispatchPayload prototype ABI size drift");
+ static_assert(sizeof(AsyncCtx) == 40 && sizeof(LocalContext) == 48, "local handoff flag must use padding");
+ static_assert(offsetof(DispatchPayload, args) == 64, "args[] must start at cache line 1 (control block = CL0)");
+-static_assert(alignof(DispatchPayload) >= 4 && offsetof(DispatchPayload, args) % 4 == 0,
+-              "local boundary ABI reserves two aligned argument pointer bits");
++static_assert(
++    alignof(DispatchPayload) >= 8 && offsetof(DispatchPayload, args) % 8 == 0,
++    "local boundary ABI reserves three aligned argument pointer bits"
++);
+ static_assert(offsetof(DispatchPayload, src_payload) < 64, "src_payload (gate) must live on the CL0 control block");
+ 
+ // Every AICore-written overlap field fits in this one aligned cache line.
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index 7183139d0..4de313805 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -225,6 +225,11 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+     overlap.reg_task_id = reg_task_id;
+     overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
+                                SCALAR_PREFIX_TAGGED_ARGS : 0u;
++    // Only compiler-advertised wrappers may consume source descriptors directly.
++    if (overlap.scalar_prefix != 0 &&
++        (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
++        overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
++    }
+     // The local predecessor protects pipeline reuse, independently of input
+     // dependencies. Gated successors retain their full-fanin doorbell wait
+     // after draining the local tail and before entering dependent computation.
+@@ -240,8 +245,8 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+         if (local_predecessor && (ready_prefix || gated_prefix)) {
+             overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
+             overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
+-            // Gated handoffs keep the ordinary early-dispatch argument path:
+-            // the receiving AICore fills args before entering the prefix.
++            // Argument preparation remains on AICore; compatible wrappers may
++            // read source metadata without materializing an intermediate vector.
+         }
+     }
+ 
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+index 927129f4d..e92295fbb 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+@@ -298,6 +298,8 @@ struct Arg : TaskArgsTpl<TensorRef, uint64_t, MaxT, MaxS, TensorArgType> {
+     void set_scalar_prefix(bool v = true) { scalar_prefix_ = v ? SUBTASK_MASK_ALL : 0; }
+     void set_scalar_prefix_mask(uint8_t mask) { scalar_prefix_ = mask; }
+     uint8_t scalar_prefix() const { return scalar_prefix_; }
++    // Member bits 0..2, plus optional SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY.
++    // Setting legacy tagged capability alone must never enable the source ABI.
+     uint8_t scalar_prefix_tagged_args_{0};
+     void set_scalar_prefix_tagged_args(bool v = true) { scalar_prefix_tagged_args_ = v ? SUBTASK_MASK_ALL : 0; }
+     void set_scalar_prefix_tagged_args_mask(uint8_t mask) { scalar_prefix_tagged_args_ = mask; }
