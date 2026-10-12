@@ -16266,3 +16266,8 @@ Simpler 1c56bcd3e保存已测普通路径修复及19项仓内CPU检查，重新�
 活动SDK保持3d0b9c820，保留源码检查点1c56bcd3e；未启用CSA、16卡或公共安装更新。
 [就绪门铃候选](superkernel_fixed_chain_ready_gate_20261012/README.md)、
 [内联Wait候选及尚缺覆盖](superkernel_fixed_chain_inline_wait_20261012/README.md)。
+
+
+过程105队列句柄更正：等待命令`--timeout 45 --wait`在超时后取消了未分配设备的145709。
+确认原status为not_found且无输出目录后，按完全相同的冻结配置补交为152316。
+过程106的151624仍pending，未重复提交。没有因此产生新的性能或功能结果；后续仅查询status。
