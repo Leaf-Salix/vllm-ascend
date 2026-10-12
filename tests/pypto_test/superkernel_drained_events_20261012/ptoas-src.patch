@@ -1,0 +1,318 @@
+commit fdebb38b5cbb4f43c69edac8ce190706b6e5991c
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Mon Oct 12 08:06:41 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Mon Oct 12 08:06:56 2026 +0800
+
+    feat(PTOAS): 在已完成全流水屏障后复用局部交接通知事件
+    
+    显式同步函数过去只要使用过某个事件 ID，就一直将其排除在通知分配之外。
+    这会把已经消费、且经过原有 PIPE_ALL 完整等待的事件也视为占用，使本可
+    继续观察后到 task 的尾部回调退回阻塞等待。
+    
+    为单基本块中的顶层静态事件记录 pending 和不确定使用；仅在保留的
+    PIPE_ALL 之后释放已成对消费的 ID。屏障之后的新使用重新占用资源。
+    动态 ID、嵌套控制流、隐藏事件、未配对使用和自动生成的可延后尾部屏障
+    保持保守处理。没有新增设备屏障、改变原有 Set/Wait，或调整派发及 ACK。
+    
+    验证：PTOAS 增量构建通过；新增八种 IR 情况与五个既有显式事件、
+    动态范围及中转分配 FileCheck 通过。单卡 TMR AIC/AIV/MIX 两次输入
+    功能、保护区和完整等待通过，MIX 两种核实际执行了复用事件的通知回调。
+    当前 CSA 未触发事件耗尽，因此不重复计时，也不据此宣称 CSA 性能收益。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>
+
+diff --git a/docs/designs/local-task-tail-event-reuse.md b/docs/designs/local-task-tail-event-reuse.md
+new file mode 100644
+index 00000000..669aab68
+--- /dev/null
++++ b/docs/designs/local-task-tail-event-reuse.md
+@@ -0,0 +1,28 @@
++# Local task-tail event reuse
++
++The private TMR handoff prototype keeps the author's local
++`wait_pre_task_end()` boundary. This allocation rule does not identify a
++Scalar boundary or change dispatch, ACK, or `allow_early_resolve`.
++
++For `pto.runtime_late_handoff` functions with explicit synchronization, tail
++notification normally needs event IDs unused by the original function. A
++textually matched Set/Wait alone does not make an ID reusable: the destination
++pipeline may not have consumed its Wait yet.
++
++An existing top-level `pto.barrier <PIPE_ALL>` can retire matched static events
++in a single-block function. The allocator can reuse those IDs for the later
++notification. It preserves the original barrier and adds no device instruction.
++A later event use reserves its ID again. Unmatched, repeated-unmatched, dynamic,
++nested, and macro-hidden uses remain conservatively reserved.
++
++A single-pipe barrier is insufficient. A barrier marked
++`pto.auto_sync_tail_barrier` is also excluded because the runtime can defer that
++barrier until after the notification. If neither direct nor relay events are
++available, the existing blocking callback fallback remains.
++
++This follows the documented [SetFlag/WaitFlag semantics](https://asc.gitcode.com/api/SIMD-API/basic_api/sync_control/intra_core_sync/SetFlag_WaitFlag_ISASI.html)
++and [PIPE_ALL completion guarantee](https://asc.gitcode.com/api/SIMD-API/basic_api/sync_control/intra_core_sync/PipeBarrier_ISASI.html).
++The proof relies on both matching event consumption and the retained drain;
++the barrier does not consume an unmatched Set.
++
++Regression: `test/lit/pto/local_task_pollable_drained_events.pto`.
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+index 23ceda17..3d888ec5 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -139,22 +139,40 @@ static std::optional<uint8_t> possibleEventIds(Value value, unsigned depth = 0)
+ 
+ class ExplicitTaskBoundaryEvents {
+ public:
+-  LogicalResult record(PIPE src, PIPE dst, std::optional<uint8_t> ids) {
++  explicit ExplicitTaskBoundaryEvents(func::FuncOp func)
++      : linearBlock(llvm::hasSingleElement(func.getBody())
++                        ? &func.getBody().front()
++                        : nullptr) {}
++
++  LogicalResult record(PIPE src, PIPE dst, std::optional<uint8_t> ids,
++                       Operation *op, bool isSet, bool isStatic) {
+     int pair = taskBoundaryEventPairIndex(src, dst);
+     if (pair < 0) return success();
+     // An unknown ID may use any slot. Preserve the author's flags, and let
+     // allocation fall back to an event-free full drain only on a probe miss.
+-    used[pair] |= ids.value_or(0xffu);
++    uint8_t mask = ids.value_or(0xffu);
++    used[pair] |= mask;
++    if (!isStatic || op->getBlock() != linearBlock) {
++      opaque[pair] |= mask;
++    } else if (isSet) {
++      opaque[pair] |= pending[pair] & mask;
++      pending[pair] |= mask;
++    } else {
++      opaque[pair] |= ~pending[pair] & mask;
++      pending[pair] &= ~mask;
++    }
+     return success();
+   }
+ 
+   template <typename Op> LogicalResult low(Op op) {
+     return record(op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
+-                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())));
++                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())),
++                  op, isa<SetFlagOp>(op), true);
+   }
+   template <typename Op> LogicalResult dynamic(Op op) {
+     return record(op.getSrcPipe().getPipe(), op.getDstPipe().getPipe(),
+-                  possibleEventIds(op.getEventId()));
++                  possibleEventIds(op.getEventId()), op,
++                  isa<SetFlagDynOp>(op), false);
+   }
+   template <typename Op> LogicalResult high(Op op) {
+     auto src = parseSyncOpTypeLikeAttr(op.getSrcOpAttr());
+@@ -162,7 +180,19 @@ public:
+     if (failed(src) || failed(dst))
+       return op.emitError("cannot resolve explicit task-boundary event pipe pair");
+     return record(mapSyncOpTypeToPipe(*src), mapSyncOpTypeToPipe(*dst),
+-                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())));
++                  uint8_t(1u << static_cast<unsigned>(op.getEventId().getEvent())),
++                  op, isa<RecordEventOp>(op), true);
++  }
++
++  void observeBarrier(BarrierOp op) {
++    if (op->getBlock() != linearBlock || op.getPipe().getPipe() != PIPE::PIPE_ALL ||
++        op->hasAttr("pto.auto_sync_tail_barrier"))
++      return;
++    // A queued Wait alone does not prove that the event was consumed. Only an
++    // existing, retained all-pipe drain retires every matched static pair.
++    // Dynamic, nested and hidden uses keep their conservative reservation.
++    for (unsigned pair = 0; pair < used.size(); ++pair)
++      used[pair] &= pending[pair] | opaque[pair];
+   }
+ 
+   void recordHidden(Operation *op) {
+@@ -170,9 +200,11 @@ public:
+       for (const auto &event : model->hiddenEvents) {
+         int pair = taskBoundaryEventPairIndex(event.srcPipe, event.dstPipe);
+         if (pair < 0) continue;
+-        auto &mask = used[pair];
++        uint8_t mask = 0;
+         for (unsigned id : event.eventIds)
+           mask |= id < 8 ? (1u << id) : 0xffu;
++        used[pair] |= mask;
++        opaque[pair] |= mask;
+       }
+     }
+   }
+@@ -224,12 +256,13 @@ private:
+     return true;
+   }
+ 
+-  std::array<uint8_t, 9> used{};
++  Block *linearBlock;
++  std::array<uint8_t, 9> used{}, pending{}, opaque{};
+ };
+ 
+ static LogicalResult allocateExplicitTaskBoundaryEvents(func::FuncOp func) {
+-  ExplicitTaskBoundaryEvents events;
+-  WalkResult result = func.walk([&](Operation *op) {
++  ExplicitTaskBoundaryEvents events(func);
++  WalkResult result = func.walk<WalkOrder::PreOrder>([&](Operation *op) {
+     LogicalResult status = success();
+     if (auto set = dyn_cast<SetFlagOp>(op)) status = events.low(set);
+     else if (auto wait = dyn_cast<WaitFlagOp>(op)) status = events.low(wait);
+@@ -237,6 +270,7 @@ static LogicalResult allocateExplicitTaskBoundaryEvents(func::FuncOp func) {
+     else if (auto wait = dyn_cast<WaitFlagDynOp>(op)) status = events.dynamic(wait);
+     else if (auto record = dyn_cast<RecordEventOp>(op)) status = events.high(record);
+     else if (auto wait = dyn_cast<WaitEventOp>(op)) status = events.high(wait);
++    else if (auto barrier = dyn_cast<BarrierOp>(op)) events.observeBarrier(barrier);
+     events.recordHidden(op);
+     return failed(status) ? WalkResult::interrupt() : WalkResult::advance();
+   });
+diff --git a/test/lit/pto/local_task_pollable_drained_events.pto b/test/lit/pto/local_task_pollable_drained_events.pto
+new file mode 100644
+index 00000000..3a561573
+--- /dev/null
++++ b/test/lit/pto/local_task_pollable_drained_events.pto
+@@ -0,0 +1,146 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++// CANN Open Software License Agreement Version 2.0 (the "License").
++// Please refer to the License for details. You may not use this file except in compliance with the License.
++// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++// See LICENSE in the root of the software repository for the full text of the License.
++// RUN: ptoas --enable-insert-sync --pto-level=level3 %s 2>&1 | FileCheck %s --implicit-check-not="PYPTO_TASK_BOUNDARY_EVENTS_V1 drained_ids" --implicit-check-not="PYPTO_TASK_BOUNDARY_RELAY_V1 drained_ids" --implicit-check-not="PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 drained_ids"
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 fenced_then_used MTE2=7 MTE1=7 M=7 FIX=7 V=6
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 paired_only
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 single_pipe
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 generated_tail
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 unmatched MTE2=7 MTE1=7 M=7 FIX=7 V=6
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_EVENTS_V1 nested_pair MTE2=7 MTE1=7 M=7 FIX=7 V=6
++// CHECK-DAG: // PYPTO_TASK_BOUNDARY_BLOCKING_POLL_V1 dynamic_pair
++// CHECK-LABEL: void drained_ids
++// CHECK: set_flag(PIPE_V, PIPE_MTE3, EVENT_ID7)
++// CHECK: wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID7)
++// CHECK: pipe_barrier(PIPE_ALL)
++// CHECK-LABEL: void fenced_then_used
++// CHECK: pipe_barrier(PIPE_ALL)
++// CHECK: set_flag(PIPE_V, PIPE_MTE3, EVENT_ID7)
++// CHECK: wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID7)
++module attributes {pto.target_arch = "a2a3"} {
++  func.func @drained_ids() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.barrier <PIPE_ALL>
++    return
++  }
++  func.func @fenced_then_used() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.barrier <PIPE_ALL>
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    return
++  }
++  func.func @paired_only() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    return
++  }
++  func.func @single_pipe() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.barrier <PIPE_V>
++    return
++  }
++  func.func @generated_tail() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.barrier <PIPE_ALL> {pto.auto_sync_tail_barrier}
++    return
++  }
++  func.func @unmatched() attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++    pto.barrier <PIPE_ALL>
++    return
++  }
++  func.func @nested_pair(%condition: i1) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    scf.if %condition {
++      pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++      pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
++      pto.barrier <PIPE_ALL>
++    }
++    pto.barrier <PIPE_ALL>
++    return
++  }
++  func.func @dynamic_pair(%id: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff} {
++    pto.set_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.wait_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_MTE3>, %id]
++    pto.barrier <PIPE_ALL>
++    return
++  }
++}

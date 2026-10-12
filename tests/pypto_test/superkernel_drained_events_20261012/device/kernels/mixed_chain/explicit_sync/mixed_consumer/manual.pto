@@ -1,0 +1,185 @@
+module attributes {pto.backend = "emitc", pto.target_arch = "a3"} {
+  func.func @mixed_consumer_aic(%arg0: !pto.ptr<i64, gm>, %arg1: !pto.ptr<i64, gm>, %arg2: !pto.ptr<f16, gm>, %arg3: !pto.ptr<f16, gm>, %arg4: !pto.ptr<f32, gm>, %arg5: !pto.ptr<f32, gm>, %arg6: i64, %arg7: i64, %arg8: !pto.ptr<i64, gm>, %arg9: i64, %arg10: i32, %arg11: i32) attributes {pto.auto_sync_tail_hint = "runtime_barrier_all", pto.kernel_kind = #pto.kernel_kind<cube>, pto.runtime_late_handoff, pto.scalar_prefix} {
+    %c64_i64 = arith.constant 64 : i64
+    %c32832_i64 = arith.constant 32832 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %c8 = arith.constant 8 : index
+    %c1 = arith.constant 1 : index
+    %c3200 = arith.constant 3200 : index
+    %c128 = arith.constant 128 : index
+    %c256 = arith.constant 256 : index
+    %c0 = arith.constant 0 : index
+    %c17_i64 = arith.constant 17 : i64
+    %c3_i64 = arith.constant 3 : i64
+    %c65521_i64 = arith.constant 65521 : i64
+    %c2_i64 = arith.constant 2 : i64
+    %c24 = arith.constant 24 : index
+    %c48 = arith.constant 48 : index
+    %0 = pto.make_tensor_view %arg2, shape = [%c3200, %c128], strides = [%c128, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf16>
+    %1 = pto.make_tensor_view %arg3, shape = [%c128, %c256], strides = [%c256, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf16>
+    %2 = arith.index_cast %arg10 : i32 to index
+    %3 = arith.index_cast %2 : index to i64
+    %4 = arith.addi %arg6, %3 : i64
+    %5 = arith.index_cast %arg7 : i64 to index
+    %6 = scf.for %arg12 = %c0 to %5 step %c1 iter_args(%arg13 = %4) -> (i64) {
+      %27 = arith.muli %arg13, %c17_i64 : i64
+      %28 = arith.addi %27, %c3_i64 : i64
+      %29 = arith.remsi %28, %c65521_i64 : i64
+      scf.yield %29 : i64
+    }
+    %7 = arith.remsi %6, %c2_i64 : i64
+    %8 = arith.cmpi eq, %7, %c0_i64 : i64
+    %9 = scf.if %8 -> (index) {
+      scf.yield %c0 : index
+    } else {
+      scf.yield %c128 : index
+    }
+    %10 = arith.index_cast %2 : index to i64
+    %11 = arith.extui %8 : i1 to i64
+    %12 = arith.index_cast %9 : index to i64
+    call @pypto_wait_pre_task_end(%arg8, %arg9) : (!pto.ptr<i64, gm>, i64) -> ()
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID1>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID1>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID2>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID2>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID3>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID3>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID4>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID4>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID5>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID5>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID6>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID6>]
+    pto.set_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID7>]
+    pto.wait_flag[<PIPE_FIX>, <PIPE_MTE3>, <EVENT_ID7>]
+    pto.barrier <PIPE_ALL>
+    %c0_i32 = arith.constant 0 : i32
+    %13 = pto.initialize_l2g2l_pipe{dir_mask = 1, slot_size = 65536, slot_num = 2, local_slot_num = 2, flag_base = 0, nosplit = false} (%arg5 : !pto.ptr<f32, gm>, %c0_i32 : i32) {__pto.frontend_id = 0 : i32} -> !pto.pipe
+    %14:2 = scf.if %8 -> (index, i64) {
+      %27 = arith.addi %2, %c24 : index
+      %28 = arith.muli %27, %c8 : index
+      %29 = pto.load %arg0[%28] : !pto.ptr<i64, gm> -> i64
+      %30 = arith.addi %2, %c48 : index
+      %31 = arith.muli %30, %c8 : index
+      %32 = pto.load %arg1[%31] : !pto.ptr<i64, gm> -> i64
+      %33 = arith.addi %29, %32 : i64
+      %34 = arith.addi %33, %c2_i64 : i64
+      scf.yield %9, %34 : index, i64
+    } else {
+      %27 = arith.addi %2, %c24 : index
+      %28 = arith.muli %27, %c8 : index
+      %29 = pto.load %arg0[%28] : !pto.ptr<i64, gm> -> i64
+      %30 = arith.addi %2, %c48 : index
+      %31 = arith.muli %30, %c8 : index
+      %32 = pto.load %arg1[%31] : !pto.ptr<i64, gm> -> i64
+      %33 = arith.addi %29, %32 : i64
+      %34 = arith.addi %33, %c2_i64 : i64
+      scf.yield %9, %34 : index, i64
+    }
+    %15 = pto.alloc_tile addr = %c64_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>
+    %16 = arith.muli %2, %c128 : index
+    %17 = arith.index_cast %14#1 : i64 to index
+    %18 = arith.addi %16, %17 : index
+    %19 = arith.maxsi %18, %c0 : index
+    %20 = pto.partition_view %0, offsets = [%19, %c0], sizes = [%c128, %c128] : !pto.tensor_view<?x?xf16>
+    pto.tload ins(%20 : !pto.partition_tensor_view<128x128xf16>) outs(%15 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) {layout = #pto.layout<nd>}
+    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]
+    %21 = pto.alloc_tile addr = %c32832_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>
+    %22 = arith.maxsi %14#0, %c0 : index
+    %23 = pto.partition_view %1, offsets = [%c0, %22], sizes = [%c128, %c128] : !pto.tensor_view<?x?xf16>
+    pto.tload ins(%23 : !pto.partition_tensor_view<128x128xf16>) outs(%21 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) {layout = #pto.layout<nd>}
+    pto.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID1>]
+    %24 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]
+    pto.tmov ins(%15 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) outs(%24 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>)
+    %25 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<right, 128x128xf16, valid=?x?, slayout=col_major>
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID1>]
+    pto.tmov ins(%21 : !pto.tile_buf<mat, 128x128xf16, valid=?x?, blayout=col_major, slayout=row_major>) outs(%25 : !pto.tile_buf<right, 128x128xf16, valid=?x?, slayout=col_major>)
+    pto.set_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID0>]
+    %26 = pto.alloc_tile addr = %c0_i64 valid_row = %c128 valid_col = %c128 : !pto.tile_buf<acc, 128x128xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>
+    pto.wait_flag[<PIPE_MTE1>, <PIPE_M>, <EVENT_ID0>]
+    pto.tmatmul ins(%24, %25 : !pto.tile_buf<left, 128x128xf16, valid=?x?, slayout=row_major>, !pto.tile_buf<right, 128x128xf16, valid=?x?, slayout=col_major>) outs(%26 : !pto.tile_buf<acc, 128x128xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>)
+    pto.set_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]
+    pto.wait_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]
+    pto.tpush(%26, %13 : !pto.tile_buf<acc, 128x128xf32, valid=?x?, blayout=col_major, slayout=row_major, fractal=1024>, !pto.pipe) {split = 1}
+    call @pypto_set_next_task_start(%arg8) : (!pto.ptr<i64, gm>) -> ()
+    return
+  }
+  func.func @mixed_consumer_aiv(%arg0: !pto.ptr<i64, gm>, %arg1: !pto.ptr<i64, gm>, %arg2: !pto.ptr<f16, gm>, %arg3: !pto.ptr<f16, gm>, %arg4: !pto.ptr<f32, gm>, %arg5: !pto.ptr<f32, gm>, %arg6: i64, %arg7: i64, %arg8: !pto.ptr<i64, gm>, %arg9: i64, %arg10: i32, %arg11: i32, %arg12: i32) attributes {pto.auto_sync_tail_hint = "runtime_barrier_all", pto.kernel_kind = #pto.kernel_kind<vector>, pto.runtime_late_handoff, pto.scalar_prefix} {
+    %c131136_i64 = arith.constant 131136 : i64
+    %c1 = arith.constant 1 : index
+    %c3200 = arith.constant 3200 : index
+    %c128 = arith.constant 128 : index
+    %c0 = arith.constant 0 : index
+    %c17_i64 = arith.constant 17 : i64
+    %c3_i64 = arith.constant 3 : i64
+    %c65521_i64 = arith.constant 65521 : i64
+    %c2_i64 = arith.constant 2 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %c64 = arith.constant 64 : index
+    %0 = pto.make_tensor_view %arg4, shape = [%c3200, %c128], strides = [%c128, %c1] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>
+    %1 = arith.index_cast %arg12 : i32 to index
+    %2 = arith.index_cast %arg10 : i32 to index
+    %3 = arith.index_cast %2 : index to i64
+    %4 = arith.addi %arg6, %3 : i64
+    %5 = arith.index_cast %arg7 : i64 to index
+    %6 = scf.for %arg13 = %c0 to %5 step %c1 iter_args(%arg14 = %4) -> (i64) {
+      %22 = arith.muli %arg14, %c17_i64 : i64
+      %23 = arith.addi %22, %c3_i64 : i64
+      %24 = arith.remsi %23, %c65521_i64 : i64
+      scf.yield %24 : i64
+    }
+    %7 = arith.remsi %6, %c2_i64 : i64
+    %8 = arith.cmpi eq, %7, %c0_i64 : i64
+    %9 = arith.index_cast %1 : index to i64
+    %10 = arith.index_cast %2 : index to i64
+    %11 = arith.extui %8 : i1 to i64
+    call @pypto_wait_pre_task_end(%arg8, %arg9) : (!pto.ptr<i64, gm>, i64) -> ()
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID1>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID2>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID3>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID4>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID5>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID6>]
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID7>]
+    pto.barrier <PIPE_ALL>
+    %c0_i32 = arith.constant 0 : i32
+    %12 = pto.initialize_l2g2l_pipe{dir_mask = 1, slot_size = 65536, slot_num = 2, local_slot_num = 2, flag_base = 0, nosplit = false} (%arg5 : !pto.ptr<f32, gm>, %c0_i32 : i32) {__pto.frontend_id = 0 : i32} -> !pto.pipe
+    %13 = scf.if %8 -> (i64) {
+      scf.yield %6 : i64
+    } else {
+      scf.yield %6 : i64
+    }
+    %14 = pto.declare_tile -> !pto.tile_buf<vec, 64x128xf32, valid=?x?>
+    pto.tpop(%14, %12 : !pto.tile_buf<vec, 64x128xf32, valid=?x?>, !pto.pipe) {split = 1}
+    pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+    %15 = pto.alloc_tile addr = %c131136_i64 valid_row = %c64 valid_col = %c128 : !pto.tile_buf<vec, 64x128xf32, valid=?x?>
+    %16 = arith.sitofp %13 : i64 to f32
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+    pto.tadds ins(%14, %16 : !pto.tile_buf<vec, 64x128xf32, valid=?x?>, f32) outs(%15 : !pto.tile_buf<vec, 64x128xf32, valid=?x?>)
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.tfree(%12 : !pto.pipe) {split = 1}
+    %17 = arith.muli %2, %c128 : index
+    %18 = arith.muli %1, %c64 : index
+    %19 = arith.addi %17, %18 : index
+    %20 = arith.maxsi %19, %c0 : index
+    %21 = pto.partition_view %0, offsets = [%20, %c0], sizes = [%c64, %c128] : !pto.tensor_view<?x?xf32>
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.tstore ins(%15 : !pto.tile_buf<vec, 64x128xf32, valid=?x?>) outs(%21 : !pto.partition_tensor_view<64x128xf32>) {layout = #pto.layout<nd>}
+    call @pypto_set_next_task_start(%arg8) : (!pto.ptr<i64, gm>) -> ()
+    return
+  }
+  func.func private @pypto_wait_pre_task_end(!pto.ptr<i64, gm>, i64)
+  func.func private @pypto_set_next_task_start(!pto.ptr<i64, gm>)
+}
