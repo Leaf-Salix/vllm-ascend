@@ -1,0 +1,19 @@
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -49,8 +49,15 @@
+                               kind == AsyncTailKind::RuntimeDirectPollClean;
+     if (runtime_tail) {
+         wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
++        if (trace_addr != 0) {
++#if defined(__DAV_CUBE__)
++            wait_flag(PIPE_M, PIPE_S, EVENT_ID6);
++#elif defined(__DAV_VEC__)
++            wait_flag(PIPE_V, PIPE_S, EVENT_ID6);
++#endif
++        }
++        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+         pipe_barrier(PIPE_ALL);
+-        compute_completed_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+     } else if (kind == AsyncTailKind::AicJoined || kind == AsyncTailKind::AicAllPipes) {
+         wait_started_at = trace_addr != 0 ? get_sys_cnt_aicore() : 0;
+         wait_flag(PIPE_M, PIPE_S, EVENT_ID7);

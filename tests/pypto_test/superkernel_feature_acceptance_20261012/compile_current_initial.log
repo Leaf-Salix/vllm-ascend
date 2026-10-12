@@ -1,0 +1,104 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+2026-10-12 09:10:30.306 W | [warning] [ScalarWriteLineShared] (pipeline_input) pl.write into 'trace' from 48 concurrent blocks ('acceptance_task_spmd') in function 'acceptance_chain': the index is computed at runtime, so the compiler cannot tell whether two blocks share a 64-byte cache line. A scalar write reaches DDR a whole 64-byte line at a time, carrying the neighbouring elements as the writing core last saw them, so two blocks sharing a line silently lose each other's stores. Give each one whole 64-byte lines (8 x INT64), or issue the writes from a single instance (pl.spmd(1)). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py:59:21
+2026-10-12 09:10:30.306 W | [warning] [ScalarWriteLineShared] (pipeline_input) pl.write into 'trace' from 48 concurrent blocks ('acceptance_task_spmd') in function 'acceptance_chain': the index is computed at runtime, so the compiler cannot tell whether two blocks share a 64-byte cache line. A scalar write reaches DDR a whole 64-byte line at a time, carrying the neighbouring elements as the writing core last saw them, so two blocks sharing a line silently lose each other's stores. Give each one whole 64-byte lines (8 x INT64), or issue the writes from a single instance (pl.spmd(1)). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py:60:21
+2026-10-12 09:10:30.306 W | [warning] [ScalarWriteLineShared] (pipeline_input) pl.write into 'trace' from 48 concurrent blocks ('acceptance_task_spmd') in function 'acceptance_chain': the index is computed at runtime, so the compiler cannot tell whether two blocks share a 64-byte cache line. A scalar write reaches DDR a whole 64-byte line at a time, carrying the neighbouring elements as the writing core last saw them, so two blocks sharing a line silently lose each other's stores. Give each one whole 64-byte lines (8 x INT64), or issue the writes from a single instance (pl.spmd(1)). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py:61:21
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 234, in <module>
+    main()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 227, in main
+    artifact(args.compiled, mode, compile_now=True)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 76, in artifact
+    compiled = _compile_impl(program, _kernel_abi=abi, **options)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/ir/compile.py", line 480, in _compile_impl
+    pipeline = _run_pass_pipeline(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/ir/compile.py", line 250, in _run_pass_pipeline
+    transformed_program = pm.run_passes(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/ir/pass_manager.py", line 461, in run_passes
+    return self._pipeline.run(input_ir)
+pypto.Error: Verification failed after 'ConvertToSSA' for properties {SSAForm}:
+IR Verification Report
+======================
+Total diagnostics: 2 (2 errors, 0 warnings)
+
+[1] ERROR - SSAVerify
+  Message: Variable 'started' used outside its defining scope
+  In function 'acceptance_chain':
+@pl.function(type=pl.FunctionType.Orchestration, level=pl.Level.CHIP, role=pl.Role.Orchestrator)
+def acceptance_chain(data__ssa_v0: pl.InOut[pl.Tensor[[27664, 512], pl.FP32]], trace__ssa_v0: pl.Out[pl.Tensor[[817, 8], pl.INT64]], length__ssa_v0: pl.Scalar[pl.INT64], work__ssa_v0: pl.Scalar[pl.INT64], scalar_steps__ssa_v0: pl.Scalar[pl.INT64], seed__ssa_v0: pl.Scalar[pl.INT64]) -> tuple[pl.Tensor[[27664, 512], pl.FP32], pl.Tensor[[817, 8], pl.INT64]]:
+    for stage__idx_v0 in pl.range(length__ssa_v0):
+        for block__ssa_v0 in pl.spmd(48, name_hint="acceptance_task_spmd", allow_early_resolve=True):
+            if False:
+                pl.system.bar_all()
+                started__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(pl.const(0, pl.INT64))
+            state__ssa_v0: pl.Scalar[pl.INT64] = seed__ssa_v0 + stage__idx_v0 + block__ssa_v0
+            for ___idx_v0, (state__iter_v1,) in pl.range(scalar_steps__ssa_v0, init_values=(state__ssa_v0,)):
+                state__ssa_v3: pl.Scalar[pl.INT64] = (state__iter_v1 * 17 + 3) % 65521
+                state__rv_v2: pl.Scalar[pl.INT64] = pl.yield_(state__ssa_v3)
+            if False:
+                scalar_end__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(state__rv_v2)
+            if False:
+                pl.system.wait_pre_task_end()
+            value__ssa_v0: pl.Tile[[32, 512], pl.FP32] = pl.tile.load(data__ssa_v0, [(stage__idx_v0 * 48 + block__ssa_v0) * 32, 0], [32, 512], [32, 512])
+            value_v1__ssa_v0: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.tile.adds(value__ssa_v0, pl.cast(state__rv_v2 % 17, pl.FP32))
+            for ___idx_v0_1, (value_v1__iter_v1,) in pl.range(work__ssa_v0, init_values=(value_v1__ssa_v0,)):
+                value_v1__ssa_v3: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.tile.adds(value_v1__iter_v1, 1.0)
+                value_v1__rv_v2: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.yield_(value_v1__ssa_v3)
+            pl.tile.store(value_v1__rv_v2, [((stage__idx_v0 + 1) * 48 + block__ssa_v0) * 32, 0], data__ssa_v0)
+            if False:
+                pl.system.bar_all()
+                finished__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(pl.const(0, pl.INT64))
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 0], started__FREE_VAR)
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 1], scalar_end__FREE_VAR)
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 2], finished__ssa_v0)
+            if False:
+                pl.system.set_next_task_start()
+    return data__ssa_v0, trace__ssa_v0
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py:43:21
+  Error Code: 6
+
+[2] ERROR - SSAVerify
+  Message: Variable 'scalar_end' used outside its defining scope
+  In function 'acceptance_chain':
+@pl.function(type=pl.FunctionType.Orchestration, level=pl.Level.CHIP, role=pl.Role.Orchestrator)
+def acceptance_chain(data__ssa_v0: pl.InOut[pl.Tensor[[27664, 512], pl.FP32]], trace__ssa_v0: pl.Out[pl.Tensor[[817, 8], pl.INT64]], length__ssa_v0: pl.Scalar[pl.INT64], work__ssa_v0: pl.Scalar[pl.INT64], scalar_steps__ssa_v0: pl.Scalar[pl.INT64], seed__ssa_v0: pl.Scalar[pl.INT64]) -> tuple[pl.Tensor[[27664, 512], pl.FP32], pl.Tensor[[817, 8], pl.INT64]]:
+    for stage__idx_v0 in pl.range(length__ssa_v0):
+        for block__ssa_v0 in pl.spmd(48, name_hint="acceptance_task_spmd", allow_early_resolve=True):
+            if False:
+                pl.system.bar_all()
+                started__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(pl.const(0, pl.INT64))
+            state__ssa_v0: pl.Scalar[pl.INT64] = seed__ssa_v0 + stage__idx_v0 + block__ssa_v0
+            for ___idx_v0, (state__iter_v1,) in pl.range(scalar_steps__ssa_v0, init_values=(state__ssa_v0,)):
+                state__ssa_v3: pl.Scalar[pl.INT64] = (state__iter_v1 * 17 + 3) % 65521
+                state__rv_v2: pl.Scalar[pl.INT64] = pl.yield_(state__ssa_v3)
+            if False:
+                scalar_end__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(state__rv_v2)
+            if False:
+                pl.system.wait_pre_task_end()
+            value__ssa_v0: pl.Tile[[32, 512], pl.FP32] = pl.tile.load(data__ssa_v0, [(stage__idx_v0 * 48 + block__ssa_v0) * 32, 0], [32, 512], [32, 512])
+            value_v1__ssa_v0: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.tile.adds(value__ssa_v0, pl.cast(state__rv_v2 % 17, pl.FP32))
+            for ___idx_v0_1, (value_v1__iter_v1,) in pl.range(work__ssa_v0, init_values=(value_v1__ssa_v0,)):
+                value_v1__ssa_v3: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.tile.adds(value_v1__iter_v1, 1.0)
+                value_v1__rv_v2: pl.Tile[[32, 512], pl.FP32, pl.Mem.Vec] = pl.yield_(value_v1__ssa_v3)
+            pl.tile.store(value_v1__rv_v2, [((stage__idx_v0 + 1) * 48 + block__ssa_v0) * 32, 0], data__ssa_v0)
+            if False:
+                pl.system.bar_all()
+                finished__ssa_v0: pl.Scalar[pl.INT64] = pl.system.read_clock(pl.const(0, pl.INT64))
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 0], started__FREE_VAR)
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 1], scalar_end__FREE_VAR)
+                pl.tensor.write(trace__ssa_v0, [stage__idx_v0 * 48 + block__ssa_v0, 2], finished__ssa_v0)
+            if False:
+                pl.system.set_next_task_start()
+    return data__ssa_v0, trace__ssa_v0
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py:48:21
+  Error Code: 6
+
+Status: FAILED (2 error(s) found)
+
+[ERROR] 2026-10-12-09:10:30 (PID:3766386, Device:-1, RankID:-1) ERR99999 UNKNOWN applicaiton exception
