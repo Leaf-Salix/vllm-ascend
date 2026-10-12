@@ -1,0 +1,119 @@
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_types.h
+@@ -103,7 +103,7 @@
+     SubtaskSlot running_subslot;            // offset 36: which subtask slot is running
+     SubtaskSlot pending_subslot;            // offset 37: which subtask slot is pending
+     bool dispatch_id_reused;               // offset 38: sticky after the first register-ID wrap
+-    uint8_t pad0_;                          // offset 39: alignment padding
++    uint8_t ordinary_context_clean;         // offset 39: clean dual-slot bitmask
+     // Precomputed COND register pointer; resolved once in handshake so the
+     // hot completion poll does a single volatile load instead of recomputing
+     // reg_base + reg_offset(COND) on every iteration.
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -204,50 +204,62 @@
+         );
+         return {};
+     }
+-    auto &overlap = payload.global_context;
+     const uint8_t member = 1u << static_cast<uint32_t>(subslot);
+-    const bool runtime_tail = (slot_state.payload->runtime_barrier_tail & member) != 0;
+-    const bool compiled_poll = (slot_state.payload->runtime_compiled_poll & member) != 0;
+-    const uint32_t scratch_contract = (slot_state.payload->runtime_direct_poll_scratch >>
+-        (subslot == SubtaskSlot::AIC ? 0 : 16)) & 0xffffu;
+-    const bool direct_poll = runtime_tail && compiled_poll && scratch_contract != 0;
+-    overlap.async_tail_kind = static_cast<uint32_t>(!runtime_tail ? AsyncTailKind::None :
+-        direct_poll ? AsyncTailKind::RuntimeDirectPollClean :
+-        compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
+-    // Original dispatch owns this resource metadata; Set performs no GM store.
+-    // High diagnostic bits are always reset before slot reuse.
+-    overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
+-        compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
+-    overlap.scalar_overlap_trace = 0;
+-    overlap.wait_predecessor_fn = 0;
+-    overlap.predecessor_context = 0;
+-    overlap.predecessor_reg_task_id = 0;
+-    overlap.reg_task_id = reg_task_id;
+-    overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
+-                               SCALAR_PREFIX_TAGGED_ARGS : 0u;
+-    // Only compiler-advertised wrappers may consume source descriptors directly.
+-    if (overlap.scalar_prefix != 0 &&
+-        (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
+-        overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
+-    }
+-    // The local predecessor protects pipeline reuse, independently of input
+-    // dependencies. Gated successors retain their full-fanin doorbell wait
+-    // after draining the local tail and before entering dependent computation.
+-    auto &source = *slot_state.payload;
+-    // Ready routing has already evaluated predicates and retired false tasks.
+-    // Predicated tasks remain excluded from unresolved-fanin early dispatch.
+-    if ((source.scalar_prefix & member) != 0) {
+-        ChipTaskSlotState *previous = core_exec_state.running_slot_state;
+-        const bool local_predecessor = to_pending && previous != nullptr;
+-        const bool ready_prefix = payload.src_payload == 0;
+-        const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
+-        if (gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
+-        if (local_predecessor && (ready_prefix || gated_prefix)) {
+-            overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
+-            overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
+-            // Argument preparation remains on AICore; compatible wrappers may
+-            // read source metadata without materializing an intermediate vector.
+-        }
++    const auto &source_contract = *slot_state.payload;
++    // Bits 3..5 are a compiler proof that the member never writes overlap state.
++    // Legacy entries have no proof and retain their per-dispatch initialization.
++    const bool ordinary =
++        (source_contract.scalar_prefix_tagged_args & (member << 3)) != 0 &&
++        ((source_contract.scalar_prefix | source_contract.runtime_barrier_tail |
++          source_contract.runtime_compiled_poll) & member) == 0;
++    const uint8_t buffer_bit = 1u << buf_idx;
++    if (!ordinary || (core_exec_state.ordinary_context_clean & buffer_bit) == 0) {
++        auto &overlap = payload.global_context;
++        const bool runtime_tail = (slot_state.payload->runtime_barrier_tail & member) != 0;
++        const bool compiled_poll = (slot_state.payload->runtime_compiled_poll & member) != 0;
++        const uint32_t scratch_contract = (slot_state.payload->runtime_direct_poll_scratch >>
++            (subslot == SubtaskSlot::AIC ? 0 : 16)) & 0xffffu;
++        const bool direct_poll = runtime_tail && compiled_poll && scratch_contract != 0;
++        overlap.async_tail_kind = static_cast<uint32_t>(!runtime_tail ? AsyncTailKind::None :
++            direct_poll ? AsyncTailKind::RuntimeDirectPollClean :
++            compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
++        // Original dispatch owns this resource metadata; Set performs no GM store.
++        // High diagnostic bits are always reset before slot reuse.
++        overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
++            compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
++        overlap.scalar_overlap_trace = 0;
++        overlap.wait_predecessor_fn = 0;
++        overlap.predecessor_context = 0;
++        overlap.predecessor_reg_task_id = 0;
++        overlap.reg_task_id = reg_task_id;
++        overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
++                                   SCALAR_PREFIX_TAGGED_ARGS : 0u;
++        // Only compiler-advertised wrappers may consume source descriptors directly.
++        if (overlap.scalar_prefix != 0 &&
++            (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
++            overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
++        }
++        // The local predecessor protects pipeline reuse, independently of input
++        // dependencies. Gated successors retain their full-fanin doorbell wait
++        // after draining the local tail and before entering dependent computation.
++        auto &source = *slot_state.payload;
++        // Ready routing has already evaluated predicates and retired false tasks.
++        // Predicated tasks remain excluded from unresolved-fanin early dispatch.
++        if ((source.scalar_prefix & member) != 0) {
++            ChipTaskSlotState *previous = core_exec_state.running_slot_state;
++            const bool local_predecessor = to_pending && previous != nullptr;
++            const bool ready_prefix = payload.src_payload == 0;
++            const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
++            if (gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
++            if (local_predecessor && (ready_prefix || gated_prefix)) {
++                overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
++                overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
++                // Argument preparation remains on AICore; compatible wrappers may
++                // read source metadata without materializing an intermediate vector.
++            }
++        }
++        if (ordinary) core_exec_state.ordinary_context_clean |= buffer_bit;
++        else core_exec_state.ordinary_context_clean &= ~buffer_bit;
+     }
+ 
+     if (to_pending) {
