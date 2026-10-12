@@ -1,0 +1,41 @@
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+2026-10-12 12:31:30.083 W | [warning] [ScalarWriteLineShared] (pipeline_input) pl.write into 'stage_trace' from 48 concurrent blocks ('acceptance_task_spmd') in function 'acceptance_chain': the index is computed at runtime, so the compiler cannot tell whether two blocks share a 64-byte cache line. A scalar write reaches DDR a whole 64-byte line at a time, carrying the neighbouring elements as the writing core last saw them, so two blocks sharing a line silently lose each other's stores. Give each one whole 64-byte lines (8 x INT64), or issue the writes from a single instance (pl.spmd(1)). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/artifacts/boundary_chain_trace_20261012/retry2/compiled/early/program.py:26:13
+Failed to compile function 'acceptance_task': ptoas compilation failed: loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/artifacts/boundary_chain_trace_20261012/retry2/compiled/early/program.py":26:13): error: operation outside the selected experimental async-tail scope; only a checked Scalar prefix may store before tile work; cross-core pipes require runtime_barrier_all
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_chain_trace.py", line 103, in <module>
+    main()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_chain_trace.py", line 51, in main
+    acceptance.artifact(root / 'compiled', 'early', compile_now=True)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_acceptance.py", line 94, in artifact
+    compiled = _compile_impl(program, _kernel_abi=abi, **options)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/ir/compile.py", line 509, in _compile_impl
+    files = generate(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/backend/pto_backend.py", line 2182, in generate
+    return _generate_single_chip(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/tests/st/runtime/kernel/task_boundary_chain_trace.py", line 48, in trace_entries
+    return original(ir.Program(functions,program.name,program.span),*positional,**keywords)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/pypto/python/pypto/backend/pto_backend.py", line 2680, in _generate_single_chip
+    raise PartialCodegenError(report, result_files)
+pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+
+  Function         | Error
+  -----------------+--------------------------------------------------------------
+  acceptance_task  | ptoas compilation failed:
+                   | loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-
+                   | overlap-demo-
+                   | 20261009/artifacts/boundary_chain_trace_20261012/retry2/comp
+                   | iled/early/program.py":26:13): error: operation outside the
+                   | selected experimental async-tail scope; only a checked
+                   | Scalar prefix may store before tile work; cross-core pipes
+                   | require runtime_barrier_all
+  -----------------+--------------------------------------------------------------
+
+  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/scalar-overlap-demo-20261009/artifacts/boundary_chain_trace_20261012/retry2/compiled/early/report/codegen_errors.txt
+[ERROR] 2026-10-12-12:31:30 (PID:184846, Device:-1, RankID:-1) ERR99999 UNKNOWN applicaiton exception
