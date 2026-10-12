@@ -16238,3 +16238,6 @@ Simpler 1c56bcd3e保存已测普通路径修复及19项仓内CPU检查，重新�
 过程101和原失败对照复查仍pending，仍未完成295/250μs双目标。
 [修复与实际SDK状态](superkernel_retained_cache_20261012/README.md)、
 [关联诊断与离线失败记录](superkernel_fixed_chain_dispatch_trace_20261012/README.md)。
+
+过程103的离线解析器已准备，合成数据检查通过；真实数据仍未获得卡。
+解析器明确区分发布已晚和发布后未观察到重叠，保留全部样本，不生成新的未插桩性能结论。

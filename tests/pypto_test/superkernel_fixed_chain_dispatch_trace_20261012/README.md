@@ -29,3 +29,17 @@ AICore行保留物理核、前缀入口、函数返回、最终尾部记录等�
 `task_boundary_chain_trace.py`和`task_boundary_normal_state_probe.py`；归档不是独立安装包。
 构建、编译分别用`build/compile --root <本次目录>`，设备阶段用归档run.sh，经task-submit分配TASK_DEVICE。
 不要使用这个带插桩的runtime做正式性能对比，也不要重编已有的冻结对照产物。
+
+## 离线解析准备
+
+[解析器](repro/task_boundary_dispatch_analysis.py)将已发布的本核后继分为四类：
+在前驱尾部记录前进入、在尾部记录后才开始发布、返回前已发布却未观察到重叠、其余尾部区间。
+同时输出CPU准备、准备后等待发布、发布操作区间和发布至函数trace起点的全部min/mean/max，
+仅作为插桩诊断，不作为295/250μs目标计时。发布后至入口为负的合法区间值保留，不删样本。
+
+入口要求5/50μs两档、每档17×48条唯一记录以及输出/保护区通过标志；
+还检查核映射与同核派发代次，报告时间顺序矛盾。已用合成数据验证四类区分、负值保留和重复身份拒绝，
+[CPU检查记录](analyzer_cpu.log)不包含设备测量。实际数据尚在排队。
+
+数据产生后运行：`python task_boundary_dispatch_analysis.py <本次目录>/results.json`，
+默认写入同目录`dispatch_analysis.json`。
