@@ -128,3 +128,33 @@ Native固定容量第一轮已重新提交，正在排队；每项max-time780秒
 在此Native基线通过后，已提交TND精度版CSA单独替换任务，HCA仍Native，
 复用相同固定状态和官方缓存。任务max-time780秒，按约五分钟间隔监控。
 本段只证明Native自身重复稳定，尚无本轮Native/PTO误差结论。
+
+## 2026-10-12：CSA初始化超时与共享JIT缓存修复
+
+旧环境CSA任务触发780秒上限，exit130，未生成任何rank结果。
+第一个Graph档位完成，第二个仍在PyPTO orchestration二进制编译等待；
+13个官方静态包均已成功安装/重选。此次不是数值失配，精度判定为未测试。
+
+只读核验发现共享缓存已开启，但官方工具链身份检查拒绝
+`pypto.pypto_core`的外部导入重定向：Python包来自源码树，原扩展来自editable安装目录。
+持久缓存的identity-unusable分支直接build，不检查对象缓存；本轮产生463个构建目录，
+451个compiled metadata具有同一ABI，448份binary manifest。
+ABI相同不能证明生成代码相同，没有把其中任意产物强行替换到其他编译请求。
+
+修复仅在私有测试目录复制完整PyPTO Python包及原来已编译的两扩展，206个文件逐项SHA一致。
+使用限定于pypto命名空间的普通PathFinder，保留Torch/Simpler既有选路；
+两扩展仍选中原依赖库路径。原官方工具链身份检查未修改，重新核验usable=true、failures为空。
+没有重装或重编译vLLM/PyPTO/Simpler，也未修改原安装目录、性能包或精度算术。
+
+官方无设备kernel artifact接口完成signature-mode预编译及READY发布。
+第一次诊断误查不变的GENERATED output_dir而退出；随后改查官方runtime.handle的BINARY_READY状态，
+不弱化二进制SHA、ABI与加载检查。独立新CPU进程约3.1秒命中READY，
+miss/bypass/generation/binary/storage计数全0。证据见
+[运行包身份与READY命中](evidence_tnd_precision/low_acceptance_runtime_package_20261012.json)。
+CPU命中仍不能证明NPU真实特殊化全部命中；后续逐rank核查cache_stats，拒绝bypass、
+强制重建、身份/存储错误及重复构建，并记录实际模块路径。
+
+这是新的环境基线，三臂必须共用同一运行包manifest SHA和同一观察源码SHA。
+旧Native重复PASS保留为历史证据，不与新环境CSA混作主对照。
+已提交新环境Native第一轮，之后独立Native第二轮，再仅替换CSA；HCA继续Native。
+每项任务仍max-time780秒，继续约五分钟监控。
