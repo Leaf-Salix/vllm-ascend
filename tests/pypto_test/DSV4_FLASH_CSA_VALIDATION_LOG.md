@@ -16361,3 +16361,15 @@ P95也降低，保留Simpler 05220c71e / PyPTO 845909ca3。第二轮max342.43μs
 [布局两轮](superkernel_compact_dispatch_20261012/README.md)、
 [主机诊断](superkernel_host_enqueue_20261012/README.md)、
 [117未接入候选](superkernel_doorbell_probe_20261012/README.md)。
+
+
+## 619. 2026-10-12：5μs链继续检查AICPU读钟成本，两个独立候选尚未接入
+
+118关闭没有使用者的CYCLE_COUNT读钟与累加，保留超时检测和Sched总窗口。
+CPU开关检查、构建通过；202358卡0固定链全部精确，标记mean295.17μs，前后295.71/298.42μs。
+119只对同频时钟换算走恒等路径，其余频率保留原128位缩放；宿主100→50MHz检查通过。
+202646卡1固定链全部精确，标记mean301.36μs，前后299.05/298.85μs，首轮回退。
+两项均未接入，正常SDK仍05220c71e/845909ca3，当前有效完整对照仍见618。
+203350已排队，计划同卡顺序复核两项并检查开启profiling记录及实际设备时钟频率；不测50μs。
+[118](superkernel_cycle_gate_20261012/README.md)、[119](superkernel_clock_identity_20261012/README.md)、
+[复核脚本与诊断](superkernel_clock_round2_20261012/README.md)。

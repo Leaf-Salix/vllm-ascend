@@ -1,0 +1,12 @@
+diff --git a/src/common/platform/include/aicpu/device_time.h b/src/common/platform/include/aicpu/device_time.h
+index cbceae634..2954712a5 100644
+--- a/src/common/platform/include/aicpu/device_time.h
++++ b/src/common/platform/include/aicpu/device_time.h
+@@ -77,4 +77,7 @@ inline uint64_t sys_cnt_now_ticks() {
+         return 0;
+     }
++    if (freq == PLATFORM_PROF_SYS_CNT_FREQ) {
++        return device_time_now_ticks();
++    }
+     return static_cast<uint64_t>(static_cast<__uint128_t>(device_time_now_ticks()) * PLATFORM_PROF_SYS_CNT_FREQ / freq);
+ }
