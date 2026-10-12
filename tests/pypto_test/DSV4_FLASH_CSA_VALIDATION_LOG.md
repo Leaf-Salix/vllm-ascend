@@ -16215,3 +16215,14 @@ MIX两次均AIC24/AIV48在前驱整组结束前进入安全前缀；本轮未复
 不删异常样本，暂不保留本核初始化，不改变正式Simpler。失败对照已单独排队复查并增加阶段日志。
 [通知成本](superkernel_notification_cost_20261012/README.md)、
 [本核初始化与完整失败记录](superkernel_core_owned_init_20261012/README.md)。
+
+
+## 609. 2026-10-12：通知初始化批量屏障CPU通过，单卡仍排队
+
+过程101保留全部通知初始化与cache clean，只合并同一调度线程派发前的完成屏障。
+隔离SDK构建和20项CPU检查通过；任务`task_20261012_132100_225793121124`排队中，
+没有设备性能或DMA可见性通过结论。失败对照原二进制复查也仍排队，没有因等待超时重启任务。
+补充既有trace的整组统计：短档166/768、长档768/768个后继在前组最后尾部记录前开始；
+该口径包含空闲核的提前前缀，不能把原21对同核交接当作全部early-start覆盖。
+[候选记录](superkernel_notification_batch_20261012/README.md)、
+[分组统计](superkernel_fixed_chain_diagnostics_20261012/group_timing_summary.json)。
