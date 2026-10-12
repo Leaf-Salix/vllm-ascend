@@ -158,3 +158,15 @@ CPU命中仍不能证明NPU真实特殊化全部命中；后续逐rank核查cach
 旧Native重复PASS保留为历史证据，不与新环境CSA混作主对照。
 已提交新环境Native第一轮，之后独立Native第二轮，再仅替换CSA；HCA继续Native。
 每项任务仍max-time780秒，继续约五分钟监控。
+
+## 2026-10-12：完整运行包环境Native重复通过
+
+完整包新环境的Native1、Native2均exit0完成，各640请求、122880输出token。
+逐token、逐请求逐轮接收事件全部一致；源清单、运行包SHA、worker配置、
+除运行ID/输出目录外的启动参数均相同。实际package/core模块路径均在私有包中。
+零抢占，平均接受3.7035909921，0…5类别全部覆盖。
+结果见[新环境Native重复](evidence_tnd_precision/low_acceptance_package_native_repeat_20261012.json)。
+
+已提交同环境仅CSA精度版任务；使用CPU准备好的同一官方READY缓存，
+逐rank核查实际替换、FULL重放、模块路径和cache_stats。
+每项仍max-time780秒，约五分钟监控。尚无新环境Native/PTO精度结论。
