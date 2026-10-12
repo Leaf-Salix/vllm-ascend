@@ -16341,7 +16341,23 @@ Simpler b5a358b88已接入107，PyPTO 4a2651638同步版本，普通入口修复
 使不可变交接描述复用原64B头；不改派发、依赖、ACK与完整流水等待。20项CPU检查通过。
 独立PyPTO 845909ca3同步版本，新venv内重建binding/runtime/torch_npu适配器，
 两路任务匹配重编，Python与计算C++保持不变。环境问题及精确版本拒绝已留档，均未上卡。
-194040单卡任务pending，16卡正被其他作业占用，尚无候选功能或性能验收。
+194040排队后完成；后续两轮及正常SDK复核见618。
 当前已保留SDK仍b5a358b88/4a2651638；50μs暂停，295/250μs双目标未完成。
 [113实测](superkernel_dispatch_clock_20261012/README.md)、
-[114补丁、SDK与排队状态](superkernel_compact_dispatch_20261012/README.md)。
+[114补丁、SDK与结果](superkernel_compact_dispatch_20261012/README.md)。
+
+
+## 618. 2026-10-12：固定5μs链保留紧凑派发头，普通293.75μs、标记295.52μs
+
+114两轮全部精确，3项局部功能通过，标记mean295.07/296.84μs，较原b5前后中点均改善4μs以上，
+P95也降低，保留Simpler 05220c71e / PyPTO 845909ca3。第二轮max342.43μs未解释，未删除样本。
+115主机计时未复现尖峰，没有证据把上一轮峰值归因于主机；完整事实已留档。
+116正常私有SDK三方重建并匹配核编译，201108卡8固定5μs全精确；公共安装未改。
+普通min/mean/max289.24/293.75/303.23μs；标记291.36/295.52/299.94μs。
+旧SDK前后mean289.53/288.34μs，当前普通仍慢1.67%，标记慢2.28%。295/250μs双目标尚未完成。
+117合并重复门铃探测，两轮分别改善2.60μs/回退2.79μs，局部AIC/AIV/MIX通过，暂不保留。
+后续仅5μs，50μs暂停。全部对照仍是原work5、Scalar256、17级×48 AIV、8调用/图、30样本。
+[当前正常SDK](superkernel_compact_sdk_20261012/README.md)、
+[布局两轮](superkernel_compact_dispatch_20261012/README.md)、
+[主机诊断](superkernel_host_enqueue_20261012/README.md)、
+[117未接入候选](superkernel_doorbell_probe_20261012/README.md)。
