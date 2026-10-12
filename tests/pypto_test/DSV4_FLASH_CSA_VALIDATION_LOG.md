@@ -16226,3 +16226,15 @@ MIX两次均AIC24/AIV48在前驱整组结束前进入安全前缀；本轮未复
 该口径包含空闲核的提前前缀，不能把原21对同核交接当作全部early-start覆盖。
 [候选记录](superkernel_notification_batch_20261012/README.md)、
 [分组统计](superkernel_fixed_chain_diagnostics_20261012/group_timing_summary.json)。
+
+
+## 610. 2026-10-12：普通派发修复源码留档与固定链关联诊断准备
+
+Simpler 1c56bcd3e保存已测普通路径修复及19项仓内CPU检查，重新构建通过。
+由于冻结产物绑定旧SDK，修复保存在独立工作区，活动源码/绑定/runtime恢复3d0b9c820；
+没有改写冻结产物或关闭ABI检查，没有新的设备性能结论。
+已有trace补算发现短链14/16个最终完成最晚的task在前组最后尾部记录后才启动，
+新关联采样将区分派发晚和核上接收晚，编译已通过、单卡任务140105排队中。
+过程101和原失败对照复查仍pending，仍未完成295/250μs双目标。
+[修复与实际SDK状态](superkernel_retained_cache_20261012/README.md)、
+[关联诊断与离线失败记录](superkernel_fixed_chain_dispatch_trace_20261012/README.md)。

@@ -1,0 +1,535 @@
+diff --git a/docs/investigations/2026-10-tmr-synchronous-entry-dispatch.md b/docs/investigations/2026-10-tmr-synchronous-entry-dispatch.md
+new file mode 100644
+index 000000000..1eb4c9095
+--- /dev/null
++++ b/docs/investigations/2026-10-tmr-synchronous-entry-dispatch.md
+@@ -0,0 +1,34 @@
++# Synchronous entries in the local boundary prototype
++
++The private A2/A3 TMR prototype must keep ordinary kernels out of the mutable
++Scalar-overlap protocol. A compiler-owned entry can advertise a synchronous
++member in bits 3–5 of `scalar_prefix_tagged_args`. Absence of this proof keeps
++the conservative path. A Wait, runtime tail, or compiled-poll contract for the
++same member overrides the proof.
++
++At submission, `TaskPayload::prepare_overlap_contracts()` derives immutable
++per-member tail, prefix, scratch, and synchronous-entry descriptors. These
++descriptors occupy existing predicate-line padding; tensor/scalar offsets and
++payload size do not change. Submission refreshes all three descriptors before
++publishing each reused task slot.
++
++On dispatch, a proven synchronous entry receives `DISPATCH_ORDINARY_ENTRY` in
++the existing local-context flag. The scheduler and executor then skip the cold
++overlap state. A subsequent marked or unknown entry initializes every consumed
++field before publication, so stale state from either physical buffer cannot
++become a predecessor or completion contract. The scheduler also derives a
++marked entry's final prefix and predecessor fields before writing each once.
++
++This does not change core selection, readiness, pending dispatch, ACK/FIN
++ordering, `allow_early_resolve`, or the late-arrival notification protocol.
++The argument preparation helper is inlined into dispatch to avoid an added
++per-block call on the ordinary path. Legacy entries and profiling retain their
++existing behavior.
++
++The scheduler CPU tests exercise ordinary/marked/legacy transitions across
++both buffers and all three physical members, contradictory member metadata,
++gated consumers, unrelated local predecessors, and dispatch-ID reuse. Device
++checks additionally need the normal compiler's proof generation and full
++data/guard validation. This fix addresses ordinary-path overhead; it does not
++establish the requested marked-chain latency target. One intermittent AICPU
++error seen in a later control run is still under separate investigation.
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index fa30265e0..ab1a72f4f 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -143,6 +143,7 @@ __aicore__ static uint32_t handoff_scalar_prefix(
+     if (next_id == task_id || next_id == AICPU_IDLE_TASK_ID || next_id == AICORE_EXIT_SIGNAL) return AICPU_IDLE_TASK_ID;
+     auto *next = base + (next_id & 1u);
+     dcci(next, ENTIRE_DATA_CACHE);
++    if (next->local_context.async_ctx.local_predecessor_pending == DISPATCH_ORDINARY_ENTRY) return AICPU_IDLE_TASK_ID;
+     if ((next->global_context.scalar_prefix & SCALAR_PREFIX_CAN_HANDOFF) == 0 ||
+         next->global_context.predecessor_reg_task_id != task_id) return AICPU_IDLE_TASK_ID;
+     next->global_context.predecessor_context = reinterpret_cast<uint64_t>(&current->global_context);
+@@ -260,16 +261,15 @@ __aicore__ __attribute__((noinline)) static uint32_t poll_late_handoff_direct(
+  *
+  * @param payload Pointer to DispatchPayload in global memory
+  */
+-__aicore__ __attribute__((always_inline)) static void execute_task(
+-    __gm__ DispatchPayload *payload, __gm__ int64_t *args
+-) {
++__aicore__ __attribute__((always_inline)) static void
++execute_task(__gm__ DispatchPayload *payload, __gm__ int64_t *args, bool ordinary) {
+     if (payload == nullptr || payload->function_bin_addr == 0) {
+         return;
+     }
+ 
+     auto kernel = reinterpret_cast<UnifiedKernelFunc>(payload->function_bin_addr);
+     kernel(args);
+-    if (payload->global_context.scalar_overlap_trace != 0) {
++    if (!ordinary && payload->global_context.scalar_overlap_trace != 0) {
+         payload->global_context.scalar_overlap_returned = get_sys_cnt_aicore();
+     }
+     OUT_OF_ORDER_STORE_BARRIER();
+@@ -350,7 +350,9 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+             if (task_id != prepared_prefix_task_id) dcci(exec_payload, ENTIRE_DATA_CACHE);
+             prepared_prefix_task_id = AICPU_IDLE_TASK_ID;
+             prepared_predecessor = nullptr;
+-            bool scalar_prefix_handoff = exec_payload->global_context.predecessor_context != 0;
++            const bool ordinary =
++                exec_payload->local_context.async_ctx.local_predecessor_pending == DISPATCH_ORDINARY_ENTRY;
++            bool scalar_prefix_handoff = !ordinary && exec_payload->global_context.predecessor_context != 0;
+             bool source_args = false;
+ 
+             // Early-dispatch gate. A gated task was staged on this core before its
+@@ -369,7 +371,7 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+                 // diagnostics still materialize the argument vector here.
+                 // Context arguments remain the AICPU's per-buffer constants.
+                 __gm__ char *src = reinterpret_cast<__gm__ char *>(exec_payload->src_payload);
+-                source_args = !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
++                source_args = !ordinary && !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
+                               (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_SOURCE_ARGS) != 0;
+                 if (!source_args) {
+                     int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
+@@ -390,7 +392,8 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+                 // An idle core can run the same checked prefix without a local
+                 // predecessor. The callback retains the full-fanin/cohort gate
+                 // and delayed ACK, so no pending slot is released prematurely.
+-                if (!scalar_prefix_handoff && !chip_swimlane_enabled && !pmu_enabled && !dump_args_enabled &&
++                if (!ordinary && !scalar_prefix_handoff && !chip_swimlane_enabled && !pmu_enabled &&
++                    !dump_args_enabled &&
+                     (exec_payload->global_context.scalar_prefix & SCALAR_PREFIX_CAN_EARLY_START) != 0) {
+                     exec_payload->global_context.wait_predecessor_fn =
+                         reinterpret_cast<uint64_t>(&wait_scalar_prefix_predecessor);
+@@ -457,9 +460,10 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+ 
+             uint64_t start_time = chip_swimlane_enabled ? get_sys_cnt_aicore() : 0;
+ 
+-            execute_task(exec_payload, call_args);
++            execute_task(exec_payload, call_args, ordinary);
+ 
+-            const auto tail_kind = static_cast<AsyncTailKind>(exec_payload->global_context.async_tail_kind);
++            const auto tail_kind = ordinary ? AsyncTailKind::None :
++                                              static_cast<AsyncTailKind>(exec_payload->global_context.async_tail_kind);
+             if (tail_kind != AsyncTailKind::None) {
+                 // Prototype observation uses explicit trace tensors; existing
+                 // PMU/swimlane ownership remains serial until separately extended.
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+index 1baa35ccc..8bb811309 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -83,6 +83,10 @@ constexpr uint32_t TASKPAYLOAD_TENSOR_STRIDE = 128;  // sizeof(simpler::tmr::Ten
+  * The struct is cache-line aligned to prevent false sharing across
+  * concurrently dispatched cores.
+  */
++// A compiler-proven synchronous entry does not consume overlap metadata.
++// This value occupies the existing hot local-context flag only on such entries.
++inline constexpr uint32_t DISPATCH_ORDINARY_ENTRY = 2u;
++
+ struct alignas(64) DispatchPayload {
+     // === Cache line 0 (64B): the base per-dispatch control block ===
+     // function_bin_addr, local_context.{block_idx,block_num,async_ctx.task_token}
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
+index bcaa2380e..3d55bf289 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp
+@@ -732,6 +732,7 @@ static bool prepare_task(
+     out->payload->runtime_barrier_tail = args.runtime_barrier_tail();
+     out->payload->runtime_compiled_poll = args.runtime_compiled_poll();
+     out->payload->runtime_direct_poll_scratch = args.runtime_direct_poll_scratch();
++    out->payload->prepare_overlap_contracts();
+ 
+     // Reset the fanout/fanin bookkeeping for this reuse. The allocator only
+     // returns a slot whose previous occupant is CONSUMED and quiescent (alloc
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+index 188bc6194..0e98cc616 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+@@ -378,6 +378,46 @@ struct TaskPayload {
+     // / scalars offsets only. Resolved at submit; evaluated by the scheduler at
+     // dispatch.
+     alignas(64) DispatchPredicate predicate;
++    struct OverlapContract {
++        static constexpr uint32_t PREFIX_MASK = 0xffffu;
++        static constexpr uint32_t SYNCHRONOUS_ENTRY = 1u << 16;
++        static constexpr uint32_t HAS_WAIT = 1u << 17;
++        uint32_t tail_kind{0};
++        uint32_t prefix{0};
++        uint32_t scratch{0};
++    };
++    // Submit-owned immutable descriptors fit in the predicate line padding.
++    // Bit 16 identifies a proven synchronous entry; bit 17 advertises a Wait.
++    OverlapContract overlap_contracts[SUBTASK_SLOT_COUNT]{};
++
++    void prepare_overlap_contracts() {
++        for (int index = 0; index < SUBTASK_SLOT_COUNT; ++index) {
++            const uint8_t member = 1u << index;
++            const bool tail = (runtime_barrier_tail & member) != 0;
++            const bool poll = (runtime_compiled_poll & member) != 0;
++            const uint32_t scratch = (runtime_direct_poll_scratch >> (index == 0 ? 0 : 16)) & 0xffffu;
++            const bool direct = tail && poll && scratch != 0;
++            auto &contract = overlap_contracts[index];
++            contract.tail_kind = static_cast<uint32_t>(
++                !tail  ? AsyncTailKind::None :
++                direct ? AsyncTailKind::RuntimeDirectPollClean :
++                poll   ? AsyncTailKind::RuntimeCompiledPollClean :
++                         AsyncTailKind::RuntimeBarrierAll
++            );
++            contract.scratch = direct ? (scratch - 1u) * 64u : poll ? COMPILED_POLL_ID_REUSED : 0u;
++            uint32_t prefix = (scalar_prefix_tagged_args & member) != 0 ? SCALAR_PREFIX_TAGGED_ARGS : 0u;
++            if (prefix && (scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY)) {
++                prefix |= SCALAR_PREFIX_SOURCE_ARGS;
++            }
++            if (scalar_prefix & member) prefix |= OverlapContract::HAS_WAIT;
++            if ((scalar_prefix_tagged_args & (member << 3)) != 0 &&
++                ((scalar_prefix | runtime_barrier_tail | runtime_compiled_poll) & member) == 0) {
++                prefix |= OverlapContract::SYNCHRONOUS_ENTRY;
++            }
++            contract.prefix = prefix;
++        }
++    }
++
+     // === Cache lines 10-73 (4096B) — tensors (alignas(64) forces alignment) ===
+     simpler::tmr::Tensor tensors[MAX_TENSOR_ARGS];
+     // === Cache lines 74-75 (128B) — scalars ===
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+index 4de313805..9cf08d205 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_dispatch.cpp
+@@ -52,17 +52,36 @@ static_assert(sizeof(simpler::tmr::Tensor) == TASKPAYLOAD_TENSOR_STRIDE);
+ 
+ namespace {
+ inline constexpr int32_t DEFERRED_RELEASE_CAP = 256;
+-
+-void fill_dispatch_args(DispatchPayload &dispatch, const TaskPayload &source) {
+-    int n = 0;
+-    for (int32_t i = 0; i < source.tensor_count; i++) {
+-        dispatch.args[n++] = reinterpret_cast<uint64_t>(&source.tensors[i]);
+-    }
+-    for (int32_t i = 0; i < source.scalar_count; i++) {
+-        dispatch.args[n++] = source.scalars[i];
++// Proven synchronous entries never consume this state. Every other entry
++// initializes it before publication, including after an ordinary slot reuse.
++__attribute__((noinline)) void initialize_overlap_context(
++    DispatchPayload &payload, ChipTaskSlotState &slot_state, CoreExecState &core_exec_state, SubtaskSlot subslot,
++    uint32_t reg_task_id, bool to_pending, bool force_gate
++) {
++    auto &overlap = payload.global_context;
++    const auto &source = *slot_state.payload;
++    const auto &contract = source.overlap_contracts[static_cast<uint32_t>(subslot)];
++    uint32_t prefix = contract.prefix & TaskPayload::OverlapContract::PREFIX_MASK;
++    uint32_t predecessor_id = 0;
++    if ((contract.prefix & TaskPayload::OverlapContract::HAS_WAIT) != 0) {
++        const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
++        const bool local_predecessor = to_pending && core_exec_state.running_slot_state != nullptr;
++        if (gated_prefix) prefix |= SCALAR_PREFIX_CAN_EARLY_START;
++        if (local_predecessor && (gated_prefix || payload.src_payload == 0)) {
++            prefix |= SCALAR_PREFIX_CAN_HANDOFF;
++            predecessor_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
++        }
+     }
++    overlap.async_tail_kind = contract.tail_kind;
++    overlap.late_handoff_scratch =
++        core_exec_state.dispatch_id_reused ? contract.scratch : contract.scratch & ~COMPILED_POLL_ID_REUSED;
++    overlap.scalar_overlap_trace = 0;
++    overlap.wait_predecessor_fn = 0;
++    overlap.predecessor_context = 0;
++    overlap.predecessor_reg_task_id = predecessor_id;
++    overlap.reg_task_id = reg_task_id;
++    overlap.scalar_prefix = prefix;
+ }
+-
+ }
+ 
+ // The early-dispatch core bitmask (EARLY_DISPATCH_CORE_MASK_WORDS * 64 bits) must cover
+@@ -132,7 +151,7 @@ int SchedulerContext::pop_ready_tasks_batch(
+     return count;
+ }
+ 
+-bool SchedulerContext::build_payload(
++__attribute__((always_inline, used)) inline bool SchedulerContext::build_payload(
+     DispatchPayload &dispatch_payload, ChipTaskSlotState &slot_state, SubtaskSlot subslot, int32_t block_idx,
+     bool force_gate
+ ) {
+@@ -156,11 +175,16 @@ bool SchedulerContext::build_payload(
+     } else {
+         // Ready task: fill args here; src_payload = 0 signals AICore to run on pickup.
+         dispatch_payload.src_payload = 0;
++        int n = 0;
++        for (int32_t i = 0; i < payload.tensor_count; i++) {
++            dispatch_payload.args[n++] = reinterpret_cast<uint64_t>(&payload.tensors[i]);
++        }
++        for (int32_t i = 0; i < payload.scalar_count; i++) {
++            dispatch_payload.args[n++] = payload.scalars[i];
++        }
+     }
+-    if (dispatch_payload.src_payload == 0) fill_dispatch_args(dispatch_payload, payload);
+     dispatch_payload.local_context.block_idx = block_idx;
+     dispatch_payload.local_context.block_num = slot_state.logical_block_num;
+-    dispatch_payload.local_context.async_ctx.local_predecessor_pending = 0;
+     // AsyncCtx's slab pointers + capacity are prefilled once per (core, buf_idx)
+     // in init(); only task_token varies per dispatch. deferred_slab is never null
+     // on this path, so task_token is always the live task id (matches the old
+@@ -204,50 +228,12 @@ SchedulerContext::PublishHandle SchedulerContext::prepare_subtask_to_core(
+         );
+         return {};
+     }
+-    auto &overlap = payload.global_context;
+-    const uint8_t member = 1u << static_cast<uint32_t>(subslot);
+-    const bool runtime_tail = (slot_state.payload->runtime_barrier_tail & member) != 0;
+-    const bool compiled_poll = (slot_state.payload->runtime_compiled_poll & member) != 0;
+-    const uint32_t scratch_contract = (slot_state.payload->runtime_direct_poll_scratch >>
+-        (subslot == SubtaskSlot::AIC ? 0 : 16)) & 0xffffu;
+-    const bool direct_poll = runtime_tail && compiled_poll && scratch_contract != 0;
+-    overlap.async_tail_kind = static_cast<uint32_t>(!runtime_tail ? AsyncTailKind::None :
+-        direct_poll ? AsyncTailKind::RuntimeDirectPollClean :
+-        compiled_poll ? AsyncTailKind::RuntimeCompiledPollClean : AsyncTailKind::RuntimeBarrierAll);
+-    // Original dispatch owns this resource metadata; Set performs no GM store.
+-    // High diagnostic bits are always reset before slot reuse.
+-    overlap.late_handoff_scratch = direct_poll ? (scratch_contract - 1u) * 64u :
+-        compiled_poll && core_exec_state.dispatch_id_reused ? COMPILED_POLL_ID_REUSED : 0u;
+-    overlap.scalar_overlap_trace = 0;
+-    overlap.wait_predecessor_fn = 0;
+-    overlap.predecessor_context = 0;
+-    overlap.predecessor_reg_task_id = 0;
+-    overlap.reg_task_id = reg_task_id;
+-    overlap.scalar_prefix = (slot_state.payload->scalar_prefix_tagged_args & member) != 0 ?
+-                               SCALAR_PREFIX_TAGGED_ARGS : 0u;
+-    // Only compiler-advertised wrappers may consume source descriptors directly.
+-    if (overlap.scalar_prefix != 0 &&
+-        (slot_state.payload->scalar_prefix_tagged_args & SCALAR_PREFIX_SOURCE_ARGS_CAPABILITY) != 0) {
+-        overlap.scalar_prefix |= SCALAR_PREFIX_SOURCE_ARGS;
+-    }
+-    // The local predecessor protects pipeline reuse, independently of input
+-    // dependencies. Gated successors retain their full-fanin doorbell wait
+-    // after draining the local tail and before entering dependent computation.
+-    auto &source = *slot_state.payload;
+-    // Ready routing has already evaluated predicates and retired false tasks.
+-    // Predicated tasks remain excluded from unresolved-fanin early dispatch.
+-    if ((source.scalar_prefix & member) != 0) {
+-        ChipTaskSlotState *previous = core_exec_state.running_slot_state;
+-        const bool local_predecessor = to_pending && previous != nullptr;
+-        const bool ready_prefix = payload.src_payload == 0;
+-        const bool gated_prefix = force_gate && source.fanin_wait_count > 0;
+-        if (gated_prefix) overlap.scalar_prefix |= SCALAR_PREFIX_CAN_EARLY_START;
+-        if (local_predecessor && (ready_prefix || gated_prefix)) {
+-            overlap.scalar_prefix |= SCALAR_PREFIX_CAN_HANDOFF;
+-            overlap.predecessor_reg_task_id = static_cast<uint32_t>(core_exec_state.running_reg_task_id);
+-            // Argument preparation remains on AICore; compatible wrappers may
+-            // read source metadata without materializing an intermediate vector.
+-        }
++
++    const auto &contract = slot_state.payload->overlap_contracts[static_cast<uint32_t>(subslot)];
++    const bool ordinary = (contract.prefix & TaskPayload::OverlapContract::SYNCHRONOUS_ENTRY) != 0;
++    payload.local_context.async_ctx.local_predecessor_pending = ordinary ? DISPATCH_ORDINARY_ENTRY : 0u;
++    if (!ordinary) {
++        initialize_overlap_context(payload, slot_state, core_exec_state, subslot, reg_task_id, to_pending, force_gate);
+     }
+ 
+     if (to_pending) {
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index baea88e3f..17d43d9c7 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -188,6 +188,98 @@ TEST_F(TmrSchedulerExecutionInputsTest, ExplicitTableBuildsEarlyPayloadAcrossABA
+ }
+ 
+ #if defined(TEST_TMR_SCALAR_PREFIX)
++// Direct payload fixtures prepare the immutable contracts normally derived at submit.
++// Exercise ordinary/marked/legacy transitions across both physical buffers.
++TEST_F(TmrSchedulerExecutionInputsTest, OrdinarySkipsColdStateAndEveryMarkedOrUnknownEntryReinitializes) {
++    for (int core_offset = 0; core_offset < 3; ++core_offset) {
++        for (bool marked : {false, true}) {
++            initialize({table_a.data(), table_a.size()});
++            const auto subslot = static_cast<SubtaskSlot>(core_offset);
++            // Visit both buffers as ordinary, potentially dirty, then ordinary.
++            for (int phase = 0; phase < 5; ++phase) {
++                for (int buffer = 0; buffer < 2; ++buffer) {
++                    init_slot();
++                    slot.active_mask = ActiveMask(SUBTASK_MASK_ALL);
++                    const bool ordinary = phase % 2 == 0;
++                    payload.scalar_prefix_tagged_args = ordinary ? 56 : 0;
++                    if (!ordinary && marked) {
++                        payload.runtime_barrier_tail = SUBTASK_MASK_ALL;
++                        payload.scalar_prefix = SUBTASK_MASK_ALL;
++                    }
++                    payload.prepare_overlap_contracts();
++                    const auto handle =
++                        context->prepare_subtask_to_core(0, core_offset, slot, subslot, false, 0, false);
++                    ASSERT_TRUE(handle.valid);
++                    auto &ctx = context->payload_per_core_[core_offset][handle.reg_task_id & 1u].global_context;
++                    EXPECT_EQ(
++                        context->payload_per_core_[core_offset][handle.reg_task_id & 1u]
++                            .local_context.async_ctx.local_predecessor_pending,
++                        ordinary ? DISPATCH_ORDINARY_ENTRY : 0u
++                    );
++                    if (!ordinary) {
++                        EXPECT_EQ(ctx.predecessor_context, 0u);
++                        EXPECT_EQ(ctx.predecessor_reg_task_id, 0u);
++                        EXPECT_EQ(ctx.wait_predecessor_fn, 0u);
++                        EXPECT_EQ(ctx.scalar_overlap_trace, 0u);
++                        // A legacy wrapper may write the same fields without
++                        // declaring a modern local Wait/Set contract.
++                        ctx.async_tail_kind = static_cast<uint32_t>(AsyncTailKind::RuntimeBarrierAll);
++                        ctx.scalar_prefix = SCALAR_PREFIX_CAN_HANDOFF;
++                        ctx.predecessor_context = 64;
++                        ctx.predecessor_reg_task_id = 27;
++                        ctx.wait_predecessor_fn = 128;
++                        ctx.scalar_overlap_trace = 192;
++                        ctx.late_handoff_scratch = ~uint64_t{0};
++                    }
++                }
++            }
++        }
++    }
++}
++
++TEST_F(TmrSchedulerExecutionInputsTest, OrdinaryProofIsPerMemberAndCannotOverrideActiveContract) {
++    for (int core_offset = 0; core_offset < 3; ++core_offset) {
++        const auto subslot = static_cast<SubtaskSlot>(core_offset);
++        const uint8_t member = 1u << core_offset;
++        for (int contract = 0; contract < 4; ++contract) {
++            initialize({table_a.data(), table_a.size()});
++            // First populate the cache for both ordinary buffers, then offer
++            // either another member's proof or a contradictory real contract.
++            for (int phase = 0; phase < 3; ++phase) {
++                for (int buffer = 0; buffer < 2; ++buffer) {
++                    init_slot();
++                    slot.active_mask = ActiveMask(SUBTASK_MASK_ALL);
++                    payload.scalar_prefix_tagged_args = 56;
++                    if (phase != 0) {
++                        if (contract == 0) payload.scalar_prefix_tagged_args &= ~(member << 3);
++                        if (contract == 1) payload.scalar_prefix = member;
++                        if (contract == 2) payload.runtime_barrier_tail = member;
++                        if (contract == 3) payload.runtime_compiled_poll = member;
++                    }
++                    payload.prepare_overlap_contracts();
++                    const auto handle =
++                        context->prepare_subtask_to_core(0, core_offset, slot, subslot, false, 0, false);
++                    ASSERT_TRUE(handle.valid);
++                    auto &ctx = context->payload_per_core_[core_offset][handle.reg_task_id & 1u].global_context;
++                    EXPECT_EQ(
++                        context->payload_per_core_[core_offset][handle.reg_task_id & 1u]
++                            .local_context.async_ctx.local_predecessor_pending,
++                        phase == 0 ? DISPATCH_ORDINARY_ENTRY : 0u
++                    );
++                    if (phase != 0) {
++                        EXPECT_EQ(ctx.predecessor_context, 0u);
++                        EXPECT_EQ(ctx.wait_predecessor_fn, 0u);
++                        EXPECT_EQ(ctx.scalar_overlap_trace, 0u);
++                        ctx.predecessor_context = 64;
++                        ctx.wait_predecessor_fn = 128;
++                        ctx.scalar_overlap_trace = 192;
++                    }
++                }
++            }
++        }
++    }
++}
++
+ TEST_F(TmrSchedulerExecutionInputsTest, ReadyTruePredicateAllowsEachMembersLocalHandoff) {
+     for (const bool mixed : {false, true}) {
+         for (const int core_offset : {0, 1, 2}) {
+@@ -213,6 +305,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, ReadyTruePredicateAllowsEachMembersLocal
+             payload.predicate = {reinterpret_cast<uint64_t>(&gate), 0, sizeof(gate), PredicateOp::GT};
+             payload.scalar_prefix = SUBTASK_MASK_ALL;
+             payload.scalar_prefix_tagged_args = SUBTASK_MASK_ALL;
++            payload.prepare_overlap_contracts();
+             sched.try_enqueue_early_dispatch_candidate(slot);
+             EXPECT_EQ(payload.early_dispatch_state.load(), EARLY_DISPATCH_NONE);
+             ASSERT_TRUE(sched.route_ready_once(slot));
+@@ -246,6 +339,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, FalsePredicateRetiresWithoutPublishingSc
+         int32_t gate = 0;
+         payload.predicate = {reinterpret_cast<uint64_t>(&gate), 0, sizeof(gate), PredicateOp::GT};
+         payload.scalar_prefix = SUBTASK_MASK_ALL;
++        payload.prepare_overlap_contracts();
+         sched.try_enqueue_early_dispatch_candidate(slot);
+         EXPECT_EQ(payload.early_dispatch_state.load(), EARLY_DISPATCH_NONE);
+         ASSERT_TRUE(sched.route_ready_once(slot));
+@@ -278,6 +372,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixKeepsIdleCoreAheadOfMatching
+ 
+     slot.active_mask = ActiveMask(SUBTASK_MASK_AIV0);
+     payload.scalar_prefix = SUBTASK_MASK_ALL;
++    payload.prepare_overlap_contracts();
+     payload.fanin_actual_count = 1;
+     payload.fanin_inline_edges[0].set(&producer, DEP_WAIT);
+     payload.fanin_wait_count = 1;
+@@ -298,6 +393,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, RuntimeTailIsIndependentOfEarlyResolveAn
+         }
+         payload.runtime_barrier_tail = enabled ? SUBTASK_MASK_ALL : 0;
+         payload.scalar_prefix_tagged_args = enabled ? SUBTASK_MASK_ALL : 0;
++        payload.prepare_overlap_contracts();
+         const auto handle = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
+         ASSERT_TRUE(handle.valid);
+         const auto &dispatch = context->payload_per_core_[0][handle.reg_task_id & 1u];
+@@ -318,6 +414,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, CompiledPollRequiresEachMembersTailAndRe
+             slot.active_mask = ActiveMask(SUBTASK_MASK_ALL);
+             payload.runtime_barrier_tail = SUBTASK_MASK_AIC | SUBTASK_MASK_AIV0;
+             payload.runtime_compiled_poll = enabled ? SUBTASK_MASK_AIC | SUBTASK_MASK_AIV1 : 0;
++            payload.prepare_overlap_contracts();
+             for (auto &dispatch : context->payload_per_core_[core_offset]) {
+                 dispatch.global_context.late_handoff_scratch = ~uint64_t{0};
+             }
+@@ -341,6 +438,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, CompiledNotificationFallsBackAfterRegist
+         init_slot();
+         payload.runtime_barrier_tail = SUBTASK_MASK_ALL;
+         payload.runtime_compiled_poll = SUBTASK_MASK_ALL;
++        payload.prepare_overlap_contracts();
+         const auto handle = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
+         ASSERT_TRUE(handle.valid);
+         EXPECT_EQ(handle.reg_task_id, expected_id);
+@@ -359,6 +457,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, CompiledNotificationFallsBackAfterRegist
+     CoreTaskArgs args;
+     args.set_runtime_direct_poll_scratch(64, -1);
+     payload.runtime_direct_poll_scratch = args.runtime_direct_poll_scratch();
++    payload.prepare_overlap_contracts();
+     const auto direct = context->prepare_subtask_to_core(0, 0, slot, SubtaskSlot::AIC, false, 0, false);
+     ASSERT_TRUE(direct.valid);
+     const auto &ctx = context->payload_per_core_[0][direct.reg_task_id & 1u].global_context;
+@@ -377,12 +476,15 @@ TEST_F(TmrSchedulerExecutionInputsTest, DirectPollResourcesRequireEachMembersCal
+             init_slot();
+             slot.active_mask = ActiveMask(SUBTASK_MASK_ALL);
+             payload.runtime_barrier_tail = SUBTASK_MASK_ALL;
++            payload.prepare_overlap_contracts();
+             // AIV1 shares the offset but has no callback contract.
+             payload.runtime_compiled_poll = SUBTASK_MASK_AIC | SUBTASK_MASK_AIV0;
++            payload.prepare_overlap_contracts();
+             CoreTaskArgs args;
+             args.set_runtime_direct_poll_scratch(0, 64 * 1000);
+             ASSERT_FALSE(args.has_error);
+             payload.runtime_direct_poll_scratch = enabled ? args.runtime_direct_poll_scratch() : 0;
++            payload.prepare_overlap_contracts();
+             for (auto &dispatch : context->payload_per_core_[core_offset]) {
+                 dispatch.global_context.late_handoff_scratch = ~uint64_t{0};
+             }
+@@ -422,6 +524,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, ScalarPrefixWithoutLocalProducerRetainsI
+     for (int i = 0; i < 2; ++i) context->payload_per_core_[0][i].args[0] = 0xfeed;
+     payload.scalar_prefix = SUBTASK_MASK_ALL;
+     payload.scalar_prefix_tagged_args = SUBTASK_MASK_ALL;
++    payload.prepare_overlap_contracts();
+     payload.fanin_wait_count = 1;
+     payload.early_dispatch_state.store(EARLY_DISPATCH_STAGING);
+     slot.fanin_count = 1;
+@@ -461,6 +564,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
+         local.logical_block_num = 1;
+         local.total_required_subtasks = 1;
+         local_payload.runtime_barrier_tail = SUBTASK_MASK_ALL;
++        local_payload.prepare_overlap_contracts();
+         local_payload.published_block_count.store(1);
+         const auto previous = context->prepare_subtask_to_core(0, core_offset, local, subslot, false, 0, false);
+         ASSERT_TRUE(previous.valid);
+@@ -482,6 +586,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, GatedPendingPrefixCanOverlapAnUnrelatedL
+         slot.fanin_count = 1;
+         payload.scalar_prefix = SUBTASK_MASK_ALL;
+         payload.scalar_prefix_tagged_args = SUBTASK_MASK_ALL;
++        payload.prepare_overlap_contracts();
+         payload.fanin_actual_count = 1;
+         payload.fanin_wait_count = 1;
+         payload.fanin_inline_edges[0].set(&remote, DEP_WAIT);
+@@ -536,6 +641,7 @@ TEST_F(TmrSchedulerExecutionInputsTest, MixedPrefixCapabilitiesBelongToEachPhysi
+         payload.scalar_prefix = SUBTASK_MASK_AIC | SUBTASK_MASK_AIV1;
+         payload.scalar_prefix_tagged_args = SUBTASK_MASK_AIV1;
+         payload.runtime_barrier_tail = SUBTASK_MASK_AIV0;
++        payload.prepare_overlap_contracts();
+         payload.fanin_wait_count = 1;
+         payload.early_dispatch_state.store(EARLY_DISPATCH_STAGING);
+         for (auto &dispatch : context->payload_per_core_[core_offset]) dispatch.args[0] = 0xfeed;
