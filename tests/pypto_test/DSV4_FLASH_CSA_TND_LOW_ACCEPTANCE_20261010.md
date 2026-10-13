@@ -203,3 +203,24 @@ HCA导入失败导致CSA捕获计数器也未安装。因此空capture_time_sele
 下一项只对首步T40/B40、首个CSA层2的同一实际hidden/positions/cache初态进行模块对拍，
 恢复声明会写的物理页后执行Native参考，保留PTO原输出和PTO cache继续执行。
 诊断仍保持短任务、复用已编译产物，优先定位最早算术或接口差异。
+
+## 2026-10-12：首步 layer 2 同输入对拍
+
+使用同一40题fixed8192 bank，只生成1个token，恢复各slot声明写入的物理页后即时运行Native参考。
+16rank完成且诊断指标一致；实际rank0日志区间22:34:04至22:39:54，长排队不计入占卡执行时间。
+
+| 边界 | 结果 |
+| --- | --- |
+| HC/norm后的输入 | 逐bit一致 |
+| raw KV有效写入 | 请求2/channel183、请求13/channel305、请求20/channel61各差1 BF16 ULP |
+| 压缩KV、Indexer缓存、两类state | 逐bit一致 |
+| O-proj前heads、O-proj输出、整层输出 | 逐bit一致 |
+| 两臂对hidden的修改 | 无 |
+
+[首步数据与有效写入差异](evidence_tnd_precision/low_acceptance_first_step_20261012.json)。
+3个差异均在NOPE通道，而非RoPE或padding；最大绝对差3.814697265625e-6。
+raw KV差异本步尚未改变该层heads或输出，不能声称它已解释整模型首token分歧。
+按照最早误差优先规则，先补抓Native KV投影/RMSNorm边界并转单卡模块回放，暂不扩大配置。
+
+这里的参考是同输入即时Native调用，不能替代此前独立生产Native图模式验收；
+此处单层输出一致也不覆盖后续20个CSA层。
