@@ -264,3 +264,41 @@ Native投影BF16、归一化输入、raw/压缩/Indexer缓存、两类state、he
 不视为完全同参数独立生成验收，也不能证明后续step/其他CSA层的逐bit稳定性。
 当前正式源码修正仅涉及精度包三个文件；性能包未改，没有性能提升结论。
 后续仍只在首步相同输入扩展阶段定位，128K和后续大配置继续暂停。
+
+## 2026-10-13：扩展到所有CSA层的首步验证协议
+
+正式精度版源码为`fc437f41f4aa0a78b3bb751ba7077ced2291cbe3`。
+仍使用fixed8192、B40、TP1 DP/EP16、确定性level1/HCCLtrue、Native HCA，
+只生成1token；FULL_DECODE_ONLY配置保持6/240两档。此次即时Native参考在实际首步中运行，
+不能视为独立Native生产图模式验收。
+
+| 门禁 | 要求 |
+| --- | --- |
+| 层覆盖 | 21个CSA层，模型索引2、4、…、42 |
+| rank覆盖 | 16rank，每个rank/层唯一记录，共336份 |
+| 逐bit边界 | normed、projection BF16、raw KV、压缩KV、Indexer packed cache、两类state、真实TopK、heads、O-proj、输出、两臂hidden保持，共13项 |
+| 输入与cache | 同一实际hidden/positions；Native前恢复声明写入的物理页，Native后恢复PTO状态 |
+| 首个失配 | 各层通过已有EP CPU组MAX同步；任一rank失配，全部rank停止后续层对拍，正常结束首token防止EP缺参与者 |
+| 失败证据 | 先发布STOP，再保存失败层张量；passing层只保存JSON |
+| 192token放行 | 无STOP、336份完整唯一记录、全部必需边界逐bit一致且有效输出无非有限值 |
+| 占卡时间 | 每项任务上限780秒，预留清理时间，禁止扩展128K等后续大配置 |
+
+无设备精确导入预检及正式ABI生成/CCEC/READY检查已通过。
+本次READY identity为`a86ef21bbce42bc9fcbfe8e156b421b43e67d94a2062c837d608af06e5388251`。
+本地覆盖门禁检查包括完整记录通过、缺样本/重复/失配/STOP/缺必需TopK均拒绝。
+独立复核确认QLI wrapper返回原值、finally恢复原算子，EP CPU同步顺序未发现阻断。
+
+[首个失配与16rank一致性证据](evidence_tnd_precision/low_acceptance_all_csa_first_stop_20261013.json)。
+
+| 首步层范围 | 16rank结果 |
+| --- | --- |
+| 2、4、6、8、10、12、14 | 全部13项逐bit一致 |
+| 16 | 仅TopK有15个位置差异；其余12项包括heads与最终输出逐bit一致 |
+| 18、20、…、42 | 首个失配后停止，未对拍 |
+
+首个差异发生在第12个请求（从0计数）的TopK排列；逐行排序后两臂完整512项逐bit一致，
+没有新增或丢失选点。16rank全部复现同一结果。不能据此认定同分排序或score误差根因，
+需要继续观察实际Native QLI输入与PTO score；不会通过忽略TopK差异放行。
+实际主进程日志11:55:20至12:01:32，约6分12秒，加预检仍小于15分钟。
+模型正常完成首token；任务exit1来自首个失配/覆盖门禁，非模型启动异常。
+共保存128份记录（16rank×8层），按预期不具备336份完整通过资格；192token复测未提交。
