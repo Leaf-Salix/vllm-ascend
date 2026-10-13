@@ -224,3 +224,27 @@ raw KV差异本步尚未改变该层heads或输出，不能声称它已解释整
 
 这里的参考是同输入即时Native调用，不能替代此前独立生产Native图模式验收；
 此处单层输出一致也不覆盖后续20个CSA层。
+
+## 2026-10-13：首步 raw KV 差异定位到投影
+
+补抓同一次Native的WKV BF16输出与KV RMSNorm输出，两次首步采集的normalized hidden与Native heads逐bit一致。
+独立单卡导出projection FP32的诊断，最终KV与原PTO路径逐bit一致，排除导出本身改写算术。
+投影在BF16发布边界即出现同一3个坐标差异，后续差异仍只在这3个坐标。
+
+| 单因素 | 投影BF16差异 | RMSNorm/RoPE后的raw KV差异 | 结论 |
+| --- | --- | --- | --- |
+| 原K256 | 3 | 3 | 最早在投影 |
+| 改K64 | 3 | 3 | 与原PTO逐bit相同，无效，不合入 |
+| 注入同一次Native投影 | 0（注入保证） | 0 | 后续RMSNorm/RoPE可以对齐 |
+
+[单卡证据与任务退出说明](evidence_tnd_precision/low_acceptance_kv_projection_20261013.json)。
+原单卡任务在保存有效结果之后因误调用shutdown模块退出1；清理修正后K64与注入任务均exit0。
+诊断缓冲的静态容量、准备tile二维/32字节对齐问题均在CPU生成检查阶段解决，没有为此占卡。
+
+据此只在精度包接入原Native WKV模块的BF16输出，作为新的动态TND输入`native_kv_projected`。
+后续KV RMSNorm/RoPE/cache写入仍由PTO执行；性能包保持原样。
+旧直接kernel fixture必须补充该输入，不能把旧READY当作新ABI证据。
+新ABI无设备注册/生成/CCEC/READY检查通过，复制任务以同一GM缓冲的inout写入、RMS任务以input读取，
+尾行保持有效形状。独立源码review未发现绑定、scope或生命周期阻断。
+正式整层候选已提交相同首步复测，结果未出，尚不能宣称修复已在整模型通过。
+该方案增加一个Native投影边界，减少融合程度；本轮没有测性能。
