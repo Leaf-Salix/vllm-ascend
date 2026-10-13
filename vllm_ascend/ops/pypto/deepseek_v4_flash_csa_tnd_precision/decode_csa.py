@@ -226,6 +226,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         idx_topk_scores: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32]],
         idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
         native_normed: pl.Tensor[[T_DYN, D], pl.BF16],
+        native_kv_projected: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
         native_heads: pl.Out[pl.Tensor[[T_DYN, H * HEAD_DIM], pl.BF16]],
         host_max_seq_len: pl.Scalar[pl.INT32] = 0,
     ):
@@ -237,6 +238,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         max_seq_len = resolve_max_seq_len(kv_seq_lens, host_max_seq_len)
         x_hc.bind_dynamic(0, T_DYN)
         native_normed.bind_dynamic(0, T_DYN)
+        native_kv_projected.bind_dynamic(0, T_DYN)
         native_heads.bind_dynamic(0, T_DYN)
         freqs_cos.bind_dynamic(0, T_DYN)
         freqs_sin.bind_dynamic(0, T_DYN)
@@ -349,6 +351,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 qr,
                 qr_scale,
                 late_dep,
+                native_kv_projected,
             )
 
             ori_block_num = pl.tensor.dim(kv_cache, 0)

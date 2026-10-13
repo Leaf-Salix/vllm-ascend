@@ -781,64 +781,31 @@ def kv_proj_rope(
     rope_swap_idx: pl.Tensor[[KV_T_DYN, ROPE_DIM], pl.INT32],
     kv: pl.Tensor[[KV_T_DYN, HEAD_DIM], pl.BF16],
     late_dep: pl.Scalar[pl.TASK_ID],
+    native_kv_projected: pl.Tensor[[KV_T_DYN, HEAD_DIM], pl.BF16],
 ):
-    """KV LoRA, RMSNorm, and RoPE over bounded dense tiles."""
+    """消费 Native BF16 投影，按原顺序执行 TND KV RMSNorm/RoPE。"""
     t_dim = pl.tensor.dim(x, 0)
     for tile_base in pl.range(0, t_dim, PREFILL_DENSE_TILE):
         tile_rows = pl.min(PREFILL_DENSE_TILE, t_dim - tile_base)
         with pl.scope():
-            x_view = pl.reshape(x, [t_dim, D])
             t_matmul = ((tile_rows + MATMUL_T_TILE - 1) // MATMUL_T_TILE) * MATMUL_T_TILE
-            kv_full_rows = (tile_rows // KV_DENSE_M_TILE) * KV_DENSE_M_TILE
-            kv_m_groups = pl.min(KV_OM, pl.max(1, tile_rows // (2 * KV_DENSE_M_TILE)))
 
-            # Split-K kv_proj: KV_N_TILE N-groups expanded KV_OK-fold into cube blocks that
-            # atomic-add their K partials into a zero-seeded output.
+            # 保留原 RMSNorm/RoPE 的临时张量布局；不在此重新计算投影。
             kv_fp32 = pl.create_tensor([t_matmul, HEAD_DIM], dtype=pl.FP32)
-            with pl.at(level=pl.Level.CORE_GROUP, name_hint="kv_proj_seed"):
-                for kts0 in pl.range(0, t_matmul, KV_M_TILE):
-                    for kvseed0 in pl.range(0, HEAD_DIM, KV_N_TILE):
-                        kv_seed = pl.full([KV_M_TILE, KV_N_TILE], dtype=pl.FP32, value=0.0)
-                        kv_fp32[kts0 : kts0 + KV_M_TILE, kvseed0 : kvseed0 + KV_N_TILE] = kv_seed
-
-            # Native changes the K traversal at the B40/S6 shape.
-            if tile_rows == KV_NATIVE_ROWS:
-                kv_fp32 = kv_project_native_240(x, wkv, kv_fp32, tile_base, late_dep)
-            else:
-                # KV projection consumes the caller's readiness dependency.
-                with pl.spmd(
-                    (HEAD_DIM // KV_N_TILE) * KV_OK * kv_m_groups,
-                    name_hint="kv_proj_matmul",
-                    deps=[late_dep],
-                ) as _kv_tid:
-                    kbg = pl.tile.get_block_idx()
-                    kv_col0 = (kbg // (KV_OK * kv_m_groups)) * KV_N_TILE
-                    kv_k_base = ((kbg // kv_m_groups) % KV_OK) * KV_SPLIT_K_TILE
-                    kv_m_group = kbg % kv_m_groups
-                    for dense_t0 in pl.range(kv_m_group * KV_DENSE_M_TILE, kv_full_rows, kv_m_groups * KV_DENSE_M_TILE):
-                        dense_x0 = tile_base + dense_t0
-                        dense_acc = pl.create_tensor([KV_DENSE_M_TILE, KV_N_TILE], dtype=pl.FP32)
-                        for dense_k in pl.pipeline(0, KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
-                            dense_d0 = kv_k_base + dense_k * KV_K_TILE
-                            dense_x = x_view[dense_x0 : dense_x0 + KV_DENSE_M_TILE, dense_d0 : dense_d0 + KV_K_TILE]
-                            dense_w = wkv[dense_d0 : dense_d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                            dense_acc = pl.matmul_acc(dense_acc, dense_x, dense_w, init_cond=(dense_k == 0))
-                        kv_fp32 = pl.assemble(kv_fp32, dense_acc, [dense_t0, kv_col0], atomic=STORE_ATOMIC)
-                    for t0 in pl.range(kv_full_rows + kv_m_group * KV_M_TILE, t_matmul, kv_m_groups * KV_M_TILE):
-                        kv_acc = pl.create_tensor([KV_M_TILE, KV_N_TILE], dtype=pl.FP32)
-                        for db in pl.pipeline(KV_SPLIT_K_TILE // KV_K_TILE, stage=2):
-                            d0 = kv_k_base + db * KV_K_TILE
-                            kv_rows = pl.min(KV_M_TILE, tile_rows - t0)
-                            x_t0 = tile_base + t0
-                            kv_x_chunk_bf16 = pl.slice(
-                                x_view,
-                                [KV_M_TILE, KV_K_TILE],
-                                [x_t0, d0],
-                                valid_shape=[kv_rows, KV_K_TILE],
-                            )
-                            wkv_chunk = wkv[d0 : d0 + KV_K_TILE, kv_col0 : kv_col0 + KV_N_TILE]
-                            kv_acc = pl.matmul_acc(kv_acc, kv_x_chunk_bf16, wkv_chunk, init_cond=(db == 0))
-                        kv_fp32 = pl.assemble(kv_fp32, kv_acc, [t0, kv_col0], atomic=STORE_ATOMIC)
+            # Native 的 matmul tiling/K 累加顺序随真实 M 改变。直接消费其
+            # BF16 发布边界，避免近零元素在 WKV 后先发生1 ULP分歧。
+            # 每个16行tile独立写入，尾行沿用有效形状，仍支持真实TND。
+            copy_blocks = (tile_rows + KV_M_TILE - 1) // KV_M_TILE
+            with pl.spmd(copy_blocks, name_hint="kv_native_projection", deps=[late_dep]):
+                copy_row = pl.tile.get_block_idx() * KV_M_TILE
+                copy_rows = pl.min(KV_M_TILE, tile_rows - copy_row)
+                projected = pl.load(
+                    native_kv_projected,
+                    [tile_base + copy_row, 0],
+                    [KV_M_TILE, HEAD_DIM],
+                    valid_shape=[copy_rows, HEAD_DIM],
+                )
+                pl.store(pl.cast(projected, pl.FP32), [copy_row, 0], kv_fp32)
 
             kv_view = pl.reshape(kv, [t_dim, HEAD_DIM])
 
@@ -1027,8 +994,9 @@ def qkv_proj_rope(
     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
     late_dep: pl.Scalar[pl.TASK_ID],
+    native_kv_projected: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
 ):
-    """Fused q + kv projection: both branches share one token axis and one rope table."""
+    """Q 投影和 Native KV 后处理共用真实 TND 行数与 RoPE 表。"""
     t_dim = pl.tensor.dim(x, 0)
     q_rope_sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
     q_rope_swap_idx = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.INT32)
@@ -1055,6 +1023,7 @@ def qkv_proj_rope(
         q_rope_swap_idx,
         kv,
         late_dep,
+        native_kv_projected,
     )
     # Priority marker only; true consumer dependencies are carried by q/kv/qr tensors.
     projection_marker = pl.system.task_dummy(deps=[late_dep])

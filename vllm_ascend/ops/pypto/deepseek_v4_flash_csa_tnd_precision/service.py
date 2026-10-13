@@ -2,6 +2,7 @@
 """Per-layer PTO resources and binding of the current Native service buffers."""
 
 import torch
+import torch_npu
 
 from vllm_ascend.ops.pypto.variant import csa_runtime
 
@@ -187,7 +188,19 @@ class CSAServiceRuntime(AttentionServiceBase):
             hidden, self.layer.hc_attn_fn, self.layer.hc_attn_scale, self.layer.hc_attn_base
         )
         normed = self.layer.input_layernorm(mixed)
-        call_weights = dict(self.weights, native_normed=normed, native_heads=self.native_heads[:tokens])
+        # 保留 Native WKV 的 BF16 发布边界；Native 根据实际 token 数选择
+        # matmul 累加顺序。后续 RMSNorm/RoPE/cache 写入仍由 TND kernel 执行。
+        native_kv_projected = self.layer.self_attn.wkv(normed)
+        if native_kv_projected.dtype != torch.bfloat16 or tuple(native_kv_projected.shape) != (tokens, 512):
+            raise ValueError("Native WKV must publish BF16 [tokens, 512]")
+        if not native_kv_projected.is_contiguous() or torch_npu.get_npu_format(native_kv_projected) not in (0, 2):
+            raise ValueError("Native WKV must publish contiguous ND storage")
+        call_weights = dict(
+            self.weights,
+            native_normed=normed,
+            native_kv_projected=native_kv_projected,
+            native_heads=self.native_heads[:tokens],
+        )
         call_type = HBGNativeCSACall if self.is_hbg else NativeCSACall
         host_kwargs = {}
         if self.is_hbg:
