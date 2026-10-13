@@ -302,3 +302,56 @@ Native投影BF16、归一化输入、raw/压缩/Indexer缓存、两类state、he
 实际主进程日志11:55:20至12:01:32，约6分12秒，加预检仍小于15分钟。
 模型正常完成首token；任务exit1来自首个失配/覆盖门禁，非模型启动异常。
 共保存128份记录（16rank×8层），按预期不具备336份完整通过资格；192token复测未提交。
+
+## 2026-10-13：layer16 TopK排列差异定位到head-weight投影
+
+只对同一真实首步的layer16新增采集，未跑192token或后续配置；任务exit0，
+主进程13:13:01至13:19:00，约6分钟。16rank再次复现同一TopK排列失配，
+声明写入cache/state、heads和输出仍逐bit一致。
+
+[QLI实际输入、score分析及单卡投影证据](evidence_tnd_precision/low_acceptance_indexer_weight_projection_20261013.json)。
+PTO重排位置的score均不相等，因此不能归因于同分排序规则。
+Native算子不支持返回score；CPU模拟明确不是Native实测score，也不作为逐bit验收。
+其诊断回归将512个已选score误差收敛到head20系数，随后用同一正式
+`indexer_weights_project`、T40实际normalized hidden和checkpoint存储BF16权重单卡回放。
+
+| 检查 | PTO | Native实际QLI输入 |
+| --- | --- | --- |
+| 40×64中不同元素数 | 1 | — |
+| 请求12/head20的FP16权重 | 0.042724609375 | 0.04248046875 |
+| 其余2559个权重 | 逐bit一致 | 逐bit一致 |
+| 官方READY复用 | hit1，无重建/旁路/身份错误 | — |
+
+单卡任务exit0，上限180秒。独立源码复核确认回放保持原K顺序、BF16投影/缩放及FP16发布，
+40行尾块只导出实际8行。checkpoint权重转置与原adapter一致；
+下一轮整层会补实际runtime权重SHA与checkpoint的直接核验，避免仅凭名称判定加载后参数相同。
+
+修正候选仅在精度包保留原`impl.weights_proj`、Native缩放表达式及
+`DeviceOperator.prepare_dsa_indexer_weights`输出，新增FP16动态TND输入；
+PTO内只精确拓宽为FP32，后续score、TopK、sparse attention仍执行原代码。
+原投影函数保留用于诊断，性能包未修改；不宣称性能改善。
+
+新ABI无设备生成与CCEC通过，真实C++使用实际有效行进行TLOAD/转换/TSTORE，
+Native输入明确注册为input，score依赖搬运后的weights。
+14项边界的首步复测已提交，336份完整唯一PASS才放行192token。
+
+### Native head-weight边界修正：首步复测结果
+
+[16rank复测及首个新失配](evidence_tnd_precision/low_acceptance_native_indexer_weights_first_step_20261013.json)。
+模型正常结束首token，严格覆盖门禁exit1，未提交192token。
+
+| 层范围 | 结果 |
+| --- | --- |
+| 2、4、…、24（12层） | 16rank全部14项逐bit一致；layer16旧TopK误差已消失 |
+| 26 | cache/state、投影、Native Indexer权重及TopK逐bit一致；heads/O-proj/输出失配 |
+| 28、30、…、42 | 首个差异后未对拍 |
+
+layer26全部差异集中在请求31：heads的105个元素（均在head45）、
+O-proj的1161个元素、整层输出429个元素不同。heads relative L2为1.49535e-5，
+整层输出relative L2为4.99834e-5；这些结果仍不满足逐bit目标。
+全16rank复现同一指标，共208份记录，不能冒充全部21层通过。
+
+layer16实际runtime的BF16投影权重SHA与checkpoint转置后的逐字节SHA一致：
+`ef523dd976546e43444a285fe9ff09b686350c7966554548a8f4ebc1d211d9a3`。
+这补齐了单卡投影回放的参数身份核验。
+下一步只定位layer26 heads前的Q与sparse attention阶段，后续层和192token继续暂停。

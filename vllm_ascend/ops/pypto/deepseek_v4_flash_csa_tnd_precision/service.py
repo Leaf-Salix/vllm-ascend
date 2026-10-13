@@ -4,6 +4,7 @@
 import torch
 import torch_npu
 
+from vllm_ascend.device.device_op import DeviceOperator
 from vllm_ascend.ops.pypto.variant import csa_runtime
 
 from .host_metadata import CSAHostMetadata
@@ -195,10 +196,21 @@ class CSAServiceRuntime(AttentionServiceBase):
             raise ValueError("Native WKV must publish BF16 [tokens, 512]")
         if not native_kv_projected.is_contiguous() or torch_npu.get_npu_format(native_kv_projected) not in (0, 2):
             raise ValueError("Native WKV must publish contiguous ND storage")
+        # Native head-weight projection publishes BF16 twice before QLI's FP16 input.
+        # Retain its shape-dependent accumulation order at the precision boundary.
+        impl = self.wrapper.dsa_attn.impl
+        native_indexer_weights = DeviceOperator.prepare_dsa_indexer_weights(
+            impl.weights_proj(normed) * (impl.indexer_softmax_scale * impl.indexer_heads**-0.5)
+        )
+        if native_indexer_weights.dtype != torch.float16 or tuple(native_indexer_weights.shape) != (tokens, 64):
+            raise ValueError("Native Indexer weights must publish FP16 [tokens, 64]")
+        if not native_indexer_weights.is_contiguous() or torch_npu.get_npu_format(native_indexer_weights) not in (0, 2):
+            raise ValueError("Native Indexer weights must publish contiguous ND storage")
         call_weights = dict(
             self.weights,
             native_normed=normed,
             native_kv_projected=native_kv_projected,
+            native_indexer_weights=native_indexer_weights,
             native_heads=self.native_heads[:tokens],
         )
         call_type = HBGNativeCSACall if self.is_hbg else NativeCSACall

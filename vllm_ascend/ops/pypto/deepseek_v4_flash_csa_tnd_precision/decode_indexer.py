@@ -2125,9 +2125,33 @@ def indexer_weights_project(
 
 
 @pl.jit.inline(auto_scope=False)
+def indexer_native_weights(
+    native_indexer_weights: pl.Tensor[[T_DYN, IDX_N_HEADS], pl.FP16],
+    gate_dep: pl.Scalar[pl.TASK_ID],
+) -> tuple[pl.Tensor[[T_PAD, IDX_N_HEADS], pl.FP32], pl.Scalar[pl.TASK_ID]]:
+    """Consume Native's published FP16 values without changing coefficient arithmetic."""
+    tokens = pl.tensor.dim(native_indexer_weights, 0)
+    row_blocks = (tokens + MM_ROW_TILE - 1) // MM_ROW_TILE
+    weights = pl.create_tensor([T_PAD, IDX_N_HEADS], dtype=pl.FP32)
+    with pl.spmd(row_blocks, name_hint="native_indexer_weights", deps=[gate_dep]) as weights_tid:
+        row = pl.tile.get_block_idx() * MM_ROW_TILE
+        rows = pl.min(MM_ROW_TILE, tokens - row)
+        values = pl.load(
+            native_indexer_weights,
+            [row, 0],
+            [MM_ROW_TILE, IDX_N_HEADS],
+            valid_shape=[rows, IDX_N_HEADS],
+            clamp=True,
+        )
+        pl.store(pl.cast(values, pl.FP32), [row, 0], weights)
+    return weights, weights_tid
+
+
+@pl.jit.inline(auto_scope=False)
 def indexer_weights_score(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
+    native_indexer_weights: pl.Tensor[[T_DYN, IDX_N_HEADS], pl.FP16],
     qr_hadamard_i8: pl.Tensor[[T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], pl.INT8],
     qr_hadamard_scale_dq: pl.Tensor[[T_PAD * IDX_N_HEADS, 1], pl.FP32],
     idx_native_kv_cache: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8],
@@ -2146,8 +2170,8 @@ def indexer_weights_score(
     weights_workers: pl.Scalar[pl.INDEX],
     host_max_seq_len: pl.Scalar[pl.INT32],
 ) -> tuple[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32], pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32], pl.Scalar[pl.TASK_ID]]:
-    """Weights projection and the score/top-k forest over an already-quantized query."""
-    weights, weights_tid = indexer_weights_project(x, weights_proj, weights_gate_dep, weights_workers)
+    """Native weight publication and the score/top-k forest over an already-quantized query."""
+    weights, weights_tid = indexer_native_weights(native_indexer_weights, weights_gate_dep)
 
     topk_scores, topk_idxs, leaf_tid = indexer_score_topk_forest(
         qr_hadamard_i8,
@@ -2177,6 +2201,7 @@ def indexer(
     wq_b: pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8],
     wq_b_scale: pl.Tensor[[IDX_N_HEADS * IDX_HEAD_DIM], pl.FP32],
     weights_proj: pl.Tensor[[D, IDX_N_HEADS], pl.BF16],
+    native_indexer_weights: pl.Tensor[[T_DYN, IDX_N_HEADS], pl.FP16],
     cos: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     sin: pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32],
     hadamard: pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16],
@@ -2212,6 +2237,7 @@ def indexer(
     topk_scores, topk_idxs, _leaf_tid = indexer_weights_score(
         x,
         weights_proj,
+        native_indexer_weights,
         qr_hadamard_i8,
         qr_hadamard_scale_dq,
         idx_native_kv_cache,

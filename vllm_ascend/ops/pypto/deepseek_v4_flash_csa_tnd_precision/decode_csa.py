@@ -227,6 +227,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         idx_topk: pl.Out[pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32]],
         native_normed: pl.Tensor[[T_DYN, D], pl.BF16],
         native_kv_projected: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
+        native_indexer_weights: pl.Tensor[[T_DYN, 64], pl.FP16],
         native_heads: pl.Out[pl.Tensor[[T_DYN, H * HEAD_DIM], pl.BF16]],
         host_max_seq_len: pl.Scalar[pl.INT32] = 0,
     ):
@@ -239,6 +240,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         x_hc.bind_dynamic(0, T_DYN)
         native_normed.bind_dynamic(0, T_DYN)
         native_kv_projected.bind_dynamic(0, T_DYN)
+        native_indexer_weights.bind_dynamic(0, T_DYN)
         native_heads.bind_dynamic(0, T_DYN)
         freqs_cos.bind_dynamic(0, T_DYN)
         freqs_sin.bind_dynamic(0, T_DYN)
@@ -429,6 +431,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                     idx_wq_b,
                     idx_wq_b_scale,
                     weights_proj,
+                    native_indexer_weights,
                     freqs_cos,
                     idx_sin_signed,
                     hadamard_idx,
