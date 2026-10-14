@@ -1,13 +1,31 @@
 # TND 精度版整模型低接受率验证（2026-10-10）
 
-本轮源码冻结于 `ff2bb7b1690e503ce4a4aa38a984916a12ed0d9d`，显式选择
+初始轮源码冻结于 `ff2bb7b1690e503ce4a4aa38a984916a12ed0d9d`，显式选择
 `deepseek_v4_flash_csa_tnd_precision`。性能包未修改；HCA始终使用Native。
 
-参考用户指定的 nalinaly `low_acceptance_20261001/RESULTS.md`，先做8K/B40，
-再做128K/B24。每条输出192 token，TP1/DP=EP16，DSpark提出5验6，greedy、ignoreEOS。
+参考用户指定的 nalinaly `low_acceptance_20261001/RESULTS.md`，原计划先做8K/B40，
+再做128K/B24。当前按用户要求只验证8K/B40，不执行后续大配置。每条输出192 token，TP1/DP=EP16，DSpark提出5验6，greedy、ignoreEOS。
 40条不同问题复用共同Native历史前缀，后缀真实prefill；固定完整target/draft cache和state。
 旧前缀来源为CANN9.0.1，后缀本次由CANN9.2生成；各臂使用同一冻结状态。
 不能把该口径写成完整历史都由CANN9.2重算。
+
+## 最新结果（2026-10-14）
+
+测试源码提交 `a9e0ae0d9`；性能版未改，HCA使用Native。
+
+| 验证 | 结果 |
+| --- | --- |
+| 全部CSA首步 | 21层×16rank，336条记录的14个已观测边界全部逐bit一致 |
+| Native两次192token重复 | 640条请求、122,880个token ID及完整acceptance事件均零差异 |
+| 精度版对Native 192token | 同上，token ID、acceptance事件、DSpark统计均零差异 |
+| 低接受率覆盖 | 接受长度0–5均覆盖，平均接受步长3.7035909921，无抢占 |
+
+RMSNorm首差定位为512通道FP32平方和归约树；已在完整行和尾行统一为Native的8×64分组顺序。
+完整行Tensor和Tile数学路径的2560行统计、1,310,720个BF16归一化元素均逐bit一致。
+整模型任务分三次独立提交，每项上限780秒，实际运行约6–7分钟；模块任务更短。
+本轮全部任务结束，未测试128K或新batch。192token一致不等于所有后续中间tensor都已逐bit验证。
+
+详见[192token验收证据](evidence_tnd_precision/low_acceptance_rms_fix_decode192_20261014.json)及下方历史记录。
 
 ## 判据与次序
 
@@ -413,3 +431,26 @@ CPU 对全部2560行尝试明确的FP32求和顺序，`stripe64-halves-then-adja
 每条记录的14个边界全部逐bit一致：normed、raw KV、compressed KV、Indexer cache、两类压缩state、attention heads、O-proj、最终输出、TopK、Native Indexer weights、Native WKV BF16发布值、PTO/Native分别不修改hidden。此前层26的heads/O-proj/输出差异消除。14项不是所有内部临时Tensor的枚举，也不证明后续decode精度。
 
 本轮仅一个实际首步，不将此结果写成192token已经通过。下一步仍是同源码、同缓存与图配置下分别执行两个Native重复对照，再执行精度版192token；各任务独立且上限780秒，发现差异不扩展配置。
+
+### RMS修正后的192token整模型验收（2026-10-14）
+
+全部CSA首步门禁通过后，冻结源码与共同manifest，分别提交Native1、Native2和精度版。
+固定8K/B40、TP1、DP=EP16、提出5验6、192token、Native HCA，动态EPLB关闭。
+每个任务独立，max-time780秒；没有合成一个长期占卡任务。
+
+| 比较 | 请求记录数 | token数 | token失配 | 接受事件失配 | 结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Native1 vs Native2 | 640 | 122,880 | 0 | 0 | PASS |
+| Native1 vs 精度版 | 640 | 122,880 | 0 | 0 | PASS |
+
+40条不同问题在16个DP rank中复现，640不是640条不同问题。
+两侧平均接受长度均为3.7035909920876446；接受长度0–5完整覆盖，抢占数均为0。
+实际41层选择、Native确定性level1/HCCL true、无atomic、13个官方静态包、FULL graph重放、
+共同缓存状态与配置、私有PyPTO包来源及精度版READY复用均通过严格门禁。
+精度版没有重新生成或编译框架/kernel产物；不是误走Native CSA的结果。
+CPU query bounds一致性门禁通过，graph容量仍为共同240档位。
+但16个rank均未记录不等长请求的FULL样本：接受长度0–5变化不等于同一步query长度不等长。
+首步的真实T40/S1已由PTO参与逐bit对拍；本次192token结果不宣称覆盖ragged FULL模式。
+
+结论限于本次8K/B40测试：全部21层首步的14个边界逐bit一致，192token生成和完整接受事件一致。
+不外推到128K、其他batch或所有后续内部临时tensor。当前任务全部结束；后续大配置未提交。
