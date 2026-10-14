@@ -27,6 +27,10 @@ RMSNorm首差定位为512通道FP32平方和归约树；已在完整行和尾行
 
 详见[192token验收证据](evidence_tnd_precision/low_acceptance_rms_fix_decode192_20261014.json)及下方历史记录。
 
+不等长CSA整层图的后续验证独立记录于
+[2026-10-14 ragged FULL报告](DSV4_FLASH_CSA_TND_RAGGED_FULL_20261014.md)，
+不与上面的等长整模型192token结果混为同一验证范围。
+
 ## 判据与次序
 
 1. Native1、Native2分别独立运行，确定性level1、HCCL true、atomic0、NZ2、EPLB关闭。
