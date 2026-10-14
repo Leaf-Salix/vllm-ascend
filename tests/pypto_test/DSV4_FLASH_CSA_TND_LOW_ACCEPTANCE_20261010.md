@@ -31,6 +31,37 @@ RMSNorm首差定位为512通道FP32平方和归约树；已在完整行和尾行
 [2026-10-14 ragged FULL报告](DSV4_FLASH_CSA_TND_RAGGED_FULL_20261014.md)，
 不与上面的等长整模型192token结果混为同一验证范围。
 
+## 2026-10-14：按nalinaly方法补做真实模型重复验证
+
+沿用nalinaly `low_acceptance_20261001` 的固定输入/状态、不同题目和逐轮接受事件口径，
+再次执行当前精度版全模型decode。正式模型DeepSeek-V4-Flash-0731-w8a8的75个权重分片
+实际加载；输入来自40条不同问题及Native实际导出的target/draft cache/state。
+本次不使用单层变长测试中的合成hidden/history。
+
+配置：TP1、DP=EP16、8K历史加实际问题后缀、每题192 token、greedy、DSpark出5验6；
+只替换21层CSA，20层HCA Native。确定性level1/HCCL true、atomic0、NZ2、EPLB关闭，
+FULL_DECODE_ONLY档位[6,240]。源码仍为a9e0ae0d9，数学/性能源码未修改，SDK与缓存全部复用。
+
+| 对照 | 不同token/总token | 逐请求DSpark统计差异 | 逐轮事件差异 |
+| --- | --- | --- | --- |
+| Native两次，重新严格核验已有基线 | 0 / 122,880 | 0 / 640 | 0 / 640 |
+| 本轮精度版对Native | 0 / 122,880 | 0 / 640 | 0 / 640 |
+| 本轮精度版对今天上一轮精度版 | 0 / 122,880 | 0 / 640 | 0 / 640 |
+
+16rank均完整完成，40种题目对应640条副本请求，不称640种独立输入。
+实际接受长度0–5均覆盖，平均接受3.7035909921，无抢占；actual runtime选择、图覆盖、
+静态包安装、READY复用及源码/bank/worker共同条件均通过严格检查。
+新提交的NPU任务max-time780秒，正常exit0，已结束；未运行128K。
+
+[真实模型重复验证证据](evidence_tnd_precision/real_model_precision_repeat_20261014.json)。
+原始三组严格比较JSON的SHA也记录于该证据，完整明细保存于本地reports。
+
+两边恢复相同Native状态；旧前缀来自CANN9.0.1，问题后缀由CANN9.2实际prefill生成，
+不声称本轮重新计算了整个前缀。这与nalinaly固定bank方法一致。
+本轮证明真实模型token和接受轨迹在这些输入下可复现地与Native一致，
+不推出192步的全部浮点中间tensor逐bit一致，也不声称覆盖不等长整模型FULL：
+本轮各rank仍未观测到同一步ragged query；不等长CSA整层图证据另见相邻报告。
+
 ## 判据与次序
 
 1. Native1、Native2分别独立运行，确定性level1、HCCL true、atomic0、NZ2、EPLB关闭。
