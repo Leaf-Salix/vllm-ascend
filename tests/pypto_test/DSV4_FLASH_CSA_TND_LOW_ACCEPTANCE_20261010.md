@@ -355,3 +355,61 @@ layer16实际runtime的BF16投影权重SHA与checkpoint转置后的逐字节SHA�
 `ef523dd976546e43444a285fe9ff09b686350c7966554548a8f4ebc1d211d9a3`。
 这补齐了单卡投影回放的参数身份核验。
 下一步只定位layer26 heads前的Q与sparse attention阶段，后续层和192token继续暂停。
+
+### Layer 26：Q 输入观测（2026-10-13）
+
+在 Native Indexer weights 发布边界修正之后，首步已验证 CSA 层 2–24 的所有已列边界逐 bit 一致；首个差异停在层 26，没有继续层 28–42 或 192 token。
+
+独立 Q 导出诊断完成，16 个 rank 的保真门禁均通过：新增观测前后的 hidden、positions、TopK、weights、cache/state、heads、O-proj 和输出与此前失败样本逐 bit 相同。Native Q 在 sparse attention 入参处观测，PTO Q 在原有 BF16 发布之后导出。
+
+差异仅为请求 31、head 45 的 4 个 NOPE 通道：
+
+| 通道 | PTO Q | Native Q |
+| --- | ---: | ---: |
+| 88 | 0.23046875 | 0.2294921875 |
+| 232 | 0.23046875 | 0.2294921875 |
+| 342 | 0.921875 | 0.91796875 |
+| 419 | -1.84375 | -1.8359375 |
+
+Q 的整体 relative L2 为 7.7254e-6；该结果将最早已观测差异前移至 attention 的 Q 输入，尚未区分 Q 投影发布与 RMSNorm 计算边界。下一项仅导出该 head 的投影发布值、平方和、variance、inverse RMS，以及 Native RMSNorm 前后值，确认数学路径保持不变后再定位。生产源码未因此修改；不将源码中的平方 dtype 差异直接认定为根因。
+
+### Layer 26：Q RMSNorm 之前逐 bit 一致
+
+同一首步的第二次诊断保真门禁在 16 个 rank 全通过，两侧 Q、heads、输出及其他已观测字段均与上一诊断逐 bit 相同。请求 24–31、head45 的全部 8×512 个 Q 投影发布值与 Native RMSNorm 入参逐 bit 一致。PTO 在请求31的 FP32 平方和为 `1.2337054014205933`，variance+epsilon 为 `0.0024105808697640896`，inverse RMS 为 `20.36756706237793`。
+
+对实际 Native 输入使用 CPU FP32 平方和/rsqrt 公式得到 inverse RMS `20.367565155029297`，归一化后的8×512个BF16值与已观测 Native 全部一致。两种 inverse RMS 相差一个 FP32 ULP。加入 BF16 平方发布边界的 CPU 候选反而有103个元素不一致，因此不能依据 Triton 源码表面的 dtype 推断来补 BF16 平方舍入。
+
+这些 CPU 数值只用于收窄归因，不代替 NPU 修正验证。后续单卡对拍共用原 FP32 平方和归约，仅比较高精度 rsqrt、基础 rsqrt、sqrt→reciprocal，并要求完整 Native RMS 重放与首步观测相同。
+
+### Layer 26：实际 Native 统计纠正归因（2026-10-14）
+
+单卡同输入反平方根对拍中，高精度 rsqrt 和 sqrt→reciprocal 均复现生产版本的4个归一化差异，基础 rsqrt 有769个差异。epsilon、variance 和高精度 inverse RMS 与生产捕获值均逐bit一致；因此不合入这些候选。
+
+新增 Native 统计导出后，全部2560行归一化输出与未加观测的 Native 首步快照逐bit一致。实际 Native 的平方和已经与 PTO 不同，**最早差异是归约顺序，不是已经证实的反平方根实现错误**。此前 CPU rsqrt 对拍只用于收窄范围，不能代表 Native 的实际 variance。
+
+| 请求31/head45 | Native 实际值 | PTO 实际值 |
+| --- | ---: | ---: |
+| 平方和 | 1.2337055206298828 | 1.2337054014205933 |
+| variance+epsilon | 0.0024105811025947332 | 0.0024105808697640896 |
+| inverse RMS | 20.367565155029297 | 20.36756706237793 |
+
+CPU 对全部2560行尝试明确的FP32求和顺序，`stripe64-halves-then-adjacent` 的平方和与 Native 全部逐bit一致：8组64通道先依次组合 `(0+4)`、`(1+5)`、`(2+6)`、`(3+7)`，再 `((0+4)+(2+6))+((1+5)+(3+7))`，最后归约64通道。仅凭CPU模拟不能认定PTO的64列row_sum具有相同指令顺序；下一项NPU单因素对拍对平方和、variance、inverse RMS、mean以及归一化输出的全部2560行设置逐bit硬门禁。
+
+### Q RMSNorm 归约修正：Tensor 和 Tile 模块实测通过
+
+单因素 NPU 对拍已通过，全部2560行的结果如下：
+
+| 路径 | 平方和 | variance | inverse RMS | BF16归一化输出（1,310,720元素） |
+| --- | --- | --- | --- | --- |
+| Tensor 8×512→8×64分组 | 全部逐bit一致 | 全部逐bit一致 | 全部逐bit一致 | 全部逐bit一致 |
+| Tile 8×512→8×64分组＋高精度scratch | 全部逐bit一致 | 全部逐bit一致 | 全部逐bit一致 | 全部逐bit一致 |
+
+两项均先校验未改动Native独立重放与真实首步快照相同，并设置统计与输出失配硬失败。Tile模块验证数学路径，不能替代实际部分行crop的整层验证。正式修改仅在精度版 `qkv_proj_rope.py`：main/tail采用相同7次FP32加法树，tail使用匹配尺寸的row_sum与高精度rsqrt scratch，原有效行crop和RoPE保持不变。性能版、ABI、框架版本未改。完整CSA根的真实CCEC/BINARY_READY通过，随后提交全部21层首步门禁；本节的模块通过不放行192token。
+
+### 修正后全部 CSA 层首步逐bit验收（2026-10-14）
+
+8K/B40、TP1、DP=EP16、Native确定性开启。层2、4、…、42共21个CSA层的全部336条首步记录通过；覆盖门禁没有缺失、重复或失败记录。
+
+每条记录的14个边界全部逐bit一致：normed、raw KV、compressed KV、Indexer cache、两类压缩state、attention heads、O-proj、最终输出、TopK、Native Indexer weights、Native WKV BF16发布值、PTO/Native分别不修改hidden。此前层26的heads/O-proj/输出差异消除。14项不是所有内部临时Tensor的枚举，也不证明后续decode精度。
+
+本轮仅一个实际首步，不将此结果写成192token已经通过。下一步仍是同源码、同缓存与图配置下分别执行两个Native重复对照，再执行精度版192token；各任务独立且上限780秒，发现差异不扩展配置。

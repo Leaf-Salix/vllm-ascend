@@ -520,7 +520,17 @@ def q_proj_q_dequant(
                     q_head_dq = pl.mul(q_head_acc_fp32, q_head_scale_combined)
                     q_head_dq = pl.cast(pl.cast(q_head_dq, pl.BF16, mode="rint"), pl.FP32)
                     q_head_sq = pl.mul(q_head_dq, q_head_dq)
-                    q_head_sq_row = pl.row_sum(q_head_sq)
+                    # Native Triton RMS folds eight 64-lane groups in this
+                    # FP32 order before its 64-lane reduction. A single
+                    # row_sum over 512 lanes has a different rounding tree.
+                    q_sq_04 = pl.add(q_head_sq[:, 0:64], q_head_sq[:, 256:320])
+                    q_sq_15 = pl.add(q_head_sq[:, 64:128], q_head_sq[:, 320:384])
+                    q_sq_26 = pl.add(q_head_sq[:, 128:192], q_head_sq[:, 384:448])
+                    q_sq_37 = pl.add(q_head_sq[:, 192:256], q_head_sq[:, 448:512])
+                    q_sq_0246 = pl.add(q_sq_04, q_sq_26)
+                    q_sq_1357 = pl.add(q_sq_15, q_sq_37)
+                    q_sq_64 = pl.add(q_sq_0246, q_sq_1357)
+                    q_head_sq_row = pl.row_sum(q_sq_64)
                     q_head_sq_sum = pl.reshape(q_head_sq_row, [1, Q_ROPE_T_TILE])
                     q_head_sq_mean = pl.mul(q_head_sq_sum, 1.0 / HEAD_DIM)
                     q_head_var = pl.add(q_head_sq_mean, EPS)
@@ -584,10 +594,11 @@ def q_proj_q_dequant(
                 q_row_offset = pl.transpose(q_row_grid, axis1=0, axis2=1)
                 q_swap_idx_tail = pl.cast(pl.add(q_swap_f, q_row_offset), target_type=pl.INT32)
                 q_head_reduce_tmp = pl.create_tile(
-                    [Q_ROPE_T_TILE, HEAD_DIM],
+                    [Q_ROPE_T_TILE, 64],
                     dtype=pl.FP32,
                     target_memory=pl.MemorySpace.Vec,
                 )
+                q_rsqrt_tmp = pl.create_tile([Q_ROPE_T_TILE, 1], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec)
                 q_gather_tmp = pl.create_tile(
                     [Q_ROPE_T_TILE, ROPE_DIM],
                     dtype=pl.INT32,
@@ -620,10 +631,17 @@ def q_proj_q_dequant(
                     q_head_dq_tail = pl.cast(pl.cast(q_head_dq_tail, pl.BF16, mode="rint"), pl.FP32)
 
                     q_head_sq_tail = pl.mul(q_head_dq_tail, q_head_dq_tail)
-                    q_head_sq_sum_tail = pl.row_sum(q_head_sq_tail, q_head_reduce_tmp)
-                    q_head_inv_rms_tail = pl.recip(
-                        pl.sqrt(pl.add(pl.mul(q_head_sq_sum_tail, 1.0 / HEAD_DIM), EPS)),
-                    )
+                    # Keep the same Native grouping for the partial token tile.
+                    q_sq_04_tail = pl.add(q_head_sq_tail[:, 0:64], q_head_sq_tail[:, 256:320])
+                    q_sq_15_tail = pl.add(q_head_sq_tail[:, 64:128], q_head_sq_tail[:, 320:384])
+                    q_sq_26_tail = pl.add(q_head_sq_tail[:, 128:192], q_head_sq_tail[:, 384:448])
+                    q_sq_37_tail = pl.add(q_head_sq_tail[:, 192:256], q_head_sq_tail[:, 448:512])
+                    q_sq_0246_tail = pl.add(q_sq_04_tail, q_sq_26_tail)
+                    q_sq_1357_tail = pl.add(q_sq_15_tail, q_sq_37_tail)
+                    q_sq_64_tail = pl.add(q_sq_0246_tail, q_sq_1357_tail)
+                    q_head_sq_sum_tail = pl.row_sum(q_sq_64_tail, q_head_reduce_tmp)
+                    q_head_var_tail = pl.add(pl.mul(q_head_sq_sum_tail, 1.0 / HEAD_DIM), EPS)
+                    q_head_inv_rms_tail = pl.tile.rsqrt(q_head_var_tail, q_rsqrt_tmp)
 
                     q_nope_normed_tail = pl.row_expand_mul(q_head_dq_tail[:, 0:NOPE_DIM], q_head_inv_rms_tail)
                     q_nope_bf16_tail = pl.cast(q_nope_normed_tail, target_type=pl.BF16, mode="rint")
