@@ -31,6 +31,27 @@ RMSNorm首差定位为512通道FP32平方和归约树；已在完整行和尾行
 [2026-10-14 ragged FULL报告](DSV4_FLASH_CSA_TND_RAGGED_FULL_20261014.md)，
 不与上面的等长整模型192token结果混为同一验证范围。
 
+## 2026-10-14：输入来源核验与表述更正
+
+用户要求进一步确认是否直接使用nalinaly原始输入。核验结果：
+
+| 核验对象 | 结论 |
+| --- | --- |
+| 公开mixed8k_cases.json的40条题目记录 | 全部逐条相同，包含顺序、完整题目、后缀token数、cached history |
+| nalinaly原始mixed8k_fixed完整bank直接复用 | 否；本次使用自行生成的固定bank，Native重新prefill问题后缀 |
+| 完整prompt token序列及cache/state与原bank逐字节等同 | 尚未证明；原bank指定位置无读取权限 |
+| 本次Native/PTO两臂使用相同输入与状态 | 是；共同bank计划SHA及启动条件已核验 |
+| 本次两臂完整输出token是否相同 | 是；122,880 token零差异 |
+
+因此，之前“测试完全对齐nalinaly”的表述过强，应更正为：使用相同40条公开题目，
+按相同固定状态decode/逐token/接受事件方法测试；输入冻结bank是本次独立准备，
+未证明与nalinaly原始完整输入bank等同。统一event模式及固定KV容量也与其原矩阵有区别。
+原有Native对PTO零token差异证据不变，但不能据此宣称已完成原bank的严格复现。
+
+[输入来源核验证据](evidence_tnd_precision/real_model_input_provenance_20261014.json)
+记录40题规范化SHA、来源及未核验项。严格复现需要原始bank的只读副本，
+先核验完整prompt token与target/draft cache/state，再运行两臂；本轮没有权限修改或复制原bank。
+
 ## 2026-10-14：按nalinaly方法补做真实模型重复验证
 
 沿用nalinaly `low_acceptance_20261001` 的固定输入/状态、不同题目和逐轮接受事件口径，
