@@ -123,5 +123,6 @@ compact metadata，Native 保留其实际逐层生成路径。固定使用 `mode
 ## TND 精度版低接受率整模型测试
 
 [2026-10-10 测试记录](DSV4_FLASH_CSA_TND_LOW_ACCEPTANCE_20261010.md)按 Native 重复、
-仅 CSA 替换的顺序检查 token 与接受事件。固定状态准备与离线编译已完成；
-生成尚未完成，不能视为整模型精度通过。
+仅 CSA 替换的顺序检查 token 与接受事件。8K/B40的192 token重复与CSA对拍已通过。
+[2026-10-15 128K/B24测试](DSV4_FLASH_CSA_TND_128K_B24_20261015.md)中，Native重复通过，
+CSA精度版有2/24种题目输出分叉；实际入场轨迹也不同，尚未定位同输入最早浮点差异。

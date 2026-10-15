@@ -4,10 +4,19 @@
 `deepseek_v4_flash_csa_tnd_precision`。性能包未修改；HCA始终使用Native。
 
 参考用户指定的 nalinaly `low_acceptance_20261001/RESULTS.md`，原计划先做8K/B40，
-再做128K/B24。当前按用户要求只验证8K/B40，不执行后续大配置。每条输出192 token，TP1/DP=EP16，DSpark提出5验6，greedy、ignoreEOS。
+再做128K/B24。初期按用户要求先验证8K/B40；2026-10-15的128K/B24结果见下文。每条输出192 token，TP1/DP=EP16，DSpark提出5验6，greedy、ignoreEOS。
 40条不同问题复用共同Native历史前缀，后缀真实prefill；固定完整target/draft cache和state。
 旧前缀来源为CANN9.0.1，后缀本次由CANN9.2生成；各臂使用同一冻结状态。
 不能把该口径写成完整历史都由CANN9.2重算。
+
+## 后续128K/B24结果（2026-10-15）
+
+用户批准进入128K/B24后，Native两次73,728 token及完整接受事件零差异。
+仅CSA替换的精度版未通过：2/24种题目有token分叉，最早为第150个输出token；
+接受事件也未对齐，包括部分请求自身首轮。两边均零抢占，但观测活跃峰值为Native24/PTO23，
+需要先控制实际入场和相同输入再定位，尚未归因某个CSA数学模块。
+本轮任务均已结束，未继续扩大配置。
+详见[128K/B24报告](DSV4_FLASH_CSA_TND_128K_B24_20261015.md)。
 
 ## 最新结果（2026-10-14）
 
