@@ -126,3 +126,6 @@ compact metadata，Native 保留其实际逐层生成路径。固定使用 `mode
 仅 CSA 替换的顺序检查 token 与接受事件。8K/B40的192 token重复与CSA对拍已通过。
 [2026-10-15 128K/B24测试](DSV4_FLASH_CSA_TND_128K_B24_20261015.md)中，Native重复通过，
 CSA精度版有2/24种题目输出分叉；实际入场轨迹也不同，尚未定位同输入最早浮点差异。
+[2026-10-16 入场对齐与首轮模块测试](DSV4_FLASH_CSA_TND_ADMISSION_ALIGNMENT_20261016.md)
+固定实际容量后，Native两轮的32个联合forward及输出完全一致；CSA在第25轮首次输入分叉。
+真实首轮21 token、rank0的21层CSA所观测边界逐bit一致，后续FULL模块仍待定位。

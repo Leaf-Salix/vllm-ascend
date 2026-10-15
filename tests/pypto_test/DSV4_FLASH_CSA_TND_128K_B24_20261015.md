@@ -82,3 +82,7 @@ PTO臂还须确认READY命中且没有重新生成/编译；静态包加载不�
 
 8K历史结果及输入来源更正见[整模型低接受率记录](DSV4_FLASH_CSA_TND_LOW_ACCEPTANCE_20261010.md)。
 不等长CSA图内逐bit结果见[ragged FULL记录](DSV4_FLASH_CSA_TND_RAGGED_FULL_20261014.md)。
+
+后续已固定共同实际KV容量并完成Native联合输入轨迹复现，见
+[2026-10-16 入场对齐与首轮模块对拍](DSV4_FLASH_CSA_TND_ADMISSION_ALIGNMENT_20261016.md)。
+该诊断只生成64 token，不能替代本记录的192 token失败结论。
