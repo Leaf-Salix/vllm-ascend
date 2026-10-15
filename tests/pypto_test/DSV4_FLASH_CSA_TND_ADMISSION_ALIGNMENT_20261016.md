@@ -91,8 +91,35 @@ D2H观测会改变时序，因此本轮不提供性能结论。
 只有观测保真和实际replay刷新检查通过，才用同样观测与CSA逐模块比较。
 发现首个不同边界后停止后续step，再按Native实现修正。
 
-截至本记录，**FULL模块逐bit精度、128K/B24完整192 token验收均未通过证明**。
+截至本记录，**完整FULL模块逐bit精度、128K/B24完整192 token验收均未通过**。
 原有192 token失败结论仍保留；本轮没有引入新的数学修复或性能优化。
+
+## FULL同输入首差：第24轮、第2层heads
+
+已完成三个顺序独立任务：原始Native仅观测图外输出、增加图内观测的Native、使用相同观测的CSA精度版。
+图内观测先通过Native保真门禁，再用于CSA归因。
+
+| 检查 | 结果 |
+| --- | --- |
+| Native图内观测是否改变实际输入/入场/完整token及接受事件 | 16rank、32轮均未改变，零抢占 |
+| Native图内观测是否改变target hidden、aux hidden或MTP residual | rank0全部32轮逐bit相同 |
+| 图内观测资格 | 43层、21个CSA，6816份边界摘要及32份原值快照完整；逐字段epoch、poison、positions检查通过 |
+| CSA在首差前的输出 | 零基第0–23轮，rank0所有观测边界及图外hidden/aux/MTP均逐bit一致 |
+| 同输入资格 | 至第24轮，16rank实际输入记录与Native逐字段相同；原值SHA与摘要交叉核验通过 |
+| 最早不同边界 | 第24轮，FULL144，18个有效token，第2层CSA的inverse RoPE后heads |
+| 本轮此前边界 | layer0、1全部边界；layer2的输入、positions、normed，共9项逐bit一致 |
+| 首差规模 | 589,127 / 589,824个BF16元素位模式不同；relative L2为1.53171959，max abs为4.125，无非有限值 |
+| 停止 | 保存首差原值后停止后续model step；没有继续192 token或扩大参数 |
+
+该轮q20完成，活跃请求从4条缩到3条，顺序为q22、q21、q23，每条6个token，padding档位仍为144。
+这只是首差与缩批的时间关联，尚不能据此认定mask、页表或原生算子有bug。
+CPU对已保存heads的比较排除了“上一轮结果原样残留”和“当前行简单重排”。
+该误差量级明显超过舍入差异，后续先核查真实设备metadata、TopK与cache寻址/状态，再细分Q及attention。
+
+观测修复也保留记录：首次Native witness在profile的400行输入复制到144行缓冲时失败，未进入生成。
+动态`min`切片候选又被CPU编译门禁拒绝。最终采用只写私有buffer的观测custom op，
+CPU回归直接复用同一捕获图处理6/21/144/400行；随后Native保真验证通过。
+这些属于探针修复，没有改动CSA数学源码。所有硬件任务上限均为780秒。
 
 ## 环境与证据
 
@@ -106,6 +133,7 @@ PyPTO `3e87a843`、Simpler `a54c0509552b01e13fb0960e23ce409a01b5024f`。
 
 - 联合输入三臂证据SHA256：`4c73a399130490c194980e437e36ad9fa9f8743aa19f609cd92675c1a38a5cde`
 - 首轮模块证据SHA256：`642beacbd1934253dc0da63dd7bd32dd867efae147b50ef1973fc95c8d14ab69`
+- FULL首差小型证据SHA256：`18be126cae8c0517f96fd5d11afa8499c508651103bbdafea1cc3b45da853070`
 
 CPU观测回归涵盖真实顺序、空/不完整参考拒绝、实际容量不匹配、idle插入、联合轮次校验、
 首差锁定、当前forward上下文及模块回调失败后的停止。无设备环境预检与独立源码复核均通过。
