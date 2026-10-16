@@ -256,7 +256,10 @@ def _hc_pre_variant(
                 # L1总计320/384KiB。编译器为相邻迭代安排搬运与计算的依赖；
                 # 这不保证完全重叠，实际收益以完整L1 incore首尾为准。
                 # RMS累加保持循环携带依赖，四次K512的FP32加法顺序不重排。
-                if STREAM_K == 512:
+                # T33～48 的 K1024 段改成两次 K512 普通循环（下方 else）：
+                # 复用转换后的输入计算 RMS，省去原整块路径的专用重读；
+                # 同循环体开 pipeline 在真机对照中更慢，故保持普通 range。
+                if STREAM_K == 512 and LINEAR_K_PER_SPLIT != 1024:
                     for kk in pl.pipeline(LINEAR_K_PER_SPLIT // STREAM_K, stage=2):
                         kc = kbase + kk * STREAM_K
                         kvalid = pl.max(0, pl.min(STREAM_K, HC_DIM - kc))
@@ -294,6 +297,9 @@ def _hc_pre_variant(
                             mid_stream_product = pl.matmul(mid_gathered_chunk, mid_weight_chunk, b_trans=True)
                         else:
                             mid_stream_product = pl.matmul_acc(mid_stream_product, mid_gathered_chunk, mid_weight_chunk, b_trans=True)
+                if LINEAR_K_PER_SPLIT == 1024:
+                    # 数学投影为24列，GM按32列存储；写回前恢复有效形状。
+                    mid_stream_product = pl.set_validshape(mid_stream_product, LINEAR_T_TILE, MIX_PAD)
                 mixes_partials[partial_row:partial_row + LINEAR_T_TILE, 0:MIX_PAD] = mid_stream_product
                 for rms_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
                     rp = partial_row + rms_lane * (LINEAR_T_TILE // 2)
@@ -398,7 +404,11 @@ def _hc_pre_variant(
                     # 投影列8～23对应每个 token 的4×4 comb logit，使用第三个 scale。
                     raw = pl.add(pl.slice(c_total, [T_TILE, 16], [0, HC_MULT * 2]), 0.0)
                     base = pl.load(hc_base_2d, [0, HC_MULT * 2], [1, 16], target_memory=pl.MemorySpace.Vec)
-                    logits = pl.add(pl.mul(pl.row_expand_mul(raw, comb_inv), scale2), pl.col_expand(raw, base))
+                    # T97及以上的两档采用广播加法；T96和更小档保持原版。
+                    if TAIL_MAX_ROWS == 8:
+                        logits = pl.col_expand_add(pl.mul(pl.row_expand_mul(raw, comb_inv), scale2), base)
+                    else:
+                        logits = pl.add(pl.mul(pl.row_expand_mul(raw, comb_inv), scale2), pl.col_expand(raw, base))
                     # 只保留本轮最多 TAIL_MAX_ROWS 个矩阵，再展平做 Sinkhorn；
                     # 这里缩小实际计算 tile，避免把8行对齐用的补零全带进20轮迭代。
                     # ri1/ri2 分别翻转矩阵内索引的低第0/1位，取同行的伙伴元素；
@@ -470,23 +480,38 @@ def _hc_pre_variant(
                         regular_logits = pl.reshape(pl.slice(logits, [TAIL_MAX_ROWS, 16], [0, 0]), [1, TAIL_MAX_ROWS * 16])
                         ids = pl.tile.arange(0, [1, TAIL_MAX_ROWS * 16], dtype=pl.INT32)
                         tmp = pl.create_tile([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32)
-                        idx_float = pl.cast(ids, pl.FP32)
-                        ri1_low = pl.cast(pl.cast(pl.mul(idx_float, 1.0), pl.INT32, mode="floor"), pl.FP32)
-                        ri1_high = pl.cast(pl.cast(pl.mul(idx_float, 0.5), pl.INT32, mode="floor"), pl.FP32)
-                        ri1_bit = pl.sub(ri1_low, pl.mul(ri1_high, 2.0))
-                        ri1 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ri1_bit, 2.0)), 1.0), pl.INT32)
-                        ri2_low = pl.cast(pl.cast(pl.mul(idx_float, 0.5), pl.INT32, mode="floor"), pl.FP32)
-                        ri2_high = pl.cast(pl.cast(pl.mul(idx_float, 0.25), pl.INT32, mode="floor"), pl.FP32)
-                        ri2_bit = pl.sub(ri2_low, pl.mul(ri2_high, 2.0))
-                        ri2 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ri2_bit, 4.0)), 2.0), pl.INT32)
-                        ci1_low = pl.cast(pl.cast(pl.mul(idx_float, 0.25), pl.INT32, mode="floor"), pl.FP32)
-                        ci1_high = pl.cast(pl.cast(pl.mul(idx_float, 0.125), pl.INT32, mode="floor"), pl.FP32)
-                        ci1_bit = pl.sub(ci1_low, pl.mul(ci1_high, 2.0))
-                        ci1 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ci1_bit, 8.0)), 4.0), pl.INT32)
-                        ci2_low = pl.cast(pl.cast(pl.mul(idx_float, 0.125), pl.INT32, mode="floor"), pl.FP32)
-                        ci2_high = pl.cast(pl.cast(pl.mul(idx_float, 0.0625), pl.INT32, mode="floor"), pl.FP32)
-                        ci2_bit = pl.sub(ci2_low, pl.mul(ci2_high, 2.0))
-                        ci2 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ci2_bit, 16.0)), 8.0), pl.INT32)
+                        # T33～95和T>144使用整数索引；小档和T97～144保留原公式。
+                        if LINEAR_K_PER_SPLIT == 1024 or (LINEAR_K_PER_SPLIT == 2048 and LINEAR_T_TILE != 48):
+                            # 同行/同列伙伴分别翻转索引的第0/1/2/3位。
+                            # 用整数异或直接生成，避免浮点乘法、floor和往返转换。
+                            ids16 = pl.reinterpret_view(ids, pl.INT16)
+                            xor_tmp16 = pl.create_tile([1, TAIL_MAX_ROWS * 32], dtype=pl.INT16)
+                            ri1_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32, value=1), pl.INT16)
+                            ri1 = pl.reinterpret_view(pl.tile.xor(ids16, ri1_mask, xor_tmp16), pl.INT32)
+                            ri2_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32, value=2), pl.INT16)
+                            ri2 = pl.reinterpret_view(pl.tile.xor(ids16, ri2_mask, xor_tmp16), pl.INT32)
+                            ci1_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32, value=4), pl.INT16)
+                            ci1 = pl.reinterpret_view(pl.tile.xor(ids16, ci1_mask, xor_tmp16), pl.INT32)
+                            ci2_mask = pl.reinterpret_view(pl.tile.full([1, TAIL_MAX_ROWS * 16], dtype=pl.INT32, value=8), pl.INT16)
+                            ci2 = pl.reinterpret_view(pl.tile.xor(ids16, ci2_mask, xor_tmp16), pl.INT32)
+                        else:
+                            idx_float = pl.cast(ids, pl.FP32)
+                            ri1_low = pl.cast(pl.cast(pl.mul(idx_float, 1.0), pl.INT32, mode="floor"), pl.FP32)
+                            ri1_high = pl.cast(pl.cast(pl.mul(idx_float, 0.5), pl.INT32, mode="floor"), pl.FP32)
+                            ri1_bit = pl.sub(ri1_low, pl.mul(ri1_high, 2.0))
+                            ri1 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ri1_bit, 2.0)), 1.0), pl.INT32)
+                            ri2_low = pl.cast(pl.cast(pl.mul(idx_float, 0.5), pl.INT32, mode="floor"), pl.FP32)
+                            ri2_high = pl.cast(pl.cast(pl.mul(idx_float, 0.25), pl.INT32, mode="floor"), pl.FP32)
+                            ri2_bit = pl.sub(ri2_low, pl.mul(ri2_high, 2.0))
+                            ri2 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ri2_bit, 4.0)), 2.0), pl.INT32)
+                            ci1_low = pl.cast(pl.cast(pl.mul(idx_float, 0.25), pl.INT32, mode="floor"), pl.FP32)
+                            ci1_high = pl.cast(pl.cast(pl.mul(idx_float, 0.125), pl.INT32, mode="floor"), pl.FP32)
+                            ci1_bit = pl.sub(ci1_low, pl.mul(ci1_high, 2.0))
+                            ci1 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ci1_bit, 8.0)), 4.0), pl.INT32)
+                            ci2_low = pl.cast(pl.cast(pl.mul(idx_float, 0.125), pl.INT32, mode="floor"), pl.FP32)
+                            ci2_high = pl.cast(pl.cast(pl.mul(idx_float, 0.0625), pl.INT32, mode="floor"), pl.FP32)
+                            ci2_bit = pl.sub(ci2_low, pl.mul(ci2_high, 2.0))
+                            ci2 = pl.cast(pl.add(pl.sub(idx_float, pl.mul(ci2_bit, 16.0)), 8.0), pl.INT32)
                         # 首轮先减行最大值再 exp，降低指数溢出风险；做行归一化并加 eps，
                         # 随后做列归一化。下面再执行19轮行/列归一化，共20轮 Sinkhorn。
                         max2 = pl.maximum(regular_logits, pl.tile.gather(regular_logits, ri1, tmp))
@@ -769,7 +794,8 @@ def hc_pre(
     # 只读取已有 shape 元数据，不回读任何 device tensor 内容。
     # 参数顺序：投影M块、K宽度、K段数、RMS子块、槽数、尾段行上限、任务名。
     # 小档保留M32/K1536和11份部分和，段内2/3次K512供数与RMS复用，
-    # 用同一显式Acc与K256 L0双缓冲；尾段后19轮使用设备标量。中档每段两次K1024，
+    # 用同一显式Acc与K256 L0双缓冲；尾段后19轮使用设备标量。T33～48用两次K512普通循环复用RMS；
+    # T49～96每段两次K1024，
     # 大档每段四次K512并使用两级流水。
     # T49～95及T>96局部累加RMS后写8份；精确T96仍写16份RMS、8份投影部分和。
     tokens = pl.tensor.dim(x, 0)
@@ -778,7 +804,7 @@ def hc_pre(
                                                32, 1536, 11, 512, 2, 2, "hc_small_spmd", 0, 11, False, 512)
     elif tokens <= MEDIUM48_T_MAX:
         mixed, post, comb_out = _hc_pre_variant(x, hc_fn, hc_scale, hc_base, mixed, post, comb_out,
-                                               48, 1024, 16, 512, 2, 2, "hc_medium48_spmd", 0, 16, True, 1024)
+                                               48, 1024, 16, 512, 2, 2, "hc_medium48_spmd", 0, 16, True, 512)
     elif tokens < MEDIUM96_T_MAX:
         mixed, post, comb_out = _hc_pre_variant(x, hc_fn, hc_scale, hc_base, mixed, post, comb_out,
                                                32, 2048, 8, 256, 2, 4, "hc_medium96_spmd", 0, 8, True, 1024)
