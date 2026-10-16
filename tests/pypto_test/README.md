@@ -1,5 +1,8 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
+[整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。
+
 2026-10-16真实模型TND精度版两档192 token结果见
 [精度结果](DSV4_FLASH_CSA_TND_NALINALY_LOW_ACCEPTANCE_20261016.md)；完整环境、输入、命令、验收和冻结材料见
 [复现手册](DSV4_FLASH_CSA_TND_PRECISION_REPRO_20261016.md)。
