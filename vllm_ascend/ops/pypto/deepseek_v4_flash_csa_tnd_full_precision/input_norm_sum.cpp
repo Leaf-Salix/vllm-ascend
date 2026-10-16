@@ -20,6 +20,8 @@ __aicore__ __attribute__((always_inline)) void fold_half() {
 extern "C" __aicore__ __attribute__((always_inline)) void kernel_entry(__gm__ int64_t* args) {
 #if defined(__DAV_VEC__)
   set_atomic_none();
+  set_mask_norm();
+  set_vector_mask(-1, -1);
   const int row = get_block_idx(args);
   auto x_desc = reinterpret_cast<__gm__ Tensor*>(args[0]);
   auto out_desc = reinterpret_cast<__gm__ Tensor*>(args[1]);

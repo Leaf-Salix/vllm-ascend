@@ -8,6 +8,7 @@
 [输入Norm恢复记录](DSV4_FLASH_CSA_TND_INPUT_NORM_PRECISION_20261016.md)。
 恢复WKV前的[8K/B40整模型回归](DSV4_FLASH_CSA_TND_FULL_PTO_MODEL_REGRESSION_20261016.md)：
 Native完成，CSA在FULL图初始化时失败，尚未获得整模型精度结论。
+后续[初始化与T240首差定位](DSV4_FLASH_CSA_TND_INITIALIZATION_DIAGNOSIS_20261016.md)记录Norm入口修正、单卡逐bit结果及完整失败证据。
 
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
 [整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。
