@@ -1,5 +1,9 @@
 # 完整PTO分阶段候选：8K/B40整模型回归（2026-10-16）
 
+后续Norm入口修正已通过正常异步8K/B40、192 token；完整对齐结果见
+[初始化定位与修正复测](DSV4_FLASH_CSA_TND_INITIALIZATION_DIAGNOSIS_20261016.md)。
+本文保留初次失败的原始状态，不改写历史结果。
+
 ## 结论与范围
 
 测试代码提交 `259cf9a5f`，分支 `dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`。

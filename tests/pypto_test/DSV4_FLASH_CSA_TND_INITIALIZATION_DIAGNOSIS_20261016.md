@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-分支`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`，正式数学源码仍为`259cf9a5f`。
+分支`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`，定位起点数学源码为`259cf9a5f`；后续最小入口修正已提交`e267e4e62`。
 此前[真实8K/B40回归](DSV4_FLASH_CSA_TND_FULL_PTO_MODEL_REGRESSION_20261016.md)的Native已完成；
 CSA在FULL初始化阶段越界，尚未进入生成。本轮复用该Native，不跑Native2，不跑128K。
 WKV恢复继续暂停。下面的缩小实验及候选均为独立诊断副本，尚未合入正式算术实现。
@@ -88,3 +88,90 @@ CPU摘要来自真实NPU快照，并非CPU golden。
 SHA256 `f326c5fab6cbf08f74206c9ecd9f347a97f65791eabc84042f00dbeb8f9ac5ed`。
 53项文件，包括所有16rank初始化事件/日志、配置、诊断helper、单卡原始失败及成功结果和脚本。
 该包不包含任何额外异常状态诊断；只执行了正常算子对拍。
+
+
+## 修正后的真实初始化复测
+
+`task_20261017_001302_228617232359`占卡6分54秒，exit1。
+16rank都完成168个非capture同步程序边界，且捕获执行到最后CSA层；没有507015。
+实际JIT导出的`extern/0/input_norm_sum.cpp`已核对包含两行修正。
+
+本轮没有获得token结果：rank3在`OFFLINE_MODEL_READY`之后，旧测试入口
+`mixed.py`硬编码断言变体为`tnd_precision`，在生成前拒绝`tnd_full_precision`。
+其他rank在父进程关闭后产生EOF/connection-refused；这些不是首因，也不是网络服务故障。
+原始任务exit1保留，不改写成整模型PASS。
+
+后续在独立step07测试快照中，将该身份校验提取成纯CPU函数，明确映射两类精度包，
+继续要求21个CSA均来自指定PTO runtime、20个HCA保持Native。
+12项CPU正负控覆盖正确变体、错包、缺层、HCA误替换、未知性能变体、空结果等；全部通过。
+生成、接受事件、实际入场和数值验收代码均未改动。
+step07数学与`e267e4e62`相同；只新增未进入正式算术提交的测试入口overlay，不能把它描述成完整Git checkout。
+
+[修正后初始化证据](evidence_tnd_precision/full_pto_20261016/norm-entry-evidence-v2.tar.gz)，
+SHA256 `9b99a736c0c7292b2c358c41a55b9721411f4f849dee71f4ec041d203889245c`，
+62项文件均已核验，包括全部16rank日志/阶段事件、step05/06清单、旧断言首错与新测试guard。
+下一轮正常异步复测不带阶段同步，仍只对一次既有Native，不跑Native2；结果另附。
+
+## 正常异步8K/B40、192 token：通过
+
+任务`task_20261017_002449_25681559404` exit0，task-submit报告占卡 **9分47秒**，
+低于15分钟；设置max-time=780。没有初始化阶段逐程序同步，也未重跑Native2。
+完整数学候选为`e267e4e62`，测试使用step07独立快照，显式保留上节的测试入口overlay。
+
+[完整CPU验收JSON](evidence_tnd_precision/full_pto_20261016/model-8k-production1-qualified.json)：
+
+| 验收项 | 结果 |
+| --- | --- |
+| 真实模型及配置 | DeepSeek-V4-Flash-0731-w8a8，TP1、DP=EP16，8K/B40、192 token，FULL[6,240] |
+| 请求与输出 | 640条请求、122880个输出token，全部完成 |
+| Native次数 | 复用前述一次Native；没有Native2 |
+| 16rank实际GPU输入与入场轨迹 | 全部一致 |
+| 16rank完整token与DSpark接受事件 | 全部一致 |
+| rank0 outer hidden、aux、MTP位摘要 | 51轮全部逐bit一致 |
+| 实际峰值请求 | 每rank40条，零抢占 |
+| 实际CSA替换 | 21层在T6/T240均记录到PTO warmup与capture选择，后续实际FULL240 replay |
+| HCA | 20层保持Native |
+| 平均接受草稿数 | 3.703590992；没有强设为3.8 |
+| 接受0～5个草稿计数 | [1696,2432,2816,2592,2240,14512]，与Native完全一致 |
+| 范围外 | 本轮未做内部逐层hook、性能测量、128K、全部CSA模块PTO恢复 |
+
+raw输入记录因停机前空尾不同，CSA各rank为52或54轮；
+验收用严格非活跃空尾判据提取51轮生成窗口，没有任意截断活跃差异。
+完整记录与窗口审计脚本均在证据包。
+
+本轮`strict_ready_reuse=false`：ready_hits=0，object_hits=248，部分rank首次JIT生成/二进制构建各2次。
+所有rank的bypasses、invalid_entries、storage_errors、forced_rebuilds均为0。
+没有重新编译或安装vLLM/PyPTO/Simpler框架；该次初始化/首次JIT开销不作为性能结论。
+
+### 可复现材料
+
+[两臂完整数值证据](evidence_tnd_precision/full_pto_20261016/model-8k-production1-evidence.tar.gz)，
+SHA256 `1b92fac9c439a53d87174e6c7db1c251863ea80b890ae3532d12ee6833cb0f2b`，
+276项文件逐项核验。包含两臂全部16rank的mixed结果、请求事件、输入轨迹与审计、
+rank0 outer位摘要、Native派生参考及绑定、3357源清单、helpers及最终qualifier。
+不含模型权重、venv、完整bank大张量、设备dump；需沿用既有且SHA校验通过的模型/环境/bank。
+与初次回归精简包不同，此包保留了完整跨rank数值原件。
+
+step07源码manifest SHA256：
+`83ad8550a84e8d51346671648bbbba33e868e373e9c01513a1b063b8fd15526d`。
+最终qualifier逐文件核对：相对Native的step05快照，仅外部Norm两行入口初始化与
+`mixed.py`测试变体校验不同。它核验两行补丁的精确字节、已测guard副本，
+并以AST确认原batch生成/观察主体和collect/peer等待函数没有变化。
+身份差异是显式校验的，未改写Native配置来伪造相同SHA。
+
+在原227独立资产目录复测（新的输出名，保留历史数据）：
+
+```bash
+JOB=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/full-pto-model-8k-b40-20261016
+# 先按证据helpers/environment核验Python、SDK/PTOAS、step07源SHA、bank与Native派生绑定。
+# 使用原生bootstrap，无初始化逐程序同步：
+task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
+  "bash $JOB/production-v1/run-case.sh precision-witness <新的CSA输出名>"
+# 任务结束后，在同一环境中仅做CPU验收；不提交Native2：
+python "$JOB/production-v1/qualify_production.py" \
+  /data/pyptouser/yejia/lc128/full-pto8k-native-20261016 \
+  /data/pyptouser/yejia/lc128/<新的CSA输出名> --job "$JOB" --output <新的验收JSON>
+```
+
+脚本仍绑定该历史Native和具体源快照；迁移或新建Native时必须显式更新资产路径/绑定和身份校验，
+不能把另一轮参考当成本轮。现在可在这个已通过基准上继续恢复WKV投影。

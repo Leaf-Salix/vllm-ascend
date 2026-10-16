@@ -7,7 +7,7 @@
 后续输入RMSNorm的半区归约、开方/除法舍入及模块/服务验收见
 [输入Norm恢复记录](DSV4_FLASH_CSA_TND_INPUT_NORM_PRECISION_20261016.md)。
 恢复WKV前的[8K/B40整模型回归](DSV4_FLASH_CSA_TND_FULL_PTO_MODEL_REGRESSION_20261016.md)：
-Native完成，CSA在FULL图初始化时失败，尚未获得整模型精度结论。
+初次CSA在FULL初始化失败；后续Norm入口修正后的8K/B40、192 token已与一次Native完整对齐。
 后续[初始化与T240首差定位](DSV4_FLASH_CSA_TND_INITIALIZATION_DIAGNOSIS_20261016.md)记录Norm入口修正、单卡逐bit结果及完整失败证据。
 
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
