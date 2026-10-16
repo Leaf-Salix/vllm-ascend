@@ -13,25 +13,21 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.service_config import valida
 def csa_layer_forward(layer, positions, hidden_states, residual, llama_4_scaling=None):
     """接管 decoder layer 的 attention 半边，FFN 半边原样留给 Native。
 
-    PTO kernel 现在是整层入口（mHC pre + input_layernorm + attention + mHC post，
-    见 `decode_csa._decode_csa_tp1_layer`），所以替换点从 `self_attn.forward` 上移到
-    这里：`hidden_states` 进出都是层间的 mHC 残差流 [T, HC_MULT, D]。`self_attn`
-    本身保持 Native 不动，custom op 里回退时照常调用它。
+    Service 接管 mHC pre 到 mHC post 的整个 attention 半层。内部由所选 variant
+    决定 PTO/Native 分工：tnd_precision 保留部分 Native 算术边界，
+    tnd_full_precision 逐模块恢复 PTO，覆盖情况以该 service 的 restored_modules 为准。
+    `hidden_states` 进出都是层间残差流 [T, HC_MULT, D]；回退执行完整 Native 半层。
 
     The Native DSA wrapper owns the prefix and all six cache tensors. Keep
     positions explicit in the custom-op ABI, including during torch.compile.
     """
     attn_out = torch.empty_like(hidden_states)
-    torch.ops.vllm.dsv4_csa_forward(
-        hidden_states, positions, attn_out, layer.self_attn.dsa_attn.prefix
-    )
+    torch.ops.vllm.dsv4_csa_forward(hidden_states, positions, attn_out, layer.self_attn.dsa_attn.prefix)
     hidden_states = attn_out
 
     # FFN 半边：与 release 的 DeepseekV4DecoderLayer.forward 后半段逐行一致。
     residual = hidden_states.clone()
-    hidden_states, post, comb = layer.hc_pre(
-        hidden_states, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base
-    )
+    hidden_states, post, comb = layer.hc_pre(hidden_states, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base)
     hidden_states = layer.post_attention_layernorm(hidden_states)
     hidden_states = layer.mlp(hidden_states)
     hidden_states = layer.hc_post(hidden_states, residual, post, comb)
@@ -61,9 +57,11 @@ def prepare_csa_model(model):
 
     import pypto.torch
     from vllm.config import get_current_vllm_config
+
     from vllm_ascend.ascend_config import get_ascend_config
     from vllm_ascend.ops.pypto.deepseek_v4_flash_dspark.nz_mode import (
-        root_weight_layouts, validate_weight_nz_mode,
+        root_weight_layouts,
+        validate_weight_nz_mode,
     )
     from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs, selected_variant, variant_package
 
@@ -82,7 +80,9 @@ def prepare_csa_model(model):
     reduction = importlib.import_module(f"{package}.qkv_proj_rope")
     logger.info(
         "PTO_CSA_REDUCTION atomic_add=%d qr_split_k=%d kv_split_k=%d",
-        ATOMIC_ADD, reduction.QR_OK, reduction.KV_OK,
+        ATOMIC_ADD,
+        reduction.QR_OK,
+        reduction.KV_OK,
     )
 
     # 运行时默认仍是 tensormap_and_ringbuffer。显存排查发现它在 init 期固定占用
@@ -114,17 +114,22 @@ def prepare_csa_model(model):
     for layer in model.model.layers:
         attention = layer.self_attn
         if attention.compress_ratio == 4:
-            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(
-                attention, operators, max_num_seqs, layer
-            )
+            attention.dsa_attn._pto_csa_runtime = CSAServiceRuntime(attention, operators, max_num_seqs, layer)
             count += 1
     if not count:
         raise ValueError("No target C4 attention layers found for PTO CSA")
-    logger.info("PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
-                selected_variant(), effective_mode, layouts,
-                [name for name, layout in layouts.items() if layout == "NZ"])
-    logger.info("Prepared PTO CSA (%s variant) for %d target C4 layers; "
-                "prefill and unsupported decode batches use Native", selected_variant(), count)
+    logger.info(
+        "PTO_CSA_LAYOUT variant=%s effective_mode=%d root_layouts=%s nz_packed=%s",
+        selected_variant(),
+        effective_mode,
+        layouts,
+        [name for name, layout in layouts.items() if layout == "NZ"],
+    )
+    logger.info(
+        "Prepared PTO CSA (%s variant) for %d target C4 layers; prefill and unsupported decode batches use Native",
+        selected_variant(),
+        count,
+    )
 
 
 class PyptoCSADeepseekV4ForCausalLM(AscendDeepseekV4ForCausalLM):

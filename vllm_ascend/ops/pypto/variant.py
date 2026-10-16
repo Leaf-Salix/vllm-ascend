@@ -26,6 +26,7 @@ import os
 _PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_dspark"
 _PERFORMANCE = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa"
 _TND_PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision"
+_TND_FULL_PRECISION = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_full_precision"
 _ENV = "PTO_CSA_VARIANT"
 _ALIASES = {
     "precision": "precision",
@@ -33,6 +34,7 @@ _ALIASES = {
     "performance": "performance",
     "perf": "performance",
     "tnd_precision": "tnd_precision",
+    "tnd_full_precision": "tnd_full_precision",
 }
 
 
@@ -49,7 +51,7 @@ def csa_runtime() -> str:
 
 
 def selected_variant() -> str:
-    """返回BSH精度版、TND性能版或TND精度版；非法值不静默回退。"""
+    """返回所选实现；full_precision为逐模块恢复候选，默认实现不变。"""
     value = os.environ.get(_ENV, "precision").strip().lower()
     if value.startswith(_BISECT_PREFIX):
         return "performance"
@@ -72,7 +74,12 @@ def variant_package() -> str:
         if not name.isidentifier():
             raise ValueError(f"{_ENV}={value!r} 的包名不合法")
         return f"vllm_ascend.ops.pypto.{name}"
-    return {"precision": _PRECISION, "performance": _PERFORMANCE, "tnd_precision": _TND_PRECISION}[selected_variant()]
+    return {
+        "precision": _PRECISION,
+        "performance": _PERFORMANCE,
+        "tnd_precision": _TND_PRECISION,
+        "tnd_full_precision": _TND_FULL_PRECISION,
+    }[selected_variant()]
 
 
 _RING_CONFIG_KEY = "pto_csa_ring_config"

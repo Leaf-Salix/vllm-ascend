@@ -2726,12 +2726,12 @@ class NPUModelRunner(GPUModelRunner):
                 num_active_loras=num_active_loras,
             )
             # Python forward gates do not run during graph replay. Only replay
-            # a captured CSA bucket for complete, unpadded six-token requests.
+            # a captured CSA bucket when its variant supports the live request layout.
             if mode == CUDAGraphMode.FULL and is_csa_model(self.vllm_config):
                 if not can_replay_csa_graph(
                     num_tokens=csa_actual_tokens, num_reqs=num_reqs,
                     uniform_decode=uniform_decode, padded_tokens=descriptor.num_tokens,
-                    variable_queries=selected_variant() in ("performance", "tnd_precision"),
+                    variable_queries=selected_variant() in ("performance", "tnd_precision", "tnd_full_precision"),
                     max_query_tokens=max_num_scheduled_tokens,
                 ):
                     return CUDAGraphMode.NONE, BatchDescriptor(num_tokens)

@@ -21,6 +21,7 @@ def test_precision_tnd_keeps_real_packed_requests(lengths):
         ("performance", "deepseek_v4_flash_csa"),
         ("precision", "deepseek_v4_flash_dspark"),
         ("tnd_precision", "deepseek_v4_flash_csa_tnd_precision"),
+        ("tnd_full_precision", "deepseek_v4_flash_csa_tnd_full_precision"),
     ],
 )
 def test_variants_have_independent_packages(monkeypatch, variant, package):
@@ -29,10 +30,11 @@ def test_variants_have_independent_packages(monkeypatch, variant, package):
     assert variant_package().endswith("." + package)
 
 
-def test_tnd_precision_defaults_to_fixed_reduction(monkeypatch):
+@pytest.mark.parametrize("variant", ["tnd_precision", "tnd_full_precision"])
+def test_tnd_precision_defaults_to_fixed_reduction(monkeypatch, variant):
     from vllm_ascend.envs import _pto_csa_atomic_add
 
-    monkeypatch.setenv("PTO_CSA_VARIANT", "tnd_precision")
+    monkeypatch.setenv("PTO_CSA_VARIANT", variant)
     monkeypatch.delenv("VLLM_ASCEND_PTO_CSA_ATOMIC_ADD", raising=False)
     assert _pto_csa_atomic_add() == 0
 
