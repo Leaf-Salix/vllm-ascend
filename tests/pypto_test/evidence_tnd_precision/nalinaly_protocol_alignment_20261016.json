@@ -640,7 +640,6 @@
     "hccl_deterministic": true,
     "eplb": false,
     "event_work_mode_all_arms": 1,
-    "num_gpu_blocks_override": 24000,
     "max_num_batched_tokens": 400,
     "graph": "FULL_DECODE_ONLY",
     "task_max_seconds": 780,
@@ -658,7 +657,11 @@
     ],
     "hca_replaced": false,
     "csa_replaced_layers": 21,
-    "native_hca_layers": 20
+    "native_hca_layers": 20,
+    "num_gpu_blocks_override_by_case": {
+      "128k_b24": 24000,
+      "8k_b40": 22000
+    }
   },
   "precision_boundary_design": "Keep committed Native HC/norm, WKV, Indexer weight projection and O-proj boundaries; CSA body uses PTO TND. No math changes in this test.",
   "environment": {
@@ -762,12 +765,14 @@
         "native2": "task_20261016_093935_324666725855",
         "csa": "task_20261016_095631_393947426780"
       },
-      "existing_final_archive_sha256": "5cff9b86f9e5ec2b1777525b457a65d5ee8ca570f128064a87e86147cbeeeae0"
+      "existing_final_archive_sha256": "5cff9b86f9e5ec2b1777525b457a65d5ee8ca570f128064a87e86147cbeeeae0",
+      "num_gpu_blocks_override": 24000
     },
     "8k_b40": {
-      "status": "native_repeat_pass_csa_pending",
+      "status": "numeric_precision_pass",
       "submitted_requests_per_rank": 40,
       "observed_peak_requests_per_rank": 40,
+      "num_gpu_blocks_override": 22000,
       "capture_sizes": [
         6,
         240
@@ -786,7 +791,7 @@
         "rank0_modules_bit_equal": false,
         "source_manifest_sha256": "e4de4927d2e5758df65784bddc412d1d90227b56ed978ad2218df50c2bd540ca",
         "production_git_commit": "cbc810c8afab47c2425068049440424f014dcde3",
-        "generation_reference_manifest_sha256": "2bcbc6cd6e7dddd3848345e161849a6d063963e67b459d2e2e2c1b1d037c0a8e",
+        "generation_reference_manifest_sha256": "d1682907e0ad4fc8fe46eda419ca046617921619337c1c029b3dcb95807c2713",
         "acceptance": {
           "qualified": true,
           "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
@@ -1148,8 +1153,8 @@
         "scope": "fixed8K bank; B40 submitted, actual concurrency recorded;192 output tokens; rank0 float witnesses only; no performance"
       },
       "native_repeat_metrics": {
-        "left": "/data/pyptouser/yejia/lc128/plan8k-native1-b24000",
-        "right": "/data/pyptouser/yejia/lc128/plan8k-native2-b24000",
+        "left": "/data/pyptouser/yejia/lc128/plan8k-native1-b22000",
+        "right": "/data/pyptouser/yejia/lc128/plan8k-native2-b22000",
         "replica_requests": 640,
         "distinct_questions": 40,
         "tokens_per_request": 192,
@@ -1175,6 +1180,1774 @@
           "stats_different": 0
         }
       },
+      "output_metrics": {
+        "left": "/data/pyptouser/yejia/lc128/plan8k-native2-b22000",
+        "right": "/data/pyptouser/yejia/lc128/plan8k-precision-b22000",
+        "replica_requests": 640,
+        "distinct_questions": 40,
+        "tokens_per_request": 192,
+        "output_token_positions": 122880,
+        "different_token_positions": 0,
+        "different_output_replica_requests": 0,
+        "different_stats_replica_requests": 0,
+        "different_events_replica_requests": 0,
+        "different_output_questions": 0,
+        "different_stats_questions": 0,
+        "different_events_questions": 0,
+        "first_token_difference": null,
+        "left_cross_dp": {
+          "compared_replica_requests": 600,
+          "output_different": 0,
+          "events_different": 0,
+          "stats_different": 0
+        },
+        "right_cross_dp": {
+          "compared_replica_requests": 600,
+          "output_different": 0,
+          "events_different": 0,
+          "stats_different": 0
+        }
+      },
+      "numerical_qualification": {
+        "pass": true,
+        "phase": "csa",
+        "ready_reuse_required": false,
+        "records": 51,
+        "inputs_equal_all16ranks": true,
+        "complete_tokens_and_acceptance_equal_all16ranks": true,
+        "rank0_outer_hidden_aux_mtp_bit_equal": true,
+        "rank0_boundary_records": 10863,
+        "rank0_csa_layers": 21,
+        "rank0_modules_bit_equal": true,
+        "source_manifest_sha256": "e4de4927d2e5758df65784bddc412d1d90227b56ed978ad2218df50c2bd540ca",
+        "production_git_commit": "cbc810c8afab47c2425068049440424f014dcde3",
+        "generation_reference_manifest_sha256": "d1682907e0ad4fc8fe46eda419ca046617921619337c1c029b3dcb95807c2713",
+        "acceptance": {
+          "qualified": true,
+          "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+          "mean_range": [
+            3.0,
+            4.0
+          ],
+          "mean_accepted": 3.7035909920876446,
+          "accepted_length_histogram": [
+            1696,
+            2432,
+            2816,
+            2592,
+            2240,
+            14512
+          ],
+          "full_five_draft_histogram": [
+            1696,
+            2432,
+            2816,
+            2592,
+            2240,
+            14512
+          ],
+          "num_drafts": 26288,
+          "num_draft_tokens": 131440,
+          "num_accepted_tokens": 97360,
+          "acceptance_rate": 0.740718198417529,
+          "request_mean_min": 2.9,
+          "request_mean_max": 5.0,
+          "total_preemptions": 0,
+          "requests_with_preemption": 0,
+          "errors": []
+        },
+        "left_observed": [
+          {
+            "rank": 0,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 1,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 2,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 3,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 4,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 5,
+            "records": 52,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 52,
+            "window_records": 51,
+            "tail_records": 1
+          },
+          {
+            "rank": 6,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 7,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 8,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 9,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 10,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 11,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 12,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 13,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 14,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          },
+          {
+            "rank": 15,
+            "records": 55,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 55,
+            "window_records": 51,
+            "tail_records": 4
+          }
+        ],
+        "right_observed": [
+          {
+            "rank": 0,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 1,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 2,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 3,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 4,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 5,
+            "records": 52,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 52,
+            "window_records": 51,
+            "tail_records": 1
+          },
+          {
+            "rank": 6,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 7,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 8,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 9,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 10,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 11,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 12,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 13,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 14,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          },
+          {
+            "rank": 15,
+            "records": 54,
+            "observed_peak_requests": 40,
+            "dp_metadata_present_all_records": true,
+            "actual_full240": 50,
+            "raw_records": 54,
+            "window_records": 51,
+            "tail_records": 3
+          }
+        ],
+        "scope": "fixed8K bank; B40 submitted, actual concurrency recorded;192 output tokens; rank0 float witnesses only; no performance; rank0 float witnesses only; no performance; strict READY result reported separately",
+        "strict_ready_reuse_pass": false,
+        "cache_stats_from_raw_observations": [
+          {
+            "rank": 0,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38153427202,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 1,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38660159975,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 2,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38409100171,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 3,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38720789093,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 4,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38220373973,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 5,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38084275137,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 6,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38280926353,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 7,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38784004256,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 8,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38198868561,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 9,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38010039967,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 10,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 37972128881,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 11,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38173243237,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 12,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38156775675,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 13,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38108101538,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 14,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 0,
+              "binary_builds": 0,
+              "lookup_ns": 38052229201,
+              "build_ns": 0
+            }
+          },
+          {
+            "rank": 15,
+            "stats": {
+              "requests": 105,
+              "object_hits": 62,
+              "ready_hits": 0,
+              "generated_hits": 0,
+              "misses": 1,
+              "disabled_requests": 0,
+              "forced_rebuilds": 0,
+              "bypasses": 0,
+              "last_bypass_reason": null,
+              "invalid_entries": 0,
+              "storage_errors": 0,
+              "generation_builds": 1,
+              "binary_builds": 1,
+              "lookup_ns": 23079929296,
+              "build_ns": 15753796322
+            }
+          }
+        ],
+        "cache_error_counters_zero_all16": true,
+        "all16_precision_csa_graph_selection_pass": true
+      },
+      "rank0_boundary_records_bit_equal": 10863,
+      "rank0_outer_bit_equal": true,
+      "mean_accepted": 3.7035909920876446,
+      "acceptance_histogram": [
+        1696,
+        2432,
+        2816,
+        2592,
+        2240,
+        14512
+      ],
+      "total_preemptions": 0,
+      "all16_csa_graph_selection_pass": true,
+      "selection_scope": "warmup/capture/Python eligibility plus actual model FULL replay; not per-layer runtime replay hook counter",
+      "selection_report_sha256": "078b5751fce06b2d53cdc613a444fb2de4a0be13d886c3c0df19d0fc8b1b8b3c",
+      "strict_ready_reuse_pass": false,
+      "strict_qualification": {
+        "pass": false,
+        "error": "rank0: READY reuse failed",
+        "scope": "default strict qualification including READY reuse; retained as failed"
+      },
+      "first_build_rank": 15,
+      "first_build_seconds": 15.753796322,
+      "artifact_identity": {
+        "task_build_directory": "/data/pyptouser/yejia/lc128/plan8k-precision-b22000/build/pypto-build-9lqsb8r6",
+        "task_build_shared_files_sha256": {
+          "binary_manifest.json": "5d1ef720192cc27f119678b297caae2a512bae8672b5fdc12637eb9ab107d761",
+          "compiled_meta.json": "bbdf4615736dcdc19cba2674d84e8e86f4e081cc219feb617ee8164bf2f35f1f",
+          "kernel_config.py": "a70875dc55e89183ae595b5d869ad126ec5b8865791534c8a2e328804665200b",
+          "kernels/aic/idx_qr_proj_matmul.cpp": "a91799e0c9576e6877bd91191f8f766b9a35e047223d4eae17a9e1c1c11085ca",
+          "kernels/aic/indexer_score_topk_leaf_aic.cpp": "b36d896f976d1287405ee241d59c247400e240ef1ba97df745cba928afc1064d",
+          "kernels/aic/indexer_score_topk_native_pair_0_aic.cpp": "1d9f6eb9b9d318ea99558d39bec1bef2b375d043ad8996f8ee3f056ed5f8703d",
+          "kernels/aic/indexer_score_topk_native_pair_1_aic.cpp": "a9a4fa298d376e66bc0407ce6db5c0045d65441bf772ef1bf10f500dedcc269a",
+          "kernels/aic/indexer_score_topk_native_pair_2_aic.cpp": "ca9727b72903f5e1725ee87e9433410f6bf0689bb2415089df5e16edf43c9e80",
+          "kernels/aic/indexer_score_topk_native_pair_aic.cpp": "6b966458e15c340b1637470bc26fcfdf7f17aba554c6bdec6b8cf0d4f4013e6a",
+          "kernels/aic/kv_hadamard.cpp": "0b99e8d56c28b6d58162b0516842a2d1440244cb14a481a3094588288a5bbb63",
+          "kernels/aic/kv_score_proj.cpp": "cbd81a17f429364387f813b0c6a43c5606dd9e3925f6a34b59dc7de8b7a200b7",
+          "kernels/aic/kv_score_proj_0.cpp": "a87984360e9f64dde8775b83b5d0c0081343c4e78259049fc9ad89d2525e34a3",
+          "kernels/aic/qk_pv_aic.cpp": "9e6642483752d273b41846e74cc1e5a099d42e90023159b088c3130f8043e6ce",
+          "kernels/aic/qproj_matmul.cpp": "6612736d7f7210f0d75a8507647b60aee7de5a9f2adfd4b5e463b427b2bce13c",
+          "kernels/aic/qr_hadamard_matmul.cpp": "2f1da3938555f3f88ad395efeb6244ed8d21455192d727cae2ada68e379f335d",
+          "kernels/aic/qr_proj_matmul.cpp": "0e980bdfe5266689deeb16906e8af0e8ad3ef70913e53f582bae916412304378",
+          "kernels/aiv/compress_state_commit.cpp": "6336e3ae82b6cb9ed1cdee5a8fabb9a4fb37c883f8597cf1a6a6c34344296f43",
+          "kernels/aiv/compress_state_commit_0.cpp": "aad05b3ae02296fefdf756ea31d77e5f0ae4c79be2e68f35f33f4c262009cb0b",
+          "kernels/aiv/csa_cache_writeback.cpp": "ddc4b0c83fc7e00ffee4e9f8ffd5136c296623d14dd3cac8d26176782b38d6f7",
+          "kernels/aiv/csa_checked_indices.cpp": "034d86e8b19074c2d464f58183e8c64de1eac7956fd7b9adade0b97565c6c59d",
+          "kernels/aiv/csa_rope_sign.cpp": "5898db390a553016af2754c1730c9bd60626a5751b316a7f0558e194b5c32d52",
+          "kernels/aiv/csa_row_offsets.cpp": "25665e1a4cda0f5dc22f046afdc0f86aaadeef6fdde0da7aa712b98c6700b91e",
+          "kernels/aiv/csa_slots_build_valid_qk_plan.cpp": "59ada2c8ce669576cadae150d43034af86fcb2738fff96fb3eeec964d349ee4f",
+          "kernels/aiv/idx_kv_scale_commit.cpp": "2c2ab7de7d51629016fa8182598ca80b75d7a8181265e1ef69f607c224f67bf7",
+          "kernels/aiv/idx_qr_dequant_rope.cpp": "a3df82a6ef65b5f98d5266971cb6797df474a3c96040496c4485595c8f0c474e",
+          "kernels/aiv/indexer_boundary_init.cpp": "d22256e5f78ecba440ac33f6727f6bedd9379ea638ee1efcf382638e48cc7db7",
+          "kernels/aiv/indexer_head_coefficients.cpp": "51340345626409ce4f5338c02fbef73e213725b7c08bb0935777dd29221f5096",
+          "kernels/aiv/indexer_head_coefficients_0.cpp": "23e20cac8b1dfd4d0d0cbe71b5c0b6cc7ed79c351f6a882b2352201266ddd9e0",
+          "kernels/aiv/indexer_head_coefficients_1.cpp": "6ac9670bdb678cc2e2ad3e7089fd8ac5334abeb1035bbf3edd6bbcacfbafedab",
+          "kernels/aiv/indexer_head_coefficients_2.cpp": "25989bd58786f1f5cfbcd1100fd020a4d055da1b52c7b9bd4c037b63dce51f00",
+          "kernels/aiv/indexer_query_groups.cpp": "77a80ac9bb9bb5f5488e82fbad4d58a007c69f54a80531abc8ec76a5860e935e",
+          "kernels/aiv/indexer_score_topk_leaf_aiv.cpp": "1f0724a8fc8206da83fcb0f6c28bc97d734abde678aaeccbfb3afb14608546e9",
+          "kernels/aiv/indexer_score_topk_native_pair_0_aiv.cpp": "d331c7128d1bdd2d9e39c14e4c67b4e39c82c140232a75ace5ae535209491565",
+          "kernels/aiv/indexer_score_topk_native_pair_1_aiv.cpp": "12221b3ea9391b66d8a86909e7055724c7d6be88e0abc39ee7d9f65211562a9a",
+          "kernels/aiv/indexer_score_topk_native_pair_2_aiv.cpp": "75a20b84cd3c015ec74283cad1e1ba57be94ecf6c29a8dcdc93101e2bce47495",
+          "kernels/aiv/indexer_score_topk_native_pair_aiv.cpp": "11196e57ec75522e841f96afc4797adb5a1632b7d59144d362192c0d99847510",
+          "kernels/aiv/indexer_topk_query_merge.cpp": "2ae04bd7c503745323456c80dc94585bb341cad9cc49eacea2eddfbaf8ab0240",
+          "kernels/aiv/indexer_topk_single_leaf_publish.cpp": "afdb8699e8dbe32629ecdd5d6dc6fcb32ed4059dd4c069757f60c1308e379942",
+          "kernels/aiv/kv_and_cache_write.cpp": "27cddeaf8f34c20b4abd8559201e03790efe680326a6b0de2ac322378cbb7961",
+          "kernels/aiv/kv_native_projection.cpp": "bc600f5153d8afaf341797591588390dfbf41873348ca86f191b29a669e4fb94",
+          "kernels/aiv/kv_rms_norm_rope.cpp": "3d1305beba918e71674d40ba7eab9ccfaf74c89e8ead853feb6d0b22dc5b66a5",
+          "kernels/aiv/kv_touch.cpp": "034a8f1ec285d118f282fa79d6793f21a55693741f65e417018db96313e5eda5",
+          "kernels/aiv/merge_norm.cpp": "38277317878e0e7a4c20bd02f4d4b67597eaa73adfef85de9629a769a8ede14c",
+          "kernels/aiv/native_heads.cpp": "ee06875e044d7f05b2235d7f88fc4259ced4652b0d23a01c3c42f6545526a1f9",
+          "kernels/aiv/native_indexer_weights.cpp": "522d3285e39ebd5ed05ef7da5a65d5ecc2a7c60b15d8373e3426ab752eacce2d",
+          "kernels/aiv/q_rope_prepare.cpp": "d670fb9de75ddaae683e9908e4300bc0d6c694de51a6e77d04418da3d7672cf3",
+          "kernels/aiv/qk_pv_aiv.cpp": "2ac6317ed2c2a6f686d891932eaf79bf047eb30d9b7a7891bdaaf2dd112fb7a3",
+          "kernels/aiv/qproj_dequant_rms_nope_rope.cpp": "fa8450c5d5a80016151d1597ee4b5e19b4eb680446ac4a319858538e7d5462db",
+          "kernels/aiv/qr_hadamard_quant.cpp": "18eefd018bb9f77316c4f12e2749543630dc89419461ed6272e85913d5a474b3",
+          "kernels/aiv/qr_proj_seed.cpp": "d315340cc132b217fe0b87741b93054e535ba2436f037262b21f8f72c25aa6bf",
+          "kernels/aiv/qr_rms_norm_quant.cpp": "6bd80b69835a64dc64d4da93a2ded2d724bd397502c348031ce24328c2de7275",
+          "kernels/aiv/rmsnorm_rope.cpp": "8da0a570954a3f6036624dce1f3d086cec5040305bad32ea27e6c189464a95ed",
+          "kernels/aiv/rmsnorm_rope_cache_write.cpp": "e7bbb32ff195f90c04c4ac4ebeb15695bdfb8f4b7fd9341b70ca3b2005ea4ba0",
+          "kernels/aiv/rope_cs.cpp": "ddaf80c353d0589a4028dc24bbb6ebeba1931a391aeac4cec0c6e24db7e9a960",
+          "kernels/aiv/scatter_softmax_pool.cpp": "da9d51a5e78b1aba26823132b0514c35f952ca09b67d25431beceec0804266c0",
+          "kernels/aiv/scatter_softmax_pool_0.cpp": "d8583563d8105ff9bd5d618a28bcb6920bf7944623dfcfbcf7c754b27578610c",
+          "orchestration/_decode_csa_tp1_layer.cpp": "c8373c75630e59fa8191ba4693c3d533c46bb421cce10cf84ba935c75be45c8f",
+          "prebuilt/kernel_0.bin": "9d0ada7f9592bfe566016f15b2205d096d2aca9a4a335a107d3d0751adb81de2",
+          "prebuilt/kernel_1.bin": "d1d8d5271f0bc1e31956887f0ce48ba97b88f22b6db9f73d7057be99f03f6ebe",
+          "prebuilt/kernel_10.bin": "acf1b504f623c7aa7aff3651b9a2e5500d80755cfec7794cdbef3f7a8c23435e",
+          "prebuilt/kernel_11.bin": "5c5412bc0e3f8d613bd9bc9498b23d58f53ff1f62c918d1df2caabaa9bf013b0",
+          "prebuilt/kernel_12.bin": "670ccd311b3d62ef19de9fe569dd63aa37c06ae5f2a4e5d6f09b44a70cdd0224",
+          "prebuilt/kernel_13.bin": "14af42ffbc874b1d546477ed857156e97dedc4bd9917120921b51edaffdddbe0",
+          "prebuilt/kernel_14.bin": "1e5948c48e15bc86fbf34585c812b0ddf6dd07c9cdd74edfe0b8c94635d03a5d",
+          "prebuilt/kernel_15.bin": "40366cbe58da9831d23d8a34a10c2bbeef0f7c272a1ca9c2b981e87d3462966c",
+          "prebuilt/kernel_16.bin": "e33b54ad3e9c207635bac0911e52b76a03609c43104f96c2f90e85c309c37107",
+          "prebuilt/kernel_17.bin": "25ebaa392c54f1d20c56903ff36ab8d230101b0b1e7b0bbc610fe061dba76aaf",
+          "prebuilt/kernel_18.bin": "59442c91b01543ac31ad0c5a21daaf611c9ea0d461830fab0ff99fe040c3e023",
+          "prebuilt/kernel_19.bin": "a14ddc15095d3c5d1cbab2789c7a14e0be3657c3dfe32dff1805b79c426b2b3c",
+          "prebuilt/kernel_2.bin": "a8ad4dda1757f117aa33369f88f98e8de790b9f33ef3bb3295d258fc92799fdb",
+          "prebuilt/kernel_20.bin": "1c8a1ba3ed24ae693031327903f64fd148df085922efe1e5bd7ff7934320e1c7",
+          "prebuilt/kernel_21.bin": "d6910f13b919577604c65c0d19eaa30654238890c2cd3297bc16b6e1ecd8ceca",
+          "prebuilt/kernel_22.bin": "e90408606672643b77834b041118b046cfe1536c9fd99340bdb644b5220d4806",
+          "prebuilt/kernel_23.bin": "f23f17d56497379092c917d8fb7f557c028d359c5c32c15fc6647838fd9a42f2",
+          "prebuilt/kernel_24.bin": "e12c7331f6995bff772776b7259ce52bdbe7e8592c0746422e16c99c7d62829a",
+          "prebuilt/kernel_25.bin": "cdb8253d7daf3b439cc871af47897a9c21d90d3399bf86da77b54c0e41e4dd7d",
+          "prebuilt/kernel_26.bin": "37a6019c723ee4ac7f8785bb3149542d3184fef463a851b382e093758626ff19",
+          "prebuilt/kernel_27.bin": "0b0bcca7d70b6dc923d88649e447b6ea1f867eaa0139e5aa7a3d2db50631a50a",
+          "prebuilt/kernel_28.bin": "46ca02d31edf4ddb609521f0cfe19e0965f257c8c67ca7f1558703aff9fe567b",
+          "prebuilt/kernel_29.bin": "dbf64e14cac835e1411de0108672fae296f0783ce4807ad6a785666156985ed6",
+          "prebuilt/kernel_3.bin": "dd55a93b45495a1a2771fcd2dc065c266c022e37b96c8d9ac6038049f1f73af9",
+          "prebuilt/kernel_30.bin": "f5c4a0b92c24585ac4acfcca70d989880007b57be36b357e7d05eeb4bfaa70e0",
+          "prebuilt/kernel_31.bin": "6a466759e6780180869da651a2295f3f21e7629c397eae4fca2fc51082f435fe",
+          "prebuilt/kernel_32.bin": "4362e2ad0f21fba45ff4886573371155351186dd90ecd3059e57cd463dc8ea32",
+          "prebuilt/kernel_33.bin": "e488480755e255e4f668d80e3630ad3ce067fbee7495041c39389d78f6c38e58",
+          "prebuilt/kernel_34.bin": "a718600d9db5680979ab984663b4da74c7fffe1cdb5a662faaf48775794c2873",
+          "prebuilt/kernel_35.bin": "dbf64e14cac835e1411de0108672fae296f0783ce4807ad6a785666156985ed6",
+          "prebuilt/kernel_36.bin": "8d1d1d3114479f5f26f243f5264a43741d29efb6e6586a4b8263edd178249a20",
+          "prebuilt/kernel_37.bin": "20a4d7314ba9296776e9fbf5fec205b3574d99f775091b529ceffd33aeb07807",
+          "prebuilt/kernel_38.bin": "4362e2ad0f21fba45ff4886573371155351186dd90ecd3059e57cd463dc8ea32",
+          "prebuilt/kernel_39.bin": "9569a1956071eb4265a594cb39418838f47956f0e92043b9dd1eaff298c1ede1",
+          "prebuilt/kernel_4.bin": "462f4a4cc738cfe24a8e9d62bacd34ced14708587c4be14efe0eabc5c9b2455f",
+          "prebuilt/kernel_40.bin": "a401fa7f2388687ca6d8cd357337d51068d7dac87b02ab7d5ff4d4c1cf94107f",
+          "prebuilt/kernel_41.bin": "511428be6d0d61a6810719f4ae2e8d938e38f57f2a3955bfb717d7e60df3421b",
+          "prebuilt/kernel_42.bin": "b4bb21ae08da8ae184a90ec249d036c2700f4b026a71641cf658d903f1648dc2",
+          "prebuilt/kernel_43.bin": "194f1b01f051e8c7b46d4ae742c20f0bbfe1703eecae56822f10097c7b858342",
+          "prebuilt/kernel_44.bin": "defe4541581c759ff6c2b308320245c87b886b2bde60862ed9b484c4e7326984",
+          "prebuilt/kernel_45.bin": "fe29c8667578cae4bf9d0a0a8a1eb1947083a61201a489c93bb91088542f807b",
+          "prebuilt/kernel_46.bin": "dd8d60e1c634e8bb1b50476039f71fe10dd6ea1ee93b9b6817097ab7d02e060d",
+          "prebuilt/kernel_47.bin": "7c480bf13357acf894e8123c71083623ea37f6119a96dfde3534aa1054e84287",
+          "prebuilt/kernel_48.bin": "a07fdbafc51c843612c72eda5d6c945aeb74278035f14938530e7f74f5297b27",
+          "prebuilt/kernel_49.bin": "7d98285052191b42fc6d07f803e4bec2e512d15a0f1c194add08a68f840c474e",
+          "prebuilt/kernel_5.bin": "424ac7d6b7588505d4f094a4f5c750e434d8076ac1a88d255b81cc9715897e45",
+          "prebuilt/kernel_50.bin": "75b45d950c4beaa9e78c2116554daeafc3f65099275b581f1162d43d9bafabf0",
+          "prebuilt/kernel_51.bin": "82548b75a79e0ce55881ec58f57bae20e91cdedaa80563248301e17e19c66008",
+          "prebuilt/kernel_52.bin": "8b7322abc975c66ee7266bdb9ace249974778a6bc64895350195f0ac101b56e9",
+          "prebuilt/kernel_6.bin": "c07e9591c0c2f871299f76bdf7f4b5262a4cafcf0adb46c20697822752401623",
+          "prebuilt/kernel_7.bin": "25c04b906550d2cc3f65fd00c34f2be2bae99d856230cb080bec56e4c96a2eed",
+          "prebuilt/kernel_8.bin": "defa6932a1e8dd6ac173a00a1bb426b53ac5184049c48e0606ea0b70fd33de80",
+          "prebuilt/kernel_9.bin": "f47ccc1d6ebd9e2822b37c609662101b621e91e3884a4714d4302aa7279a7bc8",
+          "prebuilt/orchestration.bin": "ae9a7a02af81a2b4f9b258efa410c6335c0fdf7469c2a32bde46dce960a54df0",
+          "ptoas/compress_state_commit.cpp": "6fd82b3ed7be7c794062b5b53e79e3d3c6142f65e525515bfbfab219b6a83b50",
+          "ptoas/compress_state_commit.pto": "0bbfe7d0f3f822a29b0eb81fa9dc1ad8c4b654361995bf77f4179d93052c3a4b",
+          "ptoas/compress_state_commit_0.cpp": "cbbaad28dc7742c2faf38a0b42918fe1b4c295d42f5e26b3de29c9cfdbb10ba3",
+          "ptoas/compress_state_commit_0.pto": "9260495b3d6e63e481d6fa12537649c620deabadb757d2241143c5bbb679b684",
+          "ptoas/csa_cache_writeback.cpp": "5629bd56a689e028849ed7456c06d6284c36259ea28b6925adff16f0de4af54f",
+          "ptoas/csa_cache_writeback.pto": "dadc75ec7ba6c3b6c9821ade13349b4a0c11eed44492e2c90048aebf00587f4e",
+          "ptoas/csa_checked_indices.cpp": "6264dc84d5274012d53957f17fb65cdfef0e059d625944fc5bc5776b6ba10b17",
+          "ptoas/csa_checked_indices.pto": "5aac8fe742cc14aaa969a73c2eb54e951d83b27fe7782efd6188fbc4611b19bd",
+          "ptoas/csa_rope_sign.cpp": "3449eff414458b3624568015ee57567ad7024cb95398f8e7d5b2ff8b7c255319",
+          "ptoas/csa_rope_sign.pto": "f3f0f8538110f70fc3ecbe5c335eb2c7207ef8fd2a5d3f0543b1b01a216b091d",
+          "ptoas/csa_row_offsets.cpp": "88898138b2d16e547f394657180dc52c2d8ea5003dfa9aed5674cab55762a3ba",
+          "ptoas/csa_row_offsets.pto": "3ee27baf6d0e6b1a2b30d8ae136a894244f00a2eb8e0018422984b11162a4cfe",
+          "ptoas/csa_slots_build_valid_qk_plan.cpp": "bfcc60530cb5c5730e5df51484945c6589b18b0b1e7ab2e8417cfb733fe90bc7",
+          "ptoas/csa_slots_build_valid_qk_plan.pto": "02ac0fafdfee8763d60f2b237384af25b8f73cf44471ac2ab4b2a341937420b4",
+          "ptoas/idx_kv_scale_commit.cpp": "7b81df8817468c6dc930dd0909c19625051f06ae2443148b6d9b0dbd62f9673b",
+          "ptoas/idx_kv_scale_commit.pto": "fb4a5f4976f141bf4563b9768e5fa6ff8609fc8234af0498c6a0d0a2cd3949a4",
+          "ptoas/idx_qr_dequant_rope.cpp": "10ab65fa511b06a7767e0161183451a390779b741f1fb17844562351432e6824",
+          "ptoas/idx_qr_dequant_rope.pto": "3f72462f5ca52ef5c3fd89575c380d0624baa8894a5bbbbc214ae6cf39153bca",
+          "ptoas/idx_qr_proj_matmul.cpp": "eb413d42ddc15b433c51f20e178c957b0fb5784c666babf351660bdabfed318b",
+          "ptoas/idx_qr_proj_matmul.pto": "fde47257dc56ff4da1f7b3ed4ded2540bc88c882e36e5572100a2332101cb1fd",
+          "ptoas/indexer_boundary_init.cpp": "f77589aa2017f71e5d0aa4208b12666abf85a0151e37b6b01a296d5c25cca2f1",
+          "ptoas/indexer_boundary_init.pto": "de436c3fe2afd0afe87a7ca194a67bb8286e8ba66467afa38a91f252dc93dfb3",
+          "ptoas/indexer_head_coefficients.cpp": "1686c71083ffbc4209c50532633e2f239b5bb7a8c9f0113d39ca5cf671e9bb3e",
+          "ptoas/indexer_head_coefficients.pto": "4c8fc5392745c02fdebda3f1b44d5fd69a05afb191feca49e4fe5648f971b3e1",
+          "ptoas/indexer_head_coefficients_0.cpp": "119bad5a56f0eb78b33fcad163fd52973e1cb686933047bf3b1991cf960dcbab",
+          "ptoas/indexer_head_coefficients_0.pto": "0f08ef19e16bbb5fcd9e7b09d8995d64f064ff906f3b2e250890c39231c80fb4",
+          "ptoas/indexer_head_coefficients_1.cpp": "13d92969da17d84f97e54499b61b78b380616e19ade8d3b95b281aeb6f8c3565",
+          "ptoas/indexer_head_coefficients_1.pto": "11c16ace967b3ed2d2a1ca4eb4250d93d589f0b5cd6361169e309046339432ec",
+          "ptoas/indexer_head_coefficients_2.cpp": "0314667b8a5102c7110a2ba51f1c785e8144f5a4174feb127034a1dfde7e926d",
+          "ptoas/indexer_head_coefficients_2.pto": "f3a4ac4d754fc1b0a8943d7bfeadca1c39f6ec0249d3e17c53f4def8d85d02e4",
+          "ptoas/indexer_query_groups.cpp": "b026b3909f0413a785139aa3b9dad42dc20af1ded0b994d6a61213700f9e7457",
+          "ptoas/indexer_query_groups.pto": "6a0f7c11912e8e9e01c558797a6aaa8a566d16e755c2d5587c066c35948b9c26",
+          "ptoas/indexer_score_topk_leaf.cpp": "586a7a5e8b00520b61d1646dbdc405b2d24ef31bd1c4b9f1896c9e9a4852bbe2",
+          "ptoas/indexer_score_topk_leaf.pto": "929fc4fd92451871d171e73c9ad002ca81d6c0ac0393da186301b43e27899844",
+          "ptoas/indexer_score_topk_native_pair.cpp": "1cbf022351c4d9b0ab7bea91c8291b4079d2fef90392734c7d472810d6f94b8a",
+          "ptoas/indexer_score_topk_native_pair.pto": "a77efdaec6f42748b5992e623b7144b7c08422649f88ee5203c5187efdd41b44",
+          "ptoas/indexer_score_topk_native_pair_0.cpp": "c4ba181c965ca18e5f6bc1e76643a87d878e54235c3ceaafd2edefb01f96000f",
+          "ptoas/indexer_score_topk_native_pair_0.pto": "664daec3183a9f98294070b49e007c364ccfe5809710540637e061b15e0cb552",
+          "ptoas/indexer_score_topk_native_pair_1.cpp": "01af9103072e059a0d892439ff2c350ce93ab1c403a04918b6d1e894e24874ce",
+          "ptoas/indexer_score_topk_native_pair_1.pto": "ed527524cc35721b1fa959d8708e599d384427eaced7268f6715225e1c66ef19",
+          "ptoas/indexer_score_topk_native_pair_2.cpp": "9ad7a194195924dc4c78b2a3b483595a4845c74a122b5de295e3748ad37115bb",
+          "ptoas/indexer_score_topk_native_pair_2.pto": "a50d645f9a8cc3ae708960c71ebfb0d106ec24e8b03df51c093b616f50c992f8",
+          "ptoas/indexer_topk_query_merge.cpp": "af62fa32bb5cd7f2e849a620afd5ef49eab4275ce20acfeb9eb8dc5e6c13774b",
+          "ptoas/indexer_topk_query_merge.pto": "d0033f98be0be76efa785b848d581337b9f8144d135c9649c2e256d0d10459ac",
+          "ptoas/indexer_topk_single_leaf_publish.cpp": "38f7a50a581cd78e246f0c95bb6cf97b5c203506bdeb9eb6c03348c14dea72e6",
+          "ptoas/indexer_topk_single_leaf_publish.pto": "6125d335a92e4149f277f06a3ddd08767abef7a758fd49ff0399eb93a913fc18",
+          "ptoas/kv_and_cache_write.cpp": "0c4e2ee572827c8fc56137baaace36eae25d5f1583e402f6a1b60306f4cb43f7",
+          "ptoas/kv_and_cache_write.pto": "ab08db0929a8d2d8e0b5ff92c611a0ec1d328d7c1c4a47c08ae3ed69620d4a4c",
+          "ptoas/kv_hadamard.cpp": "486753aa4bab452f526d2b6787ecc17fc4ac20dc325e4f02e532e7d6e8bfa90f",
+          "ptoas/kv_hadamard.pto": "8f46e3c73acc92f33c03375b41b7744ffbe5744cec35e491e501c4438f6bcb57",
+          "ptoas/kv_native_projection.cpp": "1a26c8da1ea88b69fd55a0b07f38c30c2a66867b91546af80d4514ca594c2878",
+          "ptoas/kv_native_projection.pto": "4791f9ae2454239cadff4b5e6847452d24fb22b22ae50045c5a2c305e1c5c166",
+          "ptoas/kv_rms_norm_rope.cpp": "52c6701da29df8b8896e5d9ad7d6206b2a6803e2d58a8c20a60c5f91cde1cee9",
+          "ptoas/kv_rms_norm_rope.pto": "d774be63cf73df5e467a518b3a679884e988c4f763a2d55fef0d5573a0331b3e",
+          "ptoas/kv_score_proj.cpp": "e3bc3eaa09422af6198c1bd16b89b6ce947bbf4bf77f7cc26640dc0be726d5e3",
+          "ptoas/kv_score_proj.pto": "2201f95ae2e8ba4de41c97c284c57d3de5bb97dba97623493237b6bf442e615e",
+          "ptoas/kv_score_proj_0.cpp": "9a4540c5a8aa59ccbb46699036ced41af21103ba43afd1cec68a68c0909e3c74",
+          "ptoas/kv_score_proj_0.pto": "7a084df427270fc6b80019a3928e2ec5dd8e2365539f9605b3ff55aa6ac52d27",
+          "ptoas/kv_touch.cpp": "e4770f9d7148328d9ad11706c4a0a9a166800e4f676495944ee8239f152b9249",
+          "ptoas/kv_touch.pto": "3575f80473208548009ba1b9b43e8ad7ba436eb0b7885647977ce429a95f0f22",
+          "ptoas/merge_norm.cpp": "53c3fd7751fba83d1eb030f82cd06019e7f01e0e0ce78f628b7bc92527b9ad28",
+          "ptoas/merge_norm.pto": "ec8bcbeaff68e41ca9d14a316e5522e954d35ca7dcff5f1e3455e7c6825f6664",
+          "ptoas/native_heads.cpp": "b995a07712b699b6e1a26b2b6233265b90ac0a48a837ed7ff5790c1355403f16",
+          "ptoas/native_heads.pto": "a3ac9782ccb9ada96dc394ad0472c71091756bd6e8444a9b3875341a554188bf",
+          "ptoas/native_indexer_weights.cpp": "ece5e1d3f158eae9f87af2df1816e7e9843ee9442b2a977dc6fb177d38f35447",
+          "ptoas/native_indexer_weights.pto": "35d353134eacdcdc4e399dff202f8380d678d6a845f58ee199c1dd7b6db00d4b",
+          "ptoas/q_rope_prepare.cpp": "96fe12051944b8d03883a3bf39c783aec85dcb5a3b5942280567e0f0ceefabb9",
+          "ptoas/q_rope_prepare.pto": "62e44554709b0928408efd09337a63b6529ea14f6e59191ac9b0a0c6876fb262",
+          "ptoas/qk_pv.cpp": "dc7372b6fff8ce9599828155fe62d2d6893d30dbda7994d8872e9ec6249ddc4f",
+          "ptoas/qk_pv.pto": "73f2f66d4c73490a35a4d632d80075d975662222189462ed18ee49ddfbe03a8b",
+          "ptoas/qproj_dequant_rms_nope_rope.cpp": "3b033406c53aa79ed28ecd22fb0ad8de371696845e053242395a52d51479aaaa",
+          "ptoas/qproj_dequant_rms_nope_rope.pto": "be7e3540dfd168aca9234f4c4164c670be4e667579f86c8f6fc7f29bde7919f3",
+          "ptoas/qproj_matmul.cpp": "5c6826fd05795ee764d15ea9191a9183469387088ac3b4982cc76030f1681862",
+          "ptoas/qproj_matmul.pto": "2fef8bfa868277c00c64ae7fba6dda20a1c4319b7ebf5f2708b5752ed77536ad",
+          "ptoas/qr_hadamard_matmul.cpp": "1ec7178541cfb98b358ce31f0cd4fe321f1dd16dbbe438bd8f8a3cb374d06cce",
+          "ptoas/qr_hadamard_matmul.pto": "9d5ac8995b771b8a1d1f4d0b4ee62c89355a3905a6661a812603d5c7e388ac2c",
+          "ptoas/qr_hadamard_quant.cpp": "01bc9f09f4c5518f2dfbd2092c5349cb17a7018edbcf2741b200d1ab7adf217e",
+          "ptoas/qr_hadamard_quant.pto": "ab07386f910eed0f90dc2f501935fde8e01105d46278fa8473195633703bb192",
+          "ptoas/qr_proj_matmul.cpp": "dd6c6e14c5a65ae5c6c02ee3095b9d611f7876eed9474f5aaa691822971d7856",
+          "ptoas/qr_proj_matmul.pto": "87c33f08da962dfc589655ba0b5e98b5fdf2e4db14b00fbd29c4a5639beac2c0",
+          "ptoas/qr_proj_seed.cpp": "9f2d65f5053054e300499867c58d54f3ab45aa2a4c39adde2299ee80ff62a3da",
+          "ptoas/qr_proj_seed.pto": "8c4fd2b3c8f784b647aa45a6443dde7d3c49a960fa68056d2208fa195eaf8f05",
+          "ptoas/qr_rms_norm_quant.cpp": "b224f8a371e5f81e508dad55b7ac1882987fa3d46899b0f58fd1bb328aa7058a",
+          "ptoas/qr_rms_norm_quant.pto": "3cb98b776c5424b954e9cd25e936edda3195305265757fc3f3ccb9968af5ccde",
+          "ptoas/rmsnorm_rope.cpp": "2f9122c3a7f0928b290f03098195b26e1dcadf284759a4090d1bf6614eda2967",
+          "ptoas/rmsnorm_rope.pto": "ea6a99a5ff9bc4c7cec7d26626bbd5ec76a65cba913422b2a261fd769919908a",
+          "ptoas/rmsnorm_rope_cache_write.cpp": "224b581380fb0b07c6a392c74236c3f475ceabbb4b653904c19c416ea607e7f1",
+          "ptoas/rmsnorm_rope_cache_write.pto": "986727a38fd5bab497c19c76736116e9b432e1e481ace3218bedf73719b4612a",
+          "ptoas/rope_cs.cpp": "a80e5761819abf66058a891602340610a64b3aabdcb6ea9688cc0c1d4c453a2a",
+          "ptoas/rope_cs.pto": "3fef84647233574afb8645b6e95ac6cd463e13d7ffa7d40cb00ae106959b2038",
+          "ptoas/scatter_softmax_pool.cpp": "f10304e77c7f96ea78474c7c3c786a835440d034cb9094f570ffb00fc9c981f9",
+          "ptoas/scatter_softmax_pool.pto": "9b554993ebbb39da14ffc64546969bc2a07af64ed05bd06eb8ff6c82f4747bea",
+          "ptoas/scatter_softmax_pool_0.cpp": "ffaa83bb66aa1c74a5e0c32032a663e862b141eb0f34112f7b802cd10a079261",
+          "ptoas/scatter_softmax_pool_0.pto": "7f3417805ab410b3152f66cfc3ccb91793fa645f540ed8e697b436852de6ed8d",
+          "report/perf_hints.log": "8cfd0b1825d1fdc26b7e5b8c89f2f4bdf197cc0fcb955273359ae67657b1fc70"
+        },
+        "pass": true,
+        "scope": "CPU recomputed frozen precision JIT source and toolchain identity; full artifact content hashes; specialization recorded from actual immutable manifest, not independently re-specialized",
+        "artifact_path": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/low-acceptance-20261010/jit-cache-package/artifacts/f7e5b97f336492a8b2dbd6cc5288163e1ce1b89978b898ec5850654d0c0abb72/7bca15ce7c23321abbda5cd3e9aaf31e70e30fb972aa7bcb4a4a7aac061a7758/029be86ac2ab4b9a3ab3ee517e698e25ce04550b98c3a485894039f8dcc3492b/ready",
+        "artifact_key": "7bca15ce7c23321abbda5cd3e9aaf31e70e30fb972aa7bcb4a4a7aac061a7758",
+        "components": {
+          "environment": {
+            "device_toolchain": "4477ea405213008802ae087b66f631c0a0cda2833d59820d9facb2b8043050a1",
+            "pto_isa": "ee100d6ae629e1ba0099b1c7ab342f9732268b417e623b4d9cc808b67d7a56de",
+            "ptoas": "a7cbc32a615f6dd049ed7322ca52fd2ac42084d482dd28acb45db9aacb7252e0",
+            "pypto": "d86a67e224ce19c36c16f60cc596f599776b8774ce22c84f7afc4e775772b48e",
+            "runtime": "89fe7dc73c8a92d0a1cf641f612bccb4600997d588e7ba394a028527b4d92e4a",
+            "schema": 1
+          },
+          "schema": 3,
+          "source": "b5744aa6c619052536a95d08bdc29d195be30382a11c192f34ecd77efff1b247",
+          "specialization": "98dde33677b9e1cc0b45b3221c4a4a09f0cd09214fbd0ab00f42ee0066ce8cd5"
+        },
+        "recomputed_source_digest": "a209717f5ad6da18d49b577e18944b738b6070af410ba7e536c69b84f402052d",
+        "extra_source_digest": "ff58c913fe1fadba21d83e61cc186668c9a6f4a3dfc1252b327051dc3a68fe0f",
+        "files_verified": 206,
+        "simpler_revision": "a54c0509552b01e13fb0960e23ce409a01b5024f",
+        "abi_params": [
+          {
+            "name": "x_hc",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              4,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 0,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_attn_fn",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24,
+              16384
+            ],
+            "kind": "tensor",
+            "tensor_index": 1,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_attn_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              3
+            ],
+            "kind": "tensor",
+            "tensor_index": 2,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "hc_attn_base",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              24
+            ],
+            "kind": "tensor",
+            "tensor_index": 3,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "attn_norm_w",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 4,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 5,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              32768
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 6,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 7,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 8,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_cq",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 9,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "gamma_ckv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 10,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "freqs_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 11,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "freqs_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 12,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_freqs_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 13,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_freqs_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 14,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_freqs_cos",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 15,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_freqs_sin",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 16,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 17,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              1024,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 18,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              1024
+            ],
+            "kind": "tensor",
+            "tensor_index": 19,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_norm_w",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 20,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "compress_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 21,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "state_block_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 22,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              1024,
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 23,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_wq_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              8192
+            ],
+            "kind": "tensor",
+            "tensor_index": 24,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "weights_proj",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              4096,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 25,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "hadamard_idx",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128,
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 26,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_wkv",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 27,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_wgate",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              256,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 28,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_ape",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4,
+              256
+            ],
+            "kind": "tensor",
+            "tensor_index": 29,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_norm_w",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              128
+            ],
+            "kind": "tensor",
+            "tensor_index": 30,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_compress_state",
+            "dtype": "fp32",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 31,
+            "dtype_tag": 0,
+            "direction_tag": 3
+          },
+          {
+            "name": "inner_state_block_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 32,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_cache",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32,
+              1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 33,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "cmp_kv",
+            "dtype": "bfloat16",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              32,
+              1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 34,
+            "dtype_tag": 6,
+            "direction_tag": 3
+          },
+          {
+            "name": "cmp_block_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 35,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_native_kv_cache",
+            "dtype": "int8",
+            "direction": "InOut",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 36,
+            "dtype_tag": 4,
+            "direction_tag": 3
+          },
+          {
+            "name": "idx_block_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 37,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "ori_slot_mapping",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 38,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "ori_block_table",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 39,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_slot_mapping",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 40,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_slot_mapping",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 41,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "state_slot_mapping",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 42,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "inner_state_slot_mapping",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1,
+              2
+            ],
+            "kind": "tensor",
+            "tensor_index": 43,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "position_ids",
+            "dtype": "int64",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 44,
+            "dtype_tag": 7,
+            "direction_tag": 1
+          },
+          {
+            "name": "kv_seq_lens",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 45,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_query_start_loc",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 46,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "cmp_seq_lens",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 47,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_query_start_loc",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 48,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "query_start_loc",
+            "dtype": "int32",
+            "direction": "In",
+            "shape": [
+              -1
+            ],
+            "kind": "tensor",
+            "tensor_index": 49,
+            "dtype_tag": 2,
+            "direction_tag": 1
+          },
+          {
+            "name": "attn_sink",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 50,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "wo_a",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              8,
+              4096,
+              1024
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 51,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "wo_b",
+            "dtype": "int8",
+            "direction": "In",
+            "shape": [
+              8192,
+              4096
+            ],
+            "layout": "NZ",
+            "kind": "tensor",
+            "tensor_index": 52,
+            "dtype_tag": 4,
+            "direction_tag": 1
+          },
+          {
+            "name": "wo_b_scale",
+            "dtype": "fp32",
+            "direction": "In",
+            "shape": [
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 53,
+            "dtype_tag": 0,
+            "direction_tag": 1
+          },
+          {
+            "name": "idx_topk_scores",
+            "dtype": "fp32",
+            "direction": "Out",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 54,
+            "dtype_tag": 0,
+            "direction_tag": 2
+          },
+          {
+            "name": "idx_topk",
+            "dtype": "int32",
+            "direction": "Out",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 55,
+            "dtype_tag": 2,
+            "direction_tag": 2
+          },
+          {
+            "name": "native_normed",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              4096
+            ],
+            "kind": "tensor",
+            "tensor_index": 56,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "native_kv_projected",
+            "dtype": "bfloat16",
+            "direction": "In",
+            "shape": [
+              -1,
+              512
+            ],
+            "kind": "tensor",
+            "tensor_index": 57,
+            "dtype_tag": 6,
+            "direction_tag": 1
+          },
+          {
+            "name": "native_indexer_weights",
+            "dtype": "fp16",
+            "direction": "In",
+            "shape": [
+              -1,
+              64
+            ],
+            "kind": "tensor",
+            "tensor_index": 58,
+            "dtype_tag": 1,
+            "direction_tag": 1
+          },
+          {
+            "name": "native_heads",
+            "dtype": "bfloat16",
+            "direction": "Out",
+            "shape": [
+              -1,
+              32768
+            ],
+            "kind": "tensor",
+            "tensor_index": 59,
+            "dtype_tag": 6,
+            "direction_tag": 2
+          }
+        ],
+        "metadata_sha256": {
+          "artifact_manifest.json": "c8b0d1197b0f6b9cb6efb54e46956b2f9a26424728751cd168e2915b338193f7",
+          "binary_manifest.json": "5d1ef720192cc27f119678b297caae2a512bae8672b5fdc12637eb9ab107d761",
+          "compiled_meta.json": "bbdf4615736dcdc19cba2674d84e8e86f4e081cc219feb617ee8164bf2f35f1f"
+        },
+        "environment": {
+          "PTOAS_ROOT": "/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/experiments/nalinaly-71153bb3/reference-env/bin",
+          "ASCEND_HOME_PATH": "/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2",
+          "VLLM_ASCEND_ENABLE_NZ": "2",
+          "PYPTO_CACHE_DIR": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/low-acceptance-20261010/jit-cache-package"
+        }
+      },
       "native_gold_boundary_records": 10863,
       "native1_has_internal_stage_witnesses": false,
       "generation_graph_rounds": {
@@ -1182,33 +2955,557 @@
         "FULL_tokens240": 50
       },
       "within_round_unequal_query_lengths_observed": false,
+      "raw_native_forward_counts": [
+        55,
+        55,
+        55,
+        55,
+        55,
+        52,
+        55,
+        55,
+        55,
+        55,
+        55,
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "raw_csa_forward_counts": [
+        54,
+        54,
+        54,
+        54,
+        54,
+        52,
+        54,
+        54,
+        54,
+        54,
+        54,
+        54,
+        54,
+        54,
+        54,
+        54
+      ],
+      "empty_native_tail_counts": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        1,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "empty_csa_tail_counts": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        1,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "empty_tail_policy": "raw preserved; complete actual generation prefix aligned; post-completion tail strictly empty with valid DP padding, not treated as equal raw counts",
       "tasks": {
         "native": [
-          "task_20261016_105617_31836166643",
-          "task_20261016_114627_49838428141"
+          "task_20261016_130947_40242198337",
+          "task_20261016_131636_170271863"
         ],
         "csa": [
-          "task_20261016_125003_260178911192"
+          "task_20261016_132730_25928429019"
         ]
       },
-      "native_evidence_archive_sha256": "4ce2c05d45efdd61a26ea5537d1c0a89ec7e042db5c1c966c21ac159ffb9fff3",
-      "csa_status": "failed_before_generation_memory_guard",
-      "failed_attempt": {
-        "task": "task_20261016_125003_260178911192",
-        "exit_code": 1,
-        "num_gpu_blocks_override": 24000,
-        "rank0_allocation_upper_bytes": 21955846144,
-        "rank0_free_bytes": 23840948224,
-        "required_reserve_bytes": 2147483648,
-        "precision_result": null,
-        "evidence_archive_sha256": "e5739d6f02f769ac4215a7c49a4787cbc5e27663c304f0918c51960f8772c380"
+      "final_archive_sha256": "8096508d7294128c3d35e5b5b3e514d771e1d31e369dac38af5dda952df72f7b",
+      "final_evidence_files_verified": 396,
+      "capacity_change_native_output_metrics": {
+        "left": "/data/pyptouser/yejia/lc128/plan8k-native2-b24000",
+        "right": "/data/pyptouser/yejia/lc128/plan8k-native1-b22000",
+        "replica_requests": 640,
+        "distinct_questions": 40,
+        "tokens_per_request": 192,
+        "output_token_positions": 122880,
+        "different_token_positions": 0,
+        "different_output_replica_requests": 0,
+        "different_stats_replica_requests": 0,
+        "different_events_replica_requests": 0,
+        "different_output_questions": 0,
+        "different_stats_questions": 0,
+        "different_events_questions": 0,
+        "first_token_difference": null,
+        "left_cross_dp": {
+          "compared_replica_requests": 600,
+          "output_different": 0,
+          "events_different": 0,
+          "stats_different": 0
+        },
+        "right_cross_dp": {
+          "compared_replica_requests": 600,
+          "output_different": 0,
+          "events_different": 0,
+          "stats_different": 0
+        }
       },
-      "retry": {
-        "num_gpu_blocks_override": 22000,
-        "fresh_three_arms": true,
-        "native_control_task": "task_20261016_130947_40242198337",
-        "status": "submitted",
-        "memory_guard_unchanged": true
+      "previous_24000_block_attempt": {
+        "status": "native_repeat_pass_csa_failed_before_generation_memory_guard",
+        "submitted_requests_per_rank": 40,
+        "observed_peak_requests_per_rank": 40,
+        "capture_sizes": [
+          6,
+          240
+        ],
+        "gpu_memory_utilization": 0.95,
+        "native_repeat": {
+          "pass": true,
+          "phase": "native",
+          "ready_reuse_required": true,
+          "records": 51,
+          "inputs_equal_all16ranks": true,
+          "complete_tokens_and_acceptance_equal_all16ranks": true,
+          "rank0_outer_hidden_aux_mtp_bit_equal": true,
+          "rank0_boundary_records": 10863,
+          "rank0_csa_layers": 21,
+          "rank0_modules_bit_equal": false,
+          "source_manifest_sha256": "e4de4927d2e5758df65784bddc412d1d90227b56ed978ad2218df50c2bd540ca",
+          "production_git_commit": "cbc810c8afab47c2425068049440424f014dcde3",
+          "generation_reference_manifest_sha256": "2bcbc6cd6e7dddd3848345e161849a6d063963e67b459d2e2e2c1b1d037c0a8e",
+          "acceptance": {
+            "qualified": true,
+            "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+            "mean_range": [
+              3.0,
+              4.0
+            ],
+            "mean_accepted": 3.7035909920876446,
+            "accepted_length_histogram": [
+              1696,
+              2432,
+              2816,
+              2592,
+              2240,
+              14512
+            ],
+            "full_five_draft_histogram": [
+              1696,
+              2432,
+              2816,
+              2592,
+              2240,
+              14512
+            ],
+            "num_drafts": 26288,
+            "num_draft_tokens": 131440,
+            "num_accepted_tokens": 97360,
+            "acceptance_rate": 0.740718198417529,
+            "request_mean_min": 2.9,
+            "request_mean_max": 5.0,
+            "total_preemptions": 0,
+            "requests_with_preemption": 0,
+            "errors": []
+          },
+          "left_observed": [
+            {
+              "rank": 0,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 1,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 2,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 3,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 4,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 5,
+              "records": 52,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 52,
+              "window_records": 51,
+              "tail_records": 1
+            },
+            {
+              "rank": 6,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 7,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 8,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 9,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 10,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 11,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 12,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 13,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 14,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 15,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            }
+          ],
+          "right_observed": [
+            {
+              "rank": 0,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 1,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 2,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 3,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 4,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 5,
+              "records": 52,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 52,
+              "window_records": 51,
+              "tail_records": 1
+            },
+            {
+              "rank": 6,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 7,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 8,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 9,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 10,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 11,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 12,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 13,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 14,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            },
+            {
+              "rank": 15,
+              "records": 55,
+              "observed_peak_requests": 40,
+              "dp_metadata_present_all_records": true,
+              "actual_full240": 50,
+              "raw_records": 55,
+              "window_records": 51,
+              "tail_records": 4
+            }
+          ],
+          "scope": "fixed8K bank; B40 submitted, actual concurrency recorded;192 output tokens; rank0 float witnesses only; no performance"
+        },
+        "native_repeat_metrics": {
+          "left": "/data/pyptouser/yejia/lc128/plan8k-native1-b24000",
+          "right": "/data/pyptouser/yejia/lc128/plan8k-native2-b24000",
+          "replica_requests": 640,
+          "distinct_questions": 40,
+          "tokens_per_request": 192,
+          "output_token_positions": 122880,
+          "different_token_positions": 0,
+          "different_output_replica_requests": 0,
+          "different_stats_replica_requests": 0,
+          "different_events_replica_requests": 0,
+          "different_output_questions": 0,
+          "different_stats_questions": 0,
+          "different_events_questions": 0,
+          "first_token_difference": null,
+          "left_cross_dp": {
+            "compared_replica_requests": 600,
+            "output_different": 0,
+            "events_different": 0,
+            "stats_different": 0
+          },
+          "right_cross_dp": {
+            "compared_replica_requests": 600,
+            "output_different": 0,
+            "events_different": 0,
+            "stats_different": 0
+          }
+        },
+        "native_gold_boundary_records": 10863,
+        "native1_has_internal_stage_witnesses": false,
+        "generation_graph_rounds": {
+          "NONE_tokens40": 1,
+          "FULL_tokens240": 50
+        },
+        "within_round_unequal_query_lengths_observed": false,
+        "tasks": {
+          "native": [
+            "task_20261016_105617_31836166643",
+            "task_20261016_114627_49838428141"
+          ],
+          "csa": [
+            "task_20261016_125003_260178911192"
+          ]
+        },
+        "native_evidence_archive_sha256": "4ce2c05d45efdd61a26ea5537d1c0a89ec7e042db5c1c966c21ac159ffb9fff3",
+        "csa_status": "failed_before_generation_memory_guard",
+        "failed_attempt": {
+          "task": "task_20261016_125003_260178911192",
+          "exit_code": 1,
+          "num_gpu_blocks_override": 24000,
+          "rank0_allocation_upper_bytes": 21955846144,
+          "rank0_free_bytes": 23840948224,
+          "required_reserve_bytes": 2147483648,
+          "precision_result": null,
+          "evidence_archive_sha256": "e5739d6f02f769ac4215a7c49a4787cbc5e27663c304f0918c51960f8772c380"
+        }
       }
     }
   },
