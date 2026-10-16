@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm及HC-post。"""
+"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm、WKV及HC-post。"""
 
 import torch
 import torch_npu
@@ -11,12 +11,14 @@ from ..deepseek_v4_flash_csa_tnd_precision.service import CSAServiceRuntime as B
 from .hc_post import hc_post_test
 from .hc_pre import hc_pre_test
 from .input_norm import input_norm_test
+from .wkv import wkv_test
+from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
 
 
 class CSAServiceRuntime(BaselineRuntime):
     """原基准保持可运行；剩余Native边界须后续逐项对拍再恢复。"""
 
-    restored_modules = ("hc_pre", "input_norm", "hc_post")
+    restored_modules = ("hc_pre", "input_norm", "wkv", "hc_post")
     # Native mDim changes above 256 rows; the current K32/22 partition is for mDim1.
     max_hc_pre_tokens = 256
 
@@ -50,6 +52,21 @@ class CSAServiceRuntime(BaselineRuntime):
         self.pto_input_norm = pypto.torch.register(input_norm_test, "dsv4_csa_tnd_full_precision::input_norm")
         self.normed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
         self.norm_rstd = torch.empty((tokens, 8), dtype=torch.float32, device=device)
+        wkv = layer.self_attn.wkv
+        weight = wkv.weight.detach()
+        if wkv.bias is not None or weight.dtype != torch.bfloat16 or tuple(weight.shape) != (512, 4096):
+            raise ValueError("PTO WKV requires the original unbiased BF16 [512, 4096] Native weight")
+        # 仅加载期整理布局；不改dtype、不反量化，也不改变权重数值。
+        if torch_npu.get_npu_format(weight) not in (0, 2):
+            weight = torch_npu.npu_format_cast(weight, 2)
+        self.wkv_weight = weight.contiguous()
+        self.wkv_projected = torch.empty((tokens, 512), dtype=torch.bfloat16, device=device)
+        self.wkv_orders = torch.tensor(
+            [[WKV_K_ORDERS[index] for index in mode] for mode in WKV_COLUMN_ORDERS],
+            dtype=torch.int32,
+            device=device,
+        )
+        self.pto_wkv = pypto.torch.register(wkv_test, "dsv4_csa_tnd_full_precision::wkv")
         self.hc_mixed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
         self.hc_post_gates = torch.empty((tokens, 4), dtype=torch.float32, device=device)
         self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
@@ -92,11 +109,13 @@ class CSAServiceRuntime(BaselineRuntime):
         )
         normed = self.normed[:tokens]
         self.pto_input_norm(mixed, self.layer.input_layernorm.weight, normed, self.norm_rstd[:tokens])
-        native_kv_projected = self.layer.self_attn.wkv(normed)
-        if native_kv_projected.dtype != torch.bfloat16 or tuple(native_kv_projected.shape) != (tokens, 512):
-            raise ValueError("Native WKV must publish BF16 [tokens, 512]")
-        if not native_kv_projected.is_contiguous() or torch_npu.get_npu_format(native_kv_projected) not in (0, 2):
-            raise ValueError("Native WKV must publish contiguous ND storage")
+        kv_projected = self.wkv_projected[:tokens]
+        order = self.wkv_orders[WKV_TOKEN_MODES[tokens - 1]]
+        self.pto_wkv(normed, self.wkv_weight, order, kv_projected)
+        if kv_projected.dtype != torch.bfloat16 or tuple(kv_projected.shape) != (tokens, 512):
+            raise ValueError("PTO WKV must publish BF16 [tokens, 512]")
+        if not kv_projected.is_contiguous() or torch_npu.get_npu_format(kv_projected) not in (0, 2):
+            raise ValueError("PTO WKV must publish contiguous ND storage")
         impl = self.wrapper.dsa_attn.impl
         native_indexer_weights = DeviceOperator.prepare_dsa_indexer_weights(
             impl.weights_proj(normed) * (impl.indexer_softmax_scale * impl.indexer_heads**-0.5)
@@ -108,7 +127,8 @@ class CSAServiceRuntime(BaselineRuntime):
         call_weights = dict(
             self.weights,
             native_normed=normed,
-            native_kv_projected=native_kv_projected,
+            # 保留CSA内部的历史边界名称，实际producer已改为PTO。
+            native_kv_projected=kv_projected,
             native_indexer_weights=native_indexer_weights,
             native_heads=self.native_heads[:tokens],
         )
