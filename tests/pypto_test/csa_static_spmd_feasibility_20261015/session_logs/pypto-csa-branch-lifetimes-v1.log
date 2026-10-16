@@ -1,0 +1,93 @@
+2026-10-16 10:59:19.566 D | Processing AssignStmt for first__ssa_v0 with call to tile.full
+2026-10-16 10:59:19.566 D | Processing AssignStmt for second__ssa_v0 with call to tile.full
+2026-10-16 10:59:19.566 D | Processing AssignStmt for flag__ssa_v0 with call to tensor.read
+2026-10-16 10:59:19.567 D | Processing AssignStmt for seed__ssa_v0 with call to tile.full
+2026-10-16 10:59:19.567 D | Processing AssignStmt for filled__ssa_v0 with call to tile.gather_row
+2026-10-16 10:59:19.567 D | Reusing MemRef from input arg 0 for filled__ssa_v0
+2026-10-16 10:59:19.567 D | Processing AssignStmt for fresh__ssa_v0 with call to tile.full
+2026-10-16 10:59:19.567 D | Processing AssignStmt for next_value__ssa_v0 with call to tile.gather_row
+2026-10-16 10:59:19.567 D | Reusing MemRef from input arg 0 for next_value__ssa_v0
+2026-10-16 10:59:19.567 D | Processing AssignStmt for saved__ssa_v0 with call to tile.store
+2026-10-16 10:59:19.567 D | Reusing MemRef from input arg 2 for saved__ssa_v0
+2026-10-16 10:59:19.567 D | Processing AssignStmt for next0__ssa_v0 with call to tile.adds
+2026-10-16 10:59:19.567 D | Processing AssignStmt for next1__ssa_v0 with call to tile.adds
+2026-10-16 10:59:19.567 D | Processing AssignStmt for state0__ssa_v0 with call to tile.store
+2026-10-16 10:59:19.567 D | Reusing MemRef from input arg 2 for state0__ssa_v0
+2026-10-16 10:59:19.567 D | Processing AssignStmt for state1__ssa_v0 with call to tile.store
+2026-10-16 10:59:19.567 D | Reusing MemRef from input arg 2 for state1__ssa_v0
+2026-10-16 10:59:19.638 D | MemRef sharing group: 2 variables share same MemRef
+2026-10-16 10:59:19.638 D | MemRef sharing group: 3 variables share same MemRef
+2026-10-16 10:59:19.638 D | MemRef sharing group: 4 variables share same MemRef
+2026-10-16 10:59:19.638 D | MemRef sharing group: 2 variables share same MemRef
+2026-10-16 10:59:19.638 D | Variable first__ssa_v0 def=7 last_use=26
+2026-10-16 10:59:19.638 D | Variable next0__ssa_v0 def=23 last_use=25
+2026-10-16 10:59:19.638 D | Lifetime for sharing group (representative: first__ssa_v0, size: 2): [7, 26] space=1 size=32768
+2026-10-16 10:59:19.638 D | Variable second__ssa_v0 def=8 last_use=27
+2026-10-16 10:59:19.638 D | Variable next1__ssa_v0 def=24 last_use=25
+2026-10-16 10:59:19.638 D | Lifetime for sharing group (representative: second__ssa_v0, size: 2): [8, 27] space=1 size=32768
+2026-10-16 10:59:19.638 D | Variable seed__ssa_v0 def=10 last_use=11
+2026-10-16 10:59:19.638 D | Variable filled__ssa_v0 def=11 last_use=12
+2026-10-16 10:59:19.638 D | Variable selected__ssa_v0 def=12 last_use=22
+2026-10-16 10:59:19.638 D | Lifetime for sharing group (representative: seed__ssa_v0, size: 3): [10, 22] space=1 size=65536
+2026-10-16 10:59:19.638 D | Variable fresh__ssa_v0 def=14 last_use=20
+2026-10-16 10:59:19.638 D | Variable next_value__ssa_v0 def=15 last_use=19
+2026-10-16 10:59:19.638 D | Variable next_value__ssa_v1 def=17 last_use=19
+2026-10-16 10:59:19.638 D | Variable selected__ssa_v1 def=20 last_use=22
+2026-10-16 10:59:19.638 D | Lifetime for sharing group (representative: fresh__ssa_v0, size: 4): [14, 22] space=1 size=65536
+2026-10-16 10:59:19.638 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Vec at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7884:13
+F
+=================================== FAILURES ===================================
+_ TestChainedInPlaceIfPhis.test_branch_local_gather_loop_reuses_sibling_storage _
+
+self = <transforms.test_memory_reuse.TestChainedInPlaceIfPhis object at 0xfffde89c64d0>
+ascend_backend = BackendType.Ascend910B
+
+    def test_branch_local_gather_loop_reuses_sibling_storage(self, ascend_backend):
+        """A fresh gather destination in one arm is dead on the sibling path."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.AIV)
+            def kernel(
+                self,
+                pool: pl.Tensor[[64, 512], pl.BF16],
+                flags: pl.Tensor[[1], pl.INT32],
+                out: pl.Out[pl.Tensor[[64, 512], pl.BF16]],
+                state: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
+            ) -> tuple[pl.Tensor[[64, 512], pl.BF16], pl.Tensor[[64, 256], pl.FP32]]:
+                first = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                second = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                flag = pl.tensor.read(flags, [0])
+                for i, (s0, s1) in pl.range(2, init_values=(first, second)):
+                    seed = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
+                    if flag != 0:
+                        filled = pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [64, 512])
+                        selected = filled
+                    else:
+                        fresh = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
+                        for j, (carry,) in pl.range(64, init_values=(fresh,)):
+                            if j < flag:
+                                next_value = pl.tile.gather_row(
+                                    carry, pool, [j, 0], [j, 0], [1, 512]
+                                )
+                            else:
+                                next_value = carry
+                            gathered = pl.yield_(next_value)
+                        selected = gathered
+                    saved = pl.tile.store(selected, [0, 0], out)
+                    next0 = pl.tile.add(s0, 1.0)
+                    next1 = pl.tile.add(s1, 2.0)
+                    result0, result1 = pl.yield_(next0, next1)
+                state0 = pl.tile.store(result0, [0, 0], state)
+                state1 = pl.tile.store(result1, [32, 0], state0)
+                return out, state1
+    
+        after = _run_pipeline(passes.convert_to_ssa()(Before))
+>       passes.allocate_memory_addr()(after)
+E       ValueError: Vec buffer usage (196608 bytes) exceeds platform limit (188416 bytes)
+E       Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473
+
+tests/ut/ir/transforms/test_memory_reuse.py:7919: ValueError
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_branch_local_gather_loop_reuses_sibling_storage
+1 failed in 1.38s

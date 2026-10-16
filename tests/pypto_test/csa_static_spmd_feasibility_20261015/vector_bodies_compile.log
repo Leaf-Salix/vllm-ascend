@@ -1,0 +1,34 @@
+{"device_execution": false, "complete_static_csa": false, "bodies": ["csa_rope_sign", "csa_cache_writeback"], "tokens_dynamic": true, "cache_pages_dynamic": true, "code_generation_completed": false, "error": "FlattenTileNdTo2D: tile op 'tile.load' has a dynamic (non-constant) dimension 0 in its >2D tile shape, which cannot be flattened to 2D. Hardware tiles map to fixed-size on-chip buffers, so every tile dimension must be a compile-time constant; a pl.dynamic dimension has no static bound and cannot back a tile dimension directly. Fix by either: (1) iterating/tiling the dynamic dimension with pl.range/pl.parallel so each per-iteration tile slice is static, or (2) reshaping the tensor to 2D before the InCore (pl.at) scope so the dynamic extent lands on the pl.parallel loop bound instead of inside the tile shape.\nCheck failed: As<ConstInt>(tile_type->shape_[i]) at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/transforms/flatten_tile_nd_to_2d/analysis.cpp:56"}
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/hc_pre_layer_integration_20261012/bootstrap.py", line 29, in <module>
+    runpy.run_path(script, run_name="__main__")
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 289, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 96, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/csa_static_spmd_feasibility_20261015/extracted_vector_bodies.py", line 124, in <module>
+    main()
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/csa_static_spmd_feasibility_20261015/extracted_vector_bodies.py", line 111, in main
+    compiled = vector_bodies_probe.compile(config=RunConfig(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3505, in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3247, in _resolve_compiled
+    return build(), ordered_args, run_config
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3236, in build
+    return self._compile(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3727, in _compile
+    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 385, in compile
+    return _compile_impl(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 480, in _compile_impl
+    pipeline = _run_pass_pipeline(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 250, in _run_pass_pipeline
+    transformed_program = pm.run_passes(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/pass_manager.py", line 585, in run_passes
+    return self._pipeline.run(input_ir)
+ValueError: FlattenTileNdTo2D: tile op 'tile.load' has a dynamic (non-constant) dimension 0 in its >2D tile shape, which cannot be flattened to 2D. Hardware tiles map to fixed-size on-chip buffers, so every tile dimension must be a compile-time constant; a pl.dynamic dimension has no static bound and cannot back a tile dimension directly. Fix by either: (1) iterating/tiling the dynamic dimension with pl.range/pl.parallel so each per-iteration tile slice is static, or (2) reshaping the tensor to 2D before the InCore (pl.at) scope so the dynamic extent lands on the pl.parallel loop bound instead of inside the tile shape.
+Check failed: As<ConstInt>(tile_type->shape_[i]) at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/transforms/flatten_tile_nd_to_2d/analysis.cpp:56

@@ -1,0 +1,26 @@
+commit 57e499238fd4ee3548947ad860be456aaeeb16b5
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Fri Oct 16 10:19:33 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Fri Oct 16 10:19:33 2026 +0800
+
+    Update: 扩展 CORE 参数容量并同步派发、参数转储和图缓存 ABI
+    
+    CSA 静态融合核需要 132/133 个 Tensor。原有 32 Tensor、单字转储
+    掩码及 512 字节派发结构限制了大参数内核，现统一扩到 256 Tensor
+    加 16 scalar，保持按值传输和显式容量边界检查。
+    
+    - 同步 A2/A3、A5 的 HBG/TMR 上下文槽位、派发结构、Graph Tensor
+      容量、任务参数池、依赖记录和 A5 调度步长，补充布局静态断言。
+    - 参数 dump 改为固定大小的多字 64 位掩码，覆盖超过 63 的 Tensor
+      位置及高位 scalar，保留无动态分配的设备侧 POD 结构。
+    - 修复 CCE 自定义构建缺失 ABI 头文件依赖的问题，避免增量编译
+      继续使用旧派发布局和旧 scalar 偏移。
+    - 添加边界、结构布局、选择性 dump 和大参数 program/kernel
+      回归用例，更新相关接口与依赖记录文档。
+    
+    验证：A2/A3、A5 的 HBG/TMR onboard/sim 共八种 runtime 构建通过；
+    14 个相关 C++ 测试目标通过；281 个 Python 用例通过、4 个跳过。
+    A3 真机 HBG/TMR program 及 kernel 模式均验证 133/256 Tensor
+    加 16 scalar；kernel 连续三次调用、输出保护区和高位 dump 通过。
+    尚未验证 A5 真机及完整 CSA 单核执行，不将组件验证记为整层通过。

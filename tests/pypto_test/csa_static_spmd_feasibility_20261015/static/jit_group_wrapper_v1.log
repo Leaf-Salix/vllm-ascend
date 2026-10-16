@@ -1,0 +1,63 @@
+2026-10-15 23:48:36.391 W | [warning] [UnusedVariableCheck] (pipeline_input) Unused variable 'cube_result' in function 'group_wrapper' at tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_jit_group_wrapper.py:45:9
+2026-10-15 23:48:36.391 W | [warning] [UnusedVariableCheck] (pipeline_input) Unused variable 'vector_result' in function 'group_wrapper' at tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_jit_group_wrapper.py:46:9
+2026-10-15 23:48:36.676 I | [perf_hint] 5 hints across 5 sites; see tests/pypto_test/results/csa_static_spmd_feasibility_20261015/jit_group_wrapper_v1/kernel/report/perf_hints.log
+Failed to generate orchestration 'entry': InferFunctionCoreType expects AIC or AIV (Spmd/Group are filtered upstream); got Opaque on function 'group_wrapper'. Either run ExpandMixedKernel before codegen or declare the function with @pl.function(type=pl.FunctionType.AIC|AIV) directly. [tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_jit_group_wrapper.py:41:1]
+Check failed: unreachable at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/codegen/orchestration/orchestration_codegen.cpp:103
+
+C++ Traceback (most recent call last):
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 4962
+ File "./include/pypto/ir/transforms/base/functor.h", line 230
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 1161
+ File "./include/pypto/ir/transforms/base/functor.h", line 233
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 1690
+ File "./include/pypto/ir/transforms/base/functor.h", line 219
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 1578
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 3560
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 3672
+ File "./src/codegen/orchestration/orchestration_codegen.cpp", line 103
+
+{"scope": "JIT wrapper API 的 CPU 编译探针", "device_execution": false, "full_codegen_passed": false, "single_mix_submission": false, "error": "1 function(s) failed to compile:\n\n  Function  | Error\n  ----------+--------------------------------------------------------------\n  entry     | InferFunctionCoreType expects AIC or AIV (Spmd/Group are\n            | filtered upstream); got Opaque on function 'group_wrapper'.\n            | Either run ExpandMixedKernel before codegen or declare the\n            | function with @pl.function(type=pl.FunctionType.AIC|AIV)\n            | directly. [tests/pypto_test/csa_static_spmd_feasibility_2026\n            | 1015/repro_jit_group_wrapper.py:41:1]\n  ----------+--------------------------------------------------------------\n\n  Full details: tests/pypto_test/results/csa_static_spmd_feasibility_20261015/jit_group_wrapper_v1/kernel/report/codegen_errors.txt"}
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/hc_pre_layer_integration_20261012/bootstrap.py", line 29, in <module>
+    runpy.run_path(script, run_name="__main__")
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 289, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 96, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_jit_group_wrapper.py", line 85, in <module>
+    main()
+  File "tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_jit_group_wrapper.py", line 67, in main
+    compiled = entry.compile(config=RunConfig(platform='a2a3', save_kernels=True,
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3505, in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3247, in _resolve_compiled
+    return build(), ordered_args, run_config
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3236, in build
+    return self._compile(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3727, in _compile
+    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 385, in compile
+    return _compile_impl(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 509, in _compile_impl
+    files = generate(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 1823, in generate
+    return _generate_single_chip(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 2290, in _generate_single_chip
+    raise PartialCodegenError(report, result_files)
+pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+
+  Function  | Error
+  ----------+--------------------------------------------------------------
+  entry     | InferFunctionCoreType expects AIC or AIV (Spmd/Group are
+            | filtered upstream); got Opaque on function 'group_wrapper'.
+            | Either run ExpandMixedKernel before codegen or declare the
+            | function with @pl.function(type=pl.FunctionType.AIC|AIV)
+            | directly. [tests/pypto_test/csa_static_spmd_feasibility_2026
+            | 1015/repro_jit_group_wrapper.py:41:1]
+  ----------+--------------------------------------------------------------
+
+  Full details: tests/pypto_test/results/csa_static_spmd_feasibility_20261015/jit_group_wrapper_v1/kernel/report/codegen_errors.txt

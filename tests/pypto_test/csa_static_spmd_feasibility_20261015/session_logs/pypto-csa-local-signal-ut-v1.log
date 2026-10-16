@@ -1,0 +1,221 @@
+bringing up nodes...
+bringing up nodes...
+
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+____________ test_local_signal_rejects_unsupported_storage[dtype1] _____________
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+dtype = fp32
+
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
+    def test_local_signal_rejects_unsupported_storage(dtype):
+        """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
+        span = ir.Span.unknown()
+        signal = ir.Var("signal", ir.TensorType([64], dtype), span)
+        with pytest.raises(Exception, match="one-dimensional INT32"):
+>           system_ops.signal_notify(signal, [0], 1)
+E           AttributeError: module 'pypto.ir.op.system_ops' has no attribute 'signal_notify'
+
+tests/ut/language/parser/test_system_ops.py:884: AttributeError
+
+During handling of the above exception, another exception occurred:
+
+dtype = fp32
+
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
+    def test_local_signal_rejects_unsupported_storage(dtype):
+        """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
+        span = ir.Span.unknown()
+        signal = ir.Var("signal", ir.TensorType([64], dtype), span)
+>       with pytest.raises(Exception, match="one-dimensional INT32"):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'one-dimensional INT32'
+E        Input: "module 'pypto.ir.op.system_ops' has no attribute 'signal_notify'"
+
+tests/ut/language/parser/test_system_ops.py:883: AssertionError
+________________ test_local_signal_rejects_overflowing_literal _________________
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+    def test_local_signal_rejects_overflowing_literal():
+        span = ir.Span.unknown()
+        signal = ir.Var("signal", ir.TensorType([64], DataType.INT32), span)
+        with pytest.raises(ValueError, match="outside INT32"):
+>           system_ops.signal_wait(signal, [0], 1 << 31)
+E           AttributeError: module 'pypto.ir.op.system_ops' has no attribute 'signal_wait'
+
+tests/ut/language/parser/test_system_ops.py:891: AttributeError
+_________________________ test_local_signal_round_trip _________________________
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+    def test_local_signal_round_trip():
+        """临时接口保留普通 GM Tensor、动态索引和 INT32 阈值。"""
+    
+        @pl.program
+>       class Before:
+
+tests/ut/language/parser/test_system_ops.py:862: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1384: in parse_statement
+    self.parse_evaluation_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:6255: in parse_evaluation_statement
+    expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6783: in parse_op_call
+    return self._parse_system_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9229: in _parse_system_op
+    return self._dispatch_op(_dsl_system, "pl.system", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffe01ef3bb0>
+module = <module 'pypto.language.op.system_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/language/op/system_ops.py'>
+module_name = 'pl.system', op_name = 'signal_notify'
+call = <ast.Call object at 0xfffe0326d660>
+
+    def _dispatch_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -> ir.Expr:
+        """Dispatch an op call to a DSL wrapper module.
+    
+        The wrapper owns type-checking and dispatch (e.g. ``tile.add`` already
+        routes scalar rhs to ``tile.adds``); the parser only parses args, wraps
+        them as DSL types via :func:`invoke_dsl`, pins the call-site span
+        through a contextvar, and unwraps the result.
+    
+        Args:
+            module: A DSL op submodule (``_dsl_tensor`` / ``_dsl_tile`` /
+                ``_dsl_system``) or the unified ``pypto.language.op`` namespace.
+            module_name: Human-readable module name for error messages.
+            op_name: Name of the operation to look up on the module.
+            call: Call AST node.
+    
+        Returns:
+            IR expression from the operation.
+        """
+        if not hasattr(module, op_name):
+>           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.system operation: signal_notify
+
+../../pypto/python/pypto/language/parser/ast_parser.py:8970: InvalidOperationError
+____________ test_local_signal_rejects_unsupported_storage[dtype0] _____________
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+dtype = int64
+
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
+    def test_local_signal_rejects_unsupported_storage(dtype):
+        """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
+        span = ir.Span.unknown()
+        signal = ir.Var("signal", ir.TensorType([64], dtype), span)
+        with pytest.raises(Exception, match="one-dimensional INT32"):
+>           system_ops.signal_notify(signal, [0], 1)
+E           AttributeError: module 'pypto.ir.op.system_ops' has no attribute 'signal_notify'
+
+tests/ut/language/parser/test_system_ops.py:884: AttributeError
+
+During handling of the above exception, another exception occurred:
+
+dtype = int64
+
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
+    def test_local_signal_rejects_unsupported_storage(dtype):
+        """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
+        span = ir.Span.unknown()
+        signal = ir.Var("signal", ir.TensorType([64], dtype), span)
+>       with pytest.raises(Exception, match="one-dimensional INT32"):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'one-dimensional INT32'
+E        Input: "module 'pypto.ir.op.system_ops' has no attribute 'signal_notify'"
+
+tests/ut/language/parser/test_system_ops.py:883: AssertionError
+__ TestSyncAllCodegen.test_local_signal_preserves_order_without_comm_context ___
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <test_pto_codegen_ops.TestSyncAllCodegen object at 0xfffdf7c80100>
+
+    def test_local_signal_preserves_order_without_comm_context(self):
+        """本地通知/等待不能被删除、合并成全体 barrier 或增加通信上下文。"""
+    
+        @pl.program
+>       class Prog:
+
+tests/ut/codegen/test_pto_codegen_ops.py:5056: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1384: in parse_statement
+    self.parse_evaluation_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:6255: in parse_evaluation_statement
+    expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6783: in parse_op_call
+    return self._parse_system_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9229: in _parse_system_op
+    return self._dispatch_op(_dsl_system, "pl.system", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffdf7edb100>
+module = <module 'pypto.language.op.system_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/language/op/system_ops.py'>
+module_name = 'pl.system', op_name = 'signal_wait'
+call = <ast.Call object at 0xfffdf7edaec0>
+
+    def _dispatch_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -> ir.Expr:
+        """Dispatch an op call to a DSL wrapper module.
+    
+        The wrapper owns type-checking and dispatch (e.g. ``tile.add`` already
+        routes scalar rhs to ``tile.adds``); the parser only parses args, wraps
+        them as DSL types via :func:`invoke_dsl`, pins the call-site span
+        through a contextvar, and unwraps the result.
+    
+        Args:
+            module: A DSL op submodule (``_dsl_tensor`` / ``_dsl_tile`` /
+                ``_dsl_system``) or the unified ``pypto.language.op`` namespace.
+            module_name: Human-readable module name for error messages.
+            op_name: Name of the operation to look up on the module.
+            call: Call AST node.
+    
+        Returns:
+            IR expression from the operation.
+        """
+        if not hasattr(module, op_name):
+>           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.system operation: signal_wait
+
+../../pypto/python/pypto/language/parser/ast_parser.py:8970: InvalidOperationError
+=========================== short test summary info ============================
+FAILED tests/ut/language/parser/test_system_ops.py::test_local_signal_rejects_unsupported_storage[dtype1]
+FAILED tests/ut/language/parser/test_system_ops.py::test_local_signal_rejects_overflowing_literal
+FAILED tests/ut/language/parser/test_system_ops.py::test_local_signal_round_trip
+FAILED tests/ut/language/parser/test_system_ops.py::test_local_signal_rejects_unsupported_storage[dtype0]
+FAILED tests/ut/codegen/test_pto_codegen_ops.py::TestSyncAllCodegen::test_local_signal_preserves_order_without_comm_context
+5 failed in 4.24s

@@ -1,0 +1,366 @@
+ISSUE_CREATE_PUBLISHING
+Host: github.com
+Repository: hw-native-sys/pypto
+Title: [Pass Bug] ExpandMixedKernel 误删仅在 while 条件中使用的 iter_arg，生成 ready__FREE_VAR
+Labels (1):
+- bug
+Body (21059 bytes):
+### Pass Name
+
+`ExpandMixedKernel`，具体定位到内部的 `FinalizeSplitCoreBody → StripDeadIterArgs`。
+
+### Description
+
+MIX SPMD 中的 AIV 轮询循环，如果携带值 `ready` **只在 while 条件中使用**，而循环结果 `final_ready` 在循环后没有使用，`ExpandMixedKernel` 会把这个仍然控制循环终止的携带值当成死状态删除。
+
+删除后，初值读取、循环回边读取及 yield 一并消失，但条件仍然引用 `ready`，生成 `ready__FREE_VAR`。随后 PyPTO PTO codegen 报错，尚未进入设备运行。
+
+典型的合法语义是：
+
+```python
+initial_ready = pl.read(flags, [0])
+for (ready,) in pl.while_(init_values=(initial_ready,)):
+    pl.cond(ready != 1)
+    pl.system.cacheinvalid()
+    final_ready = pl.yield_(pl.read(flags, [0]))
+# 后续计算只需要等到循环结束，不需要再次使用 final_ready。
+```
+
+`pl.cond(...)` 在解析后存入 `WhileStmt.condition_`，不是循环 body 中的一条普通语句。条件中的使用仍然必须让该 iter_arg 保持活跃。当前错误不能通过给函数额外传一个名为 `ready` 的标量来修正，那会改变循环语义。
+
+发现背景是将现有 CSA 动态排程固化为单个 MIX SPMD，需要表达核组之间的局部通知与等待。复现已剥离 CSA/vLLM，不需要模型权重、实际输入 Tensor 或 NPU 执行。
+
+### Git Commit ID
+
+`cb24844712fa4329563a8cfbdd8d9f77ba0dc20c`
+
+- 本地分支：`feat/kernel-mode-integration-test`。
+- Python：`3.10.19`；Host：Linux aarch64；编译目标：`a2a3`。
+- 加载本 checkout 的 `build/python/bindings/pypto_core.cpython-310-aarch64-linux-gnu.so`。
+- 工作区存在其他调试改动；本报告没有修改 PyPTO。`expand_mixed_kernel_pass.cpp` 与 `utils/loop_state_repair.cpp` 没有本地修改。
+- 这是当前实际使用的本地调试构建上的复现，不冒充干净 main 的重新构建结果。只读查看 main 时，同一活跃性判断也未纳入 while 条件；main 的独立编译复测尚未做。
+
+### Before IR (Input)
+
+下面是 tile 读取版 `24_after_LowerAutoVectorSplit.py` 中受影响的 InCore 函数，保留 `@pl.program` 包装。完整复现脚本会生成包含 Spmd/Orchestration 的全部 pass dump。
+
+```python
+import pypto.language as pl
+
+
+@pl.program
+class Before:
+    @pl.function(type=pl.FunctionType.InCore, level=pl.Level.CHIP_DIE, role=pl.Role.SubWorker)
+    def mixed_while_repro_mixed_while_repro(
+        a__ssa_v0: pl.Tensor[[384, 16], pl.FP16],
+        b__ssa_v0: pl.Tensor[[16, 16], pl.FP16],
+        cube_out__ssa_v0: pl.Out[pl.Tensor[[384, 16], pl.FP32]],
+        scratch__ssa_v0: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
+        flags__ssa_v0: pl.InOut[pl.Tensor[[16], pl.INT32]],
+        vector_out__ssa_v0: pl.Out[pl.Tensor[[16, 16], pl.FP32]],
+    ) -> tuple[pl.Tensor[[384, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32]]:
+        pl.func_attr({"mx_tensor_views_blocked": True, "split_aiv": True})
+        worker__ssa_v0: pl.Scalar[pl.INDEX] = pl.tile.get_block_idx()
+        ac__ssa_v0: pl.Tile[[16, 16], pl.FP16, pl.Mem.Mat] = pl.tile.load(a__ssa_v0, [worker__ssa_v0 * 16, 0], [16, 16], [16, 16], target_memory=pl.Mem.Mat)
+        bc__ssa_v0: pl.Tile[[16, 16], pl.FP16, pl.Mem.Mat] = pl.tile.load(b__ssa_v0, [0, 0], [16, 16], [16, 16], target_memory=pl.Mem.Mat)
+        ac__ssa_v0_Left: pl.Tile[[16, 16], pl.FP16, pl.Mem.Left] = pl.tile.move(ac__ssa_v0, target_memory=pl.Mem.Left)
+        bc__ssa_v0_Right: pl.Tile[[16, 16], pl.FP16, pl.Mem.Right] = pl.tile.move(bc__ssa_v0, target_memory=pl.Mem.Right)
+        cc__ssa_v0: pl.Tile[[16, 16], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(ac__ssa_v0_Left, bc__ssa_v0_Right)
+        cube_out__store: pl.Tensor[[384, 16], pl.FP32] = pl.tile.store(cc__ssa_v0, [worker__ssa_v0 * 16, 0], cube_out__ssa_v0)
+        for lane__ssa_v0 in pl.split_aiv(2, mode=pl.SplitMode.NONE):
+            if lane__ssa_v0 == 0:
+                if worker__ssa_v0 == 0:
+                    av__ssa_v0: pl.Tile[[16, 16], pl.FP16, pl.Mem.Vec] = pl.tile.load(a__ssa_v0, [0, 0], [16, 16], [16, 16], target_memory=pl.Mem.Vec)
+                    t__tmp_v0: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.cast(av__ssa_v0, target_type=pl.FP32, mode="round")
+                    t__tmp_v1: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.adds(t__tmp_v0, 1.0)
+                    scratch__store: pl.Tensor[[16, 16], pl.FP32] = pl.tile.store(t__tmp_v1, [0, 0], scratch__ssa_v0)
+                    pl.system.cacheinvalid()
+                    pl.system.fence()
+                    pl.tensor.write(flags__ssa_v0, [0], pl.cast(1, pl.INT32))
+                    pl.system.cacheinvalid()
+                    pl.system.fence()
+                else:
+                    if worker__ssa_v0 == 1:
+                        initial_tile__ssa_v0: pl.Tile[[16], pl.INT32, pl.Mem.Vec] = pl.tile.load(flags__ssa_v0, [0], [16], [16], target_memory=pl.Mem.Vec)
+                        initial_ready__ssa_v0: pl.Scalar[pl.INT32] = pl.tile.read(initial_tile__ssa_v0, [0])
+                        for (ready,) in pl.while_(init_values=(initial_ready__ssa_v0,)):
+                            pl.cond(pl.cast(ready, pl.INDEX) != 1)
+                            pl.system.cacheinvalid()
+                            flag_tile__ssa_v0: pl.Tile[[16], pl.INT32, pl.Mem.Vec] = pl.tile.load(flags__ssa_v0, [0], [16], [16], target_memory=pl.Mem.Vec)
+                            t__tmp_v2: pl.Scalar[pl.INT32] = pl.tile.read(flag_tile__ssa_v0, [0])
+                            final_ready: pl.Scalar[pl.INT32] = pl.yield_(t__tmp_v2)
+                        pl.system.cacheinvalid()
+                        received__ssa_v0: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.load(scratch__ssa_v0, [0, 0], [16, 16], [16, 16], target_memory=pl.Mem.Vec)
+                        t__tmp_v3: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.muls(received__ssa_v0, 2.0)
+                        vector_out__store: pl.Tensor[[16, 16], pl.FP32] = pl.tile.store(t__tmp_v3, [0, 0], vector_out__ssa_v0)
+        return cube_out__ssa_v0, scratch__ssa_v0, vector_out__ssa_v0
+```
+
+### Expected IR (After Transformation)
+
+展开后应在 AIV 函数中保留 while 的初值、条件、回边和携带变量。下面仅列受影响的 AIV 函数；AIC、Group、Spmd 和 Orchestration 应照常生成。
+
+这是根据成功对照用例整理的预期 IR，已去掉为定位问题而添加的循环后 `flags[1] = final_ready`。它是预期结果说明，不是已修复编译器的实测输出。
+
+```python
+import pypto.language as pl
+
+
+@pl.program
+class Expected:
+    @pl.function(type=pl.FunctionType.AIV, level=pl.Level.AIV, role=pl.Role.SubWorker)
+    def mixed_while_repro_mixed_while_repro_aiv(
+        a__ssa_v0: pl.Tensor[[384, 16], pl.FP16],
+        b__ssa_v0: pl.Tensor[[16, 16], pl.FP16],
+        cube_out__ssa_v0: pl.Out[pl.Tensor[[384, 16], pl.FP32]],
+        scratch__ssa_v0: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
+        flags__ssa_v0: pl.InOut[pl.Tensor[[16], pl.INT32]],
+        vector_out__ssa_v0: pl.Out[pl.Tensor[[16, 16], pl.FP32]],
+    ) -> tuple[pl.Tensor[[384, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32]]:
+        pl.func_attr({"mx_tensor_views_blocked": True, "split_aiv": True, "dual_aiv_dispatch": True})
+        worker__ssa_v0: pl.Scalar[pl.INDEX] = pl.tile.get_block_idx()
+        lane__ssa_v0: pl.Scalar[pl.INDEX] = pl.tile.get_subblock_idx()
+        if lane__ssa_v0 == 0:
+            if worker__ssa_v0 == 0:
+                av__ssa_v0: pl.Tile[[16, 16], pl.FP16, pl.Mem.Vec] = pl.tile.load(a__ssa_v0, [0, 0], [16, 16], [16, 16], target_memory=pl.Mem.Vec)
+                t__tmp_v0: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.cast(av__ssa_v0, target_type=pl.FP32, mode="round")
+                t__tmp_v1: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.adds(t__tmp_v0, 1.0)
+                scratch__store: pl.Tensor[[16, 16], pl.FP32] = pl.tile.store(t__tmp_v1, [0, 0], scratch__ssa_v0)
+                pl.system.cacheinvalid()
+                pl.system.fence()
+                pl.tensor.write(flags__ssa_v0, [0], pl.cast(1, pl.INT32))
+                pl.system.cacheinvalid()
+                pl.system.fence()
+            else:
+                if worker__ssa_v0 == 1:
+                    initial_tile__ssa_v0: pl.Tile[[16], pl.INT32, pl.Mem.Vec] = pl.tile.load(flags__ssa_v0, [0], [16], [16], target_memory=pl.Mem.Vec)
+                    initial_ready__ssa_v0: pl.Scalar[pl.INT32] = pl.tile.read(initial_tile__ssa_v0, [0])
+                    for (ready,) in pl.while_(init_values=(initial_ready__ssa_v0,)):
+                        pl.cond(pl.cast(ready, pl.INDEX) != 1)
+                        pl.system.cacheinvalid()
+                        flag_tile__ssa_v0: pl.Tile[[16], pl.INT32, pl.Mem.Vec] = pl.tile.load(flags__ssa_v0, [0], [16], [16], target_memory=pl.Mem.Vec)
+                        t__tmp_v2: pl.Scalar[pl.INT32] = pl.tile.read(flag_tile__ssa_v0, [0])
+                        final_ready: pl.Scalar[pl.INT32] = pl.yield_(t__tmp_v2)
+                    pl.system.cacheinvalid()
+                    received__ssa_v0: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.load(scratch__ssa_v0, [0, 0], [16, 16], [16, 16], target_memory=pl.Mem.Vec)
+                    t__tmp_v3: pl.Tile[[16, 16], pl.FP32, pl.Mem.Vec] = pl.tile.muls(received__ssa_v0, 2.0)
+                    vector_out__store: pl.Tensor[[16, 16], pl.FP32] = pl.tile.store(t__tmp_v3, [0, 0], vector_out__ssa_v0)
+        return cube_out__ssa_v0, scratch__ssa_v0, vector_out__ssa_v0
+```
+
+### Actual IR or Error
+
+同一函数经过 `25_after_ExpandMixedKernel.py` 后，AIV 消费者分支变为：
+
+```python
+if worker__ssa_v0 == 1:
+    while pl.cast(ready__FREE_VAR, pl.INDEX) != 1:
+        pl.system.cacheinvalid()
+    pl.system.cacheinvalid()
+    # 后续 scratch 的读取和输出计算仍在。
+```
+
+`ready` 的定义、init_values、循环内 flags 读取及 yield 已经消失。最终异常的关键部分：
+
+```text
+PartialCodegenError: 1 function(s) failed to compile:
+mixed_while_repro_mixed_while_repro
+PTO codegen cannot materialize symbol 'ready' in function
+'mixed_while_repro_mixed_while_repro_aiv': it is not a
+physical tensor dimension, a scalar parameter, or a loop
+variable of this kernel.
+```
+
+后续错误文本关于 `TensorView(valid_shape=...)` 的通用建议与本例的触发原因不符：本例 Tensor shape 全部固定，`ready` 是在上一 pass 中仍然有效的循环携带变量。
+
+### NPU Kind (if relevant)
+
+N/A (not hardware-specific)。本次只在 CPU 上运行编译流程，目标设置为 `a2a3`，没有分配 NPU Tensor 或执行设备算子。
+
+### Host Platform (if relevant)
+
+Linux (aarch64)
+
+### Additional Context
+
+**复现命令与实测结果**
+
+在已安装/构建 PyPTO、已配置其匹配 PTOAS 的开发环境中，将下方完整脚本保存为 `repro_mixed_while_loop_state.py`。各条命令独立执行；当前前两条预期退出 1，第三条退出 0。
+
+```bash
+python repro_mixed_while_loop_state.py --variant scalar --output /tmp/pypto-while-scalar
+python repro_mixed_while_loop_state.py --variant tile --output /tmp/pypto-while-tile
+python repro_mixed_while_loop_state.py --variant tile --keep-result --output /tmp/pypto-while-tile-keep
+```
+
+| 2026-10-15 实测 | CPU 代码生成 | ExpandMixedKernel 后 |
+| --- | --- | --- |
+| GM 标量读取，循环后不用 final_ready | 失败，退出 1 | 出现 ready__FREE_VAR |
+| Vec tile 读取，循环后不用 final_ready | 失败，退出 1 | 出现 ready__FREE_VAR |
+| 相同 Vec tile 读取，只增加循环后写出 final_ready | 完成，退出 0 | 初值、条件和回边读取保留 |
+
+第三个对照只增加 `pl.write(flags, [1], final_ready)`，用于让循环结果在循环后可见。它不是生产实现的修复方案，也不能代替对原始合法写法的支持。
+
+已检查第三个对照的 PTOAS C++ 输出：条件分支及回边仍在，回边中保留 `TLOAD` 和 `GetValue` 更新下一次判断值。这里的“完成”只指 PyPTO/PTOAS 代码生成；没有编译设备二进制或验证跨核通知协议的真机正确性。
+
+每次输出目录包含 `result.json`、失败时的 `exception.txt`，以及 `kernel/passes_dump/`。搜索 pass 名称即可定位边界，其他版本的编号可能变化。`result.json` 记录实际加载的 Python 模块与扩展路径。
+
+<details>
+<summary>完整独立复现脚本：repro_mixed_while_loop_state.py</summary>
+
+```python
+# SPDX-License-Identifier: Apache-2.0
+"""CPU 复现 MIX 展开丢失 while 条件携带值；不分配或运行 NPU Tensor。"""
+
+import argparse
+import json
+import platform
+import sys
+import traceback
+from pathlib import Path
+
+import pypto
+import pypto.language as pl
+from pypto.runtime import RunConfig
+
+
+@pl.jit
+def mixed_while_repro(
+    a: pl.Tensor[[384, 16], pl.FP16],
+    b: pl.Tensor[[16, 16], pl.FP16],
+    scratch: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
+    flags: pl.InOut[pl.Tensor[[16], pl.INT32]],
+    cube_out: pl.Out[pl.Tensor[[384, 16], pl.FP32]],
+    vector_out: pl.Out[pl.Tensor[[16, 16], pl.FP32]],
+    TILE_POLLING: pl.constexpr = False,
+    KEEP_RESULT: pl.constexpr = False,
+):
+    # 矩阵运算只用于使这一段成为 MIX 核；flags 协议只作为编译输入。
+    for worker in pl.spmd(24, sync_start=True, name_hint="mixed_while_repro"):
+        ac = pl.load(a, [worker * 16, 0], [16, 16], target_memory=pl.MemorySpace.Mat)
+        bc = pl.load(b, [0, 0], [16, 16], target_memory=pl.MemorySpace.Mat)
+        cc = pl.matmul(ac, bc, out_dtype=pl.FP32)
+        pl.store(cc, [worker * 16, 0], cube_out)
+        for lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
+            if lane == 0:
+                if worker == 0:
+                    av = pl.load(a, [0, 0], [16, 16], target_memory=pl.MemorySpace.Vec)
+                    pl.store(pl.add(pl.cast(av, pl.FP32), 1.0), [0, 0], scratch)
+                    pl.system.cacheinvalid()
+                    pl.system.fence()
+                    pl.write(flags, [0], pl.cast(1, pl.INT32))
+                    pl.system.cacheinvalid()
+                    pl.system.fence()
+                elif worker == 1:
+                    if TILE_POLLING:
+                        initial_tile = pl.load(flags, [0], [16], target_memory=pl.MemorySpace.Vec)
+                        initial_ready = pl.tile.read(initial_tile, [0])
+                        for (ready,) in pl.while_(init_values=(initial_ready,)):
+                            pl.cond(ready != 1)
+                            pl.system.cacheinvalid()
+                            flag_tile = pl.load(flags, [0], [16], target_memory=pl.MemorySpace.Vec)
+                            final_ready = pl.yield_(pl.tile.read(flag_tile, [0]))
+                        if KEEP_RESULT:
+                            # 仅供定位活跃性分析的对照；不作为生产代码绕过方案。
+                            pl.write(flags, [1], final_ready)
+                    else:
+                        initial_ready = pl.read(flags, [0])
+                        for (ready,) in pl.while_(init_values=(initial_ready,)):
+                            pl.cond(ready != 1)
+                            pl.system.cacheinvalid()
+                            final_ready = pl.yield_(pl.read(flags, [0]))
+                        if KEEP_RESULT:
+                            pl.write(flags, [1], final_ready)
+                    pl.system.cacheinvalid()
+                    received = pl.load(scratch, [0, 0], [16, 16], target_memory=pl.MemorySpace.Vec)
+                    pl.store(pl.mul(received, 2.0), [0, 0], vector_out)
+    return cube_out, vector_out
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--variant", choices=("scalar", "tile"), default="scalar")
+    parser.add_argument("--keep-result", action="store_true")
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    result = {
+        "variant": args.variant,
+        "keep_result": args.keep_result,
+        "python": sys.version,
+        "host_architecture": platform.machine(),
+        "pypto_module": pypto.__file__,
+        "pypto_core_module": getattr(sys.modules.get("pypto.pypto_core"), "__file__", None),
+        "platform": "a2a3",
+        "device_execution": False,
+    }
+    try:
+        compiled = mixed_while_repro.compile(
+            TILE_POLLING=args.variant == "tile",
+            KEEP_RESULT=args.keep_result,
+            config=RunConfig(
+                platform="a2a3",
+                save_kernels=True,
+                save_kernels_dir=str(output / "kernel"),
+                dump_passes=True,
+            ),
+        )
+        result["code_generation_completed"] = True
+        result["output_dir"] = str(compiled.output_dir)
+    except Exception as exc:
+        result["code_generation_completed"] = False
+        result["error"] = str(exc)
+        (output / "exception.txt").write_text(traceback.format_exc(), encoding="utf-8")
+
+    # 记录 pass 边界，便于直接将生成文件与编译错误关联。
+    boundary_files = sorted((output / "kernel/passes_dump").glob("*ExpandMixedKernel.py"))
+    result["expand_mixed_kernel_dumps"] = [str(path.relative_to(output)) for path in boundary_files]
+    result["free_ready_after_expand"] = any(
+        "ready__FREE_VAR" in path.read_text(encoding="utf-8") for path in boundary_files
+    )
+    result["pypto_core_module"] = getattr(sys.modules.get("pypto.pypto_core"), "__file__", None)
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({key: result[key] for key in (
+        "variant", "keep_result", "code_generation_completed", "free_ready_after_expand"
+    )}, ensure_ascii=False))
+    return 0 if result["code_generation_completed"] and not result["free_ready_after_expand"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+</details>
+
+**源码定位与因果链**
+
+以下是根据实际前后 IR、对照编译和源码检查得到的定位；没有在依赖仓库中打补丁验证修复。
+
+1. `ExpandMixedFunction` 对生成的 AIV body 调用 `FinalizeSplitCoreBody`。
+2. `FinalizeSplitCoreBody` 调用 `StripDeadIterArgs`；该函数同时处理 ForStmt 和 WhileStmt。
+3. `StripDeadIterArgs` 用循环 body 中的引用和循环结果在后续语句中的使用来初始化 `live`，没有把当前 `WhileStmt.condition_` 的引用加入活跃性种子。
+4. 本例的 `ready` 只用于条件；每次 yield 产生的是新读取的 flag，不依赖旧 ready；final_ready 又没有循环后用途。因此这一 slot 被误判为 dead，yield 闭包传播也无法把它救回来。
+5. slot 和 yield 被删掉，随后 DCE 删除失去用途的读取；条件保留却指向已移除的 iter_arg，形成 FREE_VAR。
+
+对应源码位置（以本地复现版本为准）：
+
+- `src/ir/transforms/expand_mixed_kernel_pass.cpp`：`ExpandMixedFunction`，AIV 的 `FinalizeSplitCoreBody` 调用，约 2081 行。
+- `src/ir/transforms/utils/loop_state_repair.cpp`：`StripDeadIterArgs`，约 351 行；活跃性种子约 399–413 行；清除 slot/yield 约 415–440 行。
+- 同文件 `FinalizeSplitCoreBody`，约 830 行。
+- [main 的 StripDeadIterArgs 所在文件](https://github.com/hw-native-sys/pypto/blob/main/src/ir/transforms/utils/loop_state_repair.cpp)：只读检查可见相同的 body/后续使用判断；行号随版本变化。
+- [官方 while/SSA 写法](https://github.com/hw-native-sys/pypto/blob/main/docs/en/user/language/02-control-flow.md)：本例使用显式 init_values、pl.cond 和赋值形式的 pl.yield_。
+
+因此问题应先由 **PyPTO IR pass/循环状态活跃性分析**处理。当前证据没有指向 Simpler 调度、PTOAS 指令选择或 PTO-ISA 硬件实现；坏 IR 已在这些环节之前出现。
+
+**建议修复范围与验收**
+
+- 为 WhileStmt 将 condition 中使用的 iter_args 纳入 live 种子，再做现有 yield 依赖闭包；不要通过虚构标量入口参数修补 FREE_VAR。
+- 复核删除后的校验是否覆盖 while condition，而不只检查幸存的 yield。
+- 补一个仅在 while condition 使用 iter_arg、yield 为独立新值、循环结果未使用的 pass 单测；覆盖当前嵌套 worker/lane 分支及嵌套条件中的 while。
+- 两个原始复现均能完整代码生成，生成 IR 无悬空变量，循环体中的重新读取与条件回边仍在。保留第三个对照用于比较，不应要求业务额外写出 final_ready。
+- 对照已有多 slot FIFO 的活跃性闭包用例，避免修复条件使用时破坏已有 yield 依赖传播。
+
+Related: #2716。它涉及多个 FIFO slot 之间通过 yield 形成的活跃性传播；本例是单个状态仅被 while condition 使用，属于不同触发条件。此前 issue 的相关修正已存在于当前源码中，本例仍然失败。
+
+ISSUE_CREATE_PUBLISHING_END

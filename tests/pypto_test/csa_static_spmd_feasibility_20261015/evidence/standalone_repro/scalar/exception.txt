@@ -1,0 +1,37 @@
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/csa_static_spmd_feasibility_20261015/repro_mixed_while_loop_state.py", line 88, in main
+    compiled = mixed_while_repro.compile(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3505, in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3247, in _resolve_compiled
+    return build(), ordered_args, run_config
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3236, in build
+    return self._compile(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/jit/decorator.py", line 3727, in _compile
+    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 385, in compile
+    return _compile_impl(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 509, in _compile_impl
+    files = generate(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 1823, in generate
+    return _generate_single_chip(
+  File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 2290, in _generate_single_chip
+    raise PartialCodegenError(report, result_files)
+pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+
+  Function                             | Error
+  -------------------------------------+--------------------------------------------------------------
+  mixed_while_repro_mixed_while_repro  | PTO codegen cannot materialize symbol 'ready' in function
+                                       | 'mixed_while_repro_mixed_while_repro_aiv': it is not a
+                                       | physical tensor dimension, a scalar parameter, or a loop
+                                       | variable of this kernel. Pass the extent as a
+                                       | pl.Scalar[pl.INDEX] parameter and use it in pl.load(...,
+                                       | valid_shape=[...]) instead of naming it in the parameter's
+                                       | pl.TensorView(valid_shape=...) annotation.
+                                       | [/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/lan
+                                       | guage/parser/ast_parser.py:3636:-1]
+  -------------------------------------+--------------------------------------------------------------
+
+  Full details: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/results/csa_static_spmd_feasibility_20261015/standalone_repro/scalar/kernel/report/codegen_errors.txt

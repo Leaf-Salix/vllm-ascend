@@ -1,0 +1,70 @@
+[
+  {
+    "id": "p1_group_inout",
+    "title": "[Bug] ExpandMixedKernel 未重绑定 Group 成员的 InOut 返回别名，生成 FREE_VAR",
+    "component": "Other (please specify in description)",
+    "description": "组件为 ExpandMixedKernel 的手写 Group ABI 规范化。\nGroup 中先调用 AIC 成员并接收共享 InOut 的新 SSA 返回值，再把它传给 AIV 成员时，\nadapter 只映射原 Group 形参，没有把前一成员的完整参数写回别名映射到统一 ABI。\n克隆后的 AIV 成员引用 Group 局部 SSA 值，产生未绑定的 free variable。\n\n普通调用以及 tuple 返回 + pl.submit + pl.no_dep 都能触发。\n这是合法参数写回的编译正确性问题，与 while 活跃性 #3009 / PR #3013 不同，\n也不依赖大于 32 个 Tensor 的扩容。",
+    "expected": "两个成员都只引用自己规范化后的形参；共享 InOut 返回值映射回对应 Group 参数。tuple 的返回次序和 no_dep 的参数位置必须同时保留。不得产生 FREE_VAR。",
+    "actual": "普通调用下 AIV 的返回值/参数别名仍指向前一个调用的 sink SSA；Submit/tuple 场景同样保留 Group 局部别名。完整 CSA 曾在 progress__ssa_v1 的未定义引用处失败。",
+    "root": "src/ir/transforms/expand_mixed_kernel_pass.cpp:\nBuildGroupAbiAdapter / GroupMemberCallRewriter / NormalizeHandWrittenGroupAbis。\n本地候选复用 return_lineage 的完整参数写回追踪，一次性建立 alias→Group parameter 映射，\n并用于成员参数重写和 no_dep 下标映射。不能把 slice/view 或新 buffer 冒充完整参数别名。",
+    "validation": "附带的两个最小回归在本地候选上通过。已有 5 参数 JIT 小例子还验证了\n24 组 MIX、双 AIV、当前 stream、连续三次执行和保护区；这不是完整 CSA 设备验证。\n代码补丁仍保留本地，本 issue 不附带 PR，不声称候选已通过全部上游 CI。",
+    "related": "Related: #2003（另一条返回 lineage / orchestration 路径，不是本次 Group ABI adapter 的缺失映射）、#3009、#3013。",
+    "repo": "hw-native-sys/pypto",
+    "labels": [
+      "bug"
+    ],
+    "body_file": "p1_group_inout.md",
+    "body_bytes": 8774
+  },
+  {
+    "id": "p4_ptoas_branch_view",
+    "title": "[Bug] PTOAS 模式下分支后 reshape 错用不支配使用点的 SSA 句柄",
+    "component": "Codegen",
+    "description": "在 memory_planner=PTOAS / emit_tile_addr=False 下，分支内对列向量作\nreshape→add→reshape，分支外再对 phi 结果 reshape。当前 view no-op 判断只比较\n预声明目标句柄的类型与结果类型。类型相同并不说明旧 MemRef 代表句柄就是当前 phi。\n分支外消费可能错误地选到只在分支内定义的 producer，导致非法 SSA dominance。\ntranspose_view 使用同类 no-op 判断，也需要同一约束。\n\n这是生成 IR 的合法性问题；PTOAS 对该 IR 的拒绝是合理的，不要求 PTOAS 放宽验证。",
+    "expected": "分支后的 view 必须从实际 phi/源句柄派生。没有固化物理地址时，不能仅凭同类型省略 view。后续 extract 应读取由 phi 派生的 treshape，其源定义支配使用点。",
+    "actual": "真实 CSA 的 PTOAS 路径曾产生两处分支外引用分支内旧句柄的问题。最小回归检查 extract 的源确实由 phi 的 treshape 产生，而不是只检查能够打印 MLIR。",
+    "root": "src/backend/common/pto_ops_datamove.cpp 的 tile.reshape / tile.transpose_view。\n本地候选仅在固定地址模式或实际 source handle 与已绑定 target 相同时执行原 no-op，\n否则从实际 source 发出 view。此处不修改内存容量、算术、Tile 或流水深度。",
+    "validation": "附带最小 CPU 回归在本地候选上通过，原完整 CSA 的两处 SSA 合法性错误也已越过。\n本问题来自 PTOAS 备用编译路径；当前完整 CSA 默认 PYPTO 路径不依赖此项。\n完整 PTOAS 路径仍存在独立的 Mat 容量问题，不能将本项修复记为整层编译或真机通过。",
+    "related": "Related: #1642（固定地址 view 丢失依赖链，本例为无地址模式下分支后的 SSA 句柄）、#2693。",
+    "repo": "hw-native-sys/pypto",
+    "labels": [
+      "bug"
+    ],
+    "body_file": "p4_ptoas_branch_view.md",
+    "body_bytes": 6769
+  },
+  {
+    "id": "p5_ptoas_gather_phi",
+    "title": "[Bug] PTOAS 条件 gather 的同存储 phi 产生非法 Mat→Mat 搬运",
+    "component": "Codegen",
+    "description": "条件两分支均对同一个 Mat tile 执行原地 gather_row，返回的 phi 理应仍指向该存储。\n连续两次这种条件更新、后接 transpose_view 和 matmul 时，PTOAS 路径会给 phi 引入新的\n目标句柄并产生 Mat→Mat tmov。A2/A3 不支持这种地址空间对，PTOAS 正确拒绝编译。\n\n触发点包含两个相连的边界：YieldFixup 在 PTOAS 模式完全跳过 if-phi 同窗口归一，\n以及共享存储存在多种 view 类型时，codegen 一律拒绝复用已声明、且恰好同类型的句柄。",
+    "expected": "两分支原本就在同一物理窗口原地更新时，phi 继续使用该存储。后续 transpose 和 matmul 必须读到此窗口，不生成非法 Mat→Mat 拷贝，也不能只删除拷贝而让消费者读未写入的新 buffer。",
+    "actual": "完整 CSA 在修复分支 view 问题后报错：\n`'pto.tmov' op expects a supported tmov address-space pair for this target`。\n附带最小回归保留连续条件 gather、transpose 和 matmul，检查没有 Mat→Mat move，\n且两轮 gather 的 subview 共享同一个根句柄。",
+    "root": "src/ir/transforms/memory_reuse_pass.cpp 的 YieldFixupMutator，\n以及 src/codegen/pto/pto_codegen.cpp / pto_control_flow_codegen.cpp 的共享句柄选择。\n本地候选只对已同窗口的两个分支同步 phi；不同窗口不得强行合并。\n多类型存储仅复用已经声明且类型完全匹配的 handle，不能修改一个 SSA handle 的类型。",
+    "validation": "附带最小 CPU 回归在本地候选上通过，完整 CSA 已越过该 Mat→Mat 错误。\n本问题属于 PTOAS 备用路径的正确性 bug，不是当前 PYPTO 路径的性能优化。\n尚未用完整 CSA 真机验证该 PTOAS 分支，不声明完整算子通过。",
+    "related": "Related: #1956、#2693；#2902 是 AutoTileMatmulL0 对已有 Mat 操作数额外搬运，本例是条件 phi / 多类型共享句柄，根因不同。",
+    "repo": "hw-native-sys/pypto",
+    "labels": [
+      "bug"
+    ],
+    "body_file": "p5_ptoas_gather_phi.md",
+    "body_bytes": 7213
+  },
+  {
+    "id": "p7_ptoas_column_carry",
+    "title": "[Bug] PTOAS 行缓冲承载列向量 loop-carry 时生成形状不匹配的 TMOV",
+    "component": "Codegen",
+    "description": "以 [1,32] 行向量 full 初始化，经 reshape 得到 [32,1] 列向量作为循环 carry。\n循环内包含条件更新，PTOAS 路径的 carry 逻辑类型为列向量，但其底层已声明 handle 仍是行向量。\ntile.move codegen 直接向底层行 handle 发出列→行 tmov，源和目标形状不一致，PTOAS 拒绝编译。\n\n这不是要求硬件支持新搬运方式，而是 codegen 应对同一存储使用正确的目标 view。",
+    "expected": "写回 carry 时先在现有存储上建立匹配 [32,1] 的目标 view，然后发出源/目标形状匹配的 tmov。不新增无意义 allocation，不改变循环结果。",
+    "actual": "完整 CSA 报错：\n`'pto.tmov' op expects A2/A3 non-mat tmov to use matching src/dst shapes`。\n最小回归检查每条 tmov 的实际源/目标 tile_buf rows/cols，要求均匹配。",
+    "root": "src/backend/common/pto_ops_elementwise.cpp 的 tile.move PTOAS 分支。\n本地候选对比逻辑 destination type 与底层 handle type，必要时建立同存储的静态\ntreshape view，再按实际 view 类型发出搬运；保留静态有效形状约束。",
+    "validation": "附带最小 CPU 回归在本地候选上通过。完整 CSA 已越过此类 MLIR 合法性错误，\n随后遇到独立的 PTOAS Mat 容量限制；因此没有宣称完整 PTOAS 编译或设备通过。\n当前默认 PYPTO 路径不依赖本项。",
+    "related": "Related: #1649（sub-column spill 的 valid_shape 问题，与这里行/列 carry 的底层 handle 形状不同）、#2693。",
+    "repo": "hw-native-sys/pypto",
+    "labels": [
+      "bug"
+    ],
+    "body_file": "p7_ptoas_column_carry.md",
+    "body_bytes": 6349
+  }
+]

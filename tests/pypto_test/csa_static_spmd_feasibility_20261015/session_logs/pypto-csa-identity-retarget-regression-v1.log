@@ -1,0 +1,79 @@
+........................................................................ [ 42%]
+.....F.................................................................. [ 85%]
+.........................                                                [100%]
+=================================== FAILURES ===================================
+_______ TestTopDownRetargeter.test_divergent_bare_acc_alias_fails_closed _______
+
+self = <transforms.test_memory_reuse.TestTopDownRetargeter object at 0xfffdcd89b400>
+
+    def test_divergent_bare_acc_alias_fails_closed(self):
+        """An alias with a stale MemRef cannot select the accumulator target."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.InCore)
+            def kernel(
+                self,
+                lhs: pl.Tensor[[16, 64], pl.BF16, pl.MemRef("mem_ddr_0", 0, 2048)],
+                rhs: pl.Tensor[[64, 64], pl.BF16, pl.MemRef("mem_ddr_1", 0, 8192)],
+                cond: pl.Scalar[pl.INDEX],
+                out: pl.Out[pl.Tensor[[16, 64], pl.FP32, pl.MemRef("mem_ddr_2", 0, 4096)]],
+            ) -> pl.Tensor[[16, 64], pl.FP32]:
+                mem_mat_3: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
+                mem_mat_4: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 8192)
+                mem_acc_5: pl.Ptr = pl.tile.alloc(pl.Mem.Acc, 4096)
+                mem_acc_6: pl.Ptr = pl.tile.alloc(pl.Mem.Acc, 4096)
+                mem_acc_7: pl.Ptr = pl.tile.alloc(pl.Mem.Acc, 4096)
+                sa: pl.Tile[[16, 64], pl.BF16, pl.MemRef(mem_mat_3, 0, 2048), pl.Mem.Mat] = pl.tile.load(
+                    lhs, [0, 0], [16, 64], [16, 64], target_memory=pl.Mem.Mat
+                )
+                sb: pl.Tile[[64, 64], pl.BF16, pl.MemRef(mem_mat_4, 0, 8192), pl.Mem.Mat] = pl.tile.load(
+                    rhs, [0, 0], [64, 64], [64, 64], target_memory=pl.Mem.Mat
+                )
+                prev: pl.Tile[[16, 64], pl.FP32, pl.MemRef(mem_acc_5, 0, 4096), pl.Mem.Acc] = pl.tile.matmul(
+                    sa, sb
+                )
+                if cond < 1:
+                    seed: pl.Tile[[16, 64], pl.FP32, pl.MemRef(mem_acc_7, 0, 4096), pl.Mem.Acc] = (
+                        pl.tile.matmul(sa, sb)
+                    )
+                    phi = pl.yield_(seed)
+                else:
+                    acc: pl.Tile[[16, 64], pl.FP32, pl.MemRef(mem_acc_5, 0, 4096), pl.Mem.Acc] = (
+                        pl.tile.matmul_acc(prev, sa, sb)
+                    )
+                    stale_alias: pl.Tile[[16, 64], pl.FP32, pl.MemRef(mem_acc_6, 0, 4096), pl.Mem.Acc] = acc
+                    phi = pl.yield_(stale_alias)
+                return pl.tile.store(phi, [0, 0], out)
+    
+>       with pytest.raises(InternalError, match="cannot align the accumulator branch"):
+E       Failed: DID NOT RAISE <class 'pypto.InternalError'>
+
+tests/ut/ir/transforms/test_memory_reuse.py:4622: Failed
+=============================== warnings summary ===============================
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5112: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5127: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend910b_split_aiv_does_not_reuse_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_dsa_rp_ascend910b_split_aiv_physically_separates_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend950_allows_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5918: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_iter_arg_tpop_operand_still_blocks_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5987: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_tpop_reaching_a_writer_across_the_back_edge_blocks_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:6047: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_divergent_bare_acc_alias_fails_closed
+1 failed, 168 passed, 7 warnings in 14.10s

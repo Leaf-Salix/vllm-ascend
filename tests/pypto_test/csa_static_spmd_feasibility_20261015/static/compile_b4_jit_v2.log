@@ -1,0 +1,14 @@
+{"source": "tests/pypto_test/csa_static_spmd_feasibility_20261015/static/h131072_b4/entry_jit.py", "frontend": "jit", "artifact_mode": "program", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PTOAS", "error": "Unknown shape variable: QKV_QPROJ_MM_T_DYN"}
+Error: Unknown shape variable: QKV_QPROJ_MM_T_DYN
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/csa_static_spmd_feasibility_20261015/static/h131072_b4/entry_jit.py:161:13
+    |
+159 |                 stage_1_v22: pl.Tensor[[32, 128], pl.FP32] = pl.tensor.matmul_acc(stage_1_v33, stage_1_v20, stage_1_v21, init_cond=stage_1_v18 == 0, a_trans=False, b_trans=True)
+160 |                 stage_1_v23: pl.Tensor[[32, 128], pl.FP32] = pl.yield_(stage_1_v22)
+161 |             stage_1_v11: pl.Tensor[[QKV_QPROJ_MM_T_DYN, 1024], pl.FP32] = pl.tensor.assemble(stage_1_v17, stage_1_v23, [stage_1_v8, stage_1_v6])
+    |             ^^^^^^^^^^^ Unknown shape variable: QKV_QPROJ_MM_T_DYN
+162 |             stage_1_v12: pl.Tensor[[32, 1024], pl.FP32] = pl.yield_(stage_1_v11)
+163 |         for (stage_1_v13, (stage_1_v24,)) in pl.range(0 + stage_1_v7 * 16, 32, 1 * 16, init_values=(stage_1_v12,)):
+    |
+   = help: Use an integer, pl.dynamic() variable, or a Scalar variable defined earlier
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

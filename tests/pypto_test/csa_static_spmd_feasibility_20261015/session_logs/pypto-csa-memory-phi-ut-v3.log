@@ -1,0 +1,51 @@
+........................................................................ [ 50%]
+.....................................................................F.  [100%]
+=================================== FAILURES ===================================
+_ TestChainedInPlaceIfPhis.test_nested_phi_identity_does_not_resurrect_old_buffer _
+python/pypto/language/parser/ast_parser.py:8981: in _dispatch_op
+    return self._attach_op_attrs(invoke_dsl(op_func, args, kwargs, span), attrs)
+python/pypto/language/parser/_dsl_invoker.py:150: in invoke_dsl
+    result = fn(*wrapped_args, **wrapped_kwargs)
+python/pypto/language/op/tile_ops.py:845: in full
+    call_expr = _ir_ops.full(shape, dtype, value)
+python/pypto/ir/op/tile_ops.py:750: in full
+    value_expr = ConstFloat(value, dtype, actual_span)
+E   TypeError: __init__(): incompatible function arguments. The following argument types are supported:
+E       1. __init__(self, value: float, dtype: pypto.pypto_core.DataType, span: pypto.pypto_core.ir.Span) -> None
+E   
+E   Invoked with types: pypto.pypto_core.ir.ConstFloat, pypto.pypto_core.ir.ConstFloat, pypto.pypto_core.DataType, pypto.pypto_core.ir.Span
+
+The above exception was the direct cause of the following exception:
+tests/ut/ir/transforms/test_memory_reuse.py:7882: in test_nested_phi_identity_does_not_resurrect_old_buffer
+    class Before:
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+python/pypto/language/parser/ast_parser.py:2082: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+python/pypto/language/parser/ast_parser.py:9141: in _parse_tile_op
+    return self._dispatch_op(_dsl_tile, "pl.tile", op_name, call)
+python/pypto/language/parser/ast_parser.py:9011: in _dispatch_op
+    raise InvalidOperationError(msg, span=span, hint=hint) from e
+E   pypto.language.parser.diagnostics.exceptions.InvalidOperationError: pl.tile operation 'full': __init__(): incompatible function arguments. The following argument types are supported:
+E       1. __init__(self, value: float, dtype: pypto.pypto_core.DataType, span: pypto.pypto_core.ir.Span) -> None
+E   
+E   Invoked with types: pypto.pypto_core.ir.ConstFloat, pypto.pypto_core.ir.ConstFloat, pypto.pypto_core.DataType, pypto.pypto_core.ir.Span
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_nested_phi_identity_does_not_resurrect_old_buffer
+1 failed, 142 passed, 7 warnings in 15.86s
