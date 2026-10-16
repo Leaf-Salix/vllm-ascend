@@ -1,5 +1,9 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+2026-10-16真实模型TND精度版两档192 token结果见
+[精度结果](DSV4_FLASH_CSA_TND_NALINALY_LOW_ACCEPTANCE_20261016.md)；完整环境、输入、命令、验收和冻结材料见
+[复现手册](DSV4_FLASH_CSA_TND_PRECISION_REPRO_20261016.md)。
+
 metadata + QR组合的七档对拍见
 [组合效率记录](DSV4_FLASH_CSA_TND_COMBINATION_20261008.md)：保持逐位结果，等长仍未持平BSH，未合入正式kernel。
 

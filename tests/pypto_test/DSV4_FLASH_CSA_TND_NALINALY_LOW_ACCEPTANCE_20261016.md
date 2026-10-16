@@ -109,3 +109,5 @@ Specialization取自实际不可变manifest，未独立重新specialize。
 不能扩大为任意输入、全部rank的所有中间值均逐bit一致，也不称原nalinaly完整bank已复现。
 
 [结构化记录](evidence_tnd_precision/nalinaly_protocol_alignment_20261016.json)保留完整协议、输入身份、两档结果与失败历史。
+
+完整可复现方案、冻结脚本与原始证据入口见[复现手册](DSV4_FLASH_CSA_TND_PRECISION_REPRO_20261016.md)。
