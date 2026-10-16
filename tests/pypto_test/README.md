@@ -4,6 +4,8 @@
 [完整PTO恢复记录](DSV4_FLASH_CSA_TND_FULL_PRECISION_20261016.md)。
 后续HC-pre的Native分片观测、HF32根因及逐bit恢复见
 [HC-pre恢复记录](DSV4_FLASH_CSA_TND_HCPRE_PRECISION_20261016.md)。原混合精度基准保留；候选尚未完成全部模块。
+后续输入RMSNorm的半区归约、开方/除法舍入及模块/服务验收见
+[输入Norm恢复记录](DSV4_FLASH_CSA_TND_INPUT_NORM_PRECISION_20261016.md)。
 
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
 [整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。

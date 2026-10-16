@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""完整PTO TND的分阶段候选：当前恢复HC-pre及HC-post，输入Norm仍Native。"""
+"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm及HC-post。"""
 
 import torch
 import torch_npu
@@ -10,12 +10,13 @@ from ..deepseek_v4_flash_csa_tnd_precision.native_adapter import NativeCSACall
 from ..deepseek_v4_flash_csa_tnd_precision.service import CSAServiceRuntime as BaselineRuntime
 from .hc_post import hc_post_test
 from .hc_pre import hc_pre_test
+from .input_norm import input_norm_test
 
 
 class CSAServiceRuntime(BaselineRuntime):
     """原基准保持可运行；剩余Native边界须后续逐项对拍再恢复。"""
 
-    restored_modules = ("hc_pre", "hc_post")
+    restored_modules = ("hc_pre", "input_norm", "hc_post")
     # Native mDim changes above 256 rows; the current K32/22 partition is for mDim1.
     max_hc_pre_tokens = 256
 
@@ -38,6 +39,17 @@ class CSAServiceRuntime(BaselineRuntime):
                 raise ValueError("PTO HC-pre requires original ND Native HC parameters")
         tokens = self.native_attention_out.shape[0]
         device = self.native_attention_out.device
+        norm = layer.input_layernorm
+        if norm.variance_epsilon != 1e-6 or norm.bias_loaded:
+            raise ValueError("PTO input Norm requires Native epsilon=1e-6 without a loaded bias")
+        norm_weight = norm.weight
+        if norm_weight.dtype != torch.bfloat16 or tuple(norm_weight.shape) != (4096,):
+            raise ValueError("PTO input Norm requires original Native BF16 [4096] weight")
+        if not norm_weight.is_contiguous() or torch_npu.get_npu_format(norm_weight) not in (0, 2):
+            raise ValueError("PTO input Norm requires original contiguous ND weight")
+        self.pto_input_norm = pypto.torch.register(input_norm_test, "dsv4_csa_tnd_full_precision::input_norm")
+        self.normed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
+        self.norm_rstd = torch.empty((tokens, 8), dtype=torch.float32, device=device)
         self.hc_mixed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
         self.hc_post_gates = torch.empty((tokens, 4), dtype=torch.float32, device=device)
         self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
@@ -78,7 +90,8 @@ class CSAServiceRuntime(BaselineRuntime):
         self.pto_hc_pre(
             hidden, self.layer.hc_attn_fn, self.layer.hc_attn_scale, self.layer.hc_attn_base, mixed, post, comb
         )
-        normed = self.layer.input_layernorm(mixed)
+        normed = self.normed[:tokens]
+        self.pto_input_norm(mixed, self.layer.input_layernorm.weight, normed, self.norm_rstd[:tokens])
         native_kv_projected = self.layer.self_attn.wkv(normed)
         if native_kv_projected.dtype != torch.bfloat16 or tuple(native_kv_projected.shape) != (tokens, 512):
             raise ValueError("Native WKV must publish BF16 [tokens, 512]")
