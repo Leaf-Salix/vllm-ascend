@@ -2,7 +2,7 @@
 
 日期：2026-10-16。分支`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`。
 数学源码为`cbc810c8afab47c2425068049440424f014dcde3`，含长档缩批Indexer根发布修复；性能版未改。
-复用已冻结的远端诊断overlay、SDK、READY及官方静态包，不重装框架。
+复用已冻结的远端诊断overlay、SDK及官方静态包，不重装框架。CSA首次构建了一份kernel，详见下文缓存资格。
 远端清单中的516个`vllm_ascend/`生产文件与该commit逐文件SHA一致；诊断harness是已记录的移植版，不能把整个目录称为本地checkout的完整复制。
 
 ## 配置
@@ -56,18 +56,59 @@ Native1没有图内stage观测，因此没有声称两次Native的每一个内�
 Native2各rank原始记录79轮，其中78轮为生成窗口、1轮为独立审计的完成后空跑。
 原始空尾数量可变的事实继续保留。
 
-## 当前执行状态
+## 最终结果
 
 | 阶段 | 任务 | 状态 |
 | --- | --- | --- |
 | Native1 control | `task_20261016_091954_247756916995` | exit0；完整输出与生成窗口资格通过 |
 | Native2 witness | `task_20261016_093935_324666725855` | exit0；完整生成输入/token/事件重复及outer保真资格通过 |
-| CSA witness | `task_20261016_095631_393947426780` | Native重复资格通过后提交，等待16卡 |
+| CSA witness | `task_20261016_095631_393947426780` | exit0；数值资格通过；严格READY复用资格未通过 |
 
-192 token的Native独立重复及观测保真通过；CSA尚未执行完成，不能宣称替换精度通过。
+| 对拍项目 | 本轮结果 |
+| --- | --- |
+| Native1 → Native2 | 全部16rank的78轮生成输入、73,728个输出token及接受事件一致；rank0 outer逐bit一致 |
+| Native2 → CSA精度版 | 全部16rank的78轮生成输入、73,728个输出token及接受事件一致；无首差、零抢占 |
+| rank0模块边界 | 43层、其中21层CSA；78轮共16,614条边界摘要逐bit一致 |
+| rank0 outer | target hidden、aux hidden、MTP residual逐bit一致 |
+| 替换范围 | 全部16rank核实：21层CSA为TND精度版，20层HCA仍为Native |
+| 实际入场 | 每卡峰值21；q00–q20在第0轮入场，q21/q22在第35轮、q23在第36轮入场 |
+| 接受步长 | 3.8264033264，0–5各长度均覆盖，三臂完整接受事件一致 |
+
+rank0生成窗口的图形态是1轮NONE/21 token、73轮FULL/144 token、4轮FULL/6 token。
+完整窗口、请求身份/顺序、实际token/position、query bounds/seq lens、padding及DP向量均对齐，
+没有仅比较最终文本。CSA各rank保留79轮raw，其中78轮生成窗口及1轮严格验证的完成后空尾。
+
+三项任务均设置780秒执行上限。实际执行约6分38秒、8分钟、8分17秒；
+Native2和CSA曾排队，CLI的提交至完成汇总时长包含排队，不能解释为占卡时间。
+所有本线程任务已结束。本轮没有扩大配置或改动数学实现，性能版保持原样。
+
+## 缓存资格与数值资格分别记录
+
+默认严格资格审计在CSA的READY复用检查失败：所有rank的ready_hits为0，
+仅rank9发生一次生成和一次binary编译，用时16.533138189秒；其余rank等待该产物。
+全部16rank原始observation中的bypass、invalid、storage error及forced rebuild计数均为0。
+官方13份静态包复用检查仍通过；没有重装/编译PyPTO、Simpler或vLLM框架。
+
+保留原始严格失败记录，不将其改写为通过。随后独立CPU审计显式排除“必须已有暖READY命中”这一项，
+继续核验全部输入、输出、模块、确定性、实际替换层及源码身份，数值资格通过。
+该结果只能用于本轮精度结论，不构成暖缓存复用或性能结论；没有为获取一次cache hit额外交NPU任务。
+
+CPU审计另行重算冻结精度入口的persistent source和工具链指纹，与READY manifest一致，
+并核验全部206份产物文件SHA；本任务实际构建目录中的同206份文件与该产物逐一一致。specialization保留实际manifest及ABI记录，未独立重新specialize，
+不推测首次cache miss的具体原因。
+
+## 结论范围
+
+本次固定bank、128K/B24提交、实际峰值21、EPLB关闭的192 token整模型精度对照通过。
+逐token结果覆盖全部16rank；逐bit浮点边界仅覆盖rank0已记录的位置，不能扩展为全部rank的所有中间tensor。
+本次生成窗口未出现同轮请求query长度不等的情况，不能替代另行的不等长TND测试矩阵。
+尚未核验与nalinaly原始完整bank逐字节一致，也没有测性能或宣称任意输入均能逐bit一致。
 
 [结构化记录](evidence_tnd_precision/low_acceptance_192_admission_retest_20261016.json)保留逐rank计数、SHA身份和审计结果。
 Native小型原始证据包SHA256：`75ccda6a4115052977ebbc5a68034b5d1bc885207dbbf9dd38541bb5cf3fe756`。
+
+最终小型原始证据包包含391份文件，已逐文件SHA校验；大tensor原值保留在227。
+证据包SHA256：`5cff9b86f9e5ec2b1777525b457a65d5ee8ca570f128064a87e86147cbeeeae0`。
 
 ## 相关记录
 
