@@ -1423,13 +1423,20 @@ def indexer_score_topk_native_cube(
                                 )
                                 buf_score_sum = pl.tile.slice(buf_score_sums, [1, score_tile // 2], [buf_query_lane, 0])
                                 buf_score_row = pl.mul(buf_score_sum, buf_kv_scale)
+                                # Multi-leaf workers must not overwrite another
+                                # leaf's scores for the same query. Only a single
+                                # leaf uses the Native contiguous query row.
+                                buf_store_row = buf_query + buf_query_lane
+                                buf_store_column = buf_score_begin + buf_lane_begin
+                                if buf_max_leaves > 1:
+                                    buf_store_row = (
+                                        buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane
+                                    )
+                                    buf_store_column = buf_score_begin
                                 if buf_lane_valid_rows > 0 and buf_lane_live:
                                     pl.store(
                                         pl.set_validshape(buf_score_row, 1, buf_lane_valid_rows),
-                                        [
-                                            buf_query + buf_query_lane,
-                                            buf_score_begin + buf_lane_begin,
-                                        ],
+                                        [buf_store_row, buf_store_column],
                                         score_arena,
                                     )
                             if balance_leaves:
@@ -1457,6 +1464,43 @@ def indexer_score_topk_native_cube(
                                                 0,
                                             )
                                             prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
+                        if buf_max_leaves > 1:
+                            # The long pair path publishes two half roots per
+                            # leaf, matching indexer_topk_query_merge_one.
+                            for buf_query_lane in pl.unroll(query_group_size):
+                                if buf_query_lane < buf_group_rows:
+                                    buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
+                                    buf_query_visible = pl.max(
+                                        pl.min(
+                                            pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO),
+                                            TOPK_MAX_CANDIDATES,
+                                        ),
+                                        0,
+                                    )
+                                    buf_half_begin = buf_logical_begin + buf_lane_begin
+                                    buf_half_valid = pl.max(
+                                        pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0
+                                    )
+                                    buf_half_slot = (
+                                        (buf_query + buf_query_lane) * TOPK_ROWS_PER_QUERY
+                                        + buf_leaf * 2
+                                        + buf_score_lane
+                                    )
+                                    if buf_half_valid > 0:
+                                        indexer_topk_half_leaf(
+                                            score_arena,
+                                            pair_arena,
+                                            buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
+                                            buf_half_begin,
+                                            buf_half_valid,
+                                            buf_half_slot,
+                                        )
+                                    else:
+                                        pl.store(
+                                            pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+                                            [buf_half_slot, 0],
+                                            pair_arena,
+                                        )
     return buffered_leaf_tid
 
 

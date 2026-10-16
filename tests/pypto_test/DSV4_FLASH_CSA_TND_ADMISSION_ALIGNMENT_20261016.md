@@ -1,9 +1,10 @@
-# TND 精度版：128K/B24 入场对齐与首轮模块对拍
+# TND 精度版：128K/B24 入场对齐、FULL首差与Indexer修复
 
 测试日期：2026-10-15 至 2026-10-16。
 分支：`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`。
-数学源码冻结在 `a9e0ae0d9f5bc60b59fc3b74342ca2b156401045`，本轮没有修改正式数学实现或性能版。
-Native 指同一冻结 checkout 的原生 CSA 路径。
+定位基线冻结在 `a9e0ae0d9f5bc60b59fc3b74342ca2b156401045`。
+定位后仅修复精度版 `decode_indexer.py` 的多leaf临时分数与TopK根发布，性能版未改。
+Native 指同一冻结 checkout 的原生 CSA 路径；修复候选相对该基线的其余源码逐字节相同。
 
 ## 为什么先对齐入场
 
@@ -91,8 +92,8 @@ D2H观测会改变时序，因此本轮不提供性能结论。
 只有观测保真和实际replay刷新检查通过，才用同样观测与CSA逐模块比较。
 发现首个不同边界后停止后续step，再按Native实现修正。
 
-截至本记录，**完整FULL模块逐bit精度、128K/B24完整192 token验收均未通过**。
-原有192 token失败结论仍保留；本轮没有引入新的数学修复或性能优化。
+以上是修复前的定位过程，当时完整FULL模块精度尚未通过。
+后续FULL首差、修复及64 token回归见下文；原有192 token失败结论保留，尚未复测。
 
 ## FULL同输入首差：第24轮、第2层heads
 
@@ -112,7 +113,7 @@ D2H观测会改变时序，因此本轮不提供性能结论。
 | 停止 | 保存首差原值后停止后续model step；没有继续192 token或扩大参数 |
 
 该轮q20完成，活跃请求从4条缩到3条，顺序为q22、q21、q23，每条6个token，padding档位仍为144。
-这只是首差与缩批的时间关联，尚不能据此认定mask、页表或原生算子有bug。
+仅凭缩批的时间关联，不能认定mask、页表或原生算子有bug。
 CPU对已保存heads的比较排除了“上一轮结果原样残留”和“当前行简单重排”。
 该误差量级明显超过舍入差异，后续先核查真实设备metadata、TopK与cache寻址/状态，再细分Q及attention。
 
@@ -120,6 +121,69 @@ CPU对已保存heads的比较排除了“上一轮结果原样残留”和“当
 动态`min`切片候选又被CPU编译门禁拒绝。最终采用只写私有buffer的观测custom op，
 CPU回归直接复用同一捕获图处理6/21/144/400行；随后Native保真验证通过。
 这些属于探针修复，没有改动CSA数学源码。所有硬件任务上限均为780秒。
+
+## Indexer归因：长档缩批路径没有发布本轮TopK根
+
+继续在真实第24轮的root入口，把设备metadata复制到独立持久缓冲区，并在原始FULL replay后读取
+已有的TopK输出。query bounds为`[0,6,...,144]`；前3条seq_lens有效，其余为0；
+18个有效token的position和slot有效，padding slot为-1。原始heads的首差SHA与前项完全相同，
+没有因增加观测而改变故障。
+
+该轮PyPTO TopK每行512项只有 **47–75个不同索引**。检查对应生产者与消费者发现：
+
+1. 长档至少4组S6请求走`balance_leaves=True`，每leaf发布一个根。
+2. 缩到3条请求后走双query的`balance_leaves=False`分支。此前短单leaf修正让分数写到连续query行，
+   同时删除half-root发布；长多leaf也复用了这个分支，多个leaf会抢写同一query行。
+3. 下游`indexer_topk_query_merge_one`在长档仍按每leaf两个half-root读取`pair_arena`，
+   但该分支没有本轮publisher，合并读到了未初始化或旧内容。
+
+这是本分支Indexer的生产/消费契约错误，不能归为Native bug或BF16舍入噪声。
+额外Native eager shadow虽然产生512个不同索引，但没有通过独立Native FULL原值门禁，
+因此未用作金标准或将其结果注入正式候选。最终比较仍使用已通过保真验证的Native FULL边界。
+
+### 修复范围
+
+仅修改`deepseek_v4_flash_csa_tnd_precision/decode_indexer.py`：
+
+- 单leaf保留原连续query score布局和短档排序路径。
+- 多leaf改为worker/query/AIV私有score行，半区内偏移从0开始，避免不同leaf抢写。
+- 恢复`query * TOPK_ROWS_PER_QUERY + leaf * 2 + AIV`的half-root发布，匹配merge读址。
+- 不完整query组只发布有效行；空半叶显式填负无穷，避免残留进入合并。
+
+没有改变QK计算、缩放、舍入顺序或Native实现。修复文件SHA256为
+`7d117c766f7cafeff379e0fbad4fa4176c999c3dd9226b14f86241c2fdc35023`。
+独立源码清单核验确认候选只有此文件不同。CPU回归执行实际DSL的地址与发布语句，
+覆盖B1/B2/B3、`(1,5,2)`变长query组和空半叶；5项通过，未修复源码的负控制5项全部被拒绝。
+该CPU检查不替代排序数学及设备同步验证，后者由下面的真实整模型任务覆盖。
+
+### 修复后同输入回归
+
+| 检查 | 结果 |
+| --- | --- |
+| 实际入场与联合输入 | 16rank全部32轮与Native逐字段相同，含30轮FULL144 |
+| rank0模块边界 | 43层、其中21个CSA，6816份边界摘要全部逐bit一致 |
+| rank0图外输出 | 全部32轮target hidden、aux hidden、MTP residual逐bit一致 |
+| 完整输出 | 384条副本请求、24,576 token，完整token序列及接受事件与Native一致 |
+| 实际并发/接受/抢占 | 峰值21；平均接受3.2472826087；零抢占，与Native一致 |
+| 原故障轮TopK | FULL144/T18，每行512个不同索引，全部位于各query有效范围 |
+| 独立重复 | 相同源码重复任务通过；16rank均READY命中1次，生成/二进制编译/bypass/损坏/存储错误均0 |
+
+模块边界是明确导出的层输入、positions、归一化结果、heads、O-proj及层输出等，不代表导出了所有内部tensor；
+浮点观测范围为rank0，其他rank通过实际输入、完整token及接受事件核验。
+
+| 阶段 | 任务 | 结果 |
+| --- | --- | --- |
+| 额外metadata/TopK定位 | `task_20261016_012900_59571325267` | 首差仍为第24轮heads；TopK结构异常，按门禁停止 |
+| 无设备生成/增量编译 | `task_20261016_015300_117095229502` | 约19.7秒；复用SDK，没有重装框架 |
+| 首次修复回归 | `task_20261016_015811_127824410229` | 数值完整通过，约7分42秒；首次真实调用由rank9构建1次，不记为零编译资格通过 |
+| 严格READY重复回归 | `task_20261016_021041_160980929476` | 约8分42秒，exit0；同输入精度与全部运行门禁通过 |
+
+第一次无设备预编译仅通过签名级缓存，未保证真实调用已预热；因此保留首次回归的构建记录，
+没有放宽READY门禁。独立审计还绑定两侧任务的源码清单、候选实际snapshot、32轮完整witness及逐轮有效token数。
+
+**当前通过范围：本固定bank、128K/B24提交、实际峰值21、64 token生成。**
+128K/B24的192 token尚未复测；本轮没有新增长档不等长query矩阵，也没有性能测量。
+因此不能由本结果推出所有配置已逐bit一致，或覆盖先前192 token的失败记录。
 
 ## 环境与证据
 
@@ -134,6 +198,7 @@ PyPTO `3e87a843`、Simpler `a54c0509552b01e13fb0960e23ce409a01b5024f`。
 - 联合输入三臂证据SHA256：`4c73a399130490c194980e437e36ad9fa9f8743aa19f609cd92675c1a38a5cde`
 - 首轮模块证据SHA256：`642beacbd1934253dc0da63dd7bd32dd867efae147b50ef1973fc95c8d14ab69`
 - FULL首差小型证据SHA256：`18be126cae8c0517f96fd5d11afa8499c508651103bbdafea1cc3b45da853070`
+- Indexer归因与两次修复回归小型证据SHA256：`75016bd5aac7474da635b7359e43e0c35f2aa40f30623c01bb0482c9a2c325e4`
 
 CPU观测回归涵盖真实顺序、空/不完整参考拒绝、实际容量不匹配、idle插入、联合轮次校验、
 首差锁定、当前forward上下文及模块回调失败后的停止。无设备环境预检与独立源码复核均通过。

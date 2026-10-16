@@ -5546,9 +5546,9 @@
     "joint_input_archive_sha256": "4c73a399130490c194980e437e36ad9fa9f8743aa19f609cd92675c1a38a5cde",
     "firststep_archive_sha256": "642beacbd1934253dc0da63dd7bd32dd867efae147b50ef1973fc95c8d14ab69"
   },
-  "full_replay_module_precision_proven": false,
+  "full_replay_module_precision_proven": true,
   "whole_model_192_token_precision_proven": false,
-  "production_math_changed": false,
+  "production_math_changed": true,
   "full_replay_first_boundary": {
     "native_instrumentation_fidelity": {
       "pass": true,
@@ -5948,5 +5948,600 @@
     "evidence_sha256": "18be126cae8c0517f96fd5d11afa8499c508651103bbdafea1cc3b45da853070",
     "math_fix_applied": false,
     "metadata_or_cache_cause_confirmed": false
+  },
+  "math_source_commit_role": "unfixed_diagnostic_baseline; repaired source is identified below by baseline plus one-file patch SHA",
+  "full_replay_module_precision_scope": "rank0 observed boundaries only; 32 rounds, 43 layers including21 CSA; same128K bank, B24 submitted, peak21,64 output tokens",
+  "indexer_multi_leaf_root_repair": {
+    "status": "strict_qualification_pass",
+    "scope": "Same fixed bank,128K/B24 submitted,observed peak21,64 output tokens; not192 or performance",
+    "baseline_commit": "a9e0ae0d9f5bc60b59fc3b74342ca2b156401045",
+    "parent_commit_before_fix": "42320ded9fc5ef1eab82220151c9129b5325baff",
+    "source_patch": {
+      "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision/decode_indexer.py": {
+        "before": "629a4ffb052ce97b54660cf0ff0971239050fdb1737c3cf470b7499b15dd5c1d",
+        "after": "7d117c766f7cafeff379e0fbad4fa4176c999c3dd9226b14f86241c2fdc35023"
+      }
+    },
+    "performance_variant_changed": false,
+    "first_observed_different_boundary": {
+      "forward_index": 24,
+      "layer": 2,
+      "name": "heads",
+      "graph_mode": "FULL",
+      "padded_tokens": 144,
+      "actual_tokens": 18
+    },
+    "diagnosed_module": "Indexer multi-leaf pair-query fallback when active S6 request groups drop below4",
+    "root_cause": [
+      "parallel leaves stored scores into the same contiguous query row",
+      "the long fallback did not publish pair_arena half roots that the downstream merge consumed"
+    ],
+    "original_topk_unique_per_row_range": [
+      47,
+      75
+    ],
+    "original_topk_items_per_row": 512,
+    "root_metadata_valid": true,
+    "native_eager_shadow_qualified_against_native_full": false,
+    "native_eager_shadow_used_as_gold_or_injected": false,
+    "fix": [
+      "preserve single-leaf contiguous score layout",
+      "use worker/query/AIV private score rows for multiple leaves",
+      "publish both half roots per leaf matching merge read addresses",
+      "guard incomplete query groups and initialize empty halves with negative infinity"
+    ],
+    "qk_arithmetic_or_rounding_order_changed": false,
+    "native_implementation_changed": false,
+    "cpu_regression": {
+      "command": "pytest --noconftest tests/pypto_test/test_csa_indexer_root_publication.py -q",
+      "passed": 5,
+      "unfixed_source_negative_controls_rejected": 5,
+      "scope": "actual DSL address/publisher statements; not sorting math or device synchronization"
+    },
+    "tasks": {
+      "head_sources": "task_20261016_012900_59571325267",
+      "cpu_compile": "task_20261016_015300_117095229502",
+      "first_repaired": "task_20261016_015811_127824410229",
+      "strict_ready_repeat": "task_20261016_021041_160980929476"
+    },
+    "task_max_time_seconds": 780,
+    "cpu_compile_seconds": 19.741,
+    "first_repaired_run": {
+      "exit_code": 0,
+      "rounds": 32,
+      "module_and_outer_witnesses_bit_exact": true,
+      "all16rank_tokens_and_acceptance_exact": true,
+      "strict_ready_qualification_pass": false,
+      "reason": "rank9 performed the first real-call generation and binary build; all others waited",
+      "rank9_generation_builds": 1,
+      "rank9_binary_builds": 1
+    },
+    "strict_repeat": {
+      "pass": true,
+      "records": 32,
+      "actual_inputs_exact_all16ranks": true,
+      "complete_tokens_and_acceptance_events_exact_all16ranks": true,
+      "rank0_module_boundaries_bit_exact": 6816,
+      "rank0_csa_layers": 21,
+      "rank0_outer_hidden_aux_mtp_bit_exact": true,
+      "topk_step24": {
+        "forward_index": 24,
+        "graph_mode": "FULL",
+        "shape": [
+          18,
+          512
+        ],
+        "unique_per_row": [
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512
+        ],
+        "range_valid_per_row": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "sha256": "8a1fed7afa87babb41e2186d68fdafb034d4b2db99dfb2de217a525e1d6d40b4"
+      },
+      "candidate_patch": {
+        "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision/decode_indexer.py": {
+          "before": "629a4ffb052ce97b54660cf0ff0971239050fdb1737c3cf470b7499b15dd5c1d",
+          "after": "7d117c766f7cafeff379e0fbad4fa4176c999c3dd9226b14f86241c2fdc35023"
+        }
+      },
+      "source_manifest_sha256": "e4de4927d2e5758df65784bddc412d1d90227b56ed978ad2218df50c2bd540ca",
+      "native_source_manifest_sha256": "2cc847f74a3cf326897acf708190c5c97924d45572dc886644486e258401270b",
+      "candidate_ready_stats": [
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22744439657,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22463902957,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22714405722,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22523707377,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22890850140,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 21746783643,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22955395992,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22951789520,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22169447272,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22592127044,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22844137786,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 21507953505,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 23055011647,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22853355963,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22721549349,
+          "build_ns": 0
+        },
+        {
+          "requests": 105,
+          "object_hits": 62,
+          "ready_hits": 1,
+          "generated_hits": 0,
+          "misses": 0,
+          "disabled_requests": 0,
+          "forced_rebuilds": 0,
+          "bypasses": 0,
+          "last_bypass_reason": null,
+          "invalid_entries": 0,
+          "storage_errors": 0,
+          "generation_builds": 0,
+          "binary_builds": 0,
+          "lookup_ns": 22860781523,
+          "build_ns": 0
+        }
+      ],
+      "scope": "Same fixed bank,128K/B24 submitted,observed peak21,64 output tokens; not192 or performance",
+      "native_acceptance": {
+        "qualified": true,
+        "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+        "mean_range": [
+          3.0,
+          4.0
+        ],
+        "mean_accepted": 3.2472826086956523,
+        "accepted_length_histogram": [
+          720,
+          864,
+          496,
+          496,
+          784,
+          2528
+        ],
+        "full_five_draft_histogram": [
+          720,
+          864,
+          496,
+          496,
+          784,
+          2528
+        ],
+        "num_drafts": 5888,
+        "num_draft_tokens": 29440,
+        "num_accepted_tokens": 19120,
+        "acceptance_rate": 0.6494565217391305,
+        "request_mean_min": 1.8636363636363635,
+        "request_mean_max": 5.0,
+        "total_preemptions": 0,
+        "requests_with_preemption": 0,
+        "errors": []
+      },
+      "candidate_acceptance": {
+        "qualified": true,
+        "criterion": "同批不同请求，实际接受长度0..5均覆盖；主批均值3..4/目标约3.8，其他batch允许1..5",
+        "mean_range": [
+          3.0,
+          4.0
+        ],
+        "mean_accepted": 3.2472826086956523,
+        "accepted_length_histogram": [
+          720,
+          864,
+          496,
+          496,
+          784,
+          2528
+        ],
+        "full_five_draft_histogram": [
+          720,
+          864,
+          496,
+          496,
+          784,
+          2528
+        ],
+        "num_drafts": 5888,
+        "num_draft_tokens": 29440,
+        "num_accepted_tokens": 19120,
+        "acceptance_rate": 0.6494565217391305,
+        "request_mean_min": 1.8636363636363635,
+        "request_mean_max": 5.0,
+        "total_preemptions": 0,
+        "requests_with_preemption": 0,
+        "errors": []
+      },
+      "observed": [
+        {
+          "rank": 0,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 1,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 2,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 3,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 4,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 5,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 6,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 7,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 8,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 9,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 10,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 11,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 12,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 13,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 14,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        },
+        {
+          "rank": 15,
+          "records": 32,
+          "observed_peak_requests": 21,
+          "dp_metadata_present_all_records": true,
+          "actual_full144": 30
+        }
+      ]
+    },
+    "whole_model_192_token_retested": false,
+    "new_long_context_ragged_query_matrix_tested": false,
+    "performance_measured": false,
+    "evidence_archive_sha256": "75016bd5aac7474da635b7359e43e0c35f2aa40f30623c01bb0482c9a2c325e4"
   }
 }
