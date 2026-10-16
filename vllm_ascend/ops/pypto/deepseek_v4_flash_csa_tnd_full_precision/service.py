@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""完整PTO TND的分阶段候选：当前仅将HC-post恢复为PTO。"""
+"""完整PTO TND的分阶段候选：当前恢复HC-pre及HC-post，输入Norm仍Native。"""
 
 import torch
 import torch_npu
@@ -9,17 +9,38 @@ from vllm_ascend.device.device_op import DeviceOperator
 from ..deepseek_v4_flash_csa_tnd_precision.native_adapter import NativeCSACall
 from ..deepseek_v4_flash_csa_tnd_precision.service import CSAServiceRuntime as BaselineRuntime
 from .hc_post import hc_post_test
+from .hc_pre import hc_pre_test
 
 
 class CSAServiceRuntime(BaselineRuntime):
     """原基准保持可运行；剩余Native边界须后续逐项对拍再恢复。"""
 
-    restored_modules = ("hc_post",)
+    restored_modules = ("hc_pre", "hc_post")
+    # Native mDim changes above 256 rows; the current K32/22 partition is for mDim1.
+    max_hc_pre_tokens = 256
+
+    def eligible(self, context, hidden, positions):
+        return hidden.shape[0] <= self.max_hc_pre_tokens and super().eligible(context, hidden, positions)
 
     def __init__(self, attention, operators, max_num_seqs, layer=None):
         super().__init__(attention, operators, max_num_seqs, layer)
         import pypto.torch
 
+        self.pto_hc_pre = pypto.torch.register(hc_pre_test, "dsv4_csa_tnd_full_precision::hc_pre")
+        for parameter, shape in (
+            (layer.hc_attn_fn, (24, 16384)),
+            (layer.hc_attn_scale, (3,)),
+            (layer.hc_attn_base, (24,)),
+        ):
+            if parameter.dtype != torch.float32 or tuple(parameter.shape) != shape or not parameter.is_contiguous():
+                raise ValueError("PTO HC-pre requires original contiguous FP32 Native HC parameters")
+            if torch_npu.get_npu_format(parameter) not in (0, 2):
+                raise ValueError("PTO HC-pre requires original ND Native HC parameters")
+        tokens = self.native_attention_out.shape[0]
+        device = self.native_attention_out.device
+        self.hc_mixed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
+        self.hc_post_gates = torch.empty((tokens, 4), dtype=torch.float32, device=device)
+        self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
         self.pto_hc_post = pypto.torch.register(hc_post_test, "dsv4_csa_tnd_full_precision::hc_post")
 
     def __call__(self, context, hidden, positions, output, kv_cache):
@@ -51,8 +72,11 @@ class CSAServiceRuntime(BaselineRuntime):
             "indexer_state": (metadata["indexer_state"], (indexer_state,)),
         }
         tokens = hidden.shape[0]
-        mixed, post, comb = self.layer.hc_pre(
-            hidden, self.layer.hc_attn_fn, self.layer.hc_attn_scale, self.layer.hc_attn_base
+        if not 1 <= tokens <= self.max_hc_pre_tokens:
+            raise ValueError("PTO HC-pre currently supports the Native mDim1 range, 1..256 token rows")
+        mixed, post, comb = self.hc_mixed[:tokens], self.hc_post_gates[:tokens], self.hc_comb_gates[:tokens]
+        self.pto_hc_pre(
+            hidden, self.layer.hc_attn_fn, self.layer.hc_attn_scale, self.layer.hc_attn_base, mixed, post, comb
         )
         normed = self.layer.input_layernorm(mixed)
         native_kv_projected = self.layer.self_attn.wkv(normed)

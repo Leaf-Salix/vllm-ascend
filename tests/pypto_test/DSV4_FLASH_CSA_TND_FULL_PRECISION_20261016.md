@@ -126,8 +126,12 @@ T11、seed17，合成BF16 attention/residual及FP32 post/comb。
 
 ## 后续：HC-pre独立定位
 
-暂不改输入Norm。实际Native `npu_hc_pre_v2` 的A3路径包含HF32向零转换、
+暂不改输入Norm。实际Native `npu_hc_pre_v2` 的A3路径包含HF32模式、
 形状相关的split-K、K32 Cube累加、顺序partials归约、Sqrt后Div、
 sigmoid的Div和四路顺序加。旧PTO相应分组/倒数写法存在差别。
 先建立实际Native三输出黄金及中间量观测，再做单因素修正；
 不能仅凭截断FP32权重就假定普通FP32 MAD与Native HF32 MAD逐bit等价。
+
+HC-pre后续定位、实际HF32舍入/累加对拍及新的模块恢复见
+[HC-pre恢复记录](DSV4_FLASH_CSA_TND_HCPRE_PRECISION_20261016.md)。
+旧诊断中曾按SDK模式名称称为“向零”，该名称不能替代实际设备转换观测。
