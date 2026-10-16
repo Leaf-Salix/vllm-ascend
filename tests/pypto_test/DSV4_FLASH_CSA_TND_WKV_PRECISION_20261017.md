@@ -6,7 +6,7 @@
 数学基准`e267e4e62`已通过真实8K/B40、192token的一次Native完整对拍，结果保存于`d7d9a5b5b`，
 见[整模型通过记录](DSV4_FLASH_CSA_TND_INITIALIZATION_DIAGNOSIS_20261016.md)。
 本轮从独立实验目录恢复WKV。下列早期实验发生时正式服务WKV仍为Native；
-完成后面的全行数对拍后，当前精度分支才开始接入PTO WKV，整模型回归仍待复测。
+完成后面的全行数对拍后，当前精度分支接入PTO WKV，并通过文末真实8K/B40整模型回归。
 没有改原混合精度基准，没有跑128K或整模型Native2，每个NPU任务max-time=780秒。
 
 独立模块使用真实L4权重及Native HC-pre、输入Norm产生的T11输入。
@@ -28,7 +28,7 @@ PTO eager一旦出现首差即停止，不继续PTO graph或其他形状。
 - 当前精度分支已将`tnd_full_precision`的WKV调用改为PTO；Indexer权重投影和O-proj仍为Native。
   真TND metadata与每请求1..6行契约未改，未增加每请求S6补位。
 - 正式kernel数学AST与通过NPU的v17一致；次序常量逐T核对冻结Native表，另有CPU边界测试和独立审查。
-  新接入版本尚待真实8K/B40/192 token回归，未用百分比阈值放行，也未用FP64替代Native gold。
+  新接入版本真实8K/B40/192 token回归也已通过，未用百分比阈值放行，也未用FP64替代Native gold。
 
 ## 完整已结束实验
 
@@ -202,3 +202,88 @@ SHA256 `11234624ba7635010801cfeb193f17149835340d3458b0b977bbb3e176349d4d`，173�
 迁移须在新目录显式更新和重新冻结。单卡运行`experiments/<候选>/run-wkv.sh <新输出名>`；
 普通用例运行`wkv-order-case-v1/run.sh`，Native短profile运行`wkv-native-profile-v1/run.sh`。
 统一经`task-submit --device auto --max-time 780 --ptoas 0.63`提交，保留旧输出、不重装框架。
+
+## 正式WKV接回后的8K/B40复测方案
+
+数学提交`bdf14adb5`，只修改完整精度服务并新增`wkv.py`、`wkv_order_data.py`。
+旧混合精度基准、性能实现和已通过的step07快照保持不变。
+新step08在step07上只更新这三个文件，3359份文件逐项冻结；旧测试变体身份guard保留。
+step08 manifest SHA256：
+`d3525c39033a5c88933bb33177caae9fa75d351c561ff54e3b7b6e64a8500580`。
+占卡前先校验实际Python、Torch-NPU、PyPTO/Simpler、CANN/ATB/PTOAS路径、全部源SHA和bank，
+并完成正式WKV两个设备程序的lower/CCEC；没有重装或重编框架。
+
+| 项目 | 口径 |
+| --- | --- |
+| 模型 | DeepSeek-V4-Flash-0731-w8a8，真实75个权重分片 |
+| 输入 | 固定8192-token bank，40条请求；公开问题及chat后缀一致，前缀/cache为本实验Native构造 |
+| 并行 | TP1、DP=EP16，每rank提交B40，共640次请求执行 |
+| 解码 | 每请求192个输出token，DSpark出5验6；实际接受率由结果统计 |
+| 图 | FULL_DECODE_ONLY，capture sizes=[6,240]，max_num_batched_tokens=400 |
+| 容量 | num_gpu_blocks_override=22000，gpu_memory_utilization=0.95，分配前检查2GiB余量 |
+| 确定性 | level1、Torch确定性、HCCL_DETERMINISTIC=true、atomic0、NZ2、event_work_mode=1 |
+| 替换 | 21层CSA使用`tnd_full_precision`，20层HCA保持Native |
+| Native基准 | 沿用task_20261016_192621_7066592194，没有运行Native2 |
+| 新任务 | task_20261017_031709_24393218129，16卡，max-time=780秒 |
+
+新任务使用正常异步初始化，没有初始化逐程序同步或内部层hook。
+实时比较每rank实际输入、请求入场和rank0 target hidden/aux/MTP位摘要，出现首差即停止。
+结束后独立CPU验收核对：完整640请求输出、全部接受事件、51轮生成窗口、16rank实际FULL240重放、
+21层两档PTO选核与无回退，以及缓存错误计数。非活跃空尾须通过原判据，不能任意截掉活跃差异。
+相对Native的源差异必须精确等于已验证Norm入口两行、原测试身份guard及本次WKV三个文件；
+每个源文件、原始Native数据、派生参考和helper均校验SHA。
+验收规则沿用旧production-v1，仅增加WKV源码身份白名单和绑定，已经过独立本地审查。
+
+此处是依赖既存冻结源码、模型、bank和SDK的增量复现；不是全新机器可直接运行的自包含包。
+迁移时先还原前文环境和原整模型通过记录中的资产，再核对源清单和Native1派生绑定。
+只需在同一环境执行以下新任务和CPU验收，使用新的输出名，保留历史数据：
+
+```bash
+BASE=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex
+JOB=$BASE/full-pto-model-8k-b40-20261016
+H=$JOB/wkv-production-v1
+bash "$H/preflight.sh"
+task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
+  "bash $H/run-case.sh precision-witness <新的CSA输出名>"
+# 任务结束后在该环境中仅做CPU验收；run-case禁止提交Native phase。
+source "$JOB/env.sh"
+export SOURCE_ROOT="$BASE/full-pto-precision-20261017/step08/source"
+export PYTHONPATH="$SOURCE_ROOT:$SOURCE_ROOT/tests/pypto_test:$JOB:$PYTHONPATH"
+python "$H/qualify_production.py" \
+  /data/pyptouser/yejia/lc128/full-pto8k-native-20261016 \
+  /data/pyptouser/yejia/lc128/<新的CSA输出名> --job "$JOB" --output <新的验收JSON>
+```
+
+### 整模型验收结果
+
+任务正常结束，exit=0，实际运行7分41秒，符合单任务不超过15分钟。
+[完整验收JSON](evidence_tnd_precision/full_pto_20261016/model-8k-wkv-production1-qualified.json)中
+`numeric_pass=true`、`wkv_restored=true`；不是仅根据任务退出码或接受率均值判定通过。
+
+| 检查 | 结果 |
+| --- | --- |
+| 全部16rank实际输入与入场轨迹 | 与原Native1完全一致 |
+| 完整请求/输出token | 640请求、122880token全部一致，每请求192token |
+| 接受事件 | 全部一致，0..5计数[1696,2432,2816,2592,2240,14512] |
+| 平均接受草稿数 | 3.7035909920876446，与Native1一致 |
+| 有效生成窗口 | 51轮一致；raw记录的52/54轮空尾按原门禁验证后排除 |
+| rank0 target hidden/aux/MTP | 51轮真实行的位摘要全部一致 |
+| 实际并发/抢占 | 每rank峰值40请求，零抢占 |
+| 实际FULL240重放 | 16rank均50次；首步T40为NONE/eager，不是FULL6 |
+| CSA/HCA | 21层CSA两档均选择PTO，20层HCA保持Native |
+| 缓存 | 全rank bypasses/invalid_entries/storage_errors/forced_rebuilds均0；strict_ready_reuse=false |
+| 占卡前编译 | 正式WKV两个程序lower/CCEC通过，未重装或重编框架 |
+
+当前结论：恢复PTO WKV没有破坏本组真实模型的完整token/事件与模型外层位一致性。
+本轮没有内部逐层hook，因此不声称已逐项观测所有层内部WKV tensor；
+固定8K bank、模型与上述环境的通过，也不等于任意输入或其他CANN版本的普遍证明。
+本组活动生成首步每请求1行，后续每请求6行；本轮没有补测非等长请求矩阵。
+Indexer权重投影与O-proj仍为Native，HC-pre到HC-post全PTO替换尚未全部完成。
+本轮只做8K，未跑Native2、128K或性能测量；未将初始化/JIT开销作为性能结论。
+
+[两臂完整数值与复现证据](evidence_tnd_precision/full_pto_20261016/model-8k-wkv-production1-evidence.tar.gz)，
+SHA256 `182fc3606e9350a1275ba8fc966f8df723ac87e822483f93e606a6f8d2e08146`，289项文件均已本地逐项校验。
+包含全部16rank原始结果、请求事件与输入轨迹、rank0 outer摘要、Native1派生参考和绑定、
+运行/预检/验收/归档脚本、step05～08源清单、正式WKV三个文件及Norm入口文件、Native次序表。
+归档中的四个正式源文件另与当前提交逐字节核对一致。
+不包含模型权重、venv、大型bank张量或完整冻结源码树；须沿用并核验前述既存资产。
