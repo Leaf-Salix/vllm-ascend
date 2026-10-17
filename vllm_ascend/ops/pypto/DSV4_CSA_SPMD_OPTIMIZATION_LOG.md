@@ -16050,3 +16050,90 @@ page table仍动态，不能用固定S反推请求。七档当前成绩只覆盖
 HC_pre重点参考融合、双AIV分工和按工作量选择实现。迁移保留实际Q/L、页表、
 尾块及动态循环，不回填冻结调度表，也不直接照搬HC_pre的阈值。跨轮静态
 成绩与独立HC_pre成绩只提供方向，正式结论仍由完整CSA同轮对照给出。
+
+### 2026-10-17 23:26：补S5 Native参照，保留S6性能验收口径
+
+上一阶段属于实质进展：query_metadata_v1两档对照完成、默认保持关闭，并
+完成详细中文阶段commit 2417166f。此次不重跑七档，先落实用户新增S5范围。
+核对发现原分task本身仍有DECODE_SEQ=6：NativeCSACall两处六行闸门，
+compact_metadata及两条compressor的token//S，Indexer的pair/整组分工及
+Attention请求定位均有S假设。旧query_source工厂还明确拒绝奇数query。
+因此不能只把fixture改成S5，再用原分task结果当作正确性oracle。
+
+本轮只参数化测试fixture的query_tokens（默认仍6），Dspark配置上限保留5，
+不伪装成num_speculative_tokens=4。默认6代回后，除新增合同检查、docstring
+和返回记录字段外，make_fixture算法AST与阶段commit完全相同；证据见
+dynamic_full_pipeline_20261017/s5_native_validation_v1/default_s6_source_compatibility.json。
+正式动态SPMD无需修改，另建native_query_probe机械绑定真实Native输入，
+用真实Native attention半层作功能/精度参照；不测Native性能、不改变原
+七档S6的原动态PTO性能基线。保留零容差诊断，功能/图稳定与Native数值
+是否逐元素相同分开报告，不把有限值通过自动当作精度验收。
+
+首版两任务因bootstrap自动追加--device而被parser拒绝（exit=2）；补上
+设备参数并校验与TASK_DEVICE一致。第二版B16在取Hadamard时误用decode
+子metadata（exit=1），改为Native父metadata；均未进入SPMD计算，不是
+算子精度失败。失败任务号与原因完整保存到s5_native_validation_v1/jobs.json。
+第三版128K/B16 task_20261017_232512_171491921674已取得真实Native参照，
+正在编译执行；8K/B32 task_20261017_232631_174021021834并行提交。输出
+保存在native_h131072_b16_s5_v3、native_h8192_b32_s5_v3，结果待续。
+
+
+### 2026-10-17 23:41：S5尾组QK紧凑L0C与TINSERT物理行距不匹配
+
+S5第三版长/短历史均完成eager及两轮同址graph：保护区、72核代际和自身
+逐bit重放通过，但不是Native精度PASS。128K/B16输出max_abs=0.1875、
+RMSE=0.013906；8K/B32为0.1953125、0.011746。每请求第五行Top-K平均
+替换454.19/331.56项，前四行只有约3～6项，说明存在独立的奇数尾组问题。
+逐行统计保存在对应结果目录per_query_position.json。
+
+用score_tail_probe直接复用正式indexer_score_cube_stage及Vector helper，
+构造同一query/KV、同址live=2→1→2的最小对照。任务
+ task_20261017_233532_189926624217，score_tail_v1：768/1024两策略，完整
+组2048个score均与CPU精确INT32点积、显式FP16舍入参考逐bit相同；仅把
+有效query数变为1，每种策略1792个score错误，Top512根也大幅不同。每个
+128列panel只有前16列正确，不是Native前置HC/QR误差或Top-K并列规则。
+
+生成C++中QK的Acc为physical M=128、valid M=64、CompactMode::Normal。
+mad按有效M紧凑存放，N方向每16列分形的源步长为64行；实际依赖头文件
+.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TInsert.hpp
+的TInsertAccToMat仍令srcStride=SrcTileData::Rows，并将固定Rows作为搬运
+M传给pto_copy_matrix_cc_to_cbuf，因而第二个分形起读错。TStore已有
+CompactMode::Normal分支，TInsert没有对应分支；本轮没有修改依赖头文件。
+这定位为当前组合的紧凑Acc→Mat布局不匹配，不宣称所有上游版本都存在。
+
+正式动态score helper内修正：GM仅load live条有效query；在本核L1把缺少
+的query槽用本组第一条query填满，再以完整物理M计算QK。系数生产者原已
+将无效槽置零，head归约使用完整物理K；补齐整数点积经1/1024和ReLU仍有限，
+零系数隔离所有补齐项。Vector仍只写live条query，实际Q/L、组数、页表、
+循环和输出均不改，不读下一请求或越界GM。额外搬运/计算只发生尾组，
+完整组保留算术顺序。相比经GM存回重载，该办法不增加workspace或跨核阶段。
+
+修正后task_20261017_233838_195151931247，score_tail_v2：两策略共六轮，
+score、Top-K根、CPU参考全零差异；同址2→1→2通过。已发长/短S5整链v4、
+两档S6对原分task精确回归及G6尾组helper检查，结果待续。未重跑七档性能。
+Native零容差是诊断，不是新制定的精度要求；历史性能版本来就与Native
+不逐bit一致（VALIDATION_LOG约4870行）。剩余数值差异仍如实保留，不能
+因为尾组隔离PASS就宣称整层Native精度或生成token验收完成。
+
+
+### 2026-10-17 23:49：尾组修正验证收尾，剩余S5精度单独保留
+
+G6 helper task_20261017_234124_2018905507：live=6→1→2→3→4→5→6的
+第一query score/Top512根及CPU参考全部零差异；未据此宣称G6整链混合请求
+或balanced尾组全覆盖。S6两档task_20261017_233941_197286026429和
+ task_20261017_233942_197336924422完整A→B→A对原分task PASS，包含输出、
+Top-K、score、cache/state、保护区和代际；无性能采样。
+
+S5 v4两档结构/两轮同址graph/保护区/代际继续PASS；Native输出max_abs从
+0.1875/0.1953125降至两档均0.03125。第五行Top-K每行平均集合替换从
+454.1875/331.5625降至6.625/3.5625。前四行PTO输出/Top-K及Native参考均
+逐bit未变，明确隔离并修复的是尾组布局错误。Native整层仍不精确相同，
+冻结输出门槛0.01+0.01*abs(reference)仍有5113/1606个超差元素；不能把
+这些差异自动归为允许误差或以helper通过代替token验收。没有放宽阈值。
+原性能版已有Native非逐bit差异，但S5剩余差异仍需单独确认，不擅自关闭。
+
+本阶段中文说明、最小复现、失败驱动、before/after源码、任务日志及原始
+结果归档于dynamic_full_pipeline_20261017/s5_native_validation_v1及相邻
+结果目录。阶段commit只纳入本次源码/文本证据，不提交.pt/编译二进制/权重，
+不动其它会话工作区。S6七档最新完整性能仍沿用HC_ROWS_PLAN_COLUMNS_SEVEN，
+此轮没有新性能数字、没有任何30%达标；目标保持active。

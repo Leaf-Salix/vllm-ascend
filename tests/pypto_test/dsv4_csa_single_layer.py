@@ -82,7 +82,12 @@ def make_layer(config, checkpoint, device, layer_index=2):
     return layer, {"weights": records, "quant_methods": methods}
 
 
-def make_fixture(config, attention, batch, history, seed, device, table_history=None, reverse_pages=False):
+def make_fixture(config, attention, batch, history, seed, device, table_history=None, reverse_pages=False, *, query_tokens=6):
+    """按实际本轮长度构造Native输入；Dspark配置上限与本轮有效长度分开。
+
+    默认S6保持既有用例。S5用于置信度导致本轮长度缩短的验证，不把模型的
+    num_speculative_tokens从5改为4。此fixture只构造等长请求；混合Q另行验证。
+    """
     import torch
     from dsv4_csa_native_case import allocate_native_cache, make_cache_groups
 
@@ -92,11 +97,13 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
 
     torch.manual_seed(seed)
     torch.npu.manual_seed(seed)
-    tokens = batch * 6
-    bounds_cpu = torch.arange(batch + 1, dtype=torch.int32) * 6
-    lengths_cpu = torch.full((batch,), history + 6, dtype=torch.int32)
+    if type(query_tokens) is not int or not 1 <= query_tokens <= 6:
+        raise ValueError("本fixture支持Dspark=5下的1..6个实际query token")
+    tokens = batch * query_tokens
+    bounds_cpu = torch.arange(batch + 1, dtype=torch.int32) * query_tokens
+    lengths_cpu = torch.full((batch,), history + query_tokens, dtype=torch.int32)
     bounds, lengths = bounds_cpu.to(device), lengths_cpu.to(device)
-    positions = (history + torch.arange(6)).repeat(batch).to(device=device, dtype=torch.int64)
+    positions = (history + torch.arange(query_tokens)).repeat(batch).to(device=device, dtype=torch.int64)
     hidden = torch.randn((tokens, 4, 4096), device=device, dtype=torch.bfloat16)
     groups = make_cache_groups(config, device, attention)
     metadata, common_cache, prefill_cache, decode_cache = {}, {}, {}, {}
@@ -108,7 +115,7 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
         width_history = history if table_history is None else table_history
         if width_history < history:
             raise ValueError("table_history 不能小于 history")
-        columns = (width_history + 6 + spec.block_size * ratio - 1) // (spec.block_size * ratio) + 1
+        columns = (width_history + query_tokens + spec.block_size * ratio - 1) // (spec.block_size * ratio) + 1
         # 非压缩历史仅需保留滑窗/近期 state；页表保留完整逻辑列并循环映射独占物理页。
         per_request = columns if name in ("compressed", "indexer") else 9
         if name == "state" and attention.compress_ratio == 128:
@@ -140,8 +147,8 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
             num_reqs=batch,
             num_actual_tokens=tokens,
             num_input_tokens=tokens,
-            max_query_len=6,
-            max_seq_len=history + 6,
+            max_query_len=query_tokens,
+            max_seq_len=history + query_tokens,
             block_table_tensor=table.block_table.gpu[:batch],
             slot_mapping=table.slot_mapping.gpu[:tokens],
             positions=positions,
@@ -184,6 +191,7 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
         "readonly": readonly,
         "hidden": hidden,
         "tokens": tokens,
+        "query_tokens": query_tokens,
     }
 
 

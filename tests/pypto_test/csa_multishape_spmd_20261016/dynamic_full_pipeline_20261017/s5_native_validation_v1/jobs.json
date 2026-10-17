@@ -1,0 +1,113 @@
+{
+  "scope": "Dspark=5配置不变，实际S5；Native仅正确性参照，不测性能",
+  "jobs": [
+    {
+      "task": "task_20261017_232116_164861729429",
+      "history": 131072,
+      "batch": 16,
+      "version": 1,
+      "status": "completed exit=2",
+      "reason": "bootstrap追加--device，首版parser未接收；尚未执行设备数学"
+    },
+    {
+      "task": "task_20261017_232116_164776312974",
+      "history": 8192,
+      "batch": 32,
+      "version": 1,
+      "status": "completed exit=2",
+      "reason": "同上，已修正parser"
+    },
+    {
+      "task": "task_20261017_232347_169047619544",
+      "history": 131072,
+      "batch": 16,
+      "version": 2,
+      "status": "completed exit=1",
+      "result": "native_h131072_b16_s5_v2/result.json",
+      "reason": "hadamard应取父metadata而非decode子对象；Native fixture已构造，未运行SPMD"
+    },
+    {
+      "task": "task_20261017_232512_171491921674",
+      "history": 131072,
+      "batch": 16,
+      "version": 3,
+      "result": "native_h131072_b16_s5_v3/result.json",
+      "status": "completed exit=1",
+      "functional_passed": true,
+      "precision_exact": false,
+      "reason": "结构/图/保护区通过；每请求第五行Top-K出现大差异，进入G2尾组定位",
+      "passed": false
+    },
+    {
+      "task": "task_20261017_232631_174021021834",
+      "history": 8192,
+      "batch": 32,
+      "version": 3,
+      "result": "native_h8192_b32_s5_v3/result.json",
+      "status": "completed exit=1",
+      "functional_passed": true,
+      "precision_exact": false,
+      "reason": "结构/图/保护区通过；每请求第五行Top-K出现大差异，进入G2尾组定位",
+      "passed": false
+    },
+    {
+      "task": "task_20261017_233532_189926624217",
+      "scope": "正式score helper，live=2→1→2，tile768/1024",
+      "status": "completed exit=1",
+      "result": "score_tail_v1/result.json",
+      "reason": "live=1两策略均1792/2048 score错误；live=2均CPU精确相同",
+      "passed": false
+    },
+    {
+      "task": "task_20261017_233838_195151931247",
+      "scope": "G2尾组修正后tile768/1024，live=2→1→2",
+      "status": "completed exit=0",
+      "result": "score_tail_v2/result.json",
+      "passed": true
+    },
+    {
+      "task": "task_20261017_233926_196680127927",
+      "history": 131072,
+      "batch": 16,
+      "version": 4,
+      "result": "native_h131072_b16_s5_v4/result.json",
+      "status": "completed exit=1",
+      "passed": false,
+      "functional_passed": true,
+      "precision_exact": false,
+      "reason": "尾组错误修复，输出Native max_abs=0.03125；Native完整精度验收仍未通过"
+    },
+    {
+      "task": "task_20261017_233925_19662801044",
+      "history": 8192,
+      "batch": 32,
+      "version": 4,
+      "result": "native_h8192_b32_s5_v4/result.json",
+      "status": "completed exit=1",
+      "passed": false,
+      "functional_passed": true,
+      "precision_exact": false,
+      "reason": "尾组错误修复，输出Native max_abs=0.03125；Native完整精度验收仍未通过"
+    },
+    {
+      "task": "task_20261017_233941_197286026429",
+      "scope": "S6原分task精确回归128K/B16",
+      "result": "score_tail_fix_h131072_b16_s6_v1/result.json",
+      "status": "completed exit=0",
+      "passed": true
+    },
+    {
+      "task": "task_20261017_233942_197336924422",
+      "scope": "S6原分task精确回归8K/B32",
+      "result": "score_tail_fix_h8192_b32_s6_v1/result.json",
+      "status": "completed exit=0",
+      "passed": true
+    },
+    {
+      "task": "task_20261017_234124_2018905507",
+      "scope": "G6 live=6→1→2→3→4→5→6，同址score/root/CPU",
+      "status": "completed exit=0",
+      "result": "score_tail_g6_v1/result.json"
+    }
+  ]
+}

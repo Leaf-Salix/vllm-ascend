@@ -19,8 +19,11 @@
     每请求query数、历史和所有arena容量保留动态。组在单请求内切G=2/6，
     最后live=min(G,request_end-first)，不读下一请求或padding query来凑整组。
     AIC query INT8[HEAD_ROWS,128]按原token*64排列；系数FP16[COEFF_ROWS,G*64]
-    每组16行。尾组限制query的有效M和系数/Score的有效K为live*64，物理tile
-    仍为G*64；完整组保留原QK/WS顺序。coeff中失效query行已由生产者置零。
+    每组16行。尾组只从GM读取live条query，在L1用首条有效query填充其余
+    片上行；对应系数已由生产者置零，不产生额外输出。QK始终使用完整物理M，
+    head归约使用完整物理K，避免动态缩M产生紧凑L0C后，A3 TINSERT仍按物理
+    行距读回造成错位。这是片上tile补齐，不能读取下一请求/越界GM来补齐。
+    完整组保留原QK/WS顺序；尾组仍仅发布live条query的score/Top-K。
     cache沿Native INT8[pages,page_bytes]布局：4096B key后是64B FP16 scale。
     key0/key64是外层绑定的只读二维别名；page_bytes>=4160且64B对齐，不在
     incore内reshape整块GM。页表列和物理页先检查再读取；无效页保护不表示
@@ -142,12 +145,28 @@ def indexer_score_cube_stage(
                 target_memory=pl.MemorySpace.Mat,
                 valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
             )
+            # A3当前TINSERT(Acc→Mat)忽略紧凑L0C的动态行距：若QK仅算
+            # live*64行而物理M=G*64，每个16列分形之后都会读错源地址。
+            # 因此在L1安全补满M，再做完整QK。补齐行只复制本组首条有效
+            # query，绝不访问下一请求；对应head系数为0，整数点积/ReLU
+            # 均有限，补齐行不会影响任何真实query。无需Host分支或GM搬运。
+            buf_query_vector = pl.set_validshape(
+                buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM
+            )
+            for padding_lane in pl.unroll(query_group_size):
+                if padding_lane >= buf_live:
+                    buf_query_vector = pl.gather_row(
+                        buf_query_vector,
+                        qr_hadamard_i8,
+                        [padding_lane * IDX_N_HEADS, 0],
+                        [buf_query * IDX_N_HEADS, 0],
+                        [IDX_N_HEADS, IDX_HEAD_DIM],
+                    )
             buf_coefficients_l1 = pl.load(
                 coefficients,
                 [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
                 [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
                 target_memory=pl.MemorySpace.Mat,
-                valid_shape=[NATIVE_QLI_WEIGHT_ROWS, buf_live * IDX_N_HEADS],
             )
             buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
             buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
@@ -162,7 +181,6 @@ def indexer_score_cube_stage(
                 buf_previous_l1 = pl.tile.create(
                     [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                 )
-                buf_previous_l1 = pl.set_validshape(buf_previous_l1, buf_live * IDX_N_HEADS, qk_panel_cols)
                 buf_current_key = pl.tile.create(
                     [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
                 )
@@ -313,7 +331,6 @@ def indexer_score_cube_stage(
                     buf_scores_l1 = pl.tile.create(
                         [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
                     )
-                    buf_scores_l1 = pl.set_validshape(buf_scores_l1, buf_live * IDX_N_HEADS, qk_panel_cols)
                     if buf_qk_panel > 0:
                         buf_previous_pair = pl.tile.extract(
                             buf_previous_l1,
@@ -322,7 +339,6 @@ def indexer_score_cube_stage(
                             [query_group_size * IDX_N_HEADS, qk_panel_cols],
                             target_memory=pl.MemorySpace.Right,
                         )
-                        buf_previous_pair = pl.set_validshape(buf_previous_pair, buf_live * IDX_N_HEADS, qk_panel_cols)
                         buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
                         buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
                         buf_scores_l1 = pl.tile.assemble(
@@ -350,7 +366,6 @@ def indexer_score_cube_stage(
                     [query_group_size * IDX_N_HEADS, qk_panel_cols],
                     target_memory=pl.MemorySpace.Right,
                 )
-                buf_last_pair = pl.set_validshape(buf_last_pair, buf_live * IDX_N_HEADS, qk_panel_cols)
                 buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
                 pl.store(
                     pl.set_validshape(buf_last_scores, query_group_size, qk_panel_cols),
