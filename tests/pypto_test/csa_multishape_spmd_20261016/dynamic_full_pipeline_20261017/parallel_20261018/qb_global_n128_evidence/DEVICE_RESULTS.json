@@ -1,0 +1,163 @@
+{
+  "reference_commit": "66882634",
+  "measurement": "完整L1 incore首尾；三方同进程同输入；五窗中位数；SPMD双方100 tick失败轮询退避",
+  "precision_scope": "原PTO精确对照、图重放、状态/保护区及72核代际；不代表Native/token或全部动态场景验收",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "task": "task_20261018_071700_29885368792",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_h131072_b16_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            871.68,
+            892.0,
+            873.6,
+            885.8,
+            867.76
+          ],
+          "median_us": 873.6
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            878.46,
+            882.74,
+            882.82,
+            882.94,
+            881.48
+          ],
+          "median_us": 882.74
+        },
+        "spmd_reference": {
+          "samples_us": [
+            875.06,
+            886.14,
+            874.58,
+            881.4,
+            882.78
+          ],
+          "median_us": 881.4
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.15203085999546673,
+      "candidate_faster_windows": 2,
+      "candidate_vs_dynamic_reduction_pct": -1.0462454212454286,
+      "target_met": false
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "task": "task_20261018_071700_29885801413",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_h8192_b32_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            974.7,
+            1014.4,
+            985.64,
+            968.6,
+            1025.52
+          ],
+          "median_us": 985.64
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1009.7,
+            1005.74,
+            1018.32,
+            996.94,
+            1005.6
+          ],
+          "median_us": 1005.74
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1004.2,
+            997.7,
+            1002.84,
+            1008.58,
+            1004.2
+          ],
+          "median_us": 1004.2
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false,
+          "QA_M16_PARALLEL": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.15335590519816034,
+      "candidate_faster_windows": 1,
+      "candidate_vs_dynamic_reduction_pct": -2.039284119962659,
+      "target_met": false
+    }
+  ],
+  "candidate": "qb_global_n128",
+  "adoption": "本报告仅保存实验；正式采用与区间验证结论见统一优化日志。"
+}

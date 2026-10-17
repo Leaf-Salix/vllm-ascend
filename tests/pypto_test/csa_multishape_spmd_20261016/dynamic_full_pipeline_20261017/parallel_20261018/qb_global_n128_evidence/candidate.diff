@@ -1,0 +1,56 @@
+--- source_reference/query_projection_stages.py
++++ source_candidate/query_projection_stages.py
+@@ -22,7 +22,7 @@
+     T、QR 暂存行数和投影工作区行数均为动态 Tensor 轴。
+ 
+ 数学 tile 与分工
+-    NZ 保留 M128/N256/K256，ND 保留 M64/N512/K128；按实际 T 计算
++    NZ 使用 M128/N128/K256，ND 保留 M64/N512/K128；按实际 T 计算
+     ceil(T/128)*128 个工作区行，不按缓存容量扫描额外行。每个显式 AIC
+     worker 负责列块 n=worker+k*WORKERS，沿 K 顺序做原 INT32 累加。
+     反量化用八行、4/8/16/32/64 个独立 head 的分组策略；完整八行时选
+@@ -35,7 +35,7 @@
+     fence、通知和等待由统一 SPMD 编排负责，返回 Tensor 不代表跨核完成。
+     Q_B 列块 owner=(column//N_TILE)%WORKERS。反量化的八行/head 组编号
+     work=(row//8)*(64/head_tile)+head//head_tile，其 owner=work%WORKERS；
+-    每个 head 完整包含两个 NZ N256 列块。RoPE owner=(row//8)%active，
++    每个 head 完整包含四个 NZ N128 列块。RoPE owner=(row//8)%active，
+     active=min(ceil(T/8),WORKERS)。各阶段只写自己负责的独立行/列片段。
+ 
+ GM 视图与工作区合同
+@@ -74,7 +74,10 @@
+ NOPE_DIM = HEAD_DIM - ROPE_DIM
+ EPS = M.rms_norm_eps
+ Q_PROJ_TILE = 128
+-QPROJ_MM_N_TILE = 256 if QUANT_WEIGHT_NZ else 512
++# NZ 将全部 32768 列划成 256 个 N128 任务，仍按 n%WORKERS 全局分配；
++# 不在原 N256 owner 内拆两列。M128、四段 K256、动态尾行与 ND 路径不变。
++# Right 单块减至 32KiB 只说明容量允许双槽，是否生成双槽须检查实际产物。
++QPROJ_MM_N_TILE = 128 if QUANT_WEIGHT_NZ else 512
+ QPROJ_M_TILE = 64
+ QPROJ_N_BLOCKS = H * HEAD_DIM // QPROJ_MM_N_TILE
+ QPROJ_PIPE_M_TILE = 128
+--- source_reference/vector_schedule.py
++++ source_candidate/vector_schedule.py
+@@ -67,7 +67,7 @@
+ from .output_projection_b_stages import o_dequant_hc_post_stage
+ from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
+ from .qkv_stages import q_r_stage
+-from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
++from .query_projection_stages import QPROJ_N_BLOCKS, q_dequant_rope_stage, q_rope_prepare_stage
+ from .runtime_abi import (
+     ATTN_PLAN_ROWS,
+     CACHE_ROWS,
+@@ -757,8 +757,10 @@
+     )
+     signal = publish_phase(signal, PHASE_IDX_SCALE, core, CORES, generation)
+ 
+-    # 每个head占两个NZ N256列块。首版等全部128列块的24个真实owner。
+-    signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1)
++    # 一个 head 包含四个 NZ N128 列块；ND 的 N512 列块划分保持不变。
++    # QB 的列块 owner=n%GROUPS，须获取全部列块对应的 24 个实际 AIC；
++    # 用派生任务数同步描述 NZ/ND，仍由 wait_row_owners 去重并统一维护缓存。
++    signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, QPROJ_N_BLOCKS, 1, GROUPS, 0, 1)
+     q_flat = q_dequant_rope_stage(
+         wq_b_scale,
+         rope_cos,

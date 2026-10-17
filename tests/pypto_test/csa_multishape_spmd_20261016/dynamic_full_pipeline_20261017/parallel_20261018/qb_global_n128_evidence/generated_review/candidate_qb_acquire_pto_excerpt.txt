@@ -1,0 +1,14 @@
+原物：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto，行 9439..9451
+9439:   %signal_v27__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%2390], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+9440:   pto.comm.tnotify(%signal_v27__ssa_v0_signal_pview, %457 : !pto.partition_tensor_view<1xi32>, i32) {notifyOp = #pto<notify_op set>}
+9441:   scf.for %ordinal_inline829__idx_v0 = %c0_index to %c24_index step %c1_index {
+9442:     %2391 = arith.muli %ordinal_inline829__idx_v0, %c128_index : index
+9443:     %2392 = arith.addi %2391, %c92160_index : index
+9444:     %2393 = arith.maxsi %2392, %c0_index : index
+9445:     %signal_v28__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%2393], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+9446:     pto.comm.twait(%signal_v28__ssa_v0_signal_pview, %457 : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+9447:   }
+9448:   pto.fence.barrier_all #pto.fence_scope<gm>
+9449:   pto.cmo.cacheinvalid all #pto.address_space<gm>
+9450:   pto.fence.barrier_all #pto.fence_scope<gm>
+9451:   %2394 = arith.addi %arg132, %c7_index : index

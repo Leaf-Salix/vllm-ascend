@@ -1,0 +1,49 @@
+原物：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp，行 11032..11049
+11032:       ;
+11033:       v2298 = (uint64_t) v217;
+11034:       TASSIGN(v2297, v2298);
+11035:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+11036:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+11037:       TMOV(v2297, v2284);
+11038:       // pto: %hadamard_tile_inline1986__tile_Right
+11039:       ;
+11040:       v2299 = Tile<TileType::Right, bfloat16_t, 128, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v248);
+11041:       // pto: %hadamard_tile_inline1986__tile_Right
+11042:       ;
+11043:       v2300 = (uint64_t) v217;
+11044:       TASSIGN(v2299, v2300);
+11045:       pipe_barrier(PIPE_MTE1);
+11046:       TMOV(v2299, v2273);
+11047:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+11048:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+11049:       // pto: %kv_hadamard_acc_inline1984__tile
+原物：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp，行 11387..11401
+11387:         v2397.SetValidShape(v2324, v248);
+11388:         // pto: %kv_acc_inline2000__tile_l0_a
+11389:         ;
+11390:         v2399 = Tile<TileType::Left, bfloat16_t, 64, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Normal>(v2324, v247);
+11391:         // pto: %kv_acc_inline2000__tile_l0_a
+11392:         ;
+11393:         v2400 = (uint64_t) v217;
+11394:         TASSIGN(v2399, v2400);
+11395:         pipe_barrier(PIPE_MTE1);
+11396:         v2401 = static_cast<uint16_t>(v266);
+11397:         v2402 = static_cast<uint16_t>(v266);
+11398:         TEXTRACT(v2399, v2335, v2401, v2402);
+11399:         // pto: %kv_acc_inline2000__tile_l0_b
+11400:         ;
+11401:         v2403 = Tile<TileType::Right, bfloat16_t, 256, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v248);
+原物：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_global_n128_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp，行 11511..11523
+11511:         ;
+11512:         v2437 = Tile<TileType::Left, bfloat16_t, 64, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Normal>(v2324, v247);
+11513:         // pto: %138
+11514:         ;
+11515:         v2438 = (uint64_t) v217;
+11516:         TASSIGN(v2437, v2438);
+11517:         pipe_barrier(PIPE_MTE1);
+11518:         v2439 = static_cast<uint16_t>(v266);
+11519:         v2440 = static_cast<uint16_t>(v266);
+11520:         TEXTRACT(v2437, v2335, v2439, v2440);
+11521:         // pto: %139
+11522:         ;
+11523:         v2441 = Tile<TileType::Right, bfloat16_t, 256, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v248);

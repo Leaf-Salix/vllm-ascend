@@ -9,7 +9,7 @@ from report_prefetch_quant_round import summarize
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("candidate", choices=("qb_b_resident", "qb_qr_b_resident", "oa_pair_manual", "oa_pair_small_t", "idx_had_owner", "idx_query_quant_owner", "attention_scalar_geometry"))
+    parser.add_argument("candidate", choices=("qb_b_resident", "qb_qr_b_resident", "oa_pair_manual", "oa_pair_small_t", "idx_had_owner", "idx_query_quant_owner", "attention_scalar_geometry", "qb_global_n128"))
     args = parser.parse_args()
     directory = Path(__file__).resolve().parent / f"{args.candidate}_evidence"
     report = summarize(directory)
