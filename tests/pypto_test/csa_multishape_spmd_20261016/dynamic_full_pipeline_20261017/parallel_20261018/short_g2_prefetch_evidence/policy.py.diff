@@ -1,0 +1,13 @@
+--- source_reference_d253/policy.py
++++ source_candidate/policy.py
+@@ -94,7 +94,9 @@
+         query_group=group,
+         qk_panel=64 if group == 6 else 128,
+         score_tile=1024 if long_history else 768,
+-        prefetch=1 if long_history else 0,
++        # 短G2的N128：WS Right32KiB加双Key各16KiB恰64KiB；384半步可整除。
++        # 只启用既有下一panel流水，G6短档仍关闭，不改变分组/半叶/根顺序。
++        prefetch=1 if long_history or group == 2 else 0,
+         balanced=long_history and group == 6,
+         roots=1 if long_history and group == 6 else 2,
+         oa_cols=128 if tokens <= 96 else 256,

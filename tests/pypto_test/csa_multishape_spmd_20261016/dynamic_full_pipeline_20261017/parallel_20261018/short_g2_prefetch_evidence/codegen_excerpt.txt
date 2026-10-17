@@ -1,0 +1,217 @@
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/short_g2_prefetch_20261018/cpu_medium_v1/kernel/ptoas/dynamic_csa_full.cpp:11865
+11865:         ;
+11866:         v2700 = Tile<TileType::Mat, int8_t, 128, 256, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v237);
+11867:         // pto: %t__tmp_v28
+11868:         ;
+11869:         v2701 = (uint64_t) v210;
+11870:         TASSIGN(v2700, v2701);
+11871:         // pto: %buf_current_key_inline1867__ssa_v1
+11872:         ;
+11873:         v2702 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+11874:         // pto: %buf_current_key_inline1867__ssa_v1
+11875:         ;
+11876:         v2703 = (uint64_t) v208;
+11877:         TASSIGN(v2702, v2703);
+11878:         wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+11879:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+11880:         v2704 = static_cast<uint16_t>(v256);
+11881:         v2705 = static_cast<uint16_t>(v256);
+11882:         TEXTRACT(v2702, v2700, v2704, v2705);
+11883:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+11884:         set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+11885:         // pto: %buf_panel_keys_inline1873__ssa_v0
+11886:         ;
+11887:         v2706 = Tile<TileType::Mat, int8_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+11888:         // pto: %buf_panel_keys_inline1873__ssa_v0
+11889:         ;
+11890:         v2707 = (uint64_t) v212;
+11891:         TASSIGN(v2706, v2707);
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/short_g2_prefetch_20261018/cpu_medium_v1/kernel/ptoas/dynamic_csa_full.cpp:12265
+12265:         // pto: %buf_prefetched_key_inline1862__ssa_v1
+12266:         ;
+12267:         v2814 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12268:         // pto: %buf_prefetched_key_inline1862__ssa_v1
+12269:         ;
+12270:         v2815 = (uint64_t) v217;
+12271:         TASSIGN(v2814, v2815);
+12272:         wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+12273:         v2816 = static_cast<uint16_t>(v256);
+12274:         v2817 = static_cast<uint16_t>(v247);
+12275:         TEXTRACT(v2814, v2812, v2816, v2817);
+12276:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+12277:         set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+12278:         // pto: %buf_key_panel_inline1878__ssa_v0
+12279:         ;
+12280:         v2818 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12281:         // pto: %buf_key_panel_inline1878__ssa_v0
+12282:         ;
+12283:         v2819 = (uint64_t) v208;
+12284:         TASSIGN(v2818, v2819);
+12285:         // pto: %buf_scores_l1_inline1847__ssa_v0
+12286:         ;
+12287:         v2820 = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12288:         // pto: %buf_scores_l1_inline1847__ssa_v0
+12289:         ;
+12290:         v2821 = (uint64_t) v212;
+12291:         TASSIGN(v2820, v2821);
+12292:         // pto: %buf_scores_inline1835__ssa_v1
+12293:         ;
+12294:         v2822 = Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v247, v247);
+12295:         // pto: %buf_scores_inline1835__ssa_v1
+12296:         ;
+12297:         v2823 = (uint64_t) v208;
+12298:         TASSIGN(v2822, v2823);
+12299:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+12300:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+12301:         TMATMUL(v2822, v2579, v2818);
+12302:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+12303:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+12304:         v2824 = static_cast<uint64_t>(v291);
+12305:         v2825 = static_cast<uint16_t>(v256);
+12306:         v2826 = static_cast<uint16_t>(v256);
+12307:         TINSERT<Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>, Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>, ReluPreMode::NormalRelu>(v2820, v2822, v2824, v2825, v2826);
+12308:         set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+12309:         set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+12310:         // pto: %buf_previous_l1_inline1830__ssa_v1
+12311:         ;
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/short_g2_prefetch_20261018/cpu_medium_v1/kernel/ptoas/dynamic_csa_full.cpp:12704
+12704:         // pto: %buf_prefetched_key_inline1862__ssa_v6
+12705:         ;
+12706:         v2939 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12707:         // pto: %buf_prefetched_key_inline1862__ssa_v6
+12708:         ;
+12709:         v2940 = (uint64_t) v223;
+12710:         TASSIGN(v2939, v2940);
+12711:         wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+12712:         v2941 = static_cast<uint16_t>(v256);
+12713:         v2942 = static_cast<uint16_t>(v256);
+12714:         TEXTRACT(v2939, v2937, v2941, v2942);
+12715:         set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+12716:         // pto: %buf_key_panel_inline1878__ssa_v3
+12717:         ;
+12718:         v2943 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12719:         // pto: %buf_key_panel_inline1878__ssa_v3
+12720:         ;
+12721:         v2944 = (uint64_t) v217;
+12722:         TASSIGN(v2943, v2944);
+12723:         // pto: %buf_scores_l1_inline1847__ssa_v4
+12724:         ;
+12725:         v2945 = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12726:         // pto: %buf_scores_l1_inline1847__ssa_v4
+12727:         ;
+12728:         v2946 = (uint64_t) v209;
+12729:         TASSIGN(v2945, v2946);
+12730:         // pto: %buf_previous_pair_inline1875__ssa_v1
+12731:         ;
+12732:         v2947 = Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+12733:         // pto: %buf_previous_pair_inline1875__ssa_v1
+12734:         ;
+12735:         v2948 = (uint64_t) v208;
+12736:         TASSIGN(v2947, v2948);
+12737:         wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+12738:         v2949 = static_cast<uint16_t>(v256);
+12739:         v2950 = static_cast<uint16_t>(v256);
+12740:         TEXTRACT(v2947, v2827, v2949, v2950);
+12741:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+12742:         // pto: %buf_scores_inline1835__ssa_v3
+12743:         ;
+12744:         v2951 = Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v247, v247);
+12745:         // pto: %buf_scores_inline1835__ssa_v3
+12746:         ;
+12747:         v2952 = (uint64_t) v208;
+12748:         TASSIGN(v2951, v2952);
+12749:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+12750:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+12751:         TMATMUL(v2951, v2579, v2943);
+12752:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID2);
+12753:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+12754:         // pto: %buf_reduced_pair_inline1880__ssa_v1
+12755:         ;
+12756:         v2953 = Tile<TileType::Acc, float, 16, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v239, v247);
+12757:         // pto: %buf_reduced_pair_inline1880__ssa_v1
+12758:         ;
+12759:         v2954 = (uint64_t) v210;
+12760:         TASSIGN(v2953, v2954);
+12761:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+12762:         TMATMUL(v2953, v2581, v2947);
+12763:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID3);
+12764:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+12765:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+12766:         v2955 = static_cast<uint64_t>(v291);
+12767:         v2956 = static_cast<uint16_t>(v256);
+12768:         v2957 = static_cast<uint16_t>(v256);
+12769:         TINSERT<Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>, Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>, ReluPreMode::NormalRelu>(v2945, v2951, v2955, v2956, v2957);
+12770:         set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+12771:         set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+12772:         v2953.SetValidShape(v254, v247);
+12773:         // pto: %1309
+12774:         ;
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/short_g2_prefetch_20261018/cpu_medium_v1/kernel/ptoas/dynamic_csa_full.cpp:14202
+14202:         // pto: %buf_prefetched_key_inline1862__ssa_v21
+14203:         ;
+14204:         v3368 = (uint64_t) v217;
+14205:         TASSIGN(v3367, v3368);
+14206:         wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+14207:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID2);
+14208:         v3369 = static_cast<uint16_t>(v256);
+14209:         v3370 = static_cast<uint16_t>(v247);
+14210:         TEXTRACT(v3367, v3365, v3369, v3370);
+14211:         set_flag(PIPE_MTE1, PIPE_FIX, EVENT_ID0);
+14212:         // pto: %buf_key_panel_inline1878__ssa_v12
+14213:         ;
+14214:         v3371 = Tile<TileType::Right, int8_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+14215:         // pto: %buf_key_panel_inline1878__ssa_v12
+14216:         ;
+14217:         v3372 = (uint64_t) v223;
+14218:         TASSIGN(v3371, v3372);
+14219:         // pto: %buf_scores_l1_inline1847__ssa_v16
+14220:         ;
+14221:         v3373 = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+14222:         // pto: %buf_scores_l1_inline1847__ssa_v16
+14223:         ;
+14224:         v3374 = (uint64_t) v210;
+14225:         TASSIGN(v3373, v3374);
+14226:         // pto: %buf_previous_pair_inline1875__ssa_v4
+14227:         ;
+14228:         v3375 = Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v247, v247);
+14229:         // pto: %buf_previous_pair_inline1875__ssa_v4
+14230:         ;
+14231:         v3376 = (uint64_t) v208;
+14232:         TASSIGN(v3375, v3376);
+14233:         wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID3);
+14234:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID3);
+14235:         v3377 = static_cast<uint16_t>(v256);
+14236:         v3378 = static_cast<uint16_t>(v256);
+14237:         TEXTRACT(v3375, v3255, v3377, v3378);
+14238:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+14239:         // pto: %buf_scores_inline1835__ssa_v12
+14240:         ;
+14241:         v3379 = Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v247, v247);
+14242:         // pto: %buf_scores_inline1835__ssa_v12
+14243:         ;
+14244:         v3380 = (uint64_t) v208;
+14245:         TASSIGN(v3379, v3380);
+14246:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+14247:         TMATMUL(v3379, v2579, v3371);
+14248:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+14249:         // pto: %buf_reduced_pair_inline1880__ssa_v4
+14250:         ;
+14251:         v3381 = Tile<TileType::Acc, float, 16, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v239, v247);
+14252:         // pto: %buf_reduced_pair_inline1880__ssa_v4
+14253:         ;
+14254:         v3382 = (uint64_t) v210;
+14255:         TASSIGN(v3381, v3382);
+14256:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+14257:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID2);
+14258:         TMATMUL(v3381, v2581, v3375);
+14259:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID2);
+14260:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+14261:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+14262:         wait_flag(PIPE_MTE1, PIPE_FIX, EVENT_ID0);
+14263:         v3383 = static_cast<uint64_t>(v291);
+14264:         v3384 = static_cast<uint16_t>(v256);
+14265:         v3385 = static_cast<uint16_t>(v256);
+14266:         TINSERT<Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>, Tile<TileType::Acc, int32_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>, ReluPreMode::NormalRelu>(v3373, v3379, v3383, v3384, v3385);
+14267:         set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+14268:         set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID4);
+14269:         v3381.SetValidShape(v254, v247);

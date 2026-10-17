@@ -1,0 +1,157 @@
+{
+  "reference_commit": "d253d627",
+  "measurement": "完整L1 incore首尾；三方同进程同输入；五窗中位数；SPMD双方100 tick失败轮询退避",
+  "precision_scope": "原PTO精确对照、图重放、状态/保护区及72核代际；不代表Native/token或全部动态场景验收",
+  "cases": [
+    {
+      "history": 8192,
+      "batch": 16,
+      "task": "task_20261018_031515_236275422318",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/short_g2_prefetch_h8192_b16_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            680.9,
+            681.92,
+            686.88,
+            669.58,
+            671.12
+          ],
+          "median_us": 680.9
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            690.32,
+            694.08,
+            692.08,
+            693.48,
+            693.6
+          ],
+          "median_us": 693.48
+        },
+        "spmd_reference": {
+          "samples_us": [
+            678.9,
+            684.3,
+            685.02,
+            682.86,
+            678.7
+          ],
+          "median_us": 682.86
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -1.555223618311219,
+      "candidate_faster_windows": 0,
+      "candidate_vs_dynamic_reduction_pct": -1.8475547070054388,
+      "target_met": false
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "task": "task_20261018_031515_236279311548",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/short_g2_prefetch_h8192_b32_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1009.3,
+            984.36,
+            993.54,
+            976.16,
+            991.36
+          ],
+          "median_us": 991.36
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            999.38,
+            998.04,
+            990.38,
+            999.78,
+            1002.04
+          ],
+          "median_us": 999.38
+        },
+        "spmd_reference": {
+          "samples_us": [
+            993.72,
+            999.26,
+            1007.46,
+            1002.38,
+            1003.08
+          ],
+          "median_us": 1002.38
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": 0.2992876952852219,
+      "candidate_faster_windows": 4,
+      "candidate_vs_dynamic_reduction_pct": -0.8089896707553335,
+      "target_met": false
+    }
+  ]
+}

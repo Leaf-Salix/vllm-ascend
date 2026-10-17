@@ -1,0 +1,14 @@
+--- d253/output_projection_a_stages.py
++++ candidate/output_projection_a_stages.py
+@@ -227,7 +227,10 @@
+             dequant_scale = pl.set_validshape(pl.mul(g_amax, 1.0 / INT8_SCALE_MAX), 1, rows)
+             pl.store(dequant_scale, [g, qt], act_scale_dq)
+             g_sq_col = pl.reshape(g_sq_row, [QUANT_TOKEN_TILE, 1])
+-            oc_q = pl.load(o_r_pad, [qt, col_g], [QUANT_TOKEN_TILE, O_LORA], valid_shape=[rows, O_LORA])
++            # 第一次加载的带符号 FP32 原值在本 qt 内继续存活，供量化乘法复用。
++            # abs/row_max 的结果不得覆盖该原值；依赖正常 Tile 生命周期分配，
++            # 不指定地址、不添加复制或额外常驻 Tile。尾行有效形状沿用原 load。
++            oc_q = oc_amax
+             oq_scaled = pl.set_validshape(pl.row_expand_mul(oc_q, g_sq_col), rows, O_LORA)
+             oq_i32 = pl.set_validshape(pl.cast(oq_scaled, target_type=pl.INT32, mode="rint"), rows, O_LORA)
+             oq_half = pl.set_validshape(pl.cast(oq_i32, target_type=pl.FP16, mode="round"), rows, O_LORA)

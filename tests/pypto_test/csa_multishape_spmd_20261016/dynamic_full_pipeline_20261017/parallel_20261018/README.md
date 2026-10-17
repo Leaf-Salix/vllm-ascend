@@ -269,3 +269,17 @@ task-submit --device auto --max-time 1200 'bash /主工作区/dynamic_full_pipel
 对应agent记录中。`summarize_parallel.py`只汇总已落盘结果，不初始化设备。
 完整CPU编译产物和二进制本地保留；路径与大小列于各证据目录
 `LOCAL_ARTIFACTS.json`，不做hash校验。
+
+## d253之后：预取与量化复用两项均不采用
+
+两个独立源码候选各一次完整符号CPU、两档同进程三方五窗验证，四任务全部
+数值/图/保护区/代际PASS。短G2预取在B16慢1.555%、B32快0.299%；O_A量化
+复用在长B16慢0.052%、短B32慢0.794%。两项均不采用、不组合、不扩七档，
+正式源码保持d253。减少真实TLOAD或UB分配没有自动变成完整L1收益。
+
+详细原始结果与范围：[短G2预取](short_g2_prefetch_evidence/DEVICE_RESULTS.md)、
+[O_A量化复用](oa_quant_reuse_evidence/DEVICE_RESULTS.md)。四任务共60窗，
+用`report_prefetch_quant_round.py`只读复算；不能跨任务拼接组合收益。
+当前Attention只读复核及dense排重分别保存在attention_aiv_d253_audit、
+dense_projection_d253_audit。后续当前版本Attention逐tick插桩单独归档，
+不计入正式性能证据。
