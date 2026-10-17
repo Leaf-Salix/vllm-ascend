@@ -1,0 +1,166 @@
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cube_schedule.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cube_schedule.py
+index 539f8606..c8801423 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cube_schedule.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cube_schedule.py
+@@ -15,6 +15,9 @@ HC行依赖路径按每个AIC实际消费的M16行等待M8输入，不等无关
+ 与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。
+ 输出尾段按策略选择整阶段或逐输出组通知；逐组路径不改变本核O_A任务序，
+ 已做完自己O_A的AIC可读就绪量化组做O_B，而不等待其它组完成量化。
++Attention入口可使用现有阶段传递关系：任一AIV发布plan前已经等过所有
++Score AIV，所有Score AIV此前均发布QUERY。因此plan获取覆盖QUERY获取；
++只省去重复槽扫描，plan之后的业务fence/cacheinvalid/fence仍完整保留。
+ 
+ 布局：x_fp32[T,16384]、normed[T,4096]；QA与KV输出pad16，QB为pad128。
+ qr与q_heads是调用层绑定的GM视图，q_heads必须恰好64*T行；compact实际行数
+@@ -186,6 +189,7 @@ def cube_schedule(
+     OB_ROWS: pl.constexpr,
+     OUTPUT_GROUP_PIPELINE: pl.constexpr,
+     HC_ROW_DEPENDENCIES: pl.constexpr,
++    ATTENTION_TRANSITIVE_DEPENDENCIES: pl.constexpr,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -376,8 +380,13 @@ def cube_schedule(
+     # Attention有效块依赖本层TopK，不能合进前置的公共metadata扫描。
+     # AIV计划完成包含“Score双缓冲已排空→TopK全部owner完成”，故可进入下一段。
+     signal = wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+-    # query反量化head分组随T变化，首版等待48个明确发布的角色完成；没有猜测tile公式。
+-    signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    if not ATTENTION_TRANSITIVE_DEPENDENCIES:
++        # 保留直接依赖路径作同进程消融；query反量化的48个角色均明确发布。
++        signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
++    # 传递路径：每个AIV的QUERY发布→该核SCORE_VECTOR发布→所有AIV的
++    # SCORE_VECTOR等待→TOPK→ATTN_PLAN。T>0时上面的plan等待至少有一个
++    # producer，且结束后仍执行完整业务缓存获取；不是只靠本核程序先后。
++    # dummy/尾块角色也无条件发布这些phase。T=0时Attention不读query行。
+     score_ring, pv_ring = attention_qk_pv_cube_stage(
+         q_heads,
+         attention_mask,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/entry.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/entry.py
+index 03c22dfe..e7d3ea5e 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/entry.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/entry.py
+@@ -20,6 +20,8 @@
+     单核可消费自己所需行，不必等待其它行完成。关闭路径保留作同轮消融。
+     OUTPUT_GROUP_PIPELINE选择输出阶段的通知粒度：开启后O_A/量化各有8个
+     模型输出组完成槽，保留原全局任务owner和动态行循环，不增加kernel。
++    ATTENTION_TRANSITIVE_DEPENDENCIES利用既有Score→TopK→plan偏序省去
++    Attention入口的重复phase扫描，保留plan后的完整业务缓存获取。
+     不同策略允许分别JIT；本入口不接受Host实际长度代替逐请求device范围。
+     当前接通的是Cube Score路径；<2048压缩候选的原Vector路径尚待接入。
+     初始完整组合使用Native NZ2布局；ND/NZ单阶段通过不代表本入口全部布局通过。
+@@ -273,6 +275,7 @@ def _csa_core_group(
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
++    ATTENTION_TRANSITIVE_DEPENDENCIES: pl.constexpr,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -363,6 +366,7 @@ def _csa_core_group(
+             OB_ROWS,
+             OUTPUT_GROUP_PIPELINE,
+             HC_ROW_DEPENDENCIES,
++            ATTENTION_TRANSITIVE_DEPENDENCIES,
+         )
+         (
+             x_fp32,
+@@ -554,6 +558,7 @@ def _csa_core_group(
+             HC_ROW_DEPENDENCIES,
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
++            ATTENTION_TRANSITIVE_DEPENDENCIES,
+         )
+     return (
+         x_fp32,
+@@ -781,6 +786,7 @@ def decode_csa_spmd(
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
++    ATTENTION_TRANSITIVE_DEPENDENCIES: pl.constexpr,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1023,6 +1029,7 @@ def decode_csa_spmd(
+             HC_ROW_DEPENDENCIES,
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
++            ATTENTION_TRANSITIVE_DEPENDENCIES,
+         )
+     return (
+         x_fp32,
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/policy.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/policy.py
+index e29e7aec..11c22c7b 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/policy.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/policy.py
+@@ -26,6 +26,9 @@ Attention查询几何复用候选使用已有mask行空余列，按次写入/发
+ HC消费者归约候选让门值/Sinkhorn直接加载四份投影部分和，省去RAW交接。
+ 128K/B16与8K/B32均与原分task精确一致；同进程五窗口完整L1分别慢1.06%、
+ 快2.54%，因此默认关闭，尚不据两个点划定启用区间。见统一优化日志。
++Attention传递依赖候选利用现有Score→TopK→plan偏序，省去入口处已经满足
++的QUERY/原KV/主压缩输出/RoPE信号扫描。仍等待真实plan owner并执行原有
++业务缓存获取，不修改发布、FFTS或数学。默认关闭，须经完整精度与L1消融。
+ """
+ 
+ from dataclasses import dataclass
+@@ -45,6 +48,7 @@ class CSASPMDPolicy:
+     hc_row_dependencies: bool = True
+     attention_query_metadata: bool = False
+     hc_consumer_reduce: bool = False
++    attention_transitive_dependencies: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -61,6 +65,7 @@ class CSASPMDPolicy:
+             "HC_ROW_DEPENDENCIES": self.hc_row_dependencies,
+             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
++            "ATTENTION_TRANSITIVE_DEPENDENCIES": self.attention_transitive_dependencies,
+         }
+ 
+ 
+diff --git a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/vector_schedule.py b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/vector_schedule.py
+index 4ee4b431..90ce053a 100644
+--- a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/vector_schedule.py
++++ b/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/vector_schedule.py
+@@ -24,6 +24,9 @@ Indexer量化/系数和主Query反量化，利用AIC主QB计算时的Vector窗
+ Attention查询几何复用开启时，plan在原64B mask行内同时发布request/position；
+ 消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时
+ 两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。
++Attention传递依赖候选保留真实plan owner等待及随后完整业务缓存获取，利用
++此前全体Score AIV完成已经蕴含原KV/主压缩/RoPE完成的偏序，省去重复扫描。
++零工作量角色仍照合同发布；仅T=0时没有plan输入依赖，也不读取任何query行。
+ 组流水启用时，量化只等本输出组的O_A owner；末块尾零属于同组通知合同，
+ 每组独立槽位。HCpost仍等待所有O_B partial，保留八组反量化左折叠顺序。
+ 数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。
+@@ -300,6 +303,7 @@ def vector_schedule(
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
++    ATTENTION_TRANSITIVE_DEPENDENCIES: pl.constexpr,
+ ):
+     pl.func_attr({"split_aiv": True})
+     x_fp32_gm = x_fp32
+@@ -867,12 +871,17 @@ def vector_schedule(
+     )
+     signal = publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)
+ 
+-    # 每组Attention处理q=group+k*24，与计划8行条带不同；读取前等全体真实plan
+-    # owner，同时确保两种Native cache写回与反向RoPE行已对当前AIV可见。
++    # 每组Attention处理q=group+k*24，与计划8行条带不同；读取前仍等全体真实
++    # plan owner，wait_row_owners保留完整业务fence/cacheinvalid/fence。
+     signal = wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
+-    signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
++    if not ATTENTION_TRANSITIVE_DEPENDENCIES:
++        signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
++        signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
++    # 传递路径：所有AIV在SCORE_VECTOR前已发布ORIGINAL_CACHE、MAIN_OUTPUT
++    # 和ROPE；本核在TOPK前无条件等待全部48个SCORE_VECTOR。各缓冲之后未
++    # 复用，故plan后的业务缓存获取已覆盖这些旧产物，不再重复扫描旧phase。
++    # 即使本核无有效请求或仅有尾块，上述发布与SCORE_VECTOR集合仍执行。
+     # 事件2..5用于Attention三槽流水，和Indexer的0/1分开。publish完成phase
+     # 不能代替这些逐槽READY/ACK；每个helper返回前均需排空自己的末尾在途项。
+     kv_ring, probability_ring, mi_ring, li_ring, packed = attention_qk_pv_vector_lane_stage(

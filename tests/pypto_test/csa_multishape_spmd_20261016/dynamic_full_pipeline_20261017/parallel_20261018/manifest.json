@@ -1,0 +1,50 @@
+{
+  "source_commit": "593c5d25",
+  "baseline_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source",
+  "hashing": false,
+  "directions": [
+    "sync",
+    "indexer",
+    "hc_attention"
+  ],
+  "performance_reference": "原分task PTO + 旧SPMD + 候选，同进程同卡轮换五窗口完整L1",
+  "agents": [
+    {
+      "name": "ultra_sync_pipeline",
+      "worktree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018",
+      "candidate": "Attention入口传递冗余等待折叠",
+      "first_cases": [
+        [
+          131072,
+          16
+        ],
+        [
+          8192,
+          32
+        ]
+      ]
+    },
+    {
+      "name": "ultra_indexer_policy",
+      "worktree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018",
+      "candidate": "G2/768 score同AIV本地半叶缓冲替代GM往返",
+      "first_cases": [
+        [
+          8192,
+          16
+        ]
+      ]
+    },
+    {
+      "name": "hc_tail_scalar_candidate",
+      "worktree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-hc_attention-20261018",
+      "candidate": "Attention同lane mi/li本地三槽替代GM重读",
+      "first_cases": [
+        [
+          131072,
+          16
+        ]
+      ]
+    }
+  ]
+}

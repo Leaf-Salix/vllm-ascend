@@ -1,0 +1,45 @@
+{
+  "status": "rejected_before_device",
+  "baseline": "593c5d25",
+  "candidate": "Attention AIV mi/li 本地三槽复用",
+  "source_audit": {
+    "passed": true,
+    "baseline": "593c5d25",
+    "candidate": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py",
+    "original_assignment_targets_preserved": 98,
+    "replaced_rhs_only": [
+      "pv_m: GM load -> local FP32 slice/reshape",
+      "pv_l: GM load -> local FP32 slice/reshape"
+    ],
+    "signature_identical": true,
+    "all_gm_stores_identical": true,
+    "all_sync_calls_identical": true,
+    "mask_cases": 33825,
+    "valid_consume_events": 250960,
+    "max_blocks_per_mask": 15,
+    "ring_logical_bytes_per_aiv": 768,
+    "stage_relation": "softmax(work) at tick work+1; consume at work+3; next same-slot write at work+4",
+    "limitations": [
+      "不模拟 A3 FP32/UB 实际物理布局",
+      "不验证编译器寄存器/UB 别名",
+      "不替代完整精度、graph、保护区与 L1 实测"
+    ]
+  },
+  "cpu_attempts": [
+    {
+      "path": "cpu_v1/result.json",
+      "passed": false,
+      "symbolic_parse_passed": true,
+      "error": "Vec buffer usage (255232 bytes) exceeds platform limit (188416 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473"
+    },
+    {
+      "path": "cpu_v2/result.json",
+      "passed": false,
+      "symbolic_parse_passed": true,
+      "error": "Vec buffer usage (255104 bytes) exceeds platform limit (188416 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473"
+    }
+  ],
+  "device_submissions": 0,
+  "performance_measured": false,
+  "recommendation": "保留隔离失败证据，不迁入主仓；本候选停止"
+}

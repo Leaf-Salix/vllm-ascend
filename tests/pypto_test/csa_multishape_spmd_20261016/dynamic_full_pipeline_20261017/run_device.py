@@ -52,6 +52,9 @@ def main():
     parser.add_argument("--hc-consumer-matrix", action="store_true")
     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default=None)
     parser.add_argument("--attention-query-matrix", action="store_true")
+    parser.add_argument("--spmd-source", type=Path)
+    parser.add_argument("--policy-json", type=Path)
+    parser.add_argument("--source-matrix-reference", type=Path)
     parser.add_argument("--device", type=int, default=int(os.environ.get("TASK_DEVICE", "-1")))
     args = parser.parse_args()
     if "TASK_DEVICE" not in os.environ:
@@ -66,9 +69,9 @@ def main():
         raise ValueError("metadata重放要求无阶段插桩、history>=2")
     if args.padding_replay and (args.phase_clock or args.batch < 2):
         raise ValueError("padding重放要求无阶段插桩、batch>=2")
-    if sum((args.output_policy_matrix, args.hc_policy_matrix, args.attention_query_matrix, args.hc_consumer_matrix)) > 1:
+    if sum((args.output_policy_matrix, args.hc_policy_matrix, args.attention_query_matrix, args.hc_consumer_matrix, bool(args.source_matrix_reference))) > 1:
         raise ValueError("每轮只比较一个策略轴，避免组合过多掩盖收益来源")
-    if (args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix) and not args.l1_windows:
+    if (args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix or args.source_matrix_reference) and not args.l1_windows:
         raise ValueError("输出策略矩阵需要显式指定配对L1窗口数")
     args.output.mkdir(parents=True, exist_ok=False)
     report = dict(
@@ -148,10 +151,12 @@ def main():
         from pypto import _torch_npu, pypto_core
 
         from vllm_ascend.ops.pypto.deepseek_v4_flash_csa import native_adapter as adapter
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.binding import PreparedDynamicCSA
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.policy import select_policy
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT
+        from source_loader import load_binding
         from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
+
+        isolated = load_binding(args.spmd_source, "candidate")
+        PreparedDynamicCSA, select_policy, PHASE_COUNT = isolated.prepared, isolated.select_policy, isolated.phase_count
+        report["source_package"] = str(isolated.source)
 
         pypto_root = Path(os.environ["CSA_STATIC_PYPTO_ROOT"]).resolve()
         simpler_root = Path(os.environ["HCA_SIMPLER_ROOT"]).resolve()
@@ -166,7 +171,7 @@ def main():
             "device": device_id,
         }
         (args.output / "source").mkdir()
-        package = REPO / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
+        package = isolated.source
         for path in package.glob("*.py"):
             (args.output / "source" / path.name).write_text(path.read_text())
         for script in (
@@ -181,6 +186,7 @@ def main():
             HERE / "padding_replay.py",
             HERE / "output_policy_matrix.py",
             HERE / "check_output_phase_signals.py",
+            HERE / "source_loader.py",
         ):
             (args.output / script.name).write_text(script.read_text())
         with native_session(config, device_id), torch.inference_mode():
@@ -248,6 +254,11 @@ def main():
                 policy = replace(policy, hc_consumer_reduce=args.hc_consumer_reduce == "on")
             if args.attention_query_metadata is not None:
                 policy = replace(policy, attention_query_metadata=args.attention_query_metadata == "on")
+            if args.policy_json:
+                overrides = json.loads(args.policy_json.read_text())
+                if not isinstance(overrides, dict) or any(type(v) not in (bool, int) for v in overrides.values()):
+                    raise ValueError("策略覆盖只允许字段到int/bool的JSON对象")
+                policy = replace(policy, **overrides)
             candidate = PreparedDynamicCSA(
                 call.args, max_query_tokens=6, max_seq_len=args.history + 6, allocator=allocate, policy=policy
             )
@@ -440,11 +451,12 @@ def main():
                 before_l1 = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
                 if not bool((before_l1 == before_l1[0]).all()):
                     raise AssertionError("L1前参与核代际不一致")
-                if args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix:
+                if args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix or args.source_matrix_reference:
                     from output_policy_matrix import run_matrix
 
-                    matrix_axis = "hc_consumer" if args.hc_consumer_matrix else "attention_query" if args.attention_query_matrix else "hc_rows" if args.hc_policy_matrix else "output"
+                    matrix_axis = "source" if args.source_matrix_reference else "hc_consumer" if args.hc_consumer_matrix else "attention_query" if args.attention_query_matrix else "hc_rows" if args.hc_policy_matrix else "output"
                     matrix_key = {
+                        "source": "source_matrix",
                         "attention_query": "attention_query_policy_matrix",
                         "hc_consumer": "hc_consumer_policy_matrix",
                         "hc_rows": "hc_row_policy_matrix",
@@ -466,6 +478,7 @@ def main():
                         wait_backoff=args.wait_backoff,
                         update_stage=update_stage,
                         axis=matrix_axis,
+                        reference_source=args.source_matrix_reference,
                     )
                     report["post_l1_protocol"] = all(
                         row["passed"] for row in report[matrix_key]["protocol"].values()

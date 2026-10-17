@@ -1,0 +1,189 @@
+{
+  "passed": true,
+  "scope": "单一固定owner两wave方案的离线资源/依赖审计，无编译或设备执行",
+  "source_functions": [
+    "indexer_long_leaf_plan",
+    "indexer_work_item",
+    "indexer_leaf_range"
+  ],
+  "source_files": [
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_group_stages.py",
+      "size_bytes": 16587
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_score_stages.py",
+      "size_bytes": 44690
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_publish_stages.py",
+      "size_bytes": 16858
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_plan_stages.py",
+      "size_bytes": 23477
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py",
+      "size_bytes": 30201
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cube_schedule.py",
+      "size_bytes": 20490
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/vector_schedule.py",
+      "size_bytes": 39989
+    }
+  ],
+  "geometry": {
+    "batch": 16,
+    "tokens": 96,
+    "group_size": 6,
+    "leaves": 6,
+    "leaf_tiles": 5,
+    "extra_leaves": 3,
+    "cut_query": 48,
+    "per_group_score_blocks": [
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22,
+      22
+    ],
+    "per_wave_score_blocks": [
+      [
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11
+      ],
+      [
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11
+      ]
+    ],
+    "attention_queries_per_group": 4
+  },
+  "protocol": {
+    "score_blocks": 528,
+    "score_ready_ack_ids": [
+      0,
+      1
+    ],
+    "attention_event_ids": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "score_fifo_slots_per_group": 2,
+    "attention_ring_slots_per_group": 3,
+    "all_score_leaf_boundaries_drained": true,
+    "disjoint_physical_group_regions": true,
+    "disjoint_pair_topk_plan_packed_query_rows": true,
+    "attention_boundary_contract": "每wave完整执行现有+2/+3排空；10个有效块的四种事件全部配对",
+    "hardware_ffts_simulated": false,
+    "cache_maintenance_validated": false
+  },
+  "cases": [
+    {
+      "score_unit": 1,
+      "attention_unit": 1,
+      "original_span": 42,
+      "two_wave_span": 42,
+      "fixed_owner_work_bound": 42,
+      "cross_group_overlap": true,
+      "modeled_compute_reduction": 0
+    },
+    {
+      "score_unit": 3,
+      "attention_unit": 1,
+      "original_span": 86,
+      "two_wave_span": 86,
+      "fixed_owner_work_bound": 86,
+      "cross_group_overlap": true,
+      "modeled_compute_reduction": 0
+    },
+    {
+      "score_unit": 1,
+      "attention_unit": 3,
+      "original_span": 82,
+      "two_wave_span": 82,
+      "fixed_owner_work_bound": 82,
+      "cross_group_overlap": true,
+      "modeled_compute_reduction": 0
+    }
+  ],
+  "unbounded_helper_cycle": [
+    "A0_g0若仍遍历所有T，会在q48需要wave1 plan",
+    "plan q48..55由AIV worker6产生，需要query48的TopK",
+    "query48 TopK由AIV worker0产生，需要request8 leaf1的score根",
+    "request8 leaf1归AIC group0，其I1在A0返回之后才允许执行",
+    "形成A0_g0→plan1→merge1→I1_g0→A0_g0等待环"
+  ],
+  "conclusion": "可构造跨组重叠且无环，但固定owner均衡反例中未缩短大阶段计算链；不选为设备候选",
+  "limitation": "不证明角色尾段细粒度交错、重分核或真实硬件不同负载互补均无收益；本模型没有这些能力",
+  "units": "抽象工作格，绝非微秒或设备性能下限"
+}

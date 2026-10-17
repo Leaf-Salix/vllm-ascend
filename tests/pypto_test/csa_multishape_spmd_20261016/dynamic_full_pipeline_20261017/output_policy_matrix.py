@@ -31,23 +31,24 @@ def run_matrix(
     wait_backoff,
     update_stage,
     axis="output",
+    reference_source=None,
 ):
     # 设备依赖延迟导入，离线报告读取不初始化NPU。
     import pypto.torch
     import torch
     from compile_diagnostics import compilation_probe
 
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.binding import PreparedDynamicCSA
     from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT, PHASE_RAW
 
     output = Path(output)
-    if axis not in ("output", "hc_rows", "attention_query", "hc_consumer"):
+    if axis not in ("output", "hc_rows", "attention_query", "hc_consumer", "source"):
         raise ValueError("未知策略矩阵轴")
     matrix_dir = output / {
         "output": "output_policy_matrix",
         "hc_rows": "hc_row_policy_matrix",
         "attention_query": "attention_query_policy_matrix",
         "hc_consumer": "hc_consumer_policy_matrix",
+        "source": "source_matrix",
     }[axis]
     matrix_dir.mkdir(exist_ok=False)
     report = dict(
@@ -58,6 +59,8 @@ def run_matrix(
         (matrix_dir / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
     def name_for(policy):
+        if axis == "source":
+            return "spmd_candidate"
         if axis == "hc_consumer":
             return "spmd_hc_" + ("consumer_reduce" if policy.hc_consumer_reduce else "raw_stage")
         if axis == "attention_query":
@@ -80,7 +83,23 @@ def run_matrix(
     assert len(initial_tables) == 1
     configs = {name_for(existing.policy): next(iter(initial_tables))}
     try:
-        if axis == "hc_consumer":
+        if axis == "source":
+            from source_loader import load_binding
+
+            if reference_source is None:
+                raise ValueError("源码矩阵必须显式提供基线包目录")
+            reference = load_binding(reference_source, "reference")
+            assert reference.phase_count == PHASE_COUNT, "源码矩阵尚不允许改变信号ABI"
+            reference_policy = reference.select_policy(
+                tokens=existing.tokens, requests=existing.requests, max_query_tokens=6, max_seq_len=max_seq_len)
+            reference_dir = matrix_dir / "reference_source"
+            reference_dir.mkdir()
+            for path in reference.source.glob("*.py"):
+                (reference_dir / path.name).write_text(path.read_text())
+            report["reference_source"] = str(reference.source)
+            plans = [("spmd_candidate", type(existing), existing.policy),
+                     ("spmd_reference", reference.prepared, reference_policy)]
+        elif axis == "hc_consumer":
             # 保持行依赖、tile与全部其它阶段不变，只比较RAW独立交接/消费者归约。
             policies = [replace(existing.policy, hc_consumer_reduce=enabled) for enabled in (False, True)]
         elif axis == "attention_query":
@@ -96,13 +115,14 @@ def run_matrix(
                 replace(existing.policy, oa_cols=cols, output_group_pipeline=grouped)
                 for cols in cols_set for grouped in (False, True)
             ]
-        for policy in policies:
-            name = name_for(policy)
+        if axis != "source":
+            plans = [(name_for(policy), type(existing), policy) for policy in policies]
+        for name, prepared_type, policy in plans:
             report["policies"][name] = policy.constexprs()
             if name in candidates:
                 continue
             update_stage("output_matrix_compile_" + name)
-            candidate = PreparedDynamicCSA(
+            candidate = prepared_type(
                 existing.native,
                 max_query_tokens=6,
                 max_seq_len=max_seq_len,
@@ -130,7 +150,7 @@ def run_matrix(
             report["checks"][name + "_eager"] = checked()
             signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
             assert bool((signal[0, :, 0] == 1).all() and (signal[:, :, 1:] == 0).all())
-            if policy.hc_consumer_reduce:
+            if axis == "hc_consumer" and policy.hc_consumer_reduce:
                 # RAW保持填毒且没有RAW通知，直接消费路径不得隐式依赖旧中间量。
                 untouched = bool((candidate.buffers["raw"].cpu() == 37).all())
                 no_publish = bool((signal[PHASE_RAW, :, 0] == 0).all())
@@ -218,6 +238,12 @@ def run_matrix(
             )
             for name in candidates
         }
+        if axis == "source":
+            reference_us = report["statistics_us"]["spmd_reference"]["median_us"]
+            candidate_us = report["statistics_us"]["spmd_candidate"]["median_us"]
+            report["candidate_vs_reference"] = dict(
+                reference_us=reference_us, candidate_us=candidate_us,
+                latency_reduction_pct=(1 - candidate_us / reference_us) * 100)
         report["protocol"] = {}
         for name, item in candidates.items():
             signal = item.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)

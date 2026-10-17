@@ -3,6 +3,7 @@
 
 import argparse
 import ast
+import importlib
 import json
 import re
 import traceback
@@ -49,11 +50,13 @@ def main():
     parser.add_argument("--hc-row-dependencies", choices=("on", "off"), default="on")
     parser.add_argument("--hc-consumer-reduce", choices=("on", "off"), default="off")
     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default="on")
+    parser.add_argument("--spmd-source", type=Path)
+    parser.add_argument("--controls-json", type=Path)
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     here = Path(__file__).resolve().parent
-    package = here.parents[3] / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
+    package = args.spmd_source.resolve() if args.spmd_source else here.parents[3] / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
     controls = dict(
         QUERY_GROUP=6,
         QK_PANEL=64,
@@ -73,6 +76,11 @@ def main():
         controls.update(
             QUERY_GROUP=2, QK_PANEL=128, SCORE_TILE=768, PREFETCH=0, BALANCED=False, ROOTS=2, OA_COLS=128, OB_ROWS=96
         )
+    if args.controls_json:
+        overrides = json.loads(args.controls_json.read_text())
+        if not isinstance(overrides, dict) or any(type(v) not in (bool, int) for v in overrides.values()):
+            raise ValueError("CPU策略覆盖只允许constexpr名称到int/bool的JSON对象")
+        controls.update(overrides)
     report = dict(
         passed=False,
         scope="完整源级动态CSA单SPMD",
@@ -106,7 +114,11 @@ def main():
         from pypto.ir.printer import python_print
         from pypto.runtime import CompileOptions
 
-        from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.entry import decode_csa_spmd
+        from source_loader import load_package
+
+        isolated = load_package(args.spmd_source, "cpu_candidate")
+        decode_csa_spmd = importlib.import_module(isolated.name + ".entry").decode_csa_spmd
+        report["source_package"] = str(isolated.source)
 
         logical = python_print(decode_csa_spmd.specialize(**controls))
         (output / "symbolic.py").write_text(logical)
