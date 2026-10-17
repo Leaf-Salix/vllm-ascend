@@ -296,3 +296,11 @@ CPU 命令 `pytest -q tests/pypto_test/test_full_precision_*_cpu.py` 当前 22 p
 格式、拼写、shell 和禁止导入问题失败；没有把批量自动改动写回正式 checkout。
 本次改动文件的增量检查、手工 Markdown 检查均通过。
 完整 CI 日志保存在本地本轮 reports 目录；这项全仓库 gate 未通过，不能记成全 CI 通过。
+
+## 完整替换后的整模型8K回归
+
+正式`425ae1f11`完整精度包已完成
+[真实整模型8K/B40、192-token复测](DSV4_FLASH_CSA_TND_COMPLETE_PTO_8K_B40_20261018.md)：
+640条请求、122880token全部与原Native1一致，接受事件、16rank入场轨迹及rank0外层
+位摘要也一致；全21CSA层确认完整PTO捕获。复用旧Native，不跑Native2或128K。
+加载助手的第二档静态选择复用修正、实际缓存计数及验证边界见该报告。
