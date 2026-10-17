@@ -1,0 +1,54 @@
+from pathlib import Path
+import ast,dataclasses,difflib,importlib.util,json,shutil,sys
+r=Path('/data/pyptouser/qinchuanyu/pto-eager');c=r/'vllm-ascend-dsv4-pto-0251rc1';formal=c/'vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd';p=c/'tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018';e=p/'qa_small_m16_v2_evidence';before=e/'source_reference_9d';v2=e/'source_candidate';selected=e/'source_selected_g6'
+assert not selected.exists()
+assert all(x.read_bytes()==(before/x.name).read_bytes() for x in formal.glob('*.py'))
+shutil.copytree(v2,selected)
+f=selected/'policy.py';s=f.read_text();old='qa_m16_parallel=16 < tokens < 32,';assert s.count(old)==1;s=s.replace(old,'qa_m16_parallel=group == 6 and 16 < tokens < 32,')
+s=s.replace('QA的M16并行候选只在16<tokens<32选用：原M32策略此时只有两个M16尾块，\n改分核不增加数学或权重请求。开关进入constexpr签名，不为未命中区间编译\n额外device分支；两种内核的T及请求元数据仍全部动态。旧手工策略默认关闭。','QA的M16并行仅在已有G6策略且16<tokens<32选用：此时原M32策略只有\n两个M16尾块，改分核不增加数学或权重请求。长历史T24/T30同轮完整L1\n降低1.33%/1.84%；G2的T18回退2.33%，因此沿既有G6边界保守收窄，\n不把三点视为G6收益的因果证明或全历史普遍提速。这个区间实际为长历史、\nquery上界至少6、24<=T<32，混合Q与其它历史长度尚需继续回归。\n开关进入constexpr签名，关闭编译旧QA路径；T和device metadata仍动态。')
+s=s.replace('# 原M32块尚未形成、恰有两份M16尾块；不按batch或S6样例选择。','# 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。')
+f.write_text(s)
+replacements={
+ 'entry.py':[('Host仅在16<T<32选择并行两份原M16尾块','Host仅在G6且16<T<32选择并行两份原M16尾块')],
+ 'cube_schedule.py':[('Host仅在原两M16尾块区间启用','Host仅在G6的原两M16尾块区间启用')],
+ 'qkv_stages.py':[('Host仅在16<T<32（原两个M16尾块、总权重请求不增）','Host仅在G6且16<T<32（原两个M16尾块、总权重请求不增）'),('Host策略只为16<T<32开启','Host策略只为G6且16<T<32开启')],
+}
+for name,pairs in replacements.items():
+ f=selected/name;s=f.read_text()
+ for a,b in pairs:assert a in s;(s:=s.replace(a,b))
+ f.write_text(s)
+class StripDoc(ast.NodeTransformer):
+ def visit_Expr(self,node):
+  return None if isinstance(node.value,ast.Constant) and isinstance(node.value.value,str) else self.generic_visit(node)
+def tree(path):return ast.dump(StripDoc().visit(ast.parse(path.read_text())),include_attributes=False)
+for x in selected.glob('*.py'):
+ if x.name!='policy.py':assert tree(x)==tree(v2/x.name),x.name
+def load(name,path):
+ spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);sys.modules[name]=m;spec.loader.exec_module(m);return m
+m0=load('qa_g6_original',before/'policy.py');m2=load('qa_g6_v2',v2/'policy.py');m3=load('qa_g6_selected',selected/'policy.py')
+n=0;on=0
+for t in (1,8,16,17,18,23,24,25,30,31,32,48,96,144,168,192):
+ for b in (1,3,4,5,8,16,24,28,32,40):
+  for q in (1,5,6):
+   if t>b*q:continue
+   for h in (8192,32768,32772,131072):
+    args=dict(tokens=t,requests=b,max_query_tokens=q,max_seq_len=h)
+    a=dataclasses.asdict(m0.select_policy(**args));b2=dataclasses.asdict(m2.select_policy(**args));z=dataclasses.asdict(m3.select_policy(**args));flag=z.pop('qa_m16_parallel');oldflag=b2.pop('qa_m16_parallel')
+    assert z==a==b2 and flag==(oldflag and z['query_group']==6)
+    assert flag==(h//4>8192 and q>=6 and 24<=t<32)
+    n+=1;on+=int(flag)
+examples=[]
+for b in (3,4,5,8,16,24,28):
+ a=m3.select_policy(tokens=b*6,requests=b,max_query_tokens=6,max_seq_len=131072)
+ examples.append({'history':131072,'batch':b,'tokens':b*6,'policy':dataclasses.asdict(a)})
+changed=[];patch=[]
+for x in sorted(selected.glob('*.py')):
+ old=(before/x.name).read_text();new=x.read_text()
+ if old!=new:
+  changed.append(x.name);patch.extend(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='source_reference_9d/'+x.name,tofile='source_selected_g6/'+x.name))
+assert set(changed)=={'entry.py','cube_schedule.py','vector_schedule.py','qkv_stages.py','policy.py'}
+(e/'selected_g6.diff').write_text(''.join(patch))
+(e/'SELECTED_POLICY_AUDIT.json').write_text(json.dumps({'no_new_compilation':True,'mathematical_and_schedule_ast_equal_to_tested_v2_except_host_policy':True,'host_cases_checked':n,'host_cases_enabled':on,'only_new_gate':'query_group == 6','changed_files':changed,'examples':examples,'scope':'同一已测True内核和同控CPU证明一致的False内核；不把G6相关性当因果或普遍收益'},ensure_ascii=False,indent=2)+'\n')
+for name in changed:shutil.copy2(selected/name,formal/name)
+assert all(x.read_bytes()==(selected/x.name).read_bytes() for x in formal.glob('*.py'))
+print(json.dumps({'selected':changed,'policy_cases':n,'enabled_cases':on,'formal_equals_selected':True},ensure_ascii=False))

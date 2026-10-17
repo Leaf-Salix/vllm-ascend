@@ -1,0 +1,159 @@
+{
+  "reference_commit": "9d5327e5",
+  "measurement": "完整L1 incore首尾；三方同进程同输入；五窗中位数；SPMD双方100 tick失败轮询退避",
+  "precision_scope": "原PTO精确对照、图重放、状态/保护区及72核代际；不代表Native/token或全部动态场景验收",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 24,
+      "task": "task_20261018_050316_27283926583",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b24_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1121.34,
+            1147.02,
+            1180.62,
+            1191.82,
+            1178.12
+          ],
+          "median_us": 1178.12
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1181.42,
+            1192.88,
+            1173.42,
+            1177.22,
+            1181.24
+          ],
+          "median_us": 1181.24
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1169.44,
+            1183.62,
+            1170.32,
+            1178.74,
+            1174.38
+          ],
+          "median_us": 1174.38
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.5841380132495466,
+      "candidate_faster_windows": 1,
+      "candidate_vs_dynamic_reduction_pct": -0.2648287101483904,
+      "target_met": false
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "task": "task_20261018_050316_27292720517",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b28_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1283.08,
+            1281.44,
+            1312.22,
+            1315.0,
+            1318.46
+          ],
+          "median_us": 1312.22
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1334.82,
+            1337.8,
+            1327.34,
+            1328.84,
+            1326.4
+          ],
+          "median_us": 1328.84
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1329.3,
+            1337.42,
+            1337.28,
+            1334.14,
+            1351.36
+          ],
+          "median_us": 1337.28
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": 0.6311318497248197,
+      "candidate_faster_windows": 3,
+      "candidate_vs_dynamic_reduction_pct": -1.2665559128804516,
+      "target_met": false
+    }
+  ],
+  "candidate": "query_linear",
+  "adoption": "本报告只记录证据；采用与否及边界补测见统一优化日志。"
+}

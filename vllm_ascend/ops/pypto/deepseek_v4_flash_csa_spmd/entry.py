@@ -14,6 +14,8 @@
     行数、压缩行数、历史分片和尾query均在核内求。main和idx的Q/L分别传，
     不因shape相同而合并语义。每请求长度无需相同，也不要求固定S=6。
     QUERY_GROUP/QK_PANEL/SCORE_TILE等仅是数学与流水策略，不固定T/B/L。
+    QA_M16_PARALLEL默认False；Host仅在G6且16<T<32选择并行两份原M16尾块，
+    同一constexpr同时传到AIC生产与AIV等待，关闭时保留原QA完整编译路径。
     HC_ROW_DEPENDENCIES按动态行归属缩小HC前段依赖，不改变任何数学块与生产者；
     ATTENTION_QUERY_METADATA让AIV复用本轮plan已验证的request/position，
     使用mask现有第5/6列，不新增Tensor/phase，也不改变候选块或环槽事件。
@@ -273,6 +275,7 @@ def _csa_core_group(
     HC_ROW_DEPENDENCIES: pl.constexpr,
     ATTENTION_QUERY_METADATA: pl.constexpr,
     HC_CONSUMER_REDUCE: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -363,6 +366,7 @@ def _csa_core_group(
             OB_ROWS,
             OUTPUT_GROUP_PIPELINE,
             HC_ROW_DEPENDENCIES,
+            QA_M16_PARALLEL,
         )
         (
             x_fp32,
@@ -554,6 +558,7 @@ def _csa_core_group(
             HC_ROW_DEPENDENCIES,
             ATTENTION_QUERY_METADATA,
             HC_CONSUMER_REDUCE,
+            QA_M16_PARALLEL,
         )
     return (
         x_fp32,
@@ -781,6 +786,7 @@ def decode_csa_spmd(
     HC_ROW_DEPENDENCIES: pl.constexpr,
     ATTENTION_QUERY_METADATA: pl.constexpr,
     HC_CONSUMER_REDUCE: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1023,6 +1029,7 @@ def decode_csa_spmd(
             HC_ROW_DEPENDENCIES,
             ATTENTION_QUERY_METADATA,
             HC_CONSUMER_REDUCE,
+            QA_M16_PARALLEL,
         )
     return (
         x_fp32,

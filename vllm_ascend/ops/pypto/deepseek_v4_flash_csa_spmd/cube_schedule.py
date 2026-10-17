@@ -186,6 +186,7 @@ def cube_schedule(
     OB_ROWS: pl.constexpr,
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
 ):
     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
@@ -255,7 +256,8 @@ def cube_schedule(
         1,
     )
     # cluster 的 GM 合同显式保留原参数别名；q_a_stage 的动态 M 分支只写同一缓冲。
-    qa = q_a_stage(normed, wq_a, qa, worker, GROUPS)
+    # Host仅在G6的原两M16尾块区间启用；T与全局M16任务数仍由device维度求得。
+    qa = q_a_stage(normed, wq_a, qa, worker, GROUPS, QA_M16_PARALLEL)
     signal = publish_phase(signal, PHASE_QA, worker, CORES, generation)
     # 先准备Indexer压缩，再做Indexer query；这两条链决定长历史Score何时可启动。
     # 独立KV投影填在等待query RoPE之前，随后发Hadamard，再做主Q_B。

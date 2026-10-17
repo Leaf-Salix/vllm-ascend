@@ -1,0 +1,83 @@
+19408:   const int64_t v340 = 1;
+19409:   const int64_t v341 = 256;
+19410:   const int64_t v342 = 64;
+19411:   const int64_t v343 = 16;
+19412:   const int64_t v344 = 32;
+19413:   const int64_t v345 = 4096;
+19414:   const int64_t v346 = 1024;
+19415:   const int64_t v347 = 32768;
+19416:   const int64_t v348 = 512;
+19417:   const int64_t v349 = 128;
+19418:   const int64_t v350 = 8192;
+19419:   const int64_t v351 = 8;
+19420:   const int64_t v352 = 262144;
+19421:   const int64_t v353 = 3;
+19422:   const int64_t v354 = 4;
+19423:   const int64_t v355 = 2;
+19424:   const int64_t v356 = 640;
+19425:   const int64_t v357 = 0;
+19426:   const int64_t v358 = 7;
+19427:   const int64_t v359 = 47;
+19428:   const int64_t v360 = 48;
+48257:   // pto: %q_flat_gather_tmp_inline869__ssa_v0
+48258:   v6467 = Tile<TileType::Vec, int32_t, 1, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v348);
+48259:   // pto: %q_flat_gather_tmp_inline869__ssa_v0
+48260:   v6468 = (uint64_t) v308;
+48261:   TASSIGN(v6467, v6468);
+48262:   // pto: %2434, %2435
+48263:   v6469 = (int64_t) ((uint64_t) (v10678 / v355) * (uint64_t) v355);
+48264:   pipe_barrier(PIPE_ALL);
+48265:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+48266:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID7);
+48267:   v10681 = v357;
+48268:   goto label685;
+48269: label685:
+48270:   v6470 = false;
+48271:   v6470 = v10681 < v6469;
+48272:   if (v6470) {
+48273:     goto label686;
+48274:   } else {
+48275:     goto label687;
+48276:   }
+48765:   v6653 = (int64_t) ((uint64_t) v10681 + (uint64_t) v355);
+48766:   v10681 = v6653;
+48767:   goto label685;
+48768: label687:
+48769:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID7);
+48770:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+48771:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+48772:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID5);
+48773:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID6);
+48774:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID7);
+48775:   // pto: %2466, %2467
+48776:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+48777:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID7);
+48778:   v6654 = false;
+48779:   v6654 = (int64_t) ((uint64_t) v10678 - (uint64_t) v6469) == v340;
+48780:   if (v6654) {
+48781:     goto label688;
+48782:   } else {
+48783:     goto label689;
+48784:   }
+48785: label688:
+48786:   // pto: %2468, %2469
+48787:   v6655 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v10679 + (uint64_t) v6469) * (uint64_t) v348);
+48788:   // pto: %321
+48789:   v6656 = Tile<TileType::Vec, int32_t, 8, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v351, v348);
+48790:   // pto: %321
+48791:   v6657 = (uint64_t) v215;
+48792:   TASSIGN(v6656, v6657);
+48793:   // pto: %2471
+48794:   v6658 = v6655 < v357 ? v357 : v6655;
+48795:   // pto: %2472
+48796:   v6659 = PTOAS__GLOBAL_TENSOR_DATA(v535);
+48797:   // pto: %2472
+48798:   // pto: %2472
+48799:   // pto: %2472
+48800:   v6662 = pto::Shape<1, 1, 1, 8, 512>();
+48801:   // pto: %2472
+48802:   v6663 = pto::Stride<262144, 262144, 262144, 32768, 1>();
+48803:   // pto: %2472
+48804:   v6664 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 8, 512>, pto::Stride<262144, 262144, 262144, 32768, 1>, pto::Layout::ND>(v6659 + (v6660 + v6397 * v6661 + v6658), v6662, v6663);
+48805:   TLOAD(v6656, v6664);
+48806:   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);

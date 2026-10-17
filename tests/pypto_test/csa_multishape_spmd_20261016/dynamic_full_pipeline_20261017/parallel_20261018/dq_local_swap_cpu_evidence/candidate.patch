@@ -1,0 +1,38 @@
+--- source_before/query_projection_stages.py
++++ source_candidate/query_projection_stages.py
+@@ -8,6 +8,12 @@
+ # -----------------------------------------------------------------------------------------------------------
+ 
+ """动态 CSA 的 Q_B 投影、query 反量化/RMS/RoPE 与 RoPE 准备阶段。
++
++局部索引候选的边界
++    仅DQ完整八行块在本核生成j XOR 1，读取的cos/sin、head数学及动态owner
++    完全不变；q_rope_prepare仍为KV写行内swap，GM参数和跨核同步合同不变。
++    本地512项INT32临时只在当前工作块活跃；实际TXORS别名/UB须核对生成物。
++    此为独立CPU候选，尚无设备精度和完整L1性能结论。
+ 
+ 阅读顺序
+     先看 q_b_stage 所选择的 ND/NZ AIC 投影，再看可与投影并行的
+@@ -206,13 +212,15 @@
+             q_sin_signed = pl.load(
+                 rope_sin_signed, [tg, 0], [Q_ROPE_T_TILE, ROPE_DIM], target_memory=pl.MemorySpace.Vec
+             )
+-            q_swap_idx = pl.load(rope_swap_idx, [tg, 0], [Q_ROPE_T_TILE, ROPE_DIM], target_memory=pl.MemorySpace.Vec)
+-            q_flat_i = pl.cast(pl.tile.arange(0, [1, Q_ROPE_T_TILE * ROPE_DIM], dtype=pl.INT32), pl.FP32)
+-            q_row_i = pl.cast(pl.mul(q_flat_i, 1.0 / ROPE_DIM), pl.INT32, mode="trunc")
+-            q_row_starts = pl.mul(pl.cast(q_row_i, pl.FP32), ROPE_DIM_SCALE)
+-            q_abs_swap = pl.cast(
+-                pl.add(pl.cast(pl.reshape(q_swap_idx, [1, Q_ROPE_T_TILE * ROPE_DIM]), pl.FP32), q_row_starts), pl.INT32
+-            )
++            # 完整八行的局部索引j=64*r+c满足j XOR 1=64*r+(c XOR 1)。
++            # prepare仍按行内0..63写共享rope_swap，KV照常消费；这里只去掉
++            # DQ自己的索引GM读取和行偏移转换，不改变sin/cos等待或尾行数学。
++            # arange/src、输出、tmp须由allocator分为三个不重叠UB区，A3 TXORS
++            # 内部有多条Vector指令与barrier，不能把本表达式当作单条硬件XOR。
++            # 生命周期仅限当前dq_work，禁止提升到动态工作循环外长期驻留。
++            q_flat_i = pl.tile.arange(0, [1, Q_ROPE_T_TILE * ROPE_DIM], dtype=pl.INT32)
++            q_swap_xor_tmp = pl.tile.create([1, Q_ROPE_T_TILE * ROPE_DIM], dtype=pl.INT32)
++            q_abs_swap = pl.tile.xors(q_flat_i, 1, q_swap_xor_tmp)
+             q_flat_gather_tmp = pl.tile.create([1, Q_ROPE_T_TILE * ROPE_DIM], dtype=pl.INT32)
+             # head之间数学独立；pipeline复用八行临时空间，逐head保持512列规约。
+             for h_inner in pl.pipeline(dq_head_tile, stage=2):

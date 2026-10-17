@@ -302,6 +302,7 @@ def vector_schedule(
     HC_ROW_DEPENDENCIES: pl.constexpr,
     ATTENTION_QUERY_METADATA: pl.constexpr,
     HC_CONSUMER_REDUCE: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -535,7 +536,11 @@ def vector_schedule(
         signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
 
     # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
-    if tokens < 128:
+    if QA_M16_PARALLEL:
+        # 与AIC同一constexpr：global M16块×八列，跨波次仍只等实际物理owner。
+        qa_tasks = pl.min(GROUPS, 8 * ((tokens + 15) // 16))
+        signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
+    elif tokens < 128:
         qa_tasks = 8 * pl.min(3, pl.max(1, tokens // 32))
         signal = wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)
     else:

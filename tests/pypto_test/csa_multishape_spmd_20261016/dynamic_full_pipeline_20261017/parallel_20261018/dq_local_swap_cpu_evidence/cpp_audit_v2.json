@@ -1,0 +1,78 @@
+{
+  "audit_completed": true,
+  "backend_passed": true,
+  "candidate_adopted": false,
+  "baseline": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/query_dequant_group_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "candidate": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/dq_local_swap_candidate_20261018/cpu_v2/kernel/ptoas/dynamic_csa_full.cpp",
+  "checks": {
+    "aic_cpp_normalized_equal": true,
+    "aiv_sync_before_dq_order_equal": false,
+    "aiv_sync_after_dq_order_equal": false,
+    "dq_head_tail_and_publish_prefix_cpp_normalized_equal": false,
+    "all_cpp_calls_delta": {
+      "TMULS": -2,
+      "pipe_barrier": -4,
+      "TADD": -1,
+      "set_flag": -2,
+      "TLOAD": -1,
+      "TASSIGN": -6,
+      "TCVT": -3,
+      "TXORS": 1,
+      "wait_flag": -2
+    },
+    "dq_cpp_calls_delta": {
+      "TMULS": -2,
+      "pipe_barrier": -5,
+      "TADD": -1,
+      "set_flag": -2,
+      "TLOAD": -1,
+      "TASSIGN": -6,
+      "TCVT": -3,
+      "TXORS": 1,
+      "wait_flag": 1
+    },
+    "prep_cpp_calls_delta": {
+      "wait_flag": 1,
+      "set_flag": -1,
+      "TLOAD": -1,
+      "TASSIGN": -6,
+      "TADD": -1,
+      "TMULS": -2,
+      "TCVT": -3,
+      "TXORS": 1,
+      "pipe_barrier": -5
+    },
+    "dq_math_after_removing_sync_normalized_equal": true,
+    "all_stages_after_dq_math_without_sync_normalized_equal": true
+  },
+  "prep_direct_sync_delta": {
+    "pipe_barrier(PIPE_ALL)": -1,
+    "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID3)": 1,
+    "wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2)": 1,
+    "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0)": -1,
+    "pipe_barrier(PIPE_V)": -4,
+    "wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID5)": -1,
+    "wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID3)": 1,
+    "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID4)": 1,
+    "wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID4)": -1,
+    "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0)": -1
+  },
+  "whole_direct_barrier_delta": {
+    "PIPE_V": -4,
+    "PIPE_ALL": 0,
+    "PIPE_MTE3": 0
+  },
+  "event_changes": "event_changes_v2.json",
+  "txors_isa_vector_stages": 6,
+  "txors_isa_internal_pipe_v_barriers": 5,
+  "integer_casts_v2": 2,
+  "TCI_b32_512_source_intrinsic_calls": 21,
+  "TCI_b16_512_source_intrinsic_calls": 34,
+  "TCI_b32_internal_PIPE_V": 8,
+  "TCI_b16_internal_PIPE_V": 10,
+  "TCI_scratch_baseline_bytes": 768,
+  "TCI_scratch_candidate_bytes": 1792,
+  "index_TLOAD_saved_per_full_chunk_bytes": 2048,
+  "scope": "已生成C++静态调用/顺序和ISA实现；未执行机器码，无周期估计",
+  "limitation": "TCI从INT32改为INT16，scratch和内部路径不同；不能仅CPP的barrier差推算全部硬件barrier或性能。"
+}

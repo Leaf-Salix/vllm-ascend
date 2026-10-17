@@ -1,0 +1,105 @@
+{
+  "conclusion": "否决当前QB→DQ及DQ→Attention分块交接为下一实现候选；没有证明新的关键路径生产等待或可直接删除的全量GM路径",
+  "scope": "只读当前33源与已有d253长B16三轮phase/tick；T96的DQ仍为16head整波，不外推其它T或后续所有controls",
+  "observations": [
+    {
+      "round": 0,
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_0_spmd_reference/phase_clock.json",
+      "bytes": 593623,
+      "qb_latest_end_us": 261.06,
+      "idx_scale_earliest_end_us": 273.78,
+      "dq_entry_after_all_qb_lower_gap_us": 12.71999999999997,
+      "dq_interval_us": {
+        "min": 20.539999999999964,
+        "median": 22.359999999999985,
+        "max": 23.82000000000005
+      },
+      "qb_signal_check_us": {
+        "min": 2.740000000000009,
+        "median": 3.3699999999999974,
+        "max": 4.3799999999999955
+      },
+      "qb_signal_check_calls": [
+        24
+      ],
+      "query_latest_end_us": 302.02,
+      "earliest_plan_notify_start_us": 568.86,
+      "query_to_earliest_plan_gap_us": 266.84000000000003
+    },
+    {
+      "round": 1,
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_1_spmd_reference/phase_clock.json",
+      "bytes": 593954,
+      "qb_latest_end_us": 255.66,
+      "idx_scale_earliest_end_us": 268.92,
+      "dq_entry_after_all_qb_lower_gap_us": 13.26000000000002,
+      "dq_interval_us": {
+        "min": 21.060000000000002,
+        "median": 23.20999999999998,
+        "max": 24.559999999999945
+      },
+      "qb_signal_check_us": {
+        "min": 2.5600000000000023,
+        "median": 3.0800000000000054,
+        "max": 3.920000000000016
+      },
+      "qb_signal_check_calls": [
+        24
+      ],
+      "query_latest_end_us": 297.1,
+      "earliest_plan_notify_start_us": 564.7,
+      "query_to_earliest_plan_gap_us": 267.6
+    },
+    {
+      "round": 2,
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_2_spmd_reference/phase_clock.json",
+      "bytes": 593551,
+      "qb_latest_end_us": 253.64,
+      "idx_scale_earliest_end_us": 268.28,
+      "dq_entry_after_all_qb_lower_gap_us": 14.639999999999986,
+      "dq_interval_us": {
+        "min": 22.340000000000032,
+        "median": 24.299999999999955,
+        "max": 25.69999999999999
+      },
+      "qb_signal_check_us": {
+        "min": 2.799999999999983,
+        "median": 3.240000000000002,
+        "max": 3.8799999999999955
+      },
+      "qb_signal_check_calls": [
+        24
+      ],
+      "query_latest_end_us": 297.32,
+      "earliest_plan_notify_start_us": 563.9,
+      "query_to_earliest_plan_gap_us": 266.58
+    }
+  ],
+  "timing_limit": "插桩端点/含依赖区间，不是纯数学/DMA；不由不同作业总时差推收益",
+  "valid_payload_bytes_t96": {
+    "qb_i32_output": 12582912,
+    "dq_i32_read": 12582912,
+    "dq_bf16_write": 6291456,
+    "attention_query_bf16_read": 6291456
+  },
+  "payload_limit": "有效数据的逻辑载荷，非HBM实测；额外padding、cache命中和物理burst不由该式确定",
+  "rejected_column_progress": {
+    "n_columns": 128,
+    "producer_owner": "n%24",
+    "producer_round": "n//24",
+    "slot_alignment_bytes": 512,
+    "cube_only_six_round_banks_bytes": 73728,
+    "existing_72_core_phase_six_banks_bytes": 221184,
+    "publishes_before": 24,
+    "publishes_after": 128,
+    "added_ub_bytes": 0,
+    "bytes_saved_in_business_gm": 0
+  },
+  "history": [
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/sync_evidence/README.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qb_tile_readonly/README.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_head_group_evidence/README.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_evidence/README.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/wave_audit/README.md"
+  ]
+}

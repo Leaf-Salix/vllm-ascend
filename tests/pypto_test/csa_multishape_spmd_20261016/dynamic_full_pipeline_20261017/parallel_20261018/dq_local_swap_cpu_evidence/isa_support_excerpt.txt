@@ -1,0 +1,338 @@
+/data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/IR/PTOTile/PTOTransposeXorPrintMatrix.cpp:141-168
+141: static LogicalResult verifyTXorSArch(TXorSOp op, bool isA5) {
+142:   auto elemResult = verifyDistinctRowMajorUnaryTileOpCommon(
+143:       op, op.getSrc(), op.getDst(), "src", "dst");
+144:   if (failed(elemResult))
+145:     return failure();
+146:   Type elem = *elemResult;
+147:   if (!isA5 && failed(verifyTXorSTmp(op, elem)))
+148:     return failure();
+149:   auto integer = dyn_cast<IntegerType>(elem);
+150:   bool supported = integer &&
+151:                    (integer.getWidth() == 8 || integer.getWidth() == 16 ||
+152:                     (isA5 && integer.getWidth() == 32));
+153:   if (!supported)
+154:     return op.emitOpError(isA5
+155:         ? "expects A5 txors src and dst element type to be i8/i16/i32"
+156:         :
+157:           "expects A2/A3 txors src and dst element type to be i8/i16");
+158:   return success();
+159: }
+160: 
+161: mlir::LogicalResult mlir::pto::TXorSOp::verify() {
+162:     auto verifyA2A3 = [this]() { return verifyTXorSArch(*this, false); };
+163:     auto verifyA5 = [this]() { return verifyTXorSArch(*this, true); };
+164:     return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+165: }
+166: 
+167: ParseResult mlir::pto::TPrintOp::parse(OpAsmParser &parser,
+168:                                        OperationState &result) {
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/tile_ops.py:849-889
+849: def ci(
+850:     start: int | Scalar,
+851:     shape: Sequence[int],
+852:     dtype: DataType = DataType.INT32,
+853:     descending: bool = False,
+854:     *,
+855:     tmp: Tile | None = None,
+856: ) -> Tile:
+857:     """Generate a contiguous integer sequence into a tile.
+858: 
+859:     Equivalent to ``numpy.arange``-style index generation. Maps to ``pto.tci``.
+860:     For a column index ``k`` in the first row of the destination, ascending gives
+861:     ``dst[0, k] = start + k`` and descending gives ``dst[0, k] = start - k``.
+862: 
+863:     Note:
+864:         ``pto.tci`` uses the destination's valid-column count as the sequence
+865:         length and does NOT populate additional rows. Leading dimensions must
+866:         be 1 — prefer shapes of the form ``[1, N]``.
+867: 
+868:     Args:
+869:         start: Starting integer (plain int or a Scalar). Must match ``dtype``.
+870:         shape: Shape of the destination tile (static, innermost dim != 1).
+871:         dtype: Destination dtype. One of {INT16, INT32}. Defaults to INT32.
+872:         descending: If True, generate a descending sequence.
+873:         tmp: Optional A2/A3 PTOAS scratch tile. Normally compiler-generated.
+874: 
+875:     Returns:
+876:         Tile wrapping the ci operation.
+877:     """
+878:     start_expr = start.unwrap() if isinstance(start, Scalar) else start
+879:     call_expr = _ir_ops.ci(
+880:         start_expr,
+881:         list(shape),
+882:         dtype=dtype,
+883:         descending=descending,
+884:         tmp=None if tmp is None else tmp.unwrap(),
+885:     )
+886:     return Tile(expr=call_expr)
+887: 
+888: 
+889: arange = ci
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TCI.hpp:65-219
+65: template <typename TileData, typename TileDataTmp, typename T, int descending>
+66: __tf__ AICORE void TCI_b32_repeat(
+67:     typename TileData::TileDType __out__ dst, typename TileDataTmp::TileDType __in__ tmp, T S, unsigned validCol,
+68:     unsigned numRepeatPerLine, unsigned numRemainPerLine)
+69: {
+70:     __ubuf__ typename TileData::DType* dstPtr = (__ubuf__ typename TileData::DType*)__cce_get_tile_ptr(dst);
+71:     __ubuf__ float* tmp0 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp);
+72:     __ubuf__ float* tmp1 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp) + 128;
+73: 
+74:     set_mask_count();
+75:     set_vector_mask(0, 8);
+76: #pragma unroll
+77:     for (int i = 0; i < 8; i++) {
+78:         vector_dup(tmp0 + i * 8, (float)float(i) * 0.125f, 1, 1, 1, 1, (int64_t)0);
+79:     }
+80:     pipe_barrier(PIPE_V);
+81:     set_vector_mask(0, 64);
+82:     vcgadd((__ubuf__ float*)tmp1, tmp0, 1, 1, 1, 8);
+83:     pipe_barrier(PIPE_V);
+84:     set_vector_mask(0, 8);
+85:     vmuls(tmp0, (__ubuf__ float*)tmp1, 8.0f, 1, 1, 1, 8, 8);
+86:     pipe_barrier(PIPE_V);
+87:     set_mask_norm();
+88:     set_vector_mask((uint64_t)-1, (uint64_t)-1);
+89:     vbrcb((__ubuf__ uint32_t*)(tmp0), (__ubuf__ uint32_t*)(tmp0), 1, 8, 1);
+90:     pipe_barrier(PIPE_V);
+91:     vadd((__ubuf__ float*)tmp1, (__ubuf__ float*)tmp1, tmp0, 1, 1, 0, 1, 8, 0, 8);
+92:     pipe_barrier(PIPE_V);
+93:     vconv_f322s32r((__ubuf__ int32_t*)tmp1, (__ubuf__ float*)tmp1, 1, 1, 1, 8, 8);
+94:     pipe_barrier(PIPE_V);
+95: #pragma unroll
+96:     for (int i = 0; i < numRepeatPerLine; i++) {
+97:         vadds((__ubuf__ int32_t*)(dstPtr + 64 * i), (__ubuf__ int32_t*)tmp1, S + 64 * i, 1, 1, 1, 8, 8);
+98:     }
+99:     pipe_barrier(PIPE_V);
+100:     if (numRemainPerLine) {
+101:         set_mask_norm();
+102:         SetContinuousMask(numRemainPerLine);
+103:         vadds(
+104:             (__ubuf__ int32_t*)(dstPtr + 64 * numRepeatPerLine), (__ubuf__ int32_t*)tmp1, S + 64 * numRepeatPerLine, 1,
+105:             1, 1, 8, 8);
+106:     }
+107:     pipe_barrier(PIPE_V);
+108:     if constexpr (descending) {
+109:         TCIFinishDescending((__ubuf__ int32_t*)dstPtr, static_cast<int32_t>(S) * 2, validCol);
+110:     }
+111:     set_mask_norm();
+112:     set_vector_mask(-1, -1);
+113: }
+114: 
+115: template <typename TileData, typename TileDataTmp, typename T, int descending>
+116: __tf__ AICORE void TCI_b32_normal(
+117:     typename TileData::TileDType __out__ dst, typename TileDataTmp::TileDType __in__ tmp, T S, unsigned validCol,
+118:     unsigned numRepeatPerLine, unsigned numRemainPerLine)
+119: {
+120:     __ubuf__ typename TileData::DType* dstPtr = (__ubuf__ typename TileData::DType*)__cce_get_tile_ptr(dst);
+121: 
+122:     __ubuf__ float* tmp1 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp);
+123:     __ubuf__ float* tmp2 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp) + 128;
+124: 
+125:     set_mask_count();
+126:     set_vector_mask(0, 8);
+127: #pragma unroll
+128:     for (int i = 0; i < 8; i++) {
+129:         vector_dup(tmp1 + i * 8, (float)float(i) * 0.125f, 1, 1, 1, 1, (int64_t)0);
+130:     }
+131:     pipe_barrier(PIPE_V);
+132:     set_vector_mask(0, 64);
+133:     vcgadd((__ubuf__ float*)tmp2, tmp1, 1, 1, 1, 8);
+134:     pipe_barrier(PIPE_V);
+135:     set_vector_mask(0, 8);
+136:     vmuls(tmp1, (__ubuf__ float*)tmp2, 8.0f, 1, 1, 1, 8, 8);
+137:     pipe_barrier(PIPE_V);
+138:     set_mask_norm();
+139:     set_vector_mask((uint64_t)-1, (uint64_t)-1);
+140:     vbrcb((__ubuf__ uint32_t*)(tmp1), (__ubuf__ uint32_t*)(tmp1), 1, 8, 1);
+141:     pipe_barrier(PIPE_V);
+142:     set_mask_count();
+143:     set_vector_mask(0, validCol);
+144:     vadd((__ubuf__ float*)tmp2, (__ubuf__ float*)tmp2, tmp1, 1, 1, 0, 1, 8, 0, 8);
+145:     pipe_barrier(PIPE_V);
+146:     vconv_f322s32r((__ubuf__ int32_t*)dstPtr, (__ubuf__ float*)tmp2, 1, 1, 1, 8, 8);
+147:     pipe_barrier(PIPE_V);
+148:     vadds((__ubuf__ int32_t*)dstPtr, (__ubuf__ int32_t*)dstPtr, S, 1, 1, 1, 8, 8);
+149:     pipe_barrier(PIPE_V);
+150:     if constexpr (descending) {
+151:         TCIFinishDescending((__ubuf__ int32_t*)dstPtr, static_cast<int32_t>(S) * 2, validCol);
+152:     }
+153:     set_mask_norm();
+154:     set_vector_mask(-1, -1);
+155: }
+156: 
+157: template <typename TileData, typename TileDataTmp, typename T, int descending>
+158: __tf__ AICORE void TCI_b16_repeat(
+159:     typename TileData::TileDType __out__ dst, typename TileDataTmp::TileDType __in__ tmp, T S, unsigned validCol,
+160:     unsigned numRepeatPerLine, unsigned numRemainPerLine)
+161: {
+162:     __ubuf__ typename TileData::DType* dstPtr = (__ubuf__ typename TileData::DType*)__cce_get_tile_ptr(dst);
+163: 
+164:     __ubuf__ float* tmp0 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp);
+165:     __ubuf__ float* tmp1 = (__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp) + 128;
+166:     __ubuf__ half* tmp2 =
+167:         reinterpret_cast<__ubuf__ half*>((__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp) + 256);
+168:     __ubuf__ half* tmp3 =
+169:         reinterpret_cast<__ubuf__ half*>((__ubuf__ typename TileDataTmp::DType*)__cce_get_tile_ptr(tmp) + 384);
+170: 
+171:     set_mask_count();
+172:     set_vector_mask(0, 8);
+173:     for (int i = 0; i < 8; i++) {
+174:         vector_dup(tmp0 + i * 8, (float)float(i) * 0.125f, 1, 1, 1, 1, (int64_t)0);
+175:         vector_dup(tmp0 + 64 + i * 8, (float)float(i + 8) * 0.125f, 1, 1, 1, 1, (int64_t)0);
+176:     }
+177:     pipe_barrier(PIPE_V);
+178:     set_vector_mask(0, 64);
+179:     vcgadd((__ubuf__ float*)tmp1, tmp0, 1, 1, 1, 8);
+180:     pipe_barrier(PIPE_V);
+181:     vcgadd((__ubuf__ float*)tmp1 + 8, tmp0 + 64, 1, 1, 1, 8);
+182:     pipe_barrier(PIPE_V);
+183:     vconv_f322f16r((__ubuf__ half*)tmp2, (__ubuf__ float*)tmp1, 1, 1, 1, 8, 8);
+184: 
+185:     pipe_barrier(PIPE_V);
+186:     set_vector_mask(0, 8);
+187:     vmuls(tmp3, (__ubuf__ half*)tmp2, (half)16.0f, 1, 1, 1, 8, 8);
+188:     pipe_barrier(PIPE_V);
+189:     set_mask_norm();
+190:     set_vector_mask((uint64_t)-1, (uint64_t)-1);
+191:     vbrcb((__ubuf__ uint16_t*)(tmp3), (__ubuf__ uint16_t*)(tmp3), 1, 8, 1);
+192:     pipe_barrier(PIPE_V);
+193: 
+194:     set_vector_mask(0, 65535);
+195:     for (int i = 0; i < 8; i++) {
+196:         vadd((__ubuf__ half*)(tmp3 + i * 16), (__ubuf__ half*)(tmp3 + i * 16), tmp2, 1, 1, 0, 1, 8, 0, 8);
+197:     }
+198:     pipe_barrier(PIPE_V);
+199:     set_vector_mask((uint64_t)-1, (uint64_t)-1);
+200:     vconv_f162s16r((__ubuf__ int16_t*)tmp3, (__ubuf__ half*)tmp3, 1, 1, 1, 8, 8);
+201:     pipe_barrier(PIPE_V);
+202: 
+203:     for (int i = 0; i < numRepeatPerLine; i++) {
+204:         vadds((__ubuf__ int16_t*)(dstPtr + 128 * i), (__ubuf__ int16_t*)tmp3, S + 128 * i, 1, 1, 1, 8, 8);
+205:     }
+206:     pipe_barrier(PIPE_V);
+207:     if (numRemainPerLine) {
+208:         SetContinuousMask(numRemainPerLine);
+209:         vadds(
+210:             (__ubuf__ int16_t*)(dstPtr + 128 * numRepeatPerLine), (__ubuf__ int16_t*)tmp3, S + 128 * numRepeatPerLine,
+211:             1, 1, 1, 8, 8);
+212:     }
+213:     pipe_barrier(PIPE_V);
+214:     if constexpr (descending) {
+215:         TCIFinishDescending((__ubuf__ int16_t*)dstPtr, static_cast<int16_t>(S * 2), validCol);
+216:     }
+217:     set_mask_norm();
+218:     set_vector_mask(-1, -1);
+219: }
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TBitwiseSOp.hpp:96-141
+96: }
+97: 
+98: template <typename TileDataDst, typename TileDataSrc>
+99: PTO_INTERNAL void TANDS_IMPL(TileDataDst& dst, TileDataSrc& src, typename TileDataSrc::DType scalar)
+100: {
+101: #ifndef __PTO_AUTO__
+102:     PTO_ASSERT(
+103:         dst.data() != src.data(), "Setting the source Tile and destination Tile to the same memory is unsupported");
+104: #endif
+105:     TEXPANDS_IMPL(dst, scalar);
+106:     pipe_barrier(PIPE_V);
+107:     TAND_IMPL(dst, src, dst);
+108: }
+109: 
+110: template <typename TileDataDst, typename TileDataSrc>
+111: PTO_INTERNAL void TORS_IMPL(TileDataDst& dst, TileDataSrc& src, typename TileDataSrc::DType scalar)
+112: {
+113: #ifndef __PTO_AUTO__
+114:     PTO_ASSERT(
+115:         dst.data() != src.data(), "Setting the source Tile and destination Tile to the same memory is unsupported");
+116: #endif
+117:     TEXPANDS_IMPL(dst, scalar);
+118:     pipe_barrier(PIPE_V);
+119:     TOR_IMPL(dst, src, dst);
+120: }
+121: 
+122: template <typename TileDataDst, typename TileDataSrc, typename TileDataTmp>
+123: PTO_INTERNAL void TXORS_IMPL(TileDataDst& dst, TileDataSrc& src, typename TileDataSrc::DType scalar, TileDataTmp& tmp)
+124: {
+125: #ifndef __PTO_AUTO__
+126:     PTO_ASSERT(
+127:         dst.data() != src.data() && dst.data() != tmp.data() && src.data() != tmp.data(),
+128:         "dst, src, tmp must in different memory.");
+129: #endif
+130:     TORS_IMPL(tmp, src, scalar);
+131:     pipe_barrier(PIPE_V);
+132:     TANDS_IMPL(dst, src, scalar);
+133:     pipe_barrier(PIPE_V);
+134:     TNOT_IMPL(dst, dst);
+135:     pipe_barrier(PIPE_V);
+136:     TAND_IMPL(dst, dst, tmp);
+137: }
+138: } // namespace pto
+139: 
+140: #endif
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TCvt.hpp:753-812
+753: // int32<->int64, int32<->int16, int32->half (deq)
+754: template <typename TileDataD, typename TileDataS>
+755: PTO_INTERNAL void GenCastCallSpecialCases(
+756:     __ubuf__ typename TileDataD::DType* dst, __ubuf__ typename TileDataS::DType* src, uint8_t repeatNum, RoundMode mode,
+757:     uint16_t dstBlockStride, uint16_t srcBlockStride, uint16_t dstRepeatStride, uint16_t srcRepeatStride)
+758: {
+759:     if constexpr (
+760:         std::is_same<typename TileDataD::DType, float>::value &&
+761:         std::is_same<typename TileDataS::DType, half>::value) { // half to fp32
+762:         vconv_f162f32(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+763:     } else if constexpr (
+764:         std::is_same<typename TileDataD::DType, float>::value &&
+765:         std::is_same<typename TileDataS::DType, bfloat16_t>::value) { // bfloat16 to float
+766:         vconv_bf162f32(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+767:     } else if constexpr (
+768:         std::is_same<typename TileDataD::DType, half>::value &&
+769:         std::is_same<typename TileDataS::DType, uint8_t>::value) { // uint8 to half
+770:         vconv_u82f16(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+771:     } else if constexpr (
+772:         std::is_same<typename TileDataD::DType, half>::value &&
+773:         std::is_same<typename TileDataS::DType, int8_t>::value) { // int8 to half
+774:         vconv_s82f16(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+775:     } else if constexpr (
+776:         std::is_same<typename TileDataD::DType, float>::value &&
+777:         std::is_same<typename TileDataS::DType, int16_t>::value) { // int16 to float32
+778:         vconv_s162f32(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+779:     } else if constexpr (
+780:         std::is_same<typename TileDataD::DType, int32_t>::value &&
+781:         std::is_same<typename TileDataS::DType, int64_t>::value) { // int64 to int32
+782:         vconv_s642s32(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+783:     } else if constexpr (
+784:         std::is_same<typename TileDataD::DType, int64_t>::value &&
+785:         std::is_same<typename TileDataS::DType, int32_t>::value) { // int32 to int64
+786:         vconv_s322s64(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+787:     } else if constexpr (
+788:         std::is_same<typename TileDataD::DType, int16_t>::value &&
+789:         std::is_same<typename TileDataS::DType, int32_t>::value) { // int32 to int16
+790:         vconv_s322s16(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+791:     } else if constexpr (
+792:         std::is_same<typename TileDataD::DType, half>::value &&
+793:         std::is_same<typename TileDataS::DType, int32_t>::value) { // int32 to half
+794:         set_deqscale(static_cast<half>(1.0));
+795:         pipe_barrier(PIPE_V);
+796:         vconv_deq(dst, src, repeatNum, dstBlockStride, srcBlockStride, dstRepeatStride, srcRepeatStride);
+797:     }
+798: }
+799: 
+800: // ============================================================================
+801: // Type Conversion Dispatcher
+802: // ============================================================================
+803: // The trailing `numElemsPerRow` parameter is only consumed by NonSatTorch paths that need
+804: // explicit sub-chunk splitting (currently fp16 -> int8).  TCvtTail forwards its
+805: // numRemainPerLine as this argument so the NonSatTorch path can split rows wider than the
+806: // int32 hardware capacity (64 elements) into multiple sub-chunks.  TCvtHead leaves it at the
+807: // default 0 which the NonSatTorch path interprets as "full logical repeat" (= 128 elements).
+808: template <typename TileDataD, typename TileDataS>
+809: AICORE void GenCastCall(
+810:     __ubuf__ typename TileDataD::DType* dst, __ubuf__ typename TileDataS::DType* src, uint8_t repeatNum, RoundMode mode,
+811:     uint16_t dstBlockStride, uint16_t srcBlockStride, uint16_t dstRepeatStride, uint16_t srcRepeatStride,
+812:     uint16_t /*numElemsPerRow*/ = 0)

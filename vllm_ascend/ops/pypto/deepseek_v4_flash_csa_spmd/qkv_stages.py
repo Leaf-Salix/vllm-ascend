@@ -21,6 +21,11 @@
     份独立 M/N 工作，由显式 AIC worker 按 WORKERS 步长领取。QR 仍按八行
     一个 tile、每 256 列一次规约，由显式 AIV worker 按实际有效 tile 数分工。
     这些区间决定数学 tile，循环边界仍来自实际 T，并非为某个 batch 展开图。
+    QA_M16_PARALLEL为Host选择的constexpr，默认False保留原完整策略；
+    Host仅在G6且16<T<32（原两个M16尾块、总权重请求不增）开启全局M16分核。
+    开启时每块八个N128列任务按logical%WORKERS领取；T及尾部仍动态。
+    关闭时不编译该分支，避免只增运行时判断也扰动旧QA流水。所有核的
+    QA发布保留，QR在开启时等待min(WORKERS,8*ceil(T/16))个真实owner。
     权重 BYPASS 缓存策略须由外层直接在 spmd 体内设置；PyPTO 不允许把该
     scope 属性藏在 inline helper 中。
 
@@ -140,16 +145,51 @@ def _q_a_worker(
 
 
 @pl.jit.inline(auto_scope=False)
-def q_a_stage(
+def _q_a_m16_parallel_worker(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
 ):
+    """全局M16块按八个N128列任务分核；仅改变owner，不改变原尾块数学。
+
+    Host策略只为G6且16<T<32开启，所以正式调用每核至多一块且总权重请求不增。
+    helper仍按实际T计算循环上界，较大T也可按WORKERS跨波次领取；不得将
+    T24或两块写死。每块仍K256×16、首段初始化、valid_shape及pad16写回。
+    新增QA参与核仍承担后继Indexer，不能按核数预记整层性能收益。
+    """
+    tokens = pl.tensor.dim(x, 0)
+    m16_blocks = (tokens + QR_M_TILE - 1) // QR_M_TILE
+    for logical_worker in pl.range(pl.max(worker_id, 0), QR_N_BLOCKS * m16_blocks, WORKERS):
+        column = (logical_worker % QR_N_BLOCKS) * QR_N_TILE
+        row = (logical_worker // QR_N_BLOCKS) * QR_M_TILE
+        m16_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
+        for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
+            k0 = k_block * QR_K_TILE
+            valid_rows = pl.min(QR_M_TILE, tokens - row)
+            m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [row, k0],
+                             valid_shape=[valid_rows, QR_K_TILE])
+            m16_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
+            m16_acc = pl.matmul_acc(m16_acc, m16_x, m16_weight, b_trans=True, init_cond=(k_block == 0))
+        qa_fp32 = pl.assemble(qa_fp32, m16_acc, [row, column])
+    return qa_fp32
+
+
+@pl.jit.inline(auto_scope=False)
+def q_a_stage(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    qa_fp32: pl.Tensor[[QA_ROWS_DYN, Q_LORA], pl.FP32],
+    worker_id: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+    QA_M16_PARALLEL: pl.constexpr = False,
+):
     """由外层 AIC 调用；按实际 T 选 M32/M64，不按固定 batch 生成入口。"""
     tokens = pl.tensor.dim(x, 0)
-    if tokens < QR_FIXED_SMALL_ROWS:
+    if QA_M16_PARALLEL:
+        qa_fp32 = _q_a_m16_parallel_worker(x, wq_a, qa_fp32, worker_id, WORKERS)
+    elif tokens < QR_FIXED_SMALL_ROWS:
         qa_fp32 = _q_a_worker(x, wq_a, qa_fp32, worker_id, WORKERS, QR_FIXED_SMALL_M_TILE)
     else:
         qa_fp32 = _q_a_worker(x, wq_a, qa_fp32, worker_id, WORKERS, QR_DENSE_M_TILE)

@@ -1,0 +1,115 @@
+--- source_reference/query_projection_stages.py
++++ source_candidate/query_projection_stages.py
+@@ -25,17 +25,18 @@
+     NZ 保留 M128/N256/K256，ND 保留 M64/N512/K128；按实际 T 计算
+     ceil(T/128)*128 个工作区行，不按缓存容量扫描额外行。每个显式 AIC
+     worker 负责列块 n=worker+k*WORKERS，沿 K 顺序做原 INT32 累加。
+-    反量化用八行、4/8/16/32/64 个独立 head 的分组策略；完整八行时选
+-    最大且能形成48-AIV整波的组，尾行固定4。WORKERS只决定条带owner，
+-    每个head的512列数学不变；RoPE准备仍按八行条带。
++    反量化仍用八行×单head数学。完整八行且原g4任务足够覆盖WORKERS时，
++    将(row_tile,head)线性空间按floor首尾分给AIV，再沿64-head行边界
++    拆chunk复用准备；小T和尾行保留g4条带。RoPE准备仍按八行条带。
+ 
+ 数据流、同步与所有权
+     三个 helper 内没有 spmd/submit/notify。外层须等 QR 的 INT8 写回再运行
+     Q_B；反量化同时依赖相关 Q_B 列块、QR scale 和 RoPE 准备写回。数据
+     fence、通知和等待由统一 SPMD 编排负责，返回 Tensor 不代表跨核完成。
+-    Q_B 列块 owner=(column//N_TILE)%WORKERS。反量化的八行/head 组编号
+-    work=(row//8)*(64/head_tile)+head//head_tile，其 owner=work%WORKERS；
+-    每个 head 完整包含两个 NZ N256 列块。RoPE owner=(row//8)%active，
++    Q_B 列块 owner=(column//N_TILE)%WORKERS。反量化的连续区间为
++    [total_heads*worker//WORKERS,total_heads*(worker+1)//WORKERS)；
++    回退时g4任务owner=work%WORKERS。每个head完整包含两个NZ N256列块。
++    RoPE owner=(row//8)%active，
+     active=min(ceil(T/8),WORKERS)。各阶段只写自己负责的独立行/列片段。
+ 
+ GM 视图与工作区合同
+@@ -169,37 +170,40 @@
+ ):
+     """显式 AIV 反量化、RMS、NOPE/RoPE；q_flat 必须是外层建立的 GM 二维别名。
+ 
+-    完整八行与尾块沿用不同的既有 RMS 算术；每次工作只写八行中的一个 head 组。"""
++    完整八行连续分配独立head，沿行边界分chunk；尾块保留原g4及既有RMS算术。"""
+     tokens = pl.tensor.dim(q_flat, 0)
+     dq_token_tiles = (tokens + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE
+-    dq_head_tile = Q_ROPE_H_TILE
+-    # 只合并完整八行块的独立 head：选择最大的 64/32/16/8，使
+-    # dq_token_tiles*(H/head_tile) 恰为正的 48-AIV 整波；不满足则保留4。
+-    # 扩组后每个AIV的head迭代数不增，只减少scale/cos/sin/swap的重复准备。
+-    # 此条件取实际设备T，不用B/S或测试点；WORKERS仍只决定任务条带。
+-    # 有尾行必须留4，保持下面固定4-head尾循环及原recip(sqrt)数学。
+-    if tokens % Q_ROPE_T_TILE == 0:
+-        if dq_token_tiles >= Q_DEQUANT_WORKERS and dq_token_tiles % Q_DEQUANT_WORKERS == 0:
+-            dq_head_tile = H
+-        elif (
+-            dq_token_tiles >= Q_DEQUANT_WORKERS * 32 // H
+-            and dq_token_tiles % (Q_DEQUANT_WORKERS * 32 // H) == 0
+-        ):
+-            dq_head_tile = 32
+-        elif (
+-            dq_token_tiles >= Q_DEQUANT_WORKERS * 16 // H
+-            and dq_token_tiles % (Q_DEQUANT_WORKERS * 16 // H) == 0
+-        ):
+-            dq_head_tile = 16
+-        elif (
+-            dq_token_tiles >= Q_DEQUANT_WORKERS * 8 // H
+-            and dq_token_tiles % (Q_DEQUANT_WORKERS * 8 // H) == 0
+-        ):
+-            dq_head_tile = 8
+-    # 将“八行块、head组”展平成任务号，worker只处理自己的条带，避免重复写。
+-    for dq_work in pl.range(worker_id, (tokens + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE * (H // dq_head_tile), WORKERS):
+-        hg = dq_work % (H // dq_head_tile) * dq_head_tile
+-        tg = dq_work // (H // dq_head_tile) * Q_ROPE_T_TILE
++    # 原g4至少有WORKERS个任务才扩大连续分工；正式48 AIV对应完整T>=24。
++    # T8/T16及任何尾行保留g4条带，不为小工作量增加scale/cos/sin/swap准备。
++    dq_contiguous = (
++        tokens % Q_ROPE_T_TILE == 0
++        and dq_token_tiles * (H // Q_ROPE_H_TILE) >= WORKERS
++    )
++    dq_work_start = worker_id
++    dq_work_end = dq_token_tiles * (H // Q_ROPE_H_TILE)
++    dq_work_stride = WORKERS
++    dq_first_head = 0
++    dq_last_head = 0
++    if dq_contiguous:
++        # 线性编号=row_tile*64+head。floor分界覆盖全部head且负载至多差1；
++        # 不固定T，不改变一个head内的8行/512列规约和RoPE算术顺序。
++        dq_total_heads = dq_token_tiles * H
++        dq_first_head = dq_total_heads * worker_id // WORKERS
++        dq_last_head = dq_total_heads * (worker_id + 1) // WORKERS
++        dq_work_start = dq_first_head // H
++        dq_work_end = (dq_last_head + H - 1) // H
++        dq_work_stride = 1
++    # 同一个数学体：完整区间逐行拆chunk，其余仍按旧g4任务条带。
++    # 入口保证连续区间非空；每个chunk在一个64-head行内，head数为1..64。
++    for dq_work in pl.range(dq_work_start, dq_work_end, dq_work_stride):
++        hg = dq_work % (H // Q_ROPE_H_TILE) * Q_ROPE_H_TILE
++        tg = dq_work // (H // Q_ROPE_H_TILE) * Q_ROPE_T_TILE
++        dq_heads_in_row = Q_ROPE_H_TILE
++        if dq_contiguous:
++            dq_row_head = dq_work * H
++            hg = pl.max(dq_first_head, dq_row_head) - dq_row_head
++            tg = dq_work * Q_ROPE_T_TILE
++            dq_heads_in_row = pl.min(dq_last_head, dq_row_head + H) - pl.max(dq_first_head, dq_row_head)
+         if tg + Q_ROPE_T_TILE <= tokens:
+             qr_scale_dq_t = pl.load(qr_scale_pad_store, [tg, 0], [Q_ROPE_T_TILE, 1], target_memory=pl.MemorySpace.Vec)
+             q_cos_il = pl.load(rope_cos_il, [tg, 0], [Q_ROPE_T_TILE, ROPE_DIM], target_memory=pl.MemorySpace.Vec)
+@@ -215,7 +219,7 @@
+             )
+             q_flat_gather_tmp = pl.tile.create([1, Q_ROPE_T_TILE * ROPE_DIM], dtype=pl.INT32)
+             # head之间数学独立；pipeline复用八行临时空间，逐head保持512列规约。
+-            for h_inner in pl.pipeline(dq_head_tile, stage=2):
++            for h_inner in pl.pipeline(dq_heads_in_row, stage=2):
+                 h = hg + h_inner
+                 h0 = h * HEAD_DIM
+                 q_head_acc = pl.load(q_proj_i32, [tg, h0], [Q_ROPE_T_TILE, HEAD_DIM], target_memory=pl.MemorySpace.Vec)
+@@ -286,7 +290,7 @@
+                 [Q_ROPE_T_TILE, HEAD_DIM], dtype=pl.FP32, target_memory=pl.MemorySpace.Vec
+             )
+             q_gather_tmp = pl.create_tile([Q_ROPE_T_TILE, ROPE_DIM], dtype=pl.INT32, target_memory=pl.MemorySpace.Vec)
+-            # 扩组分支显式要求T整除8；有尾行必回退4。此处继续固定4，
++            # 连续区间显式要求T整除8；有尾行必回退4。此处继续固定4，
+             # 不改变原尾块的有效写回和recip(sqrt)路径。
+             for h_inner_tail in pl.range(Q_ROPE_H_TILE):
+                 h_tail = hg + h_inner_tail

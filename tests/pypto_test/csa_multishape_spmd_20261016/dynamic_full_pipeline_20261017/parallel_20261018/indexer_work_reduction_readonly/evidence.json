@@ -1,0 +1,87 @@
+{
+  "decision": "本轮不提出实现候选；未找到同时有新证据、明确大额省工与逐bit依据的路径",
+  "source_comparison": [
+    {
+      "file": "indexer_score_stages.py",
+      "current": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_score_stages.py",
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source/indexer_score_stages.py",
+      "current_bytes": 44690,
+      "same_text_as_593": true
+    },
+    {
+      "file": "indexer_topk_stages.py",
+      "current": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_topk_stages.py",
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source/indexer_topk_stages.py",
+      "current_bytes": 17656,
+      "same_text_as_593": true
+    },
+    {
+      "file": "indexer_group_stages.py",
+      "current": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_group_stages.py",
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source/indexer_group_stages.py",
+      "current_bytes": 16587,
+      "same_text_as_593": true
+    },
+    {
+      "file": "indexer_publish_stages.py",
+      "current": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_publish_stages.py",
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source/indexer_publish_stages.py",
+      "current_bytes": 16858,
+      "same_text_as_593": true
+    },
+    {
+      "file": "policy.py",
+      "current": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/policy.py",
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/baseline_source/policy.py",
+      "current_bytes": 5460,
+      "same_text_as_593": true
+    }
+  ],
+  "representative": {
+    "history": 131072,
+    "batch": 16,
+    "query_tokens": 6,
+    "query_group": 6,
+    "qk_panel": 64,
+    "score_tile": 1024,
+    "plan_steps_per_core": 22,
+    "cores": 24,
+    "plan_evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/indexer_query_group_audit/README.md"
+  },
+  "work": {
+    "qk_int8_mac_per_step": 50331648,
+    "ws_fp16_mac_per_step": 6291456,
+    "useful_diagonal_ws_products_per_step": 393216,
+    "ws_zero_or_padding_products_per_step": 5898240,
+    "ws_fraction_of_combined_mac_count": 0.1111111111111111,
+    "zero_ws_fraction_of_combined_mac_count": 0.10416666666666667,
+    "qk_int8_mac_per_core": 1107296256,
+    "ws_fp16_mac_per_core": 138412032,
+    "qk_calls_per_core": 352,
+    "ws_calls_per_core": 352,
+    "current_score_transfer_bytes_per_step": 24576,
+    "raw_qk_transfer_bytes_per_step": 786432,
+    "raw_qk_transfer_ratio": 32.0,
+    "extra_qk_handoff_write_plus_read_bytes_per_step": 1523712,
+    "raw_qk_bytes_per_aiv": 393216,
+    "extra_key_staging_bytes_long_b16": 138412032
+  },
+  "segment_merge": {
+    "candidates": 2048,
+    "merge_passes": 3,
+    "full_merge_output_pairs": 6144,
+    "exhausted_min_logical_output_pairs": 512,
+    "interleaved_scores_output_pairs": 2045,
+    "best_reduction_of_three_merge_output_pairs": 0.25,
+    "guaranteed_reduction_of_sort32_input": 0,
+    "note": "仅理想逐项耗尽的逻辑计数；硬件写出粒度/耗时另论，不是一个已提实现"
+  },
+  "evidence_limits": [
+    "INT8与FP16 MAC不能按次数直接换成时延，原QK/WS已流水重叠",
+    "593旧插桩不是当前9d的性能；前驱compact顺序已改变",
+    "当前helper文本相同仅支持算法工作量沿用，不支持旧等待时间直接相减",
+    "短尾、WS搬迁、GM暂存、G/leaf/panel、根前缀认证均复用已有排重记录"
+  ],
+  "compiler_execution": false,
+  "device_execution": false
+}
