@@ -1,0 +1,107 @@
+{
+  "scope": "源级AST有限constexpr折叠，不替代真实后端；没有冻结真实运行T",
+  "comparisons": [
+    {
+      "controls": {
+        "OA_COLS": 256,
+        "OUTPUT_GROUP_PIPELINE": true
+      },
+      "file": "cube_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 256,
+        "OUTPUT_GROUP_PIPELINE": true
+      },
+      "file": "vector_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 128,
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "cube_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 128,
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "vector_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 256,
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "cube_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 256,
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "vector_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 97
+      },
+      "file": "cube_schedule.py",
+      "folded_function_ast_identical": true
+    },
+    {
+      "controls": {
+        "OA_COLS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 97
+      },
+      "file": "vector_schedule.py",
+      "folded_function_ast_identical": true
+    }
+  ],
+  "byte_identical_host_abi_files": [
+    "policy.py",
+    "entry.py",
+    "binding.py",
+    "runtime_abi.py",
+    "signals.py",
+    "wait_codegen.py"
+  ],
+  "candidate_calls_and_ancestor_guards": [
+    {
+      "function": "o_projection_a_pair_group_stage_nz",
+      "guards": [
+        "OUTPUT_GROUP_PIPELINE",
+        "OA_COLS == 128 and tokens > 0 and (tokens <= 96)",
+        "worker >= pair_first and worker < pair_first + 3 or (worker >= single_first and worker < single_first + 2)"
+      ],
+      "line": 414
+    },
+    {
+      "function": "wait_oa_pair_group",
+      "guards": [
+        "OUTPUT_GROUP_PIPELINE",
+        "quant_owned < quant_first + quant_per_group",
+        "OA_COLS == 128 and tokens > 0 and (tokens <= 96)"
+      ],
+      "line": 939
+    }
+  ],
+  "accepted_T_range": [
+    1,
+    96
+  ],
+  "single_M128_block": true,
+  "new_runtime_roots": 0,
+  "new_phase_definitions": 0,
+  "coverage_evidence": "../owner_evidence/rotated_owner_model.json：T1..96全部64个N128列块唯一写、五owner等待及phase DAG"
+}

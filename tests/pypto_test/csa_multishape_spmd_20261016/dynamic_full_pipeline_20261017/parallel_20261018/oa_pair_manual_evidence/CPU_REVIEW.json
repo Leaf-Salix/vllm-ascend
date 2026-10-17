@@ -1,0 +1,24 @@
+{
+  "ready_for_representative_device_validation": true,
+  "reference": "66882634",
+  "cpu_passed": true,
+  "cpu_control_scope": "long G6，OA128/OB96，QA=false；其它控件在设备任务JIT另验证",
+  "tensor_roots": 130,
+  "symbolic_axes": 58,
+  "new_phases": 0,
+  "new_workspaces": 0,
+  "resources_bytes": {
+    "pair_Mat_active": 393216,
+    "pair_Mat_end": 458752,
+    "global_AIC_Mat_end": 475136,
+    "Left": 65536,
+    "Right": 65536,
+    "Acc": 131072
+  },
+  "valid": "device T来自tensor shape，SetValidShape(T,128)，两个输出store各[T,128]；容量与T分离",
+  "owner": "每组pair 3g+p，single (3g+3+s)%24；五owner互异，最多三列块/核",
+  "predicate": "生产/消费同为OA_COLS128且0<T<=96，原OUTPUT_GROUP_PIPELINE内部",
+  "events": "当前Mat只等本块MTE2事件；下块TLOAD已发出；Right M→MTE1覆盖依赖保留；wait末一次业务cache维护",
+  "source_matches_frozen_cpu_input": true,
+  "no_device_conclusion_yet": true
+}

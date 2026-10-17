@@ -1,0 +1,269 @@
+{
+  "scope": "静态生成物审阅，不能代替设备精度/性能；只读既有产物，未新增编译",
+  "cpu_v1": {
+    "passed": false,
+    "error": "Right buffer usage (131072 bytes) exceeds platform limit (65536 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473",
+    "order": {
+      "32": {
+        "extract_k256": 1580,
+        "mma_k256": 1587,
+        "extract_k512": 1597
+      },
+      "33": {
+        "extract_k256": 1580,
+        "mma_k256": 1598,
+        "extract_k512": 1591
+      },
+      "37": {
+        "extract_k256": 1464,
+        "mma_k256": 1484,
+        "extract_k512": 1472
+      }
+    },
+    "first_right_reuses_pipeline0_and_tail": true,
+    "cause": "Pipeline IO重排把K512 Right提前至K256 MMA前；两份64KiB真实重叠，不是first存活或K增大"
+  },
+  "cpu_v2": {
+    "passed": true,
+    "full_codegen_passed": true,
+    "symbolic_dimensions": 58,
+    "single_mix": true,
+    "device_execution": false,
+    "sample_shapes_supplied": false,
+    "qb_tiles": [
+      {
+        "name": "resident_weight_inline1971__ssa_v0",
+        "address": 65536,
+        "space": "mat",
+        "dtype": "i8",
+        "rows": 1024,
+        "cols": 256,
+        "size": 262144,
+        "line": 1486
+      },
+      {
+        "name": "resident_qr0_inline1974__ssa_v0",
+        "address": 327680,
+        "space": "mat",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1494
+      },
+      {
+        "name": "resident_qr1_inline1963__ssa_v0",
+        "address": 360448,
+        "space": "mat",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1498
+      },
+      {
+        "name": "resident_w0_inline1969__ssa_v0",
+        "address": 0,
+        "space": "right",
+        "dtype": "i8",
+        "rows": 256,
+        "cols": 256,
+        "size": 65536,
+        "line": 1502
+      },
+      {
+        "name": "resident_qr0_inline1974__ssa_v0_Left",
+        "address": 0,
+        "space": "left",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1504
+      },
+      {
+        "name": "resident_acc_inline1962__ssa_v0",
+        "address": 0,
+        "space": "acc",
+        "dtype": "i32",
+        "rows": 128,
+        "cols": 256,
+        "size": 131072,
+        "line": 1506
+      },
+      {
+        "name": "resident_qr2_inline1968__ssa_v0",
+        "address": 327680,
+        "space": "mat",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1508
+      },
+      {
+        "name": "resident_w1_inline1976__ssa_v0",
+        "address": 0,
+        "space": "right",
+        "dtype": "i8",
+        "rows": 256,
+        "cols": 256,
+        "size": 65536,
+        "line": 1512
+      },
+      {
+        "name": "resident_qr1_inline1963__ssa_v0_Left",
+        "address": 0,
+        "space": "left",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1514
+      },
+      {
+        "name": "resident_qr3_inline1972__ssa_v0",
+        "address": 360448,
+        "space": "mat",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1517
+      },
+      {
+        "name": "resident_w2_inline1966__ssa_v0",
+        "address": 0,
+        "space": "right",
+        "dtype": "i8",
+        "rows": 256,
+        "cols": 256,
+        "size": 65536,
+        "line": 1521
+      },
+      {
+        "name": "resident_qr2_inline1968__ssa_v0_Left",
+        "address": 0,
+        "space": "left",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1523
+      },
+      {
+        "name": "resident_w3_inline1982__ssa_v0",
+        "address": 0,
+        "space": "right",
+        "dtype": "i8",
+        "rows": 256,
+        "cols": 256,
+        "size": 65536,
+        "line": 1526
+      },
+      {
+        "name": "resident_qr3_inline1972__ssa_v0_Left",
+        "address": 0,
+        "space": "left",
+        "dtype": "i8",
+        "rows": 128,
+        "cols": 256,
+        "size": 32768,
+        "line": 1528
+      }
+    ],
+    "full_aic_max_end_bytes": {
+      "acc": 131072,
+      "mat": 475136,
+      "left": 65536,
+      "right": 65536,
+      "vec": 16384
+    },
+    "qb_live_mat_bytes": 327680,
+    "four_k_order": [
+      0,
+      256,
+      512,
+      768
+    ],
+    "interior_pipe_all": 0,
+    "qr_slot_reuse": "QR0/2同址、QR1/3同址；MTE1→MTE2消费完毕后覆盖",
+    "right_reuse": "四Right同址；每次M→MTE1后才提取下一段，MTE1→M后MMA",
+    "acc_and_store": "首段/下一M首段等FIX→M；末段M→FIX后有效行TSTORE",
+    "valid": "min(T-t0,128)同时约束QR GM view、Left、compact Acc和store GM view"
+  },
+  "non_qb": {
+    "baseline_artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b24_v1/build_output/decode_csa_spmd_5e_gzb5p",
+    "baseline_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/query_dequant_linear_20261018/source_reference",
+    "baseline_scope": "已有9d对照，QA=false可达32文件AST与668相同；不是新编668二进制",
+    "baseline_role_verified_by": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b24_v1/source_matrix/result.json",
+    "controls_equal_after_new_flags": true,
+    "baseline_controls": {
+      "QUERY_GROUP": 6,
+      "QK_PANEL": 64,
+      "SCORE_TILE": 1024,
+      "PREFETCH": 1,
+      "TO_L0": true,
+      "BALANCED": true,
+      "ROOTS": 1,
+      "OA_COLS": 256,
+      "OB_ROWS": 128,
+      "OUTPUT_GROUP_PIPELINE": true,
+      "HC_ROW_DEPENDENCIES": true,
+      "ATTENTION_QUERY_METADATA": false,
+      "HC_CONSUMER_REDUCE": false
+    },
+    "reachable_source_ast_equal": {
+      "__init__.py": true,
+      "attention_plan_stages.py": true,
+      "attention_stream_stages.py": true,
+      "binding.py": true,
+      "cache_stages.py": true,
+      "compressor_output_stages.py": true,
+      "compressor_pool_stages.py": true,
+      "compressor_projection_stages.py": true,
+      "cube_schedule.py": true,
+      "entry.py": true,
+      "hc_stages.py": true,
+      "indexer_cache_stages.py": true,
+      "indexer_compressor_output_stages.py": true,
+      "indexer_group_stages.py": true,
+      "indexer_publish_stages.py": true,
+      "indexer_query_stages.py": true,
+      "indexer_scale_plan_stages.py": true,
+      "indexer_score_stages.py": true,
+      "indexer_topk_stages.py": true,
+      "kv_stages.py": true,
+      "metadata_stages.py": true,
+      "output_projection_a_stages.py": true,
+      "output_projection_b_stages.py": true,
+      "phase_sync.py": true,
+      "qkv_stages.py": true,
+      "query_projection_stages.py": true,
+      "query_source.py": true,
+      "request_geometry.py": true,
+      "runtime_abi.py": true,
+      "signals.py": true,
+      "vector_schedule.py": true,
+      "wait_codegen.py": true
+    },
+    "allocation_entries": 535,
+    "allocations_equal": true,
+    "normalized_pto_equal": true,
+    "full_aiv_normalized_pto_equal": true,
+    "normalization": "只去loc与SSA名、展开常量声明；保留数学/控制流/类型/布局/所有地址",
+    "cpp_local_event_entries": [
+      4722,
+      4722
+    ],
+    "cpp_local_event_sequence_equal": true,
+    "cpp_scope": "只比较cube_schedule函数体非Q_B的set_flag/wait_flag/pipe_barrier。旧设备注入wait-backoff helper，本CPU没有；不声称整C++或GM等待helper相同"
+  },
+  "artifact_paths": {
+    "reference_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/source_reference",
+    "candidate_v1": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/source_candidate",
+    "candidate_v2": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/source_candidate_v2",
+    "cpu_v1_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/cpu_v1/result.json",
+    "cpu_v2_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/cpu_v2/result.json"
+  }
+}

@@ -1,0 +1,127 @@
+原始路径：/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/canonicalize_io_order_pass.cpp
+原始行：68–191
+
+68: ///
+69: /// This is a **hardware-unit stage ladder** for SAME-CORE pipelines: statements
+70: /// are ordered by the unit they cross along the dataflow, scalar → MTE-load →
+71: /// CUBE/Vec compute → MTE-store. Clustering the loads of a replicated pipeline
+72: /// body up front issues both stages' prefetches before the computes, so the
+73: /// MTE load engine runs ahead of the Vector/Cube compute engine (double-buffer
+74: /// overlap). The compute/store tier additionally orders by pipeline *stage*
+75: /// (see ``ReorderRegion``) so each stage stores its output right after its
+76: /// compute, freeing that buffer before the next stage. Stage *separation* of
+77: /// the buffers themselves is no longer a side effect of this clustering — it is
+78: /// now an explicit ``MemoryReuse`` constraint (``pipeline_membership``); this
+79: /// pass only shapes the *schedule*. Cross-core (cube/vector) pipelines are
+80: /// software-pipelined upstream by ``SkewCrossCorePipeline`` (which leaves them
+81: /// ``ForKind::Sequential``, so this pass never sees a cross-core Pipeline body);
+82: /// there is no cross-core tier here.
+83: ///
+84: /// ``ScalarCompute`` sits above ``Load`` so that address-arithmetic assigns
+85: /// (e.g. ``k = i * 512``) — the typical predecessors of a tile.load offset —
+86: /// are emitted first, allowing all sibling clones' loads to become ready and
+87: /// cluster at the top of the region. An L1→L0 ``tile.extract`` is also load-like
+88: /// (see ``IsL1ToL0ExtractCall``) so matmul operand prep clusters with the loads.
+89: enum class IOCategory : int {
+90:   ScalarCompute = 0,
+91:   Load = 1,
+92:   TileCompute = 2,
+93:   Store = 3,
+94: };
+95: 
+96: /// Singletons for the ops the pass cares about — resolved once from the registry
+97: /// and compared by identity in ``CategorizeStmt``. Using pointer identity instead
+98: /// of name strings avoids string comparisons in the hot path and makes the set
+99: /// of recognized ops explicit at pass construction.
+100: struct IOCategoryOps {
+101:   OpPtr tile_load;      ///< Read: tensor → tile data movement
+102:   OpPtr tile_read;      ///< Read: extract scalar from a tile
+103:   OpPtr tile_store;     ///< Write: tile → tensor data movement
+104:   OpPtr tile_write;     ///< Write: put scalar into a tile
+105:   OpPtr tile_extract;   ///< Sub-tile extract — load-like only when L1→L0 (see IsL1ToL0ExtractCall)
+106:   OpPtr tile_assemble;  ///< Acc→Mat sub-tile drain (Mat-scratch path) — drain-like only under dbC
+107: 
+108:   static IOCategoryOps Build() {
+109:     const auto& registry = OpRegistry::GetInstance();
+110:     return {
+111:         registry.GetOp("tile.load"),  registry.GetOp("tile.read"),    registry.GetOp("tile.store"),
+112:         registry.GetOp("tile.write"), registry.GetOp("tile.extract"), registry.GetOp("tile.assemble"),
+113:     };
+114:   }
+115: 
+116:   [[nodiscard]] bool IsLoadLike(const OpPtr& op) const { return op == tile_load || op == tile_read; }
+117:   [[nodiscard]] bool IsStoreLike(const OpPtr& op) const { return op == tile_store || op == tile_write; }
+118:   [[nodiscard]] bool IsAssemble(const OpPtr& op) const { return op == tile_assemble; }
+119: 
+120:   /// True when @p call is a `tile.extract` whose source lives in L1 (Mat) and
+121:   /// whose destination lives in L0a/L0b (Left/Right) — i.e. the ISA TEXTRACT
+122:   /// L1→L0 data-movement pattern emitted by AutoTileMatmulL0. Such extracts
+123:   /// are load-like for scheduling purposes: clustering them ahead of the
+124:   /// matmul/matmul_acc consumers in the iteration body lets the codegen
+125:   /// ping-pong on Left/Right buffers (analogous to how tile.load clustering
+126:   /// enables DDR→Mat ping-pong).
+127:   ///
+128:   /// Other tile.extract patterns — non-Mat source, non-{Left,Right} target,
+129:   /// or unknown memory space — keep the default TileCompute tier so we don't
+130:   /// disturb compute orderings the dependency graph already constrains.
+131:   [[nodiscard]] bool IsL1ToL0ExtractCall(const Call& call) const {
+132:     if (call.op_ != tile_extract) return false;
+133:     if (call.args_.empty()) return false;
+134:     auto src_tile = std::dynamic_pointer_cast<const TileType>(call.args_[0]->GetType());
+135:     if (!src_tile) return false;
+136:     auto src_ms = src_tile->GetMemorySpace();
+137:     if (!src_ms.has_value() || *src_ms != MemorySpace::Mat) return false;
+138:     for (const auto& [k, v] : call.kwargs_) {
+139:       if (k != "target_memory") continue;
+140:       auto target = AnyCast<MemorySpace>(v, "kwarg key: target_memory");
+141:       return target == MemorySpace::Left || target == MemorySpace::Right;
+142:     }
+143:     return false;
+144:   }
+145: };
+146: 
+147: /// @param overlap_stores When false, store-like ops are categorized as
+148: ///   ``TileCompute`` instead of ``Store`` so the (category, index) sort keeps
+149: ///   each store adjacent to its producing compute rather than floating it below
+150: ///   the next iteration's compute — the one-accumulator schedule. See
+151: ///   ``kPipelineOverlapStoresAttr``.
+152: /// @param double_buffer_c When true, store-like ops are categorized as ``Store``
+153: ///   regardless of ``overlap_stores`` (``ReorderRegion`` then lifts them to a tier
+154: ///   above all compute — the dbC=2 co-live schedule). See
+155: ///   ``kPipelineDoubleBufferCAttr``.
+156: IOCategory CategorizeStmt(const StmtPtr& stmt, const IOCategoryOps& ops, bool overlap_stores,
+157:                           bool double_buffer_c) {
+158:   const IOCategory store_tier =
+159:       (overlap_stores || double_buffer_c) ? IOCategory::Store : IOCategory::TileCompute;
+160:   if (auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt)) {
+161:     if (auto call = std::dynamic_pointer_cast<const Call>(assign->value_)) {
+162:       // tile.read keeps Load even though its LHS is scalar — it's I/O against
+163:       // a tile and belongs in the load tier alongside tile.load.
+164:       if (ops.IsLoadLike(call->op_)) return IOCategory::Load;
+165:       if (ops.IsStoreLike(call->op_)) return store_tier;
+166:       // tile.assemble is the Acc→Mat drain of the Mat-scratch path. Under dbC it is
+167:       // drain-like (Store tier → lifted above all compute in ReorderRegion) so the
+168:       // two Mat-scratch accumulators stay co-live, mirroring tile.store on the
+169:       // direct-store path. Without dbC it stays TileCompute (its chain dependency
+170:       // already orders it after its producing matmul) — the one-accumulator
+171:       // Mat-scratch schedule is unchanged.
+172:       if (double_buffer_c && ops.IsAssemble(call->op_)) return IOCategory::Store;
+173:       // tile.extract is load-like only when it represents an L1→L0 transfer
+174:       // (Mat source, Left/Right target). Other extract shapes stay in
+175:       // TileCompute — see IsL1ToL0ExtractCall doc for rationale.
+176:       if (ops.IsL1ToL0ExtractCall(*call)) return IOCategory::Load;
+177:     }
+178:     INTERNAL_CHECK_SPAN(assign->var_, assign->span_) << "Internal error: AssignStmt has null var_";
+179:     // Scalar-producing compute lifts to the top so it unblocks downstream
+180:     // loads; tile/tensor-producing compute stays in the middle.
+181:     if (std::dynamic_pointer_cast<const ScalarType>(assign->var_->GetType())) {
+182:       return IOCategory::ScalarCompute;
+183:     }
+184:     return IOCategory::TileCompute;
+185:   }
+186:   if (auto eval = std::dynamic_pointer_cast<const EvalStmt>(stmt)) {
+187:     if (auto call = std::dynamic_pointer_cast<const Call>(eval->expr_)) {
+188:       if (ops.IsStoreLike(call->op_)) return store_tier;
+189:     }
+190:   }
+191:   return IOCategory::TileCompute;

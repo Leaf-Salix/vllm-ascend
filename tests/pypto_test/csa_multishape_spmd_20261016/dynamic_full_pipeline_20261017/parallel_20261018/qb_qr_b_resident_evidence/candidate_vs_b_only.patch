@@ -1,0 +1,101 @@
+--- /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/source_candidate/query_projection_stages.py
++++ /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_qb_qr_b_resident_cpu_20261018/source_candidate/query_projection_stages.py
+@@ -22,7 +22,8 @@
+     T、QR 暂存行数和投影工作区行数均为动态 Tensor 轴。
+ 
+ 数学 tile 与分工
+-    NZ 保留 M128/N256/K256；128<T<=256时整K权重在L1跨两M复用，
++    NZ 保留 M128/N256/K256；128<T<=256时QR全行与整K权重各占256KiB L1，
++    QR跨本核全部N复用、权重跨两M复用；四K256仍按原顺序完成。
+     其它T仍按K256流式搬运。ND保留M64/N512/K128；按实际T计算
+     ceil(T/128)*128 个工作区行，不按缓存容量扫描额外行。每个显式 AIC
+     worker 负责列块 n=worker+k*WORKERS，沿 K 顺序做原 INT32 累加。
+@@ -128,53 +129,54 @@
+     WORKERS: pl.constexpr,
+     QB_B_RESIDENT: pl.constexpr = False,
+ ):
+-    """NZ Q_B：双M区间显式复用整K权重，原K顺序/列owner/有效尾行保持。"""
++    """NZ Q_B：双M区间QR/B恰512KiB常驻；直接提取到L0，动态尾行与K顺序保持。"""
+     qproj_worker = pl.max(worker_id, 0)
+     qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
+     # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
+-    # 两个真实M128块时复用整K权重：只改变GM→L1搬运，不改变M/N/K数学。
+-    # 256KiB权重在两个M块之间保持存活；QR仍按K256进行stage=2流水，
+-    # 两个QR槽最多64KiB，目标L1活跃容量320KiB。其余T沿用原流式路径。
+-    # Host仅按已有T描述符选择128<T<=256；实际M循环和尾valid仍读device T。
+-    # constexpr关闭时整支不进入IR，避免给非目标小T改变片上规划和事件。
++    # 仅Host选出的128<T<=256区间：QR的固定容量为256×1024 INT8，
++    # validT仍来自设备动态维度；每个AIC在N循环外只载一次，不能用256作有效T。
++    # 与每N常驻的B1024×256合计恰512KiB Mat，不另建Mat切片或stage2副本。
++    # 两个M128按原次序完成，各自K0初始化，再依次累加K256/K512/K768。
++    # Right一份64KiB已满L0B：后一extract只能排在前一MMA之后；不手工删覆盖事件。
++    # constexpr关闭支逐字保留B-only的原流式代码，全部跨核协议仍由外层负责。
+     if QB_B_RESIDENT:
++        resident_qr_full = pl.load(
++            qr_i8_matmul,
++            [0, 0],
++            [2 * QPROJ_PIPE_M_TILE, Q_LORA],
++            valid_shape=[tokens, Q_LORA],
++            target_memory=pl.MemorySpace.Mat,
++        )
+         for resident_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
+             resident_n = qproj_worker + resident_round * WORKERS
+             resident_col = resident_n * QPROJ_MM_N_TILE
+-            # 显式Mat载入放在M循环外，避免把GM的惰性view误当已驻留权重。
+-            # 外层wq_b的Native NZ声明与BYPASS属性继续作用于这一次载入。
+             resident_weight = pl.load(
+                 wq_b, [0, resident_col], [Q_LORA, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat
+             )
+             for resident_t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+-                resident_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - resident_t0)
+-                resident_qr_first = pl.load(
+-                    qr_i8_matmul,
+-                    [resident_t0, 0],
+-                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+-                    valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
+-                    target_memory=pl.MemorySpace.Mat,
+-                )
+-                # Mat slice只供矩阵消费；后端应融合成Mat→Right提取，不能
+-                # 生成Mat→Mat搬运，也不能将整K权重移入64KiB的Right。
+-                resident_w_first = pl.tile.slice(
+-                    resident_weight, [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], [0, 0]
+-                )
+-                # 首段创建带有效M的compact Acc；不对固定满M种子盲加尾块。
+-                resident_acc = pl.tile.matmul(resident_qr_first, resident_w_first)
+-                for resident_k in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+-                    resident_qr = pl.load(
+-                        qr_i8_matmul,
+-                        [resident_t0, resident_k],
+-                        [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+-                        valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
+-                        target_memory=pl.MemorySpace.Mat,
++                # extract从QR源validT减去动态行偏移并裁至128，生成compact Left；
++                # 不把动态validT改成物理Rows，Mat布局始终以capacity256为步长。
++                resident_left_first = pl.tile.extract(
++                    resident_qr_full, resident_t0, 0,
++                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], target_memory=pl.MemorySpace.Left,
++                )
++                resident_right_first = pl.tile.extract(
++                    resident_weight, 0, 0,
++                    [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
++                )
++                resident_acc = pl.tile.matmul(resident_left_first, resident_right_first)
++                # 使用普通K循环，避免stage2先构造两份64KiB Right再做首MMA。
++                # 无新增数学、fence或同步；后端必须保留M→MTE1的单槽覆盖依赖。
++                for resident_k in pl.range(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE):
++                    resident_left = pl.tile.extract(
++                        resident_qr_full, resident_t0, resident_k,
++                        [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], target_memory=pl.MemorySpace.Left,
+                     )
+-                    resident_w = pl.tile.slice(
+-                        resident_weight, [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], [resident_k, 0]
++                    resident_right = pl.tile.extract(
++                        resident_weight, resident_k, 0,
++                        [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
+                     )
+-                    resident_acc = pl.tile.matmul_acc(resident_acc, resident_qr, resident_w)
+-                # Tile有效行沿原T尾部传播到FIX，只写本M块的实际query行。
++                    resident_acc = pl.tile.matmul_acc(resident_acc, resident_left, resident_right)
+                 q_proj_i32 = pl.store(resident_acc, [resident_t0, resident_col], q_proj_i32)
+     else:
+         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):

@@ -1,0 +1,82 @@
+原始路径：/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/cpu_v1/kernel/passes_dump/33_after_CanonicalizeIOOrder.py
+原始行：1551–1629
+
+1551:         for resident_round_inline1978__idx_v0, (q_proj__iter_v1,) in pl.range((23 - qproj_worker_inline1970__ssa_v0 + 128) // 24, init_values=(q_proj__ssa_v0,)):
+1552:             resident_n_inline1971__ssa_v0: pl.Scalar[pl.INDEX] = qproj_worker_inline1970__ssa_v0 + resident_round_inline1978__idx_v0 * 24
+1553:             resident_col_inline1972__ssa_v0: pl.Scalar[pl.INDEX] = resident_n_inline1971__ssa_v0 * 256
+1554:             resident_weight_inline1981__ssa_v0: pl.Tile[[1024, 256], pl.INT8, pl.Mem.Mat] = pl.tile.load(
+1555:                 wq_b__ssa_v0, [0, resident_col_inline1972__ssa_v0 // 32, 0, 0, 0], [1, 8, 64, 16, 32], [1, 8, 64, 16, 32], target_memory=pl.Mem.Mat, cache=1
+1556:             )
+1557:             for resident_t0_inline1979__idx_v0, (q_proj__iter_v3,) in pl.range(0, qproj_t_matmul_inline1969__ssa_v0, 128, init_values=(q_proj__iter_v1,)):
+1558:                 resident_rows_inline1982__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(tokens__ssa_v0 - resident_t0_inline1979__idx_v0, 128)
+1559:                 resident_qr_first_inline1973__ssa_v0: pl.Tile[[128, 256], pl.INT8, pl.Mem.Mat, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.load(
+1560:                     qr_matmul__ssa_v0, [resident_t0_inline1979__idx_v0, 0], [128, 256], [resident_rows_inline1982__ssa_v0, 256], target_memory=pl.Mem.Mat
+1561:                 )
+1562:                 resident_w_first_inline1974__ssa_v0_textract: pl.Tile[[256, 256], pl.INT8, pl.Mem.Right] = pl.tile.extract(
+1563:                     resident_weight_inline1981__ssa_v0, 0, 0, [256, 256], target_memory=pl.Mem.Right
+1564:                 )
+1565:                 resident_qr_first_inline1973__ssa_v0_Left: pl.Tile[[128, 256], pl.INT8, pl.Mem.Left, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.move(
+1566:                     resident_qr_first_inline1973__ssa_v0, target_memory=pl.Mem.Left
+1567:                 )
+1568:                 resident_acc_inline1983__ssa_v0: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1569:                     pl.tile.matmul(resident_qr_first_inline1973__ssa_v0_Left, resident_w_first_inline1974__ssa_v0_textract)
+1570:                 )
+1571:                 for resident_k_inline1984__idx_v0, (resident_acc_inline1983__iter_v1,) in pl.range(256, 768, 512, init_values=(resident_acc_inline1983__ssa_v0,)):
+1572:                     resident_qr_inline1976__ssa_v0: pl.Tile[[128, 256], pl.INT8, pl.Mem.Mat, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.load(
+1573:                         qr_matmul__ssa_v0,
+1574:                         [resident_t0_inline1979__idx_v0, resident_k_inline1984__idx_v0],
+1575:                         [128, 256],
+1576:                         [resident_rows_inline1982__ssa_v0, 256],
+1577:                         target_memory=pl.Mem.Mat,
+1578:                         attrs={"pipeline_membership": "20:0"},
+1579:                     )
+1580:                     resident_w_inline1977__ssa_v0_textract: pl.Tile[[256, 256], pl.INT8, pl.Mem.Right] = pl.tile.extract(
+1581:                         resident_weight_inline1981__ssa_v0, resident_k_inline1984__idx_v0, 0, [256, 256], target_memory=pl.Mem.Right, attrs={"pipeline_membership": "20:0"}
+1582:                     )
+1583:                     resident_qr_inline1976__ssa_v0_1: pl.Tile[[128, 256], pl.INT8, pl.Mem.Mat, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.load(
+1584:                         qr_matmul__ssa_v0,
+1585:                         [resident_t0_inline1979__idx_v0, resident_k_inline1984__idx_v0 + 256],
+1586:                         [128, 256],
+1587:                         [resident_rows_inline1982__ssa_v0, 256],
+1588:                         target_memory=pl.Mem.Mat,
+1589:                         attrs={"pipeline_membership": "20:1"},
+1590:                     )
+1591:                     resident_w_inline1977__ssa_v0_textract_1: pl.Tile[[256, 256], pl.INT8, pl.Mem.Right] = pl.tile.extract(
+1592:                         resident_weight_inline1981__ssa_v0, resident_k_inline1984__idx_v0 + 256, 0, [256, 256], target_memory=pl.Mem.Right, attrs={"pipeline_membership": "20:1"}
+1593:                     )
+1594:                     resident_qr_inline1976__ssa_v0_Left: pl.Tile[[128, 256], pl.INT8, pl.Mem.Left, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.move(
+1595:                         resident_qr_inline1976__ssa_v0, target_memory=pl.Mem.Left, attrs={"pipeline_membership": "20:0"}
+1596:                     )
+1597:                     resident_acc_inline1983__ssa_v3: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1598:                         pl.tile.matmul_acc(resident_acc_inline1983__iter_v1, resident_qr_inline1976__ssa_v0_Left, resident_w_inline1977__ssa_v0_textract)
+1599:                     )
+1600:                     resident_qr_inline1976__ssa_v0_Left_1: pl.Tile[[128, 256], pl.INT8, pl.Mem.Left, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.move(
+1601:                         resident_qr_inline1976__ssa_v0_1, target_memory=pl.Mem.Left, attrs={"pipeline_membership": "20:1"}
+1602:                     )
+1603:                     resident_acc_inline1983__ssa_v3_1: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1604:                         pl.tile.matmul_acc(resident_acc_inline1983__ssa_v3, resident_qr_inline1976__ssa_v0_Left_1, resident_w_inline1977__ssa_v0_textract_1)
+1605:                     )
+1606:                     resident_acc_inline1983__rv_v2_main: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1607:                         pl.yield_(resident_acc_inline1983__ssa_v3_1)
+1608:                     )
+1609:                 resident_qr_inline1976__ssa_v0_2: pl.Tile[[128, 256], pl.INT8, pl.Mem.Mat, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.load(
+1610:                     qr_matmul__ssa_v0, [resident_t0_inline1979__idx_v0, 768], [128, 256], [resident_rows_inline1982__ssa_v0, 256], target_memory=pl.Mem.Mat, attrs={"pipeline_membership": "21:0"}
+1611:                 )
+1612:                 resident_w_inline1977__ssa_v0_textract_2: pl.Tile[[256, 256], pl.INT8, pl.Mem.Right] = pl.tile.extract(
+1613:                     resident_weight_inline1981__ssa_v0, 768, 0, [256, 256], target_memory=pl.Mem.Right, attrs={"pipeline_membership": "21:0"}
+1614:                 )
+1615:                 resident_qr_inline1976__ssa_v0_Left_2: pl.Tile[[128, 256], pl.INT8, pl.Mem.Left, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256])] = pl.tile.move(
+1616:                     resident_qr_inline1976__ssa_v0_2, target_memory=pl.Mem.Left, attrs={"pipeline_membership": "21:0"}
+1617:                 )
+1618:                 resident_acc_inline1983__ssa_v3_2: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1619:                     pl.tile.matmul_acc(resident_acc_inline1983__rv_v2_main, resident_qr_inline1976__ssa_v0_Left_2, resident_w_inline1977__ssa_v0_textract_2)
+1620:                 )
+1621:                 resident_acc_inline1983__rv_v2: pl.Tile[[128, 256], pl.INT32, pl.Mem.Acc, pl.TileView(valid_shape=[resident_rows_inline1982__ssa_v0, 256], compact=pl.CompactMode.normal)] = (
+1622:                     resident_acc_inline1983__ssa_v3_2
+1623:                 )
+1624:                 q_proj__ssa_v5: pl.Tensor[[CSA_FULL_QPROJ_ROWS, 32768], pl.INT32] = pl.tile.store(
+1625:                     resident_acc_inline1983__rv_v2, [resident_t0_inline1979__idx_v0, resident_col_inline1972__ssa_v0], q_proj__iter_v3
+1626:                 )
+1627:                 q_proj__rv_v4: pl.Tensor[[CSA_FULL_QPROJ_ROWS, 32768], pl.INT32] = pl.yield_(q_proj__ssa_v5)
+1628:             q_proj__rv_v2: pl.Tensor[[CSA_FULL_QPROJ_ROWS, 32768], pl.INT32] = pl.yield_(q_proj__rv_v4)
+1629:         q_proj_v1__ssa_v0: pl.Tensor[[CSA_FULL_QPROJ_ROWS, 32768], pl.INT32] = q_proj__rv_v2

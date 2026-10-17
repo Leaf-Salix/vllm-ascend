@@ -1,0 +1,99 @@
+{
+  "scope": "一次OA256/OB128/QAfalse CPU；只读同控已有设备reference，没有新NPU",
+  "cpu_passed": true,
+  "roots": 130,
+  "dynamic_axes": 58,
+  "single_mix": true,
+  "sync_start": true,
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 256,
+    "OB_ROWS": 128,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false,
+    "QA_M16_PARALLEL": false
+  },
+  "baseline_artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b24_v1/build_output/decode_csa_spmd_5e_gzb5p",
+  "baseline_role_and_controls_evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/query_linear_h131072_b24_v1/source_matrix/result.json",
+  "baseline_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_indexer_20261018/query_dequant_linear_20261018/source_reference",
+  "qa_false_reachable_source_bridge": {
+    "__init__.py": true,
+    "attention_plan_stages.py": true,
+    "attention_stream_stages.py": true,
+    "binding.py": true,
+    "cache_stages.py": true,
+    "compressor_output_stages.py": true,
+    "compressor_pool_stages.py": true,
+    "compressor_projection_stages.py": true,
+    "cube_schedule.py": true,
+    "entry.py": true,
+    "hc_stages.py": true,
+    "indexer_cache_stages.py": true,
+    "indexer_compressor_output_stages.py": true,
+    "indexer_group_stages.py": true,
+    "indexer_publish_stages.py": true,
+    "indexer_query_stages.py": true,
+    "indexer_scale_plan_stages.py": true,
+    "indexer_score_stages.py": true,
+    "indexer_topk_stages.py": true,
+    "kv_stages.py": true,
+    "metadata_stages.py": true,
+    "output_projection_a_stages.py": true,
+    "output_projection_b_stages.py": true,
+    "phase_sync.py": true,
+    "qkv_stages.py": true,
+    "query_projection_stages.py": true,
+    "query_source.py": true,
+    "request_geometry.py": true,
+    "runtime_abi.py": true,
+    "signals.py": true,
+    "vector_schedule.py": true,
+    "wait_codegen.py": true
+  },
+  "host_policy_note": "旧9d规则后来改变，但此处同controls固定QAfalse；候选对668自身policy字节不变另有source_closure.json证明",
+  "whole_pto_equal_including_qb": true,
+  "normalization": "仅去loc和SSA名，并把常量声明内联为相同值/类型；保留运算、控制流、类型、cache选项和所有物理地址",
+  "aic_allocation_entries": 553,
+  "allocation_fields_equal": [
+    "address",
+    "space",
+    "dtype",
+    "rows",
+    "cols",
+    "size"
+  ],
+  "full_aic_upper_bounds": {
+    "acc": 131072,
+    "mat": 475136,
+    "left": 65536,
+    "right": 65536,
+    "vec": 16384
+  },
+  "cpp_local_events": {
+    "aic": {
+      "old_count": 1700,
+      "new_count": 1700,
+      "same_sequence_and_event_ids": true
+    },
+    "aiv": {
+      "old_count": 3088,
+      "new_count": 3088,
+      "same_sequence_and_event_ids": true
+    }
+  },
+  "new_pair_unreachable_in_pto": true,
+  "not_claimed": [
+    "未比较机器码等价：设备reference开启wait-backoff，CPU为默认wait实现",
+    "OUTPUT_GROUP_PIPELINE=false只有源级折叠证明，未另加CPU",
+    "此结果不替代T1..96打开候选的设备正确性/性能验证"
+  ],
+  "helper_module_used_readonly": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/ultra_qb_weight_reuse_design_20261018/b_resident_cpu/audit_cpu.py"
+}

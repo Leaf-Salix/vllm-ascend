@@ -1,0 +1,20 @@
+                if 0 < tokens__ssa_v0 and tokens__ssa_v0 <= 96:
+                    # N128小T专用五owner并集；合同0≤group<8，24AIC，三pair和两single。
+                    #
+                    #         pair归3g..3g+2；single归下一组前两核，并在g7回绕到0/1。两集合互异。
+                    #         所有信号按原代际读取后才统一维护业务cache，避免每owner多一次全局fence。
+                    #         本helper没有新增信号/phase，不可用于旧logical%24或T>96分工。
+                    #
+                    for pair_inline1410__idx_v0 in pl.range(3):
+                        owner_inline1409__ssa_v0: pl.Scalar[pl.INDEX] = quant_group__idx_v0 * 3 + pair_inline1410__idx_v0
+                        offset_inline1408__ssa_v0: pl.Scalar[pl.INDEX] = (quant_group__idx_v0 * 72 + owner_inline1409__ssa_v0) * 128 + 405504
+                        # 等待该槽达到 expected，不清零；业务数据可见性由外层保证。
+                        pl.system.signal_wait(signal_v46__iter_v1, [offset_inline1408__ssa_v0], generation__ssa_v0)
+                    for single_inline1407__idx_v0 in pl.range(2):
+                        owner_inline1409__ssa_v1: pl.Scalar[pl.INDEX] = (quant_group__idx_v0 * 3 + single_inline1407__idx_v0 + 3) % 24
+                        offset_inline1408__ssa_v1: pl.Scalar[pl.INDEX] = (quant_group__idx_v0 * 72 + owner_inline1409__ssa_v1) * 128 + 405504
+                        # 等待该槽达到 expected，不清零；业务数据可见性由外层保证。
+                        pl.system.signal_wait(signal_v46__iter_v1, [offset_inline1408__ssa_v1], generation__ssa_v0)
+                    pl.system.fence()
+                    pl.system.cacheinvalid()
+                    pl.system.fence()

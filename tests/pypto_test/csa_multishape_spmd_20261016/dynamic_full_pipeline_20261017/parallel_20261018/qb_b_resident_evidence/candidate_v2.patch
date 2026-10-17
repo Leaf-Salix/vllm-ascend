@@ -1,0 +1,238 @@
+--- source_reference/cube_schedule.py
++++ source_candidate_v2/cube_schedule.py
+@@ -187,6 +187,7 @@
+     OUTPUT_GROUP_PIPELINE: pl.constexpr,
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QB_B_RESIDENT: pl.constexpr = False,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -310,7 +311,8 @@
+     )
+     signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
+     # Q_B列块n归n%24；每个owner处理所有实际M128行块。返回原GM别名给cluster。
+-    q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
++    # B常驻策略只改变本helper搬运；device T、24核列owner及QB发布保持。
++    q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS, QB_B_RESIDENT)
+     signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
+ 
+     # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。
+--- source_reference/entry.py
++++ source_candidate_v2/entry.py
+@@ -14,6 +14,7 @@
+     行数、压缩行数、历史分片和尾query均在核内求。main和idx的Q/L分别传，
+     不因shape相同而合并语义。每请求长度无需相同，也不要求固定S=6。
+     QUERY_GROUP/QK_PANEL/SCORE_TILE等仅是数学与流水策略，不固定T/B/L。
++    QB_B_RESIDENT默认False；Host按128<T<=256选择整K的B跨M复用，实际T仍动态。
+     QA_M16_PARALLEL默认False；Host仅在G6且16<T<32选择并行两份原M16尾块，
+     同一constexpr同时传到AIC生产与AIV等待，关闭时保留原QA完整编译路径。
+     HC_ROW_DEPENDENCIES按动态行归属缩小HC前段依赖，不改变任何数学块与生产者；
+@@ -276,6 +277,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QB_B_RESIDENT: pl.constexpr = False,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -367,6 +369,7 @@
+             OUTPUT_GROUP_PIPELINE,
+             HC_ROW_DEPENDENCIES,
+             QA_M16_PARALLEL,
++            QB_B_RESIDENT,
+         )
+         (
+             x_fp32,
+@@ -787,6 +790,7 @@
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
+     QA_M16_PARALLEL: pl.constexpr = False,
++    QB_B_RESIDENT: pl.constexpr = False,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1030,6 +1034,7 @@
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
+             QA_M16_PARALLEL,
++            QB_B_RESIDENT,
+         )
+     return (
+         x_fp32,
+--- source_reference/policy.py
++++ source_candidate_v2/policy.py
+@@ -52,6 +52,7 @@
+     attention_query_metadata: bool = False
+     hc_consumer_reduce: bool = False
+     qa_m16_parallel: bool = False
++    qb_b_resident: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -69,6 +70,7 @@
+             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
+             "QA_M16_PARALLEL": self.qa_m16_parallel,
++            "QB_B_RESIDENT": self.qb_b_resident,
+         }
+ 
+ 
+@@ -109,4 +111,6 @@
+         ob_rows=ob_rows,
+         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
+         qa_m16_parallel=group == 6 and 16 < tokens < 32,
++        # 原双M128区间复用同一整K权重；不按B/S6白名单，实际M尾仍由device T决定。
++        qb_b_resident=128 < tokens <= 256,
+     )
+--- source_reference/query_projection_stages.py
++++ source_candidate_v2/query_projection_stages.py
+@@ -22,7 +22,8 @@
+     T、QR 暂存行数和投影工作区行数均为动态 Tensor 轴。
+ 
+ 数学 tile 与分工
+-    NZ 保留 M128/N256/K256，ND 保留 M64/N512/K128；按实际 T 计算
++    NZ 保留 M128/N256/K256；128<T<=256时整K权重在L1跨两M复用，
++    其它T仍按K256流式搬运。ND保留M64/N512/K128；按实际T计算
+     ceil(T/128)*128 个工作区行，不按缓存容量扫描额外行。每个显式 AIC
+     worker 负责列块 n=worker+k*WORKERS，沿 K 顺序做原 INT32 累加。
+     反量化用八行、4/8/16/32/64 个独立 head 的分组策略；完整八行时选
+@@ -96,6 +97,7 @@
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
++    QB_B_RESIDENT: pl.constexpr = False,
+ ):
+     """ND Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
+     qproj_worker = pl.max(worker_id, 0)
+@@ -124,34 +126,108 @@
+     tokens: pl.Scalar[pl.INDEX],
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
++    QB_B_RESIDENT: pl.constexpr = False,
+ ):
+-    """NZ Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
++    """NZ Q_B：双M区间显式复用整K权重，原K顺序/列owner/有效尾行保持。"""
+     qproj_worker = pl.max(worker_id, 0)
+     qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
+     # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
+-    for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
+-        # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
+-        qproj_n_idx = qproj_worker + qproj_round * WORKERS
+-        w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+-        for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+-            # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
+-            m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
+-            qr_first = pl.slice(
+-                qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
+-            )
+-            wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-            # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
+-            col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
+-            for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+-                qr_chunk = pl.slice(
++    # 两个真实M128块时复用整K权重：只改变GM→L1搬运，不改变M/N/K数学。
++    # 256KiB权重在两个M块之间保持存活；QR按K256手工交错供数，
++    # 两个QR槽最多64KiB，目标L1活跃容量320KiB。其余T沿用原流式路径。
++    # Host仅按已有T描述符选择128<T<=256；实际M循环和尾valid仍读device T。
++    # constexpr关闭时整支不进入IR，避免给非目标小T改变片上规划和事件。
++    if QB_B_RESIDENT:
++        for resident_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
++            resident_n = qproj_worker + resident_round * WORKERS
++            resident_col = resident_n * QPROJ_MM_N_TILE
++            # 显式Mat载入放在M循环外，避免把GM的惰性view误当已驻留权重。
++            # 外层wq_b的Native NZ声明与BYPASS属性继续作用于这一次载入。
++            resident_weight = pl.load(
++                wq_b, [0, resident_col], [Q_LORA, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat
++            )
++            for resident_t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
++                resident_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - resident_t0)
++                # 四段K256保持原INT32顺序。这里故意使用普通直线语句：
++                # CanonicalizeIOOrder会把pipeline中的Mat→Right提取一起提前，
++                # 两份Right各64KiB会超过A3的64KiB。普通直线不做该重排。
++                # 先准备QR0/QR1，消耗QR0后才载QR2，消耗QR1后再载QR3；
++                # QR同时最多两份32KiB，Right每次消费后才准备下一份。
++                resident_qr0 = pl.load(
+                     qr_i8_matmul,
++                    [resident_t0, 0],
+                     [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+-                    [t0, k0],
+-                    valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+-                )
+-                wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-                col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
+-            q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
++                    valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
++                resident_qr1 = pl.load(
++                    qr_i8_matmul,
++                    [resident_t0, QPROJ_PIPE_K_TILE],
++                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
++                    valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
++                resident_w0 = pl.tile.extract(
++                    resident_weight, 0, 0,
++                    [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
++                )
++                # 第一段matmul据QR真实valid M创建compact Acc，尾部不取满M种子。
++                resident_acc = pl.tile.matmul(resident_qr0, resident_w0)
++                resident_qr2 = pl.load(
++                    qr_i8_matmul,
++                    [resident_t0, 2 * QPROJ_PIPE_K_TILE],
++                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
++                    valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
++                resident_w1 = pl.tile.extract(
++                    resident_weight, QPROJ_PIPE_K_TILE, 0,
++                    [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
++                )
++                resident_acc = pl.tile.matmul_acc(resident_acc, resident_qr1, resident_w1)
++                resident_qr3 = pl.load(
++                    qr_i8_matmul,
++                    [resident_t0, 3 * QPROJ_PIPE_K_TILE],
++                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
++                    valid_shape=[resident_rows, QPROJ_PIPE_K_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
++                resident_w2 = pl.tile.extract(
++                    resident_weight, 2 * QPROJ_PIPE_K_TILE, 0,
++                    [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
++                )
++                resident_acc = pl.tile.matmul_acc(resident_acc, resident_qr2, resident_w2)
++                resident_w3 = pl.tile.extract(
++                    resident_weight, 3 * QPROJ_PIPE_K_TILE, 0,
++                    [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Right,
++                )
++                resident_acc = pl.tile.matmul_acc(resident_acc, resident_qr3, resident_w3)
++                # Tile有效行沿原T尾部传播到FIX，只写本M块的实际query行。
++                q_proj_i32 = pl.store(resident_acc, [resident_t0, resident_col], q_proj_i32)
++    else:
++        for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
++            # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
++            qproj_n_idx = qproj_worker + qproj_round * WORKERS
++            w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
++            for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
++                # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
++                m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
++                qr_first = pl.slice(
++                    qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
++                )
++                wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
++                # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
++                col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
++                for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
++                    qr_chunk = pl.slice(
++                        qr_i8_matmul,
++                        [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
++                        [t0, k0],
++                        valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
++                    )
++                    wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
++                    col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
++                q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+     return q_proj_i32
+ 
+ 

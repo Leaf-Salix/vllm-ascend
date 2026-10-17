@@ -1,0 +1,36 @@
+120: def _q_b_nz_stage(
+121:     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+122:     qr_i8_matmul: pl.Tensor[[PAD_ROWS_DYN, Q_LORA], pl.INT8],
+123:     q_proj_i32: pl.Tensor[[QPROJ_ROWS_DYN, H * HEAD_DIM], pl.INT32],
+124:     tokens: pl.Scalar[pl.INDEX],
+125:     worker_id: pl.Scalar[pl.INDEX],
+126:     WORKERS: pl.constexpr,
+127: ):
+128:     """NZ Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
+129:     qproj_worker = pl.max(worker_id, 0)
+130:     qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
+131:     # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
+132:     for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
+133:         # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
+134:         qproj_n_idx = qproj_worker + qproj_round * WORKERS
+135:         w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+136:         for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+137:             # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
+138:             m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
+139:             qr_first = pl.slice(
+140:                 qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
+141:             )
+142:             wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+143:             # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
+144:             col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
+145:             for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+146:                 qr_chunk = pl.slice(
+147:                     qr_i8_matmul,
+148:                     [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+149:                     [t0, k0],
+150:                     valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+151:                 )
+152:                 wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+153:                 col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
+154:             q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+155:     return q_proj_i32

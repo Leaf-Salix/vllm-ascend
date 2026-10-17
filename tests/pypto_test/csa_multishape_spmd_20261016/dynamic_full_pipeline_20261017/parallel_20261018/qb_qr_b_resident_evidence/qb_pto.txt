@@ -1,0 +1,49 @@
+# 原物：/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_qb_qr_b_resident_cpu_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.pto
+# 行号保留；仅去掉各行末尾源路径 loc(...)，不改指令/有效行表达式。
+1476:   %resident_qr_full_inline1972__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %arg132 valid_col = %c1024_index : !pto.tile_buf<loc=mat, dtype=i8, rows=256, cols=1024, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+1477:   %qr_matmul__ssa_v0_pview = pto.partition_view %qr_matmul__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%arg132, %c1024_index] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<?x1024xi8>
+1478:   pto.tload ins(%qr_matmul__ssa_v0_pview : !pto.partition_tensor_view<?x1024xi8>) outs(%resident_qr_full_inline1972__ssa_v0 : !pto.tile_buf<loc=mat, dtype=i8, rows=256, cols=1024, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+1479:   %712 = arith.subi %c23_index, %worker__ssa_v0 : index
+1480:   %713 = arith.addi %712, %c128_index : index
+1481:   %714 = arith.divsi %713, %c24_index : index
+1482:   scf.for %resident_round_inline1973__idx_v0 = %c0_index to %714 step %c1_index {
+1483:     %715 = arith.muli %resident_round_inline1973__idx_v0, %c24_index : index
+1484:     %716 = arith.addi %worker__ssa_v0, %715 : index
+1485:     %717 = arith.muli %716, %c256_index : index
+1486:     %resident_weight_inline1980__ssa_v0 = pto.alloc_tile addr = %c262144_i64 valid_row = %c1024_index valid_col = %c256_index : !pto.tile_buf<loc=mat, dtype=i8, rows=1024, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+1487:     %718 = arith.divsi %717, %c32_index : index
+1488:     %719 = arith.maxsi %718, %c0_index : index
+1489:     %wq_b__ssa_v0_pview = pto.partition_view %wq_b__ssa_v0_view, offsets = [%c0_index, %719, %c0_index, %c0_index, %c0_index], sizes = [%c1_index, %c8_index, %c64_index, %c16_index, %c32_index] : !pto.tensor_view<?x?x?x?x?xi8> -> !pto.partition_tensor_view<1x8x64x16x32xi8>
+1490:     pto.tload ins(%wq_b__ssa_v0_pview : !pto.partition_tensor_view<1x8x64x16x32xi8>) outs(%resident_weight_inline1980__ssa_v0 : !pto.tile_buf<loc=mat, dtype=i8, rows=1024, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>) {cache_policy = #pto.load_cache_policy<l2_bypass>}
+1491:     scf.for %resident_t0_inline1978__idx_v0 = %c0_index to %711 step %c128_index {
+1492:       %720 = arith.subi %arg132, %resident_t0_inline1978__idx_v0 : index
+1493:       %721 = arith.maxsi %720, %c0_index : index
+1494:       %722 = arith.minsi %721, %c128_index : index
+1495:       %resident_left_first_inline1981__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %722 valid_col = %c256_index : !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>
+1496:       pto.textract ins(%resident_qr_full_inline1972__ssa_v0, %resident_t0_inline1978__idx_v0, %c0_index : !pto.tile_buf<loc=mat, dtype=i8, rows=256, cols=1024, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index) outs(%resident_left_first_inline1981__ssa_v0 : !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>)
+1497:       %resident_right_first_inline1979__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %c256_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+1498:       pto.textract ins(%resident_weight_inline1980__ssa_v0, %c0_index, %c0_index : !pto.tile_buf<loc=mat, dtype=i8, rows=1024, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index) outs(%resident_right_first_inline1979__ssa_v0 : !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+1499:       %723 = arith.subi %arg132, %resident_t0_inline1978__idx_v0 : index
+1500:       %724 = arith.maxsi %723, %c0_index : index
+1501:       %725 = arith.minsi %724, %c128_index : index
+1502:       %resident_acc_inline1982__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %725 valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=i32, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>
+1503:       pto.tmatmul ins(%resident_left_first_inline1981__ssa_v0, %resident_right_first_inline1979__ssa_v0 : !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>, !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%resident_acc_inline1982__ssa_v0 : !pto.tile_buf<loc=acc, dtype=i32, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>)
+1504:       scf.for %resident_k_inline1977__idx_v0 = %c256_index to %c1024_index step %c256_index {
+1505:         %726 = arith.subi %arg132, %resident_t0_inline1978__idx_v0 : index
+1506:         %727 = arith.maxsi %726, %c0_index : index
+1507:         %728 = arith.minsi %727, %c128_index : index
+1508:         %resident_left_inline1984__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %728 valid_col = %c256_index : !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>
+1509:         pto.textract ins(%resident_qr_full_inline1972__ssa_v0, %resident_t0_inline1978__idx_v0, %resident_k_inline1977__idx_v0 : !pto.tile_buf<loc=mat, dtype=i8, rows=256, cols=1024, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index) outs(%resident_left_inline1984__ssa_v0 : !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>)
+1510:         %resident_right_inline1967__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %c256_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+1511:         pto.textract ins(%resident_weight_inline1980__ssa_v0, %resident_k_inline1977__idx_v0, %c0_index : !pto.tile_buf<loc=mat, dtype=i8, rows=1024, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index) outs(%resident_right_inline1967__ssa_v0 : !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+1512:         pto.tmatmul.acc ins(%resident_acc_inline1982__ssa_v0, %resident_left_inline1984__ssa_v0, %resident_right_inline1967__ssa_v0 : !pto.tile_buf<loc=acc, dtype=i32, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>, !pto.tile_buf<loc=left, dtype=i8, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>, !pto.tile_buf<loc=right, dtype=i8, rows=256, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%resident_acc_inline1982__ssa_v0 : !pto.tile_buf<loc=acc, dtype=i32, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>)
+1513:       }
+1514:       %729 = arith.subi %arg132, %resident_t0_inline1978__idx_v0 : index
+1515:       %730 = arith.maxsi %729, %c0_index : index
+1516:       %731 = arith.minsi %730, %c128_index : index
+1517:       %732 = arith.maxsi %resident_t0_inline1978__idx_v0, %c0_index : index
+1518:       %733 = arith.maxsi %717, %c0_index : index
+1519:       %q_proj__iter_v3_pview = pto.partition_view %q_proj__ssa_v0_view, offsets = [%732, %733], sizes = [%731, %c256_index] : !pto.tensor_view<?x?xi32> -> !pto.partition_tensor_view<?x256xi32>
+1520:       pto.tstore ins(%resident_acc_inline1982__ssa_v0 : !pto.tile_buf<loc=acc, dtype=i32, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>) outs(%q_proj__iter_v3_pview : !pto.partition_tensor_view<?x256xi32>)
+1521:     }
+1522:   }

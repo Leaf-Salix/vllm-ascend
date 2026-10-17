@@ -1,0 +1,348 @@
+                    if pair_first_inline2189__ssa_v0 <= worker__ssa_v0 and worker__ssa_v0 < pair_first_inline2189__ssa_v0 + 3:
+                        pair_inline2177__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(worker__ssa_v0 - pair_first_inline2189__ssa_v0, 0)
+                        row_base_inline2196__ssa_v0: pl.Scalar[pl.INDEX] = g_inline2197__ssa_v0 * pack_stride_inline2206__ssa_v0
+                        n0_inline2198__ssa_v0: pl.Scalar[pl.INDEX] = pair_inline2177__ssa_v0 * 256
+                        output_col_inline2184__ssa_v0: pl.Scalar[pl.INDEX] = g_inline2197__ssa_v0 * 1024 + n0_inline2198__ssa_v0
+                        valid_rows_inline2201__ssa_v0: pl.Scalar[pl.INDEX] = tokens__ssa_v0
+                        group_inline2203__ssa_v0: pl.Scalar[pl.INDEX] = g_inline2197__ssa_v0
+                        seed0_inline2190__ssa_v0: pl.Tile[[128, 128], pl.FP32, pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536), pl.Mem.Acc, pl.TileView(compact=pl.CompactMode.normal)] = (
+                            pl.tile.create([128, 128], dtype=pl.FP32, target_memory=pl.Mem.Acc, compact=True)
+                        )
+                        seed1_inline2204__ssa_v0: pl.Tile[[128, 128], pl.FP32, pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536), pl.Mem.Acc, pl.TileView(compact=pl.CompactMode.normal)] = (
+                            pl.tile.create([128, 128], dtype=pl.FP32, target_memory=pl.Mem.Acc, compact=True)
+                        )
+                        valid0_inline2209__ssa_v0: pl.Tile[
+                            [128, 128],
+                            pl.FP32,
+                            pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                            pl.Mem.Acc,
+                            pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                        ] = pl.tile.set_validshape(seed0_inline2190__ssa_v0, valid_rows_inline2201__ssa_v0, 128)
+                        valid1_inline2192__ssa_v0: pl.Tile[
+                            [128, 128],
+                            pl.FP32,
+                            pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                            pl.Mem.Acc,
+                            pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                        ] = pl.tile.set_validshape(seed1_inline2204__ssa_v0, valid_rows_inline2201__ssa_v0, 128)
+                        for outer_inline2183__idx_v0, (acc0, acc1) in pl.range(4, init_values=(valid0_inline2209__ssa_v0, valid1_inline2192__ssa_v0)):
+                            kbase_inline2195__ssa_v0: pl.Scalar[pl.INDEX] = outer_inline2183__idx_v0 * 1024
+                            a0_inline2175__ssa_v0: pl.Tile[
+                                [128, 256], pl.BF16, pl.MemRef(mem_mat_694, pl.const(65536, pl.INT64), 65536), pl.Mem.Mat, pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 256])
+                            ] = pl.tile.load(packed__ssa_v0, [row_base_inline2196__ssa_v0, kbase_inline2195__ssa_v0], [128, 256], [valid_rows_inline2201__ssa_v0, 256], target_memory=pl.Mem.Mat)
+                            w0a_inline2208__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(131072, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, n0_inline2198__ssa_v0 // 16, kbase_inline2195__ssa_v0 // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w0b_inline2194__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(196608, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, (n0_inline2198__ssa_v0 + 128) // 16, kbase_inline2195__ssa_v0 // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            a1_inline2171__ssa_v0: pl.Tile[
+                                [128, 256], pl.BF16, pl.MemRef(mem_mat_694, pl.const(262144, pl.INT64), 65536), pl.Mem.Mat, pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 256])
+                            ] = pl.tile.load(packed__ssa_v0, [row_base_inline2196__ssa_v0, kbase_inline2195__ssa_v0 + 256], [128, 256], [valid_rows_inline2201__ssa_v0, 256], target_memory=pl.Mem.Mat)
+                            w1a_inline2186__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(327680, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, n0_inline2198__ssa_v0 // 16, (kbase_inline2195__ssa_v0 + 256) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w1b_inline2170__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(393216, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, (n0_inline2198__ssa_v0 + 128) // 16, (kbase_inline2195__ssa_v0 + 256) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w0a_flat_inline2191__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(131072, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w0a_inline2208__ssa_v0, [256, 128]
+                            )
+                            w0b_flat_inline2212__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(196608, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w0b_inline2194__ssa_v0, [256, 128]
+                            )
+                            l00_inline2181__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(0, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a0_inline2175__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Left)
+                            r00a_inline2223__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w0a_flat_inline2191__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            r00b_inline2169__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w0b_flat_inline2212__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c0a_first_inline2199__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(acc0, l00_inline2181__ssa_v0, r00a_inline2223__ssa_v0, outer_inline2183__idx_v0 == 0)
+                            l01_inline2228__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(32768, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a0_inline2175__ssa_v0, 0, 128, [128, 128], target_memory=pl.Mem.Left)
+                            r01a_inline2207__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w0a_flat_inline2191__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c0b_first_inline2211__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(acc1, l00_inline2181__ssa_v0, r00b_inline2169__ssa_v0, outer_inline2183__idx_v0 == 0)
+                            r01b_inline2235__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w0b_flat_inline2212__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c0a_last_inline2176__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c0a_first_inline2199__ssa_v0, l01_inline2228__ssa_v0, r01a_inline2207__ssa_v0, pl.const(0, pl.BOOL))
+                            c0b_last_inline2214__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c0b_first_inline2211__ssa_v0, l01_inline2228__ssa_v0, r01b_inline2235__ssa_v0, pl.const(0, pl.BOOL))
+                            a2_inline2218__ssa_v0: pl.Tile[
+                                [128, 256], pl.BF16, pl.MemRef(mem_mat_694, pl.const(65536, pl.INT64), 65536), pl.Mem.Mat, pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 256])
+                            ] = pl.tile.load(packed__ssa_v0, [row_base_inline2196__ssa_v0, kbase_inline2195__ssa_v0 + 512], [128, 256], [valid_rows_inline2201__ssa_v0, 256], target_memory=pl.Mem.Mat)
+                            w2a_inline2220__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(131072, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, n0_inline2198__ssa_v0 // 16, (kbase_inline2195__ssa_v0 + 512) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w2b_inline2236__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(196608, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, (n0_inline2198__ssa_v0 + 128) // 16, (kbase_inline2195__ssa_v0 + 512) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w1a_flat_inline2221__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(327680, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w1a_inline2186__ssa_v0, [256, 128]
+                            )
+                            w1b_flat_inline2200__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(393216, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w1b_inline2170__ssa_v0, [256, 128]
+                            )
+                            l10_inline2224__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(0, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a1_inline2171__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Left)
+                            r10a_inline2215__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w1a_flat_inline2221__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            r10b_inline2225__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w1b_flat_inline2200__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c1a_first_inline2210__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c0a_last_inline2176__ssa_v0, l10_inline2224__ssa_v0, r10a_inline2215__ssa_v0, pl.const(0, pl.BOOL))
+                            l11_inline2226__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(32768, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a1_inline2171__ssa_v0, 0, 128, [128, 128], target_memory=pl.Mem.Left)
+                            r11a_inline2227__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w1a_flat_inline2221__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c1b_first_inline2185__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c0b_last_inline2214__ssa_v0, l10_inline2224__ssa_v0, r10b_inline2225__ssa_v0, pl.const(0, pl.BOOL))
+                            r11b_inline2230__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w1b_flat_inline2200__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c1a_last_inline2229__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c1a_first_inline2210__ssa_v0, l11_inline2226__ssa_v0, r11a_inline2227__ssa_v0, pl.const(0, pl.BOOL))
+                            c1b_last_inline2231__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c1b_first_inline2185__ssa_v0, l11_inline2226__ssa_v0, r11b_inline2230__ssa_v0, pl.const(0, pl.BOOL))
+                            a3_inline2188__ssa_v0: pl.Tile[
+                                [128, 256], pl.BF16, pl.MemRef(mem_mat_694, pl.const(262144, pl.INT64), 65536), pl.Mem.Mat, pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 256])
+                            ] = pl.tile.load(packed__ssa_v0, [row_base_inline2196__ssa_v0, kbase_inline2195__ssa_v0 + 768], [128, 256], [valid_rows_inline2201__ssa_v0, 256], target_memory=pl.Mem.Mat)
+                            w3a_inline2213__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(327680, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, n0_inline2198__ssa_v0 // 16, (kbase_inline2195__ssa_v0 + 768) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w3b_inline2232__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(393216, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.load(
+                                wo_a__ssa_v0,
+                                [group_inline2203__ssa_v0, (n0_inline2198__ssa_v0 + 128) // 16, (kbase_inline2195__ssa_v0 + 768) // 16, 0, 0],
+                                [1, 8, 16, 16, 16],
+                                [1, 8, 16, 16, 16],
+                                target_memory=pl.Mem.Mat,
+                                cache=1,
+                            )
+                            w2a_flat_inline2233__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(131072, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w2a_inline2220__ssa_v0, [256, 128]
+                            )
+                            w2b_flat_inline2234__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(196608, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w2b_inline2236__ssa_v0, [256, 128]
+                            )
+                            l20_inline2178__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(0, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a2_inline2218__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Left)
+                            r20a_inline2237__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w2a_flat_inline2233__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            r20b_inline2179__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w2b_flat_inline2234__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c2a_first_inline2182__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c1a_last_inline2229__ssa_v0, l20_inline2178__ssa_v0, r20a_inline2237__ssa_v0, pl.const(0, pl.BOOL))
+                            l21_inline2166__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(32768, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a2_inline2218__ssa_v0, 0, 128, [128, 128], target_memory=pl.Mem.Left)
+                            r21a_inline2202__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w2a_flat_inline2233__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c2b_first_inline2193__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c1b_last_inline2231__ssa_v0, l20_inline2178__ssa_v0, r20b_inline2179__ssa_v0, pl.const(0, pl.BOOL))
+                            r21b_inline2165__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w2b_flat_inline2234__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c2a_last_inline2219__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c2a_first_inline2182__ssa_v0, l21_inline2166__ssa_v0, r21a_inline2202__ssa_v0, pl.const(0, pl.BOOL))
+                            c2b_last_inline2163__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c2b_first_inline2193__ssa_v0, l21_inline2166__ssa_v0, r21b_inline2165__ssa_v0, pl.const(0, pl.BOOL))
+                            w3a_flat_inline2162__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(327680, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w3a_inline2213__ssa_v0, [256, 128]
+                            )
+                            w3b_flat_inline2187__ssa_v0: pl.Tile[[256, 128], pl.BF16, pl.MemRef(mem_mat_694, pl.const(393216, pl.INT64), 65536), pl.Mem.Mat] = pl.tile.reshape(
+                                w3b_inline2232__ssa_v0, [256, 128]
+                            )
+                            l30_inline2174__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(0, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a3_inline2188__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Left)
+                            r30a_inline2161__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w3a_flat_inline2162__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            r30b_inline2217__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w3b_flat_inline2187__ssa_v0, 0, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c3a_first_inline2159__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c2a_last_inline2219__ssa_v0, l30_inline2174__ssa_v0, r30a_inline2161__ssa_v0, pl.const(0, pl.BOOL))
+                            l31_inline2158__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.BF16,
+                                pl.MemRef(mem_left_491, pl.const(32768, pl.INT64), 32768),
+                                pl.Mem.Left,
+                                pl.TileView(valid_shape=[pl.min(valid_rows_inline2201__ssa_v0, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal),
+                            ] = pl.tile.extract(a3_inline2188__ssa_v0, 0, 128, [128, 128], target_memory=pl.Mem.Left)
+                            r31a_inline2216__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(0, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w3a_flat_inline2162__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c3b_first_inline2157__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c2b_last_inline2163__ssa_v0, l30_inline2174__ssa_v0, r30b_inline2217__ssa_v0, pl.const(0, pl.BOOL))
+                            r31b_inline2168__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.MemRef(mem_right_381, pl.const(32768, pl.INT64), 32768), pl.Mem.Right] = pl.tile.extract(
+                                w3b_flat_inline2187__ssa_v0, 128, 0, [128, 128], target_memory=pl.Mem.Right
+                            )
+                            c3a_last_inline2156__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(0, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c3a_first_inline2159__ssa_v0, l31_inline2158__ssa_v0, r31a_inline2216__ssa_v0, pl.const(0, pl.BOOL))
+                            c3b_last_inline2155__ssa_v0: pl.Tile[
+                                [128, 128],
+                                pl.FP32,
+                                pl.MemRef(mem_acc_382, pl.const(65536, pl.INT64), 65536),
+                                pl.Mem.Acc,
+                                pl.TileView(valid_shape=[valid_rows_inline2201__ssa_v0, 128], compact=pl.CompactMode.normal),
+                            ] = pl.tile.matmul_acc(c3b_first_inline2157__ssa_v0, l31_inline2158__ssa_v0, r31b_inline2168__ssa_v0, pl.const(0, pl.BOOL))
+                            done0_inline2180, done1_inline2172 = pl.yield_(c3a_last_inline2156__ssa_v0, c3b_last_inline2155__ssa_v0)
+                        pl.tile.store(done0_inline2180, [0, output_col_inline2184__ssa_v0], o_r__iter_v1)
+                        pl.tile.store(done1_inline2172, [0, output_col_inline2184__ssa_v0 + 128], o_r__iter_v1)

@@ -1,0 +1,437 @@
+9009:   v1828 = PTOAS__GLOBAL_TENSOR_DATA(v709);
+9010:   // pto: %signal_v9__ssa_v0_signal_pview
+9011:   // pto: %signal_v9__ssa_v0_signal_pview
+9012:   v1830 = pto::Shape<1, 1, 1, 1, 1>();
+9013:   // pto: %signal_v9__ssa_v0_signal_pview
+9014:   v1831 = pto::Stride<1, 1, 1, 1, 1>();
+9015:   // pto: %signal_v9__ssa_v0_signal_pview
+9016:   v1832 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v1828 + (v1829 + v1827), v1830, v1831);
+9017:   v1833 = pto::comm::NotifyOp::Set;
+9018:   pto::comm::TNOTIFY(v1832, v936, v1833);
+9019:   // pto: %587, %588
+9020:   v1834 = (int64_t) ((uint64_t) v133 + (uint64_t) v287) / v258;
+9021:   // pto: %589
+9022:   // pto: %592
+9023:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+9024:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+9025:   wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+9026:   for (int64_t v4368 = v267; v4368 < ((int64_t) ((uint64_t) v214 - (uint64_t) v926) / v245); v4368 += v247) {
+9027:     // pto: %594, %593, %595
+9028:     ;
+9029:     v1835 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v926 + (uint64_t) ((int64_t) (uint64_t) v4368 * (uint64_t) v245)) * (uint64_t) v248);
+9030:     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+9031:     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+9032:     set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+9033:     set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+9034:     for (int64_t v4369 = v267; v4369 < ((int64_t) ((uint64_t) v1834 * (uint64_t) v258)); v4369 += v258) {
+9035:       // pto: %596
+9036:       ;
+9037:       v1836 = (int64_t) ((uint64_t) v133 - (uint64_t) v4369);
+9038:       // pto: %597
+9039:       ;
+9040:       v1837 = v1836 < v258 ? v1836 : v258;
+9041:       // pto: %qr_first_inline1970__tile
+9042:       ;
+9043:       v1838 = Tile<TileType::Mat, int8_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9044:       // pto: %qr_first_inline1970__tile
+9045:       ;
+9046:       v1839 = (uint64_t) v218;
+9047:       TASSIGN(v1838, v1839);
+9048:       // pto: %598
+9049:       ;
+9050:       v1840 = v4369 < v267 ? v267 : v4369;
+9051:       // pto: %qr_matmul__ssa_v0_pview
+9052:       ;
+9053:       // pto: %qr_matmul__ssa_v0_pview
+9054:       ;
+9055:       v1842 = PTOAS__GLOBAL_TENSOR_DATA(v388);
+9056:       // pto: %qr_matmul__ssa_v0_pview
+9057:       ;
+9058:       // pto: %qr_matmul__ssa_v0_pview
+9059:       ;
+9060:       // pto: %qr_matmul__ssa_v0_pview
+9061:       ;
+9062:       // pto: %qr_matmul__ssa_v0_pview
+9063:       ;
+9064:       v1846 = v1837 * v254;
+9065:       // pto: %qr_matmul__ssa_v0_pview
+9066:       ;
+9067:       v1847 = v1845 * v1846;
+9068:       // pto: %qr_matmul__ssa_v0_pview
+9069:       ;
+9070:       v1848 = pto::Shape<1, 1, 1, -1, 256>(v1843, v1844, v1845, v1837, v248);
+9071:       // pto: %qr_matmul__ssa_v0_pview
+9072:       ;
+9073:       v1849 = pto::Stride<-1, -1, -1, -1, -1>(v1844 * v1847, v1847, v1846, v254, v247);
+9074:       // pto: %qr_matmul__ssa_v0_pview
+9075:       ;
+9076:       v1850 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, 256>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v1842 + (v1841 + v1840 * v254 + v267 * v247), v1848, v1849);
+9077:       wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+9078:       TLOAD(v1838, v1850);
+9079:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9080:       // pto: %wq_first_inline1971__tile
+9081:       ;
+9082:       v1851 = Tile<TileType::Mat, int8_t, 256, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9083:       // pto: %wq_first_inline1971__tile
+9084:       ;
+9085:       v1852 = (uint64_t) v219;
+9086:       TASSIGN(v1851, v1852);
+9087:       // pto: %599
+9088:       ;
+9089:       v1853 = v1835 / v252;
+9090:       // pto: %600
+9091:       ;
+9092:       v1854 = v1853 < v267 ? v267 : v1853;
+9093:       // pto: %wq_b__ssa_v0_pview
+9094:       ;
+9095:       v1855 = PTOAS__GLOBAL_TENSOR_DATA(v391);
+9096:       // pto: %wq_b__ssa_v0_pview
+9097:       ;
+9098:       // pto: %wq_b__ssa_v0_pview
+9099:       ;
+9100:       // pto: %wq_b__ssa_v0_pview
+9101:       ;
+9102:       v1858 = pto::Shape<1, 8, 16, 16, 32>();
+9103:       // pto: %wq_b__ssa_v0_pview
+9104:       ;
+9105:       v1859 = pto::Stride<33554432, 32768, 512, 32, 1>();
+9106:       // pto: %wq_b__ssa_v0_pview
+9107:       ;
+9108:       v1860 = GlobalTensor<int8_t, pto::Shape<1, 8, 16, 16, 32>, pto::Stride<33554432, 32768, 512, 32, 1>, pto::Layout::NZ>(v1855 + (v1856 + v1854 * v1857), v1858, v1859);
+9109:       wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+9110:       TLOAD(v1851, v1860);
+9111:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9112:       // pto: %qr_first_inline1970__tile_Left
+9113:       ;
+9114:       v1861 = Tile<TileType::Left, int8_t, 128, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9115:       // pto: %qr_first_inline1970__tile_Left
+9116:       ;
+9117:       v1862 = (uint64_t) v217;
+9118:       TASSIGN(v1861, v1862);
+9119:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9120:       pipe_barrier(PIPE_MTE1);
+9121:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+9122:       TMOV(v1861, v1838);
+9123:       // pto: %wq_first_inline1971__tile_Right
+9124:       ;
+9125:       v1863 = Tile<TileType::Right, int8_t, 256, 256, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9126:       // pto: %wq_first_inline1971__tile_Right
+9127:       ;
+9128:       v1864 = (uint64_t) v217;
+9129:       TASSIGN(v1863, v1864);
+9130:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9131:       TMOV(v1863, v1851);
+9132:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9133:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+9134:       // pto: %col_acc_inline1962__tile
+9135:       ;
+9136:       v1865 = Tile<TileType::Acc, int32_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Normal>(v1837, v248);
+9137:       // pto: %col_acc_inline1962__tile
+9138:       ;
+9139:       v1866 = (uint64_t) v217;
+9140:       TASSIGN(v1865, v1866);
+9141:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9142:       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+9143:       TMATMUL(v1865, v1861, v1863);
+9144:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9145:       // pto: %qr_chunk_inline1969__tile
+9146:       ;
+9147:       v1867 = Tile<TileType::Mat, int8_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9148:       // pto: %qr_chunk_inline1969__tile
+9149:       ;
+9150:       v1868 = (uint64_t) v223;
+9151:       TASSIGN(v1867, v1868);
+9152:       // pto: %602
+9153:       ;
+9154:       // pto: %602
+9155:       ;
+9156:       v1870 = PTOAS__GLOBAL_TENSOR_DATA(v388);
+9157:       // pto: %602
+9158:       ;
+9159:       // pto: %602
+9160:       ;
+9161:       // pto: %602
+9162:       ;
+9163:       // pto: %602
+9164:       ;
+9165:       v1874 = v1837 * v254;
+9166:       // pto: %602
+9167:       ;
+9168:       v1875 = v1873 * v1874;
+9169:       // pto: %602
+9170:       ;
+9171:       v1876 = pto::Shape<1, 1, 1, -1, 256>(v1871, v1872, v1873, v1837, v248);
+9172:       // pto: %602
+9173:       ;
+9174:       v1877 = pto::Stride<-1, -1, -1, -1, -1>(v1872 * v1875, v1875, v1874, v254, v247);
+9175:       // pto: %602
+9176:       ;
+9177:       v1878 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, 256>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v1870 + (v1869 + v1840 * v254 + v248 * v247), v1876, v1877);
+9178:       TLOAD(v1867, v1878);
+9179:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9180:       // pto: %wq_chunk_inline1972__tile
+9181:       ;
+9182:       v1879 = Tile<TileType::Mat, int8_t, 256, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9183:       // pto: %wq_chunk_inline1972__tile
+9184:       ;
+9185:       v1880 = (uint64_t) v219;
+9186:       TASSIGN(v1879, v1880);
+9187:       // pto: %605
+9188:       ;
+9189:       v1881 = PTOAS__GLOBAL_TENSOR_DATA(v391);
+9190:       // pto: %605
+9191:       ;
+9192:       // pto: %605
+9193:       ;
+9194:       // pto: %605
+9195:       ;
+9196:       v1884 = pto::Shape<1, 8, 16, 16, 32>();
+9197:       // pto: %605
+9198:       ;
+9199:       v1885 = pto::Stride<33554432, 32768, 512, 32, 1>();
+9200:       // pto: %605
+9201:       ;
+9202:       v1886 = GlobalTensor<int8_t, pto::Shape<1, 8, 16, 16, 32>, pto::Stride<33554432, 32768, 512, 32, 1>, pto::Layout::NZ>(v1881 + (v1882 + v1854 * v1883), v1884, v1885);
+9203:       wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+9204:       TLOAD(v1879, v1886);
+9205:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9206:       // pto: %81
+9207:       ;
+9208:       v1887 = Tile<TileType::Mat, int8_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9209:       // pto: %81
+9210:       ;
+9211:       v1888 = (uint64_t) v238;
+9212:       TASSIGN(v1887, v1888);
+9213:       // pto: %607
+9214:       ;
+9215:       // pto: %607
+9216:       ;
+9217:       v1890 = PTOAS__GLOBAL_TENSOR_DATA(v388);
+9218:       // pto: %607
+9219:       ;
+9220:       // pto: %607
+9221:       ;
+9222:       // pto: %607
+9223:       ;
+9224:       // pto: %607
+9225:       ;
+9226:       v1894 = v1837 * v254;
+9227:       // pto: %607
+9228:       ;
+9229:       v1895 = v1893 * v1894;
+9230:       // pto: %607
+9231:       ;
+9232:       v1896 = pto::Shape<1, 1, 1, -1, 256>(v1891, v1892, v1893, v1837, v248);
+9233:       // pto: %607
+9234:       ;
+9235:       v1897 = pto::Stride<-1, -1, -1, -1, -1>(v1892 * v1895, v1895, v1894, v254, v247);
+9236:       // pto: %607
+9237:       ;
+9238:       v1898 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, 256>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v1890 + (v1889 + v1840 * v254 + v257 * v247), v1896, v1897);
+9239:       TLOAD(v1887, v1898);
+9240:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID2);
+9241:       // pto: %82
+9242:       ;
+9243:       v1899 = Tile<TileType::Mat, int8_t, 256, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9244:       // pto: %82
+9245:       ;
+9246:       v1900 = (uint64_t) v218;
+9247:       TASSIGN(v1899, v1900);
+9248:       // pto: %610
+9249:       ;
+9250:       v1901 = PTOAS__GLOBAL_TENSOR_DATA(v391);
+9251:       // pto: %610
+9252:       ;
+9253:       // pto: %610
+9254:       ;
+9255:       // pto: %610
+9256:       ;
+9257:       v1904 = pto::Shape<1, 8, 16, 16, 32>();
+9258:       // pto: %610
+9259:       ;
+9260:       v1905 = pto::Stride<33554432, 32768, 512, 32, 1>();
+9261:       // pto: %610
+9262:       ;
+9263:       v1906 = GlobalTensor<int8_t, pto::Shape<1, 8, 16, 16, 32>, pto::Stride<33554432, 32768, 512, 32, 1>, pto::Layout::NZ>(v1901 + (v1902 + v1854 * v1903), v1904, v1905);
+9264:       TLOAD(v1899, v1906);
+9265:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID3);
+9266:       // pto: %qr_chunk_inline1969__tile_Left
+9267:       ;
+9268:       v1907 = Tile<TileType::Left, int8_t, 128, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9269:       // pto: %qr_chunk_inline1969__tile_Left
+9270:       ;
+9271:       v1908 = (uint64_t) v217;
+9272:       TASSIGN(v1907, v1908);
+9273:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9274:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9275:       TMOV(v1907, v1867);
+9276:       // pto: %wq_chunk_inline1972__tile_Right
+9277:       ;
+9278:       v1909 = Tile<TileType::Right, int8_t, 256, 256, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9279:       // pto: %wq_chunk_inline1972__tile_Right
+9280:       ;
+9281:       v1910 = (uint64_t) v217;
+9282:       TASSIGN(v1909, v1910);
+9283:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9284:       TMOV(v1909, v1879);
+9285:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9286:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9287:       TMATMUL_ACC(v1865, v1865, v1907, v1909);
+9288:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9289:       // pto: %84
+9290:       ;
+9291:       v1911 = Tile<TileType::Left, int8_t, 128, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9292:       // pto: %84
+9293:       ;
+9294:       v1912 = (uint64_t) v217;
+9295:       TASSIGN(v1911, v1912);
+9296:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9297:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID2);
+9298:       TMOV(v1911, v1887);
+9299:       // pto: %85
+9300:       ;
+9301:       v1913 = Tile<TileType::Right, int8_t, 256, 256, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9302:       // pto: %85
+9303:       ;
+9304:       v1914 = (uint64_t) v217;
+9305:       TASSIGN(v1913, v1914);
+9306:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID3);
+9307:       TMOV(v1913, v1899);
+9308:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9309:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+9310:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9311:       TMATMUL_ACC(v1865, v1865, v1911, v1913);
+9312:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9313:       // pto: %87
+9314:       ;
+9315:       v1915 = Tile<TileType::Mat, int8_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9316:       // pto: %87
+9317:       ;
+9318:       v1916 = (uint64_t) v218;
+9319:       TASSIGN(v1915, v1916);
+9320:       // pto: %612
+9321:       ;
+9322:       // pto: %612
+9323:       ;
+9324:       v1918 = PTOAS__GLOBAL_TENSOR_DATA(v388);
+9325:       // pto: %612
+9326:       ;
+9327:       // pto: %612
+9328:       ;
+9329:       // pto: %612
+9330:       ;
+9331:       // pto: %612
+9332:       ;
+9333:       v1922 = v1837 * v254;
+9334:       // pto: %612
+9335:       ;
+9336:       v1923 = v1921 * v1922;
+9337:       // pto: %612
+9338:       ;
+9339:       v1924 = pto::Shape<1, 1, 1, -1, 256>(v1919, v1920, v1921, v1837, v248);
+9340:       // pto: %612
+9341:       ;
+9342:       v1925 = pto::Stride<-1, -1, -1, -1, -1>(v1920 * v1923, v1923, v1922, v254, v247);
+9343:       // pto: %612
+9344:       ;
+9345:       v1926 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, 256>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v1918 + (v1917 + v1840 * v254 + v288 * v247), v1924, v1925);
+9346:       wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+9347:       TLOAD(v1915, v1926);
+9348:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9349:       // pto: %88
+9350:       ;
+9351:       v1927 = Tile<TileType::Mat, int8_t, 256, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9352:       // pto: %88
+9353:       ;
+9354:       v1928 = (uint64_t) v219;
+9355:       TASSIGN(v1927, v1928);
+9356:       // pto: %615
+9357:       ;
+9358:       v1929 = PTOAS__GLOBAL_TENSOR_DATA(v391);
+9359:       // pto: %615
+9360:       ;
+9361:       // pto: %615
+9362:       ;
+9363:       // pto: %615
+9364:       ;
+9365:       v1932 = pto::Shape<1, 8, 16, 16, 32>();
+9366:       // pto: %615
+9367:       ;
+9368:       v1933 = pto::Stride<33554432, 32768, 512, 32, 1>();
+9369:       // pto: %615
+9370:       ;
+9371:       v1934 = GlobalTensor<int8_t, pto::Shape<1, 8, 16, 16, 32>, pto::Stride<33554432, 32768, 512, 32, 1>, pto::Layout::NZ>(v1929 + (v1930 + v1854 * v1931), v1932, v1933);
+9372:       TLOAD(v1927, v1934);
+9373:       set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9374:       // pto: %89
+9375:       ;
+9376:       v1935 = Tile<TileType::Left, int8_t, 128, 256, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1837, v248);
+9377:       // pto: %89
+9378:       ;
+9379:       v1936 = (uint64_t) v217;
+9380:       TASSIGN(v1935, v1936);
+9381:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+9382:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+9383:       TMOV(v1935, v1915);
+9384:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+9385:       // pto: %90
+9386:       ;
+9387:       v1937 = Tile<TileType::Right, int8_t, 256, 256, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v248, v248);
+9388:       // pto: %90
+9389:       ;
+9390:       v1938 = (uint64_t) v217;
+9391:       TASSIGN(v1937, v1938);
+9392:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+9393:       TMOV(v1937, v1927);
+9394:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9395:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+9396:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+9397:       TMATMUL_ACC(v1865, v1865, v1935, v1937);
+9398:       set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+9399:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+9400:       // pto: %col_acc_inline1962__rv_v2
+9401:       ;
+9402:       v1939 = Tile<TileType::Acc, int32_t, 128, 256, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Normal>(v1837, v248);
+9403:       // pto: %col_acc_inline1962__rv_v2
+9404:       ;
+9405:       v1940 = (uint64_t) v217;
+9406:       TASSIGN(v1939, v1940);
+9407:       // pto: %617
+9408:       ;
+9409:       v1941 = v1835 < v267 ? v267 : v1835;
+9410:       // pto: %q_proj__iter_v3_pview
+9411:       ;
+9412:       // pto: %q_proj__iter_v3_pview
+9413:       ;
+9414:       v1943 = PTOAS__GLOBAL_TENSOR_DATA(v400);
+9415:       // pto: %q_proj__iter_v3_pview
+9416:       ;
+9417:       // pto: %q_proj__iter_v3_pview
+9418:       ;
+9419:       // pto: %q_proj__iter_v3_pview
+9420:       ;
+9421:       // pto: %q_proj__iter_v3_pview
+9422:       ;
+9423:       v1947 = v1837 * v256;
+9424:       // pto: %q_proj__iter_v3_pview
+9425:       ;
+9426:       v1948 = v1946 * v1947;
+9427:       // pto: %q_proj__iter_v3_pview
+9428:       ;
+9429:       v1949 = pto::Shape<1, 1, 1, -1, 256>(v1944, v1945, v1946, v1837, v248);
+9430:       // pto: %q_proj__iter_v3_pview
+9431:       ;
+9432:       v1950 = pto::Stride<-1, -1, -1, -1, -1>(v1945 * v1948, v1948, v1947, v256, v247);
+9433:       // pto: %q_proj__iter_v3_pview
+9434:       ;
+9435:       v1951 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, 256>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v1943 + (v1942 + v1840 * v256 + v1941 * v247), v1949, v1950);
+9436:       wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+9437:       TSTORE(v1951, v1939);
+9438:       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+9439:     };
+9440:     wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+9441:     wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+9442:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+9443:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+9444:   }
+9445:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);

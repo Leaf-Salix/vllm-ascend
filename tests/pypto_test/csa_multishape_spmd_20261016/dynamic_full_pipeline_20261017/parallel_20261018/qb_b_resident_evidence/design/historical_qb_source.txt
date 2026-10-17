@@ -1,0 +1,67 @@
+2de2baa6:vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
+81: def _q_proj_q_matmul_nz(
+82:     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+83:     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
+84:     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
+85:     tile_rows: pl.Scalar[pl.INDEX],
+86:     qproj_dep: pl.Scalar[pl.TASK_ID],
+87: ):
+88:     """Use upstream's full-K resident weight and compact tail matmul on Native NZ."""
+89:     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+90:     qproj_full_rows = (tile_rows // QPROJ_M_TILE) * QPROJ_M_TILE
+91:     with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
+92:         qproj_worker = pl.tile.get_block_idx()
+93:         # Keep the column offset provably nonnegative after NZ outlining.
+94:         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
+95:             qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
+96:             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+97:             wq_full = wq_b[0:Q_LORA, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+98:             for t0 in pl.range(0, qproj_full_rows, QPROJ_M_TILE):
+99:                 qr_full = qr_i8_matmul[t0 : t0 + QPROJ_M_TILE, 0:Q_LORA]
+100:                 col_acc = pl.matmul(qr_full, wq_full, out_dtype=pl.INT32)
+101:                 q_proj_i32[t0 : t0 + QPROJ_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+102:             for tail_t0 in pl.range(qproj_full_rows, qproj_t_matmul, QPROJ_TAIL_M_TILE):
+103:                 tail_rows = pl.min(QPROJ_TAIL_M_TILE, tile_rows - tail_t0)
+104:                 qr_tail = pl.slice(qr_i8_matmul, [QPROJ_TAIL_M_TILE, Q_LORA], [tail_t0, 0],
+105:                                    valid_shape=[tail_rows, Q_LORA])
+106:                 tail_acc = pl.matmul(qr_tail, wq_full, out_dtype=pl.INT32)
+107:                 q_proj_i32[tail_t0 : tail_t0 + QPROJ_TAIL_M_TILE,
+108:                            w_col0 : w_col0 + QPROJ_MM_N_TILE] = tail_acc
+109:     return q_proj_i32, qproj_tid
+
+74be8a6c:vllm_ascend/ops/pypto/deepseek_v4_flash_dspark/q_projection.py
+85: def _q_proj_q_matmul_nz(
+86:     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+87:     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
+88:     q_proj_i32: pl.Tensor[[QPROJ_MM_T_DYN, H * HEAD_DIM], pl.INT32],
+89:     tile_rows: pl.Scalar[pl.INDEX],
+90:     qproj_dep: pl.Scalar[pl.TASK_ID],
+91: ):
+92:     """N256 列块内按 K256 双缓冲：下一段权重搬运与本段 Cube 计算重叠。
+93: 
+94:     原实现每轮先整段读入 K1024×N256 权重再计算，搬运与计算串行；这里对每个 M128 行块
+95:     按 K 顺序 matmul_acc。INT8×INT8→INT32 累加精确，分块不改变结果。
+96:     """
+97:     qproj_t_matmul = pl.tensor.dim(q_proj_i32, 0)
+98:     with pl.spmd(QPROJ_WORKERS, name_hint="qproj_matmul", deps=[qproj_dep]) as qproj_tid:
+99:         # Match upstream weight streaming; arithmetic is unchanged.
+100:         pl.set_cache_policy(wq_b, pl.CachePolicy.BYPASS)
+101:         qproj_worker = pl.tile.get_block_idx()
+102:         # Keep the column offset provably nonnegative after NZ outlining.
+103:         for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + QPROJ_WORKERS - 1) // QPROJ_WORKERS):
+104:             qproj_n_idx = qproj_worker + qproj_round * QPROJ_WORKERS
+105:             w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+106:             for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+107:                 m_rows = pl.min(QPROJ_PIPE_M_TILE, tile_rows - t0)
+108:                 qr_first = pl.slice(qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0],
+109:                                     valid_shape=[m_rows, QPROJ_PIPE_K_TILE])
+110:                 wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+111:                 # 首段由 matmul 生成累加器，携带有效行的 compact 形态。
+112:                 col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
+113:                 for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+114:                     qr_chunk = pl.slice(qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, k0],
+115:                                         valid_shape=[m_rows, QPROJ_PIPE_K_TILE])
+116:                     wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+117:                     col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
+118:                 q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
+119:     return q_proj_i32, qproj_tid
