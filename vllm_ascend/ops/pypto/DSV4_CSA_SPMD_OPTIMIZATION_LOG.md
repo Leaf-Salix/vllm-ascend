@@ -16257,3 +16257,112 @@ plan owner，也不把历史直接L1/UB缓存失败误当成本方案实测。�
 的Attention0→Plan1→TopK1→Indexer1→Attention0环。模型只否决这一固定
 owner、三角色整段排空方案，不泛化为任何细粒度交错/重新分核都无收益；
 源码、假设、反例与结果归档于本轮parallel_20261018/wave_audit。
+
+### 2026-10-18：Attention物理行plan完成，同进程改善0.81%，未默认采用
+
+独立worktree的候选在既有plan内用Vector把512个逻辑候选映射为私有INT32
+物理行。生产和消费共用同一容量谓词：压缩页表列1..2048、完整物理页数
+1..2^24；其余回退原逻辑。安全夹紧只用于访问，未夹紧值仍控制合法性；
+最终地址用INT32位移和加法，不经FP32。外部TopK、bias/mask、原SWA/geometry、
+双AIV分工、三槽FFTS及全部归约数学不变，无新Tensor或phase。
+
+完整无样例shape的符号编译通过，58动态轴、130根Tensor；132轮CPU解释器
+oracle与15轮真实A3地址probe通过，覆盖页表容量回退、整型边界、非法页、
+odd/mixed/dummy/stale和A→B→A。另一agent独立源码审阅未发现阻塞问题；
+审阅不能代替真实设备的写回/获取语义验证。
+
+任务task_20261018_010403_360472313010完成exit0。128K/B16/S6整层对原PTO
+输出/TopK/score/五份cache-state逐bit一致，图、页表/历史重放、保护区及72核
+协议均通过。同进程三方五窗口完整L1中位：原分task880.32、旧SPMD904.78、
+候选897.44μs；相对旧降低0.811%，相对原分task仍慢1.945%。没有达到30%，
+不将局部指令减少称为整层明显收益；本轮保持隔离候选默认关闭，不扩七档。
+早先task_20261018_005742_348545224475在编译期主动取消以补设备probe，
+无数值/性能结论，不计为算子错误。源码、失败/取消记录、完整证据和路径大小
+归档至parallel_20261018/physical_plan_evidence与physical_plan_h131072_b16_v2。
+本轮未执行整层S1/S5/mixedQ，不把plan局部probe提升为这些场景的通过结论。
+
+三路首轮已以详细中文提交7dc60748保存，正式ops源码未变。新的有界诊断
+将补当前593基线的阶段时钟与Indexer B32候选对照；旧阶段记录早于HC行依赖，
+且TWAIT计时未包含FFTS，不能把other直接认作纯计算或据旧差值挑新候选。
+
+### 2026-10-18：补齐当前阶段诊断，区分Score供数与Attention推进瓶颈
+
+任务task_20261018_011813_39503015186完成当前593基线128K/B16/S6的5次
+完整数值/图/保护/代际检查；task_20261018_011739_393773027095完成8K/B32
+旧版和半叶score候选共10次检查。两项只诊断阶段时钟，不重复未插桩性能测试。
+原16..19列继续记录notify及GM TWAIT，20/21列在既有wait_flag_dev前后计时，
+没有新增fence。插桩影响调度，不能用这些区间替代完整L1或直接相减预测收益。
+
+长档三轮Score AIC的FFTS区间中位16.05/16.60/16.15μs，AIV为107.90/
+106.69/107.63μs；Attention AIC为119.71/108.31/112.51μs，AIV为18.35/
+14.51/14.99μs。二者等待方向相反：优先核对Score的AIC供数链与Attention
+的AIV推进链，而非笼统归为Vector排序或Cube矩阵乘。剩余other仍含DMA、
+Scalar和未单独计量的同步，不能称纯计算。B32半叶缓存少做的局部工作主要
+转成等待Score READY，整体Score窗口没有稳定大幅缩短，保留此前整层无收益结论。
+
+独立核对CANN官方及本地dav_c220路径：A3跨核wait会阻塞后续流水，不能套用
+A5指定pipe语义称原位时钟只记录发射。最终机器码次序仍未知：原始.text已
+提取，两个官方objdump连同已有A3控制对象都无法反汇编，保存失败证据，
+不记ISA通过。详细记录在parallel_20261018/CURRENT_PHASE_DIAGNOSTIC.md，
+原始时钟、十次对照和工具局限分别归档current_clock与indexer_phase_evidence。
+
+同次生成文件只读审计确认三处融合降槽：HC Right、Indexer压缩投影Right、
+主QB Left由原两地址变一地址，并有对应M→MTE1覆盖依赖。OA/OB/QA/KV及
+主压缩仍有真实两槽；Score的48KiB WS和两份8KiB Key也保留。性能提示不是
+最终地址证据，不据提示数量扫参。完整定位、旧尝试排除与源码提取见
+parallel_20261018/pipeline_depth_audit；仅提出compact K512 pair保留真实
+交错活跃期的有界修复，尚未记设备或性能结论。
+
+本会话另做compact生产优先候选：AIC在主QB后先完成compact Hadamard再做
+独立主压缩；AIV在系数后先提交Indexer量化/scale，再做主Query/主压缩。
+两块原等待/数学/发布完整移动，Score的双槽及双AIV ACK未改。顶层AST语句
+多重集合、144组调度模型及58动态轴/130 roots完整CPU编译通过；独立审阅
+确认所有AIC先发布QB/MAIN_PROJECT再等Score ACK，不形成新增等待环。
+指定前段与Score的Left/Right地址未因重排改变；CPU输出投影策略不同，
+不声称整文件分配等价。设备任务task_20261018_013723_19521519782已提交，
+在其完成前不预记PASS或收益。各候选仍隔离，正式默认源码未改变。
+
+compact优先长B16任务已完成exit0，完整输出/TopK/score/cache-state与原PTO
+一致，A→B→A、同址图/动态历史页表、保护区与72核代际均通过。同进程五窗
+完整L1中位：原task861.48、旧SPMD913.06、候选888.38μs；相对旧降低2.703%
+（24.68μs），相对原task仍慢3.123%，30%目标未达。已保存全五窗，不择最小值，
+不与物理plan的跨任务数字拼接收益。8K/B32另一负载代表任务
+task_20261018_014358_34138622015已提交，尚不把单档收益推广到整个区间。
+compact_priority_evidence保存源码、生成器、模型、CPU/独立审阅、完整日志、
+结果与本地大产物路径大小；正式默认及完整七档表尚未更新。
+
+### 2026-10-18：Indexer compact投影显式L0双槽候选
+
+根据同次原task/融合生成物的实际降槽，另一隔离worktree仅修改Indexer
+压缩投影helper。每两个K512先装入两份KV Right，保留其交错活跃期，再按
+KV0/gate0/KV1/gate1原顺序做M16/N32/K512 MMA；K0..7累加、pair0初始化、
+动态有效M及原pad写回不变。只改源码内搬运时刻，不改依赖仓/物理地址/同步。
+
+首轮58动态轴完整CPU通过；156例实际helper AST分别比较load、MMA、store
+三类列表，每类内部操作数、shape、valid、init和顺序一致，不比较三类混合
+时序，亦不模拟浮点。实际Right为0/32768/0/0，KV1搬运先于首MMA，原gate0
+到KV1搬运的覆盖等待消失；必要gate1复用依赖及PIPE_M仍在。全函数分配
+多重集仅一份Right地址0→32768，其他helper地址/形状/数量完全一致，各
+空间地址上界未增加。CPU证明不当作性能收益。
+
+源码已冻结；独立长B16同进程三方五窗task_20261018_014826_4729059881
+已提交，暂不记设备或精度通过，不叠加compact优先排序。证据/补丁/源快照/
+CPU日志/156例/生成片段和本地路径大小在parallel_20261018/compact_l0_evidence。
+
+并行只读路线也已收口。Key由双AIV整理的方案在15组/1793状态有限模型中，
+私有scale双槽无覆写/死锁，共享scale在单leaf三步和跨两个单步leaf均有
+快lane覆盖慢lane待读数据的反例。GM方案为长B16额外增加约132MiB Key
+交接字节，若scale也放私有GM则另增4.125MiB交通；不是直接声称这些字节
+全部到HBM或等于固定耗时。当前A3的aic_gather/TPUSH/TPOP仍经GM FIFO，
+没有找到消除此往返的可用片上直传；A5和GridPipe mock不能混用。自动FIFO
+还涉及全函数L1保留底座、工作区及手工FFTS事件避让，不直接推进GM实现。
+旧静态Key提交11.81μs/704次探针仅作历史限制，不当作当前动态纯计算分解。
+设计、反例、资源模型和分层源码依据见key_prefetch_design/key_transport_audit。
+
+Attention审计仅使用现有current_clock同作业产物：106项Tile操作序列
+同序，额外请求扫描/guard由已有query_metadata和physical plan试验覆盖。
+融合三处新增PIPE_ALL在阶段初始化；原task逐tick末PIPE_ALL在融合对应
+六条MTE2→V局部wait，不能按静态数量断言更慢。整层AIV bin151012B与
+独立Attention10548B不是同范围对照；Attention PTO去loc仅增10.25%，
+没有独立机器码边界或icache证据。本轮无充分依据的新方向，不再编译/上卡。
+attention_readonly_audit保存七份文本摘录、提取脚本、结果与明确限制。

@@ -1,0 +1,1038 @@
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/system_ops.py =====
+
+363: def tpush_to_aic(tile: Tile, *, split: int, id: int | None = None, span: Span | None = None) -> Call:
+364:     """Push tile data from AIV to AIC via cross-core pipe.
+365: 
+366:     The Cube side receives it with [`tpop_from_aiv`][pypto.language.system.tpop_from_aiv] and releases the
+367:     slot with [`tfree_to_aiv`][pypto.language.system.tfree_to_aiv]; ``split`` and ``id`` must match across all
+368:     three.
+369: 
+370:     Args:
+371:         tile: Tile to send. Its Vector-side buffer stays live until the consumer frees the slot.
+372:         split: Split mode (0=none, 1=up-down, 2=left-right). Selects the axis along
+373:             which the two AIV lanes divide the tile; 0 sends it whole.
+374:         id: Optional frontend pipe id. Omit to use PTOAS default id 0.
+375:         span: Optional source span
+376:     """
+377:     return _ir_ops.tpush_to_aic(tile.unwrap(), split=split, id=id, span=span)
+378: 
+379: 
+380: def tfree_to_aic(
+408:         tile: The tile returned by the matching [`tpop_from_aiv`][pypto.language.system.tpop_from_aiv].
+409:         span: Optional source span
+410:         split: Leave ``None``. The ``StampTfreeSplit`` pass always takes this from
+411:             the originating ``tpop``, so a value passed here cannot override it.
+412:         id: Optional frontend pipe id, inherited from the originating ``tpop`` when
+413:             omitted. Supplying one that disagrees with the ``tpop`` is rejected.
+414:     """
+415:     return _ir_ops.tfree_to_aiv(tile.unwrap(), split=split, id=id, span=span)
+416: 
+417: 
+418: def tpop_from_aic(
+419:     *,
+420:     shape: list[int] | None = None,
+421:     dtype: DataType | None = None,
+422:     split: int = 0,
+423:     lane_stride: int | None = None,
+424:     id: int | None = None,
+456:         shape: Shape of the tile to receive
+457:         dtype: Data type of the tile to receive
+458:         split: Split mode (0=none, 1=up-down, 2=left-right)
+459:         id: Optional frontend pipe id. Omit to use PTOAS default id 0.
+460:         span: Optional source span
+461:     """
+462:     call = _ir_ops.tpop_from_aiv(shape=shape, dtype=dtype, split=split, id=id, span=span)
+463:     return Tile(expr=call)
+464: 
+465: 
+466: def reserve_buffer(*, name: str, size: int, base: int = AUTO, span: Span | None = None) -> Scalar:
+467:     """Reserve a named buffer for cross-core communication.
+468: 
+469:     Args:
+470:         name: Buffer name for cross-core reference.
+471:         size: Buffer size in bytes.
+472:         base: Base address in local SRAM. Use AUTO (-1) to let the compiler
+473:               pick a non-conflicting address, or an explicit integer for
+474:               manual kernels.
+475:         span: Optional source span.
+476: 
+477:     Returns:
+478:         ``pl.Scalar[pl.INT32]`` wrapping the ``system.reserve_buffer`` IR call (PTO ``... -> i32``).
+479:     """
+480:     call = _ir_ops.reserve_buffer(name=name, size=size, base=base, span=span)
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/tile_ops.py =====
+
+795: def aic_gather(x: _SplitOperandT, span: Span | None = None) -> _SplitOperandT:
+796:     """Hand a vector-produced operand to the cube (AIV -> AIC crossing).
+797: 
+798:     Inverse of [`aiv_shard`][pypto.language.tile.aiv_shard]: in a data-parallel region it **rejoins** the two
+799:     lanes' halves along the split axis, and in a task-parallel ``mode=NONE`` region
+800:     it crosses and **preserves the shape**. It is how a V->C crossing out of a
+801:     region is named; an unnamed one is rejected by the ``AivSplitValid`` verifier.
+802: 
+803:     Out of a ``mode=NONE`` region the two lanes share one destination slot with no
+804:     per-lane offset and nothing arbitrates between them: both push, so when they
+805:     hold different values the cube receives an **unspecified** one of the two.
+806:     Guarding the *production* of the value does not help — lane 1 still reaches
+807:     the push and still sends its own tile. Gather only a value both lanes agree
+808:     on; if they must contribute different data, use a data-parallel region.
+809: 
+810:     Like [`aiv_shard`][pypto.language.tile.aiv_shard], the split mode is
+811:     **inherited** from the enclosing ``for aiv_id in pl.split_aiv(mode=...)``
+812:     scope and must not be passed here. Calling it eagerly (outside a parsed
+813:     program) raises, since there is no scope to read the mode from.
+814: 
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/ir/op/system_ops.py =====
+
+608: def aic_initialize_pipe(
+609:     c2v_consumer_buf: PipeBufOperand = 0,
+610:     v2c_consumer_buf: PipeBufOperand = 0,
+611:     *,
+612:     dir_mask: int,
+613:     slot_size: int,
+614:     slot_num: int | None = None,
+615:     local_slot_num: int | None = None,
+616:     id: int | None = None,
+617:     span: Span | None = None,
+618: ) -> Call:
+619:     """Initialize cross-core pipe on AIC side.
+620: 
+621:     Args:
+622:         c2v_consumer_buf: C2V consumer buffer base (Expr, int, or DSL ``Scalar``; default 0)
+623:         v2c_consumer_buf: V2C consumer buffer base (Expr, int, or DSL ``Scalar``; default 0)
+624:         dir_mask: Direction mask for pipe
+625:         slot_size: Size of each pipe slot
+626:         slot_num: Optional ring-buffer slot count. Omit to let PTOAS pick its
+627:             default (8 unidirectional, 4 per direction bidirectional).
+628:         local_slot_num: Optional local slot count (a2/a3 only, must be
+629:             ``<= slot_num``). On a3 the reserved/imported buffer is sized
+630:             ``slot_size * local_slot_num``; on a5 it is ``slot_size * slot_num``.
+631:         id: Optional frontend pipe id. Omit to use PTOAS default id 0.
+632:         span: Optional source span
+633:     """
+634:     actual_span = _get_span_or_capture(span, frame_offset=1)
+635:     kwargs = _build_pipe_init_kwargs(dir_mask, slot_size, slot_num, local_slot_num, id)
+636:     args = _build_pipe_init_args(c2v_consumer_buf, v2c_consumer_buf, actual_span)
+637:     return _ir_core.create_op_call("system.aic_initialize_pipe", args, kwargs, actual_span)
+638: 
+639: 
+640: def aiv_initialize_pipe(
+641:     c2v_consumer_buf: PipeBufOperand = 0,
+642:     v2c_consumer_buf: PipeBufOperand = 0,
+643:     *,
+644:     dir_mask: int,
+645:     slot_size: int,
+646:     slot_num: int | None = None,
+647:     local_slot_num: int | None = None,
+648:     id: int | None = None,
+649:     span: Span | None = None,
+650: ) -> Call:
+651:     """Initialize cross-core pipe on AIV side.
+652: 
+653:     Args:
+654:         c2v_consumer_buf: C2V consumer buffer base (Expr, int, or DSL ``Scalar``; default 0)
+655:         v2c_consumer_buf: V2C consumer buffer base (Expr, int, or DSL ``Scalar``; default 0)
+656:         dir_mask: Direction mask for pipe
+657:         slot_size: Size of each pipe slot
+658:         slot_num: Optional ring-buffer slot count. Omit to let PTOAS pick its
+659:             default (8 unidirectional, 4 per direction bidirectional).
+660:         local_slot_num: Optional local slot count (a2/a3 only, must be
+661:             ``<= slot_num``). On a3 the reserved/imported buffer is sized
+662:             ``slot_size * local_slot_num``; on a5 it is ``slot_size * slot_num``.
+663:         id: Optional frontend pipe id. Omit to use PTOAS default id 0.
+664:         span: Optional source span
+665:     """
+666:     actual_span = _get_span_or_capture(span, frame_offset=1)
+667:     kwargs = _build_pipe_init_kwargs(dir_mask, slot_size, slot_num, local_slot_num, id)
+668:     args = _build_pipe_init_args(c2v_consumer_buf, v2c_consumer_buf, actual_span)
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/910B/backend_910b_handler.cpp =====
+
+31:                                                            const ir::TileView& original_view) const {
+32:   // Ascend910B (a2a3): cross-core transfer goes through GM. All GM -> Mat
+33:   // transfers must be in NZ layout (hardware constraint), so Left / Right /
+34:   // Mat destinations all use NZ at the transfer boundary. The final
+35:   // Left/Right layout is later resolved by a Mat -> Left/Right move (MTE1).
+36:   //
+37:   // Vec destinations preserve the original Vec view: the GM-backed C2V pop
+38:   // materialises through an ND GlobalTensor on the consumer side and PTO-ISA
+39:   // only supports Vec loads for matching ND/DN/NZ layouts. Emitting an NZ Vec
+40:   // bridge tile would make the generated kernel invalid.
+41:   ir::TileView result = original_view;
+42:   switch (dest_ms) {
+43:     case ir::MemorySpace::Left:
+44:     case ir::MemorySpace::Right:
+45:     case ir::MemorySpace::Mat:
+46:       result.blayout = ir::TileLayout::col_major;
+47:       result.slayout = ir::TileLayout::row_major;
+48:       return result;
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/common/soc.cpp =====
+
+124:                                           Mem(ir::MemorySpace::Mat, 512ULL * 1024, 128),  // 512KB Mat
+125:                                           Mem(ir::MemorySpace::Left, 64ULL * 1024, 64),   // 64KB Left
+126:                                           Mem(ir::MemorySpace::Right, 64ULL * 1024, 64),  // 64KB Right
+127:                                           Mem(ir::MemorySpace::Acc, 128ULL * 1024, 128),  // 128KB Acc
+128:                                           Mem(ir::MemorySpace::Bias, 1ULL * 1024, 64)     // 1KB Bias
+129:                                       });
+130: 
+131:     // AIV (VECTOR) core configuration.
+132:     // NOTE: the physical Vec UB is 192KB, but PTO-ISA reserves ~8KB at the top of the
+133:     // buffer that silently corrupts any tile placed there (pto-isa#170). We therefore
+134:     // cap the *safe* usable UB at 184KB so AllocateMemoryAddr raises an error before an
+135:     // allocation can reach the bad region, instead of producing NaNs on device.
+136:     // TODO(pto-isa#170): restore to 192ULL * 1024 (physical size) once PTO-ISA is fixed.
+137:     Core aiv_core(ir::CoreType::VECTOR,
+138:                   {
+139:                       Mem(ir::MemorySpace::Vec, 184ULL * 1024, 128),  // 184KB safe (192KB physical)
+140:                   });
+141: 
+142:     Cluster aic_cluster(aic_core, 1);  // 1 core per cluster
+143:     Cluster aiv_cluster(aiv_core, 1);  // 1 core per cluster
+144: 
+145:     Die die({{aic_cluster, 24}, {aiv_cluster, 48}});  // 24 AIC cores and 48 AIV cores per die
+146: 
+147:     // Memory hierarchy graph for path finding
+148:     std::map<ir::MemorySpace, std::vector<ir::MemorySpace>> mem_graph;
+149:     mem_graph[ir::MemorySpace::DDR] = {ir::MemorySpace::Vec, ir::MemorySpace::Mat};
+150:     mem_graph[ir::MemorySpace::Vec] = {ir::MemorySpace::DDR};
+151:     mem_graph[ir::MemorySpace::Mat] = {ir::MemorySpace::Left, ir::MemorySpace::Right, ir::MemorySpace::Bias};
+152:     mem_graph[ir::MemorySpace::Acc] = {ir::MemorySpace::Mat, ir::MemorySpace::DDR};
+153: 
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/common/backend.cpp =====
+
+507:     return Pipe::MTE3;
+508:   }
+509:   if (source == ir::MemorySpace::Acc &&
+510:       (destination == ir::MemorySpace::DDR || destination == ir::MemorySpace::Mat ||
+511:        destination == ir::MemorySpace::Vec)) {
+512:     return Pipe::FIX;
+513:   }
+514:   if (source == ir::MemorySpace::Mat && IsL0Memory(destination)) return Pipe::MTE1;
+515:   // A5's memory graph contains Vec->Mat; A2/A3's does not. PTOAS lowers
+516:   // the A5 V2C insertion route on MTE3.
+517:   if (source == ir::MemorySpace::Vec && destination == ir::MemorySpace::Mat) return Pipe::MTE3;
+518:   return std::nullopt;
+519: }
+520: 
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/common/pto_ops_crosscore.cpp =====
+
+450:                                        const std::string& c2v_ssa, const std::string& v2c_ssa) {
+451:   if (!gm_ssa.empty()) {
+452:     oss << "\n      (gm_slot_buffer = " << gm_ssa << " : !pto.ptr<f32>"
+453:         << ", c2v_consumer_buf = " << c2v_ssa << " : i32"
+454:         << ", v2c_consumer_buf = " << v2c_ssa << " : i32)";
+455:   } else {
+456:     oss << " (c2v_consumer_buf = " << c2v_ssa << " : i32"
+457:         << ", v2c_consumer_buf = " << v2c_ssa << " : i32)";
+458:   }
+459: }
+460: 
+461: // system.{aic,aiv}_initialize_pipe: Initialize a cross-core pipe. `target` is
+462: // "aic" (Cube side) or "aiv" (Vector side); operands are explicit i32 SSAs
+463: // (validated by the MixedKernelExpanded verifier).
+464: static std::string MakeInitializePipeCodegenPTO(const char* target, const CallPtr& op,
+465:                                                 codegen::CodegenBase& codegen_base) {
+466:   auto& codegen = AsPto(codegen_base);
+467:   const std::string op_name = std::string(target) + "_initialize_pipe";
+468: 
+469:   INTERNAL_CHECK_SPAN(op->args_.size() == 2, op->span_)
+470:       << op_name << " requires 2 arguments (c2v_consumer_buf, v2c_consumer_buf), got " << op->args_.size();
+471:   const int dir_mask = op->GetKwarg<int>("dir_mask", -1);
+472:   const int slot_size = op->GetKwarg<int>("slot_size", -1);
+473:   CHECK(dir_mask >= 0) << op_name << " requires 'dir_mask' attribute";
+474:   CHECK(slot_size > 0) << op_name << " requires 'slot_size' attribute";
+475: 
+476:   std::string c2v_ssa = GetPipeBufOperandI32SSA(codegen, op->args_[0]);
+477:   std::string v2c_ssa = GetPipeBufOperandI32SSA(codegen, op->args_[1]);
+478:   CHECK(!c2v_ssa.empty() && !v2c_ssa.empty()) << op_name << ": failed to lower buffer operands to SSA names";
+479: 
+480:   std::ostringstream oss;
+481:   oss << "pto." << target << "_initialize_pipe " << FormatInitializePipeAttrs(op, dir_mask, slot_size);
+482:   const int pipe_id = op->GetKwarg<int>("id", 0);
+483:   EmitInitializePipeOperands(oss, codegen.GetGMSlotBufferSSAForPipe(pipe_id, dir_mask), c2v_ssa, v2c_ssa);
+484:   codegen.Emit(oss.str());
+485: 
+486:   return "";
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/inject_gm_pipe_buffer_pass.cpp =====
+
+13:  * @file inject_gm_pipe_buffer_pass.cpp
+14:  * @brief Inject the __gm_pipe_buffer workspace parameter for cross-core pipes on backends
+15:  *        that route slot data through GM (currently Ascend910B).
+16:  *
+17:  * On 910B, cross-core tpush/tpop rides through a shared GM buffer instead of a
+18:  * direct inter-core fabric. This pass runs after ExpandMixedKernel has split
+19:  * mixed InCore functions into AIC/AIV pairs, and:
+20:  *
+21:  *   1. Finds every function that issues initialize_pipe ops.
+22:  *   2. Adds a fresh __gm_pipe_buffer Out-tensor parameter to each, propagating
+23:  *      the parameter upward through callers except Orchestration functions,
+24:  *      which instead get a per-call-site placeholder tensor.create. Codegen
+25:  *      owns the real hardware workspace size and per-pipe offsets.
+26:  *
+27:  * The pass is gated on BackendHandler::RequiresGMPipeBuffer(); other backends
+28:  * see it as a no-op. Nothing else in the pipeline depends on its output, so it
+29:  * produces the same IR properties it requires (MixedKernelExpanded).
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp =====
+
+105: /// message, or empty when `space` pays for no reserve buffer.
+106: ///
+107: /// A reserve_buffer is NOT a MemRef: every tile is allocated *above* it, so it is
+108: /// counted in the footprint yet is invisible in the per-tile accounting an author can
+109: /// inspect. On a cube/vector boundary carrying a large tile the automatic pipe ring is
+110: /// routinely most of the overflow, so name those bytes — and the knob for them, but
+111: /// only when the buffer really is a pipe ring.
+112: ///
+113: /// The figure is `reserved_end_by_space`: the aligned max-END that tiles are placed
+114: /// above, which is exactly the quantity charged to this overflow. It is deliberately
+115: /// NOT worded as "bytes the buffers occupy" — an explicitly based buffer
+116: /// (`base=0x1000, size=4096`) or an alignment gap makes the floor exceed the summed
+117: /// buffer sizes, so the wording states the floor.
+118: ///
+119: /// Shared by the in-pass capacity CHECK and the AllocatedMemoryAddr verifier so the two
+120: /// explain the same overflow identically. Which of them a given compile hits depends on
+121: /// configuration (the pass CHECK is skipped under memory_planner=PTOAS, which skips the
+122: /// pass), so the wording must not live in only one of them.
+123: std::string ReservedBytesNote(const ReserveBufferResolution& resolution, MemorySpace space,
+124:                               const std::string& func_name) {
+125:   const auto& ends = resolution.reserved_end_by_space;
+126:   auto it = ends.find(space);
+127:   if (it == ends.end() || it->second == 0) return "";
+128:   std::string note = ". The first " + std::to_string(it->second) +
+129:                      " bytes of that space are reserved by system.reserve_buffer, so tiles are "
+130:                      "allocated above them";
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/utils/cross_core_pipe.cpp =====
+
+289:   // Ring depth: pl.cross_core_slot(slot_num=N) override, else kDefaultAutoPipeSlotNum. The reserved
+290:   // buffer and the emitted initialize_pipe slot_num attribute both use this value, and the attribute
+291:   // is always emitted — so the buffer and the depth PTOAS indexes stay consistent on a3 (local
+292:   // footprint = slot_num when local_slot_num is omitted) and a5 (footprint = slot_num).
+293:   if (slot_num_override.has_value()) {
+294:     INTERNAL_CHECK_SPAN(slot_num_override.value() > 0, span)
+295:         << "Cross-core slot_num override must be positive: " << slot_num_override.value();
+296:   }
+297:   const int effective_slot_num = slot_num_override.value_or(kDefaultAutoPipeSlotNum);
+298:   // Bound-check the slot size before multiplying so an oversized inferred size
+299:   // can't overflow the int64 buffer_size computation.
+300:   const int64_t slot_size_i64 = common_slot_size.value();
+301:   INTERNAL_CHECK_SPAN(slot_size_i64 >= 0 && slot_size_i64 <= std::numeric_limits<int>::max(), span)
+302:       << "Cross-core slot_size out of range: " << slot_size_i64;
+303:   const int slot_size_bytes = static_cast<int>(slot_size_i64);
+304:   const int64_t buffer_size = slot_size_i64 * effective_slot_num;
+305:   AutomaticPipeSetup setup;
+306: 
+307:   std::shared_ptr<Var> aic_v2c_reserve_var;
+308:   std::shared_ptr<Var> aic_c2v_import_var;
+309:   std::shared_ptr<Var> aiv_c2v_reserve_var;
+310:   std::shared_ptr<Var> aiv_v2c_import_var;
+311: 
+312:   auto zero_i32 = [&]() { return std::make_shared<ConstInt>(0, DataType::INT32, span); };
+313:   auto var_as_expr = [](const std::shared_ptr<Var>& v) -> ExprPtr {
+314:     return std::static_pointer_cast<const Expr>(v);
+315:   };
+316: 
+317:   if (dir_mask & core_affinity::kDirMaskV2C) {
+318:     const auto v2c_name = BuildPipeBufferName(func_name, core_affinity::PipeDirection::V2C);
+319:     auto v2c_reserve = CreateReserveBuffer(v2c_name, buffer_size, span);
+320:     aic_v2c_reserve_var = std::make_shared<Var>(v2c_name, v2c_reserve->GetType(), span);
+321:     setup.aic_stmts.push_back(std::make_shared<AssignStmt>(aic_v2c_reserve_var, v2c_reserve, span));
+322:     auto v2c_import = CreateImportPeerBuffer(v2c_name, aic_name, span);
+323:     aiv_v2c_import_var = std::make_shared<Var>(v2c_name + "_import", v2c_import->GetType(), span);
+324:     setup.aiv_stmts.push_back(std::make_shared<AssignStmt>(aiv_v2c_import_var, v2c_import, span));
+325:   }
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/include/pypto/ir/transforms/utils/cross_core_pipe.h =====
+
+62: /// keeping the consumer-side ring (L1 for V2C, UB for C2V) affordable — the full-tile slots make a
+63: /// deeper default overflow on-chip memory for most real tile shapes. `BuildAutomaticPipeSetup`
+64: /// always emits this value explicitly on `initialize_pipe`, so it is a pypto policy number and is
+65: /// deliberately independent of PTOAS's own fallback below.
+66: constexpr int kDefaultAutoPipeSlotNum = 2;
+67: 
+68: /// Compile-time integer value of @p expr, or ``nullopt`` when it is not one
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/include/pypto/codegen/gm_pipe_layout.h =====
+
+31: /// derivation (`cross_core_pipe::GetPtoasImplicitSlotNum`), so it applies only to hand-written
+32: /// `pl.system.{aic,aiv}_initialize_pipe` — automatic pipes always carry an explicit `slot_num`
+33: /// (`cross_core_pipe::kDefaultAutoPipeSlotNum` by default), which takes precedence below.
+34: /// Returns 0 for a dir_mask that does not describe a GM-backed pipe.
+35: inline int SlotCountForDirMask(int dir_mask) {
+36:   const int bidirectional = ir::core_affinity::kDirMaskC2V | ir::core_affinity::kDirMaskV2C;
+37:   if (dir_mask == bidirectional) {
+38:     return 4;
+39:   }
+40:   if (dir_mask == ir::core_affinity::kDirMaskC2V || dir_mask == ir::core_affinity::kDirMaskV2C) {
+41:     return 8;
+42:   }
+43:   return 0;
+44: }
+45: 
+46: /// Independent rings in the GM buffer. A bidirectional pipe is TWO rings laid out back to back:
+47: /// on a2a3 the C2V ring starts at the pipe's base and the V2C ring at base + slot_num * slot_size
+48: /// (pto-isa, `TPipe`). Returns 0 for a dir_mask that does not describe a GM-backed pipe.
+49: inline int RingCountForDirMask(int dir_mask) {
+50:   const int bidirectional = ir::core_affinity::kDirMaskC2V | ir::core_affinity::kDirMaskV2C;
+51:   if (dir_mask == bidirectional) {
+52:     return 2;
+
+===== /data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/Transforms/Lowering/PTOLowerFrontendPipeOpsPass.cpp =====
+
+216:                                                 Value peerLocalAddr = Value{}) {
+217:   Location loc = initOp.getLoc();
+218:   auto dirAttr = rewriter.getI8IntegerAttr(spec.dirMask);
+219:   auto slotSizeAttr = rewriter.getI32IntegerAttr(initOp.getSlotSize());
+220:   auto slotNumAttr = rewriter.getI32IntegerAttr(spec.slotNum);
+221:   auto noSplitAttr = initOp.getNosplitAttr();
+222:   auto accPushEpilogueAttr = initOp.getAccPushEpilogueAttr();
+223: 
+224:   if (spec.arch == PTOArch::A5) {
+225:     if (!localAddr) {
+226:       return initOp.emitOpError(
+227:           "requires local consumer buffer operands when lowering to a5");
+228:     }
+229:     auto pipe = rewriter.create<InitializeL2LPipeOp>(
+230:         loc, spec.pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
+231:         noSplitAttr, accPushEpilogueAttr, localAddr, peerLocalAddr);
+232:     propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
+233:     propagateFixpipePeerKeyAttrs(initOp, pipe.getOperation(), rewriter);
+234:     return pipe.getPipe();
+235:   }
+236: 
+237:   if (failed(requireFrontendGmSlotBuffer(initOp))) {
+238:     return failure();
+239:   }
+240:   if (!localAddr) {
+241:     return initOp.emitOpError(
+242:         "requires local consumer buffer operands for local FIFO pipe lowering");
+243:   }
+244: 
+245:   IntegerAttr localSlotNumAttr = initOp.getLocalSlotNumAttr();
+246:   if (!localSlotNumAttr) {
+247:     localSlotNumAttr = rewriter.getI32IntegerAttr(spec.slotNum);
+248:   }
+249:   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
+250:       loc, spec.pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
+251:       IntegerAttr{}, noSplitAttr, accPushEpilogueAttr,
+252:       initOp.getGmSlotBuffer(), localAddr, peerLocalAddr);
+253:   propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
+254:   propagateFixpipePeerKeyAttrs(initOp, pipe.getOperation(), rewriter);
+
+===== /data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/Transforms/Passes/PTOResolveReservedBuffersPass.cpp =====
+
+410: static FailureOr<int32_t> chooseFlagBaseForComponent(const PipeComponent &component,
+411:                                                      PipeFlagUsage &usedByFunc) {
+412:   if (component.explicitFlagBase) {
+413:     if (failed(reserveComponentFlagBase(component, *component.explicitFlagBase,
+414:                                         usedByFunc))) {
+415:       return failure();
+416:     }
+417:     return *component.explicitFlagBase;
+418:   }
+419: 
+420:   int32_t candidateBase = 0;
+421:   while (true) {
+422:     candidateBase = alignToEven(candidateBase);
+423:     FlagInterval candidate{candidateBase,
+424:                            candidateBase +
+425:                                static_cast<int32_t>(component.flagWidth)};
+426:     bool conflict = false;
+427:     int32_t nextCandidate = candidateBase + 2;
+428:     for (const std::string &funcName : component.participants) {
+429:       for (const FlagInterval &used : usedByFunc[funcName]) {
+430:         if (!overlaps(candidate, used)) {
+431:           continue;
+432:         }
+433:         conflict = true;
+434:         nextCandidate = std::max(nextCandidate, alignToEven(used.end));
+435:       }
+436:     }
+437:     if (!conflict) {
+438:       break;
+439:     }
+440:     candidateBase = nextCandidate;
+441:   }
+442: 
+443:   if (failed(reserveComponentFlagBase(component, candidateBase, usedByFunc))) {
+444:     return failure();
+445:   }
+446:   return candidateBase;
+447: }
+448: 
+449: struct PTOResolveReservedBuffersPass
+450:     : public mlir::pto::impl::PTOResolveReservedBuffersBase<
+451:           PTOResolveReservedBuffersPass> {
+452:   LogicalResult assignPeerAwareFlagBases(ModuleOp moduleOp) const {
+453:     // Build peer-connected pipe-init components, assign one consistent
+454:     // flag_base per component, and reserve non-overlapping flag ranges per
+455:     // function so multiple frontend pipes can coexist safely.
+456:     SmallVector<PipeInitInfo> initInfos;
+457:     PipeInitGroups keyedInits;
+458:     LogicalResult status = success();
+459: 
+460:     auto collectInit = [&initInfos, &keyedInits, &status](auto initOp) {
+461:       if (failed(status)) {
+462:         return;
+463:       }
+464:       status = collectPeerAwareInit(initOp, initInfos, keyedInits);
+465:     };
+466: 
+467:     moduleOp.walk([&](InitializeL2LPipeOp initOp) { collectInit(initOp); });
+468:     moduleOp.walk([&](InitializeL2G2LPipeOp initOp) { collectInit(initOp); });
+469:     if (failed(status)) {
+470:       return failure();
+471:     }
+472: 
+473:     auto componentsOr = buildPeerAwareComponents(initInfos, keyedInits);
+474:     if (failed(componentsOr)) {
+475:       return failure();
+476:     }
+477: 
+478:     OpBuilder builder(moduleOp.getContext());
+479:     PipeFlagUsage usedByFunc;
+480:     for (const PipeComponent &component : *componentsOr) {
+481:       auto chosenBaseOr = chooseFlagBaseForComponent(component, usedByFunc);
+482:       if (failed(chosenBaseOr)) {
+483:         return failure();
+484:       }
+485:       auto flagBaseAttr = builder.getI32IntegerAttr(*chosenBaseOr);
+486:       for (Operation *op : component.ops) {
+487:         setFlagBaseAttr(op, flagBaseAttr);
+488:       }
+489:     }
+490: 
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp =====
+
+23: 
+24: template <
+25:     uint8_t FlagID, uint8_t DirType, uint32_t SlotSize, uint32_t SlotNum, uint32_t LocalSlotNum = 2,
+26:     bool IsNoSplit = false, bool EN_UNIT_FLAG = false>
+27: struct TPipe {
+28:     static constexpr uint8_t DIR_MASK = 0x7;
+29:     static constexpr uint8_t DIR_TYPE = DIR_MASK & DirType;
+30:     static constexpr bool is_c2v = (DIR_TYPE == Direction::DIR_C2V);           // 1
+31:     static constexpr bool is_v2c = (DIR_TYPE == Direction::DIR_V2C);           // 2
+32:     static constexpr bool is_both = (DIR_TYPE == Direction::DIR_BOTH);         // 3
+33:     static constexpr bool is_v2c_ctrl = (DIR_TYPE == Direction::DIR_V2C_CTRL); // 4
+34:     static_assert(
+35:         is_c2v || is_v2c || is_both || is_v2c_ctrl,
+36:         "Fix: TPipe only supports C2V or V2C or Both or V2C_CTRL communication on A2A3.");
+37:     // get rid of codechecker warnings
+38:     static constexpr uint32_t SyncPeriod = (SlotNum <= 2) ? SlotNum : SlotNum / 2;
+39:     static constexpr uint8_t FlagIDPlusOne = FlagID + 1;
+40:     static constexpr uint8_t FlagIDPlusTwo = FlagID + 2;
+41:     static constexpr uint8_t FlagIDPlusThree = FlagID + 3;
+42:     static_assert(SlotNum >= 1, "Fix: TPipe requires SlotNum >= 1.");
+43:     static_assert(SyncPeriod >= 1, "Fix: TPipe requires SyncPeriod >= 1.");
+44:     static_assert(
+45:         FlagIDPlusOne <= MAX_SYC_ID,
+46:         "Fix: With Both direction, FlagID + 1 must be less than 15 due to hardware limit.");
+47: 
+48:     using RingFiFo = RingFIFO<SlotSize, SlotNum, LocalSlotNum>;
+49: 
+50:     PTO_INTERNAL static uint64_t getFFTSMsgCfg(TSyncCVMode mode, uint16_t flagID, uint16_t base_const = 0x1)
+51:     {
+52:         constexpr uint16_t FFTS_FLAG_ID_BIT_START = 8;
+53:         constexpr uint16_t FFTS_MODE_BIT_START = 4;
+54:         return (
+55:             (base_const & 0xf) + ((mode & 0x3) << FFTS_MODE_BIT_START) + ((flagID & 0xf) << FFTS_FLAG_ID_BIT_START));
+56:     }
+57: 
+58:     PTO_INTERNAL static bool shouldWaitFree(uint32_t tileIndex)
+59:     {
+60:         if (tileIndex < SlotNum) {
+61:             return false;
+62:         }
+63:         return (tileIndex % SyncPeriod) == 0;
+64:     }
+65: 
+139:             }
+140:         }
+141: 
+142:         PTO_INTERNAL void record() const
+143:         {
+144:             if constexpr (is_c2v) {
+145:                 // Cube produces, Vector consumes
+146: #ifdef PTO_COMPILE_CUBE
+147:                 ffts_cross_core_sync(PIPE_FIX, getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, FlagID));
+148: #endif
+149:             } else if constexpr (is_v2c) {
+150:                 // Vector produces, Cube consumes
+151: #ifdef PTO_COMPILE_VEC
+184:         PTO_INTERNAL void pushVec2GMFiFo(RingFiFo& fifo, TileProd& tile, int32_t subBlockId)
+185:         {
+186:             using T = typename TileProd::DType;
+187:             int gmValidR = tile.GetValidRow();
+188:             int gmValidC = tile.GetValidCol();
+189:             constexpr int splitNum = 2;
+190:             int gmStrideR = (Split == TileSplitAxis::TILE_LEFT_RIGHT) ? gmValidC * splitNum : gmValidC;
+191:             size_t entryBase = (tileIndex % RingFiFo::SLOT_NUM) * RingFiFo::SLOT_SIZE;
+192:             size_t subAIVOffset = 0;
+193:             if constexpr (Split == TileSplitAxis::TILE_NO_SPLIT) {
+194:                 // TILE_NO_SPLIT : single writer, no offset needed
+195:                 subAIVOffset = 0;
+196:             } else if constexpr (Split == TileSplitAxis::TILE_UP_DOWN) {
+197:                 // TILE_UP_DOWN  : Vec1 starts at the second row-block → offset = ProdM * ProdN * sizeof(T)
+198:                 subAIVOffset = subBlockId * gmValidR * gmValidC * sizeof(T);
+199:             } else if constexpr (Split == TileSplitAxis::TILE_LEFT_RIGHT) {
+200:                 // TILE_LEFT_RIGHT: Vec1 starts at column ProdN within row 0 → offset = ProdN * sizeof(T)
+201:                 subAIVOffset = subBlockId * gmValidC * sizeof(T);
+202:             } else if constexpr (Split == TileSplitAxis::TILE_UP_DOWN_ODD) {
+203:                 // TILE_UP_DOWN_ODD: Vec1 starts at the second row-block → offset = (ProdM + 1) * ProdN * sizeof(T)
+204:                 subAIVOffset = subBlockId * (gmValidR + subBlockId) * gmValidC * sizeof(T);
+205:             } else if constexpr (Split == TileSplitAxis::TILE_LEFT_RIGHT_ODD) {
+206:                 // TILE_LEFT_RIGHT_ODD: Vec1 starts at column ProdN+1 within row 0 → offset = (ProdN + 1) * sizeof(T)
+207:                 subAIVOffset = subBlockId * (gmValidC + subBlockId) * sizeof(T);
+208:                 // [xx, 15] -> [xx, 8] + [xx, 7], row stride of AIV0 and AIV1 are same, both are 15.
+209:                 gmStrideR = gmValidC * splitNum + 2 * subBlockId - 1;
+210:             }
+211:             using GlobalShape = pto::Shape<1, 1, 1, -1, -1>;
+212:             using GlobalStride = pto::Stride<1, 1, 1, -1, 1>;
+213:             using GlobalData = GlobalTensor<T, GlobalShape, GlobalStride>;
+214:             __gm__ T* addr = (__gm__ T*)((uint64_t)fifo.GM_SLOT_BUFFER + entryBase + subAIVOffset + entryOffset);
+215:             GlobalData globalData(addr, GlobalShape(gmValidR, gmValidC), GlobalStride(gmStrideR));
+216:             TSTORE_IMPL(globalData, tile);
+217:         }
+218: 
+350:         {
+351:             // Vector waits for Cube
+352:             // Or Cube waits for Vector
+353:             if constexpr (is_both) {
+354: #ifdef PTO_COMPILE_VEC
+355:                 wait_flag_dev(FlagID);
+356: #endif
+357: #ifdef PTO_COMPILE_CUBE
+358:                 wait_flag_dev(FlagIDPlusTwo);
+359: #endif
+360:             } else {
+361:                 wait_flag_dev(FlagID);
+362:             }
+363:         }
+364: 
+365:         /**
+366:          * free: Release space in FIFO
+367:          * 1. (iter >= Depth - Period): Silence at start. Don't signal if Producer
+368:          * is still enjoying the initial free buffer space.
+369:          * 2. (is_sync_step): Accumulate free slots and signal in batches.
+370:          */
+371:         PTO_INTERNAL void free() const
+372:         {
+373:             // Vector frees buffer for Cube
+374:             // Or Cube frees buffer for Vector
+375:             if constexpr (is_c2v) { // Vec consumer frees buffer for Cube
+376: #ifdef PTO_COMPILE_VEC
+377:                 ffts_cross_core_sync(PIPE_MTE2, getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, FlagIDPlusOne));
+378: #endif
+379:             } else if constexpr (is_v2c) { // cube consumer frees buffer for vec
+380: #ifdef PTO_COMPILE_CUBE
+381:                 ffts_cross_core_sync(PIPE_MTE2, getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, FlagIDPlusOne));
+382: #endif
+383:             } else if constexpr (is_both) {
+384: #ifdef PTO_COMPILE_VEC
+385:                 ffts_cross_core_sync(PIPE_MTE2, getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, FlagIDPlusOne));
+386: #endif
+437:         PTO_INTERNAL void popMatTileFromGMFiFo(RingFiFo& fifo, TileCons& tile)
+438:         {
+439:             using T = typename TileCons::DType;
+440:             size_t entryBase = (static_cast<size_t>(tileIndex) % RingFiFo::SLOT_NUM) * RingFiFo::SLOT_SIZE;
+441:             __gm__ T* addr = (__gm__ T*)((uint64_t)fifo.GM_SLOT_BUFFER + entryBase + entryOffset);
+442:             using GlobalShape = pto::Shape<1, 1, 1, -1, -1>;
+443:             using GlobalStride = pto::Stride<1, 1, 1, -1, 1>;
+444:             using GlobalData = GlobalTensor<T, GlobalShape, GlobalStride>;
+445:             GlobalData globalTensor(
+446:                 addr, GlobalShape(tile.GetValidRow(), tile.GetValidCol()), GlobalStride(tile.GetValidCol()));
+447: 
+448:             // Local slots must be strided by SLOT_SIZE, exactly like the GM ring above.
+449:             // Striding by the popped tile's own Rows*Cols makes slot i+1 of a smaller tile
+450:             // land INSIDE slot i of a larger one, so consecutive tiles of different sizes
+451:             // alias in L1 and silently corrupt each other.
+452:             uint64_t localTileBase = fifo.V2C_CONSUMER_BUF +
+453:                                      (static_cast<size_t>(tileIndex) % RingFiFo::LOCAL_SLOT_NUM) * RingFiFo::SLOT_SIZE;
+454:             TASSIGN_IMPL(tile, localTileBase);
+455:             TLOAD_IMPL(tile, globalTensor);
+456:         }
+457: 
+458:         PTO_INTERNAL void popCtrlFromCtrlFiFo(RingFiFo& fifo)
+485: 
+486:     PTO_INTERNAL explicit TPipe(__gm__ void* GM_SLOT_BUFFER, uint32_t C2V_CONSUMER_BUF, uint32_t V2C_CONSUMER_BUF)
+487:         : fifo(GM_SLOT_BUFFER, C2V_CONSUMER_BUF, V2C_CONSUMER_BUF), prod(), cons()
+488:     {
+489:         // Bidirectional: the two rings must NOT overlap. Both directions index the shared GM
+490:         // buffer as (tileIndex % SlotNum) * SlotSize, so without a per-direction base the C2V
+491:         // and V2C rings alias the same slots and silently corrupt each other's tiles. Place
+492:         // V2C after C2V, exactly as the ISA reference specifies
+493:         // (`v2c_ring_buf = GM_SLOT_BUFFER + SLOT_NUM * SLOT_SIZE`).
+494:         if constexpr (is_both) {
+495:             constexpr int V2C_ENTRY_OFFSET = static_cast<int>(SlotNum) * static_cast<int>(SlotSize);
+496: #ifdef PTO_COMPILE_CUBE
+497:             cons.setEntryOffset(V2C_ENTRY_OFFSET); // Cube consumes V2C
+498: #endif
+499: #ifdef PTO_COMPILE_VEC
+500:             prod.setEntryOffset(V2C_ENTRY_OFFSET); // Vector produces V2C
+501: #endif
+502:         }
+503:     }
+504: 
+505:     // Destructor for TPipe: drain leftover free credits on FlagID+1.
+506:     // Initial TPUSH calls skip allocate() via shouldWaitFree (tileIndex < SlotNum, or 0 for depth 1).
+507:     PTO_INTERNAL ~TPipe()
+508:     {
+509:         const uint32_t drainCount = countPendingFreeCredits(prod.tileIndex);
+510:         for (uint32_t i = 0; i < drainCount; ++i) {
+511:             prod.allocate();
+512:         }
+513:     }
+514: };
+515: 
+516: /**
+517:  * TPUSH: Push Tile to FIFO
+518:  * * Flow:
+519:  * 1. [Alloc]   Check GM space (Cross-Core)
+520:  * 2. [Store]   Write data to GM
+521:  * 3. [Commit]  Signal Consumer (Cross-Core)
+522:  */
+523: template <typename Pipe, typename TileProd, TileSplitAxis Split, std::enable_if_t<is_tile_data_v<TileProd>, int> = 0>
+524: PTO_INTERNAL void TPUSH_IMPL(Pipe& pipe, TileProd& tile)
+525: {
+526:     // 1. Cross-Core: Wait for space
+527:     bool isAllocate = pipe.prod.getAllocateStatus() && Pipe::shouldWaitFree(pipe.prod.tileIndex);
+528:     if (isAllocate) {
+529:         pipe.prod.allocate();
+530:     }
+531: 
+532:     // 2. Address Calculation
+533:     pipe.prod.template push<TileProd, Split>(pipe.fifo, tile, get_subblockid());
+534:     pipe.prod.tileIndex++;
+535: 
+536:     // 3. Cross-Core: Commit & Signal
+537:     bool isRecord = pipe.prod.getRecordStatus();
+538:     if (isRecord) {
+539:         pipe.prod.record();
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPop.hpp =====
+
+19: 
+20: // pop tile from fifo for tile data
+21: template <typename Pipe, typename TileCons, TileSplitAxis Split, std::enable_if_t<is_tile_data_v<TileCons>, int> = 0>
+22: PTO_INTERNAL void TPOP_IMPL(Pipe& pipe, TileCons& tile)
+23: {
+24:     // 1. Cross-Core: Wait for Data
+25:     bool isWait = pipe.cons.getWaitStatus();
+26:     if (isWait) {
+27:         pipe.cons.wait();
+28:     }
+29: 
+30:     // 2. Address Calculation & Load
+31:     pipe.cons.template pop<TileCons, Split>(pipe.fifo, tile, get_subblockid());
+32: 
+33:     // 3. Cross-Core: Free Space
+34:     bool isFree = pipe.cons.getFreeStatus() && Pipe::shouldNotifyFree(pipe.cons.tileIndex);
+35:     if (isFree) {
+36:         pipe.cons.free();
+37:     }
+38:     pipe.cons.tileIndex++;
+39: }
+40: 
+80:     typename Pipe, typename GlobalData, TileSplitAxis Split, std::enable_if_t<is_global_data_v<GlobalData>, int> = 0>
+81: PTO_INTERNAL void TPOP_IMPL(Pipe& pipe, GlobalData& gmTensor)
+82: {
+83:     static_assert(is_global_data_v<GlobalData>, "Fix: GlobalTensor must satisfy is_global_data_v<GlobalData>.");
+84:     static_assert(
+85:         Pipe::is_c2v || Pipe::is_v2c || Pipe::is_both,
+86:         "Fix: TPOP with GlobalTensor is only supported by C2V or V2C or Both communication on A2A3.");
+87:     // 1. Cross-Core: Wait for Data
+88:     pipe.cons.wait();
+89: 
+90:     // 2. Address Calculation
+91:     uint64_t entryBase = (uint64_t)pipe.fifo.GM_SLOT_BUFFER;
+92:     const uint64_t slotOffset = (pipe.cons.tileIndex % Pipe::RingFiFo::SLOT_NUM) * Pipe::RingFiFo::SLOT_SIZE;
+93:     if constexpr (Pipe::is_c2v) {
+94:         entryBase += slotOffset + getPopSubAIVOffset<GlobalData, Split>();
+95:     } else if constexpr (Pipe::is_v2c) {
+96:         entryBase += slotOffset;
+97:     } else if constexpr (Pipe::is_both) {
+98: #ifdef PTO_COMPILE_VEC
+99:         entryBase += slotOffset + getPopSubAIVOffset<GlobalData, Split>();
+100: #endif
+101: #ifdef PTO_COMPILE_CUBE
+102:         entryBase += slotOffset;
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TFree.hpp =====
+
+18: 
+19: // free space for tile data
+20: template <typename Pipe, TileSplitAxis Split>
+21: PTO_INTERNAL void TFREE_IMPL(Pipe& pipe)
+22: {
+23:     return;
+24: }
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TInsert.hpp =====
+
+163: 
+164: template <typename DstTileData, typename SrcTileData>
+165: PTO_INTERNAL void TINSERT_IMPL(DstTileData& dst, SrcTileData& src, uint16_t indexRow = 0, uint16_t indexCol = 0)
+166: {
+167:     if constexpr (DstTileData::Loc == TileType::Vec && SrcTileData::Loc == TileType::Vec) {
+168:         CheckTInsertVecToVecCommon<DstTileData, SrcTileData>();
+169:         if constexpr (DstTileData::isRowMajor && SrcTileData::isRowMajor) {
+170:             TInsertVecToVecNDDispatch<DstTileData, SrcTileData>(dst, src, indexRow, indexCol);
+171:         } else if constexpr (
+172:             !DstTileData::isRowMajor && !SrcTileData::isRowMajor && DstTileData::SFractal == SLayout::RowMajor &&
+173:             SrcTileData::SFractal == SLayout::RowMajor) {
+174:             TInsertVecToVecNZDispatch<DstTileData, SrcTileData>(dst, src, indexRow, indexCol);
+175:         } else {
+176:             static_assert(
+177:                 DstTileData::isRowMajor == SrcTileData::isRowMajor,
+178:                 "TINSERT Vec->Vec : Source and destination layout must match (both ND or both NZ).");
+179:             static_assert(
+180:                 DstTileData::SFractal == SrcTileData::SFractal,
+181:                 "TINSERT Vec->Vec : Source and destination SFractal must match.");
+182:         }
+183:     } else {
+184:         CheckTMovAccToMat<DstTileData, SrcTileData, typename DstTileData::DType, typename SrcTileData::DType, true>();
+185:         PTO_ASSERT(
+186:             indexRow + SrcTileData::Rows <= DstTileData::Rows,
+187:             "The sum of indexRow and srcRow should be less than dstRow!");
+188:         PTO_ASSERT(
+189:             indexCol + SrcTileData::Cols <= DstTileData::Cols,
+190:             "The sum of indexCol and srcCol should be less than dstCol!");
+191:         constexpr QuantMode_t quantPre =
+192:             GetCastPreQuantMode<typename SrcTileData::DType, typename DstTileData::DType>();
+193:         TInsertAccToMat<DstTileData, SrcTileData, quantPre, ReluPreMode::NoRelu>(
+194:             dst.data(), src.data(), src.GetValidRow(), src.GetValidCol(), indexRow, indexCol);
+195:     }
+196: }
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a5/TPush.hpp =====
+
+244:         template <typename TileProd, TileSplitAxis Split>
+245:         PTO_INTERNAL void pushVec2MatFiFo(RingFiFo& fifo, TileProd& tile, int32_t subBlockId)
+246:         {
+247:             using T = typename TileProd::DType;
+248:             constexpr uint32_t splitNum = 2;
+249:             constexpr int ConsM = (Split == TileSplitAxis::TILE_UP_DOWN) ? TileProd::Rows * splitNum : TileProd::Rows;
+250:             constexpr int ConsN =
+251:                 (Split == TileSplitAxis::TILE_LEFT_RIGHT) ? TileProd::Cols * splitNum : TileProd::Cols;
+252:             int vRows = (Split == TileSplitAxis::TILE_UP_DOWN) ? tile.GetValidRow() * splitNum : tile.GetValidRow();
+253:             int vCols = (Split == TileSplitAxis::TILE_LEFT_RIGHT) ? tile.GetValidCol() * splitNum : tile.GetValidCol();
+254:             using MatTile = Tile<TileType::Mat, T, ConsM, ConsN, BLayout::ColMajor, -1, -1>;
+255:             MatTile matTile(vRows, vCols);
+256:             uint64_t entryBase = (tileIndex % RingFiFo::SLOT_NUM) * RingFiFo::SLOT_SIZE; // ConsM * ConsN * sizeof(T);
+257:             TASSIGN_IMPL(matTile, (uint64_t)(fifo.V2C_CONSUMER_BUF + entryBase + entryOffset));
+258:             if constexpr (Split == TileSplitAxis::TILE_NO_SPLIT) {
+259:                 // single vector core
+260:                 TINSERT_IMPL(matTile, tile, static_cast<uint16_t>(0), static_cast<uint16_t>(0));
+261:             } else if constexpr (Split == TileSplitAxis::TILE_UP_DOWN) {
+262:                 int rowIndex = tile.GetValidRow() * static_cast<size_t>(subBlockId);
+263:                 TINSERT_IMPL(matTile, tile, static_cast<uint16_t>(rowIndex), static_cast<uint16_t>(0));
+264:             } else if constexpr (Split == TileSplitAxis::TILE_LEFT_RIGHT) {
+265:                 PTO_ASSERT(
+266:                     tile.GetValidCol() * sizeof(T) % 32 == 0,
+267:                     "Fix: For V2C(UB->L1), tile's valid column must be multiple of 32 bytes due to hardware "
+268:                     "requirement.");
+269:                 uint32_t colIndex = tile.GetValidCol() * static_cast<size_t>(subBlockId);
+270:                 TINSERT_IMPL(matTile, tile, static_cast<uint16_t>(0), static_cast<uint16_t>(colIndex));
+271:             }
+272:         }
+273: 
+274:         template <typename TileProd>
+328:         template <typename TileProd, TileSplitAxis Split>
+329:         PTO_INTERNAL void pushVec2FiFoByDir(RingFiFo& fifo, TileProd& tile, int32_t subBlockId)
+330:         {
+331:             if constexpr (is_v2c_mat || is_both) {
+332:                 pushVec2MatFiFo<TileProd, Split>(fifo, tile, subBlockId);
+333:             } else if constexpr (is_v2c_gm) {
+334:                 pushVec2GMFiFo<TileProd, Split>(fifo, tile, subBlockId);
+335:             } else if constexpr (is_v2c_ctrl) {
+336:                 pushVec2CtrlFiFo<TileProd>(fifo, tile);
+337:             }
+338:         }
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/grid_intrinsic.hpp =====
+
+12: //
+13: // This header is the consolidation of four former include/pto/common headers:
+14: //   * grid_pipe.hpp             -> Section 1: GridPipe mesh model + resolvers
+15: //   * grid_pipe_mock_spr.hpp    -> Section 2: A2/A3 SPR+WFE mock (GM atomic flags)
+16: //   * grid_counter_intrinsic.hpp-> Section 3: neighbor-counter intrinsic (mtspr/wfe)
+17: //   * grid_sram_intrinsic.hpp   -> Section 4: neighbor SRAM addressing + transfer
+18: //
+19: // The GridPipe TPUSH/TPOP overloads in pto/common/pto_instr.hpp and the A2/A3
+20: // backends in GridTPush.hpp / GridTPop.hpp both pull this single header in.
+21: // Compiler-visible static constraints are still enforced via static_assert
+22: // inside the intrinsic overloads in pto_instr.hpp.
+23: 
+24: #ifndef PTO_A2A3_GRID_INTRINSIC_HPP
+25: #define PTO_A2A3_GRID_INTRINSIC_HPP
+26: 
+27: #include <cstdint>
+28: #include <type_traits>
+29: 
+30: #include <pto/common/arch_macro.hpp>
+31: #include <pto/common/type.hpp> // for AICORE (callable from both host and aicore contexts)
+32: 
+33: // ===========================================================================
+34: // Section 1: GridPipe -- neighbor-core FIFO communication primitives.
+35: //            (formerly include/pto/common/grid_pipe.hpp)
+36: //
+37: // This is the proposal-level abstraction described in
+38: // distributed-ffn-grid-tpush-tpop_zh-SPR_WFE.md.  On LPU WSE silicon the
+39: // operations defined here are expected to lower to "SPR write + WFE wait +
+40: // existing TMOV" sequences (see design doc section 5.3).  On A2/A3 we provide
+41: // a mock backend that emulates the SPR+WFE semantics with HCCL shared windows
+42: // and GM atomic flags; see Section 2 below and GridTPush.hpp.
+43: // ===========================================================================
+
+===== /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/hc_pre_direct_stream_v1/README.md =====
+
+1: # HC_pre 第一阶段紧凑流式交接设计核对（2026-10-17）
+2: 
+3: 本文是未采用候选的源码设计审计，未编译、未启动 NPU。正式动态 SPMD 实现由主会话放入 `vllm_ascend/ops/pypto/`；本目录只保留本次设计与纯 CPU 协议检查。
+4: 
+5: ## 结论与需要纠正的前提
+6: 
+7: **在当前 A3 软件路径上，`pl.aic_gather` 不是 AIV 的 UB 直接向 AIC 的 L1 发送数据。**
+8: 
+9: 它确实能形成编译器管理的双槽流式交接，但底层仍为 `AIV UB → GM FIFO → AIC L1`。因此不能把采用 `aic_gather` 解释成消除 GM 往返；收益可能来自及时供数、紧凑地址、重用 BF16→FP32 转换、流水交错和较小驻留集合，必须由完整 CSA L1 incore 对照证明。
+10: 
+11: 本次核对的依赖根目录均为独立 worktree，没有修改共享依赖：
+12: 
+13: - PyPTO：`/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016`
+14: - PTO-ISA：`/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa`
+15: 
+16: 可直接接手的原始源码证据：
+17: 
+18: | 位置（以上述相应依赖根为起点） | 实际含义 |
+19: | --- | --- |
+20: | `python/pypto/language/op/tile_ops.py:795` | `aic_gather` 必须处于 `split_aiv` 区域，由编译器形成 Vec→Mat 边界。 |
+21: | `src/backend/910B/backend_910b_handler.cpp:31` | 明确说明 A2/A3 cross-core transfer goes through GM；GM→Mat 边界转换为 NZ。 |
+22: | `include/pto/npu/a2a3/TPush.hpp:184` | `pushVec2GMFiFo` 将 Tile 用 `TSTORE_IMPL` 写入 GM 环形槽；两个 AIV 通过行偏移写不同半块。 |
+23: | 同文件 `:147` 附近 | V2C READY 用 `ffts_cross_core_sync(PIPE_MTE3, ...)` 发布。 |
+24: | 同文件 `:434` | `popMatTileFromGMFiFo` 将同一 GM 槽用 `TLOAD_IMPL` 读入本地 L1 槽。 |
+25: | 同文件 `:373` 附近 | V2C FREE 在 AIC 的 MTE2 上发布，表示 GM 槽已经读入本地。 |
+26: | `include/pto/npu/a2a3/TPop.hpp:22` | TPOP 执行 wait→load→按周期 free；Tile TFREE 本身在 A3 实现为空。 |
+27: | `include/pto/npu/a2a3/TPush.hpp:505` | TPipe 析构按真实剩余 credit 排空 FREE，防止下一次调用误消费旧事件。 |
+28: | `src/ir/transforms/allocate_memory_addr_pass.cpp:107` | reserve_buffer 不是普通有生命周期的 MemRef；其他 Tile 均放在保留区之后。 |
+29: 
+30: 不能用 A5 的直接写 L1 能力，或源码中存在 `TINSERT` 一词，就推导 A3 的该交接路径绕过 GM。
+31: 
+32: ## 与已有候选的实际差别
+33: 
+34: 原数学核来自仓库内 `tests/pypto_test/csa_static_spmd_feasibility_20261015/generated/core_bodies_ir.py`：
+
+===== /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/QK_DIRECT_L1_EXPERIMENT.md =====
+
+78: `pushVec2GMFiFo` / `popMatTileFromGMFiFo`，没有为此改依赖或运行新测试。
+79: 
+80: 所有变更位于本实验目录。冻结静态结果、PyPTO、Simpler、PTOAS及生产算子没有修改。
+
+===== /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md =====
+
+6862: ## 02:30：Indexer AIC提交区间探针通过
+6863: 
+6864: indexer_phase_clock.py 只包围原32个页表读取至Key DMA提交窗口和1024分数块循环，
+6865: 另计原wait_flag_dev，不给普通异步wait_flag虚构Scalar等待时间。保持原中间流水屏障。
+6866: CPU提取审计indexer_clock_prepare_v1通过：32个静态页加载点、1个分数块循环、
+6867: 2处FFTS等待；每核512B进度区的第二行记录，首行信号不动。
+6868: 
+6869: task_20261017_022628_11712641926 / b16_cached_indexer_clock_v1 完整PASS。
+6870: 24个AIC中位：阶段210.23μs、Key提交累计11.81μs/704次、分数块193.96μs/22次、
+6871: FFTS等待15.00μs/22次。普通wait是异步pipe指令，区间会重叠且插桩扰动队列，
+6872: 不能简单相减成计算/搬运独占耗时。完整插桩L1为845.64μs，不用于700μs目标。
+6873: 精度/TopK/六份状态/图/30代信号/保护区全部PASS。页地址分支暂不继续优先优化。
+6874: 
+6875: ## 02:35：完整CSA同地址动态metadata A→B→C→A通过
+6876: 
+6877: dynamic_metadata_replay.py 与 --metadata-replay-only：固定B16/S6、页表容量、
+12964: - task_20261017_022628_11712641926 / b16_cached_indexer_clock_v1 PASS：
+12965:   Indexer AIC中位210.23μs；Key提交11.81/704次；score_step193.96/22次；
+12966:   FFTS15/22次。是Scalar提交区间，不是异步pipe独占忙时；不能简单相减。
+12967:   完整插桩L1845.64不参与目标。页读取分支不继续优先优化。
+12968: - task_20261017_023022_12848062458 / b16_metadata_replay_v1 PASS：
+12969:   固定B16/S6/容量/地址/图，131072→131071→130048→131072，19个根输入变化。
+
+===== /data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/docs/reference/pto-cvid-cluster-id-mapping.md =====
+
+60:     +---------------------------------------------------------------+
+61:     |  16 Semaphore IDs per Cluster (ID 0-15)                       |
+62:     |                                                               |
+63:     |  Each ID has a 4-bit semaphore value (0-15)                   |
+64:     |  Can control 0-15 FIFO slots per semaphore                    |
+65:     |                                                               |
+66:     +---------------------------------------------------------------+
+67: ```
+68: 
+69: ### TPUSH/TPOP Semaphore Allocation
+70: 
+71: TPUSH/TPOP uses **4 semaphore IDs** for bidirectional Cube-Vector communication:
+72: 
+73: | ID | Direction | Purpose |
+74: |----|-----------|---------|
+75: | 0 | C→V | Cube signals data ready for Vector |
+76: | 1 | C→V | Vector signals slot free to Cube |
+77: | 2 | V→C | Vector signals data ready for Cube |
+78: | 3 | V→C | Cube signals slot free to Vector |
+79: 
+80: ### Semaphore Operations
+81: 
+103: | **C→V** | `set_cross_core` | **Broadcast**: Block sets semaphore for both subblocks (AIV0 + AIV1) |
+104: | **C→V** | `wait_flag_dev` | Each Vector core waits independently |
+105: | **V→C** | `set_cross_core` | Each Vector core sets its own semaphore |
+106: | **V→C** | `wait_flag_dev` | **Reduce**: Cube waits for **both** Vector subblocks to set |
+107: 
+108: ```
+109: C→V Broadcast (set_cross_core from Cube):
+110: 
+111:     AIC ──set──┬──> AIV0 semaphore++
+112:                └──> AIV1 semaphore++
+113: 
+114: V→C Reduce (wait_flag_dev on Cube):
+115: 
+116:     AIV0 ──set──┐
+117:                 ├──> AIC waits for BOTH
+118:     AIV1 ──set──┘
+119: ```
+120: 
+121: This ensures correct synchronization for the 1:2 Cube-Vector cluster topology without requiring separate signaling to each Vector core.
+122: 
+123: ### 4-bit Semaphore Range
+124: 
+125: Each semaphore ID has a **4-bit counter** (values 0-15), which limits the maximum number of outstanding FIFO slots:
+126: 
+127: ```
+128: Semaphore value range: 0-15
+129: 
+130:     - Value 0: No slots available (consumer blocks on wait_flag_dev)
+131:     - Value 1-15: N slots available
+132:     - Maximum outstanding slots: 15 per direction
+199: - **Scope**: Per-cluster, shared by all cores (AIC + AIV0 + AIV1) in the cluster
+200: 
+201: This initialization is part of the AICPU handshake (step 3 above) and ensures the semaphore IDs (0-15) are correctly mapped to hardware registers for the assigned cluster.
+202: 
+203: ## A3 FFTS Scheduler and Logical Cluster Setup
+204: 
+205: ### Current TPUSH/TPOP Implementation on A3
+206: 
+207: The A3 TPUSH/TPOP implementation relies on **FFTS cross-core synchronization** features. During mixed kernel kickstart, the FFTS hardware establishes a logical cluster through the block scheduler.
+208: 
+209: ### Logical-to-Physical Core Mapping
+210: 
+211: The FFTS hardware builds the logical-to-physical core mapping at task launch time:
+212: 
+213: 1. **Block ID → Physical Cube Core**: The block scheduler assigns a physical AIC core to each logical block.
+214: 
+215: 2. **Subblock ID → Physical Vector Core**: Each subblock (0, 1) maps to a physical AIV core that becomes a buddy of the assigned Cube.
+216: 
+217: 3. **Intra-cluster sync resolution**: The FFTS hardware resolves all intra-cluster synchronization and communication paths based on this mapping.
+218: 
+219: 

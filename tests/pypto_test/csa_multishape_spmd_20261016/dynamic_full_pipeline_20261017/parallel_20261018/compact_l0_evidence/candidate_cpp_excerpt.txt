@@ -1,0 +1,132 @@
+7984:       // pto: %left0_inline1686__ssa_v0
+7985:       ;
+7986:       v1521 = Tile<TileType::Left, bfloat16_t, 16, 512, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1458, v257);
+7987:       // pto: %left0_inline1686__ssa_v0
+7988:       ;
+7989:       v1522 = (uint64_t) v217;
+7990:       TASSIGN(v1521, v1522);
+7991:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+7992:       TMOV(v1521, v1461);
+7993:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+7994:       // pto: %left1_inline1677__ssa_v0
+7995:       ;
+7996:       v1523 = Tile<TileType::Left, bfloat16_t, 16, 512, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v1458, v257);
+7997:       // pto: %left1_inline1677__ssa_v0
+7998:       ;
+7999:       v1524 = (uint64_t) v222;
+8000:       TASSIGN(v1523, v1524);
+8001:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+8002:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+8003:       TMOV(v1523, v1492);
+8004:       // pto: %t__tmp_v0
+8005:       ;
+8006:       v1525 = Tile<TileType::Mat, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8007:       // pto: %t__tmp_v0
+8008:       ;
+8009:       v1526 = (uint64_t) v219;
+8010:       TASSIGN(v1525, v1526);
+8011:       // pto: %right_kv0_inline1697__ssa_v0
+8012:       ;
+8013:       v1527 = Tile<TileType::Right, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8014:       // pto: %right_kv0_inline1697__ssa_v0
+8015:       ;
+8016:       v1528 = (uint64_t) v217;
+8017:       TASSIGN(v1527, v1528);
+8018:       TMOV(v1527, v1525);
+8019:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8020:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+8021:       // pto: %t__tmp_v1
+8022:       ;
+8023:       v1529 = Tile<TileType::Mat, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8024:       // pto: %t__tmp_v1
+8025:       ;
+8026:       v1530 = (uint64_t) v218;
+8027:       TASSIGN(v1529, v1530);
+8028:       // pto: %right_kv1_inline1685__ssa_v0
+8029:       ;
+8030:       v1531 = Tile<TileType::Right, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8031:       // pto: %right_kv1_inline1685__ssa_v0
+8032:       ;
+8033:       v1532 = (uint64_t) v226;
+8034:       TASSIGN(v1531, v1532);
+8035:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID2);
+8036:       TMOV(v1531, v1529);
+8037:       // pto: %436
+8038:       ;
+8039:       v1533 = v4640 == v267;
+8040:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8041:       if (v1533) {
+8042:         TMATMUL(v1453, v1521, v1527);
+8043:       } else {
+8044:         TMATMUL_ACC(v1453, v1453, v1521, v1527);
+8045:       };
+8046:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+8047:       // pto: %t__tmp_v2
+8048:       ;
+8049:       v1534 = Tile<TileType::Mat, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8050:       // pto: %t__tmp_v2
+8051:       ;
+8052:       v1535 = (uint64_t) v221;
+8053:       TASSIGN(v1534, v1535);
+8054:       // pto: %right_gate0_inline1688__ssa_v0
+8055:       ;
+8056:       v1536 = Tile<TileType::Right, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8057:       // pto: %right_gate0_inline1688__ssa_v0
+8058:       ;
+8059:       v1537 = (uint64_t) v217;
+8060:       TASSIGN(v1536, v1537);
+8061:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+8062:       pipe_barrier(PIPE_MTE1);
+8063:       TMOV(v1536, v1534);
+8064:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8065:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+8066:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8067:       if (v1533) {
+8068:         TMATMUL(v1455, v1521, v1536);
+8069:       } else {
+8070:         TMATMUL_ACC(v1455, v1455, v1521, v1536);
+8071:       };
+8072:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+8073:       pipe_barrier(PIPE_M);
+8074:       TMATMUL_ACC(v1453, v1453, v1523, v1531);
+8075:       // pto: %t__tmp_v3
+8076:       ;
+8077:       v1538 = Tile<TileType::Mat, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8078:       // pto: %t__tmp_v3
+8079:       ;
+8080:       v1539 = (uint64_t) v234;
+8081:       TASSIGN(v1538, v1539);
+8082:       // pto: %right_gate1_inline1676__ssa_v0
+8083:       ;
+8084:       v1540 = Tile<TileType::Right, bfloat16_t, 512, 32, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v257, v252);
+8085:       // pto: %right_gate1_inline1676__ssa_v0
+8086:       ;
+8087:       v1541 = (uint64_t) v217;
+8088:       TASSIGN(v1540, v1541);
+8089:       wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+8090:       pipe_barrier(PIPE_MTE1);
+8091:       wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID3);
+8092:       TMOV(v1540, v1538);
+8093:       set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8094:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
+8095:       wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+8096:       TMATMUL_ACC(v1455, v1455, v1523, v1540);
+8097:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+8098:     };
+8099:     wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+8100:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
+8101:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+8102:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+8103:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+8104:     set_flag(PIPE_M, PIPE_FIX, EVENT_ID5);
+8105:     // pto: %438
+8106:     ;
+8107:     v1542 = v1451 < v267 ? v267 : v1451;
+8108:     // pto: %439
+8109:     ;
+8110:     v1543 = v1452 < v267 ? v267 : v1452;
+8111:     // pto: %idx_value__ssa_v0_pview
+8112:     ;
+8113:     v1544 = PTOAS__GLOBAL_TENSOR_DATA(v476);
+8114:     // pto: %idx_value__ssa_v0_pview
+8115:     ;

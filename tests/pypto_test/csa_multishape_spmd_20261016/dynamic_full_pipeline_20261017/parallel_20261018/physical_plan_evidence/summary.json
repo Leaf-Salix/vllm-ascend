@@ -1,0 +1,94 @@
+{
+  "candidate": "PLAN_PHYSICAL_ROWS",
+  "baseline": "593c5d25",
+  "enabled_by_default": false,
+  "task": "task_20261018_010403_360472313010",
+  "task_status": "completed (exit=0)",
+  "device": 0,
+  "full_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/physical_plan_h131072_b16_v2/result.json",
+  "matrix_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/physical_plan_h131072_b16_v2/source_matrix/result.json",
+  "private_device_oracle": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-physical-plan-20261018/tests/pypto_test/ultra_physical_plan_20261018/device_probe_v1/result.json",
+  "private_device_oracle_cases": 15,
+  "cpu_oracle_runs": 132,
+  "cpu_first_attempt_passed": true,
+  "full_csa_validated": true,
+  "metadata_replay_passed": true,
+  "metadata_graph_replays": 6,
+  "graph_replay_validated": true,
+  "matrix_checks": 7,
+  "l1_windows_per_side": 5,
+  "statistics_us": {
+    "dynamic_pto": {
+      "samples_us": [
+        887.82,
+        880.32,
+        858.44,
+        894.06,
+        874.94
+      ],
+      "median_us": 880.32
+    },
+    "spmd_candidate": {
+      "samples_us": [
+        906.1,
+        893.26,
+        897.44,
+        889.88,
+        901.88
+      ],
+      "median_us": 897.44
+    },
+    "spmd_reference": {
+      "samples_us": [
+        913.06,
+        902.06,
+        904.24,
+        907.82,
+        904.78
+      ],
+      "median_us": 904.78
+    }
+  },
+  "comparison": {
+    "spmd_candidate": {
+      "latency_reduction_pct": -1.94474736459469,
+      "target_met": false
+    },
+    "spmd_reference": {
+      "latency_reduction_pct": -2.778535078153399,
+      "target_met": false
+    }
+  },
+  "candidate_vs_reference": {
+    "reference_us": 904.78,
+    "candidate_us": 897.44,
+    "latency_reduction_pct": 0.8112469329560668
+  },
+  "protocol": {
+    "spmd_candidate": {
+      "passed": true,
+      "before": 9,
+      "calls": 9
+    },
+    "spmd_reference": {
+      "passed": true,
+      "before": 1,
+      "calls": 9
+    }
+  },
+  "changed_files": [
+    "attention_plan_stages.py",
+    "attention_stream_stages.py",
+    "entry.py",
+    "policy.py",
+    "vector_schedule.py"
+  ],
+  "recommendation": "保持默认关闭，作为有限容量物理行plan的完整正确性候选留存；仅0.81%旧SPMD名义改善，不继续本轮扩测，不声称30%目标有进展。",
+  "limits": [
+    "仅128K/B16完整层性能；其它六档未测",
+    "C/P支持区间以外完整回退",
+    "页容量2**24边界只做CPU oracle与INT32代码生成审计，设备实际页容量为19和代表完整cache",
+    "5窗口没有独立统计显著性结论，不能把子阶段指令减少折算整层收益",
+    "未改主仓/依赖/共享安装，未commit/push"
+  ]
+}
