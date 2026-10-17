@@ -1,0 +1,235 @@
+17855:         wait_flag_dev(v4238);
+17856:         // pto: %pv_probability_inline12465__ssa_v0
+17857:         ;
+17858:         v4239 = Tile<TileType::Mat, bfloat16_t, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v249, v258);
+17859:         // pto: %pv_probability_inline12465__ssa_v0
+17860:         ;
+17861:         v4240 = (uint64_t) v243;
+17862:         TASSIGN(v4239, v4240);
+17863:         // pto: %2043
+17864:         ;
+17865:         v4241 = v4237 < v267 ? v267 : v4237;
+17866:         // pto: %probability_ring__ssa_v0_pview
+17867:         ;
+17868:         v4242 = PTOAS__GLOBAL_TENSOR_DATA(v647);
+17869:         // pto: %probability_ring__ssa_v0_pview
+17870:         ;
+17871:         // pto: %probability_ring__ssa_v0_pview
+17872:         ;
+17873:         // pto: %probability_ring__ssa_v0_pview
+17874:         ;
+17875:         v4245 = pto::Shape<1, 1, 1, 64, 128>();
+17876:         // pto: %probability_ring__ssa_v0_pview
+17877:         ;
+17878:         v4246 = pto::Stride<8192, 8192, 8192, 128, 1>();
+17879:         // pto: %probability_ring__ssa_v0_pview
+17880:         ;
+17881:         v4247 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<8192, 8192, 8192, 128, 1>, pto::Layout::ND>(v4242 + (v4243 + v4241 * v4244), v4245, v4246);
+17882:         TLOAD(v4239, v4247);
+17883:         set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+17884:         // pto: %2045
+17885:         ;
+17886:         v4248 = (int64_t) ((uint64_t) v4236 * (uint64_t) v258);
+17887:         // pto: %pv_probability_left_inline12462__ssa_v0
+17888:         ;
+17889:         v4249 = Tile<TileType::Left, bfloat16_t, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v249, v258);
+17890:         // pto: %pv_probability_left_inline12462__ssa_v0
+17891:         ;
+17892:         v4250 = (uint64_t) v217;
+17893:         TASSIGN(v4249, v4250);
+17894:         wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+17895:         pipe_barrier(PIPE_MTE1);
+17896:         TMOV(v4249, v4239);
+17897:         // pto: %pv_first_right_inline12469__ssa_v0
+17898:         ;
+17899:         v4251 = Tile<TileType::Right, bfloat16_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+17900:         // pto: %pv_first_right_inline12469__ssa_v0
+17901:         ;
+17902:         v4252 = (uint64_t) v217;
+17903:         TASSIGN(v4251, v4252);
+17904:         v4253 = static_cast<uint16_t>(v4248);
+17905:         v4254 = static_cast<uint16_t>(v267);
+17906:         TEXTRACT(v4251, v918, v4253, v4254);
+17907:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17908:         // pto: %pv_previous_inline12461__ssa_v0
+17909:         ;
+17910:         v4255 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+17911:         // pto: %pv_previous_inline12461__ssa_v0
+17912:         ;
+17913:         v4256 = (uint64_t) v217;
+17914:         TASSIGN(v4255, v4256);
+17915:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17916:         TMATMUL(v4255, v4249, v4251);
+17917:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+17918:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+17919:         // pto: %pv_next_right_inline12459__ssa_v0
+17920:         ;
+17921:         v4257 = Tile<TileType::Right, bfloat16_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+17922:         // pto: %pv_next_right_inline12459__ssa_v0
+17923:         ;
+17924:         v4258 = (uint64_t) v217;
+17925:         TASSIGN(v4257, v4258);
+17926:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+17927:         v4259 = static_cast<uint16_t>(v4248);
+17928:         v4260 = static_cast<uint16_t>(v258);
+17929:         TEXTRACT(v4257, v918, v4259, v4260);
+17930:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17931:         // pto: %pv_current_inline12467__ssa_v0
+17932:         ;
+17933:         v4261 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+17934:         // pto: %pv_current_inline12467__ssa_v0
+17935:         ;
+17936:         v4262 = (uint64_t) v226;
+17937:         TASSIGN(v4261, v4262);
+17938:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17939:         TMATMUL(v4261, v4249, v4257);
+17940:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+17941:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+17942:         // pto: %pv_ring__ssa_v0_pview
+17943:         ;
+17944:         v4263 = PTOAS__GLOBAL_TENSOR_DATA(v656);
+17945:         // pto: %pv_ring__ssa_v0_pview
+17946:         ;
+17947:         // pto: %pv_ring__ssa_v0_pview
+17948:         ;
+17949:         // pto: %pv_ring__ssa_v0_pview
+17950:         ;
+17951:         v4266 = pto::Shape<1, 1, 1, 64, 128>();
+17952:         // pto: %pv_ring__ssa_v0_pview
+17953:         ;
+17954:         v4267 = pto::Stride<32768, 32768, 32768, 512, 1>();
+17955:         // pto: %pv_ring__ssa_v0_pview
+17956:         ;
+17957:         v4268 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<32768, 32768, 32768, 512, 1>, pto::Layout::ND>(v4263 + (v4264 + v4241 * v4265), v4266, v4267);
+17958:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+17959:         pipe_barrier(PIPE_FIX);
+17960:         TSTORE(v4268, v4255);
+17961:         set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+17962:         // pto: %pv_previous_inline12461__ssa_v1
+17963:         ;
+17964:         v4269 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+17965:         // pto: %pv_previous_inline12461__ssa_v1
+17966:         ;
+17967:         v4270 = (uint64_t) v226;
+17968:         TASSIGN(v4269, v4270);
+17969:         // pto: %pv_next_right_inline12459__ssa_v1
+17970:         ;
+17971:         v4271 = Tile<TileType::Right, bfloat16_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+17972:         // pto: %pv_next_right_inline12459__ssa_v1
+17973:         ;
+17974:         v4272 = (uint64_t) v217;
+17975:         TASSIGN(v4271, v4272);
+17976:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+17977:         v4273 = static_cast<uint16_t>(v4248);
+17978:         v4274 = static_cast<uint16_t>(v248);
+17979:         TEXTRACT(v4271, v918, v4273, v4274);
+17980:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17981:         // pto: %pv_current_inline12467__ssa_v1
+17982:         ;
+17983:         v4275 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+17984:         // pto: %pv_current_inline12467__ssa_v1
+17985:         ;
+17986:         v4276 = (uint64_t) v217;
+17987:         TASSIGN(v4275, v4276);
+17988:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+17989:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+17990:         TMATMUL(v4275, v4249, v4271);
+17991:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+17992:         set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+17993:         // pto: %2048
+17994:         ;
+17995:         v4277 = PTOAS__GLOBAL_TENSOR_DATA(v656);
+17996:         // pto: %2048
+17997:         ;
+17998:         // pto: %2048
+17999:         ;
+18000:         // pto: %2048
+18001:         ;
+18002:         v4280 = pto::Shape<1, 1, 1, 64, 128>();
+18003:         // pto: %2048
+18004:         ;
+18005:         v4281 = pto::Stride<32768, 32768, 32768, 512, 1>();
+18006:         // pto: %2048
+18007:         ;
+18008:         v4282 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<32768, 32768, 32768, 512, 1>, pto::Layout::ND>(v4277 + (v4278 + v4241 * v4279), v4280, v4281);
+18009:         pipe_barrier(PIPE_FIX);
+18010:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+18011:         TSTORE(v4282, v4269);
+18012:         set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+18013:         // pto: %pv_previous_inline12461__ssa_v2
+18014:         ;
+18015:         v4283 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+18016:         // pto: %pv_previous_inline12461__ssa_v2
+18017:         ;
+18018:         v4284 = (uint64_t) v217;
+18019:         TASSIGN(v4283, v4284);
+18020:         // pto: %pv_next_right_inline12459__ssa_v2
+18021:         ;
+18022:         v4285 = Tile<TileType::Right, bfloat16_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+18023:         // pto: %pv_next_right_inline12459__ssa_v2
+18024:         ;
+18025:         v4286 = (uint64_t) v217;
+18026:         TASSIGN(v4285, v4286);
+18027:         wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+18028:         v4287 = static_cast<uint16_t>(v4248);
+18029:         v4288 = static_cast<uint16_t>(v300);
+18030:         TEXTRACT(v4285, v918, v4287, v4288);
+18031:         set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+18032:         // pto: %pv_current_inline12467__ssa_v2
+18033:         ;
+18034:         v4289 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+18035:         // pto: %pv_current_inline12467__ssa_v2
+18036:         ;
+18037:         v4290 = (uint64_t) v226;
+18038:         TASSIGN(v4289, v4290);
+18039:         wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+18040:         wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+18041:         TMATMUL(v4289, v4249, v4285);
+18042:         set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+18043:         // pto: %2050
+18044:         ;
+18045:         v4291 = PTOAS__GLOBAL_TENSOR_DATA(v656);
+18046:         // pto: %2050
+18047:         ;
+18048:         // pto: %2050
+18049:         ;
+18050:         // pto: %2050
+18051:         ;
+18052:         v4294 = pto::Shape<1, 1, 1, 64, 128>();
+18053:         // pto: %2050
+18054:         ;
+18055:         v4295 = pto::Stride<32768, 32768, 32768, 512, 1>();
+18056:         // pto: %2050
+18057:         ;
+18058:         v4296 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<32768, 32768, 32768, 512, 1>, pto::Layout::ND>(v4291 + (v4292 + v4241 * v4293), v4294, v4295);
+18059:         pipe_barrier(PIPE_FIX);
+18060:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+18061:         TSTORE(v4296, v4283);
+18062:         // pto: %pv_previous_inline12461__ssa_v3
+18063:         ;
+18064:         v4297 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+18065:         // pto: %pv_previous_inline12461__ssa_v3
+18066:         ;
+18067:         v4298 = (uint64_t) v226;
+18068:         TASSIGN(v4297, v4298);
+18069:         // pto: %2052
+18070:         ;
+18071:         v4299 = PTOAS__GLOBAL_TENSOR_DATA(v656);
+18072:         // pto: %2052
+18073:         ;
+18074:         // pto: %2052
+18075:         ;
+18076:         // pto: %2052
+18077:         ;
+18078:         v4302 = pto::Shape<1, 1, 1, 64, 128>();
+18079:         // pto: %2052
+18080:         ;
+18081:         v4303 = pto::Stride<32768, 32768, 32768, 512, 1>();
+18082:         // pto: %2052
+18083:         ;
+18084:         v4304 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<32768, 32768, 32768, 512, 1>, pto::Layout::ND>(v4299 + (v4300 + v4241 * v4301), v4302, v4303);
+18085:         pipe_barrier(PIPE_FIX);
+18086:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+18087:         TSTORE(v4304, v4297);
+18088:         v4305 = getFFTSMsg(FFTS_MODE_VAL, v302);
+18089:         ffts_cross_core_sync(PIPE_FIX, v4305);

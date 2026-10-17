@@ -1,0 +1,446 @@
+{
+  "run": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1",
+  "scope": "同一次已完成guard_elision长B16作业，选原task及未删guard的d253 reference；不把被否决candidate当正式基线。",
+  "read_only_inputs": true,
+  "compiled": false,
+  "device_submitted": false,
+  "candidate_proposed": false,
+  "sides": {
+    "task": {
+      "files": {
+        "cpp": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/_decode_csa_tp1_layer_sh8x34u9/ptoas/qk_pv.cpp",
+          "bytes": 195761
+        },
+        "pto": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/_decode_csa_tp1_layer_sh8x34u9/ptoas/qk_pv.pto",
+          "bytes": 267958
+        },
+        "actual_wrapper": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/_decode_csa_tp1_layer_sh8x34u9/kernels/aiv/qk_pv_aiv.cpp",
+          "bytes": 206043
+        }
+      },
+      "segments": {
+        "compressed_loop": {
+          "raw_lines": [
+            1776,
+            1830
+          ],
+          "wrapper_start_line": 1797,
+          "raw_segment_bytes": 2842,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "TLOAD": 1
+          }
+        },
+        "zero_common": {
+          "raw_lines": [
+            1363,
+            1387
+          ],
+          "wrapper_start_line": 1384,
+          "raw_segment_bytes": 1137,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "pipe_barrier": 1,
+            "wait_flag": 6,
+            "TEXPANDS": 1,
+            "set_flag": 6
+          }
+        },
+        "zero_compressed": {
+          "raw_lines": [
+            1771,
+            1775
+          ],
+          "wrapper_start_line": 1792,
+          "raw_segment_bytes": 181,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "pipe_barrier": 1,
+            "TEXPANDS": 1,
+            "set_flag": 1,
+            "wait_flag": 1
+          }
+        },
+        "ring_store_join": {
+          "raw_lines": [
+            1831,
+            1871
+          ],
+          "wrapper_start_line": 1852,
+          "raw_segment_bytes": 2146,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "set_flag": 8,
+            "wait_flag": 8,
+            "TSTORE": 1
+          }
+        },
+        "tick_reuse": {
+          "raw_lines": [
+            1342,
+            1356
+          ],
+          "wrapper_start_line": 1363,
+          "raw_segment_bytes": 490,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "wait_flag": 2
+          }
+        }
+      },
+      "allocations": {
+        "qk_l1": {
+          "pto_line": 33,
+          "byte_address": 65536,
+          "rows": 384,
+          "cols": 512,
+          "dtype": "bf16"
+        },
+        "qk_kv_half": {
+          "pto_line": 250,
+          "byte_address": 69888,
+          "rows": 64,
+          "cols": 512,
+          "dtype": "bf16"
+        },
+        "running_left": {
+          "pto_line": 321,
+          "byte_address": 4352,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "running_right": {
+          "pto_line": 323,
+          "byte_address": 37120,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "qk_reduce_tmp": {
+          "pto_line": 605,
+          "byte_address": 69888,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "f32"
+        },
+        "qk_scores_half": {
+          "pto_line": 606,
+          "byte_address": 135680,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "f32"
+        },
+        "qk_mi": {
+          "pto_line": 620,
+          "byte_address": 168448,
+          "rows": 32,
+          "cols": 1,
+          "dtype": "f32"
+        },
+        "qk_li": {
+          "pto_line": 626,
+          "byte_address": 173056,
+          "rows": 32,
+          "cols": 1,
+          "dtype": "f32"
+        },
+        "qk_probability": {
+          "pto_line": 628,
+          "byte_address": 69888,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "bf16"
+        },
+        "pv_left": {
+          "pto_line": 726,
+          "byte_address": 69888,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "pv_right": {
+          "pto_line": 737,
+          "byte_address": 69888,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "reset_left": {
+          "pto_line": 941,
+          "byte_address": 4352,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "reset_right": {
+          "pto_line": 943,
+          "byte_address": 37120,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        }
+      },
+      "compressed_loop": {
+        "rows": 64,
+        "candidate_order": "(block-1)*128+lane*64+row",
+        "scalar_indirection_loads_per_valid_row": 2,
+        "kv_load": "1x512 BF16 contiguous, direct into final 64x512 UB subrow",
+        "local_wait_or_copy_inside_row_loop": false
+      }
+    },
+    "fused_d253": {
+      "files": {
+        "cpp": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/decode_csa_spmd_mqgq0rdn/ptoas/dynamic_csa_full.cpp",
+          "bytes": 2465976
+        },
+        "pto": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/decode_csa_spmd_mqgq0rdn/ptoas/dynamic_csa_full.pto",
+          "bytes": 4248537
+        },
+        "actual_wrapper": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1/build_output/decode_csa_spmd_mqgq0rdn/kernels/aiv/vector_schedule.cpp",
+          "bytes": 2517544
+        }
+      },
+      "segments": {
+        "compressed_loop": {
+          "raw_lines": [
+            58190,
+            58281
+          ],
+          "wrapper_start_line": 58235,
+          "raw_segment_bytes": 2525,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "TLOAD": 1
+          }
+        },
+        "zero_common": {
+          "raw_lines": [
+            57510,
+            57524
+          ],
+          "wrapper_start_line": 57555,
+          "raw_segment_bytes": 671,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "pipe_barrier": 1,
+            "wait_flag": 1,
+            "TEXPANDS": 1,
+            "set_flag": 7
+          }
+        },
+        "zero_to_mte2_join": {
+          "raw_lines": [
+            57779,
+            57800
+          ],
+          "wrapper_start_line": 57824,
+          "raw_segment_bytes": 530,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "wait_flag": 6
+          }
+        },
+        "ring_store_join": {
+          "raw_lines": [
+            58283,
+            58313
+          ],
+          "wrapper_start_line": 58328,
+          "raw_segment_bytes": 1485,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "set_flag": 7,
+            "wait_flag": 7,
+            "TSTORE": 1
+          }
+        },
+        "tick_reuse": {
+          "raw_lines": [
+            57472,
+            57490
+          ],
+          "wrapper_start_line": 57517,
+          "raw_segment_bytes": 519,
+          "direct_text_in_actual_wrapper": true,
+          "calls": {
+            "wait_flag": 2
+          }
+        }
+      },
+      "allocations": {
+        "qk_l1": {
+          "pto_line": 273,
+          "byte_address": 65536,
+          "rows": 384,
+          "cols": 512,
+          "dtype": "bf16"
+        },
+        "qk_kv_half": {
+          "pto_line": 4607,
+          "byte_address": 65536,
+          "rows": 64,
+          "cols": 512,
+          "dtype": "bf16"
+        },
+        "running_left": {
+          "pto_line": 12601,
+          "byte_address": 0,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "running_right": {
+          "pto_line": 12603,
+          "byte_address": 32768,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "qk_reduce_tmp": {
+          "pto_line": 13034,
+          "byte_address": 65536,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "f32"
+        },
+        "qk_scores_half": {
+          "pto_line": 13035,
+          "byte_address": 81920,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "f32"
+        },
+        "qk_mi": {
+          "pto_line": 13049,
+          "byte_address": 98304,
+          "rows": 32,
+          "cols": 1,
+          "dtype": "f32"
+        },
+        "qk_li": {
+          "pto_line": 13055,
+          "byte_address": 98432,
+          "rows": 32,
+          "cols": 1,
+          "dtype": "f32"
+        },
+        "qk_probability": {
+          "pto_line": 13057,
+          "byte_address": 65536,
+          "rows": 32,
+          "cols": 128,
+          "dtype": "bf16"
+        },
+        "pv_left": {
+          "pto_line": 13155,
+          "byte_address": 65536,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "pv_right": {
+          "pto_line": 13166,
+          "byte_address": 65536,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "reset_left": {
+          "pto_line": 13371,
+          "byte_address": 0,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        },
+        "reset_right": {
+          "pto_line": 13373,
+          "byte_address": 32768,
+          "rows": 32,
+          "cols": 256,
+          "dtype": "f32"
+        }
+      },
+      "compressed_loop": {
+        "rows": 64,
+        "candidate_order": "(block-1)*128+lane*64+row",
+        "scalar_indirection_loads_per_valid_row": 2,
+        "kv_load": "1x512 BF16 contiguous, direct into final 64x512 UB subrow",
+        "local_wait_or_copy_inside_row_loop": false
+      }
+    }
+  },
+  "source_positions": {
+    "task": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py:482-528",
+    "actual_fused_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_attention_guard_elision_20261018/source_before/attention_stream_stages.py:261-322",
+    "fused_query_geometry": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_attention_guard_elision_20261018/source_before/attention_plan_stages.py:310-343",
+    "fused": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_attention_guard_elision_20261018/source_before/attention_stream_stages.py:261-322"
+  },
+  "address_normal_form": {
+    "index": "r=indices[t, (sb-1)*128+64*lane+row]",
+    "page": "p=compressed_table[request, r//32]",
+    "cache_byte_address": "cache_base + 1024*max(32*p+r%32,0)",
+    "ub_byte_address": "KV_UB_BASE + 1024*row (task base69888, fused65536)",
+    "ring_byte_address": "ring_base + 1024*(128*(3*group+tick%3)+64*lane)",
+    "guard_difference": "fused additionally checks column<table_cols and 0<=page<physical_pages; already rejected guard-elision isolated those checks.",
+    "geometry_difference": "task request=t//6; fused derives request and causal position from dynamic Q/L each valid block; cached-plan geometry was already tested."
+  },
+  "tick_counterexamples": [
+    {
+      "query_ordinal": 0,
+      "first_compressed_tick": 1,
+      "previous_query_final_publish_tick": null,
+      "first_compressed_ring_slot": 1,
+      "query_per_group": "group+24*q",
+      "uniform_s6_request": "group//6+4*q"
+    },
+    {
+      "query_ordinal": 1,
+      "first_compressed_tick": 6,
+      "previous_query_final_publish_tick": 7,
+      "first_compressed_ring_slot": 0,
+      "query_per_group": "group+24*q",
+      "uniform_s6_request": "group//6+4*q"
+    },
+    {
+      "query_ordinal": 2,
+      "first_compressed_tick": 11,
+      "previous_query_final_publish_tick": 12,
+      "first_compressed_ring_slot": 2,
+      "query_per_group": "group+24*q",
+      "uniform_s6_request": "group//6+4*q"
+    },
+    {
+      "query_ordinal": 3,
+      "first_compressed_tick": 16,
+      "previous_query_final_publish_tick": 17,
+      "first_compressed_ring_slot": 1,
+      "query_per_group": "group+24*q",
+      "uniform_s6_request": "group//6+4*q"
+    }
+  ],
+  "zero_correction": {
+    "task_common_pto_line": 345,
+    "task_compressed_extra_pto_line": 508,
+    "task_common_cpp_line": 1373,
+    "task_compressed_extra_cpp_line": 1773,
+    "fused_common_cpp_line": 57517,
+    "task_compressed_executes_two_initializations": true,
+    "fused_compressed_executes_one_initialization": true,
+    "previous_report_statement": "旧attention_readonly_audit将两TEXPANDS解释为互斥SWA/压缩分支；当前实际原物显示第一条在分支前、第二条在压缩else，需在后续归档更正。",
+    "not_a_new_candidate": "既有qk_scoped_zero/full-valid候选已否决；这里仅修正文档事实。"
+  },
+  "source_order_evidence": {
+    "initialization_fence": "两版均由上一tick KV TSTORE后的MTE3→V EVENT_ID2保护下一tick同一KV缓冲TEXPANDS；融合随后V→MTE2的6路set/wait在SWA/压缩分支外。",
+    "block_one_special_path": false,
+    "why": "融合除sb==0选择SWA外，sb=1..4进入同一64行循环；没有sb==1专属fence、Tile、搬运数或UB地址。",
+    "final_publish_relation": "previous query block4 merge/final occurs at current query block2 gather tick, after current block1; first-ever block1 has no preceding finalpublish at all."
+  },
+  "no_candidate_reason": "核心压缩采集、GM ring和三槽协议没有融合独有的额外行搬运；首块固定慢未对应到专属源级依赖。相邻本核query属于不同request，缺少实际物理行重合证据，不能假定跨query重用。剩余DCache/MTE回压/别名解释无完成事件或地址样本支持，不据此提出新测试。"
+}
