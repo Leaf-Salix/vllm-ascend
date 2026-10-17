@@ -989,3 +989,34 @@ T0..4096、196656个AIV/T与8390656个token块模型PASS，独立复审确认
 本轮没有实测改善；单核最大逻辑列量下降不能替代完整L1收益。正式源保持668，不合入、不扩七档、不追加手工双Right变体；生成物Right仍单槽，且非QB分配/局部barrier变化作为消融边界记录。源码、动态模型、唯一CPU、独立生成审阅、任务日志与全部五窗结果保存于qb_global_n128_evidence。设备结果仅覆盖两代表，未进行Native/token或完整动态区间验收，30%逐档目标未完成。
 
 下一步仅为Score服务区间诊断：复用正式668、128K/B16、三轮A/B/A和原完整精确/图/保护检查，无新优化候选或性能窗。两个agent分别实现C++计时hook与runner，第三agent独立审阅；只采固定j8细分及全step/ACK累计，在原release前一次写本核独占padding。不将插桩累计、局部wait或单panel样本当端到端性能，也不乘16外推；正式源和依赖均不改。
+
+
+## 2026-10-18：正式668 Score服务诊断准备完成并提交唯一任务
+
+本次不是优化候选，正式33源逐字保持668。两个agent分别实现测试C++ hook和runner，第三agent独立审阅。复用已有formal668原始C++做离线检查，没有新启动PyPTO CPU编译。固定128K/B16/S6、long G6/N64/1024，仅本次诊断限制，不改变正式动态支持范围。
+
+hook记录整个Score body/step与ACK，并只在固定第九个QK面板附近采样页/Key、QK+FIX、前一面板WS和原local wait。20个独立起始变量避免嵌套覆盖，独立review逐项核对同一C++大括号作用域。原同步语句序列、Vector活动函数不变，剥离标记逐字恢复原C++。每核只在phase34自己的32..63列一次写入，768唯一word，schema/epoch与计数严格检查；17个反例、0/1/2/3/7/33动态step离线模型通过。仅保留原phase-clock16..19，不混入Attention tick或FFTS20/21。
+
+原phase release承担可见性；本hook没有新增硬件fence，组合的旧phase-clock仍有其既有DCCI/DSB。Scalar区间包括发射、原依赖和插桩扰动，邻接区间含计时开销，不能称纯异步引擎耗时、相加为完整延迟或将j8样本乘16。当前工具无法读取最终A3机器码，未核实CCEC时钟指令次序和spill。
+
+runner复用正式权重、原动态PTO精确oracle、状态/保护区及图代际检查，三轮A→B→A只改变hidden正负，不声称本次切换了history/page metadata。无DFX/L1性能采样窗，eligible_for_performance=false。主提交包装初次字段名不匹配在task-submit前报错，修正为实际ready键后才执行唯一任务，未重复占卡。
+唯一任务：`task_20261018_073047_323892912778`；当前待设备结果，尚不记PASS。源码/runner/设计/离线证据位于score_service_clock_evidence。
+
+
+## 2026-10-18：Score服务诊断完整通过，保留发射与依赖解释边界
+
+唯一任务task_20261018_073047_323892912778完成exit0。eager、graph预热及三轮A/B/A共5次完整检查全部PASS，原PTO精确输出/Top-K/score/cache/state、保护区及72核代际正确，最终generation=5；正式668的33源未变。本次A/B仅hidden正负，未切换history/page，不冒充额外动态metadata验收。
+
+下表是每核本次累计量再取24核中位数（us），不是单panel或完整L1性能。每轮每核均4个叶、22个step、22次ACK、22个固定j8样本和220处local wait。
+
+| 轮次 | body | step | ACK | j8页/Key | j8 QK+FIX | 对应WS | 嵌套local wait |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 232.28 | 214.24 | 30.91 | 3.83 | 0.20 | 7.44 | 6.42 |
+| 1 | 239.39 | 219.23 | 32.27 | 3.84 | 0.20 | 7.43 | 6.28 |
+| 2 | 233.21 | 215.76 | 29.71 | 3.87 | 0.18 | 7.50 | 6.33 |
+
+生成事件映射确认，采样实际为预取Key9、QK8、WS7；10处local wait分为页3处、QK2处、WS5处。最后WS的M→FIX事件位于先发QK8、再发WS7之后，保障此前M队列前缀完成，不能把约7.5us当WS独占计算。6.3us是10站合计，不能归给某个wait，也不与WS直接相减出纯compute。QK+FIX接近0仅说明这段Scalar发射区间短，不代表QK硬件耗时为0。不能将j8乘16、相加嵌套区间或将探针端点当完整性能收益。
+
+同次阶段端点与独立统计见DEVICE_DIAGNOSTIC_CHECKS.json和analysis/；实际事件/生产消费来源见wait_mapping/。三个核组body与ACK呈相同分组趋势，而固定j8页/WS无相同单调趋势，最多支持进一步核对消费相位/背压，不能据此归因硬件慢核。历史全局G3/N128已测并后被G6替代，当前观察不足以重试；另一个G6内部双M192/N128负例独立列出，不混淆两者。
+
+完整探针、runner、源快照、初稿修正、离线/独立审阅、真机结果/日志均在score_service_clock_evidence。无额外L1窗口、无七档重测、无新增正式优化。当前仅继续只读评估不同请求波次的Score/Attention块交错，与旧whole-stage两wave方案排重，核对有向事件顺序和同时live资源；未开始实现或编译。
