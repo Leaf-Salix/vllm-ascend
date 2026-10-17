@@ -155,3 +155,9 @@ Native派生参考及SHA绑定、正式包和overlay增改源码、两版助手�
 Ruff、拼写、shell和禁止导入问题exit1；全仓库格式gate没有通过。
 批量自动修复只发生在临时副本，没有写回正式checkout或重写历史原始证据。
 完整日志保存在本轮本地reports/dsv4-full-pto-8k-b40-20261018/full-format.log。
+
+## 同一完整PTO代码的128K对照
+
+后续[128K/B24、192-token对照](DSV4_FLASH_CSA_TND_COMPLETE_PTO_128K_B24_20261018.md)
+也已通过：384条请求、73728token全部与原Native一致，78轮入场/外层位摘要及接受事件一致。
+每rank提交24条、实际峰值21条，零抢占；不重跑Native2，数学源码与本组8K相同。
