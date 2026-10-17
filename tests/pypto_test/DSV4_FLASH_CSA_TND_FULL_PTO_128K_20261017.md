@@ -8,7 +8,7 @@ rank0的target hidden、三组aux hidden及MTP residual位摘要均与冻结Nati
 
 截至停止，全部16rank的75轮实际设备输入和入场轨迹与Native1完全相同；
 rank0前74轮outer浮点摘要一致。差异已经缩小到首次使用FULL6的实际执行，
-**尚未定位具体模块或误差幅度，不能直接归因于新恢复的Indexer投影。**
+**本任务未定位内部模块；后续同轨迹hook已定位到L20的attention heads边界，见下文关联记录。**
 
 原8K/B40通过结果保留，但不能外推到本长档或真实活跃的FULL6。
 本轮未修改模型数学、旧混合精度基准或性能版，未提交后续大配置或Native2。
@@ -30,7 +30,7 @@ rank0前74轮outer浮点摘要一致。差异已经缩小到首次使用FULL6的
 | 图/容量 | FULL_DECODE_ONLY `[6,144]`；max_num_batched_tokens=400；固定24000 KV blocks；gpu util=0.97 |
 | 确定性 | level1、Torch确定性、HCCL_DETERMINISTIC=true、atomic0、NZ2、event1、EPLB关闭 |
 | 环境 | CANN9.2 beta2、ATB9.2 ABI1、Torch2.10.0、Torch-NPU2.10.0.post2、vLLM0.25.1；复用既有私有PyPTO/Simpler工具链 |
-| 替换范围 | 配置为21层CSA使用tnd_full_precision、20层HCA使用Native；O-proj仍复用Native |
+| 替换范围 | 配置为21层CSA使用tnd_full_precision，非CSA层保留Native；O-proj仍复用Native |
 | 当前恢复的PTO部分 | HC-pre、输入Norm、WKV、Indexer权重投影、HC-post，以及已有CSA主体；保留真实TND请求边界 |
 | Native对照 | 冻结任务`task_20261016_091954_247756916995`的Native1，未重新提交 |
 | 新CSA任务 | `task_20261017_130310_40506967427`，16卡，max-time780秒 |
@@ -108,3 +108,5 @@ task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
 
 相关基准：[8K/B40 Indexer恢复结果](DSV4_FLASH_CSA_TND_INDEXER_PROJECTION_20261017.md)、
 [旧混合精度版128K通过结果](DSV4_FLASH_CSA_TND_192_ADMISSION_RETEST_20261016.md)。
+
+后续定位：[首次FULL6同输入内部hook记录](DSV4_FLASH_CSA_TND_FULL6_LOCALIZATION_20261017.md)。
