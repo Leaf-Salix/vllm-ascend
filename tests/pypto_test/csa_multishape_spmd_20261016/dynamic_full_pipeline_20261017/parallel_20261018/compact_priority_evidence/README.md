@@ -2,7 +2,8 @@
 
 基线593c5d25，2026-10-18。只在独立worktree修改两份动态编排源码；
 没有改生产数学helper、共享依赖或安装，也没有将输入shape固化。
-完整过程将在主工作区`parallel_20261018/compact_priority_evidence/`归档。
+完整过程已在主工作区`parallel_20261018/compact_priority_evidence/`归档；
+同源码七档均完成当前S6精度/图/协议验收，详见[SEVEN_CASES.md](SEVEN_CASES.md)。
 
 ## 问题与实际改动
 
@@ -52,20 +53,44 @@ Cube68条、Vector159条均相同；仅两个调度文件变化。数学、owner
 
 相对同轮旧SPMD降低2.703%（24.68μs）；相对原task仍慢3.123%，30%目标
 未达到。不与其它任务物理plan或L0候选的数字相加计算组合收益。
-这只验收该S6代表场景，对Native精度/整网token、整层mixedQ/空rank或
-连续状态轨迹没有新结论。当前正式默认和完整七档表尚未改变。
+这段数字只对应长B16；完整七档已补齐，见[SEVEN_CASES.md](SEVEN_CASES.md)。
+七档仅验收各自当前S6 fixture，对Native精度/整网token、整层mixedQ/空rank或
+连续状态轨迹没有新结论。
 
-8K/B32代表另一策略，任务`task_20261018_014358_34138622015`已提交；
-在终态结果前不记通过或推广到整个区间。之后再决定是否继续采用。
+## 短历史代表通过，迁回正式动态源
+
+8K/B32另一策略任务`task_20261018_014358_34138622015`已完成exit0，
+全部数值、图、保护及代际检查通过。同进程五窗完整L1：
+
+| 实现 | 五窗μs | 中位数μs |
+| --- | --- | ---: |
+| 原动态分task | 998.48 / 1041.28 / 1010.42 / 985.76 / 983.26 | 998.48 |
+| 593旧SPMD | 1024.52 / 1024.26 / 1027.80 / 1010.24 / 1029.14 | 1024.52 |
+| compact优先 | 1001.86 / 999.22 / 1005.68 / 989.46 / 1001.56 | 1001.56 |
+
+相对同轮旧SPMD降低2.241%（22.96μs），相对原task仍慢0.308%，未达30%。
+两个策略代表均有改善后，主会话只将cube/vector_schedule两份文件搬入正式
+动态包；33份Python源码与已验证冻结候选逐字一致，见formal_migration.json。
+没有叠加物理plan、本地score或L0候选，没有新增静态shape/测试点白名单。
+
+同源码其余128K B4/B8/B24/B28及8K B16已各完成一次exit0，当前fixture
+完整精度、图、保护区与代际协议均通过；已完成长B16/短B32未重测。
+[SEVEN_CASES.json](SEVEN_CASES.json)保留七档三方共105窗引用、全部原始五样本
+及逐项验收状态。七档相对同轮593降低1.73%–4.98%，但仍比原task慢
+0.31%–6.09%；相对原task至少降低30%的门槛全部未达。Native/token不在验收范围。
 
 ## 复现与本地大产物
 
 从主工作区调用`dynamic_full_pipeline_20261017/run_device.sh`，不能从私有
 worktree复制的包装脚本推导环境根。设备须经`task-submit --device auto`：
-`--history 131072 --batch 16 --spmd-source 本目录/source_snapshot
+`--history 131072 --batch 16 --spmd-source formal_migration.json中的tested_snapshot
 --source-matrix-reference 主parallel目录/baseline_source --wait-backoff --l1-windows 5`。
-短档替换history/batch为8192/32。完整任务记录见device_job.json及
-`device_medium_job.json`；所有日志保留，没有hash校验。
+短档替换history/batch为8192/32。代表任务记录见device_job.json及
+`device_medium_job.json`；补齐五档的精确命令、脚本和stdout/stderr见
+[remaining_five/compact_priority_remaining_jobs.json](remaining_five/compact_priority_remaining_jobs.json)
+及同目录文本日志。所有原始日志保留，没有hash校验。
 
-CPU大编译目录、原始设备构建和二进制本地保留，只提交路径/大小清单；
-中文记录、脚本、源补丁、JSON、原始L1 tracing和文本日志进入Git。
+CPU大编译目录、原始设备构建和二进制本地保留，只登记路径/大小清单；
+七档build_output、编译binary和大CPP/PTO见
+[LOCAL_ARTIFACTS_REMAINING.json](LOCAL_ARTIFACTS_REMAINING.json)。
+本次归档只复制文本和结果摘要，未复制二进制、未运行Git操作、未重测。

@@ -14,7 +14,9 @@ HC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等�
 请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。
 
 第二段：先Indexer query反量化、head权重与压缩pool/norm，再KV处理、
-Indexer量化/系数和主Query反量化，利用AIC主QB计算时的Vector窗口；主/Indexer
+Indexer query量化/系数、compact key量化与scale提交，再主Query反量化及主压缩。
+让已具备Indexer输入的AIC提前填充Score双槽，本AIV仍先完成主分支再消费Score；
+没有等整段Score或跳过ACK。前移等待的代价须由整层实测判断。主/Indexer
 两条压缩分支直接读写各自Native state。pool全部读完共享prefix历史后才
 提交state。Indexer key并行写槽，32个FP16 scale所在64B区按物理page%48
 分配唯一writer，同页更新顺序执行，避免读改写覆盖；其地址计划由早期planner准备。
@@ -707,6 +709,41 @@ def vector_schedule(
         QUERY_GROUP,
     )
     signal = publish_phase(signal, PHASE_COEFF, core, CORES, generation)
+    # 系数之后先提交Indexer compact key/scale。主Query和主压缩仅供后继
+    # Attention消费，仍在本AIV进入Score之前完成；这里不先等待整段Score。
+    # AIC可以用既有两槽提前生产，槽复用继续由原SCORE_READY/ACK保证。
+    compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+    had_tasks = ((compact_count + 15) // 16) * 2
+    signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
+    idx_scales, idx_debug, idx_cache = indexer_compact_quant_cache_stage(
+        idx_had,
+        positions,
+        idx_bounds,
+        idx_lengths,
+        idx_offsets,
+        idx_slots,
+        idx_scales,
+        idx_debug,
+        idx_cache,
+        worker,
+        VECTORS,
+    )
+    signal = publish_phase(signal, PHASE_IDX_QUANT, core, CORES, generation)
+    # 量化key/中间scale先全部完成；随后物理page%48确定唯一scale页写者。
+    # 同页多offset由同核顺序RMW，不同页并行。空writer也发布完成，消费者
+    # 根据本阶段48个参与者等待；这不同于上一版只等AIV0的阶段合同。
+    signal = wait_row_owners(signal, PHASE_IDX_QUANT, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)
+    idx_cache = indexer_scale_page_commit_stage(
+        idx_scales,
+        group_offsets,
+        idx_cache,
+        tokens,
+        idx_requests,
+        worker,
+        VECTORS,
+    )
+    signal = publish_phase(signal, PHASE_IDX_SCALE, core, CORES, generation)
+
     # 每个head占两个NZ N256列块。首版等全部128列块的24个真实owner。
     signal = wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1)
     q_flat = q_dequant_rope_stage(
@@ -772,38 +809,6 @@ def vector_schedule(
         VECTORS,
     )
     signal = publish_phase(signal, PHASE_MAIN_OUTPUT, core, CORES, generation)
-
-    compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
-    had_tasks = ((compact_count + 15) // 16) * 2
-    signal = wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)
-    idx_scales, idx_debug, idx_cache = indexer_compact_quant_cache_stage(
-        idx_had,
-        positions,
-        idx_bounds,
-        idx_lengths,
-        idx_offsets,
-        idx_slots,
-        idx_scales,
-        idx_debug,
-        idx_cache,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_QUANT, core, CORES, generation)
-    # 量化key/中间scale先全部完成；随后物理page%48确定唯一scale页写者。
-    # 同页多offset由同核顺序RMW，不同页并行。空writer也发布完成，消费者
-    # 根据本阶段48个参与者等待；这不同于上一版只等AIV0的阶段合同。
-    signal = wait_row_owners(signal, PHASE_IDX_QUANT, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)
-    idx_cache = indexer_scale_page_commit_stage(
-        idx_scales,
-        group_offsets,
-        idx_cache,
-        tokens,
-        idx_requests,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_SCALE, core, CORES, generation)
 
     # Score两种角色必须同时可推进。不能先等PHASE_SCORE_CUBE“整段完成”，否则
     # Cube等待AIV归还双缓冲槽，而AIV等待Cube退出，形成环。这里只等输入就绪。

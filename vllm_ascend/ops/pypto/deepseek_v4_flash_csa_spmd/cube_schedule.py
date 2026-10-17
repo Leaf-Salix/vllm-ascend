@@ -6,7 +6,7 @@
 策略选择；没有输入规格白名单、固定S推导请求或冻结的历史DAG。
 
 阅读顺序：HC投影→QA→Indexer压缩/query/head权重→KV→query Hadamard→
-主QB/压缩投影→compact Hadamard→Indexer score→Attention→O_A/O_B。矩阵计算调用各
+主QB→compact Hadamard→主压缩投影→Indexer score→Attention→O_A/O_B。矩阵计算调用各
 *_stages.py的inline函数；本文件只描述何时允许消费数据，不另写数学。
 HC行依赖路径按每个AIC实际消费的M16行等待M8输入，不等无关行；
 每个producer仍发布自己的完整阶段，消费者等待后保留业务缓存获取。
@@ -311,22 +311,9 @@ def cube_schedule(
     q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
     signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
 
-    # 先发布Indexer两种投影和query Hadamard，再执行独立的主压缩投影。
-    # 此时AIV可以做Indexer pool/norm及query量化；主投影不等待这些结果，
-    # 等IDX_NORM放在主投影之后，避免空等，也不改变任一矩阵累加顺序。
-    main_value, main_score = compressor_project_stage(
-        normed,
-        main_wkv,
-        main_wgate,
-        main_value,
-        main_score,
-        worker,
-        GROUPS,
-    )
-    signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
-
-    # 到这里才首次读取公共计划。未参与HC前段的AIV此前已经可以做metadata；
-    # 满核时planner先widen后扫描，仍不会阻止HC投影。每次从实际T重新计算同一owner。
+    # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。
+    # 本轮META早于投影完成；仍显式获取本次计划与所有IDX_NORM生产者。
+    # 不假定CPU时序已保证可见性。每次从真实T重新计算同一planner owner。
     planner = pl.min((tokens + 7) // 8, VECTORS - 1)
     signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
     requests = pl.tensor.dim(idx_lengths, 0)
@@ -341,6 +328,20 @@ def cube_schedule(
         GROUPS,
     )
     signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
+
+    # compact Hadamard已发布；AIV可在这段主压缩投影期间量化并提交Indexer
+    # cache/scale。主压缩的数学、owner和累加顺序均不变。若别的形状下
+    # IDX_NORM较晚，前移的等待可能抵消收益，因此必须实测，不能假定免费。
+    main_value, main_score = compressor_project_stage(
+        normed,
+        main_wkv,
+        main_wgate,
+        main_value,
+        main_score,
+        worker,
+        GROUPS,
+    )
+    signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
 
     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
