@@ -17,6 +17,10 @@
 21层真实权重的三边界/Graph对拍与复现证据；接回后真实8K/B40、192token的完整输出/事件与Native1一致，
 O-proj继续保留Native。
 
+同一候选的[128K/B24首差回归](DSV4_FLASH_CSA_TND_FULL_PTO_128K_20261017.md)未通过：
+前74轮outer摘要一致，第75轮首次实际FULL6出现位差；截至停止全部16rank输入/入场相同。
+首差原件与复现方法已保存，尚未定位具体模块，不能将8K通过结果外推到128K。
+
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
 [整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。
 
