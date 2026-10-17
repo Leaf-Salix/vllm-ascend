@@ -144,4 +144,91 @@ CSA内部历史参数名`native_indexer_weights`保留，实际producer改为PTO
 再提交16卡8K/B40、192token回归。复用既有Native1，不跑整模型Native2。
 采用原来相同的确定性设置、bank、容量、实际入场轨迹与实时outer首差门禁，
 严格验收全部16rank输入/入场、完整640请求与122880输出token、接受事件及rank0 hidden/aux/MTP位摘要。
-本轮不做128K或性能测试。整模型结果与最终证据在完成后另记。
+本轮不做128K或性能测试。整模型结果与最终证据见下文。
+
+## 8K/B40整模型接入回归方案
+
+数学提交`c1ef141ae`已正常推送，13项CPU合约/证据绑定检查通过，增量pre-commit和Markdown检查通过。
+接入经过独立审查；正式kernel数学AST与已测v6完全相同，服务类AST与审查预览相同。
+在step08上只修改`service.py`、新增`indexer_projection.py`和`indexer_order_data.py`，
+独立step09共3361文件；保留已验证Norm入口与测试变体身份guard。
+step09 manifest SHA256：
+`d997d41080882209007134564ca488ce19cfe7f136397b6fd0e389c929001638`。
+这是有明确白名单的旧版本测试overlay，不应称为整份Git tree的逐文件复制。
+
+| 项目 | 参数 |
+| --- | --- |
+| 新CSA任务 | task_20261017_090030_412028016524，16卡，max-time=780秒 |
+| Native对照 | 沿用task_20261016_192621_7066592194，没有提交Native2 |
+| 模型/输入 | DeepSeek-V4-Flash-0731-w8a8真实75分片，固定8192-token bank/40条请求 |
+| 并行/输出 | TP1、DP=EP16，每rank B40；共640请求，每请求192输出token |
+| DSpark | 出5验6，接受事件照原协议实际统计 |
+| 图/容量 | FULL_DECODE_ONLY，[6,240]，max_num_batched_tokens=400，KV blocks=22000，gpu util=0.95 |
+| 确定性 | level1、Torch确定性、HCCL_DETERMINISTIC=true、atomic0、NZ2、event mode1，EPLB关闭 |
+| 替换 | 21层CSA使用full_precision，Indexer三阶段改PTO；20层HCA保持Native |
+| 输出目录 | `lc128/full-pto8k-indexer-production1-20261017` |
+
+占卡前已核验相同环境/导入路径、SDK、全部源SHA、bank公开问题及chat后缀，
+正式两个Indexer程序lower/CCEC成功，字节数117672/122448；没有重装或重编框架。
+bank前缀/cache仍为本实验Native构造，与nalinaly原bank逐字节身份未核验，此限制与原基准相同。
+
+启动与最终CPU验收位于独立`indexer-production-v1`；
+与WKV版相比，只扩大Indexer新增文件/服务源码白名单和显式配置身份。
+输入/入场、原始Native与派生SHA绑定、完整token/events、outer、21层捕获选择和cache门禁均不放松。
+`indexer_module_real_weight_layers_qualified=21`引用本页298项模块证据；
+整模型本次没有内部stage hook，不能将此字段读成21层真实运行中间tensor的逐项观测。
+
+同资产复测用新的输出名，保留历史结果：
+
+```bash
+BASE=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex
+JOB=$BASE/full-pto-model-8k-b40-20261016
+H=$JOB/indexer-production-v1
+bash "$H/preflight.sh"
+task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
+  "bash $H/run-case.sh precision-witness <新的CSA输出名>"
+# 任务结束后仅做CPU验收；run-case禁止Native phase。
+source "$JOB/env.sh"
+export SOURCE_ROOT="$BASE/full-pto-precision-20261017/step09/source"
+export PYTHONPATH="$SOURCE_ROOT:$SOURCE_ROOT/tests/pypto_test:$JOB:$PYTHONPATH"
+python "$H/qualify_production.py" \
+  /data/pyptouser/yejia/lc128/full-pto8k-native-20261016 \
+  /data/pyptouser/yejia/lc128/<新的CSA输出名> --job "$JOB" --output <新的验收JSON>
+```
+
+脚本绑定历史Native1、bank、环境和源清单；迁移必须显式更新资产并重新冻结身份。
+
+### 整模型最终结果
+
+任务exit=0，实际运行7分35秒，符合每任务不超过15分钟。
+[完整CPU验收结果](evidence_tnd_precision/full_pto_20261016/model-8k-indexer-production1-qualified.json)中
+`numeric_pass=true`、`indexer_projection_restored=true`；验收不是仅按退出码或接受率均值判定。
+
+| 检查 | 结果 |
+| --- | --- |
+| 全16rank实际输入与入场轨迹 | 与Native1完全一致 |
+| 完整输出token | 640请求、122880token全部一致，每请求192token |
+| 全部接受事件 | 完全一致，接受0…5计数[1696,2432,2816,2592,2240,14512] |
+| 平均接受草稿数 | 3.7035909920876446，与Native1一致 |
+| 有效生成窗口 | 51轮一致；raw CSA记录52/54轮，非活跃空尾通过原判据后排除 |
+| rank0 target hidden/aux/MTP | 51轮真实行的位摘要全部一致 |
+| 实际并发与抢占 | 每rank峰值40，零抢占 |
+| 实际图执行 | 首步T40为NONE/eager；后续各rank50次FULL240重放 |
+| 替换资格 | 21层CSA两捕获档均PTO，20层HCA保持Native |
+| 缓存 | 全rank bypasses/invalid_entries/storage_errors/forced_rebuilds均0；strict_ready_reuse=false |
+| 范围外 | 没有内部逐层stage hook、Native2、128K或本轮性能测量 |
+
+**结论：本组真实模型测试中，把Indexer投影、缩放及FP16发布改为PTO后，
+完整token、接受事件、实际输入/入场和模型外层位摘要继续与原Native1一致。**
+模块精度证据为前述298项；整模型本次未逐项导出21层内部tensor，
+因此不将外层摘要一致扩展成任意输入、未来CANN版本或所有内部中间值的普遍证明。
+本组活动生成首步每请求1行、后续每请求6行；没有新增非等长请求矩阵测试。
+TND metadata设计与原准入范围保持不变，当前投影数学调用中O-proj仍保留Native。
+
+[两臂完整整模型证据](evidence_tnd_precision/full_pto_20261016/model-8k-indexer-production1-evidence.tar.gz)，
+SHA256=`6a62b0f8e44387e35e7d293bb10cd36142e9ac348866ee586aaae96a65a9b14b`，
+293项文件均已本地逐项校验。包含两臂全部16rank结果、事件、输入轨迹与审计、rank0 outer摘要、
+Native1派生参考及绑定、step05…09清单、运行/预检/验收/归档脚本、两份Native次序表，
+以及6份正式源文件；这些源文件另与本地数学提交逐字节核对一致。
+不含模型权重、venv、大型bank张量和完整源码树，复现依赖前述既存资产。
+原step08/WKV通过数据与原混合精度、性能实现均保留；本轮仅恢复Indexer，不修改O-proj。

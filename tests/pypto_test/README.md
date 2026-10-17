@@ -14,7 +14,8 @@
 全部T1..256模块对拍，以及接回PTO WKV后的8K/B40、192token整模型一致结果。该次回归时Indexer权重投影和O-proj仍为Native。
 
 后续[Indexer投影逐bit恢复](DSV4_FLASH_CSA_TND_INDEXER_PROJECTION_20261017.md)记录首差修正、全部T1..256、
-21层真实权重的三边界/Graph对拍与复现证据；O-proj继续保留Native，整模型接入回归另行记录。
+21层真实权重的三边界/Graph对拍与复现证据；接回后真实8K/B40、192token的完整输出/事件与Native1一致，
+O-proj继续保留Native。
 
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
 [整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。
