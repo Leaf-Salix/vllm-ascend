@@ -1,0 +1,692 @@
+{
+  "scope": "仅只读两档已完成同进程结果及实际生成物；未编译、未上卡、未改源。",
+  "method": "顺序比较 pto.alloc_tile 的角色、物理地址、valid_shape、完整 tile type、源 basename/行/列。仅归一化 inline 编号与数字 SSA 名称；不将 SSA 编号差异当成分配改变。C++ 局部范围逐字确认包含在实际 AIC wrapper，再比较 wait_flag/set_flag/pipe_barrier 的有序调用列表。此列表不代表执行耗时或机器码周期。",
+  "cases": {
+    "long_b16": {
+      "result_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/source_matrix/result.json",
+      "passed": true,
+      "same_process": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            874.14,
+            874.18,
+            870.82,
+            858.64,
+            868.08
+          ],
+          "median_us": 870.82
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            869.84,
+            873.04,
+            870.92,
+            875.52,
+            877.42
+          ],
+          "median_us": 873.04
+        },
+        "spmd_reference": {
+          "samples_us": [
+            881.4,
+            881.02,
+            881.18,
+            886.0,
+            883.74
+          ],
+          "median_us": 881.4
+        }
+      },
+      "candidate_vs_reference": {
+        "reference_us": 881.4,
+        "candidate_us": 873.04,
+        "latency_reduction_pct": 0.9484910369866095
+      },
+      "variants": {
+        "n128": {
+          "root": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj",
+          "artifacts": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj/ptoas/dynamic_csa_full.pto",
+              "bytes": 4248537
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj/ptoas/dynamic_csa_full.cpp",
+              "bytes": 2465976
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj/kernels/aic/cube_schedule.cpp",
+              "bytes": 2517378
+            }
+          ],
+          "allocation_count": 2370,
+          "allocation_count_by_role": {
+            "cube_schedule": 558,
+            "vector_schedule": 1812
+          },
+          "address_upper_bounds_bytes": {
+            "cube_schedule:acc": 131072,
+            "cube_schedule:mat": 475136,
+            "cube_schedule:left": 65536,
+            "cube_schedule:right": 65536,
+            "cube_schedule:vec": 16384,
+            "vector_schedule:vec": 163872
+          },
+          "attention_cpp": {
+            "raw_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj/ptoas/dynamic_csa_full.cpp",
+            "raw_line_start": 17597,
+            "raw_line_end": 18115,
+            "actual_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_q1m9wnpj/kernels/aic/cube_schedule.cpp",
+            "actual_line_start": 17644,
+            "actual_line_end": 18162,
+            "raw_span_is_literal_substring_of_actual": true
+          }
+        },
+        "n256": {
+          "root": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x",
+          "artifacts": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x/ptoas/dynamic_csa_full.pto",
+              "bytes": 4183009
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x/ptoas/dynamic_csa_full.cpp",
+              "bytes": 2460092
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x/kernels/aic/cube_schedule.cpp",
+              "bytes": 2511494
+            }
+          ],
+          "allocation_count": 2364,
+          "allocation_count_by_role": {
+            "cube_schedule": 552,
+            "vector_schedule": 1812
+          },
+          "address_upper_bounds_bytes": {
+            "cube_schedule:acc": 131072,
+            "cube_schedule:mat": 475136,
+            "cube_schedule:left": 65536,
+            "cube_schedule:right": 65536,
+            "cube_schedule:vec": 16384,
+            "vector_schedule:vec": 163872
+          },
+          "attention_cpp": {
+            "raw_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x/ptoas/dynamic_csa_full.cpp",
+            "raw_line_start": 17569,
+            "raw_line_end": 17985,
+            "actual_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h131072_b16_v1/build_output/decode_csa_spmd_zpf_6y0x/kernels/aic/cube_schedule.cpp",
+            "actual_line_start": 17616,
+            "actual_line_end": 18032,
+            "raw_span_is_literal_substring_of_actual": true
+          }
+        }
+      },
+      "outside_attention": {
+        "reference_count": 2178,
+        "candidate_count": 2178,
+        "ordered_records_equal": true
+      },
+      "only_allocation_difference": {
+        "kind": "replace",
+        "n128": [
+          {
+            "line": 3782,
+            "name": "%pv_first_right_inline15550__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              180,
+              17
+            ]
+          },
+          {
+            "line": 3784,
+            "name": "%pv_previous_inline15548__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              183,
+              17
+            ]
+          },
+          {
+            "line": 3786,
+            "name": "%pv_next_right_inline15547__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3788,
+            "name": "%pv_current_inline15565__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3793,
+            "name": "%pv_previous_inline15548__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          },
+          {
+            "line": 3794,
+            "name": "%pv_next_right_inline15547__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3796,
+            "name": "%pv_current_inline15565__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3801,
+            "name": "%pv_previous_inline15548__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          },
+          {
+            "line": 3802,
+            "name": "%pv_next_right_inline15547__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3804,
+            "name": "%pv_current_inline15565__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3809,
+            "name": "%pv_previous_inline15548__ssa_v3",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          }
+        ],
+        "n256": [
+          {
+            "line": 3782,
+            "name": "%pv_first_right_inline12474__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              180,
+              17
+            ]
+          },
+          {
+            "line": 3784,
+            "name": "%pv_previous_inline12462__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              183,
+              17
+            ]
+          },
+          {
+            "line": 3786,
+            "name": "%pv_next_right_inline12460__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3788,
+            "name": "%pv_current_inline12459__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c65536_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3793,
+            "name": "%pv_previous_inline12462__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c65536_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          }
+        ]
+      }
+    },
+    "short_b32": {
+      "result_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/source_matrix/result.json",
+      "passed": true,
+      "same_process": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            942.26,
+            982.58,
+            980.38,
+            978.36,
+            954.68
+          ],
+          "median_us": 978.36
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1016.68,
+            1019.9,
+            1030.46,
+            1009.74,
+            1017.26
+          ],
+          "median_us": 1017.26
+        },
+        "spmd_reference": {
+          "samples_us": [
+            997.38,
+            991.4,
+            1007.54,
+            1006.42,
+            998.02
+          ],
+          "median_us": 998.02
+        }
+      },
+      "candidate_vs_reference": {
+        "reference_us": 998.02,
+        "candidate_us": 1017.26,
+        "latency_reduction_pct": -1.9278170778140646
+      },
+      "variants": {
+        "n128": {
+          "root": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp",
+          "artifacts": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp/ptoas/dynamic_csa_full.pto",
+              "bytes": 3998850
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp/ptoas/dynamic_csa_full.cpp",
+              "bytes": 2323581
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp/kernels/aic/cube_schedule.cpp",
+              "bytes": 2374983
+            }
+          ],
+          "allocation_count": 2212,
+          "allocation_count_by_role": {
+            "cube_schedule": 421,
+            "vector_schedule": 1791
+          },
+          "address_upper_bounds_bytes": {
+            "cube_schedule:acc": 131072,
+            "cube_schedule:mat": 475136,
+            "cube_schedule:left": 65536,
+            "cube_schedule:right": 65536,
+            "cube_schedule:vec": 16384,
+            "vector_schedule:vec": 163872
+          },
+          "attention_cpp": {
+            "raw_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp/ptoas/dynamic_csa_full.cpp",
+            "raw_line_start": 14514,
+            "raw_line_end": 15032,
+            "actual_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_qydiajcp/kernels/aic/cube_schedule.cpp",
+            "actual_line_start": 14561,
+            "actual_line_end": 15079,
+            "raw_span_is_literal_substring_of_actual": true
+          }
+        },
+        "n256": {
+          "root": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux",
+          "artifacts": [
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux/ptoas/dynamic_csa_full.pto",
+              "bytes": 3936692
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux/ptoas/dynamic_csa_full.cpp",
+              "bytes": 2317697
+            },
+            {
+              "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux/kernels/aic/cube_schedule.cpp",
+              "bytes": 2369099
+            }
+          ],
+          "allocation_count": 2206,
+          "allocation_count_by_role": {
+            "cube_schedule": 415,
+            "vector_schedule": 1791
+          },
+          "address_upper_bounds_bytes": {
+            "cube_schedule:acc": 131072,
+            "cube_schedule:mat": 475136,
+            "cube_schedule:left": 65536,
+            "cube_schedule:right": 65536,
+            "cube_schedule:vec": 16384,
+            "vector_schedule:vec": 163872
+          },
+          "attention_cpp": {
+            "raw_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux/ptoas/dynamic_csa_full.cpp",
+            "raw_line_start": 14486,
+            "raw_line_end": 14902,
+            "actual_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/pv_n256_h8192_b32_v1/build_output/decode_csa_spmd_92kaozux/kernels/aic/cube_schedule.cpp",
+            "actual_line_start": 14533,
+            "actual_line_end": 14949,
+            "raw_span_is_literal_substring_of_actual": true
+          }
+        }
+      },
+      "outside_attention": {
+        "reference_count": 2020,
+        "candidate_count": 2020,
+        "ordered_records_equal": true
+      },
+      "only_allocation_difference": {
+        "kind": "replace",
+        "n128": [
+          {
+            "line": 3200,
+            "name": "%pv_first_right_inline15549__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              180,
+              17
+            ]
+          },
+          {
+            "line": 3202,
+            "name": "%pv_previous_inline15565__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              183,
+              17
+            ]
+          },
+          {
+            "line": 3204,
+            "name": "%pv_next_right_inline15548__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3206,
+            "name": "%pv_current_inline15547__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3211,
+            "name": "%pv_previous_inline15565__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          },
+          {
+            "line": 3212,
+            "name": "%pv_next_right_inline15548__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3214,
+            "name": "%pv_current_inline15547__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3219,
+            "name": "%pv_previous_inline15565__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          },
+          {
+            "line": 3220,
+            "name": "%pv_next_right_inline15548__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3222,
+            "name": "%pv_current_inline15547__ssa_v2",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3227,
+            "name": "%pv_previous_inline15565__ssa_v3",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c32768_i64 valid_row = %c64_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          }
+        ],
+        "n256": [
+          {
+            "line": 3200,
+            "name": "%pv_first_right_inline12472__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              180,
+              17
+            ]
+          },
+          {
+            "line": 3202,
+            "name": "%pv_previous_inline12482__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              183,
+              17
+            ]
+          },
+          {
+            "line": 3204,
+            "name": "%pv_next_right_inline12459__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+              "attention_stream_stages.py",
+              185,
+              21
+            ]
+          },
+          {
+            "line": 3206,
+            "name": "%pv_current_inline12462__ssa_v0",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c65536_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              193,
+              21
+            ]
+          },
+          {
+            "line": 3211,
+            "name": "%pv_previous_inline12482__ssa_v1",
+            "record": [
+              "cube_schedule",
+              "pto.alloc_tile addr = %c65536_i64 valid_row = %c64_index valid_col = %c256_index : !pto.tile_buf<loc=acc, dtype=f32, rows=64, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+              "attention_stream_stages.py",
+              195,
+              21
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "cross_case_same_attention_local_event_sequence": {
+    "n128": true,
+    "n256": true
+  },
+  "physical_attention": {
+    "qk_acc": {
+      "address": 0,
+      "bytes": 32768,
+      "shape": "64x128 f32",
+      "same_all_four": true
+    },
+    "qk_left": {
+      "addresses": [
+        0,
+        16384
+      ],
+      "slot_bytes": 16384,
+      "same_all_four": true
+    },
+    "qk_right": {
+      "addresses": [
+        0,
+        32768
+      ],
+      "slot_bytes": 32768,
+      "same_all_four": true
+    },
+    "pv_n128": {
+      "acc_addresses": [
+        0,
+        32768
+      ],
+      "acc_slot_bytes": 32768,
+      "right_addresses": [
+        0
+      ],
+      "right_slot_bytes": 32768,
+      "right_panel_loads": 4,
+      "mma_calls": 4,
+      "stores": 4
+    },
+    "pv_n256": {
+      "acc_addresses": [
+        0,
+        65536
+      ],
+      "acc_slot_bytes": 65536,
+      "right_addresses": [
+        0
+      ],
+      "right_slot_bytes": 65536,
+      "right_panel_loads": 2,
+      "mma_calls": 2,
+      "stores": 2
+    },
+    "same_l1": {
+      "query_address": 0,
+      "query_bytes": 65536,
+      "kv_ring_address": 65536,
+      "kv_ring_bytes": 393216,
+      "probability_address": 458752,
+      "probability_bytes": 16384
+    },
+    "events": "每 tick 尾 FIX→M EVENT_ID0 及下一 tick 入口等待、QK→PV 的 FIX→M EVENT_ID1 均保留；N128 PV 内两次 Acc 复用 FIX→M EVENT_ID1 消失，N256 双 Acc 不需面板内复用。PV Right 都是同址单槽，后一 TEXTRACT 均由前一 MMA 的 M→MTE1 EVENT_ID1 保护。"
+  },
+  "conclusion": "未发现短档独有的 allocation、Attention 本地事件或新增跨 tick 屏障。PV 面板变宽是可验证的共同差异；实际流水时长及供数交互未被本静态审计测量，不能将 T>=144 早 KV 分支、容量或三点性能符号直接定为根因/启用边界。"
+}

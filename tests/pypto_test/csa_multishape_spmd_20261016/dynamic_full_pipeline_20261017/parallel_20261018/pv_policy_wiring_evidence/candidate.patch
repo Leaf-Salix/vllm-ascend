@@ -1,0 +1,162 @@
+--- source_before/attention_stream_stages.py
++++ source_candidate/attention_stream_stages.py
+@@ -56,7 +56,11 @@
+     阶段级phase没有逐槽ACK，不能拿它替代这些通知；此处没有创建task或新SPMD。
+ 
+ 算术边界、安全与外层责任
+-    KV进一次L1，QK用转置view，PV复用原L1行；PV N128/K128保留交替累加器。
++    KV进一次L1，QK用转置view，PV复用原L1行；PV N128或N256/K128保留交替累加器。
++    PV_N_TILE为编译策略，默认128；不固定实际T/B/Q/L，不新增GM工作区。
++    128/256均整除完整512列，只改变独立列分块数量，不改变K归约或softmax；
++    所有列写回后才发布原PV_READY，AIV仍以原两段256列消费，不感知列tile。
++    私有策略暂按长历史G6编排/资源域选择256，尚待完整实测采用，非根因结论。
+     AIV保持FP32块内softmax和在线m/l/左右oi顺序，probability及最终输出BF16均
+     rint。最终归一化仍加入sink，RoPE读取未cast的FP32值，再执行BF16边界。
+     gather再次检查Q/L活动、causal position、页表列和物理页上下界；inactive
+@@ -98,7 +102,6 @@
+ SPARSE_BLOCKS = 5
+ QK_PRE_LAUNCH = 2
+ QK_TRANSFER_SLOTS = 3
+-PV_N_TILE = 128
+ SWA_RUNS = 5
+ FINAL_HEAD_TILE = 16
+ O_GROUPS = 8
+@@ -125,6 +128,7 @@
+     core_id: pl.Scalar[pl.INDEX],
+     CORE_GROUPS: pl.constexpr,
+     EVENT_BASE: pl.constexpr = 0,
++    PV_N_TILE: pl.constexpr = 128,
+ ):
+     """AIC侧：QK领先PV两拍；必须与本组两个AIV helper并发。"""
+     t_dim = pl.tensor.dim(q_flat, 0) // H
+@@ -175,7 +179,9 @@
+                     target_memory=pl.MemorySpace.Mat,
+                 )
+                 pv_l1_row = (pv_work % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+-                # PV沿用N128/K128，保留每128候选一次softmax和query流水顺序。
++                # PV只特化独立输出列：128为四块，256为两块；K始终128，
++                # 每个输出元素的点积、softmax边界和query推进顺序不变。
++                # 仍交替保留前后累加器，末块store后才发布原PV_READY。
+                 pv_probability_left = pl.tile.move(pv_probability, target_memory=pl.MemorySpace.Left)
+                 pv_first_right = pl.tile.extract(
+                     qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+--- source_before/cube_schedule.py
++++ source_candidate/cube_schedule.py
+@@ -29,6 +29,9 @@
+ 
+ 当前入口覆盖Cube Score策略；完整CPU后端、真机精度及性能以验证记录为准。
+ 前段已有的设备PASS不能证明本文件新接入的全链路或七档性能达标。
++
++Attention PV列tile由策略传入，只特化AIC的128/256列计算；环槽仍写全512列，
++AIV协议和动态工作量不变。此私有区间候选尚待实测采用，不声称已证明性能根因。
+ """
+ 
+ import pypto.language as pl
+@@ -186,6 +189,8 @@
+     OB_ROWS: pl.constexpr,
+     OUTPUT_GROUP_PIPELINE: pl.constexpr,
+     HC_ROW_DEPENDENCIES: pl.constexpr,
++    # 独立列分块由策略特化；不影响本核实际query循环或信号所有权。
++    PV_N_TILE: pl.constexpr = 128,
+ ):
+     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
+     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
+@@ -390,6 +395,7 @@
+         worker,
+         GROUPS,
+         2,
++        PV_N_TILE,
+     )
+     signal = publish_phase(signal, PHASE_ATTN_CUBE, worker, CORES, generation)
+ 
+--- source_before/entry.py
++++ source_candidate/entry.py
+@@ -14,6 +14,8 @@
+     行数、压缩行数、历史分片和尾query均在核内求。main和idx的Q/L分别传，
+     不因shape相同而合并语义。每请求长度无需相同，也不要求固定S=6。
+     QUERY_GROUP/QK_PANEL/SCORE_TILE等仅是数学与流水策略，不固定T/B/L。
++    PV_N_TILE只经root→core_group→AIC传递，决定PV独立列块为128/256；
++    默认128兼容旧controls。AIV读取完整512列及环槽、FFTS和动态轴均不变。
+     HC_ROW_DEPENDENCIES按动态行归属缩小HC前段依赖，不改变任何数学块与生产者；
+     ATTENTION_QUERY_METADATA让AIV复用本轮plan已验证的request/position，
+     使用mask现有第5/6列，不新增Tensor/phase，也不改变候选块或环槽事件。
+@@ -273,6 +275,8 @@
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
++    # 仅作编译策略；尾部默认兼容未传此项的旧controls，不增加运行时标量。
++    PV_N_TILE: pl.constexpr = 128,
+ ):
+     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
+     with pl.cluster(name_hint="dynamic_csa_full"):
+@@ -363,6 +367,7 @@
+             OB_ROWS,
+             OUTPUT_GROUP_PIPELINE,
+             HC_ROW_DEPENDENCIES,
++            PV_N_TILE,
+         )
+         (
+             x_fp32,
+@@ -781,6 +786,8 @@
+     HC_ROW_DEPENDENCIES: pl.constexpr,
+     ATTENTION_QUERY_METADATA: pl.constexpr,
+     HC_CONSUMER_REDUCE: pl.constexpr,
++    # 仅作编译策略；尾部默认兼容未传此项的旧controls，不增加运行时标量。
++    PV_N_TILE: pl.constexpr = 128,
+ ):
+     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
+     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
+@@ -1023,6 +1030,7 @@
+             HC_ROW_DEPENDENCIES,
+             ATTENTION_QUERY_METADATA,
+             HC_CONSUMER_REDUCE,
++            PV_N_TILE,
+         )
+     return (
+         x_fp32,
+--- source_before/policy.py
++++ source_candidate/policy.py
+@@ -26,6 +26,12 @@
+ HC消费者归约候选让门值/Sinkhorn直接加载四份投影部分和，省去RAW交接。
+ 128K/B16与8K/B32均与原分task精确一致；同进程五窗口完整L1分别慢1.06%、
+ 快2.54%，因此默认关闭，尚不据两个点划定启用区间。见统一优化日志。
++Attention PV列tile新增待采用区间候选：长历史且Indexer使用G6时选256，
++其余仍128；字段本身默认128，显式旧策略保持原行为。这个域对应既有
++长历史G6平衡单根编排及完整函数资源布局，不按七个B/S验收点写白名单。
++已有长/短域结果分化只支撑继续验证区间，不能声称已证明性能根因；
++完整长域补测和接线验证完成前，本文件仅为私有待采用候选。PV列tile
++只改变512列的独立分块，不改变K128归约、softmax块、动态Q/L或缓存协议。
+ """
+ 
+ from dataclasses import dataclass
+@@ -45,6 +51,14 @@
+     hc_row_dependencies: bool = True
+     attention_query_metadata: bool = False
+     hc_consumer_reduce: bool = False
++    # 默认值保留手工构造旧策略的N128行为；select_policy单独表达待验证区间。
++    pv_cols: int = 128
++
++    def __post_init__(self):
++        # 只接受两种已设计的完整列分块；拒绝bool及不能整分512列的值，
++        # 避免错误配置悄悄漏写PV尾列。这里只检查Host策略，不读设备数据。
++        if type(self.pv_cols) is not int or self.pv_cols not in (128, 256):
++            raise ValueError("Attention PV列tile仅支持整数128或256")
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -61,6 +75,7 @@
+             "HC_ROW_DEPENDENCIES": self.hc_row_dependencies,
+             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
++            "PV_N_TILE": self.pv_cols,
+         }
+ 
+ 
+@@ -99,4 +114,7 @@
+         roots=1 if long_history and group == 6 else 2,
+         oa_cols=128 if tokens <= 96 else 256,
+         ob_rows=ob_rows,
++        # 暂定沿用长历史G6平衡单根的编排/资源域，而非以T或B白名单选值。
++        # 这是待完整实测采用的候选边界，不是已证实的性能因果解释。
++        pv_cols=256 if long_history and group == 6 else 128,
+     )

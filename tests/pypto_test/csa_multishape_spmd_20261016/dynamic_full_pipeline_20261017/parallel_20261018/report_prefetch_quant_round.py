@@ -9,10 +9,10 @@ import json
 from pathlib import Path
 
 
-def summarize(evidence: Path) -> dict:
+def summarize(evidence: Path, registry_name: str = "registry.json") -> dict:
     """核对每个登记任务已完成，并复算中位数比值及逐窗改善数量。"""
     cases = []
-    for record in json.loads((evidence / "registry.json").read_text()):
+    for record in json.loads((evidence / registry_name).read_text()):
         directory = Path(record["output"])
         result = json.loads((directory / "result.json").read_text())
         matrix = json.loads((directory / "source_matrix/result.json").read_text())
