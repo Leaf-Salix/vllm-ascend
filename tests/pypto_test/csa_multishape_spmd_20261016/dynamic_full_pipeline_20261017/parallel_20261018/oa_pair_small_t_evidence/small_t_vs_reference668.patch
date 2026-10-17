@@ -1,0 +1,435 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -13,8 +13,10 @@
+ 先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在Indexer query和
+ 等待其RoPE之间，使AIV有推进窗口。两种压缩独立，先发Indexer投影，让其AIV pool/norm
+ 与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。
+-输出尾段按策略选择整阶段或逐输出组通知；逐组路径不改变本核O_A任务序，
+-已做完自己O_A的AIC可读就绪量化组做O_B，而不等待其它组完成量化。
++输出尾段按策略选择整阶段或逐输出组通知。逐组 N128、OB_ROWS=32 且 0<T<=32 时，
++使用三 pair、两 single 的五 owner 分工；其它区间沿用 logical%24。每核
++先完成自己的全部 O_A，再消费就绪量化组做 O_B，保持无环的生产消费方向。
++pair 会改变原每核任务和组间就绪次序，不保证每个组都更早完成。
+ 
+ 布局：x_fp32[T,16384]、normed[T,4096]；QA与KV输出pad16，QB为pad128。
+ qr与q_heads是调用层绑定的GM视图，q_heads必须恰好64*T行；compact实际行数
+@@ -44,7 +46,11 @@
+ )
+ from .indexer_score_stages import indexer_score_cube_stage
+ from .kv_stages import kv_project_stage
+-from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
++from .output_projection_a_stages import (
++    o_projection_a_groups_stage_nz,
++    o_projection_a_stage_nz,
++    o_projection_a_pair_group_stage_nz,
++)
+ from .output_projection_b_stages import o_b_groups_stage, o_b_stage
+ from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
+ from .qkv_stages import BF16_WEIGHT_LAYOUT, q_a_stage
+@@ -401,17 +407,28 @@
+     signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1)
+     if OUTPUT_GROUP_PIPELINE:
+         oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+-        # 固定8是模型的输出组数，不是B/S档位。每组内部任务数由本次T决定；
+-        # 首项公式保留全局logical%24分核及原每核组序，不把所有核绑到同一组。
+-        # 本核完成某组即可通知AIV；该AIC继续其它组的O_A，与已就绪组量化重叠。
+-        for oa_group in pl.range(8):
+-            oa_first = oa_group * oa_per_group
+-            oa_owned = worker + ((oa_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
+-            if oa_owned < oa_first + oa_per_group:
+-                o_r = o_projection_a_groups_stage_nz(
+-                    packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
+-                )
+-                signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
++        # 固定八组来自模型结构；实际行数和工作区容量仍动态。
++        # 每核先完成自身全部 O_A，再进入 O_B 等待，避免量化与未来 O_A 互等。
++        # N128、OB_ROWS=32 且 0<T<=32 使用与 Vector 匹配的五 owner；否则保留 logical%24。
++        # 两条路径只在本核负责的组发布一次，发布前完成该组全部本核写入。
++        # OB32 沿用既有 T<=32 区间，每组量化仅一个 32 行任务，不按 B/S 选点。
++        # 在此域共享输入是待实测假说，不能由边界或搬运次数预记完整 L1 收益。
++        if OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32:
++            for oa_group in pl.range(8):
++                pair_first = oa_group * 3
++                single_first = ((oa_group + 1) * 3) % GROUPS
++                if (worker >= pair_first and worker < pair_first + 3) or (worker >= single_first and worker < single_first + 2):
++                    o_r = o_projection_a_pair_group_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, oa_group)
++                    signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
++        else:
++            for oa_group in pl.range(8):
++                oa_first = oa_group * oa_per_group
++                oa_owned = worker + ((oa_first + GROUPS - 1 - worker) // GROUPS) * GROUPS
++                if oa_owned < oa_first + oa_per_group:
++                    o_r = o_projection_a_groups_stage_nz(
++                        packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS, oa_group, oa_group + 1
++                    )
++                    signal = publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)
+         quant_per_group = (tokens + 31) // 32
+         # 本核自己的O_A全部完成后，即可处理已量化的O_B组，不再等无关组。
+         # O_B的NZ owner为(group*8+dc)%24，每个dc内部保留所有动态行块。
+@@ -428,7 +445,7 @@
+                     o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS, ob_group, ob_group + 1
+                 )
+     else:
+-        # 保留整阶段路径供区间策略与同轮对照；两分支复用全部数学helper。
++        # 关闭组流水时保留原整阶段数学与通知，不使用 pair 分工或五 owner 等待。
+         o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+         signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)
+         quant_tasks = 8 * ((tokens + 31) // 32)
+--- a/output_projection_a_stages.py
++++ b/output_projection_a_stages.py
+@@ -5,50 +5,55 @@
+ # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ # See LICENSE in the root of the software repository for the full text of the License.
+-"""动态 CSA 的 O_A 分组投影与分组量化：外层显式分核的三个核内阶段。
++"""动态 CSA 的 O_A 分组投影与分组量化。
+ 
+ 输入输出与阅读顺序
+-    先读 o_projection_a_stage_nd/nz：AIC 消费 attention 的 packed heads，
+-    按八个 O group 独立做 K4096→N1024，写 FP32[P_MM,8192]。再读
+-    o_projection_group_quant_stage：AIV 对每行每组1024列独立取 amax，
+-    写 INT8[P_MM,8192] 和 FP32[8,P_SCALE]。这不是跨8192列的统一量化。
+-    wo_a 保持 Native BF16[8,4096,1024] 的实际 ND 或 NZ 存储；两个函数
+-    分开声明布局，调用方按真实权重选择，不做格式转换或导入期设备探针。
++    AIC 消费 attention 的 packed heads，按八个 O group 独立做
++    K4096→N1024，写 FP32[P_MM,8192]。输出组流水开启、OA_COLS=128、OB_ROWS=32 且
++    设备实际 0<T<=32 时，使用 o_projection_a_pair_group_stage_nz；
++    其它区间保留原独立列块 helper。AIV 再对每行每组 1024 列独立取
++    amax，写 INT8[P_MM,8192] 和 FP32[8,P_SCALE]，不跨八组归约。
++    wo_a 保持 Native BF16[8,4096,1024] 的实际 ND 或 NZ 存储；各入口
++    声明所需布局，pair 专用于 NZ，不做格式转换或导入期设备探针。
+ 
+ 动态轴、容量与别名
+     tokens 是调用方从真实业务 Tensor 动态轴得到的设备 Scalar T，不从
+     packed/workspace 容量反推。packed 是 BF16[PACK_TOTAL_ROWS,4096]，
+     PACK_TOTAL_ROWS=8*P_PACK，组 g 的第 t 行位于 g*P_PACK+t，P_PACK>=T。
+     FP32/INT8 工作区共享 P_MM 容量合同但不共享存储；P_SCALE 独立且>=T。
+-    O_B 使用的 ROW_TILE 为32/96/128之一，P_MM>=ceil(T/ROW_TILE)*ROW_TILE，
+-    并须足以保存实际T行。packed总行数须整除8，各视图连续且不得非法别名。
+-    所有容量轴均 pl.dynamic；固定8组、模型维度和128/256列tile不是B/S白名单。
++    O_B 使用的 ROW_TILE 为 32/96/128 之一，P_MM>=ceil(T/ROW_TILE)*ROW_TILE，
++    并须足以保存实际 T 行。packed 总行数须整除 8，各视图连续且不得非法别名。
++    所有容量轴均 pl.dynamic；固定八组、模型维度和 tile 不是 B/S 白名单。
+     外层捕获前拒绝不一致容量/layout；不能让生产者跳写而消费者读取旧值。
+ 
+ 分工、数学与尾行
+-    O_A 以(group,ceil(T/128)行块,N列块)展平，logical%WORKERS 为AIC owner；
+-    每块先K256 matmul，再原顺序追加15个K256，pipeline只重叠本核搬运。
+-    仅迁移当前实际启用的 PIPELINE_OA=False，不搬未启用的显式L0流水候选。
+-    量化以(group,32行块)展平轮转AIV，块内每8行流水；有效行数贯穿load、
+-    row_max、常数、div、cast和store，绝不读取 O_A 未写的 FP32 padding。
+-    每组最后一个活动32行块是唯一尾owner，额外将INT8的[T,P_USED)写零，
+-    P_USED=ceil(T/ROW_TILE)*ROW_TILE；O_B 才能安全整块读取。T=0不产生任务。
+-    量化保留127/amax、amax*(1/127)及INT32 rint→FP16 round→INT8 trunc；
+-    反量化scale不能替换为recip(量化乘数)，也不增加BF16往返舍入。
++    原路径以 (group,ceil(T/128) 行块,N 列块) 展平并按 logical%WORKERS
++    分给 AIC，每块先 K256 matmul，再按原顺序追加 15 个 K256。
++    小 T pair 路径专用于 24 AIC：组 g 的三个 pair 归 3g..3g+2，每核
++    共用输入和 Left，分别累加两个 N128 输出；末两个 N128 块分别归
++    (3g+3+s)%24，s 为 0/1。组内五 owner 互异，组 7 的 single 回绕到 0/1。
++    pair 显式使用 Mat/Left/Right 与两个 FP32 Acc，每条链按 K128 顺序
++    累加；single 保留原 K256 首块和后续流水。M128 是 tile 容量，所有
++    GM 读写只覆盖实际 T 行；不把 tile 容量当作可访问的 GM 行数。
++    量化以 (group,32 行块) 展平轮转 AIV，块内每 8 行流水；有效行数贯穿
++    load、row_max、常数、div、cast 和 store，不读取 O_A 未写的 FP32 padding。
++    每组最后一个活动 32 行块是唯一尾 owner，额外将 INT8 的 [T,P_USED) 写零，
++    P_USED=ceil(T/ROW_TILE)*ROW_TILE；O_B 才能安全整块读取。T=0 不产生任务。
++    量化保留 127/amax、amax*(1/127) 及 INT32 rint→FP16 round→INT8 trunc；
++    反量化 scale 不能替换为 recip(量化乘数)，也不增加 BF16 往返舍入。
+ 
+ 同步与生命周期
+-    groups helper 允许外层按输出组发布，而不改变原有逻辑任务的 owner。
+-    group_begin/end 是核内 Scalar 范围；先定位该组内满足 logical%WORKERS
+-    的首项，后续仍按 WORKERS 条带循环。只改变独立组之间的可见时机，不
+-    切断组内 K 累加、amax 归约或 padding 清零。全阶段入口调用相同数学体。
+-    helper不创建spmd、task或notify/wait。O_A先等所消费packed行的全部
+-    attention生产者，量化先等本组本行的所有O_A列块。量化的真实INT8行、
+-    scale和所需尾零均完成发布后，O_B才可读整ROW_TILE；外层负责业务fence、
+-    缓存维护和阶段信号。本核return仅返回GM别名，不能当作其它核完成。
+-    每个输出行列块唯一写；返回前所有本核wave已经执行，但消费者完成前
+-    不得复用GM。工作区标InOut保留未写区，P_USED以后的INT8和T以后的scale
+-    不承诺初始化。BYPASS策略如需使用，须在外层spmd直属设置。
+-    当前是源级阶段迁移；CPU编译不等于整层设备精度、同步或性能已通过。
++    原 groups helper 保留 logical%WORKERS；pair helper 使用与 cube/vector
++    同步的五 owner 映射。各 helper 均不创建 spmd、task 或 notify/wait。
++    O_A 先获取所消费 packed 行的全部 attention 生产者；每个 AIC 完成
++    本核全部 O_A 组后才进入 O_B 等待。AIV 获取本组全部 O_A owner 后量化，
++    真实 INT8、scale 与所需尾零完成后才发布。O_B 获取该组全部量化 owner
++    后可读整 ROW_TILE。组间就绪次序可以变化，组内归约与尾零合同不变。
++    外层负责业务 fence、缓存维护和阶段信号。函数返回 GM 别名不代表
++    异步流水已完成，也不代表其它核完成；消费者读完前不得复用 GM。
++    每个输出行列块唯一写；InOut 保留未写区，P_USED 以后的 INT8 和 T 以后的
++    scale 不承诺初始化。BYPASS 策略如需使用，须在外层 spmd 直属设置。
++    实际编译、精度与完整 L1 验证状态见对应测试档案，不由源码说明推定。
+ """
+ 
+ import pypto.language as pl
+@@ -173,7 +178,7 @@
+     WORKERS: pl.constexpr,
+     A_COL_TILE: pl.constexpr,
+ ):
+-    """全八组兼容入口：与按组通知分支复用同一数学，不另维护计算版本。"""
++    """原独立列块路径的全八组入口：复用 groups helper，不包含专用 pair 分工。"""
+     o_r_pad = o_projection_a_groups_stage_nz(
+         o_packed, wo_a, o_r_pad, tokens, worker_id, WORKERS, A_COL_TILE, 0, O_GROUPS
+     )
+@@ -259,3 +264,138 @@
+         o_r_pad, o_r_i8_pad, act_scale_dq, tokens, worker_id, WORKERS, ROW_TILE, 0, O_GROUPS
+     )
+     return o_r_i8_pad, act_scale_dq
++
++
++@pl.jit.inline(auto_scope=False)
++def o_projection_a_pair_group_stage_nz(
++    o_packed: pl.Tensor[[PACK_TOTAL_ROWS_DYN, O_GROUP_IN], pl.BF16],
++    wo_a: pl.Tensor[[O_GROUPS, O_GROUP_IN, O_LORA], pl.BF16, pl.NZ],
++    o_r_pad: pl.InOut[pl.Tensor[[MM_ROWS_DYN, O_GROUPS * O_LORA], pl.FP32]],
++    tokens: pl.Scalar[pl.INDEX],
++    worker_id: pl.Scalar[pl.INDEX],
++    WORKERS: pl.constexpr,
++    group_id: pl.Scalar[pl.INDEX],
++):
++    """仅输出组流水开启、N128、OB_ROWS=32 且 0<T<=32：每组三个 pair、两个 single。
++
++    pair p 归 3*g+p，写列块 2p/2p+1；single s 归 (3*g+3+s)%24，写 6+s。
++    本组五个 owner 互异，每核在同组只执行一种角色；外层完成本组全部
++    本核写入后才发布。实际 GM 容量与有效行仍动态，不能按 M128 写满尾行。
++    组间packed步长由Tensor求得，不沿用资源探针固定384；输入T可小于M128，
++    valid_rows贯穿Tile的compact Acc/load/store，不能写实际GM的padding/guard。
++    K1024普通range内部四K256局部Mat，只有两个FP32 Acc跨回边；每条链仍
++    K128依次累加。MTE2/MTE1/M事件由后端保持，源码顺序不是异步保证。
++    single保留现行Tensor matmul的首K256及后续15段pipeline，量化数学不动。
++    WORKERS必须24；不含任务/通知，完整依赖由cube/vector两侧匹配公式维护。
++    """
++    pack_stride = pl.tensor.dim(o_packed, 0) // O_GROUPS
++    g = pl.max(0, group_id)
++    pair_first = g * 3
++    if worker_id >= pair_first and worker_id < pair_first + 3:
++        pair = pl.max(0, worker_id - pair_first)
++        row_base = g * pack_stride
++        n0 = pair * 256
++        output_col = g * O_LORA + n0
++        valid_rows = tokens
++        group = g
++        seed0 = pl.tile.create([128, 128], dtype=pl.FP32, target_memory=pl.Mem.Acc, compact=True)
++        seed1 = pl.tile.create([128, 128], dtype=pl.FP32, target_memory=pl.Mem.Acc, compact=True)
++        valid0 = pl.tile.set_validshape(seed0, valid_rows, 128)
++        valid1 = pl.tile.set_validshape(seed1, valid_rows, 128)
++        # 仅Acc跨回边，Mat不会被固定到循环入口地址再做非法Mat→Mat复制。
++        for outer, (acc0, acc1) in pl.range(0, 4, init_values=(valid0, valid1)):
++            kbase = outer * 1024
++            # 加载K256块0；当前尚待消费的前一块仍活跃，形成两个L1窗口。
++            a0 = pl.tile.load(o_packed, [row_base, kbase + 0], [128, 256], [valid_rows, 256], target_memory=pl.Mem.Mat)
++            w0a = pl.tile.load(wo_a, [group, kbase + 0, n0], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            w0b = pl.tile.load(wo_a, [group, kbase + 0, n0 + 128], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            # 加载K256块1；当前尚待消费的前一块仍活跃，形成两个L1窗口。
++            a1 = pl.tile.load(o_packed, [row_base, kbase + 256], [128, 256], [valid_rows, 256], target_memory=pl.Mem.Mat)
++            w1a = pl.tile.load(wo_a, [group, kbase + 256, n0], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            w1b = pl.tile.load(wo_a, [group, kbase + 256, n0 + 128], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            # 消费块0的两个K128。第一次MMA后释放Right-a，第二次后释放Right-b；
++            # 等待M真正完成由后端M→MTE1事件负责，不能直接按发射时间覆盖。
++            w0a_flat = pl.tile.reshape(w0a, [256, 128])
++            w0b_flat = pl.tile.reshape(w0b, [256, 128])
++            l00 = pl.tile.extract(a0, 0, 0, [128, 128], target_memory=pl.Mem.Left)
++            r00a = pl.tile.extract(w0a_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            r00b = pl.tile.extract(w0b_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            c0a_first = pl.tile.matmul_acc(acc0, l00, r00a, init_cond=(outer == 0))
++            l01 = pl.tile.extract(a0, 0, 128, [128, 128], target_memory=pl.Mem.Left)
++            r01a = pl.tile.extract(w0a_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c0b_first = pl.tile.matmul_acc(acc1, l00, r00b, init_cond=(outer == 0))
++            r01b = pl.tile.extract(w0b_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c0a_last = pl.tile.matmul_acc(c0a_first, l01, r01a, init_cond=False)
++            c0b_last = pl.tile.matmul_acc(c0b_first, l01, r01b, init_cond=False)
++            # 加载K256块2；当前尚待消费的前一块仍活跃，形成两个L1窗口。
++            a2 = pl.tile.load(o_packed, [row_base, kbase + 512], [128, 256], [valid_rows, 256], target_memory=pl.Mem.Mat)
++            w2a = pl.tile.load(wo_a, [group, kbase + 512, n0], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            w2b = pl.tile.load(wo_a, [group, kbase + 512, n0 + 128], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            # 消费块1的两个K128。第一次MMA后释放Right-a，第二次后释放Right-b；
++            # 等待M真正完成由后端M→MTE1事件负责，不能直接按发射时间覆盖。
++            w1a_flat = pl.tile.reshape(w1a, [256, 128])
++            w1b_flat = pl.tile.reshape(w1b, [256, 128])
++            l10 = pl.tile.extract(a1, 0, 0, [128, 128], target_memory=pl.Mem.Left)
++            r10a = pl.tile.extract(w1a_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            r10b = pl.tile.extract(w1b_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            c1a_first = pl.tile.matmul_acc(c0a_last, l10, r10a, init_cond=False)
++            l11 = pl.tile.extract(a1, 0, 128, [128, 128], target_memory=pl.Mem.Left)
++            r11a = pl.tile.extract(w1a_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c1b_first = pl.tile.matmul_acc(c0b_last, l10, r10b, init_cond=False)
++            r11b = pl.tile.extract(w1b_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c1a_last = pl.tile.matmul_acc(c1a_first, l11, r11a, init_cond=False)
++            c1b_last = pl.tile.matmul_acc(c1b_first, l11, r11b, init_cond=False)
++            # 加载K256块3；当前尚待消费的前一块仍活跃，形成两个L1窗口。
++            a3 = pl.tile.load(o_packed, [row_base, kbase + 768], [128, 256], [valid_rows, 256], target_memory=pl.Mem.Mat)
++            w3a = pl.tile.load(wo_a, [group, kbase + 768, n0], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            w3b = pl.tile.load(wo_a, [group, kbase + 768, n0 + 128], [1, 256, 128], [1, 256, 128], target_memory=pl.Mem.Mat, cache=1)
++            # 消费块2的两个K128。第一次MMA后释放Right-a，第二次后释放Right-b；
++            # 等待M真正完成由后端M→MTE1事件负责，不能直接按发射时间覆盖。
++            w2a_flat = pl.tile.reshape(w2a, [256, 128])
++            w2b_flat = pl.tile.reshape(w2b, [256, 128])
++            l20 = pl.tile.extract(a2, 0, 0, [128, 128], target_memory=pl.Mem.Left)
++            r20a = pl.tile.extract(w2a_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            r20b = pl.tile.extract(w2b_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            c2a_first = pl.tile.matmul_acc(c1a_last, l20, r20a, init_cond=False)
++            l21 = pl.tile.extract(a2, 0, 128, [128, 128], target_memory=pl.Mem.Left)
++            r21a = pl.tile.extract(w2a_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c2b_first = pl.tile.matmul_acc(c1b_last, l20, r20b, init_cond=False)
++            r21b = pl.tile.extract(w2b_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c2a_last = pl.tile.matmul_acc(c2a_first, l21, r21a, init_cond=False)
++            c2b_last = pl.tile.matmul_acc(c2b_first, l21, r21b, init_cond=False)
++            # 消费块3的两个K128。第一次MMA后释放Right-a，第二次后释放Right-b；
++            # 等待M真正完成由后端M→MTE1事件负责，不能直接按发射时间覆盖。
++            w3a_flat = pl.tile.reshape(w3a, [256, 128])
++            w3b_flat = pl.tile.reshape(w3b, [256, 128])
++            l30 = pl.tile.extract(a3, 0, 0, [128, 128], target_memory=pl.Mem.Left)
++            r30a = pl.tile.extract(w3a_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            r30b = pl.tile.extract(w3b_flat, 0, 0, [128, 128], target_memory=pl.Mem.Right)
++            c3a_first = pl.tile.matmul_acc(c2a_last, l30, r30a, init_cond=False)
++            l31 = pl.tile.extract(a3, 0, 128, [128, 128], target_memory=pl.Mem.Left)
++            r31a = pl.tile.extract(w3a_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c3b_first = pl.tile.matmul_acc(c2b_last, l30, r30b, init_cond=False)
++            r31b = pl.tile.extract(w3b_flat, 128, 0, [128, 128], target_memory=pl.Mem.Right)
++            c3a_last = pl.tile.matmul_acc(c3a_first, l31, r31a, init_cond=False)
++            c3b_last = pl.tile.matmul_acc(c3b_first, l31, r31b, init_cond=False)
++            # 本轮四段全部完成后才回边；只携带两条Acc，不携带任何Mat。
++            done0, done1 = pl.yield_(c3a_last, c3b_last)
++        pl.tile.store(done0, [0, output_col], o_r_pad)
++        pl.tile.store(done1, [0, output_col + 128], o_r_pad)
++
++    # single交给下一组三核中的前两核，避免同组pair与single串行后才发布。
++    # 该映射来自8组/24AIC结构，不依赖B/S。每核至多一个pair加一个single。
++    single_first = ((g + 1) * 3) % WORKERS
++    if worker_id >= single_first and worker_id < single_first + 2:
++        single = pl.max(0, worker_id - single_first)
++        single_n0 = 768 + single * 128
++        single_src0 = g * pack_stride
++        single_x_first = pl.slice(o_packed, [128, 256], [single_src0, 0], valid_shape=[tokens, 256])
++        single_w_first = wo_a[g : g + 1, 0:256, single_n0 : single_n0 + 128]
++        single_acc = pl.matmul(single_x_first, single_w_first, out_dtype=pl.FP32)
++        for single_kb in pl.pipeline(1, 16, stage=2):
++            single_k0 = single_kb * 256
++            single_x = pl.slice(o_packed, [128, 256], [single_src0, single_k0], valid_shape=[tokens, 256])
++            single_w = wo_a[g : g + 1, single_k0 : single_k0 + 256, single_n0 : single_n0 + 128]
++            single_acc = pl.matmul_acc(single_acc, single_x, single_w)
++        o_r_pad = pl.assemble(o_r_pad, single_acc, [0, g * O_LORA + single_n0])
++    return o_r_pad
+--- a/phase_sync.py
++++ b/phase_sync.py
+@@ -28,19 +28,23 @@
+     工作也不能跳过；否则不同核的代际会不一致。执行失败后不可直接复用
+     部分推进的工作区，必须在设备空闲时重新初始化。INT32 代际到上限前
+     同样需要在捕获外重建工作区，禁止在核内回绕清零造成 ABA。
+-    同一工作区的 G、核编号映射、阶段槽数及阶段含义必须保持不变；仅改变
+-    业务 T/B/metadata 不改变此合同。若新策略改变参与核集合或阶段布局，
+-    必须绑定另一份清零的新工作区，不能只因容量足够就复用旧信号内容。
++    同一工作区调用 begin 的物理核集合、G、核编号映射、阶段槽数与阶段
++    含义必须保持不变。每个阶段的活动 owner 可随 T 和合法策略变化，
++    由当次消费者公式与当代发布匹配；这不要求清空未使用槽。改变物理
++    参与核或槽布局时，必须绑定另一份清零的新工作区，不能只因容量
++    足够就复用旧信号内容。
+     publish_phase 必须位于该生产者本阶段全部写回之后；零工作量参与者
+     也应按调用方合同发布完成，或由消费者的所有权计算将其排除。
+     这是整阶段完成通知，没有消费者 ACK。不能对同一槽/代际逐 tile 重复
+     发布，也不能在消费者读完前覆盖业务缓冲；需要环形槽复用时，必须另设
+     进度或反向依赖。消费者未消费信号，不代表已经释放生产者的数据空间。
+ 
+-五、当前状态
+-    这是可复用的动态控制组件，尚不等于完整 CSA。wait_row_owners 只适用
+-    “按连续行 tile 轮转分给 worker”的布局；请求分组、split-K 和多维
+-    投影应显式枚举自己的真实 owner，不能误用本函数减少依赖。
++五、通用与专用 owner 等待
++    wait_row_owners 只适用“按连续行 tile 轮转分给 worker”的布局；
++    请求分组、split-K 和多维投影须显式枚举真实 owner，不能误用该公式。
++    wait_oa_pair_group 专用于固定 24 AIC、输出组流水开启、OB_ROWS=32 的 N128 小 T
++    分工，等待 3g..3g+2 与 (3g+3+s)%24。两种 helper 均在获取全部依赖
++    后统一维护业务缓存，不能交换 owner 公式。
+ """
+ 
+ import pypto.language as pl
+@@ -153,3 +157,31 @@
+         pl.system.cacheinvalid()
+         pl.system.fence()
+     return signals
++
++
++@pl.jit.inline(auto_scope=False)
++def wait_oa_pair_group(
++    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
++    phase: pl.Scalar[pl.INDEX],
++    participant_count: pl.Scalar[pl.INDEX],
++    generation: pl.Scalar[pl.INT32],
++    group: pl.Scalar[pl.INDEX],
++):
++    """N128 小 T 的五 owner 并集：组流水开启、OB_ROWS=32、0<T<=32、0<=group<8、24 AIC。
++
++    pair归3g..3g+2；single归下一组前两核，并在g7回绕到0/1。两集合互异。
++    所有信号按原代际读取后才统一维护业务cache，避免每owner多一次全局fence。
++    本helper没有新增信号/phase，不可用于旧logical%24、OB_ROWS!=32或T>32分工。
++    """
++    for pair in pl.range(3):
++        owner = group * 3 + pair
++        offset = (phase * participant_count + owner) * SIGNAL_SLOT_WORDS
++        signals = csa_signal_wait(signals, offset, generation)
++    for single in pl.range(2):
++        owner = (group * 3 + 3 + single) % 24
++        offset = (phase * participant_count + owner) * SIGNAL_SLOT_WORDS
++        signals = csa_signal_wait(signals, offset, generation)
++    pl.system.fence()
++    pl.system.cacheinvalid()
++    pl.system.fence()
++    return signals
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -26,8 +26,10 @@
+ Attention查询几何复用开启时，plan在原64B mask行内同时发布request/position；
+ 消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时
+ 两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。
+-组流水启用时，量化只等本输出组的O_A owner；末块尾零属于同组通知合同，
+-每组独立槽位。HCpost仍等待所有O_B partial，保留八组反量化左折叠顺序。
++组流水启用时，量化只等本输出组的真实 O_A owner。N128、OB_ROWS=32 且 0<T<=32
++等三 pair 加两 single 的五核，其它区间按原逻辑列块 owner 等待。量化
++仍按 (group,32 行块)%48 分工，每组末块尾零在同组发布前完成。HCpost
++仍等待所有 O_B partial，保留八组反量化左折叠顺序。
+ 数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。
+ 
+ 每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要
+@@ -65,7 +67,13 @@
+ from .metadata_stages import compact_offsets_and_count_stage
+ from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
+ from .output_projection_b_stages import o_dequant_hc_post_stage
+-from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
++from .phase_sync import (
++    begin_invocation,
++    publish_phase,
++    wait_producer,
++    wait_row_owners,
++    wait_oa_pair_group,
++)
+ from .qkv_stages import q_r_stage
+ from .query_projection_stages import q_dequant_rope_stage, q_rope_prepare_stage
+ from .runtime_abi import (
+@@ -931,12 +939,19 @@
+             quant_first = quant_group * quant_per_group
+             quant_owned = worker + ((quant_first + VECTORS - 1 - worker) // VECTORS) * VECTORS
+             if quant_owned < quant_first + quant_per_group:
+-                # amax需要本行的全部1024列。首版按整组所有行的真实O_A owner
+-                # 获取数据，已比等待全八组更细；不声称做到逐行块最小依赖。
+-                signal = wait_row_owners(
+-                    signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation,
+-                    quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1
+-                )
++                # amax 需要本行全部 1024 列；等待本组所有行的真实 O_A owner。
++                # 依赖按输出组区分，不声称做到逐行块最小等待。
++                # pair写两列块，owner已不再是旧logical%24；必须等同代的
++                # 三pair+两single共五核。仅一次末尾cache维护，量化/pad数学不动。
++                # OB32 沿用既有 T<=32 区间，每组量化仅一个 32 行任务，不按 B/S 选点。
++                # 在此域共享输入是待实测假说，不能由边界或搬运次数预记完整 L1 收益。
++                if OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32:
++                    signal = wait_oa_pair_group(signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation, quant_group)
++                else:
++                    signal = wait_row_owners(
++                        signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation,
++                        quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1
++                    )
+                 o_quant, o_scales = o_projection_groups_quant_stage(
+                     o_r, o_quant, o_scales, tokens, worker, VECTORS, OB_ROWS, quant_group, quant_group + 1
+                 )

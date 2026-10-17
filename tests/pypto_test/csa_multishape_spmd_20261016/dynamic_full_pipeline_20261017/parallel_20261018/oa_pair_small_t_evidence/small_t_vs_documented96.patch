@@ -1,0 +1,94 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -13,7 +13,7 @@
+ 先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在Indexer query和
+ 等待其RoPE之间，使AIV有推进窗口。两种压缩独立，先发Indexer投影，让其AIV pool/norm
+ 与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。
+-输出尾段按策略选择整阶段或逐输出组通知。逐组 N128 且 0<T<=96 时，
++输出尾段按策略选择整阶段或逐输出组通知。逐组 N128、OB_ROWS=32 且 0<T<=32 时，
+ 使用三 pair、两 single 的五 owner 分工；其它区间沿用 logical%24。每核
+ 先完成自己的全部 O_A，再消费就绪量化组做 O_B，保持无环的生产消费方向。
+ pair 会改变原每核任务和组间就绪次序，不保证每个组都更早完成。
+@@ -409,9 +409,11 @@
+         oa_per_group = ((tokens + 127) // 128) * (1024 // OA_COLS)
+         # 固定八组来自模型结构；实际行数和工作区容量仍动态。
+         # 每核先完成自身全部 O_A，再进入 O_B 等待，避免量化与未来 O_A 互等。
+-        # N128 且 0<T<=96 使用与 Vector 匹配的五 owner；否则保留 logical%24。
++        # N128、OB_ROWS=32 且 0<T<=32 使用与 Vector 匹配的五 owner；否则保留 logical%24。
+         # 两条路径只在本核负责的组发布一次，发布前完成该组全部本核写入。
+-        if OA_COLS == 128 and tokens > 0 and tokens <= 96:
++        # OB32 沿用既有 T<=32 区间，每组量化仅一个 32 行任务，不按 B/S 选点。
++        # 在此域共享输入是待实测假说，不能由边界或搬运次数预记完整 L1 收益。
++        if OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32:
+             for oa_group in pl.range(8):
+                 pair_first = oa_group * 3
+                 single_first = ((oa_group + 1) * 3) % GROUPS
+--- a/output_projection_a_stages.py
++++ b/output_projection_a_stages.py
+@@ -9,8 +9,8 @@
+ 
+ 输入输出与阅读顺序
+     AIC 消费 attention 的 packed heads，按八个 O group 独立做
+-    K4096→N1024，写 FP32[P_MM,8192]。输出组流水开启、OA_COLS=128 且
+-    设备实际 0<T<=96 时，使用 o_projection_a_pair_group_stage_nz；
++    K4096→N1024，写 FP32[P_MM,8192]。输出组流水开启、OA_COLS=128、OB_ROWS=32 且
++    设备实际 0<T<=32 时，使用 o_projection_a_pair_group_stage_nz；
+     其它区间保留原独立列块 helper。AIV 再对每行每组 1024 列独立取
+     amax，写 INT8[P_MM,8192] 和 FP32[8,P_SCALE]，不跨八组归约。
+     wo_a 保持 Native BF16[8,4096,1024] 的实际 ND 或 NZ 存储；各入口
+@@ -276,7 +276,7 @@
+     WORKERS: pl.constexpr,
+     group_id: pl.Scalar[pl.INDEX],
+ ):
+-    """仅输出组流水开启、N128 且 0<T<=96：每组三个 pair、两个 single。
++    """仅输出组流水开启、N128、OB_ROWS=32 且 0<T<=32：每组三个 pair、两个 single。
+ 
+     pair p 归 3*g+p，写列块 2p/2p+1；single s 归 (3*g+3+s)%24，写 6+s。
+     本组五个 owner 互异，每核在同组只执行一种角色；外层完成本组全部
+--- a/phase_sync.py
++++ b/phase_sync.py
+@@ -42,7 +42,7 @@
+ 五、通用与专用 owner 等待
+     wait_row_owners 只适用“按连续行 tile 轮转分给 worker”的布局；
+     请求分组、split-K 和多维投影须显式枚举真实 owner，不能误用该公式。
+-    wait_oa_pair_group 专用于固定 24 AIC、输出组流水开启的 N128 小 T
++    wait_oa_pair_group 专用于固定 24 AIC、输出组流水开启、OB_ROWS=32 的 N128 小 T
+     分工，等待 3g..3g+2 与 (3g+3+s)%24。两种 helper 均在获取全部依赖
+     后统一维护业务缓存，不能交换 owner 公式。
+ """
+@@ -167,11 +167,11 @@
+     generation: pl.Scalar[pl.INT32],
+     group: pl.Scalar[pl.INDEX],
+ ):
+-    """N128 小 T 的五 owner 并集：组流水开启、0<T<=96、0<=group<8、24 AIC。
++    """N128 小 T 的五 owner 并集：组流水开启、OB_ROWS=32、0<T<=32、0<=group<8、24 AIC。
+ 
+     pair归3g..3g+2；single归下一组前两核，并在g7回绕到0/1。两集合互异。
+     所有信号按原代际读取后才统一维护业务cache，避免每owner多一次全局fence。
+-    本helper没有新增信号/phase，不可用于旧logical%24或T>96分工。
++    本helper没有新增信号/phase，不可用于旧logical%24、OB_ROWS!=32或T>32分工。
+     """
+     for pair in pl.range(3):
+         owner = group * 3 + pair
+--- a/vector_schedule.py
++++ b/vector_schedule.py
+@@ -26,7 +26,7 @@
+ Attention查询几何复用开启时，plan在原64B mask行内同时发布request/position；
+ 消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时
+ 两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。
+-组流水启用时，量化只等本输出组的真实 O_A owner。N128 且 0<T<=96
++组流水启用时，量化只等本输出组的真实 O_A owner。N128、OB_ROWS=32 且 0<T<=32
+ 等三 pair 加两 single 的五核，其它区间按原逻辑列块 owner 等待。量化
+ 仍按 (group,32 行块)%48 分工，每组末块尾零在同组发布前完成。HCpost
+ 仍等待所有 O_B partial，保留八组反量化左折叠顺序。
+@@ -943,7 +943,9 @@
+                 # 依赖按输出组区分，不声称做到逐行块最小等待。
+                 # pair写两列块，owner已不再是旧logical%24；必须等同代的
+                 # 三pair+两single共五核。仅一次末尾cache维护，量化/pad数学不动。
+-                if OA_COLS == 128 and tokens > 0 and tokens <= 96:
++                # OB32 沿用既有 T<=32 区间，每组量化仅一个 32 行任务，不按 B/S 选点。
++                # 在此域共享输入是待实测假说，不能由边界或搬运次数预记完整 L1 收益。
++                if OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32:
+                     signal = wait_oa_pair_group(signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation, quant_group)
+                 else:
+                     signal = wait_row_owners(

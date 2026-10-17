@@ -1,0 +1,259 @@
+{
+  "status": "PASS",
+  "scope": "只进行源码文本与 AST 审计，未编译或上卡；不声称生成 CPP/分配/事件已核对",
+  "inputs": {
+    "frozen96": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_evidence/source_candidate",
+    "documented96": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_oa_pair_documented_20261018/source_documented",
+    "reference668": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_evidence/source_reference"
+  },
+  "outputs": {
+    "candidate": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_oa_pair_small_t_20261018/source_small_t",
+    "reference668": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_oa_pair_small_t_20261018/source_reference668"
+  },
+  "files_each": 33,
+  "complete_ast_method": "剥除全部 module/class/function/async docstring，保留其余所有 AST 节点、类型注释、导入及顺序；忽略行列位置",
+  "candidate_vs_documented96_ast_changes": [
+    {
+      "file": "cube_schedule.py",
+      "changed_node": "If.test",
+      "count": 1,
+      "old_predicate": "OA_COLS == 128 and tokens > 0 and tokens <= 96",
+      "new_predicate": "OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32",
+      "complete_ast_equal_after_restoring_only_predicate": true
+    },
+    {
+      "file": "vector_schedule.py",
+      "changed_node": "If.test",
+      "count": 1,
+      "old_predicate": "OA_COLS == 128 and tokens > 0 and tokens <= 96",
+      "new_predicate": "OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32",
+      "complete_ast_equal_after_restoring_only_predicate": true
+    }
+  ],
+  "candidate_vs_documented96_unchanged_ast_files": [
+    "__init__.py",
+    "attention_plan_stages.py",
+    "attention_stream_stages.py",
+    "binding.py",
+    "cache_stages.py",
+    "compressor_output_stages.py",
+    "compressor_pool_stages.py",
+    "compressor_projection_stages.py",
+    "entry.py",
+    "hc_stages.py",
+    "indexer_cache_stages.py",
+    "indexer_compressor_output_stages.py",
+    "indexer_group_stages.py",
+    "indexer_publish_stages.py",
+    "indexer_query_stages.py",
+    "indexer_scale_plan_stages.py",
+    "indexer_score_stages.py",
+    "indexer_topk_stages.py",
+    "kv_stages.py",
+    "metadata_stages.py",
+    "output_projection_a_stages.py",
+    "output_projection_b_stages.py",
+    "phase_sync.py",
+    "policy.py",
+    "qkv_stages.py",
+    "query_projection_stages.py",
+    "query_source.py",
+    "request_geometry.py",
+    "runtime_abi.py",
+    "signals.py",
+    "wait_codegen.py"
+  ],
+  "candidate_vs_reference668_byte_identical_files": [
+    "__init__.py",
+    "attention_plan_stages.py",
+    "attention_stream_stages.py",
+    "binding.py",
+    "cache_stages.py",
+    "compressor_output_stages.py",
+    "compressor_pool_stages.py",
+    "compressor_projection_stages.py",
+    "entry.py",
+    "hc_stages.py",
+    "indexer_cache_stages.py",
+    "indexer_compressor_output_stages.py",
+    "indexer_group_stages.py",
+    "indexer_publish_stages.py",
+    "indexer_query_stages.py",
+    "indexer_scale_plan_stages.py",
+    "indexer_score_stages.py",
+    "indexer_topk_stages.py",
+    "kv_stages.py",
+    "metadata_stages.py",
+    "output_projection_b_stages.py",
+    "policy.py",
+    "qkv_stages.py",
+    "query_projection_stages.py",
+    "query_source.py",
+    "request_geometry.py",
+    "runtime_abi.py",
+    "signals.py",
+    "wait_codegen.py"
+  ],
+  "reference668_copy_all_files_byte_identical": true,
+  "frozen_inputs_text_unchanged": true,
+  "common_math_and_sync_functions_ast_unchanged": {
+    "output_projection_a_stages.py": [
+      "o_projection_a_stage_nd",
+      "o_projection_a_groups_stage_nz",
+      "o_projection_a_stage_nz",
+      "o_projection_groups_quant_stage",
+      "o_projection_group_quant_stage"
+    ],
+    "phase_sync.py": [
+      "signal_word_count",
+      "begin_invocation",
+      "publish_phase",
+      "wait_producer",
+      "wait_row_owners"
+    ]
+  },
+  "closed_branch_comparisons": [
+    {
+      "known_values": {
+        "OB_ROWS": 96
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OB_ROWS": 96
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OB_ROWS": 128
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OB_ROWS": 128
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 256
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 256
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OUTPUT_GROUP_PIPELINE": false
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 128,
+        "OB_ROWS": 32,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 0
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 128,
+        "OB_ROWS": 32,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 0
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 128,
+        "OB_ROWS": 32,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 33
+      },
+      "file": "cube_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    },
+    {
+      "known_values": {
+        "OA_COLS": 128,
+        "OB_ROWS": 32,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "tokens": 33
+      },
+      "file": "vector_schedule.py",
+      "entire_schedule_function_ast_equal_to_reference668": true,
+      "pair_and_special_wait_unreachable": true
+    }
+  ],
+  "closed_branch_limit": "只比较完整调度函数及原有 helper；Python 模块仍有新增 import 和未调用的 pair/wait 定义，不把此结果称为整个模块或实际后端生成物相同",
+  "calls_with_ancestor_guards": [
+    {
+      "file": "cube_schedule.py",
+      "name": "o_projection_a_pair_group_stage_nz",
+      "line": 421,
+      "guards": [
+        "OUTPUT_GROUP_PIPELINE",
+        "OA_COLS == 128 and OB_ROWS == 32 and (tokens > 0) and (tokens <= 32)",
+        "worker >= pair_first and worker < pair_first + 3 or (worker >= single_first and worker < single_first + 2)"
+      ]
+    },
+    {
+      "file": "vector_schedule.py",
+      "name": "wait_oa_pair_group",
+      "line": 949,
+      "guards": [
+        "OUTPUT_GROUP_PIPELINE",
+        "quant_owned < quant_first + quant_per_group",
+        "OA_COLS == 128 and OB_ROWS == 32 and (tokens > 0) and (tokens <= 32)"
+      ]
+    }
+  ],
+  "effective_predicate": "OUTPUT_GROUP_PIPELINE && OA_COLS == 128 and OB_ROWS == 32 and tokens > 0 and tokens <= 32",
+  "OB32_dynamic_T_checked": [
+    0,
+    97
+  ],
+  "OB32_enabled_T": [
+    1,
+    32
+  ],
+  "source_policy_unchanged": true,
+  "policy_basis": "现行 policy.py: OB_ROWS=32 iff tokens<=32；量化每组只有一个32行任务。该边界是待验证假说，不是收益保证"
+}

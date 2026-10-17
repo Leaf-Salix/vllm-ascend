@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "scope": "只读直接文本/AST接口核对；无编译/设备/运行时测试",
+  "main_candidate_matches_private_33_files": true,
+  "main_reference_matches_private_33_files": true,
+  "byte_identical_to_reference668": [
+    "policy.py",
+    "entry.py",
+    "binding.py",
+    "runtime_abi.py",
+    "signals.py",
+    "wait_codegen.py"
+  ],
+  "schedule_signature_checks": [
+    {
+      "file": "cube_schedule.py",
+      "function": "cube_schedule",
+      "args_decorators_returns_type_comments_unchanged": true
+    },
+    {
+      "file": "vector_schedule.py",
+      "function": "vector_schedule",
+      "args_decorators_returns_type_comments_unchanged": true
+    }
+  ],
+  "actual_T_source": {
+    "runtime_abi.py:73": "T = pl.dynamic(\"CSA_FULL_T\")",
+    "cube_schedule.py:223": "tokens = pl.tensor.dim(x_fp32, 0)",
+    "vector_schedule.py:380": "tokens = pl.tensor.dim(x, 0)"
+  },
+  "host_policy": "binding.py:50-58 仍使用已有 hidden.shape/metadata shape 与 caller max_query_tokens/max_seq_len；未新增 device 内容回读",
+  "OA_OB_controls": "policy.constexprs 原有 OA_COLS/OB_ROWS，entry 原样传给 cube/vector，未新增 bool 字段或 ABI 参数",
+  "no_new_host_device_read": true,
+  "no_new_tensor_or_phase_definition": true,
+  "comment_only_followup": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_small_t_evidence/source_candidate/entry.py",
+    "line": 24,
+    "text": "旧总览仍称输出组流水保留原全局任务owner；pair区间改owner后该句需在最终采用时另作docstring澄清。本次entry完全保持668原文，不影响ABI/运行。",
+    "suggested_text": "OUTPUT_GROUP_PIPELINE 选择八个输出组的通知；原路径保留全局任务owner，OB32小T pair路径使用两侧匹配的五owner，动态行与kernel数量不变。"
+  }
+}

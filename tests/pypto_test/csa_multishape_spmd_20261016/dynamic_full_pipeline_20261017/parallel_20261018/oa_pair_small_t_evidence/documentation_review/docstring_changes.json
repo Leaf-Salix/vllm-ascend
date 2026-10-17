@@ -1,0 +1,89 @@
+{
+  "count": 7,
+  "changes": [
+    {
+      "file": "cube_schedule.py",
+      "scope": "<module>",
+      "before": {
+        "line": 2,
+        "text": "完整动态CSA的AIC编排：阶段数据流、分工与阅读顺序。\n\n本文件和vector_schedule.py是在同一个MIX任务中并发运行的两种角色，不是\n两个独立kernel。24个AIC按真实T及device请求计划循环，数学tile由constexpr\n策略选择；没有输入规格白名单、固定S推导请求或冻结的历史DAG。\n\n阅读顺序：HC投影→QA→Indexer压缩/query/head权重→KV→query Hadamard→\n主QB→compact Hadamard→主压缩投影→Indexer score→Attention→O_A/O_B。矩阵计算调用各\n*_stages.py的inline函数；本文件只描述何时允许消费数据，不另写数学。\nHC行依赖路径按每个AIC实际消费的M16行等待M8输入，不等无关行；\n每个producer仍发布自己的完整阶段，消费者等待后保留业务缓存获取。\n先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在Indexer query和\n等待其RoPE之间，使AIV有推进窗口。两种压缩独立，先发Indexer投影，让其AIV pool/norm\n与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。\n输出尾段按策略选择整阶段或逐输出组通知；逐组路径不改变本核O_A任务序，\n已做完自己O_A的AIC可读就绪量化组做O_B，而不等待其它组完成量化。\n\n布局：x_fp32[T,16384]、normed[T,4096]；QA与KV输出pad16，QB为pad128。\nqr与q_heads是调用层绑定的GM视图，q_heads必须恰好64*T行；compact实际行数\n读设备计数，不能用其pad容量替代。主/Indexer state、cache始终是Native\n存储；本角色只通过显式等候读取其他核产物。输出packed为8组，组stride由\n其真实容量除8得到。完整的外部容量/别名合同见entry.py及各数学文件头部。\n\n同步：每核begin一次，即使本轮无工作也不能跳过。phase是单写者整阶段\n完成标记，消费者只等对应owner；发布和等待都包含业务流水/缓存维护。\nScore与Attention内部还有组内环槽READY/ACK，必须让双AIV同时推进，不能\n等AIV整段结束才启动AIC。Scalar完成标记不能代替MTE/FIX完成或读侧缓存维护。\n\n当前入口覆盖Cube Score策略；完整CPU后端、真机精度及性能以验证记录为准。\n前段已有的设备PASS不能证明本文件新接入的全链路或七档性能达标。\n"
+      },
+      "after": {
+        "line": 2,
+        "text": "完整动态CSA的AIC编排：阶段数据流、分工与阅读顺序。\n\n本文件和vector_schedule.py是在同一个MIX任务中并发运行的两种角色，不是\n两个独立kernel。24个AIC按真实T及device请求计划循环，数学tile由constexpr\n策略选择；没有输入规格白名单、固定S推导请求或冻结的历史DAG。\n\n阅读顺序：HC投影→QA→Indexer压缩/query/head权重→KV→query Hadamard→\n主QB→compact Hadamard→主压缩投影→Indexer score→Attention→O_A/O_B。矩阵计算调用各\n*_stages.py的inline函数；本文件只描述何时允许消费数据，不另写数学。\nHC行依赖路径按每个AIC实际消费的M16行等待M8输入，不等无关行；\n每个producer仍发布自己的完整阶段，消费者等待后保留业务缓存获取。\n先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在Indexer query和\n等待其RoPE之间，使AIV有推进窗口。两种压缩独立，先发Indexer投影，让其AIV pool/norm\n与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。\n输出尾段按策略选择整阶段或逐输出组通知。逐组 N128 且 0<T<=96 时，\n使用三 pair、两 single 的五 owner 分工；其它区间沿用 logical%24。每核\n先完成自己的全部 O_A，再消费就绪量化组做 O_B，保持无环的生产消费方向。\npair 会改变原每核任务和组间就绪次序，不保证每个组都更早完成。\n\n布局：x_fp32[T,16384]、normed[T,4096]；QA与KV输出pad16，QB为pad128。\nqr与q_heads是调用层绑定的GM视图，q_heads必须恰好64*T行；compact实际行数\n读设备计数，不能用其pad容量替代。主/Indexer state、cache始终是Native\n存储；本角色只通过显式等候读取其他核产物。输出packed为8组，组stride由\n其真实容量除8得到。完整的外部容量/别名合同见entry.py及各数学文件头部。\n\n同步：每核begin一次，即使本轮无工作也不能跳过。phase是单写者整阶段\n完成标记，消费者只等对应owner；发布和等待都包含业务流水/缓存维护。\nScore与Attention内部还有组内环槽READY/ACK，必须让双AIV同时推进，不能\n等AIV整段结束才启动AIC。Scalar完成标记不能代替MTE/FIX完成或读侧缓存维护。\n\n当前入口覆盖Cube Score策略；完整CPU后端、真机精度及性能以验证记录为准。\n前段已有的设备PASS不能证明本文件新接入的全链路或七档性能达标。\n"
+      }
+    },
+    {
+      "file": "vector_schedule.py",
+      "scope": "<module>",
+      "before": {
+        "line": 2,
+        "text": "完整动态CSA的双AIV编排：先读整体数据流，再沿阶段注释阅读。\n\n48个AIV来自24个常驻MIX组，worker=group*2+lane。split_aiv让两条Vector\n角色分别执行同一段源码，按worker领取不同的动态行、请求或head块；它不\n自动建立跨核数据依赖。T和B均为Tensor动态轴，Q/L/position/slots是device\nTensor；不能用T/固定S反推请求，Native dummy及不等长请求由各阶段Q/L处理。\n\n第一段：HC加宽/RMS并发布；根据ceil(T/8)选前段空闲AIV计算公共metadata。\n满48核时选47号，先发布其widen，再计算计划，不永久保留一核。其他核继续\nHC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等本核\n消费的四个K片及一到两个RAW owner，数学、发布协议与其它阶段依赖不变。归一化先发布，让QA与Sinkhorn\n重叠，再进入QR、RoPE与KV/query处理。这里只算\n请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。\n\n第二段：先Indexer query反量化、head权重与压缩pool/norm，再KV处理、\nIndexer query量化/系数、compact key量化与scale提交，再主Query反量化及主压缩。\n让已具备Indexer输入的AIC提前填充Score双槽，本AIV仍先完成主分支再消费Score；\n没有等整段Score或跳过ACK。前移等待的代价须由整层实测判断。主/Indexer\n两条压缩分支直接读写各自Native state。pool全部读完共享prefix历史后才\n提交state。Indexer key并行写槽，32个FP16 scale所在64B区按物理page%48\n分配唯一writer，同页更新顺序执行，避免读改写覆盖；其地址计划由早期planner准备。\n\n第三段：与AIC并发执行Score/双槽ACK→跨叶TopK→Attention有效块计划→\n与AIC并发执行三槽QK/PV的采KV/softmax/归并→分组量化→反量化和HCpost。\nAttention查询几何复用开启时，plan在原64B mask行内同时发布request/position；\n消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时\n两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。\n组流水启用时，量化只等本输出组的O_A owner；末块尾零属于同组通知合同，\n每组独立槽位。HCpost仍等待所有O_B partial，保留八组反量化左折叠顺序。\n数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。\n\n每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要\n在业务写回完成之后，wait之后做读侧维护；单写者免atomic不等于cache一致。\n计划本轮只写一次、后续只读，signal另占512B隔离槽。组内环槽另有READY/ACK，\n不能用整阶段信号替代。所有参与核每次begin一次，首次signal清零、单流/图\n独占、失败后重置及代际上限由调用层保证。验证状态见统一优化日志。\n"
+      },
+      "after": {
+        "line": 2,
+        "text": "完整动态CSA的双AIV编排：先读整体数据流，再沿阶段注释阅读。\n\n48个AIV来自24个常驻MIX组，worker=group*2+lane。split_aiv让两条Vector\n角色分别执行同一段源码，按worker领取不同的动态行、请求或head块；它不\n自动建立跨核数据依赖。T和B均为Tensor动态轴，Q/L/position/slots是device\nTensor；不能用T/固定S反推请求，Native dummy及不等长请求由各阶段Q/L处理。\n\n第一段：HC加宽/RMS并发布；根据ceil(T/8)选前段空闲AIV计算公共metadata。\n满48核时选47号，先发布其widen，再计算计划，不永久保留一核。其他核继续\nHC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等本核\n消费的四个K片及一到两个RAW owner，数学、发布协议与其它阶段依赖不变。归一化先发布，让QA与Sinkhorn\n重叠，再进入QR、RoPE与KV/query处理。这里只算\n请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。\n\n第二段：先Indexer query反量化、head权重与压缩pool/norm，再KV处理、\nIndexer query量化/系数、compact key量化与scale提交，再主Query反量化及主压缩。\n让已具备Indexer输入的AIC提前填充Score双槽，本AIV仍先完成主分支再消费Score；\n没有等整段Score或跳过ACK。前移等待的代价须由整层实测判断。主/Indexer\n两条压缩分支直接读写各自Native state。pool全部读完共享prefix历史后才\n提交state。Indexer key并行写槽，32个FP16 scale所在64B区按物理page%48\n分配唯一writer，同页更新顺序执行，避免读改写覆盖；其地址计划由早期planner准备。\n\n第三段：与AIC并发执行Score/双槽ACK→跨叶TopK→Attention有效块计划→\n与AIC并发执行三槽QK/PV的采KV/softmax/归并→分组量化→反量化和HCpost。\nAttention查询几何复用开启时，plan在原64B mask行内同时发布request/position；\n消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时\n两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。\n组流水启用时，量化只等本输出组的真实 O_A owner。N128 且 0<T<=96\n等三 pair 加两 single 的五核，其它区间按原逻辑列块 owner 等待。量化\n仍按 (group,32 行块)%48 分工，每组末块尾零在同组发布前完成。HCpost\n仍等待所有 O_B partial，保留八组反量化左折叠顺序。\n数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。\n\n每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要\n在业务写回完成之后，wait之后做读侧维护；单写者免atomic不等于cache一致。\n计划本轮只写一次、后续只读，signal另占512B隔离槽。组内环槽另有READY/ACK，\n不能用整阶段信号替代。所有参与核每次begin一次，首次signal清零、单流/图\n独占、失败后重置及代际上限由调用层保证。验证状态见统一优化日志。\n"
+      }
+    },
+    {
+      "file": "output_projection_a_stages.py",
+      "scope": "<module>",
+      "before": {
+        "line": 8,
+        "text": "动态 CSA 的 O_A 分组投影与分组量化：外层显式分核的三个核内阶段。\n\n输入输出与阅读顺序\n    先读 o_projection_a_stage_nd/nz：AIC 消费 attention 的 packed heads，\n    按八个 O group 独立做 K4096→N1024，写 FP32[P_MM,8192]。再读\n    o_projection_group_quant_stage：AIV 对每行每组1024列独立取 amax，\n    写 INT8[P_MM,8192] 和 FP32[8,P_SCALE]。这不是跨8192列的统一量化。\n    wo_a 保持 Native BF16[8,4096,1024] 的实际 ND 或 NZ 存储；两个函数\n    分开声明布局，调用方按真实权重选择，不做格式转换或导入期设备探针。\n\n动态轴、容量与别名\n    tokens 是调用方从真实业务 Tensor 动态轴得到的设备 Scalar T，不从\n    packed/workspace 容量反推。packed 是 BF16[PACK_TOTAL_ROWS,4096]，\n    PACK_TOTAL_ROWS=8*P_PACK，组 g 的第 t 行位于 g*P_PACK+t，P_PACK>=T。\n    FP32/INT8 工作区共享 P_MM 容量合同但不共享存储；P_SCALE 独立且>=T。\n    O_B 使用的 ROW_TILE 为32/96/128之一，P_MM>=ceil(T/ROW_TILE)*ROW_TILE，\n    并须足以保存实际T行。packed总行数须整除8，各视图连续且不得非法别名。\n    所有容量轴均 pl.dynamic；固定8组、模型维度和128/256列tile不是B/S白名单。\n    外层捕获前拒绝不一致容量/layout；不能让生产者跳写而消费者读取旧值。\n\n分工、数学与尾行\n    O_A 以(group,ceil(T/128)行块,N列块)展平，logical%WORKERS 为AIC owner；\n    每块先K256 matmul，再原顺序追加15个K256，pipeline只重叠本核搬运。\n    仅迁移当前实际启用的 PIPELINE_OA=False，不搬未启用的显式L0流水候选。\n    量化以(group,32行块)展平轮转AIV，块内每8行流水；有效行数贯穿load、\n    row_max、常数、div、cast和store，绝不读取 O_A 未写的 FP32 padding。\n    每组最后一个活动32行块是唯一尾owner，额外将INT8的[T,P_USED)写零，\n    P_USED=ceil(T/ROW_TILE)*ROW_TILE；O_B 才能安全整块读取。T=0不产生任务。\n    量化保留127/amax、amax*(1/127)及INT32 rint→FP16 round→INT8 trunc；\n    反量化scale不能替换为recip(量化乘数)，也不增加BF16往返舍入。\n\n同步与生命周期\n    groups helper 允许外层按输出组发布，而不改变原有逻辑任务的 owner。\n    group_begin/end 是核内 Scalar 范围；先定位该组内满足 logical%WORKERS\n    的首项，后续仍按 WORKERS 条带循环。只改变独立组之间的可见时机，不\n    切断组内 K 累加、amax 归约或 padding 清零。全阶段入口调用相同数学体。\n    helper不创建spmd、task或notify/wait。O_A先等所消费packed行的全部\n    attention生产者，量化先等本组本行的所有O_A列块。量化的真实INT8行、\n    scale和所需尾零均完成发布后，O_B才可读整ROW_TILE；外层负责业务fence、\n    缓存维护和阶段信号。本核return仅返回GM别名，不能当作其它核完成。\n    每个输出行列块唯一写；返回前所有本核wave已经执行，但消费者完成前\n    不得复用GM。工作区标InOut保留未写区，P_USED以后的INT8和T以后的scale\n    不承诺初始化。BYPASS策略如需使用，须在外层spmd直属设置。\n    当前是源级阶段迁移；CPU编译不等于整层设备精度、同步或性能已通过。\n\n独立候选补充\n    pair_group helper仅用于1≤T≤96既有N128区间，三个pair共享各自Left，\n    两个single沿原数学；五owner映射及阶段通知必须与cube/vector同时修改。\n    T/GM容量仍动态，不扩大到T128，也不改变N256或关闭组流水时的原路径。\n"
+      },
+      "after": {
+        "line": 8,
+        "text": "动态 CSA 的 O_A 分组投影与分组量化。\n\n输入输出与阅读顺序\n    AIC 消费 attention 的 packed heads，按八个 O group 独立做\n    K4096→N1024，写 FP32[P_MM,8192]。输出组流水开启、OA_COLS=128 且\n    设备实际 0<T<=96 时，使用 o_projection_a_pair_group_stage_nz；\n    其它区间保留原独立列块 helper。AIV 再对每行每组 1024 列独立取\n    amax，写 INT8[P_MM,8192] 和 FP32[8,P_SCALE]，不跨八组归约。\n    wo_a 保持 Native BF16[8,4096,1024] 的实际 ND 或 NZ 存储；各入口\n    声明所需布局，pair 专用于 NZ，不做格式转换或导入期设备探针。\n\n动态轴、容量与别名\n    tokens 是调用方从真实业务 Tensor 动态轴得到的设备 Scalar T，不从\n    packed/workspace 容量反推。packed 是 BF16[PACK_TOTAL_ROWS,4096]，\n    PACK_TOTAL_ROWS=8*P_PACK，组 g 的第 t 行位于 g*P_PACK+t，P_PACK>=T。\n    FP32/INT8 工作区共享 P_MM 容量合同但不共享存储；P_SCALE 独立且>=T。\n    O_B 使用的 ROW_TILE 为 32/96/128 之一，P_MM>=ceil(T/ROW_TILE)*ROW_TILE，\n    并须足以保存实际 T 行。packed 总行数须整除 8，各视图连续且不得非法别名。\n    所有容量轴均 pl.dynamic；固定八组、模型维度和 tile 不是 B/S 白名单。\n    外层捕获前拒绝不一致容量/layout；不能让生产者跳写而消费者读取旧值。\n\n分工、数学与尾行\n    原路径以 (group,ceil(T/128) 行块,N 列块) 展平并按 logical%WORKERS\n    分给 AIC，每块先 K256 matmul，再按原顺序追加 15 个 K256。\n    小 T pair 路径专用于 24 AIC：组 g 的三个 pair 归 3g..3g+2，每核\n    共用输入和 Left，分别累加两个 N128 输出；末两个 N128 块分别归\n    (3g+3+s)%24，s 为 0/1。组内五 owner 互异，组 7 的 single 回绕到 0/1。\n    pair 显式使用 Mat/Left/Right 与两个 FP32 Acc，每条链按 K128 顺序\n    累加；single 保留原 K256 首块和后续流水。M128 是 tile 容量，所有\n    GM 读写只覆盖实际 T 行；不把 tile 容量当作可访问的 GM 行数。\n    量化以 (group,32 行块) 展平轮转 AIV，块内每 8 行流水；有效行数贯穿\n    load、row_max、常数、div、cast 和 store，不读取 O_A 未写的 FP32 padding。\n    每组最后一个活动 32 行块是唯一尾 owner，额外将 INT8 的 [T,P_USED) 写零，\n    P_USED=ceil(T/ROW_TILE)*ROW_TILE；O_B 才能安全整块读取。T=0 不产生任务。\n    量化保留 127/amax、amax*(1/127) 及 INT32 rint→FP16 round→INT8 trunc；\n    反量化 scale 不能替换为 recip(量化乘数)，也不增加 BF16 往返舍入。\n\n同步与生命周期\n    原 groups helper 保留 logical%WORKERS；pair helper 使用与 cube/vector\n    同步的五 owner 映射。各 helper 均不创建 spmd、task 或 notify/wait。\n    O_A 先获取所消费 packed 行的全部 attention 生产者；每个 AIC 完成\n    本核全部 O_A 组后才进入 O_B 等待。AIV 获取本组全部 O_A owner 后量化，\n    真实 INT8、scale 与所需尾零完成后才发布。O_B 获取该组全部量化 owner\n    后可读整 ROW_TILE。组间就绪次序可以变化，组内归约与尾零合同不变。\n    外层负责业务 fence、缓存维护和阶段信号。函数返回 GM 别名不代表\n    异步流水已完成，也不代表其它核完成；消费者读完前不得复用 GM。\n    每个输出行列块唯一写；InOut 保留未写区，P_USED 以后的 INT8 和 T 以后的\n    scale 不承诺初始化。BYPASS 策略如需使用，须在外层 spmd 直属设置。\n    实际编译、精度与完整 L1 验证状态见对应测试档案，不由源码说明推定。\n"
+      }
+    },
+    {
+      "file": "output_projection_a_stages.py",
+      "scope": "<module>.o_projection_a_pair_group_stage_nz",
+      "before": {
+        "line": 279,
+        "text": "仅既有N128且1≤T≤96：每组3pair+2single，实际GM容量/有效行仍动态。\n\n    pair p归3*g+p，写2p/2p+1；single s归(3*g+3+s)%24，写6+s。\n    本组五个owner互异。两个判断独立，外层在本组所有本核写入完成后才发布。\n    组间packed步长由Tensor求得，不沿用资源探针固定384；输入T可小于M128，\n    valid_rows贯穿Tile的compact Acc/load/store，不能写实际GM的padding/guard。\n    K1024普通range内部四K256局部Mat，只有两个FP32 Acc跨回边；每条链仍\n    K128依次累加。MTE2/MTE1/M事件由后端保持，源码顺序不是异步保证。\n    single保留现行Tensor matmul的首K256及后续15段pipeline，量化数学不动。\n    WORKERS必须24；不含任务/通知，完整依赖由cube/vector两侧匹配公式维护。\n    "
+      },
+      "after": {
+        "line": 279,
+        "text": "仅输出组流水开启、N128 且 0<T<=96：每组三个 pair、两个 single。\n\n    pair p 归 3*g+p，写列块 2p/2p+1；single s 归 (3*g+3+s)%24，写 6+s。\n    本组五个 owner 互异，每核在同组只执行一种角色；外层完成本组全部\n    本核写入后才发布。实际 GM 容量与有效行仍动态，不能按 M128 写满尾行。\n    组间packed步长由Tensor求得，不沿用资源探针固定384；输入T可小于M128，\n    valid_rows贯穿Tile的compact Acc/load/store，不能写实际GM的padding/guard。\n    K1024普通range内部四K256局部Mat，只有两个FP32 Acc跨回边；每条链仍\n    K128依次累加。MTE2/MTE1/M事件由后端保持，源码顺序不是异步保证。\n    single保留现行Tensor matmul的首K256及后续15段pipeline，量化数学不动。\n    WORKERS必须24；不含任务/通知，完整依赖由cube/vector两侧匹配公式维护。\n    "
+      }
+    },
+    {
+      "file": "output_projection_a_stages.py",
+      "scope": "<module>.o_projection_a_stage_nz",
+      "before": {
+        "line": 181,
+        "text": "全八组兼容入口：与按组通知分支复用同一数学，不另维护计算版本。"
+      },
+      "after": {
+        "line": 181,
+        "text": "原独立列块路径的全八组入口：复用 groups helper，不包含专用 pair 分工。"
+      }
+    },
+    {
+      "file": "phase_sync.py",
+      "scope": "<module>",
+      "before": {
+        "line": 2,
+        "text": "动态 CSA 单 SPMD 的阶段通知协议：整体思路与阅读顺序。\n\n一、用途与数据流\n    数学阶段在一个常驻 MIX SPMD 中运行。生产者完成业务 Tensor 写回后，\n    只发布自己的阶段信号；消费者只等待实际依赖的生产者。这里不创建\n    task，不传入历史 records/waits 表，也不把每个阶段变成全核屏障。\n    阅读顺序：工作区约定 → begin_invocation → publish_phase → wait_*。\n\n二、输入、布局和动态范围\n    signals 是独占的一维 INT32 GM Tensor，长度保留 pl.dynamic。布局为\n    [阶段数, 参与核数, 128 个 INT32]；每个槽只使用首元素，其余是隔离区。\n    沿用此前验证过的 512 字节隔离跨度，不声称这就是硬件最小缓存行。\n    阶段 0 保存每核调用代际，其余阶段由调用方使用有含义的阶段常量。\n    核编号约定为 AIC 的 [0,G)、AIV 的 [G,3G)，G 是该工作区固定的常驻核组数。\n    阶段数和核数描述算法/硬件，不是固定 batch；行范围来自实际 T/B。\n\n三、所有权、同步与缓存\n    (阶段, 核编号) 只有该核写，多个消费者可以等同一槽，因此不需要\n    多写者 atomic。Scalar DCache 不一致：signal_notify/wait 负责信号\n    的发布/读取，业务 Tensor 仍需本核流水完成及缓存维护，不能混为一谈。\n    本模块调用通用 signals 适配，发布前排空流水；等待结束后再刷新业务\n    数据的本地缓存。组内 Cube/Vector FIFO/FFTS 握手仍由数学阶段自己负责。\n\n四、生命周期和正确性边界\n    工作区须在首次调用前清零，并由单个顺序执行的图/流独占。每次调用\n    所有参与核必须且只能调用一次 begin_invocation，即使该核没有数学\n    工作也不能跳过；否则不同核的代际会不一致。执行失败后不可直接复用\n    部分推进的工作区，必须在设备空闲时重新初始化。INT32 代际到上限前\n    同样需要在捕获外重建工作区，禁止在核内回绕清零造成 ABA。\n    同一工作区的 G、核编号映射、阶段槽数及阶段含义必须保持不变；仅改变\n    业务 T/B/metadata 不改变此合同。若新策略改变参与核集合或阶段布局，\n    必须绑定另一份清零的新工作区，不能只因容量足够就复用旧信号内容。\n    publish_phase 必须位于该生产者本阶段全部写回之后；零工作量参与者\n    也应按调用方合同发布完成，或由消费者的所有权计算将其排除。\n    这是整阶段完成通知，没有消费者 ACK。不能对同一槽/代际逐 tile 重复\n    发布，也不能在消费者读完前覆盖业务缓冲；需要环形槽复用时，必须另设\n    进度或反向依赖。消费者未消费信号，不代表已经释放生产者的数据空间。\n\n五、当前状态\n    这是可复用的动态控制组件，尚不等于完整 CSA。wait_row_owners 只适用\n    “按连续行 tile 轮转分给 worker”的布局；请求分组、split-K 和多维\n    投影应显式枚举自己的真实 owner，不能误用本函数减少依赖。\n"
+      },
+      "after": {
+        "line": 2,
+        "text": "动态 CSA 单 SPMD 的阶段通知协议：整体思路与阅读顺序。\n\n一、用途与数据流\n    数学阶段在一个常驻 MIX SPMD 中运行。生产者完成业务 Tensor 写回后，\n    只发布自己的阶段信号；消费者只等待实际依赖的生产者。这里不创建\n    task，不传入历史 records/waits 表，也不把每个阶段变成全核屏障。\n    阅读顺序：工作区约定 → begin_invocation → publish_phase → wait_*。\n\n二、输入、布局和动态范围\n    signals 是独占的一维 INT32 GM Tensor，长度保留 pl.dynamic。布局为\n    [阶段数, 参与核数, 128 个 INT32]；每个槽只使用首元素，其余是隔离区。\n    沿用此前验证过的 512 字节隔离跨度，不声称这就是硬件最小缓存行。\n    阶段 0 保存每核调用代际，其余阶段由调用方使用有含义的阶段常量。\n    核编号约定为 AIC 的 [0,G)、AIV 的 [G,3G)，G 是该工作区固定的常驻核组数。\n    阶段数和核数描述算法/硬件，不是固定 batch；行范围来自实际 T/B。\n\n三、所有权、同步与缓存\n    (阶段, 核编号) 只有该核写，多个消费者可以等同一槽，因此不需要\n    多写者 atomic。Scalar DCache 不一致：signal_notify/wait 负责信号\n    的发布/读取，业务 Tensor 仍需本核流水完成及缓存维护，不能混为一谈。\n    本模块调用通用 signals 适配，发布前排空流水；等待结束后再刷新业务\n    数据的本地缓存。组内 Cube/Vector FIFO/FFTS 握手仍由数学阶段自己负责。\n\n四、生命周期和正确性边界\n    工作区须在首次调用前清零，并由单个顺序执行的图/流独占。每次调用\n    所有参与核必须且只能调用一次 begin_invocation，即使该核没有数学\n    工作也不能跳过；否则不同核的代际会不一致。执行失败后不可直接复用\n    部分推进的工作区，必须在设备空闲时重新初始化。INT32 代际到上限前\n    同样需要在捕获外重建工作区，禁止在核内回绕清零造成 ABA。\n    同一工作区调用 begin 的物理核集合、G、核编号映射、阶段槽数与阶段\n    含义必须保持不变。每个阶段的活动 owner 可随 T 和合法策略变化，\n    由当次消费者公式与当代发布匹配；这不要求清空未使用槽。改变物理\n    参与核或槽布局时，必须绑定另一份清零的新工作区，不能只因容量\n    足够就复用旧信号内容。\n    publish_phase 必须位于该生产者本阶段全部写回之后；零工作量参与者\n    也应按调用方合同发布完成，或由消费者的所有权计算将其排除。\n    这是整阶段完成通知，没有消费者 ACK。不能对同一槽/代际逐 tile 重复\n    发布，也不能在消费者读完前覆盖业务缓冲；需要环形槽复用时，必须另设\n    进度或反向依赖。消费者未消费信号，不代表已经释放生产者的数据空间。\n\n五、通用与专用 owner 等待\n    wait_row_owners 只适用“按连续行 tile 轮转分给 worker”的布局；\n    请求分组、split-K 和多维投影须显式枚举真实 owner，不能误用该公式。\n    wait_oa_pair_group 专用于固定 24 AIC、输出组流水开启的 N128 小 T\n    分工，等待 3g..3g+2 与 (3g+3+s)%24。两种 helper 均在获取全部依赖\n    后统一维护业务缓存，不能交换 owner 公式。\n"
+      }
+    },
+    {
+      "file": "phase_sync.py",
+      "scope": "<module>.wait_oa_pair_group",
+      "before": {
+        "line": 166,
+        "text": "N128小T专用五owner并集；合同0≤group<8，24AIC，三pair和两single。\n\n    pair归3g..3g+2；single归下一组前两核，并在g7回绕到0/1。两集合互异。\n    所有信号按原代际读取后才统一维护业务cache，避免每owner多一次全局fence。\n    本helper没有新增信号/phase，不可用于旧logical%24或T>96分工。\n    "
+      },
+      "after": {
+        "line": 170,
+        "text": "N128 小 T 的五 owner 并集：组流水开启、0<T<=96、0<=group<8、24 AIC。\n\n    pair归3g..3g+2；single归下一组前两核，并在g7回绕到0/1。两集合互异。\n    所有信号按原代际读取后才统一维护业务cache，避免每owner多一次全局fence。\n    本helper没有新增信号/phase，不可用于旧logical%24或T>96分工。\n    "
+      }
+    }
+  ]
+}
