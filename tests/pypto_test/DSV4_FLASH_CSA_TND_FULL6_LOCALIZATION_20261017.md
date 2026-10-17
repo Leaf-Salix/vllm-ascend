@@ -293,3 +293,9 @@ task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
 旧helper的forbidden imports等失败；未把它计成通过，也未扩展清理历史测试资产。
 全量formatter自动修改的346个无关tracked文件均恢复HEAD，正式数学和原始证据保持原样；
 本次改动范围仍只有关联文档、新定位文档与新证据包。
+
+## 后续完整128K复核
+
+同一独立WKV修正候选已继续完成128K/B24的192 token验收：384请求、73728输出token及接受事件与Native相同，
+rank0全部78轮的43层已观测边界及outer逐bit相同。此前首FULL6原记录及正式默认保持不变。
+详见[完整192 token复核结果与复现方法](DSV4_FLASH_CSA_TND_STATIC_WKV_128K_192_RETEST_20261017.md)。
