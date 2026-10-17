@@ -25,7 +25,7 @@ PTO eager一旦出现首差即停止，不继续PTO graph或其他形状。
 - 输入A复用真实L4权重下Native归一化行，T256追加前16行；B为列roll后加0.03125。
   这是固定权重与输入样本的模块资格，**不是任意权重、所有输入或整模型证明**。
 - 新候选已消除本轮实际遇到的T240 31处、T64 4处误差，并覆盖简单分段未包含的T16/T65等变化。
-- 当前精度分支已将`tnd_full_precision`的WKV调用改为PTO；Indexer权重投影和O-proj仍为Native。
+- 本轮WKV验收时已将`tnd_full_precision`的WKV调用改为PTO；Indexer权重投影和O-proj仍为Native。
   真TND metadata与每请求1..6行契约未改，未增加每请求S6补位。
 - 正式kernel数学AST与通过NPU的v17一致；次序常量逐T核对冻结Native表，另有CPU边界测试和独立审查。
   新接入版本真实8K/B40/192 token回归也已通过，未用百分比阈值放行，也未用FP64替代Native gold。
@@ -278,7 +278,8 @@ python "$H/qualify_production.py" \
 本轮没有内部逐层hook，因此不声称已逐项观测所有层内部WKV tensor；
 固定8K bank、模型与上述环境的通过，也不等于任意输入或其他CANN版本的普遍证明。
 本组活动生成首步每请求1行，后续每请求6行；本轮没有补测非等长请求矩阵。
-Indexer权重投影与O-proj仍为Native，HC-pre到HC-post全PTO替换尚未全部完成。
+该次回归时Indexer权重投影与O-proj仍为Native，HC-pre到HC-post全PTO替换尚未全部完成。
+后续[Indexer投影恢复记录](DSV4_FLASH_CSA_TND_INDEXER_PROJECTION_20261017.md)单独保存其进展。
 本轮只做8K，未跑Native2、128K或性能测量；未将初始化/JIT开销作为性能结论。
 
 [两臂完整数值与复现证据](evidence_tnd_precision/full_pto_20261016/model-8k-wkv-production1-evidence.tar.gz)，

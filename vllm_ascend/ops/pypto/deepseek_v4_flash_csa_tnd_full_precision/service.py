@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm、WKV及HC-post。"""
+"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm、WKV、Indexer权重投影及HC-post。"""
 
 import torch
 import torch_npu
-
-from vllm_ascend.device.device_op import DeviceOperator
 
 from ..deepseek_v4_flash_csa_tnd_precision.native_adapter import NativeCSACall
 from ..deepseek_v4_flash_csa_tnd_precision.service import CSAServiceRuntime as BaselineRuntime
 from .hc_post import hc_post_test
 from .hc_pre import hc_pre_test
+from .indexer_order_data import INDEXER_K_ORDERS, INDEXER_TILE_ORDERS, INDEXER_TOKEN_MODES
+from .indexer_projection import indexer_projection
 from .input_norm import input_norm_test
 from .wkv import wkv_test
 from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
@@ -18,7 +18,7 @@ from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
 class CSAServiceRuntime(BaselineRuntime):
     """原基准保持可运行；剩余Native边界须后续逐项对拍再恢复。"""
 
-    restored_modules = ("hc_pre", "input_norm", "wkv", "hc_post")
+    restored_modules = ("hc_pre", "input_norm", "wkv", "indexer_weights", "hc_post")
     # Native mDim changes above 256 rows; the current K32/22 partition is for mDim1.
     max_hc_pre_tokens = 256
 
@@ -67,6 +67,30 @@ class CSAServiceRuntime(BaselineRuntime):
             device=device,
         )
         self.pto_wkv = pypto.torch.register(wkv_test, "dsv4_csa_tnd_full_precision::wkv")
+        projection = self.wrapper.dsa_attn.impl.weights_proj
+        weight = projection.weight.detach()
+        if projection.bias is not None or weight.dtype != torch.bfloat16 or tuple(weight.shape) != (64, 4096):
+            raise ValueError("PTO Indexer projection requires original unbiased BF16 [64, 4096] weight")
+        if type(projection.quant_method).__name__ != "AscendUnquantizedLinearMethod" or projection.return_bias:
+            raise ValueError("PTO Indexer projection requires Native unquantized tensor output")
+        impl = self.wrapper.dsa_attn.impl
+        if impl.indexer_heads != 64 or impl.indexer_softmax_scale * impl.indexer_heads**-0.5 != 0.011048543456039806:
+            raise ValueError("PTO Indexer projection requires the calibrated Native scale")
+        # 保留原权重dtype与值；加载期只把Native NZ布局整理为ND。
+        if torch_npu.get_npu_format(weight) not in (0, 2):
+            weight = torch_npu.npu_format_cast(weight, 2)
+        self.indexer_projection_weight = weight.contiguous()
+        self.indexer_projection_raw = torch.empty((tokens, 64), dtype=torch.bfloat16, device=device)
+        self.indexer_projection_scaled = torch.empty((tokens, 64), dtype=torch.bfloat16, device=device)
+        self.indexer_weights = torch.empty((tokens, 64), dtype=torch.float16, device=device)
+        self.indexer_orders = torch.tensor(
+            [[[INDEXER_K_ORDERS[index] for index in row] for row in mode] for mode in INDEXER_TILE_ORDERS],
+            dtype=torch.int32,
+            device=device,
+        )
+        self.pto_indexer_projection = pypto.torch.register(
+            indexer_projection, "dsv4_csa_tnd_full_precision::indexer_projection"
+        )
         self.hc_mixed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
         self.hc_post_gates = torch.empty((tokens, 4), dtype=torch.float32, device=device)
         self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
@@ -117,19 +141,26 @@ class CSAServiceRuntime(BaselineRuntime):
         if not kv_projected.is_contiguous() or torch_npu.get_npu_format(kv_projected) not in (0, 2):
             raise ValueError("PTO WKV must publish contiguous ND storage")
         impl = self.wrapper.dsa_attn.impl
-        native_indexer_weights = DeviceOperator.prepare_dsa_indexer_weights(
-            impl.weights_proj(normed) * (impl.indexer_softmax_scale * impl.indexer_heads**-0.5)
+        indexer_weights = self.indexer_weights[:tokens]
+        indexer_order = self.indexer_orders[INDEXER_TOKEN_MODES[tokens - 1]]
+        self.pto_indexer_projection(
+            normed,
+            self.indexer_projection_weight,
+            indexer_order,
+            self.indexer_projection_raw[:tokens],
+            self.indexer_projection_scaled[:tokens],
+            indexer_weights,
         )
-        if native_indexer_weights.dtype != torch.float16 or tuple(native_indexer_weights.shape) != (tokens, 64):
-            raise ValueError("Native Indexer weights must publish FP16 [tokens, 64]")
-        if not native_indexer_weights.is_contiguous() or torch_npu.get_npu_format(native_indexer_weights) not in (0, 2):
-            raise ValueError("Native Indexer weights must publish contiguous ND storage")
+        if indexer_weights.dtype != torch.float16 or tuple(indexer_weights.shape) != (tokens, 64):
+            raise ValueError("PTO Indexer weights must publish FP16 [tokens, 64]")
+        if not indexer_weights.is_contiguous() or torch_npu.get_npu_format(indexer_weights) not in (0, 2):
+            raise ValueError("PTO Indexer weights must publish contiguous ND storage")
         call_weights = dict(
             self.weights,
             native_normed=normed,
             # 保留CSA内部的历史边界名称，实际producer已改为PTO。
             native_kv_projected=kv_projected,
-            native_indexer_weights=native_indexer_weights,
+            native_indexer_weights=indexer_weights,
             native_heads=self.native_heads[:tokens],
         )
         call = NativeCSACall(
