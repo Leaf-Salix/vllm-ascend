@@ -645,3 +645,50 @@ PTO层少1次TLOAD、3次TCVT、2次TMULS和1次TADD，增加TXORS；不能止�
 
 三套33源、两次日志、CPU结果、必要生成片段与事件差分全部归档；大生成物保留
 本地路径/大小，无hash。未修改正式源码/依赖，没有设备精度或性能结果。
+
+
+## 2026-10-18：跨核搬运与权重复用三路并行复审
+
+正式基线为66882634。当前三路分别审计Q_B跨M行块复用权重、输出投影A的显式
+缓冲生命周期，以及A3 Cube/Vector交接；各自在独立worktree工作，未改共享依赖。
+
+已完成的只读结论与证据位于parallel_20261018：
+- acc_to_dq_transport_readonly：当前A3 Acc→AIV仍经GM，T96有效INT32交接单程
+  12MiB、双向24MiB；小FIFO仅减少驻留容量，不自动省掉一写一读。当前AIV在DQ前
+  等待QB之后的compact Hadamard，直接加入有限FIFO消费ACK会形成背压环。
+  必须区分前端可表达、后端可执行与硬件直接传输，未提出无证据的直接替换。
+- attention_kv_multiconsumer_readonly：同一query唯一归属一组，AIC计算全部64heads，
+  双AIV各搬64候选，已有三槽KV复用；并不存在每head/Indexer分片重复搬同query KV。
+  跨query物理row重合尚未测量，不能从共享prefix推定节省量，也不能省略READY/ACK。
+- oa_pair_explicit_lifetime_readonly：以前OA pair的外层pipeline使两条Right流各申请
+  双槽，导致128KiB超过64KiB，或被退为单槽。新设计借鉴HC_pre的手工交错生命周期，
+  显式K256 Mat双缓冲共384KiB，任意时刻只保留两Right和两Acc。其loop-carried
+  coalesce、事件和真实性能仍待验证，未把容量算术当成功实现。
+
+当前只授权Q_B单项完整CPU lowering及OA独立最小CPU探针，尚无本轮设备或性能结果。
+Q_B首选仅B常驻，保留M128与四段K256 INT32累加；QR+B同时常驻的M64备选虽然
+进一步减少逻辑QR读取，却增加50% MMA/FIX和Right载荷，因此暂不叠加。该原理在
+旧分task中已有先例，本轮核对的是当前动态SPMD双M区间，不能把它宣传为新发现。
+
+
+## 2026-10-18：O_A显式双缓冲v1失败、v2通过CPU
+
+完整最小探针归档于parallel_20261018/oa_pair_explicit_mat_cpu_evidence。
+v1真实分配已达到Mat384KiB、Left/Right各64KiB、Acc128KiB，但MemoryReuse
+在Mat循环回边插入三次64KiB Mat→Mat，当前A3 PTOAS拒绝，不存在可执行C++。
+没有修改依赖，也没有忽略后端错误；源、命令、失败日志与IR均保留。
+
+v2只改变这个明确的表达边界：外层普通K1024循环，内部四个固定K256数学块
+手工交错供数，仅两条Acc跨回边；每条输出仍按原K128 FP32顺序累加。CPU完整
+通过，实际Mat仍384KiB、Left/Right各64KiB、Acc128KiB，没有Mat→Mat。C++中
+下一组三次TLOAD已位于当前组提取前，当前组仅等待自己的MTE2事件，不提前
+等下一组，故生成的依赖保留供数窗口；这不是设备重叠或性能收益的证据。
+
+该探针使用真实八组NZ根布局与动态valid_rows，但仅覆盖每组三对N128，余下
+两个singleton没有包含，不能当成完整CSA或正式动态算子。下一步正在独立补齐
+完整输出、唯一写者与组通知/等待，尚未修改正式包。
+
+Q_B另一分支的一次完整CPU在Right128KiB>64KiB处失败；还没有本轮NPU任务。
+已定位到pipeline区域CanonicalizeIOOrder提前Mat→Right extract，导致两个
+K256 Right同时活跃。原路径真实K本来也为256，不是数学K突然变大。失败源与
+修正候选仍在独立worktree，后续结果另记，不将当前过程提交误报为性能改善。

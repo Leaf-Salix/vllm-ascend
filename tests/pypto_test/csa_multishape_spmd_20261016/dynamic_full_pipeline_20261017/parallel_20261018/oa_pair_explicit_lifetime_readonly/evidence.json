@@ -1,0 +1,129 @@
+{
+  "scope": "只读源码与既有产物设计；没有新编译、设备执行、生产修改或精度/性能结论",
+  "formal_baseline": "66882634",
+  "historical_attempts": [
+    {
+      "attempt": "nested_v1",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/nested_v1/result.json",
+      "bytes": 9156,
+      "pass": false,
+      "error": "pl.tile operation 'extract': tile.extract requires a 2D source tile, but got rank 3"
+    },
+    {
+      "attempt": "nested_v2",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/nested_v2/result.json",
+      "bytes": 5948,
+      "pass": false,
+      "error": "Verification failed after 'InferTileMemorySpace' for properties {TileMemoryInferred, AivSplitValid, AccToGmStoreValid, FixpipeEpilogueValid, AccCompactValid}:\nIR Verification Report\n======================\nTotal diagnostics: 2 (2 errors, 0 warnings)\n\n[1] ERROR - AccCompactValid\n  Message: 'tile.matmul_acc' accumulates pl.min(valid_rows__ssa_v0, 128) valid rows into an accumulator that is not compact (function 'oa_pair_n_t96'). mad lays the product out at a pitch of ceil(validRow/16)*16, but a non-compact accumulator is read back at its physical row count 128, which skews every N-fractal above the first. The accumulator this op writes into never carried CompactMode::normal -- a seed built by tile.create declares it with compact=True, and tile.matmul derives it via StampCompactForNarrowedAccRows.\n  Location: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/nested_v2/source.py:44:17\n  Error Code: 1\n\n[2] ERROR - AccCompactValid\n  Message: 'tile.matmul_acc' accumulates pl.min(valid_rows__ssa_v0, 128) valid rows into an accumulator that is not compact (function 'oa_pair_n_t96'). mad lays the product out at a pitch of ceil(validRow/16)*16, but a non-compact accumulator is read back at its physical row count 128, which skews every N-fractal above the first. The accumulator this op writes into never carried CompactMode::normal -- a seed built by tile.create declares it with compact=True, and tile.matmul derives it via StampCompactForNarrowedAccRows.\n  Location: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/nested_v2/source.py:45:17\n  Error Code: 1\n\nStatus: FAILED (2 error(s) found)\n"
+    },
+    {
+      "attempt": "nested_v3",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/nested_v3/result.json",
+      "bytes": 2883,
+      "pass": false,
+      "error": "Right buffer usage (131072 bytes) exceeds platform limit (65536 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473"
+    },
+    {
+      "attempt": "flat_v4",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/flat_v4/result.json",
+      "bytes": 8043,
+      "pass": false,
+      "error": "Cannot reassign 'left' with a different type: was pl.Tile[[128, 128], pl.BF16, pl.Mem.Left, pl.TileView(valid_shape=[pl.min(valid_rows, pl.const(128, pl.INDEX)), 128], blayout=pl.TileLayout.row_major, compact=pl.CompactMode.normal)], got pl.Tile[[128, 128], pl.BF16, pl.Mem.Left, pl.TileView(valid_shape=[valid_rows, 128])]"
+    },
+    {
+      "attempt": "flat_v5",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/flat_v5/result.json",
+      "bytes": 4820,
+      "pass": false,
+      "error": "Internal error: cannot coalesce L0C accumulator across a peeled if-phi — seed producer 'update0__ssa_v1' refused retarget onto the accumulator buffer, which would force an illegal Acc->Acc tile.move. [/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/flat_v5/source.py:48:21]\nCheck failed: ok at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/memory_reuse_pass.cpp:1547\n\nC++ Traceback (most recent call last):\n File \"./src/ir/transforms/passes.cpp\", line 270\n File \"./src/ir/transforms/passes.cpp\", line 55\n File \"./src/ir/transforms/passes.cpp\", line 141\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 5375\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1330\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1332\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1330\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1332\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1330\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1339\n File \"./src/ir/transforms/memory_reuse_pass.cpp\", line 1547\n"
+    },
+    {
+      "attempt": "sequential_k_v6",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6/result.json",
+      "bytes": 3849,
+      "pass": false,
+      "error": "_task_interface was built from ef6812891575, but this source tree is at 57e499238fd4. The compiled extension does not rebuild on import (editable.rebuild = false), so its struct layouts may no longer match the Python that drives them — fields can read as 0 with no error.\nRebuild:  pip install --no-build-isolation -e ."
+    },
+    {
+      "attempt": "sequential_k_v6_envfixed",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6_envfixed/result.json",
+      "bytes": 779,
+      "pass": true,
+      "error": null
+    },
+    {
+      "attempt": "right_lifetime_v7",
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/right_lifetime_v7/result.json",
+      "bytes": 2899,
+      "pass": false,
+      "error": "Right buffer usage (131072 bytes) exceeds platform limit (65536 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473"
+    }
+  ],
+  "historical_v6_memory_peaks_bytes": {
+    "Right": 65536,
+    "Acc": 131072,
+    "Left": 65536,
+    "Mat": 393216
+  },
+  "historical_v6_hints": [
+    "[perf_hint PH-MR-001] MemoryReuse: software pipelining requested depth 2 for pipeline group 0 in Right, but only 1 of 2 buffers fit (32768 B per stage, 65536 B free) — stages 1 apart share storage and serialize. The operand would fit depth 2 on its own, but co-resident buffers / other pipeline groups over-subscribe the space; relieve the co-residents (smaller or fewer co-live tiles) or reduce the pipeline depth to 1. at /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6_envfixed/source.py:17:5",
+    "[perf_hint PH001] TileInnermostDimGranularity: tile.load has innermost dim = 256B (tile bfloat16[128], target_memory=Mat); moves 65536B as 256 x 256B rows; recommended >= 512B for backend a2a3 (L2 cache line = 512B). Consider increasing tile shape on the innermost axis. (2 occurrences at this source location) at /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6_envfixed/source.py:33:13",
+    "[perf_hint PH001] TileInnermostDimGranularity: tile.load has innermost dim = 256B (tile bfloat16[128], target_memory=Mat); moves 65536B as 256 x 256B rows; recommended >= 512B for backend a2a3 (L2 cache line = 512B). Consider increasing tile shape on the innermost axis. (2 occurrences at this source location) at /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6_envfixed/source.py:36:13"
+  ],
+  "proposal": "普通range，显式K256 Mat当前/下一组三元组；每轮两个K128，两个输出的四次MMA无条件分别更新两条Acc；最后K256剥离，不预取越界",
+  "proposed_live_bytes": {
+    "Mat": 393216,
+    "Left": 65536,
+    "Right": 65536,
+    "Acc": 131072
+  },
+  "new_cpu": false,
+  "new_device": false,
+  "uncertainties": [
+    "Mat loop-carried phi是否只需六个Mat槽，必须看实际allocator",
+    "MTE2预取是否被过宽事件合并成等待，必须看生成事件",
+    "M→MTE1复用依赖是否允许相邻MMA与搬运重叠，不能凭SSA最后使用当硬件完成",
+    "整层pair/singleton owner和quant完成通知仍未实现；不能直接沿用旧owner公式",
+    "资源探针的两条K128链与当前整层实际降级MMA链仍需完整数值门验证"
+  ],
+  "sources": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/pair_sequential_k_v6.py",
+      "bytes": 2916
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/pair_nested_v3.py",
+      "bytes": 2825
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/pair_flat_v5.py",
+      "bytes": 2995
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/pair_right_lifetime_v7.py",
+      "bytes": 2829
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/audit.json",
+      "bytes": 32882
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/hc_pre.py",
+      "bytes": 68115
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/output_projection_a_stages.py",
+      "bytes": 14991
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/oa_pair_source_v1/sequential_k_v6_envfixed/kernel/kernels/aic/oa_pair_n_t96.cpp",
+      "bytes": 26281
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/include/pypto/backend/910B/backend_910b_handler.h",
+      "line": 106,
+      "bytes": 6276
+    }
+  ],
+  "local_backend_mat_capacity_bytes": 524288
+}
