@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""完整PTO TND的分阶段候选：当前恢复HC-pre、输入Norm、WKV、Indexer权重投影及HC-post。"""
+"""完整PTO TND的分阶段候选：HC-pre至HC-post均由PTO执行，保留真实TND边界。"""
 
 import torch
 import torch_npu
@@ -11,20 +11,28 @@ from .hc_pre import hc_pre_test
 from .indexer_order_data import INDEXER_K_ORDERS, INDEXER_TILE_ORDERS, INDEXER_TOKEN_MODES
 from .indexer_projection import indexer_projection
 from .input_norm import input_norm_test
+from .o_proj import o_proj_test
+from .oproj_order_data import OPROJ_TILE_STARTS, OPROJ_TOKEN_MODES
 from .wkv import wkv_test
 from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
 from .wkv_profile import WKVProfile
 
 
 class CSAServiceRuntime(BaselineRuntime):
-    """原基准保持可运行；剩余Native边界须后续逐项对拍再恢复。"""
+    """原混合基准保留；本路径用PTO发布各Native计算和舍入边界。"""
 
-    restored_modules = ("hc_pre", "input_norm", "wkv", "indexer_weights", "hc_post")
+    restored_modules = ("hc_pre", "input_norm", "wkv", "indexer_weights", "o_proj", "hc_post")
     # Native mDim changes above 256 rows; the current K32/22 partition is for mDim1.
     max_hc_pre_tokens = 256
 
     def eligible(self, context, hidden, positions):
-        return hidden.shape[0] <= self.max_hc_pre_tokens and super().eligible(context, hidden, positions)
+        if hidden.shape[0] > self.max_hc_pre_tokens or not super().eligible(context, hidden, positions):
+            return False
+        if self.wkv_profile.metadata_sha256 is None:
+            if torch.npu.is_current_stream_capturing():
+                raise RuntimeError("PTO O-proj capture requires verified static qualification and PTO warmup")
+            return False
+        return True
 
     def __init__(self, attention, operators, max_num_seqs, layer=None):
         super().__init__(attention, operators, max_num_seqs, layer)
@@ -97,6 +105,17 @@ class CSAServiceRuntime(BaselineRuntime):
         self.pto_indexer_projection = pypto.torch.register(
             indexer_projection, "dsv4_csa_tnd_full_precision::indexer_projection"
         )
+        from vllm_ascend.utils import olora_tp_enable
+
+        if get_ascend_config().weight_nz_mode != 2 or olora_tp_enable():
+            raise ValueError("PTO O-proj currently requires the calibrated A3 NZ2 grouped TP1 path")
+        if impl.wo_b.bias is not None:
+            raise ValueError("PTO O-proj requires the original unbiased W8A8 WO-B")
+        self.oproj_starts = torch.tensor(OPROJ_TILE_STARTS, dtype=torch.int32, device=device)
+        self.oproj_projected = torch.empty((tokens, 8192), dtype=torch.bfloat16, device=device)
+        self.oproj_quantized = torch.empty((tokens, 8192), dtype=torch.int8, device=device)
+        self.oproj_token_scale = torch.empty((tokens, 1), dtype=torch.float32, device=device)
+        self.pto_o_proj = pypto.torch.register(o_proj_test, "dsv4_csa_tnd_full_precision::o_proj")
         self.hc_mixed = torch.empty((tokens, 4096), dtype=torch.bfloat16, device=device)
         self.hc_post_gates = torch.empty((tokens, 4), dtype=torch.float32, device=device)
         self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
@@ -114,6 +133,8 @@ class CSAServiceRuntime(BaselineRuntime):
         )
         from vllm_ascend.memcache_comm_fence import record_attention_compute_start
 
+        if self.wkv_profile.metadata_sha256 is None:
+            raise RuntimeError("PTO O-proj requires explicit verified static qualification before execution")
         metadata = {name: context.attn_metadata[prefix] for name, prefix in self.prefixes.items()}
         hadamard = metadata["indexer"].hadamard
         if hadamard is None:
@@ -156,7 +177,6 @@ class CSAServiceRuntime(BaselineRuntime):
             raise ValueError("PTO WKV must publish BF16 [tokens, 512]")
         if not kv_projected.is_contiguous() or torch_npu.get_npu_format(kv_projected) not in (0, 2):
             raise ValueError("PTO WKV must publish contiguous ND storage")
-        impl = self.wrapper.dsa_attn.impl
         indexer_weights = self.indexer_weights[:tokens]
         indexer_order = self.indexer_orders[INDEXER_TOKEN_MODES[tokens - 1]]
         self.pto_indexer_projection(
@@ -191,7 +211,17 @@ class CSAServiceRuntime(BaselineRuntime):
         )
         record_attention_compute_start()
         call()
-        impl._forward_o_proj(self.native_heads[:tokens].view(tokens, 64, 512), self.native_attention_out[:tokens])
+        self.pto_o_proj(
+            self.native_heads[:tokens],
+            self.weights["wo_a"],
+            self.weights["wo_b"],
+            self.weights["wo_b_scale"],
+            self.oproj_starts[OPROJ_TOKEN_MODES[tokens - 1]],
+            self.oproj_projected[:tokens],
+            self.oproj_quantized[:tokens],
+            self.oproj_token_scale[:tokens],
+            self.native_attention_out[:tokens],
+        )
         # Directly publish into the caller's output; no Native HC-post call remains.
         self.pto_hc_post(self.native_attention_out[:tokens], hidden, post, comb.view(tokens, 16), output)
         notify_kv_cache_written(self.layer_name)

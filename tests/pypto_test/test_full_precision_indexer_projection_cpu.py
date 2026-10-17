@@ -64,4 +64,5 @@ def test_service_replaces_native_indexer_projection_boundaries():
     assert "self.pto_indexer_projection" in calls
     assert "impl.weights_proj" not in calls
     assert "DeviceOperator.prepare_dsa_indexer_weights" not in calls
-    assert "impl._forward_o_proj" in calls
+    assert "self.pto_o_proj" in calls
+    assert "impl._forward_o_proj" not in calls
