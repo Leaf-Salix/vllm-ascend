@@ -1,0 +1,99 @@
+{
+  "passed": true,
+  "scope": "最新默认策略，两种工作量区间的同址历史/页表变化与整请求padding；固定S6",
+  "not_validated": [
+    "mixed query",
+    "empty rank",
+    "request lifecycle and prefix sharing",
+    "continuous cache evolution",
+    "service routing"
+  ],
+  "runs": [
+    {
+      "directory": "replay_h131072_b16_hc_rows_padding_v1",
+      "task": "task_20261017_223602_7069429923",
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 128,
+        "OB_ROWS": 96,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true
+      },
+      "current_source_ast_equal": true,
+      "performance_measured": false,
+      "scenarios": {
+        "metadata_replay": {
+          "passed": true,
+          "sequence": [
+            "A",
+            "B",
+            "C",
+            "A",
+            "B",
+            "A"
+          ],
+          "replays": 6
+        },
+        "padding_replay": {
+          "passed": true,
+          "sequence": [
+            16,
+            15,
+            1,
+            16
+          ],
+          "replays": 4
+        }
+      }
+    },
+    {
+      "directory": "replay_h8192_b32_hc_rows_padding_v1",
+      "task": "task_20261017_224033_8295157738",
+      "policy": {
+        "QUERY_GROUP": 2,
+        "QK_PANEL": 128,
+        "SCORE_TILE": 768,
+        "PREFETCH": 0,
+        "TO_L0": true,
+        "BALANCED": false,
+        "ROOTS": 2,
+        "OA_COLS": 256,
+        "OB_ROWS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true
+      },
+      "current_source_ast_equal": true,
+      "performance_measured": false,
+      "scenarios": {
+        "metadata_replay": {
+          "passed": true,
+          "sequence": [
+            "A",
+            "B",
+            "C",
+            "A",
+            "B",
+            "A"
+          ],
+          "replays": 6
+        },
+        "padding_replay": {
+          "passed": true,
+          "sequence": [
+            32,
+            31,
+            1,
+            32
+          ],
+          "replays": 4
+        }
+      }
+    }
+  ]
+}

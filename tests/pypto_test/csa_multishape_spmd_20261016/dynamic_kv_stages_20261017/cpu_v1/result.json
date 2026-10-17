@@ -1,0 +1,174 @@
+{
+  "device_execution": false,
+  "performance_measured": false,
+  "stages": {
+    "project": {
+      "specialized": true,
+      "full_codegen_passed": true,
+      "artifact_output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/project/kernel",
+      "dynamic_signature": [
+        {
+          "name": "x",
+          "direction": "In",
+          "shape": [
+            -1,
+            4096
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "wkv",
+          "direction": "In",
+          "shape": [
+            4096,
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "kv_fp32",
+          "direction": "Out",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        }
+      ]
+    },
+    "norm": {
+      "specialized": true,
+      "full_codegen_passed": true,
+      "artifact_output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/norm/kernel",
+      "dynamic_signature": [
+        {
+          "name": "kv_fp32",
+          "direction": "In",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "gamma",
+          "direction": "In",
+          "shape": [
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "cos",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "signed_sin",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "swap",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "int32",
+          "layout": "ND"
+        },
+        {
+          "name": "kv",
+          "direction": "Out",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        }
+      ]
+    }
+  },
+  "source_audit": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/qkv_proj_rope.py",
+    "fixed_k_pipelines_ast_equal": [
+      "dense_k",
+      "db"
+    ],
+    "full_tail_norm_rope_entire_branch_ast_equal": true,
+    "arithmetic_constant_values_equal": {
+      "D": 4096,
+      "HEAD_DIM": 512,
+      "ROPE_DIM": 64,
+      "ROPE_DIM_SCALE": 64.0,
+      "NOPE_DIM": 448,
+      "EPS": 1e-06,
+      "KV_M_TILE": 16,
+      "KV_DENSE_M_TILE": 64,
+      "KV_FIXED_SMALL_M_TILE": 32,
+      "KV_FIXED_SMALL_ROWS": 128,
+      "KV_N_TILE": 128,
+      "KV_K_TILE": 512,
+      "KV_OM": 3,
+      "KV_RMS_T_TILE": 32,
+      "KV_TILE": 64
+    },
+    "source_prefill_chunk_rows_equal": 512,
+    "no_nested_dispatch_or_sync": true,
+    "no_nz_mode_import": true,
+    "explicit_changes": [
+      "固定KV_OK=1，拒绝atomic模式；删除旧SPMD/task依赖和GM reshape。",
+      "各逻辑M/N单元映射到显式worker条带循环。",
+      "投影输出从chunk局部行改成tile_base+行，使用全T pad16工作区。",
+      "norm按全T的32行tile条带分核；512是32的倍数，完整/尾块分支不变。"
+    ],
+    "projection_coverage_cases": 1600,
+    "norm_coverage_cases": 1600,
+    "tokens": {
+      "continuous": [
+        0,
+        384
+      ],
+      "additional_chunk_boundaries": [
+        511,
+        512,
+        513,
+        543,
+        544,
+        575,
+        576,
+        639,
+        640,
+        767,
+        768,
+        769,
+        1023,
+        1024,
+        1025
+      ]
+    },
+    "all_valid_rows_and_columns_once": true,
+    "projection_pad16_storage_once": true,
+    "device_numerical_equivalence_proven": false
+  },
+  "source_audit_reused_from": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/audit_v1/result.json",
+  "original_nz_probe_module_imported": false,
+  "all_passed": true
+}

@@ -1,0 +1,154 @@
+{
+  "passed": true,
+  "scope": "动态 O_A→分组量化/尾零→O_B→反量化/HCpost 的单 MIX CPU 组合与既有产物审计，非完整 CSA",
+  "device_execution": false,
+  "hardware_cache_visibility_proven": false,
+  "device_sync_validated": false,
+  "device_precision_validated": false,
+  "full_csa_validated": false,
+  "performance_measured": false,
+  "compile": {
+    "result": "cpu_v2/result.json",
+    "single_mix_submission": true,
+    "sync_start": true,
+    "core_groups": 24,
+    "aic": 24,
+    "aiv": 48,
+    "sample_shapes_supplied": false,
+    "mathematical_tiles": {
+      "o_a_n": 256,
+      "o_b_rows": 96
+    },
+    "weight_layout": "NZ，VLLM_ASCEND_ENABLE_NZ=2",
+    "tensor_arguments": 13,
+    "dynamic_descriptor_axes": [
+      "OUT_PIPE_PACK",
+      "OUT_PIPE_MM",
+      "OUT_PIPE_SCALE",
+      "OUT_PIPE_T",
+      "OUT_PIPE_WORDS"
+    ],
+    "incore_cpp_arguments": {
+      "cube": 20,
+      "vector": 21
+    }
+  },
+  "compiled_audit": {
+    "path": "cpu_v2/compiled_audit.json",
+    "passed": true,
+    "actual_stores": {
+      "o_a_fp32": [
+        975
+      ],
+      "quant_i8": [
+        2108,
+        2314,
+        2590,
+        2663
+      ],
+      "quant_scales": [
+        2076,
+        2282,
+        2493
+      ],
+      "o_b_int32": [
+        1372
+      ],
+      "hcpost_bf16": [
+        3284,
+        3413,
+        3542,
+        3672
+      ]
+    },
+    "line_numbers_relative_to": "各角色 cpu_v2/kernel/kernels/aic/cube.cpp 或 aiv/vector.cpp；不是源码行号",
+    "quant_tail_zero_store_line": 2663,
+    "quant_notify_line": 2692,
+    "ob_wait_line": 1038,
+    "ob_quant_load_line": 1102,
+    "note": "量化尾零是真实 TEXPANDS(0)→TCVT→TSTORE；其先于 phase 2 发布。跨核先后依赖由信号建立，不能比较不同 CPP 文件的行号。"
+  },
+  "phase_model": {
+    "path": "cpu_v2/phase_model.json",
+    "passed": true,
+    "cases": 22,
+    "tested_tokens": [
+      0,
+      1,
+      7,
+      8,
+      24,
+      31,
+      32,
+      33,
+      48,
+      64,
+      95,
+      96,
+      97,
+      127,
+      128,
+      129,
+      144,
+      168,
+      169,
+      192,
+      193,
+      257
+    ],
+    "nodes_each_case": 216,
+    "edges_all_cases": 66144,
+    "checks": [
+      "从快照直接执行去注解后的 cube/vector 编排与 wait_row_owners，数学调用只用事件桩",
+      "OA/quant/OB 所有权和尾零范围使用数学 helper 的同源 AST 标量表达式",
+      "每核每轮 begin 一次，72 个核映射无重复/遗漏",
+      "实际 owner 全覆盖，量化尾零唯一写者包含在 O_B 等待集合",
+      "每个 T 的 216 节点依赖图均可拓扑排序，无环",
+      "T=0 无业务工作，AIV 仍等待 24 个已发布的 O_B 空阶段完成信号"
+    ],
+    "not_proven": [
+      "浮点/量化数值结果",
+      "实际设备缓存一致性",
+      "设备调度公平性或吞吐",
+      "图重放代际生命周期"
+    ]
+  },
+  "history": [
+    {
+      "attempt": "cpu_v1",
+      "passed": false,
+      "reason": "InOutUseDiscipline：Cube 将只读 quant/scales/output 错标为 InOut；组合后继续使用旧引用被校验器拒绝",
+      "evidence": "cpu_v1/result.json",
+      "retained": true,
+      "resolution": "按实际读写责任修正 incore 签名：Cube 的 quant/scales/output、Vector 的 o_r/partials 为只读 Tensor；没有修改数学 helper 或编译器"
+    },
+    {
+      "attempt": "cpu_v2",
+      "passed": true,
+      "reason": "上述签名修正后 CPU 全后端编译通过",
+      "evidence": "cpu_v2/result.json",
+      "retained": true
+    },
+    {
+      "attempt": "compiled_audit 首次只读运行",
+      "passed": false,
+      "reason": "审计脚本错误地期待常量填充 lowering 为 TDUP，实际生成 TEXPANDS(v408,v61)，其中 v61=0.0f",
+      "resolution": "按实际零值 TEXPANDS→TCVT→TSTORE 追踪修正审计断言；没有重编译，没有修改产物",
+      "retest_evidence": "cpu_v2/compiled_audit.json"
+    }
+  ],
+  "reproduce": {
+    "compile_if_needed": "bash reproduce_cpu.sh <全新输出目录>；本次收尾没有执行该命令",
+    "read_only_audit": "python audit_compiled.py --run cpu_v2 --output <全新审计JSON>",
+    "phase_model": "python check_phase_model.py --run cpu_v2 --output <全新模型JSON>",
+    "text_parser_dependency": "../dynamic_compressor_pipeline_20261017/audit_compiled.py 的 role_body/bounded/require_access，纯文本，不导入 PyPTO"
+  },
+  "validation": "新增 audit_compiled.py/check_phase_model.py Ruff 通过；只做现有编译产物审计和轻量模型，无新增编译、NPU 或性能采样",
+  "caller_contract": [
+    "packed heads、HC post/comb/residual 在此组合开始前就绪",
+    "PACK%8=0，PACK/8>=T；MM>=ceil(T/96)*96；scale>=T",
+    "signal 至少 5*72*128=46080 个 INT32，初次清零，单顺序图/流独占，固定阶段及核映射",
+    "所有业务工作区保持不同张量的正确别名合同，消费者完成前不能重用",
+    "完成完整动态 CSA 入口后仍需正式权重设备精度/状态/保护区/动态 metadata/图重放及七档性能验证"
+  ]
+}

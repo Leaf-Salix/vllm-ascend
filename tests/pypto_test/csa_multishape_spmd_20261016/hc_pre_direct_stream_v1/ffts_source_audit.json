@@ -1,0 +1,66 @@
+{
+  "scope": "只读本地A3正式PTO-ISA与PTOAS/PyPTO实现的接口语义核对；未编译、未运行NPU",
+  "candidate_source_frozen": "cpu_transform_v3/production_h131072_b16/entry_jit.py",
+  "candidate_sync_change_required": false,
+  "checks": [
+    {
+      "topic": "READY发布顺序",
+      "conclusion": "与A3 TPipe Vec→Cube正式实现吻合：GM TSTORE后在MTE3发布FFTS mode2事件。候选同一轮两个GM store（FIFO与RMS部分值）之后发布READY8/9，因此需要编译产物仍保持二者先于发信号。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:184",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:152",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:522"
+      ]
+    },
+    {
+      "topic": "AIC ACK释放GM槽",
+      "conclusion": "与A3 Consumer.free吻合：AIC的GM→L1 TLOAD之后在MTE2发布ACK10/11。ACK只保证GM槽可以覆盖，不表示matmul结束；L1局部Tile后续读取/复用仍依靠正常自动同步与内存规划。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:434",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:379",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPop.hpp:22"
+      ]
+    },
+    {
+      "topic": "A3 wait的pipe参数",
+      "conclusion": "PyPTO保留pipe到PTO IR，但PTOAS对A2/A3生成单参数wait_flag_dev(event)，没有等待pipe实参；A5才生成带pipe的wait。候选READY发在MTE3而AIC写wait(MTE2)不构成A3 pipe配对错误，不能将A5的每pipe等待语义套用。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/common/pto_ops_crosscore.cpp:488",
+        "/data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/Transforms/PTOToEmitC/Arith/ArithSupport.cpp:403",
+        "/data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/Transforms/PTOToEmitC/SyncComm/Sync.cpp:326"
+      ]
+    },
+    {
+      "topic": "一个AIC与两个AIV的事件对应",
+      "conclusion": "A2/A3 mode2为1:2核组广播/汇聚：AIC一发ACK到两个AIV；AIC一次wait收齐两个AIV READY。每个lane即使没有有效尾行也必须写零并发READY，不能跳过通知。物理group_id索引用于FIFO，逻辑worker从同一AIC record读取。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:22",
+        "/data/pyptouser/qinchuanyu/pto-eager/ptoas-src/docs/release/PTO-micro-Instruction-SPEC-v0.4.md:1364"
+      ]
+    },
+    {
+      "topic": "排空与事件编号",
+      "conclusion": "两槽各有独立READY8/9与ACK10/11；每轮task结尾等待两个剩余ACK，下轮和kernel退出无悬挂信用。四个ID均在PyPTO用户0..13内，候选构建时与原事件做静态不重叠检查。协议中每槽最多一份待消费通知，未使用4位计数的大队列容量。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3/TPush.hpp:505",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/system_ops.py:92"
+      ]
+    },
+    {
+      "topic": "源码注释偏差",
+      "conclusion": "PyPTO system_ops.py sync_set/sync_wait docstring称两侧pipe必须相同；A3 lowering实际无wait pipe，A3正式FIFO也用MTE3 READY配合无pipe wait。此处属于通用文档表述不精确，不以它为由修改候选的正确MTE3/MTE2发布pipe。",
+      "sources": [
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/system_ops.py:105",
+        "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/system_ops.py:130",
+        "/data/pyptouser/qinchuanyu/pto-eager/ptoas-src/lib/PTO/Transforms/PTOToEmitC/Arith/ArithSupport.cpp:403"
+      ]
+    }
+  ],
+  "device_assumptions_still_pending": [
+    "目标编译确实启用A3 FFTS mode2",
+    "两AIV通知数与硬件核组一致",
+    "生成代码没有把TLOAD/两个TSTORE越过发布点",
+    "AIC L1与AIV UB动态分配和自动pipeline同步正确"
+  ],
+  "historical_codegen_cross_check": "../hc_stream_prepare_v4/codegen_audit.json 中旧候选确实生成MTE3 READY/MTE2 ACK/单参数wait，但不代替本次新源码的完整lowering检查"
+}

@@ -1,0 +1,58 @@
+{
+  "scope": "动态请求组/叶计划与Cube系数；不包含score、FFTS或最终TopK",
+  "plan_words": [
+    "groups",
+    "max_history",
+    "leaves",
+    "leaf_tiles",
+    "extra",
+    "group_size",
+    "balanced",
+    "roots_per_leaf"
+  ],
+  "group_sizes": {
+    "cube_coefficients": [
+      2,
+      6
+    ],
+    "scalar_geometry_only": [
+      1,
+      2,
+      6
+    ]
+  },
+  "roots_per_leaf": {
+    "0": "短Vector单叶score发布",
+    "1": "balanced单根每leaf",
+    "2": "常规双半leaf根"
+  },
+  "capacities": {
+    "offsets": "B+1或更多，末端offsets[B]=groups；其余未写",
+    "plan": "独立INT32[8]",
+    "coefficients": "FP16[COEFF_ROWS,G*64]，COEFF_ROWS>=16*groups；尾部保持",
+    "scale_weights": "独立FP32[ROWS,64]，ROWS>=T；scale外层绑定原始[ROWS*64,1]同存储别名"
+  },
+  "ownership": {
+    "plan": "选定角色集合中仅worker0；禁止AIC0与AIV0重复调用",
+    "coefficients": "group_id % WORKERS，组号按实际Q/L请求前缀",
+    "score_work": "groups<24采用leaf-major，否则group-major；AIC/两个AIV共用"
+  },
+  "guards": [
+    "request_bounds核验活动性",
+    "causal position=length-query_length+query-begin",
+    "尾组lane<live先于payload读取",
+    "输入Q全局单调不重叠是调用者合同",
+    "ROOTS/BALANCED/G须与计划及生产者一致"
+  ],
+  "sync": [
+    "计划写完发布后才读取offsets/plan",
+    "系数等待scale/weights",
+    "全部系数完成才供score生产者消费",
+    "本文件无跨核通知；phase不替代FFTS消费ACK"
+  ],
+  "limits": [
+    "plan G=1尚未做单独backend验证，数学与G2/6共用；short-vector待接入",
+    "NumPy不是A3舍入证明",
+    "未进行设备/整层/性能验证"
+  ]
+}

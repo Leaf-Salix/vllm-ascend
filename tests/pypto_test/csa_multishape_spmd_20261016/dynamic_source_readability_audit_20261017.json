@@ -1,0 +1,471 @@
+{
+  "audit_date": "2026-10-17",
+  "scope": "正式动态包9文件的只读可读性/注释审计",
+  "edited_production": false,
+  "compiled": false,
+  "device_execution": false,
+  "tests_run": false,
+  "method": "逐文件源码阅读及AST索引；不导入模块，不运行数学；行号对应最后一次读取，root并发补注释后可能前移。",
+  "summary": "九个文件已具有中文开头总览；本轮发现的七项具体缺口均已由root/对应owner补齐，本agent最后只读核对。保留问题与修正位置供追溯，不将初见问题记作未修。无需为本次纯注释增强重编译或重复设备测试。",
+  "files": [
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/__init__.py",
+      "lines_when_read": 29,
+      "overview_lines_when_read": 25,
+      "status": "本轮root已补齐目录总览和阅读顺序",
+      "assessment": "当前仅文档导入、__all__空，描述不加载PyPTO/torch与代码一致。已明确完整入口仍未实现。",
+      "entry_definitions": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/request_geometry.py",
+      "lines_when_read": 127,
+      "overview_lines_when_read": 27,
+      "status": "已充分；无必须补充项",
+      "assessment": "Native Q/L含义、独立动态轴、INDEX/active类型、非法边界、负compact_offset、count=0仍active、核内扫描而非展开映射均与源码一致。可选增加一句阅读顺序，无需重复全套同步说明。",
+      "entry_definitions": [
+        {
+          "name": "request_bounds",
+          "line": 39
+        },
+        {
+          "name": "query_request",
+          "line": 65
+        },
+        {
+          "name": "compression_geometry",
+          "line": 97
+        }
+      ]
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py",
+      "lines_when_read": 155,
+      "overview_lines_when_read": 42,
+      "status": "已充分；无新缺口",
+      "assessment": "阶段×producer、动态容量、AIC/AIV映射、单写者、缓存、空核、代际/布局身份、无ACK/缓冲复用和owner限制均明确；先前审计已另存review.json。",
+      "entry_definitions": [
+        {
+          "name": "signal_word_count",
+          "line": 55
+        },
+        {
+          "name": "begin_invocation",
+          "line": 65
+        },
+        {
+          "name": "publish_phase",
+          "line": 84
+        },
+        {
+          "name": "wait_producer",
+          "line": 103
+        },
+        {
+          "name": "wait_row_owners",
+          "line": 121
+        }
+      ]
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+      "lines_when_read": 562,
+      "overview_lines_when_read": 37,
+      "status": "本轮缺口已由root/owner补齐并只读复核",
+      "assessment": "参见specific_findings中的初见问题及resolution；关键合同与当前源码对应，未新增要求重复编译或测试。",
+      "entry_definitions": [
+        {
+          "name": "workspace_contract",
+          "line": 77
+        },
+        {
+          "name": "hc_widen_rms_range",
+          "line": 106
+        },
+        {
+          "name": "hc_project_range",
+          "line": 164
+        },
+        {
+          "name": "hc_reduce_range",
+          "line": 203
+        },
+        {
+          "name": "hc_gates_range",
+          "line": 230
+        },
+        {
+          "name": "hc_comb_range",
+          "line": 287
+        },
+        {
+          "name": "hc_mix_norm_range",
+          "line": 484
+        }
+      ],
+      "initial_assessment": "现各函数说明已有原数学/归约顺序/尾行scratch含义，但开头输入工作区合同和关键数值原因仍可补齐。对应R02/R03/R04。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/qkv_stages.py",
+      "lines_when_read": 255,
+      "overview_lines_when_read": 41,
+      "status": "本轮缺口已由root/owner补齐并只读复核",
+      "assessment": "参见specific_findings中的初见问题及resolution；关键合同与当前源码对应，未新增要求重复编译或测试。",
+      "entry_definitions": [
+        {
+          "name": "_q_a_worker",
+          "line": 94
+        },
+        {
+          "name": "q_a_stage",
+          "line": 140
+        },
+        {
+          "name": "q_r_stage",
+          "line": 157
+        }
+      ],
+      "initial_assessment": "实际T分档、AIC M/N分工、QR八行、pipeline顺序、BF16 gamma、量化舍入链和无内部同步均已说明。对应R05。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+      "lines_when_read": 376,
+      "overview_lines_when_read": 44,
+      "status": "本轮缺口已由root/owner补齐并只读复核",
+      "assessment": "参见specific_findings中的初见问题及resolution；关键合同与当前源码对应，未新增要求重复编译或测试。",
+      "entry_definitions": [
+        {
+          "name": "_q_b_nd_stage",
+          "line": 91
+        },
+        {
+          "name": "_q_b_nz_stage",
+          "line": 119
+        },
+        {
+          "name": "q_dequant_rope_stage",
+          "line": 158
+        },
+        {
+          "name": "q_rope_prepare_stage",
+          "line": 308
+        }
+      ],
+      "initial_assessment": "ND/NZ tile、owner、二维别名、反量化乘法次序、rsqrt与尾块recip(sqrt)、BF16输出和同步职责均与代码一致。对应R06。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/signals.py",
+      "lines_when_read": 54,
+      "overview_lines_when_read": 27,
+      "status": "本轮root已补齐主要缺口",
+      "assessment": "最新总览含offset单位、INT32/GE、单写者、AIC/AIV、本核PIPE_ALL和业务缓存分工、无ACK、临时接口和默认/可选wait区别。不是此前的一句短总览。",
+      "entry_definitions": [
+        {
+          "name": "csa_signal_notify",
+          "line": 35
+        },
+        {
+          "name": "csa_signal_wait",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/wait_codegen.py",
+      "lines_when_read": 76,
+      "overview_lines_when_read": 24,
+      "status": "本轮缺口已由root/owner补齐并只读复核",
+      "assessment": "参见specific_findings中的初见问题及resolution；关键合同与当前源码对应，未新增要求重复编译或测试。",
+      "entry_definitions": [
+        {
+          "name": "rewrite_wait_source",
+          "line": 56
+        }
+      ],
+      "initial_assessment": "当前轮询/缓存/设备tick/本核barrier/显式启用/验证边界说明完整，R01是仍需强调的语义限制。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+      "lines_when_read": 320,
+      "overview_lines_when_read": 38,
+      "status": "本轮缺口已由root/owner补齐并只读复核",
+      "assessment": "参见specific_findings中的初见问题及resolution；关键合同与当前源码对应，未新增要求重复编译或测试。",
+      "entry_definitions": [
+        {
+          "name": "QuerySourceConfig",
+          "line": 60
+        },
+        {
+          "name": "OutlinedQuerySource",
+          "line": 87
+        },
+        {
+          "name": "QuerySourceBundle",
+          "line": 97
+        },
+        {
+          "name": "_dynamic_declarations",
+          "line": 206
+        },
+        {
+          "name": "_source_closure",
+          "line": 220
+        },
+        {
+          "name": "_configure_source",
+          "line": 239
+        },
+        {
+          "name": "materialize_query_source",
+          "line": 262
+        }
+      ],
+      "initial_assessment": "准备流程、隔离命名空间、原数学来源、四配置、动态轴与仍未融合均说明清楚。R07收紧无设备操作及容量说法。"
+    }
+  ],
+  "specific_findings": [
+    {
+      "id": "R01",
+      "priority": "需补充接口前置合同",
+      "finding": "WAIT_HELPER只读signal.data()首元素，但rewrite_wait_source按字符串替换输入CPP的全部TWAIT。总览目前只写INT32槽和GE，未明确每个被替换调用必须是一元素信号视图。",
+      "why": "原TWAIT可遍历多元素视图；将此helper误用于多个信号会忽略第2个及后续元素。当前phase_sync产物是一元素切片，未发现当前探针功能错误。",
+      "suggestion": "在总览、rewrite函数docstring和helper旁明确只适用于本协议的一元素INT32/GE等待，调用方须核对所有替换点。不要把它称作通用TWAIT替换器；未来接其它同步入口需另审。",
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/wait_codegen.py",
+        "line": 35,
+        "fragment": "auto ptr ="
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/wait_codegen.py",
+        "line": 11,
+        "fragment": "单元素 INT32 视图"
+      },
+      "resolution": "已明确只支持单元素INT32/GE；所有被替换调用由调用方核对，不是任意Tensor的通用等待。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R02",
+      "priority": "修正注释与实现不一致",
+      "finding": "workspace_contract的单worker描述未限定Vector阶段；hc_project_range为同一M16行块建立4个K4096生产单元。",
+      "code_evidence": [
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+          "line": 182,
+          "fragment": "task = group_worker + wave * group_workers"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+          "line": 185,
+          "fragment": "linear_split = task % LINEAR_OK"
+        }
+      ],
+      "suggestion": "改为每个Vector行块由一个Vector worker处理；AIC投影每个(行块,K分段)唯一owner，同一行的归约需等4个分段。不能据该句为投影套用单owner行等待。",
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": null,
+        "fragment": "一个 token 行块只归属一个 worker",
+        "note": "后续编辑已改变待审语句，请按符号定位"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": 83,
+        "fragment": "AIC 投影的唯一 owner 单位"
+      },
+      "resolution": "已区分Vector行块唯一owner与AIC(行块,K分片)唯一owner，同一行四份部分和。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R03",
+      "priority": "补全文件开头总览",
+      "finding": "现HC总览说明动态T、同步DAG和数学来源，但没有集中说明输入输出布局、PAD16/PAD8、split-major partial布局以及函数阅读顺序。读者须跨六函数和workspace_contract自行拼接。",
+      "suggestion": [
+        "列明x为Native HC输入的二维GM别名[T,4*4096]；hc_fn FP32[24,16384]，norm_w BF16[4096]；输出x_normed[T,4096]、post[T,4]、comb[T,16]。",
+        "解释pad16=ceil(T/16)*16、pad8=ceil(T/8)*8；mixes_partials以split*pad16+row放4份结果，mixes_raw/pre_val为物理padding列；无效容量行不等于有效token。",
+        "阅读顺序为workspace_contract→widen_rms→project→reduce→gates/comb→mix_norm，并列明AIC/AIV角色和外层发布等待职责。",
+        "pipeline用于核内搬运/计算重叠，不新建任务，不改变loop-carried归约次序；stage=4/2是编译流水配置，不是4/2个核。"
+      ],
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": 8,
+        "fragment": "完整动态 CSA 的 HC 核内阶段"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": 10,
+        "fragment": "输入输出与动态布局"
+      },
+      "resolution": "已补Native二维视图、输出、PAD16/PAD8、split-major partial布局、六阶段阅读顺序、外层同步与验证边界。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R04",
+      "priority": "补关键数值设计原因",
+      "finding": "20轮Sinkhorn和BF16混合舍入在函数说明里提到，但关键表达式旁未说明循环为什么是19次、混合归一化为什么再次转换FP32。",
+      "code_evidence": [
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+          "line": 409,
+          "fragment": "col_sum = pl.add(pl.add(row0_eff"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+          "line": 530,
+          "fragment": "y_bf16 = pl.cast(y"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+          "line": 532,
+          "fragment": "y_rounded = pl.cast(y_bf16"
+        }
+      ],
+      "suggestion": [
+        "首轮softmax/列归一化在循环外已经完成，所以剩余HC_SINKHORN_ITER-1=19轮；循环内各轮依赖上一轮，不是可并行独立的19个任务。",
+        "RMS平方和刻意使用先rint到BF16再回FP32的混合值，匹配中间BF16存储语义，不能拿未舍入y直接累加。",
+        "padding列先用最小值隔离softmax，再将有效4列以外清零参与列归一化；尾行最终只写valid_rows。"
+      ],
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": 417,
+        "fragment": "for _sk_it in pl.pipeline"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+        "line": 415,
+        "fragment": "上面已经完成首轮列归一化"
+      },
+      "resolution": "已补19轮缘由、迭代依赖、pipeline语义、padding列处理及先BF16舍入后RMS平方和。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R05",
+      "priority": "补跨阶段工作区合同",
+      "finding": "QKV头部写两个Q_B暂存至少ceil(T/8)*8行；这是QR本阶段的写入最低容量，真正Q_B的qr_i8_matmul需要ceil(T/128)*128。另一文件已经说明更大的合同，但单看此处容易按较小值分配。",
+      "code_evidence": [
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+          "line": 42,
+          "fragment": "QR 和投影暂存至少预留"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+          "line": 111,
+          "fragment": "qr_i8_chunk = qr_i8_matmul"
+        }
+      ],
+      "suggestion": "明确区分QR本阶段写入范围与整链容量：qa需pad16，qr_i8_matmul接Q_B时需pad128，scale只需pad8；未写的padding行不属于有效输出，不能宣称清零。",
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/qkv_stages.py",
+        "line": 33,
+        "fragment": "qa 至少分配"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/qkv_stages.py",
+        "line": 34,
+        "fragment": "这里的八行"
+      },
+      "resolution": "已区分QR本阶段pad8最小值与接Q_B后的INT8 pad128容量；scale仍pad8，并补阅读顺序。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R06",
+      "priority": "补非显然分支不变量",
+      "finding": "完整块按4/16/64-head策略分工，而尾块固定遍历4 heads，代码正确依赖一个未就地写出的蕴含关系。",
+      "code_evidence": [
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+          "line": 175,
+          "fragment": "if tokens >= Q_DEQUANT_WORKERS"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+          "line": 178,
+          "fragment": "tokens >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16"
+        }
+      ],
+      "suggestion": "注释说明16/64-head分支要求T分别整除96/384，均为8倍数；只要有尾行就一定使用默认4-head分组，因此尾块循环4不会漏head。未来改分档阈值必须重新满足该不变量。RoPE准备处可另用一句解释pair=floor(col/2)、swap=(1,0,3,2,...)、sign=(-1,+1,...)。",
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+        "line": 274,
+        "fragment": "for h_inner_tail in pl.range(Q_ROPE_H_TILE)"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+        "line": 272,
+        "fragment": "64/16-head策略分别要求"
+      },
+      "resolution": "owner已补T整除384/96蕴含无8行尾块的证明，并解释trunc/pair/swap/sign。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    },
+    {
+      "id": "R07",
+      "priority": "收紧副作用与支持范围陈述",
+      "finding": "materialize_query_source只做AST/文件，不执行设备；但import_entry会导入源码闭包的decode_csa→nz_mode。NZ=2且设备已经初始化时，nz_mode会运行一次device empty/npu_format_cast探针。整模块笼统“不启动NPU”不能被理解为所有方法均无设备操作。",
+      "code_evidence": [
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+          "line": 132,
+          "fragment": "entry = importlib.import_module"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/nz_mode.py",
+          "line": 61,
+          "fragment": "设备未初始化则返回，否则63-64行运行格式探针"
+        },
+        {
+          "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/nz_mode.py",
+          "line": 72,
+          "fragment": "模块加载时按BF16 NZ模式决定是否调用探针"
+        }
+      ],
+      "suggestion": [
+        "限定“materialize不导入数学模块、不启动设备”；import_entry/specialize/outline继承原源码导入副作用，未初始化NPU时原探针跳过，不保证已初始化进程内零设备操作。",
+        "头部容量说明除128对齐外还需capacity%query_tokens==0。QuerySourceConfig中2..16/even是先决条件而非保证全部可用：仍受容量整除约束；odd/mixed支持只在request_geometry组件，当前工厂仍uniform偶数。"
+      ],
+      "status": "已修正并只读复核；未修改数学/未重编译",
+      "initial_review_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+        "line": null,
+        "fragment": "也不启动 NPU",
+        "note": "后续编辑已改变待审语句，请按符号定位"
+      },
+      "resolution_location": {
+        "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+        "line": 29,
+        "fragment": "源码物化阶段"
+      },
+      "resolution": "已把纯AST/文件阶段与后续import的条件性设备探针分开，补容量128对齐和S整除、阅读顺序。",
+      "finding_scope": "保留审计初见问题以记录修正原因；不是最终仍未解决的缺口。"
+    }
+  ],
+  "already_addressed_during_review": [
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/signals.py",
+      "change": "root已从一句短注释扩为完整总览/职责/生命周期和函数说明。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/wait_codegen.py",
+      "change": "root已补完整流程、DCCI/volatile区别、100设备tick不是微秒、不是全核屏障、默认未启用及验证边界；单元素前提待R01。"
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/__init__.py",
+      "change": "root已补7模块阅读顺序与完整接入未完成边界。"
+    }
+  ],
+  "not_claimed": [
+    "不判断本轮性能达标。",
+    "注释与源码对应不等于设备精度/同步已验证。",
+    "不将数学来源“保持原式”当作新动态整层精度证据。",
+    "不建议为补注释改动数学、阶段分工或新建测试。"
+  ],
+  "unresolved_required_comment_items": [],
+  "remaining_runtime_boundaries": [
+    "单元素TWAIT替换合同、workspace布局身份/顺序独占和payload生命周期仍由未来完整组装层落实；本轮注释审计不声称已有自动runtime guard。",
+    "完整动态CSA仍未实现，不将组件源码/CPU证据扩展成整层精度或性能证明。"
+  ],
+  "final_read_note": "最后重读确认HC总览/所有权/数学原因、signals/wait、QKV pad128、projection尾块head条件、query_source导入副作用说明均已落地。仅更新本JSON，未触碰生产代码。"
+}

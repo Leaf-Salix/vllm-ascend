@@ -1,0 +1,3548 @@
+{
+  "passed": true,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_pool_stages.py",
+  "source_ast_interpreted": true,
+  "canonical_online_ast": [
+    {
+      "canonical_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_compressor_ratio4.py",
+      "canonical_function": "compressor_ratio4_pool_projected",
+      "new_function": "compressor_pool_stage",
+      "online_update_ast_exact": true,
+      "update_order": [
+        "mi_next",
+        "alpha",
+        "beta",
+        "li",
+        "oi",
+        "mi"
+      ],
+      "updates": [
+        "mi_next = pl.maximum(mi, score)",
+        "alpha = pl.exp(pl.sub(mi, mi_next))",
+        "beta = pl.exp(pl.sub(score, mi_next))",
+        "li = pl.add(pl.mul(alpha, li), beta)",
+        "oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))",
+        "mi = mi_next"
+      ],
+      "initialization_order": [
+        "mi",
+        "li",
+        "oi"
+      ],
+      "initialization_order_ast_exact": true,
+      "initial_li_ast_exact": true,
+      "seven_position_loop_ast_exact": true,
+      "final_div_oi_li_preserved": true,
+      "initial_current_second_half": "两源码读取当前token后半区，score加本位置APE，li=exp(mi-mi)，oi为value；地址由独立窗口oracle覆盖"
+    },
+    {
+      "canonical_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer_compressor.py",
+      "canonical_function": "indexer_compressor_pool_projected",
+      "new_function": "indexer_compressor_pool_stage",
+      "online_update_ast_exact": true,
+      "update_order": [
+        "mi_next",
+        "alpha",
+        "beta",
+        "li",
+        "oi",
+        "mi"
+      ],
+      "updates": [
+        "mi_next = pl.maximum(mi, score)",
+        "alpha = pl.exp(pl.sub(mi, mi_next))",
+        "beta = pl.exp(pl.sub(score, mi_next))",
+        "li = pl.add(pl.mul(alpha, li), beta)",
+        "oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))",
+        "mi = mi_next"
+      ],
+      "initialization_order": [
+        "mi",
+        "li",
+        "oi"
+      ],
+      "initialization_order_ast_exact": true,
+      "initial_li_ast_exact": true,
+      "seven_position_loop_ast_exact": true,
+      "final_div_oi_li_preserved": true,
+      "initial_current_second_half": "两源码读取当前token后半区，score加本位置APE，li=exp(mi-mi)，oi为value；地址由独立窗口oracle覆盖"
+    }
+  ],
+  "cases": [
+    {
+      "case": "short_h0_no_close",
+      "head": 512,
+      "workers": 1,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h0_no_close",
+      "head": 512,
+      "workers": 3,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h0_no_close",
+      "head": 512,
+      "workers": 48,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h0_no_close",
+      "head": 128,
+      "workers": 1,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h0_no_close",
+      "head": 128,
+      "workers": 3,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h0_no_close",
+      "head": 128,
+      "workers": 48,
+      "tokens": 1,
+      "query_widths": [
+        1
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 18,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 512,
+      "workers": 1,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 51,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 512,
+      "workers": 3,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 51,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 512,
+      "workers": 48,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 51,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 128,
+      "workers": 1,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 64,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 128,
+      "workers": 3,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 64,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_h1_close",
+      "head": 128,
+      "workers": 48,
+      "tokens": 3,
+      "query_widths": [
+        3
+      ],
+      "histories": [
+        1
+      ],
+      "closed_tokens": [
+        2
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 64,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 512,
+      "workers": 1,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.4901161193847656e-07,
+      "memory_accesses": 173,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 512,
+      "workers": 3,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.4901161193847656e-07,
+      "memory_accesses": 173,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 512,
+      "workers": 48,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.4901161193847656e-07,
+      "memory_accesses": 173,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 128,
+      "workers": 1,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 248,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 128,
+      "workers": 3,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 248,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "odd_h7_cross_pages",
+      "head": 128,
+      "workers": 48,
+      "tokens": 9,
+      "query_widths": [
+        9
+      ],
+      "histories": [
+        7
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 248,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 512,
+      "workers": 1,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 2.384185791015625e-07,
+      "memory_accesses": 230,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 512,
+      "workers": 3,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 2.384185791015625e-07,
+      "memory_accesses": 230,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 512,
+      "workers": 48,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 2.384185791015625e-07,
+      "memory_accesses": 230,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 128,
+      "workers": 1,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 318,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 128,
+      "workers": 3,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 318,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "mixed_odd_and_uncovered",
+      "head": 128,
+      "workers": 48,
+      "tokens": 16,
+      "query_widths": [
+        1,
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        0,
+        1,
+        7,
+        15
+      ],
+      "closed_tokens": [
+        5,
+        6,
+        10,
+        11
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 318,
+      "active_rows_initialized": 11,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 199,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 199,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 199,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 262,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 262,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "uniform_s6",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        6,
+        6
+      ],
+      "histories": [
+        7,
+        1
+      ],
+      "closed_tokens": [
+        0,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 262,
+      "active_rows_initialized": 12,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 512,
+      "workers": 1,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 106,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 512,
+      "workers": 3,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 106,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 512,
+      "workers": 48,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.7881393432617188e-07,
+      "memory_accesses": 106,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 128,
+      "workers": 1,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 128,
+      "workers": 3,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "dummy_stale_positions",
+      "head": 128,
+      "workers": 48,
+      "tokens": 13,
+      "query_widths": [
+        3,
+        5,
+        2
+      ],
+      "histories": [
+        1,
+        -1,
+        7
+      ],
+      "closed_tokens": [
+        2,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 512,
+      "workers": 1,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 512,
+      "workers": 3,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 512,
+      "workers": 48,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 128,
+      "workers": 1,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 128,
+      "workers": 3,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "all_dummy",
+      "head": 128,
+      "workers": 48,
+      "tokens": 6,
+      "query_widths": [
+        1,
+        5
+      ],
+      "histories": [
+        -1,
+        -1
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 4,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 512,
+      "workers": 1,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 512,
+      "workers": 3,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 512,
+      "workers": 48,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 128,
+      "workers": 1,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 128,
+      "workers": 3,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b0",
+      "head": 128,
+      "workers": 48,
+      "tokens": 0,
+      "query_widths": [],
+      "histories": [],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 512,
+      "workers": 1,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 512,
+      "workers": 3,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 512,
+      "workers": 48,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 128,
+      "workers": 1,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 128,
+      "workers": 3,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "t0_b1_zero_query",
+      "head": 128,
+      "workers": 48,
+      "tokens": 0,
+      "query_widths": [
+        0
+      ],
+      "histories": [
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 2,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 512,
+      "workers": 1,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 512,
+      "workers": 3,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 512,
+      "workers": 48,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 128,
+      "workers": 1,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 128,
+      "workers": 3,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "no_closing_groups",
+      "head": 128,
+      "workers": 48,
+      "tokens": 3,
+      "query_widths": [
+        1,
+        2
+      ],
+      "histories": [
+        0,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 46,
+      "active_rows_initialized": 3,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 512,
+      "workers": 1,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 116,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 512,
+      "workers": 3,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 116,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 512,
+      "workers": 48,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 116,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 128,
+      "workers": 1,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 8.940696716308594e-08,
+      "memory_accesses": 166,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 128,
+      "workers": 3,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 8.940696716308594e-08,
+      "memory_accesses": 166,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "shared_history_requires_phase",
+      "head": 128,
+      "workers": 48,
+      "tokens": 5,
+      "query_widths": [
+        1,
+        4
+      ],
+      "histories": [
+        7,
+        8
+      ],
+      "closed_tokens": [
+        0,
+        4
+      ],
+      "max_abs": 8.940696716308594e-08,
+      "memory_accesses": 166,
+      "active_rows_initialized": 5,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_page",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 110,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "page_overflow",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 151,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_offset",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "offset_overflow",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 195,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 144,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 174,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 174,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "empty_table",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 174,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 150,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 150,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 150,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 213,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 213,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "short_page",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 213,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 99,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 99,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 99,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 112,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 112,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "causal_mismatch",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3
+      ],
+      "max_abs": 5.960464477539063e-08,
+      "memory_accesses": 112,
+      "active_rows_initialized": 9,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "length_too_short",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 30,
+      "active_rows_initialized": 1,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 132,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 182,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 182,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "negative_bound",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 182,
+      "active_rows_initialized": 6,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 165,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 165,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 165,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 228,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 228,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "bound_overflow",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [
+        3,
+        4,
+        8
+      ],
+      "max_abs": 1.1920928955078125e-07,
+      "memory_accesses": 228,
+      "active_rows_initialized": 8,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 512,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 512,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 512,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 128,
+      "workers": 1,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 128,
+      "workers": 3,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    },
+    {
+      "case": "truncated_bounds",
+      "head": 128,
+      "workers": 48,
+      "tokens": 12,
+      "query_widths": [
+        3,
+        5,
+        1
+      ],
+      "histories": [
+        1,
+        7,
+        0
+      ],
+      "closed_tokens": [],
+      "max_abs": 0.0,
+      "memory_accesses": 0,
+      "active_rows_initialized": 0,
+      "inactive_and_tail_poison_preserved": true,
+      "state_unwritten_preserved": true,
+      "guards_passed": true,
+      "input_unchanged": true,
+      "passed": true
+    }
+  ],
+  "case_count": 132,
+  "case_shapes": 22,
+  "oracle": "独立八位置FP64稳定softmax，输入score保持FP32加法边界",
+  "atol": 3e-06,
+  "rtol": 3e-06,
+  "max_abs": 2.384185791015625e-07,
+  "state_commit_exact": true,
+  "ordering_counterexamples": [
+    {
+      "head": 512,
+      "incorrect_local_pool_commit_order_max_abs": 0.8574411869049072,
+      "global_pool_before_commit_dependency_required": true,
+      "note": "仅CPU反例；正式代码未改、正常oracle全部pool先于commit"
+    },
+    {
+      "head": 128,
+      "incorrect_local_pool_commit_order_max_abs": 0.5601351261138916,
+      "global_pool_before_commit_dependency_required": true,
+      "note": "仅CPU反例；正式代码未改、正常oracle全部pool先于commit"
+    }
+  ],
+  "device_execution": false,
+  "new_compilation": false,
+  "hardware_precision_proved": false,
+  "limitations": [
+    "未模拟A3浮点指令、DMA完成或Scalar cache一致性",
+    "非法metadata用例只核对越界安全与当前回退语义，不宣称有效模型数学",
+    "Q全局单调/活动区间不重叠、有效写槽唯一、投影与pooled容量至少T由调用者保证",
+    "causal检查拒绝当前不一致行；不宣称把此前不一致位置传播为整个请求失活",
+    "inactive pooled poison必须由后续消费者的active/闭合判定隔离，不需要本阶段全T清零"
+  ]
+}

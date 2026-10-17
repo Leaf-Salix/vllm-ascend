@@ -1,0 +1,62 @@
+{
+  "scope": "2026-10-17 正式生成器迁移；未启动NPU，不产生新性能数据",
+  "production_package": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd",
+  "public_generation_entry": "compiler.build_csa",
+  "public_binding_entry": "prepare_arguments / arguments.PreparedCSAArguments",
+  "dependency_on_test_sources": false,
+  "range_device_driver_uses_production_builder": true,
+  "uniform_query_support": 6,
+  "seven_shape_thirty_percent_target_achieved": false,
+  "cpu_full_lowering": {
+    "source": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/h65536_b17/entry_jit.py",
+    "frontend": "jit",
+    "artifact_mode": "kernel",
+    "source_imported": true,
+    "full_codegen_passed": true,
+    "device_execution": false,
+    "kernel_runtime_validated": false,
+    "runtime_abi_supported": false,
+    "memory_planner": "PYPTO",
+    "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/cpu_lowering/source.py",
+    "output_dir": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/cpu_lowering/kernel"
+  },
+  "pipeline_equivalence": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/pipeline_check_v2/result.json",
+  "binding_contract_checks": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/binding_migration.json",
+  "graph_schedule_checks": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/graph_migration.json",
+  "b16_selected_source_equivalence": {
+    "case": "h131072_b16",
+    "generated_ast_equal": true,
+    "old_batches": {
+      "aic": 34,
+      "aiv": 40
+    },
+    "new_batches": {
+      "aic": 34,
+      "aiv": 40
+    },
+    "old_waits": 12183,
+    "new_waits": 12183,
+    "performance_validated": false
+  },
+  "wait_cpp_equivalence": "tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/wait_cpp_and_dependency_check.json",
+  "fixed_during_migration": [
+    "catalog初版遗漏system_operations，完整build在layout处拒绝；现由生产数学AST生成并已编译通过",
+    "不同Native root可写storage重叠未建模，已增加仅Host元信息的拒绝检查",
+    "ND根入参未检查NPU物理格式，已限制ND为0/2、NZ为29，禁止隐式转换"
+  ],
+  "test_adjustments": [
+    "pipeline_check_v1对源文件行号也要求相同，迁移导致source_line变化；v2只忽略位置/ABI说明，保留同步内容及完整数学AST比较"
+  ],
+  "compiler_warnings_review": {
+    "temporary_14_15": "cmp/idx_row_offsets由唯一csa_row_offsets成员写入，不是多核共享写",
+    "temporary_54": "valid_block_mask为INT32[T,16]，每query独占64B行；分核不改变query所有权",
+    "scope": "源码与layout核对，不代替硬件验证"
+  },
+  "remaining": [
+    "新生产范围入口的真实设备回归与服务JIT集成；此次仅CPU验证",
+    "100tick策略源码变换已独立，但当前编译回调仍由隔离验证进程安装，未提供可并发共享的生产JIT回调",
+    "S!=6及混合query边界的正式数学实现与验证",
+    "七档完整L1各降低至少30%，及区间代表/边界点验收",
+    "HC紧凑双槽实际候选和更大的关键链优化"
+  ]
+}

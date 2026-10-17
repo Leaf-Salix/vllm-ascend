@@ -1,0 +1,17 @@
+{
+  "attempts": [
+    {
+      "status": "FAIL",
+      "test": "check_compiled.py首次版本",
+      "error": "AssertionError: ('v255', 'v256')",
+      "cause": "v255是gather的动态目的切片，无构造器Tile视图，地址为base+page*64；非新增scratch分配",
+      "fix": "常量TASSIGN统计分配highwater；动态地址必须是无构造器Tile视图并单独列出，不能重复加完整Tile尺寸",
+      "recompiled_math": false
+    },
+    {
+      "status": "PASS",
+      "test": "修正后check_compiled.py",
+      "result": "compiled_audit.json"
+    }
+  ]
+}

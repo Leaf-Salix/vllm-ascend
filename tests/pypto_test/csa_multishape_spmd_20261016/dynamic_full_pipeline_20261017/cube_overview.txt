@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+"""完整动态CSA的AIC编排：阶段数据流、分工与阅读顺序。
+
+本文件和vector_schedule.py是在同一个MIX任务中并发运行的两种角色，不是
+两个独立kernel。24个AIC按真实T及device请求计划循环，数学tile由constexpr
+策略选择；没有输入规格白名单、固定S推导请求或冻结的历史DAG。
+
+阅读顺序：HC投影→QA/KV→QB/Indexer query/head权重/两种压缩投影→query与
+compact Hadamard→Indexer score→Attention QK/PV→O_A/O_B。矩阵计算调用各
+*_stages.py的inline函数；本文件只描述何时允许消费数据，不另写数学。
+先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在QA和等待QR之间，
+使AIV归一化有推进窗口。当前阶段粒度仍较保守，不能宣称已有性能收益。
+
+布局：x_fp32[T,16384]、normed[T,4096]；QA与KV输出pad16，QB为pad128。
+qr与q_heads是调用层绑定的GM视图，q_heads必须恰好64*T行；compact实际行数
+读设备计数，不能用其pad容量替代。主/Indexer state、cache始终是Native
+存储；本角色只通过显式等候读取其他核产物。输出packed为8组，组stride由
+其真实容量除8得到。完整的外部容量/别名合同见entry.py及各数学文件头部。
+
+同步：每核begin一次，即使本轮无工作也不能跳过。phase是单写者整阶段
+完成标记，消费者只等对应owner；发布和等待都包含业务流水/缓存维护。
+Score与Attention内部还有组内环槽READY/ACK，必须让双AIV同时推进，不能
+等AIV整段结束才启动AIC。Scalar完成标记不能代替MTE/FIX完成或读侧缓存维护。
+
+当前入口覆盖Cube Score策略；完整CPU后端、真机精度及性能以验证记录为准。
+前段已有的设备PASS不能证明本文件新接入的全链路或七档性能达标。
+"""

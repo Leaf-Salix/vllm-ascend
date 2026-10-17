@@ -1,0 +1,157 @@
+{
+  "passed": true,
+  "scope": "正式动态attention计划与inverse RoPE迁移，两个helper的CPU功能/后端产物验证，非整层通过",
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_plan_stages.py",
+  "interface_contract": "interface_contract.json",
+  "source_matches_passed_cpu_snapshot": true,
+  "compile_attempts": [
+    {
+      "attempt": "cpu_v1",
+      "passed": false,
+      "parse_passed": false,
+      "reason": "Tensor/Tile混用，row_expand_mul拒绝",
+      "command": "bash reproduce_cpu.sh cpu_v1 > cpu_v1.log 2>&1",
+      "log": "cpu_v1.log",
+      "snapshot": "cpu_v1/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v2",
+      "passed": false,
+      "parse_passed": false,
+      "reason": "替换脚本断言失败未写回；误重试相同源，仍Tensor/Tile混用",
+      "command": "bash reproduce_cpu.sh cpu_v2 > cpu_v2.log 2>&1",
+      "log": "cpu_v2.log",
+      "snapshot": "cpu_v2/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v3",
+      "passed": false,
+      "parse_passed": false,
+      "reason": "显式Tile row_max缺UB暂存",
+      "command": "bash reproduce_cpu.sh cpu_v3 > cpu_v3.log 2>&1",
+      "log": "cpu_v3.log",
+      "snapshot": "cpu_v3/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v4",
+      "passed": false,
+      "parse_passed": false,
+      "reason": "替换仅加了reduce_tmp声明，调用未增加参数，仍缺tmp；属于本地修补遗漏",
+      "command": "bash reproduce_cpu.sh cpu_v4 > cpu_v4.log 2>&1",
+      "log": "cpu_v4.log",
+      "snapshot": "cpu_v4/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v5",
+      "passed": false,
+      "parse_passed": true,
+      "reason": "解析通过，codegen拒绝Scalar INDEX↔FP32直接cast；并提示8x1 row-major物理跨度不足",
+      "command": "bash reproduce_cpu.sh cpu_v5 > cpu_v5.log 2>&1",
+      "log": "cpu_v5.log",
+      "snapshot": "cpu_v5/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v6",
+      "passed": true,
+      "parse_passed": true,
+      "reason": "通过：INT32中转、1x8 reshape列向量；随后主动补齐最终舍入index的页保护",
+      "command": "bash reproduce_cpu.sh cpu_v6 > cpu_v6.log 2>&1",
+      "log": "cpu_v6.log",
+      "snapshot": "cpu_v6/attention_plan_stages.py"
+    },
+    {
+      "attempt": "cpu_v7",
+      "passed": true,
+      "parse_passed": true,
+      "reason": "最终通过：页保护读取最终INT32 candidate Tile，保留原向量数学",
+      "command": "bash reproduce_cpu.sh cpu_v7 > cpu_v7.log 2>&1",
+      "log": "cpu_v7.log",
+      "snapshot": "cpu_v7/attention_plan_stages.py"
+    }
+  ],
+  "final_artifact": "cpu_v7/kernel",
+  "final_compiled_audit": "cpu_v7/compiled_audit.json",
+  "compiler_fixes": [
+    "全部数学统一为显式Tile，使用load/full/store，不混Tensor/Tile。",
+    "row_max显式给8x128 FP32 UB暂存，保持128列归约。",
+    "INDEX/FP32经INT32中转；causal position在[0,L)，L为INT32，因此该步无损。",
+    "8x1列向量由1x8 full后reshape生成，最终CPP为ColMajor，满足32B物理布局。"
+  ],
+  "behavior_change_from_canonical": "增加Q/L mixed-query owner/causal检查及页表列、物理页容量检查，非法候选同步mask而非读零KV参与分母。正常输入数学保持。",
+  "math_AST_equal_assignments": [
+    "c_pos_q",
+    "c_upper_b",
+    "c_ge_tile",
+    "c_lt_tile",
+    "c_mask_tile",
+    "c_out_tile",
+    "v_columns",
+    "v_col_tile",
+    "v_valid_tile",
+    "v_lo_fp32",
+    "v_hi_fp32",
+    "v_ge",
+    "v_lt",
+    "cs_ones",
+    "cs_idx_f",
+    "cs_col",
+    "cs_dup_i32",
+    "cs_dup_f",
+    "cs_lane",
+    "cs_sign"
+  ],
+  "math_AST_comparison_count": 20,
+  "oracle": {
+    "result": "PASS",
+    "path": "oracle_v4.json",
+    "source": "oracle_v4_source.py",
+    "cases": 32,
+    "command": "python check_oracle.py --output <new_oracle_json>",
+    "coverage": [
+      "9个uniform场景含当前目标七档的B/历史长度",
+      "same physical T=9/active6 的[2,4]与[2,2,2]请求划分，含3个未覆盖pad",
+      "odd/mixed/zero-length/dummy/短Q/反向Q/重叠Q/容量超界Q",
+      "陈旧position、负页/正页越界/短表/空表/零cache页",
+      "FP32 index舍入跨页：检查最终index页，而非原TopK页",
+      "T=0、8行尾、worker1/3/24、输出poison pad与mask后11列保持"
+    ],
+    "prior_attempts": [
+      "oracle_v1/v2各31用例通过；后续添加最终index舍入页保护",
+      "oracle_v3新增大数边界失败，原因为NumPy 2将FP32 Tile和0D FP64立即数提升为FP64；源程序未因该失败修改",
+      "oracle_v4解释器按DSL把立即数绑定FP32，32用例通过"
+    ],
+    "model_scope": "解释正式Python helper控制流/基础FP32数学；不模拟NPU指令、管线或缓存，不声称device精度。"
+  },
+  "artifact_audit": {
+    "result": "PASS",
+    "path": "cpu_v7/compiled_audit.json",
+    "command": "python audit_compiled.py --artifact cpu_v7/kernel --output <new_json>",
+    "first_audit_failure": "仅审计脚本误期望列维动态；实际store列是固定512/64，行仍动态，修正匹配后通过。",
+    "public_tensor_count": 13,
+    "incore_tensor_count": 11,
+    "incore_page_scalar_count": 2,
+    "dynamic_dimensions_total": 9,
+    "dynamic_dims_from_incore_descriptors": 7,
+    "page_capacities_from_outer_descriptors": 2,
+    "cache_payload_pointer_absent_from_incore": true,
+    "topk_page_validation_reads_local_tile": true,
+    "actual_output_writeback": true,
+    "column_major_small_tiles": true
+  },
+  "known_warning": "ScalarWriteLineShared静态警告仍保留；mask16个INT32为64B整行，8行tile独占owner，不同worker不共享行，入口必须确保64B对齐。",
+  "lint": {
+    "first": "lint_v1.log",
+    "final": "lint_v2.log",
+    "result": "PASS"
+  },
+  "reproduction_script": "reproduce_cpu.sh",
+  "device_execution": false,
+  "device_precision_validated": false,
+  "device_sync_validated": false,
+  "performance_measured": false,
+  "remaining": [
+    "组装完整attention的QK/PV/gather及最终inverse RoPE消费者，使用一致Q/L/page/mask合同。",
+    "完整入口实际容量、stride、alias、64B对齐检查。",
+    "后续有界设备功能/精度/同步验证，然后才测性能。"
+  ]
+}

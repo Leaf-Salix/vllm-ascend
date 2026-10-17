@@ -1,0 +1,300 @@
+{
+  "status": "CPU完整后端和现产物审计PASS，仅query前段",
+  "not_full_csa": true,
+  "device_execution": false,
+  "precision_tested": false,
+  "performance_measured": false,
+  "source": "probe.py",
+  "production_helpers": [
+    "hc_stages.py",
+    "qkv_stages.py",
+    "query_projection_stages.py",
+    "phase_sync.py"
+  ],
+  "source_strategy": "直接调用高层正式数学helper；动态T核内循环、无历史IR、无按档位展开entry，旧dynamic_front_pipeline保持原样",
+  "weight_layouts": {
+    "process_config": "VLLM_ASCEND_ENABLE_NZ=2",
+    "wq_a": "Native BF16 NZ [1024,4096]",
+    "wq_b": "Native INT8 NZ [1024,32768]",
+    "conversion_performed": false
+  },
+  "ordered_tensor_parameters": [
+    {
+      "name": "x",
+      "annotation": "pl.Tensor[[T, 16384], pl.BF16]"
+    },
+    {
+      "name": "hc_fn",
+      "annotation": "pl.Tensor[[24, 16384], pl.FP32]"
+    },
+    {
+      "name": "hc_scale",
+      "annotation": "pl.Tensor[[3], pl.FP32]"
+    },
+    {
+      "name": "hc_base",
+      "annotation": "pl.Tensor[[24], pl.FP32]"
+    },
+    {
+      "name": "hc_base_2d",
+      "annotation": "pl.Tensor[[1, 24], pl.FP32]"
+    },
+    {
+      "name": "norm_w",
+      "annotation": "pl.Tensor[[4096], pl.BF16]"
+    },
+    {
+      "name": "wq_a",
+      "annotation": "pl.Tensor[[1024, 4096], pl.BF16, pl.NZ]"
+    },
+    {
+      "name": "gamma_cq",
+      "annotation": "pl.Tensor[[1024], pl.BF16]"
+    },
+    {
+      "name": "x_fp32",
+      "annotation": "pl.InOut[pl.Tensor[[T, 16384], pl.FP32]]"
+    },
+    {
+      "name": "inv",
+      "annotation": "pl.InOut[pl.Tensor[[P16, 1], pl.FP32]]"
+    },
+    {
+      "name": "widen_tail",
+      "annotation": "pl.InOut[pl.Tensor[[8, 16384], pl.FP32]]"
+    },
+    {
+      "name": "partials",
+      "annotation": "pl.InOut[pl.Tensor[[PARTIAL, 32], pl.FP32]]"
+    },
+    {
+      "name": "raw",
+      "annotation": "pl.InOut[pl.Tensor[[P16, 32], pl.FP32]]"
+    },
+    {
+      "name": "pre",
+      "annotation": "pl.InOut[pl.Tensor[[P16, 8], pl.FP32]]"
+    },
+    {
+      "name": "post",
+      "annotation": "pl.InOut[pl.Tensor[[T, 4], pl.FP32]]"
+    },
+    {
+      "name": "post_tail",
+      "annotation": "pl.InOut[pl.Tensor[[8, 8], pl.FP32]]"
+    },
+    {
+      "name": "comb",
+      "annotation": "pl.InOut[pl.Tensor[[T, 16], pl.FP32]]"
+    },
+    {
+      "name": "comb_tail",
+      "annotation": "pl.InOut[pl.Tensor[[8, 32], pl.FP32]]"
+    },
+    {
+      "name": "mixed",
+      "annotation": "pl.InOut[pl.Tensor[[P8, 4096], pl.BF16]]"
+    },
+    {
+      "name": "normed",
+      "annotation": "pl.InOut[pl.Tensor[[T, 4096], pl.BF16]]"
+    },
+    {
+      "name": "norm_tail",
+      "annotation": "pl.InOut[pl.Tensor[[8, 4096], pl.BF16]]"
+    },
+    {
+      "name": "qa",
+      "annotation": "pl.InOut[pl.Tensor[[P16, 1024], pl.FP32]]"
+    },
+    {
+      "name": "qr",
+      "annotation": "pl.InOut[pl.Tensor[[T, 1024], pl.INT8]]"
+    },
+    {
+      "name": "qr_scale",
+      "annotation": "pl.InOut[pl.Tensor[[T, 1], pl.FP32]]"
+    },
+    {
+      "name": "qr_matmul",
+      "annotation": "pl.InOut[pl.Tensor[[QR_ROWS, 1024], pl.INT8]]"
+    },
+    {
+      "name": "qr_scale_pad",
+      "annotation": "pl.InOut[pl.Tensor[[P8, 1], pl.FP32]]"
+    },
+    {
+      "name": "wq_b",
+      "annotation": "pl.Tensor[[1024, 32768], pl.INT8, pl.NZ]"
+    },
+    {
+      "name": "wq_b_scale",
+      "annotation": "pl.Tensor[[32768], pl.FP32]"
+    },
+    {
+      "name": "rope_cos",
+      "annotation": "pl.Tensor[[T, 64], pl.FP32]"
+    },
+    {
+      "name": "rope_sin",
+      "annotation": "pl.Tensor[[T, 64], pl.FP32]"
+    },
+    {
+      "name": "rope_signed",
+      "annotation": "pl.InOut[pl.Tensor[[T, 64], pl.FP32]]"
+    },
+    {
+      "name": "rope_swap",
+      "annotation": "pl.InOut[pl.Tensor[[T, 64], pl.INT32]]"
+    },
+    {
+      "name": "q_proj",
+      "annotation": "pl.InOut[pl.Tensor[[QPROJ_ROWS, 32768], pl.INT32]]"
+    },
+    {
+      "name": "q_flat",
+      "annotation": "pl.InOut[pl.Tensor[[T, 32768], pl.BF16]]"
+    },
+    {
+      "name": "signal",
+      "annotation": "pl.InOut[pl.Tensor[[WORDS], pl.INT32]]"
+    }
+  ],
+  "tensor_count": 35,
+  "dynamic_ABI": {
+    "T": "实际token数，T>0",
+    "P16": "ceil(T/16)*16，用于HC inv/raw/pre和QA",
+    "P8": "ceil(T/8)*8，用于mixed和QR scale",
+    "HC_PARTIAL": "4*P16",
+    "QR_ROWS": "INT8 QR至少ceil(T/128)*128；与scale的P8单独动态轴",
+    "QPROJ_ROWS": "INT32 QB输出至少ceil(T/128)*128；不借用QR_ROWS轴",
+    "WORDS": "12*72*128=110592个INT32，本G24合同固定含义和跨度"
+  },
+  "phase_contract": [
+    {
+      "id": 1,
+      "name": "HC_INPUT",
+      "writers": "48 AIV",
+      "owner": "widen tile8 % 48",
+      "consumers": "AIC HC投影；HC gates/comb/mix",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 2,
+      "name": "HC_PARTIAL",
+      "writers": "24 AIC",
+      "owner": "(M16行块*4+K4096 split) % 24",
+      "consumers": "AIV reduce",
+      "active_owners": "0..min(ceil(T/16)*4,24)-1"
+    },
+    {
+      "id": 3,
+      "name": "HC_RAW",
+      "writers": "48 AIV",
+      "owner": "M16行块 % 48",
+      "consumers": "AIV gates和comb",
+      "active_owners": "0..min(ceil(T/16),48)-1"
+    },
+    {
+      "id": 4,
+      "name": "HC_GATES",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "AIV mix；post供后续层阶段",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 5,
+      "name": "HC_COMB",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "本前段无消费者；输出供后续HCpost",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 6,
+      "name": "HC_NORM",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "AIC Q_A",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 7,
+      "name": "QA",
+      "writers": "24 AIC",
+      "owner": "(M组*8+N128列块) % 24",
+      "consumers": "AIV QR全部1024列",
+      "active_owners": "0..8*min(3,max(1,T//M))-1；T<128时M32，否则M64"
+    },
+    {
+      "id": 8,
+      "name": "QR",
+      "writers": "48 AIV",
+      "owner": "token8 tile % min(ceil(T/8),48)",
+      "consumers": "AIC QB消费INT8，AIV query反量化消费scale",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 9,
+      "name": "ROPE_PREP",
+      "writers": "48 AIV",
+      "owner": "token8 tile % min(ceil(T/8),48)",
+      "consumers": "query dequant/RMS/RoPE",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 10,
+      "name": "QB",
+      "writers": "24 AIC",
+      "owner": "NZ N256列块号 % 24，每个owner处理全部真实M128行块",
+      "consumers": "query dequant/RMS/RoPE",
+      "active_owners": "0..23，128个N256列块覆盖32768列"
+    },
+    {
+      "id": 11,
+      "name": "QUERY",
+      "writers": "48 AIV",
+      "owner": "(token8块*(64/head_tile)+head组) % 48",
+      "consumers": "当前probe外的后续Attention",
+      "active_owners": "0..min(ceil(T/8)*(64/head_tile),48)-1"
+    }
+  ],
+  "ownership_rules": [
+    "所有72核包括空核begin一次；同一单流/图顺序复用信号区，失败后清零重建。",
+    "Q_A M32/M64区间分支保留，等待全部实际8列块×M组的owner。",
+    "Q_B读取QR只用真实tokens约束M128有效行；无需依赖P8..P128未写容量尾部的数值。",
+    "query有尾行时只会选head_tile=4；完整8行rsqrt与尾行recip(sqrt)原路径保留。",
+    "q_flat与下游[T,64,512]必须由外层建立同数据GM视图。",
+    "各阶段publish一次全部wave完成；无ACK，不能逐tile复用信号/覆盖业务缓冲。",
+    "RoPE发布不等QB；query同时等待QB、RoPE和QR的真实owner，phase图无环。"
+  ],
+  "compiler_alias_handling": "cube返回qa_gm/q_proj_gm显式原GM参数别名，绕开动态分支返回lineage追踪限制；CPP审计真实存储与另一角色读取同指针，未仅凭未用SSA警告或编译成功判定。",
+  "cache_policy": {
+    "set": false,
+    "reason": "显式cluster成员的外层SPMD属性无可附着incore，full_v1真实报错；本轮不为属性改数学/依赖，也不做性能结论。"
+  },
+  "follow_up_interface_note": "q_r_stage两个工作区目前注解共用PAD_ROWS_DYN；现inline CPP证明实际QR128/P8轴独立，已通知root建议把正式helper两个符号也拆开。",
+  "evidence": {
+    "full_backend": "full_v2/result.json",
+    "actual_NZ_dynamic_ABI_and_GM_dependencies": "full_v2/compiled_audit.json",
+    "390_T_owner_coverage_and_DAG": "ownership.json"
+  },
+  "attempts": [
+    {
+      "path": "full_v1/result.json",
+      "status": "FAIL frontend",
+      "reason": "set_cache_policy cannot attach to explicit-kernel Spmd；保留源和异常，去掉测试壳两条属性后重试。"
+    },
+    {
+      "path": "full_v2/result.json",
+      "status": "PASS",
+      "reason": "实际NZ2，完整CPU后端、单MIX、7动态维度；现产物GM数据流审计也通过。"
+    }
+  ],
+  "reproduction": {
+    "compile": "bash reproduce_cpu.sh <新结果目录>",
+    "owner_model": "python check_ownership.py",
+    "artifact_audit": "python audit_compiled.py --artifact full_v2/kernel --output <新审计文件>"
+  }
+}

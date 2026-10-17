@@ -1,0 +1,33 @@
+{
+  "module": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_compressor_output_stages.py",
+  "scope": "Indexer compressor compact RMS/逆RoPE与Hadamard；不含quant/key/scale commit",
+  "norm_interface": {
+    "name": "indexer_compressor_norm_rope_stage",
+    "inputs": ["pooled FP32[POOL_ROWS,128]", "norm_w BF16[128]", "cos/sin FP32[C_CAPACITY,64]", "positions INT64[T]", "bounds INT32[Q_CAPACITY]", "lengths INT32[B]", "offsets INT32[B]", "normed InOut BF16[COMPACT_PAD,128]", "worker_id INDEX", "WORKERS constexpr"],
+    "returns": "normed同一GM别名",
+    "ownership": "AIV按worker+k*WORKERS领取完整request，清零本请求真实compact区间，再写causal关闭行。",
+    "mathematics": "两段64列平方先加后row_sum；recip(sqrt(variance))；BF16 norm_w核内FP32；NOPE和逆RoPE分别BF16(rint)。",
+    "pool_contract": "pool已写所有活动请求本轮行，非关闭行置零；inactive和Q未覆盖区可以未写，本helper不读取。",
+    "compact_contract": "Native合法Q/L及对应offsets使各请求prefix/count区间无重叠并密排为[0,C_valid)。本段清零的单位是请求真实区间，不是固定ceil(S/4)。",
+    "stale_positions": "本请求compact行先被置零；只有position==L-Qlen+token-begin且关闭C4才能覆盖。下游不得用零值代替active/causal/slot检查。",
+    "tail": "请求内最多16行块，GM load valid_shape止于request end；输出单行slice显式valid_shape=[1,64]。",
+    "padding": "normed[C_valid:]保持未写；不是有效数学输入。"
+  },
+  "hadamard_interface": {
+    "name": "indexer_compressor_hadamard_stage",
+    "inputs": ["normed BF16[COMPACT_PAD,128]", "hadamard BF16[128,128]", "output FP32[COMPACT_PAD,128]", "valid_count INDEX", "worker_id INDEX", "WORKERS constexpr"],
+    "returns": "output同一GM别名",
+    "valid_count_origin": "root的metadata compact_offsets_and_count_stage扫描同一Q/L，worker0写device INT32[1]；外层等待并完成读侧缓存维护后device read/cast为INDEX传入。",
+    "capacity": "两份工作区COMPACT_PAD一致且>=align_up(C_valid,16)；C_valid不超过Native紧凑cos/sin/slots容量。",
+    "ownership": "按原N64列块优先、M16行块其次的网格条带分配AIC；每个块完整K128 matmul。",
+    "zero_and_tail": "C_valid=0不load normed/权重；M16尾只读valid_shape行，不要求pad初始化。",
+    "defensive_guard": "负count或容量不足跳过工作，仅防越界，不构成合法数学支持。"
+  },
+  "external_synchronization": [
+    "norm等待pool、compact offsets以及Native紧凑RoPE输入可见。",
+    "Hadamard等待所有norm生产者发布并完成业务数据缓存维护，再读C_valid与normed。",
+    "helpers不创建task、notify或wait；无工作的参与核仍遵循外层阶段发布合同。",
+    "后续quant/cache必须保留active/causal/slot条件和Indexer scale的64B单写者RMW。"
+  ],
+  "not_claimed": ["完整CSA已组装", "设备精度通过", "硬件同步正确", "性能达标"]
+}

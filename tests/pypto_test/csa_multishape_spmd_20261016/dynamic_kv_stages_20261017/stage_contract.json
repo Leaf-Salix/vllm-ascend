@@ -1,0 +1,54 @@
+{
+  "production_file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kv_stages.py",
+  "functions": {
+    "kv_project_stage": {
+      "role": "AIC",
+      "parameters": [
+        "x BF16 ND[T,4096]",
+        "wkv BF16 ND[4096,512]",
+        "kv_fp32 FP32 ND[PAD_ROWS,512]",
+        "worker_id INDEX",
+        "WORKERS constexpr正整数"
+      ],
+      "returns": "kv_fp32同一GM别名",
+      "algorithm": "每512行chunk局部选择M32(<128行)/M64，否则末尾M16；N128,K512，完整K4096顺序累加，非atomic",
+      "owners": "每chunk m_groups=min(3,max(1,chunk_rows//DENSE_M))；logical=column_block*m_groups+m_group；owner=logical%WORKERS。dense行组=(chunk_local_row//DENSE_M)%m_groups；tail行组=((row-full_rows)//16)%m_groups。",
+      "dependencies": "输入x就绪，不能按一行单producer近似四个N128列块的后续依赖。wkv BYPASS由外层spmd设置。"
+    },
+    "kv_norm_rope_stage": {
+      "role": "AIV",
+      "parameters": [
+        "kv_fp32 FP32 ND[PAD_ROWS,512]",
+        "gamma_ckv BF16[512]",
+        "cos/signed_sin FP32[T,64]",
+        "swap INT32[T,64]",
+        "kv BF16[T,512]",
+        "worker_id INDEX",
+        "WORKERS constexpr正整数"
+      ],
+      "returns": "kv同一GM别名",
+      "owners": "连续32行tile，owner=(row//32)%WORKERS，row取该tile首行。",
+      "dependencies": "等待实际覆盖该32行的投影四列块全部完成，以及相同token的cos/signed_sin/swap就绪；helper不自己通知或等待。",
+      "rope_preparation": "可复用query_projection_stages.q_rope_prepare_stage的signed_sin/swap。"
+    }
+  },
+  "workspace": {
+    "kv_fp32_min_rows": "ceil(T/16)*16",
+    "element_type": "FP32",
+    "columns": 512,
+    "full_T_storage": true,
+    "reuse_chunk_ring": false,
+    "tail_row_read": "Norm尾32行Tile每次load使用valid_rows，不要求物理pad32；最终kv只写T行。",
+    "untouched_capacity": "大于pad16的多余容量不被投影写入；不保证padding值清零。"
+  },
+  "entry_requirements": [
+    "各Tensor描述符实际T一致，元数据/最终cache写入保持同一token顺序。",
+    "0<=worker_id<WORKERS；WORKERS>0。T=0的数学索引模型为空操作，但未做零shape设备调用。",
+    "所有input/output/workspace物理布局连续ND，不能有未建模的可写别名。",
+    "不支持split-K atomic；当前配置启用atomic时明确拒绝导入。",
+    "输出kv包含入参T所列行；本阶段不解析dummy/slot/page，不写KV cache。",
+    "外层负责本核流水完成、GM发布/消费者缓存、notify/wait；返回值不表示跨核完成。"
+  ],
+  "dynamic_shape": "T和PAD_ROWS均pl.dynamic，真实循环边界来自Tensor dim；512分段为算法常量，不是固定B/S模板。",
+  "status": "仅数学阶段；完整CSA组装、设备精度、跨核同步和性能未验证。"
+}

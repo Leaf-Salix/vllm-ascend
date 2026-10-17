@@ -1,0 +1,17 @@
+{"source": "hc_mix_resident_prepare_v1/variants/h131072_b16/entry_jit.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/hc_mix_resident_cpu_v1/source.py", "error": "pl.tile operation 'full': __init__(): incompatible function arguments. The following argument types are supported:\n    1. __init__(self, value: float, dtype: pypto.pypto_core.DataType, span: pypto.pypto_core.ir.Span) -> None\n\nInvoked with types: pypto.pypto_core.ir.ConstFloat, pypto.language.typing.scalar.Scalar, pypto.pypto_core.DataType, pypto.pypto_core.ir.Span"}
+Error: pl.tile operation 'full': __init__(): incompatible function arguments. The following argument types are supported:
+    1. __init__(self, value: float, dtype: pypto.pypto_core.DataType, span: pypto.pypto_core.ir.Span) -> None
+
+Invoked with types: pypto.pypto_core.ir.ConstFloat, pypto.language.typing.scalar.Scalar, pypto.pypto_core.DataType, pypto.pypto_core.ir.Span
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/hc_mix_resident_cpu_v1/source.py:2772:13
+     |
+2770 |                 stage_8_v43 = pl.tile.read(stage_8_v31, [stage_8_v33, 0])
+2771 |                 stage_8_v32 = stage_8_v32 + stage_8_v43
+2772 |             stage_8_v34 = pl.tile.full([1, 8], dtype=pl.FP32, value=stage_8_v32)
+     |             ^^^^^^^^^^^
+2773 |             stage_8_v35 = pl.tile.muls(stage_8_v34, 0.000244140625)
+2774 |             stage_8_v36 = pl.tile.adds(stage_8_v35, 1e-06)
+     |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

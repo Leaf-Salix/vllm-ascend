@@ -1,0 +1,14 @@
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_v1.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v1/source.py", "error": "`with pl.spmd(...)` body neither reads the per-block index via `pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, so every block would run identical work."}
+Error: `with pl.spmd(...)` body neither reads the per-block index via `pl.tile.get_block_idx()` nor dispatches a `self.<kernel>(...)` call, so every block would run identical work.
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v1/source.py:19:5
+   |
+17 |     out: pl.Out[pl.Tensor[[16, 32], pl.INT32]],
+18 | ):
+19 |     with pl.spmd(1, name_hint="page_base_select"):
+   |     ^^^^
+20 |         parity = pl.tensor.read(control, [0])
+21 |         row = pl.cast(pl.tensor.read(control, [1]), pl.INDEX)
+   |
+   = help: Add `i = pl.tile.get_block_idx()` inside the scope, dispatch a kernel that reads it, or use `for i in pl.spmd(n):` to bind the block index automatically.
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

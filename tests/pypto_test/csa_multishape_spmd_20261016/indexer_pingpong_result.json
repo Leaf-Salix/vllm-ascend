@@ -1,0 +1,73 @@
+{
+  "task": "task_20261017_035437_31474978052",
+  "case": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_indexer_pingpong_v1",
+  "passed": true,
+  "signal_generations": 30,
+  "l1_incore": {
+    "dynamic_pto": {
+      "samples_us": [
+        900.7,
+        904.72,
+        907.0
+      ],
+      "count": 3,
+      "median_us": 904.72,
+      "mean_us": 904.14,
+      "min_us": 900.7,
+      "max_us": 907.0,
+      "p95_us": 907.0
+    },
+    "single_spmd": {
+      "samples_us": [
+        968.92,
+        965.56,
+        972.0
+      ],
+      "count": 3,
+      "median_us": 968.92,
+      "mean_us": 968.8266666666666,
+      "min_us": 965.56,
+      "max_us": 972.0,
+      "p95_us": 972.0
+    }
+  },
+  "comparison": {
+    "l1_incore": {
+      "dynamic_pto_us": 904.72,
+      "single_spmd_us": 968.92,
+      "speedup": 0.9337406597035875,
+      "latency_change_pct": 7.096118135997864
+    },
+    "event_replay": {
+      "dynamic_pto_us": 961.0100090503693,
+      "single_spmd_us": 1079.6899795532227,
+      "speedup": 0.8900795851120492,
+      "latency_change_pct": 12.349504103513764
+    }
+  },
+  "selected": false,
+  "codegen_counts": {
+    "selected": {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_qk_indices_v1/build_output/entry_57ys1c05/ptoas/csa_static_group.cpp",
+      "phase_cpp_bytes": 235326,
+      "static_matmul_calls": 32,
+      "static_fix_inserts": 16,
+      "static_stores": 16,
+      "static_set_flag": 166,
+      "static_wait_flag": 166,
+      "static_pipe_all": 1
+    },
+    "pingpong": {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_indexer_pingpong_v1/build_output/entry_fcb6s14s/ptoas/csa_static_group.cpp",
+      "phase_cpp_bytes": 268546,
+      "static_matmul_calls": 64,
+      "static_fix_inserts": 32,
+      "static_stores": 32,
+      "static_set_flag": 187,
+      "static_wait_flag": 187,
+      "static_pipe_all": 1
+    }
+  },
+  "interpretation": "两份Acc确实互不重叠，但分组增加Cube及同步提交数，整层未提速；静态指令数量不能换算成实测各阶段耗时。",
+  "scope": "完整CSA固定fixture图重放，原动态PTO对照；不是连续decode"
+}

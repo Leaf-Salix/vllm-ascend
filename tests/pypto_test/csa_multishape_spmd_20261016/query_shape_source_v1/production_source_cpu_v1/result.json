@@ -1,0 +1,56 @@
+{
+  "device_execution": false,
+  "single_spmd_implemented": false,
+  "factory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+  "cases": [],
+  "rejections": [
+    {
+      "query_tokens": 3,
+      "token_capacity": 384,
+      "reason": "现有 pair/双 AIV 数学分组不支持奇数 query_tokens"
+    },
+    {
+      "query_tokens": [
+        2,
+        2
+      ],
+      "token_capacity": 384,
+      "reason": "query_tokens 必须是 2..16 的整数；当前 Native decode 边界为 16"
+    },
+    {
+      "query_tokens": 10,
+      "token_capacity": 384,
+      "reason": "容量必须包含完整 uniform 请求，不能静默截断尾请求"
+    },
+    {
+      "query_tokens": 4,
+      "token_capacity": 512,
+      "reason": "token_capacity 必须是 1..384 的整数"
+    },
+    {
+      "query_tokens": 4,
+      "token_capacity": 96,
+      "reason": "现有 O projection 容量必须按 128 行对齐"
+    },
+    {
+      "query_tokens": 0,
+      "token_capacity": 384,
+      "reason": "query_tokens 必须是 2..16 的整数；当前 Native decode 边界为 16"
+    },
+    {
+      "query_tokens": 18,
+      "token_capacity": 384,
+      "reason": "query_tokens 必须是 2..16 的整数；当前 Native decode 边界为 16"
+    },
+    {
+      "query_tokens": true,
+      "token_capacity": 384,
+      "reason": "query_tokens 必须是 2..16 的整数；当前 Native decode 边界为 16"
+    }
+  ],
+  "stdlib_only_import": true,
+  "pypto_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/__init__.py",
+  "all_passed": false,
+  "error": "'NoneType' object has no attribute '_fields'",
+  "traceback": "Traceback (most recent call last):\n  File \"tests/pypto_test/csa_multishape_spmd_20261016/query_shape_source_v1/run_production_source_cpu.py\", line 74, in main\n    annotations = {arg.arg: ast.unparse(arg.annotation) for arg in root.args.args}\n  File \"tests/pypto_test/csa_multishape_spmd_20261016/query_shape_source_v1/run_production_source_cpu.py\", line 74, in <dictcomp>\n    annotations = {arg.arg: ast.unparse(arg.annotation) for arg in root.args.args}\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 1681, in unparse\n    return unparser.visit(ast_obj)\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 815, in visit\n    self.traverse(node)\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 806, in traverse\n    super().visit(node)\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 418, in visit\n    return visitor(node)\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 422, in generic_visit\n    for field, value in iter_fields(node):\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/ast.py\", line 260, in iter_fields\n    for field in node._fields:\nAttributeError: 'NoneType' object has no attribute '_fields'\n"
+}

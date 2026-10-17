@@ -1,0 +1,137 @@
+{
+  "scope": "显式worker动态attention计划与逆RoPE两个inline helper，非完整attention或CSA",
+  "module": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_plan_stages.py",
+  "functions": {
+    "attention_slot_plan_stage": {
+      "line": 76,
+      "end_line": 213,
+      "parameters": [
+        {
+          "name": "topk",
+          "type": "pl.Tensor[[T_DYN, TOPK], pl.INT32]"
+        },
+        {
+          "name": "positions",
+          "type": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "bounds",
+          "type": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+        },
+        {
+          "name": "lengths",
+          "type": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+        },
+        {
+          "name": "original_table",
+          "type": "pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "compressed_table",
+          "type": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "indices",
+          "type": "pl.InOut[pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]]"
+        },
+        {
+          "name": "bias",
+          "type": "pl.InOut[pl.Tensor[[PLAN_CAP_DYN, BIAS_COLS], pl.FP32]]"
+        },
+        {
+          "name": "valid_blocks",
+          "type": "pl.InOut[pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32]]"
+        },
+        {
+          "name": "original_pages",
+          "type": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "compressed_pages",
+          "type": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "worker_id",
+          "type": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "type": "pl.constexpr"
+        }
+      ]
+    },
+    "attention_inverse_rope_sign_stage": {
+      "line": 217,
+      "end_line": 239,
+      "parameters": [
+        {
+          "name": "sin",
+          "type": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]"
+        },
+        {
+          "name": "signed_sin",
+          "type": "pl.InOut[pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]]"
+        },
+        {
+          "name": "worker_id",
+          "type": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "type": "pl.constexpr"
+        }
+      ]
+    }
+  },
+  "model_constants": {
+    "ROWS": 8,
+    "TOPK": 512,
+    "WIN": 128,
+    "BLOCK_SIZE": 32,
+    "SPARSE_BLOCKS": 5,
+    "BIAS_COLS": 640,
+    "MASK_COLS": 16,
+    "ROPE_DIM": 64
+  },
+  "dynamic_axes": {
+    "T": "positions/topk/sin实际token轴，三者需一致",
+    "B": "lengths和两份页表请求轴",
+    "Q": "原始Native query_start_loc实际边界容量",
+    "PLAN_CAP": "indices/bias/mask行容量，须>=T",
+    "ROPE_CAP": "signed_sin行容量，须>=T",
+    "original_columns": "原始页表列容量",
+    "compressed_columns": "压缩页表列容量",
+    "original_pages": "外层已有原cache descriptor的页容量INDEX Scalar",
+    "compressed_pages": "外层已有压缩cache descriptor的页容量INDEX Scalar"
+  },
+  "outputs": {
+    "indices": "INT32[PLAN_CAP,512]；每次覆盖[:T,:]，非法=-1",
+    "bias": "FP32[PLAN_CAP,640]；每次覆盖[:T,:]，非法=-1e20",
+    "valid_blocks": "INT32[PLAN_CAP,16]；只覆盖[:T,0:5]，其余11列/pad不写",
+    "signed_sin": "FP32[ROPE_CAP,64]；只覆盖[:T,:]，偶数列+sin/奇数列-sin"
+  },
+  "ownership": "8行tile编号%WORKERS；每个实际token唯一writer。mask每行16个INT32独占64B缓存行；首地址须64B对齐。",
+  "input_contracts": [
+    "WORKERS>0，0<=worker_id<WORKERS，由外层核映射保证。",
+    "Tensor均为连续ND；同dynamic symbol的实际维度必须一致，入口预检容量和stride。",
+    "Q是原query边界，不是压缩compact Q；L包含本轮query，活动行位置必须与L-Qlen+local_index一致。",
+    "workspace与输入及cache不非法alias；页表在plan→gather期间保持本轮一致。",
+    "页数Scalar来自已有descriptor，可为0；不得把模型最大长度当物理cache页数。",
+    "mask第一维stride16，buffer和start_offset共同保持64B对齐；无另一个writer触碰同一物理行。"
+  ],
+  "guard_behavior": [
+    "inactive/无owner/多owner/非法Q/陈旧位置：全候选无效，不读页表；inactive不读position。",
+    "页表列超界/负页/页数越界：同一候选indices、bias、block mask一致无效。",
+    "压缩页检查使用FP32数学最终cast出的实际候选index；不对原TopK页检查后输出另一个舍入页。",
+    "plan不接收cache payload，因此本段不会访问任何cache数据；下游gather仍须一致guard。"
+  ],
+  "sync_contract": [
+    "调用者等待Indexer Top-K和Native Q/L/positions/page metadata可见后执行plan。",
+    "helper不含task/SPMD/notify/wait，外层实际owner完成后发布plan阶段。",
+    "QK与双AIV必须消费相同本轮五块mask，禁止读取后11列或T后的pad。",
+    "逆RoPE与plan独立，可不同worker集合；最终attention发布头向量前等待对应signed_sin row owner。",
+    "本helper不自行做业务缓存维护，外层phase/stream依赖负责。"
+  ],
+  "first_version_performance_limit": "页合法检查按候选Scalar读取本核Tile并读取页表；未使用性能优化结果作本段吞吐承诺。",
+  "device_execution": false
+}

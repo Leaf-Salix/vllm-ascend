@@ -1,0 +1,193 @@
+{
+  "cpu_full_codegen_passed": true,
+  "scope": "独立一个O-A group，不代表整层编译/设备精度/性能",
+  "memory_peaks_bytes": {
+    "Mat": 327680,
+    "Left": 49152,
+    "Right": 65536,
+    "Acc": 98304
+  },
+  "limits_bytes": {
+    "Mat": 524288,
+    "Left": 65536,
+    "Right": 65536,
+    "Acc": 131072
+  },
+  "allocations": {
+    "mem_acc_3": {
+      "space": "Acc",
+      "start": 0,
+      "end": 49152,
+      "bytes": 49152
+    },
+    "mem_acc_4": {
+      "space": "Acc",
+      "start": 49152,
+      "end": 98304,
+      "bytes": 49152
+    },
+    "mem_mat_5": {
+      "space": "Mat",
+      "start": 65536,
+      "end": 114688,
+      "bytes": 49152
+    },
+    "mem_mat_6": {
+      "space": "Mat",
+      "start": 114688,
+      "end": 163840,
+      "bytes": 49152
+    },
+    "mem_mat_7": {
+      "space": "Mat",
+      "start": 163840,
+      "end": 229376,
+      "bytes": 65536
+    },
+    "mem_mat_8": {
+      "space": "Mat",
+      "start": 229376,
+      "end": 278528,
+      "bytes": 49152
+    },
+    "mem_mat_9": {
+      "space": "Mat",
+      "start": 278528,
+      "end": 327680,
+      "bytes": 49152
+    },
+    "mem_mat_10": {
+      "space": "Mat",
+      "start": 0,
+      "end": 65536,
+      "bytes": 65536
+    },
+    "mem_left_11": {
+      "space": "Left",
+      "start": 0,
+      "end": 12288,
+      "bytes": 12288
+    },
+    "mem_left_12": {
+      "space": "Left",
+      "start": 12288,
+      "end": 24576,
+      "bytes": 12288
+    },
+    "mem_right_13": {
+      "space": "Right",
+      "start": 0,
+      "end": 16384,
+      "bytes": 16384
+    },
+    "mem_left_14": {
+      "space": "Left",
+      "start": 24576,
+      "end": 36864,
+      "bytes": 12288
+    },
+    "mem_left_15": {
+      "space": "Left",
+      "start": 36864,
+      "end": 49152,
+      "bytes": 12288
+    },
+    "mem_right_16": {
+      "space": "Right",
+      "start": 16384,
+      "end": 32768,
+      "bytes": 16384
+    },
+    "mem_right_21": {
+      "space": "Right",
+      "start": 32768,
+      "end": 49152,
+      "bytes": 16384
+    },
+    "mem_right_24": {
+      "space": "Right",
+      "start": 49152,
+      "end": 65536,
+      "bytes": 16384
+    }
+  },
+  "two_accumulators_nonoverlapping": true,
+  "nz_layout_retained": true,
+  "real_grouped_root_binding_equivalence_proven": false,
+  "weight_loads_per_k256": 1,
+  "weight_consumers_per_load": 2,
+  "k_offsets_per_accumulator": [
+    0,
+    64,
+    128,
+    192,
+    256,
+    320,
+    384,
+    448,
+    512,
+    576,
+    640,
+    704,
+    768,
+    832,
+    896,
+    960,
+    1024,
+    1088,
+    1152,
+    1216,
+    1280,
+    1344,
+    1408,
+    1472,
+    1536,
+    1600,
+    1664,
+    1728,
+    1792,
+    1856,
+    1920,
+    1984,
+    2048,
+    2112,
+    2176,
+    2240,
+    2304,
+    2368,
+    2432,
+    2496,
+    2560,
+    2624,
+    2688,
+    2752,
+    2816,
+    2880,
+    2944,
+    3008,
+    3072,
+    3136,
+    3200,
+    3264,
+    3328,
+    3392,
+    3456,
+    3520,
+    3584,
+    3648,
+    3712,
+    3776,
+    3840,
+    3904,
+    3968,
+    4032
+  ],
+  "two_output_stores": true,
+  "pipeline_capacity_hints": [
+    "[perf_hint PH-MR-001] MemoryReuse: software pipelining requested depth 2 for pipeline group 0 in Left, but only 1 of 2 buffers fit (12288 B per stage, 65536 B free) — stages 1 apart share storage and serialize. The operand would fit depth 2 on its own, but co-resident buffers / other pipeline groups over-subscribe the space; relieve the co-residents (smaller or fewer co-live tiles) or reduce the pipeline depth to 1. at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/seven_stage_opportunities_v1/oa_pair_m_cpu_v2/source.py:11:5",
+    "[perf_hint PH-MR-001] MemoryReuse: software pipelining requested depth 2 for pipeline group 1 in Left, but only 1 of 2 buffers fit (12288 B per stage, 65536 B free) — stages 1 apart share storage and serialize. The operand would fit depth 2 on its own, but co-resident buffers / other pipeline groups over-subscribe the space; relieve the co-residents (smaller or fewer co-live tiles) or reduce the pipeline depth to 1. at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/seven_stage_opportunities_v1/oa_pair_m_cpu_v2/source.py:11:5",
+    "[perf_hint PH001] TileInnermostDimGranularity: tile.load has innermost dim = 256B (tile bfloat16[128], target_memory=Mat); moves 65536B as 256 x 256B rows; recommended >= 512B for backend a2a3 (L2 cache line = 512B). Consider increasing tile shape on the innermost axis. (2 occurrences at this source location) at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/seven_stage_opportunities_v1/oa_pair_m_cpu_v2/source.py:20:13"
+  ],
+  "pipeline_hint_present": true,
+  "device_validated": false
+}

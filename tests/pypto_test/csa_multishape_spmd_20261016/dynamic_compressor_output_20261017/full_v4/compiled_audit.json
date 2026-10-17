@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "scope": "full_v4实际CPP，只读审计；未重编译、未上卡",
+  "dynamic_axes": [
+    "CSA_COMPRESSOR_OUTPUT_T",
+    "CSA_GEOMETRY_REQUESTS",
+    "CSA_COMPRESSOR_OUTPUT_CACHE_ROWS",
+    "CSA_GEOMETRY_QUERY_BOUNDS",
+    "CSA_METADATA_COMPACT_ROWS",
+    "CSA_COMPRESSOR_OUTPUT_POOL_ROWS",
+    "CSA_COMPRESSOR_OUTPUT_NORM_ROWS",
+    "CSA_COMPRESSOR_OUTPUT_SLOT_ROWS"
+  ],
+  "single_AIV_submission": true,
+  "inout_outputs": [
+    "normed",
+    "debug",
+    "cache"
+  ],
+  "valid_rows": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 426
+  },
+  "normed_nope_actual_store": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1108
+  },
+  "normed_rope_actual_store": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1499
+  },
+  "MTE3_to_MTE2_before_readback": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1502
+  },
+  "same_normed_GM_readback": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1578
+  },
+  "compact_guard_before_slot": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1524
+  },
+  "page_offset_guard": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1542
+  },
+  "debug_store": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1599
+  },
+  "cache_store": {
+    "file": "full_v4/kernel/kernels/aiv/compressor_output_probe_incore_0.cpp",
+    "line": 1635
+  },
+  "notes": [
+    "cos/sin合同共用一个动态C轴，因此后端合并二者容量检查；Native绑定须保证两者同C。slots保留独立C轴。",
+    "normed只写active请求rows；debug/cache只写合法关闭组及合法槽。",
+    "规范中的phase跨核可见性由外层处理；本次只证明本核GM读写及编译器pipeline依赖保留。"
+  ],
+  "device_execution": false,
+  "device_precision_or_performance_claim": false
+}

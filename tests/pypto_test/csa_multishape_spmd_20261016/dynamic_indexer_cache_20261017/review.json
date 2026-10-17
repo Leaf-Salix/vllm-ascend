@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "blocking_defects_found": [],
+  "source_modified": false,
+  "address_review": [
+    "Q/L决定每请求关闭数与first_token，offset与历史组数合成prefix；未使用固定S",
+    "16行只作UB分块，请求compact起点不对齐16也只写rows行scale",
+    "C=0与负prefix先于slot读取，不沿用旧safe_row=-1读取",
+    "合法negative compact_offset不可当无效；应检查合成prefix",
+    "stale causal行可写中间scale，不得写key/debug/Native scale"
+  ],
+  "numerical_dag_review": {
+    "canonical": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer_compressor.py:indexer_compressor_write",
+    "quantization_assignments": [
+      "kv_f32 = pl.cast(pl.cast(raw, target_type=pl.BF16, mode='rint'), target_type=pl.FP32)",
+      "kv_f32 = pl.mul(kv_f32, HADAMARD_SCALE)",
+      "amax = pl.reshape(pl.row_max(pl.abs(kv_f32)), [1, ROW_TILE])",
+      "amax = pl.maximum(amax, pl.full([1, ROW_TILE], dtype=pl.FP32, value=INT8_AMAX_EPS))",
+      "scale_q_row = pl.div(pl.full([1, ROW_TILE], dtype=pl.FP32, value=INT8_SCALE_MAX), amax)",
+      "scale_dq_col = pl.reshape(pl.recip(scale_q_row), [ROW_TILE, 1])",
+      "scale_q_col = pl.reshape(scale_q_row, [ROW_TILE, 1])",
+      "scaled = pl.row_expand_mul(kv_f32, scale_q_col)",
+      "quant_i32 = pl.cast(scaled, target_type=pl.INT32, mode='rint')",
+      "quant_half = pl.cast(quant_i32, target_type=pl.FP16, mode='round')",
+      "quant_i8 = pl.cast(quant_half, target_type=pl.INT8, mode='trunc')"
+    ],
+    "normalized_ast_exact": true,
+    "normalization": [
+      "变量重命名",
+      "输入kv_final切片映射到raw",
+      "pl.tile.full与pl.full等价",
+      "唯一赋值floor/numerator常量内联，保留full原始数值与dtype",
+      "移除新增valid_shape描述和row_max UB scratch参数，不改变数值DAG"
+    ],
+    "rmw_call_order": [
+      "pl.tile.load",
+      "pl.tile.reinterpret_view",
+      "pl.tile.write",
+      "pl.tile.reinterpret_view",
+      "pl.tile.store"
+    ],
+    "single_worker_zero_guard": true,
+    "note": "AST等价只覆盖数值表达式；动态有效范围另由同源控制流及独立枚举oracle检查"
+  },
+  "rmw_review": [
+    "唯一worker0按请求/关闭行顺序读取64B、reinterpret FP16、改一个元素、转回并写64B",
+    "不同请求同页不同slot仍共享同一64B；不能凭slot唯一改多核并发",
+    "key区域、历史邻槽scale及页尾额外字节均按独立掩码原样保留"
+  ],
+  "readability_review": {
+    "module_overview": true,
+    "inputs_outputs_layout": true,
+    "dynamic_capacity": true,
+    "worker_and_phase_dependency": true,
+    "numerical_order": true,
+    "tail_valid_rows": true,
+    "nonblocking_note": "最终组装入口必须统一拒绝values容量不足，避免仅quant跳过而commit读旧scale"
+  },
+  "evidence": "oracle.json",
+  "new_compilation": false,
+  "device_execution": false,
+  "not_covered": [
+    "不模拟A3 div/recip指令精度、Scalar FP16默认cast模式、DMA或cache一致性",
+    "values、scale_values、slots容量与同轮Q/L/offset必须由组装入口统一验证",
+    "quant因values不足跳过时，commit没有values参数，不得仍把旧scale作为有效结果提交",
+    "Q全局无重叠、紧凑offset同源、有效slot唯一仍是外层合同；非法metadata只测试越界保护",
+    "未执行Hadamard、完整Indexer或完整CSA，不报告性能"
+  ]
+}

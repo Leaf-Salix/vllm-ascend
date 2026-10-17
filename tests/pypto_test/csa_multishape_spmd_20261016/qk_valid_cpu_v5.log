@@ -1,0 +1,14 @@
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_prepare_v5/variants/h131072_b16/entry_jit.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_cpu_v5/source.py", "error": "Cannot reassign 'stage_30_v302' with a different type: was pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec], got pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)]"}
+Error: Cannot reassign 'stage_30_v302' with a different type: was pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec], got pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)]
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_cpu_v5/source.py:5023:29
+     |
+5021 |                             stage_30_v303 = stage_30_v344
+5022 |                         else:
+5023 |                             stage_30_v302: pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec] = pl.tile.fillpad_inplace(pl.tile.set_validshape(stage_30_v286, 0, 512))
+     |                             ^^^^^^^^^^^^^
+5024 |                             for (stage_30_v345, (stage_30_v349,)) in pl.range(64, init_values=(stage_30_v302,)):
+5025 |                                 stage_30_v346: pl.Scalar[pl.INDEX] = (stage_30_v50 - 1) * 128 + stage_30_v27 + stage_30_v345
+     |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

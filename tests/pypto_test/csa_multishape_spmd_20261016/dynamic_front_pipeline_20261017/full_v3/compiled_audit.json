@@ -1,0 +1,139 @@
+{
+  "passed": true,
+  "scope": "已有full_v3编译产物，只读复核，无重编译或设备运行",
+  "full_codegen_passed": true,
+  "single_mix_submission": true,
+  "submission_calls": [
+    "rt_submit_task("
+  ],
+  "device_precision_validated": false,
+  "device_sync_validated": false,
+  "performance_measured": false,
+  "original_result_note": "full_v3/result.json末尾失败只因ABI正则漏右括号；编译本身成功。原记录保留。",
+  "compiler_warning": "显式qa_gm原参数别名使qa_v1返回SSA未使用；以下实际存储证明QA未被删除",
+  "cpp_files": {
+    "aic": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_front_pipeline_20261017/full_v3/kernel/kernels/aic/cube.cpp",
+    "aiv": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_front_pipeline_20261017/full_v3/kernel/kernels/aiv/vector.cpp"
+  },
+  "dynamic_dimensions": {
+    "aic": [
+      {
+        "name": "FRONT_T",
+        "line": 9470,
+        "statement": "int64_t FRONT_T = static_cast<int64_t>(x_fp32__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PARTIAL_ROWS",
+        "line": 9473,
+        "statement": "int64_t FRONT_PARTIAL_ROWS = static_cast<int64_t>(partials__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PAD16",
+        "line": 9476,
+        "statement": "int64_t FRONT_PAD16 = static_cast<int64_t>(qa__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_SIGNAL_WORDS",
+        "line": 9479,
+        "statement": "int64_t FRONT_SIGNAL_WORDS = static_cast<int64_t>(signal__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PAD8",
+        "line": 9482,
+        "statement": "int64_t FRONT_PAD8 = static_cast<int64_t>(mixed__ssa_v0_tensor->shapes[0]);"
+      }
+    ],
+    "aiv": [
+      {
+        "name": "FRONT_T",
+        "line": 9473,
+        "statement": "int64_t FRONT_T = static_cast<int64_t>(x_fp32__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PARTIAL_ROWS",
+        "line": 9476,
+        "statement": "int64_t FRONT_PARTIAL_ROWS = static_cast<int64_t>(partials__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PAD16",
+        "line": 9479,
+        "statement": "int64_t FRONT_PAD16 = static_cast<int64_t>(qa__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_SIGNAL_WORDS",
+        "line": 9482,
+        "statement": "int64_t FRONT_SIGNAL_WORDS = static_cast<int64_t>(signal__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "FRONT_PAD8",
+        "line": 9485,
+        "statement": "int64_t FRONT_PAD8 = static_cast<int64_t>(mixed__ssa_v0_tensor->shapes[0]);"
+      }
+    ]
+  },
+  "qa_alias": {
+    "shared_tensor_slot": 5,
+    "same_pointer_parameter": "v6",
+    "aic_writebacks": [
+      {
+        "line": 1060,
+        "instruction": "TSTORE(v339, v255);",
+        "global_root": "v118",
+        "subview": "v339",
+        "root_parameter": "v6 / qa / shared_tensor_arg[5]"
+      },
+      {
+        "line": 1427,
+        "instruction": "TSTORE(v435, v341);",
+        "global_root": "v118",
+        "subview": "v435",
+        "root_parameter": "v6 / qa / shared_tensor_arg[5]"
+      },
+      {
+        "line": 1793,
+        "instruction": "TSTORE(v528, v444);",
+        "global_root": "v118",
+        "subview": "v528",
+        "root_parameter": "v6 / qa / shared_tensor_arg[5]"
+      },
+      {
+        "line": 2160,
+        "instruction": "TSTORE(v624, v530);",
+        "global_root": "v118",
+        "subview": "v624",
+        "root_parameter": "v6 / qa / shared_tensor_arg[5]"
+      }
+    ],
+    "aiv_loads": [
+      {
+        "line": 8502,
+        "instruction": "TLOAD(v1868, v1876);",
+        "global_root": "v138",
+        "subview": "v1876",
+        "root_parameter": "v6 / qa / shared_tensor_arg[5]"
+      }
+    ],
+    "aic_wait_lines": [
+      313,
+      689
+    ],
+    "aic_publish_lines": [
+      281,
+      659,
+      2197
+    ],
+    "norm_wait_before_all_qa_stores": true,
+    "qa_publish_after_all_qa_stores": true,
+    "aiv_qa_wait_lines": [
+      8366,
+      8405
+    ],
+    "qa_wait_before_read": true
+  },
+  "limitations": [
+    "顺序/别名为编译源码证据；不证明A3硬件同步或数值",
+    "未设置权重BYPASS缓存策略",
+    "HC输出与QA/QR数学仍待设备验证；不是完整CSA",
+    "phase完成通知没有ACK，不可逐tile覆盖工作区"
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "passed": true,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_pool_stages.py",
+  "blocking_defects_found": [],
+  "address_review": [
+    "主state每逻辑位置2048 FP32、每页4096；Indexer每位置512、每页1024",
+    "历史地址按logical_position//2查本请求页表，页内offset乘2*OUT_DIM；score再偏移OUT_DIM",
+    "本轮overlay按Q/H映射回同请求TND，不依赖固定S，历史score不重复加APE",
+    "pool只写active请求行；未覆盖区保留poison是正确合同",
+    "commit在所有pool完成后才可覆盖state；共享历史反例证明确有跨请求读后写依赖"
+  ],
+  "numerical_review": [
+    {
+      "canonical_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_compressor_ratio4.py",
+      "canonical_function": "compressor_ratio4_pool_projected",
+      "new_function": "compressor_pool_stage",
+      "online_update_ast_exact": true,
+      "update_order": [
+        "mi_next",
+        "alpha",
+        "beta",
+        "li",
+        "oi",
+        "mi"
+      ],
+      "updates": [
+        "mi_next = pl.maximum(mi, score)",
+        "alpha = pl.exp(pl.sub(mi, mi_next))",
+        "beta = pl.exp(pl.sub(score, mi_next))",
+        "li = pl.add(pl.mul(alpha, li), beta)",
+        "oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))",
+        "mi = mi_next"
+      ],
+      "initialization_order": [
+        "mi",
+        "li",
+        "oi"
+      ],
+      "initialization_order_ast_exact": true,
+      "initial_li_ast_exact": true,
+      "seven_position_loop_ast_exact": true,
+      "final_div_oi_li_preserved": true,
+      "initial_current_second_half": "两源码读取当前token后半区，score加本位置APE，li=exp(mi-mi)，oi为value；地址由独立窗口oracle覆盖"
+    },
+    {
+      "canonical_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer_compressor.py",
+      "canonical_function": "indexer_compressor_pool_projected",
+      "new_function": "indexer_compressor_pool_stage",
+      "online_update_ast_exact": true,
+      "update_order": [
+        "mi_next",
+        "alpha",
+        "beta",
+        "li",
+        "oi",
+        "mi"
+      ],
+      "updates": [
+        "mi_next = pl.maximum(mi, score)",
+        "alpha = pl.exp(pl.sub(mi, mi_next))",
+        "beta = pl.exp(pl.sub(score, mi_next))",
+        "li = pl.add(pl.mul(alpha, li), beta)",
+        "oi = pl.add(pl.mul(oi, alpha), pl.mul(value, beta))",
+        "mi = mi_next"
+      ],
+      "initialization_order": [
+        "mi",
+        "li",
+        "oi"
+      ],
+      "initialization_order_ast_exact": true,
+      "initial_li_ast_exact": true,
+      "seven_position_loop_ast_exact": true,
+      "final_div_oi_li_preserved": true,
+      "initial_current_second_half": "两源码读取当前token后半区，score加本位置APE，li=exp(mi-mi)，oi为value；地址由独立窗口oracle覆盖"
+    }
+  ],
+  "readability_review": {
+    "module_overview": true,
+    "layout_and_dynamic_axes": true,
+    "role_and_ownership": true,
+    "workspace_and_sync": true,
+    "reading_order": true,
+    "online_order_and_tail": true,
+    "nonblocking_clarifications": [
+      "文件头可再显式写明kv_proj/score_proj行容量均须>=T，当前仅pooled的>=T最明确",
+      "当前causal判断针对被处理行；此前位置异常是否使整请求失活不属于本helper合同"
+    ]
+  },
+  "evidence": "oracle.json",
+  "source_modified": false,
+  "dependencies_modified": false,
+  "new_compilation": false,
+  "device_execution": false,
+  "not_covered": [
+    "未模拟A3浮点指令、DMA完成或Scalar cache一致性",
+    "非法metadata用例只核对越界安全与当前回退语义，不宣称有效模型数学",
+    "Q全局单调/活动区间不重叠、有效写槽唯一、投影与pooled容量至少T由调用者保证",
+    "causal检查拒绝当前不一致行；不宣称把此前不一致位置传播为整个请求失活",
+    "inactive pooled poison必须由后续消费者的active/闭合判定隔离，不需要本阶段全T清零"
+  ]
+}

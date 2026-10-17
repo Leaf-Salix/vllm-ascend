@@ -1,0 +1,104 @@
+{
+  "scope": "已有CCEC输入源码及编译回调核对，没有重新上卡",
+  "cases": [
+    {
+      "case": "b16_cached_row_deps_v1",
+      "actual_kernel_sources": [
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/build_output/entry_q0pmqift/kernels/aic/csa_static_aic.cpp",
+          "default_wait_calls": 0,
+          "replacement_wait_calls": 74,
+          "has_100_tick_backoff": true
+        },
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/build_output/entry_q0pmqift/kernels/aiv/csa_static_aiv.cpp",
+          "default_wait_calls": 0,
+          "replacement_wait_calls": 74,
+          "has_100_tick_backoff": true
+        }
+      ],
+      "requested_policy_applied": true,
+      "missing_callback_rejected": null,
+      "wrong_source_with_valid_manifest_rejected": null
+    },
+    {
+      "case": "b16_row_deps_indexer_l1_ring_v4",
+      "actual_kernel_sources": [
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_indexer_l1_ring_v4/build_output/entry_nz7dtkxj/kernels/aic/csa_static_aic.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        },
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_indexer_l1_ring_v4/build_output/entry_nz7dtkxj/kernels/aiv/csa_static_aiv.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        }
+      ],
+      "requested_policy_applied": false,
+      "missing_callback_rejected": "等待策略编译回调没有执行，禁止使用默认等待版本测量",
+      "wrong_source_with_valid_manifest_rejected": "aic实际源码没有完整应用等待策略"
+    },
+    {
+      "case": "b16_row_deps_qk_merge_state_v6",
+      "actual_kernel_sources": [
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_qk_merge_state_v6/build_output/entry_e8l6x6so/kernels/aic/csa_static_aic.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        },
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_qk_merge_state_v6/build_output/entry_e8l6x6so/kernels/aiv/csa_static_aiv.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        }
+      ],
+      "requested_policy_applied": false,
+      "missing_callback_rejected": "等待策略编译回调没有执行，禁止使用默认等待版本测量",
+      "wrong_source_with_valid_manifest_rejected": "aic实际源码没有完整应用等待策略"
+    },
+    {
+      "case": "b16_row_deps_indexer_ws_order_v5",
+      "actual_kernel_sources": [
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_indexer_ws_order_v5/build_output/entry_nm_c05b6/kernels/aic/csa_static_aic.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        },
+        {
+          "path": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_indexer_ws_order_v5/build_output/entry_nm_c05b6/kernels/aiv/csa_static_aiv.cpp",
+          "default_wait_calls": 74,
+          "replacement_wait_calls": 0,
+          "has_100_tick_backoff": false
+        }
+      ],
+      "requested_policy_applied": false,
+      "missing_callback_rejected": "等待策略编译回调没有执行，禁止使用默认等待版本测量",
+      "wrong_source_with_valid_manifest_rejected": "aic实际源码没有完整应用等待策略"
+    }
+  ],
+  "correct_modern_artifact_gate_pass": {
+    "passed": true,
+    "reader": "dcci_then_volatile_load",
+    "backoff_syscnt_ticks": 100,
+    "ramp_backoff": false,
+    "kernels": {
+      "aic": {
+        "source": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_kv_touch_signal_v1/build_output/entry_n2jqj3d4/kernels/aic/csa_static_aic.cpp",
+        "wait_sites": 74
+      },
+      "aiv": {
+        "source": "tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_kv_touch_signal_v1/build_output/entry_n2jqj3d4/kernels/aiv/csa_static_aiv.cpp",
+        "wait_sites": 74
+      }
+    },
+    "checked_before_first_launch": true
+  },
+  "historical_manifest_note": "最早现选manifest没有ramp_backoff字段；首次CPU回归因旧字段失败，未改变门禁；改用已有明确ramp_backoff=false的有效产物检验正例。最早现选实际源码独立确认正确。",
+  "affected_runs_are_precision_valid_but_not_requested_wait_policy": true
+}

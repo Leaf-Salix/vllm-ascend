@@ -1,0 +1,670 @@
+@pl.function(type=pl.FunctionType.Inline, auto_scope=False)
+def indexer_score_topk_native_pair_aic(native_page_bytes_inline8726__ssa_v0: pl.Scalar[pl.INDEX], original_block_idx: pl.Scalar[pl.INDEX], position_ids__ssa_v0: pl.Tensor[[T_DYN], pl.INT64], kv_seq_lens__ssa_v0: pl.Tensor[[B_DYN], pl.INT32], buf_score_ffts_inline8757__ssa_v0: pl.Tensor[[256], pl.INT64], qr_hadamard_i8_inline583__rv_v2: pl.Tensor[[24576, 128], pl.INT8], coefficients_inline8733__ssa_v0: pl.Tensor[[1024, 384], pl.FP16], idx_block_table__ssa_v0: pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32], idx_kv_cache_inline8854__ssa_v0: pl.Tensor[[key_rows_inline8656__ssa_v0, 128], pl.INT8], idx_kv_cache_shift64_inline8790__ssa_v0: pl.Tensor[[shifted_rows_inline8748__ssa_v0, 128], pl.INT8], buf_score_transfer_inline8845__ssa_v0: pl.InOut[pl.Tensor[[288, 1024], pl.FP32]], idx_native_kv_cache__rv_v2: pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8], pair_arena_inline3226_inline4202__ssa_v0: pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]):
+    pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})
+    buf_worker_inline8783__ssa_v0: pl.Scalar[pl.INDEX] = original_block_idx
+    buf_query_count_inline8792__ssa_v0: pl.Scalar[pl.INDEX] = pl.tensor.dim(position_ids__ssa_v0, 0)
+    buf_max_cache_len_inline8842__ssa_v0: pl.Scalar[pl.INDEX] = 0
+    for (buf_batch_inline8692__idx_v0, (buf_max_cache_len_inline8842__iter_v1,)) in pl.range(buf_query_count_inline8792__ssa_v0 // 6, init_values=(buf_max_cache_len_inline8842__ssa_v0,)):
+        t__tile: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [buf_batch_inline8692__idx_v0])
+        buf_max_cache_len_inline8842__ssa_v3: pl.Scalar[pl.INDEX] = pl.max(buf_max_cache_len_inline8842__iter_v1, pl.cast(t__tile, pl.INDEX) // 4)
+        buf_max_cache_len_inline8842__rv_v2: pl.Scalar[pl.INDEX] = pl.yield_(buf_max_cache_len_inline8842__ssa_v3)
+    buf_capped_history_inline8793__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(buf_max_cache_len_inline8842__rv_v2, 262144)
+    tile_count_inline1302_inline8734__ssa_v0: pl.Scalar[pl.INDEX] = (buf_capped_history_inline8793__ssa_v0 + 1023) // 1024
+    leaf_count_inline1301_inline8775__ssa_v0: pl.Scalar[pl.INDEX] = pl.max((buf_capped_history_inline8793__ssa_v0 + 16383) // 16384, 1)
+    leaf_tiles_inline1300_inline8753__ssa_v0: pl.Scalar[pl.INDEX] = 16
+    extra_leaves_inline1299_inline8670__ssa_v0: pl.Scalar[pl.INDEX] = 0
+    leaf_multiple_inline1298_inline8785__ssa_v0: pl.Scalar[pl.INDEX] = 1
+    if buf_query_count_inline8792__ssa_v0 // 6 * 3 == 48:
+        leaf_multiple_inline1298_inline8785__ssa_v1: pl.Scalar[pl.INDEX] = 3
+        leaf_multiple_inline1298_inline8785__phi_v6: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__ssa_v1)
+    else:
+        if buf_query_count_inline8792__ssa_v0 // 6 * 3 == 24:
+            leaf_multiple_inline1298_inline8785__ssa_v2: pl.Scalar[pl.INDEX] = 3
+            leaf_multiple_inline1298_inline8785__phi_v5: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__ssa_v2)
+        else:
+            if buf_query_count_inline8792__ssa_v0 // 6 * 6 == 24:
+                leaf_multiple_inline1298_inline8785__ssa_v3: pl.Scalar[pl.INDEX] = 6
+                leaf_multiple_inline1298_inline8785__phi_v4: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__ssa_v3)
+            else:
+                leaf_multiple_inline1298_inline8785__phi_v4: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__ssa_v0)
+            leaf_multiple_inline1298_inline8785__phi_v5: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__phi_v4)
+        leaf_multiple_inline1298_inline8785__phi_v6: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline1298_inline8785__phi_v5)
+    if 1 < leaf_multiple_inline1298_inline8785__phi_v6:
+        balanced_count_inline1297_inline8798__ssa_v0: pl.Scalar[pl.INDEX] = (leaf_count_inline1301_inline8775__ssa_v0 + leaf_multiple_inline1298_inline8785__phi_v6 - 1) // leaf_multiple_inline1298_inline8785__phi_v6 * leaf_multiple_inline1298_inline8785__phi_v6
+        if balanced_count_inline1297_inline8798__ssa_v0 <= 32:
+            leaf_count_inline1301_inline8775__ssa_v1: pl.Scalar[pl.INDEX] = balanced_count_inline1297_inline8798__ssa_v0
+            leaf_tiles_inline1300_inline8753__ssa_v1: pl.Scalar[pl.INDEX] = pl.max(tile_count_inline1302_inline8734__ssa_v0 // balanced_count_inline1297_inline8798__ssa_v0, 1)
+            extra_leaves_inline1299_inline8670__ssa_v1: pl.Scalar[pl.INDEX] = tile_count_inline1302_inline8734__ssa_v0 % balanced_count_inline1297_inline8798__ssa_v0
+            (extra_leaves_inline1299_inline8670__phi_v2, leaf_count_inline1301_inline8775__phi_v2, leaf_tiles_inline1300_inline8753__phi_v2) = pl.yield_(extra_leaves_inline1299_inline8670__ssa_v1, leaf_count_inline1301_inline8775__ssa_v1, leaf_tiles_inline1300_inline8753__ssa_v1)
+        else:
+            (extra_leaves_inline1299_inline8670__phi_v2, leaf_count_inline1301_inline8775__phi_v2, leaf_tiles_inline1300_inline8753__phi_v2) = pl.yield_(extra_leaves_inline1299_inline8670__ssa_v0, leaf_count_inline1301_inline8775__ssa_v0, leaf_tiles_inline1300_inline8753__ssa_v0)
+        (extra_leaves_inline1299_inline8670__phi_v3, leaf_count_inline1301_inline8775__phi_v3, leaf_tiles_inline1300_inline8753__phi_v3) = pl.yield_(extra_leaves_inline1299_inline8670__phi_v2, leaf_count_inline1301_inline8775__phi_v2, leaf_tiles_inline1300_inline8753__phi_v2)
+    else:
+        (extra_leaves_inline1299_inline8670__phi_v3, leaf_count_inline1301_inline8775__phi_v3, leaf_tiles_inline1300_inline8753__phi_v3) = pl.yield_(extra_leaves_inline1299_inline8670__ssa_v0, leaf_count_inline1301_inline8775__ssa_v0, leaf_tiles_inline1300_inline8753__ssa_v0)
+    buf_max_leaves_inline8794__ssa_v1: pl.Scalar[pl.INDEX] = leaf_count_inline1301_inline8775__phi_v3
+    buf_leaf_tiles_inline8752__ssa_v1: pl.Scalar[pl.INDEX] = leaf_tiles_inline1300_inline8753__phi_v3
+    buf_extra_leaves_inline8749__ssa_v1: pl.Scalar[pl.INDEX] = extra_leaves_inline1299_inline8670__phi_v3
+    pl.system.set_ffts(buf_score_ffts_inline8757__ssa_v0)
+    for buf_item_inline8803__idx_v0 in pl.range(buf_worker_inline8783__ssa_v0, buf_query_count_inline8792__ssa_v0 // 6 * buf_max_leaves_inline8794__ssa_v1, 24):
+        if buf_query_count_inline8792__ssa_v0 < 144:
+            buf_query_inline8778__ssa_v0: pl.Scalar[pl.INDEX] = buf_item_inline8803__idx_v0 % (buf_query_count_inline8792__ssa_v0 // 6) * 6
+            buf_leaf_inline8721__ssa_v0: pl.Scalar[pl.INDEX] = buf_item_inline8803__idx_v0 // (buf_query_count_inline8792__ssa_v0 // 6)
+            (buf_leaf_inline8721__phi_v2, buf_query_inline8778__phi_v2) = pl.yield_(buf_leaf_inline8721__ssa_v0, buf_query_inline8778__ssa_v0)
+        else:
+            buf_query_inline8778__ssa_v1: pl.Scalar[pl.INDEX] = buf_item_inline8803__idx_v0 // buf_max_leaves_inline8794__ssa_v1 * 6
+            buf_leaf_inline8721__ssa_v1: pl.Scalar[pl.INDEX] = buf_item_inline8803__idx_v0 % buf_max_leaves_inline8794__ssa_v1
+            (buf_leaf_inline8721__phi_v2, buf_query_inline8778__phi_v2) = pl.yield_(buf_leaf_inline8721__ssa_v1, buf_query_inline8778__ssa_v1)
+        buf_batch_idx_inline8687__ssa_v0: pl.Scalar[pl.INDEX] = buf_query_inline8778__phi_v2 // 6
+        buf_last_position_inline8776__tile: pl.Scalar[pl.INT64] = pl.tensor.read(position_ids__ssa_v0, [buf_query_inline8778__phi_v2 + 5])
+        t__tile_1: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [buf_batch_idx_inline8687__ssa_v0])
+        buf_cache_len_inline8809__ssa_v0: pl.Scalar[pl.INDEX] = pl.cast(t__tile_1, pl.INDEX) // 4
+        buf_visible_count_inline8653__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(pl.min(pl.min(buf_cache_len_inline8809__ssa_v0, (buf_last_position_inline8776__tile + 1) // 4), 262144), 0)
+        buf_logical_begin_inline8767__ssa_v1: pl.Scalar[pl.INDEX] = (buf_leaf_inline8721__phi_v2 * buf_leaf_tiles_inline8752__ssa_v1 + pl.min(buf_leaf_inline8721__phi_v2, buf_extra_leaves_inline8749__ssa_v1)) * 1024
+        buf_leaf_capacity_inline8774__ssa_v1: pl.Scalar[pl.INDEX] = (buf_leaf_tiles_inline8752__ssa_v1 + pl.cast(buf_leaf_inline8721__phi_v2 < buf_extra_leaves_inline8749__ssa_v1, pl.INDEX)) * 1024
+        if buf_logical_begin_inline8767__ssa_v1 < buf_visible_count_inline8653__ssa_v0:
+            buf_valid_count_inline8796__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(buf_leaf_capacity_inline8774__ssa_v1, buf_visible_count_inline8653__ssa_v0 - buf_logical_begin_inline8767__ssa_v1)
+            buf_tile_count_inline8890__ssa_v0: pl.Scalar[pl.INDEX] = (buf_valid_count_inline8796__ssa_v0 + 1023) // 1024
+            buf_lane_span_inline8763__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(buf_tile_count_inline8890__ssa_v0 * 512, 8192)
+            buf_score_iters_inline8863__ssa_v0: pl.Scalar[pl.INDEX] = (buf_lane_span_inline8763__ssa_v0 + 511) // 512
+            buf_query_vector_inline8886__ssa_v0: pl.Tile[[384, 128], pl.INT8, pl.Mem.Mat] = pl.tile.load(qr_hadamard_i8_inline583__rv_v2, [buf_query_inline8778__phi_v2 * 64, 0], [384, 128], [384, 128], target_memory=pl.Mem.Mat)
+            buf_coefficients_l1_inline8812__ssa_v0: pl.Tile[[16, 384], pl.FP16, pl.Mem.Mat] = pl.tile.load(coefficients_inline8733__ssa_v0, [buf_query_inline8778__phi_v2 // 6 * 16, 0], [16, 384], [16, 384], target_memory=pl.Mem.Mat)
+            buf_query_left_inline8850__ssa_v0: pl.Tile[[384, 128], pl.INT8, pl.Mem.Left] = pl.tile.move(buf_query_vector_inline8886__ssa_v0, target_memory=pl.Mem.Left)
+            buf_coefficient_pair_inline8676__ssa_v0: pl.Tile[[16, 384], pl.FP16, pl.Mem.Left] = pl.tile.move(buf_coefficients_l1_inline8812__ssa_v0, target_memory=pl.Mem.Left)
+            for buf_score_step_inline8719__idx_v0 in pl.range(buf_score_iters_inline8863__ssa_v0):
+                if 2 <= buf_score_step_inline8719__idx_v0:
+                    pl.system.sync_wait(1, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                buf_score_begin_inline8717__ssa_v1: pl.Scalar[pl.INDEX] = buf_score_step_inline8719__idx_v0 * 1024
+                buf_transfer_row_inline8782__ssa_v0: pl.Scalar[pl.INDEX] = buf_worker_inline8783__ssa_v0 * 12 + buf_score_step_inline8719__idx_v0 % 2 * 6
+                buf_key_l1_pool_inline8671__ssa_v0: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.create([128, 128], dtype=pl.INT8, target_memory=pl.Mem.Mat)
+                buf_prime_col_inline8852__ssa_v0: pl.Scalar[pl.INDEX] = 0
+                buf_prime_key_row_inline8824__ssa_v1: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_prime_col_inline8852__ssa_v0
+                buf_prime_safe_page_inline8806__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(buf_prime_key_row_inline8824__ssa_v1 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_2: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_prime_safe_page_inline8806__ssa_v0])
+                buf_prime_physical_page_inline8707__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_2, pl.INDEX), 0)
+                buf_prime_native_byte_inline8722__ssa_v0: pl.Scalar[pl.INDEX] = buf_prime_physical_page_inline8707__ssa_v0 * native_page_bytes_inline8726__ssa_v0
+                if buf_prime_native_byte_inline8722__ssa_v0 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v1: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__ssa_v0, idx_kv_cache_inline8854__ssa_v0, [0, 0], [buf_prime_native_byte_inline8722__ssa_v0 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v3: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v1)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v2: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__ssa_v0, idx_kv_cache_shift64_inline8790__ssa_v0, [0, 0], [buf_prime_native_byte_inline8722__ssa_v0 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v3: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v2)
+                buf_prime_key_row_inline8824__ssa_v4: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_prime_col_inline8852__ssa_v0 + 32
+                buf_prime_safe_page_inline8806__ssa_v1: pl.Scalar[pl.INDEX] = pl.min(buf_prime_key_row_inline8824__ssa_v4 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_3: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_prime_safe_page_inline8806__ssa_v1])
+                buf_prime_physical_page_inline8707__ssa_v1: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_3, pl.INDEX), 0)
+                buf_prime_native_byte_inline8722__ssa_v1: pl.Scalar[pl.INDEX] = buf_prime_physical_page_inline8707__ssa_v1 * native_page_bytes_inline8726__ssa_v0
+                if buf_prime_native_byte_inline8722__ssa_v1 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v4: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v3, idx_kv_cache_inline8854__ssa_v0, [32, 0], [buf_prime_native_byte_inline8722__ssa_v1 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v6: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v4)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v5: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v3, idx_kv_cache_shift64_inline8790__ssa_v0, [32, 0], [buf_prime_native_byte_inline8722__ssa_v1 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v6: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v5)
+                t__tmp_v289: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v6)
+                buf_current_key_inline8875__ssa_v1: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v289, 0, 0, [128, 64], target_memory=pl.Mem.Right)
+                buf_load_col_inline8740__ssa_v0: pl.Scalar[pl.INDEX] = 64
+                buf_load_slot_inline8695__ssa_v0: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v1: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v0
+                buf_safe_page_inline8690__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v1 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_4: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v0])
+                buf_physical_page_inline8689__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_4, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v0: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v0 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v0 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v8: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v6, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v0, 0], [buf_native_byte_inline8742__ssa_v0 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v12: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v8)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v10: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v6, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v0, 0], [buf_native_byte_inline8742__ssa_v0 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v12: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v10)
+                buf_key_row_inline8708__ssa_v4: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v0 + 32
+                buf_safe_page_inline8690__ssa_v1: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v4 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_5: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v1])
+                buf_physical_page_inline8689__ssa_v1: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_5, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v1: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v1 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v1 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v13: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v12, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v0 + 32, 0], [buf_native_byte_inline8742__ssa_v1 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v17: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v13)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v15: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v12, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v0 + 32, 0], [buf_native_byte_inline8742__ssa_v1 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v17: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v15)
+                t__tmp_v292: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v17)
+                buf_prefetched_key_inline8710__ssa_v1: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v292, 0, buf_load_slot_inline8695__ssa_v0, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v0: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v1
+                buf_scores_l1_inline8725__ssa_v0: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_scores_inline8770__ssa_v1: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v0)
+                buf_scores_l1_inline8725__ssa_v2: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v0, buf_scores_inline8770__ssa_v1, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                buf_previous_l1_inline8810__ssa_v1: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v2
+                buf_current_key_inline8875__ssa_v7: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v1
+                buf_panel_col_inline8699__ssa_v1: pl.Scalar[pl.INDEX] = 64
+                buf_load_col_inline8740__ssa_v1: pl.Scalar[pl.INDEX] = 128
+                buf_load_slot_inline8695__ssa_v1: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v7: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v1
+                buf_safe_page_inline8690__ssa_v2: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v7 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_6: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v2])
+                buf_physical_page_inline8689__ssa_v2: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_6, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v2: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v2 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v2 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v19: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v17, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v1, 0], [buf_native_byte_inline8742__ssa_v2 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v23: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v19)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v21: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v17, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v1, 0], [buf_native_byte_inline8742__ssa_v2 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v23: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v21)
+                buf_key_row_inline8708__ssa_v10: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v1 + 32
+                buf_safe_page_inline8690__ssa_v3: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v10 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_7: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v3])
+                buf_physical_page_inline8689__ssa_v3: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_7, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v3: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v3 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v3 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v24: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v23, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v1 + 32, 0], [buf_native_byte_inline8742__ssa_v3 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v28: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v24)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v26: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v23, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v1 + 32, 0], [buf_native_byte_inline8742__ssa_v3 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v28: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v26)
+                t__tmp_v295: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v28)
+                buf_prefetched_key_inline8710__ssa_v6: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v295, 0, buf_load_slot_inline8695__ssa_v1, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v3: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v7
+                buf_scores_l1_inline8725__ssa_v4: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v1: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v1, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v3: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v3)
+                buf_reduced_pair_inline8682__ssa_v1: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v1)
+                buf_scores_l1_inline8725__ssa_v5: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v4, buf_scores_inline8770__ssa_v3, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v296: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v1, 6, 64)
+                buf_score_transfer_inline8845__store: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v296, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v1 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v2: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v5
+                buf_current_key_inline8875__ssa_v14: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v6
+                buf_panel_col_inline8699__ssa_v2: pl.Scalar[pl.INDEX] = 128
+                buf_load_col_inline8740__ssa_v2: pl.Scalar[pl.INDEX] = 192
+                buf_load_slot_inline8695__ssa_v2: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v13: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v2
+                buf_safe_page_inline8690__ssa_v4: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v13 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_8: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v4])
+                buf_physical_page_inline8689__ssa_v4: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_8, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v4: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v4 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v4 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v30: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v28, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v2, 0], [buf_native_byte_inline8742__ssa_v4 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v34: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v30)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v32: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v28, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v2, 0], [buf_native_byte_inline8742__ssa_v4 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v34: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v32)
+                buf_key_row_inline8708__ssa_v16: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v2 + 32
+                buf_safe_page_inline8690__ssa_v5: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v16 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_9: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v5])
+                buf_physical_page_inline8689__ssa_v5: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_9, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v5: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v5 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v5 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v35: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v34, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v2 + 32, 0], [buf_native_byte_inline8742__ssa_v5 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v39: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v35)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v37: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v34, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v2 + 32, 0], [buf_native_byte_inline8742__ssa_v5 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v39: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v37)
+                t__tmp_v299: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v39)
+                buf_prefetched_key_inline8710__ssa_v11: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v299, 0, buf_load_slot_inline8695__ssa_v2, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v6: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v14
+                buf_scores_l1_inline8725__ssa_v8: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v2: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v2, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v6: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v6)
+                buf_reduced_pair_inline8682__ssa_v2: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v2)
+                buf_scores_l1_inline8725__ssa_v9: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v8, buf_scores_inline8770__ssa_v6, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v300: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v2, 6, 64)
+                buf_score_transfer_inline8845__store_v0: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v300, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v2 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v3: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v9
+                buf_current_key_inline8875__ssa_v21: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v11
+                buf_panel_col_inline8699__ssa_v3: pl.Scalar[pl.INDEX] = 192
+                buf_load_col_inline8740__ssa_v3: pl.Scalar[pl.INDEX] = 256
+                buf_load_slot_inline8695__ssa_v3: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v19: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v3
+                buf_safe_page_inline8690__ssa_v6: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v19 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_10: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v6])
+                buf_physical_page_inline8689__ssa_v6: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_10, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v6: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v6 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v6 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v41: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v39, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v3, 0], [buf_native_byte_inline8742__ssa_v6 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v45: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v41)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v43: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v39, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v3, 0], [buf_native_byte_inline8742__ssa_v6 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v45: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v43)
+                buf_key_row_inline8708__ssa_v22: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v3 + 32
+                buf_safe_page_inline8690__ssa_v7: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v22 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_11: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v7])
+                buf_physical_page_inline8689__ssa_v7: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_11, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v7: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v7 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v7 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v46: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v45, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v3 + 32, 0], [buf_native_byte_inline8742__ssa_v7 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v50: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v46)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v48: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v45, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v3 + 32, 0], [buf_native_byte_inline8742__ssa_v7 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v50: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v48)
+                t__tmp_v303: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v50)
+                buf_prefetched_key_inline8710__ssa_v16: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v303, 0, buf_load_slot_inline8695__ssa_v3, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v9: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v21
+                buf_scores_l1_inline8725__ssa_v12: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v3: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v3, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v9: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v9)
+                buf_reduced_pair_inline8682__ssa_v3: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v3)
+                buf_scores_l1_inline8725__ssa_v13: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v12, buf_scores_inline8770__ssa_v9, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v304: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v3, 6, 64)
+                buf_score_transfer_inline8845__store_v1: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v304, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v3 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v4: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v13
+                buf_current_key_inline8875__ssa_v28: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v16
+                buf_panel_col_inline8699__ssa_v4: pl.Scalar[pl.INDEX] = 256
+                buf_load_col_inline8740__ssa_v4: pl.Scalar[pl.INDEX] = 320
+                buf_load_slot_inline8695__ssa_v4: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v25: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v4
+                buf_safe_page_inline8690__ssa_v8: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v25 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_12: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v8])
+                buf_physical_page_inline8689__ssa_v8: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_12, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v8: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v8 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v8 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v52: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v50, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v4, 0], [buf_native_byte_inline8742__ssa_v8 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v56: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v52)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v54: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v50, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v4, 0], [buf_native_byte_inline8742__ssa_v8 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v56: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v54)
+                buf_key_row_inline8708__ssa_v28: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v4 + 32
+                buf_safe_page_inline8690__ssa_v9: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v28 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_13: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v9])
+                buf_physical_page_inline8689__ssa_v9: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_13, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v9: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v9 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v9 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v57: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v56, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v4 + 32, 0], [buf_native_byte_inline8742__ssa_v9 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v61: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v57)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v59: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v56, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v4 + 32, 0], [buf_native_byte_inline8742__ssa_v9 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v61: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v59)
+                t__tmp_v307: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v61)
+                buf_prefetched_key_inline8710__ssa_v21: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v307, 0, buf_load_slot_inline8695__ssa_v4, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v12: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v28
+                buf_scores_l1_inline8725__ssa_v16: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v4: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v4, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v12: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v12)
+                buf_reduced_pair_inline8682__ssa_v4: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v4)
+                buf_scores_l1_inline8725__ssa_v17: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v16, buf_scores_inline8770__ssa_v12, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v308: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v4, 6, 64)
+                buf_score_transfer_inline8845__store_v2: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v308, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v4 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v5: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v17
+                buf_current_key_inline8875__ssa_v35: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v21
+                buf_panel_col_inline8699__ssa_v5: pl.Scalar[pl.INDEX] = 320
+                buf_load_col_inline8740__ssa_v5: pl.Scalar[pl.INDEX] = 384
+                buf_load_slot_inline8695__ssa_v5: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v31: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v5
+                buf_safe_page_inline8690__ssa_v10: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v31 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_14: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v10])
+                buf_physical_page_inline8689__ssa_v10: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_14, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v10: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v10 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v10 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v63: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v61, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v5, 0], [buf_native_byte_inline8742__ssa_v10 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v67: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v63)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v65: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v61, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v5, 0], [buf_native_byte_inline8742__ssa_v10 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v67: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v65)
+                buf_key_row_inline8708__ssa_v34: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v5 + 32
+                buf_safe_page_inline8690__ssa_v11: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v34 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_15: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v11])
+                buf_physical_page_inline8689__ssa_v11: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_15, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v11: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v11 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v11 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v68: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v67, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v5 + 32, 0], [buf_native_byte_inline8742__ssa_v11 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v72: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v68)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v70: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v67, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v5 + 32, 0], [buf_native_byte_inline8742__ssa_v11 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v72: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v70)
+                t__tmp_v311: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v72)
+                buf_prefetched_key_inline8710__ssa_v26: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v311, 0, buf_load_slot_inline8695__ssa_v5, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v15: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v35
+                buf_scores_l1_inline8725__ssa_v20: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v5: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v5, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v15: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v15)
+                buf_reduced_pair_inline8682__ssa_v5: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v5)
+                buf_scores_l1_inline8725__ssa_v21: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v20, buf_scores_inline8770__ssa_v15, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v312: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v5, 6, 64)
+                buf_score_transfer_inline8845__store_v3: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v312, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v5 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v6: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v21
+                buf_current_key_inline8875__ssa_v42: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v26
+                buf_panel_col_inline8699__ssa_v6: pl.Scalar[pl.INDEX] = 384
+                buf_load_col_inline8740__ssa_v6: pl.Scalar[pl.INDEX] = 448
+                buf_load_slot_inline8695__ssa_v6: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v37: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v6
+                buf_safe_page_inline8690__ssa_v12: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v37 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_16: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v12])
+                buf_physical_page_inline8689__ssa_v12: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_16, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v12: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v12 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v12 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v74: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v72, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v6, 0], [buf_native_byte_inline8742__ssa_v12 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v78: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v74)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v76: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v72, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v6, 0], [buf_native_byte_inline8742__ssa_v12 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v78: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v76)
+                buf_key_row_inline8708__ssa_v40: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v6 + 32
+                buf_safe_page_inline8690__ssa_v13: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v40 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_17: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v13])
+                buf_physical_page_inline8689__ssa_v13: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_17, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v13: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v13 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v13 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v79: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v78, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v6 + 32, 0], [buf_native_byte_inline8742__ssa_v13 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v83: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v79)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v81: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v78, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v6 + 32, 0], [buf_native_byte_inline8742__ssa_v13 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v83: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v81)
+                t__tmp_v315: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v83)
+                buf_prefetched_key_inline8710__ssa_v31: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v315, 0, buf_load_slot_inline8695__ssa_v6, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v18: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v42
+                buf_scores_l1_inline8725__ssa_v24: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v6: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v6, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v18: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v18)
+                buf_reduced_pair_inline8682__ssa_v6: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v6)
+                buf_scores_l1_inline8725__ssa_v25: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v24, buf_scores_inline8770__ssa_v18, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v316: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v6, 6, 64)
+                buf_score_transfer_inline8845__store_v4: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v316, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v6 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v7: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v25
+                buf_current_key_inline8875__ssa_v49: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v31
+                buf_panel_col_inline8699__ssa_v7: pl.Scalar[pl.INDEX] = 448
+                buf_load_col_inline8740__ssa_v7: pl.Scalar[pl.INDEX] = 512
+                buf_load_slot_inline8695__ssa_v7: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v43: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v7
+                buf_safe_page_inline8690__ssa_v14: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v43 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_18: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v14])
+                buf_physical_page_inline8689__ssa_v14: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_18, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v14: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v14 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v14 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v85: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v83, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v7, 0], [buf_native_byte_inline8742__ssa_v14 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v89: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v85)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v87: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v83, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v7, 0], [buf_native_byte_inline8742__ssa_v14 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v89: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v87)
+                buf_key_row_inline8708__ssa_v46: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v7 + 32
+                buf_safe_page_inline8690__ssa_v15: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v46 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_19: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v15])
+                buf_physical_page_inline8689__ssa_v15: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_19, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v15: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v15 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v15 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v90: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v89, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v7 + 32, 0], [buf_native_byte_inline8742__ssa_v15 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v94: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v90)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v92: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v89, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v7 + 32, 0], [buf_native_byte_inline8742__ssa_v15 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v94: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v92)
+                t__tmp_v319: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v94)
+                buf_prefetched_key_inline8710__ssa_v36: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v319, 0, buf_load_slot_inline8695__ssa_v7, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v21: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v49
+                buf_scores_l1_inline8725__ssa_v28: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v7: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v7, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v21: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v21)
+                buf_reduced_pair_inline8682__ssa_v7: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v7)
+                buf_scores_l1_inline8725__ssa_v29: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v28, buf_scores_inline8770__ssa_v21, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v320: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v7, 6, 64)
+                buf_score_transfer_inline8845__store_v5: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v320, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v7 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v8: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v29
+                buf_current_key_inline8875__ssa_v56: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v36
+                buf_panel_col_inline8699__ssa_v8: pl.Scalar[pl.INDEX] = 512
+                buf_load_col_inline8740__ssa_v8: pl.Scalar[pl.INDEX] = 576
+                buf_load_slot_inline8695__ssa_v8: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v49: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v8
+                buf_safe_page_inline8690__ssa_v16: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v49 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_20: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v16])
+                buf_physical_page_inline8689__ssa_v16: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_20, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v16: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v16 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v16 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v96: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v94, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v8, 0], [buf_native_byte_inline8742__ssa_v16 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v100: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v96)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v98: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v94, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v8, 0], [buf_native_byte_inline8742__ssa_v16 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v100: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v98)
+                buf_key_row_inline8708__ssa_v52: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v8 + 32
+                buf_safe_page_inline8690__ssa_v17: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v52 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_21: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v17])
+                buf_physical_page_inline8689__ssa_v17: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_21, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v17: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v17 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v17 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v101: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v100, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v8 + 32, 0], [buf_native_byte_inline8742__ssa_v17 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v105: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v101)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v103: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v100, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v8 + 32, 0], [buf_native_byte_inline8742__ssa_v17 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v105: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v103)
+                t__tmp_v323: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v105)
+                buf_prefetched_key_inline8710__ssa_v41: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v323, 0, buf_load_slot_inline8695__ssa_v8, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v24: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v56
+                buf_scores_l1_inline8725__ssa_v32: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v8: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v8, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v24: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v24)
+                buf_reduced_pair_inline8682__ssa_v8: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v8)
+                buf_scores_l1_inline8725__ssa_v33: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v32, buf_scores_inline8770__ssa_v24, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v324: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v8, 6, 64)
+                buf_score_transfer_inline8845__store_v6: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v324, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v8 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v9: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v33
+                buf_current_key_inline8875__ssa_v63: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v41
+                buf_panel_col_inline8699__ssa_v9: pl.Scalar[pl.INDEX] = 576
+                buf_load_col_inline8740__ssa_v9: pl.Scalar[pl.INDEX] = 640
+                buf_load_slot_inline8695__ssa_v9: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v55: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v9
+                buf_safe_page_inline8690__ssa_v18: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v55 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_22: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v18])
+                buf_physical_page_inline8689__ssa_v18: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_22, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v18: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v18 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v18 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v107: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v105, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v9, 0], [buf_native_byte_inline8742__ssa_v18 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v111: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v107)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v109: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v105, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v9, 0], [buf_native_byte_inline8742__ssa_v18 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v111: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v109)
+                buf_key_row_inline8708__ssa_v58: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v9 + 32
+                buf_safe_page_inline8690__ssa_v19: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v58 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_23: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v19])
+                buf_physical_page_inline8689__ssa_v19: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_23, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v19: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v19 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v19 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v112: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v111, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v9 + 32, 0], [buf_native_byte_inline8742__ssa_v19 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v116: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v112)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v114: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v111, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v9 + 32, 0], [buf_native_byte_inline8742__ssa_v19 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v116: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v114)
+                t__tmp_v327: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v116)
+                buf_prefetched_key_inline8710__ssa_v46: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v327, 0, buf_load_slot_inline8695__ssa_v9, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v27: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v63
+                buf_scores_l1_inline8725__ssa_v36: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v9: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v9, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v27: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v27)
+                buf_reduced_pair_inline8682__ssa_v9: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v9)
+                buf_scores_l1_inline8725__ssa_v37: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v36, buf_scores_inline8770__ssa_v27, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v328: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v9, 6, 64)
+                buf_score_transfer_inline8845__store_v7: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v328, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v9 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v10: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v37
+                buf_current_key_inline8875__ssa_v70: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v46
+                buf_panel_col_inline8699__ssa_v10: pl.Scalar[pl.INDEX] = 640
+                buf_load_col_inline8740__ssa_v10: pl.Scalar[pl.INDEX] = 704
+                buf_load_slot_inline8695__ssa_v10: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v61: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v10
+                buf_safe_page_inline8690__ssa_v20: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v61 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_24: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v20])
+                buf_physical_page_inline8689__ssa_v20: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_24, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v20: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v20 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v20 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v118: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v116, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v10, 0], [buf_native_byte_inline8742__ssa_v20 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v122: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v118)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v120: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v116, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v10, 0], [buf_native_byte_inline8742__ssa_v20 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v122: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v120)
+                buf_key_row_inline8708__ssa_v64: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v10 + 32
+                buf_safe_page_inline8690__ssa_v21: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v64 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_25: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v21])
+                buf_physical_page_inline8689__ssa_v21: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_25, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v21: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v21 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v21 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v123: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v122, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v10 + 32, 0], [buf_native_byte_inline8742__ssa_v21 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v127: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v123)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v125: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v122, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v10 + 32, 0], [buf_native_byte_inline8742__ssa_v21 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v127: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v125)
+                t__tmp_v331: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v127)
+                buf_prefetched_key_inline8710__ssa_v51: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v331, 0, buf_load_slot_inline8695__ssa_v10, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v30: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v70
+                buf_scores_l1_inline8725__ssa_v40: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v10: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v10, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v30: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v30)
+                buf_reduced_pair_inline8682__ssa_v10: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v10)
+                buf_scores_l1_inline8725__ssa_v41: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v40, buf_scores_inline8770__ssa_v30, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v332: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v10, 6, 64)
+                buf_score_transfer_inline8845__store_v8: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v332, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v10 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v11: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v41
+                buf_current_key_inline8875__ssa_v77: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v51
+                buf_panel_col_inline8699__ssa_v11: pl.Scalar[pl.INDEX] = 704
+                buf_load_col_inline8740__ssa_v11: pl.Scalar[pl.INDEX] = 768
+                buf_load_slot_inline8695__ssa_v11: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v67: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v11
+                buf_safe_page_inline8690__ssa_v22: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v67 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_26: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v22])
+                buf_physical_page_inline8689__ssa_v22: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_26, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v22: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v22 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v22 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v129: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v127, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v11, 0], [buf_native_byte_inline8742__ssa_v22 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v133: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v129)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v131: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v127, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v11, 0], [buf_native_byte_inline8742__ssa_v22 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v133: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v131)
+                buf_key_row_inline8708__ssa_v70: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v11 + 32
+                buf_safe_page_inline8690__ssa_v23: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v70 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_27: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v23])
+                buf_physical_page_inline8689__ssa_v23: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_27, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v23: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v23 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v23 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v134: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v133, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v11 + 32, 0], [buf_native_byte_inline8742__ssa_v23 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v138: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v134)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v136: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v133, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v11 + 32, 0], [buf_native_byte_inline8742__ssa_v23 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v138: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v136)
+                t__tmp_v335: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v138)
+                buf_prefetched_key_inline8710__ssa_v56: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v335, 0, buf_load_slot_inline8695__ssa_v11, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v33: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v77
+                buf_scores_l1_inline8725__ssa_v44: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v11: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v11, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v33: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v33)
+                buf_reduced_pair_inline8682__ssa_v11: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v11)
+                buf_scores_l1_inline8725__ssa_v45: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v44, buf_scores_inline8770__ssa_v33, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v336: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v11, 6, 64)
+                buf_score_transfer_inline8845__store_v9: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v336, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v11 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v12: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v45
+                buf_current_key_inline8875__ssa_v84: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v56
+                buf_panel_col_inline8699__ssa_v12: pl.Scalar[pl.INDEX] = 768
+                buf_load_col_inline8740__ssa_v12: pl.Scalar[pl.INDEX] = 832
+                buf_load_slot_inline8695__ssa_v12: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v73: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v12
+                buf_safe_page_inline8690__ssa_v24: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v73 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_28: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v24])
+                buf_physical_page_inline8689__ssa_v24: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_28, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v24: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v24 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v24 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v140: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v138, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v12, 0], [buf_native_byte_inline8742__ssa_v24 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v144: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v140)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v142: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v138, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v12, 0], [buf_native_byte_inline8742__ssa_v24 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v144: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v142)
+                buf_key_row_inline8708__ssa_v76: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v12 + 32
+                buf_safe_page_inline8690__ssa_v25: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v76 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_29: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v25])
+                buf_physical_page_inline8689__ssa_v25: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_29, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v25: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v25 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v25 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v145: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v144, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v12 + 32, 0], [buf_native_byte_inline8742__ssa_v25 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v149: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v145)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v147: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v144, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v12 + 32, 0], [buf_native_byte_inline8742__ssa_v25 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v149: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v147)
+                t__tmp_v339: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v149)
+                buf_prefetched_key_inline8710__ssa_v61: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v339, 0, buf_load_slot_inline8695__ssa_v12, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v36: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v84
+                buf_scores_l1_inline8725__ssa_v48: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v12: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v12, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v36: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v36)
+                buf_reduced_pair_inline8682__ssa_v12: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v12)
+                buf_scores_l1_inline8725__ssa_v49: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v48, buf_scores_inline8770__ssa_v36, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v340: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v12, 6, 64)
+                buf_score_transfer_inline8845__store_v10: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v340, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v12 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v13: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v49
+                buf_current_key_inline8875__ssa_v91: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v61
+                buf_panel_col_inline8699__ssa_v13: pl.Scalar[pl.INDEX] = 832
+                buf_load_col_inline8740__ssa_v13: pl.Scalar[pl.INDEX] = 896
+                buf_load_slot_inline8695__ssa_v13: pl.Scalar[pl.INDEX] = 0
+                buf_key_row_inline8708__ssa_v79: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v13
+                buf_safe_page_inline8690__ssa_v26: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v79 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_30: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v26])
+                buf_physical_page_inline8689__ssa_v26: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_30, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v26: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v26 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v26 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v151: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v149, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v13, 0], [buf_native_byte_inline8742__ssa_v26 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v155: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v151)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v153: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v149, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v13, 0], [buf_native_byte_inline8742__ssa_v26 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v155: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v153)
+                buf_key_row_inline8708__ssa_v82: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v13 + 32
+                buf_safe_page_inline8690__ssa_v27: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v82 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_31: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v27])
+                buf_physical_page_inline8689__ssa_v27: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_31, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v27: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v27 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v27 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v156: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v155, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v13 + 32, 0], [buf_native_byte_inline8742__ssa_v27 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v160: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v156)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v158: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v155, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v13 + 32, 0], [buf_native_byte_inline8742__ssa_v27 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v160: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v158)
+                t__tmp_v343: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v160)
+                buf_prefetched_key_inline8710__ssa_v66: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v343, 0, buf_load_slot_inline8695__ssa_v13, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v39: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v91
+                buf_scores_l1_inline8725__ssa_v52: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v13: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v13, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v39: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v39)
+                buf_reduced_pair_inline8682__ssa_v13: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v13)
+                buf_scores_l1_inline8725__ssa_v53: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v52, buf_scores_inline8770__ssa_v39, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v344: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v13, 6, 64)
+                buf_score_transfer_inline8845__store_v11: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v344, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v13 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v14: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v53
+                buf_current_key_inline8875__ssa_v98: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v66
+                buf_panel_col_inline8699__ssa_v14: pl.Scalar[pl.INDEX] = 896
+                buf_load_col_inline8740__ssa_v14: pl.Scalar[pl.INDEX] = 960
+                buf_load_slot_inline8695__ssa_v14: pl.Scalar[pl.INDEX] = 64
+                buf_key_row_inline8708__ssa_v85: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v14
+                buf_safe_page_inline8690__ssa_v28: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v85 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_32: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v28])
+                buf_physical_page_inline8689__ssa_v28: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_32, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v28: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v28 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v28 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v162: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v160, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v14, 0], [buf_native_byte_inline8742__ssa_v28 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v166: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v162)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v164: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v160, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v14, 0], [buf_native_byte_inline8742__ssa_v28 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v166: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v164)
+                buf_key_row_inline8708__ssa_v88: pl.Scalar[pl.INDEX] = buf_logical_begin_inline8767__ssa_v1 + buf_score_begin_inline8717__ssa_v1 + buf_load_col_inline8740__ssa_v14 + 32
+                buf_safe_page_inline8690__ssa_v29: pl.Scalar[pl.INDEX] = pl.min(buf_key_row_inline8708__ssa_v88 // 32, pl.max((buf_cache_len_inline8809__ssa_v0 - 1) // 32, 0))
+                t__tile_33: pl.Scalar[pl.INT32] = pl.tensor.read(idx_block_table__ssa_v0, [buf_batch_idx_inline8687__ssa_v0, buf_safe_page_inline8690__ssa_v29])
+                buf_physical_page_inline8689__ssa_v29: pl.Scalar[pl.INDEX] = pl.max(pl.cast(t__tile_33, pl.INDEX), 0)
+                buf_native_byte_inline8742__ssa_v29: pl.Scalar[pl.INDEX] = buf_physical_page_inline8689__ssa_v29 * native_page_bytes_inline8726__ssa_v0
+                if buf_native_byte_inline8742__ssa_v29 % 128 == 0:
+                    buf_key_l1_pool_inline8671__ssa_v167: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v166, idx_kv_cache_inline8854__ssa_v0, [buf_load_slot_inline8695__ssa_v14 + 32, 0], [buf_native_byte_inline8742__ssa_v29 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v171: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v167)
+                else:
+                    buf_key_l1_pool_inline8671__ssa_v169: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.tile.gather_row(buf_key_l1_pool_inline8671__phi_v166, idx_kv_cache_shift64_inline8790__ssa_v0, [buf_load_slot_inline8695__ssa_v14 + 32, 0], [buf_native_byte_inline8742__ssa_v29 // 128, 0], [32, 128], transpose=False)
+                    buf_key_l1_pool_inline8671__phi_v171: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat] = pl.yield_(buf_key_l1_pool_inline8671__ssa_v169)
+                t__tmp_v347: pl.Tile[[128, 128], pl.INT8, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(buf_key_l1_pool_inline8671__phi_v171)
+                buf_prefetched_key_inline8710__ssa_v71: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = pl.tile.extract(t__tmp_v347, 0, buf_load_slot_inline8695__ssa_v14, [128, 64], target_memory=pl.Mem.Right)
+                buf_key_panel_inline8688__ssa_v42: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v98
+                buf_scores_l1_inline8725__ssa_v56: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v14: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v14, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v42: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v42)
+                buf_reduced_pair_inline8682__ssa_v14: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v14)
+                buf_scores_l1_inline8725__ssa_v57: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v56, buf_scores_inline8770__ssa_v42, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v348: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v14, 6, 64)
+                buf_score_transfer_inline8845__store_v12: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v348, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v14 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v15: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v57
+                buf_current_key_inline8875__ssa_v105: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_prefetched_key_inline8710__ssa_v71
+                buf_panel_col_inline8699__ssa_v15: pl.Scalar[pl.INDEX] = 960
+                buf_key_panel_inline8688__ssa_v45: pl.Tile[[128, 64], pl.INT8, pl.Mem.Right] = buf_current_key_inline8875__ssa_v105
+                buf_scores_l1_inline8725__ssa_v60: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.create([384, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
+                buf_previous_pair_inline8683__ssa_v15: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v15, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_scores_inline8770__ssa_v45: pl.Tile[[384, 64], pl.INT32, pl.Mem.Acc] = pl.tile.matmul(buf_query_left_inline8850__ssa_v0, buf_key_panel_inline8688__ssa_v45)
+                buf_reduced_pair_inline8682__ssa_v15: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_previous_pair_inline8683__ssa_v15)
+                buf_scores_l1_inline8725__ssa_v61: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = pl.tile.assemble(buf_scores_l1_inline8725__ssa_v60, buf_scores_inline8770__ssa_v45, [0, 0], pre_quant=0.0009765625, pre_relu=True)
+                t__tmp_v349: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_reduced_pair_inline8682__ssa_v15, 6, 64)
+                buf_score_transfer_inline8845__store_v13: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v349, [buf_transfer_row_inline8782__ssa_v0, buf_panel_col_inline8699__ssa_v15 - 64], buf_score_transfer_inline8845__ssa_v0)
+                buf_previous_l1_inline8810__ssa_v16: pl.Tile[[384, 64], pl.FP16, pl.Mem.Mat] = buf_scores_l1_inline8725__ssa_v61
+                buf_last_pair_inline8679__ssa_v0: pl.Tile[[384, 64], pl.FP16, pl.Mem.Right] = pl.tile.extract(buf_previous_l1_inline8810__ssa_v16, 0, 0, [384, 64], target_memory=pl.Mem.Right)
+                buf_last_scores_inline8674__ssa_v0: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(buf_coefficient_pair_inline8676__ssa_v0, buf_last_pair_inline8679__ssa_v0)
+                t__tmp_v350: pl.Tile[[16, 64], pl.FP32, pl.Mem.Acc, pl.TileView(valid_shape=[6, 64])] = pl.tile.set_validshape(buf_last_scores_inline8674__ssa_v0, 6, 64)
+                buf_score_transfer_inline8845__store_v14: pl.Tensor[[288, 1024], pl.FP32] = pl.tile.store(t__tmp_v350, [buf_transfer_row_inline8782__ssa_v0, 960], buf_score_transfer_inline8845__ssa_v0)
+                pl.system.sync_set(0, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+            for buf_score_drain_inline8686__idx_v0 in pl.range(pl.min(buf_score_iters_inline8863__ssa_v0, 2)):
+                pl.system.sync_wait(1, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)

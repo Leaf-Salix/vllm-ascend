@@ -1,0 +1,463 @@
+{
+  "passed": true,
+  "scope": "只读既有 CPU 生成代码的 ABI/写回/等待顺序审计；非设备或完整 CSA 验证",
+  "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_pipeline_20261017/cpu_v2/kernel",
+  "shared_tensor_arguments": 13,
+  "dynamic_descriptor_dimensions": [
+    "OUT_PIPE_PACK",
+    "OUT_PIPE_MM",
+    "OUT_PIPE_SCALE",
+    "OUT_PIPE_T",
+    "OUT_PIPE_WORDS"
+  ],
+  "incore_cpp_arguments": {
+    "cube": 20,
+    "vector": 21
+  },
+  "single_mix_submission": true,
+  "sync_start": true,
+  "source_ast_matches_compiled_snapshot": [
+    "probe.py",
+    "output_projection_a_stages.py",
+    "output_projection_b_stages.py",
+    "phase_sync.py",
+    "signals.py"
+  ],
+  "roles": {
+    "cube": {
+      "arguments": {
+        "v1": "packed__ssa_v0",
+        "v2": "wo_a__ssa_v0",
+        "v3": "o_r__ssa_v0",
+        "v4": "quant__ssa_v0",
+        "v5": "scales__ssa_v0",
+        "v6": "wo_b__ssa_v0",
+        "v7": "partials__ssa_v0",
+        "v8": "weight_scale__ssa_v0",
+        "v9": "residual__ssa_v0",
+        "v10": "post__ssa_v0",
+        "v11": "comb__ssa_v0",
+        "v12": "output__ssa_v0",
+        "v13": "signal__ssa_v0",
+        "v14": "OUT_PIPE_PACK",
+        "v15": "OUT_PIPE_MM",
+        "v16": "OUT_PIPE_SCALE",
+        "v17": "OUT_PIPE_T",
+        "v18": "OUT_PIPE_WORDS",
+        "v19": "__pypto_spmd_block_idx",
+        "v20": "__pypto_spmd_block_num"
+      },
+      "accesses": {
+        "signal": {
+          "scalar_load": [
+            {
+              "line": 275,
+              "statement": "int32_t v125 = (v13)[v117];"
+            }
+          ]
+        },
+        "packed": {
+          "TLOAD": [
+            {
+              "line": 352,
+              "statement": "TLOAD(v138, v150);"
+            },
+            {
+              "line": 534,
+              "statement": "TLOAD(v186, v198);"
+            },
+            {
+              "line": 615,
+              "statement": "TLOAD(v211, v223);"
+            },
+            {
+              "line": 830,
+              "statement": "TLOAD(v272, v283);"
+            }
+          ]
+        },
+        "wo_a": {
+          "TLOAD": [
+            {
+              "line": 390,
+              "statement": "TLOAD(v151, v162);"
+            },
+            {
+              "line": 572,
+              "statement": "TLOAD(v199, v210);"
+            },
+            {
+              "line": 653,
+              "statement": "TLOAD(v224, v235);"
+            },
+            {
+              "line": 859,
+              "statement": "TLOAD(v284, v292);"
+            }
+          ]
+        },
+        "o_r": {
+          "TSTORE": [
+            {
+              "line": 975,
+              "statement": "TSTORE(v325, v311);"
+            }
+          ]
+        },
+        "quant": {
+          "TLOAD": [
+            {
+              "line": 1102,
+              "statement": "TLOAD(v350, v359);"
+            }
+          ]
+        },
+        "wo_b": {
+          "TLOAD": [
+            {
+              "line": 1175,
+              "statement": "TLOAD(v369, v381);"
+            },
+            {
+              "line": 1212,
+              "statement": "TLOAD(v382, v392);"
+            }
+          ]
+        },
+        "partials": {
+          "TSTORE": [
+            {
+              "line": 1372,
+              "statement": "TSTORE(v432, v362);"
+            }
+          ]
+        }
+      },
+      "waits": [
+        1038
+      ],
+      "publishes": [
+        280,
+        1008,
+        1406
+      ]
+    },
+    "vector": {
+      "arguments": {
+        "v1": "packed__ssa_v0",
+        "v2": "wo_a__ssa_v0",
+        "v3": "o_r__ssa_v0",
+        "v4": "quant__ssa_v0",
+        "v5": "scales__ssa_v0",
+        "v6": "wo_b__ssa_v0",
+        "v7": "partials__ssa_v0",
+        "v8": "weight_scale__ssa_v0",
+        "v9": "residual__ssa_v0",
+        "v10": "post__ssa_v0",
+        "v11": "comb__ssa_v0",
+        "v12": "output__ssa_v0",
+        "v13": "signal__ssa_v0",
+        "v14": "OUT_PIPE_PACK",
+        "v15": "OUT_PIPE_MM",
+        "v16": "OUT_PIPE_SCALE",
+        "v17": "OUT_PIPE_T",
+        "v18": "OUT_PIPE_WORDS",
+        "v19": "__pypto_spmd_block_idx",
+        "v20": "__pypto_spmd_block_num",
+        "v21": "__pypto_spmd_subblock_idx"
+      },
+      "accesses": {
+        "signal": {
+          "scalar_load": [
+            {
+              "line": 1706,
+              "statement": "int32_t v161 = (v13)[v153];"
+            }
+          ]
+        },
+        "o_r": {
+          "TLOAD": [
+            {
+              "line": 1837,
+              "statement": "TLOAD(v190, v203);"
+            },
+            {
+              "line": 1846,
+              "statement": "TLOAD(v204, v203);"
+            },
+            {
+              "line": 1891,
+              "statement": "TLOAD(v206, v219);"
+            },
+            {
+              "line": 1900,
+              "statement": "TLOAD(v220, v219);"
+            },
+            {
+              "line": 2371,
+              "statement": "TLOAD(v335, v348);"
+            },
+            {
+              "line": 2510,
+              "statement": "TLOAD(v381, v348);"
+            }
+          ]
+        },
+        "scales": {
+          "TSTORE": [
+            {
+              "line": 2076,
+              "statement": "TSTORE(v267, v238);"
+            },
+            {
+              "line": 2282,
+              "statement": "TSTORE(v322, v294);"
+            },
+            {
+              "line": 2493,
+              "statement": "TSTORE(v378, v365);"
+            }
+          ],
+          "scalar_load": [
+            {
+              "line": 2763,
+              "statement": "float v458 = (v5)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v456 * (uint64_t) v16) + (uint64_t) v453)];"
+            },
+            {
+              "line": 2769,
+              "statement": "float v460 = (v5)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v456 + (uint64_t) v37) * (uint64_t) v16) + (uint64_t) v453)];"
+            }
+          ]
+        },
+        "quant": {
+          "TSTORE": [
+            {
+              "line": 2108,
+              "statement": "TSTORE(v277, v252);"
+            },
+            {
+              "line": 2314,
+              "statement": "TSTORE(v332, v308);"
+            },
+            {
+              "line": 2590,
+              "statement": "TSTORE(v406, v393);"
+            },
+            {
+              "line": 2663,
+              "statement": "TSTORE(v427, v410);"
+            }
+          ]
+        },
+        "weight_scale": {
+          "TLOAD": [
+            {
+              "line": 2737,
+              "statement": "TLOAD(v445, v450);"
+            }
+          ]
+        },
+        "partials": {
+          "TLOAD": [
+            {
+              "line": 2802,
+              "statement": "TLOAD(v461, v470);"
+            },
+            {
+              "line": 2832,
+              "statement": "TLOAD(v471, v479);"
+            }
+          ]
+        },
+        "residual": {
+          "TLOAD": [
+            {
+              "line": 2983,
+              "statement": "TLOAD(v511, v523);"
+            },
+            {
+              "line": 3034,
+              "statement": "TLOAD(v528, v539);"
+            },
+            {
+              "line": 3085,
+              "statement": "TLOAD(v544, v555);"
+            },
+            {
+              "line": 3137,
+              "statement": "TLOAD(v560, v571);"
+            }
+          ]
+        },
+        "post": {
+          "scalar_load": [
+            {
+              "line": 3156,
+              "statement": "float v577 = (v10)[v576];"
+            },
+            {
+              "line": 3288,
+              "statement": "float v611 = (v10)[(int64_t) ((uint64_t) v576 + (uint64_t) v37)];"
+            },
+            {
+              "line": 3417,
+              "statement": "float v644 = (v10)[(int64_t) ((uint64_t) v576 + (uint64_t) v46)];"
+            },
+            {
+              "line": 3546,
+              "statement": "float v677 = (v10)[(int64_t) ((uint64_t) v576 + (uint64_t) v73)];"
+            }
+          ]
+        },
+        "comb": {
+          "scalar_load": [
+            {
+              "line": 3171,
+              "statement": "float v581 = (v11)[v580];"
+            },
+            {
+              "line": 3191,
+              "statement": "float v586 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v45)];"
+            },
+            {
+              "line": 3212,
+              "statement": "float v591 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v38)];"
+            },
+            {
+              "line": 3233,
+              "statement": "float v596 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v66)];"
+            },
+            {
+              "line": 3300,
+              "statement": "float v614 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v37)];"
+            },
+            {
+              "line": 3320,
+              "statement": "float v619 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v67)];"
+            },
+            {
+              "line": 3341,
+              "statement": "float v624 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v68)];"
+            },
+            {
+              "line": 3362,
+              "statement": "float v629 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v69)];"
+            },
+            {
+              "line": 3429,
+              "statement": "float v647 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v46)];"
+            },
+            {
+              "line": 3449,
+              "statement": "float v652 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v70)];"
+            },
+            {
+              "line": 3470,
+              "statement": "float v657 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v71)];"
+            },
+            {
+              "line": 3491,
+              "statement": "float v662 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v72)];"
+            },
+            {
+              "line": 3557,
+              "statement": "float v680 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v73)];"
+            },
+            {
+              "line": 3577,
+              "statement": "float v685 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v56)];"
+            },
+            {
+              "line": 3598,
+              "statement": "float v690 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v74)];"
+            },
+            {
+              "line": 3619,
+              "statement": "float v695 = (v11)[(int64_t) ((uint64_t) v580 + (uint64_t) v75)];"
+            }
+          ]
+        },
+        "output": {
+          "TSTORE": [
+            {
+              "line": 3284,
+              "statement": "TSTORE(v610, v601);"
+            },
+            {
+              "line": 3413,
+              "statement": "TSTORE(v643, v634);"
+            },
+            {
+              "line": 3542,
+              "statement": "TSTORE(v676, v667);"
+            },
+            {
+              "line": 3672,
+              "statement": "TSTORE(v709, v700);"
+            }
+          ]
+        }
+      },
+      "waits": [
+        1741,
+        2716
+      ],
+      "publishes": [
+        1711,
+        2692,
+        3703
+      ]
+    }
+  },
+  "cache_order_checks": {
+    "cube": {
+      "generation_scalar_load_line": 275,
+      "begin_notify_line": 280,
+      "phase_notify_lines": [
+        1008,
+        1406
+      ],
+      "wait_lines": [
+        1038
+      ],
+      "publish_pipeline_drain_and_dcci_dsb_present": true,
+      "post_wait_dcci_dsb_present": true
+    },
+    "vector": {
+      "generation_scalar_load_line": 1706,
+      "begin_notify_line": 1711,
+      "phase_notify_lines": [
+        2692,
+        3703
+      ],
+      "wait_lines": [
+        1741,
+        2716
+      ],
+      "publish_pipeline_drain_and_dcci_dsb_present": true,
+      "post_wait_dcci_dsb_present": true
+    }
+  },
+  "quant_padding_store": {
+    "line": 2663,
+    "statement": "TSTORE(v427, v410);"
+  },
+  "all_four_hc_residual_output_stores_preserved": true,
+  "verified_order": [
+    "AIC O_A 实际 FP32 写回→phase 1；AIV 等待→FP32 读取",
+    "AIV INT8/scale/尾零实际写回→phase 2；AIC 等待→INT8 读取",
+    "AIC O_B partial 实际 INT32 写回→phase 3；AIV 等待→partial/scale 读取",
+    "AIV 反量化及 HCpost 的四路 BF16 实际写回→phase 4"
+  ],
+  "device_execution": false,
+  "hardware_cache_visibility_proven": false,
+  "device_precision_validated": false,
+  "full_csa_validated": false,
+  "performance_measured": false,
+  "limits": [
+    "CPU CPP 顺序不证明 A3 运行时跨核可见性或设备精度",
+    "真实 owner 与等待图由 check_phase_model.py 单独核对，不以 TWAIT 数量替代",
+    "20/21 为 13 Tensor+5 描述符动态轴+2/3 worker 的 CPP 形参，不是 dispatch 槽数",
+    "只审计 NZ、RB96/N256 的输出后段组合；输入 packed/post/comb/residual 须先就绪"
+  ]
+}

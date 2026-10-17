@@ -1,0 +1,265 @@
+{
+  "status": "CPU_SOURCE_READY_DEVICE_UNVERIFIED",
+  "production": "vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_score_stages.py",
+  "device_execution": false,
+  "performance_measured": false,
+  "full_CSA": false,
+  "functions": {
+    "indexer_score_cube_stage": [
+      {
+        "name": "qr_hadamard_i8",
+        "annotation": "pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]"
+      },
+      {
+        "name": "coefficients",
+        "annotation": "pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16]"
+      },
+      {
+        "name": "idx_kv_cache",
+        "annotation": "pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]"
+      },
+      {
+        "name": "idx_kv_cache_shift64",
+        "annotation": "pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]"
+      },
+      {
+        "name": "idx_native_kv_cache",
+        "annotation": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]"
+      },
+      {
+        "name": "idx_block_table",
+        "annotation": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]"
+      },
+      {
+        "name": "position_ids",
+        "annotation": "pl.Tensor[[TOKENS_DYN], pl.INT64]"
+      },
+      {
+        "name": "kv_seq_lens",
+        "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+      },
+      {
+        "name": "bounds",
+        "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+      },
+      {
+        "name": "offsets",
+        "annotation": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]"
+      },
+      {
+        "name": "plan",
+        "annotation": "pl.Tensor[[PLAN_WORDS], pl.INT32]"
+      },
+      {
+        "name": "buf_score_transfer",
+        "annotation": "pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]]"
+      },
+      {
+        "name": "buf_worker",
+        "annotation": "pl.Scalar[pl.INDEX]"
+      },
+      {
+        "name": "query_group_size",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "qk_panel_cols",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "score_tile",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "key_prefetch_panels",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "key_prefetch_to_l0",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "balance_leaves",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "SCORE_READY_EVENT",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "SCORE_CONSUMED_EVENT",
+        "annotation": "pl.constexpr"
+      }
+    ],
+    "indexer_score_vector_lane_stage": [
+      {
+        "name": "idx_native_kv_cache",
+        "annotation": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]"
+      },
+      {
+        "name": "idx_block_table",
+        "annotation": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]"
+      },
+      {
+        "name": "position_ids",
+        "annotation": "pl.Tensor[[TOKENS_DYN], pl.INT64]"
+      },
+      {
+        "name": "kv_seq_lens",
+        "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+      },
+      {
+        "name": "bounds",
+        "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+      },
+      {
+        "name": "offsets",
+        "annotation": "pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32]"
+      },
+      {
+        "name": "plan",
+        "annotation": "pl.Tensor[[PLAN_WORDS], pl.INT32]"
+      },
+      {
+        "name": "buf_score_transfer",
+        "annotation": "pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]"
+      },
+      {
+        "name": "score_arena",
+        "annotation": "pl.InOut[pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]]"
+      },
+      {
+        "name": "pair_arena",
+        "annotation": "pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]]"
+      },
+      {
+        "name": "buf_score_lane",
+        "annotation": "pl.Scalar[pl.INDEX]"
+      },
+      {
+        "name": "buf_worker",
+        "annotation": "pl.Scalar[pl.INDEX]"
+      },
+      {
+        "name": "query_group_size",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "qk_panel_cols",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "score_tile",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "key_prefetch_panels",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "key_prefetch_to_l0",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "balance_leaves",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "SCORE_READY_EVENT",
+        "annotation": "pl.constexpr"
+      },
+      {
+        "name": "SCORE_CONSUMED_EVENT",
+        "annotation": "pl.constexpr"
+      }
+    ]
+  },
+  "configs": [
+    {
+      "name": "g2_768",
+      "G": 2,
+      "QK_N": 128,
+      "score_tile": 768,
+      "prefetch_panels": 0,
+      "to_l0": true,
+      "balanced": false,
+      "roots": 2
+    },
+    {
+      "name": "g6_768",
+      "G": 6,
+      "QK_N": 64,
+      "score_tile": 768,
+      "prefetch_panels": 0,
+      "to_l0": true,
+      "balanced": false,
+      "roots": 2
+    },
+    {
+      "name": "g2_1024",
+      "G": 2,
+      "QK_N": 128,
+      "score_tile": 1024,
+      "prefetch_panels": 1,
+      "to_l0": true,
+      "balanced": false,
+      "roots": 2
+    },
+    {
+      "name": "g6_balanced",
+      "G": 6,
+      "QK_N": 64,
+      "score_tile": 1024,
+      "prefetch_panels": 1,
+      "to_l0": true,
+      "balanced": true,
+      "roots": 1
+    }
+  ],
+  "capacity_contract": {
+    "actual_T": "position_ids.dim0；B=lengths.dim0，Q至少B+1且有效请求边界在[0,T]，不得从容量反算S/B",
+    "query": "query_head_rows>=T*64；只load live*64真实行，不要求整个尾G预填",
+    "coefficients": "coeff_rows>=plan[0]*16，coeff_cols=G*64，来自相同group plan；尾query块全零",
+    "keys": "Native slab[pages,page_bytes]；page_bytes>=4160且64字节对齐；key0字节0开始floor(total_bytes/128)行；key64字节64开始floor((total_bytes-64)/128)行，都是同一slab只读别名",
+    "page_table": "真实visible历史所有逻辑页必须在table列范围且物理页合法；guard用于不解引用非法地址，不定义非法metadata的TopK结果",
+    "transfer": "FP32[>=24*2*G,score_tile]，每core两槽，每槽G行；所有实际TSTORE G行且双AIV共同消费后复用",
+    "score_arena": "FP32[>=24*2*G,8192]；nonbalanced每AIV/query独有一行，按实际prefix写后排序，不读取容量尾",
+    "pair_arena": "FP32[>=T*64,1024]；roots2=q*64+leaf*2+lane，roots1=q*64+leaf，和publish阶段一致",
+    "plan": "INT32[8]=[groups,max_history,leaves,leaf_tiles,extra,G,balanced,roots]，生产/消费同一配置且执行期间固定"
+  },
+  "ownership": "24core共享相同动态work_item/leaf_range；请求内group不跨Q边界；尾live不足G的AIV仍wait+TLOAD+ACK，只跳过无效query数学/根store",
+  "synchronization": {
+    "outer_waits": [
+      "plan与group_offsets完成",
+      "query INT8完成",
+      "coeff FP16完成",
+      "Native slab key/scale写回完成"
+    ],
+    "events": "显式READY/ACK constexpr，测试0/1；完整融合须审计与Attention等事件号冲突",
+    "ring": "AIC每步最后FIX store后READY；AIV MTE2 wait->load->ACK；AIC第2步起等待ACK后复用，leaf尾min(steps,2)排空",
+    "phase": "外层阶段完成信号只用于整阶段生产者/消费者；不能替代消费ACK，也不能把AIV执行挂在AIC整个阶段完成之后",
+    "base": "当前PyPTO剔除set_ffts_base_addr，实际FFTS base由Simpler kernel入口配置；测试壳INT64[256]不作为独立硬件信号区证明"
+  },
+  "math": "16类QK/WS/FIX/scale/sort与merge表达式AST同canonical；完整组保持原面板与归约顺序。尾组以live*64限制有效M/K，新的ragged场景仍待设备确认。",
+  "evidence": {
+    "full_backend": "full_v2/result.json（四配置实际成对MIX）",
+    "source_geometry_protocol": "source_geometry_protocol_audit.json（16类数学AST、1456场景、steps1..11及负例）",
+    "compiled": "compiled_audit.json（实际runtime ABI、QK/WS有效M/K、事件与容量高水位）"
+  },
+  "failures": [
+    {
+      "path": "full_v1/result.json",
+      "reason": "A3 PTOAS不支持INT8 full TEXPANDS，改INT16零Tile按位reinterpret，字节保持全零，未改编译器"
+    },
+    {
+      "path": "audit_attempts.json",
+      "reason": "首次compiled审计脚本把动态gather别名视图当新分配，已改只统计常量分配并显式列出视图，未重编译数学"
+    }
+  ],
+  "remaining": [
+    "纯Vector short-history score producer尚未迁移",
+    "完整CSA集成与跨阶段event命名空间待审",
+    "设备同步/精度/性能待验证，不声称七档全部已支持"
+  ],
+  "post_codegen_edits": "仅中文FFTS说明与测试壳显式导入/格式化；函数AST与full_v2快照一致，未重编译数学"
+}

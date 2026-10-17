@@ -1,0 +1,33 @@
+{
+  "scope": "真实紧凑行量化/key写入与64B scale单写者提交",
+  "successful_results": {
+    "quant": "cpu_v3/result.json",
+    "scale_commit": "cpu_v1/result.json"
+  },
+  "oracle": "oracle.json",
+  "independent_review": "review.json",
+  "attempts": [
+    {
+      "path": "cpu_v1/result.json",
+      "result": "scale提交完整通过；quant div尾valid_shape不一致"
+    },
+    {
+      "path": "cpu_v2/result.json",
+      "result": "显式设置常数[1,rows]后，动态Tile Python下标不支持"
+    },
+    {
+      "path": "cpu_v3/result.json",
+      "result": "改显式pl.slice单行valid_shape；quant完整通过，未重编scale提交"
+    }
+  ],
+  "mathematics": "原FP32→BF16→FP32、Hadamard缩放、amax/div/recip和INT8转换DAG保持；A3数值未验证",
+  "valid_contract": [
+    "统一校验values/scale_values/slots容量覆盖C_valid",
+    "quant必须完成并发布后才消费scale",
+    "单worker维护共享64B scale RMW",
+    "零值与缓冲容量不能代替active/causal/合法slot"
+  ],
+  "device_execution": false,
+  "performance_measured": false,
+  "full_csa_validated": false
+}

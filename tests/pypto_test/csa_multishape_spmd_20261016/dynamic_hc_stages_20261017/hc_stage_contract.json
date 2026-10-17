@@ -1,0 +1,280 @@
+{
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+  "status": "六段动态签名frontend lowering均PASS；widen/project完整CPU codegen PASS；未进行设备或整层验证。",
+  "stages": [
+    {
+      "function": "hc_widen_rms_range",
+      "role": "AIV",
+      "parameter_order": [
+        "x",
+        "x_fp32",
+        "inv_rms",
+        "widen_tail",
+        "vector_worker",
+        "vector_workers"
+      ],
+      "source_line": 80,
+      "logical_count": "ceil(T/8)",
+      "owner": "token8_block % vector_workers",
+      "wait_before_call": [],
+      "publish_after_call": [
+        "HC_INPUT"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "x": "pl.Tensor[[T_DYN, HC_DIM], pl.BF16]",
+        "x_fp32": "pl.Out[pl.Tensor[[T_DYN, HC_DIM], pl.FP32]]",
+        "inv_rms": "pl.Out[pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]]",
+        "widen_tail": "pl.InOut[pl.Tensor[[T_TILE, HC_DIM], pl.FP32]]",
+        "vector_worker": "pl.Scalar[pl.INDEX]",
+        "vector_workers": "pl.Scalar[pl.INDEX]"
+      }
+    },
+    {
+      "function": "hc_project_range",
+      "role": "AIC",
+      "parameter_order": [
+        "x",
+        "hc_fn",
+        "mixes_partials",
+        "group_worker",
+        "group_workers"
+      ],
+      "source_line": 133,
+      "logical_count": "ceil(T/16)*4",
+      "owner": "(token16_block*4+k_split) % group_workers",
+      "wait_before_call": [
+        "HC_INPUT"
+      ],
+      "publish_after_call": [
+        "HC_PARTIAL"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "x": "pl.Tensor[[T_DYN, HC_DIM], pl.FP32]",
+        "hc_fn": "pl.Tensor[[MIX_HC, HC_DIM], pl.FP32]",
+        "mixes_partials": "pl.Out[pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]]",
+        "group_worker": "pl.Scalar[pl.INDEX]",
+        "group_workers": "pl.Scalar[pl.INDEX]"
+      }
+    },
+    {
+      "function": "hc_reduce_range",
+      "role": "AIV",
+      "parameter_order": [
+        "mixes_partials",
+        "mixes_raw",
+        "vector_worker",
+        "vector_workers"
+      ],
+      "source_line": 169,
+      "logical_count": "ceil(T/16)",
+      "owner": "token16_block % vector_workers",
+      "wait_before_call": [
+        "HC_PARTIAL"
+      ],
+      "publish_after_call": [
+        "HC_RAW"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "mixes_partials": "pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "mixes_raw": "pl.Out[pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]]",
+        "vector_worker": "pl.Scalar[pl.INDEX]",
+        "vector_workers": "pl.Scalar[pl.INDEX]"
+      }
+    },
+    {
+      "function": "hc_gates_range",
+      "role": "AIV",
+      "parameter_order": [
+        "inv_rms",
+        "mixes_raw",
+        "hc_scale",
+        "hc_base",
+        "pre_val_store",
+        "post",
+        "post_tail_store",
+        "vector_worker",
+        "vector_workers"
+      ],
+      "source_line": 195,
+      "logical_count": "ceil(T/8)",
+      "owner": "token8_block % vector_workers",
+      "wait_before_call": [
+        "HC_INPUT",
+        "HC_RAW"
+      ],
+      "publish_after_call": [
+        "HC_GATES"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "inv_rms": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "mixes_raw": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "hc_scale": "pl.Tensor[[3], pl.FP32]",
+        "hc_base": "pl.Tensor[[MIX_HC], pl.FP32]",
+        "pre_val_store": "pl.Out[pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32]]",
+        "post": "pl.Out[pl.Tensor[[T_DYN, HC_MULT], pl.FP32]]",
+        "post_tail_store": "pl.InOut[pl.Tensor[[T_TILE, HC_PAD], pl.FP32]]",
+        "vector_worker": "pl.Scalar[pl.INDEX]",
+        "vector_workers": "pl.Scalar[pl.INDEX]"
+      }
+    },
+    {
+      "function": "hc_comb_range",
+      "role": "AIV",
+      "parameter_order": [
+        "inv_rms",
+        "mixes_raw",
+        "hc_scale",
+        "hc_base_2d",
+        "comb",
+        "comb_tail_store",
+        "vector_worker",
+        "vector_workers"
+      ],
+      "source_line": 251,
+      "logical_count": "ceil(T/8)",
+      "owner": "token8_block % vector_workers",
+      "wait_before_call": [
+        "HC_INPUT",
+        "HC_RAW"
+      ],
+      "publish_after_call": [
+        "HC_COMB"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "inv_rms": "pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32]",
+        "mixes_raw": "pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32]",
+        "hc_scale": "pl.Tensor[[3], pl.FP32]",
+        "hc_base_2d": "pl.Tensor[[1, MIX_HC], pl.FP32]",
+        "comb": "pl.Out[pl.Tensor[[T_DYN, HC_MULT * HC_MULT], pl.FP32]]",
+        "comb_tail_store": "pl.InOut[pl.Tensor[[COMB_T_TILE, HC_PAD * HC_MULT], pl.FP32]]",
+        "vector_worker": "pl.Scalar[pl.INDEX]",
+        "vector_workers": "pl.Scalar[pl.INDEX]"
+      }
+    },
+    {
+      "function": "hc_mix_norm_range",
+      "role": "AIV",
+      "parameter_order": [
+        "x",
+        "pre_val_store",
+        "norm_w",
+        "x_mixed",
+        "x_normed",
+        "x_normed_tail_store",
+        "vector_worker",
+        "vector_workers"
+      ],
+      "source_line": 439,
+      "logical_count": "ceil(T/8)",
+      "owner": "token8_block % vector_workers",
+      "wait_before_call": [
+        "HC_INPUT",
+        "HC_GATES"
+      ],
+      "publish_after_call": [
+        "HC_NORM"
+      ],
+      "completion": "本worker所有动态波次均完成；不得在调用返回前发布整阶段完成。",
+      "parameter_annotations": {
+        "x": "pl.Tensor[[T_DYN, HC_DIM], pl.FP32]",
+        "pre_val_store": "pl.Tensor[[PAD_ROWS_DYN, HC_PAD], pl.FP32]",
+        "norm_w": "pl.Tensor[[D], pl.BF16]",
+        "x_mixed": "pl.InOut[pl.Tensor[[MIX_ROWS_DYN, D], pl.BF16]]",
+        "x_normed": "pl.Out[pl.Tensor[[T_DYN, D], pl.BF16]]",
+        "x_normed_tail_store": "pl.InOut[pl.Tensor[[T_TILE, D], pl.BF16]]",
+        "vector_worker": "pl.Scalar[pl.INDEX]",
+        "vector_workers": "pl.Scalar[pl.INDEX]"
+      }
+    }
+  ],
+  "ownership_rules": {
+    "id_namespace": "函数内worker是对应阶段集合的逻辑零起点编号。若AIV使用物理0..47，调用方信号core=groups+vector_worker；AIC信号core=group_worker。若只分配subset，发布和等待须共享同一个逻辑→物理映射。",
+    "worker_count": "同一阶段所有producer/consumer使用相同workers值；建议初版widen48、project24、reduce/gates/comb/mix由调度层显式选择，函数不隐藏min(count,workers)。",
+    "range_formula": "wave_count=ceil(logical_count/workers); logical=worker+wave*workers; 仅logical<logical_count执行。",
+    "consumer_rows_to_widen": "消费实际行[a,b)时，widen块为floor(a/8)..ceil(b/8)-1，owner=block%widen_workers。",
+    "consumer_rows_to_projection": "消费行[a,b)时，投影逻辑task区间[floor(a/16)*4,ceil(b/16)*4)，owner=task%group_workers；可作为wait_row_owners的tile=1逻辑任务行区间。",
+    "consumer_rows_to_reduce": "归约token16块floor(a/16)..ceil(b/16)-1，owner=block%reduce_workers。",
+    "consumer_rows_to_gates": "token8块floor(a/8)..ceil(b/8)-1，owner=block%gates_workers。",
+    "padding": "reduce包含M16 padding行；实际消费者只取自身有效T行。inv/pre缓冲按pad16；mixed按pad8；不能根据pad16向输入真实T之外发load。",
+    "tail_scratch": "widen/post/comb/norm各只在全局最后不满8行块使用tail scratch，因此当前分片公式下每份scratch最多一个writer。改变为任意短行分工后必须重新设计scratch所有权。",
+    "producer_side_wait": "helper本身不等待。控制层可在调用前对所有该worker任务对应的输入owner求并集后等待；第一版保守等待全部有效输入owner也正确。循环内精细等待需要新增tile级helper，不应把等待偷偷放入数学函数。"
+  },
+  "dependency_precision": "gates和comb共享HC_RAW但互不依赖；mix只消费HC_GATES及x_fp32；最终HCpost仍需HC_GATES的post与HC_COMB的comb两个完成语义。",
+  "unchanged_math": [
+    "输入32×K512顺序RMS",
+    "HC投影4×K4096、每份16×K256顺序MMA",
+    "四投影左折叠",
+    "原sigmoid与20轮除法Sinkhorn",
+    "混合pairwise树、BF16舍入后16×K256平方和",
+    "Native BF16 norm权重"
+  ],
+  "source_validation": "source_check.json: 六份数学体AST一致，T1..384×六worker规格×三类逻辑count共6912所有权组合通过；不等于设备数值通过。",
+  "gm_views": {
+    "x/x_fp32": "二维[T,16384]连续GM view，由调用方在incore之外从Native[T,4,4096]绑定；无数据搬运。",
+    "hc_base_2d": "comb输入[1,24] FP32 GM view在外层绑定；gates仍接[24]。",
+    "禁止": "helper内不reshape整块GM为Tensor后再load，避免incore Tensor→Tile转换；仅已加载Tile做原UB小块reshape。"
+  },
+  "frontend_result": "lowering_v1/result.json",
+  "full_codegen_result": "full_front_v1/result.json",
+  "dynamic_cpp_evidence": {
+    "widen": {
+      "file": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_hc_stages_20261017/full_front_v1/widen/kernel/kernels/aiv/widen_probe_incore_0.cpp",
+      "dynamic_descriptor_parameter_lines": [
+        {
+          "line": 1460,
+          "text": "    // Extract dynamic dim: HC_STAGE_T"
+        },
+        {
+          "line": 1461,
+          "text": "    int64_t HC_STAGE_T = static_cast<int64_t>(x__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1463,
+          "text": "    // Extract dynamic dim: HC_STAGE_PAD16_ROWS"
+        },
+        {
+          "line": 1464,
+          "text": "    int64_t HC_STAGE_PAD16_ROWS = static_cast<int64_t>(inv__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1467,
+          "text": "    widen_probe_incore_0(x__ssa_v0, x_fp32__ssa_v0, inv__ssa_v0, tail__ssa_v0, HC_STAGE_T, HC_STAGE_PAD16_ROWS, __pypto_spmd_block_idx, __pypto_spmd_block_num);"
+        }
+      ],
+      "full_codegen_passed": true,
+      "device_execution": false
+    },
+    "project": {
+      "file": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_hc_stages_20261017/full_front_v1/project/kernel/kernels/aic/project_probe_incore_0.cpp",
+      "dynamic_descriptor_parameter_lines": [
+        {
+          "line": 491,
+          "text": "    // Extract dynamic dim: HC_STAGE_T"
+        },
+        {
+          "line": 492,
+          "text": "    int64_t HC_STAGE_T = static_cast<int64_t>(x__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 494,
+          "text": "    // Extract dynamic dim: HC_STAGE_PARTIAL_ROWS"
+        },
+        {
+          "line": 495,
+          "text": "    int64_t HC_STAGE_PARTIAL_ROWS = static_cast<int64_t>(partials__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 498,
+          "text": "    project_probe_incore_0(x__ssa_v0, partials__ssa_v0, weight__ssa_v0, HC_STAGE_T, HC_STAGE_PARTIAL_ROWS, __pypto_spmd_block_idx, __pypto_spmd_block_num);"
+        }
+      ],
+      "full_codegen_passed": true,
+      "device_execution": false
+    }
+  }
+}

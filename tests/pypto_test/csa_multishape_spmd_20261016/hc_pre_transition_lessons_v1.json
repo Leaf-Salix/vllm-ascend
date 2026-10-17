@@ -1,0 +1,1413 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-17",
+  "scope": "只读复盘 HC_pre 从多个 PTO task 到一个 SPMD 的历史结构变化；未运行编译、NPU 或新性能测试。只生成本 JSON。",
+  "target": "完整 CSA 七档分别 <= 同轮动态分 task PTO 完整 L1 incore 耗时的 0.70；本报告不是达标证据。",
+  "conclusion": "值得迁移的是跨任务的消费方式、工作归属与缓冲生命周期重构，而不是把旧 task 函数逐个内联；HC_pre 历史里有实际删中间张量/独立归约、重新分配第二阶段核角色、显式安排 L0 搬运与计算的三类证据。每类都有反例，不保证迁入整层仍然获益。",
+  "timing_contract": {
+    "metric": "每次完整 HC_pre 的 L1 最早 incore 开始至最晚 incore 结束，包括内部空隙；排除区间外 orchestrator/AICPU 首尾。",
+    "samples": "引用原报告的三个采样及中位数；单 SPMD 两个 AIC/AIV 核函数名字不是两个独立运行时 task。",
+    "cross_run_limit": "2026-10-09 各版本为不同轮次，源码变化与当时完整性能对应，但不能相减后声称每个变换的独立净收益。2026-10-11 显式交错有同任务正反顺序对照。",
+    "warmup_warning": "HC_PRE_OPTIMIZATION_LOG 记录同代码完整 L1 曾受流程/运行顺序影响。33.88/52.02/32.52/35.06 us 的差别不能推断为外层调度开销；历史未采集足以归因的频率/缓存计数。用户后来统一 Native profiling 前置、PTO 五次预热、三个 L1 step。",
+    "source": {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/HC_PRE_OPTIMIZATION_LOG.md",
+      "lines": [
+        563,
+        624
+      ],
+      "exists": true
+    },
+    "do_not_compare": "不得将 HC_pre standalone 子阶段或动态分 task 阶段时长当成当前单 SPMD CSA 的真实瓶颈。"
+  },
+  "lessons": [
+    {
+      "id": "consumer_local_reduce_then_single_spmd",
+      "verified_change": "从独立 linear_reduce 产出 mixes_raw/inv_rms，改成 comb 和 pre/post/mix 消费者直接读取 mixes_partials/rms_partials，在消费者内部归约并立即消费；随后将 CV 和两类尾段重组到一个 MIX SPMD。",
+      "before": {
+        "tasks": [
+          "hc_cv_block_aic / hc_cv_block_aiv",
+          "hc_pre_linear_reduce",
+          "comb_sinkhorn",
+          "pre_post_mix"
+        ],
+        "materialized_intermediates": [
+          "mixes_raw",
+          "inv_rms"
+        ],
+        "source": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_flat_gather.py",
+          "lines": [
+            100,
+            118
+          ],
+          "exists": true
+        }
+      },
+      "after": {
+        "removed": [
+          "独立 hc_pre_linear_reduce task",
+          "mixes_raw 的全局写入与两消费者重读",
+          "inv_rms 的全局写入与消费者重读"
+        ],
+        "retained": [
+          "跨核生产的 mixes_partials/rms_partials 仍在 GM",
+          "进入尾段前仍需要 MIX 全参与同步和缓存维护",
+          "不同消费者各自做少量重复归约，换取删除独立交接"
+        ],
+        "sources": [
+          {
+            "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_fused_flat_v2.py",
+            "lines": [
+              98,
+              177
+            ],
+            "exists": true
+          },
+          {
+            "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_single_spmd.py",
+            "lines": [
+              62,
+              110
+            ],
+            "exists": true
+          }
+        ]
+      },
+      "execution_rewrite": "单 SPMD 的第一阶段通过 AIV->AIC gather 消费数据；其后同一 worker 集合在 split_aiv 中分成 comb/Sinkhorn 与 pre/post/mix 角色，不保留旧 task 的所有核分配。后续 joint_gates 将 pre/post 的公共归一化、scale/base 和 sigmoid 计算合并。",
+      "full_l1_evidence": [
+        {
+          "experiment": "cv_flat_gather_edges",
+          "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_flat_gather_edges/report.json",
+          "report_status": "PASS",
+          "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_flat_gather.py",
+          "cases": [
+            {
+              "case": "B02_S6_T012",
+              "tokens": 12,
+              "status": "PASS",
+              "full_l1_p50_us": 32.56,
+              "full_l1_samples_us": [
+                30.52,
+                36.16,
+                32.56
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_flat_gather_edges/traces/B02_S6_T012_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                38,
+                38,
+                38
+              ],
+              "no_incore_gap_samples_us": [
+                4.24,
+                3.94,
+                4.44
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "hc_pre_linear_reduce",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 53.98,
+                  "last_end_us": 65.26,
+                  "blocks": 11
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 54.22,
+                  "last_end_us": 63.08,
+                  "blocks": 22
+                },
+                "hc_pre_linear_reduce": {
+                  "first_start_us": 68.44,
+                  "last_end_us": 73.64,
+                  "blocks": 1
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 75.5,
+                  "last_end_us": 83.6,
+                  "blocks": 2
+                },
+                "pre_post_mix": {
+                  "first_start_us": 74.7,
+                  "last_end_us": 84.5,
+                  "blocks": 2
+                }
+              }
+            },
+            {
+              "case": "B28_S6_T168",
+              "tokens": 168,
+              "status": "PASS",
+              "full_l1_p50_us": 50.56,
+              "full_l1_samples_us": [
+                52.92,
+                50.56,
+                48.92
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_flat_gather_edges/traces/B28_S6_T168_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                120,
+                120,
+                120
+              ],
+              "no_incore_gap_samples_us": [
+                8.32,
+                4.3,
+                4.34
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "hc_pre_linear_reduce",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 28.24,
+                  "last_end_us": 50.0,
+                  "blocks": 24
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 28.18,
+                  "last_end_us": 47.74,
+                  "blocks": 48
+                },
+                "hc_pre_linear_reduce": {
+                  "first_start_us": 53.46,
+                  "last_end_us": 59.46,
+                  "blocks": 6
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 66.72,
+                  "last_end_us": 81.1,
+                  "blocks": 21
+                },
+                "pre_post_mix": {
+                  "first_start_us": 64.32,
+                  "last_end_us": 78.96,
+                  "blocks": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "experiment": "cv_fused_flat_v2_edges",
+          "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_edges/report.json",
+          "report_status": "PASS",
+          "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_fused_flat_v2.py",
+          "cases": [
+            {
+              "case": "B02_S6_T012",
+              "tokens": 12,
+              "status": "PASS",
+              "full_l1_p50_us": 28.14,
+              "full_l1_samples_us": [
+                27.4,
+                30.54,
+                28.14
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_edges/traces/B02_S6_T012_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                37,
+                37,
+                37
+              ],
+              "no_incore_gap_samples_us": [
+                4.4,
+                3.72,
+                3.66
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 29.92,
+                  "last_end_us": 39.7,
+                  "blocks": 11
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 30.04,
+                  "last_end_us": 37.78,
+                  "blocks": 22
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 44.62,
+                  "last_end_us": 53.06,
+                  "blocks": 2
+                },
+                "pre_post_mix": {
+                  "first_start_us": 44.1,
+                  "last_end_us": 57.32,
+                  "blocks": 2
+                }
+              }
+            },
+            {
+              "case": "B28_S6_T168",
+              "tokens": 168,
+              "status": "PASS",
+              "full_l1_p50_us": 48.66,
+              "full_l1_samples_us": [
+                48.44,
+                48.76,
+                48.66
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_edges/traces/B28_S6_T168_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                114,
+                114,
+                114
+              ],
+              "no_incore_gap_samples_us": [
+                4.52,
+                4.42,
+                5.04
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 28.34,
+                  "last_end_us": 53.0,
+                  "blocks": 24
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 28.64,
+                  "last_end_us": 50.48,
+                  "blocks": 48
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 58.7,
+                  "last_end_us": 71.72,
+                  "blocks": 21
+                },
+                "pre_post_mix": {
+                  "first_start_us": 57.52,
+                  "last_end_us": 76.78,
+                  "blocks": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "experiment": "cv_fused_flat_v2_all14",
+          "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_all14/report.json",
+          "report_status": "PASS",
+          "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_fused_flat_v2.py",
+          "cases": [
+            {
+              "case": "B02_S6_T012",
+              "tokens": 12,
+              "status": "PASS",
+              "full_l1_p50_us": 28.4,
+              "full_l1_samples_us": [
+                27.94,
+                28.96,
+                28.4
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_all14/traces/B02_S6_T012_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                37,
+                37,
+                37
+              ],
+              "no_incore_gap_samples_us": [
+                3.8,
+                2.8,
+                3.46
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 28.3,
+                  "last_end_us": 38.5,
+                  "blocks": 11
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 28.56,
+                  "last_end_us": 36.62,
+                  "blocks": 22
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 43.14,
+                  "last_end_us": 51.5,
+                  "blocks": 2
+                },
+                "pre_post_mix": {
+                  "first_start_us": 42.3,
+                  "last_end_us": 56.24,
+                  "blocks": 2
+                }
+              }
+            },
+            {
+              "case": "B16_S6_T096",
+              "tokens": 96,
+              "status": "PASS",
+              "full_l1_p50_us": 41.3,
+              "full_l1_samples_us": [
+                40.78,
+                41.3,
+                42.7
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_all14/traces/B16_S6_T096_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                96,
+                96,
+                96
+              ],
+              "no_incore_gap_samples_us": [
+                3.96,
+                3.84,
+                5.04
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 29.0,
+                  "last_end_us": 49.54,
+                  "blocks": 24
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 29.24,
+                  "last_end_us": 47.24,
+                  "blocks": 48
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 54.16,
+                  "last_end_us": 65.14,
+                  "blocks": 12
+                },
+                "pre_post_mix": {
+                  "first_start_us": 53.5,
+                  "last_end_us": 69.78,
+                  "blocks": 12
+                }
+              }
+            },
+            {
+              "case": "B28_S6_T168",
+              "tokens": 168,
+              "status": "PASS",
+              "full_l1_p50_us": 49.02,
+              "full_l1_samples_us": [
+                49.42,
+                49.02,
+                48.4
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_fused_flat_v2_all14/traces/B28_S6_T168_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                114,
+                114,
+                114
+              ],
+              "no_incore_gap_samples_us": [
+                4.52,
+                3.78,
+                4.54
+              ],
+              "task_names": [
+                "hc_cv_block_aic",
+                "hc_cv_block_aiv",
+                "comb_sinkhorn",
+                "pre_post_mix"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_cv_block_aic": {
+                  "first_start_us": 31.48,
+                  "last_end_us": 56.58,
+                  "blocks": 24
+                },
+                "hc_cv_block_aiv": {
+                  "first_start_us": 31.18,
+                  "last_end_us": 53.8,
+                  "blocks": 48
+                },
+                "comb_sinkhorn": {
+                  "first_start_us": 62.18,
+                  "last_end_us": 75.1,
+                  "blocks": 21
+                },
+                "pre_post_mix": {
+                  "first_start_us": 61.1,
+                  "last_end_us": 80.6,
+                  "blocks": 21
+                }
+              }
+            }
+          ]
+        },
+        {
+          "experiment": "cv_single_spmd_edges",
+          "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_spmd_edges/report.json",
+          "report_status": "PASS",
+          "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_single_spmd.py",
+          "cases": [
+            {
+              "case": "B02_S6_T012",
+              "tokens": 12,
+              "status": "PASS",
+              "full_l1_p50_us": 31.78,
+              "full_l1_samples_us": [
+                32.08,
+                31.74,
+                31.78
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_spmd_edges/traces/B02_S6_T012_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                72,
+                72,
+                72
+              ],
+              "no_incore_gap_samples_us": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "task_names": [
+                "hc_single_aic",
+                "hc_single_aiv"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_single_aic": {
+                  "first_start_us": 45.72,
+                  "last_end_us": 62.16,
+                  "blocks": 24
+                },
+                "hc_single_aiv": {
+                  "first_start_us": 45.68,
+                  "last_end_us": 77.76,
+                  "blocks": 48
+                }
+              }
+            },
+            {
+              "case": "B28_S6_T168",
+              "tokens": 168,
+              "status": "PASS",
+              "full_l1_p50_us": 41.5,
+              "full_l1_samples_us": [
+                41.84,
+                41.5,
+                40.7
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_spmd_edges/traces/B28_S6_T168_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                72,
+                72,
+                72
+              ],
+              "no_incore_gap_samples_us": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "task_names": [
+                "hc_single_aic",
+                "hc_single_aiv"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_single_aic": {
+                  "first_start_us": 42.72,
+                  "last_end_us": 67.46,
+                  "blocks": 24
+                },
+                "hc_single_aiv": {
+                  "first_start_us": 43.06,
+                  "last_end_us": 84.56,
+                  "blocks": 48
+                }
+              }
+            }
+          ]
+        },
+        {
+          "experiment": "cv_single_joint_gates_v4_all14",
+          "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_joint_gates_v4_all14/report.json",
+          "report_status": "PASS",
+          "kernel_file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/kernels/cv_single_joint_gates_v4.py",
+          "cases": [
+            {
+              "case": "B02_S6_T012",
+              "tokens": 12,
+              "status": "PASS",
+              "full_l1_p50_us": 27.7,
+              "full_l1_samples_us": [
+                26.32,
+                27.7,
+                28.8
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_joint_gates_v4_all14/traces/B02_S6_T012_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                72,
+                72,
+                72
+              ],
+              "no_incore_gap_samples_us": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "task_names": [
+                "hc_single_aic",
+                "hc_single_aiv"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_single_aic": {
+                  "first_start_us": 32.52,
+                  "last_end_us": 47.48,
+                  "blocks": 24
+                },
+                "hc_single_aiv": {
+                  "first_start_us": 32.22,
+                  "last_end_us": 58.54,
+                  "blocks": 48
+                }
+              }
+            },
+            {
+              "case": "B16_S6_T096",
+              "tokens": 96,
+              "status": "PASS",
+              "full_l1_p50_us": 34.84,
+              "full_l1_samples_us": [
+                35.04,
+                34.84,
+                33.44
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_joint_gates_v4_all14/traces/B16_S6_T096_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                72,
+                72,
+                72
+              ],
+              "no_incore_gap_samples_us": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "task_names": [
+                "hc_single_aic",
+                "hc_single_aiv"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_single_aic": {
+                  "first_start_us": 33.72,
+                  "last_end_us": 53.06,
+                  "blocks": 24
+                },
+                "hc_single_aiv": {
+                  "first_start_us": 33.58,
+                  "last_end_us": 68.62,
+                  "blocks": 48
+                }
+              }
+            },
+            {
+              "case": "B28_S6_T168",
+              "tokens": 168,
+              "status": "PASS",
+              "full_l1_p50_us": 39.82,
+              "full_l1_samples_us": [
+                39.82,
+                39.96,
+                38.78
+              ],
+              "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_opt_20261009/cv_single_joint_gates_v4_all14/traces/B28_S6_T168_PTO_L1_3steps.json",
+              "source_exists": true,
+              "blocks_per_sample": [
+                72,
+                72,
+                72
+              ],
+              "no_incore_gap_samples_us": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "task_names": [
+                "hc_single_aic",
+                "hc_single_aiv"
+              ],
+              "first_sample_task_bounds_us": {
+                "hc_single_aic": {
+                  "first_start_us": 33.06,
+                  "last_end_us": 57.52,
+                  "blocks": 24
+                },
+                "hc_single_aiv": {
+                  "first_start_us": 33.08,
+                  "last_end_us": 72.88,
+                  "blocks": 48
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "interpretation": "T168 的各轮完整中位数 50.56 -> 48.66 -> 41.50 -> 39.82 us 与结构迁移一致；第一次单 SPMD T12=31.78 us，反而慢于前一完整十四档版 28.40 us。不能声称单一融合方式对所有档位获益，也不能将跨轮差值作净归因。",
+      "counterexample": "cv_group32_edges 将每 32 token 独立缓冲/子图，T168 到 83.54 us；更细任务分组增加交接，并未延续融合收益。",
+      "csa_transfer": "在生产者已有最终 Tile 时就地执行下游消费数学，保留必须输出的 GM 数据，删除仅为旧 task 边界存在的回读/临时结果。必须重新推导行所有权及等待，不能仅改 inline 标记。"
+    },
+    {
+      "id": "phase_specific_ownership_and_local_full_row_consumption",
+      "verified_change": "第二阶段不再按固定 AIV0/AIV1 角色让部分核空闲；按 Sinkhorn token 工作量分配逻辑 worker，剩余 AIV 按 token-pair 和 D 分片处理 mixed。后续中档改为 worker 消费完整 D=4096 的真实行，标量 gate 复用并沿行流水。",
+      "ownership_contract": [
+        "新旧 14 档逐元素覆盖检查证明每个 mixed 区间、post 和 comb 输出恰好写一次。",
+        "post 每行 16 B，按两行边界分配，避免不同核写同一 32 B 事务；只有相应 D 分片写 post。",
+        "48 个 AIV 都执行有效工作是设备计数结论，不代表全部时间满负载。"
+      ],
+      "source": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/evidence/hc_pre_tail_vectors_20261011/README_VECTOR_WORK.md",
+        "lines": null,
+        "exists": true
+      },
+      "device_work_and_full_l1": {
+        "scope": "设备实际计数，14场景48个逻辑AIV均执行第二阶段有效工作；每步L1仍有真实24AIC+48AIV记录；不等同于全程100%占用率",
+        "old_b16_s6_active_vectors": 24,
+        "cases": [
+          {
+            "case": "B02_S5_T010",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 10,
+            "mixed_vectors": 38,
+            "sink_rows_min": 1,
+            "sink_rows_max": 1,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 512,
+            "mixed_d_width_max": 1024,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 28.0,
+            "new_incore_p50_us": 31.68,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B02_S5_T010_tail_work.json"
+          },
+          {
+            "case": "B02_S6_T012",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 12,
+            "mixed_vectors": 36,
+            "sink_rows_min": 1,
+            "sink_rows_max": 1,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 512,
+            "mixed_d_width_max": 1024,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 28.56,
+            "new_incore_p50_us": 31.92,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_1/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B02_S6_T012_tail_work.json"
+          },
+          {
+            "case": "B04_S5_T020",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 20,
+            "mixed_vectors": 28,
+            "sink_rows_min": 1,
+            "sink_rows_max": 1,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 1024,
+            "mixed_d_width_max": 2048,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 29.98,
+            "new_incore_p50_us": 32.54,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_2/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B04_S5_T020_tail_work.json"
+          },
+          {
+            "case": "B04_S6_T024",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 1,
+            "sink_rows_max": 1,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 2048,
+            "mixed_d_width_max": 2048,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 30.28,
+            "new_incore_p50_us": 31.18,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_3/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B04_S6_T024_tail_work.json"
+          },
+          {
+            "case": "B08_S5_T040",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 1,
+            "sink_rows_max": 2,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 2048,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 34.1,
+            "new_incore_p50_us": 30.22,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_4/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B08_S5_T040_tail_work.json"
+          },
+          {
+            "case": "B08_S6_T048",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 2,
+            "sink_rows_max": 2,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 2,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 35.4,
+            "new_incore_p50_us": 29.52,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_5/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B08_S6_T048_tail_work.json"
+          },
+          {
+            "case": "B16_S5_T080",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 3,
+            "sink_rows_max": 4,
+            "mixed_rows_min": 2,
+            "mixed_rows_max": 4,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 35.74,
+            "new_incore_p50_us": 32.84,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_6/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B16_S5_T080_tail_work.json"
+          },
+          {
+            "case": "B16_S6_T096",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 4,
+            "sink_rows_max": 4,
+            "mixed_rows_min": 4,
+            "mixed_rows_max": 4,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 34.62,
+            "new_incore_p50_us": 34.36,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_7/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B16_S6_T096_tail_work.json"
+          },
+          {
+            "case": "B20_S5_T100",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 4,
+            "sink_rows_max": 5,
+            "mixed_rows_min": 4,
+            "mixed_rows_max": 6,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 33.18,
+            "new_incore_p50_us": 41.64,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_8/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B20_S5_T100_tail_work.json"
+          },
+          {
+            "case": "B20_S6_T120",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 5,
+            "sink_rows_max": 5,
+            "mixed_rows_min": 4,
+            "mixed_rows_max": 6,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 33.54,
+            "new_incore_p50_us": 43.1,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_9/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B20_S6_T120_tail_work.json"
+          },
+          {
+            "case": "B24_S5_T120",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 5,
+            "sink_rows_max": 5,
+            "mixed_rows_min": 4,
+            "mixed_rows_max": 6,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 33.24,
+            "new_incore_p50_us": 43.96,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_10/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B24_S5_T120_tail_work.json"
+          },
+          {
+            "case": "B24_S6_T144",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 6,
+            "sink_rows_max": 6,
+            "mixed_rows_min": 6,
+            "mixed_rows_max": 6,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 37.28,
+            "new_incore_p50_us": 46.18,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_11/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B24_S6_T144_tail_work.json"
+          },
+          {
+            "case": "B28_S5_T140",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 5,
+            "sink_rows_max": 6,
+            "mixed_rows_min": 4,
+            "mixed_rows_max": 6,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 37.16,
+            "new_incore_p50_us": 46.3,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_12/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B28_S5_T140_tail_work.json"
+          },
+          {
+            "case": "B28_S6_T168",
+            "active_vectors": 48,
+            "sinkhorn_vectors": 24,
+            "mixed_vectors": 24,
+            "sink_rows_min": 7,
+            "sink_rows_max": 7,
+            "mixed_rows_min": 6,
+            "mixed_rows_max": 8,
+            "mixed_d_width_min": 4096,
+            "mixed_d_width_max": 4096,
+            "coverage": "全部 token、D 分片及 post 写入各覆盖一次",
+            "bitwise_same_as_old_pto": true,
+            "old_incore_p50_us": 39.12,
+            "new_incore_p50_us": 45.2,
+            "l1_trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/pto_only_full_vectors_14/dfx/window_13/merged_swimlane.json",
+            "work_record": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/hc_pre_tail_vectors_20261011/probe_full_device_counts/B28_S6_T168_tail_work.json"
+          }
+        ]
+      },
+      "interpretation": "T48 完整 L1 35.40 -> 29.52 us，但 T168 39.12 -> 45.20 us；增加工作核数与分片数量会增加 gate/归约重复、小块 load/store 和尾波开销。T96 34.62 -> 34.36 us 几乎持平。",
+      "later_local_consumption": {
+        "adoption": {
+          "source": "vllm_ascend/ops/pypto/hc_pre.py",
+          "validated_candidate": "mixed_scalar_medium_v2.py",
+          "validation_report": "scalar_medium_v2_14/report.json",
+          "task": "task_20261011_195346_2486078324",
+          "cases_passed": 14,
+          "executable_ast_matches": true,
+          "changed_branch": "49 <= T <= 96；其它档位保留原路径",
+          "goal_achieved": false,
+          "target_us": 20,
+          "T96_L1_us": 28.56
+        },
+        "source": {
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/evidence/hc_pre_goal20_20261011/adoption.json",
+          "lines": null,
+          "exists": true
+        },
+        "limit": "adoption 中的 T96=28.56 us 是后续十四档那一轮结果，不与上述 34.62/34.36 拼接成单因素收益；中档保留区间分支，不能照搬 T 阈值到 CSA。"
+      },
+      "csa_transfer": "融合边界上应先统一生产/消费的行或列归属，再考虑多核数量；每次新分核都要覆盖审计和完整时延。TopK merge 的 q=w,w+48 与 plan 的八连续行归属不一致，直接拼接会回读或引入新等待。"
+    },
+    {
+      "id": "physical_l0_lifetimes_not_pipeline_syntax",
+      "verified_change": "同一 K 累加顺序、同一 Acc：先准备当前和下一块 Left/Right，计算当前 MMA 时安排后续块搬入；在最后一次从 FIFO 输入提取后释放槽位，而非等最后两次 MMA 完成。第二阶段已经单 SPMD 的情况下，继续通过局部资源时序获得收益。",
+      "cpu_resource_evidence": {
+        "candidate": "l0_interleave_unroll_v1.py",
+        "cpu_status": "COMPILED",
+        "T96_buffers": {
+          "Left": [
+            0,
+            32768
+          ],
+          "Right": [
+            0,
+            32768
+          ],
+          "Acc": [
+            0
+          ],
+          "Mat_weight": [
+            262144
+          ]
+        },
+        "other_four_branches_cpp_equal": true,
+        "K_accumulation_order_unchanged": true,
+        "first_MMA_only_has_initialization_branch": true,
+        "schedule": "当前块计算后发出后两块搬入；生成代码在最后一次输入提取后释放FIFO，早于最后两次MMA。",
+        "not_performance_proof": true
+      },
+      "cpu_resource_source": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/evidence/hc_pre_goal20_20261011/l0_interleave_static_audit.json",
+        "lines": null,
+        "exists": true
+      },
+      "full_l1_evidence": {
+        "records": [
+          {
+            "task": "task_20261011_235702_379898121298",
+            "label": "l0_interleave_t96_control",
+            "report": "l0_interleave_t96_control/report.json",
+            "status": "PASS",
+            "case": "B16_S6_T096",
+            "p50_us": 34.339999999999975,
+            "samples_us": [
+              33.42,
+              34.339999999999975,
+              35.15999999999997
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          },
+          {
+            "task": "task_20261011_235702_379898121298",
+            "label": "l0_interleave_t96",
+            "report": "l0_interleave_t96/report.json",
+            "status": "PASS",
+            "case": "B16_S6_T096",
+            "p50_us": 31.100000000000023,
+            "samples_us": [
+              30.78,
+              32.65999999999997,
+              31.100000000000023
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          },
+          {
+            "task": "task_20261011_235702_379846418448",
+            "label": "l0_interleave_t12_control",
+            "report": "l0_interleave_t12_control/report.json",
+            "status": "PASS",
+            "case": "B02_S6_T012",
+            "p50_us": 26.600000000000023,
+            "samples_us": [
+              26.82,
+              26.24000000000001,
+              26.600000000000023
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          },
+          {
+            "task": "task_20261011_235702_379846418448",
+            "label": "l0_interleave_t12",
+            "report": "l0_interleave_t12/report.json",
+            "status": "PASS",
+            "case": "B02_S6_T012",
+            "p50_us": 29.360000000000014,
+            "samples_us": [
+              27.800000000000004,
+              29.640000000000043,
+              29.360000000000014
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          },
+          {
+            "task": "task_20261011_235929_389946332695",
+            "label": "l0_interleave_reverse_t96",
+            "report": "l0_interleave_reverse_t96/report.json",
+            "status": "PASS",
+            "case": "B16_S6_T096",
+            "p50_us": 29.219999999999914,
+            "samples_us": [
+              27.18,
+              29.71999999999997,
+              29.219999999999914
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          },
+          {
+            "task": "task_20261011_235929_389946332695",
+            "label": "l0_interleave_reverse_control_t96",
+            "report": "l0_interleave_reverse_control_t96/report.json",
+            "status": "PASS",
+            "case": "B16_S6_T096",
+            "p50_us": 31.759999999999998,
+            "samples_us": [
+              31.759999999999998,
+              30.54000000000002,
+              33.09999999999991
+            ],
+            "checks": {
+              "pto_native": true,
+              "pto_graph_eager": true,
+              "native_graph_eager": true,
+              "native_updated_input": true,
+              "pto_updated_input": true
+            },
+            "output_guards": true,
+            "blocks_each_sample": [
+              72,
+              72,
+              72
+            ]
+          }
+        ],
+        "adopted_scope": "仅精确T96",
+        "not_adopted": "小档展开后T12回退，其它三小档不再提交该候选",
+        "forward_us": [
+          34.34,
+          31.1
+        ],
+        "reverse_us": [
+          31.76,
+          29.22
+        ]
+      },
+      "full_l1_evidence_source": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/evidence/hc_pre_goal20_20261011/l0_interleave_device_evidence.json",
+        "lines": null,
+        "exists": true
+      },
+      "code": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/hc_pre.py",
+        "lines": [
+          220,
+          247
+        ],
+        "exists": true
+      },
+      "interpretation": "T96 正向 34.34 -> 31.10 us、反序 31.76 -> 29.22 us；T12 26.60 -> 29.36 us 回退。因此只采纳受益分支，未将展开/双槽泛化到全部规格。",
+      "limits": [
+        "CPU 静态审计证明 Left/Right 真实双槽和原 K 顺序，静态模型自身不是性能证明。",
+        "历史多个 stage=2 候选因实际 Vec/Left/Right 缓冲退成单槽而失败，增加流水标记不能替代物理地址审计。",
+        "本轮 OA pair CPU 探针也有 Right 超容量及退化证据，不能据 HC_pre 结果断言所有 Cube 阶段都能等比例受益。"
+      ],
+      "csa_transfer": "最终 Tile 被消费后及时终结旧排序/累加临时区生命周期；避免融合使前一阶段全部暂存与下一阶段宽 Tile 同时活跃。资源、别名和实际搬运等待要查最终 lowering。"
+    }
+  ],
+  "next_bounded_transform": {
+    "name": "TopK 最终 merge 与有效块计划的局部消费融合",
+    "status": "只读建议；未实现、未编译、未测量；先 CPU 所有权/UB 资源/完整调度审计，不能预记收益。",
+    "why_this_is_the_hc_pre_lesson": "直接消费已形成的最终 INT32 indices Tile，删去下游为旧 task 边界而回读 TopK 的 GM load，并重新统一行归属；这比只把两个旧核体放在同一 SPMD 中更接近 HC_pre 的实际结构变化。",
+    "code_landings": [
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kernels.py",
+        "lines": [
+          6008,
+          6117
+        ],
+        "exists": true
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kernels.py",
+        "lines": [
+          6128,
+          6213
+        ],
+        "exists": true
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/row_dependencies.py",
+        "lines": [
+          145,
+          233
+        ],
+        "exists": true
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "lines": [
+          207,
+          282
+        ],
+        "exists": true
+      }
+    ],
+    "current_code": "indexer_topk_query_merge__2 的 root_indices_inline729 是 [1,512] INT32 Tile，处理 visible<512/-1 尾填充后写 topk_indices；csa_slots_build_valid_qk_plan 随后按八行从 index_indices 加载，再构建 cmp_sparse_indices、sparse_bias 和 valid_block_mask。",
+    "proposed_ownership": "保留 48 个 merge worker；每 worker 遍历 base=2*worker,2*worker+96,... 并处理 base 与 base+1，两个相邻 query 共用一个 fused plan 小组。现有 q=worker,worker+48,... 并非相邻，不可直接假定已满足。更广 T 使用相同范围循环和有效尾行，不写七点白名单。",
+    "data_contract": [
+      "TopK indices/scores 对外可观察，仍按原布局写 GM；只删除 plan 对已持有 indices 的 GM 回读。",
+      "T96 理论少读 96*512*4=196608 B；不把该字节数换算成未经测量的收益。",
+      "在排序 scratch 完成最后一次使用后，仅保留两个 [1,512] INT32 Tile（共 4096 B），再进入计划数学；避免 merge_tmp 与 plan 宽 Tile 无谓重叠生命周期。",
+      "保留完整动态 position_ids、kv_seq_lens、ori_block_table、压缩上界、dummy/负索引/尾块语义；排序树、TopK tie 规则、quant 和后续数学不改变。",
+      "plan 仍写既有 cmp_sparse_indices[T,512]、sparse_bias[T,640]、valid_block_mask[T,16]，不将多核 QK 所需产物私有化。"
+    ],
+    "dependencies": [
+      "融合成员等待两个 query 各自的原 Indexer 生产者并集，完整保留 AIC/AIV 组依赖。",
+      "QK 等待按新的 query owner=floor(q/2)%48 构建，保留所有其他 KV/RoPE/状态依赖。",
+      "为生产 catalog、源码 DAG、row_dependencies 建立实际别名和读写合同；不通过删除 manual 依赖制造更短路径。",
+      "不新增全核 barrier；涉及 GM 结果发布时沿用已验证 notify/wait 缓存语义。"
+    ],
+    "risks": [
+      "原 plan 八行批处理仅 12 个有效 worker；新方案两行小组和 48 worker 可能增加标量/Vector 启动与填充代价。",
+      "merge 处理顺序变化可能等待更多 Indexer 组、增加长尾。",
+      "融合延长 merge worker 占用，可能推迟同核 csa_cache_writeback，反而延长完整关键链。",
+      "小档、单 leaf 与不同 merge 分支需要各自合同，不宣称 __2 的证明覆盖全部区间。"
+    ],
+    "current_spmd_evidence": {
+      "summary_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/row_deps_stage_summary.json",
+      "raw_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_stage_clock_v1/stage_clock/stages.json",
+      "instrumented_not_acceptance": true,
+      "stages": [
+        {
+          "kernel": "indexer_topk_query_merge__2",
+          "members": 48,
+          "first_math_us": 457.11999999999995,
+          "last_math_us": 471.73999999999995,
+          "math_and_fence_median_us": 5.980000000000018,
+          "math_and_fence_max_us": 6.920000000000016
+        },
+        {
+          "kernel": "csa_slots_build_valid_qk_plan",
+          "members": 16,
+          "first_math_us": 464.88,
+          "last_math_us": 480.09999999999997,
+          "math_and_fence_median_us": 5.609999999999985,
+          "math_and_fence_max_us": 6.819999999999993
+        },
+        {
+          "kernel": "csa_cache_writeback",
+          "members": 8,
+          "first_math_us": 466.46,
+          "last_math_us": 474.59999999999997,
+          "math_and_fence_median_us": 4.060000000000002,
+          "math_and_fence_max_us": 5.920000000000016
+        },
+        {
+          "kernel": "kv_touch",
+          "members": 1,
+          "first_math_us": 477.09999999999997,
+          "last_math_us": 478.7,
+          "math_and_fence_median_us": 1.6000000000000227,
+          "math_and_fence_max_us": 1.6000000000000227
+        },
+        {
+          "kernel": "qk_pv_aiv",
+          "members": 48,
+          "first_math_us": 481.7,
+          "last_math_us": 647.36,
+          "math_and_fence_median_us": 158.02,
+          "math_and_fence_max_us": 164.01999999999998
+        },
+        {
+          "kernel": "qk_pv_aic",
+          "members": 24,
+          "first_math_us": 481.71999999999997,
+          "last_math_us": 639.5,
+          "math_and_fence_median_us": 150.93,
+          "math_and_fence_max_us": 156.27999999999997
+        }
+      ],
+      "critical_chain_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/row_deps_stage_critical_chain.json",
+      "critical_chain_members": [
+        {
+          "core": 24,
+          "seq": 15,
+          "kernel": "indexer_topk_query_merge__2",
+          "start": 460.71999999999997,
+          "end": 467.71999999999997,
+          "math_and_notify": 7.0,
+          "after_ready": 2.480000000000018,
+          "from_own_sequence": false
+        },
+        {
+          "core": 24,
+          "seq": 16,
+          "kernel": "csa_cache_writeback",
+          "start": 468.67999999999995,
+          "end": 474.59999999999997,
+          "math_and_notify": 5.920000000000016,
+          "after_ready": 0.9599999999999795,
+          "from_own_sequence": true
+        },
+        {
+          "core": 24,
+          "seq": 17,
+          "kernel": "kv_touch",
+          "start": 477.09999999999997,
+          "end": 480.26,
+          "math_and_notify": 3.160000000000025,
+          "after_ready": 2.5,
+          "from_own_sequence": true
+        },
+        {
+          "core": 33,
+          "seq": 16,
+          "kernel": "qk_pv_aiv",
+          "start": 482.97999999999996,
+          "end": 647.48,
+          "math_and_notify": 164.5,
+          "after_ready": 2.7199999999999704,
+          "from_own_sequence": false
+        }
+      ]
+    },
+    "critical_path_limit": "当前 B16 插桩关键链经 merge -> csa_cache_writeback -> kv_touch -> QK，plan 不在所提取的最长前驱链上；plan 最后数学约 480.10 us 与 kv_touch 发布约 480.26 us 接近。不能把 merge/plan 两段时长相加当收益，当前证据不足以证明此变换缩短完整 span。CPU 完整调度模型若推迟 cache_write/QK 则不应直接上机。",
+    "not_repeating_closed_candidates": "不同于已关闭的全链 48-query-group 调度模型：本候选只改变 merge/plan 的数据消费和局部所有权，不把 Indexer/QK/OA/OB/HcPost 全链切成 query 组；也不重复 HCcompact、HCstream、kv_touch_elision 或 kv_touch_signal_only。",
+    "expected_full_gain_us": null,
+    "acceptance": "通过局部资源和覆盖审计仍只能进入候选；最终必须同轮完整 CSA L1 比较。不能用此局部候选填报七档 30% 目标。"
+  },
+  "historical_paths": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/HC_PRE_OPTIMIZATION_LOG.md",
+      "lines": null,
+      "exists": true
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/README.md",
+      "lines": null,
+      "exists": true
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/hc_pre_optimization_20261012/LATEST_PERFORMANCE.md",
+      "lines": null,
+      "exists": true
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md",
+      "lines": null,
+      "exists": true
+    }
+  ],
+  "validation_this_turn": {
+    "new_device_tests": 0,
+    "new_cpu_lowerings": 0,
+    "historical_sources_only": true,
+    "hashing": false,
+    "production_modifications": false
+  },
+  "current_acceptance_points": {
+    "history_131072_batches": [
+      4,
+      8,
+      16,
+      24,
+      28
+    ],
+    "history_8192_batches": [
+      16,
+      32
+    ],
+    "query_seqlen": 6,
+    "updated_by_user": "2026-10-17",
+    "note": "短历史 B24 已移出验收点，新增长历史 B28；全部旧结果保留且不改名。"
+  }
+}

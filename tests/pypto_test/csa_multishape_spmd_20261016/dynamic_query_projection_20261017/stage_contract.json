@@ -1,0 +1,54 @@
+{
+  "implementation": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+  "sources": ["deepseek_v4_flash_csa/q_projection.py", "deepseek_v4_flash_csa/qkv_proj_rope.py"],
+  "high_level_source_extraction": true,
+  "historical_ir_used": false,
+  "runtime_test_dependency": false,
+  "scope": "Q_B、query dequant/RMS/NOPE/RoPE 和 RoPE 准备阶段；未组装整层或阶段间同步",
+  "dynamic_shape": "T/PAD_ROWS/QPROJ_ROWS 为 pl.dynamic；Q_B tokens 是由实际 Tensor 维度取得的设备 Scalar",
+  "qb": {
+    "interface": "q_b_stage(wq_b, qr_i8_matmul, q_proj_i32, tokens, worker_id, WORKERS)",
+    "suggested_workers": 20,
+    "role": "AIC",
+    "nz_tiles": "M128/N256/K256，原 INT8×INT8→INT32 累加",
+    "nd_tiles": "M64/N512/K128，保留原填充行路径",
+    "owner": "每个 N_TILE 列块 n 的 owner=n%WORKERS；每个 owner 处理所有实际 token 块",
+    "dependencies": "QR 对全部消费行的 INT8 暂存已写回并发布；外层直接设置 wq_b BYPASS",
+    "capacity": "QR 暂存与 INT32 投影暂存均至少 ceil(T/128)*128 行；循环边界不取整个较大容量"
+  },
+  "rope_prepare": {
+    "interface": "q_rope_prepare_stage(sin, signed_sin, swap, worker_id, WORKERS)",
+    "suggested_workers": 48,
+    "role": "AIV",
+    "owner": "(row//8)%min(ceil(T/8),WORKERS)",
+    "dependencies": "只依赖本轮 sin，允许与 Q_B 并行；消费 signed_sin/swap 前须等待发布",
+    "pair_rule": "sign=(-1,+1)，swap=(1,0,3,2,...)；尾行保持相同列规则，只截取有效行"
+  },
+  "dequant_rope": {
+    "interface": "q_dequant_rope_stage(scale_w, cos, signed_sin, swap, q_flat, scale_pad, q_i32, worker_id, WORKERS)",
+    "suggested_workers": 48,
+    "role": "AIV",
+    "head_group": "T整除384且T>=384时64；否则T整除96且T>=96时16；其它4",
+    "owner": "work=(row//8)*(64/head_tile)+head//head_tile，owner=work%WORKERS",
+    "dependencies": "Q_B 对本 head 的所有列块已发布；QR scale 和对应行 RoPE 准备已发布。NZ 每个 head 需要两个 N256 块。",
+    "gm_view": "q_flat[T,32768] 必须是下游 q[T,64,512] 的外层零拷贝GM别名；不得在 helper 内做 GM reshape 后再读写",
+    "arithmetic": "先activation_scale再weight_scale；完整八行rsqrt，尾行recip(sqrt)；顺序不变",
+    "tail_proof": "16/64-head 分组要求 T 为96/384的倍数，必整除8，因此有尾行时 head_tile=4，尾分支固定处理4 heads覆盖完整"
+  },
+  "evidence": {
+    "source_equivalence": "source_equivalence.json",
+    "actual_nz_cpu_codegen": "nz_v3/result.json",
+    "successful_stages": ["qb", "dequant", "rope"],
+    "original_nz_probe_module_imported": false,
+    "nd_cpu_codegen_done": false
+  },
+  "attempts": {
+    "nz_v1": "环境 source 在 nounset 下读取未定义 ZSH_VERSION 退出；未导入源码或开始CPU编译。只修复复现脚本的环境加载选项，保留 startup_failure_nz_v1.json。",
+    "nz_v2": "源码审计把 Ruff 的 docstring 缩进差异当成代码差异；未编译。排除文档字符串后所有控制和数学AST通过。",
+    "nz_v3": "三段实际 NZ2 CPU codegen 全部通过，无编译器或依赖修改。"
+  },
+  "device_execution": false,
+  "device_precision_proven": false,
+  "cross_stage_synchronization_proven": false,
+  "performance_measured": false
+}

@@ -1,0 +1,28 @@
+INFO 10-17 15:15:00 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 10-17 15:15:00 [__init__.py:46] - ascend -> vllm_ascend:register
+INFO 10-17 15:15:00 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 10-17 15:15:00 [__init__.py:237] Platform plugin ascend is activated
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+INFO 10-17 15:15:05 [platform.py:61] Breakable cudagraph is force disabled on Ascend because DeepSeek V4 PIECEWISE cudagraph is not supported yet.
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/hc_pre_direct_stream_v1/cpu_transform_v2/production_h131072_b16/entry_jit.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/hc_compact_stream_cpu_v1/source.py", "error": "Cannot reassign 'hc_compact_fp32' with a different type: was pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec], got pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)]"}
+Error: Cannot reassign 'hc_compact_fp32' with a different type: was pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec], got pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(pad=pl.PadValue.zero)]
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/hc_compact_stream_cpu_v1/source.py:2278:21
+     |
+2276 |                     hc_compact_fp32_valid = pl.tile.cast(hc_compact_bf16, target_type=pl.FP32, mode='round')
+2277 |                     hc_compact_clean = pl.tile.fillpad(pl.tile.set_validshape(hc_compact_fp32_valid, hc_compact_rows, 512), pad_value=pl.PadValue.zero)
+2278 |                     hc_compact_fp32 = pl.tile.set_validshape(hc_compact_clean, 8, 512)
+     |                     ^^^^^^^^^^^^^^^
+2279 |                 hc_compact_fifo_row = group_id * 32 + hc_compact_k % 2 * 16 + lane_id * 8
+2280 |                 pl.tile.store(hc_compact_fp32, [hc_compact_fifo_row, 0], view_2)
+     |
+   = help: Use a different variable name for tensors with different shapes or dtypes
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.
+[ERROR] 2026-10-17-15:15:18 (PID:3069819, Device:-1, RankID:-1) ERR99999 UNKNOWN applicaiton exception

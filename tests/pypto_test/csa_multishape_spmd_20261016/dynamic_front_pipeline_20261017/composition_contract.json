@@ -1,0 +1,122 @@
+{
+  "status": "完整前段单MIX CPU codegen及产物审计通过",
+  "not_full_csa": true,
+  "device_tested": false,
+  "precision_tested": false,
+  "performance_measured": false,
+  "source": "probe.py",
+  "mathematics": "直接调用正式hc_stages.py和qkv_stages.py，未导入历史IR或按档位冻结代码",
+  "dynamic_ABI": {
+    "T": "实际token数，T>0",
+    "P16": "ceil(T/16)*16，供HC raw/inv/pre及QA",
+    "P8": "ceil(T/8)*8，供mixed/QR填充区",
+    "PARTIAL": "4*P16",
+    "WORDS": "9*72*128=82944个INT32；动态ABI维度但本G24协议要求固定容量"
+  },
+  "phase_contract": [
+    {
+      "id": 1,
+      "name": "HC_INPUT",
+      "writers": "48 AIV",
+      "owner": "widen tile8 % 48",
+      "consumers": "AIC HC投影；HC gates/comb/mix",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 2,
+      "name": "HC_PARTIAL",
+      "writers": "24 AIC",
+      "owner": "(M16行块*4+K4096 split) % 24",
+      "consumers": "AIV reduce",
+      "active_owners": "0..min(ceil(T/16)*4,24)-1"
+    },
+    {
+      "id": 3,
+      "name": "HC_RAW",
+      "writers": "48 AIV",
+      "owner": "M16行块 % 48",
+      "consumers": "AIV gates和comb",
+      "active_owners": "0..min(ceil(T/16),48)-1"
+    },
+    {
+      "id": 4,
+      "name": "HC_GATES",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "AIV mix；post供后续层阶段",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 5,
+      "name": "HC_COMB",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "本前段无消费者；输出供后续HCpost",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 6,
+      "name": "HC_NORM",
+      "writers": "48 AIV",
+      "owner": "token8 tile % 48",
+      "consumers": "AIC Q_A",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    },
+    {
+      "id": 7,
+      "name": "QA",
+      "writers": "24 AIC",
+      "owner": "(M组*8+N128列块) % 24",
+      "consumers": "AIV QR全部1024列",
+      "active_owners": "0..8*min(3,max(1,T//M))-1；T<128时M32，否则M64"
+    },
+    {
+      "id": 8,
+      "name": "QR",
+      "writers": "48 AIV",
+      "owner": "token8 tile % min(ceil(T/8),48)",
+      "consumers": "本前段无消费者",
+      "active_owners": "0..min(ceil(T/8),48)-1"
+    }
+  ],
+  "role_notes": [
+    "AIC core=group，AIV core=24+2*group+subblock。72核包括空核均begin一次。",
+    "每helper完成所有本核wave后才publish一次，不以完成信号当FIFO ACK。",
+    "第一版所有消费者保守等当前phase全部活跃owner；没有全局syncall。",
+    "GATES与COMB逻辑独立，因同一AIV程序顺序COMB在本核mix前；不作为性能最优策略。",
+    "HC base扁平与二维GM视图由调用层绑定，同一权重；BF16 norm/gamma原格式。",
+    "同一个signals工作区只能按G24/固定phase含义被单图单流顺序复用，失败后重置。"
+  ],
+  "cpu_evidence": {
+    "owner_sets_and_DAG": "ownership.json",
+    "full_codegen_and_ABI_QA_lineage": "full_v3/compiled_audit.json",
+    "full_v3_original_result": "full_v3/result.json",
+    "reproduce_full_compile": "bash reproduce_cpu.sh <新的输出目录>",
+    "reproduce_no_compile_audit": "python audit_compiled.py --artifact full_v3/kernel --output <新的审计json>"
+  },
+  "attempts": [
+    {
+      "path": "full_v1/result.json",
+      "result": "失败",
+      "reason": "测试壳将AIC只读参数标成InOut且未返回；改真实只读合同。"
+    },
+    {
+      "path": "full_v2/result.json",
+      "result": "失败",
+      "reason": "cluster无法追溯QA动态M分支的返回SSA到原GM参数。"
+    },
+    {
+      "path": "full_v3/result.json",
+      "result": "后端成功，末尾harness失败",
+      "reason": "通过qa_gm显式保留GM别名，QA未被DCE；ABI检查正则漏右括号，独立现产物审计纠正，无重编译。"
+    }
+  ],
+  "current_math_equivalent_to_compiled_snapshots_ignoring_docs": {
+    "hc_stages.py": true,
+    "qkv_stages.py": true,
+    "phase_sync.py": true,
+    "signals.py": true
+  },
+  "current_probe_equivalent_to_compiled_snapshot_ignoring_docs": true,
+  "snapshot_note": "根对正式helper补充中文注释；当前与编译快照数学AST一致，probe仅补充生命周期说明。"
+}

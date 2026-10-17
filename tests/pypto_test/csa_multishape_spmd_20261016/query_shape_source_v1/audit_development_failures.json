@@ -1,0 +1,25 @@
+{
+  "scope": "生成 IR 审计脚本开发中的误匹配；原 CSA 源码 import/specialize/outline 首次即通过",
+  "attempts": [
+    {
+      "attempt": 1,
+      "error": "AssertionError: buf_query_inline8822__phi_v2 // 2",
+      "reason": "按 query 左操作数匹配过宽，将 coefficient pair 组编号除数2误认为请求定位除数",
+      "fix": "按赋值目标的 batch/request 语义匹配，保留组编号的正确除数2"
+    },
+    {
+      "attempt": 2,
+      "error": "AssertionError: qk_block_count_inline4356__ssa_v0 = qk_query_count_inline4292__ssa_v0 * 5",
+      "reason": "qk_b 前缀误匹配 qk_block_count；它是分块计数而不是请求编号",
+      "fix": "收窄为 qk_b_inline 等真实 SSA 源变量前缀"
+    },
+    {
+      "attempt": 3,
+      "error": "AssertionError: len(mappings) >= 15",
+      "reason": "审计预设命中数量15没有源码依据；实际8类函数中12个具名请求定位赋值",
+      "fix": "断言预期8类函数覆盖，不再猜测数字阈值；12项实际位置全部保存在 generated_ir_audit.json"
+    }
+  ],
+  "final_audit_passed": true,
+  "math_source_changed_to_pass_audit": false
+}

@@ -1,0 +1,285 @@
+{
+  "passed": true,
+  "device_execution": false,
+  "device_sync_validated": false,
+  "device_precision_validated": false,
+  "performance_measured": false,
+  "sample_shapes_supplied": false,
+  "core_groups": 24,
+  "aic": 24,
+  "aiv": 48,
+  "ffts_event_ids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "scope": "Attention成对流水，非完整CSA",
+  "symbolic_parse_passed": true,
+  "symbolic_dynamic_dimensions": [
+    "CSA_ATTN_COMPRESSED_COLUMNS",
+    "CSA_ATTN_ORIGINAL_COLUMNS",
+    "CSA_ATTN_PLAN_CAP",
+    "CSA_ATTN_PLAN_T",
+    "CSA_ATTN_ROPE_CAP",
+    "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+    "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+    "CSA_ATTN_STREAM_KV_RING_ROWS",
+    "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+    "CSA_ATTN_STREAM_PACK_ROWS",
+    "CSA_ATTN_STREAM_Q_ROWS"
+  ],
+  "artifact_output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/cpu_v4/kernel",
+  "full_codegen_passed": true,
+  "submission_calls": [
+    "rt_submit_task("
+  ],
+  "single_mix_submission": true,
+  "sync_start": true,
+  "cpp_dynamic_dimensions": {
+    "kernels/aic/cube.cpp": [
+      "CSA_ATTN_STREAM_Q_ROWS",
+      "CSA_ATTN_PLAN_CAP",
+      "CSA_ATTN_STREAM_KV_RING_ROWS",
+      "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+      "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+      "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+      "CSA_ATTN_ORIGINAL_COLUMNS",
+      "CSA_ATTN_COMPRESSED_COLUMNS",
+      "CSA_ATTN_PLAN_T",
+      "CSA_ATTN_ROPE_CAP",
+      "CSA_ATTN_STREAM_PACK_ROWS"
+    ],
+    "kernels/aiv/vector.cpp": [
+      "CSA_ATTN_STREAM_Q_ROWS",
+      "CSA_ATTN_PLAN_CAP",
+      "CSA_ATTN_STREAM_KV_RING_ROWS",
+      "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+      "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+      "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+      "CSA_ATTN_ORIGINAL_COLUMNS",
+      "CSA_ATTN_COMPRESSED_COLUMNS",
+      "CSA_ATTN_PLAN_T",
+      "CSA_ATTN_ROPE_CAP",
+      "CSA_ATTN_STREAM_PACK_ROWS"
+    ]
+  },
+  "compiled_abi": [
+    {
+      "name": "q_flat",
+      "direction": "In",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "valid_block_mask",
+      "direction": "In",
+      "shape": [
+        -1,
+        16
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "kv_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "score_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "probability_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "pv_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "ffts_workspace",
+      "direction": "In",
+      "shape": [
+        256
+      ],
+      "dtype": "int64",
+      "layout": "ND"
+    },
+    {
+      "name": "ori_kv_flat",
+      "direction": "In",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "cmp_kv_flat",
+      "direction": "In",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "ori_block_table",
+      "direction": "In",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "cmp_block_table",
+      "direction": "In",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "bounds",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "lengths",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "position_ids",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int64",
+      "layout": "ND"
+    },
+    {
+      "name": "cmp_sparse_indices",
+      "direction": "In",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "sparse_bias",
+      "direction": "In",
+      "shape": [
+        -1,
+        640
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "attn_sink_col",
+      "direction": "In",
+      "shape": [
+        64,
+        1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "freqs_cos",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "rope_sin_signed",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "mi_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "li_transfer",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "o_packed_heads",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    }
+  ]
+}

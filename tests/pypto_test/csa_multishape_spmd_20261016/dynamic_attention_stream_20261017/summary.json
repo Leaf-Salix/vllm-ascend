@@ -1,0 +1,63 @@
+{
+  "scope": "正式动态Attention QK/PV成对AIC/双AIV及最终packed head发布，非完整CSA",
+  "status": "CPU_BACKEND_AND_BOUNDED_PROTOCOL_PASS",
+  "production_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py",
+  "entrypoints": [
+    "attention_qk_pv_cube_stage",
+    "attention_qk_pv_vector_lane_stage"
+  ],
+  "evidence": {
+    "full_backend": "cpu_v4/result.json",
+    "compiled_writeback_and_dynamic_abi": "cpu_v4/compiled_audit.json",
+    "math_and_event_source": "source_v2.json",
+    "protocol": "protocol_v1.json",
+    "api": "interface_contract.json",
+    "attempts": "attempts.json",
+    "semantic_snapshot": "final_snapshot_audit.json",
+    "lint": "lint_v2.log"
+  },
+  "findings": {
+    "mixed_submissions": 1,
+    "aic": 24,
+    "aiv": 48,
+    "public_tensor_arguments": 22,
+    "cpp_dynamic_dimensions": 13,
+    "math_assignment_names_equal": 69,
+    "event_call_order_and_pipe_equal": 10,
+    "protocol_cases": 84,
+    "random_interleavings": 1008,
+    "maximum_pending_notifications": {
+      "KV": 1,
+      "SCORE": 1,
+      "PROB": 3,
+      "PV": 2
+    },
+    "expected_actual_store_sites": {
+      "cube": {
+        "score_transfer": 1,
+        "pv_transfer": 4
+      },
+      "vector": {
+        "kv_transfer": 1,
+        "probability_transfer": 1,
+        "mi_transfer": 1,
+        "li_transfer": 1,
+        "o_packed_heads": 4
+      }
+    },
+    "final_FFTS_binding": "PTOAS emits source declaration; PyPTO removes hardware base reset in wrapper; Simpler runtime initializes FFTS"
+  },
+  "reproduction_commands": [
+    "bash /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/reproduce_cpu.sh cpu_new",
+    "python /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_source.py --output /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/source_new.json",
+    "python /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_protocol.py --output /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/protocol_new.json",
+    "python /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/audit_compiled.py --artifact /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/cpu_v4/kernel --output /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/compiled_audit_new.json"
+  ],
+  "limitations": [
+    "未运行NPU，不代表整层功能/精度/graph/性能通过",
+    "无主机metadata回读，无样本形状绑定；FFTS[256]为当前API硬件控制常量",
+    "事件模型依赖计数通知/双AIV聚合及硬件可见性假设，不能替代A3验证",
+    "同一dynamic符号须绑定同一维度，入口应校验合法shape容量和事件生命周期",
+    "源码generation builder仅首次历史提取，最终正式文件不依赖它；后续中文注释与import整理未改已编译数学AST"
+  ]
+}

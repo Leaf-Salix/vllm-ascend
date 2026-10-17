@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-17",
+  "production_source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_projection_stages.py",
+  "status": "两路源级动态投影完成；首次联合CPU完整后端编译通过；未NPU",
+  "scope": "只迁移canonical主/Indexer压缩投影；不包含请求池化、state/cache、同步组装",
+  "interfaces": "stage_contract.json",
+  "reproduce": "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_projection_20261017/reproduce_cpu.sh cpu_v1 > tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_projection_20261017/cpu_v1.log 2>&1",
+  "new_reproduction_note": "输出目录必须尚不存在；复现时更换cpu_v1目录名，历史产物不覆盖。",
+  "source_comparison": "主与Indexer各自完整idx循环经变量/常量名及worker名对齐后AST相同；包含尾块、K流水、首块matmul或init_cond、两份写回。",
+  "geometry": {
+    "per_helper_cases": 1600,
+    "per_helper_capacity_cases": 4800,
+    "T_contiguous_range": [
+      0,
+      384
+    ],
+    "additional_boundaries": [
+      511,
+      512,
+      513,
+      543,
+      544,
+      575,
+      576,
+      639,
+      640,
+      767,
+      768,
+      769,
+      1023,
+      1024,
+      1025
+    ],
+    "workers": [
+      1,
+      3,
+      8,
+      24
+    ],
+    "valid_rows_and_column_blocks_single_owner": true,
+    "padding_content_defined": false
+  },
+  "compilation": {
+    "result": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_projection_20261017/cpu_v1/result.json",
+    "parse_passed": true,
+    "full_codegen_passed": true,
+    "sample_shapes_supplied": false,
+    "dynamic_inputs_and_outputs": 5,
+    "dynamic_axis_symbols": 3,
+    "aic_tasks": 1,
+    "original_nz_probe_module_imported": false
+  },
+  "generated_artifact_audit": "generated_cpp_audit.json",
+  "attempts": [
+    {
+      "name": "lint_v1",
+      "result": "B023失败，仅审计脚本闭包捕获；改显式参数后lint_v2通过",
+      "evidence": "lint_v1.json"
+    },
+    {
+      "name": "cpu_v1",
+      "result": "首轮联合AST/几何/parse/full_codegen通过，无编译失败或依赖修改",
+      "evidence": "cpu_v1.log"
+    },
+    {
+      "name": "format_v1",
+      "result": "仅测试脚本需格式化；format_v2完成，生产文件未改，二者AST均与编译快照相同",
+      "evidence": "format_v1.log"
+    }
+  ],
+  "limitations": [
+    "没有设备数值/精度证明",
+    "没有完整CSA核间同步证明",
+    "没有真实性能数据",
+    "CPU probe把两路顺序放一个SPMD不规定最终全层调度顺序"
+  ]
+}

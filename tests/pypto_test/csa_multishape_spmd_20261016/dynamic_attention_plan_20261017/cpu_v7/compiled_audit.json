@@ -1,0 +1,281 @@
+{
+  "passed": true,
+  "scope": "attention plan与inverse RoPE两个helper的既有CPU产物审计，非完整CSA",
+  "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_plan_20261017/cpu_v7/kernel",
+  "kernel_cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_plan_20261017/cpu_v7/kernel/kernels/aiv/dynamic_attention_plan_and_inverse_rope.cpp",
+  "single_aiv_submission": true,
+  "public_tensor_count": 13,
+  "incore_tensor_count": 11,
+  "incore_scalar_page_counts": 2,
+  "cpp_dynamic_descriptor_dimensions": [
+    [
+      "CSA_ATTN_PLAN_T",
+      "positions__ssa_v0_tensor->shapes[0]"
+    ],
+    [
+      "CSA_GEOMETRY_REQUESTS",
+      "lengths__ssa_v0_tensor->shapes[0]"
+    ],
+    [
+      "CSA_GEOMETRY_QUERY_BOUNDS",
+      "bounds__ssa_v0_tensor->shapes[0]"
+    ],
+    [
+      "CSA_ATTN_PLAN_CAP",
+      "bias__ssa_v0_tensor->shapes[0]"
+    ],
+    [
+      "CSA_ATTN_COMPRESSED_COLUMNS",
+      "compressed_table__ssa_v0_tensor->shapes[1]"
+    ],
+    [
+      "CSA_ATTN_ORIGINAL_COLUMNS",
+      "original_table__ssa_v0_tensor->shapes[1]"
+    ],
+    [
+      "CSA_ATTN_ROPE_CAP",
+      "signed_sin__ssa_v0_tensor->shapes[0]"
+    ]
+  ],
+  "page_count_scalar_origins": [
+    [
+      "CSA_ATTN_PROBE_ORIGINAL_PAGES",
+      "6"
+    ],
+    [
+      "CSA_ATTN_PROBE_COMPRESSED_PAGES",
+      "7"
+    ]
+  ],
+  "page_capacity_guards": {
+    "CSA_ATTN_PROBE_COMPRESSED_PAGES": {
+      "cpp_parameter": "v12",
+      "guards": [
+        "if (v300 >= v42 & v300 < v12)"
+      ]
+    },
+    "CSA_ATTN_PROBE_ORIGINAL_PAGES": {
+      "cpp_parameter": "v13",
+      "guards": [
+        "if (v343 >= v42 & v343 < v13)"
+      ]
+    }
+  },
+  "dynamic_T_loops": [
+    "for (int64_t v107 = v106; v107 < v14; v107 += v41) {",
+    "for (int64_t v427 = v106; v427 < v14; v427 += v41) {"
+  ],
+  "column_major_8x1_tile_count": 8,
+  "row_max_instructions": 1,
+  "real_GM_accesses": {
+    "topk": {
+      "TLOAD": [
+        {
+          "line": 288,
+          "statement": "TLOAD(v110, v122);"
+        }
+      ]
+    },
+    "lengths": {
+      "scalar_load": [
+        {
+          "line": 413,
+          "statement": "int32_t v157 = (v3)[v149];"
+        },
+        {
+          "line": 568,
+          "statement": "int32_t v185 = (v3)[v144];"
+        }
+      ]
+    },
+    "bounds": {
+      "scalar_load": [
+        {
+          "line": 431,
+          "statement": "int32_t v162 = (v4)[v149];"
+        },
+        {
+          "line": 437,
+          "statement": "int32_t v164 = (v4)[v153];"
+        }
+      ]
+    },
+    "positions": {
+      "scalar_load": [
+        {
+          "line": 565,
+          "statement": "int64_t v184 = (v1)[v140];"
+        },
+        {
+          "line": 1022,
+          "statement": "int64_t v301 = (v1)[v289];"
+        }
+      ]
+    },
+    "bias": {
+      "TSTORE": [
+        {
+          "line": 964,
+          "statement": "TSTORE(v287, v276);"
+        },
+        {
+          "line": 1328,
+          "statement": "TSTORE(v376, v368);"
+        },
+        {
+          "line": 1473,
+          "statement": "TSTORE(v413, v402);"
+        }
+      ]
+    },
+    "compressed_table": {
+      "scalar_load": [
+        {
+          "line": 1008,
+          "statement": "int32_t v299 = (v6)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v291 * (uint64_t) v18) + (uint64_t) v298)];"
+        }
+      ]
+    },
+    "original_table": {
+      "scalar_load": [
+        {
+          "line": 1076,
+          "statement": "int32_t v317 = (v7)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v291 * (uint64_t) v19) + (uint64_t) v315)];"
+        },
+        {
+          "line": 1181,
+          "statement": "int32_t v342 = (v7)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v291 * (uint64_t) v19) + (uint64_t) v341)];"
+        }
+      ]
+    },
+    "mask": {
+      "scalar_store": [
+        {
+          "line": 1338,
+          "statement": "(v8)[v377] = v292;"
+        },
+        {
+          "line": 1521,
+          "statement": "(v8)[v426] = v425;"
+        }
+      ]
+    },
+    "indices": {
+      "TSTORE": [
+        {
+          "line": 1420,
+          "statement": "TSTORE(v399, v386);"
+        }
+      ]
+    },
+    "sin": {
+      "TLOAD": [
+        {
+          "line": 1707,
+          "statement": "TLOAD(v464, v476);"
+        }
+      ]
+    },
+    "signed_sin": {
+      "TSTORE": [
+        {
+          "line": 1752,
+          "statement": "TSTORE(v488, v477);"
+        }
+      ]
+    }
+  },
+  "tail_store_context": {
+    "indices": {
+      "line": 1420,
+      "context": [
+        "    TCVT(v386, v384, v388, v389);",
+        "    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID2);",
+        "    v386.SetValidShape(v109, v36);",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v390 = 0;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    __gm__ int32_t* v391 = PTOAS__GLOBAL_TENSOR_DATA(v81);",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v392 = 1;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v393 = 1;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v394 = 1;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    int64_t v395 = v109 * v36;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    int64_t v396 = v394 * v395;",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    pto::Shape<1, 1, 1, -1, 512> v397 = pto::Shape<1, 1, 1, -1, 512>(v392, v393, v394, v109, v36);",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    pto::Stride<-1, -1, -1, -1, -1> v398 = pto::Stride<-1, -1, -1, -1, -1>(v393 * v396, v396, v395, v36, v35);",
+        "    // pto: %indices__ssa_v0_pview",
+        "    ;",
+        "    GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, 512>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v399 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, 512>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v391 + (v390 + v112 * v36 + v42 * v35), v397, v398);",
+        "    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID2);",
+        "    TSTORE(v399, v386);"
+      ]
+    },
+    "signed_sin": {
+      "line": 1752,
+      "context": [
+        "    pipe_barrier(PIPE_V);",
+        "    TMUL(v477, v464, v462);",
+        "    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID4);",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v479 = 0;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    __gm__ float* v480 = PTOAS__GLOBAL_TENSOR_DATA(v99);",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v481 = 1;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v482 = 1;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    const int64_t v483 = 1;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    int64_t v484 = v429 * v39;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    int64_t v485 = v483 * v484;",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    pto::Shape<1, 1, 1, -1, 64> v486 = pto::Shape<1, 1, 1, -1, 64>(v481, v482, v483, v429, v39);",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    pto::Stride<-1, -1, -1, -1, -1> v487 = pto::Stride<-1, -1, -1, -1, -1>(v482 * v485, v485, v484, v39, v35);",
+        "    // pto: %signed_sin__ssa_v0_pview",
+        "    ;",
+        "    GlobalTensor<float, pto::Shape<1, 1, 1, -1, 64>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v488 = GlobalTensor<float, pto::Shape<1, 1, 1, -1, 64>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v480 + (v479 + v466 * v39 + v42 * v35), v486, v487);",
+        "    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID4);",
+        "    TSTORE(v488, v477);"
+      ]
+    }
+  },
+  "cache_payload_pointer_absent_from_incore": true,
+  "topk_page_validation_reads_local_tile": true,
+  "no_embedded_wait_notify": true,
+  "device_execution": false,
+  "device_precision_validated": false,
+  "performance_measured": false,
+  "limits": [
+    "CPP地址/顺序与CPU oracle不是A3设备指令/缓存验证。",
+    "ScalarWriteLineShared静态警告保留，mask按64B整行和8行tile分配给唯一owner；入口须保证64B对齐。",
+    "实际T、输入动态轴一致性和workspace容量需要未来整层入口检查。"
+  ]
+}

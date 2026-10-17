@@ -1,0 +1,152 @@
+{
+  "candidate": "attention_query_metadata_v1",
+  "decision": "默认保持关闭；两个点收益方向不同，保留候选，未扩七档或建立新阈值",
+  "comparison": "同卡同进程相同根Tensor地址，开关单轴对照与原动态分task，每侧五窗口完整L1首尾中位数",
+  "wait_backoff": "测试编译hook：失败轮询100 syscnt tick；正式binding未默认启用",
+  "new_runtime_tensors": 0,
+  "new_allocations": 0,
+  "new_phases": 0,
+  "default_attention_query_metadata": false,
+  "rows": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "task": "task_20261017_225635_12278994621",
+      "task_status": "completed (exit=0)",
+      "source_result": "matrix_h131072_b16_query_metadata_v1/result.json",
+      "matrix_result": "matrix_h131072_b16_query_metadata_v1/attention_query_policy_matrix/result.json",
+      "full_csa_validated": true,
+      "graph_replay_validated": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            863.62,
+            877.76,
+            857.7,
+            873.2,
+            896.52
+          ],
+          "median_us": 873.2
+        },
+        "spmd_attention_query_plan": {
+          "samples_us": [
+            897.3,
+            913.8,
+            907.28,
+            911.06,
+            913.48
+          ],
+          "median_us": 911.06
+        },
+        "spmd_attention_query_scan": {
+          "samples_us": [
+            896.2,
+            901.26,
+            887.42,
+            888.8,
+            898.9
+          ],
+          "median_us": 896.2
+        }
+      },
+      "on_vs_off_latency_reduction_pct": -1.6581120285650508,
+      "vs_dynamic": {
+        "spmd_attention_query_plan": {
+          "latency_reduction_pct": -4.335776454420515,
+          "target_met": false
+        },
+        "spmd_attention_query_scan": {
+          "latency_reduction_pct": -2.6339899221255125,
+          "target_met": false
+        }
+      },
+      "protocol": {
+        "spmd_attention_query_plan": {
+          "passed": true,
+          "before": 11,
+          "calls": 9
+        },
+        "spmd_attention_query_scan": {
+          "passed": true,
+          "before": 1,
+          "calls": 9
+        }
+      },
+      "plan_probe_passed": true,
+      "metadata_replay_passed": true,
+      "padding_replay_passed": true
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "task": "task_20261017_225636_122852430692",
+      "task_status": "completed (exit=0)",
+      "source_result": "matrix_h8192_b32_query_metadata_v1/result.json",
+      "matrix_result": "matrix_h8192_b32_query_metadata_v1/attention_query_policy_matrix/result.json",
+      "full_csa_validated": true,
+      "graph_replay_validated": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            983.74,
+            978.82,
+            1009.98,
+            971.4,
+            965.1
+          ],
+          "median_us": 978.82
+        },
+        "spmd_attention_query_plan": {
+          "samples_us": [
+            1022.52,
+            1037.92,
+            1019.38,
+            1036.64,
+            1022.4
+          ],
+          "median_us": 1022.52
+        },
+        "spmd_attention_query_scan": {
+          "samples_us": [
+            1034.48,
+            1043.92,
+            1036.34,
+            1040.0,
+            1035.44
+          ],
+          "median_us": 1036.34
+        }
+      },
+      "on_vs_off_latency_reduction_pct": 1.333539185981425,
+      "vs_dynamic": {
+        "spmd_attention_query_plan": {
+          "latency_reduction_pct": -4.464559367401555,
+          "target_met": false
+        },
+        "spmd_attention_query_scan": {
+          "latency_reduction_pct": -5.876463496863549,
+          "target_met": false
+        }
+      },
+      "protocol": {
+        "spmd_attention_query_plan": {
+          "passed": true,
+          "before": 1,
+          "calls": 9
+        },
+        "spmd_attention_query_scan": {
+          "passed": true,
+          "before": 1,
+          "calls": 9
+        }
+      },
+      "plan_probe_passed": null,
+      "metadata_replay_passed": null,
+      "padding_replay_passed": null
+    }
+  ],
+  "s5_validated": false,
+  "next_scope": "KV历史和batch为主要分档维度，下一阶段补S5整链验证；S5/S6可各自特化但请求边界保持device动态"
+}

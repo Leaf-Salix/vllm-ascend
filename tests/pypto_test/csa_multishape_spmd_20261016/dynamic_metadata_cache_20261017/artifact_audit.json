@@ -1,0 +1,94 @@
+{
+  "device_execution": false,
+  "recompiled": false,
+  "stages": {
+    "offsets": {
+      "required_axes": [
+        "CSA_GEOMETRY_QUERY_BOUNDS",
+        "CSA_GEOMETRY_REQUESTS",
+        "METADATA_CACHE_PROBE_T"
+      ],
+      "descriptor_reads": [
+        {
+          "file": "cpu_v1/offsets/kernels/aiv/offsets_entry_incore_0.cpp",
+          "line": 271,
+          "symbol": "CSA_GEOMETRY_REQUESTS",
+          "statement": "int64_t CSA_GEOMETRY_REQUESTS = static_cast<int64_t>(lengths__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "file": "cpu_v1/offsets/kernels/aiv/offsets_entry_incore_0.cpp",
+          "line": 274,
+          "symbol": "CSA_GEOMETRY_QUERY_BOUNDS",
+          "statement": "int64_t CSA_GEOMETRY_QUERY_BOUNDS = static_cast<int64_t>(bounds__ssa_v0_tensor->shapes[0]);"
+        }
+      ],
+      "scalar_evidence": {
+        "shape_source": "int64_t METADATA_CACHE_PROBE_T = (int64_t)orch_args.tensor(0).ref().shapes[0];",
+        "dispatch": "params_t0.add_scalar(METADATA_CACHE_PROBE_T)",
+        "kernel": "Unpack scalar: METADATA_CACHE_PROBE_T",
+        "host_device_value_readback": false
+      },
+      "passed": true
+    },
+    "rope": {
+      "required_axes": [
+        "CSA_GEOMETRY_QUERY_BOUNDS",
+        "CSA_GEOMETRY_REQUESTS",
+        "CSA_METADATA_COMPACT_ROWS",
+        "METADATA_CACHE_PROBE_T"
+      ],
+      "descriptor_reads": [
+        {
+          "file": "cpu_v2/rope/kernels/aiv/rope_entry_incore_0.cpp",
+          "line": 711,
+          "symbol": "METADATA_CACHE_PROBE_T_1",
+          "statement": "int64_t METADATA_CACHE_PROBE_T_1 = static_cast<int64_t>(out_cos__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "file": "cpu_v2/rope/kernels/aiv/rope_entry_incore_0.cpp",
+          "line": 714,
+          "symbol": "CSA_GEOMETRY_REQUESTS_1",
+          "statement": "int64_t CSA_GEOMETRY_REQUESTS_1 = static_cast<int64_t>(lengths__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "file": "cpu_v2/rope/kernels/aiv/rope_entry_incore_0.cpp",
+          "line": 717,
+          "symbol": "CSA_GEOMETRY_QUERY_BOUNDS",
+          "statement": "int64_t CSA_GEOMETRY_QUERY_BOUNDS = static_cast<int64_t>(bounds__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "file": "cpu_v2/rope/kernels/aiv/rope_entry_incore_0.cpp",
+          "line": 720,
+          "symbol": "CSA_METADATA_COMPACT_ROWS",
+          "statement": "int64_t CSA_METADATA_COMPACT_ROWS = static_cast<int64_t>(cos__ssa_v0_tensor->shapes[0]);"
+        }
+      ],
+      "scalar_evidence": null,
+      "passed": true
+    },
+    "cache": {
+      "required_axes": [
+        "CSA_ORIGINAL_CACHE_ROWS",
+        "METADATA_CACHE_PROBE_T"
+      ],
+      "descriptor_reads": [
+        {
+          "file": "cpu_v2/cache/kernels/aiv/cache_entry_incore_0.cpp",
+          "line": 244,
+          "symbol": "METADATA_CACHE_PROBE_T",
+          "statement": "int64_t METADATA_CACHE_PROBE_T = static_cast<int64_t>(kv__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "file": "cpu_v2/cache/kernels/aiv/cache_entry_incore_0.cpp",
+          "line": 247,
+          "symbol": "CSA_ORIGINAL_CACHE_ROWS",
+          "statement": "int64_t CSA_ORIGINAL_CACHE_ROWS = static_cast<int64_t>(cache__ssa_v0_tensor->shapes[0]);"
+        }
+      ],
+      "scalar_evidence": null,
+      "passed": true
+    }
+  },
+  "initial_audit_correction": "初版只查AIV descriptor，漏掉offsets的动态T scalar ABI；并非编译失败",
+  "passed": true
+}

@@ -1,0 +1,32 @@
+{
+  "changed_functions": [
+    "hc_widen_rms",
+    "mix_x_rms_norm"
+  ],
+  "other_functions_unchanged": 71,
+  "all_for_pipeline_expressions_identical": true,
+  "loop_expressions": {
+    "hc_widen_rms": [
+      [
+        "pl.range(t__tmp_v2, widen_rows__ssa_v0, pl.min(widen_rows__ssa_v0, 48), init_values=(inv_rms__ssa_v0, widen_tail__ssa_v0, x_hc32_flat__ssa_v0))",
+        "pl.range(t__tmp_v2, widen_rows__ssa_v0, pl.min(widen_rows__ssa_v0, 48), init_values=(inv_rms__ssa_v0, widen_tail__ssa_v0, x_hc32_flat__ssa_v0))"
+      ],
+      [
+        "pl.pipeline(32, stage=4, init_values=(w_sq_sum__tile, widen_tail__iter_v1, x_hc32_flat__iter_v1))",
+        "pl.pipeline(32, stage=4, init_values=(w_sq_sum__tile, widen_tail__iter_v1, x_hc32_flat__iter_v1))"
+      ]
+    ],
+    "mix_x_rms_norm": [
+      [
+        "pl.pipeline(16, stage=2, init_values=(sq_sum_inline530__tile, x_mixed_inline534__ssa_v0))",
+        "pl.pipeline(16, stage=2, init_values=(sq_sum_inline530__tile, x_mixed_inline534__ssa_v0))"
+      ],
+      [
+        "pl.pipeline(16, stage=2, init_values=(x_normed_t__ssa_v0, x_normed_tail_store_inline516__ssa_v0))",
+        "pl.pipeline(16, stage=2, init_values=(x_normed_t__ssa_v0, x_normed_tail_store_inline516__ssa_v0))"
+      ]
+    ]
+  },
+  "row_mapping_shapes_checked": 96,
+  "coverage": "T=8..384步8，每档2/4行；widen最多48个worker循环，mix逐块一worker"
+}

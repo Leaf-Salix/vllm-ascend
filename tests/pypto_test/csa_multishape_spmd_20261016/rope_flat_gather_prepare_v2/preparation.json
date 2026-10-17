@@ -1,0 +1,37 @@
+{
+  "case": "rope_flat_gather_prepare_v2/variants/h131072_b16",
+  "audit": {
+    "functions": {
+      "kv_rms_norm_rope": {
+        "rows": 32,
+        "columns": 64,
+        "source": "kv_rope_norm_chunk_inline3671__tile",
+        "indices": "kv_swap_idx_full_inline3741__tile",
+        "old_gather_executions_per_loop": 32,
+        "new_gather_executions_per_loop": 1
+      },
+      "rmsnorm_rope_cache_write": {
+        "rows": 16,
+        "columns": 64,
+        "source": "rope_normed_inline3859__tile",
+        "indices": "rope_swap_idx_inline3853__tile",
+        "old_gather_executions_per_loop": 16,
+        "new_gather_executions_per_loop": 1
+      },
+      "rmsnorm_rope": {
+        "rows": 16,
+        "columns": 64,
+        "source": "rope_normed_inline1611_inline3890__tile",
+        "indices": "rope_swap_idx_inline1684_inline3923__tile",
+        "old_gather_executions_per_loop": 16,
+        "new_gather_executions_per_loop": 1
+      }
+    },
+    "all_other_ast_unchanged": true,
+    "all_valid_column_selections_checked": 262144,
+    "input_index_values_preserved": true,
+    "gm_and_sync_unchanged": true,
+    "device_validated": false
+  },
+  "device_executed": false
+}

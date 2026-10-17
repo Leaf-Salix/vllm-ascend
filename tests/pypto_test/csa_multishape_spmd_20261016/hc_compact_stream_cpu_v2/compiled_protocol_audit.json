@@ -1,0 +1,322 @@
+{
+  "scope": "只读本次完整CPU codegen产物；未重复编译、未执行NPU",
+  "input_cpp": "tests/pypto_test/csa_multishape_spmd_20261016/hc_compact_stream_cpu_v2/kernel/ptoas/csa_static_group.cpp",
+  "input_allocation_ir": "tests/pypto_test/csa_multishape_spmd_20261016/hc_compact_stream_cpu_v2/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "full_codegen_passed": true,
+  "decision": "未发现阻止单B16设备验证的新增同步或容量问题；可进入功能/精度/重放检查，不能据此宣称硬件通过",
+  "cpp_protocol_passed": true,
+  "device_execution": false,
+  "hardware_visibility_proven": false,
+  "precision_proven": false,
+  "performance_measured": false,
+  "events": {
+    "csa_static_aic": [
+      {
+        "cpp_line": 1445,
+        "operation": "wait",
+        "event_id": 8,
+        "instruction": "wait_flag_dev(v885);"
+      },
+      {
+        "cpp_line": 1448,
+        "operation": "wait",
+        "event_id": 9,
+        "instruction": "wait_flag_dev(v886);"
+      },
+      {
+        "cpp_line": 1485,
+        "operation": "set",
+        "event_id": 10,
+        "pipe": "PIPE_MTE2",
+        "instruction": "ffts_cross_core_sync(PIPE_MTE2, v897);"
+      },
+      {
+        "cpp_line": 1488,
+        "operation": "set",
+        "event_id": 11,
+        "pipe": "PIPE_MTE2",
+        "instruction": "ffts_cross_core_sync(PIPE_MTE2, v898);"
+      }
+    ],
+    "csa_static_aiv": [
+      {
+        "cpp_line": 24062,
+        "operation": "wait",
+        "event_id": 10,
+        "instruction": "wait_flag_dev(v1576);"
+      },
+      {
+        "cpp_line": 24065,
+        "operation": "wait",
+        "event_id": 11,
+        "instruction": "wait_flag_dev(v1577);"
+      },
+      {
+        "cpp_line": 24270,
+        "operation": "set",
+        "event_id": 8,
+        "pipe": "PIPE_MTE3",
+        "instruction": "ffts_cross_core_sync(PIPE_MTE3, v1630);"
+      },
+      {
+        "cpp_line": 24273,
+        "operation": "set",
+        "event_id": 9,
+        "pipe": "PIPE_MTE3",
+        "instruction": "ffts_cross_core_sync(PIPE_MTE3, v1631);"
+      },
+      {
+        "cpp_line": 24282,
+        "operation": "wait",
+        "event_id": 10,
+        "instruction": "wait_flag_dev(v1633);"
+      },
+      {
+        "cpp_line": 24285,
+        "operation": "wait",
+        "event_id": 11,
+        "instruction": "wait_flag_dev(v1634);"
+      }
+    ]
+  },
+  "order_checks": {
+    "aic_ready_before_fifo_tload": {
+      "passed": true,
+      "ready_wait_cpp_lines": [
+        1445,
+        1448
+      ],
+      "fifo_tload_cpp_line": 1481
+    },
+    "aic_fifo_tload_before_ack": {
+      "passed": true,
+      "fifo_tload_cpp_line": 1481,
+      "ack_cpp_lines": [
+        1485,
+        1488
+      ],
+      "ack_pipe": "MTE2",
+      "meaning": "该pipe完成GM到L1后才允许AIV复用GM槽；不是等待matmul结束"
+    },
+    "aiv_both_gm_stores_before_ready": {
+      "passed": true,
+      "fifo_store_cpp_line": 24206,
+      "rms_partial_store_cpp_line": 24264,
+      "ready_cpp_lines": [
+        24270,
+        24273
+      ],
+      "ready_pipe": "MTE3"
+    },
+    "static_event_ids": {
+      "passed": true,
+      "ready": [
+        8,
+        9
+      ],
+      "ack": [
+        10,
+        11
+      ],
+      "ffts_mode": "FFTS_MODE_VAL，A3为2",
+      "note": "CPP中经局部const变量传入，已沿const/cast别名解析成常量；不是依赖循环的动态event表达式"
+    },
+    "aiv_slot_reuse_wait": {
+      "passed": true,
+      "chunk_loop_cpp_line": 24054,
+      "guard": "v1575>=v456，即k>=2",
+      "slot_expression": "k%2",
+      "ack_cpp_lines": [
+        24062,
+        24065
+      ],
+      "mapping": "奇偶两槽各自等ACK10/11后复用",
+      "guard_cpp_line": 24057
+    },
+    "aiv_ack_drain": {
+      "passed": true,
+      "cpp_loop_line": 24277,
+      "bounds": "0..2，每task执行一次",
+      "wait_cpp_lines": [
+        24282,
+        24285
+      ],
+      "events": [
+        10,
+        11
+      ]
+    },
+    "zero_row_lane": {
+      "passed": true,
+      "cpp_guard_line": 24096,
+      "bf16_tload_cpp_line": 24140,
+      "note": "按实际rows>0才读原BF16，否则使用显式零Tile；两支都继续store和READY"
+    },
+    "local_l1_reuse": {
+      "passed": true,
+      "description": "当前迭代最后一次TEXTRACT后set MTE1→MTE2 EVENT0，下轮权重TLOAD前wait；L0重用由M→MTE1事件隔离。MTE2 ACK只释放GM，L1复用仍有本地自动同步。",
+      "cpp_lines": [
+        1428,
+        1498,
+        1531,
+        1547,
+        1548
+      ]
+    },
+    "local_ub_reuse": {
+      "passed": true,
+      "description": "FIFO store后set MTE3→V EVENT2，TROWSUM使用曾存放FIFO输入的scratch前wait；RMS store后set MTE3→MTE2 EVENT0，下轮BF16 load前wait。",
+      "cpp_lines": [
+        24207,
+        24232,
+        24233,
+        24265,
+        24095
+      ]
+    },
+    "math_order": {
+      "passed": true,
+      "description": "AIC k=0..7，每轮两个K256 matmul，首轮第一个init，后续全部acc；原M16、4个K4096偏和保留。此项为源序/代码生成核对，不是数值结果证明。",
+      "matmul_cpp_lines": [
+        1519,
+        1521,
+        1551
+      ]
+    },
+    "old_full_widen_wait_removed": {
+      "passed": true,
+      "cpp_range": [
+        1356,
+        1376
+      ],
+      "description": "首个HC AIC阶段直接fence/cache维护/set_ffts后进入HC循环，没有原progress等待循环"
+    }
+  },
+  "memory": {
+    "csa_static_aic": {
+      "all_tile_maximum_address_extent": {
+        "Mat": {
+          "end_exclusive_bytes": 475136,
+          "offset_bytes": 458752,
+          "size_bytes": 16384,
+          "name": "stage_17_v53__ssa_v0",
+          "allocation_ir_line": 2980,
+          "capacity_bytes": 524288,
+          "within_capacity": true
+        },
+        "Acc": {
+          "end_exclusive_bytes": 131072,
+          "offset_bytes": 0,
+          "size_bytes": 131072,
+          "name": "stage_5_v14__tile",
+          "allocation_ir_line": 1092,
+          "capacity_bytes": 131072,
+          "within_capacity": true
+        },
+        "Vec": {
+          "end_exclusive_bytes": 16384,
+          "offset_bytes": 0,
+          "size_bytes": 16384,
+          "name": "stage_4_v11__ssa_v0",
+          "allocation_ir_line": 658,
+          "capacity_bytes": 188416,
+          "within_capacity": true
+        },
+        "Left": {
+          "end_exclusive_bytes": 65536,
+          "offset_bytes": 32768,
+          "size_bytes": 32768,
+          "name": "stage_18_v13__tile_l0_a_1",
+          "allocation_ir_line": 3089,
+          "capacity_bytes": 65536,
+          "within_capacity": true
+        },
+        "Right": {
+          "end_exclusive_bytes": 65536,
+          "offset_bytes": 0,
+          "size_bytes": 65536,
+          "name": "stage_5_v13__tile_Right",
+          "allocation_ir_line": 1089,
+          "capacity_bytes": 65536,
+          "within_capacity": true
+        }
+      },
+      "hc_named_tile_maximum_address_extent": {
+        "Acc": {
+          "end_exclusive_bytes": 2048,
+          "offset_bytes": 0,
+          "size_bytes": 2048,
+          "name": "hc_compact_acc__ssa_v0",
+          "allocation_ir_line": 270,
+          "capacity_bytes": 131072,
+          "within_capacity": true
+        },
+        "Mat": {
+          "end_exclusive_bytes": 163840,
+          "offset_bytes": 131072,
+          "size_bytes": 32768,
+          "name": "hc_compact_input__ssa_v0",
+          "allocation_ir_line": 288,
+          "capacity_bytes": 524288,
+          "within_capacity": true
+        },
+        "Left": {
+          "end_exclusive_bytes": 16384,
+          "offset_bytes": 0,
+          "size_bytes": 16384,
+          "name": "hc_compact_left0_full__ssa_v0",
+          "allocation_ir_line": 295,
+          "capacity_bytes": 65536,
+          "within_capacity": true
+        },
+        "Right": {
+          "end_exclusive_bytes": 32768,
+          "offset_bytes": 0,
+          "size_bytes": 32768,
+          "name": "hc_compact_right0_full__ssa_v0",
+          "allocation_ir_line": 301,
+          "capacity_bytes": 65536,
+          "within_capacity": true
+        }
+      }
+    },
+    "csa_static_aiv": {
+      "all_tile_maximum_address_extent": {
+        "Vec": {
+          "end_exclusive_bytes": 163872,
+          "offset_bytes": 163840,
+          "size_bytes": 32,
+          "name": "stage_31_v10__ssa_v0",
+          "allocation_ir_line": 12015,
+          "capacity_bytes": 188416,
+          "within_capacity": true
+        }
+      },
+      "hc_named_tile_maximum_address_extent": {
+        "Vec": {
+          "end_exclusive_bytes": 126976,
+          "offset_bytes": 122880,
+          "size_bytes": 4096,
+          "name": "hc_compact_mix_bf16_2__ssa_v0_1",
+          "allocation_ir_line": 7242,
+          "capacity_bytes": 188416,
+          "within_capacity": true
+        }
+      }
+    }
+  },
+  "memory_interpretation": "为AllocateMemoryAddr后Tile的最大地址末端，不是把各阶段Tile大小相加，也不是峰值活跃字节数；未新增永久L1 reserve。CPP静态TASSIGN地址与同一最大末端一致；后续既有attention动态子视图仍引用这些已分配backing store，本审计未重新证明所有旧动态下标。",
+  "memory_capacity_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/backend/common/soc.cpp:118",
+  "vec_safe_limit_explanation": "按当前PyPTO SoC合同使用184KiB安全UB上限；物理192KiB顶部约8KiB为PTO-ISA保留区域。当前AIV最大163872字节低于188416字节。",
+  "baseline_cpu_protocol_evidence": [
+    "../hc_pre_direct_stream_v1/cpu_transform_v2/result.json",
+    "../hc_pre_direct_stream_v1/cpu_tail_t6_v1/result.json"
+  ],
+  "remaining_device_gates": [
+    "本次BF16/FIFO变换输出与原动态PTO比较",
+    "Top-K/cache/state/guard检查",
+    "连续调用及aclgraph重放的信号排空与无死锁",
+    "完整L1 incore首尾性能配对；CPU编译不代表30%目标达到"
+  ],
+  "runtime_abi_note": "未复核运行环境ABI；此处沿用root已准备的独立256参数Simpler部署，禁止把codegen成功视作共享运行库支持132个Tensor的证明"
+}

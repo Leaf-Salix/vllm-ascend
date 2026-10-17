@@ -1,0 +1,64 @@
+{
+  "status": "源码及限定CPU后端验证完成",
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_publish_stages.py",
+  "source_audit": "source_audit.json",
+  "contract": "stage_contract.json",
+  "validated": {
+    "leaf_math_AST_exact": true,
+    "pair_merge_tree_and_publish_tail_AST_exact": true,
+    "root_boundary_cases": 684,
+    "geometry_owner_invalid_tail_cases": 26,
+    "true_T0": true,
+    "CPU_backend": [
+      "single_leaf roots0 (cpu_v1)",
+      "pair roots1 balanced (cpu_v2)",
+      "pair roots2 balanced (cpu_v2)",
+      "pair roots2 sequential (cpu_v2)"
+    ],
+    "Q_B_T_arena_dynamic_descriptors": true,
+    "sample_shapes_supplied": false,
+    "device_execution": false,
+    "performance_measured": false,
+    "A3_numerical_proven": false
+  },
+  "failure_retained": {
+    "path": "cpu_v1/result.json",
+    "cause": "pair检查把INT32 plan[6]直接与constexpr bool比较，PyPTO eq不接受bool dtype",
+    "fix": "对BALANCED显式pl.cast(...,pl.INT32)，不改任何score/排序算术；只重编3条失败pair路径，不重编已过single_leaf"
+  },
+  "final_source_vs_compiled_snapshot_AST": {
+    "cpu_v1": [
+      "indexer_single_leaf_publish_stage",
+      "indexer_topk_leaf_publish"
+    ],
+    "cpu_v2": [
+      "indexer_pair_publish_stage",
+      "indexer_visible_root_count"
+    ],
+    "unchanged_referenced_dependencies": {
+      "request_geometry.py": [
+        "request_bounds",
+        "query_request"
+      ],
+      "indexer_group_stages.py": [
+        "indexer_query_visibility"
+      ],
+      "indexer_topk_stages.py": [
+        "merge2_top512_pairs",
+        "merge_top512_roots"
+      ]
+    },
+    "hash_used": false
+  },
+  "coordination": "已向root与score agent确认统一plan及64行query stride；root同意short-vector根数0/G1合同，Cube仍G2/G6。",
+  "reproduce": [
+    "python tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_publish_20261017/check_source.py",
+    "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_publish_20261017/reproduce_cpu.sh NEW_OUTPUT_DIR"
+  ],
+  "not_done": [
+    "没有NPU精度/输出token比较",
+    "没有完整Indexer/CSA的阶段组装、环槽ACK或缓存同步验证",
+    "没有性能测试",
+    "没有改其它生产文件/依赖/共享环境"
+  ]
+}

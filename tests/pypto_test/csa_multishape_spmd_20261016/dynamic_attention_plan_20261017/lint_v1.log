@@ -1,0 +1,42 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_plan_20261017/check_cpu.py:28:9
+   |
+27 |           dsv4_csa_env.activate()
+28 | /         import pypto.language as pl
+29 | |         from pypto import passes
+30 | |         from pypto.ir.printer import python_print
+31 | |         from pypto.runtime import RunConfig
+32 | |         from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.attention_plan_stages import (
+33 | |             T_DYN,
+34 | |             PLAN_CAP_DYN,
+35 | |             ROPE_CAP_DYN,
+36 | |             ORIGINAL_COLUMNS_DYN,
+37 | |             COMPRESSED_COLUMNS_DYN,
+38 | |             QUERY_BOUNDS_DYN,
+39 | |             REQUESTS_DYN,
+40 | |             attention_slot_plan_stage,
+41 | |             attention_inverse_rope_sign_stage,
+42 | |         )
+   | |_________^
+43 |
+44 |           assert "vllm_ascend.ops.pypto.deepseek_v4_flash_csa.nz_mode" not in sys.modules
+   |
+help: Organize imports
+
+SIM105 Use `contextlib.suppress(ValueError, TypeError)` instead of `try`-`except`-`pass`
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_plan_20261017/check_oracle.py:198:17
+    |
+196 |           for node in tree.body:
+197 |               if isinstance(node, ast.Assign):
+198 | /                 try:
+199 | |                     namespace[ast.unparse(node.targets[0])] = ast.literal_eval(node.value)
+200 | |                 except (ValueError, TypeError):
+201 | |                     pass
+    | |________________________^
+202 |               elif isinstance(node, ast.FunctionDef):
+203 |                   nodes.append(Plain().visit(copy.deepcopy(node)))
+    |
+help: Replace `try`-`except`-`pass` with `with contextlib.suppress(ValueError, TypeError): ...`
+
+Found 2 errors.
+[*] 1 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

@@ -1,0 +1,258 @@
+{
+  "date": "2026-10-17",
+  "scope": "只读核对当前canonical Indexer QK/score/Top-K；不改源码、不创建冻结IR、不编译、不运行NPU。",
+  "sources": {
+    "indexer": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer.py",
+    "entry": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+    "storage": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/native_storage.py",
+    "layout": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/layout.py",
+    "new_helpers": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/{request_geometry,phase_sync,indexer_query_stages,indexer_cache_stages}.py"
+  },
+  "conclusions": [
+    "不能只替换T_PAD：query//S、T//group_size、query+group_size-1、leaf plan和merge根数相互依赖；必须统一改成请求内动态组。",
+    "固定数学tile、FP16转换位置、head归约与sort/mrgsort同分顺序保留；分档用于资源/调度，不把B/S/历史有效长度变成固定展开代码。",
+    "现有native-cube已经是一个局部MIX：1AIC+2AIV靠双GM槽、FIX READY/MTE2 ACK合作。嵌入整个CSA需保留这一协议，再用外层phase信号连接前后阶段。",
+    "不同请求长度共享max leaf只影响工作上界；每query可见候选数必须独立从该请求L和causal position求得。容量行不能自动变成有效候选。",
+    "推荐先独立抽sort叶根/最终publish与系数生成，再迁native-cube角色对；不要把短Vector数学强行统一为Cube以减少代码。"
+  ],
+  "model_constants": {
+    "index_heads": 64,
+    "head_dim": 128,
+    "topk": 512,
+    "compress_ratio": 4,
+    "page_tokens": 32,
+    "model_max_position": 1048576,
+    "max_candidates": 262144,
+    "leaf_candidates": 8192,
+    "max_leaves": 32,
+    "root_pair_floats": 1024,
+    "old_rows_per_query": 64,
+    "score_workers_AIC_groups": 24,
+    "merge_workers_AIV": 48,
+    "notes": "pair行是512个(value,index)交错对，index以位模式放在FP32载体中；不是1024个独立score。"
+  },
+  "current_strategies": [
+    {
+      "name": "short_vector",
+      "condition": "max_seq_len//4 < 2048，即原始最大L<8192",
+      "source": "decode_indexer.py:1493-1620,1623-1633",
+      "group": "一个query、64heads；两个AIV按候选列左右分片",
+      "tiles": "QK INT8[64,128]×INT8[384,128]^T→INT32[64,384]；每AIV192列，pipeline stage=2，cross_core_slot=1",
+      "math": "INT32→FP32→max(0)→逐head FP32(query_scale*weights)乘→col_sum(head)→FP16 key_scale转FP32后相乘；没有Cube路径的FP16 QK量化。",
+      "topk": "当前阈值下实际单leaf：score_arena按query行写有效列，后继indexer_topk_leaf_publish直接排序。源码仍有multi-leaf通用分支，不能拿它证明短路径支持任意错误策略上界。"
+    },
+    {
+      "name": "native_cube_single_leaf",
+      "condition": "2048 <= max_seq_len//4 <= 8192",
+      "source": "decode_indexer.py:1435-1491,1190-1347,1634-1638",
+      "group": "默认G=2、N128；在T>=S*24且4*S*ceil((T/S)/24)<=5*2*ceil((T/2)/24)时G=S=6、N64。旧条件针对均匀S6，不是通用mixed-Q判据。",
+      "tiles": "score_tile=768；两个AIV各384列，单leaf分成两个连续候选半区；key_prefetch_panels=0，key_prefetch_to_l0=True。",
+      "runtime": "sync_start=False,allow_early_resolve=True；这些是旧task调度属性，单SPMD不需要复制成额外全核屏障。",
+      "math": "head系数：FP32 query_scale和weight分别FP16(rint)后FP16乘；QK INT8点积，FIX pre_relu并pre_quant=1/1024转FP16，FP16系数×FP16 QK经Cube归约成FP32，再乘FP16 key_scale转FP32；原代码没有额外乘回1024，迁移不可自行补。",
+      "topk": "每query每leaf两份半根，最终按原incoming优先的顺序合并；single-leaf merge使用multiway=False。"
+    },
+    {
+      "name": "native_cube_long_pair",
+      "condition": "max_seq_len//4 >8192 且旧T<4*S(24)",
+      "source": "decode_indexer.py:1414-1434,1190-1347",
+      "group": "G=2,N128,score_tile=1024",
+      "prefetch": "1个Key panel预取到L0，保留Key L1双panel池与Score L1不同生存期。",
+      "topk": "每leaf8192候选，AIV按列各半，2根/leaf；最终multiway=True但旧T门槛使half_count=2*leaf_count。"
+    },
+    {
+      "name": "native_cube_long_request",
+      "condition": "max_seq_len//4 >8192 且旧T>=4*S(24)",
+      "source": "decode_indexer.py:1388-1413,364-391,968-1188",
+      "group": "G=6,N64,score_tile=1024；两个AIV各负责3个完整query，读整条1024候选scale，不再按列左右分片。",
+      "leaf_plan": "根据runtime max缓存行与query_groups平衡：组数4→leaf个数凑6倍数，8或16→3倍数，其余保留ceil(max_candidates/8192)；最多32叶。每叶由整数个1024 tile构成，余tile给前extra_leaves个leaf。",
+      "topk": "每2个1024 step合成连续2048候选段；本query每段sort后以新段在前merge，UB保持512根，最后每query每leaf仅1根。最终half_count=leaf_count。",
+      "runtime": "sync_start=True,allow_early_resolve=False属于旧任务准入/提前释放，整层单SPMD应保留所需前驱和生命周期，不照搬成syncall。"
+    }
+  ],
+  "native_cache_and_workspaces": {
+    "native_slab": {
+      "shape": "INT8[physical_pages,page_bytes]一份Native slab；key view[pages,32,1,128]与FP16 scale view[pages,32,1,1]共享allocation。",
+      "layout": "每页开头4096字节为32×128 INT8 key；页内+4096的64字节为32个FP16 scale。page_bytes>=4160且%64==0，可能还有尾部padding。",
+      "source": "native_storage.py:24-36；layout.py:17-20；decode_indexer.py:661-670/1367-1375",
+      "key_aliases": "旧TMR建立offset0的INT8[floor(total_bytes/128),128]与offset64的INT8[floor((total_bytes-64)/128),128]两描述符。physical_page*page_bytes模128为0用前者，为64用后者。page_bytes为64倍数保证只有两种情况。",
+      "migration": "全部GM reshape/切片别名在外层绑定；inline只接受既有二维key0/key64与原页载体。禁止在incore把整个slab reshape成Tile。若输入共享同allocation，保持唯一写root并在内部读alias，避免Torch ABI局部重叠写参数。",
+      "page_table": "INT32[requests,table_columns]是Indexer压缩页表；逻辑候选k映射 table[request,k//32]，不能用主512列压缩组页表。",
+      "tail_and_invalid": "原代码将越过cache_len的tail逻辑页夹到最后合法页，随后仅排序有效候选；对负物理页用max(page,0)，未全面检查表列数/物理页上界。迁移需明确有效可见范围的页表合法合同；额外guard先于读取，不能把容量或page0 fallback假称有效候选。"
+    },
+    "query": "已有helper输出INT8[q_capacity*64,128]与FP32[scale_capacity*64,1]，weights FP32[weight_capacity,64]；实际query仍Q/L定义，容量可更大。",
+    "coefficients": "旧[G_count*16,G*64]FP16，每组16行、前G行对角head系数，其余0。动态迁移容量至少group_capacity*16，group_capacity>=sum_r ceil(query_len_r/G)。不能再用T_PAD//G。",
+    "score_transfer": "FP32[24*2*G,score_tile]，每group两个槽，槽容纳整个G query分数；固定硬件/数学规模，可constexpr。每槽读完前不能重用。",
+    "score_arena": "旧FP32[max(T_PAD,24*2*S),8192]。短Vector按query行；非balanced Cube按worker*2*G+query_lane*2+aiv_lane使用私有半叶行。迁移容量至少max(T_capacity,24*2*G)行，但两模式有效列解释不同。",
+    "pair_arena": "旧FP32[T_PAD*64,1024]。一般路径每leaf2根，balanced每leaf1根；新的动态T/ROOT_STRIDE参数必须由同一plan生产/消费。可按安全区间上界缩小allocation，但root_stride>=本策略最大leaf_count*roots_per_leaf，不能以小容量截断有效历史。",
+    "outputs": "FP32[T,512] score及INT32[T,512] index。visible<512时剩余index必须-1；visible=0、inactive和未被Q覆盖padding不能留下上次graph内容。",
+    "ffts": "旧INT64[256]配合set_ffts与固定event0/1；整MIX使用的FFTS配置必须一致且避免其他阶段未排空事件冲突。"
+  },
+  "fixed_S_migration": [
+    {
+      "source": "decode_indexer.py:38-42,95,102,151,154,169-171",
+      "old": "B/S/T及T_PAD，LONG_S6_MIN_QUERY_ROWS=4*S，SCORE_MAX_QUERY_GROUP=S，assert S整除/T_PAD整除",
+      "replace": "B/T/capacity用独立dynamic；G为明确可支持的constexpr2或6，不等同本轮query长度；删除依赖S整除的正确性假设，资源门槛用实际group数量/工作波次。"
+    },
+    {
+      "source": "407,463-467,569,691,711,977,1199,1503,1514",
+      "old": "query//S、T//S读lengths；扫批数从T推断",
+      "replace": "以Native Indexer Q/L请求驱动，request_bounds取得begin/end；position需等于L-(end-begin)+(query-begin)。直接读lengths.shape0遍历B，inactive在payload前拒绝。"
+    },
+    {
+      "source": "589,595,605,613,631,703-710,739,968-979,1190-1200",
+      "old": "T//G个等宽组且全局query=group*G",
+      "replace": "请求r内部j=0..ceil((end-begin)/G)-1；first=begin+j*G，live=min(G,end-first)。组不得跨请求。组内最后位置读first+live-1，绝不能读first+G-1越界。系数/QR只load live行，其余G-live行显式清零。"
+    },
+    {
+      "source": "1388,1437-1447,416-423",
+      "old": "T>=24决定G6及每leaf1根；短档按S6请求wave比较；merge再用T独立推断root布局",
+      "replace": "策略显式携带G、balanced/roots_per_leaf、leaf_tiles/extra_leaves；同一plan供AIC、两AIV和final merge消费，merge禁止独立由T推断。"
+    },
+    {
+      "source": "734-742,1028-1053,1180-1187,1258-1269,1301-1308",
+      "old": "unroll全部G query，隐含每lane有效",
+      "replace": "保留固定Tile与unroll；仅真实lane读取position/输出pair/topk。无效lane的coeff/query输入为零且不触及邻请求；两个AIV仍按组统一step等待/ACK。"
+    }
+  ],
+  "dynamic_plan_contract": {
+    "inputs": "Native Q[B+1], L[B], positions[T]、显式G/策略配置；所有为设备Tensor或既有Host形状/上界，不新增.item()或T行request映射。",
+    "request": "active且0<=begin<end<=T、q=end-begin<=L；H=L-q；group_live<=G。需要额外拒绝陈旧/不连续position，不能只看L>0。",
+    "visibility": "每个真实query: max(min(L[r]//4,(position+1)//4,262144),0)；组visible取最后真实query或有效lane最大值，不能拿首query范围代替全组。",
+    "group_numbering": "可由单worker一次扫描Q/L生成小INT32[B+1] group_offsets，groups=sum ceil(q/G)，不展开T。首版也可所有角色按请求/局部group嵌套扫描并用运行累计group序号，只要共享同函数和顺序；不建议每token重复扫全部B。",
+    "work_order": "保留旧小组数的leaf-major/大组数的group-major意图：groups<24时item→(group=item%groups,leaf=item//groups)，否则(group=item//max_leaves,leaf=item%max_leaves)。group_id可借小prefix定位request。AIC与两个AIV必须使用同plan。",
+    "leaf_plan": "runtime最大active L//4 capped至模型上限；8192常规leaf或1024整数tile平衡leaf。Q/L不等长时global max只提供leaf循环上界；组/单query的实际visible单独截断。最终merge使用同leaf_tiles/extra/roots_per_leaf计算真正已写根数。",
+    "optional_small_metadata": "在现metadata阶段追加group_offsets[B+1]和少量plan标量可避免72核反复扫L；也可先在核内复算同纯Scalar函数。二者都不是冻结任务表，也不需要Host读设备metadata。",
+    "no_work": "groups=0/max_visible=0不得除以0或读positions。所有参加phase的空核仍完成begin及phase发布；未执行任何score step时不发/不等FFTS逐槽事件。"
+  },
+  "policy_and_TMR": {
+    "current_entry": "decode_csa.py:135-153：legacy在TMR读lengths求max；HBG factory切换为Host已有max_seq_len。231将该值传Indexer，forest:1380先除4作短/中/长策略选择。",
+    "interval_policy": "允许由现有Host上界或明确的range配置选择有限组高层helper(G2/G6、N128/N64、384/768/1024等数学tile)，不是给七个(B,S,H)生成七段展开代码。B/T和历史可见范围在helper中仍runtime。",
+    "cross_boundary": "若同一range可能跨8192或32768原始L边界，需要单SPMD保留统一的device runtime策略分支，或调用前选择另一个明确支持该区间的配置。不得仅因Host upper较大就悄悄将原短Vector数值换成FP16 Cube并宣称等价。",
+    "uniform_choice": "一种方法是选定一个参与者扫描active Q/L写小plan，然后所有角色wait该phase；或各角色执行同纯Scalar判定。不能由AIC和AIV各用不同长度快照决定迭代或槽协议。",
+    "sync_start": "它是旧spmd任务runtime准入行为；融合后替换为实际QR/weights/cache/coeff前驱完成信号，不能推导出新增全核barrier是必须的。旧early-resolve属性也不能当数学或缓存顺序。"
+  },
+  "math_invariants": [
+    "短Vector head_coefficient=query_scale*weights为FP32，max(INT32→FP32,0)后乘再col_sum，key_scale最后乘。不可换为Cube。",
+    "Cube系数的两次FP16(rint)必须在乘法前；对角行lane*(G+1)与完整16×G*64清零布局保持，避免A3 partial-column TMOV限制。",
+    "QK固定K128完整INT8点积、relu与1/1024 FIX预量化成FP16，再按原Cube系数归约；保留当前panel流水与Key/Score L1独立存储生存期。",
+    "long-request每query连续2048候选段排序，<=512、<=1024、<=2048三条sort路径及同分merge输入顺序保留；不能任意改变leaf分段再称TopK indices逐bit相同。",
+    "half_leaf的512/1024/2048/2560/3072/4096分支与64→256→1024归并层次保持。2560/3072/4096的后2048段优先规则不能概括成统一左右顺序。",
+    "merge2是incoming,right在前；multiway是incoming3,incoming2,incoming1,root，exhausted标志与tile.extract压缩生存期保持。浮点得分相等也会影响index次序。",
+    "FP32_NEG_INF是有限最小FP32，fillpad使用PadValue.min后再maximum(FP32_NEG_INF)。不要随意改成IEEE -inf或0。",
+    "不混入历史precision-port或Native bit移植版本；本次以当前canonical代码逐条数学为准。"
+  ],
+  "initialization_and_tails": [
+    {
+      "item": "group_tail",
+      "requirement": "每请求尾组保留G固定M，QR INT8仅load live*64有效head行，补零其余行；coeff矩阵完整清零再写live对角。不得依赖padding容量里的旧值。"
+    },
+    {
+      "item": "score_transfer",
+      "requirement": "每个发READY的step必须已经写完本槽G×score_tile的消费者读取范围。AIV必须先真实TLOAD完成后ACK，不能只等READY后立即ACK。"
+    },
+    {
+      "item": "score_arena",
+      "requirement": "私有行可重复使用但只读本leaf已写前缀；排序valid_shape只覆盖有效候选，padding由fillpad显式最小化。不能按8192容量排序未初始化列。"
+    },
+    {
+      "item": "pair_arena",
+      "requirement": "不需要无条件全量清零，但final merge将读取的每个root必须本代写入；空半叶/真实query在组末leaf无可见候选时显式最小值root。无效尾query不读position、不写越界root。"
+    },
+    {
+      "item": "balanced_segments",
+      "requirement": "UB single_roots与single_segments初始最小值；最后奇数step仅排序1个1024有效前缀，旧另半段不可参与。2048段root顺序照原实现。"
+    },
+    {
+      "item": "outputs_padding",
+      "requirement": "独立output初始化helper可按T写score最小/index=-1，然后active请求结果覆盖，需phase顺序避免初始化与真实写并发。另一实现是最终每token唯一writer判断是否属于active请求；前者更易证明但新增阶段，不能让inactive残留。"
+    },
+    {
+      "item": "cache_tail",
+      "requirement": "可见范围内table列与physical page必须合法；超出visible但为了整panel的读取只可夹到已确认有效最后页。visible=0直接跳过，不允许为了填tile去读page0。"
+    },
+    {
+      "item": "odd_query",
+      "requirement": "G2/G6均可能遇到live=1/3/5。balanced两AIV按query分工时某lane可以无真实query，但仍要消费并ACK相同step以便AIC槽排空。"
+    }
+  ],
+  "role_sync_and_resources": {
+    "external_dependencies": [
+      "QR Hadamard INT8与scale完成",
+      "weights FP32完成",
+      "coefficients完整矩阵完成",
+      "Indexer cache INT8 key与串行FP16 scale commit均完成",
+      "相应Native Q/L/positions/table来自同轮；读写cache的外部stream/event已落实"
+    ],
+    "native_cube_AIC": "每worker负责组/leaf串行流。step>=2先wait CONSUMED(event1,MTE2,AIC)，写下一slot全部panel；FIX READY(event0,ffts_mode2,AIC)通知两AIV；结束每leaf drain min(step_count,2)次CONSUMED。",
+    "native_cube_AIV": "两个lane同组/leaf/step序列，先可预取独立scale；wait READY(event0,MTE2,AIV)，TLOAD本lane分数后用MTE2发CONSUMED(event1,ffts_mode2,AIV)，再做scale/sort。ACK是该lane读完通信GM，不能提前成Scalar信号。",
+    "fusion": "拆AIC生产者helper和AIV消费者helper可去掉其内部pl.spmd/split_aiv，但外层固定G24 MIX将AIC group与AIV group/lane正确配对。sync event编号和set_ffts生命周期由整入口统一管理。",
+    "phase_notify": "所有leaf根完成后按真正AIV owner发布phase；final merge可先等所有参与AIV，再优化只等本query根owner。现phase完成信号每代一次，无ACK，不能直接复用为双槽逐step通知。",
+    "alternative_GM_protocol": "若不用FFTS，需单独slot READY序号+两lane各ACK序号，single-writer分离cacheline、DCCI/DSB发布、poll读新值及业务fence；禁止普通Scalar load/store假定cache一致。该方案是新增验证项，不优先替换当前有效FFTS。",
+    "short_vector": "原pl.aiv_shard和split_aiv LEFT_RIGHT由编译器隐含Tile跨核通道；拆成独立AIC/AIV函数时必须显式保留同等QK INT32分片传递，可先整体inline于外层编排或设计GM槽。不能拿native_cube归约替代来绕过。",
+    "resource_math": {
+      "G6_N64": "Q Left INT8 384×128=48KiB，coeff Left FP16 16×384=12KiB；QK Acc INT32 384×64=96KiB，WS Acc FP32 16×64=4KiB；Key Right两槽共16KiB+WS Right FP16 384×64=48KiB，合64KiB。",
+      "G2_N128": "Q Left16KiB+coeff Left4KiB；QK Acc64KiB+WS Acc8KiB；Key Right两槽32KiB+WS Right32KiB=64KiB。",
+      "constraint": "这些是可见Tile有效字节的静态核算，不是完整planner峰值报告。G不宜直接等任意query长度：G>6或任意N组合可超L0A/L0B/Acc。请求长度更大用多个G组，尾组补零。",
+      "lifetime": "Key L1双panel池不能被Score L1复用；QK与上一panel WS并存，tail pipeline事件必须全部排空后再复用FFTS编号或退出阶段。"
+    }
+  },
+  "minimal_helper_sequence": [
+    {
+      "step": 1,
+      "name": "topk_half_leaf_inline / topk_segment_pairs_inline / merge_top512_roots_inline",
+      "scope": "最小可独立迁移切片：原226-362及175-223的纯排序/归并；Tensor容量改dynamic，显式score_row/logical_begin/valid_count/root_slot。无request推导、无dispatch、无notify。",
+      "interface": "score_arena FP32[SCORE_ROWS,8192], pair_arena FP32[PAIR_ROWS,1024], rows/valid_count/logical_begin INDEX；score_offset为少数固定constexpr0/2048；返回Tile或原GM别名。",
+      "reason": "数学体已无固定S，能独立审查tie规则与valid_count=1/511/512/513/1024/2048/2560/3072/4096，避免先同时引入QK/动态组/跨核协议。"
+    },
+    {
+      "step": 2,
+      "name": "indexer_group_plan_inline + indexer_head_coefficients_stage",
+      "scope": "纯Scalar请求/group/leaf几何与系数，G2/G6固定数学，实际B/Q动态。",
+      "interface": "Q/L/positions、qr_scale平坦二维GM别名[scale_row_cap,64]、weights、coefficients[group_row_cap,16*G*64或原二维]、group_offsets可选、worker_id/WORKERS/G。",
+      "reason": "系数保持单query FP16转换顺序，先解决非对齐begin与尾组清零、owner映射，为两端协议提供唯一计划。"
+    },
+    {
+      "step": 3,
+      "name": "indexer_native_cube_producer_stage / indexer_native_cube_consumer_stage",
+      "scope": "原638-1348拆成显式AIC与AIV角色，不在helper内创建task；仅支持明确配置G2_N128或G6_N64。",
+      "interface": "Q/L/positions、group_offsets/plan、query INT8、coefficients FP16、Native cache root/key0/key64、Indexer table、transfer GM、score/pair arena、ffts、group_id、lane_id及constexpr策略。",
+      "reason": "两个helper复用同一Scalar work item解码、visible/leaf/step公式；保留FFTS双槽ACK而不是补全核syncall。"
+    },
+    {
+      "step": 4,
+      "name": "indexer_topk_publish_stage",
+      "scope": "按真实request/query，接收与producer相同leaf布局，合并并写512结果；active/causal检查和padding输出合同显式。",
+      "interface": "Q/L/positions、pair/score arena、leaf_plan标量、ROOTS_PER_LEAF、topk_scores/indices、worker_id/WORKERS；不得query//S或按T再次猜G。"
+    },
+    {
+      "step": 5,
+      "name": "indexer_short_vector_producer_consumer",
+      "scope": "保留短档原INT32 QK→FP32 Vector head归约；与Cube角色对共用请求geometry但不混用数学。",
+      "interface": "query/scale/weights、cache/table、Q/L/positions、显式QK通信Tile或GM槽、score_arena和显式group/lane。",
+      "reason": "旧混合高层算子aiv_shard隐含传输需要单独lowering确认，属于后续真实编译边界而非本次已验证。"
+    }
+  ],
+  "compiler_limits_and_unverified": [
+    "当前正式helper均采用inline+显式worker；嵌套spmd/at或直接保留TASK_ID不可移入融合核。原sort helper返回Tile应能按同层Tile API使用，但本轮未编译。",
+    "A3部分列TMOV限制真实存在：系数行先按[16*G,64]完整行assemble再reshape为[16,G*64]；不要直接对宽Tile的中间列写1×64片。",
+    "显式valid_shape后高层Tensor会变Tile，row/col_reduce scratch、gather绝对索引与Tensor/Tile层级须按已有动态helper经验处理；不为过编译擅改数学。",
+    "partial group的Q Mat valid_rows与系数零填充可能影响Matmul Acc valid-shape推导；需独立CPU lowering再设备验证，不能仅CPU Python覆盖证明。",
+    "一份大MIX多策略runtime分支的资源生存期可能增加planner峰值；允许少量区间constexpr配置分开编译，但禁止B/S实值冻结任务展开。",
+    "set_ffts、event0/1、AIC-AIV关系在显式cluster下需要核对最终CPP。当前完整动态前段没有证明这个局部FFTS协议迁移已通过。",
+    "同分TopK对leaf分区/merge输入顺序敏感。mixed-query新分组可能需要明确可接受的排序合同；先保持均匀旧场景原policy及原tie规则，不声称所有新分组bit一致。",
+    "L过模型max时旧实现截断到262144候选；服务是否允许、是否应报错/换实现需入口合同，不应因workspace变小进一步静默截断。",
+    "现有排序pair哨兵把score/index载体均写FP32最小值；仅valid_count与最终-1屏蔽保证无效index不外泄。不能忽略每代初始化和empty-root写入。"
+  ],
+  "next_validation_only_when_implemented": {
+    "cpu": "先源数学AST和request/group/leaf/slot纯模型，覆盖同T的[2,2,2]/[4,2]、odd query、G-1/G/G+1、0/短/长历史、混长、inactive、C/table不足、group=0；再各最小helper一次必要完整lowering。",
+    "compiled_audit": "确认动态ABI、每端相同step数、READY在FIX stores后、ACK在MTE2 loads后、双槽tail排空、pair有效列/根GM写回及final读前phase，容量与实际范围分离。",
+    "device": "本计划没有执行；后续先功能及边界，再正式权重精度，最后完整CSA L1性能。不拿局部score估算七档30%目标。"
+  },
+  "performed": {
+    "source_read_only": true,
+    "production_edits": false,
+    "compilation": false,
+    "NPU": false,
+    "new_MD": false
+  }
+}

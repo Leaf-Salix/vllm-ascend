@@ -1,0 +1,660 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-17",
+  "scope": "只读原多 task 数学、Native metadata 生产与现有适配；未修改源码、未生成静态模板、未编译或上卡。",
+  "current_acceptance_points": {
+    "history_131072_batches": [
+      4,
+      8,
+      16,
+      24,
+      28
+    ],
+    "history_8192_batches": [
+      16,
+      32
+    ],
+    "query_tokens": 6,
+    "required_full_span_reduction": 0.3,
+    "note": "验收点的 S6 不等于把动态源码限制为 S6；mixed query 合同是本次设计审计，尚未实现/验证。"
+  },
+  "main_findings": [
+    "原 CSA 根入口已传入原始请求 query 前缀和：cmp_query_start_loc 与 idx_query_start_loc 是 Native 原始 TND query_start_loc，不是压缩后的行前缀和。最小接口可以复用其中一份规范原始边界，并保留两组 compact metadata 的独立来源；无需新增 token 数量的展开映射缓冲。",
+    "kv_seq_lens 表示包括本轮 query 的未压缩总 KV 长度，单独不能恢复 query 长度、TND 请求划分、历史起点。须与 query_start_loc 的相邻差配合。position_ids 也不能替代请求边界。",
+    "当前缺失主要发生在子函数签名与内部计算：Indexer、QK/plan、两套 compressor pool/cache_write 没有收到原始边界，仍用 query//S、request*S 或 T//B。",
+    "Indexer 不只是把除数换成动态 S：同组 query 共用 Key 和页表，原二维/六行分组必须改成请求内分组，尾组用 valid rows；mixed 的相邻全局 query 不保证来自同一请求。",
+    "Native padding 有均匀补请求和 mixed 追加 dummy 请求两种。seq_lens==0 的请求必须在读取 position/页表/compact 索引之前屏蔽；不得假定所有 padding 请求仍占六行。"
+  ],
+  "native_boundary_provenance": [
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/attention/dsa_v1.py",
+      "line": 949,
+      "evidence": "build_decode_metadata 从 common_attn_metadata.query_start_loc[:num_decodes+1] 取原始 query 边界；同 ratio 缓存复用。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/attention/dsa_v1.py",
+      "line": 979,
+      "evidence": "seq_lens_q=Q[1:]-Q[:-1]；start_pos_decode=seq_lens-seq_lens_q。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/attention/dsa_v1.py",
+      "line": 1153,
+      "evidence": "decode metadata 同时存原始 seq_lens 与 query_start_loc（1159）。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/attention/dsa_v1.py",
+      "line": 1613,
+      "evidence": "compressor_metadata 接受原始 Q/start_pos，再生成紧凑 cos/sin/slot；不能把原始 Q 当作 compact 输出前缀。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/native_adapter.py",
+      "line": 296,
+      "evidence": "kv_seq_lens 绑定 indexer decode.seq_lens。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/native_adapter.py",
+      "line": 318,
+      "evidence": "cmp_query_start_loc/idx_query_start_loc 分别直接绑定 compressed/indexer decode.query_start_loc。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "line": 204,
+      "evidence": "根入口已经有 position_ids、kv_seq_lens、cmp_query_start_loc、cmp_seq_lens、idx_query_start_loc。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "line": 343,
+      "evidence": "当前这些 Q 只用于构造 compact_row_offsets，没有传递到一般 query→request 消费者。"
+    }
+  ],
+  "minimal_entry_contract": {
+    "device_inputs": [
+      {
+        "name": "query_start_loc / 复用 idx_query_start_loc",
+        "type": "INT32 [B_capacity+1]，Native 固定地址 device Tensor",
+        "meaning": "每请求原始 TND query 起止，不要求 Q[r+1]-Q[r] 相等。",
+        "new_allocation_required": false
+      },
+      {
+        "name": "kv_seq_lens",
+        "type": "INT32 [B_capacity]，原 Native device Tensor",
+        "meaning": "未压缩总长度 L_r，包含本轮 query；真实请求 L_r>0，padding 请求为0。"
+      },
+      {
+        "name": "position_ids",
+        "type": "INT64 [T_capacity]，原 Native device Tensor",
+        "meaning": "每 token 绝对位置，所有 position 依赖的可见范围/RoPE/压缩边界继续读取。"
+      },
+      {
+        "name": "cmp_query_start_loc + cmp_seq_lens",
+        "type": "原 Native compressed group 的两个 device Tensor",
+        "meaning": "保留 compact cos/sin/slot 寻址的来源。当前 Native 同一 decode 步与规范 Q/seq 使用同一原始请求顺序；不能未经证明复用跨 group 的页表。"
+      },
+      {
+        "name": "Native cache/state page tables, slot mappings, RoPE, weights",
+        "type": "现有 dtype/stride/layout 不变",
+        "meaning": "每个 cache group 仍独立绑定。slot 不能提供完整 query 划分；Q 不能替代 group 页表或物理 slot。"
+      }
+    ],
+    "host_descriptors": [
+      "T_capacity 取 hidden.shape[0]；B_capacity 取 kv_seq_lens.shape[0]，不再 T//S 推导 B。",
+      "可复用 Native 已有 max_seq_lens/max_seqlen_q、实际请求数/实际 token 数做容量与选择；这些不是替代 device Q 的每步真实内容。",
+      "Host 只读取既有 shape/stride/dtype/生产者已有标量；不新增 .item()/.cpu() 从 device 获取 Q 或长度。",
+      "允许按 shape/资源分档 JIT 多份二进制；源码 Tensor 轴使用 pl.dynamic，循环和有效区域使用实际 DSL metadata。"
+    ],
+    "active_request_rules": [
+      "对 r in [0,B_capacity)，先读取 L_r；L_r<=0 时不据 position 或 Q 推算 state/cache 地址。",
+      "活动请求 b=Q[r],e=Q[r+1] 必须满足 0<=b<e<=T_capacity 且 Qlen=e-b<=L_r；不同活动请求区间不重叠，顺序与所有 cache group 页表行一致。",
+      "规范 TND 有效区间连续且从0开始；支持 Native 尾部 dummy 以及可能无有效行的请求。未使用尾部边界若为 -1 不参与搜索。",
+      "普通 causal target decode：请求内位置连续，与 L_r-Qlen+j 对应；如以后允许非连续位置/非 causal drafter，pool overlay 的寻址合同须另改，不能靠边界支持声明一并覆盖。",
+      "tail/padding 输出保持约定的有限值，不更新 cache/state；TopK 无效索引为-1，SWA/CSA mask 关闭。"
+    ],
+    "derived_on_device": {
+      "query_length": "Qlen_r = Q[r+1]-Q[r]",
+      "history_start": "H_r = L_r-Qlen_r",
+      "query_owner": "request-driven 循环可直接持有 r；平铺 query 消费者查找活动 r 满足 Q[r]<=q<Q[r+1]（逐请求小循环或边界搜索），不必先展开 T 个 request_id。",
+      "local_query": "j=q-Q[r]",
+      "state_overlay_row": "Q[r]+logical_pos-first_pos_r；读取前保证0<=local<Qlen_r。",
+      "compression_count": "C_r=floor(L_r/4)-floor(H_r/4)，Cprefix_r=sum(C_i for active i<r)。",
+      "compact_metadata_row": "对于满足 (position[q]+1)%4==0 的有效 token：Cprefix_r+floor((position[q]+1)/4)-floor(H_r/4)-1。",
+      "request_local_group": "给定编译期 tile 容量 G，循环 local=0,G,...<Qlen_r；actual_group_rows=min(G,Qlen_r-local)，有效 query 均属于 r，页表与 key 范围不跨请求。"
+    },
+    "uniform_mode": "Q[r]=r*S 只是上述合同的特例。可保留经证明的 uniform 快路径；max_seqlen_q==S 单独不足以证明所有 Qlen 都等于 S。不得对 mixed 默认执行全局整除或 query_pair。",
+    "mixed_examples": [
+      {
+        "T": 6,
+        "Q": [
+          0,
+          2,
+          4,
+          6
+        ],
+        "query_lengths": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "T": 6,
+        "Q": [
+          0,
+          4,
+          6
+        ],
+        "query_lengths": [
+          4,
+          2
+        ]
+      },
+      {
+        "T": 6,
+        "B": 2,
+        "Q": [
+          0,
+          3,
+          6
+        ],
+        "query_lengths": [
+          3,
+          3
+        ],
+        "reason": "与[4,2]同 T/同 B，进一步证明 shape 与 seq_lens 无法代替 Q。"
+      }
+    ],
+    "genuinely_missing_inputs": [
+      {
+        "scope": "两套 pool、Indexer、sparse attention 子函数",
+        "missing": "根入口已有 Q，但子函数没有参数。必须下传原 Q 或在共同核内显式绑定。"
+      },
+      {
+        "scope": "indexer_compressor_pool_projected",
+        "missing": "签名没有 seq_lens（163-178），只有 state_table/position/slot；mixed+dummy 应加传现有 kv_seq_lens，在 first_pos/历史 state 访问之前判断活动请求。"
+      },
+      {
+        "scope": "如果不同 Native group 的原始 query 排列不一致",
+        "missing": "现根入口未单独传 SWA/state/indexer_state Q。当前 Native common metadata 路径可共用规范 Q；若未来不能保证同序，则需显式传相应 group 的原始 Q/映射，不能从 slot 猜测。"
+      }
+    ]
+  },
+  "required_logic_changes": [
+    {
+      "file": "decode_csa.py",
+      "functions": [
+        "_make_decode_csa_entry/_decode_csa_tp1_layer"
+      ],
+      "lines": [
+        159,
+        204,
+        260,
+        335,
+        343,
+        424,
+        445,
+        468,
+        485
+      ],
+      "change": "规范 Q 作为原始边界贯穿主 compressor、Indexer compressor、Indexer score/merge、sparse attention；B 与 T 独立动态。保留各 group compact Q/L，不新增展开数组。"
+    },
+    {
+      "file": "compact_metadata.py",
+      "functions": [
+        "build_compact_row_offsets",
+        "load_compact_rope_rows"
+      ],
+      "lines": [
+        19,
+        25,
+        37,
+        52
+      ],
+      "change": "offset 构造本就使用 Q 相邻差，支持 mixed 的主体公式可保留；补活动请求屏蔽和边界下界，避免 dummy 负 history 影响前缀。RoPE gather 的 token//DECODE_SEQ 改为 owner(Q,token) 或由 request-driven caller 传 r。"
+    },
+    {
+      "file": "decode_compressor_ratio4.py",
+      "functions": [
+        "compressor_ratio4_pool_projected",
+        "compressor_ratio4_cache_write",
+        "compressor_ratio4_pool",
+        "compressor_ratio4"
+      ],
+      "lines": [
+        162,
+        176,
+        191,
+        197,
+        238,
+        299,
+        322,
+        335,
+        405,
+        431
+      ],
+      "change": "bs//b_dim 改为每请求 begin/end，first_pos 从 begin 读；overlay 从 begin 加偏移。cache write 与 RMS 的 token//S 改 owner。保留 pool 完成后 state commit 的依赖，不提前覆盖历史 state。包装函数下传 Q。"
+    },
+    {
+      "file": "decode_indexer_compressor.py",
+      "functions": [
+        "indexer_compressor_pool_projected",
+        "indexer_compressor_write",
+        "indexer_compressor_pool",
+        "indexer_compressor"
+      ],
+      "lines": [
+        112,
+        163,
+        183,
+        194,
+        241,
+        270,
+        293,
+        342,
+        345,
+        406,
+        420,
+        477,
+        488,
+        519,
+        530,
+        560
+      ],
+      "change": "pool/state commit 按每请求 Q 遍历并新增已有 seq_lens 参数。删除固定 B*ceil(S/4) 的逻辑 compact 行映射；优先与 Native Cprefix/C_r 保持一致，或使用明示容量的每请求槽，但不能假定每请求最多两行。RMS→Hadamard→quant/scale 写共用新行所有权，保证未用 padding 初始化。"
+    },
+    {
+      "file": "decode_indexer.py",
+      "functions": [
+        "indexer_topk_query_merge_one",
+        "indexer_topk_query_merge",
+        "indexer_topk_single_leaf_publish"
+      ],
+      "lines": [
+        395,
+        407,
+        448,
+        463,
+        467,
+        557,
+        569
+      ],
+      "change": "query//S 改 owner；最大长度归约按 kv_seq_lens.shape[0] 遍历；merge 的 leaf/group 计划必须和 score 生产者使用同一 request-local 分组方案，不能保留 T//S 与半叶/整叶不一致。"
+    },
+    {
+      "file": "decode_indexer.py",
+      "functions": [
+        "indexer_head_coefficients",
+        "indexer_score_topk_native_cube"
+      ],
+      "lines": [
+        579,
+        588,
+        595,
+        605,
+        613,
+        638,
+        691,
+        699,
+        703,
+        711,
+        712,
+        969,
+        977,
+        1191,
+        1199
+      ],
+      "change": "系数矩阵与 score 均按请求内 query-group 排列，G 只代表物理 tile 容量；尾组补零/validshape，读取最后位置使用 actual_group_rows-1。现 query_group_size=2/6 均不能无条件跨全 T 平铺，否则混用页表/Key且丢奇数尾组。"
+    },
+    {
+      "file": "decode_indexer.py",
+      "functions": [
+        "indexer_score_topk_forest",
+        "indexer_weights_score",
+        "indexer"
+      ],
+      "lines": [
+        1351,
+        1389,
+        1503,
+        1514,
+        1920,
+        1959
+      ],
+      "change": "所有 Cube/Vector/单叶/多叶策略下传 Q，Vector fallback 也替换 query//S。以长度和 query 工作量分档；LONG_S6_MIN_QUERY_ROWS 不再作为请求边界事实。"
+    },
+    {
+      "file": "decode_sparse_attn_csa.py",
+      "functions": [
+        "sparse_attn_csa",
+        "sparse_attn_csa_tp1"
+      ],
+      "logical_tasks": [
+        "csa_slots_build_valid_qk_plan",
+        "qk_pv"
+      ],
+      "lines": [
+        175,
+        266,
+        300,
+        487,
+        698
+      ],
+      "change": "plan 与 QK 用同一个 owner(Q,q) 访问 seq_lens、SWA 和 compressed 页表；padding 先屏蔽再访问 metadata。QK query 分核可继续按 T 动态轮转，分片数与 query→request 映射分开处理。"
+    },
+    {
+      "file": "native_adapter.py + service.py",
+      "functions": [
+        "NativeCSACall.__init__",
+        "AttentionServiceBase.eligible",
+        "CSAServiceRuntime.__init__"
+      ],
+      "lines": [
+        252,
+        265,
+        268,
+        318,
+        34,
+        38,
+        46,
+        52,
+        100
+      ],
+      "change": "用 Native B/Q 描述符替换 tokens/6 和 num_actual_tokens%6 门槛；服务预分配按明确 T_capacity 与 B_capacity，而非仅 B*6。仅在子函数改完且动态合同验证后才放宽门槛。"
+    }
+  ],
+  "not_boundary_dependent": [
+    "HC_pre/HC_post、token-wise RMSNorm、Q/KV线性投影、输出投影本身沿 T 计算，通常不需要 query_start_loc；保留动态 T/tail 逻辑并审查容量即可。hc_pre/后处理中的 token tile 数不能当请求数。",
+    "RoPE 普通逐 token sin/cos、position 与原始 slot_mapping 已直接提供，不应再 Host 展开或转换；compact RoPE 的 owner 仍需 Q。",
+    "config.py:195-198 的 B64/S6/T384 当前主要定义工作区上限，但同时 S 被数学使用；动态实现应拆分 query 语义与容量常量，不能简单全局把 S 改为某一新常量。"
+  ],
+  "padding_and_graph_evidence": [
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/worker/model_runner_v1.py",
+      "line": 792,
+      "evidence": "uniform padding 给额外请求增加固定 query_len（798-800）；mixed padding 可能追加一个占余下 token 的 dummy（803-810）。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/worker/model_runner_v1.py",
+      "line": 997,
+      "evidence": "非使用尾部 query_start_loc 可填 -1，不能无条件遍历所有容量边界。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/worker/model_runner_v1.py",
+      "line": 1163,
+      "evidence": "真实请求以外 seq_lens 清0，为 device 活动判据。"
+    },
+    {
+      "file": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa/host_metadata.py",
+      "line": 30,
+      "evidence": "Host 最大长度参与拓扑选择；捕获之后跨策略区间需匹配新 graph，不能只更新 device 长度假定 Host 分支变动。"
+    }
+  ],
+  "implementation_constraints": [
+    "先让真实动态源码保留 T/B/Q 轴和 device 元素读取，不从七点冻结 IR 生成数学。",
+    "不新增 T 个 request_id、展开 RoPE 或 state 搬运窗口；必要的请求级 Cprefix 属于现有紧凑 metadata 计算，不等于 Host 展开。",
+    "重复计算 owner 的成本可以后续通过请求级工作分配/本核边界缓存减少；最小正确合同不要求新增 GM 映射。",
+    "Indexer 新 group ordinal 若需要跨阶段复用，可用每请求组数的前缀或请求×最大组数的受界映射，但必须在源码上明确，不能保留七档 schedule JSON。",
+    "同址 metadata 更新、empty/dummy、奇数 query 长度、零 compact 产出、超过两次压缩边界、跨页/共享 prefix 的精度和状态验证仍待实施。当前只给合同，未声称已支持任意 S 或 prefill。"
+  ],
+  "boundary_expression_inventory": [
+    {
+      "file": "compact_metadata.py",
+      "function": "load_compact_rope_rows",
+      "definition_line": 37,
+      "boundary_expressions": [
+        {
+          "line": 52,
+          "expression": "token // DECODE_SEQ"
+        }
+      ]
+    },
+    {
+      "file": "decode_compressor_ratio4.py",
+      "function": "compressor_ratio4_pool_projected",
+      "definition_line": 162,
+      "boundary_expressions": [
+        {
+          "line": 176,
+          "expression": "s_dim = bs // b_dim"
+        },
+        {
+          "line": 191,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 197,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 238,
+          "expression": "c_idx * s_dim"
+        }
+      ]
+    },
+    {
+      "file": "decode_compressor_ratio4.py",
+      "function": "compressor_ratio4_cache_write",
+      "definition_line": 299,
+      "boundary_expressions": [
+        {
+          "line": 322,
+          "expression": "s_dim = bs // b_dim"
+        },
+        {
+          "line": 336,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 405,
+          "expression": "token // S"
+        },
+        {
+          "line": 406,
+          "expression": "token // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer_compressor.py",
+      "function": "indexer_compressor_pool_projected",
+      "definition_line": 163,
+      "boundary_expressions": [
+        {
+          "line": 183,
+          "expression": "s_dim = bs // b_dim"
+        },
+        {
+          "line": 194,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 196,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 241,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 271,
+          "expression": "c_idx * s_dim"
+        },
+        {
+          "line": 298,
+          "expression": "init_request * BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 342,
+          "expression": "token // S"
+        },
+        {
+          "line": 343,
+          "expression": "request * S"
+        },
+        {
+          "line": 345,
+          "expression": "request * BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 345,
+          "expression": "token % S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer_compressor.py",
+      "function": "indexer_compressor_write",
+      "definition_line": 406,
+      "boundary_expressions": [
+        {
+          "line": 420,
+          "expression": "bs // S * BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 420,
+          "expression": "bs // S"
+        },
+        {
+          "line": 477,
+          "expression": "compact_token // BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 478,
+          "expression": "request * S"
+        },
+        {
+          "line": 480,
+          "expression": "compact_token % BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 489,
+          "expression": "request * S"
+        },
+        {
+          "line": 519,
+          "expression": "compact_token // BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 520,
+          "expression": "request * S"
+        },
+        {
+          "line": 522,
+          "expression": "compact_token % BOUNDARY_ROWS_PER_REQUEST"
+        },
+        {
+          "line": 531,
+          "expression": "request * S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer.py",
+      "function": "indexer_topk_query_merge_one",
+      "definition_line": 395,
+      "boundary_expressions": [
+        {
+          "line": 407,
+          "expression": "query // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer.py",
+      "function": "indexer_topk_query_merge",
+      "definition_line": 448,
+      "boundary_expressions": [
+        {
+          "line": 463,
+          "expression": "query_count // S"
+        },
+        {
+          "line": 467,
+          "expression": "query_count // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer.py",
+      "function": "indexer_topk_single_leaf_publish",
+      "definition_line": 557,
+      "boundary_expressions": [
+        {
+          "line": 569,
+          "expression": "query // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer.py",
+      "function": "indexer_score_topk_native_cube",
+      "definition_line": 638,
+      "boundary_expressions": [
+        {
+          "line": 691,
+          "expression": "buf_query_count // S"
+        },
+        {
+          "line": 711,
+          "expression": "buf_query // S"
+        },
+        {
+          "line": 977,
+          "expression": "single_query // S"
+        },
+        {
+          "line": 1199,
+          "expression": "buf_query // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_indexer.py",
+      "function": "indexer_score_topk_forest",
+      "definition_line": 1351,
+      "boundary_expressions": [
+        {
+          "line": 1439,
+          "expression": "short_queries // S"
+        },
+        {
+          "line": 1444,
+          "expression": "4 * S"
+        },
+        {
+          "line": 1503,
+          "expression": "query_count // S"
+        },
+        {
+          "line": 1514,
+          "expression": "query // S"
+        }
+      ]
+    },
+    {
+      "file": "decode_sparse_attn_csa.py",
+      "function": "sparse_attn_csa",
+      "definition_line": 175,
+      "boundary_expressions": [
+        {
+          "line": 266,
+          "expression": "v_len_t // S"
+        },
+        {
+          "line": 300,
+          "expression": "bias_t // S"
+        },
+        {
+          "line": 487,
+          "expression": "qk_t // S"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "method": "rg/nl/AST 只读定位；人工对照 Native metadata 来源与消费者公式",
+    "new_tests": 0,
+    "new_lowerings": 0,
+    "npu_runs": 0,
+    "code_modifications": 0,
+    "not_a_pass_claim": true
+  }
+}

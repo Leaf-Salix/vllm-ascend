@@ -1,0 +1,144 @@
+{
+  "cpu_full_codegen_passed": true,
+  "device_execution": false,
+  "prepared_case": "128K B16/S6; qk_vector_indices=True; row_dependencies=True",
+  "current_short_b32_qk_vector_indices": false,
+  "raw_address_transform_only_audit": "raw_transform_only/audit.json",
+  "candidate_memory_peaks_bytes": {
+    "Right": 65536,
+    "Acc": 131072,
+    "Mat": 475136,
+    "Left": 65536,
+    "Vec": 163872
+  },
+  "row_buffers": [
+    {
+      "function": "csa_static_aiv",
+      "variable": "stage_30_v319__ssa_v0",
+      "space": "Vec",
+      "start": 131072,
+      "end": 132096,
+      "bytes": 1024,
+      "source_line": 11650
+    },
+    {
+      "function": "csa_static_aiv",
+      "variable": "stage_30_v319__ssa_v0_1",
+      "space": "Vec",
+      "start": 131072,
+      "end": 132096,
+      "bytes": 1024,
+      "source_line": 11671
+    }
+  ],
+  "lowered_pipeline_iterations_per_loop": 2,
+  "row_buffer_distinct_addresses": 1,
+  "row_loads_overlap": false,
+  "new_submit_before_previous_assemble": false,
+  "generated_operation_order": [
+    "TLOAD",
+    "TMOV",
+    "TLOAD",
+    "TMOV"
+  ],
+  "baseline_operation_order": [
+    "TLOAD"
+  ],
+  "baseline_generated_loop_has_per_row_explicit_wait": false,
+  "baseline_gather_writes_directly_to_destination_row": true,
+  "per_valid_row_extra_ub_to_ub_bytes": 1024,
+  "full_valid_half_extra_ub_to_ub_bytes": 65536,
+  "full_valid_query_compressed_extra_ub_to_ub_bytes_both_aiv": 524288,
+  "gm_load_bytes_unchanged": true,
+  "qk_l1_tile_shape_unchanged": true,
+  "qk_aic_body_unchanged": true,
+  "candidate": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_row_load_pipeline_v1/cpu_v1/kernel/ptoas/csa_static_group.cpp",
+    "first_line": 48758,
+    "last_line": 48942,
+    "events": [
+      {
+        "line": 48764,
+        "statement": "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);"
+      },
+      {
+        "line": 48806,
+        "statement": "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);"
+      },
+      {
+        "line": 48807,
+        "statement": "TLOAD(v8086, v8094);"
+      },
+      {
+        "line": 48808,
+        "statement": "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);"
+      },
+      {
+        "line": 48816,
+        "statement": "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);"
+      },
+      {
+        "line": 48817,
+        "statement": "TMOV(v8095, v8086);"
+      },
+      {
+        "line": 48818,
+        "statement": "set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);"
+      },
+      {
+        "line": 48851,
+        "statement": "set_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);"
+      },
+      {
+        "line": 48854,
+        "statement": "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);"
+      },
+      {
+        "line": 48896,
+        "statement": "wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);"
+      },
+      {
+        "line": 48897,
+        "statement": "TLOAD(v8108, v8116);"
+      },
+      {
+        "line": 48898,
+        "statement": "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);"
+      },
+      {
+        "line": 48906,
+        "statement": "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);"
+      },
+      {
+        "line": 48907,
+        "statement": "TMOV(v8117, v8108);"
+      },
+      {
+        "line": 48908,
+        "statement": "set_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);"
+      },
+      {
+        "line": 48941,
+        "statement": "set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);"
+      }
+    ]
+  },
+  "baseline": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/build_output/entry_q0pmqift/ptoas/csa_static_group.cpp",
+    "first_line": 48733,
+    "last_line": 48810,
+    "events": [
+      {
+        "line": 48777,
+        "statement": "TLOAD(v8080, v8088);"
+      }
+    ]
+  },
+  "conclusion": "关闭本次stage=2行加载变换：有效性分支仍逐行包含load/assemble；不建议上卡或扫stage。",
+  "limitations": [
+    "CPU代码顺序及地址证据，不是硬件延迟/吞吐测量。",
+    "未运行设备精度；只有AST合同检查与完整codegen。",
+    "raw_scalar版本仅验证源码变换，没有重新完整lowering。",
+    "不能据此断言手写显式分批发射或未来编译器不能重叠；本实现未形成重叠。"
+  ]
+}

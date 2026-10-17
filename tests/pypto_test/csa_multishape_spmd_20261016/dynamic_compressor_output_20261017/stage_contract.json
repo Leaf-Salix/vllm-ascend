@@ -1,0 +1,109 @@
+{
+  "scope": "主512列compressor RMS/RoPE/compact cache，显式AIV worker；不包含pool或state commit",
+  "source": "vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_output_stages.py",
+  "reference": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_output_20261017/reference_decode_compressor_ratio4.py",
+  "function": "compressor_norm_rope_cache_stage",
+  "parameters": [
+    {
+      "name": "pooled_kv",
+      "annotation": "pl.Tensor[[POOLED_ROWS_DYN, HEAD_DIM], pl.FP32]"
+    },
+    {
+      "name": "norm_w",
+      "annotation": "pl.Tensor[[HEAD_DIM], pl.BF16]"
+    },
+    {
+      "name": "cos",
+      "annotation": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]"
+    },
+    {
+      "name": "sin",
+      "annotation": "pl.Tensor[[COMPACT_ROWS_DYN, ROPE_HEAD_DIM], pl.FP32]"
+    },
+    {
+      "name": "bounds",
+      "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+    },
+    {
+      "name": "lengths",
+      "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+    },
+    {
+      "name": "positions",
+      "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+    },
+    {
+      "name": "compact_offsets",
+      "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+    },
+    {
+      "name": "compact_slots",
+      "annotation": "pl.Tensor[[COMPACT_SLOT_ROWS_DYN, 2], pl.INT32]"
+    },
+    {
+      "name": "normed_kv",
+      "annotation": "pl.InOut[pl.Tensor[[NORMED_ROWS_DYN, HEAD_DIM], pl.FP32]]"
+    },
+    {
+      "name": "kv_debug",
+      "annotation": "pl.InOut[pl.Tensor[[T_DYN, HEAD_DIM], pl.FP32]]"
+    },
+    {
+      "name": "cache_flat",
+      "annotation": "pl.InOut[pl.Tensor[[CACHE_ROWS_DYN, HEAD_DIM], pl.BF16]]"
+    },
+    {
+      "name": "worker_id",
+      "annotation": "pl.Scalar[pl.INDEX]"
+    },
+    {
+      "name": "WORKERS",
+      "annotation": "pl.constexpr"
+    }
+  ],
+  "return_aliases": [
+    "normed_kv",
+    "kv_debug",
+    "cache_flat"
+  ],
+  "owner": "request%WORKERS，核内按[Q[r],Q[r+1])分<=16行；不同请求不共享块，允许非16对齐起点与任意query数",
+  "capacity": [
+    "T=positions.shape[0]，debug同T；T可含padding，不代表有效行",
+    "pooled与normed独立容量，均>=T；上游只初始化active请求原始行，本helper也只读写这些行",
+    "Q和L动态轴独立，request_bounds先校验范围；Q/L全局单调无重叠由Native入口保证",
+    "cos/sin共享Native动态C且必须等长；slots有独立动态C_slot",
+    "cache_flat是Native同GM[pages*32,512]BF16别名，行数必须整除32；helper检查page/offset与实际row上界"
+  ],
+  "math": "平方和256→128→64→row_sum，eps与recip(sqrt)，gamma BF16先load后UB cast，无Host升精；原NOPE/RoPE顺序，sin符号消费端偶负奇正；cache rint BF16，debug FP32",
+  "debug_contract": "仅active且causal且关闭C4且compact索引合法且cache槽合法时写debug；其余debug保留原值，与当前canonical语义相同。",
+  "wait_before": [
+    "所有所需pooled行写回且可见；首版可等全部pool worker",
+    "compact_offsets单写者完成且可见",
+    "Native compact cos/sin与slots/positions/Q/L为同轮输入，外部event完成"
+  ],
+  "state_relation": "本helper与state commit都是pool消费者；state commit须等全体pool旧state读完，本helper不负责该全局依赖。完整组合可并行但不得放宽pool→commit依赖。",
+  "publish_after": "当前worker全部request/wave的norm/debug/cache副作用完成后由外层发布；helper内部无spmd/submit/notify/wait。空worker也须按外层phase协议处理。",
+  "guards": "active→causal position/关闭→compact>=0且分别<C_cos/C_sin/C_slot→读slot→page与offset下/上界→cache实际行界→debug/cache副作用。C=0不读slot。",
+  "evidence": {
+    "source_audit": "source_audit.json：17数学表达式+gather索引等价，126配置的所有权/边界CPU模型",
+    "full_v1": "frontend失败：Tile row_sum需显式同形FP32 tmp",
+    "full_v2": "frontend失败：pl.gather(dim=-1)仅支持Tensor，当前显式load返回Tile",
+    "full_v3": "frontend失败：Tile gather索引混用Tensor与Tile",
+    "full_v4": "完整CPU backend PASS；统一Tile索引+row*64绝对索引，同算法不改数学",
+    "compiled_audit": "full_v4/compiled_audit.json：8动态轴，实际norm写回rows与同GM读回保留，MTE3→MTE2 event位于两者之间，slot读前边界保留",
+    "audit_script_correction": "首次检查v117全GM描述符时误期待(v11+offset)，实际是(v11,shape,stride)；只修审计匹配，未改源码或重编译"
+  },
+  "not_validated": [
+    "设备精度",
+    "完整MIX跨核同步",
+    "服务混长query/padding执行",
+    "性能"
+  ],
+  "device_execution": false,
+  "weights_values_loaded": false,
+  "reproduce": {
+    "source": "python check_source.py",
+    "existing_cpp": "python check_compiled.py",
+    "full_cpu": "bash reproduce_cpu.sh <新目录>"
+  }
+}

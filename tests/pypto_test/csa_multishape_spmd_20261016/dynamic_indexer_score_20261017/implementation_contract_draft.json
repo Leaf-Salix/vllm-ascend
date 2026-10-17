@@ -1,0 +1,40 @@
+{
+  "状态": "已对照源码并与root/最终TopK发布agent对齐，尚未写正式helper或编译。",
+  "范围": "当前Native Cube score的成对AIC/AIV流水及叶根；不含short Vector或最终query Top-K publish。",
+  "helper": [
+    "indexer_score_cube_stage",
+    "indexer_score_vector_lane_stage"
+  ],
+  "配置": "GROUP_SIZE=2/6、QK_PANEL=128/64、SCORE_TILE=768/1024、prefetch=0/1、BALANCED/ROOTS均显式constexpr，必须与统一plan一致。不可按T再猜。",
+  "共同输入": [
+    "Q/L/positions",
+    "group_offsets",
+    "plan[8]",
+    "Native slab INT8[pages,page_bytes]及其只读key0/key64外层别名",
+    "Native请求页表",
+    "score_transfer双槽"
+  ],
+  "AIC额外输入": [
+    "qr INT8[query_head_rows,128]",
+    "coefficients FP16[coeff_rows,G*64]"
+  ],
+  "AIV额外输入输出": [
+    "core_id及lane0/1",
+    "score_arena FP32[>=2*24*G,8192]按core/query_lane/lane私有",
+    "pair_arena FP32[>=T*64,1024]"
+  ],
+  "pair布局": "stride64=MAX_LEAVES*2，ROOTS2写q*64+leaf*2+lane；ROOTS1写q*64+leaf；与最终发布agent确认一致。",
+  "工作分配": "group_plan与work_item/leaf_range/query_visibility全复用正式indexer_group_stages.py；每core从core_id按24轮转统一groups*leaves。",
+  "FFTS": "外层同一MIX同时运行AIC/双AIV，统一set_ffts。READY=FIX发，AIV MTE2等并TLOAD后ACK=MTE2发。AIC第2步起先等ACK复用两GM槽，每个leaf末排空min(steps,2)。无有效query输出的AIV lane仍须消费组消息与ACK。",
+  "尾组待验证": "仅load live*64个真实query head；同样限制QK Mat/Right有效行和coefficient Mat/Left有效K，使WS不读未产生的尾QK行。物理tile仍G*64，完整组数学不变。后端若无法保存该有效K链须停止回报，不读下一请求或padding query。",
+  "地址边界": "Q/L先决定active，causal per-query visibility决定有效候选；Native页表列/物理page必须先检查后读。无效page不作为受支持的数学场景，不能把安全guard当成有效输入精度证明。",
+  "CPU计划": "有限编译真正成对MIX：先G2/768/nonbalanced/prefetch0与G6/1024/balanced/prefetch1覆盖两个主要资源/根模式，源码与协议模型另外枚举空core/odd请求/长短历史/两槽ACK；不NPU。",
+  "当前资源": "源数学G6 QK A=L0A48KiB+系数12KiB；Right两Key8KiB+8KiB+WS48KiB=64KiB；QK Acc96KiB+WS4KiB。G2两Key16+16+WS32=64KiB。保留原liveness，不同时永久reserve额外L1/L0。",
+  "不修改": [
+    "indexer_group_stages.py",
+    "indexer_topk_stages.py",
+    "其它正式源码",
+    "依赖仓",
+    "MASTER"
+  ]
+}

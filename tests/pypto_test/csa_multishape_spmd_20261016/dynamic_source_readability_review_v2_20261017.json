@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "reviewed_at": "2026-10-17T08:35:01.638919+00:00",
+  "scope": "仅四个指定正式源码的中文注释/docstring；不修改执行逻辑",
+  "verification_method": "对编辑前后ast.parse结果递归移除Module/Function/Class首个docstring，ast.dump(include_attributes=False)完整比较；注释不进入AST",
+  "hash_used": false,
+  "new_compilation": false,
+  "npu_execution": false,
+  "files": [
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kv_stages.py",
+      "changes": [
+        "补齐 KV 512 列内部划分、interleaved RoPE 符号与交换合同，说明输入是 token 行。",
+        "明确按每段实际 tile_rows 选择 M32/M64，区分动态分块与按实值形状展开。",
+        "解释 helper 返回、两级 pipeline 与外部发布/等待之间的边界。",
+        "扩展 AIC helper 入参和所有权说明，强调完整 K 链及四份列块依赖。",
+        "补充完整 M 行块条带循环的互斥所有权。",
+        "说明 M16 收尾归属、唯一短尾块及 pad16 合法写入范围。",
+        "消除“helper 自己等待”的阅读歧义，说明整行 RMS 与 NOPE/RoPE 数据流。",
+        "补充 pad16 工作区小于最后 M32 读取窗口时必须使用 valid_rows 的原因。"
+      ],
+      "non_docstring_ast_identical": true,
+      "non_docstring_ast_nodes": 2558,
+      "before_lines": 287,
+      "after_lines": 308,
+      "module_overview_present": true,
+      "function_lines": {
+        "_kv_project_worker": 86,
+        "kv_project_stage": 143,
+        "kv_norm_rope_stage": 164
+      }
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cache_stages.py",
+      "changes": [
+        "明确二维 cache 零拷贝描述符、容量整除和 device slot 的语义。",
+        "写出 token 的唯一写回 owner，并提醒与前一段 RMS 分核不同。",
+        "补齐 cache 发布与早期 KV 完成的区别、纯拷贝数值语义和源存储重叠约束。",
+        "补充尾行逐行处理和空 worker 的同步边界。"
+      ],
+      "non_docstring_ast_identical": true,
+      "non_docstring_ast_nodes": 347,
+      "before_lines": 70,
+      "after_lines": 79,
+      "module_overview_present": true,
+      "function_lines": {
+        "original_kv_writeback_stage": 54
+      }
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/metadata_stages.py",
+      "changes": [
+        "区分 Q/B/T 独立轴及 token_capacity 与工作区容量，解释边界来源。",
+        "明确扫描的 Scalar 角色、单个 worker 0 所属集合和 AIV 取行的 UB 作用域。",
+        "解释紧凑偏移中的减一、实际关闭组计数和具体地址示例。",
+        "补充空 worker 返回不等于前缀就绪，dummy 清零不等于 active。",
+        "说明至多16行的请求内循环、未填充 UB 行的有效性和关闭条件。",
+        "复核并澄清 token_capacity 为本轮 Tensor 的实际 T（可含 dummy），不是 Host 读取的 num_actual_tokens；取行 helper 不执行 token 配对。"
+      ],
+      "non_docstring_ast_identical": true,
+      "non_docstring_ast_nodes": 801,
+      "before_lines": 105,
+      "after_lines": 123,
+      "module_overview_present": true,
+      "function_lines": {
+        "compact_offsets_stage": 61,
+        "load_request_compact_rope_rows": 90
+      }
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/__init__.py",
+      "changes": [
+        "目录地图加入 KV、原始 cache、紧凑 metadata 和已落盘但开发中的 Indexer query 阶段。",
+        "修正过时“KV尚未实现”表述，区分阶段落盘、组装、后续未完成及设备证据范围。"
+      ],
+      "non_docstring_ast_identical": true,
+      "non_docstring_ast_nodes": 6,
+      "before_lines": 29,
+      "after_lines": 40,
+      "module_overview_present": true,
+      "function_lines": {}
+    }
+  ],
+  "not_covered": [
+    "indexer_query_stages.py 正在开发：只在阅读地图标明现状，没有编辑/审阅其数学或验证",
+    "未修改请求几何、同步实现、原多task数学、依赖仓或安装",
+    "不重新证明阶段数值、设备同步、混合query/padding生命周期与性能",
+    "仍未提供完整CSA动态单SPMD入口；地图不是完成声明"
+  ],
+  "passed": true
+}

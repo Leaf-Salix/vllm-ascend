@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-17",
+  "reviewer": "anchor_gap_design",
+  "scope": "只读复核正式动态 metadata_stages.py、cache_stages.py 的边界和 Native 语义；未修改源码，未重编译，未运行 NPU。",
+  "conclusion": {
+    "status": "未发现约定合法输入内的实质公式或越界缺陷",
+    "qualification": "这是源码审查结论，不是整层或硬件 PASS；后续组装必须兑现下列入口、同步和副作用合同。",
+    "production_files": [
+      "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/metadata_stages.py",
+      "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cache_stages.py"
+    ]
+  },
+  "reused_evidence": [
+    {
+      "path": "oracle.json",
+      "result": "116 次 metadata 检查、70 组 cache 检查通过",
+      "actual_method": "解释执行同源 Python AST，并用有界 NumPy pl 替身核对访存与输出",
+      "limits": ["没有执行 lowered CPP", "没有验证硬件缓存发布或 AICore 并发", "cache oracle 的数值载荷不证明 BF16 数学"]
+    },
+    {
+      "path": "cpu_v1/result.json",
+      "result": "offsets parse/full_codegen 通过；首次 rope 的 Tile/Tensor 类型错误保留为失败记录",
+      "limits": ["cpu_v1 整体 passed=false，不能整体写为 PASS"]
+    },
+    {
+      "path": "cpu_v2/result.json",
+      "result": "改为显式 UB Tile 后，rope 与 cache parse/full_codegen 通过",
+      "limits": ["未输入固定样例 shape", "没有设备执行", "最终动态参数产物审计由 root 单独记录"]
+    }
+  ],
+  "checked_semantics": [
+    {
+      "topic": "L=0 dummy 与短 Q",
+      "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/request_geometry.py:49-61；metadata_stages.py:61-70,91-102",
+      "finding": "request_bounds 先核对 L/Q 各自容量，再检查 L>0、0<=begin<end<=T 和 query_len<=L。L=0 不读 Q 内容；metadata consumer 不读残留 positions。短 Q 或非法范围作为 inactive，offset 写 0，不推进 prefix。活动但无 C4 关闭组的请求仍 active。",
+      "limit": "局部范围检查不是对整个 Q 前缀和单调性、跨请求无重叠的完整验证；合法 Native Q 仍是入口合同。"
+    },
+    {
+      "topic": "Native 紧凑偏移",
+      "source": "metadata_stages.py:65-68,99-103；csrc/attention/compressor_metadata/op_kernel/compressor_metadata.h:159-168,211-216",
+      "derivation": "令 H=L-(Q[r+1]-Q[r])、p 为此前活动请求的关闭组数。Native 本请求关闭组数 floor(L/4)-floor(H/4)，对应本 helper 的 prefix 增量。第 k 个关闭位置满足 floor((position+1)/4)=floor(H/4)+1+k，故 offset=p-floor(H/4)-1 加该商恰为 p+k。",
+      "finding": "offset 本身可负，不能按负数判无效；仅最终 compact_row 作非负与 cos/sin 容量检查。"
+    },
+    {
+      "topic": "causal position、短 tile、C=0",
+      "source": "metadata_stages.py:89-104",
+      "finding": "仅接受同一活动请求内 1..16 行；位置必须等于 H+token-begin 且关闭 C4。最终行同时检查两张紧凑表，C=0 或负/过大行不执行 gather。其余位置保留单位旋转。",
+      "limit": "单位旋转只防越界，不能代替活动、位置或 slot 合法性。"
+    },
+    {
+      "topic": "cache 短尾与 slot 边界",
+      "source": "cache_stages.py:55-69",
+      "finding": "动态 ceil(T/8) 条带分核，尾块仅遍历 min(8,T-first) 行；T=0 无载荷读写。先分别判断 page 与 offset 的上下界，再读对应 KV 并写单行。offset>=32 不会串到相邻页，负 dummy 不加载 KV。",
+      "limit": "正确分配要求 WORKERS>0 且 worker_id 位于 [0,WORKERS)，输入连续别名和容量须由绑定层保证。"
+    }
+  ],
+  "integration_requirements": [
+    {
+      "id": "R1",
+      "priority": "接完整入口前落实",
+      "issue": "Native prefix 的判定量是 actualNumReqs、startPos 和 Q，而新 helper 的判定量是 L/Q。二者不是对任意 metadata 都无条件等价。",
+      "evidence": [
+        "csrc/attention/compressor_metadata/op_kernel/compressor_metadata.h:159-168",
+        "vllm_ascend/attention/dsa_v1.py:979-981,1002-1005,1613-1623",
+        "vllm_ascend/worker/model_runner_v1.py:1160-1163"
+      ],
+      "required_contract": "有效请求使用同一轮 Q/L，Native startPos=L-Qlen；Native actualNumReqs 排除的尾部请求在传给 PTO 的 L 中为 0。真实 decode 当前来源遵循这一关系；不能将独立构造或不一致的 startPos/actualNumReqs 当作已支持输入。",
+      "recommendation": "组装层记录并核对 metadata 来源/顺序，继续直接传 Native device Tensor；不为此添加 Host 回读。"
+    },
+    {
+      "id": "R2",
+      "priority": "压缩消费者必须遵守",
+      "issue": "单位旋转与 compact 表的容量不能作为业务有效性标记。",
+      "evidence": [
+        "metadata_stages.py:26-31,91-104",
+        "vllm_ascend/attention/dsa_v1.py:606-619",
+        "csrc/attention/compressor_metadata/op_kernel/compressor_metadata.h:335-387"
+      ],
+      "required_contract": "C 是分配容量，Native 会把未用行填成单位旋转和无效 slot；压缩 state/cache 的副作用前，仍须独立检查 active、causal position、关闭边界和合法 slot。不能因某行 cos=1/sin=0 就判断有效或无效。",
+      "recommendation": "让请求身份与 begin/end/H 沿消费者局部计算保留；在最终 slot 读取之前先判 0<=compact_row<C，读取后再判页/页内 offset。"
+    },
+    {
+      "id": "R3",
+      "priority": "外层绑定与同步合同",
+      "issue": "cache helper 有意不去重、不查 Q/L，也不发布完成；这不能被外层误解为自包含的原始 cache 更新。",
+      "evidence": ["cache_stages.py:22-29,47-69", "metadata_stages.py:18-23"],
+      "required_contract": "kv 与 slots 的 T 一致；cache 二维别名连续且行数为 32 的倍数；所有活动写 slot 唯一；dummy slot 负数；共享 prefix 只读或由上游保证写时不冲突。先等待 KV 生产者，写完发布，attention 再消费。offsets 的消费者等待 worker 0 发布。",
+      "recommendation": "正式 caller 绑定上述布局与生产者集合，不能以 helper 返回值视作跨核完成；不要用有效 slot 加 L=0 的不一致输入来声称 dummy 已覆盖。"
+    },
+    {
+      "id": "R4",
+      "priority": "证据表述边界",
+      "issue": "现有 116 次 metadata oracle 主要覆盖均匀/混合/奇数 query、dummy、偏移越界和零行，未逐项构造本模块 causal position 不匹配、first/rows 非法、短 Q 的反例。",
+      "required_contract": "这些分支当前结论来自源码检查；短 Q 的 request_bounds 另有历史独立 oracle。不得把本次 116 的数量解释为所有防御分支都已测试。",
+      "recommendation": "此次不重测；以后组装压缩消费者时用少量有实际副作用的反例检查这些入口条件，尤其捕获阶段陈旧 positions。"
+    }
+  ],
+  "not_claimed": [
+    "没有整层动态 CSA 或混合 query 的设备数值结论",
+    "没有证明 prefix 生命周期、真实服务 dummy slot 或硬件核间同步",
+    "没有性能结论，也没有将源码安全兜底推广为支持非法 metadata"
+  ]
+}

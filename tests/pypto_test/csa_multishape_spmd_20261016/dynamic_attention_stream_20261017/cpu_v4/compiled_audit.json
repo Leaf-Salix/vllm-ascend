@@ -1,0 +1,565 @@
+{
+  "passed": true,
+  "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/cpu_v4/kernel",
+  "roles": {
+    "cube": {
+      "base_line": 59,
+      "arguments": {
+        "v1": "q_flat__ssa_v0",
+        "v2": "valid_block_mask__ssa_v0",
+        "v3": "kv_transfer__ssa_v0",
+        "v4": "score_transfer__ssa_v0",
+        "v5": "probability_transfer__ssa_v0",
+        "v6": "pv_transfer__ssa_v0",
+        "v7": "ffts_workspace__ssa_v0",
+        "v8": "ori_kv_flat__ssa_v0",
+        "v9": "cmp_kv_flat__ssa_v0",
+        "v10": "ori_block_table__ssa_v0",
+        "v11": "cmp_block_table__ssa_v0",
+        "v12": "bounds__ssa_v0",
+        "v13": "lengths__ssa_v0",
+        "v14": "position_ids__ssa_v0",
+        "v15": "cmp_sparse_indices__ssa_v0",
+        "v16": "sparse_bias__ssa_v0",
+        "v17": "attn_sink_col__ssa_v0",
+        "v18": "freqs_cos__ssa_v0",
+        "v19": "rope_sin_signed__ssa_v0",
+        "v20": "mi_transfer__ssa_v0",
+        "v21": "li_transfer__ssa_v0",
+        "v22": "o_packed_heads__ssa_v0",
+        "v23": "CSA_ATTN_STREAM_Q_ROWS",
+        "v24": "CSA_ATTN_PLAN_CAP",
+        "v25": "CSA_ATTN_STREAM_KV_RING_ROWS",
+        "v26": "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+        "v27": "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+        "v28": "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+        "v29": "CSA_GEOMETRY_REQUESTS",
+        "v30": "CSA_ATTN_ORIGINAL_COLUMNS",
+        "v31": "CSA_ATTN_COMPRESSED_COLUMNS",
+        "v32": "CSA_GEOMETRY_QUERY_BOUNDS",
+        "v33": "CSA_ATTN_PLAN_T",
+        "v34": "CSA_ATTN_ROPE_CAP",
+        "v35": "CSA_ATTN_STREAM_PACK_ROWS",
+        "v36": "__pypto_spmd_block_idx",
+        "v37": "__pypto_spmd_block_num"
+      },
+      "accesses": {
+        "q_flat": {
+          "TLOAD": [
+            {
+              "line": 281,
+              "statement": "TLOAD(v121, v130);"
+            }
+          ]
+        },
+        "valid_block_mask": {
+          "scalar_load": [
+            {
+              "line": 286,
+              "statement": "int32_t v131 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v120 * (uint64_t) v46) + (uint64_t) v119)];"
+            },
+            {
+              "line": 466,
+              "statement": "int32_t v178 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v111 + (uint64_t) ((int64_t) (uint64_t) (v177 / v51) * (uint64_t) v50)) * (uint64_t) v46) + (uint64_t) (v177 % v51))];"
+            }
+          ]
+        },
+        "kv_transfer": {
+          "TLOAD": [
+            {
+              "line": 336,
+              "statement": "TLOAD(v138, v146);"
+            }
+          ]
+        },
+        "score_transfer": {
+          "TSTORE": [
+            {
+              "line": 449,
+              "statement": "TSTORE(v175, v149);"
+            }
+          ]
+        },
+        "probability_transfer": {
+          "TLOAD": [
+            {
+              "line": 506,
+              "statement": "TLOAD(v182, v190);"
+            }
+          ]
+        },
+        "pv_transfer": {
+          "TSTORE": [
+            {
+              "line": 586,
+              "statement": "TSTORE(v211, v198);"
+            },
+            {
+              "line": 639,
+              "statement": "TSTORE(v225, v212);"
+            },
+            {
+              "line": 691,
+              "statement": "TSTORE(v239, v226);"
+            },
+            {
+              "line": 719,
+              "statement": "TSTORE(v247, v240);"
+            }
+          ]
+        }
+      },
+      "waits": [],
+      "publishes": [],
+      "events": [
+        {
+          "op": "wait",
+          "event": 0,
+          "line": 304
+        },
+        {
+          "op": "notify",
+          "event": 1,
+          "pipe": "PIPE_FIX",
+          "line": 451
+        },
+        {
+          "op": "wait",
+          "event": 2,
+          "line": 477
+        },
+        {
+          "op": "notify",
+          "event": 3,
+          "pipe": "PIPE_FIX",
+          "line": 721
+        }
+      ]
+    },
+    "vector": {
+      "base_line": 738,
+      "arguments": {
+        "v1": "q_flat__ssa_v0",
+        "v2": "valid_block_mask__ssa_v0",
+        "v3": "kv_transfer__ssa_v0",
+        "v4": "score_transfer__ssa_v0",
+        "v5": "probability_transfer__ssa_v0",
+        "v6": "pv_transfer__ssa_v0",
+        "v7": "ffts_workspace__ssa_v0",
+        "v8": "ori_kv_flat__ssa_v0",
+        "v9": "cmp_kv_flat__ssa_v0",
+        "v10": "ori_block_table__ssa_v0",
+        "v11": "cmp_block_table__ssa_v0",
+        "v12": "bounds__ssa_v0",
+        "v13": "lengths__ssa_v0",
+        "v14": "position_ids__ssa_v0",
+        "v15": "cmp_sparse_indices__ssa_v0",
+        "v16": "sparse_bias__ssa_v0",
+        "v17": "attn_sink_col__ssa_v0",
+        "v18": "freqs_cos__ssa_v0",
+        "v19": "rope_sin_signed__ssa_v0",
+        "v20": "mi_transfer__ssa_v0",
+        "v21": "li_transfer__ssa_v0",
+        "v22": "o_packed_heads__ssa_v0",
+        "v23": "CSA_ATTN_STREAM_Q_ROWS",
+        "v24": "CSA_ATTN_PLAN_CAP",
+        "v25": "CSA_ATTN_STREAM_KV_RING_ROWS",
+        "v26": "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+        "v27": "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+        "v28": "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+        "v29": "CSA_GEOMETRY_REQUESTS",
+        "v30": "CSA_ATTN_ORIGINAL_COLUMNS",
+        "v31": "CSA_ATTN_COMPRESSED_COLUMNS",
+        "v32": "CSA_GEOMETRY_QUERY_BOUNDS",
+        "v33": "CSA_ATTN_PLAN_T",
+        "v34": "CSA_ATTN_ROPE_CAP",
+        "v35": "CSA_ATTN_STREAM_PACK_ROWS",
+        "v36": "__pypto_spmd_block_idx",
+        "v37": "__pypto_spmd_block_num",
+        "v38": "__pypto_spmd_subblock_idx"
+      },
+      "accesses": {
+        "attn_sink_col": {
+          "TLOAD": [
+            {
+              "line": 1376,
+              "statement": "TLOAD(v313, v320);"
+            },
+            {
+              "line": 3149,
+              "statement": "TLOAD(v766, v772);"
+            },
+            {
+              "line": 3673,
+              "statement": "TLOAD(v913, v920);"
+            },
+            {
+              "line": 4052,
+              "statement": "TLOAD(v1021, v320);"
+            }
+          ]
+        },
+        "valid_block_mask": {
+          "scalar_load": [
+            {
+              "line": 1432,
+              "statement": "int32_t v335 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v332 * (uint64_t) v59) + (uint64_t) v333)];"
+            },
+            {
+              "line": 2250,
+              "statement": "int32_t v533 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v273 + (uint64_t) ((int64_t) (uint64_t) (v532 / v66) * (uint64_t) v65)) * (uint64_t) v59) + (uint64_t) (v532 % v66))];"
+            },
+            {
+              "line": 2261,
+              "statement": "int32_t v535 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v332 * (uint64_t) v59) + (uint64_t) v333)];"
+            },
+            {
+              "line": 2287,
+              "statement": "int32_t v540 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v539 * (uint64_t) v59) + (uint64_t) v538)];"
+            },
+            {
+              "line": 2547,
+              "statement": "int32_t v610 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v332 * (uint64_t) v59) + (uint64_t) v333)];"
+            },
+            {
+              "line": 2575,
+              "statement": "int32_t v615 = (v2)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v614 * (uint64_t) v59) + (uint64_t) v613)];"
+            }
+          ]
+        },
+        "lengths": {
+          "scalar_load": [
+            {
+              "line": 1514,
+              "statement": "int32_t v354 = (v13)[v346];"
+            },
+            {
+              "line": 1675,
+              "statement": "int32_t v382 = (v13)[v341];"
+            }
+          ]
+        },
+        "bounds": {
+          "scalar_load": [
+            {
+              "line": 1532,
+              "statement": "int32_t v359 = (v12)[v346];"
+            },
+            {
+              "line": 1538,
+              "statement": "int32_t v361 = (v12)[v350];"
+            }
+          ]
+        },
+        "position_ids": {
+          "scalar_load": [
+            {
+              "line": 1672,
+              "statement": "int64_t v381 = (v14)[v332];"
+            }
+          ]
+        },
+        "ori_block_table": {
+          "scalar_load": [
+            {
+              "line": 1735,
+              "statement": "int32_t v398 = (v10)[(int64_t) ((uint64_t) ((int64_t) v397 * (uint64_t) v30) + (uint64_t) v396)];"
+            },
+            {
+              "line": 1815,
+              "statement": "int32_t v420 = (v10)[(int64_t) ((uint64_t) ((int64_t) v419 * (uint64_t) v30) + (uint64_t) v418)];"
+            },
+            {
+              "line": 1898,
+              "statement": "int32_t v443 = (v10)[(int64_t) ((uint64_t) ((int64_t) v442 * (uint64_t) v30) + (uint64_t) v441)];"
+            },
+            {
+              "line": 1981,
+              "statement": "int32_t v466 = (v10)[(int64_t) ((uint64_t) ((int64_t) v465 * (uint64_t) v30) + (uint64_t) v464)];"
+            },
+            {
+              "line": 2064,
+              "statement": "int32_t v489 = (v10)[(int64_t) ((uint64_t) ((int64_t) v488 * (uint64_t) v30) + (uint64_t) v487)];"
+            }
+          ]
+        },
+        "ori_kv_flat": {
+          "TLOAD": [
+            {
+              "line": 1785,
+              "statement": "TLOAD(v401, v413);"
+            },
+            {
+              "line": 1868,
+              "statement": "TLOAD(v424, v436);"
+            },
+            {
+              "line": 1951,
+              "statement": "TLOAD(v447, v459);"
+            },
+            {
+              "line": 2034,
+              "statement": "TLOAD(v470, v482);"
+            },
+            {
+              "line": 2117,
+              "statement": "TLOAD(v493, v505);"
+            }
+          ]
+        },
+        "cmp_sparse_indices": {
+          "scalar_load": [
+            {
+              "line": 2131,
+              "statement": "int32_t v508 = (v15)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v332 * (uint64_t) v57) + (uint64_t) v507)];"
+            }
+          ]
+        },
+        "cmp_block_table": {
+          "scalar_load": [
+            {
+              "line": 2149,
+              "statement": "int32_t v512 = (v11)[(int64_t) ((uint64_t) ((int64_t) v511 * (uint64_t) v31) + (uint64_t) v510)];"
+            }
+          ]
+        },
+        "cmp_kv_flat": {
+          "TLOAD": [
+            {
+              "line": 2187,
+              "statement": "TLOAD(v515, v523);"
+            }
+          ]
+        },
+        "kv_transfer": {
+          "TSTORE": [
+            {
+              "line": 2233,
+              "statement": "TSTORE(v531, v205);"
+            }
+          ]
+        },
+        "score_transfer": {
+          "TLOAD": [
+            {
+              "line": 2338,
+              "statement": "TLOAD(v545, v554);"
+            }
+          ]
+        },
+        "sparse_bias": {
+          "TLOAD": [
+            {
+              "line": 2372,
+              "statement": "TLOAD(v555, v564);"
+            }
+          ]
+        },
+        "probability_transfer": {
+          "TSTORE": [
+            {
+              "line": 2461,
+              "statement": "TSTORE(v586, v577);"
+            }
+          ]
+        },
+        "mi_transfer": {
+          "TSTORE": [
+            {
+              "line": 2495,
+              "statement": "TSTORE(v597, v569);"
+            }
+          ],
+          "TLOAD": [
+            {
+              "line": 2628,
+              "statement": "TLOAD(v617, v631);"
+            }
+          ]
+        },
+        "li_transfer": {
+          "TSTORE": [
+            {
+              "line": 2530,
+              "statement": "TSTORE(v608, v575);"
+            }
+          ],
+          "TLOAD": [
+            {
+              "line": 2670,
+              "statement": "TLOAD(v632, v644);"
+            }
+          ]
+        },
+        "pv_transfer": {
+          "TLOAD": [
+            {
+              "line": 2924,
+              "statement": "TLOAD(v705, v712);"
+            },
+            {
+              "line": 2980,
+              "statement": "TLOAD(v719, v726);"
+            }
+          ]
+        },
+        "freqs_cos": {
+          "TLOAD": [
+            {
+              "line": 3345,
+              "statement": "TLOAD(v817, v825);"
+            },
+            {
+              "line": 3848,
+              "statement": "TLOAD(v965, v825);"
+            }
+          ]
+        },
+        "rope_sin_signed": {
+          "TLOAD": [
+            {
+              "line": 3372,
+              "statement": "TLOAD(v826, v833);"
+            },
+            {
+              "line": 3857,
+              "statement": "TLOAD(v967, v833);"
+            }
+          ]
+        },
+        "o_packed_heads": {
+          "TSTORE": [
+            {
+              "line": 3533,
+              "statement": "TSTORE(v878, v864);"
+            },
+            {
+              "line": 3556,
+              "statement": "TSTORE(v885, v868);"
+            },
+            {
+              "line": 4019,
+              "statement": "TSTORE(v1013, v999);"
+            },
+            {
+              "line": 4043,
+              "statement": "TSTORE(v1020, v1003);"
+            }
+          ]
+        }
+      },
+      "waits": [],
+      "publishes": [],
+      "events": [
+        {
+          "op": "wait",
+          "event": 1,
+          "line": 2255
+        },
+        {
+          "op": "notify",
+          "event": 0,
+          "pipe": "PIPE_MTE3",
+          "line": 2266
+        },
+        {
+          "op": "wait",
+          "event": 1,
+          "line": 2298
+        },
+        {
+          "op": "notify",
+          "event": 2,
+          "pipe": "PIPE_MTE3",
+          "line": 2533
+        },
+        {
+          "op": "notify",
+          "event": 0,
+          "pipe": "PIPE_MTE3",
+          "line": 2552
+        },
+        {
+          "op": "wait",
+          "event": 3,
+          "line": 2581
+        }
+      ]
+    }
+  },
+  "dynamic_dimensions": [
+    {
+      "name": "CSA_ATTN_STREAM_Q_ROWS",
+      "descriptor_read": "q_flat__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_PLAN_CAP",
+      "descriptor_read": "valid_block_mask__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_STREAM_KV_RING_ROWS",
+      "descriptor_read": "kv_transfer__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_STREAM_HEAD_RING_ROWS",
+      "descriptor_read": "score_transfer__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_STREAM_ORIGINAL_ROWS",
+      "descriptor_read": "ori_kv_flat__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_STREAM_COMPRESSED_ROWS",
+      "descriptor_read": "cmp_kv_flat__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_GEOMETRY_REQUESTS",
+      "descriptor_read": "ori_block_table__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_ORIGINAL_COLUMNS",
+      "descriptor_read": "ori_block_table__ssa_v0_tensor->shapes[1]"
+    },
+    {
+      "name": "CSA_ATTN_COMPRESSED_COLUMNS",
+      "descriptor_read": "cmp_block_table__ssa_v0_tensor->shapes[1]"
+    },
+    {
+      "name": "CSA_GEOMETRY_QUERY_BOUNDS",
+      "descriptor_read": "bounds__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_PLAN_T",
+      "descriptor_read": "position_ids__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_ROPE_CAP",
+      "descriptor_read": "rope_sin_signed__ssa_v0_tensor->shapes[0]"
+    },
+    {
+      "name": "CSA_ATTN_STREAM_PACK_ROWS",
+      "descriptor_read": "o_packed_heads__ssa_v0_tensor->shapes[0]"
+    }
+  ],
+  "dynamic_dimension_count": 13,
+  "packed_stride_division": [
+    {
+      "statement": "int64_t v737 = v35 / v86;",
+      "divisor": 8
+    }
+  ],
+  "public_abi_count": 22,
+  "single_mix": true,
+  "aic": 24,
+  "aiv": 48,
+  "ffts_setup": {
+    "raw_ptoas_setup_calls": 2,
+    "final_wrapper_setup_calls": 0,
+    "reason": "PyPTO _ptoas_preprocess.py deliberately removes set_ffts_base_addr; Simpler runtime kernel owns hardware FFTS base",
+    "pypto_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/_ptoas_preprocess.py:123",
+    "simpler_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/src/a2a3/platform/onboard/aicore/kernel.cpp:99"
+  },
+  "device_sync_validated": false,
+  "device_precision_validated": false,
+  "performance_measured": false
+}

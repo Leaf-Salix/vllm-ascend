@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+"""DeepSeek V4 Flash CSA的完整源级动态单SPMD入口与ABI合同。
+
+整体思路与阅读顺序
+    decode_csa_spmd只创建一次24组SPMD；_csa_core_group把AIC和双AIV角色
+    装进同一个MIX任务。两种角色在设备同时推进，GM phase通知连接跨组依赖，
+    组内FFTS READY/ACK驱动Score与Attention的环槽流水。先读runtime_abi.py
+    和两份*_schedule.py，再读对应*_stages.py数学。不读历史IR、不在运行时
+    调用tests生成器，不创建额外meta或适配task。
+
+动态输入与分档
+    hidden是x[T,16384]的BF16视图，最终output同形状。T是Native整档容量，
+    可以含dummy；Q/L/position/slots/页表保留device Tensor，每请求有效
+    行数、压缩行数、历史分片和尾query均在核内求。main和idx的Q/L分别传，
+    不因shape相同而合并语义。每请求长度无需相同，也不要求固定S=6。
+    QUERY_GROUP/QK_PANEL/SCORE_TILE等仅是数学与流水策略，不固定T/B/L。
+    不同策略允许分别JIT；本入口不接受Host实际长度代替逐请求device范围。
+    当前接通的是Cube Score路径；<2048压缩候选的原Vector路径尚待接入。
+    初始完整组合使用Native NZ2布局；ND/NZ单阶段通过不代表本入口全部布局通过。
+
+外部工作区与无损视图（捕获前按shape/stride绑定，禁止Host读取device值）
+    所有暂存由调用层预分配，参数签名保持pl.dynamic。HC的P16=pad16(T)，
+    PARTIAL=4*P16，P8=pad8(T)；QR与QPROJ_ROWS至少pad128(T)，KV_ROWS至少
+    pad16(T)。q_heads必须和q_flat同一GM、恰好64*T行。hc_base/hc_base_2d同址。
+    两套压缩pool至少覆盖T行，投影分别pad64(T)/pad16(T)，compact/RoPE/slots
+    容量按Native缓冲绑定，实际count来自前置设备扫描；idx_normed/idx_had按
+    pad16(compact容量)预留。state页宽/表及cache字节布局见对应数学文件。
+    idx_query_rope_heads与idx_query_rope同址，前者行数为后者的64倍；
+    idx_query_scale_heads与idx_query_scale同址，前者行数为后者的1/64。
+    idx_key0/idx_key64分别是idx_cache字节0/64开始的128列只读别名，在JIT
+    编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
+    写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
+    group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32，
+    依次为前缀/组描述符/scale页writer链表头/合法关闭行地址；
+    group_plan固定8项；系数至少16*T行、
+    QUERY_GROUP*64列。Indexer双槽transfer/score至少24*2*QUERY_GROUP行，
+    transfer列为SCORE_TILE，pair至少T*64行。计划容量覆盖pad8(T)。
+    Attention的KV_RING_ROWS>=24*3*128、HEAD_RING_ROWS>=24*3*64；packed
+    为8组，PACK_ROWS可被8整除且PACK_ROWS/8>=T。O_MM_ROWS至少
+    max(pad128(T),pad_OB_ROWS(T))，O_SCALE_ROWS>=T。各缓冲除上述明确的
+    只读别名外不得互相覆盖；hidden/post/comb保留到HCpost完成。
+
+同步生命周期与当前验证边界
+    signal为独立、首次清零的INT32 Tensor，至少PHASE_COUNT*72*128项；
+    每核每调用begin一次，阶段含义和参与集合不能跨工作区复用时改变。只能
+    单图/单流顺序使用，失败或INT32代际将溢出时在捕获外重新初始化。
+    ffts[256]用于PyPTO源码接口；底层地址初始化沿用Simpler运行时，不能
+    把它当作普通GM phase信号的存储。公共metadata与HC/QKV重叠，TopK后
+    的有效块计划仍在层内执行。性能计时须包含这些工作及内部等待。
+    该入口的整链验证状态记在DSV4_CSA_SPMD_OPTIMIZATION_LOG.md；完成源码
+    接线、CPU编译或已有前段PASS都不等于整层精度、图重放或30%性能目标通过。
+"""

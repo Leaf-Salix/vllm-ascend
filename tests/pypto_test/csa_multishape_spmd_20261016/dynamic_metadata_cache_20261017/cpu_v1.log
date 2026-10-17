@@ -1,0 +1,13 @@
+{"device_execution": false, "sample_shapes_supplied": false, "stages": {"offsets": {"parse_passed": true, "full_codegen_passed": true, "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_metadata_cache_20261017/cpu_v1/offsets"}, "rope": {"parse_passed": false, "full_codegen_passed": false}}, "passed": false, "error": "pl operation 'store': The operator tile.store requires first argument to be a TileType, but got TensorType"}
+Error: pl operation 'store': The operator tile.store requires first argument to be a TileType, but got TensorType
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_metadata_cache_20261017/probe.py:64:21
+   |
+62 |                     c, s = load_request_compact_rope_rows(cos, sin, positions, bounds, lengths, offsets,
+63 |                                                          request, first, rows)
+64 |                     out_cos = pl.store(pl.set_validshape(c, rows, 64), [first, 0], out_cos)
+   |                     ^^^^^^^
+65 |                     out_sin = pl.store(pl.set_validshape(s, rows, 64), [first, 0], out_sin)
+66 |     return out_cos, out_sin
+   |
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

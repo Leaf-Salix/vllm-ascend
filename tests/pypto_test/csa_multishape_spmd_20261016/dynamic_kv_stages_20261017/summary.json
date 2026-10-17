@@ -1,0 +1,143 @@
+{
+  "production": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kv_stages.py",
+  "line_count": 287,
+  "contract": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/stage_contract.json",
+  "source_audit": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/audit_v1/result.json",
+  "cpu_result": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/result.json",
+  "compile_log": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1.log",
+  "all_passed": true,
+  "device_execution": false,
+  "original_nz_probe_module_imported": false,
+  "commands": [
+    "python tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/check_cpu.py --stage audit --output tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/audit_v1",
+    "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/reproduce_cpu.sh cpu_v1 both audit_v1 > tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1.log 2>&1",
+    "ruff check vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kv_stages.py tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/check_cpu.py"
+  ],
+  "audit_reuse": "完整后端复用audit_v1已通过的3200覆盖场景；先核对正式源码AST与audit_v1快照一致，不重复枚举。",
+  "validation": {
+    "math": "dense_k/db两个固定K pipeline、Norm完整/尾块整个if分支在显式别名规范化后AST相等；模型常量与原源码一致。",
+    "coverage": "AIC/Norm各1600场景；T=0..384及511/512/513等chunk边界到1025；有效行/四N块和pad16物理写入不重不漏。",
+    "compiler": "两阶段无实际shape描述符的specialize与a2a3/PYPTO完整lowering到最终CPP通过；正式helper不含SPMD/submit/notify/wait。",
+    "lint": "Ruff PASS；首次test脚本有长行及导入顺序两项，已仅格式修正。生产数学未因此变化。"
+  },
+  "codegen_inspection": {
+    "project": {
+      "orchestration": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/project/kernel/orchestration/project_entry.cpp",
+      "submission_calls": [
+        "rt_submit_aic_task("
+      ],
+      "cpp": [
+        "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/project/kernel/kernels/aic/dynamic_kv_project.cpp"
+      ],
+      "dynamic_shape_params": [
+        {
+          "name": "x",
+          "direction": "In",
+          "shape": [
+            -1,
+            4096
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "wkv",
+          "direction": "In",
+          "shape": [
+            4096,
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "kv_fp32",
+          "direction": "Out",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        }
+      ]
+    },
+    "norm": {
+      "orchestration": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/norm/kernel/orchestration/norm_entry.cpp",
+      "submission_calls": [
+        "rt_submit_aiv_task("
+      ],
+      "cpp": [
+        "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_kv_stages_20261017/cpu_v1/norm/kernel/kernels/aiv/dynamic_kv_norm_rope.cpp"
+      ],
+      "dynamic_shape_params": [
+        {
+          "name": "kv_fp32",
+          "direction": "In",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "gamma",
+          "direction": "In",
+          "shape": [
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "cos",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "signed_sin",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        },
+        {
+          "name": "swap",
+          "direction": "In",
+          "shape": [
+            -1,
+            64
+          ],
+          "dtype": "int32",
+          "layout": "ND"
+        },
+        {
+          "name": "kv",
+          "direction": "Out",
+          "shape": [
+            -1,
+            512
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        }
+      ]
+    }
+  },
+  "source_snapshot_note": "cpu_v1保留实际kv_stages.py与当时check_cpu.py；后续只修测试脚本格式。未用hash校验。",
+  "limitations": [
+    "两阶段分别测试包装，不证明已实现整层一个MIX或两阶段正确同步。",
+    "未NPU执行；未验证真机数值/保护区/图重放/性能，不沿用静态版本数据。",
+    "尚未接cache写入；Native dummy/slot仍由后续metadata阶段过滤。"
+  ],
+  "failures": "数学审计和CPU lowering首轮均通过；只有测试脚本Ruff格式项已修。"
+}

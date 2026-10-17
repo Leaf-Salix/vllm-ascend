@@ -1,0 +1,147 @@
+{
+  "source": "vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_topk_stages.py",
+  "reference_snapshot": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_topk_20261017/reference_decode_indexer.py",
+  "scope": "纯排序/归并四helper；不含QK、请求/Q/L定位或最终topk_scores/topk_indices发布。",
+  "functions": [
+    {
+      "name": "merge2_top512_pairs",
+      "line": 59,
+      "parameters": [
+        {
+          "name": "pair_arena",
+          "annotation": "pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]]"
+        },
+        {
+          "name": "left_slot",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "right_slot",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "output_slot",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return": "None"
+    },
+    {
+      "name": "merge_top512_roots",
+      "line": 76,
+      "parameters": [
+        {
+          "name": "pair_arena",
+          "annotation": "pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]"
+        },
+        {
+          "name": "arena_base",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "half_count",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return": "pl.Tile"
+    },
+    {
+      "name": "indexer_topk_half_leaf",
+      "line": 108,
+      "parameters": [
+        {
+          "name": "score_arena",
+          "annotation": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]"
+        },
+        {
+          "name": "pair_arena",
+          "annotation": "pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]]"
+        },
+        {
+          "name": "score_row",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "logical_begin",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "valid_count",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "output_slot",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return": "None"
+    },
+    {
+      "name": "indexer_topk_segment_pairs",
+      "line": 213,
+      "parameters": [
+        {
+          "name": "score_arena",
+          "annotation": "pl.Tensor[[SCORE_ROWS_DYN, TOPK_CANDIDATES_PER_LEAF], pl.FP32]"
+        },
+        {
+          "name": "score_row",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "logical_begin",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "valid_count",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "score_offset",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "return": "pl.Tile"
+    }
+  ],
+  "dynamic_capacity": {
+    "score": "FP32[SCORE_ROWS_DYN,8192]",
+    "pair": "FP32[PAIR_ROWS_DYN,1024]",
+    "meaning": "行容量独立dynamic，逻辑候选起点/有效数/根数由调用者显式Scalar传入，不从容量推断。"
+  },
+  "caller_preconditions": [
+    "score_row与所有pair输入/输出行号非负且小于对应容量；logical_begin及生成候选index应在模型有效范围且不溢出INT32。",
+    "half_leaf valid_count范围1..4096；segment范围1..2048，当前score_offset=0或2048，所选分支完整load tile不超过8192列。",
+    "merge_top512_roots half_count>=1且arena_base+half_count<=PAIR_ROWS；所有根都在本代已完整写入且按原score/index格式有序。",
+    "零候选/零根不调用此段，由外层写最小值pair或最终index=-1；不得无条件排序8192列旧数据。",
+    "进入前等待对应score/pair生产者并处理业务cache可见性；pure helper内部不dispatch/notify。",
+    "pair_arena写参数InOut，保留其它行；单writer所有权与不覆盖其他消费者未读数据由外层保证。merge2读完两输入后允许本核output_slot复用输入槽。",
+    "返回Tile只供同核继续消费；后续跨核使用必须显式GM store后发布phase。"
+  ],
+  "unchanged_math": [
+    "四段函数整个数学body的分支、运算、循环、return与canonical AST一致，只有doc/注解/decorator变化。",
+    "score/index配对按原UINT32 reinterpret与FP32载体，不做数值cast；mask填充原PadValue.min后maximum有限FP32_NEG_INF。",
+    "sort32和mrgsort block_len 64/256/1024、2560/3072特殊根布局、各分支mrgsort输入优先序完全保留。",
+    "merge_top512_roots四路/三路exhausted=True，二路原默认False；root用tile.extract限制1024元素storage生存期。"
+  ],
+  "validation": {
+    "source_audit": "source_audit.json：4完整数学body PASS；21 half尾数、24 segment+offset、10根数模型。模型不模拟硬件tie结果。",
+    "full_cpu": "full_v1/result.json：4独立后端首轮PASS；无数学API修复或编译失败。",
+    "compiled_audit": "full_v1/compiled_audit.json：真实sort/merge/store、runtime控制读取与arena动态维度保留；half_leaf六分支各有TSTORE，roots保留Scalar loop。",
+    "warnings": "单worker测试壳未使用worker变量的编译提示已记录，不为消除此提示重复编译。",
+    "audit_correction": "仅人工TMRGSORT数量预期由18更正为20，源代码与编译产物未改。"
+  },
+  "not_validated": [
+    "设备TopK精度/同分index",
+    "动态整层SPMD组合",
+    "跨核同步",
+    "性能"
+  ],
+  "device_execution": false,
+  "weights_loaded": false,
+  "reproduce": {
+    "source": "python check_source.py",
+    "existing_cpp": "python check_compiled.py",
+    "full_cpu": "bash reproduce_cpu.sh <新目录>"
+  }
+}

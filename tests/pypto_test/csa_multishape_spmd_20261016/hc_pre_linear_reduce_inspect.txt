@@ -1,0 +1,13 @@
+@pl.function(type=pl.FunctionType.Inline, auto_scope=False)
+def hc_pre_linear_reduce(t_linear_inline461__ssa_v0: pl.Scalar[pl.INDEX], original_block_idx: pl.Scalar[pl.INDEX], mixes_partials_inline487__rv_v2: pl.Tensor[[t_linear_inline461__ssa_v0 * pl.const(4, pl.INDEX), 32], pl.FP32], mixes_raw_inline448__ssa_v0: pl.Out[pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]]) -> pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]:
+    pl.func_attr({'mx_tensor_views_blocked': True})
+    linear_block_inline460__ssa_v0: pl.Scalar[pl.INDEX] = original_block_idx
+    linear_t0_inline482__ssa_v0: pl.Scalar[pl.INDEX] = linear_block_inline460__ssa_v0 * 16
+    mixes_total_inline423__tile: pl.Tile[[16, 32], pl.FP32, pl.Mem.Vec] = pl.tile.load(mixes_partials_inline487__rv_v2, [linear_t0_inline482__ssa_v0, 0], [16, 32], [16, 32], target_memory=pl.Mem.Vec)
+    for (linear_split_inline501__idx_v0, (mixes_total_inline423__iter_v1,)) in pl.range(1, 4, init_values=(mixes_total_inline423__tile,)):
+        partial_t0_inline428__ssa_v0: pl.Scalar[pl.INDEX] = linear_split_inline501__idx_v0 * t_linear_inline461__ssa_v0 + linear_t0_inline482__ssa_v0
+        partial_tile_inline464__tile: pl.Tile[[16, 32], pl.FP32, pl.Mem.Vec] = pl.tile.load(mixes_partials_inline487__rv_v2, [partial_t0_inline428__ssa_v0, 0], [16, 32], [16, 32], target_memory=pl.Mem.Vec)
+        mixes_total_inline423__tile_1: pl.Tile[[16, 32], pl.FP32, pl.Mem.Vec] = pl.tile.add(mixes_total_inline423__iter_v1, partial_tile_inline464__tile)
+        mixes_total_inline423__rv_v2: pl.Tile[[16, 32], pl.FP32, pl.Mem.Vec] = pl.yield_(mixes_total_inline423__tile_1)
+    mixes_raw_inline448__tile: pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32] = pl.tile.store(mixes_total_inline423__rv_v2, [linear_t0_inline482__ssa_v0, 0], mixes_raw_inline448__ssa_v0)
+    return mixes_raw_inline448__ssa_v0

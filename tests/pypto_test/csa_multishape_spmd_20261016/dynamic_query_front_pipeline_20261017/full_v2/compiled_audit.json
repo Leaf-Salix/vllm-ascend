@@ -1,0 +1,396 @@
+{
+  "passed": true,
+  "scope": "动态query前段已有完整CPU产物审计，无设备执行",
+  "single_mix_submission": true,
+  "submissions": [
+    "rt_submit_task("
+  ],
+  "tensor_abi_count": 35,
+  "phase_count_including_generation": 12,
+  "participant_cores": 72,
+  "cpp_files": {
+    "aic": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_query_front_pipeline_20261017/full_v2/kernel/kernels/aic/cube.cpp",
+    "aiv": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_query_front_pipeline_20261017/full_v2/kernel/kernels/aiv/vector.cpp"
+  },
+  "actual_weight_layouts": {
+    "wq_a": {
+      "layout": "NZ",
+      "dtype": "bfloat16_t",
+      "root": "v127",
+      "parameter": "v5",
+      "declaration": "GlobalTensor<bfloat16_t, pto::Shape<-1, -1, -1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::NZ> v127 = GlobalTensor<bfloat16_t, pto::Shape<-1, -1, -1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::NZ>(v5, v125, v126);"
+    },
+    "wq_b": {
+      "layout": "NZ",
+      "dtype": "int8_t",
+      "root": "v139",
+      "parameter": "v7",
+      "declaration": "GlobalTensor<int8_t, pto::Shape<-1, -1, -1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::NZ> v139 = GlobalTensor<int8_t, pto::Shape<-1, -1, -1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::NZ>(v7, v137, v138);"
+    }
+  },
+  "dynamic_descriptor_dimensions": {
+    "aic": [
+      {
+        "name": "QUERY_FRONT_T",
+        "line": 13365,
+        "statement": "int64_t QUERY_FRONT_T = static_cast<int64_t>(x_fp32__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PARTIAL_ROWS",
+        "line": 13368,
+        "statement": "int64_t QUERY_FRONT_PARTIAL_ROWS = static_cast<int64_t>(partials__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PAD16",
+        "line": 13371,
+        "statement": "int64_t QUERY_FRONT_PAD16 = static_cast<int64_t>(qa__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_QR_PAD128",
+        "line": 13374,
+        "statement": "int64_t QUERY_FRONT_QR_PAD128 = static_cast<int64_t>(qr_matmul__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PROJ_PAD128",
+        "line": 13377,
+        "statement": "int64_t QUERY_FRONT_PROJ_PAD128 = static_cast<int64_t>(q_proj__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_SIGNAL_WORDS",
+        "line": 13380,
+        "statement": "int64_t QUERY_FRONT_SIGNAL_WORDS = static_cast<int64_t>(signal__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PAD8",
+        "line": 13383,
+        "statement": "int64_t QUERY_FRONT_PAD8 = static_cast<int64_t>(mixed__ssa_v0_tensor->shapes[0]);"
+      }
+    ],
+    "aiv": [
+      {
+        "name": "QUERY_FRONT_T",
+        "line": 13368,
+        "statement": "int64_t QUERY_FRONT_T = static_cast<int64_t>(x_fp32__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PARTIAL_ROWS",
+        "line": 13371,
+        "statement": "int64_t QUERY_FRONT_PARTIAL_ROWS = static_cast<int64_t>(partials__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PAD16",
+        "line": 13374,
+        "statement": "int64_t QUERY_FRONT_PAD16 = static_cast<int64_t>(qa__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_QR_PAD128",
+        "line": 13377,
+        "statement": "int64_t QUERY_FRONT_QR_PAD128 = static_cast<int64_t>(qr_matmul__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PROJ_PAD128",
+        "line": 13380,
+        "statement": "int64_t QUERY_FRONT_PROJ_PAD128 = static_cast<int64_t>(q_proj__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_SIGNAL_WORDS",
+        "line": 13383,
+        "statement": "int64_t QUERY_FRONT_SIGNAL_WORDS = static_cast<int64_t>(signal__ssa_v0_tensor->shapes[0]);"
+      },
+      {
+        "name": "QUERY_FRONT_PAD8",
+        "line": 13386,
+        "statement": "int64_t QUERY_FRONT_PAD8 = static_cast<int64_t>(mixed__ssa_v0_tensor->shapes[0]);"
+      }
+    ]
+  },
+  "signal_instruction_lines": {
+    "cube": {
+      "TWAIT": [
+        370,
+        746,
+        2371
+      ],
+      "TNOTIFY": [
+        338,
+        716,
+        2341,
+        2859
+      ]
+    },
+    "vector": {
+      "TWAIT": [
+        4948,
+        5128,
+        5160,
+        7827,
+        9347,
+        9386,
+        10969,
+        11000,
+        11030
+      ],
+      "TNOTIFY": [
+        3632,
+        4916,
+        5099,
+        5706,
+        7800,
+        9313,
+        10359,
+        10945,
+        13206
+      ]
+    }
+  },
+  "gm_accesses": {
+    "aic_qa_TSTORE": {
+      "parameter": "v6",
+      "gm_root": "v136",
+      "root_declaration": "GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v136 = GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v6, v134, v135);",
+      "operations": [
+        {
+          "line": 1138,
+          "instruction": "TSTORE(v385, v294);",
+          "subview": "v385"
+        },
+        {
+          "line": 1526,
+          "instruction": "TSTORE(v488, v387);",
+          "subview": "v488"
+        },
+        {
+          "line": 1913,
+          "instruction": "TSTORE(v588, v497);",
+          "subview": "v588"
+        },
+        {
+          "line": 2301,
+          "instruction": "TSTORE(v691, v590);",
+          "subview": "v691"
+        }
+      ]
+    },
+    "aiv_qa_TLOAD": {
+      "parameter": "v6",
+      "gm_root": "v163",
+      "root_declaration": "GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v163 = GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v6, v161, v162);",
+      "operations": [
+        {
+          "line": 9495,
+          "instruction": "TLOAD(v1957, v1965);",
+          "subview": "v1965"
+        }
+      ]
+    },
+    "aiv_qr_matmul_TSTORE": {
+      "parameter": "v8",
+      "gm_root": "v172",
+      "root_declaration": "GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v172 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v8, v170, v171);",
+      "operations": [
+        {
+          "line": 10141,
+          "instruction": "TSTORE(v2143, v2115);",
+          "subview": "v2143"
+        },
+        {
+          "line": 10316,
+          "instruction": "TSTORE(v2195, v2167);",
+          "subview": "v2195"
+        }
+      ]
+    },
+    "aic_qr_matmul_TLOAD": {
+      "parameter": "v8",
+      "gm_root": "v148",
+      "root_declaration": "GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v148 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v8, v146, v147);",
+      "operations": [
+        {
+          "line": 2444,
+          "instruction": "TLOAD(v715, v727);",
+          "subview": "v727"
+        },
+        {
+          "line": 2549,
+          "instruction": "TLOAD(v744, v755);",
+          "subview": "v755"
+        },
+        {
+          "line": 2616,
+          "instruction": "TLOAD(v764, v775);",
+          "subview": "v775"
+        },
+        {
+          "line": 2730,
+          "instruction": "TLOAD(v792, v803);",
+          "subview": "v803"
+        }
+      ]
+    },
+    "aic_q_proj_TSTORE": {
+      "parameter": "v9",
+      "gm_root": "v157",
+      "root_declaration": "GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v157 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v9, v155, v156);",
+      "operations": [
+        {
+          "line": 2826,
+          "instruction": "TSTORE(v828, v816);",
+          "subview": "v828"
+        }
+      ]
+    },
+    "aiv_q_proj_TLOAD": {
+      "parameter": "v9",
+      "gm_root": "v181",
+      "root_declaration": "GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v181 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v9, v179, v180);",
+      "operations": [
+        {
+          "line": 11409,
+          "instruction": "TLOAD(v2470, v2478);",
+          "subview": "v2478"
+        },
+        {
+          "line": 11464,
+          "instruction": "TLOAD(v2486, v2494);",
+          "subview": "v2494"
+        },
+        {
+          "line": 12092,
+          "instruction": "TLOAD(v2652, v2660);",
+          "subview": "v2660"
+        },
+        {
+          "line": 12800,
+          "instruction": "TLOAD(v2847, v2855);",
+          "subview": "v2855"
+        }
+      ]
+    },
+    "aiv_rope_signed_TSTORE": {
+      "parameter": "v33",
+      "gm_root": "v389",
+      "root_declaration": "GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v389 = GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v33, v387, v388);",
+      "operations": [
+        {
+          "line": 10603,
+          "instruction": "TSTORE(v2266, v2259);",
+          "subview": "v2266"
+        },
+        {
+          "line": 10857,
+          "instruction": "TSTORE(v2335, v2324);",
+          "subview": "v2335"
+        }
+      ]
+    },
+    "aiv_rope_signed_TLOAD": {
+      "parameter": "v33",
+      "gm_root": "v389",
+      "root_declaration": "GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v389 = GlobalTensor<float, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v33, v387, v388);",
+      "operations": [
+        {
+          "line": 11213,
+          "instruction": "TLOAD(v2413, v2420);",
+          "subview": "v2420"
+        },
+        {
+          "line": 12524,
+          "instruction": "TLOAD(v2769, v2780);",
+          "subview": "v2780"
+        }
+      ]
+    },
+    "aiv_rope_swap_TSTORE": {
+      "parameter": "v34",
+      "gm_root": "v398",
+      "root_declaration": "GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v398 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v34, v396, v397);",
+      "operations": [
+        {
+          "line": 10624,
+          "instruction": "TSTORE(v2272, v2238);",
+          "subview": "v2272"
+        },
+        {
+          "line": 10903,
+          "instruction": "TSTORE(v2349, v2336);",
+          "subview": "v2349"
+        }
+      ]
+    },
+    "aiv_rope_swap_TLOAD": {
+      "parameter": "v34",
+      "gm_root": "v398",
+      "root_declaration": "GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v398 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v34, v396, v397);",
+      "operations": [
+        {
+          "line": 11241,
+          "instruction": "TLOAD(v2421, v2428);",
+          "subview": "v2428"
+        }
+      ]
+    },
+    "aiv_q_flat_TSTORE": {
+      "parameter": "v35",
+      "gm_root": "v407",
+      "root_declaration": "GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND> v407 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, -1, -1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::ND>(v35, v405, v406);",
+      "operations": [
+        {
+          "line": 11738,
+          "instruction": "TSTORE(v2567, v2536);",
+          "subview": "v2567"
+        },
+        {
+          "line": 11765,
+          "instruction": "TSTORE(v2575, v2558);",
+          "subview": "v2575"
+        },
+        {
+          "line": 12015,
+          "instruction": "TSTORE(v2641, v2610);",
+          "subview": "v2641"
+        },
+        {
+          "line": 12042,
+          "instruction": "TSTORE(v2649, v2632);",
+          "subview": "v2649"
+        },
+        {
+          "line": 12282,
+          "instruction": "TSTORE(v2711, v2702);",
+          "subview": "v2711"
+        },
+        {
+          "line": 12393,
+          "instruction": "TSTORE(v2741, v2730);",
+          "subview": "v2741"
+        },
+        {
+          "line": 13040,
+          "instruction": "TSTORE(v2920, v2907);",
+          "subview": "v2920"
+        },
+        {
+          "line": 13152,
+          "instruction": "TSTORE(v2950, v2935);",
+          "subview": "v2950"
+        }
+      ]
+    }
+  },
+  "verified_order": [
+    "HC_NORM等待→QA写回→QA发布→QR读取QA并写INT8暂存→QR发布",
+    "QR等待→QB读取同一INT8暂存并写INT32投影→QB发布",
+    "RoPE准备写回→ROPE发布；QB/ROPE/QR等待→query读取→query输出→QUERY发布"
+  ],
+  "cache_policy_override": false,
+  "device_execution": false,
+  "device_precision_validated": false,
+  "device_sync_validated": false,
+  "performance_measured": false,
+  "limits": [
+    "保留qa/q_proj原GM别名的返回SSA未使用警告，已查实际存储未被DCE",
+    "CPP依赖顺序不等于已验证设备缓存一致性或数值",
+    "不包含KV/Indexer/Attention，非完整CSA",
+    "BYPASS外层标记在full_v1被拒绝；本轮未设置缓存策略，不做性能结论"
+  ]
+}

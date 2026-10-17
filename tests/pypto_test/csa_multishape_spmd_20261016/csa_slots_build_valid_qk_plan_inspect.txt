@@ -1,0 +1,148 @@
+@pl.function(type=pl.FunctionType.Inline, auto_scope=False)
+def csa_slots_build_valid_qk_plan(t_dim_inline4335__ssa_v0: pl.Scalar[pl.INDEX], original_block_idx: pl.Scalar[pl.INDEX], cmp_sparse_indices_inline4329__ssa_v0: pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32]], sparse_bias_inline4301__ssa_v0: pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]], index_indices__ssa_v0: pl.Tensor[[T_DYN, 512], pl.INT32], position_ids_t1__ssa_v0: pl.Tensor[[T_DYN, 1], pl.INT64], valid_block_mask_inline4413__ssa_v0: pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 16], pl.INT32]], kv_seq_lens__ssa_v0: pl.Tensor[[B_DYN], pl.INT32], ori_block_table__ssa_v0: pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32]) -> tuple[pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32], pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]]:
+    pl.func_attr({'mx_tensor_views_blocked': True})
+    plan_worker_inline4432__ssa_v0: pl.Scalar[pl.INDEX] = original_block_idx
+    for (bias_t0_inline4319__idx_v0, (cmp_sparse_indices_inline4329__iter_v1, sparse_bias_inline4301__iter_v1)) in pl.range(plan_worker_inline4432__ssa_v0 * 8, t_dim_inline4335__ssa_v0, 128, init_values=(cmp_sparse_indices_inline4329__ssa_v0, sparse_bias_inline4301__ssa_v0)):
+        bias_rows_inline4314__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(t_dim_inline4335__ssa_v0 - bias_t0_inline4319__idx_v0, 8)
+        t__tile: pl.Tile[[8, 512], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.load(index_indices__ssa_v0, [bias_t0_inline4319__idx_v0, 0], [8, 512], [bias_rows_inline4314__ssa_v0, 512], target_memory=pl.Mem.Vec)
+        c_raw_tile_inline4340__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.cast(t__tile, target_type=pl.FP32, mode='round')
+        t__tile_1: pl.Tile[[8, 1], pl.INT64, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.load(position_ids_t1__ssa_v0, [bias_t0_inline4319__idx_v0, 0], [8, 1], [bias_rows_inline4314__ssa_v0, 1], target_memory=pl.Mem.Vec)
+        c_pos_inline4401__rm_a0_tmp_v0: pl.Tile[[1, 8], pl.INT64, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.reshape(t__tile_1, [1, 8])
+        c_pos_inline4401__row_major_tmp_v1: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.cast(c_pos_inline4401__rm_a0_tmp_v0, target_type=pl.FP32, mode='round')
+        c_pos_inline4401__tile: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.reshape(c_pos_inline4401__row_major_tmp_v1, [8, 1])
+        t__rm_a0_tmp_v2: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.reshape(c_pos_inline4401__tile, [1, 8])
+        t__row_major_tmp_v3: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.adds(t__rm_a0_tmp_v2, 1.0)
+        t__tile_2: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.reshape(t__row_major_tmp_v3, [8, 1])
+        t__rm_a0_tmp_v4: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.reshape(t__tile_2, [1, 8])
+        t__row_major_tmp_v5: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.muls(t__rm_a0_tmp_v4, 0.25)
+        t__tile_3: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.reshape(t__row_major_tmp_v5, [8, 1])
+        t__rm_a0_tmp_v6: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.reshape(t__tile_3, [1, 8])
+        t__row_major_tmp_v7: pl.Tile[[1, 8], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.cast(t__rm_a0_tmp_v6, target_type=pl.INT32, mode='trunc')
+        t__tile_4: pl.Tile[[8, 1], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.reshape(t__row_major_tmp_v7, [8, 1])
+        c_pos_q_inline4351__rm_a0_tmp_v8: pl.Tile[[1, 8], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.reshape(t__tile_4, [1, 8])
+        c_pos_q_inline4351__row_major_tmp_v9: pl.Tile[[1, 8], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[1, bias_rows_inline4314__ssa_v0])] = pl.tile.cast(c_pos_q_inline4351__rm_a0_tmp_v8, target_type=pl.FP32, mode='round')
+        c_pos_q_inline4351__tile: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 1])] = pl.tile.reshape(c_pos_q_inline4351__row_major_tmp_v9, [8, 1])
+        t__tile_5: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec] = pl.tile.full([8, 512], dtype=pl.FP32, value=1.0)
+        c_upper_b_inline4372__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec] = pl.tile.row_expand_mul(t__tile_5, c_pos_q_inline4351__tile)
+        t__tile_6: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.adds(c_raw_tile_inline4340__tile, 1.0)
+        t__tile_7: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.maximums(t__tile_6, 0.0)
+        c_ge_tile_inline4424__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.minimums(t__tile_7, 1.0)
+        t__tile_8: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec] = pl.tile.sub(c_upper_b_inline4372__tile, c_raw_tile_inline4340__tile)
+        t__tile_9: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec] = pl.tile.maximums(t__tile_8, 0.0)
+        c_lt_tile_inline4423__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec] = pl.tile.minimums(t__tile_9, 1.0)
+        c_mask_tile_inline4357__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.mul(c_ge_tile_inline4424__tile, c_lt_tile_inline4423__tile)
+        t__tile_10: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.adds(c_raw_tile_inline4340__tile, 1.0)
+        t__tile_11: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.mul(c_mask_tile_inline4357__tile, t__tile_10)
+        c_out_tile_inline4336__tile: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.subs(t__tile_11, 1.0)
+        t__tile_12: pl.Tile[[8, 512], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.cast(c_out_tile_inline4336__tile, target_type=pl.INT32, mode='round')
+        t__tile_13: pl.Tile[[8, 512], pl.INT32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.set_validshape(t__tile_12, bias_rows_inline4314__ssa_v0, 512)
+        cmp_sparse_indices_inline4329__tile: pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32] = pl.tile.store(t__tile_13, [bias_t0_inline4319__idx_v0, 0], cmp_sparse_indices_inline4329__iter_v1)
+        t__tile_14: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.minimums(c_out_tile_inline4336__tile, 0.0)
+        t__tile_15: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.muls(t__tile_14, 1e+20)
+        t__tile_16: pl.Tile[[8, 512], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 512])] = pl.tile.set_validshape(t__tile_15, bias_rows_inline4314__ssa_v0, 512)
+        sparse_bias_inline4301__tile: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.tile.store(t__tile_16, [bias_t0_inline4319__idx_v0, 128], sparse_bias_inline4301__iter_v1)
+        for c_sb_inline4295__idx_v0 in pl.range(1, 5):
+            c_s0_inline4433__ssa_v0: pl.Scalar[pl.INDEX] = (c_sb_inline4295__idx_v0 - 1) * 128
+            t__tile_17: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[pl.min(bias_rows_inline4314__ssa_v0, pl.const(8, pl.INDEX)), 128])] = pl.tile.slice(c_mask_tile_inline4357__tile, [8, 128], [0, c_s0_inline4433__ssa_v0], [bias_rows_inline4314__ssa_v0, 128])
+            tmp_tile: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.create([8, 128], dtype=pl.FP32, target_memory=pl.Mem.Vec)
+            c_blk_valid_inline4337__tile: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[pl.min(bias_rows_inline4314__ssa_v0, pl.const(8, pl.INDEX)), 1])] = pl.tile.row_max(t__tile_17, tmp_tile)
+            for c_dt_inline4360__idx_v0 in pl.range(bias_rows_inline4314__ssa_v0):
+                t__tile_18: pl.Scalar[pl.FP32] = pl.tile.read(c_blk_valid_inline4337__tile, [c_dt_inline4360__idx_v0, 0])
+                c_valid_inline4366__ssa_v0: pl.Scalar[pl.INT32] = pl.cast(t__tile_18, pl.INT32)
+                pl.tensor.write(valid_block_mask_inline4413__ssa_v0, [bias_t0_inline4319__idx_v0 + c_dt_inline4360__idx_v0, c_sb_inline4295__idx_v0], c_valid_inline4366__ssa_v0)
+        t__tile_19: pl.Tile[[1, 128], pl.INT32, pl.Mem.Vec] = pl.tile.ci(pl.const(0, pl.INT32), [1, 128], dtype=pl.INT32, descending=False)
+        v_columns_inline4359__tile: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.cast(t__tile_19, target_type=pl.FP32, mode='round')
+        v_len_col_inline4328__tile: pl.Tile[[8, 1], pl.FP32, pl.Mem.Vec] = pl.tile.create([8, 1], dtype=pl.FP32, target_memory=pl.Mem.Vec)
+        for bias_len_dt_inline4341__idx_v0 in pl.range(8):
+            v_len_t_inline4373__ssa_v0: pl.Scalar[pl.INDEX] = bias_t0_inline4319__idx_v0 + pl.min(bias_len_dt_inline4341__idx_v0, bias_rows_inline4314__ssa_v0 - 1)
+            v_len_request_inline4312__ssa_v0: pl.Scalar[pl.INDEX] = v_len_t_inline4373__ssa_v0 // 6
+            t__tile_20: pl.Scalar[pl.INT64] = pl.tensor.read(position_ids_t1__ssa_v0, [v_len_t_inline4373__ssa_v0, 0])
+            v_len_position_inline4300__ssa_v0: pl.Scalar[pl.INDEX] = pl.cast(t__tile_20, pl.INDEX)
+            v_len_value_inline4307__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(v_len_position_inline4300__ssa_v0 + 1, 128)
+            t__tile_21: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [v_len_request_inline4312__ssa_v0])
+            if pl.cast(t__tile_21, pl.INDEX) <= 0:
+                v_len_value_inline4307__ssa_v1: pl.Scalar[pl.INDEX] = pl.cast(0, pl.INDEX)
+                v_len_value_inline4307__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(v_len_value_inline4307__ssa_v1)
+            else:
+                v_len_value_inline4307__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(v_len_value_inline4307__ssa_v0)
+            pl.tile.write(v_len_col_inline4328__tile, [bias_len_dt_inline4341__idx_v0, 0], pl.cast(pl.cast(v_len_value_inline4307__phi_v2, pl.INT32), pl.FP32))
+        t__tile_22: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.full([8, 128], dtype=pl.FP32, value=1.0)
+        v_col_tile_inline4368__tile: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.col_expand_mul(t__tile_22, v_columns_inline4359__tile)
+        t__tile_23: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.row_expand_sub(v_col_tile_inline4368__tile, v_len_col_inline4328__tile)
+        t__tile_24: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.neg(t__tile_23)
+        t__tile_25: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.maximums(t__tile_24, 0.0)
+        v_valid_tile_inline4305__tile: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.minimums(t__tile_25, 1.0)
+        t__tile_26: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.subs(v_valid_tile_inline4305__tile, 1.0)
+        t__tile_27: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec] = pl.tile.muls(t__tile_26, 1e+20)
+        t__tile_28: pl.Tile[[8, 128], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[bias_rows_inline4314__ssa_v0, 128])] = pl.tile.set_validshape(t__tile_27, bias_rows_inline4314__ssa_v0, 128)
+        sparse_bias_inline4301__tile_1: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.tile.store(t__tile_28, [bias_t0_inline4319__idx_v0, 0], sparse_bias_inline4301__tile)
+        for (bias_dt_inline4299__idx_v0, (sparse_bias_inline4301__iter_v7,)) in pl.range(bias_rows_inline4314__ssa_v0, init_values=(sparse_bias_inline4301__tile_1,)):
+            bias_t_inline4387__ssa_v0: pl.Scalar[pl.INDEX] = bias_t0_inline4319__idx_v0 + bias_dt_inline4299__idx_v0
+            bias_request_inline4292__ssa_v0: pl.Scalar[pl.INDEX] = bias_t_inline4387__ssa_v0 // 6
+            t__tile_29: pl.Scalar[pl.INT64] = pl.tensor.read(position_ids_t1__ssa_v0, [bias_t_inline4387__ssa_v0, 0])
+            c_position_inline4285__ssa_v0: pl.Scalar[pl.INDEX] = pl.cast(t__tile_29, pl.INDEX)
+            v_length_inline4323__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(c_position_inline4285__ssa_v0 + 1, 128)
+            t__tile_30: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [bias_request_inline4292__ssa_v0])
+            if pl.cast(t__tile_30, pl.INDEX) <= 0:
+                v_length_inline4323__ssa_v1: pl.Scalar[pl.INDEX] = pl.cast(0, pl.INDEX)
+                v_length_inline4323__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(v_length_inline4323__ssa_v1)
+            else:
+                v_length_inline4323__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(v_length_inline4323__ssa_v0)
+            v_start_inline4346__ssa_v0: pl.Scalar[pl.INDEX] = c_position_inline4285__ssa_v0 - v_length_inline4323__phi_v2 + 1
+            v_head_inline4431__ssa_v0: pl.Scalar[pl.INDEX] = v_start_inline4346__ssa_v0 % 32
+            v_block_valid_inline4311__ssa_v0: pl.Scalar[pl.INT32] = pl.cast(0, pl.INT32)
+            v_has_hole_inline4338__ssa_v0: pl.Scalar[pl.INT32] = pl.cast(0, pl.INT32)
+            for (v_run_inline4332__idx_v0, (v_block_valid_inline4311__iter_v1, v_has_hole_inline4338__iter_v1)) in pl.range(5, init_values=(v_block_valid_inline4311__ssa_v0, v_has_hole_inline4338__ssa_v0)):
+                v_lo_inline4322__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(v_run_inline4332__idx_v0 * 32 - v_head_inline4431__ssa_v0, 0)
+                v_hi_inline4294__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(v_run_inline4332__idx_v0 * 32 - v_head_inline4431__ssa_v0 + 32, v_length_inline4323__phi_v2)
+                if v_lo_inline4322__ssa_v0 < v_hi_inline4294__ssa_v0:
+                    v_page_inline4290__tile: pl.Scalar[pl.INT32] = pl.tensor.read(ori_block_table__ssa_v0, [bias_request_inline4292__ssa_v0, (v_start_inline4346__ssa_v0 + v_lo_inline4322__ssa_v0) // 32])
+                    if 0 <= pl.cast(v_page_inline4290__tile, pl.INDEX):
+                        v_block_valid_inline4311__ssa_v3: pl.Scalar[pl.INT32] = pl.cast(1, pl.INT32)
+                        (v_block_valid_inline4311__phi_v4, v_has_hole_inline4338__phi_v4) = pl.yield_(v_block_valid_inline4311__ssa_v3, v_has_hole_inline4338__iter_v1)
+                    else:
+                        v_has_hole_inline4338__ssa_v3: pl.Scalar[pl.INT32] = pl.cast(1, pl.INT32)
+                        (v_block_valid_inline4311__phi_v4, v_has_hole_inline4338__phi_v4) = pl.yield_(v_block_valid_inline4311__iter_v1, v_has_hole_inline4338__ssa_v3)
+                    (v_block_valid_inline4311__phi_v5, v_has_hole_inline4338__phi_v5) = pl.yield_(v_block_valid_inline4311__phi_v4, v_has_hole_inline4338__phi_v4)
+                else:
+                    (v_block_valid_inline4311__phi_v5, v_has_hole_inline4338__phi_v5) = pl.yield_(v_block_valid_inline4311__iter_v1, v_has_hole_inline4338__iter_v1)
+                (v_block_valid_inline4311__rv_v2, v_has_hole_inline4338__rv_v2) = pl.yield_(v_block_valid_inline4311__phi_v5, v_has_hole_inline4338__phi_v5)
+            pl.tensor.write(valid_block_mask_inline4413__ssa_v0, [bias_t_inline4387__ssa_v0, 0], v_block_valid_inline4311__rv_v2)
+            if pl.cast(v_has_hole_inline4338__rv_v2, pl.INDEX) == 1:
+                t__tile_31: pl.Tile[[1, 128], pl.INT32, pl.Mem.Vec] = pl.tile.ci(pl.const(0, pl.INT32), [1, 128], dtype=pl.INT32, descending=False)
+                v_columns_row_inline4313__tile: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.cast(t__tile_31, target_type=pl.FP32, mode='round')
+                v_valid_inline4287__tile: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.full([1, 128], dtype=pl.FP32, value=0.0)
+                for (v_hole_run_inline4286__idx_v0, (v_valid_inline4287__iter_v1,)) in pl.range(5, init_values=(v_valid_inline4287__tile,)):
+                    v_hole_lo_inline4284__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(v_hole_run_inline4286__idx_v0 * 32 - v_head_inline4431__ssa_v0, 0)
+                    v_hole_hi_inline4297__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(v_hole_run_inline4286__idx_v0 * 32 - v_head_inline4431__ssa_v0 + 32, v_length_inline4323__phi_v2)
+                    if v_hole_lo_inline4284__ssa_v0 < v_hole_hi_inline4297__ssa_v0:
+                        v_hole_page_inline4352__tile: pl.Scalar[pl.INT32] = pl.tensor.read(ori_block_table__ssa_v0, [bias_request_inline4292__ssa_v0, (v_start_inline4346__ssa_v0 + v_hole_lo_inline4284__ssa_v0) // 32])
+                        if 0 <= pl.cast(v_hole_page_inline4352__tile, pl.INDEX):
+                            v_lo_fp32_inline4283__ssa_v0: pl.Scalar[pl.FP32] = pl.cast(pl.cast(v_hole_lo_inline4284__ssa_v0, pl.INT32), pl.FP32)
+                            v_hi_fp32_inline4356__ssa_v0: pl.Scalar[pl.FP32] = pl.cast(pl.cast(v_hole_hi_inline4297__ssa_v0, pl.INT32), pl.FP32)
+                            t__tile_32: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.subs(v_columns_row_inline4313__tile, v_lo_fp32_inline4283__ssa_v0)
+                            t__tile_33: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.adds(t__tile_32, 1.0)
+                            t__tile_34: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.maximums(t__tile_33, 0.0)
+                            v_ge_inline4348__tile: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.minimums(t__tile_34, 1.0)
+                            t__tile_35: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.neg(v_columns_row_inline4313__tile)
+                            t__tile_36: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.adds(t__tile_35, v_hi_fp32_inline4356__ssa_v0)
+                            t__tile_37: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.maximums(t__tile_36, 0.0)
+                            v_lt_inline4355__tile: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.minimums(t__tile_37, 1.0)
+                            t__tile_38: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.mul(v_ge_inline4348__tile, v_lt_inline4355__tile)
+                            v_valid_inline4287__tile_1: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.add(v_valid_inline4287__iter_v1, t__tile_38)
+                            v_valid_inline4287__phi_v4: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.yield_(v_valid_inline4287__tile_1)
+                        else:
+                            v_valid_inline4287__phi_v4: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.yield_(v_valid_inline4287__iter_v1)
+                        v_valid_inline4287__phi_v5: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.yield_(v_valid_inline4287__phi_v4)
+                    else:
+                        v_valid_inline4287__phi_v5: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.yield_(v_valid_inline4287__iter_v1)
+                    v_valid_inline4287__rv_v2: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.yield_(v_valid_inline4287__phi_v5)
+                t__tile_39: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.subs(v_valid_inline4287__rv_v2, 1.0)
+                t__tile_40: pl.Tile[[1, 128], pl.FP32, pl.Mem.Vec] = pl.tile.muls(t__tile_39, 1e+20)
+                sparse_bias_inline4301__tile_2: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.tile.store(t__tile_40, [bias_t_inline4387__ssa_v0, 0], sparse_bias_inline4301__iter_v7)
+                sparse_bias_inline4301__phi_v10: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.yield_(sparse_bias_inline4301__tile_2)
+            else:
+                sparse_bias_inline4301__phi_v10: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.yield_(sparse_bias_inline4301__iter_v7)
+            sparse_bias_inline4301__rv_v8: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32] = pl.yield_(sparse_bias_inline4301__phi_v10)
+        (cmp_sparse_indices_inline4329__rv_v2, sparse_bias_inline4301__rv_v2) = pl.yield_(cmp_sparse_indices_inline4329__tile, sparse_bias_inline4301__rv_v8)
+    return (cmp_sparse_indices_inline4329__ssa_v0, sparse_bias_inline4301__ssa_v0)

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+"""完整动态CSA的双AIV编排：先读整体数据流，再沿阶段注释阅读。
+
+48个AIV来自24个常驻MIX组，worker=group*2+lane。split_aiv让两条Vector
+角色分别执行同一段源码，按worker领取不同的动态行、请求或head块；它不
+自动建立跨核数据依赖。T和B均为Tensor动态轴，Q/L/position/slots是device
+Tensor；不能用T/固定S反推请求，Native dummy及不等长请求由各阶段Q/L处理。
+
+第一段：HC加宽/RMS并发布；根据ceil(T/8)选前段空闲AIV计算公共metadata。
+满48核时选47号，先发布其widen，再计算计划，不永久保留一核。其他核继续
+HC归约、门值、Sinkhorn、混合归一化、QR、RoPE与KV/query处理。这里只算
+请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。
+
+第二段：Indexer query反量化、Hadamard量化、head权重和系数；主/Indexer
+两条压缩分支直接读写各自Native state。pool全部读完共享prefix历史后才
+提交state。Indexer key并行写槽，32个FP16 scale所在64B区按物理page%48
+分配唯一writer，同页更新顺序执行，避免读改写覆盖；其地址计划由早期planner准备。
+
+第三段：与AIC并发执行Score/双槽ACK→跨叶TopK→Attention有效块计划→
+与AIC并发执行三槽QK/PV的采KV/softmax/归并→分组量化→反量化和HCpost。
+数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。
+
+每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要
+在业务写回完成之后，wait之后做读侧维护；单写者免atomic不等于cache一致。
+计划本轮只写一次、后续只读，signal另占512B隔离槽。组内环槽另有READY/ACK，
+不能用整阶段信号替代。所有参与核每次begin一次，首次signal清零、单流/图
+独占、失败后重置及代际上限由调用层保证。验证状态见统一优化日志。
+"""

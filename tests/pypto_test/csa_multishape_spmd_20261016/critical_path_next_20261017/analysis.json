@@ -1,0 +1,507 @@
+{
+  "date": "2026-10-17",
+  "scope": "只读既有证据，选择下一项具体实现；本次未运行测试/编译/NPU，未改生产或候选。",
+  "goal": "七档完整 CSA L1 incore 首尾逐档 ≤ 同轮动态分 task PTO ×0.70；候选收益未知，不代表达标。",
+  "read_order": [
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/NEXT_STEP.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/GOAL_AND_CONSTRAINTS.md",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md"
+  ],
+  "production_migration_context": "master 末尾记录完整生成器已迁正式包。正式 B16 同成本生成与旧 selected AST 相同；这里历史性能只归属对应旧实测，不为默认模型分核背书。",
+  "baseline": {
+    "shape": {
+      "H": 131072,
+      "B": 16,
+      "S": 6,
+      "T": 96
+    },
+    "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/result.json",
+    "l1_incore": {
+      "dynamic_pto": {
+        "samples_us": [
+          888.48,
+          905.08,
+          909.8
+        ],
+        "count": 3,
+        "median_us": 905.08,
+        "mean_us": 901.12,
+        "min_us": 888.48,
+        "max_us": 909.8,
+        "p95_us": 909.8
+      },
+      "single_spmd": {
+        "samples_us": [
+          807.16,
+          804.4,
+          811.26
+        ],
+        "count": 3,
+        "median_us": 807.16,
+        "mean_us": 807.6066666666667,
+        "min_us": 804.4,
+        "max_us": 811.26,
+        "p95_us": 811.26
+      }
+    },
+    "target_us": 633.556,
+    "gap_us": 173.604,
+    "raw_windows": [
+      {
+        "side": "dynamic_pto",
+        "step": 1,
+        "incore_span_us": 888.48,
+        "clock_freq_hz": 50000000,
+        "core_records": 973,
+        "task_count": 66,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_1/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_1/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_1/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      },
+      {
+        "side": "single_spmd",
+        "step": 1,
+        "incore_span_us": 807.16,
+        "clock_freq_hz": 50000000,
+        "core_records": 72,
+        "task_count": 1,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_1/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_1/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_1/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      },
+      {
+        "side": "single_spmd",
+        "step": 2,
+        "incore_span_us": 804.4,
+        "clock_freq_hz": 50000000,
+        "core_records": 72,
+        "task_count": 1,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_2/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_2/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_2/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      },
+      {
+        "side": "dynamic_pto",
+        "step": 2,
+        "incore_span_us": 905.08,
+        "clock_freq_hz": 50000000,
+        "core_records": 973,
+        "task_count": 66,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_2/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_2/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_2/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      },
+      {
+        "side": "dynamic_pto",
+        "step": 3,
+        "incore_span_us": 909.8,
+        "clock_freq_hz": 50000000,
+        "core_records": 973,
+        "task_count": 66,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_3/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_3/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/dynamic_pto/step_3/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      },
+      {
+        "side": "single_spmd",
+        "step": 3,
+        "incore_span_us": 811.26,
+        "clock_freq_hz": 50000000,
+        "core_records": 72,
+        "task_count": 1,
+        "raw": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_3/chip_swimlane_records.json",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_3/swimlane.json",
+        "canonical_raw": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/l1/single_spmd/step_3/chip_swimlane_records.json",
+        "canonical_raw_exists": true
+      }
+    ],
+    "scope": "正式 W8A8 layer4、fixture 每次恢复、PTO 对 PTO；不是连续 decode 轨迹。完整 L1 包含内部等待/空隙，不含外围调度头尾。"
+  },
+  "single_spmd_direct_evidence": {
+    "raw_stages": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_row_deps_stage_clock_v1/stage_clock/stages.json",
+    "summary_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/row_deps_stage_summary.json",
+    "critical_chain_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/row_deps_stage_critical_chain.json",
+    "instrumentation": {
+      "members": 973,
+      "clock_freq_hz": 50000000,
+      "instrumented_span_us": 796.24,
+      "eligible_for_700us_target": false
+    },
+    "selected_stage_records": [
+      {
+        "kernel": "indexer_score_topk_native_pair_aic",
+        "members": 24,
+        "first_math_us": 234.42000000000002,
+        "last_math_us": 458.15999999999997,
+        "math_and_fence_median_us": 211.02999999999997,
+        "math_and_fence_max_us": 217.02
+      },
+      {
+        "kernel": "indexer_score_topk_native_pair_aiv",
+        "members": 48,
+        "first_math_us": 247.9,
+        "last_math_us": 461.94,
+        "math_and_fence_median_us": 202.27999999999997,
+        "math_and_fence_max_us": 212.57999999999998
+      },
+      {
+        "kernel": "qk_pv_aiv",
+        "members": 48,
+        "first_math_us": 481.7,
+        "last_math_us": 647.36,
+        "math_and_fence_median_us": 158.02,
+        "math_and_fence_max_us": 164.01999999999998
+      },
+      {
+        "kernel": "qk_pv_aic",
+        "members": 24,
+        "first_math_us": 481.71999999999997,
+        "last_math_us": 639.5,
+        "math_and_fence_median_us": 150.93,
+        "math_and_fence_max_us": 156.27999999999997
+      },
+      {
+        "kernel": "proj_a_mm_0",
+        "members": 64,
+        "first_math_us": 650.26,
+        "last_math_us": 735.32,
+        "math_and_fence_median_us": 22.850000000000023,
+        "math_and_fence_max_us": 25.199999999999932
+      },
+      {
+        "kernel": "quant_0",
+        "members": 24,
+        "first_math_us": 681.02,
+        "last_math_us": 751.0600000000001,
+        "math_and_fence_median_us": 6.360000000000014,
+        "math_and_fence_max_us": 8.779999999999973
+      },
+      {
+        "kernel": "_proj_b_mm_nz_kernel__2",
+        "members": 64,
+        "first_math_us": 712.2,
+        "last_math_us": 766.7800000000001,
+        "math_and_fence_median_us": 11.71999999999997,
+        "math_and_fence_max_us": 14.06000000000006
+      },
+      {
+        "kernel": "proj_b_act_hc_post_0",
+        "members": 48,
+        "first_math_us": 772.6800000000001,
+        "last_math_us": 796.22,
+        "math_and_fence_median_us": 20.690000000000055,
+        "math_and_fence_max_us": 22.120000000000005
+      }
+    ],
+    "oa_critical_members": [
+      {
+        "core": 11,
+        "seq": 10,
+        "kernel": "proj_a_mm_0",
+        "start": 651.5600000000001,
+        "end": 679.9200000000001,
+        "math_and_notify": 28.360000000000014,
+        "after_ready": 4.080000000000041,
+        "from_own_sequence": false
+      },
+      {
+        "core": 11,
+        "seq": 11,
+        "kernel": "proj_a_mm_0",
+        "start": 684.12,
+        "end": 709.8000000000001,
+        "math_and_notify": 25.680000000000064,
+        "after_ready": 4.199999999999932,
+        "from_own_sequence": true
+      },
+      {
+        "core": 11,
+        "seq": 12,
+        "kernel": "proj_a_mm_0",
+        "start": 710.6,
+        "end": 738.0600000000001,
+        "math_and_notify": 27.460000000000036,
+        "after_ready": 0.7999999999999545,
+        "from_own_sequence": true
+      }
+    ],
+    "oa_critical_span_us": 86.5,
+    "oa_critical_math_notify_sum_us": 81.5,
+    "critical_tail": [
+      {
+        "core": 11,
+        "seq": 10,
+        "kernel": "proj_a_mm_0",
+        "start": 651.5600000000001,
+        "end": 679.9200000000001,
+        "math_and_notify": 28.360000000000014,
+        "after_ready": 4.080000000000041,
+        "from_own_sequence": false
+      },
+      {
+        "core": 11,
+        "seq": 11,
+        "kernel": "proj_a_mm_0",
+        "start": 684.12,
+        "end": 709.8000000000001,
+        "math_and_notify": 25.680000000000064,
+        "after_ready": 4.199999999999932,
+        "from_own_sequence": true
+      },
+      {
+        "core": 11,
+        "seq": 12,
+        "kernel": "proj_a_mm_0",
+        "start": 710.6,
+        "end": 738.0600000000001,
+        "math_and_notify": 27.460000000000036,
+        "after_ready": 0.7999999999999545,
+        "from_own_sequence": true
+      },
+      {
+        "core": 11,
+        "seq": 13,
+        "kernel": "_proj_b_mm_nz_kernel__2",
+        "start": 739.96,
+        "end": 752.08,
+        "math_and_notify": 12.120000000000005,
+        "after_ready": 1.8999999999999773,
+        "from_own_sequence": true
+      },
+      {
+        "core": 11,
+        "seq": 14,
+        "kernel": "_proj_b_mm_nz_kernel__2",
+        "start": 753.3000000000001,
+        "end": 769.32,
+        "math_and_notify": 16.019999999999982,
+        "after_ready": 1.2200000000000273,
+        "from_own_sequence": true
+      },
+      {
+        "core": 49,
+        "seq": 10,
+        "kernel": "proj_b_act_hc_post_0",
+        "start": 774.6,
+        "end": 796.24,
+        "math_and_notify": 21.639999999999986,
+        "after_ready": 5.279999999999973,
+        "from_own_sequence": false
+      }
+    ],
+    "qk_end_to_final_end_us": 148.76,
+    "limitations": [
+      "计时来自融合 SPMD 内 973 个逻辑成员插桩，不是拿动态分 task 成本直接充当融合瓶颈。",
+      "math_and_fence 含核内 FFTS 等待；math_and_notify 另含发布。各成员中位数不是阶段独占贡献。",
+      "关键链按最晚显式前驱回溯，after_ready 包含未记录控制，不能全部归因于软同步。",
+      "OA、quant、OB 明显重叠：quant 681.02 开始，OB 712.20 开始，OA 735.32 才结束；不能把三个全段区间相加。",
+      "796.24 μs 插桩窗口仅用于定位，不取代未插桩三轮完整 L1 的 807.16 μs 中位数。"
+    ]
+  },
+  "phase_probes": [
+    {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_indexer_clock_v1/indexer_phase_clock/phases.json",
+      "scope": "末次重放的Scalar提交区间；异步pipe可以重叠，插桩会改变流水，不是各pipe独占耗时",
+      "medians": {
+        "stage_us": 210.23000000000002,
+        "key_submit_us": 11.81,
+        "key_count": 704.0,
+        "score_step_us": 193.96,
+        "step_count": 22.0,
+        "ffts_us": 15.0,
+        "ffts_count": 22.0
+      },
+      "limitation": "早期同数学阶段探针，不是本次 rowdeps 相同配置；Scalar 提交与异步 pipe 重叠，不能把分项相加或称为硬件独占忙时。"
+    },
+    {
+      "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/b16_qk_phase_clock_v1/qk_phase_clock/phases.json",
+      "scope": "末次重放Scalar分段墙钟，不增加中间pipe屏障；不是各pipe独占忙时，插桩扰动流水",
+      "medians": {
+        "stage_us": 161.82,
+        "kv_us": 58.73,
+        "kv_count": 20.0,
+        "softmax_us": 12.36,
+        "softmax_count": 20.0,
+        "pv_merge_us": 2.88,
+        "pv_merge_count": 20.0,
+        "publish_us": 14.920000000000002,
+        "publish_count": 4.0
+      },
+      "limitation": "早期同数学阶段探针，不是本次 rowdeps 相同配置；Scalar 提交与异步 pipe 重叠，不能把分项相加或称为硬件独占忙时。"
+    }
+  ],
+  "closed_directions": [
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_PARTITION_EXPERIMENTS.md",
+      "candidate": "leaf 8192→16384；M384N64→两 M192N64",
+      "reason": "最慢 Cube 仍 22 block；拆 M 增加矩阵/FIX 提交。已有负结果，不再作为新候选。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_N80_EXPERIMENT.md",
+      "candidate": "N64→N80",
+      "reason": "panel 变少但页内 Key 片数增加，Right 占用挤压 Key 预取；未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_N80_WS128_EXPERIMENT.md",
+      "candidate": "N80 配 WS K128",
+      "reason": "减小 Right 占用的版本已测，未改善现选。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_N32_ACC_EXPERIMENT.md",
+      "candidate": "N32 双累加器",
+      "reason": "panel/提交数增加；已测失败。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_KEY_PAIRS_EXPERIMENT.md",
+      "candidate": "N64 双 panel Key 预取",
+      "reason": "正确 cached/100 配置已测，完整 813.42 μs，无采用依据。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_WS_LOAD_ORDER_CPU.md",
+      "candidate": "QK 先于 WS 权重加载",
+      "reason": "正确等待配置最终完整 814.12 μs；旧错误默认等待结果不能作为数学负结论。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_L1_RING_EXPERIMENT.md",
+      "candidate": "L1 ring/多版本",
+      "reason": "存在编译/phi 问题，最终正确等待配置 806.38 μs 与现选相近，不能重复当未测新方向。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_SHORT_TAIL_EXPERIMENT.md",
+      "candidate": "最后 ≤64 panel 省第二半",
+      "reason": "最慢 worker 不变；B16 完整 820.12 μs，未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/INDEXER_TRANSFER_2048_EXPERIMENT.md",
+      "candidate": "两 1024→一次 2048 交接",
+      "reason": "修正 step 条件后完整 834.68 μs；未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/QK_DIRECT_L1_EXPERIMENT.md",
+      "candidate": "Native KV 直接进 Cube L1",
+      "reason": "完整 1100.10 μs，已关闭；A3 TPUSH 仍有 GM FIFO，不能假设免费直连。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/QK_ROLE_SPLIT_EXPERIMENT.md",
+      "candidate": "AIV0 搬 KV、AIV1 softmax/PV",
+      "reason": "已有 885.08/830.46 μs 两版；阶段插桩 QK 变慢，未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/QK_MERGE_STATE_EXPERIMENT.md",
+      "candidate": "减小 PV state/head 分块",
+      "reason": "最终修正等待配置 820.24 μs，未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/QK_EARLY_KV_EXPERIMENT.md",
+      "candidate": "更早准备 KV",
+      "reason": "完整 823.38 μs，未采用。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/qk_row_load_pipeline_v1/lowering_audit.json",
+      "candidate": "独立行 Tile 软件流水",
+      "reason": "CPU 已证伪预期重叠：基线已连续 TLOAD，候选额外逐行等待和 TMOV；不再上卡。"
+    },
+    {
+      "evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/seven_stage_opportunities_v1/README.md",
+      "candidate": "T192 双 M 输出共享 B 探针",
+      "reason": "仅单 group CPU 通过，Left pipeline 请求 2 实得 1；展开版 Right 溢出。不是 T96 双 N 失败证据。"
+    }
+  ],
+  "recommendation": {
+    "name": "T≤128 O-A 相邻 N128 部分配对，共享 A 的 L1/Left；B16 首个实现用每组 3 对 + 2 单块",
+    "status": "未实现、未 lowering、未测量；只读设计建议。双输出共享输入的总体想法已在 seven_stage_opportunities_v1 提出，本次新增的是 T96 具体实现与避免 32 对/24 核尾波失衡的 3对+2单约束。不能称整个配对方向从未讨论。",
+    "selection_reason": "直接单 SPMD 证据中 Indexer/QK 更大，但已测试多种具体分块/搬运方向；当前找到的最大、尚有明确未实现变换且可保留数学归约合同的后段是 O-A 三成员链 86.50 μs。不能据此证明这是所有可能算法中收益最大的方向。",
+    "source": [
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/orchestration.py",
+        "line": 255,
+        "expression": "proj_a_mm_0；A slice [128,256] valid=[pa_rows,256]，B slice [1,256,128]，同一 A 为不同 nf 重复读取。"
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kernels.py",
+        "line": 6922,
+        "expression": "pa_rb=pa_unit//8; nf=pa_unit%8; n0=nf*128；K256 外层，K128 matmul_acc 内层；保留每条输出链的 K 升序。"
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/orchestration.py",
+        "line": 1077,
+        "expression": "8 group 并行；每组 spmd(proj_a_rows*8)，quant deps=[pa_tid]，随后 OB。"
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/codegen.py",
+        "line": 183,
+        "expression": "NZ 调用重新使用 logical_source_ir 的数学体；只改 kernels.py 不会实现实际 NZ 生成路径。"
+      },
+      {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/row_dependencies.py",
+        "line": 157,
+        "expression": "当前强制恰有 8 个 proj_a_mm_0 调用并按 group 建立 QK→OA 行依赖；新增 pair/single 必须同时扩展源码合同与行依赖证明。"
+      }
+    ],
+    "transform": [
+      "保留 8 group、原 row_base_o=g*384/out_col_g=g*1024、NZ 根 Tensor/stride，输入和输出分布不变。",
+      "每组 N128 单元 [0,1]、[2,3]、[4,5] 分别由双输出 member 处理；6、7 保持单输出。每对共用同一 A[K256] load 和相应 Left[K128] extract，两份 B 和两个 FP32 Acc 独立。",
+      "两个 Acc 都按 K=0,128,...,3968 累加。保持 M128 valid96、N128，不改成单 N256，也不把外层改 K512。",
+      "pair 和 singleton 用两个独立的逻辑 kernel/call，避免现有每 call 固定时长模型无法表达 slot 成本差异；每 group 分别 3 与 2 member，quant 显式等待两者（可 dummy 汇合），不添加全核 barrier。",
+      "生成仍为一个完整 SPMD；新增逻辑 call 不是新增 runtime incore task。保持跨 group quant/OB 重叠。",
+      "分核目标：24 个 pair 分到 24 AIC，16 个 singleton 分到其中 16 AIC。依赖就绪差异可能破坏此理想分配，需按真实 DAG/逐成员成本模型检查，不以输出数量等同耗时。"
+    ],
+    "ownership_and_balance": {
+      "baseline_output_tiles": 64,
+      "baseline_longest_equal_cost_tile_count": 3,
+      "naive_all_pair_members": 32,
+      "naive_all_pair_longest_equal_cost_output_count": 4,
+      "partial_pair_members": 24,
+      "singleton_members": 16,
+      "total_candidate_members": 40,
+      "candidate_max_output_count_if_balanced": 3,
+      "limitation": "计数推导而非 CPU 排程结果；pair 的实际成本并不等于两倍 singleton，需显式估计、之后以实测修订。"
+    },
+    "logical_input_traffic_mib": {
+      "baseline_A": 48,
+      "baseline_B": 64,
+      "candidate_A": 30,
+      "candidate_B": 64,
+      "baseline_total": 112,
+      "candidate_total": 94,
+      "saved": 18,
+      "saved_fraction": 0.16071428571428573,
+      "basis": "8 group × T96 × K4096 × BF16；每 group A 8 次变 5 次、B 不变。只算有效逻辑读取，不等于 HBM/实际 padding DMA/耗时节约。"
+    },
+    "resource_design_upper_bound_bytes": {
+      "Mat_shared_A_double_buffer": 131072,
+      "Mat_two_B_streams_double_buffer": 262144,
+      "Mat_total": 393216,
+      "Left_two_K128_slots": 65536,
+      "Right_two_K128xN128_slots_total": 65536,
+      "Acc_two_M128xN128_FP32": 131072,
+      "warning": "只是拟定存活区间。Right 若被嵌套流水复制成每 N 两份即 131072B，立即溢出；Acc 已到 128KiB 上限。需构造 K/N 合并微步或明确生命周期，保证 Right 总共两槽、Left 同 K 复用，并审计编译器没有降流水/隐式复制。不得仅凭这些手算值上卡。"
+    },
+    "first_bounded_implementation_check": [
+      "只做 T96 原分支的真实 8-group NZ 接口生成/CPU lowering，保留完整 CSA ABI 和全部归约链；不要使用单 group 根签名替代来宣告集成通过。",
+      "检查每一输出矩形恰写一次，group0..7 的 NZ B 地址、A row_base、o_r_pad stride 和 valid96 不变；pair/single 的源 DAG、manual deps、rowdeps/FFTS 资源顺序与 quant 全列归约完整。",
+      "核对实际生成 A load 与 Left extract 每 K 只共享一次、B 访问数不变、两个 Acc 无别名、L1/Left/Right/Acc 峰值和流水深度；若 Right 四槽或 Left/Right 流水退化，先判失败，不重复无依据扩展参数。",
+      "模拟现有真实前驱与量化消费者，确认 40 个成员不会把最长输出负担变成 4 块，且不串行化 8 组 quant/OB。成本标注估计。",
+      "只有上述成立后才值得父任务提交一次完整 B16 功能/精度/图重放/同步/保护区与同轮 L1；本子任务没有执行。"
+    ],
+    "generality": "首先针对现有 T≤128/N128 分支形成区间策略，B16/S6 是证据点而非孤立 whitelist；T24/48 有更少 A 流量和不同调度边际，不预设也有收益。T>128 的原 N256/K64 分支需独立推导，不能套用此 K128 数学。",
+    "expected_gain_us": null,
+    "performance_status": "未知；18MiB 逻辑读取减少不能换算实测 μs。即使 OA 整段完全消失也不足填 B16 当前 173.60 μs 的完整差距，不能单靠该候选或 HC 宣称七档30%。"
+  },
+  "not_selected": "不把 Indexer WS 的 16×384 稀疏系数改 Vector 当新主方向：虽有零乘法，但会增加 Score 交接数据/改变归约，当前没有融合内成本证据。先不引入无法支持的收益推断。",
+  "validation_this_task": {
+    "new_device_runs": 0,
+    "new_lowering_runs": 0,
+    "new_benchmarks": 0,
+    "modified_production_files": [],
+    "created_files": [
+      "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/critical_path_next_20261017/analysis.json"
+    ],
+    "checks": "JSON 解析、所引原始 L1 canonical 路径及关闭候选路径存在性检查；其余是旧证据读回和明确标注的算术推导。"
+  }
+}

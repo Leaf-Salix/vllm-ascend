@@ -1,0 +1,48 @@
+{
+  "implementation": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/qkv_stages.py",
+  "scope": "动态单 SPMD 的源级 Q_A/QR 前段 helper；不是完整 CSA，也未组装跨阶段同步",
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/qkv_proj_rope.py",
+  "historical_ir_used": false,
+  "fixed_k_only": true,
+  "stage_worker_inputs": "worker_id 为设备 Scalar 索引，WORKERS 为正 constexpr；不包含 spmd/submit",
+  "qa_ownership": {
+    "dense_m": "M=32 if T<128 else 64",
+    "groups": "g=min(3,max(1,T//M))",
+    "full_rows": "full=(T//M)*M",
+    "row_group": "r<full 时 (r//M)%g，否则 ((r-full)//16)%g",
+    "logical_producer": "8*row_group+n，其中 n=0..7 对应八个 N128 列块",
+    "physical_aic_worker": "logical_producer % WORKERS",
+    "consumer_wait": "QR 的八行 tile 不跨 M16 边界；每个 tile 需要该组全部八个列块。若在整段 q_r_stage 前统一等待，需取它所有条带的生产者并集。"
+  },
+  "qr_ownership": {
+    "active_aiv_workers": "min(ceil(T/8),WORKERS)，当前建议沿用 16",
+    "row_owner": "(r//8) % active_aiv_workers；空 T 不进入循环"
+  },
+  "workspace": {
+    "qa_fp32": "FP32[QA_ROWS,1024]，QA_ROWS>=ceil(T/16)*16",
+    "qr": "INT8[T,1024]",
+    "qr_scale": "FP32[T,1]",
+    "qr_i8_matmul": "INT8[PAD_ROWS,1024]",
+    "qr_scale_pad": "FP32[PAD_ROWS,1]",
+    "padding_contract": "本阶段 PAD_ROWS>=ceil(T/8)*8；后续 Q_B 另有自己的容量要求。未写容量尾部不保证清零。",
+    "alias_contract": "工作区不可互相覆盖；x 和 qr 的实际 T 必须一致。"
+  },
+  "outer_scope_requirement": "在外层 spmd 体直接设置 pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)",
+  "synchronization_requirement": "HC/x producer 数据完成并发布后 QA 才能读；QA 的相关八个 N 块写回完成后 QR 才能读；QR 的 INT8/scale 写回后再通知下游。helper 返回不代表跨核完成。",
+  "cpu_evidence": {
+    "qa_nd": "nd_v3/result.json",
+    "qr": "nd_v2/result.json",
+    "qa_nz_mode2": "nz_v1/result.json",
+    "source_equivalence": "source_equivalence.json"
+  },
+  "attempts": {
+    "nd_v1": "QA cache policy 位置不合法；QR 将原 task 外 GM reshape 搬入 incore 后成为 Tile，导致 load 类型错误。",
+    "nd_v2": "QR 完整 codegen 通过；QA dense/tail 重用 Tile 变量名，因 M64/M16 类型不同被拒绝。",
+    "nd_v3": "QA ND 完整 codegen 通过，dense/tail 改用独立变量。",
+    "nz_v1": "QA NZ2 完整 codegen 通过；不导入原 nz_mode 的无关 wo_a 探针，布局仍按 Native 同一开关声明。",
+    "audit_development": "源码等价检查首轮遗漏 q_a_col0→column 的变量重命名，补齐后通过；非数学或编译失败。"
+  },
+  "device_execution": false,
+  "numerical_device_equivalence_proven": false,
+  "performance_measured": false
+}

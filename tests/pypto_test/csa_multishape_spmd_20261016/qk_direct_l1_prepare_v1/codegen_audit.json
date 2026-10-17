@@ -1,0 +1,97 @@
+{
+  "full_cpu_codegen": true,
+  "manual_review": true,
+  "note": "审计真实生成IR/C++的提交顺序；不等于硬件交接或性能证明",
+  "source_automatic_pipeline_added": false,
+  "existing_matmul_pipeline_preserved": true,
+  "evidence": {
+    "cube_plan_wait_before_cache_maintenance": [
+      {
+        "line": 3422,
+        "text": "    pto.sync.wait <PIPE_MTE2>, %c4_index loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1476:9)"
+      },
+      {
+        "line": 3423,
+        "text": "    pto.fence.barrier_all #pto.fence_scope<gm> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1477:9)"
+      },
+      {
+        "line": 3424,
+        "text": "    pto.cmo.cacheinvalid all #pto.address_space<gm> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1478:9)"
+      },
+      {
+        "line": 3425,
+        "text": "    pto.fence.barrier_all #pto.fence_scope<gm> loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1479:9)"
+      }
+    ],
+    "cube_reuse_ack_before_next_qk": [
+      {
+        "line": 3441,
+        "text": "          pto.sync.wait <PIPE_MTE2>, %c0_index loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1485:21)"
+      },
+      {
+        "line": 3592,
+        "text": "          pto.sync.set <PIPE_FIX>, %c1_index {ffts_mode = 2 : i32} loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1536:21)"
+      }
+    ],
+    "cube_tail_ack_drained": [
+      {
+        "line": 3671,
+        "text": "        pto.sync.wait <PIPE_MTE2>, %c0_index loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":1576:17)"
+      }
+    ],
+    "vector_address_and_zero_ready": [
+      {
+        "line": 12562,
+        "text": "    pto.sync.set <PIPE_MTE3>, %c4_index {ffts_mode = 2 : i32} loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":4929:9)"
+      }
+    ],
+    "vector_pv_wait_before_loads_and_ack": [
+      {
+        "line": 12684,
+        "text": "          pto.sync.wait <PIPE_MTE2>, %c3_index loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":4985:21)"
+      },
+      {
+        "line": 12755,
+        "text": "          pto.sync.set <PIPE_MTE2>, %c0_index {ffts_mode = 2 : i32} loc(\"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_direct_l1_cpu_v1/source.py\":5026:21)"
+      }
+    ],
+    "cpp_cube_plan_wait_before_dcci": [
+      {
+        "line": 12188,
+        "text": "    wait_flag_dev(v3795);"
+      },
+      {
+        "line": 12193,
+        "text": "    dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);"
+      }
+    ],
+    "cpp_vector_zero_store_before_ready": [
+      {
+        "line": 48254,
+        "text": "      TSTORE(v7852, v7843);"
+      },
+      {
+        "line": 48258,
+        "text": "    ffts_cross_core_sync(PIPE_MTE3, v7853);"
+      }
+    ],
+    "cpp_vector_right_pv_load_before_ack": [
+      {
+        "line": 49097,
+        "text": "          TLOAD(v8063, v8070);"
+      },
+      {
+        "line": 49127,
+        "text": "          ffts_cross_core_sync(PIPE_MTE2, v8077);"
+      }
+    ],
+    "cpp_tail_ack": [
+      {
+        "line": 12955,
+        "text": "        wait_flag_dev(v3995);"
+      }
+    ]
+  },
+  "npu_cpp_source": "b16_cached_qk_direct_l1_v1/build_output/entry_fvsbj5tb/ptoas/csa_static_group.cpp",
+  "npu_cpp_identical_to_cpu_cpp": true
+}

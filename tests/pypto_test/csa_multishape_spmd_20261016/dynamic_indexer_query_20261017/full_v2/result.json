@@ -1,0 +1,81 @@
+{
+  "scope": "六个独立源级数学阶段完整CPU编译，尚非阶段融合",
+  "device_execution": false,
+  "weight_values_loaded": false,
+  "stages": [
+    {
+      "stage": "project",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/project/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aic/project_probe_incore_0.cpp": [
+          "CSA_INDEX_QUERY_T",
+          "CSA_INDEX_PROJ_PAD64"
+        ]
+      }
+    },
+    {
+      "stage": "dequant",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/dequant/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aiv/dequant_probe_incore_0.cpp": [
+          "CSA_INDEX_QUERY_T",
+          "CSA_INDEX_ROPE_PAD16",
+          "CSA_INDEX_PROJ_PAD64"
+        ]
+      }
+    },
+    {
+      "stage": "hadamard",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/hadamard/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aic/hadamard_probe_incore_0.cpp": [
+          "CSA_INDEX_HADAMARD_ROWS",
+          "CSA_INDEX_ROPE_HEAD_ROWS"
+        ]
+      }
+    },
+    {
+      "stage": "quant",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/quant/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aiv/quant_probe_incore_0.cpp": [
+          "CSA_INDEX_SCALE_ROWS",
+          "CSA_INDEX_QUANT_ROWS",
+          "CSA_INDEX_HADAMARD_ROWS"
+        ]
+      }
+    },
+    {
+      "stage": "weights_project",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/weights_project/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aic/weights_project_probe_incore_0.cpp": [
+          "CSA_INDEX_QUERY_T",
+          "CSA_INDEX_WEIGHTS_PARTIAL_ROWS"
+        ]
+      }
+    },
+    {
+      "stage": "weights_reduce",
+      "status": "PASS",
+      "full_codegen_passed": true,
+      "artifact": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/full_v2/weights_reduce/kernel",
+      "dynamic_cpp_dimensions": {
+        "kernels/aiv/weights_reduce_probe_incore_0.cpp": [
+          "CSA_INDEX_WEIGHTS_PAD16",
+          "CSA_INDEX_WEIGHTS_PARTIAL_ROWS"
+        ]
+      }
+    }
+  ]
+}

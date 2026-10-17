@@ -1,0 +1,87 @@
+{
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_publish_stages.py",
+  "status": "真正动态源级发布helper与限定CPU编译已完成；未组装完整Indexer/CSA或上卡",
+  "interfaces": {
+    "indexer_pair_publish_stage": {
+      "arguments": [
+        "bounds INT32[Q_ROWS]",
+        "lengths INT32[B]",
+        "positions INT64[T]",
+        "plan INT32[8]",
+        "pair_arena InOut FP32[PAIR_ROWS,1024]",
+        "topk_scores InOut FP32[T,512]",
+        "topk_indices InOut INT32[T,512]",
+        "worker INDEX",
+        "WORKERS constexpr",
+        "ROOTS_PER_LEAF constexpr 1或2",
+        "BALANCED constexpr bool"
+      ],
+      "returns": [
+        "topk_scores",
+        "topk_indices"
+      ],
+      "role": "AIV",
+      "owner": "query%WORKERS",
+      "pair_stride": 64,
+      "one_root_slot": "query*64+leaf",
+      "two_root_slot": "query*64+leaf*2+half_lane",
+      "nonbalanced": "保留逐child二路归并，每次incoming在旧root之前；每次原位写query根0，所以pair参数必须InOut",
+      "balanced": "保留原多路根归并；实际根数依据plan的leaf_tiles/extra与每query visible计算，不按T猜G或roots",
+      "capacity": "外层保证PAIR_ROWS>=T*64；内部仍检查实际arena_base+root_count，避免越界读取",
+      "plan_contract": "plan[6]必须等于INT32(BALANCED)，plan[7]必须等于ROOTS_PER_LEAF；其它根分区字段须与score生产者同轮一致"
+    },
+    "indexer_single_leaf_publish_stage": {
+      "arguments": [
+        "bounds",
+        "lengths",
+        "positions",
+        "plan",
+        "score_arena FP32[SCORE_ROWS,8192]",
+        "topk_scores",
+        "topk_indices",
+        "worker",
+        "WORKERS"
+      ],
+      "returns": [
+        "topk_scores",
+        "topk_indices"
+      ],
+      "role": "AIV",
+      "owner": "query%WORKERS",
+      "score_layout": "score_arena[query,:visible]，不是环形worker临时行；SCORE_ROWS>=T",
+      "plan_contract": "plan[7]=0、plan[6]=0、plan[2]=1，plan[1]<=8192；允许group_plan用G=1，最终排序不从G推导地址",
+      "math": "原2048/4096/8192 leaf排序body直接AST一致；small不足512 index尾填-1"
+    },
+    "indexer_visible_root_count": {
+      "returns": "实际连续根数或0",
+      "inputs": "visible, plan, ROOTS_PER_LEAF, BALANCED",
+      "purpose": "统一plan反算有效叶前缀；不可替代生产者plan初始化或容量校验"
+    }
+  },
+  "plan_words": [
+    "groups",
+    "max_history",
+    "leaves",
+    "leaf_tiles",
+    "extra",
+    "group_size",
+    "balanced",
+    "roots_per_leaf"
+  ],
+  "visibility": "通过query_request在原始Q/L找到唯一owner；position须等于L-(end-begin)+query-begin。visible=max(0,min(L//4,(position+1)//4,262144))，不依赖固定S。",
+  "invalid_outputs": "dummy/gap/重叠owner/陈旧causal/visible0整行score=FP32_NEG_INF、index=-1；不读旧arena。明显不匹配plan/容量的防越界路径也填空，但外层仍应拒绝非法输入。",
+  "tail_semantics": "valid<512时只保留该前缀index，尾部-1。有效行score尾部保持原sort pad语义，不另改数值。",
+  "synchronization": [
+    "所有helper无task/spmd/notify；入口统一调度",
+    "发布前必须等待plan和本worker将读取的全部score根生产者完成；Q/L/positions/plan在整个score→publish期间不变",
+    "ROOTS=2时每个覆盖叶的两半根都必须已写，包括空半叶的NEG_INF根，不能只写实际有候选的一半",
+    "ROOTS=1时每个覆盖叶写一个根；没有覆盖的叶不读，整份arena无需全零填",
+    "short路径须保留[query,:visible] score直到最终发布读取，不能用普通phase通知当环形槽消费ACK",
+    "顺序归并会覆盖根0，复用或其它读取必须等本query发布结束"
+  ],
+  "limits": [
+    "本文件不生成score，不证明页表/INT8点积正确",
+    "CPU模型排序payload是桩，只验证控制流/地址/掩码；数值和tie在设备尚未验证",
+    "容量/alias/WORKERS/策略组合由外层统一拒绝非法值"
+  ]
+}

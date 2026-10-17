@@ -1,0 +1,14 @@
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_boundary_prepare_v2/entry.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_boundary_cpu_v2/source.py", "error": "Type annotation for 'qk_kv_half_inline4272__ssa_v0' has dtype bfloat16 but expression has dtype fp32"}
+Error: Type annotation for 'qk_kv_half_inline4272__ssa_v0' has dtype bfloat16 but expression has dtype fp32
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_boundary_cpu_v2/source.py:46:9
+   |
+44 |         qk_kv_half_inline4272__rv_v17 = pl.yield_(qk_fast_result)
+45 |     else:
+46 |         qk_kv_half_inline4272__ssa_v0: pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec] = pl.tile.expands(qk_valid_blank, 0.0)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+47 |         for (qk_row_inline4264__idx_v0, (qk_kv_half_inline4272__iter_v16,)) in pl.range(64, init_values=(qk_kv_half_inline4272__ssa_v0,)):
+48 |             qk_cmp_k_inline4263__ssa_v0: pl.Scalar[pl.INDEX] = (qk_sb_inline4367__ssa_v1 - 1) * 128 + qk_lane_kv_inline4438__ssa_v0 + qk_row_inline4264__idx_v0
+   |
+   = help: Change annotation to: pl.Tile[[64, 512], pl.FP32, pl.Mem.Vec]
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

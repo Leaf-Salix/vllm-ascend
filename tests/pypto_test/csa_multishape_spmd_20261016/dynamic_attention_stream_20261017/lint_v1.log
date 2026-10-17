@@ -1,0 +1,188 @@
+F401 [*] `ast` imported but unused
+ --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/audit_compiled.py:5:8
+  |
+4 | import argparse
+5 | import ast
+  |        ^^^
+6 | import json
+7 | import re
+  |
+help: Remove unused import: `ast`
+
+E501 Line too long (139 > 120)
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/audit_compiled.py:158:121
+    |
+156 | …
+157 | …
+158 | …emoves set_ffts_base_addr; Simpler runtime kernel owns hardware FFTS base",
+    |                                                          ^^^^^^^^^^^^^^^^^^^
+159 | …r/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/_ptoas_preprocess.py:123",
+160 | …ger/.worktrees/simpler-csa-core-args-256-20261016/src/a2a3/platform/onboard/aicore/kernel.cpp:99",
+    |
+
+E501 Line too long (156 > 120)
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/audit_compiled.py:159:121
+    |
+157 | …
+158 | …et_ffts_base_addr; Simpler runtime kernel owns hardware FFTS base",
+159 | …rees/pypto-csa-static-fixes-20261016/python/pypto/backend/_ptoas_preprocess.py:123",
+    |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+160 | …ktrees/simpler-csa-core-args-256-20261016/src/a2a3/platform/onboard/aicore/kernel.cpp:99",
+161 | …
+    |
+
+E501 Line too long (162 > 120)
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/audit_compiled.py:160:121
+    |
+158 | …ffts_base_addr; Simpler runtime kernel owns hardware FFTS base",
+159 | …s/pypto-csa-static-fixes-20261016/python/pypto/backend/_ptoas_preprocess.py:123",
+160 | …ees/simpler-csa-core-args-256-20261016/src/a2a3/platform/onboard/aicore/kernel.cpp:99",
+    |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+161 | …
+162 | …
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/build_source.py:4:1
+  |
+2 |   """历史首次提取工具；只写本目录候选，未包含后续FFTS/Tile接口修正，禁止用作正式生成器。"""
+3 |
+4 | / from pathlib import Path
+5 | | import textwrap
+  | |_______________^
+6 |
+7 |   HERE = Path(__file__).resolve().parent
+  |
+help: Organize imports
+
+E402 Module level import not at top of file
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/build_source.py:264:1
+    |
+262 | body = header + publish + cube + vector
+263 | body = body.replace("NUM_QK_CORES", "CORE_GROUPS")
+264 | import re
+    | ^^^^^^^^^
+265 |
+266 | body = re.sub(r"\bT\b", "t_dim", body)
+    |
+
+E402 Module level import not at top of file
+   --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/build_source.py:272:1
+    |
+270 |     )
+271 | # 事件调用的缩进不同，按源AST精确插入基址，不依赖空格。
+272 | import ast
+    | ^^^^^^^^^^
+273 |
+274 | parsed = ast.parse(body)
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_cpu.py:41:9
+   |
+40 |           dsv4_csa_env.activate()
+41 | /         import probe
+42 | |         import sys
+   | |__________________^
+43 |
+44 |           assert "vllm_ascend.ops.pypto.deepseek_v4_flash_csa.nz_mode" not in sys.modules
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_protocol.py:9:1
+   |
+ 7 |   """
+ 8 |
+ 9 | / import argparse
+10 | | from collections import defaultdict, deque
+11 | | import json
+12 | | from pathlib import Path
+13 | | import random
+   | |_____________^
+   |
+help: Organize imports
+
+SIM905 [*] Consider using a list literal instead of `str.split`
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_source.py:42:13
+   |
+40 | …ginal_nodes = sorted(ast.walk(original), key=lambda n: getattr(n, "lineno", 0))
+41 | …rated_nodes = sorted(ast.walk(nt), key=lambda n: getattr(n, "lineno", 0))
+42 | …es = """qk_l1_t qk_kv_t qk_scores pv_probability pv_probability_left pv_first_right pv_previous pv_next_right pv_current m_idx m_rem_tmp m_lane m_swap_row m_swap_base m_swap_source m_row_offsets m_swap_idx running_m running_l running_left running_right qk_reduce_tmp qk_scores_half qk_bias qk_masked qk_mi qk_exp qk_li qk_probability pv_m pv_l next_m alpha beta next_l pv_left next_left pv_right next_right m_gather_tmp pub_local_head m_h0 m_mi m_li m_left m_right m_oi n_sink_bias n_sink_tile n_denom n_full n_bf16 m_rope m_cos_il m_sin_signed m_swapped_flat m_swapped m_rot n_rope_bf16 n_full_bf16 n_group_bf16 n_pack_first n_pack_second n_pack_row n_pack_row_second reset_m reset_l reset_left reset_right""".split()
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+43 | …
+44 | … assignments(nodes, name):
+   |
+help: Replace with list literal
+
+E501 Line too long (725 > 120)
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/check_source.py:42:121
+   |
+40 | …
+41 | …
+42 | …t pv_current m_idx m_rem_tmp m_lane m_swap_row m_swap_base m_swap_source m_row_offsets m_swap_idx running_m running_l running_left running_right qk_reduce_tmp qk_scores_half qk_bias qk_masked qk_mi qk_exp qk_li qk_probability pv_m pv_l next_m alpha beta next_l pv_left next_left pv_right next_right m_gather_tmp pub_local_head m_h0 m_mi m_li m_left m_right m_oi n_sink_bias n_sink_tile n_denom n_full n_bf16 m_rope m_cos_il m_sin_signed m_swapped_flat m_swapped m_rot n_rope_bf16 n_full_bf16 n_group_bf16 n_pack_first n_pack_second n_pack_row n_pack_row_second reset_m reset_l reset_left reset_right""".split()
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+43 | …
+44 | …
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/pypto_test/csa_multishape_spmd_20261016/dynamic_attention_stream_20261017/probe.py:18:1
+   |
+16 |   """
+17 |
+18 | / import pypto.language as pl
+19 | | from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.attention_stream_stages import (
+20 | |     ATTN_K_TILE,
+21 | |     CMP_TOPK,
+22 | |     COMPRESSED_COLUMNS_DYN,
+23 | |     COMPRESSED_ROWS_DYN,
+24 | |     FFTS_WORDS,
+25 | |     H,
+26 | |     HEAD_DIM,
+27 | |     HEAD_RING_ROWS_DYN,
+28 | |     KV_RING_ROWS_DYN,
+29 | |     ORIGINAL_COLUMNS_DYN,
+30 | |     ORIGINAL_ROWS_DYN,
+31 | |     O_GROUP_IN,
+32 | |     PACK_ROWS_DYN,
+33 | |     PLAN_CAP_DYN,
+34 | |     QUERY_BOUNDS_DYN,
+35 | |     Q_ROWS_DYN,
+36 | |     REQUESTS_DYN,
+37 | |     ROPE_CAP_DYN,
+38 | |     ROPE_DIM,
+39 | |     T_DYN,
+40 | |     attention_qk_pv_cube_stage,
+41 | |     attention_qk_pv_vector_lane_stage,
+42 | | )
+   | |_^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py:67:1
+   |
+65 |   """
+66 |
+67 | / import pypto.language as pl
+68 | |
+69 | | from ..deepseek_v4_flash_csa.config import FLASH as M
+70 | | from .attention_plan_stages import (
+71 | |     COMPRESSED_COLUMNS_DYN,
+72 | |     ORIGINAL_COLUMNS_DYN,
+73 | |     PLAN_CAP_DYN,
+74 | |     ROPE_CAP_DYN,
+75 | |     T_DYN,
+76 | |     QUERY_BOUNDS_DYN,
+77 | |     REQUESTS_DYN,
+78 | | )
+79 | | from .request_geometry import query_request
+   | |___________________________________________^
+80 |
+81 |   Q_ROWS_DYN = pl.dynamic("CSA_ATTN_STREAM_Q_ROWS")
+   |
+help: Organize imports
+
+Found 13 errors.
+[*] 7 fixable with the `--fix` option.

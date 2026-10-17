@@ -1,0 +1,798 @@
+{
+  "passed": true,
+  "scope": "两路压缩单MIX组合探针，非完整CSA；仅CPU解析/完整后端代码生成和产物审计",
+  "entry": "probe.py:entry",
+  "formal_math_reused": [
+    "compressor_projection_stages",
+    "compressor_pool_stages",
+    "compressor_output_stages",
+    "indexer_compressor_output_stages",
+    "indexer_cache_stages",
+    "metadata_stages",
+    "request_geometry",
+    "phase_sync",
+    "signals"
+  ],
+  "compile_attempts": [
+    {
+      "directory": "cpu_v1",
+      "result": "FAIL",
+      "stage": "symbolic parser",
+      "reason": "探针vector原GM别名赋值放在func_attr前；解析器要求func_attr为第一语句",
+      "fix": "只将探针func_attr提到首句，未修改正式helper/依赖",
+      "log": "cpu_v1.log"
+    },
+    {
+      "directory": "cpu_v2",
+      "result": "PASS",
+      "stage": "symbolic parse + complete CPU codegen",
+      "command": "bash reproduce_cpu.sh cpu_v2 > cpu_v2.log 2>&1",
+      "log": "cpu_v2.log",
+      "artifact": "cpu_v2/kernel",
+      "result_json": "cpu_v2/result.json"
+    }
+  ],
+  "compiled_artifact_audit": {
+    "result": "PASS",
+    "path": "cpu_v2/compiled_audit.json",
+    "command": "python audit_compiled.py --artifact cpu_v2/kernel --output <new_json>",
+    "log": "audit_v1.log"
+  },
+  "single_mix_submission": true,
+  "sync_start": true,
+  "symbolic_dynamic_dimensions": [
+    "COMP_PIPE_IB",
+    "COMP_PIPE_IC",
+    "COMP_PIPE_ICACHE_BYTES",
+    "COMP_PIPE_ICACHE_PAGES",
+    "COMP_PIPE_ICPAD",
+    "COMP_PIPE_IPOOL",
+    "COMP_PIPE_IPROJ",
+    "COMP_PIPE_IQ",
+    "COMP_PIPE_ISCALES",
+    "COMP_PIPE_ISLOTS",
+    "COMP_PIPE_ISTATE_ELEMS",
+    "COMP_PIPE_ISTATE_PAGES",
+    "COMP_PIPE_IT",
+    "COMP_PIPE_ITABLE_COLS",
+    "COMP_PIPE_MB",
+    "COMP_PIPE_MC",
+    "COMP_PIPE_MCACHE_ROWS",
+    "COMP_PIPE_MNORM",
+    "COMP_PIPE_MPOOL",
+    "COMP_PIPE_MPROJ",
+    "COMP_PIPE_MQ",
+    "COMP_PIPE_MSLOTS",
+    "COMP_PIPE_MSTATE_ELEMS",
+    "COMP_PIPE_MSTATE_PAGES",
+    "COMP_PIPE_MT",
+    "COMP_PIPE_MTABLE_COLS",
+    "COMP_PIPE_WORDS"
+  ],
+  "dynamic_dimension_count": 27,
+  "public_tensor_abi": [
+    {
+      "name": "main_x",
+      "direction": "In",
+      "shape": [
+        -1,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "main_wkv",
+      "direction": "In",
+      "shape": [
+        1024,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "main_wgate",
+      "direction": "In",
+      "shape": [
+        1024,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "main_value",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        1024
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_score",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        1024
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_state",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_table",
+      "direction": "In",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_ape",
+      "direction": "In",
+      "shape": [
+        4,
+        1024
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_positions",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int64",
+      "layout": "ND"
+    },
+    {
+      "name": "main_bounds",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_lengths",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_state_slots",
+      "direction": "In",
+      "shape": [
+        -1,
+        2
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_pooled",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_gamma",
+      "direction": "In",
+      "shape": [
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "main_cos",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_sin",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_offsets",
+      "direction": "InOut",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_count",
+      "direction": "InOut",
+      "shape": [
+        1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_slots",
+      "direction": "In",
+      "shape": [
+        -1,
+        2
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_normed",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_debug",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "main_cache",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        512
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_x",
+      "direction": "In",
+      "shape": [
+        -1,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_wkv",
+      "direction": "In",
+      "shape": [
+        256,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_wgate",
+      "direction": "In",
+      "shape": [
+        256,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_value",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        256
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_score",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        256
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_state",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_table",
+      "direction": "In",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_ape",
+      "direction": "In",
+      "shape": [
+        4,
+        256
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_positions",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int64",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_bounds",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_lengths",
+      "direction": "In",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_state_slots",
+      "direction": "In",
+      "shape": [
+        -1,
+        2
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_pooled",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_gamma",
+      "direction": "In",
+      "shape": [
+        128
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_cos",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_sin",
+      "direction": "In",
+      "shape": [
+        -1,
+        64
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_offsets",
+      "direction": "InOut",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_count",
+      "direction": "InOut",
+      "shape": [
+        1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_slots",
+      "direction": "In",
+      "shape": [
+        -1,
+        2
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_normed",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "hadamard",
+      "direction": "In",
+      "shape": [
+        128,
+        128
+      ],
+      "dtype": "bfloat16",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_had",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_scales",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        1
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_debug",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        128
+      ],
+      "dtype": "fp32",
+      "layout": "ND"
+    },
+    {
+      "name": "idx_cache",
+      "direction": "InOut",
+      "shape": [
+        -1,
+        -1
+      ],
+      "dtype": "int8",
+      "layout": "ND"
+    },
+    {
+      "name": "signal",
+      "direction": "InOut",
+      "shape": [
+        -1
+      ],
+      "dtype": "int32",
+      "layout": "ND"
+    }
+  ],
+  "public_tensor_count": 48,
+  "cpp_body_argument_counts": {
+    "cube": 77,
+    "vector": 78
+  },
+  "abi_count_explanation": "CPP核体77/78形参由48个Tensor裸指针+27个从Tensor descriptor读取的动态维度+2/3个worker索引组成；不是77/78个dispatch槽。runtime task Tensor参数为48，未运行设备派发。",
+  "phase_protocol": [
+    [
+      0,
+      "generation",
+      "每核各自begin一次",
+      null
+    ],
+    [
+      1,
+      "main_project",
+      "AIC: task=(m64,n64), task%24",
+      "ceil(MT/64)*16"
+    ],
+    [
+      2,
+      "idx_project",
+      "AIC: task=(m16,n32), task%24",
+      "ceil(IT/16)*8"
+    ],
+    [
+      3,
+      "main_metadata",
+      "AIV0 / global core24",
+      1
+    ],
+    [
+      4,
+      "idx_metadata",
+      "AIV0 / global core24",
+      1
+    ],
+    [
+      5,
+      "main_pool",
+      "AIV: request%48",
+      "MB"
+    ],
+    [
+      6,
+      "main_state_commit",
+      "AIV: request%48；等待所有main pool owner",
+      "MB"
+    ],
+    [
+      7,
+      "main_output",
+      "AIV: request%48；本核pool完成+main metadata",
+      "MB"
+    ],
+    [
+      8,
+      "idx_pool",
+      "AIV: request%48",
+      "IB"
+    ],
+    [
+      9,
+      "idx_state_commit",
+      "AIV: request%48；等待所有idx pool owner",
+      "IB"
+    ],
+    [
+      10,
+      "idx_norm",
+      "AIV: request%48；本核pool完成+idx metadata",
+      "IB"
+    ],
+    [
+      11,
+      "idx_hadamard",
+      "AIC: task=(n64,m16), task%24；等所有idx norm owner和idx metadata",
+      "ceil(C_valid/16)*2"
+    ],
+    [
+      12,
+      "idx_quant",
+      "AIV: request%48；等待所有Hadamard owner",
+      "IB"
+    ],
+    [
+      13,
+      "idx_scale",
+      "AIV0 / global core24；等待所有quant owner",
+      1
+    ]
+  ],
+  "participants": {
+    "AIC": 24,
+    "AIV": 48,
+    "begin_per_core": 1,
+    "phase_slots": 14,
+    "signal_min_words": 129024,
+    "signal_bytes": 516096
+  },
+  "phase_model": {
+    "scenario_fields": [
+      "main_T",
+      "main_B",
+      "idx_T",
+      "idx_B",
+      "C_valid"
+    ],
+    "scenarios": [
+      [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        6,
+        1,
+        6,
+        1,
+        1
+      ],
+      [
+        17,
+        3,
+        13,
+        4,
+        0
+      ],
+      [
+        257,
+        51,
+        155,
+        31,
+        45
+      ],
+      [
+        24,
+        4,
+        24,
+        4,
+        4
+      ],
+      [
+        48,
+        8,
+        48,
+        8,
+        8
+      ],
+      [
+        96,
+        16,
+        96,
+        16,
+        16
+      ],
+      [
+        144,
+        24,
+        144,
+        24,
+        24
+      ],
+      [
+        168,
+        28,
+        168,
+        28,
+        28
+      ],
+      [
+        192,
+        32,
+        192,
+        32,
+        32
+      ]
+    ],
+    "random_series": 80,
+    "generations_per_series": 3,
+    "generation_executions": 240,
+    "events": 1153536,
+    "raw_report_label_correction": "cpu_v2/result.json中的random_schedules=240计数实际为80个随机推进系列×3代。当前check_phase_model字段已澄清，无重跑。",
+    "source_cube_vector_interpreted": true,
+    "math_helpers_stubbed": true,
+    "semantics_checked": "仅组合偏序和推进；各helper既有数学检查不重复。",
+    "no_deadlock_in_model": true
+  },
+  "device_count_wait_audit": {
+    "cube": {
+      "signal_offset_int32": 39936,
+      "metadata_wait_line": 1617,
+      "count_load": {
+        "line": 1667,
+        "statement": "int32_t v597 = (v12)[v96];"
+      },
+      "post_wait_dcci_and_dsb_before_count_load": true
+    },
+    "vector": {
+      "signal_offset_int32": 39936,
+      "metadata_wait_line": 7075,
+      "count_load": {
+        "line": 8385,
+        "statement": "int32_t v1887 = (v12)[v109];"
+      },
+      "post_wait_dcci_and_dsb_before_count_load": true
+    }
+  },
+  "source_status": {
+    "probe_function_AST_matches_passed_compile": true,
+    "formal_helper_function_AST_matches_snapshots": [
+      "compressor_projection_stages",
+      "compressor_pool_stages",
+      "compressor_output_stages",
+      "indexer_compressor_output_stages",
+      "indexer_cache_stages",
+      "metadata_stages",
+      "request_geometry",
+      "phase_sync",
+      "signals"
+    ],
+    "post_compile_changes": "仅导入排序、lint、测试报告字段、增补未来复现config快照；未改probe函数数学/控制流。",
+    "model_config": "model_config_post_compile.py为完成后补存，非cpu_v2编译时快照；symbolic_entry和完整pass IR保存本次实际常量。"
+  },
+  "contracts": [
+    "两组x/Q/L/positions/state/cache及所有workspace分别绑定独立连续GM；不得非法别名。",
+    "T/B/Q/页表容量/compact容量全部由descriptor动态读取，C_valid由设备metadata扫描写入，不使用固定S或Host回读。",
+    "main投影pad至少align_up(MT,64)，Indexer投影pad至少align_up(IT,16)，主pool/norm容量足够覆盖真实T，Indexer compact工作区至少align_up(C_valid,16)。",
+    "Q/L/positions须满足正式request_geometry/causal合同；dummy不读取非法位置；compact输入cos/sin/slots容量覆盖C_valid。",
+    "相同层代际中state写slot和cache key写slot须唯一；prefix共享只读页允许，state commit必须等完所有pool历史读取者。",
+    "Indexer norm先初始化真实compact区间；Hadamard只读valid C，不消费未初始化pad。",
+    "同一signal workspace首次清零、布局固定、单stream非并发调用；改变72核/14phase含义或执行失败须新清零workspace。",
+    "phase无ACK，本探针不逐tile复用payload槽；普通业务缓存发布依赖正式phase_sync的fence/cache维护。",
+    "为了正确性保守等待全部实际request/tile owner，空worker仍begin和publish；首版不以此分核宣称性能优化。"
+  ],
+  "warnings": [
+    "未用返回SSA警告存在；已逐GM根参数追踪TSTORE/TLOAD，确认数学/state/cache写回未被DCE。",
+    "ScalarWriteLineShared警告存在；最终CPP条件为block_idx*2+subblock_idx==0，两组metadata均仅该worker写入。"
+  ],
+  "lint": {
+    "initial": "lint_v1.log",
+    "fix": "lint_fix.log",
+    "final": "lint_v2.log",
+    "result": "PASS"
+  },
+  "device_execution": false,
+  "device_sync_validated": false,
+  "device_precision_validated": false,
+  "performance_measured": false,
+  "limits": [
+    "CPP语句顺序和CPU随机推进不证明A3缓存可见性。",
+    "尚未绑定真实Native缓存运行，不证明device精度/保护区/连续轨迹/图重放。",
+    "未融合HC/QKV/检索/Attention/output/HCpost，不能称完整CSA或目标性能达成。"
+  ]
+}

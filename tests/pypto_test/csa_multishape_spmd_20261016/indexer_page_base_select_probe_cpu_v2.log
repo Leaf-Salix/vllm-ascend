@@ -1,0 +1,59 @@
+2026-10-17 11:29:48.687 I | [perf_hint] 2 hints across 2 sites; see tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v2/kernel/report/perf_hints.log
+Failed to compile function 'page_base_select': Internal error: IfStmt in-place return_var 'source__rv_v0' yields different backing SSAs across branches: %even__ssa_v0_view vs %odd__ssa_v0_view [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v2/source.py:22:9]
+Check failed: inplace_return_ssa[i] == branch_yields[i] at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/codegen/pto/pto_control_flow_codegen.cpp:422
+
+C++ Traceback (most recent call last):
+ File "./src/codegen/pto/pto_codegen.cpp", line 699
+ File "./src/codegen/pto/pto_codegen.cpp", line 1214
+ File "./src/codegen/pto/pto_codegen.cpp", line 2127
+ File "./include/pypto/ir/transforms/base/functor.h", line 233
+ File "./src/ir/transforms/visitor.cpp", line 349
+ File "./src/codegen/pto/pto_codegen.cpp", line 2127
+ File "./include/pypto/ir/transforms/base/functor.h", line 220
+ File "./src/codegen/pto/pto_control_flow_codegen.cpp", line 482
+ File "./src/codegen/pto/pto_control_flow_codegen.cpp", line 422
+
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_v2.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v2/source.py", "error": "1 function(s) failed to compile:\n\n  Function          | Error\n  ------------------+--------------------------------------------------------------\n  page_base_select  | Internal error: IfStmt in-place return_var 'source__rv_v0'\n                    | yields different backing SSAs across branches:\n                    | %even__ssa_v0_view vs %odd__ssa_v0_view\n                    | [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dy\n                    | namic-\n                    | 20261016/tests/pypto_test/csa_multishape_spmd_20261016/index\n                    | er_page_base_select_probe_cpu_v2/source.py:22:9]\n  ------------------+--------------------------------------------------------------\n\n  Full details: tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v2/kernel/report/codegen_errors.txt"}
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_static_spmd_feasibility_20261015/bootstrap_isolated.py", line 63, in <module>
+    runpy.run_path(target, run_name="__main__")
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 289, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 96, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "tests/pypto_test/csa_static_spmd_feasibility_20261015/compile_jit_entry.py", line 57, in <module>
+    main()
+  File "tests/pypto_test/csa_static_spmd_feasibility_20261015/compile_jit_entry.py", line 40, in main
+    compiled = module.entry._resolve_kernel_artifact((), {"config": CompileOptions(
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py", line 3331, in _resolve_kernel_artifact
+    artifact, _, _ = self._resolve_compiled(args, kwargs, allow_signature_mode, _kernel=True)
+  File "/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py", line 3295, in _resolve_compiled
+    return build(), ordered_args, run_config
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py", line 3231, in build
+    return _compile_impl(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/ir/compile.py", line 509, in _compile_impl
+    files = generate(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/pto_backend.py", line 1794, in generate
+    return _generate_single_chip(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/pto_backend.py", line 2261, in _generate_single_chip
+    raise PartialCodegenError(report, result_files)
+pypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:
+
+  Function          | Error
+  ------------------+--------------------------------------------------------------
+  page_base_select  | Internal error: IfStmt in-place return_var 'source__rv_v0'
+                    | yields different backing SSAs across branches:
+                    | %even__ssa_v0_view vs %odd__ssa_v0_view
+                    | [/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dy
+                    | namic-
+                    | 20261016/tests/pypto_test/csa_multishape_spmd_20261016/index
+                    | er_page_base_select_probe_cpu_v2/source.py:22:9]
+  ------------------+--------------------------------------------------------------
+
+  Full details: tests/pypto_test/csa_multishape_spmd_20261016/indexer_page_base_select_probe_cpu_v2/kernel/report/codegen_errors.txt

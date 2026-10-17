@@ -1,0 +1,898 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-17",
+  "scope": "只读规划 canonical CSA sparse attention → O_A → 按组量化 → O_B → 反量化/HC post 的真正动态单 SPMD 源级迁移；只生成本 JSON",
+  "status": {
+    "production_code_changed": false,
+    "new_compilation": false,
+    "device_execution": false,
+    "performance_test": false,
+    "source_math_imported": false,
+    "frozen_ir_used": false,
+    "other_session_optimization_read": false,
+    "note": "只用标准库解析源码和人工审阅；这里的 proposed 接口、边界处理与同步拆分均不是已验证实现"
+  },
+  "source_inventory": [
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+      "bytes": 40732,
+      "lines": 717,
+      "functions": [
+        {
+          "name": "sparse_attn_csa",
+          "line": 175,
+          "end_line": 694
+        },
+        {
+          "name": "sparse_attn_csa_tp1",
+          "line": 698,
+          "end_line": 717
+        }
+      ]
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+      "bytes": 25402,
+      "lines": 575,
+      "functions": [
+        {
+          "name": "_proj_a_mm_nz",
+          "line": 179,
+          "end_line": 252
+        },
+        {
+          "name": "_proj_a_mm_nd",
+          "line": 256,
+          "end_line": 298
+        },
+        {
+          "name": "_proj_b_mm_nd",
+          "line": 305,
+          "end_line": 337
+        },
+        {
+          "name": "_proj_b_mm_nz_kernel",
+          "line": 341,
+          "end_line": 385
+        },
+        {
+          "name": "_proj_b_mm_nz",
+          "line": 389,
+          "end_line": 404
+        },
+        {
+          "name": "_decode_o_proj_tp1_tiled",
+          "line": 411,
+          "end_line": 535
+        },
+        {
+          "name": "decode_o_proj_tp1",
+          "line": 539,
+          "end_line": 575
+        }
+      ]
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/hc_post.py",
+      "bytes": 4239,
+      "lines": 107,
+      "functions": [
+        {
+          "name": "hc_post_block",
+          "line": 35,
+          "end_line": 76
+        },
+        {
+          "name": "_hc_post",
+          "line": 79,
+          "end_line": 103
+        }
+      ]
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "bytes": 25818,
+      "lines": 510,
+      "functions": [
+        {
+          "name": "_read_device_max_seq_len",
+          "line": 135,
+          "end_line": 142
+        },
+        {
+          "name": "_use_host_max_seq_len",
+          "line": 146,
+          "end_line": 150
+        },
+        {
+          "name": "_make_decode_csa_entry",
+          "line": 153,
+          "end_line": 503
+        },
+        {
+          "name": "_decode_csa_tp1_layer",
+          "line": 159,
+          "end_line": 495
+        }
+      ]
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/config.py",
+      "bytes": 5760,
+      "lines": 209,
+      "functions": [
+        {
+          "name": "nope_head_dim",
+          "line": 79,
+          "end_line": 80
+        },
+        {
+          "name": "softmax_scale",
+          "line": 83,
+          "end_line": 84
+        },
+        {
+          "name": "index_nope_head_dim",
+          "line": 87,
+          "end_line": 88
+        },
+        {
+          "name": "index_weights_scale",
+          "line": 91,
+          "end_line": 92
+        },
+        {
+          "name": "hc_dim",
+          "line": 95,
+          "end_line": 96
+        },
+        {
+          "name": "mix_hc",
+          "line": 99,
+          "end_line": 100
+        }
+      ]
+    },
+    {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/nz_mode.py",
+      "bytes": 5955,
+      "lines": 116,
+      "functions": [
+        {
+          "name": "_native_keeps_3d_bf16_as_nz",
+          "line": 40,
+          "end_line": 66
+        },
+        {
+          "name": "validate_weight_nz_mode",
+          "line": 75,
+          "end_line": 86
+        },
+        {
+          "name": "root_weight_layouts",
+          "line": 96,
+          "end_line": 110
+        },
+        {
+          "name": "root_weight_shapes",
+          "line": 113,
+          "end_line": 116
+        }
+      ]
+    }
+  ],
+  "additional_read_only_context": [
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/request_geometry.py",
+    "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py"
+  ],
+  "current_root_chain": {
+    "source": {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "start_line": 393,
+      "end_line": 495
+    },
+    "chain": [
+      "原 KV writeback；主 Compressor 写压缩 KV；Indexer Compressor 写 Native INT8 KV/scale",
+      "Indexer 产出每 token 的 Top-K logical compressed index",
+      "sparse_attn_csa_tp1(q, 原/压缩 cache 与页表, Top-K, positions, L, sink, cos/sin, packed_heads)",
+      "decode_o_proj_tp1(packed_heads, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep)"
+    ],
+    "missing_native_input": "当前 sparse_attn 参数没有原始 query_start_loc，靠 token//S 定请求；新入口必须显式传入现成 Native Q，不是压缩组的 compact Q，也不是 T/B 推算。",
+    "touched_dependencies": [
+      "原 cache writeback 的完成与可见性",
+      "主 Compressor cache 的完成与可见性",
+      "Q/RoPE 完成",
+      "Indexer Top-K 完成",
+      "HC pre 的 post/comb 完成"
+    ],
+    "war_marker": {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 195,
+        "end_line": 199
+      },
+      "current": "kv_touch 自复制原 cache 第0行是多 task TMR 的 WAR 依赖标记，不是 attention 数学。",
+      "migration": "单 SPMD 中改成显式等待真实 cache 生产者，不保留这次额外 GM 自复制；这不允许删除真实 cache 依赖，也不允许读写请求共享页时丢失原有顺序。"
+    },
+    "scope_limit": "本计划只覆盖 TP1 本地完整 CSA；源码中 TP/ReduceScatter 常量不代表已实现 TP 通信迁移。"
+  },
+  "model_constants_not_dynamic_shapes": {
+    "hidden_D": 4096,
+    "attention_heads_H": 64,
+    "head_dim": 512,
+    "rope_dim": 64,
+    "nope_dim": 448,
+    "sliding_window": 128,
+    "compressed_topk": 512,
+    "compress_ratio": 4,
+    "page_tokens": 32,
+    "o_groups": 8,
+    "heads_per_o_group": 8,
+    "o_group_input": 4096,
+    "o_lora_per_group": 1024,
+    "hc_mult": 4,
+    "attention_candidate_tile": 128,
+    "sparse_blocks": 5,
+    "padded_candidates": 640,
+    "valid_mask_cols": 16,
+    "note": "模型维度、合法 tile 和硬件核数可以是 constexpr；实际 B、T、每请求 query 长度、历史长度与页地址必须来自本次 Tensor/metadata。"
+  },
+  "dynamic_axes_and_external_binding": {
+    "T": "q/residual/x_out 的实际物理 token 行数；包括入口允许的 padding 行，独立于 B。所有 token Tensor 实际行数必须一致。",
+    "B": "L 与各请求页表的请求轴；Q 的轴独立声明，要求能覆盖 B+1 个边界。",
+    "Q_L": "活动请求 r 的 [begin,end)=Q[r:r+2]；query_count=end-begin；history=L[r]-query_count。先用 request_bounds 检查，再读取 payload。",
+    "owner": "token驱动 attention 用 query_request(Q,L,t,T) 找唯一 request；不生成 T 长 request_id GM 适配缓冲。请求驱动实现可持有 r，避免重复 O(B) 查询，但改变分核需另验。",
+    "causal_position": "活动 token 还须 position[t] == L[r]-(Q[r+1]-Q[r])+(t-Q[r])；陈旧位置不能据此读页表。",
+    "page_axes": "原/压缩 cache 页数、两份页表列数分别动态；先检查 logical_column 在表内，再检查 0<=page<对应 cache 页数。",
+    "topk": "[T,512] INT32，是逻辑压缩行号；必须在本 token 可见范围内，再换算压缩页，不是 Native 物理 slot。",
+    "packed_stride": "P_PACK 独立动态容量/行步长。packed_heads [8*P_PACK,4096]，或逻辑 [8,P_PACK,4096] 并在外层建共享 storage 的2D view；必须 P_PACK>=T，第一轴能整除8。推荐按16向上取容量但不能把其值变成实际T常量。",
+    "projection_capacity": "P_MM 独立动态容量。所选 R_B 为32/96/128时，P_MM>=ceil(T/R_B)*R_B；不要错误复用只满足 ceil(T/16)*16 的 P_PACK。",
+    "scale_capacity": "P_SCALE 独立动态容量>=T；若实现保留8行物理store则须>=ceil(T/8)*8，否则应显式 valid_rows 只写T。不得与P_MM误绑定为同一 dynamic symbol。",
+    "outer_views": "ori/cmp cache展平、q[T*64,512]、sink[64,1]、residual/y[T,16384]均在外层准备描述符共享底层storage，inline阶段不执行需Host的GM reshape或复制适配。",
+    "layout": "wo_a [8,4096,1024] BF16 用 Native 实际 WO_A_WEIGHT_LAYOUT；wo_b [8192,4096] INT8 用 Native QUANT_WEIGHT_LAYOUT。只读源码，未导入 nz_mode 或触发设备探针。",
+    "entry_rejection": "形状/stride/layout/容量不一致须在捕获前统一拒绝；不能某生产者跳过写而消费者继续读旧工作区。"
+  },
+  "fixed_shape_replacement_points": [
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 34,
+        "end_line": 38
+      },
+      "old": "B=DECODE_BATCH//TP; S=DECODE_SEQ; T=B*S",
+      "replacement": "移除实际B/T/S配置依赖；模型常量与策略tile保留，实际T/B从Tensor，request从Q/L。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 120,
+        "end_line": 171
+      },
+      "old": "固定T_PAD、ROPE_CS_T_TILE=S、BIAS_T_TILE=min(T,8)、T整除bias/publish tile断言",
+      "replacement": "P_PACK动态；ROPE/BIAS选固定合法tile并显式尾行valid_shape；不以固定S作为tile正确性前提。当前最终发布逐token，T%4断言不是数学必要条件。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 264,
+        "end_line": 316
+      },
+      "old": "v_len_t//S 与 bias_t//S",
+      "replacement": "Q/L反查request，先判活动和位置一致，再算滑窗及页表地址；BIAS最后tile仍只写bias_rows。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 483,
+        "end_line": 525
+      },
+      "old": "qk_b=qk_t//S；原页只检>=0，压缩页读出后直接gather",
+      "replacement": "所有实际query都用一致Q/L映射；logical column/page上下界在plan和gather一致检查。压缩非法页不能只填零KV却留下有效bias，否则softmax分母变大。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+        "start_line": 668,
+        "end_line": 671
+      },
+      "old": "group*T_PAD+token",
+      "replacement": "group*P_PACK+token，其中P_PACK由输出描述符确定并传给O_A，两个模块必须使用同一stride。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+        "start_line": 47,
+        "end_line": 79
+      },
+      "old": "LOCAL_T=DECODE_TOKENS//TP; T_PAD/窗口容量",
+      "replacement": "拆实际T与各容量轴；不搬未使用的TP通信窗口常量。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+        "start_line": 168,
+        "end_line": 172
+      },
+      "old": "导入期要求T_PAD整除128",
+      "replacement": "入口按所选ROW_TILE校验P_MM；不是要求每个实际T整除128。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+        "start_line": 438,
+        "end_line": 490
+      },
+      "old": "同一个T_PAD绑定所有workspace；量化完整8行读取；尾块只零INT8",
+      "replacement": "独立动态容量、量化有效行加载/常量valid_shape/store，INT8[T,P_MM_used)独立清零；不读取O_A从未写入的FP32 pad行。"
+    },
+    {
+      "source": {
+        "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/hc_post.py",
+        "start_line": 28,
+        "end_line": 31
+      },
+      "old": "导入期(DECODE_BATCH//TP*DECODE_SEQ)%4==0",
+      "replacement": "去静态导入断言；原body已有t<t_dim，保留实际T循环与单行门控。"
+    }
+  ],
+  "attention_plan_math": {
+    "source": {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+      "start_line": 202,
+      "end_line": 344
+    },
+    "compressed": [
+      "raw=FP32(topk); upper=FP32(INT32_trunc((position+1)*0.25))",
+      "ge=clamp(raw+1,0,1); lt=clamp(upper-raw,0,1); mask=ge*lt",
+      "index=INT32(mask*(raw+1)-1); bias=min(index_as_fp32,0)*(-NEG_INF), NEG_INF=-1e20",
+      "每128项的mask取row_max写valid_block_mask[:,1:5]"
+    ],
+    "sliding": [
+      "length=min(position+1,128)，失活请求压成0；start=position-length+1",
+      "初始bias由 j<length 得出；按32token页拆最多5个run",
+      "原页负数为空洞时，只把各有效run对应区间置有效；block0标志表示至少一个合法run"
+    ],
+    "required_dynamic_sanitization": [
+      "失活/无owner/重叠owner/陈旧causal：整个5块mask=0、全部bias=-1e20、compressed index=-1，不能只清SWA而留下旧compressed Top-K。",
+      "合法输入保留上述FP32 clamp顺序；额外地址合法性应折入同一候选有效掩码，避免gather与bias看见不一致的有效性。",
+      "当前canonical未全面检查正页越界/压缩负页；补齐是动态输入安全合同的新增保护，不宣称源代码已具备或已经设备验证。"
+    ],
+    "initialization": "每次调用覆盖全部实际T行的640个bias、512个compressed index、5个有效位；mask剩余11列不被读取可保留poison。T=0时不触碰业务Tensor。"
+  },
+  "attention_streaming_protocol": {
+    "source": {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+      "start_line": 374,
+      "end_line": 694
+    },
+    "ownership": "G=24核组；query t归core=t%G，core内序号=t//G；每query固定5个逻辑candidate块。AIV lane0/1各管32heads和64行KV。",
+    "work_count": "query_count=max(0,ceil((T-core)/G)); N=query_count*5。空核仍参加外层调用代际，但不触发业务事件。",
+    "slot": "slot=core*3+(work%3)，work跨本核所有query连续增加，不能每query重置slot序号。",
+    "cube_schedule": "tick in [0,N+2)：QK(work=tick)；PV(work=tick-2)。首块加载当前query的64x512 Q；KV一次入L1，同一份既作QK转置又作延后PV。",
+    "vector_schedule": "tick in [0,N+3)：gather KV(work=tick)，softmax(work=tick-1)，merge/publish(work=tick-3)。无效block跳过对应事件和数据读写，但最后block仍触发query发布与状态重置。",
+    "events": [
+      {
+        "id": 0,
+        "name": "KV_READY",
+        "producer": "两个AIV的KV MTE3写回",
+        "consumer": "本组AIC MTE2读KV"
+      },
+      {
+        "id": 1,
+        "name": "SCORE_READY",
+        "producer": "AIC FIX写score",
+        "consumer": "两个AIV MTE2读各自32head的score"
+      },
+      {
+        "id": 2,
+        "name": "PROB_READY",
+        "producer": "两个AIV MTE3写prob/mi/li",
+        "consumer": "本组AIC MTE2读prob"
+      },
+      {
+        "id": 3,
+        "name": "PV_READY",
+        "producer": "AIC FIX写PV",
+        "consumer": "两个AIV MTE2读PV并merge"
+      }
+    ],
+    "ack_distinction": [
+      "canonical仅显式命名4个READY事件，没有独立名为FREE/ACK的GM变量。其安全性依赖配对sync_set/sync_wait、固定先后顺序和3槽生存期；不能把名字为READY理解为任意时刻可覆盖槽。",
+      "尤其T>=144分支先consume上一块SCORE通知，再允许发布本块KV，以限制Cube继续前进；小T分支先softmax再发KV。该次序必须与原源码一致。",
+      "outer phase_sync.publish_phase只表示本核整个阶段完成，没有消费者ACK，也没有每槽序号；只能用于plan/rope就绪及整个attention结束等边界。",
+      "首版优先保留组内FFTS握手，给完整CSA分配不冲突的event id/ffts workspace；若改普通GM信号，必须另设计每槽producer READY序号和consumer FREE/ACK序号，处理两AIV都完成、跨query复用、跨invocation代际、可见性和无效块跳过，不能套用现有phase信号。",
+      "KV GM槽在AIC读入L1后才可重写；同槽L1旧KV必须等旧PV读取后才覆盖；score待两个AIV读完、prob/mi/li待AIC与merge消费完成、PV待两个AIV merge完才可复用。"
+    ],
+    "outer_deadlock_rule": "AIC helper与两个AIV lane helper必须处于同一MIX阶段并发推进；不能先等待整个Cube helper完成再启动Vector，反向也不行。二者有循环流水依赖。",
+    "event_scope_pending": "单个融合任务内多个已有阶段可能也用FFTS或通信事件。必须在组装时审计命名空间、set_ffts生命周期、双方event计数完全相同与尾部drain；当前只读源码不足证明backend正确。",
+    "scratch": {
+      "kv_transfer": "BF16[G*3*128,512]",
+      "score_transfer": "FP32[G*3*64,128]",
+      "probability_transfer": "BF16[G*3*64,128]",
+      "pv_transfer": "FP32[G*3*64,512]",
+      "mi_transfer": "FP32[G*3*64,1]",
+      "li_transfer": "FP32[G*3*64,1]",
+      "ffts_workspace": "INT64[256]，保留接口所需容量，具体初始化/地址设置按现有set_ffts语义核对",
+      "ring_gm_bytes_at_24_groups_excluding_ffts": 22450176,
+      "local_cube": "Q Mat[64,512]；KV Mat[3*128,512]；PV Left/Right与交替两个Accumulator",
+      "local_vector": "每lane running_m/l [32,1] 与 running_left/right [32,256]；局部score/exp [32,128]和归约scratch",
+      "initialization": "gather每个有效KV半块先BF16零填再覆盖有效行；其余GM环槽不用全清，但每次读取必须有对应本次有效写入+事件。空/无效block绝不读旧槽；每query数值状态明确初始化/重置。"
+    }
+  },
+  "attention_numerical_order": {
+    "source": {
+      "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+      "start_line": 559,
+      "end_line": 681
+    },
+    "local_softmax": [
+      "FP32 score*softmax_scale 后加bias",
+      "row_max → exp(score-max) → row_sum",
+      "probability用BF16 rint；mi/li保持FP32"
+    ],
+    "pv": "BF16概率×BF16原KV；N128/K128，四个N128输出，交替两个Accumulator以保持原FIX/Cube流水。",
+    "online_merge": [
+      "m从sink起，l=0，oi=0；next_m=max(m,mi)",
+      "alpha=exp(m-next_m), beta=exp(mi-next_m)",
+      "next_l=alpha*l+beta*li；左右oi各为old_oi*alpha+PV*beta；不改求和/归一化分块"
+    ],
+    "final": [
+      "denom=l+exp((m-m+sink)-m)，保留表达式顺序；n_full=oi/denom",
+      "NOPE段从n_full cast BF16 rint；RoPE仍用FP32 n_full，不用已经cast的值",
+      "inverse RoPE pair swap为(1,0,3,2)，符号even=+1、odd=-1；cos/signed_sin列广播相乘再相加，之后BF16 rint",
+      "16heads结果整理成两个4096宽O组，各写[group*P_PACK+t,0]；每lane两次16heads覆盖4组，两lane共8组",
+      "每query最后逻辑block发布后才reset m=sink,l=0,oi=0；即使5块都无效也发布零attention并重置，下一query流水仍在飞"
+    ],
+    "must_keep_backend_workaround": "m/li先将完整[32,1] reshape成[1,32]，再ND extract目标16项再reshape；canonical明确slice后column-to-row reshape会丢第二半偏移，不能在重构时顺手简化。"
+  },
+  "minimal_helpers_in_implementation_order": [
+    {
+      "order": 1,
+      "proposed_helper": "attention_slot_plan_stage",
+      "role": "AIV，显式worker_id/WORKERS，无spmd/submit",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+          "start_line": 202,
+          "end_line": 344
+        }
+      ],
+      "inputs": [
+        "Top-K INT32[T,512]",
+        "positions INT64[T]",
+        "原始Q INT32[Q_ROWS]、L INT32[B]",
+        "原/压缩页表及两类cache页容量"
+      ],
+      "outputs": [
+        "compressed_indices INT32[T,512]",
+        "bias FP32[T,640]",
+        "valid_blocks INT32[T,16]"
+      ],
+      "ownership": "tile b归worker=b%WORKERS；每tile常量8行，最后rows=min(8,T-t0)。一行可属于不同请求，必须逐行查Q/L。",
+      "dynamic_contract": [
+        "Q/L为请求真值；T=0无工作",
+        "compressed candidate与SWA同一有效性合同",
+        "不得将非法compressed页保留bias为0"
+      ],
+      "numerical_order": [
+        "raw=FP32(topk); upper=FP32(INT32_trunc((position+1)*0.25))",
+        "ge=clamp(raw+1,0,1); lt=clamp(upper-raw,0,1); mask=ge*lt",
+        "index=INT32(mask*(raw+1)-1); bias=min(index_as_fp32,0)*(-NEG_INF), NEG_INF=-1e20",
+        "每128项的mask取row_max写valid_block_mask[:,1:5]",
+        "length=min(position+1,128)，失活请求压成0；start=position-length+1",
+        "初始bias由 j<length 得出；按32token页拆最多5个run",
+        "原页负数为空洞时，只把各有效run对应区间置有效；block0标志表示至少一个合法run"
+      ],
+      "synchronization": [
+        "等待Top-K生产者、页表更新完成；只读取cache页号无需提前读cache payload",
+        "每生产者写完其全部行发布plan phase；QK/AIV都必须看到相同valid mask"
+      ],
+      "workspace_and_tail": [
+        "tile scalar长度缓冲使用合法核内Tile，不把原create_tensor误变成新GM调度",
+        "每有效物理行640bias/512index/5mask全部初始化；其它mask列保持未写"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "row_max动态valid_rows、逐行pl.read地址guard与scalar→tile写入",
+        "tail constant tile与row_expand valid_shape"
+      ]
+    },
+    {
+      "order": 2,
+      "proposed_helper": "attention_inverse_rope_sign_stage",
+      "role": "AIV，显式worker行tile轮转",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+          "start_line": 347,
+          "end_line": 368
+        }
+      ],
+      "inputs": [
+        "sin FP32[T,64]"
+      ],
+      "outputs": [
+        "inverse_signed_sin FP32[P_ROPE,64]，P_ROPE>=T"
+      ],
+      "ownership": "row tile常量4或8；worker跨实际ceil(T/tile)循环，不按request S。",
+      "dynamic_contract": [
+        "实际T动态，允许odd/尾块；这一逐行数学与Q分组无关"
+      ],
+      "numerical_order": [
+        "pair=trunc(column*0.5); lane=column-2*pair; sign=-(2*lane-1); result=sin*sign"
+      ],
+      "synchronization": [
+        "与plan可独立并行；attention最终publish读取前等待实际rope row owners"
+      ],
+      "workspace_and_tail": [
+        "只写T行，不读P_ROPE的pad；tile常量需set_validshape到实际尾rows"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "动态尾部tile乘法/存储；避免误用query正向RoPE的相反符号"
+      ]
+    },
+    {
+      "order": 3,
+      "proposed_helper": "attention_publish_heads_tile",
+      "role": "AIV纯数学内联，后续嵌在流式merge尾部",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+          "start_line": 621,
+          "end_line": 671
+        }
+      ],
+      "inputs": [
+        "live m/l [32,1] FP32",
+        "live左右oi [32,256] FP32",
+        "sink[64,1] FP32",
+        "cos/signed_sin",
+        "token、lane、P_PACK"
+      ],
+      "outputs": [
+        "packed_heads BF16[8*P_PACK,4096]中的本lane四个组"
+      ],
+      "ownership": "lane0负责head0..31，lane1负责head32..63；每lane按16heads发布两轮，每轮写两个组。",
+      "dynamic_contract": [
+        "token<T；P_PACK来自本次输出描述符；不新增T*H FP32中间GM"
+      ],
+      "numerical_order": [
+        "denom=l+exp((m-m+sink)-m)，保留表达式顺序；n_full=oi/denom",
+        "NOPE段从n_full cast BF16 rint；RoPE仍用FP32 n_full，不用已经cast的值",
+        "inverse RoPE pair swap为(1,0,3,2)，符号even=+1、odd=-1；cos/signed_sin列广播相乘再相加，之后BF16 rint",
+        "16heads结果整理成两个4096宽O组，各写[group*P_PACK+t,0]；每lane两次16heads覆盖4组，两lane共8组"
+      ],
+      "synchronization": [
+        "调用者只在本query五逻辑块均合并后调用；需要rope ready和sink可读",
+        "完成所有query发布才发整个attention完成phase，或另设计明确逐row完成协议"
+      ],
+      "workspace_and_tail": [
+        "保留完整列tile先reshape再ND extract的workaround",
+        "不读/写packed pad行；对全无效query也产生零attention"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "Tile参数alias/liveness、动态GM group stride、二次reshape存储",
+        "gather绝对head偏移与第二半m/li提取"
+      ]
+    },
+    {
+      "order": 4,
+      "proposed_helper": "attention_qk_pv_cube_stage + attention_qk_pv_vector_lane_stage",
+      "role": "同一MIX中AIC和双AIV并发；两helper必须成对组装",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+          "start_line": 374,
+          "end_line": 694
+        }
+      ],
+      "inputs": [
+        "q_flat BF16[T*64,512]",
+        "原/压缩cache flat BF16[pages*32,512]及页表",
+        "Q/L/positions",
+        "plan输出、rope、sink",
+        "ring GM、FFTS workspace",
+        "core_id、lane_id、constexpr CORE_GROUPS=24"
+      ],
+      "outputs": [
+        "环槽score/prob/PV等互传",
+        "packed_heads最终结果"
+      ],
+      "ownership": "G=24核组；query t归core=t%G，core内序号=t//G；每query固定5个逻辑candidate块。AIV lane0/1各管32heads和64行KV。",
+      "dynamic_contract": [
+        "所有loop上限由actual T与core_id计算；block数5与ring槽3是数学/流水常量",
+        "每次QK/softmax/PV/merge都用相同valid mask跳过",
+        "不以全部等待phase替代逐槽消息"
+      ],
+      "numerical_order": [
+        "tick in [0,N+2)：QK(work=tick)；PV(work=tick-2)。首块加载当前query的64x512 Q；KV一次入L1，同一份既作QK转置又作延后PV。",
+        "tick in [0,N+3)：gather KV(work=tick)，softmax(work=tick-1)，merge/publish(work=tick-3)。无效block跳过对应事件和数据读写，但最后block仍触发query发布与状态重置。",
+        "m从sink起，l=0，oi=0；next_m=max(m,mi)",
+        "alpha=exp(m-next_m), beta=exp(mi-next_m)",
+        "next_l=alpha*l+beta*li；左右oi各为old_oi*alpha+PV*beta；不改求和/归一化分块"
+      ],
+      "synchronization": [
+        "canonical仅显式命名4个READY事件，没有独立名为FREE/ACK的GM变量。其安全性依赖配对sync_set/sync_wait、固定先后顺序和3槽生存期；不能把名字为READY理解为任意时刻可覆盖槽。",
+        "尤其T>=144分支先consume上一块SCORE通知，再允许发布本块KV，以限制Cube继续前进；小T分支先softmax再发KV。该次序必须与原源码一致。",
+        "outer phase_sync.publish_phase只表示本核整个阶段完成，没有消费者ACK，也没有每槽序号；只能用于plan/rope就绪及整个attention结束等边界。",
+        "首版优先保留组内FFTS握手，给完整CSA分配不冲突的event id/ffts workspace；若改普通GM信号，必须另设计每槽producer READY序号和consumer FREE/ACK序号，处理两AIV都完成、跨query复用、跨invocation代际、可见性和无效块跳过，不能套用现有phase信号。",
+        "KV GM槽在AIC读入L1后才可重写；同槽L1旧KV必须等旧PV读取后才覆盖；score待两个AIV读完、prob/mi/li待AIC与merge消费完成、PV待两个AIV merge完才可复用。",
+        "AIC helper与两个AIV lane helper必须处于同一MIX阶段并发推进；不能先等待整个Cube helper完成再启动Vector，反向也不行。二者有循环流水依赖。"
+      ],
+      "workspace_and_tail": [
+        "kv半tile先置零再gather；3份KV在L1驻留供QK/PV复用",
+        "仅最后query需要drain；空核不可对不存在的块发/等event",
+        "业务ring无全清但本次写→本次读顺序严格成立"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "AIC/AIV角色拆分、事件作用域、DMA/FIX完成语义",
+        "实际L1/UB容量与helper内存生命周期",
+        "无效块交错、空core、T变化后的event配对"
+      ]
+    },
+    {
+      "order": 5,
+      "proposed_helper": "o_projection_a_stage_nd / o_projection_a_stage_nz",
+      "role": "AIC；保留两种layout专用函数，显式worker",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+          "start_line": 178,
+          "end_line": 301
+        }
+      ],
+      "inputs": [
+        "packed BF16[8*P_PACK,4096]",
+        "wo_a BF16[8,4096,1024] Native layout",
+        "actual_T、动态P_PACK/P_MM",
+        "worker_id/WORKERS，常量A_COL_TILE"
+      ],
+      "outputs": [
+        "o_r FP32[P_MM,8192]，仅写actual T"
+      ],
+      "ownership": "逻辑任务=(group,ceil(T/128)行块,1024/A_COL_TILE列块)，展开后按worker轮转；明确owner供quant等待。",
+      "dynamic_contract": [
+        "row_count=min(128,T-row0)",
+        "pack row=group*P_PACK+row0，out col=group*1024+n0",
+        "ND/NZ使用各自真实声明，NZ n0非负可证明"
+      ],
+      "numerical_order": [
+        "K256首块matmul种FP32累加器，再按K递增pipeline(stage=2)matmul_acc",
+        "当前根调用PIPELINE_OA=False；首次只迁这条实际路径，不额外搬未启用的L1K512/L0K128 pipeline候选"
+      ],
+      "synchronization": [
+        "等待消费范围内所有attention head-group/row生产者；不能只等一个AIV lane",
+        "OA写完phase；quant必须等对应group全部1024列tile owner"
+      ],
+      "workspace_and_tail": [
+        "只有actual T有效行；P_MM足量但pad不初始化",
+        "Matmul输出保留group轴时用明确assemble/store映射，不随意reshape丢NZ信息"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "动态valid_rows与3D weight NZ view/assemble",
+        "worker flat index的NZ偏移非负证明",
+        "FP32累加/分块保持source"
+      ]
+    },
+    {
+      "order": 6,
+      "proposed_helper": "o_projection_group_quant_stage",
+      "role": "AIV，显式group×row tile owner",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+          "start_line": 455,
+          "end_line": 492
+        }
+      ],
+      "inputs": [
+        "o_r FP32[P_MM,8192]",
+        "actual T",
+        "R_B常量、P_MM/P_SCALE"
+      ],
+      "outputs": [
+        "o_r_i8 INT8[P_MM,8192]",
+        "act_scale_dq FP32[8,P_SCALE]"
+      ],
+      "ownership": "按(group,8行tile)或保留32行任务再内含8行pipeline分配；每个group最后active任务独占其pad零填。",
+      "dynamic_contract": [
+        "rows=min(8,T-qt)",
+        "完整R_B读范围P_USED=ceil(T/R_B)*R_B<=P_MM",
+        "T=0不量化，不由负行号指定尾任务"
+      ],
+      "numerical_order": [
+        "amax=max(eps,row_max(abs(o_r[group1024])))",
+        "q_multiplier=127/amax；dequant_scale=amax*(1/127)，不能换成recip(q_multiplier)",
+        "FP32乘q_multiplier→INT32 rint→FP16 round→INT8 trunc；保持按组scale，不变成全8192列同一个scale"
+      ],
+      "synchronization": [
+        "依赖对应group/row OA所有列块完成",
+        "INT8有效行与所需pad零填都完成后，才允许OB读取整R_B块"
+      ],
+      "workspace_and_tail": [
+        "rows不足8时，o_r load、row_max输出、eps/127常量、scale/int8 store全部携带一致valid_shape",
+        "只将[T,P_USED)置INT8零；不让尾tile读取未初始化o_r；无须读pad act_scale"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "动态valid_shape在reduce/div/cast链传播",
+        "纯Tile scratch/full替代核内GMcreate不改DAG"
+      ]
+    },
+    {
+      "order": 7,
+      "proposed_helper": "o_projection_b_stage_nd / o_projection_b_stage_nz",
+      "role": "AIC，显式worker；保留Native2D NZ权重",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+          "start_line": 304,
+          "end_line": 407
+        }
+      ],
+      "inputs": [
+        "o_r_i8 INT8[P_MM,8192]",
+        "wo_b INT8[8192,4096] Native layout",
+        "actual T/R_B",
+        "worker_id/WORKERS"
+      ],
+      "outputs": [
+        "partials INT32[P_MM,32768]，每group独占4096列"
+      ],
+      "ownership": "NZ保留(group,D512chunk)共64逻辑任务，每任务循环ceil(T/R_B)行块；ND保留(group,rowblock,D512chunk)。不要为了统一接口把NZ驻留循环交换。",
+      "dynamic_contract": [
+        "R_B=32/96/128是区间策略，T仍运行时；完整M块只读已量化/清零P_USED行",
+        "weights group K offset为group*1024；2D根storage不可误当3D"
+      ],
+      "numerical_order": [
+        "R_B<=96：activation整[RB,1024]入L1，两个N256输出分别K256 pipeline，init_cond首K块",
+        "R_B=128：N256 weight[1024,256]在外层，内层rowblocks整K matmul INT32",
+        "保持原AutoTile K128 L0模式；INT32 partial不先cast或sum跨group"
+      ],
+      "synchronization": [
+        "等待本group相应INT8行范围及padding完成",
+        "发布partial owner phase；终端dequant需全部8组对应row/N贡献"
+      ],
+      "workspace_and_tail": [
+        "无atomic且每partial块唯一写，无需初始化partials",
+        "P_MM必须容纳P_USED，不能仅按16pad分配"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "NZ动态group/row偏移与L1驻留布局",
+        "跨inline函数Acc/Mat元数据与init_cond",
+        "正确反推出partial owner，而非套普通行tile wait_row_owners"
+      ]
+    },
+    {
+      "order": 8,
+      "proposed_helper": "o_dequant_hc_post_stage + hc_post_row_block",
+      "role": "AIV终端阶段；数学helper可先独立抽取，保留1行门控",
+      "source": [
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+          "start_line": 498,
+          "end_line": 534
+        },
+        {
+          "path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/hc_post.py",
+          "start_line": 34,
+          "end_line": 76
+        }
+      ],
+      "inputs": [
+        "partials INT32[P_MM,32768]",
+        "act_scale_dq FP32[8,P_SCALE]",
+        "wo_b_scale FP32[4096]",
+        "residual_flat BF16[T,16384]",
+        "post FP32[T,4]",
+        "comb FP32[T,16]"
+      ],
+      "outputs": [
+        "x_out_flat BF16[T,16384]，共享Native[T,4,4096]storage"
+      ],
+      "ownership": "actual token row按worker轮转或合法连续row区间；每行先保持D4096一次处理与4份residual复用。COLS分片可另按资源需要，但不改求和顺序。",
+      "dynamic_contract": [
+        "每个token使用自己的四个post/16个comb；原helper ROWS=1，不可直接改ROWS>1仍复用t0 scalar",
+        "T任意且输入动态轴一致；无S/B推导"
+      ],
+      "numerical_order": [
+        "acc FP32从0起，g=0..7顺序 acc=acc+FP32(partial_g)*act_scale_dq[g,t]",
+        "组和完成后才乘wo_b_scale，cast BF16 rint形成HC输入边界",
+        "将该BF16输入cast FP32；residual4份BF16分别cast FP32",
+        "每out_h先post[out_h]*x，再按in_h=0,1,2,3逐项mul/add comb[in_h*4+out_h]*residual[in_h]",
+        "最后BF16 rint写out_h对应4096列；不得先求comb残差和再合post项改变加法顺序"
+      ],
+      "synchronization": [
+        "等待全部8组/目标row/N的OB owner、scale owner以及HCpre的post/comb owner",
+        "原T=96 sync_start是多task启动策略；单SPMD不能照搬成逐stage启动或凭空全核barrier，先用真实依赖保证正确"
+      ],
+      "workspace_and_tail": [
+        "residual/y flat view外层创建",
+        "out_bf16原create_tensor只是元数据种子后被Tile cast覆盖，不应新增GM临时输出",
+        "不做未授权inplace；保持4份residual读取先于对应输出覆盖"
+      ],
+      "implementation_state": "仅源级迁移计划，未实现/未编译/未上卡",
+      "backend_pending": [
+        "GM flat alias描述符与Tile实参签名",
+        "八组FP32求和与两处BF16边界",
+        "是否需要额外stage barrier只由调度/资源决定，不由旧sync_start字面决定"
+      ]
+    }
+  ],
+  "capacity_initialization_and_alias_rules": [
+    "业务输入actual T与workspace容量分开命名；q_flat的行数为T*64，packed为8*P_PACK，O partial为[P_MM,32768]，不能共享一个错误symbol。",
+    "plan每次覆盖实际T全部候选；inactive行必须显式写无效值，以免复用工作区遗留上一轮Top-K/flags。",
+    "O_A只写actual T；quant不得读O_A未写的FP32 pad行。quant写有效INT8，并完整零填[T,ceil(T/R_B)*R_B)，因为O_B读取完整R_B行。",
+    "O_B每个组独占partial[:,g*D:(g+1)*D]；无atomic累加，无需对partials预先清零。acc首K块init_cond必须正确。",
+    "act_scale_dq只读actual T；未写padding不应被dequant读取，不能为了统一长度无谓清零所有scale。",
+    "packed每个实际token的8组都由attention完整覆盖；O_A只按valid_rows读实际T，不依赖packed padding初值。",
+    "residual输入与x_out输出默认不alias。若上层允许in-place，要证明同一token四份residual先读取再存4输出、其它helper都不再读取该input，并消除跨worker覆盖；首版入口明确拒绝未证明alias。",
+    "只读Q/L/positions/pages/weights与所有workspace互不重叠；signal、ffts和ring workspace独立，不能复用尚有reader的地址。",
+    "同一流/图按既有phase generation协议复用；环槽event必须在每次调用尾部drain，不能用只递增phase序号掩盖遗留组内event。",
+    "输出padding policy须与Native入口合同明确：attention inactive生成零attention，但随后HCpost是否计算residual组合或不写inactive行是上层约定；不得仅凭seq_len=0私自改最终输出语义。"
+  ],
+  "source_level_vs_backend_validation": {
+    "source_level_feasible_now": [
+      "用Q/L替换三个token//S并保留positions/page/Top-K动态读取",
+      "拆动态workspace容量与常量模型维度；固定tile的最后有效行保护",
+      "原高层math抽显式worker helper，删spmd/task_id编排包装，不读冻结IR",
+      "O_A/O_B/quant/dequant/HCpost原DAG与组次序的AST核对及独立地址oracle",
+      "plan无效/越界/混合请求掩码、分核覆盖与槽复用协议的CPU控制流审计"
+    ],
+    "not_established_by_read_only_plan": [
+      "动态Scalar/Tile索引在pl.slice/load/gather的合法lowering及NZ偏移证明",
+      "MIX内拆开的AIC/AIV helper是否保留role、split lane和FFTS等待语义",
+      "QK/PV Mat/UB/Acc驻留、跨helper liveness、ACK及event id复用是否被backend正确保留",
+      "动态valid_shape在row_max/div/cast和packed GM store后的传播",
+      "ND/NZ wo_a以及真实NZ wo_b的实际存储绑定与编译",
+      "设备数值、跨调用代际/环槽重放、全CSA功能以及七档性能均未测"
+    ],
+    "future_minimal_evidence_order": [
+      "先source/地址oracle覆盖T0、T1、T%8尾块、混合odd Q和同T不同Q；同源合法输入math顺序不变",
+      "分别CPU full backend覆盖必要ND/NZ与实际动态尾块，不围绕固定S6生成冻结入口",
+      "MIX合并后检查真实动态ABI、一条MIX、所有事件与生产者消费者读写；然后才申请有界设备功能",
+      "设备先原动态分task PTO作同math reference，正式权重；功能/精度稳定后再做目标七档性能"
+    ],
+    "honesty": "本文件没有执行上述未来验证，不把计划或源码检查写成PASS。"
+  },
+  "tiling_strategy_boundary": {
+    "current_source": {
+      "T_le_32": "R_B=32,A_N=128,POST_SYNC=False",
+      "T_33_to_96": "R_B=96,A_N=128；仅T=96旧多task POST_SYNC=True",
+      "T_gt_96": "R_B=128,A_N=256,POST_SYNC=False",
+      "attention_early_kv": "T>=144走提前KV发布次序，数学不变"
+    },
+    "dynamic_rule": "这些区间只选tile/流水与容量；编译后actual T仍由Tensor dim驱动。可以保留多个策略版本，不得把七个B/S测试点变成完全静态计算图。",
+    "not_a_performance_claim": "当前分档来自canonical参考，不证明合并后最优，也不宣称满足七档至少30%目标。"
+  },
+  "recommended_parallel_work_slices": [
+    {
+      "slice": "plan + inverse rope",
+      "reason": "不需QK循环体即可做Q/L地址、mask和尾块CPU审计"
+    },
+    {
+      "slice": "O_A + group quant",
+      "reason": "边界是packed heads与INT8/scale workspace，可独立做源码DAG和必要layout lowering"
+    },
+    {
+      "slice": "O_B + terminal HCpost",
+      "reason": "独立输入partial/scale或INT8/weights，先保持原数值顺序"
+    },
+    {
+      "slice": "QK/PV paired MIX pipeline",
+      "reason": "须由同一实现者一起处理AIC与双AIV、事件、ring及final publication；不按普通无环stage随意拆人"
+    }
+  ],
+  "known_unresolved_contracts": [
+    "完整融合入口尚需决定inactive/padding最终output行是否必须写；plan必须先保证这些行不读cache，不可据此猜最终x_out规范。",
+    "跨请求共享cache页但不同写slot的读写重叠需结合Native lifecycle合同；本计划只等待真实写者，没有声称消除了所有共享页hazard。",
+    "非法压缩页目前canonical未定义完整mask策略；新动态实现在安全屏蔽候选前应由根入口确认非法metadata处置，不以地址保护通过冒充模型有效输入支持。",
+    "FFTS事件id/工作区初始化及多阶段共存的backend实际语义需要编译产物和后续有界设备证据；本轮没有相关执行。",
+    "动态入口均应采用原许可证/版权，完整中文总览及循环/尾块/角色/同步说明；此JSON不是实现完成声明。"
+  ]
+}

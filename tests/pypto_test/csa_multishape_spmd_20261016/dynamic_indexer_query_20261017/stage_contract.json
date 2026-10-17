@@ -1,0 +1,269 @@
+{
+  "scope": "动态CSA Indexer query与weights六段源级helper；非完整Indexer/CSA",
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_query_stages.py",
+  "reference_source_snapshot": "vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_query_20261017/reference_decode_indexer.py",
+  "reference_policy": "以本次保存的canonical decode_indexer.py内容为准；不以历史精度优化描述覆盖当前数学",
+  "weights_or_reference_values_loaded": false,
+  "scale_order_correction": "先前“先合并activation与weight scale”的口述依据历史记录；当前canonical是(acc*activation_scale)*weight_scale，源级迁移完整保留该顺序。",
+  "source_fixed_S_dependency": false,
+  "old_T_constants": "原T仅冻结容量与DEQUANT_T_TILE=min(T,8)；当前容量pl.dynamic，有效循环由真实T决定。",
+  "tail_note": "T<8改走原逐行tail分支；8行全块或逐行尾行仅访问有效T，AST与所有权检查不能代替设备数值证明。",
+  "native_rope_contract": "cos为已交错FP32[T,64]，sin为偶列负、奇列正的signed_sin；原decode_csa.py:345..365准备。",
+  "workspaces_alias": "Hadamard的[pad16(T)*64,128]与dequant输出[pad16(T),8192]必须是同GM别名，在外层建立；helper内部不reshape整张GM。",
+  "phase_contract": "helper本身不notify/wait，也不创建spmd/task。外层按上述owner等待，writer全部wave写回完成后发布，包含业务fence与cache可见性；phase完成前不复用缓冲。",
+  "stages": [
+    {
+      "name": "indexer_query_project_stage",
+      "line": 82,
+      "parameters": [
+        {
+          "name": "qr",
+          "annotation": "pl.Tensor[[T_DYN, Q_LORA], pl.INT8]"
+        },
+        {
+          "name": "wq_b",
+          "annotation": "pl.Tensor[[Q_LORA, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT8]"
+        },
+        {
+          "name": "qr_acc_pad",
+          "annotation": "pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIC",
+      "owner": "col_block%WORKERS，col_block=0..31；该owner完成本列全部ceil(T/64)行块",
+      "wait_before": "QR量化全部有效行完成；输入INT8与QR scale独立buffer",
+      "consumer_wait_after": "dequant任意head组需等其覆盖N256条带的owner；初版可等min(WORKERS,32)个AIC",
+      "capacity_contract": [
+        "PROJ_ROWS>=ceil(T/64)*64"
+      ],
+      "returns": "qr_acc_pad"
+    },
+    {
+      "name": "indexer_query_dequant_rope_stage",
+      "line": 107,
+      "parameters": [
+        {
+          "name": "qr_scale",
+          "annotation": "pl.Tensor[[T_DYN, 1], pl.FP32]"
+        },
+        {
+          "name": "wq_b_scale",
+          "annotation": "pl.Tensor[[IDX_N_HEADS * IDX_HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "cos",
+          "annotation": "pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "sin",
+          "annotation": "pl.Tensor[[T_DYN, ROPE_HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "qr_acc_pad",
+          "annotation": "pl.Tensor[[PROJ_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.INT32]"
+        },
+        {
+          "name": "qr_bf16_2d",
+          "annotation": "pl.Tensor[[ROPE_ROWS_DYN, IDX_N_HEADS * IDX_HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIV",
+      "owner": "unit=(token//8)*16+head//4；owner=unit%min(ceil(T/8)*16,WORKERS)",
+      "wait_before": "对应project条带、QR scale和signed_sin/cos全部所需行完成",
+      "consumer_wait_after": "Hadamard token t需等其16个head-group unit的所有owner；可保守等全部活跃AIV",
+      "capacity_contract": [
+        "ROPE_ROWS>=ceil(T/16)*16",
+        "PROJ_ROWS>=ceil(T/64)*64"
+      ],
+      "returns": "qr_bf16_2d"
+    },
+    {
+      "name": "indexer_query_hadamard_stage",
+      "line": 201,
+      "parameters": [
+        {
+          "name": "qr_bf16",
+          "annotation": "pl.Tensor[[ROPE_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "hadamard",
+          "annotation": "pl.Tensor[[IDX_HEAD_DIM, IDX_HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "qh_acc_gm",
+          "annotation": "pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "tokens",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIC",
+      "owner": "token%WORKERS，每token含64个head行",
+      "wait_before": "该token所有64个BF16 head已写回且可见",
+      "consumer_wait_after": "query_quant token t需等AIC t%WORKERS",
+      "capacity_contract": [
+        "ROPE_HEAD_ROWS>=ceil(T/16)*16*64",
+        "HADAMARD_ROWS>=T*64",
+        "qr_bf16是qr_bf16_2d同一GM缓冲的平坦视图"
+      ],
+      "returns": "qh_acc_gm"
+    },
+    {
+      "name": "indexer_query_quant_stage",
+      "line": 221,
+      "parameters": [
+        {
+          "name": "qh_acc_gm",
+          "annotation": "pl.Tensor[[HADAMARD_ROWS_DYN, IDX_HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "qr_hadamard_i8",
+          "annotation": "pl.Tensor[[QUANT_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]"
+        },
+        {
+          "name": "qr_hadamard_scale_dq",
+          "annotation": "pl.Tensor[[SCALE_ROWS_DYN, 1], pl.FP32]"
+        },
+        {
+          "name": "tokens",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIV",
+      "owner": "token%WORKERS，每token含64个head行",
+      "wait_before": "对应token Hadamard全部FP32结果完成",
+      "consumer_wait_after": "后续Indexer score需等相应token INT8及scale同一phase发布",
+      "capacity_contract": [
+        "HADAMARD_ROWS>=T*64",
+        "QUANT_ROWS>=T*64",
+        "SCALE_ROWS>=T*64",
+        "tokens来自真实T，不能从上述容量反推"
+      ],
+      "returns": "qr_hadamard_i8, qr_hadamard_scale_dq"
+    },
+    {
+      "name": "indexer_weights_project_stage",
+      "line": 259,
+      "parameters": [
+        {
+          "name": "x",
+          "annotation": "pl.Tensor[[T_DYN, D], pl.BF16]"
+        },
+        {
+          "name": "weights_proj",
+          "annotation": "pl.Tensor[[D, IDX_N_HEADS], pl.BF16]"
+        },
+        {
+          "name": "weights_partial",
+          "annotation": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIC",
+      "owner": "unit=(token//16)*4+Ksplit；owner=unit%WORKERS",
+      "wait_before": "x_normed对应M16有效行完成",
+      "consumer_wait_after": "weights_reduce每M16需等四个Ksplit的owner",
+      "capacity_contract": [
+        "WEIGHTS_PARTIAL_ROWS>=4*ceil(T/16)*16",
+        "实际partial stride=ceil(T/16)*16，允许allocation更大但禁止拿容量做stride"
+      ],
+      "returns": "weights_partial"
+    },
+    {
+      "name": "indexer_weights_reduce_stage",
+      "line": 290,
+      "parameters": [
+        {
+          "name": "weights_partial",
+          "annotation": "pl.Tensor[[WEIGHTS_PARTIAL_ROWS_DYN, IDX_N_HEADS], pl.FP32]"
+        },
+        {
+          "name": "weights",
+          "annotation": "pl.Tensor[[WEIGHTS_ROWS_DYN, IDX_N_HEADS], pl.FP32]"
+        },
+        {
+          "name": "tokens",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "worker_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "WORKERS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "core": "AIV",
+      "owner": "M16行块%WORKERS",
+      "wait_before": "对应M16的四个Ksplit写回且可见",
+      "consumer_wait_after": "Indexer score需等对应token weights所在M16 owner",
+      "capacity_contract": [
+        "WEIGHTS_PARTIAL_ROWS>=4*ceil(T/16)*16",
+        "WEIGHTS_ROWS>=ceil(T/16)*16",
+        "tokens必须与project的x.shape[0]一致"
+      ],
+      "returns": "weights"
+    }
+  ],
+  "validation": {
+    "source_math_AST": "source_equivalence.json:6段PASS",
+    "coverage": "240组T与worker配置PASS",
+    "full_v1": "六段均因测试壳把输出参数标成输入，artifact ABI验证In→Out失败；保留失败，未改数学",
+    "full_v2": "六个独立阶段完整CPU backend PASS",
+    "compiled_T_audit": "full_v2/compiled_audit.json",
+    "not_validated": [
+      "同一个MIX组合",
+      "设备精度",
+      "硬件缓存同步",
+      "性能",
+      "长历史QK/TopK"
+    ]
+  },
+  "reproduce": {
+    "math_and_coverage": "python check_source.py",
+    "existing_CPP_ABI": "python check_compiled.py",
+    "full_CPU": "bash reproduce_cpu.sh <新输出目录>"
+  },
+  "limits": "有效T>=1，WORKERS>=1；T=0未建合同。固定数学维度对应DSV4 Flash，B/S可变化但乘积T不超过调用方工作区容量。"
+}

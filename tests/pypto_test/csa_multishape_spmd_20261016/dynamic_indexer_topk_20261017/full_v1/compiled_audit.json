@@ -1,0 +1,58 @@
+{
+  "passed": true,
+  "scope": "四个独立CPU完整产物审计，不重新编译",
+  "stages": [
+    {
+      "stage": "merge2",
+      "kernel": "full_v1/merge2/kernel/kernels/aiv/merge2_probe_incore_0.cpp",
+      "dynamic_dimensions": [
+        "CSA_INDEX_TOPK_PAIR_ROWS"
+      ],
+      "sort32_sites": 0,
+      "mrgsort_sites": 1,
+      "actual_GM_store_sites": 1,
+      "control_values_read_on_device": true
+    },
+    {
+      "stage": "roots",
+      "kernel": "full_v1/roots/kernel/kernels/aiv/roots_probe_incore_0.cpp",
+      "dynamic_dimensions": [
+        "CSA_INDEX_TOPK_PAIR_ROWS",
+        "CSA_TOPK_PROBE_OUTPUT_ROWS"
+      ],
+      "sort32_sites": 0,
+      "mrgsort_sites": 3,
+      "actual_GM_store_sites": 1,
+      "control_values_read_on_device": true
+    },
+    {
+      "stage": "half_leaf",
+      "kernel": "full_v1/half_leaf/kernel/kernels/aiv/half_leaf_probe_incore_0.cpp",
+      "dynamic_dimensions": [
+        "CSA_INDEX_TOPK_SCORE_ROWS",
+        "CSA_INDEX_TOPK_PAIR_ROWS"
+      ],
+      "sort32_sites": 6,
+      "mrgsort_sites": 20,
+      "actual_GM_store_sites": 6,
+      "control_values_read_on_device": true
+    },
+    {
+      "stage": "segment",
+      "kernel": "full_v1/segment/kernel/kernels/aiv/segment_probe_incore_0.cpp",
+      "dynamic_dimensions": [
+        "CSA_INDEX_TOPK_SCORE_ROWS",
+        "CSA_TOPK_PROBE_OUTPUT_ROWS"
+      ],
+      "sort32_sites": 3,
+      "mrgsort_sites": 8,
+      "actual_GM_store_sites": 1,
+      "control_values_read_on_device": true
+    }
+  ],
+  "warnings": "测试壳单worker循环变量未使用，编译器有UnusedVariableCheck提示；不影响实际sort/store。",
+  "limits": "操作存在与动态ABI不能证明设备同分排序、cache同步或实际TopK数值。",
+  "audit_correction": "初次人工预期漏算half_leaf两处mrgsort，按六分支原AST重数应为20；仅修审计常数，无源码修改/重编译。",
+  "device_execution": false,
+  "performance_claim": false
+}

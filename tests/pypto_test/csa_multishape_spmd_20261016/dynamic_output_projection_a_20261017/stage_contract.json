@@ -1,0 +1,106 @@
+{
+  "状态": "源级迁移及三份独立CPU后端通过；不含O_B/HCpost组合，不含设备或性能结论。",
+  "生产文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/output_projection_a_stages.py",
+  "接口": [
+    {
+      "名称": "o_projection_a_stage_nd",
+      "角色": "AIC",
+      "参数顺序": [
+        "o_packed BF16[PACK_TOTAL_ROWS,4096]",
+        "wo_a ND BF16[8,4096,1024]",
+        "o_r_pad InOut FP32[P_MM,8192]",
+        "tokens INDEX",
+        "worker_id INDEX",
+        "WORKERS constexpr",
+        "A_COL_TILE constexpr 128或256"
+      ],
+      "返回": "o_r_pad原GM别名"
+    },
+    {
+      "名称": "o_projection_a_stage_nz",
+      "角色": "AIC",
+      "参数顺序": [
+        "o_packed BF16[PACK_TOTAL_ROWS,4096]",
+        "wo_a NZ BF16[8,4096,1024]",
+        "o_r_pad InOut FP32[P_MM,8192]",
+        "tokens INDEX",
+        "worker_id INDEX",
+        "WORKERS constexpr",
+        "A_COL_TILE constexpr 128或256"
+      ],
+      "返回": "o_r_pad原GM别名"
+    },
+    {
+      "名称": "o_projection_group_quant_stage",
+      "角色": "AIV",
+      "参数顺序": [
+        "o_r_pad FP32[P_MM,8192]",
+        "o_r_i8_pad InOut INT8[P_MM,8192]",
+        "act_scale_dq InOut FP32[8,P_SCALE]",
+        "tokens INDEX",
+        "worker_id INDEX",
+        "WORKERS constexpr",
+        "ROW_TILE constexpr 32/96/128"
+      ],
+      "返回": "o_r_i8_pad,act_scale_dq原GM别名"
+    }
+  ],
+  "动态与容量": {
+    "T": "外层真实业务Tensor动态轴；helper接设备INDEX Scalar，不以容量推导。",
+    "PACK_TOTAL_ROWS": "独立dynamic且整除8；P_PACK=总行数/8>=T，组stride由packed描述符取。",
+    "P_MM": "FP32和INT8独立allocation、同dynamic行数；至少P_USED=ceil(T/ROW_TILE)*ROW_TILE。OA只写T行，未写FP32 pad禁止读取。",
+    "P_SCALE": "独立dynamic，>=T。scale仅写[0,T)，尾区不初始化。",
+    "T=0": "所有工作循环为空，除数task_rows=0仅出现在未进入的循环体内，源模型通过但未设备运行。",
+    "别名": "全部输入/输出GM不得非法覆盖；真实Native权重layout不做转换；上层统一校验shape/stride/capacity。"
+  },
+  "owner": {
+    "OA": "row_blocks=ceil(T/128),Nblocks=1024/A_COL_TILE；logical=(group*row_blocks+row_block)*Nblocks+column_block；owner=logical%WORKERS。同一group行需等Nblocks全部列owner。",
+    "quant": "task_rows=ceil(T/32)；logical=group*task_rows+row_block32，owner=logical%WORKERS；内部8行pipeline。",
+    "tail_zero": "每组最后32行active任务独占[T,P_USED)，只写INT8，不读FP32或写scale；quant发布包括实际行和尾零均完成。"
+  },
+  "同步": "attention packed producers→OA所有本核wave写回发布→每组完整1024列ready→quant有效行+INT8尾零+scale发布→OB。helper无spmd/task/notify；返回别名不是跨核同步。保留全部GM不循环复用槽，无新增ACK协议。",
+  "数学": "PIPELINE_OA=False；首K256 matmul后15次K256累加；quant保持组内rowmax、max(eps,...),127/amax、amax*(1/127)，rint INT32→round FP16→trunc INT8。",
+  "已执行": {
+    "源码数学AST": "source_audit.json 27项；显式有效形状/Tile scratch剥离后比较，不交换数学次序。",
+    "整数几何": "source_audit.json 65个T×3个worker数×3个RB=585组；OA N128/N256另外遍历，同步不由整数模型证明。",
+    "ND": "full_v1/nd 完整backend PASS，N128/24AIC",
+    "NZ": "full_v4/nz 完整backend PASS，N256/24AIC",
+    "quant": "full_v1/quant 完整backend PASS，RB96/48AIV",
+    "CPP": "compiled_audit.json，T为运行时Scalar，容量独立，OA有效M写回，quant3条pipeline展开链有效mask，尾零不读FP32。",
+    "Ruff": "所改生产模块与测试脚本通过；仅测试脚本import排序/字符串折行修正，无需数学重编译。"
+  },
+  "失败与修正": [
+    {
+      "版本": "full_v1",
+      "结果": "ND/quant通过；NZ在NZ slice非负证明失败。",
+      "初始表达式": "nf=(logical%(row_blocks*Nblocks))%Nblocks；max(nf,0)未解决。"
+    },
+    {
+      "版本": "full_v2",
+      "结果": "NZ同类失败。",
+      "修改": "等价改nf=logical%column_blocks；column_blocks仍是Scalar常量别名。"
+    },
+    {
+      "版本": "full_v3",
+      "结果": "NZ同类失败。",
+      "修改": "max常量置前仍被Simplify规范化/移除，不能作为可靠证明；另将group非负合同显式化。"
+    },
+    {
+      "版本": "full_v4",
+      "结果": "NZ完整通过。",
+      "最终原因": "证明器FloorMod要求右操作数直接ConstInt，不沿Scalar别名追常量；nf=logical%(O_LORA//A_COL_TILE)使模数constexpr直接展开。所有权与数学不变，不改PyPTO。"
+    }
+  ],
+  "复现": [
+    "python check_source.py",
+    "python check_compiled.py",
+    "bash reproduce_cpu.sh <全新目录> [--stages nd nz quant]"
+  ],
+  "边界": [
+    "不启动NPU、不加载权重数据；未证明设备精度、完整融合依赖、图重放或性能。",
+    "只编译ND/N128、NZ/N256、quant/RB96，不宣称另外列块/所有RB组合都逐一设备验证。",
+    "未改其它正式文件、共享依赖或MASTER。"
+  ],
+  "设备执行": false,
+  "性能结论": false
+}

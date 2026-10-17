@@ -1,0 +1,300 @@
+{
+  "scope": "历史静态 shape 七档与当前动态源码版本对照，仅读历史结果，不重新测量",
+  "new_device_run": false,
+  "timing": "完整 CSA L1 incore 最早开始至最晚结束；静态3窗，动态5窗，各自中位数",
+  "cross_run_comparison_is_not_causal_ablation": true,
+  "static_rows": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "query_tokens": 6,
+      "baseline_us": 582.82,
+      "static_spmd_us": 541.92,
+      "reduction_pct": 7.017604063004034,
+      "samples_baseline_us": [
+        585.28,
+        582.82,
+        569.8
+      ],
+      "samples_spmd_us": [
+        541.92,
+        541.98,
+        537.0
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/cached_h131072_b4_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "query_tokens": 6,
+      "baseline_us": 679.84,
+      "static_spmd_us": 641.56,
+      "reduction_pct": 5.630736643916223,
+      "samples_baseline_us": [
+        679.84,
+        700.26,
+        679.3
+      ],
+      "samples_spmd_us": [
+        641.6,
+        636.56,
+        641.56
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/qk_indices_h131072_b8_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "baseline_us": 905.08,
+      "static_spmd_us": 807.16,
+      "reduction_pct": 10.818933132982721,
+      "samples_baseline_us": [
+        888.48,
+        905.08,
+        909.8
+      ],
+      "samples_spmd_us": [
+        807.16,
+        804.4,
+        811.26
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/b16_cached_row_deps_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "baseline_us": 1169.46,
+      "static_spmd_us": 1121.12,
+      "reduction_pct": 4.133531715492634,
+      "samples_baseline_us": [
+        1114.16,
+        1171.52,
+        1169.46
+      ],
+      "samples_spmd_us": [
+        1121.12,
+        1114.96,
+        1124.7
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/cached_h131072_b24_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "query_tokens": 6,
+      "baseline_us": 680.02,
+      "static_spmd_us": 621.96,
+      "reduction_pct": 8.537984176935964,
+      "samples_baseline_us": [
+        680.02,
+        672.48,
+        693.7
+      ],
+      "samples_spmd_us": [
+        613.2,
+        622.04,
+        621.96
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/cached_h8192_b16_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 8192,
+      "batch": 24,
+      "query_tokens": 6,
+      "baseline_us": 861.62,
+      "static_spmd_us": 836.74,
+      "reduction_pct": 2.887583853670994,
+      "samples_baseline_us": [
+        870.32,
+        832.7,
+        861.62
+      ],
+      "samples_spmd_us": [
+        838.36,
+        834.08,
+        836.74
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/cached_h8192_b24_v1/result.json",
+      "passed": true
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "baseline_us": 972.72,
+      "static_spmd_us": 905.72,
+      "reduction_pct": 6.887901965622167,
+      "samples_baseline_us": [
+        971.08,
+        1015.28,
+        972.72
+      ],
+      "samples_spmd_us": [
+        898.08,
+        905.72,
+        916.86
+      ],
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/cached_h8192_b32_v1/result.json",
+      "passed": true
+    }
+  ],
+  "current_verified_rows": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "baseline_us": 872.52,
+      "dynamic_shape_spmd_us": 932.54,
+      "change_vs_baseline_pct": 6.878925411451875,
+      "historical_static_spmd_us": 807.16,
+      "cross_run_change_vs_static_pct": 15.533475395212836,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 128,
+        "OB_ROWS": 96
+      },
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            874.28,
+            875.84,
+            872.52,
+            870.82,
+            865.16
+          ],
+          "median_us": 872.52,
+          "min_us": 865.16,
+          "max_us": 875.84
+        },
+        "single_spmd": {
+          "samples_us": [
+            942.26,
+            930.8,
+            951.86,
+            928.66,
+            932.54
+          ],
+          "median_us": 932.54,
+          "min_us": 928.66,
+          "max_us": 951.86
+        }
+      },
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/perf_h131072_b16_scale_page_owners_v2/result.json",
+      "passed": true,
+      "version": "scale_page_owners_v2"
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "query_tokens": 6,
+      "baseline_us": 1308.74,
+      "dynamic_shape_spmd_us": 1416.62,
+      "change_vs_baseline_pct": 8.243042926784527,
+      "historical_static_spmd_us": null,
+      "cross_run_change_vs_static_pct": null,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 256,
+        "OB_ROWS": 128
+      },
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1308.74,
+            1282.2,
+            1315.12,
+            1316.98,
+            1270.48
+          ],
+          "median_us": 1308.74,
+          "min_us": 1270.48,
+          "max_us": 1316.98
+        },
+        "single_spmd": {
+          "samples_us": [
+            1412.7,
+            1416.62,
+            1413.68,
+            1420.14,
+            1421.48
+          ],
+          "median_us": 1416.62,
+          "min_us": 1412.7,
+          "max_us": 1421.48
+        }
+      },
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/perf_h131072_b28_scale_page_owners_v2/result.json",
+      "passed": true,
+      "version": "scale_page_owners_v2"
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "baseline_us": 995.9,
+      "dynamic_shape_spmd_us": 1183.92,
+      "change_vs_baseline_pct": 18.879405562807516,
+      "historical_static_spmd_us": 905.72,
+      "cross_run_change_vs_static_pct": 30.71589453694299,
+      "policy": {
+        "QUERY_GROUP": 2,
+        "QK_PANEL": 128,
+        "SCORE_TILE": 768,
+        "PREFETCH": 0,
+        "TO_L0": true,
+        "BALANCED": false,
+        "ROOTS": 2,
+        "OA_COLS": 256,
+        "OB_ROWS": 128
+      },
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1037.56,
+            995.9,
+            1010.4,
+            974.7,
+            971.0
+          ],
+          "median_us": 995.9,
+          "min_us": 971.0,
+          "max_us": 1037.56
+        },
+        "single_spmd": {
+          "samples_us": [
+            1172.34,
+            1193.02,
+            1192.98,
+            1183.92,
+            1179.18
+          ],
+          "median_us": 1183.92,
+          "min_us": 1172.34,
+          "max_us": 1193.02
+        }
+      },
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/perf_h8192_b32_scale_page_owners_v2/result.json",
+      "passed": true,
+      "version": "scale_page_owners_v2"
+    }
+  ]
+}

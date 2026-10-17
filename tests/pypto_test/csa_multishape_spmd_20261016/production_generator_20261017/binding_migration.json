@@ -1,0 +1,166 @@
+{
+  "scope": "CPU 源码、合同及绑定差分；不代表lowering或NPU正确性/性能",
+  "executed_at_utc": "2026-10-17T06:52:33.941248+00:00",
+  "original_root_and_nz_bodies": [
+    "_proj_b_mm_nz_kernel",
+    "_proj_b_mm_nz_kernel__2",
+    "_proj_b_mm_nz_kernel__3",
+    "proj_a_mm",
+    "proj_a_mm_0",
+    "proj_a_mm_1",
+    "proj_a_mm_2",
+    "qproj_matmul",
+    "qr_proj_matmul",
+    "qr_proj_matmul_0",
+    "_decode_csa_tp1_layer"
+  ],
+  "logical_alias_stubs": [
+    "comb_sinkhorn",
+    "compress_state_commit",
+    "compress_state_commit_0",
+    "csa_cache_writeback",
+    "csa_rope_sign",
+    "csa_row_offsets",
+    "csa_slots_build_valid_qk_plan",
+    "hc_pre_linear",
+    "hc_pre_linear_reduce",
+    "hc_widen_rms",
+    "idx_kv_scale_commit",
+    "idx_qr_dequant_rope",
+    "idx_qr_proj_matmul",
+    "indexer_boundary_init",
+    "indexer_head_coefficients",
+    "indexer_head_coefficients_0",
+    "indexer_head_coefficients_1",
+    "indexer_head_coefficients_2",
+    "indexer_score_topk_leaf",
+    "indexer_score_topk_native_pair",
+    "indexer_score_topk_native_pair_0",
+    "indexer_score_topk_native_pair_1",
+    "indexer_score_topk_native_pair_2",
+    "indexer_topk_query_merge",
+    "indexer_topk_query_merge__2",
+    "indexer_topk_single_leaf_publish",
+    "kv_and_cache_write",
+    "kv_hadamard",
+    "kv_proj_matmul",
+    "kv_proj_matmul_0",
+    "kv_rms_norm_rope",
+    "kv_score_proj",
+    "kv_score_proj_0",
+    "kv_touch",
+    "mix_x_rms_norm",
+    "proj_b_act_hc_post",
+    "proj_b_act_hc_post_0",
+    "proj_b_act_hc_post_1",
+    "proj_b_act_hc_post_2",
+    "q_rope_prepare",
+    "qk_pv",
+    "qproj_dequant_rms_nope_rope",
+    "qr_hadamard_matmul",
+    "qr_hadamard_quant",
+    "qr_rms_norm_quant",
+    "quant",
+    "quant_0",
+    "quant_1",
+    "quant_2",
+    "rmsnorm_rope",
+    "rmsnorm_rope_cache_write",
+    "rope_cs",
+    "scatter_softmax_pool",
+    "scatter_softmax_pool_0",
+    "split_pre_post",
+    "weights_proj",
+    "weights_proj_reduce"
+  ],
+  "physical_contracts_equal": 73,
+  "system_operations_equal": 73,
+  "binding_equivalence": [
+    {
+      "case": "h131072_b4",
+      "compute_calls": 66,
+      "dependency_only_calls": 4,
+      "task_scopes_compared": true,
+      "passed": true
+    }
+  ],
+  "guards": {
+    "metadata_values_rejected": true,
+    "missing_host_max_rejected": true,
+    "norm_dtype_mismatch_rejected": true,
+    "other_tensor_read_rejected": true,
+    "out_of_bounds_kv_read_rejected": true
+  },
+  "pypto_imported": false,
+  "npu_run": false,
+  "passed": true,
+  "reproduction": {
+    "recorded_script_command": "python tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/check_binding_migration.py --cases h131072_b4 --output tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/binding_migration.json",
+    "full_seven_reproduction": "移除 --cases h131072_b4 可复现七档严格差分；本次仅为新脚本复跑B4，没有再次执行完整七档。"
+  },
+  "prior_inline_verification": {
+    "execution_origin": "本会话此前已完成的两条纯Python exec命令，结果在工具输出中；此处记录原结果，未将它们伪装成本脚本本次执行。",
+    "verification_date": "2026-10-17",
+    "first_command": {
+      "root_and_nz_original_bodies_equal": 11,
+      "logical_signature_and_return_alias_stubs_equal": 57,
+      "physical_contracts_equal": 73,
+      "binding_cases": [
+        {
+          "case": "h131072_b16",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h131072_b24",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h131072_b4",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h131072_b8",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h8192_b16",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h8192_b24",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        },
+        {
+          "case": "h8192_b32",
+          "compute_calls": 66,
+          "dependency_only_calls": 4,
+          "passed": true
+        }
+      ],
+      "normalization_note": "首次七档比较去除了source_line/source_ir/metadata_source/max_seq_len以及所有名为scope的键，因此不能单独作为task.scope已逐项比较的证据。完整root AST相同另有检查。",
+      "source_stage_note": "该命令执行后追加了root dtype检查与catalog system_operations字段；其余绑定算法未改变。",
+      "metadata_values_and_missing_max_guards_passed": true,
+      "pypto_imported": false
+    },
+    "second_command": {
+      "system_operations_equal_ignoring_source_line": 73,
+      "binding_B4_including_task_scope_equal": true,
+      "root_dtype_mismatch_rejected": true,
+      "other_tensor_and_out_of_bounds_reads_rejected": true,
+      "pypto_imported": false
+    },
+    "no_npu_or_lowering_in_these_checks": true
+  }
+}

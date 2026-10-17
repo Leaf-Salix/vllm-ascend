@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "math_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa",
+  "probe_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_front_pipeline_20261017/probe.py",
+  "source_kind": "当前高层动态源码；不是历史 IR/静态 entry",
+  "hc_functions": [
+    {
+      "source_function": "hc_pre_gates_from_rms",
+      "observed_function": "observed_gates",
+      "only_externalized_allocations": [
+        "mixes_partials",
+        "mixes_raw",
+        "post_tail_store",
+        "comb_tail_store"
+      ],
+      "inverse_ast_identical": true
+    },
+    {
+      "source_function": "hc_mix_norm",
+      "observed_function": "observed_mix",
+      "only_externalized_allocations": [
+        "x_mixed",
+        "x_normed_tail_store"
+      ],
+      "inverse_ast_identical": true
+    }
+  ],
+  "widen_task_ast_identical": true,
+  "qa_qr": "直接调用当前 qkv_proj_rope.q_proj_qa / q_proj_qr_normalize",
+  "guard_contract": "外置原中间容量；数学有效区与 pad 可写区分开检查",
+  "device_execution": false
+}

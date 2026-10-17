@@ -1,0 +1,48 @@
+{
+  "scope": "CPU AST / 真实layout外围阶段抽象协议；未lowering、未NPU、未测性能",
+  "cases": [
+    {
+      "case": "production_h8192_b1",
+      "input": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/hc_pre_direct_stream_v1/source_h8192_b1",
+      "tokens": 6,
+      "waves_by_group": {
+        "0": 1,
+        "1": 1,
+        "2": 1,
+        "3": 1
+      },
+      "structural": {
+        "non_replaced_stages_and_original_projection_reduce_ast_identical": 69,
+        "zero_row_bf16_load_guarded": true,
+        "all_event_ids_static": true,
+        "old_cube_wait_removed": true,
+        "only_binding_view2_changed": true,
+        "binding_allocation_capacity_unchanged": true,
+        "double_application_rejected": true
+      },
+      "modeled_steps_per_seed": [
+        3909,
+        3909,
+        3909,
+        3909,
+        3909,
+        3909,
+        3909,
+        3909
+      ],
+      "old_wait_deadlock_detected": true,
+      "new_protocol_passed": true
+    }
+  ],
+  "passed": true,
+  "hardware_visibility_proven": false,
+  "original_non_hc_ffts_execution_modeled": false,
+  "protocol_assumptions": [
+    "MTE3 READY在两个GM写入完成后发布",
+    "MTE2 ACK在整块GM到L1完成后发布",
+    "组内AIC等待同时收齐两个AIV通知，ACK广播到同组两个AIV",
+    "其它阶段原有FFTS代码及GM信号语义正确"
+  ],
+  "protocol_seeds_per_case": 8,
+  "generations_per_seed": 3
+}

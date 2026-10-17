@@ -1,0 +1,60 @@
+{
+  "status": "源码和限定CPU后端验证完成",
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/output_projection_b_stages.py",
+  "source_audit": "source_audit.json",
+  "contract": "stage_contract.json",
+  "validation": {
+    "source_ast_passed": true,
+    "ownership_tail_cases": 78,
+    "NZ_RB32_96_128_codegen_and_ABI_passed": true,
+    "dequant_HCpost_codegen_and_three_dynamic_axes_passed": true,
+    "ND_RB96_codegen_and_ABI_passed": true,
+    "dynamic_sample_T_B_supplied": false,
+    "device_execution": false,
+    "device_numerical_comparison": false,
+    "performance_measured": false
+  },
+  "cpu_evidence": {
+    "NZ": "nz_v1/ob32, nz_v1/ob96, nz_v1/ob128",
+    "dequant": "nz_v1/dequant",
+    "NZ_actual_ABI_corrected_audit": "nz_artifact_audit_v2.json",
+    "ND": "nd_v2/result.json"
+  },
+  "failures_and_corrections": [
+    {
+      "evidence": "nz_v1/result.json",
+      "type": "审计误报，后端已生成",
+      "cause": "审计限定T在核内直接读descriptor，但O_B本来接收外层descriptor读取后传入的动态Scalar",
+      "fix": "只读原产物追踪descriptor→add_scalar→kernel解包；未改生产NZ/终端函数，未重编这四个后端产物"
+    },
+    {
+      "evidence": "nd_v1/result.json",
+      "type": "真实DSL层级错误",
+      "cause": "首版把ND原Tensor累加器种子换成Tile，而左右操作数仍是Tensor切片",
+      "fix": "恢复canonical pl.create_tensor种子；其余nf/K数学完全不变，仅重编失败的ND96路径为nd_v2"
+    }
+  ],
+  "final_source_vs_compiled_snapshots": {
+    "nz_v1_functions_unchanged": [
+      "_o_b_nz_stage",
+      "hc_post_row_block",
+      "o_dequant_hc_post_stage"
+    ],
+    "nd_v2_functions_unchanged": [
+      "_o_b_nd_stage"
+    ],
+    "method": "逐函数AST相等；无hash"
+  },
+  "reproduce": [
+    "python tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_b_20261017/check_source.py",
+    "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_b_20261017/reproduce_cpu.sh NEW_NZ_DIR 2",
+    "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_b_20261017/reproduce_cpu.sh NEW_ND_DIR 0 --stages ob96"
+  ],
+  "limitations": [
+    "没有ND32/128新增后端编译；它们共享已直接AST核对的同一ND数学循环，但不同Acc尺寸不能据此宣称全部backend已过",
+    "不检查上游量化实际padding写入；需要root统一容量合同和依赖组装",
+    "尚未做完整MIX融合内存规划、跨核同步、设备精度或七档性能",
+    "最终worker分配是独立token轮转，与旧task的2/4行连续分组不同；数学不变，性能待后续整层测试",
+    "实际执行依赖只使用既有隔离worktree，未改依赖仓/共享安装"
+  ]
+}

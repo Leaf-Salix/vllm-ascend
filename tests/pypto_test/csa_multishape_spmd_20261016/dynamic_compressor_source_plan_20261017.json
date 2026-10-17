@@ -1,0 +1,160 @@
+{
+  "date": "2026-10-17",
+  "author": "anchor_gap_design",
+  "scope": "只读规划原多 task 主 compressor 与 indexer_compressor 迁为源级动态 Q/L 数学；未改数学，未构建静态模板，未运行测试或 NPU。",
+  "current_target_points": {"history_131072": [4, 8, 16, 24, 28], "history_8192": [16, 32], "query_per_request_for_regression": 6},
+  "goal_boundary": "七点只是回归点。实现以实际 Q、L、T 和 device metadata 决定请求边界、循环、关闭组、访问及尾块；固定模型维度和合法 tile 是 constexpr，不将 B、S、T 实值展开。",
+  "source_roots": {
+    "old_math": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa",
+    "new_dynamic": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
+  },
+  "key_findings": [
+    "原入口已经取得主压缩组和 Indexer 组各自的 Native query_start_loc；缺的是把它们传入压缩数学，不能新增由 Host 展开的 token→request 映射。",
+    "主 compressor 的 pool 已有 L，但以 T/B 计算局部 S；Indexer pool 连 L 都没有，只按 position 关闭边界执行。",
+    "Indexer 的固定每请求 ceil(S/4) 行预留、Hadamard 行数及两处 compact→request 反算是一套相互依赖的静态合同，不能只替换 token//S 一处。",
+    "状态池化必须先完成历史 state 读取，再提交覆盖。本次只去掉 task 包装，不自动削弱该先后关系。",
+    "Indexer scale 虽然逻辑 slot 唯一，32 个 FP16 scale 仍共享一段 64B RMW；首版保留单写者。"
+  ],
+  "minimal_input_contract": {
+    "common": [
+      "x_norm BF16[T,4096] 与 positions INT64[T] 使用同一平铺 token 顺序；T 可含 padding。",
+      "各压缩组分别传 Native INT32 Q[B+1]、含本轮 query 的 INT32 L[B]；不是用其中一组 Q 替代另一组。",
+      "活动请求 begin=Q[r]、end=Q[r+1]，0<=begin<end<=T，q=end-begin<=L[r]，H=L[r]-q。合法位置 positions[begin+i]=H+i。",
+      "L=0、非法 Q 或零宽请求不访问 positions/state/cache；Q 的全局单调、无重叠和同轮来源由入口保证。",
+      "Native 紧凑 metadata 使用同一 Q 与 startPos=H；actualNumReqs 排除的尾部请求 L=0。C 是表容量，不是实际关闭行数。",
+      "state page table、state slot、压缩 cache slot 与各自组的请求/token/compact 顺序一致；写槽唯一，dummy 为负，页和页内 offset 另做上下界检查。"
+    ],
+    "source_evidence": [
+      "native_adapter.py:295-320：已有两组 Q/L、state/cache 别名和 Native 紧凑表",
+      "decode_csa.py:205-208,335-344,410-450：顶层有 Q，子 compressor 调用未下传",
+      "vllm_ascend/attention/dsa_v1.py:979-981,1002-1005,1613-1623：Native startPos 和实际请求数",
+      "csrc/attention/compressor_metadata/op_kernel/compressor_metadata.h:159-168：真实关闭组前缀"
+    ],
+    "typed_values": "核内 request、begin/end、H、token、compact_row 和循环范围使用 pl.INDEX；active 保持 INT32。只读现有 device Tensor，不 .item()，不 Host 回读，不把 device scalar 当编译时常量。"
+  },
+  "geometry_to_share": {
+    "existing_helpers": [
+      "request_geometry.request_bounds(Q,L,request,T)",
+      "metadata_stages.compact_offsets_stage(Q,L,offsets,T,worker)",
+      "metadata_stages.load_request_compact_rope_rows(cos,sin,positions,Q,L,offsets,request,first,rows)"
+    ],
+    "formulas": {
+      "query_rows": "end-begin",
+      "history_start": "H=L-(end-begin)",
+      "closed_count": "floor(L/4)-floor(H/4)",
+      "first_closed_local_query": "3-(H%4)",
+      "closed_token_j": "begin+3-(H%4)+4*j，0<=j<closed_count",
+      "compact_prefix": "offset[r]+floor(H/4)+1",
+      "compact_row_j": "compact_prefix+j；仍核对真实 position 与 closing 条件",
+      "projected_overlay_token": "begin+(logical_pos-H)"
+    },
+    "loop_form": "消费者按显式 worker 条带领取 request，再在 [begin,end) 或本请求 compact 范围内以 tile 分块；不逐 token 重扫全部 B，不依赖 token//S。超过 16 行的请求切成多个 <=16 行子块。",
+    "no_new_expanded_mapping": true,
+    "possible_small_metadata_extension": "若 Hadamard 按全局真实 compact 行分核，在现串行 prefix worker 结束时把最终 prefix 写入一个 device scalar 工作区即可提供 C_valid；它不是 T 行展开映射。另一可正确但更费算力的首版是初始化全部 C_capacity 并计算容量行，cache 写入仍只枚举有效请求关闭行。当前 helper 尚未实现该扩展。"
+  },
+  "source_changes": [
+    {
+      "id": "S1",
+      "functions": ["compressor_ratio4_project", "indexer_compressor_project"],
+      "lines": ["decode_compressor_ratio4.py:104-158", "decode_indexer_compressor.py:116-159"],
+      "replace": "保留动态 dim(x,0)，把静态 BS_PAD 参数/分配改为独立 PAD_T 动态轴；去掉 spmd 和 TASK_ID 包装，改由显式 worker_id/WORKERS 领取 M×N 块。",
+      "workspace": "主投影至少 align_up(T,64) 行×1024 FP32；Indexer 投影至少 align_up(T,16) 行×256 FP32。kv_projected 与 score_projected 各自独立，所有有效元素单写者。",
+      "must_preserve": [
+        "固定 K=4096、K tile=512、按原顺序累加，无 atomic K 归约。",
+        "主 M64/N64 路径第一块使用 pl.matmul，其余 matmul_acc；143-154 的 AccCompactValid 说明禁止把首块草率改为统一 init_cond。",
+        "Indexer M16/N32 保留原 matmul_acc(init_cond=kb==0)。数学相似不等于两个投影实现可以无条件合成一段。",
+        "尾 M 的 valid_shape 与工作区完整存储 tile 区分；不靠固定 B*S 证明不越界。"
+      ],
+      "dependencies": "x_norm 完成后可投影；原显式 late_tid/chain_tid 的资源或调度顺序先保留，不能仅因没有 Tensor RAW 就删除。"
+    },
+    {
+      "id": "S2",
+      "functions": ["compressor_ratio4_pool_projected", "indexer_compressor_pool_projected"],
+      "lines": ["decode_compressor_ratio4.py:162-257", "decode_indexer_compressor.py:163-263"],
+      "replace": "删 T/B、request*S 和读 positions[request*S] 推断起点。主分支新增 Q；Indexer 分支新增 Q 和 L。每请求先 request_bounds，H=L-Qlen，仅对活动且 causal 的关闭 token 计算窗口。",
+      "pool_addressing": "历史逻辑位置 logical_pos<H 时读 state；本步 H<=logical_pos<=position 时读 projected[begin+logical_pos-H]。后者再限制于当前请求 [begin,end)；不会读邻请求，即使 query 长度混合。",
+      "shared_source_opportunity": "可抽在线池化核心 helper，按模型 HEAD_DIM/OUT_DIM/HEAD_TILE 参数化；主 HEAD_DIM=512/OUT_DIM=1024，Indexer HEAD_DIM=128/OUT_DIM=256、head tile=64。请求几何共享，不能静态生成每个请求的一份函数。",
+      "must_preserve": [
+        "八行窗口：当前 second-half 行初始化 mi/li/oi，再按原 state_idx=0..6 顺序合并。",
+        "mi_next=max(mi,score)，alpha=exp(mi-mi_next)，beta=exp(score-mi_next)，li=alpha*li+beta，oi=oi*alpha+value*beta，最后 oi/li。",
+        "原历史逻辑位置为负与缺失 page 的初始化行为并不相同；不要顺便把缺页 score=0 改为 -inf。改变该语义需另有 Native 数值证据。",
+        "旧全 T pooled 的非关闭行先写零；若后段仍可能读取这些行，则必须保留零初始化和它与有效写的先后关系。更直接的请求/关闭行消费者可避免读未写行，但不能混用两种合同。"
+      ],
+      "dependencies": "读两个 projected 和旧 state；所有可能别名的历史读取完成前不能覆盖 state。"
+    },
+    {
+      "id": "S3",
+      "functions": ["compressor_ratio4_cache_write 中 commit 段", "indexer_compressor_pool_projected 中 commit 段"],
+      "lines": ["decode_compressor_ratio4.py:331-354", "decode_indexer_compressor.py:265-290"],
+      "replace": "提交按活动 request 的 [begin,end) 迭代；先核对 causal position 与 state slot，再写 projected value 及 score+APE。避免读取 dummy positions 或使用统一 S。",
+      "state_layout": "C4 状态块大小为 2，主每 token STATE_DIM=2048 FP32，Indexer 每 token STATE_DIM=512 FP32；这不是原始 KV cache 的页大小 32。实际 GM 页 stride 由现 Native state 描述符给出，两个组分别绑定。",
+      "shared_source_opportunity": "页/offset 检查、按 request 遍历和 APE 行选择可共享源码 helper；向量长度为模型 constexpr。状态 storage 元素数和页表列数保留动态，不固定物理页数。",
+      "must_preserve": ["先完成 pool 对旧 state 的读，再提交；helper return 不表示其他核已经读完。", "写槽唯一不自动排除另一个请求仍在读共享 prefix；在别名分析或生命周期证据明确前保留阶段读完依赖。"]
+    },
+    {
+      "id": "S4",
+      "functions": ["compressor_ratio4_cache_write 中 RMS/RoPE/cache 段"],
+      "lines": ["decode_compressor_ratio4.py:356-427"],
+      "replace": "全局 16 行块中 token//S 改为持有 request 的 <=16 行子块或关闭行块；复用核内 compact RoPE helper。主压缩结果仍 FP32 归一化，再按原 rint 转 BF16 写 Native cache。",
+      "must_preserve": [
+        "512 维 RMS 的 256→128→64 折叠与 row_sum 顺序，eps、recip(sqrt)、BF16 norm weight 及 NOPE/RoPE 原表达式。",
+        "请求局部 first 不一定按 16 对齐；load 的 valid_rows 与 store 的实际区间必须一致，不能把尾部完整 16 行写进下一请求所有权。",
+        "先确认 active、causal、关闭边界以及 0<=compact_row<C，再读取 Native slot；再独立验证 page、offset 和 cache 容量。"
+      ],
+      "do_not_copy_old_boundary_bug": "原416-418先用 min(metadata_row,C-1)读 slot，之后才判行号；C=0或负metadata_row会先读负地址。新路径不能搬运这一形式。"
+    },
+    {
+      "id": "S5",
+      "functions": ["indexer_compressor_pool_projected 中 compact 初始化与 RMS/RoPE"],
+      "lines": ["decode_indexer_compressor.py:292-349"],
+      "replace": "删除 BOUNDARY_ROWS_PER_REQUEST=(S+3)//4 和 request*BOUNDARY_ROWS_PER_REQUEST。normed_kv 改为按 Native 真实 compact prefix 连续存储，每个有效关闭 token 写 compact_prefix+j。工作区容量 align_up(C_capacity,16)，有效行由 device count 决定。",
+      "initialization": "保留已有初始化的职责，改为按动态 compact 容量清零；完成后再允许 norm 写入。这样 capture 中位置不满足 causal 条件的关闭候选仍保持确定值，后续副作用继续由请求检查屏蔽。不能让初始化与 norm 并发覆盖同一行。",
+      "must_preserve": ["128 维两个 64 列平方块相加后 row_sum 的原 RMS 顺序。", "NOPE/RoPE 先转 BF16(rint)，再进入 Hadamard；不可把该舍入推迟到量化后。", "每请求可有 0、1 或任意多个关闭组；大于 16 的 compact/request 子区间再分块，不能仅容纳 S6 的两行。"]
+    },
+    {
+      "id": "S6",
+      "functions": ["indexer_compressor_write 中 Hadamard、quant 与 cache key 写入"],
+      "lines": ["decode_indexer_compressor.py:406-509"],
+      "replace": "Hadamard 的 compact_rows 从 (T//S)*固定预留改为 device C_valid（或已初始化的 C_capacity 正确性路径）；移除 compact_token//预留行数 和 request*S 反算。",
+      "consumer_mapping": "Hadamard 可按连续 compact tile 分核。量化/写入消费者按 request 拿到 compact_prefix/count，在该段按 <=16 行读取 Hadamard 结果；闭合 token 从 begin+3-H%4+4*j 恢复并核对真实 positions，再直接读 Native slots[compact_prefix+j]。无需额外 C→request 或 T→request GM 映射。",
+      "must_preserve": [
+        "Hadamard BF16 输入、FP32 输出、原 N64/K128 数学与 M16 尾块。",
+        "FP32→BF16(rint)→FP32，再乘 128**(-0.5)；amax floor、127/amax、recip scale、INT32(rint)→FP16(round)→INT8(trunc) 顺序。",
+        "合法 compact 行的容量检查先于 slot 读取；有效 position、页与页内 offset 检查先于 cache 副作用。"
+      ],
+      "optional_output": "旧 kv_flat[T,128] 在 decode_csa.py:429-450 以 idx_kv_unused 传入且后面未读。首版可保留请求驱动的 token 写回合同；若正式接口确认为内部无消费者，可另行删掉该 GM 结果，不能为保留一个无消费者调试输出而重建固定 S 反向映射。"
+    },
+    {
+      "id": "S7",
+      "functions": ["indexer_compressor_write 中 idx_kv_scale_commit"],
+      "lines": ["decode_indexer_compressor.py:511-556"],
+      "replace": "显式指定一个 AIV worker，按活动 request 及 closed_count 串行枚举 compact 行，使用同一 causal/slot 检查；从 dense idx_kv_scale_values[compact_prefix+j] 读取 scale。",
+      "must_preserve": ["先等待量化生产的 scale_values。", "32 个 FP16 scale 共用 64B 区域，保留 load→reinterpret FP16→单元素更新→reinterpret INT8→store 的单写者 RMW。", "slot 唯一不能证明两次 scale 写不共享该 64B 区域；未来若按页唯一 owner 重分配，需要独立证明。"],
+      "do_not_copy_old_boundary_bug": "原539-541与主压缩一样先读safe_row，缺少C=0/负行前置保护。"
+    },
+    {
+      "id": "S8",
+      "functions": ["compressor_ratio4", "indexer_compressor", "正式动态单 SPMD 组装入口"],
+      "lines": ["decode_compressor_ratio4.py:431-487", "decode_indexer_compressor.py:560-611", "decode_csa.py:408-450"],
+      "replace": "正式源码调用上述 inline stage helpers；原 wrapper 中创建 task、取 TASK_ID、固定 BS_PAD 的职责由动态工作区绑定和阶段依赖取代。每个 helper 接受显式 worker，不隐式派发或同步。",
+      "dependency_order": [
+        "x_norm→两个投影；Q/L→compact offsets/count 可并行准备。",
+        "投影→pool；pool 所有历史读取完成→state commit。",
+        "pool+offsets+compact rope 就绪→RMS/RoPE；norm初始化完成→有效 compact 写。",
+        "Indexer norm→Hadamard→quant/key write→串行 scale commit。",
+        "主压缩 cache 完成→CSA sparse attention；Indexer cache key+scale 完成→Indexer 读取。",
+        "保留旧late_tid/chain_tid等显式顺序的来源说明；只有明确为可删除资源约束且验证后才放松。"
+      ],
+      "zero_work_rule": "固定正数的参与 worker 可以遇到空范围；无工作者仍按外层阶段协议发布进度，不能因为 count=0、T=0 或 B<WORKERS 就漏掉消费者等待的完成信号。"
+    }
+  ],
+  "remaining_unknowns_before_execution": [
+    {"topic": "真实服务组别合同", "question": "两组 Native Q/L、positions、actualNumReqs 在 graph capture、DP dummy、CP 拆分下是否始终同轮同顺序？本次按已读 decode 来源建立合同，未跑服务证明。"},
+    {"topic": "state 共享生命周期", "question": "prefix 共享时，是否允许一个请求写到另一个请求本轮尚需读的物理 state 行？未证明前保持 pool 全部完成后再 commit。"},
+    {"topic": "动态容量与零行", "question": "C_valid 与 C_capacity 的小 scalar 绑定、align_up(C_capacity,16) 工作区以及真正 T=0/C=0 的设备执行还未实现/验证。不得使用 pl.spmd(0)。"},
+    {"topic": "尾块资源", "question": "request-local 非16对齐行、动态 compact M16 和主投影 M64 Acc valid-shape 需要后续同源 CPU lowering；已有固定S结果不能替代。"},
+    {"topic": "数值与性能", "question": "在线池化和逐行归约保持原顺序仍不代表新编译产物精度已通过；先功能/边界，再正式权重精度，最后完整CSA L1。不得拿任一子阶段耗时推断七档30%目标已达成。"}
+  ],
+  "recommended_first_bounded_implementation": "先做 S1 两个动态投影与 S2 主/Indexer 共用请求几何的在线 pool helper，使用 Q/L 驱动，输出仍为动态 T-pad pooled；同时把 pool→state commit 的读完依赖写成明确接口。完成同源 AST 数学与 CPU 后端证据后，再迁 compact norm/Hadamard/write，避免一次引入投影、compact索引和同步三类未知项。",
+  "not_done": ["未修改原多 task 源码", "未修改正式动态包", "未添加新静态生成代码", "未重跑既有验证", "未执行 NPU"]
+}

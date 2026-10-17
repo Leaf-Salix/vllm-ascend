@@ -1,0 +1,96 @@
+{
+  "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/output_projection_b_stages.py",
+  "status": "动态helper已落盘并有CPU后端证据，尚未接入完整单SPMD或设备验证",
+  "public_api": {
+    "o_b_stage": {
+      "selected_by": "模块导入时VLLM_ASCEND_ENABLE_NZ>=1选择NZ，否则ND；不导入含设备探针的nz_mode",
+      "args": [
+        "o_r_i8_pad INT8[P_MM,8192]",
+        "wo_b INT8[8192,4096] Native ND/NZ",
+        "partials INT32[P_MM,32768]",
+        "tokens INDEX",
+        "worker_id INDEX",
+        "WORKERS constexpr",
+        "ROW_TILE constexpr"
+      ],
+      "return": "partials",
+      "roles": "AIC",
+      "allowed_row_tiles": [
+        32,
+        96,
+        128
+      ],
+      "dynamic_T_binding": "外层从实际Tensor dim取T；helper不从P_MM推导T，不从B/S推导T",
+      "ND_owner": "(group * ceil(T/ROW_TILE) * 8 + row_block * 8 + d_chunk) % WORKERS",
+      "NZ_owner": "(group * 8 + d_chunk) % WORKERS；每owner在内部循环实际row_block",
+      "writes": "row [0,ceil(T/ROW_TILE)*ROW_TILE)，col group*4096 + d_chunk*512 + nf*256",
+      "preconditions": [
+        "WORKERS>0且0<=worker_id<WORKERS",
+        "ROW_TILE只选32/96/128",
+        "P_MM>=ceil(T/ROW_TILE)*ROW_TILE",
+        "activation与partials同P_MM维度但storage独立",
+        "上游已写所有actual T并将[T,usedMM)的8组INT8置零",
+        "Native权重真实存储与注解一致；外层统一设置缓存策略，ND原BYPASS不在helper内重复设置"
+      ],
+      "waits": "进入前等待对应group/row所有量化producer及pad写者；返回后仍需fence/notify供AIV消费"
+    },
+    "o_dequant_hc_post_stage": {
+      "args": [
+        "partials INT32[P_MM,32768]",
+        "act_scale_dq FP32[8,P_SCALE]",
+        "wo_b_scale FP32[4096]",
+        "residual_flat BF16[T,16384]",
+        "post FP32[T,4]",
+        "comb FP32[T,16]",
+        "out_flat BF16[T,16384]",
+        "worker_id INDEX",
+        "WORKERS constexpr"
+      ],
+      "return": "out_flat",
+      "roles": "AIV",
+      "owner": "token % WORKERS",
+      "writes": "仅本worker负责的真实token，所有4个4096维HC组",
+      "preconditions": [
+        "P_SCALE>=T，P_MM>=T",
+        "post/comb/residual/out的实际T一致",
+        "flat residual/out是外层创建的Native[T,4,4096]共享storage视图，不是拷贝",
+        "residual/out默认互不alias",
+        "每行4个post与16个comb各自读取，严禁把ROWS增大但仍复用t0门值"
+      ],
+      "waits": "消费每token前须保证8组相应partial/scale、post/comb都已完成且可见。当前helper是整段数学，不带逐行等待回调；外层应在调用前等足本worker整段将消费的producer集合。",
+      "rounding": [
+        "组号0..7依次FP32 partial*activation_scale加到acc",
+        "乘FP32 wo_b_scale",
+        "BF16 rint作为HC输入",
+        "转FP32后先post*x，再顺序加res0*comb0至res3*comb3",
+        "最终BF16 rint"
+      ]
+    },
+    "hc_post_row_block": {
+      "purpose": "终端内部严格单行数学，可供后续源级组合；不单独提交task",
+      "args": [
+        "x_block BF16[1,COLS] Tile/Tensor临时",
+        "residual_flat",
+        "post",
+        "comb",
+        "y_flat",
+        "t0 INDEX",
+        "n0 INDEX",
+        "COLS constexpr"
+      ],
+      "return": "y_flat"
+    }
+  },
+  "lifecycle": [
+    "不创建SPMD、不发notify/wait、不重置信号；由外层统一调度",
+    "INT32 partial每块唯一写且首K累加初始化；不用整份零填",
+    "未使用capacity尾区不写；pad activation必须清零是上游义务",
+    "T=0不写activation/partial/output；可能仍读取合法常量权重/scale，不声称完全无访存"
+  ],
+  "not_supported_by_this_module": [
+    "TP通信/ReduceScatter",
+    "异常输入静默兜底",
+    "并发别名workspace",
+    "完整CSA功能或任何性能提升证明"
+  ]
+}

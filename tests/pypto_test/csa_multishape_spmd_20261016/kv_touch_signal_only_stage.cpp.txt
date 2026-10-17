@@ -1,0 +1,61 @@
+  if (v7774 >= v481) {
+    // pto: %done_29__tile
+    ;
+    int64_t v7775 = (v131)[(int64_t) ((uint64_t) v1492 + (uint64_t) v182)];
+    // pto: %2933
+    ;
+    int64_t v7776 = (v131)[(int64_t) ((uint64_t) v1492 + (uint64_t) v181)];
+    // pto: %2936
+    ;
+    int64_t v7777 = (v131)[(int64_t) ((uint64_t) v1492 + (uint64_t) v180)];
+    // pto: %publish_29__tile
+    ;
+    int64_t v7778 = (v131)[(int64_t) ((uint64_t) v1492 + (uint64_t) v179)];
+    for (int64_t v7779 = v481; v7779 < v7777; v7779 += v444) {
+      // pto: %2940, %2941
+      ;
+      int64_t v7780 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) v7776 + (uint64_t) v7779) * (uint64_t) v461);
+      // pto: %2942
+      ;
+      int64_t v7781 = (v132)[v7780];
+      // pto: %2944, %required_29__tile
+      ;
+      int64_t v7782 = (v132)[(int64_t) ((uint64_t) v7780 + (uint64_t) v444)];
+      // pto: %2947
+      ;
+      int64_t v7783 = (int64_t) ((uint64_t) v7781 * (uint64_t) v458);
+      // pto: %2948
+      ;
+      int64_t v7784 = v7783 < v481 ? v481 : v7783;
+      // pto: %2949
+      ;
+      __gm__ int32_t* v7785 = PTOAS__GLOBAL_TENSOR_DATA(v1338);
+      // pto: %2949
+      ;
+      const int64_t v7786 = 0;
+      // pto: %2949
+      ;
+      pto::Shape<1, 1, 1, 1, 1> v7787 = pto::Shape<1, 1, 1, 1, 1>();
+      // pto: %2949
+      ;
+      pto::Stride<1, 1, 1, 1, 1> v7788 = pto::Stride<1, 1, 1, 1, 1>();
+      // pto: %2949
+      ;
+      GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND> v7789 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v7785 + (v7786 + v7784), v7787, v7788);
+      // pto: %2946, %2950
+      ;
+      int32_t v7790 = (int32_t) ((int64_t) (uint64_t) v1489 + (uint64_t) v7782);
+      pto::comm::WaitCmp v7791 = pto::comm::WaitCmp::GE;
+      pto::comm::TWAIT(v7789, v7790, v7791);
+    };
+    // pto: %2951
+    ;
+    if (v7778 != v318) {
+      pipe_barrier(PIPE_ALL);
+      // pto: %2955, %2956
+      ;
+      int32_t v7792 = (int32_t) ((int64_t) (uint64_t) v1489 + (uint64_t) v7775);
+      pto::comm::NotifyOp v7793 = pto::comm::NotifyOp::Set;
+      pto::comm::TNOTIFY(v1486, v7792, v7793);
+    };
+  }

@@ -1,0 +1,81 @@
+# Indexer query投影与head权重都只依赖前段结果；先发出需要AIV处理的投影。
+# 不能在写出这些结果之前等待Indexer归一化或量化，否则会形成等待环。
+idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, worker, GROUPS)
+signal = publish_phase(signal, PHASE_IDX_QUERY_PROJECT, worker, CORES, generation)
+weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
+signal = publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)
+idx_value, idx_score = indexer_compressor_project_stage(
+    normed, idx_wkv, idx_wgate, idx_value, idx_score, worker, GROUPS,
+)
+signal = publish_phase(signal, PHASE_IDX_PROJECT, worker, CORES, generation)
+
+# query的8行×4head反量化块共有ceil(T/8)*16个，不把T误当作其owner数量。
+query_rope_tasks = ((tokens + 7) // 8) * 16
+signal = wait_row_owners(signal, PHASE_IDX_QUERY_ROPE, CORES, generation,
+                         0, query_rope_tasks, 1, VECTORS, GROUPS, 1)
+idx_query_had = indexer_query_hadamard_stage(
+    idx_query_rope_heads, hadamard, idx_query_had, tokens, worker, GROUPS,
+)
+signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
+
+# 先发布Indexer两种投影和query Hadamard，再执行独立的主压缩投影。
+# 此时AIV可以做Indexer pool/norm及query量化；主投影不等待这些结果，
+# 等IDX_NORM放在主投影之后，避免空等，也不改变任一矩阵累加顺序。
+main_value, main_score = compressor_project_stage(
+    normed, main_wkv, main_wgate, main_value, main_score, worker, GROUPS,
+)
+signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
+
+# 到这里才首次读取公共计划。未参与HC前段的AIV此前已经可以做metadata；
+# 满核时planner先widen后扫描，仍不会阻止HC投影。每次从实际T重新计算同一owner。
+planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
+requests = pl.tensor.dim(idx_lengths, 0)
+signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation,
+                         0, requests, 1, VECTORS, GROUPS, 1)
+compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+idx_had = indexer_compressor_hadamard_stage(
+    idx_normed, hadamard, idx_had, compact_count, worker, GROUPS,
+)
+signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
+
+# Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
+# 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
+signal = wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation,
+                         0, tokens, 1, VECTORS, GROUPS, 1)
+groups = pl.cast(pl.read(group_plan, [0]), pl.INDEX)
+signal = wait_row_owners(signal, PHASE_COEFF, CORES, generation,
+                         0, groups, 1, VECTORS, GROUPS, 1)
+signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
+indexer_transfer = indexer_score_cube_stage(
+    idx_query_i8, coefficients, idx_key0, idx_key64, idx_cache, indexer_table,
+    positions, idx_lengths, idx_bounds, group_offsets, group_plan, indexer_transfer,
+    worker, QUERY_GROUP, QK_PANEL, SCORE_TILE, PREFETCH, TO_L0, BALANCED, 0, 1,
+)
+signal = publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)
+
+# Attention有效块依赖本层TopK，不能合进前置的公共metadata扫描。
+# AIV计划完成包含“Score双缓冲已排空→TopK全部owner完成”，故可进入下一段。
+signal = wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation,
+                         0, tokens, 8, VECTORS, GROUPS, 1)
+# query反量化head分组随T变化，首版等待48个明确发布的角色完成；没有猜测tile公式。
+signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation,
+                         0, VECTORS, 1, VECTORS, GROUPS, 1)
+score_ring, pv_ring = attention_qk_pv_cube_stage(
+    q_heads, attention_mask, kv_ring, score_ring, probability_ring, pv_ring,
+    ffts, worker, GROUPS, 2,
+)
+signal = publish_phase(signal, PHASE_ATTN_CUBE, worker, CORES, generation)
+
+# 每个query归q%24组，其双AIV共同完成packed。这里只等真实活跃组的两个AIV，
+# 等待的是发布完packed，而不是只等AIC的PV矩阵指令已经发出。
+packed_workers = pl.min(tokens, GROUPS) * 2
+signal = wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation,
+                         0, packed_workers, 1, VECTORS, GROUPS, 1)
+o_r = o_projection_a_stage_nz(packed, wo_a, o_r, tokens, worker, GROUPS, OA_COLS)
+signal = publish_phase(signal, PHASE_OA, worker, CORES, generation)
+quant_tasks = 8 * ((tokens + 31) // 32)
+signal = wait_row_owners(signal, PHASE_O_QUANT, CORES, generation,
+                         0, quant_tasks, 1, VECTORS, GROUPS, 1)
+o_partials = o_b_stage(o_quant, wo_b, o_partials, tokens, worker, GROUPS, OB_ROWS)
+signal = publish_phase(signal, PHASE_OB, worker, CORES, generation)

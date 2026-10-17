@@ -1,0 +1,339 @@
+{
+  "review_scope": {
+    "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py",
+    "support": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/signals.py",
+    "generated_cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp",
+    "read_only_production": true,
+    "recompiled": false,
+    "device_execution": false,
+    "hardware_correctness_proven": false,
+    "full_csa_validated": false,
+    "model": "立即可见GM和顺序核内事件，只检验协议逻辑，不模拟Scalar DCache/流水/FFTS/编译器"
+  },
+  "conclusion": "固定布局、顺序独占且所有参与核每调用推进一次代际的合同下，现有两阶段探针未发现单写者、代际或依赖顺序错误。发现的工作区跨核组/阶段布局复用合同漏洞已由root补充文档；未来组装层仍须实际校验布局身份，当前尚无runtime guard。CPU结果不能证明A3缓存和流水同步。",
+  "substantive_finding": {
+    "id": "workspace_layout_identity",
+    "severity": "high_if_reused_across_layouts",
+    "status": "root已补合同；完整调用层尚未接入，运行时防护未实现",
+    "location": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:31",
+    "mechanism": "phase0按core_id存上一代；阶段槽偏移为(phase*participant_count+core_id)*128。改变G既改变参与者代际推进，也重解释旧stage槽；容量足够不代表同一协议布局。",
+    "counterexample": {
+      "groups_by_round": [
+        6,
+        3,
+        6
+      ],
+      "next_generations": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "outcomes_over_256_seeds": {
+        "premature_payload_read": 219,
+        "deadlock": 37
+      },
+      "first_failure": {
+        "seed": 0,
+        "status": "premature_payload_read",
+        "core": 13,
+        "rows": [
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63
+        ],
+        "generations": [
+          null,
+          3,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          3,
+          null,
+          3,
+          null,
+          2,
+          2,
+          null,
+          null,
+          2,
+          2
+        ],
+        "steps": 9,
+        "recent": [
+          {
+            "core": 12,
+            "operation": "begin"
+          },
+          {
+            "core": 13,
+            "operation": "begin"
+          },
+          {
+            "core": 1,
+            "operation": "begin"
+          },
+          {
+            "core": 8,
+            "operation": "begin"
+          },
+          {
+            "core": 17,
+            "operation": "begin"
+          },
+          {
+            "core": 16,
+            "operation": "begin"
+          },
+          {
+            "core": 13,
+            "operation": "wait"
+          },
+          {
+            "core": 10,
+            "operation": "begin"
+          },
+          {
+            "core": 17,
+            "operation": "wait"
+          }
+        ]
+      }
+    },
+    "current_probe_affected": false,
+    "current_probe_reason": "cpu_v1固定24核组、72参与者、3阶段；不复用不同布局。",
+    "root_fix": "已明确同一workspace的G、core_id映射、阶段槽数/含义固定；改变时使用另一份清零workspace。新增说明位于当前phase_sync.py:31-33，cpu_v1快照仍是修正前注释，数学源码未变。",
+    "remaining_integration_requirement": "工作区绑定持有不可变布局身份(核组数/核映射/阶段枚举版本/槽数)，允许T/B/metadata变化；改变身份必须新分配并清零，失败/部分推进也必须重新初始化。禁止仅按numel兼容复用。"
+  },
+  "source_and_cpp_checks": [
+    {
+      "topic": "单写者",
+      "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:71-76,94-95,108-109",
+      "observation": "phase0由本核更新；phase>0的偏移包含唯一core_id。消费者只读取、不清零。probe AIC 0..23，AIV 24..71，无重叠。TNOTIFY使用Set，未混入AtomicAdd。",
+      "cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp:193,367,519,682",
+      "limit": "调用方必须保证core_id唯一且0<=core_id<participant_count、phase>0且小于阶段数；helper本身不做运行时范围检查。"
+    },
+    {
+      "topic": "代际",
+      "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:62-77",
+      "observation": "先失效本核phase0槽、fence、读取INT32 prior，再+1并发布；所有核即使零工作也调用一次，则同一顺序调用代际相同。等待用GE，旧完成值小于新代际，尚未发布的槽不会通过。",
+      "cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp:178-193,509-519",
+      "limit": "同workspace不得并发调用。INT32溢出、失败后部分推进、某核跳过begin、改变布局不在此保证内。MAX_SIGNAL_GENERATION是合同常量，不是执行期检测器。"
+    },
+    {
+      "topic": "AIC业务写回先于信号",
+      "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/signals.py:11-15; vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:89-95",
+      "observation": "现探针TSTORE后有FIX->M event等待，再有分流水barrier/DSB与整DCache维护，TNOTIFY前额外PIPE_ALL保留。没有仅凭gm fence就宣称Scalar已经等待FIX。",
+      "cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp:334-367",
+      "limit": "只检查最终CPP中顺序和调用存在，未检查机器码/真机完成语义。未来有不同数学流水仍需检查真实产物。"
+    },
+    {
+      "topic": "AIV业务写回先于信号",
+      "observation": "MTE3写回后有wait_flag(MTE3,MTE2)、PIPE_ALL、DSB、整DCache维护和再次PIPE_ALL，之后TNOTIFY。",
+      "cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp:656-682",
+      "limit": "CPU生成结果不证明NPU上的实际可见性。"
+    },
+    {
+      "topic": "信号缓存发布",
+      "header": "../.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/comm/a2a3/TNotify.hpp:38-60",
+      "observation": "Set路径为DCCI(signal)、volatile写、DCCI(signal)、DSB_DDR，末尾PIPE_ALL。atomic只用于多写者累加，此协议单写者不需要它。",
+      "limit": "本文读取managed PTO-ISA源码及最终CPP；未重编译，也未用CPU模型代替A3缓存实测。"
+    },
+    {
+      "topic": "信号轮询与payload获取",
+      "header": "../.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/comm/a2a3/TWait.hpp:68-101",
+      "observation": "当前默认TWAIT逐次单行DCCI后volatile读取，GE比较；每64次未就绪有PIPE_ALL，存在最大spin断言。wait返回之后helper再fence/整DCache维护/fence，然后消费者载入payload。",
+      "cpp": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/kernels/aic/cube.cpp:382-392,564-571",
+      "limit": "不是ld_dev实现，不应描述为天然不经DCache；当前cpu_v1没有历史CSA_WAIT_LOCAL_GM/100tick退避替换，因此不能沿用旧静态版本等待性能。没有仅因缺100tick就判定功能bug。"
+    },
+    {
+      "topic": "空工作量",
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/check_cpu.py:48,58,74,83",
+      "observation": "begin和publish都在数学tile循环之外。T=0/不足核数也会发布；AIC等待的AIV即使无行也可完成，避免空核不发布导致死锁。",
+      "model_negative": {
+        "status": "deadlock",
+        "steps": 19,
+        "generations": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "recent": [
+          {
+            "core": 2,
+            "operation": "produce"
+          },
+          {
+            "core": 8,
+            "operation": "begin"
+          },
+          {
+            "core": 1,
+            "operation": "begin"
+          },
+          {
+            "core": 2,
+            "operation": "publish"
+          },
+          {
+            "core": 0,
+            "operation": "produce"
+          },
+          {
+            "core": 0,
+            "operation": "publish"
+          },
+          {
+            "core": 3,
+            "operation": "wait"
+          },
+          {
+            "core": 1,
+            "operation": "produce"
+          },
+          {
+            "core": 1,
+            "operation": "publish"
+          },
+          {
+            "core": 3,
+            "operation": "consume"
+          },
+          {
+            "core": 3,
+            "operation": "publish"
+          },
+          {
+            "core": 2,
+            "operation": "wait"
+          }
+        ]
+      },
+      "limit": "纯CPU模型覆盖T=0，不代表已运行零shape设备ABI。"
+    },
+    {
+      "topic": "阶段图无环",
+      "source": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/check_cpu.py:58-61,80-83",
+      "observation": "AIC先完成全部生产并发布phase1，之后才等phase2；AIV每消费tile只等phase1，最后发布phase2。因此phase1 -> 消费 -> phase2，没有彼此等待尚未发布阶段的环。",
+      "limit": "此结论仅针对现两阶段probe；完整CSA每条新分支都必须保持等待前驱可达，不能从这个probe推断任意数学DAG。"
+    },
+    {
+      "topic": "所有权公式",
+      "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:130-147",
+      "observation": "连续tile的owner是tile%producer_workers，连续区间需要的不同owner至多为workers。公式覆盖非对齐first、跨多worker轮次、zero count；现CPU检查720组集合相等。",
+      "existing_result": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/result.json",
+      "limit": "只适用于连续行tile轮转所有权；不能直接套给request grouped、split-K、多维tile，真实producer集合应由相同算法推导。"
+    },
+    {
+      "topic": "动态入口与单MIX",
+      "existing_result": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/result.json",
+      "metadata": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/cpu_v1/kernel/compiled_meta.json",
+      "observation": "x/mm/result第一轴为-1，signal长度为-1；源循环取实际dim，不是静态T展开；orchestration一处rt_submit_task和sync_start。",
+      "limit": "G=24是硬件策略，不是动态B；此结果仍仅为组件probe，不是完整CSA。"
+    }
+  ],
+  "integration_hazards_not_observed_bugs": [
+    {
+      "id": "phase_not_a_tile_queue",
+      "requirement": "每phase每producer的代际值代表该producer整个阶段完成。相同调用内不可用同一个值重复表示tile进度；第二次wait会立即见到第一次publish的值。",
+      "negative": {
+        "expected_generation": 1,
+        "after_first_tile_flag": 1,
+        "second_tile_published": false,
+        "second_wait_passes": true
+      },
+      "fix_if_streaming_needed": "独立阶段/单调进度标签，或ready+ack有界缓冲协议；不能直接在tile循环里复用publish_phase。"
+    },
+    {
+      "id": "payload_lifetime",
+      "requirement": "完成信号没有消费ACK。producer发布后若要复用/覆盖同一payload区，必须确保所有消费者已完成读取（反向依赖、单独ack或不复用），不能把消费者看到标记误当成消费结束。",
+      "probe_status": "mm/result各自完整allocation且不在本调用覆盖，没有这类重用。"
+    },
+    {
+      "id": "conditional_stage",
+      "requirement": "分支省略数学工作仍须对实际被等待的阶段发布；或消费者从同一动态合同排除该producer。禁止只有producer或consumer一侧改变分支。phase0每核始终一次。"
+    },
+    {
+      "id": "range_and_alignment",
+      "requirement": "调用层检查INT32连续signals、独占且不与payload别名、实际容量、core/phase范围、producer_workers和rows_per_tile为正及owner映射有效；512字节是槽间距，不是已证明的硬件最小缓存行。"
+    },
+    {
+      "id": "same_stream_and_overflow",
+      "requirement": "同workspace严格顺序独占；capture/replay代际也会自增。代际达到INT32上限前在捕获外新建清零workspace；运行失败后不得直接重试旧workspace。"
+    }
+  ],
+  "new_cpu_model": {
+    "script": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/check_protocol_model.py",
+    "result": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/protocol_model.json",
+    "command": "python tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/check_protocol_model.py --output tests/pypto_test/csa_multishape_spmd_20261016/dynamic_phase_sync_20261017/protocol_model.json",
+    "exit_code": 0,
+    "fixed_layout": {
+      "passed": true,
+      "invocations": 1792,
+      "event_steps": 162304,
+      "groups": [
+        1,
+        2,
+        3,
+        24
+      ],
+      "seeds": 32,
+      "rows_by_round": [
+        0,
+        1,
+        7,
+        8,
+        15,
+        16,
+        17,
+        95,
+        96,
+        97,
+        168,
+        385,
+        769,
+        0
+      ]
+    },
+    "proof_boundary": "把payload写与信号写视为立即可见原子事件，固定核内顺序。只验证协议拓扑和代际/槽寻址；既不模型化DCCI/DSB/PIPE_ALL，也不验证硬件进展、公平性、缓存发布或最终机器码。"
+  },
+  "actions_taken": [
+    "只读phase_sync/signals及cpu_v1最终CPP/元数据与managed PTO-ISA头文件。",
+    "把布局身份漏洞告知root；root修正生产注释，本agent未改生产文件。",
+    "仅新增check_protocol_model.py/protocol_model.json/review.json。未重编译、未上卡、未重跑原720项检查。"
+  ],
+  "performance_claim": null,
+  "followup_root_documentation": {
+    "status": "root收尾时已进一步补充整阶段完成不是ACK、不能同槽同代际表示逐tile进度、payload复用须反向依赖或新进度。",
+    "source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py:34",
+    "validation": "注释补充未改变数学源码；本轮不重编译。报告其余精确CPP行号不受注释调整影响；生产源码函数行号以此前读取版本为准。"
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "日期": "2026-10-17",
+  "状态": "源级动态SPMD可实施设计；没有生成静态变换、没有编译或NPU任务。",
+  "用户约束": {
+    "正式源码": "ops/pypto仅维护目标动态shape实现；不得搬入完整静态展开链。",
+    "动态含义": "源级B/T使用pl.dynamic，运行时长度/位置/slot/页表仍读device Tensor；允许为不同B/S或容量区间编译不同二进制。",
+    "验收点": [
+      {
+        "history": 131072,
+        "batch": 4,
+        "S": 6,
+        "T": 24
+      },
+      {
+        "history": 131072,
+        "batch": 8,
+        "S": 6,
+        "T": 48
+      },
+      {
+        "history": 131072,
+        "batch": 16,
+        "S": 6,
+        "T": 96
+      },
+      {
+        "history": 131072,
+        "batch": 24,
+        "S": 6,
+        "T": 144
+      },
+      {
+        "history": 131072,
+        "batch": 28,
+        "S": 6,
+        "T": 168
+      },
+      {
+        "history": 8192,
+        "batch": 16,
+        "S": 6,
+        "T": 96
+      },
+      {
+        "history": 8192,
+        "batch": 32,
+        "S": 6,
+        "T": 192
+      }
+    ],
+    "性能": "每点完整CSA L1 incore首尾至少降低30%，相对同轮原动态PTO；本设计不声明已经达成。"
+  },
+  "最小架构": {
+    "入口": "一个@pl.jit入口绑定Native张量与动态B/T；创建所需动态shape中间Tensor和私有信号workspace；一次pl.spmd(设备MIX核组数,sync_start=True)进入整层。",
+    "核内程序": "每组1 AIC+2 AIV。保持少量可读的源级阶段函数与按核角色的调用顺序；所有数学helper使用inline或确证被同一MIX任务内联的incore调用。helper内部不得再submit/生成新的pl.spmd任务。",
+    "实现依据": "现有验证入口使用cluster包装AIC/AIV核函数，最终单MIX任务已经成立；standalone hc_pre的pl.spmd+split_aiv展示动态T范围循环。新实现复用这些结构语义，不复用静态stage_0...stage_39正文或records/waits重放表。最终仍需检查lowering仅一完整MIX任务。",
+    "动态工作循环": "阶段定义rows=ceil_div(T,tile_rows)，本核for wave in pl.range(ceil_div(rows,workers))，logical=worker+wave*workers，if logical<rows处理该tile。采用wave形式可避开历史INDEX循环起点lowering问题。实际row尾部valid_rows=min(tile_rows,T-row)；历史页循环继续读kv_seq_lens、position_ids、页表、TopK。",
+    "分工函数": "worker_count、tile尺寸、group partition来自可读的源码范围策略。worker_id只映射逻辑角色；不按一个历史trace中的physical core序列硬编码。变更角色预算应同时更新producer_owner和consumer_required_workers两个函数。",
+    "工作区": "Host只绑定已有shape/stride/dtype与容量上界。源级张量维度使用T/B/ceil_div表达式；固定的安全容量必须与当前区间合同对应。无法全部变为动态的PTO tile尺寸保留编译期常量，不要求tile本身动态。",
+    "功能最小版本": "先保留原各数学阶段，仅把调度写为上述源级常驻程序；用基于真实张量所有权的等待。HC两类尾角色在此源级结构内演进，不把消task边界与整个动态入口改造捆成一次无法归因的大改。"
+  },
+  "建议函数划分": [
+    {
+      "函数": "csa_entry",
+      "职责": "动态root张量合同、区间policy和workspace；唯一外部JIT/SPMD入口。"
+    },
+    {
+      "函数": "csa_aic_program",
+      "职责": "给定组worker、动态B/T、策略常量，按可读阶段调用HC投影、QA/QB、KV/压缩/Indexer投影、Indexer分支Cube、QK/PV Cube、O投影。没有trace成员表。"
+    },
+    {
+      "函数": "csa_aiv_program",
+      "职责": "给定全局vector_id=2*worker+lane，运行widen/RMS、HC尾、metadata/RoPE、量化/压缩状态、Indexer分支Vector、QK/PV Vector、HCpost。"
+    },
+    {
+      "函数": "*_tile / *_range",
+      "职责": "从相邻deepseek_v4_flash_csa高层数学源码提取单tile或本核动态范围计算。数学函数接显式row_start/query/request/leaf等变量，不接冻结stage编号。"
+    },
+    {
+      "函数": "notify_phase / wait_phase",
+      "职责": "封装本地已验证signal_notify/signal_wait、代际、发布前pipeline排空及读侧cache维护；后续主线notify/wait接口替换局限于此。"
+    },
+    {
+      "函数": "producer_workers_for_rows / producer_workers_for_leaf",
+      "职责": "用同一分片公式列出某消费者真实依赖的生产者，合并同核重复依赖；不能依据历史时间先后推断。"
+    }
+  ],
+  "可读控制伪代码": [
+    "T=pl.tensor.dim(x_hc,0); B=pl.tensor.dim(kv_seq_lens,0)",
+    "for group in pl.spmd(groups,sync_start=True):",
+    "    在单MIX域内调用AIC program(group, T, B, ...)与AIV program(2*group+lane, T, B, ...)",
+    "AIV: for wave ...: hc_widen_rms_tile(row,valid_rows); publish(HC_INPUT,vector_id,generation)",
+    "AIC: wait(HC_INPUT, producers_for_my_rows); for task ...: hc_project_tile(row,k_split); publish(HC_PARTIAL,group,generation)",
+    "AIV sink role: wait(HC_PARTIAL,producers_for_my_rows); fold4_original_order; sinkhorn_original; publish(HC_COMB,vector_id,generation)",
+    "AIV mix role: wait(HC_PARTIAL,producers_for_my_rows); fold4_original_order; pre/post_original; mix+norm_original; publish(HC_NORM,vector_id,generation)",
+    "其余CSA分支在各自消费输入后推进；独立核可提前进入其他分支，不插入每阶段syncall。",
+    "Indexer按一致策略进入vector/medium/long分支，分支内部保留每请求动态叶数/有效候选循环；三条路径都发布相同语义SCORE_READY。",
+    "TopK合并等待本query实际叶owner；发布TOPK_READY；QK/PV等待Q、KV与TopK；最后O投影+HCpost写output。"
+  ],
+  "通知协议": {
+    "为何按阶段分槽": "源级AIC/AIV可能采用不同阶段顺序，单一每核阶段号不再能任意比较。首版使用固定语义阶段×生产者核的独占GM槽，value=本轮generation；每槽单写者，不需atomic。",
+    "地址": "slot=(phase_kind*core_count+physical_core)*signal_stride_words；phase_kind是少量源码枚举，与历史task_id/dispatch_seq无关。沿用隔离缓存行的stride，首版可保守沿用128个INT32字=512B，之后再据底层要求缩减。",
+    "写侧": "先完成payload计算和GM写回，现有adapter使用bar_all排空本核，再signal_notify正确执行DCCI/DSB发布；不把atomic当作cache一致性。",
+    "读侧": "wait检查本轮generation，使用现有绕缓存/失效轮询路径；完成信号等待后仍执行payload所需cacheinvalid/fence。仅信号已到不代表业务数据cache自动一致。",
+    "重放": "graph/eager每次传入或推进代际；并发调用使用独立workspace。溢出前由已有控制层重置，不能跨并发流共享同一进度区。",
+    "零工作": "仅等待由相同分配公式算出的有效owner。可以让固定stage全部参与核即使无工作也发布完成以简化首版，但不能等待某个未进入分支的生产者。",
+    "发布粒度": "首版每逻辑阶段的本核范围循环完成后发布一次；要跨波次流水可用阶段槽的generation×wave_capacity+completed_count，但只有已证明消费单调前缀时才扩展。不能先在最终累加器仍被写时发布。",
+    "空间代价": "按64个阶段×72核×512B隔离槽约2.25MiB；这是保守上界示例，不是已确认最终阶段数。可只为真实跨核边分配槽，不强求每阶段72份。GM空间换取源级清晰的无歧义完成语义，需实测轮询成本。",
+    "无需全核屏障": "跨阶段采用所需producer集合等待；sync_start只保证常驻集合启动，不替代通知。整个SPMD结束由运行时完成事件代表。"
+  },
+  "保留分支及依赖": [
+    {
+      "分支": "HC输入/投影/尾段",
+      "必须保留": "widen的32项K512 RMS顺序、4×K4096投影及每份16×K256累加；sink与mix独立消费partials；mix返回normed，sink返回comb，post仍由实际mix写者发布。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "参考行": 275
+    },
+    {
+      "分支": "metadata与RoPE",
+      "必须保留": "compact行偏移仍是每请求前缀和；可由一个AIV完成，发布后Rope/压缩等消费者开始。pos/slot/原始页表继续是Native device Tensor，不因改SPMD改为Host取值。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "参考行": 338
+    },
+    {
+      "分支": "Q、KV、主/Indexer压缩、系数投影",
+      "必须保留": "共享HC_NORM后是多条分支；按真实张量行所有权等待，不串成一条完整全核阶段barrier链。压缩state写者/Native页边界及缓存保护规则保持。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py",
+      "参考行": 350
+    },
+    {
+      "分支": "Indexer策略选择",
+      "必须保留": "原max_topk_cache_len=host_max_seq_len//4分为<2048 Vector、2048..8192 medium Cube、>8192 long Cube；medium pair/request依赖动态query数/S及波次数，long按query范围选择，不能固定某次B16编译选到的branch。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer.py",
+      "参考行": 1380
+    },
+    {
+      "分支": "Indexer核内动态长度",
+      "必须保留": "每请求读取kv_seq_lens和position_ids，算leaf数量、有效候选、page地址/尾块，叶内原tie规则与TopK归约顺序不变。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer.py",
+      "参考行": 681
+    },
+    {
+      "分支": "Indexer分支合流",
+      "必须保留": "Vector发布、单叶merge、多叶merge各自只等待被选score分支真实产生的数据；统一语义完成槽避免悬空旧TaskRef。多叶段数是实际长度，不是固定trace叶数。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_indexer.py",
+      "参考行": 1622
+    },
+    {
+      "分支": "稀疏注意力准备/QK/PV",
+      "必须保留": "有效slot/索引/bias规划继续执行；QK/PV消费Q、KV缓存写入和TopK；原组内FFTS通知及资源复用ACK顺序保持，不用generic进度信号替代L1/L0资源事件。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+      "参考行": 175
+    },
+    {
+      "分支": "输出投影与HCpost",
+      "必须保留": "O-A/量化/O-B保留对应T范围tile与数值链；HCpost同时依赖attention输出、post门和comb矩阵，最终输出前必须等待这三条分支。",
+      "源文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_o_proj.py",
+      "参考行": 539
+    }
+  ],
+  "策略一致性": {
+    "已有Host上界": "可将当前已有Host max_seq_len作为本轮策略输入或区间上界，不新增device→host取值。若该值按graph固定，调用方必须选择覆盖当前长度的区间或在跨界时重选。",
+    "设备分支替代": "若希望同一graph内跨策略边界，指定一个已有metadata worker在设备读取kv_seq_lens计算全局策略并发布小型控制结果；所有相关AIC/AIV等待并读取同一结果。不能各核依据自己的不同request长度选择相互不匹配的FFTS分支。",
+    "分支保存方式": "源级pl.if/pl.range与Python编译期区间选择均可；选了区间模板仍保留区间内T/B循环和每请求长度动态。不能用trace捕获结果替代未执行分支。",
+    "query_tokens": "S可以作为QuerySourceConfig的编译期参数，B/T仍动态；核心索引query//S、request波数与缓冲容量必须由同一S实例产生，不能只改入口参数或HC模块。"
+  },
+  "最小落地顺序": [
+    "先以相邻CSA高层数学源码为唯一可维护来源；隔离配置只注入S/容量/区间policy，不能把历史lowered IR作为生产数学体。",
+    "提取HC、Q/KV、Indexer、attention、O投影的单核tile/range helper，函数内不再创建独立task；保留原数学和动态边界。",
+    "新增一个源级调度program，用明确角色/输出owner公式和generic notify/wait连接这些helper；首版保持同一函数覆盖动态区间，允许不同区间选不同数学tile常量。",
+    "CPU检查每条分支producer/consumer集合、循环覆盖、尾行/零工作、同组FFTS分支一致性，以及组合DAG无环。所有权证明应按区间公式，不是只对七个采样布局通过。",
+    "CPU lowering只检查单MIX任务、动态循环仍存在和资源上界；不能把生成成功记为功能/精度/性能通过。",
+    "整层功能/精度先由root验证，然后用新七档完整L1对照；HC局部效果不作为全CSA30%结论。"
+  ],
+  "最小HC源级接入点": {
+    "现调用": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_csa.py:325 的hc_pre_gates_from_rms(...)加hc_mix_norm(...)。",
+    "建议函数": "hc_pre_norm_from_rms(x_fp32, hc_fn, hc_scale, hc_base, norm_w, inv_rms, post, comb, x_normed, range_policy)",
+    "结构": "先保留AIC投影为一个动态范围helper，输出四份partials；两种尾角色直接读partials和inv_rms，原顺序归约后计算comb或pre/post/mix/norm。最终只返回真实输出和所需语义完成，删除独立reduce/split以及跨阶段mixes_raw/pre GM接口。",
+    "原输入RMS": "由decode_csa原widen函数继续产生，不重排32项顺序。compact供数前段未选，不叠加。",
+    "维护边界": "query_source隔离命名空间在加载源码时明确选择这个高层函数；不对已生成entry替换函数名、stage索引、record offset或SSA变量。"
+  },
+  "不能保证的内容": [
+    "静态化调度不自动复现动态调度器在每种输入分布下的最佳重叠；固定角色的负载不均衡仍须按动态工作量和性能证据调整。",
+    "满48AIV不是独立目标；小T整D RMS所有权与post写回粒度限制可用角色，过分切D可能增加同步。",
+    "目前没有完整新动态SPMD源实现或性能成绩；既有805us compact成绩属于历史静态候选。"
+  ],
+  "本次文件动作": {
+    "仅新增本设计JSON": true,
+    "修改生产源码": false,
+    "运行编译或设备": false,
+    "原尾段审计": "hc_tail_distribution_audit_v1.json，历史收口，未写静态尾融合transform。"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "device_execution": false,
+  "sample_shapes_supplied": false,
+  "stages": {
+    "norm": {
+      "parse_passed": true,
+      "full_codegen_passed": false,
+      "error": "1 function(s) failed to compile:\n\n  Function                           | Error\n  -----------------------------------+--------------------------------------------------------------\n  dynamic_indexer_compact_norm_rope  | ptoas compilation failed:\n                                     | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\n                                     | pto-\n                                     | 0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/ind\n                                     | exer_compressor_output_stages.py\":163:41): error:\n                                     | 'pto.subview' op expects result valid_shape[0] to match\n                                     | inferred/explicit valid_row\n  -----------------------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/cpu_v1/norm/kernel/report/codegen_errors.txt",
+      "traceback": "Traceback (most recent call last):\n  File \"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/check_cpu.py\", line 92, in main\n    artifact = entry.compile(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py\", line 3505, in compile\n    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)\n  File \"/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py\", line 79, in inner\n    return func(*args, **kwds)\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py\", line 3247, in _resolve_compiled\n    return build(), ordered_args, run_config\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py\", line 3236, in build\n    return self._compile(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py\", line 3727, in _compile\n    return ir_compile(parsed, skip_ptoas=skip_ptoas, **ir_compile_kwargs)\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/ir/compile.py\", line 385, in compile\n    return _compile_impl(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/ir/compile.py\", line 509, in _compile_impl\n    files = generate(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/pto_backend.py\", line 1794, in generate\n    return _generate_single_chip(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/backend/pto_backend.py\", line 2261, in _generate_single_chip\n    raise PartialCodegenError(report, result_files)\npypto.backend.pto_backend.PartialCodegenError: 1 function(s) failed to compile:\n\n  Function                           | Error\n  -----------------------------------+--------------------------------------------------------------\n  dynamic_indexer_compact_norm_rope  | ptoas compilation failed:\n                                     | loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-\n                                     | pto-\n                                     | 0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/ind\n                                     | exer_compressor_output_stages.py\":163:41): error:\n                                     | 'pto.subview' op expects result valid_shape[0] to match\n                                     | inferred/explicit valid_row\n  -----------------------------------+--------------------------------------------------------------\n\n  Full details: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/cpu_v1/norm/kernel/report/codegen_errors.txt\n"
+    },
+    "hadamard": {
+      "parse_passed": true,
+      "full_codegen_passed": true,
+      "artifact_output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/cpu_v1/hadamard/kernel",
+      "params": [
+        {
+          "name": "normed",
+          "direction": "In",
+          "shape": [
+            -1,
+            128
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "hadamard",
+          "direction": "In",
+          "shape": [
+            128,
+            128
+          ],
+          "dtype": "bfloat16",
+          "layout": "ND"
+        },
+        {
+          "name": "valid_count",
+          "direction": "In",
+          "shape": [
+            1
+          ],
+          "dtype": "int32",
+          "layout": "ND"
+        },
+        {
+          "name": "output",
+          "direction": "Out",
+          "shape": [
+            -1,
+            128
+          ],
+          "dtype": "fp32",
+          "layout": "ND"
+        }
+      ]
+    }
+  },
+  "audit": {
+    "norm_math_assignments_ast_equal": [
+      "folded_sq",
+      "square_sum",
+      "variance",
+      "inv_rms",
+      "normed_chunk",
+      "normed_nope",
+      "rope_normed",
+      "sin_signed",
+      "rope_rot",
+      "normed_rope"
+    ],
+    "hadamard_assignments_ast_equal": [
+      "hadamard_tile",
+      "had_b0",
+      "had_rows",
+      "kv_proj_tile",
+      "kv_hadamard_acc"
+    ],
+    "normalization_source_ast_executed": true,
+    "oracle_cases": 54,
+    "hadamard_geometry_cases": 51,
+    "dummy_and_uncovered_pooled_not_read": true,
+    "compact_padding_unchanged": true,
+    "stale_positions_owned_compact_rows_zero": true,
+    "floating_point_model": "NumPy FP32及显式BF16 RNE，仅CPU数学/地址oracle，不是Ascend精度结论",
+    "device_execution": false
+  },
+  "all_passed": false
+}

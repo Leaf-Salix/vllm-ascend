@@ -1,0 +1,394 @@
+{
+  "passed": true,
+  "device_execution": false,
+  "cpu_result": "cpu_prepare_v2/result.json",
+  "schema": {
+    "168": {
+      "pad8": 168,
+      "pad16": 176,
+      "candidate_shapes": {
+        "x": [
+          168,
+          16384
+        ],
+        "hc_fn": [
+          24,
+          16384
+        ],
+        "hc_scale": [
+          3
+        ],
+        "hc_base": [
+          24
+        ],
+        "norm_w": [
+          4096
+        ],
+        "wq_a": [
+          1024,
+          4096
+        ],
+        "gamma_cq": [
+          1024
+        ],
+        "x_fp32": [
+          168,
+          16384
+        ],
+        "inv": [
+          176,
+          1
+        ],
+        "widen_tail": [
+          8,
+          16384
+        ],
+        "partials": [
+          704,
+          32
+        ],
+        "raw": [
+          176,
+          32
+        ],
+        "pre": [
+          176,
+          8
+        ],
+        "post": [
+          168,
+          4
+        ],
+        "post_tail": [
+          8,
+          8
+        ],
+        "comb": [
+          168,
+          16
+        ],
+        "comb_tail": [
+          8,
+          32
+        ],
+        "mixed": [
+          168,
+          4096
+        ],
+        "normed": [
+          168,
+          4096
+        ],
+        "norm_tail": [
+          8,
+          4096
+        ],
+        "qa": [
+          176,
+          1024
+        ],
+        "qr": [
+          168,
+          1024
+        ],
+        "qr_scale": [
+          168,
+          1
+        ],
+        "qr_matmul": [
+          168,
+          1024
+        ],
+        "qr_scale_pad": [
+          168,
+          1
+        ],
+        "signal": [
+          82944
+        ],
+        "hc_base_2d": [
+          1,
+          24
+        ]
+      },
+      "reference_qr_capacity": 512
+    },
+    "169": {
+      "pad8": 176,
+      "pad16": 176,
+      "candidate_shapes": {
+        "x": [
+          169,
+          16384
+        ],
+        "hc_fn": [
+          24,
+          16384
+        ],
+        "hc_scale": [
+          3
+        ],
+        "hc_base": [
+          24
+        ],
+        "norm_w": [
+          4096
+        ],
+        "wq_a": [
+          1024,
+          4096
+        ],
+        "gamma_cq": [
+          1024
+        ],
+        "x_fp32": [
+          169,
+          16384
+        ],
+        "inv": [
+          176,
+          1
+        ],
+        "widen_tail": [
+          8,
+          16384
+        ],
+        "partials": [
+          704,
+          32
+        ],
+        "raw": [
+          176,
+          32
+        ],
+        "pre": [
+          176,
+          8
+        ],
+        "post": [
+          169,
+          4
+        ],
+        "post_tail": [
+          8,
+          8
+        ],
+        "comb": [
+          169,
+          16
+        ],
+        "comb_tail": [
+          8,
+          32
+        ],
+        "mixed": [
+          176,
+          4096
+        ],
+        "normed": [
+          169,
+          4096
+        ],
+        "norm_tail": [
+          8,
+          4096
+        ],
+        "qa": [
+          176,
+          1024
+        ],
+        "qr": [
+          169,
+          1024
+        ],
+        "qr_scale": [
+          169,
+          1
+        ],
+        "qr_matmul": [
+          176,
+          1024
+        ],
+        "qr_scale_pad": [
+          176,
+          1
+        ],
+        "signal": [
+          82944
+        ],
+        "hc_base_2d": [
+          1,
+          24
+        ]
+      },
+      "reference_qr_capacity": 512
+    }
+  },
+  "argument_order": [
+    "x",
+    "hc_fn",
+    "hc_scale",
+    "hc_base",
+    "hc_base_2d",
+    "norm_w",
+    "wq_a",
+    "gamma_cq",
+    "x_fp32",
+    "inv",
+    "widen_tail",
+    "partials",
+    "raw",
+    "pre",
+    "post",
+    "post_tail",
+    "comb",
+    "comb_tail",
+    "mixed",
+    "normed",
+    "norm_tail",
+    "qa",
+    "qr",
+    "qr_scale",
+    "qr_matmul",
+    "qr_scale_pad",
+    "signal"
+  ],
+  "norm_loading_sources": [
+    {
+      "path": "tests/pypto_test/dsv4_csa_single_layer.py",
+      "line": 64,
+      "meaning": "默认 BF16 构造 RMSNorm 参数"
+    },
+    {
+      "path": "tests/pypto_test/dsv4_csa_single_layer.py",
+      "line": 77,
+      "meaning": "attn_norm FP32 checkpoint copy_ 到 BF16 参数"
+    },
+    {
+      "path": "tests/pypto_test/dsv4_csa_formal_weights.py",
+      "line": 58,
+      "meaning": "q_norm 使用 default_weight_loader"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.cache/migration-v0.25.1rc1/vllm/vllm/model_executor/layers/layernorm.py",
+      "line": 61,
+      "meaning": "RMSNorm dtype 未指定则沿用 torch 默认 dtype"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.cache/migration-v0.25.1rc1/vllm/vllm/model_executor/model_loader/weight_utils.py",
+      "line": 1212,
+      "meaning": "默认 loader 通过 parameter.data.copy_ 加载"
+    }
+  ],
+  "norm_values_roundtrip_bf16_exact": true,
+  "launch_count": {
+    "reference": 4,
+    "candidate": 6
+  },
+  "precision": "有效业务区逐 bit，不放宽阈值",
+  "limits": [
+    "只验证 HC→QA→QR；不是完整 CSA",
+    "T169 为 token 行尾块验证，不宣称支持奇数每请求 query 或 mixed query",
+    "ND BF16 wq_a；未覆盖正式 NZ2 部署布局",
+    "合成 hidden + 正式权重，不是模型真实 hidden 回放",
+    "无 NPU 执行、无性能结果"
+  ],
+  "executed_evidence": [
+    {
+      "task_id": "task_20261017_162439_53401511955",
+      "status": "completed (exit=0)",
+      "device": 8,
+      "result": "device_v1/result.json",
+      "post_execution_archive": "device_v1/evidence_manifest.json",
+      "cases": [
+        {
+          "tokens": 168,
+          "pad8": 168,
+          "pad16": 176,
+          "sequence": [
+            "A",
+            "B",
+            "A"
+          ],
+          "generations": [
+            1,
+            2,
+            3
+          ],
+          "candidate_launches": 3,
+          "reference_launches": 2,
+          "all_outputs_bitwise_equal": true,
+          "guards_passed": true,
+          "signals_passed": true,
+          "inputs_unchanged": true,
+          "repeat_a_passed": true,
+          "compared_output_names": [
+            "x_fp32",
+            "inv",
+            "pre",
+            "post",
+            "comb",
+            "mixed",
+            "normed",
+            "qa",
+            "qr",
+            "qr_scale",
+            "qr_matmul",
+            "qr_scale_pad",
+            "raw",
+            "partials_split0",
+            "partials_split1",
+            "partials_split2",
+            "partials_split3"
+          ]
+        },
+        {
+          "tokens": 169,
+          "pad8": 176,
+          "pad16": 176,
+          "sequence": [
+            "A",
+            "B",
+            "A"
+          ],
+          "generations": [
+            1,
+            2,
+            3
+          ],
+          "candidate_launches": 3,
+          "reference_launches": 2,
+          "all_outputs_bitwise_equal": true,
+          "guards_passed": true,
+          "signals_passed": true,
+          "inputs_unchanged": true,
+          "repeat_a_passed": true,
+          "compared_output_names": [
+            "x_fp32",
+            "inv",
+            "pre",
+            "post",
+            "comb",
+            "mixed",
+            "normed",
+            "qa",
+            "qr",
+            "qr_scale",
+            "qr_matmul",
+            "qr_scale_pad",
+            "raw",
+            "partials_split0",
+            "partials_split1",
+            "partials_split2",
+            "partials_split3"
+          ]
+        }
+      ],
+      "candidate_single_dynamic_mix": true,
+      "wait_strategy": "默认TWAIT，未应用backoff",
+      "performance_measured": false,
+      "full_csa_validated": false,
+      "note": "原CPU准备记录保留；本项追加已执行证据。未重测，未改原result，执行前没有source_snapshot。"
+    }
+  ]
+}

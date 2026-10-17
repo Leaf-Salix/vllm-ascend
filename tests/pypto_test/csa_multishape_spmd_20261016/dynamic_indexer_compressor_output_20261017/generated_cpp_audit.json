@@ -1,0 +1,59 @@
+{
+  "method": "只读最终产物检查，不重编译，不执行NPU",
+  "stages": {
+    "norm": {
+      "path": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/cpu_v2/norm/kernel/kernels/aiv/dynamic_indexer_compact_norm_rope.cpp",
+      "dynamic_axes_from_descriptors": [
+        {
+          "line": 1575,
+          "symbol": "CSA_GEOMETRY_REQUESTS",
+          "descriptor_read": "int64_t CSA_GEOMETRY_REQUESTS = static_cast<int64_t>(lengths__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1578,
+          "symbol": "CSA_GEOMETRY_QUERY_BOUNDS",
+          "descriptor_read": "int64_t CSA_GEOMETRY_QUERY_BOUNDS = static_cast<int64_t>(bounds__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1581,
+          "symbol": "CSA_INDEXER_COMPRESSOR_OUTPUT_T",
+          "descriptor_read": "int64_t CSA_INDEXER_COMPRESSOR_OUTPUT_T = static_cast<int64_t>(positions__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1584,
+          "symbol": "CSA_INDEXER_COMPRESSOR_OUTPUT_COMPACT_PAD",
+          "descriptor_read": "int64_t CSA_INDEXER_COMPRESSOR_OUTPUT_COMPACT_PAD = static_cast<int64_t>(normed__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1587,
+          "symbol": "CSA_INDEXER_COMPRESSOR_OUTPUT_POOL_ROWS",
+          "descriptor_read": "int64_t CSA_INDEXER_COMPRESSOR_OUTPUT_POOL_ROWS = static_cast<int64_t>(pooled__ssa_v0_tensor->shapes[0]);"
+        },
+        {
+          "line": 1590,
+          "symbol": "CSA_METADATA_COMPACT_ROWS",
+          "descriptor_read": "int64_t CSA_METADATA_COMPACT_ROWS = static_cast<int64_t>(cos__ssa_v0_tensor->shapes[0]);"
+        }
+      ],
+      "final_helper_ast_matches_compiled_snapshot": true
+    },
+    "hadamard": {
+      "path": "tests/pypto_test/csa_multishape_spmd_20261016/dynamic_indexer_compressor_output_20261017/cpu_v1/hadamard/kernel/kernels/aic/dynamic_indexer_compact_hadamard.cpp",
+      "dynamic_axes_from_descriptors": [
+        {
+          "line": 335,
+          "symbol": "CSA_INDEXER_COMPRESSOR_OUTPUT_COMPACT_PAD",
+          "descriptor_read": "int64_t CSA_INDEXER_COMPRESSOR_OUTPUT_COMPACT_PAD = static_cast<int64_t>(normed__ssa_v0_tensor->shapes[0]);"
+        }
+      ],
+      "final_helper_ast_matches_compiled_snapshot": true,
+      "actual_C_device_scalar_load": [
+        {
+          "line": 141,
+          "code": "int32_t v44 = (v1)[v12];"
+        }
+      ],
+      "C_not_inferred_from_PAD": "有效行来自valid_count Tensor的device scalar；COMPACT_PAD仅作容量检查"
+    }
+  }
+}

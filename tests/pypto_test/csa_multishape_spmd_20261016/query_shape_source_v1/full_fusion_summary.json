@@ -1,0 +1,51 @@
+{
+  "query_tokens": 4,
+  "batch": 16,
+  "tokens": 64,
+  "history": 131072,
+  "token_capacity": 384,
+  "weight_nz_mode": 1,
+  "source_factory_import_and_outline": true,
+  "dynamic_full_codegen_passed": true,
+  "physical_kernel_bodies": 73,
+  "logical_compute_bodies": 67,
+  "body_parse": "PASS",
+  "fusion_material_audit": true,
+  "fusion_full_codegen_passed": true,
+  "selected_memory_planner": "PYPTO",
+  "single_spmd_core_groups": 24,
+  "workspace_bytes": 288292864,
+  "root_tensors": 130,
+  "leaf_tensors": 132,
+  "views_in_bounds": 292,
+  "selected_fusion_source": "b16_s4_h131072_fusion_v3/entry_jit.py",
+  "selected_compile_evidence": "b16_s4_h131072_fused_lowering_v3/result.json",
+  "temporary_codegen_workaround": "只在实验生成器让ND O-proj-a从同次早期逻辑体重新lowering，原数学函数未改",
+  "failures_preserved": [
+    {
+      "path": "b16_s4_h131072_fusion_v1/result.json",
+      "reason": "准备脚本预设11个token轴错误，实际10个；改为按名称核对"
+    },
+    {
+      "path": "b16_s4_h131072_fused_lowering_v1/result.json",
+      "reason": "ConvertTensorToTileOps误替换ND投影BF16 load为FP32 accumulator，后续InferTileMemorySpace拒绝matmul_acc"
+    },
+    {
+      "path": "b16_s4_h131072_fused_lowering_v2/result.json",
+      "reason": "PTOAS memory planner Mat需求544KiB超过512KiB；同源码PYPTO planner通过"
+    }
+  ],
+  "reproduction": "bash tests/pypto_test/csa_multishape_spmd_20261016/query_shape_source_v1/reproduce_fusion_cpu.sh 新后缀 PYPTO",
+  "device_execution": false,
+  "runtime_abi_validated": false,
+  "precision_validated": false,
+  "performance_validated": false,
+  "limitations": [
+    "仅uniform S4，非odd/mixed query",
+    "B16输入是Host描述符原型：沿用旧缓存/metadata容量并按语义改变T轴，不是真实S4服务捕获",
+    "NZ模式1；不能冒充所有Native部署布局均验证",
+    "未对NPU执行，GM信号缓存可见性和内部事件未验证",
+    "生成源码DAG调度使用缺省常数成本，没有性能代表性",
+    "未接入当前正式S6生产入口，未降低任何精度门槛"
+  ]
+}

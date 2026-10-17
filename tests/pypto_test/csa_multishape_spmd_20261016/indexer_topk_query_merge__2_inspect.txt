@@ -1,0 +1,112 @@
+@pl.function(type=pl.FunctionType.Inline, auto_scope=False)
+def indexer_topk_query_merge__2(original_block_idx: pl.Scalar[pl.INDEX], position_ids__ssa_v0: pl.Tensor[[T_DYN], pl.INT64], kv_seq_lens__ssa_v0: pl.Tensor[[B_DYN], pl.INT32], pair_arena__ssa_v0: pl.Tensor[[24576, 1024], pl.FP32], topk_scores__ssa_v0: pl.Out[pl.Tensor[[T_DYN, 512], pl.FP32]], topk_indices__ssa_v0: pl.Out[pl.Tensor[[T_DYN, 512], pl.INT32]]):
+    pl.func_attr({'mx_tensor_views_blocked': True})
+    worker__ssa_v0: pl.Scalar[pl.INDEX] = original_block_idx
+    query_count__ssa_v0: pl.Scalar[pl.INDEX] = pl.tensor.dim(position_ids__ssa_v0, 0)
+    max_cache_count__ssa_v0: pl.Scalar[pl.INDEX] = 0
+    for (batch__idx_v0, (max_cache_count__iter_v1,)) in pl.range(query_count__ssa_v0 // 6, init_values=(max_cache_count__ssa_v0,)):
+        t__tile: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [batch__idx_v0])
+        max_cache_count__ssa_v3: pl.Scalar[pl.INDEX] = pl.max(max_cache_count__iter_v1, pl.cast(t__tile, pl.INDEX) // 4)
+        max_cache_count__rv_v2: pl.Scalar[pl.INDEX] = pl.yield_(max_cache_count__ssa_v3)
+    query_groups__ssa_v0: pl.Scalar[pl.INDEX] = query_count__ssa_v0 // 2
+    if 24 <= query_count__ssa_v0:
+        query_groups__ssa_v1: pl.Scalar[pl.INDEX] = query_count__ssa_v0 // 6
+        query_groups__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(query_groups__ssa_v1)
+    else:
+        query_groups__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(query_groups__ssa_v0)
+    tile_count_inline717__ssa_v0: pl.Scalar[pl.INDEX] = (pl.min(max_cache_count__rv_v2, 262144) + 1023) // 1024
+    leaf_count_inline716__ssa_v0: pl.Scalar[pl.INDEX] = pl.max((pl.min(max_cache_count__rv_v2, 262144) + 16383) // 16384, 1)
+    leaf_tiles_inline715__ssa_v0: pl.Scalar[pl.INDEX] = 16
+    extra_leaves_inline714__ssa_v0: pl.Scalar[pl.INDEX] = 0
+    leaf_multiple_inline713__ssa_v0: pl.Scalar[pl.INDEX] = 1
+    if query_groups__phi_v2 * 3 == 48:
+        leaf_multiple_inline713__ssa_v1: pl.Scalar[pl.INDEX] = 3
+        leaf_multiple_inline713__phi_v6: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__ssa_v1)
+    else:
+        if query_groups__phi_v2 * 3 == 24:
+            leaf_multiple_inline713__ssa_v2: pl.Scalar[pl.INDEX] = 3
+            leaf_multiple_inline713__phi_v5: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__ssa_v2)
+        else:
+            if query_groups__phi_v2 * 6 == 24:
+                leaf_multiple_inline713__ssa_v3: pl.Scalar[pl.INDEX] = 6
+                leaf_multiple_inline713__phi_v4: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__ssa_v3)
+            else:
+                leaf_multiple_inline713__phi_v4: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__ssa_v0)
+            leaf_multiple_inline713__phi_v5: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__phi_v4)
+        leaf_multiple_inline713__phi_v6: pl.Scalar[pl.INDEX] = pl.yield_(leaf_multiple_inline713__phi_v5)
+    if 1 < leaf_multiple_inline713__phi_v6:
+        balanced_count_inline712__ssa_v0: pl.Scalar[pl.INDEX] = (leaf_count_inline716__ssa_v0 + leaf_multiple_inline713__phi_v6 - 1) // leaf_multiple_inline713__phi_v6 * leaf_multiple_inline713__phi_v6
+        if balanced_count_inline712__ssa_v0 <= 32:
+            leaf_tiles_inline715__ssa_v1: pl.Scalar[pl.INDEX] = pl.max(tile_count_inline717__ssa_v0 // balanced_count_inline712__ssa_v0, 1)
+            extra_leaves_inline714__ssa_v1: pl.Scalar[pl.INDEX] = tile_count_inline717__ssa_v0 % balanced_count_inline712__ssa_v0
+            (extra_leaves_inline714__phi_v2, leaf_tiles_inline715__phi_v2) = pl.yield_(extra_leaves_inline714__ssa_v1, leaf_tiles_inline715__ssa_v1)
+        else:
+            (extra_leaves_inline714__phi_v2, leaf_tiles_inline715__phi_v2) = pl.yield_(extra_leaves_inline714__ssa_v0, leaf_tiles_inline715__ssa_v0)
+        (extra_leaves_inline714__phi_v3, leaf_tiles_inline715__phi_v3) = pl.yield_(extra_leaves_inline714__phi_v2, leaf_tiles_inline715__phi_v2)
+    else:
+        (extra_leaves_inline714__phi_v3, leaf_tiles_inline715__phi_v3) = pl.yield_(extra_leaves_inline714__ssa_v0, leaf_tiles_inline715__ssa_v0)
+    merge_leaf_tiles__ssa_v1: pl.Scalar[pl.INDEX] = leaf_tiles_inline715__phi_v3
+    merge_extra_leaves__ssa_v1: pl.Scalar[pl.INDEX] = extra_leaves_inline714__phi_v3
+    for query__idx_v0 in pl.range(worker__ssa_v0, query_count__ssa_v0, 48):
+        batch_idx_inline724__ssa_v0: pl.Scalar[pl.INDEX] = query__idx_v0 // 6
+        position_inline723__tile: pl.Scalar[pl.INT64] = pl.tensor.read(position_ids__ssa_v0, [query__idx_v0])
+        t__tile_1: pl.Scalar[pl.INT32] = pl.tensor.read(kv_seq_lens__ssa_v0, [batch_idx_inline724__ssa_v0])
+        cache_len_inline725__ssa_v0: pl.Scalar[pl.INDEX] = pl.cast(t__tile_1, pl.INDEX) // 4
+        cache_bound_inline727__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(cache_len_inline725__ssa_v0, (position_inline723__tile + 1) // 4)
+        visible_count_inline726__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(cache_bound_inline727__ssa_v0, 262144)
+        if 0 < visible_count_inline726__ssa_v0:
+            visible_tiles_inline732__ssa_v0: pl.Scalar[pl.INDEX] = (visible_count_inline726__ssa_v0 + 1023) // 1024
+            larger_leaf_tiles_inline728__ssa_v0: pl.Scalar[pl.INDEX] = merge_extra_leaves__ssa_v1 * (merge_leaf_tiles__ssa_v1 + 1)
+            larger_leaf_count_inline734__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(merge_extra_leaves__ssa_v1, (visible_tiles_inline732__ssa_v0 + merge_leaf_tiles__ssa_v1) // (merge_leaf_tiles__ssa_v1 + 1))
+            remaining_tiles_inline730__ssa_v0: pl.Scalar[pl.INDEX] = pl.max(visible_tiles_inline732__ssa_v0 - larger_leaf_tiles_inline728__ssa_v0, 0)
+            leaf_count_inline731__ssa_v1: pl.Scalar[pl.INDEX] = larger_leaf_count_inline734__ssa_v0 + (remaining_tiles_inline730__ssa_v0 + merge_leaf_tiles__ssa_v1 - 1) // merge_leaf_tiles__ssa_v1
+            half_count_inline733__ssa_v0: pl.Scalar[pl.INDEX] = leaf_count_inline731__ssa_v1 * 2
+            t__tmp_v2: pl.Scalar[pl.INDEX] = pl.tensor.dim(position_ids__ssa_v0, 0)
+            if 24 <= t__tmp_v2:
+                half_count_inline733__ssa_v1: pl.Scalar[pl.INDEX] = leaf_count_inline731__ssa_v1
+                half_count_inline733__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(half_count_inline733__ssa_v1)
+            else:
+                half_count_inline733__phi_v2: pl.Scalar[pl.INDEX] = pl.yield_(half_count_inline733__ssa_v0)
+            arena_base_inline735__ssa_v0: pl.Scalar[pl.INDEX] = query__idx_v0 * 64
+            root_inline4931__ssa_v0: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.load(pair_arena__ssa_v0, [arena_base_inline735__ssa_v0, 0], [1, 1024], [1, 1024], target_memory=pl.Mem.Vec)
+            for (child_inline4930__idx_v0, (root_inline4931__iter_v1,)) in pl.range(1, half_count_inline733__phi_v2, 3, init_values=(root_inline4931__ssa_v0,)):
+                incoming1_inline4929__ssa_v0: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.load(pair_arena__ssa_v0, [arena_base_inline735__ssa_v0 + child_inline4930__idx_v0, 0], [1, 1024], [1, 1024], target_memory=pl.Mem.Vec)
+                if child_inline4930__idx_v0 + 2 < half_count_inline733__phi_v2:
+                    incoming2_inline4926__ssa_v0: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.load(pair_arena__ssa_v0, [arena_base_inline735__ssa_v0 + child_inline4930__idx_v0 + 1, 0], [1, 1024], [1, 1024], target_memory=pl.Mem.Vec)
+                    incoming3_inline4924__ssa_v0: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.load(pair_arena__ssa_v0, [arena_base_inline735__ssa_v0 + child_inline4930__idx_v0 + 2, 0], [1, 1024], [1, 1024], target_memory=pl.Mem.Vec)
+                    merge_tmp4_inline4928__ssa_v0: pl.Tile[[1, 4096], pl.FP32, pl.Mem.Vec] = pl.tile.create([1, 4096], dtype=pl.FP32, target_memory=pl.Mem.Vec)
+                    merged4_inline4922__ssa_v0: pl.Tile[[1, 4096], pl.FP32, pl.Mem.Vec] = pl.tile.mrgsort_format2(incoming3_inline4924__ssa_v0, incoming2_inline4926__ssa_v0, incoming1_inline4929__ssa_v0, root_inline4931__iter_v1, merge_tmp4_inline4928__ssa_v0, exhausted=True)
+                    root_inline4931__ssa_v3: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.extract(merged4_inline4922__ssa_v0, 0, 0, [1, 1024], target_memory=pl.Mem.Vec)
+                    root_inline4931__phi_v7: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.yield_(root_inline4931__ssa_v3)
+                else:
+                    if child_inline4930__idx_v0 + 1 < half_count_inline733__phi_v2:
+                        incoming2_inline4926__ssa_v1: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.load(pair_arena__ssa_v0, [arena_base_inline735__ssa_v0 + child_inline4930__idx_v0 + 1, 0], [1, 1024], [1, 1024], target_memory=pl.Mem.Vec)
+                        merge_tmp3_inline4927__ssa_v0: pl.Tile[[1, 3072], pl.FP32, pl.Mem.Vec] = pl.tile.create([1, 3072], dtype=pl.FP32, target_memory=pl.Mem.Vec)
+                        merged3_inline4925__ssa_v0: pl.Tile[[1, 3072], pl.FP32, pl.Mem.Vec] = pl.tile.mrgsort_format2(incoming2_inline4926__ssa_v1, incoming1_inline4929__ssa_v0, root_inline4931__iter_v1, merge_tmp3_inline4927__ssa_v0, exhausted=True)
+                        root_inline4931__ssa_v4: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.extract(merged3_inline4925__ssa_v0, 0, 0, [1, 1024], target_memory=pl.Mem.Vec)
+                        root_inline4931__phi_v6: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.yield_(root_inline4931__ssa_v4)
+                    else:
+                        merge_tmp2_inline4921__ssa_v0: pl.Tile[[1, 2048], pl.FP32, pl.Mem.Vec] = pl.tile.create([1, 2048], dtype=pl.FP32, target_memory=pl.Mem.Vec)
+                        merged2_inline4923__ssa_v0: pl.Tile[[1, 2048], pl.FP32, pl.Mem.Vec] = pl.tile.mrgsort_format2(incoming1_inline4929__ssa_v0, root_inline4931__iter_v1, merge_tmp2_inline4921__ssa_v0, exhausted=False)
+                        root_inline4931__ssa_v5: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.tile.extract(merged2_inline4923__ssa_v0, 0, 0, [1, 1024], target_memory=pl.Mem.Vec)
+                        root_inline4931__phi_v6: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.yield_(root_inline4931__ssa_v5)
+                    root_inline4931__phi_v7: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.yield_(root_inline4931__phi_v6)
+                root_inline4931__rv_v2: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = pl.yield_(root_inline4931__phi_v7)
+            root_pairs_inline736__ssa_v0: pl.Tile[[1, 1024], pl.FP32, pl.Mem.Vec] = root_inline4931__rv_v2
+            root_scores_inline720__ssa_v0: pl.Tile[[1, 512], pl.FP32, pl.Mem.Vec] = pl.tile.gather_mask(root_pairs_inline736__ssa_v0, mask_pattern=1, output_dtype=pl.FP32)
+            pl.tile.store(root_scores_inline720__ssa_v0, [query__idx_v0, 0], topk_scores__ssa_v0)
+            root_indices_inline729__ssa_v0: pl.Tile[[1, 512], pl.INT32, pl.Mem.Vec] = pl.tile.gather_mask(root_pairs_inline736__ssa_v0, mask_pattern=2, output_dtype=pl.INT32)
+            if 512 <= visible_count_inline726__ssa_v0:
+                pl.tile.store(root_indices_inline729__ssa_v0, [query__idx_v0, 0], topk_indices__ssa_v0)
+            else:
+                output_indices_inline719__ssa_v0: pl.Tile[[1, 512], pl.INT32, pl.Mem.Vec] = pl.tile.full([1, 512], dtype=pl.INT32, value=-1)
+                for lane_inline718__idx_v0 in pl.range(visible_count_inline726__ssa_v0):
+                    t__tmp_v3: pl.Scalar[pl.INT32] = pl.tile.read(root_indices_inline729__ssa_v0, [0, lane_inline718__idx_v0])
+                    pl.tile.write(output_indices_inline719__ssa_v0, [0, lane_inline718__idx_v0], t__tmp_v3)
+                pl.tile.store(output_indices_inline719__ssa_v0, [query__idx_v0, 0], topk_indices__ssa_v0)
+        else:
+            t__tmp_v4: pl.Tile[[1, 512], pl.FP32, pl.Mem.Vec] = pl.tile.full([1, 512], dtype=pl.FP32, value=-3.4028234663852886e+38)
+            pl.tile.store(t__tmp_v4, [query__idx_v0, 0], topk_scores__ssa_v0)
+            t__tmp_v5: pl.Tile[[1, 512], pl.INT32, pl.Mem.Vec] = pl.tile.full([1, 512], dtype=pl.INT32, value=-1)
+            pl.tile.store(t__tmp_v5, [query__idx_v0, 0], topk_indices__ssa_v0)
+    return

@@ -1,0 +1,178 @@
+{
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py",
+  "functions": [
+    {
+      "name": "attention_qk_pv_cube_stage",
+      "line": 115,
+      "parameters": [
+        {
+          "name": "q_flat",
+          "annotation": "pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "valid_block_mask",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]"
+        },
+        {
+          "name": "kv_transfer",
+          "annotation": "pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "score_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]]"
+        },
+        {
+          "name": "probability_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]"
+        },
+        {
+          "name": "pv_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]]"
+        },
+        {
+          "name": "ffts_workspace",
+          "annotation": "pl.Tensor[[FFTS_WORDS], pl.INT64]"
+        },
+        {
+          "name": "core_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        },
+        {
+          "name": "EVENT_BASE",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "returns": "(score_transfer, pv_transfer)"
+    },
+    {
+      "name": "attention_qk_pv_vector_lane_stage",
+      "line": 203,
+      "parameters": [
+        {
+          "name": "ori_kv_flat",
+          "annotation": "pl.Tensor[[ORIGINAL_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "cmp_kv_flat",
+          "annotation": "pl.Tensor[[COMPRESSED_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "ori_block_table",
+          "annotation": "pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_block_table",
+          "annotation": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "bounds",
+          "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+        },
+        {
+          "name": "lengths",
+          "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+        },
+        {
+          "name": "position_ids",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "cmp_sparse_indices",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, CMP_TOPK], pl.INT32]"
+        },
+        {
+          "name": "sparse_bias",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32]"
+        },
+        {
+          "name": "valid_block_mask",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]"
+        },
+        {
+          "name": "attn_sink_col",
+          "annotation": "pl.Tensor[[H, 1], pl.FP32]"
+        },
+        {
+          "name": "freqs_cos",
+          "annotation": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]"
+        },
+        {
+          "name": "rope_sin_signed",
+          "annotation": "pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]"
+        },
+        {
+          "name": "kv_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]]"
+        },
+        {
+          "name": "score_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]"
+        },
+        {
+          "name": "probability_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]]"
+        },
+        {
+          "name": "pv_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "mi_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]]"
+        },
+        {
+          "name": "li_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]]"
+        },
+        {
+          "name": "o_packed_heads",
+          "annotation": "pl.InOut[pl.Tensor[[PACK_ROWS_DYN, O_GROUP_IN], pl.BF16]]"
+        },
+        {
+          "name": "ffts_workspace",
+          "annotation": "pl.Tensor[[FFTS_WORDS], pl.INT64]"
+        },
+        {
+          "name": "core_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "lane_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        },
+        {
+          "name": "EVENT_BASE",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "returns": "(kv_transfer, probability_transfer, mi_transfer, li_transfer, o_packed_heads)"
+    }
+  ],
+  "contracts": {
+    "actual_T": "q_flat.shape[0] == 64 * position_ids.shape[0]; q_flat is actual logical rows, not Q_PAD",
+    "metadata": "bounds Q[B+1], lengths L[B], positions[T], both tables[B,columns]; same batch as plan; immutable during paired helpers",
+    "plan": "indices/bias/mask equal PLAN_CAP>=T; first5 columns of mask used; remaining11 untouched/read-never",
+    "cache": "Native contiguous BF16[page_count*32,512] views; page_count inferred as row_capacity//32; illegal pages skipped",
+    "rope": "cos rows exactly T, signed_sin ROPE_CAP>=T; all accessed rows and sink finite including dummy output rows",
+    "ring": "KV_RING_ROWS>=CORE_GROUPS*3*128; score/probability/PV/mi/li share same HEAD_RING_ROWS>=CORE_GROUPS*3*64; mutually independent scratch",
+    "packed": "PACK_ROWS%8==0, P_PACK=PACK_ROWS//8>=T; write g*P_PACK+t for all 8 groups and actual t; group padding untouched",
+    "ffts": "INT64[256] fixed hardware control declaration; current wrapped runtime uses Simpler hardware base",
+    "events": "EVENT_BASE..+3 are KV,SCORE,PROB,PV; range within0..13; 14/15 reserved. Reuse only after both previous AIC/AIV protocols drain",
+    "roles": "CORE_GROUPS matches actual MIX groups, core_id in[0,G), lane_id in{0,1}. Concurrent AIC plus two AIV, no phase barrier between starting roles",
+    "external_dependencies": "Before paired entry, await q/plan/original+compressed caches/rope. After all vector groups drain, publish packed readiness to OA consumers",
+    "dummy": "Shared plan allzero disables cache/math/events; each lane publishes zero attention for its owned dummy query under finite sink/rope; empty core does not publish",
+    "sync_limit": "CPU model assumes ordered counted FFTS and visibility; no A3 validation"
+  },
+  "new_tasks_created": false,
+  "host_readback": false,
+  "token_divide_S": false,
+  "hardware_executed": false
+}

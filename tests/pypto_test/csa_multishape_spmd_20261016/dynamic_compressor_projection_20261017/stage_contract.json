@@ -1,0 +1,37 @@
+{
+  "production_module": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_projection_stages.py",
+  "source": "canonical deepseek_v4_flash_csa/decode_compressor_ratio4.py 与 decode_indexer_compressor.py 的 project 函数",
+  "entry_helpers": {
+    "compressor_project_stage": {
+      "arguments": ["x BF16 ND[T,4096]", "wkv BF16 ND[1024,4096]", "wgate BF16 ND[1024,4096]", "kv_proj_pad FP32[PAD_MAIN,1024]", "score_proj_pad FP32[PAD_MAIN,1024]", "worker_id INDEX", "WORKERS constexpr"],
+      "returns": ["kv_proj_pad 原GM别名", "score_proj_pad 原GM别名"],
+      "capacity": "PAD_MAIN >= ceil(T/64)*64",
+      "math_tile": {"M": 64, "N": 64, "K": 512, "pipeline_stage": 2, "full_K": 4096},
+      "initialization": "kb=0 使用 pl.matmul，kb>0 使用 pl.matmul_acc；不得改为统一 init_cond"
+    },
+    "indexer_compressor_project_stage": {
+      "arguments": ["x BF16 ND[T,4096]", "wkv BF16 ND[256,4096]", "wgate BF16 ND[256,4096]", "kv_proj_pad FP32[PAD_INDEXER,256]", "score_proj_pad FP32[PAD_INDEXER,256]", "worker_id INDEX", "WORKERS constexpr"],
+      "returns": ["kv_proj_pad 原GM别名", "score_proj_pad 原GM别名"],
+      "capacity": "PAD_INDEXER >= ceil(T/16)*16",
+      "math_tile": {"M": 16, "N": 32, "K": 512, "pipeline_stage": 2, "full_K": 4096},
+      "initialization": "pl.matmul_acc(init_cond=kb==0)，保持原源码"
+    }
+  },
+  "ownership": "M/N网格按行块再列块编号idx，由worker_id+k*WORKERS领取；每块的value/score由同一核顺序归约完整K，无atomic。",
+  "invariants": [
+    "T和两类pad轴保持pl.dynamic；pad是容量，循环只读取真实x的T。",
+    "WORKERS>0、0<=worker_id<WORKERS；没有工作块的核跳过计算。",
+    "尾M仅读取valid_rows，输出只保证前T行，padding内容未定义。",
+    "权重是ND转置布局，matmul b_trans=True；不导入nz_mode或新增权重转换。",
+    "四份输出、输入和权重不可非法别名；调用方按容量绑定GM描述符。"
+  ],
+  "external_responsibilities": [
+    "确保x_norm及权重可读；原late_dep/chain_dep的依赖不能因迁移helper而无依据删除。",
+    "pool读取所需全部列块前等待对应AIC生产者；helper返回不是核间完成或GM发布。",
+    "外层完成本核流水、缓存发布及notify/wait；无工作者是否发布由阶段协议决定。",
+    "请求Q/L、池化、state/cache生命周期及精度验证由完整消费者另行承担。"
+  ],
+  "probe": "一个独立24核SPMD内顺序inline两路helper；只用动态签名进行CPU编译，无具体T/PAD样例，无NPU执行。",
+  "reproduction_command": "bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_projection_20261017/reproduce_cpu.sh cpu_v1 > tests/pypto_test/csa_multishape_spmd_20261016/dynamic_compressor_projection_20261017/cpu_v1.log 2>&1",
+  "limitations": ["不是完整单SPMD CSA", "未测设备数值", "未测同步", "未测性能"]
+}

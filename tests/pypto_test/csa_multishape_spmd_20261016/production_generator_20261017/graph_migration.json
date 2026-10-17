@@ -1,0 +1,188 @@
+{
+  "record_kind": "already_executed_terminal_cpu_checks",
+  "record_date": "2026-10-17",
+  "scope": "生产 DAG/分核/等待迁移的既有 CPU 结果；本次只归档，没有重跑这些检查",
+  "working_directory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1",
+  "device_execution": false,
+  "lowering_executed": false,
+  "performance_measured": false,
+  "reproduction_script": "check_graph_migration.py",
+  "reproduction_command": "python tests/pypto_test/csa_multishape_spmd_20261016/production_generator_20261017/check_graph_migration.py",
+  "script_execution_status": "新整理的脚本未重新执行功能验证；下列结果来自此前两段终端 Python",
+  "production_code_state_note": "七档/B17检查先于仅处理空view的_overlap修正及Ruff排版；短B1/无效输入检查在该修正后执行。未声称整组最终状态复测。",
+  "seven_shapes": [
+    {
+      "case": "h131072_b16",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 973,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h131072_b24",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 1057,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h131072_b4",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 712,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h131072_b8",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 786,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h8192_b16",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 1005,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h8192_b24",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 1057,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    },
+    {
+      "case": "h8192_b32",
+      "passed": true,
+      "tasks": 66,
+      "reachable_pairs": 1377,
+      "members": 1188,
+      "task_closure_equal_to_reference": true,
+      "wait_plan_internal_partial_order_equal": true,
+      "model_cost": "默认10.0，无隐式+1"
+    }
+  ],
+  "b17_exact_cost": {
+    "case": "h65536_b17",
+    "passed": true,
+    "host_max_seq_len": 65542,
+    "binding_source": "生产 binding.bind 与生产 orchestration.py，根描述符取历史 prepared",
+    "cost_key": "(call_ordinal,slot)",
+    "cost_value": "旧 source_audit.cost_sources.model_cost + 1，显式还原旧调度器加项",
+    "compared_member_fields": [
+      "task",
+      "original_subslot",
+      "logical_block",
+      "logical_block_num",
+      "logical_block_stride",
+      "dispatch_seq",
+      "wait_for_core_progress",
+      "publish_completion"
+    ],
+    "compared_core_keys_and_sequence_order": true,
+    "compared_task_partial_order": true,
+    "excluded_fields": [
+      "模型时间戳",
+      "kernel_id",
+      "source_line",
+      "数学数值",
+      "设备同步"
+    ],
+    "member_count": null,
+    "member_count_note": "原终端未输出B17成员数，此处不补造数值"
+  },
+  "short_vector": {
+    "case": "class_0_h8191_b1",
+    "passed": true,
+    "policy": "critical_path",
+    "tasks": 65,
+    "reachable_pairs": 1333,
+    "member_count": null,
+    "member_count_note": "原终端未输出成员数"
+  },
+  "edge_checks": [
+    {
+      "check": "unknown_cost_kernel",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "zero_cost",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "nan_cost",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "boolean_cost",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "member_cycle",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "unknown_member_parent",
+      "passed": true,
+      "expected_exception": "ValueError"
+    },
+    {
+      "check": "empty_view_has_no_overlap",
+      "passed": true
+    },
+    {
+      "check": "war_raw_and_dummy_expansion",
+      "passed": true
+    },
+    {
+      "check": "manual_scope_skips_automatic_edges",
+      "passed": true
+    }
+  ],
+  "original_commands": [
+    {
+      "name": "seven_shapes_and_b17",
+      "command": "python - <<'PY'\nimport importlib, importlib.util, json, sys\nfrom pathlib import Path\np=Path('vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd').resolve()\nspec=importlib.util.spec_from_file_location('csa_spmd_cpu_audit',p/'__init__.py',submodule_search_locations=[str(p)])\nmod=importlib.util.module_from_spec(spec);sys.modules[spec.name]=mod;spec.loader.exec_module(mod)\ng=importlib.import_module(spec.name+'.graph');catalog=importlib.import_module(spec.name+'.catalog').catalog();contracts=g.SourceContracts(catalog)\nf=Path('tests/pypto_test/csa_static_spmd_feasibility_20261015/bindings')\ndef graph(s):\n calls=s['call_bindings'];return {calls[t['task_id']]['ordinal']:{calls[x]['ordinal'] for x in t['predecessors']} for t in s['tasks']}\nfor path in sorted(f.glob('*_prepared.json')):\n name=path.stem.removesuffix('_prepared');old=json.loads(path.read_text());bound=json.loads((f/(name+'.json')).read_text());s,a=g.build_source_schedule(bound,catalog,contracts=contracts)\n assert g.closure(graph(old))==g.closure(graph(s)),name\n assert a['wait_plan']['identical_dependency_partial_order']\n print(name,'PASS',len(s['tasks']),a['task_graph_reachable_pairs'],s['summary']['physical_members'])\n# 沿用已有 B17 源码图的绑定，明确传入旧模型权重 + 1，只比较映射与等待。\nn=Path('tests/pypto_test/csa_multishape_spmd_20261016/anchor_gap_design_v1/builder_check_v3_war/extra_h65536_b17')\nold=json.loads((n/'prepared.json').read_text());audit=json.loads((n/'source_audit.json').read_text())\ntasks=sorted(list(old['call_bindings'].values())+old['non_compute_tasks'],key=lambda x:x['ordinal'])\n# 新构建器还需原 scope 声明，从同一个源码按原root描述符重新绑定，避免反推手动语义。\nbind=importlib.import_module(spec.name+'.binding').bind\nnames={'FP32':'torch.float32','BF16':'torch.bfloat16','FP16':'torch.float16','INT8':'torch.int8','INT32':'torch.int32','INT64':'torch.int64'}\ndescriptors={name:{'shape':v['shape'],'stride':v['strides'],'dtype':names[v['dtype']]} for name,v in old['root_arguments'].items()}\nbound=bind(Path(catalog['logical_source_ir']),descriptors,max_seq_len=65542)\ncosts={(old['call_bindings'][r['task']]['ordinal'],r['slot']):r['model_cost']+1 for r in audit['cost_sources']}\ns,a=g.build_source_schedule(bound,catalog,contracts=contracts,member_costs=costs)\nfields=('task','original_subslot','logical_block','logical_block_num','logical_block_stride','dispatch_seq','wait_for_core_progress','publish_completion')\nnormalize=lambda v:{k:[{z:r[z] for z in fields} for r in rows] for k,rows in v['per_core_sequences'].items() if rows}\nleft,right=normalize(old),normalize(s)\nprint('B17 exact-cost mapping/wait',left==right)\nif left!=right:\n print('different_cores',[k for k in left if left[k]!=right.get(k)])\n for k in left:\n  if left[k]!=right.get(k):\n   for i,(x,y) in enumerate(zip(left[k],right[k])):\n    if x!=y:print('first_difference',k,i,x,y);break\n   break\nelse:\n assert g.closure(graph(old))==g.closure(graph(s))\nPY",
+      "exit_code": 0,
+      "stdout": "h131072_b16 PASS 66 1377 973\nh131072_b24 PASS 66 1377 1057\nh131072_b4 PASS 66 1377 712\nh131072_b8 PASS 66 1377 786\nh8192_b16 PASS 66 1377 1005\nh8192_b24 PASS 66 1377 1057\nh8192_b32 PASS 66 1377 1188\nB17 exact-cost mapping/wait True\n"
+    },
+    {
+      "name": "short_vector_and_edge_checks",
+      "command": "python - <<'PY'\nimport copy, importlib, importlib.util, json, sys\nfrom pathlib import Path\np=Path('vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd').resolve(); spec=importlib.util.spec_from_file_location('csa_spmd_edges',p/'__init__.py',submodule_search_locations=[str(p)]);mod=importlib.util.module_from_spec(spec);sys.modules[spec.name]=mod;spec.loader.exec_module(mod)\ng=importlib.import_module(spec.name+'.graph');w=importlib.import_module(spec.name+'.wait_plan');c=importlib.import_module(spec.name+'.catalog').catalog();contracts=g.SourceContracts(c)\nb=json.loads(Path('tests/pypto_test/csa_multishape_spmd_20261016/anchor_gap_design_v1/class_0_h8191_b1_bindings.json').read_text())\ns,a=g.build_source_schedule(b,c,contracts=contracts,policy='critical_path');assert len(s['tasks'])==65;assert a['task_graph_reachable_pairs']==1333\nfor costs in ({'unknown':1},{'hc_widen_rms':0},{'hc_widen_rms':float('nan')},{'hc_widen_rms':True}):\n try:g.build_source_schedule(b,c,contracts=contracts,member_costs=costs)\n except ValueError:pass\n else:raise AssertionError(('accepted invalid cost',costs))\nfor parents in ([{1},{0}],[{2},set()]):\n try:w.ancestor_sets(parents)\n except ValueError:pass\n else:raise AssertionError('invalid member DAG accepted')\nx={'allocation':'x','dtype':'FP32','offset':0,'shape':[8],'strides':[1],'manual_dep':False}\nempty={**x,'offset':4,'shape':[0]};assert not g._overlap(x,empty)\ndef task(i,role,scope=()):return {'ordinal':i,'kind':'compute','scope':list(scope),'options':{},'logical_function':role,'arguments':[{'parameter':'x','value':x}]}\nbound={'tasks':[task(0,'read'),task(1,'write'),{'ordinal':2,'kind':'dependency_only','scope':[],'options':{'deps':[{'task_ordinal':1}]},'arguments':[]},task(3,'read')],'scopes':[]}\nbound['tasks'][3]['options']={'deps':[{'task_ordinal':2}]}\nparents,explicit,war=g.infer_dependencies(bound,{'read':{'x':{'R'}},'write':{'x':{'R','W'}}})\nassert 0 in parents[1] and 1 in parents[3] and 1 in explicit[3] and (0,1) in war\nmanual=copy.deepcopy(bound);manual['scopes']=[{'id':1,'options':{'mode':'manual'}}];manual['tasks'][1]['scope']=[1]\np,_,_=g.infer_dependencies(manual,{'read':{'x':{'R'}},'write':{'x':{'R','W'}}});assert not p[1]\nprint('short Vector B1 source DAG PASS: 65 tasks /1333 reachable pairs')\nprint('invalid costs/cycle/unknown-parent/empty-view/WAR/dummy/manual scope PASS')\nprint('CPU only; no compiler or NPU')\nPY",
+      "exit_code": 0,
+      "stdout": "short Vector B1 source DAG PASS: 65 tasks /1333 reachable pairs\ninvalid costs/cycle/unknown-parent/empty-view/WAR/dummy/manual scope PASS\nCPU only; no compiler or NPU\n"
+    }
+  ],
+  "limitations": [
+    "七档只比较数学task闭包及构造器内部等待偏序，不声称默认成本映射等于旧映射",
+    "B17差分比较上述八个成员字段与核/序列顺序，不比较完整schedule字节",
+    "CPU进度偏序不证明Scalar缓存可见性、设备精度、图重放或性能",
+    "未保存原执行时全部中间schedule；原命令与stdout从本会话工具记录归档",
+    "整理脚本将原B17仅打印不一致的分支加强为失败退出；既有记录确实为True，不沿用任何未执行分支的PASS"
+  ]
+}

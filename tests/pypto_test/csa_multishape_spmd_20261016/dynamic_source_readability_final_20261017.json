@@ -1,0 +1,706 @@
+{
+  "审查时间": "2026-10-17T09:11:57.264318+00:00",
+  "范围": {
+    "生产目录": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd",
+    "文件数量": 19,
+    "方法": "逐一阅读19份顶部总览；只读AST定位循环/通知，人工抽查关键循环、边界、同步和工作区注释。非逐行数学正确性审查。",
+    "执行限制": "未修改生产源码，未导入生产模块，未运行数学、编译或设备测试；仅写本JSON。"
+  },
+  "结论": "当前19份源码的顶部说明和关键调度注释已覆盖实际职责；没有待修的实质可读性缺口。",
+  "未完成工作不作为注释遗漏": [
+    "完整单SPMD入口、QK/最终Top-K发布、Attention、O/HCpost仍未全部实现；包总览已如实标出。",
+    "设备精度、全链同步、七档性能不能由此只读审查或各阶段CPU编译推导。"
+  ],
+  "调度节点范围说明": "本目录当前只有源级数学helper与工具，没有可执行pl.spmd/pl.split_aiv调用；外层统一创建MIX和角色的要求在包总览及阶段头部明确，故不虚构其附近注释缺口。pl.range/pl.pipeline与phase notify/wait按实际出现位置审查。wait_codegen中的C++ while以字符串源码人工检查。",
+  "已处理建议": [
+    {
+      "文件": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_topk_stages.py",
+      "初次位置": 22,
+      "问题": "单独阅读TopK文件时未明确四个排序/归并helper仅能在AIV内联，虽然包总览已说明排序归AIV。",
+      "程度": "低；阅读合同补充，不是数学或编译缺陷。",
+      "处理": "root收到建议后补充Vector/AIV限定及AIC不能消费UB返回值；本代理只读复核，未修改源码。",
+      "当前位置": [
+        24,
+        25
+      ],
+      "状态": "已补齐，无需重编译或测试。"
+    }
+  ],
+  "需root继续补充": [],
+  "逐文件审查": [
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/__init__.py",
+      "line_count": 93,
+      "overview_lines": [
+        2,
+        91
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "全链分支及尚未实现的QK/Top-K、Attention、O/HCpost明确标出；不是可运行完整CSA入口。",
+        "Q/L/H/C、真实T与pad容量、主/Indexer metadata独立、AIC/AIV和外层SPMD职责覆盖。",
+        "phase完成不等于ACK、pool读完后state提交、post/comb长依赖、GM/UB生命周期及17项模块阅读顺序已说明。"
+      ],
+      "spot_check_lines": [
+        11,
+        28,
+        43,
+        54,
+        83
+      ],
+      "source_schedule_calls": {},
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/cache_stages.py",
+      "line_count": 79,
+      "overview_lines": [
+        8,
+        42
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "BF16[T,512]、Native INT32[T,2]离散slot及[pages*32,512]同GM别名清楚。",
+        "8行tile仅作AIV分工，真实尾行、slot上下界、dummy、有效写槽唯一以及prefix读写边界已说明。",
+        "先等KV生产者、后续attention等cache写回的区别明确；无额外GM工作区。"
+      ],
+      "spot_check_lines": [
+        61,
+        65,
+        68,
+        74
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          66,
+          70
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_output_stages.py",
+      "line_count": 181,
+      "overview_lines": [
+        8,
+        37
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "主512列pool→请求内RMS/RoPE→紧凑slot/cache/debug顺序及各工作区已说明。",
+        "request%WORKERS和请求内最多16行有效访问，inactive/poison不可读；BF16 gamma和归约树不变。",
+        "pool/offsets/RoPE前驱、state提交独立、slot读取前causal/关闭/compact边界及InOut未写区保留均清楚。"
+      ],
+      "spot_check_lines": [
+        77,
+        79,
+        86,
+        106,
+        154,
+        157
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          80,
+          86,
+          110,
+          154
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_pool_stages.py",
+      "line_count": 287,
+      "overview_lines": [
+        8,
+        56
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "主512和Indexer128两份原在线softmax数学及state_commit分离的阅读顺序清楚。",
+        "Q/L请求区间、投影两半布局、Native state页/slot、APE、原始T行pooled有效性和所有容量已说明。",
+        "按请求分核、七次追加保持原顺序、负历史/负页区别、所有pool读完才commit及唯一写slot合同清楚。"
+      ],
+      "spot_check_lines": [
+        92,
+        97,
+        98,
+        111,
+        162,
+        172,
+        181,
+        229,
+        266
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          93,
+          97,
+          111,
+          163,
+          167,
+          173,
+          181,
+          230,
+          234,
+          267,
+          271
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/compressor_projection_stages.py",
+      "line_count": 138,
+      "overview_lines": [
+        8,
+        45
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "主M64/N64与Indexer M16/N32的ND转置权重、两份value/score输出容量清楚。",
+        "实际T的M/N网格轮转AIC，每块完整K4096，不改变split-K/累加；主M64首matmul原因已解释。",
+        "x_norm前驱、pool等待全部列生产者、完整GM不环形复用、padding写回与真实load边界清楚。"
+      ],
+      "spot_check_lines": [
+        76,
+        79,
+        86,
+        117,
+        120,
+        126
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          87,
+          127
+        ],
+        "pl.range": [
+          80,
+          121
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/hc_stages.py",
+      "line_count": 562,
+      "overview_lines": [
+        8,
+        45
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "六段HC数据流、AIC四份K4096与AIV各行tile、gates/comb独立以及外层phase职责清楚。",
+        "Native二维输入、BF16 norm、PAD16/PAD8及workspace_contract的精确shape子视图要求、唯一tail scratch写者已说明。",
+        "32项RMS/16项mix平方和顺序、BF16舍入点、20轮Sinkhorn、两遍mixed读取以及原GM策略边界清楚。"
+      ],
+      "spot_check_lines": [
+        77,
+        114,
+        122,
+        129,
+        171,
+        179,
+        189,
+        209,
+        241,
+        297,
+        303,
+        415,
+        494,
+        502,
+        515,
+        542
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          131,
+          190,
+          417,
+          517,
+          544
+        ],
+        "pl.range": [
+          123,
+          181,
+          216,
+          221,
+          250,
+          304,
+          503
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_cache_stages.py",
+      "line_count": 191,
+      "overview_lines": [
+        8,
+        47
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "真实紧凑行quant/key与单worker0 scale提交分段清楚，Native每页4096B key+64B FP16 scale布局明确。",
+        "request条带、Q/L关闭数与capacity不同、尾块有效行、positions/slot检查顺序和未写区保留已说明。",
+        "BF16舍入再缩放的顺序、所有quant结束才64B RMW及key+scale均可见后score才读的合同清楚。"
+      ],
+      "spot_check_lines": [
+        82,
+        91,
+        121,
+        159,
+        160,
+        171
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          83,
+          94,
+          121,
+          161,
+          171
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_compressor_output_stages.py",
+      "line_count": 201,
+      "overview_lines": [
+        8,
+        49
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "请求内RMS/逆RoPE后紧凑BF16，再AIC M16/N64 Hadamard的数据流清楚。",
+        "先初始化本请求真实compact行、C_valid来自device计数、C=0不读、容量和有效行不同已说明。",
+        "请求内load不跨请求、原RMS归约/行内gather、两个角色owner和pool/metadata/norm前驱清楚。"
+      ],
+      "spot_check_lines": [
+        85,
+        94,
+        100,
+        131,
+        153,
+        188,
+        191
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          86,
+          97,
+          132,
+          153,
+          192
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_query_stages.py",
+      "line_count": 308,
+      "overview_lines": [
+        8,
+        43
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "六段query及独立head权重分支阅读顺序，ND Indexer权重和主query NZ区别已有布局声明。",
+        "真实T、pad64/pad16、同GM flattened head视图、独立scale容量、signed_sin合同清楚。",
+        "各AIC/AIV worker单位、8行尾块逐行、Hadamard每token64head、weights真实pad16 split stride与原数学顺序清楚。"
+      ],
+      "spot_check_lines": [
+        89,
+        93,
+        117,
+        129,
+        149,
+        169,
+        175,
+        209,
+        229,
+        266,
+        269,
+        297,
+        303
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          149,
+          175
+        ],
+        "pl.range": [
+          94,
+          97,
+          130,
+          171,
+          213,
+          232,
+          237,
+          273,
+          280,
+          300
+        ],
+        "pl.unroll": [
+          304
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_topk_stages.py",
+      "line_count": 256,
+      "overview_lines": [
+        8,
+        45
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "四个helper范围、score和(score,index位编码)pair布局、valid_count与容量区别、零候选由外层处理清楚。",
+        "root与scratch生命周期、同核UB返回、GM根生产者等待和跨核复用依赖清楚；审查中唯一建议已由root补齐四个helper仅AIV可用。",
+        "sort32→32/128/512候选run、pair元素block_len单位、各分支输入tie优先序、尾mask与root层级循环有关键注释。"
+      ],
+      "spot_check_lines": [
+        24,
+        25,
+        67,
+        71,
+        83,
+        85,
+        93,
+        95,
+        121,
+        128,
+        133,
+        149,
+        160,
+        170,
+        178,
+        192,
+        196,
+        209,
+        222,
+        225,
+        234,
+        247
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          87
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/kv_stages.py",
+      "line_count": 308,
+      "overview_lines": [
+        8,
+        53
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "ND wkv、BF16 gamma、512=448+64、signed_sin与swap、pad16和真实T布局清楚。",
+        "512行段按实际余量选M32/M64、M16尾、N128四列owner与AIV32行owner、核内pipeline含义清楚。",
+        "完整GM非环形槽、等待全部投影列与RoPE、尾load/store和RMS逐lane归约/舍入顺序已说明。"
+      ],
+      "spot_check_lines": [
+        105,
+        110,
+        114,
+        121,
+        150,
+        174,
+        181,
+        187,
+        194
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          115,
+          126,
+          189,
+          198,
+          224,
+          238
+        ],
+        "pl.range": [
+          107,
+          111,
+          124,
+          152,
+          183
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/metadata_stages.py",
+      "line_count": 162,
+      "overview_lines": [
+        2,
+        52
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "Native device Q/L/T和compact cos/sin，不Host取值、不展开T metadata，offsets/count小工作区清楚。",
+        "单写者前缀扫描、负offset合法、C4关闭公式与例子、只取同请求16行及单位旋转默认值清楚。",
+        "只能一个角色的worker0写、消费者等offset/count、Native RoPE外部依赖、返回UB同核使用清楚。"
+      ],
+      "spot_check_lines": [
+        71,
+        73,
+        82,
+        95,
+        114,
+        123,
+        140,
+        150
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          74,
+          154
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/phase_sync.py",
+      "line_count": 155,
+      "overview_lines": [
+        2,
+        44
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "单写者phase×core×128 INT32布局、动态信号容量与固定G/阶段身份、全体每调用begin一次及代际生命周期清楚。",
+        "Scalar信号和业务数据发布/获取分开、PIPE_ALL排流水、消费者后置cacheinvalid、完成信号无ACK清楚。",
+        "wait_row_owners仅适合行tile轮转，真实owner公式和正除数条件、请求/split-K不可误用均已说明。"
+      ],
+      "spot_check_lines": [
+        55,
+        69,
+        91,
+        92,
+        110,
+        113,
+        133,
+        144,
+        151
+      ],
+      "source_schedule_calls": {
+        "csa_signal_notify": [
+          79,
+          98
+        ],
+        "csa_signal_wait": [
+          112,
+          150
+        ],
+        "pl.range": [
+          146
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/qkv_stages.py",
+      "line_count": 258,
+      "overview_lines": [
+        9,
+        50
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "Q_A/QR输入输出、BF16 gamma、真实T与QA/MATMUL/SCALE各容量、下游QB需pad128特例清楚。",
+        "T区间M32/M64和尾M16、AIC M/N分工、AIV八行/256列原归约与量化顺序清楚。",
+        "QA整行全部列生产者→QR→QB/Indexer关系、set_cache_policy外层要求与源码/CPU验证边界清楚。"
+      ],
+      "spot_check_lines": [
+        114,
+        121,
+        128,
+        190,
+        200,
+        238
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          122,
+          131,
+          201,
+          240
+        ],
+        "pl.range": [
+          116,
+          119,
+          129,
+          192
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_projection_stages.py",
+      "line_count": 376,
+      "overview_lines": [
+        10,
+        54
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "QB→RoPE准备→反量化阅读顺序；ND/NZ不同tile、动态tokens与同GM q_flat/q别名清楚。",
+        "实际T驱动M128上界、AIC列owner/AIV行head owner、QR scale独立pad8、输出有效T已说明。",
+        "QR、QB各列、RoPE多前驱及外层同步、完整/尾RMS公式不同和尾head_tile=4阈值蕴含有说明。"
+      ],
+      "spot_check_lines": [
+        103,
+        106,
+        109,
+        127,
+        130,
+        136,
+        142,
+        182,
+        200,
+        272,
+        336
+      ],
+      "source_schedule_calls": {
+        "pl.pipeline": [
+          110,
+          144,
+          201
+        ],
+        "pl.range": [
+          104,
+          107,
+          131,
+          135,
+          183,
+          274,
+          337
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/query_source.py",
+      "line_count": 320,
+      "overview_lines": [
+        2,
+        40
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "作为原多task源码隔离工具的输入/输出和阅读顺序清楚，不宣称融合入口。",
+        "uniform偶数S配置与实际动态B/T不同，容量128对齐和完整S、S4/S6证据及odd/mixed限制清楚。",
+        "AST配置复制、命名空间隔离、编译出口动态轴检查、可能NZ探针设备副作用、输出源码存续要求已说明。"
+      ],
+      "spot_check_lines": [
+        61,
+        67,
+        72,
+        77,
+        111,
+        159,
+        165,
+        169,
+        173,
+        192,
+        221,
+        265,
+        298
+      ],
+      "source_schedule_calls": {},
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/request_geometry.py",
+      "line_count": 127,
+      "overview_lines": [
+        2,
+        29
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "Q/L device请求几何、原始TND请求范围、独立动态轴和active返回语义清楚。",
+        "不建token映射，不用token//S；先检查边界再读payload，反查重复覆盖拒绝。",
+        "C4计数/负偏移、核内Scalar无GM工作区、AIC/AIV可inline、请求驱动避免O(B)反查已说明。"
+      ],
+      "spot_check_lines": [
+        45,
+        49,
+        71,
+        78,
+        103,
+        114
+      ],
+      "source_schedule_calls": {
+        "pl.range": [
+          80,
+          115
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/signals.py",
+      "line_count": 54,
+      "overview_lines": [
+        2,
+        29
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "一维INT32 signal/元素offset/单调value、单写者隔离、AIC/AIV通用及phase_sync分层清楚。",
+        "Scalar DCache不一致，PIPE_ALL排本核流水非syncall、信号可见不代替业务cache维护、GE多消费者不消费标记已说明。",
+        "首次清零/代际/独占/非ACK、临时接口和可选wait变换边界清楚。"
+      ],
+      "spot_check_lines": [
+        38,
+        39,
+        51,
+        52
+      ],
+      "source_schedule_calls": {
+        "pl.system.signal_notify": [
+          43
+        ],
+        "pl.system.signal_wait": [
+          53
+        ]
+      },
+      "open_issues": []
+    },
+    {
+      "file": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/wait_codegen.py",
+      "line_count": 76,
+      "overview_lines": [
+        2,
+        26
+      ],
+      "coverage": "已覆盖本文件实际职责",
+      "existing_coverage": [
+        "输入PTOAS后CCEC前C++与返回源码/统计，纯Host工具不实值化B/T、不增加工作区。",
+        "仅单INT32视图/GE合同、DCCI+volatile不是ld_dev、100tick非微秒、首次不退避和周期PIPE_ALL原因清楚。",
+        "显式启用、重复/空替换拒绝、发布端不变以及本次无设备证据边界清楚。"
+      ],
+      "spot_check_lines": [
+        33,
+        37,
+        42,
+        48,
+        57,
+        61
+      ],
+      "source_schedule_calls": {},
+      "open_issues": []
+    }
+  ],
+  "不采用机械模板": "单函数模块不强求多级阅读顺序；纯Python源码准备/等待变换不要求虚构device workspace或AIC/AIV分核。函数头与紧邻关键注释可共同构成完整合同。"
+}

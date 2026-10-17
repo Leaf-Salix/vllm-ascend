@@ -1,0 +1,47 @@
+{
+  "passed": true,
+  "scope": "动态请求组/叶计划与Cube系数；不包含score、FFTS或最终TopK",
+  "device_execution": false,
+  "performance_measured": false,
+  "formal_source": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/indexer_group_stages.py",
+  "cpu_full_codegen": "cpu_v2/result.json",
+  "compiled_audit": "cpu_v2/compiled_audit.json",
+  "oracle": "oracle.json",
+  "oracle_scope": {
+    "scenarios": 23,
+    "group_sizes": [
+      2,
+      6
+    ],
+    "coefficient_workers": [
+      1,
+      3,
+      48
+    ],
+    "coefficient_cases": 138,
+    "geometry_group_checks": 1744
+  },
+  "source_AST": {
+    "canonical_leaf_plan": "完整数学体一致，重命名常量",
+    "fp16_cast_multiply": "两次FP16 cast再相乘保持"
+  },
+  "failures": [
+    {
+      "artifact": "cpu_v1/result.json",
+      "reason": "末端offsets[B]的裸tensor.dim下标生成pto.store ptr[]，PTOAS expected SSA operand",
+      "fix": "显式pl.cast(dim,INDEX)保留动态descriptor值；无依赖修改"
+    },
+    {
+      "kind": "compiled_audit_initial_assertion",
+      "reason": "误查CPP中pto.store字串；CPP已lower为(vN)[index]=value",
+      "fix": "只读核对实际指针参数的Scalar赋值及最终TSTORE，无重编"
+    }
+  ],
+  "readability": "完整中文总览/布局/动态边界/策略/所有权/同步/工作区与关键循环已写",
+  "not_validated": [
+    "实际A3 FP16舍入",
+    "设备读写/跨核同步",
+    "score/TopK完整链路",
+    "七档完整L1性能"
+  ]
+}

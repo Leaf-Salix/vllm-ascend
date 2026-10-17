@@ -1,0 +1,26 @@
+# 公共metadata只有Q/L/positions依赖，可与HC投影重叠。选择第一个没有HC M8条带的
+# AIV；若48核都有工作，则选47号，先完成其本轮全部widen并发布，再计算计划。
+# 所以既没有永久保留一核，也没有让AIC等metadata才能开始HC。
+planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+if worker == planner:
+    # 两套compact Q/L分开扫描；只共用真实T，不合并Native语义不同的Tensor。
+    # helper的worker=0表示“由调用方选定的唯一写者执行”，不是固定物理0核。
+    main_offsets, main_count = compact_offsets_and_count_stage(
+        main_bounds, main_lengths, main_offsets, main_count, tokens, 0,
+    )
+    idx_offsets, idx_count = compact_offsets_and_count_stage(
+        idx_bounds, idx_lengths, idx_offsets, idx_count, tokens, 0,
+    )
+    group_offsets, group_plan = indexer_group_plan_stage(
+        idx_bounds, idx_lengths, positions, group_offsets, group_plan, tokens, 0,
+        QUERY_GROUP, BALANCED, ROOTS,
+    )
+    # scale的地址/页所有权也只依赖本轮metadata，可在量化值产生之前准备。
+    # 输入slots在整次调用中不可变；计划与组描述符共用一块有明确分区的工作区。
+    group_offsets = indexer_scale_page_plan_stage(
+        idx_bounds, idx_lengths, positions, idx_offsets, idx_slots, idx_cache,
+        group_offsets, pl.tensor.dim(idx_scales, 0), VECTORS,
+    )
+    # publish先排空业务写回并维护缓存，随后发单写者完成信号；不是atomic计数器。
+    # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
+    signal = publish_phase(signal, PHASE_META, core, CORES, generation)

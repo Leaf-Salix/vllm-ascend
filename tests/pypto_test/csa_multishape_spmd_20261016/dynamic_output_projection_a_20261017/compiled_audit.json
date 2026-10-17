@@ -1,0 +1,64 @@
+{
+  "status": "PASS",
+  "selected_artifacts": [
+    {
+      "stage": "nd",
+      "version": "full_v1",
+      "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_a_20261017/full_v1/nd/kernel/kernels/aic/nd_probe_incore_0.cpp",
+      "dynamic_tensor_dims": [
+        "CSA_OA_PACK_TOTAL_ROWS",
+        "CSA_OA_MM_ROWS"
+      ],
+      "actual_T": "CSA_OA_PROBE_T运行时Scalar→v4",
+      "math_source_matches_current": true,
+      "TSTORE_sites": 1,
+      "TLOAD_sites": 8
+    },
+    {
+      "stage": "nz",
+      "version": "full_v4",
+      "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_a_20261017/full_v4/nz/kernel/kernels/aic/nz_probe_incore_0.cpp",
+      "dynamic_tensor_dims": [
+        "CSA_OA_PACK_TOTAL_ROWS",
+        "CSA_OA_MM_ROWS"
+      ],
+      "actual_T": "CSA_OA_PROBE_T运行时Scalar→v4",
+      "math_source_matches_current": true,
+      "TSTORE_sites": 1,
+      "TLOAD_sites": 8
+    },
+    {
+      "stage": "quant",
+      "version": "full_v1",
+      "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_output_projection_a_20261017/full_v1/quant/kernel/kernels/aiv/quant_probe_incore_0.cpp",
+      "dynamic_tensor_dims": [
+        "CSA_OA_MM_ROWS",
+        "CSA_OA_SCALE_ROWS"
+      ],
+      "actual_T": "CSA_OA_PROBE_T运行时Scalar→v4",
+      "math_source_matches_current": true,
+      "TSTORE_sites": 7,
+      "TLOAD_sites": 6
+    }
+  ],
+  "oa_effective_rows": {
+    "nd": "v54=min(T-v52,128)同时限制packed TLOAD与output TSTORE形状。",
+    "nz": "v64=min(T-v62,128)限制Mat输入与output GM视图；weight根仍Layout::NZ。",
+    "packed_stride": "两份最终CPP均以独立PACK_TOTAL_ROWS/8计算组stride，不复用P_MM。"
+  },
+  "quant_effective_rows": {
+    "paired_pipeline_rows": [
+      "v73=min(T-qt,8)",
+      "v75=min(T-qt-8,8)"
+    ],
+    "tail_pipeline_rows": "v220=min(T-qt_tail,8)",
+    "checked": "三条链常数、amax/div、dequant_scale、乘法与三次cast保留有效shape；尾行scale/INT8 TSTORE没有DCE。",
+    "zero_owner": "v4(T)<=quant_start+32的唯一组内任务；[T,ceil(T/96)*96)每8行纯写INT8，末段限valid_rows，不读FP32。",
+    "scale_capacity": "独立CSA_OA_SCALE_ROWS从scale.shape[1]取得，仅写T真实行。"
+  },
+  "device_execution": false,
+  "limits": [
+    "检查固定已保存后端产物与源级合同；不是设备数据、完整融合同步或性能证明。",
+    "CPU实际编译ND/N128、NZ/N256、quant/RB96；RB32/128等容量边界由源码几何模型检查，未额外重复编译。"
+  ]
+}

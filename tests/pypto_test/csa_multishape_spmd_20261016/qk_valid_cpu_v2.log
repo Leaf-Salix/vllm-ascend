@@ -1,0 +1,14 @@
+{"source": "tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_prepare_v2/variants/h131072_b16/entry_jit.py", "frontend": "jit", "artifact_mode": "kernel", "source_imported": true, "full_codegen_passed": false, "device_execution": false, "kernel_runtime_validated": false, "runtime_abi_supported": false, "memory_planner": "PYPTO", "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_cpu_v2/source.py", "error": "Type annotation for 'stage_30_v255' has dtype bfloat16 but expression has dtype fp32"}
+Error: Type annotation for 'stage_30_v255' has dtype bfloat16 but expression has dtype fp32
+  --> /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-spmd-dynamic-20261016/tests/pypto_test/csa_multishape_spmd_20261016/qk_valid_cpu_v2/source.py:5023:29
+     |
+5021 |                             stage_30_v302 = stage_30_v343
+5022 |                         else:
+5023 |                             stage_30_v255: pl.Tile[[64, 512], pl.BF16, pl.Mem.Vec] = pl.tile.expands(stage_30_v286, 0.0)
+     |                             ^^^^^^^^^^^^^
+5024 |                             for (stage_30_v344, (stage_30_v348,)) in pl.range(64, init_values=(stage_30_v255,)):
+5025 |                                 stage_30_v345: pl.Scalar[pl.INDEX] = (stage_30_v50 - 1) * 128 + stage_30_v27 + stage_30_v344
+     |
+   = help: Change annotation to: pl.Tile[[64, 512], pl.FP32, pl.Mem.Vec]
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.

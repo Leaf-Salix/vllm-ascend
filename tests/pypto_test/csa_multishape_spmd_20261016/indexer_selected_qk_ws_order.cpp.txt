@@ -1,0 +1,101 @@
+// pto: %stage_16_v119__ssa_v0
+          ;
+          Tile<TileType::Right, int8_t, 128, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null> v2590 = Tile<TileType::Right, int8_t, 128, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v333, v328);
+          // pto: %stage_16_v119__ssa_v0
+          ;
+          uint64_t v2591 = (uint64_t) v313;
+          TASSIGN(v2590, v2591);
+          wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+          uint16_t v2592 = static_cast<uint16_t>(v351);
+          uint16_t v2593 = static_cast<uint16_t>(v351);
+          TEXTRACT(v2590, v2588, v2592, v2593);
+          set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
+          // pto: %stage_16_v120__ssa_v0
+          ;
+          Tile<TileType::Right, int8_t, 128, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null> v2594 = Tile<TileType::Right, int8_t, 128, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v333, v328);
+          // pto: %stage_16_v120__ssa_v0
+          ;
+          uint64_t v2595 = (uint64_t) v312;
+          TASSIGN(v2594, v2595);
+          // pto: %stage_16_v121__ssa_v0
+          ;
+          Tile<TileType::Mat, half, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null> v2596 = Tile<TileType::Mat, half, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v321, v328);
+          // pto: %stage_16_v121__ssa_v0
+          ;
+          uint64_t v2597 = (uint64_t) v311;
+          TASSIGN(v2596, v2597);
+          // pto: %stage_16_v122__ssa_v0
+          ;
+          Tile<TileType::Right, half, 384, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null> v2598 = Tile<TileType::Right, half, 384, 64, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v321, v328);
+          // pto: %stage_16_v122__ssa_v0
+          ;
+          uint64_t v2599 = (uint64_t) v292;
+          TASSIGN(v2598, v2599);
+          wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+          uint16_t v2600 = static_cast<uint16_t>(v351);
+          uint16_t v2601 = static_cast<uint16_t>(v351);
+          TEXTRACT(v2598, v2532, v2600, v2601);
+          set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+          // pto: %stage_16_v123__ssa_v0
+          ;
+          Tile<TileType::Acc, int32_t, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null> v2602 = Tile<TileType::Acc, int32_t, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v321, v328);
+          // pto: %stage_16_v123__ssa_v0
+          ;
+          uint64_t v2603 = (uint64_t) v292;
+          TASSIGN(v2602, v2603);
+          wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+          wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+          TMATMUL(v2602, v2394, v2594);
+          set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+          set_flag(PIPE_M, PIPE_MTE1, EVENT_ID2);
+          // pto: %stage_16_v124__ssa_v0
+          ;
+          Tile<TileType::Acc, float, 16, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null> v2604 = Tile<TileType::Acc, float, 16, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v326, v328);
+          // pto: %stage_16_v124__ssa_v0
+          ;
+          uint64_t v2605 = (uint64_t) v296;
+          TASSIGN(v2604, v2605);
+          wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+          TMATMUL(v2604, v2396, v2598);
+          set_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+          set_flag(PIPE_M, PIPE_MTE1, EVENT_ID3);
+          wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+          uint64_t v2606 = static_cast<uint64_t>(v381);
+          uint16_t v2607 = static_cast<uint16_t>(v351);
+          uint16_t v2608 = static_cast<uint16_t>(v351);
+          TINSERT<Tile<TileType::Mat, half, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>, Tile<TileType::Acc, int32_t, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>, ReluPreMode::NormalRelu>(v2596, v2602, v2606, v2607, v2608);
+          set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+          set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+          v2604.SetValidShape(v352, v328);
+          // pto: %1386
+          ;
+          int64_t v2609 = v2400 < v351 ? v351 : v2400;
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          __gm__ float* v2610 = PTOAS__GLOBAL_TENSOR_DATA(v679);
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          const int64_t v2611 = 0;
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          const int64_t v2612 = 1024;
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          pto::Shape<1, 1, 1, 6, 64> v2613 = pto::Shape<1, 1, 1, 6, 64>();
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          pto::Stride<6144, 6144, 6144, 1024, 1> v2614 = pto::Stride<6144, 6144, 6144, 1024, 1>();
+          // pto: %temporary_49__ssa_v0_pview
+          ;
+          GlobalTensor<float, pto::Shape<1, 1, 1, 6, 64>, pto::Stride<6144, 6144, 6144, 1024, 1>, pto::Layout::ND> v2615 = GlobalTensor<float, pto::Shape<1, 1, 1, 6, 64>, pto::Stride<6144, 6144, 6144, 1024, 1>, pto::Layout::ND>(v2610 + (v2611 + v2609 * v2612), v2613, v2614);
+          wait_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+          TSTORE(v2615, v2604);
+          set_flag(PIPE_FIX, PIPE_M, EVENT_ID2);
+          // pto: %stage_16_v128__ssa_v0
+          ;
+          Tile<TileType::Mat, half, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null> v2616 = Tile<TileType::Mat, half, 384, 64, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v321, v328);
+          // pto: %stage_16_v128__ssa_v0
+          ;
+          uint64_t v2617 = (uint64_t) v311;
+          TASSIGN(v2616, v2617);
+          

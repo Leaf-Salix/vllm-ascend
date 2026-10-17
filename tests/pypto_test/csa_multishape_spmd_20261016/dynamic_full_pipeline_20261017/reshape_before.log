@@ -1,0 +1,30 @@
+F.F                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestDynamicLocalTensorMetadata.test_reshape_dim_arithmetic_reaches_dependency _
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/jit/test_decorator.py:2148: in test_reshape_dim_arithmetic_reaches_dependency
+    assert local["flat"].dtype == DataType.INT8
+E   KeyError: 'flat'
+___ TestDynamicLocalTensorMetadata.test_reshape_dim_arithmetic_full_compile ____
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/jit/test_decorator.py:2194: in test_reshape_dim_arithmetic_full_compile
+    compiled = entry.compile(
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py:3505: in compile
+    compiled, _ordered_args, _run_config = self._resolve_compiled(args, kwargs, allow_signature_mode=True)
+/data/server-toolkits/miniconda3/envs/py310/lib/python3.10/contextlib.py:79: in inner
+    return func(*args, **kwds)
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py:3247: in _resolve_compiled
+    return build(), ordered_args, run_config
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py:3236: in build
+    return self._compile(
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/decorator.py:3718: in _compile
+    source = specializer.specialize()
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/specializer.py:1947: in specialize
+    method_lines = self._specialize_function(ctx)
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/specializer.py:2102: in _specialize_function
+    params = self._build_params(
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/specializer.py:2368: in _build_params
+    raise ValueError(
+E   ValueError: @pl.jit: missing inferred tensor metadata for parameter 'keys' of 'copy_key'. This usually means the tensor's shape/dtype could not be statically determined, or that the call site passing it was not resolved (no call to 'copy_key' found in its caller). Pass the tensor directly as a function argument, or ensure any intermediate pl.create_tensor() used for this parameter has a statically inferable shape and dtype.
+=========================== short test summary info ============================
+FAILED tests/ut/jit/test_decorator.py::TestDynamicLocalTensorMetadata::test_reshape_dim_arithmetic_reaches_dependency
+FAILED tests/ut/jit/test_decorator.py::TestDynamicLocalTensorMetadata::test_reshape_dim_arithmetic_full_compile
+2 failed, 1 passed, 163 deselected in 0.80s

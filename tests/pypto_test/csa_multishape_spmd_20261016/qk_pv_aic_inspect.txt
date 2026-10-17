@@ -1,0 +1,71 @@
+@pl.function(type=pl.FunctionType.Inline, auto_scope=False)
+def qk_pv_aic(t_dim_inline4335__ssa_v0: pl.Scalar[pl.INDEX], original_block_idx: pl.Scalar[pl.INDEX], ffts_workspace_inline4361__ssa_v0: pl.Tensor[[256], pl.INT64], q_flat_inline4389__ssa_v0: pl.Tensor[[t_heads_inline4306__ssa_v0, 512], pl.BF16], valid_block_mask_inline4413__ssa_v0: pl.Tensor[[t_dim_inline4335__ssa_v0, 16], pl.INT32], kv_transfer_inline4342__ssa_v0: pl.InOut[pl.Tensor[[9216, 512], pl.BF16]], score_transfer_inline4398__ssa_v0: pl.InOut[pl.Tensor[[4608, 128], pl.FP32]], probability_transfer_inline4399__ssa_v0: pl.InOut[pl.Tensor[[4608, 128], pl.BF16]], pv_transfer_inline4320__ssa_v0: pl.InOut[pl.Tensor[[4608, 512], pl.FP32]], attn_sink_col_inline4382__ssa_v0: pl.Tensor[[64, 1], pl.FP32], position_ids_t1__ssa_v0: pl.Tensor[[T_DYN, 1], pl.INT64], ori_block_table__ssa_v0: pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32], ori_kv_flat_inline4326__ssa_v1: pl.Tensor[[ori_block_num_inline4369__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16], cmp_sparse_indices_inline4329__rv_v2: pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32], cmp_block_table__ssa_v0: pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32], cmp_kv_flat_inline4388__ssa_v0: pl.Tensor[[cmp_block_num_inline4371__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16], sparse_bias_inline4301__rv_v2: pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32], mi_transfer_inline4318__ssa_v0: pl.InOut[pl.Tensor[[4608, 1], pl.FP32]], li_transfer_inline4403__ssa_v0: pl.InOut[pl.Tensor[[4608, 1], pl.FP32]], freqs_cos__ssa_v0: pl.Tensor[[T_DYN, 64], pl.FP32], rope_sin_signed_inline4321__ssa_v0: pl.Tensor[[384, 64], pl.FP32], o_packed_heads__ssa_v0: pl.Out[pl.Tensor[[3072, 4096], pl.BF16]]):
+    pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})
+    qk_core_inline4347__ssa_v0: pl.Scalar[pl.INDEX] = original_block_idx
+    pl.system.set_ffts(ffts_workspace_inline4361__ssa_v0)
+    qk_query_count_inline4331__ssa_v0: pl.Scalar[pl.INDEX] = (t_dim_inline4335__ssa_v0 - qk_core_inline4347__ssa_v0 + 23) // 24
+    qk_block_count_inline4405__ssa_v0: pl.Scalar[pl.INDEX] = qk_query_count_inline4331__ssa_v0 * 5
+    qk_q_inline4406__ssa_v0: pl.Tile[[64, 512], pl.BF16, pl.Mem.Mat] = pl.tile.create([64, 512], dtype=pl.BF16, target_memory=pl.Mem.Mat)
+    qk_l1_inline4426__ssa_v0: pl.Tile[[384, 512], pl.BF16, pl.Mem.Mat] = pl.tile.create([384, 512], dtype=pl.BF16, target_memory=pl.Mem.Mat)
+    for (qk_tick_inline4364__idx_v0, (qk_l1_inline4426__iter_v1, qk_q_inline4406__iter_v1)) in pl.range(qk_block_count_inline4405__ssa_v0 + 2, init_values=(qk_l1_inline4426__ssa_v0, qk_q_inline4406__ssa_v0)):
+        if qk_tick_inline4364__idx_v0 < qk_block_count_inline4405__ssa_v0:
+            qk_sb_inline4367__ssa_v0: pl.Scalar[pl.INDEX] = qk_tick_inline4364__idx_v0 % 5
+            qk_t_inline4408__ssa_v0: pl.Scalar[pl.INDEX] = qk_core_inline4347__ssa_v0 + qk_tick_inline4364__idx_v0 // 5 * 24
+            if qk_sb_inline4367__ssa_v0 == 0:
+                qk_q_inline4406__ssa_v3: pl.Tile[[64, 512], pl.BF16, pl.Mem.Mat] = pl.tile.gather_row(qk_q_inline4406__iter_v1, q_flat_inline4389__ssa_v0, [0, 0], [qk_t_inline4408__ssa_v0 * 64, 0], [64, 512], transpose=False)
+                qk_q_inline4406__phi_v4: pl.Tile[[64, 512], pl.BF16, pl.Mem.Mat] = pl.yield_(qk_q_inline4406__ssa_v3)
+            else:
+                qk_q_inline4406__phi_v4: pl.Tile[[64, 512], pl.BF16, pl.Mem.Mat] = pl.yield_(qk_q_inline4406__iter_v1)
+            t__tile: pl.Scalar[pl.INT32] = pl.tensor.read(valid_block_mask_inline4413__ssa_v0, [qk_t_inline4408__ssa_v0, qk_sb_inline4367__ssa_v0])
+            if 0 < pl.cast(t__tile, pl.INDEX):
+                qk_slot_inline4410__ssa_v0: pl.Scalar[pl.INDEX] = qk_core_inline4347__ssa_v0 * 3 + qk_tick_inline4364__idx_v0 % 3
+                qk_kv_row_inline4412__ssa_v0: pl.Scalar[pl.INDEX] = qk_slot_inline4410__ssa_v0 * 128
+                qk_transfer_row_inline4414__ssa_v0: pl.Scalar[pl.INDEX] = qk_slot_inline4410__ssa_v0 * 64
+                pl.system.sync_wait(0, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                qk_l1_row_inline4415__ssa_v0: pl.Scalar[pl.INDEX] = qk_tick_inline4364__idx_v0 % 3 * 128
+                qk_l1_inline4426__ssa_v3: pl.Tile[[384, 512], pl.BF16, pl.Mem.Mat] = pl.tile.gather_row(qk_l1_inline4426__iter_v1, kv_transfer_inline4342__ssa_v0, [qk_l1_row_inline4415__ssa_v0, 0], [qk_kv_row_inline4412__ssa_v0, 0], [128, 512], transpose=False)
+                qk_l1_t_inline4400__ssa_v0: pl.Tile[[512, 384], pl.BF16, pl.Mem.Mat, pl.TileView(blayout=pl.TileLayout.row_major, slayout=pl.TileLayout.col_major)] = pl.tile.transpose_view(qk_l1_inline4426__ssa_v3)
+                qk_scores_inline4386__ssa_v0_l0_init: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.create([64, 128], dtype=pl.FP32, target_memory=pl.Mem.Acc)
+                for (qk_scores_inline4386__ssa_v0_l0_ko, (qk_scores_inline4386__ssa_v0_l0_c,)) in pl.pipeline(0, 512, 128, stage=2, init_values=(qk_scores_inline4386__ssa_v0_l0_init,)):
+                    qk_scores_inline4386__ssa_v0_l0_a: pl.Tile[[64, 128], pl.BF16, pl.Mem.Left, pl.TileView(blayout=pl.TileLayout.row_major)] = pl.tile.extract(qk_q_inline4406__phi_v4, 0, qk_scores_inline4386__ssa_v0_l0_ko, [64, 128], target_memory=pl.Mem.Left)
+                    qk_scores_inline4386__ssa_v0_l0_b: pl.Tile[[128, 128], pl.BF16, pl.Mem.Right] = pl.tile.extract(qk_l1_t_inline4400__ssa_v0, qk_scores_inline4386__ssa_v0_l0_ko, qk_l1_row_inline4415__ssa_v0, [128, 128], target_memory=pl.Mem.Right)
+                    qk_scores_inline4386__ssa_v0_l0_c_acc: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.matmul_acc(qk_scores_inline4386__ssa_v0_l0_c, qk_scores_inline4386__ssa_v0_l0_a, qk_scores_inline4386__ssa_v0_l0_b, qk_scores_inline4386__ssa_v0_l0_ko == 0)
+                    qk_scores_inline4386__ssa_v0: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.yield_(qk_scores_inline4386__ssa_v0_l0_c_acc)
+                score_transfer_inline4398__store: pl.Tensor[[4608, 128], pl.FP32] = pl.tile.store(qk_scores_inline4386__ssa_v0, [qk_transfer_row_inline4414__ssa_v0, 0], score_transfer_inline4398__ssa_v0)
+                pl.system.sync_set(1, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+                qk_l1_inline4426__phi_v4: pl.Tile[[384, 512], pl.BF16, pl.Mem.Mat] = pl.yield_(qk_l1_inline4426__ssa_v3)
+            else:
+                qk_l1_inline4426__phi_v4: pl.Tile[[384, 512], pl.BF16, pl.Mem.Mat] = pl.yield_(qk_l1_inline4426__iter_v1)
+            (qk_l1_inline4426__phi_v5, qk_q_inline4406__phi_v5) = pl.yield_(qk_l1_inline4426__phi_v4, qk_q_inline4406__phi_v4)
+        else:
+            (qk_l1_inline4426__phi_v5, qk_q_inline4406__phi_v5) = pl.yield_(qk_l1_inline4426__iter_v1, qk_q_inline4406__iter_v1)
+        if 2 <= qk_tick_inline4364__idx_v0:
+            pv_work_inline4417__ssa_v0: pl.Scalar[pl.INDEX] = qk_tick_inline4364__idx_v0 - 2
+            pv_sb_inline4418__ssa_v0: pl.Scalar[pl.INDEX] = pv_work_inline4417__ssa_v0 % 5
+            pv_t_inline4420__ssa_v0: pl.Scalar[pl.INDEX] = qk_core_inline4347__ssa_v0 + pv_work_inline4417__ssa_v0 // 5 * 24
+            t__tile_1: pl.Scalar[pl.INT32] = pl.tensor.read(valid_block_mask_inline4413__ssa_v0, [pv_t_inline4420__ssa_v0, pv_sb_inline4418__ssa_v0])
+            if 0 < pl.cast(t__tile_1, pl.INDEX):
+                pv_slot_inline4391__ssa_v0: pl.Scalar[pl.INDEX] = qk_core_inline4347__ssa_v0 * 3 + pv_work_inline4417__ssa_v0 % 3
+                pv_transfer_row_inline4421__ssa_v0: pl.Scalar[pl.INDEX] = pv_slot_inline4391__ssa_v0 * 64
+                pl.system.sync_wait(2, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                pv_probability_inline4422__ssa_v0: pl.Tile[[64, 128], pl.BF16, pl.Mem.Mat] = pl.tile.load(probability_transfer_inline4399__ssa_v0, [pv_transfer_row_inline4421__ssa_v0, 0], [64, 128], [64, 128], target_memory=pl.Mem.Mat)
+                pv_l1_row_inline4425__ssa_v0: pl.Scalar[pl.INDEX] = pv_work_inline4417__ssa_v0 % 3 * 128
+                pv_probability_left_inline4427__ssa_v0: pl.Tile[[64, 128], pl.BF16, pl.Mem.Left] = pl.tile.move(pv_probability_inline4422__ssa_v0, target_memory=pl.Mem.Left)
+                pv_first_right_inline4365__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.Mem.Right] = pl.tile.extract(qk_l1_inline4426__phi_v5, pv_l1_row_inline4425__ssa_v0, 0, [128, 128], target_memory=pl.Mem.Right)
+                pv_previous_inline4407__ssa_v0: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(pv_probability_left_inline4427__ssa_v0, pv_first_right_inline4365__ssa_v0)
+                pv_next_right_inline4429__ssa_v0: pl.Tile[[128, 128], pl.BF16, pl.Mem.Right] = pl.tile.extract(qk_l1_inline4426__phi_v5, pv_l1_row_inline4425__ssa_v0, 128, [128, 128], target_memory=pl.Mem.Right)
+                pv_current_inline4353__ssa_v0: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(pv_probability_left_inline4427__ssa_v0, pv_next_right_inline4429__ssa_v0)
+                pv_transfer_inline4320__store: pl.Tensor[[4608, 512], pl.FP32] = pl.tile.store(pv_previous_inline4407__ssa_v0, [pv_transfer_row_inline4421__ssa_v0, 0], pv_transfer_inline4320__ssa_v0)
+                pv_previous_inline4407__ssa_v1: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pv_current_inline4353__ssa_v0
+                pv_next_right_inline4429__ssa_v1: pl.Tile[[128, 128], pl.BF16, pl.Mem.Right] = pl.tile.extract(qk_l1_inline4426__phi_v5, pv_l1_row_inline4425__ssa_v0, 256, [128, 128], target_memory=pl.Mem.Right)
+                pv_current_inline4353__ssa_v1: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(pv_probability_left_inline4427__ssa_v0, pv_next_right_inline4429__ssa_v1)
+                pv_transfer_inline4320__store_v0: pl.Tensor[[4608, 512], pl.FP32] = pl.tile.store(pv_previous_inline4407__ssa_v1, [pv_transfer_row_inline4421__ssa_v0, 128], pv_transfer_inline4320__ssa_v0)
+                pv_previous_inline4407__ssa_v2: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pv_current_inline4353__ssa_v1
+                pv_next_right_inline4429__ssa_v2: pl.Tile[[128, 128], pl.BF16, pl.Mem.Right] = pl.tile.extract(qk_l1_inline4426__phi_v5, pv_l1_row_inline4425__ssa_v0, 384, [128, 128], target_memory=pl.Mem.Right)
+                pv_current_inline4353__ssa_v2: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(pv_probability_left_inline4427__ssa_v0, pv_next_right_inline4429__ssa_v2)
+                pv_transfer_inline4320__store_v1: pl.Tensor[[4608, 512], pl.FP32] = pl.tile.store(pv_previous_inline4407__ssa_v2, [pv_transfer_row_inline4421__ssa_v0, 256], pv_transfer_inline4320__ssa_v0)
+                pv_previous_inline4407__ssa_v3: pl.Tile[[64, 128], pl.FP32, pl.Mem.Acc] = pv_current_inline4353__ssa_v2
+                pv_transfer_inline4320__store_v2: pl.Tensor[[4608, 512], pl.FP32] = pl.tile.store(pv_previous_inline4407__ssa_v3, [pv_transfer_row_inline4421__ssa_v0, 384], pv_transfer_inline4320__ssa_v0)
+                pl.system.sync_set(3, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+        (qk_l1_inline4426__rv_v2, qk_q_inline4406__rv_v2) = pl.yield_(qk_l1_inline4426__phi_v5, qk_q_inline4406__phi_v5)
+    pl.system.set_ffts(ffts_workspace_inline4361__ssa_v0)
