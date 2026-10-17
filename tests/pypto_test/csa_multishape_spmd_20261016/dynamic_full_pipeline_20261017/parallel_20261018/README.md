@@ -9,6 +9,13 @@
 [compact_priority_evidence/SEVEN_CASES.md](compact_priority_evidence/SEVEN_CASES.md)。
 冻结基线源码在 `baseline_source/`，候选源码在各结果目录的 `source/`。
 
+此后HC四阶段有效消费者通知已在128K/B4、128K/B16、8K/B32三个代表点完成
+同进程验证，并迁入正式动态源：相对含compact前移的d56分别降低1.117%、
+0.909%、0.354%，15个配对窗口均更快。当前仅有这三个代表点的新性能数据，
+不能把下方d56的完整七档表改标为HC通知版。原数学/等待和72核代际未变；
+真实设备信号快照还核对了未发布槽保留旧值。完整证据见
+[hc_active_notifications_evidence/DEVICE_RESULTS.md](hc_active_notifications_evidence/DEVICE_RESULTS.md)。
+
 ## 比较方法
 
 正式 W8A8 权重，每请求 S6；先精确核对输出、Top-K、score、cache/state，
@@ -213,6 +220,43 @@ UB→GM FIFO→L1，A5直接写peer L1不适用；自动FIFO还涉及全函数L1
 充分的新候选；保留提取脚本、IR/C++摘录及明确限制，不为凑方案增加测试。
 
 ## 复现与归档
+
+compact阶段前移与完整七档已经阶段提交为`d56c9eb6`；后续消融使用
+`adopted_source_d56c9eb6/`中的33份动态源作同进程参照，避免仍与未采用
+该项优化的593版本比较而混入已获得收益。当前正式源保持此提交。
+
+`ob_hcpost_stream_audit/`只读审计了O_B逐组发布、提前八组反量化的可能性。
+它与已有OA→quant→OB组流水不同：单行外层只隐藏每名AIV首行的部分归约，
+并增加通知/获取；组外层需16～64KiB常驻累加器或额外GM往返。未形成足够
+收益依据，本轮不制作设备候选。保留257例所有权检查、真实旧时钟、生成
+尾段摘录与资源边界；既有约25～26μs的OB末端到OUT区间包含HCpost，不能
+全部当成可隐藏时间。
+
+另在隔离源准备HC四阶段有效消费者通知候选：只guard RAW/GATES/NORM/COMB
+四处发布，真实生产者的发布、全部原数学/等待和72核begin均保留。`hc_active_notifications_evidence/`
+保存后续独立证据；在实际结果回收前，不把减少发布次数记作性能收益。
+
+上述HC候选随后三例均已通过，正式迁移只改变`vector_schedule.py`的四处
+publish guard，33份源与验证副本逐字相同；详情及适用边界在该目录的
+`formal_migration.json`与`DEVICE_RESULTS.md/json`。不新增shape白名单，
+不据小幅同轮改善作统计显著性或全部区间达标结论。
+
+`indexer_query_group_audit/`保存G4/G6和叶分配审查：六叶方案不推进，
+五叶owner的41→40只是工作量示意、没有设备收益；当前G2/768本就采用N128，
+不存在可重复实施的“N64改N128”优化。`qb_left_doublebuffer_evidence/`
+保留主QB首次显式Left双槽导致Mat退化的负例及修正版：第二版完整CPU恢复
+原Mat窗口，Left两槽、Right单槽，生成事件允许预取下一Left；设备性能待收。
+`aic_orphan_notifications_evidence/`只删除SCORE_CUBE/ATTN_CUBE两处无人等待
+的AIC发布；CPU全部物理allocation、FFTS与后继获取不变，设备性能待收。
+两者都从d56独立出发，不叠加HC guard，不跨任务相减推算组合收益。
+
+两项设备结果现已收齐：QB v2完整通过但870.98→876.70μs、慢0.657%，
+五个配对均更慢，不采用、不扩档。AIC两通知独立B16为885.90→875.34μs，
+降低1.192%，但与HC guard组合后效果不一致：长B4改善5.248%、长B16
+近乎持平（0.009%）、短B32回退0.624%。三个组合任务均通过全部原检查，
+仍不采用全区间默认、不按B4测试点建立白名单。正式源码保持仅HC四处guard。
+原始窗口与完整限制见各目录`DEVICE_RESULTS.md/json`和
+[notification_combo_evidence/README.md](notification_combo_evidence/README.md)。
 
 从上一级目录运行主工作区脚本，避免私有worktree改变依赖根的解析：
 

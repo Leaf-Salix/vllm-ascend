@@ -1,0 +1,769 @@
+{
+  "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/adopted_source_d56c9eb6",
+  "phases": {
+    "PHASE_PARTIAL": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 244,
+          "call": "publish_phase(signal, PHASE_PARTIAL, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 433,
+          "call": "wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, worker // 2 * 4, 4, 1, GROUPS, 0, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 450,
+          "call": "wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, 0, projection_tasks, 1, GROUPS, 0, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 444,
+          "call": "wait_row_owners(signal, PHASE_PARTIAL, CORES, generation, worker * 4, 4, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_NORM": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 523,
+          "call": "publish_phase(signal, PHASE_NORM, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 245,
+          "call": "wait_row_owners(signal, PHASE_NORM, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_QA": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 259,
+          "call": "publish_phase(signal, PHASE_QA, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 532,
+          "call": "wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 535,
+          "call": "wait_row_owners(signal, PHASE_QA, CORES, generation, 0, qa_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_PROJECT": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 272,
+          "call": "publish_phase(signal, PHASE_IDX_PROJECT, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 602,
+          "call": "wait_row_owners(signal, PHASE_IDX_PROJECT, CORES, generation, 0, idx_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_QR": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 546,
+          "call": "publish_phase(signal, PHASE_QR, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 273,
+          "call": "wait_row_owners(signal, PHASE_QR, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 566,
+          "call": "wait_row_owners(signal, PHASE_QR, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_QUERY_PROJECT": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 288,
+          "call": "publish_phase(signal, PHASE_IDX_QUERY_PROJECT, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 579,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_WEIGHTS_PROJECT": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 290,
+          "call": "publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 592,
+          "call": "wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_KV_PROJECT": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 294,
+          "call": "publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 650,
+          "call": "wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 653,
+          "call": "wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_QUERY_ROPE": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 590,
+          "call": "publish_phase(signal, PHASE_IDX_QUERY_ROPE, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 298,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_QUERY_HAD": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 309,
+          "call": "publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 684,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_QB": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 312,
+          "call": "publish_phase(signal, PHASE_QB, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 748,
+          "call": "wait_row_owners(signal, PHASE_QB, CORES, generation, 0, 128, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_META": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 425,
+          "call": "publish_phase(signal, PHASE_META, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 318,
+          "call": "wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 598,
+          "call": "wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)"
+        }
+      ]
+    },
+    "PHASE_IDX_NORM": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 644,
+          "call": "publish_phase(signal, PHASE_IDX_NORM, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 320,
+          "call": "wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_HADAMARD": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 330,
+          "call": "publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 717,
+          "call": "wait_row_owners(signal, PHASE_IDX_HADAMARD, CORES, generation, 0, had_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_MAIN_PROJECT": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 344,
+          "call": "publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 766,
+          "call": "wait_row_owners(signal, PHASE_MAIN_PROJECT, CORES, generation, 0, main_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_QUERY_QUANT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 693,
+          "call": "publish_phase(signal, PHASE_IDX_QUERY_QUANT, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 348,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 698,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUERY_QUANT, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_COEFF": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 711,
+          "call": "publish_phase(signal, PHASE_COEFF, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 350,
+          "call": "wait_row_owners(signal, PHASE_COEFF, CORES, generation, 0, groups, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_SCALE": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 745,
+          "call": "publish_phase(signal, PHASE_IDX_SCALE, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 351,
+          "call": "wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 815,
+          "call": "wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_SCORE_CUBE": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 375,
+          "call": "publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_ATTN_PLAN": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 873,
+          "call": "publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 379,
+          "call": "wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 877,
+          "call": "wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_QUERY": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 760,
+          "call": "publish_phase(signal, PHASE_QUERY, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 381,
+          "call": "wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_ATTN_CUBE": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 394,
+          "call": "publish_phase(signal, PHASE_ATTN_CUBE, worker, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_ATTN_VECTOR": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 911,
+          "call": "publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 399,
+          "call": "wait_row_owners(signal, PHASE_ATTN_VECTOR, CORES, generation, 0, packed_workers, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_OB": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 435,
+          "call": "publish_phase(signal, PHASE_OB, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 940,
+          "call": "wait_row_owners(signal, PHASE_OB, CORES, generation, 0, 64, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_INPUT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 373,
+          "call": "publish_phase(signal, PHASE_INPUT, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 231,
+          "call": "wait_row_owners(signal, PHASE_INPUT, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "cube_schedule.py",
+          "line": 226,
+          "call": "wait_row_owners(signal, PHASE_INPUT, CORES, generation, hc_first, pl.min(16, tokens - hc_first), 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 493,
+          "call": "wait_row_owners(signal, PHASE_INPUT, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_OA": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 431,
+          "call": "publish_phase(signal, PHASE_OA, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 935,
+          "call": "wait_row_owners(signal, PHASE_OA, CORES, generation, 0, oa_tasks, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_O_QUANT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 939,
+          "call": "publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 433,
+          "call": "wait_row_owners(signal, PHASE_O_QUANT, CORES, generation, 0, quant_tasks, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_OA_GROUP_BASE + group": {
+      "publish": [
+        {
+          "file": "cube_schedule.py",
+          "line": 412,
+          "call": "publish_phase(signal, PHASE_OA_GROUP_BASE + oa_group, worker, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 923,
+          "call": "wait_row_owners(signal, PHASE_OA_GROUP_BASE + quant_group, CORES, generation, quant_group * oa_per_group, oa_per_group, 1, GROUPS, 0, 1)"
+        }
+      ]
+    },
+    "PHASE_O_QUANT_GROUP_BASE + group": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 932,
+          "call": "publish_phase(signal, PHASE_O_QUANT_GROUP_BASE + quant_group, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "cube_schedule.py",
+          "line": 421,
+          "call": "wait_row_owners(signal, PHASE_O_QUANT_GROUP_BASE + ob_group, CORES, generation, ob_group * quant_per_group, quant_per_group, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_GATES": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 518,
+          "call": "publish_phase(signal, PHASE_GATES, core, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_COMB": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 527,
+          "call": "publish_phase(signal, PHASE_COMB, core, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_ROPE": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 550,
+          "call": "publish_phase(signal, PHASE_ROPE, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 554,
+          "call": "wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 654,
+          "call": "wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 880,
+          "call": "wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_WEIGHTS": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 594,
+          "call": "publish_phase(signal, PHASE_WEIGHTS, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 697,
+          "call": "wait_row_owners(signal, PHASE_WEIGHTS, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_POOL": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 616,
+          "call": "publish_phase(signal, PHASE_IDX_POOL, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 617,
+          "call": "wait_row_owners(signal, PHASE_IDX_POOL, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_COMMIT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 630,
+          "call": "publish_phase(signal, PHASE_IDX_COMMIT, core, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_KV_NORM": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 667,
+          "call": "publish_phase(signal, PHASE_KV_NORM, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 669,
+          "call": "wait_row_owners(signal, PHASE_KV_NORM, CORES, generation, 0, tokens, 32, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_ORIGINAL_CACHE": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 682,
+          "call": "publish_phase(signal, PHASE_ORIGINAL_CACHE, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 878,
+          "call": "wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_IDX_QUANT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 731,
+          "call": "publish_phase(signal, PHASE_IDX_QUANT, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 735,
+          "call": "wait_row_owners(signal, PHASE_IDX_QUANT, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_MAIN_POOL": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 780,
+          "call": "publish_phase(signal, PHASE_MAIN_POOL, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 781,
+          "call": "wait_row_owners(signal, PHASE_MAIN_POOL, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_MAIN_COMMIT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 794,
+          "call": "publish_phase(signal, PHASE_MAIN_COMMIT, core, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_MAIN_OUTPUT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 811,
+          "call": "publish_phase(signal, PHASE_MAIN_OUTPUT, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 879,
+          "call": "wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_SCORE_VECTOR": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 838,
+          "call": "publish_phase(signal, PHASE_SCORE_VECTOR, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 841,
+          "call": "wait_row_owners(signal, PHASE_SCORE_VECTOR, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_TOPK": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 855,
+          "call": "publish_phase(signal, PHASE_TOPK, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 856,
+          "call": "wait_row_owners(signal, PHASE_TOPK, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    },
+    "PHASE_OUT": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 954,
+          "call": "publish_phase(signal, PHASE_OUT, core, CORES, generation)"
+        }
+      ],
+      "wait": []
+    },
+    "PHASE_RAW": {
+      "publish": [
+        {
+          "file": "vector_schedule.py",
+          "line": 463,
+          "call": "publish_phase(signal, PHASE_RAW, core, CORES, generation)"
+        }
+      ],
+      "wait": [
+        {
+          "file": "vector_schedule.py",
+          "line": 481,
+          "call": "wait_row_owners(signal, PHASE_RAW, CORES, generation, 0, tokens, 16, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 471,
+          "call": "wait_row_owners(signal, PHASE_RAW, CORES, generation, worker // 2, 1, 1, VECTORS, GROUPS, 1)"
+        },
+        {
+          "file": "vector_schedule.py",
+          "line": 476,
+          "call": "wait_row_owners(signal, PHASE_RAW, CORES, generation, worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1)"
+        }
+      ]
+    }
+  },
+  "no_phase_wait": [
+    "PHASE_ATTN_CUBE",
+    "PHASE_COMB",
+    "PHASE_GATES",
+    "PHASE_IDX_COMMIT",
+    "PHASE_MAIN_COMMIT",
+    "PHASE_OUT",
+    "PHASE_SCORE_CUBE"
+  ],
+  "normalization": "输出组发布/等待使用不同循环变量，按 PHASE_*_GROUP_BASE+group 对齐，不误判为无人消费。",
+  "scope": "只统计两个正式 schedule 的 phase 调用；FFTS 与本核 payload 依赖另见 README，不因无 wait 自动删除 fence。"
+}

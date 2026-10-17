@@ -1,0 +1,79 @@
+--- v1/query_projection_stages.py
++++ v2/query_projection_stages.py
+@@ -124,7 +124,7 @@
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+-    """NZ Q_B：仅后续K256 pair显式保留两份Left；跨核协议仍由caller负责。
++    """NZ Q_B：保留原 Mat 活跃窗口并显式保留两份 Left；跨核协议仍由caller负责。
+ 
+     初始K0与最后K768使用单块；中间K256/K512先形成两份Left再提交MMA，
+     用重叠活跃期表达双槽需求，不使用固定地址或全局reserve。Right仍单槽：
+@@ -142,11 +142,11 @@
+                 qr_i8_matmul, [t0, 0], [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+                 target_memory=pl.MemorySpace.Mat, valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+             )
+-            qr_first_left = pl.tile.move(qr_first_mat, target_memory=pl.MemorySpace.Left)
+             wq_first_mat = pl.load(
+                 wq_b, [0, w_col0], [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE],
+                 target_memory=pl.MemorySpace.Mat,
+             )
++            qr_first_left = pl.tile.move(qr_first_mat, target_memory=pl.MemorySpace.Left)
+             wq_first_right = pl.tile.move(wq_first_mat, target_memory=pl.MemorySpace.Right)
+             # INT8×INT8的tile.matmul建立INT32 Acc，和原首次高层matmul同一K0点积。
+             col_acc = pl.tile.matmul(qr_first_left, wq_first_right)
+@@ -154,28 +154,31 @@
+             # 次MMA之前同时存活。两份物理[128,256]INT8恰为64KiB，尾M仍读m_rows。
+             # 此range只描述模型K范围，实际T仍动态；不改变INT32累加的四段顺序。
+             for k0 in pl.range(QPROJ_PIPE_K_TILE, Q_LORA - QPROJ_PIPE_K_TILE, 2 * QPROJ_PIPE_K_TILE):
++                # 两份 QR Mat 与两份 weight Mat 共 192 KiB；四次 load 先完成源码
++                # 建立，再消费任何一份，恢复原 pair 的 L1 双槽活跃窗口。
+                 qr_pair0_mat = pl.load(
+                     qr_i8_matmul, [t0, k0], [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+                     target_memory=pl.MemorySpace.Mat, valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+                 )
+-                qr_pair0_left = pl.tile.move(qr_pair0_mat, target_memory=pl.MemorySpace.Left)
++                wq_pair0_mat = pl.load(
++                    wq_b, [k0, w_col0], [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
+                 qr_pair1_mat = pl.load(
+                     qr_i8_matmul, [t0, k0 + QPROJ_PIPE_K_TILE], [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+                     target_memory=pl.MemorySpace.Mat, valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+                 )
+-                qr_pair1_left = pl.tile.move(qr_pair1_mat, target_memory=pl.MemorySpace.Left)
+-                wq_pair0_mat = pl.load(
+-                    wq_b, [k0, w_col0], [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE],
+-                    target_memory=pl.MemorySpace.Mat,
+-                )
+-                wq_pair0_right = pl.tile.move(wq_pair0_mat, target_memory=pl.MemorySpace.Right)
+-                col_acc = pl.tile.matmul_acc(col_acc, qr_pair0_left, wq_pair0_right)
+-                # 单份Right物理64KiB，不能在消费上一份前请求第二份；这里不把
+-                # 恢复Left双槽伪装成整套操作数双缓冲，也不取消任何覆盖依赖。
+                 wq_pair1_mat = pl.load(
+                     wq_b, [k0 + QPROJ_PIPE_K_TILE, w_col0], [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE],
+                     target_memory=pl.MemorySpace.Mat,
+                 )
++                # 先提交 Left0/Right0，再建立 Left1。两个 Left 在 MMA0 前共同
++                # 活跃；Right0→M 的事件是否可早于 Left1，必须核对生成 C++。
++                qr_pair0_left = pl.tile.move(qr_pair0_mat, target_memory=pl.MemorySpace.Left)
++                wq_pair0_right = pl.tile.move(wq_pair0_mat, target_memory=pl.MemorySpace.Right)
++                qr_pair1_left = pl.tile.move(qr_pair1_mat, target_memory=pl.MemorySpace.Left)
++                col_acc = pl.tile.matmul_acc(col_acc, qr_pair0_left, wq_pair0_right)
++                # Right 仍只有 64 KiB 单槽；原 M→MTE1 覆盖等待不得删除。
+                 wq_pair1_right = pl.tile.move(wq_pair1_mat, target_memory=pl.MemorySpace.Right)
+                 col_acc = pl.tile.matmul_acc(col_acc, qr_pair1_left, wq_pair1_right)
+             # 剩余K768单块不借机拆K128，不额外驻留整条QR或预取相邻N列。
+@@ -184,11 +187,11 @@
+                 qr_i8_matmul, [t0, k_tail], [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+                 target_memory=pl.MemorySpace.Mat, valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+             )
+-            qr_tail_left = pl.tile.move(qr_tail_mat, target_memory=pl.MemorySpace.Left)
+             wq_tail_mat = pl.load(
+                 wq_b, [k_tail, w_col0], [QPROJ_PIPE_K_TILE, QPROJ_MM_N_TILE],
+                 target_memory=pl.MemorySpace.Mat,
+             )
++            qr_tail_left = pl.tile.move(qr_tail_mat, target_memory=pl.MemorySpace.Left)
+             wq_tail_right = pl.tile.move(wq_tail_mat, target_memory=pl.MemorySpace.Right)
+             col_acc = pl.tile.matmul_acc(col_acc, qr_tail_left, wq_tail_right)
+             # Tile的动态有效M来自原QR valid_shape；外部仍绑定同一pad128 GM容量。

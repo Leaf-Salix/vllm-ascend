@@ -1,0 +1,255 @@
+{
+  "passed": true,
+  "checks": {
+    "cpu_full_dynamic_passed": true,
+    "baseline_33_source_files_direct_text_match_d56": true,
+    "frozen_33_candidate_files_direct_text_match_compiled_copy": true,
+    "controls_equal": true,
+    "compiled_abi_equal": true,
+    "all_allocation_records_same_order": true,
+    "all_allocation_records_same_multiset": true,
+    "all_FFTS_PTO_sync_records_equal_except_source_prefix": true,
+    "cube_local_hardware_event_sequence_equal": true,
+    "vector_local_hardware_event_sequence_equal": true,
+    "vector_cpp_identical_after_removing_comments_only": true,
+    "SCORE_CUBE_and_ATTN_CUBE_slot_constants_removed": true,
+    "performance_hints_identical_except_source_prefix": true
+  },
+  "baseline_cpu": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_compact_priority_20261018/cpu_v1",
+  "candidate_cpu": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/orphan_publish_audit/cpu_v1",
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 256,
+    "OB_ROWS": 128,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false
+  },
+  "symbolic_dimension_count": 58,
+  "required_root_dimension_count": 56,
+  "compiled_abi_argument_count": 130,
+  "single_mix": true,
+  "sample_shapes_supplied": false,
+  "allocation_record_count": 2365,
+  "allocation_method": "按出现顺序直接比较(role, physical byte address, complete tile type including shape/layout, source basename/line/column)。记录包括重复/复用视图，非独立物理缓冲区数量；不比较SSA临时名。",
+  "allocation_records_by_space": [
+    {
+      "role": "cube_schedule",
+      "space": "acc",
+      "count": 66
+    },
+    {
+      "role": "cube_schedule",
+      "space": "left",
+      "count": 73
+    },
+    {
+      "role": "cube_schedule",
+      "space": "mat",
+      "count": 271
+    },
+    {
+      "role": "cube_schedule",
+      "space": "right",
+      "count": 141
+    },
+    {
+      "role": "cube_schedule",
+      "space": "vec",
+      "count": 2
+    },
+    {
+      "role": "vector_schedule",
+      "space": "vec",
+      "count": 1812
+    }
+  ],
+  "cpp_static_occurrence_counts": {
+    "cube_schedule": {
+      "baseline": {
+        "TNOTIFY": 15,
+        "TWAIT": 13,
+        "wait_flag_dev": 4,
+        "ffts_cross_core_sync": 3,
+        "PIPE_ALL": 15,
+        "DSB_DDR": 55,
+        "whole_DCCI": 27,
+        "set_flag": 691,
+        "wait_flag": 691
+      },
+      "candidate": {
+        "TNOTIFY": 13,
+        "TWAIT": 13,
+        "wait_flag_dev": 4,
+        "ffts_cross_core_sync": 3,
+        "PIPE_ALL": 13,
+        "DSB_DDR": 51,
+        "whole_DCCI": 25,
+        "set_flag": 691,
+        "wait_flag": 691
+      }
+    },
+    "vector_schedule": {
+      "baseline": {
+        "TNOTIFY": 30,
+        "TWAIT": 33,
+        "wait_flag_dev": 4,
+        "ffts_cross_core_sync": 4,
+        "PIPE_ALL": 201,
+        "DSB_DDR": 121,
+        "whole_DCCI": 62,
+        "set_flag": 993,
+        "wait_flag": 993
+      },
+      "candidate": {
+        "TNOTIFY": 30,
+        "TWAIT": 33,
+        "wait_flag_dev": 4,
+        "ffts_cross_core_sync": 4,
+        "PIPE_ALL": 201,
+        "DSB_DDR": 121,
+        "whole_DCCI": 62,
+        "set_flag": 993,
+        "wait_flag": 993
+      }
+    }
+  },
+  "pto_operation_count_differences": [
+    {
+      "role": "cube_schedule",
+      "operation": "barrier",
+      "baseline": 15,
+      "candidate": 13
+    },
+    {
+      "role": "cube_schedule",
+      "operation": "cmo.cacheinvalid",
+      "baseline": 28,
+      "candidate": 26
+    },
+    {
+      "role": "cube_schedule",
+      "operation": "comm.tnotify",
+      "baseline": 15,
+      "candidate": 13
+    },
+    {
+      "role": "cube_schedule",
+      "operation": "fence.barrier_all",
+      "baseline": 55,
+      "candidate": 51
+    },
+    {
+      "role": "cube_schedule",
+      "operation": "partition_view",
+      "baseline": 219,
+      "candidate": 217
+    }
+  ],
+  "ffts_records": [
+    [
+      "cube_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c1_index loc(\"indexer_score_stages.py\":176:21)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.set <PIPE_FIX>, %c0_index {ffts_mode = 2 : i32} loc(\"indexer_score_stages.py\":375:17)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c1_index loc(\"indexer_score_stages.py\":378:17)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c2_index loc(\"attention_stream_stages.py\":151:17)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.set <PIPE_FIX>, %c3_index {ffts_mode = 2 : i32} loc(\"attention_stream_stages.py\":158:17)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c4_index loc(\"attention_stream_stages.py\":168:17)"
+    ],
+    [
+      "cube_schedule",
+      "pto.sync.set <PIPE_FIX>, %c5_index {ffts_mode = 2 : i32} loc(\"attention_stream_stages.py\":197:17)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c0_index loc(\"indexer_score_stages.py\":469:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.set <PIPE_MTE2>, %c1_index {ffts_mode = 2 : i32} loc(\"indexer_score_stages.py\":473:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c3_index loc(\"attention_stream_stages.py\":337:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.set <PIPE_MTE3>, %c2_index {ffts_mode = 2 : i32} loc(\"attention_stream_stages.py\":342:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c3_index loc(\"attention_stream_stages.py\":354:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.set <PIPE_MTE3>, %c4_index {ffts_mode = 2 : i32} loc(\"attention_stream_stages.py\":375:17)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.set <PIPE_MTE3>, %c2_index {ffts_mode = 2 : i32} loc(\"attention_stream_stages.py\":381:21)"
+    ],
+    [
+      "vector_schedule",
+      "pto.sync.wait <PIPE_MTE2>, %c5_index loc(\"attention_stream_stages.py\":391:17)"
+    ]
+  ],
+  "trace_boundary": "本审计比较全部物理allocation记录、FFTS指令和本核set_flag/wait_flag顺序；AIV仅去注释后全文相同。没有声称删除发布后的AIC全指令时序相同，也未执行最终机器码或测量耗时。数学与原wait的参数/控制流由source_audit.json的AST对照约束。",
+  "device_precision_validated": false,
+  "performance_measured": false,
+  "local_artifacts": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_compact_priority_20261018/cpu_v1/result.json",
+      "bytes": 28484
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_compact_priority_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "bytes": 3987931
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_compact_priority_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+      "bytes": 2455872
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/ultra_compact_priority_20261018/cpu_v1/kernel/report/perf_hints.log",
+      "bytes": 87356
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/orphan_publish_audit/cpu_v1/result.json",
+      "bytes": 28533
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/orphan_publish_audit/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "bytes": 4365870
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/orphan_publish_audit/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+      "bytes": 2453231
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/orphan_publish_audit/cpu_v1/kernel/report/perf_hints.log",
+      "bytes": 93659
+    }
+  ]
+}

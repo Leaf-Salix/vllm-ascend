@@ -1,0 +1,133 @@
+{
+  "status": "closed_without_implementation_or_device_test",
+  "formal_reference": "d56c9eb6",
+  "scope": "只读源码和有限整数工作量/分配模型；成本示意不是性能结果。",
+  "decision": {
+    "query_group_policy": "保持正式 G2/G6 区间；不重试已有 G4 与旧 G6 下放。",
+    "six_leaf_gcd_rotation": "不推进：mixed history 退化、额外根及 drain，以及 exact tie 风险。",
+    "same_leaf_heavy_tail_owner": "保存设计，不实施或上卡：B28 仅 41→40 steps，部分核交接工作集中，无收益证据。"
+  },
+  "actions": {
+    "production_source_modified": false,
+    "dependency_modified": false,
+    "kernel_compilation": false,
+    "device_task_submitted": false,
+    "extra_model_cases_at_closeout": false
+  },
+  "uniform_leaf_matrix": {
+    "cases": 960,
+    "plan_changed": 221,
+    "max_steps_improves": 470,
+    "max_steps_regresses": 14,
+    "max_steps_equal": 476
+  },
+  "mixed_history_leaf_matrix": {
+    "cases": 790,
+    "plan_changed": 556,
+    "max_steps_improves": 379,
+    "max_steps_regresses": 161,
+    "max_steps_equal": 250
+  },
+  "owner_model": {
+    "cases": 2685,
+    "enabled": 405,
+    "max_steps_improves": 405,
+    "max_steps_equal": 2280,
+    "max_steps_regresses": 0,
+    "complete_leaf_coverage_unique": true,
+    "unchanged_root_and_arithmetic_counts": true,
+    "limitation": "Finite integer work/placement model; not a timing, ISA, floating-point or device proof."
+  },
+  "b28_leaf_change": {
+    "baseline": {
+      "max_steps": 41,
+      "total_steps": 924,
+      "valid_leaves": 140,
+      "roots_written": 840,
+      "roots_consumed": 756,
+      "final_merge_calls": 252,
+      "leaf_drain_waits": 252,
+      "total_ack_waits": 924,
+      "query_and_coeff_load_requested_bytes": 8601600
+    },
+    "new_leaves_no_rotation": {
+      "max_steps": 42,
+      "total_steps": 924,
+      "valid_leaves": 168,
+      "roots_written": 1008,
+      "roots_consumed": 1008,
+      "final_merge_calls": 336,
+      "leaf_drain_waits": 336,
+      "total_ack_waits": 924,
+      "query_and_coeff_load_requested_bytes": 10321920
+    },
+    "candidate": {
+      "max_steps": 39,
+      "total_steps": 924,
+      "valid_leaves": 168,
+      "roots_written": 1008,
+      "roots_consumed": 1008,
+      "final_merge_calls": 336,
+      "leaf_drain_waits": 336,
+      "total_ack_waits": 924,
+      "query_and_coeff_load_requested_bytes": 10321920
+    }
+  },
+  "b28_owner_change": {
+    "baseline": {
+      "max_steps": 41,
+      "total_steps": 924,
+      "valid_leaves": 140,
+      "roots_written": 840,
+      "roots_consumed": 756,
+      "final_merge_calls": 252,
+      "leaf_drain_waits": 252,
+      "total_ack_waits": 924,
+      "query_and_coeff_load_requested_bytes": 8601600
+    },
+    "candidate": {
+      "max_steps": 40,
+      "total_steps": 924,
+      "valid_leaves": 140,
+      "roots_written": 840,
+      "roots_consumed": 756,
+      "final_merge_calls": 252,
+      "leaf_drain_waits": 252,
+      "total_ack_waits": 924,
+      "query_and_coeff_load_requested_bytes": 8601600
+    }
+  },
+  "fixed_item_count_lower_bound": {
+    "heavy_items": 112,
+    "heavy_steps": 8,
+    "tail_items": 28,
+    "tail_steps": 1,
+    "six_item_cores": 20,
+    "five_item_cores": 4,
+    "heavy_capacity_if_max40": 100,
+    "required_heavy": 112,
+    "lower_bound_max_steps": 41,
+    "unrestricted_owner_lower_bound": 40
+  },
+  "gate": {
+    "enabled": true,
+    "reason": "all_heavy_leaves_full_and_tail_fits_gap",
+    "heavy_total": 112,
+    "remainder": 16,
+    "light_cores": 8,
+    "min_group_visible": 32769,
+    "max_group_visible": 32769,
+    "tail_steps_upper": 1,
+    "tail_leaves_per_light_core_upper": 4,
+    "tail_step_slack": 4
+  },
+  "source_comparison": "source_reference_comparison.json",
+  "historical_overlap": "旧4+2 query方案已做重/轻组与尾叶分配；本设计不是全新配平思想。",
+  "implementation_cost": "需变量每核item数、统一AIC/AIV映射helper，并扩展当前固定8字group_plan及其调用绑定。",
+  "limitations": [
+    "无浮点、精度、同步协议、编译资源或设备性能证明。",
+    "仅紧凑有效query加q=0失活输入，不覆盖全部保留T容量dummy变体。",
+    "1344个owner矩阵例子强制G6覆盖几何，其余依当前policy；不等于正式策略全覆盖。",
+    "h<2.5s只是单参数成本示意条件，没有测量证明；不假设同步开销低。"
+  ]
+}

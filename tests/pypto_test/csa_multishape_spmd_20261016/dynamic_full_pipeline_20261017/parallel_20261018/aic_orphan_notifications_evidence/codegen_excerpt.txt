@@ -1,0 +1,288 @@
+[baseline: dynamic_csa_full.cpp:17459-17526]
+17459:       ;
+17460:       for (int64_t v4654 = v267; v4654 < (v2602 < v265 ? v2602 : v265); v4654 += v247) {
+17461:         v4145 = (int32_t) v247;
+17462:         wait_flag_dev(v4145);
+17463:       };
+17464:     };
+17465:   }
+17466:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+17467:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+17468:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+17469:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+17470:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+17471:   pipe_barrier(PIPE_MTE2);
+17472:   pipe_barrier(PIPE_MTE3);
+17473:   pipe_barrier(PIPE_FIX);
+17474:   dsb(DSB_DDR);
+17475:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+17476:   pipe_barrier(PIPE_MTE2);
+17477:   pipe_barrier(PIPE_MTE3);
+17478:   pipe_barrier(PIPE_FIX);
+17479:   dsb(DSB_DDR);
+17480:   // pto: %1970
+17481:   v4146 = (int64_t) ((uint64_t) v926 + (uint64_t) v312);
+17482:   pipe_barrier(PIPE_ALL);
+17483:   // pto: %1971
+17484:   v4147 = v4146 < v267 ? v267 : v4146;
+17485:   // pto: %signal_v18__ssa_v0_signal_pview
+17486:   v4148 = PTOAS__GLOBAL_TENSOR_DATA(v708);
+17487:   // pto: %signal_v18__ssa_v0_signal_pview
+17488:   // pto: %signal_v18__ssa_v0_signal_pview
+17489:   v4150 = pto::Shape<1, 1, 1, 1, 1>();
+17490:   // pto: %signal_v18__ssa_v0_signal_pview
+17491:   v4151 = pto::Stride<1, 1, 1, 1, 1>();
+17492:   // pto: %signal_v18__ssa_v0_signal_pview
+17493:   v4152 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4148 + (v4149 + v4147), v4150, v4151);
+17494:   v4153 = pto::comm::NotifyOp::Set;
+17495:   pto::comm::TNOTIFY(v4152, v935, v4153);
+17496:   if (v1036) {
+17497:     // pto: %1976
+17498:     ;
+17499:     for (int64_t v4655 = v267; v4655 < (v2080 < v272 ? v2080 : v272); v4655 += v247) {
+17500:       // pto: %1978, %1979, %1980, %1981
+17501:       ;
+17502:       v4154 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v4655 % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v313);
+17503:       // pto: %1982
+17504:       ;
+17505:       v4155 = v4154 < v267 ? v267 : v4154;
+17506:       // pto: %signal_v19__ssa_v0_signal_pview
+17507:       ;
+17508:       v4156 = PTOAS__GLOBAL_TENSOR_DATA(v708);
+17509:       // pto: %signal_v19__ssa_v0_signal_pview
+17510:       ;
+17511:       // pto: %signal_v19__ssa_v0_signal_pview
+17512:       ;
+17513:       v4158 = pto::Shape<1, 1, 1, 1, 1>();
+17514:       // pto: %signal_v19__ssa_v0_signal_pview
+17515:       ;
+17516:       v4159 = pto::Stride<1, 1, 1, 1, 1>();
+17517:       // pto: %signal_v19__ssa_v0_signal_pview
+17518:       ;
+17519:       v4160 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4156 + (v4157 + v4155), v4158, v4159);
+17520:       v4161 = pto::comm::WaitCmp::GE;
+17521:       pto::comm::TWAIT(v4160, v935, v4161);
+17522:     };
+17523:     pipe_barrier(PIPE_MTE2);
+17524:     pipe_barrier(PIPE_MTE3);
+17525:     pipe_barrier(PIPE_FIX);
+17526:     dsb(DSB_DDR);
+[baseline: dynamic_csa_full.cpp:18063-18132]
+18063:       };
+18064:     };
+18065:     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18066:     set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18067:     set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18068:   }
+18069:   wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18070:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18071:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18072:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18073:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18074:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18075:   pipe_barrier(PIPE_MTE2);
+18076:   pipe_barrier(PIPE_MTE3);
+18077:   pipe_barrier(PIPE_FIX);
+18078:   dsb(DSB_DDR);
+18079:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+18080:   pipe_barrier(PIPE_MTE2);
+18081:   pipe_barrier(PIPE_MTE3);
+18082:   pipe_barrier(PIPE_FIX);
+18083:   dsb(DSB_DDR);
+18084:   // pto: %2047
+18085:   v4305 = (int64_t) ((uint64_t) v926 + (uint64_t) v315);
+18086:   pipe_barrier(PIPE_ALL);
+18087:   // pto: %2048
+18088:   v4306 = v4305 < v267 ? v267 : v4305;
+18089:   // pto: %signal_v21__ssa_v0_signal_pview
+18090:   v4307 = PTOAS__GLOBAL_TENSOR_DATA(v708);
+18091:   // pto: %signal_v21__ssa_v0_signal_pview
+18092:   // pto: %signal_v21__ssa_v0_signal_pview
+18093:   v4309 = pto::Shape<1, 1, 1, 1, 1>();
+18094:   // pto: %signal_v21__ssa_v0_signal_pview
+18095:   v4310 = pto::Stride<1, 1, 1, 1, 1>();
+18096:   // pto: %signal_v21__ssa_v0_signal_pview
+18097:   v4311 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4307 + (v4308 + v4306), v4309, v4310);
+18098:   v4312 = pto::comm::NotifyOp::Set;
+18099:   pto::comm::TNOTIFY(v4311, v935, v4312);
+18100:   // pto: %2049
+18101:   v4313 = v133 < v245 ? v133 : v245;
+18102:   // pto: %2050
+18103:   v4314 = (int64_t) ((uint64_t) v4313 * (uint64_t) v265);
+18104:   // pto: %2051
+18105:   if (v4314 > v267) {
+18106:     for (int64_t v4659 = v267; v4659 < v4314; v4659 += v247) {
+18107:       // pto: %2054, %2055, %2056, %2057
+18108:       ;
+18109:       v4315 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v4659 % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v316);
+18110:       // pto: %2058
+18111:       ;
+18112:       v4316 = v4315 < v267 ? v267 : v4315;
+18113:       // pto: %signal_v22__ssa_v0_signal_pview
+18114:       ;
+18115:       v4317 = PTOAS__GLOBAL_TENSOR_DATA(v708);
+18116:       // pto: %signal_v22__ssa_v0_signal_pview
+18117:       ;
+18118:       // pto: %signal_v22__ssa_v0_signal_pview
+18119:       ;
+18120:       v4319 = pto::Shape<1, 1, 1, 1, 1>();
+18121:       // pto: %signal_v22__ssa_v0_signal_pview
+18122:       ;
+18123:       v4320 = pto::Stride<1, 1, 1, 1, 1>();
+18124:       // pto: %signal_v22__ssa_v0_signal_pview
+18125:       ;
+18126:       v4321 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4317 + (v4318 + v4316), v4319, v4320);
+18127:       v4322 = pto::comm::WaitCmp::GE;
+18128:       pto::comm::TWAIT(v4321, v935, v4322);
+18129:     };
+18130:     pipe_barrier(PIPE_MTE2);
+18131:     pipe_barrier(PIPE_MTE3);
+18132:     pipe_barrier(PIPE_FIX);
+[candidate: dynamic_csa_full.cpp:17435-17518]
+17435:       wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+17436:       set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+17437:       set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+17438:       // pto: %1968
+17439:       ;
+17440:       for (int64_t v4636 = v267; v4636 < (v2600 < v265 ? v2600 : v265); v4636 += v247) {
+17441:         v4143 = (int32_t) v247;
+17442:         wait_flag_dev(v4143);
+17443:       };
+17444:     };
+17445:   }
+17446:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+17447:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+17448:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+17449:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+17450:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+17451:   if (v1034) {
+17452:     // pto: %1973
+17453:     ;
+17454:     for (int64_t v4637 = v267; v4637 < (v2078 < v272 ? v2078 : v272); v4637 += v247) {
+17455:       // pto: %1975, %1976, %1977, %1978
+17456:       ;
+17457:       v4144 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v4637 % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v312);
+17458:       // pto: %1979
+17459:       ;
+17460:       v4145 = v4144 < v267 ? v267 : v4144;
+17461:       // pto: %signal_v18__ssa_v0_signal_pview
+17462:       ;
+17463:       v4146 = PTOAS__GLOBAL_TENSOR_DATA(v706);
+17464:       // pto: %signal_v18__ssa_v0_signal_pview
+17465:       ;
+17466:       // pto: %signal_v18__ssa_v0_signal_pview
+17467:       ;
+17468:       v4148 = pto::Shape<1, 1, 1, 1, 1>();
+17469:       // pto: %signal_v18__ssa_v0_signal_pview
+17470:       ;
+17471:       v4149 = pto::Stride<1, 1, 1, 1, 1>();
+17472:       // pto: %signal_v18__ssa_v0_signal_pview
+17473:       ;
+17474:       v4150 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4146 + (v4147 + v4145), v4148, v4149);
+17475:       v4151 = pto::comm::WaitCmp::GE;
+17476:       pto::comm::TWAIT(v4150, v933, v4151);
+17477:     };
+17478:     pipe_barrier(PIPE_MTE2);
+17479:     pipe_barrier(PIPE_MTE3);
+17480:     pipe_barrier(PIPE_FIX);
+17481:     dsb(DSB_DDR);
+17482:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+17483:     pipe_barrier(PIPE_MTE2);
+17484:     pipe_barrier(PIPE_MTE3);
+17485:     pipe_barrier(PIPE_FIX);
+17486:     dsb(DSB_DDR);
+17487:   }
+17488:   for (int64_t v4638 = v267; v4638 < v272; v4638 += v247) {
+17489:     // pto: %1980, %1981, %1982
+17490:     ;
+17491:     v4152 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v4638 + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v313);
+17492:     // pto: %1983
+17493:     ;
+17494:     v4153 = v4152 < v267 ? v267 : v4152;
+17495:     // pto: %signal_v19__ssa_v0_signal_pview
+17496:     ;
+17497:     v4154 = PTOAS__GLOBAL_TENSOR_DATA(v706);
+17498:     // pto: %signal_v19__ssa_v0_signal_pview
+17499:     ;
+17500:     // pto: %signal_v19__ssa_v0_signal_pview
+17501:     ;
+17502:     v4156 = pto::Shape<1, 1, 1, 1, 1>();
+17503:     // pto: %signal_v19__ssa_v0_signal_pview
+17504:     ;
+17505:     v4157 = pto::Stride<1, 1, 1, 1, 1>();
+17506:     // pto: %signal_v19__ssa_v0_signal_pview
+17507:     ;
+17508:     v4158 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4154 + (v4155 + v4153), v4156, v4157);
+17509:     v4159 = pto::comm::WaitCmp::GE;
+17510:     pto::comm::TWAIT(v4158, v933, v4159);
+17511:   }
+17512:   pipe_barrier(PIPE_MTE2);
+17513:   pipe_barrier(PIPE_MTE3);
+17514:   pipe_barrier(PIPE_FIX);
+17515:   dsb(DSB_DDR);
+17516:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+17517:   pipe_barrier(PIPE_MTE2);
+17518:   pipe_barrier(PIPE_MTE3);
+[candidate: dynamic_csa_full.cpp:18010-18071]
+18010:         // pto: %2042
+18011:         ;
+18012:         v4293 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<32768, 32768, 32768, 512, 1>, pto::Layout::ND>(v4288 + (v4289 + v4230 * v4290), v4291, v4292);
+18013:         pipe_barrier(PIPE_FIX);
+18014:         wait_flag(PIPE_M, PIPE_FIX, EVENT_ID1);
+18015:         TSTORE(v4293, v4286);
+18016:         v4294 = getFFTSMsg(FFTS_MODE_VAL, v302);
+18017:         ffts_cross_core_sync(PIPE_FIX, v4294);
+18018:       };
+18019:     };
+18020:     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18021:     set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18022:     set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18023:   }
+18024:   wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18025:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18026:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18027:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+18028:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+18029:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+18030:   // pto: %2043
+18031:   v4295 = v133 < v245 ? v133 : v245;
+18032:   // pto: %2044
+18033:   v4296 = (int64_t) ((uint64_t) v4295 * (uint64_t) v265);
+18034:   // pto: %2045
+18035:   if (v4296 > v267) {
+18036:     for (int64_t v4641 = v267; v4641 < v4296; v4641 += v247) {
+18037:       // pto: %2048, %2049, %2050, %2051
+18038:       ;
+18039:       v4297 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v4641 % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v314);
+18040:       // pto: %2052
+18041:       ;
+18042:       v4298 = v4297 < v267 ? v267 : v4297;
+18043:       // pto: %signal_v20__ssa_v0_signal_pview
+18044:       ;
+18045:       v4299 = PTOAS__GLOBAL_TENSOR_DATA(v706);
+18046:       // pto: %signal_v20__ssa_v0_signal_pview
+18047:       ;
+18048:       // pto: %signal_v20__ssa_v0_signal_pview
+18049:       ;
+18050:       v4301 = pto::Shape<1, 1, 1, 1, 1>();
+18051:       // pto: %signal_v20__ssa_v0_signal_pview
+18052:       ;
+18053:       v4302 = pto::Stride<1, 1, 1, 1, 1>();
+18054:       // pto: %signal_v20__ssa_v0_signal_pview
+18055:       ;
+18056:       v4303 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v4299 + (v4300 + v4298), v4301, v4302);
+18057:       v4304 = pto::comm::WaitCmp::GE;
+18058:       pto::comm::TWAIT(v4303, v933, v4304);
+18059:     };
+18060:     pipe_barrier(PIPE_MTE2);
+18061:     pipe_barrier(PIPE_MTE3);
+18062:     pipe_barrier(PIPE_FIX);
+18063:     dsb(DSB_DDR);
+18064:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+18065:     pipe_barrier(PIPE_MTE2);
+18066:     pipe_barrier(PIPE_MTE3);
+18067:     pipe_barrier(PIPE_FIX);
+18068:     dsb(DSB_DDR);
+18069:   }
+18070:   // pto: %2055
+18071:   v4305 = (int64_t) ((uint64_t) v2124 * (uint64_t) v264);

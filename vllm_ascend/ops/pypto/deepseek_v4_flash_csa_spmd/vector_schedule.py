@@ -460,7 +460,9 @@ def vector_schedule(
                 1,
             )
         raw = hc_reduce_range(partials, raw, worker, VECTORS)
-        signal = publish_phase(signal, PHASE_RAW, core, CORES, generation)
+        # RAW消费者只覆盖真实T的M16 owner；较大P16的原数学/尾写仍保留。
+        if worker < (tokens + 15) // 16:
+            signal = publish_phase(signal, PHASE_RAW, core, CORES, generation)
         if HC_ROW_DEPENDENCIES:
             # gates/comb按M8块ob=worker+wave*48分工；对应RAW M16 owner
             # 为floor(ob/2)%48，随wave只在worker//2及worker//2+24间交替。
@@ -515,16 +517,22 @@ def vector_schedule(
         partials,
         HC_CONSUMER_REDUCE,
     )
-    signal = publish_phase(signal, PHASE_GATES, core, CORES, generation)
+    # 只省略没有本阶段有效输出的M8角色通知；活跃角色发布与全部wait/math不变。
+    if worker < (tokens + 7) // 8:
+        signal = publish_phase(signal, PHASE_GATES, core, CORES, generation)
     # gates与mix_norm按相同M8条带归同一AIV；pre由本核写，且GATES发布
     # 已排空写回，无需等待所有其他gate owner。先混合/归一化并发布NORM，
     # AIC便可开始QA；后面的Sinkhorn只供最终HCpost，不是QA的依赖。
     mixed, normed = hc_mix_norm_range(x_fp32, pre, norm_w, mixed, normed, norm_tail, worker, VECTORS)
-    signal = publish_phase(signal, PHASE_NORM, core, CORES, generation)
+    # 只省略没有本阶段有效输出的M8角色通知；活跃角色发布与全部wait/math不变。
+    if worker < (tokens + 7) // 8:
+        signal = publish_phase(signal, PHASE_NORM, core, CORES, generation)
     comb = hc_comb_range(
         inv, raw, hc_scale, hc_base_2d, comb, comb_tail, worker, VECTORS, partials, HC_CONSUMER_REDUCE
     )
-    signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
+    # 只省略没有本阶段有效输出的M8角色通知；活跃角色发布与全部wait/math不变。
+    if worker < (tokens + 7) // 8:
+        signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
 
     # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。
     if tokens < 128:
@@ -938,7 +946,7 @@ def vector_schedule(
         )
         signal = publish_phase(signal, PHASE_O_QUANT, core, CORES, generation)
     signal = wait_row_owners(signal, PHASE_OB, CORES, generation, 0, 64, 1, GROUPS, 0, 1)
-    # 所有HC角色先发布COMB再进入Score的48核完成集合，所以post/comb此时已
+    # 所有有有效comb输出的HC角色先发布COMB，再进入未改动的Score全48核完成集合；post/comb此时已
     # 完整，且未复用其工作区。原hidden也必须保持只读直到最后的HCpost结束。
     output = o_dequant_hc_post_stage(
         o_partials,

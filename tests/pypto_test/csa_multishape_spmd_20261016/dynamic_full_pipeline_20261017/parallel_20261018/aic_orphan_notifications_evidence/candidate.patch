@@ -1,0 +1,20 @@
+--- a/cube_schedule.py
++++ b/cube_schedule.py
+@@ -372,7 +372,7 @@
+         0,
+         1,
+     )
+-    signal = publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)
++    # Score每leaf已等双AIV ACK排空；后继plan/query获取保留，无需无人等待的SCORE_CUBE槽。
+ 
+     # Attention有效块依赖本层TopK，不能合进前置的公共metadata扫描。
+     # AIV计划完成包含“Score双缓冲已排空→TopK全部owner完成”，故可进入下一段。
+@@ -391,7 +391,7 @@
+         GROUPS,
+         2,
+     )
+-    signal = publish_phase(signal, PHASE_ATTN_CUBE, worker, CORES, generation)
++    # 后继ATTN_VECTOR获取包含PV消费、归并及packed发布；无需无人等待的ATTN_CUBE槽。
+ 
+     # 每个query归q%24组，其双AIV共同完成packed。这里只等真实活跃组的两个AIV，
+     # 等待的是发布完packed，而不是只等AIC的PV矩阵指令已经发出。

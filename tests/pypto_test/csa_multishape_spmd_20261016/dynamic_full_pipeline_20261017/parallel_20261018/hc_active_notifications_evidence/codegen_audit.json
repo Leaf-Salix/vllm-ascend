@@ -1,0 +1,120 @@
+{
+  "passed": true,
+  "reference_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/adopted_source_d56c9eb6",
+  "frozen_candidate_source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/source_candidate",
+  "cpu_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/cpu_v1/result.json",
+  "full_codegen_passed": true,
+  "single_mix": true,
+  "dynamic_axes": 58,
+  "root_tensors": 130,
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 256,
+    "OB_ROWS": 128,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false
+  },
+  "sample_shapes_supplied": false,
+  "device_execution": false,
+  "performance_measured": false,
+  "scalar_mapping": {
+    "v1514": "AIV worker=block*2+subblock",
+    "v133": "T, source/PTO dynamic arg132",
+    "v2055": "ceil(T/16)",
+    "v1528": "ceil(T/8)",
+    "v1516": "(worker+24)*128"
+  },
+  "guard_blocks": [
+    {
+      "phase": "RAW",
+      "id": 3,
+      "block_label": "label159",
+      "false_join": "label160",
+      "condition": "v2056",
+      "block_line": 34314,
+      "notify_line": 34335,
+      "all_publish_operations_inside_guard": true,
+      "operations_in_block": {
+        "pipe_all": 3,
+        "dsb_ddr": 2,
+        "whole_dcache_invalid": 1,
+        "notify": 1
+      },
+      "phase_base_word_offset": 27648
+    },
+    {
+      "phase": "GATES",
+      "id": 4,
+      "block_label": "label176",
+      "false_join": "label177",
+      "condition": "v2112",
+      "block_line": 34832,
+      "notify_line": 34853,
+      "all_publish_operations_inside_guard": true,
+      "operations_in_block": {
+        "pipe_all": 3,
+        "dsb_ddr": 2,
+        "whole_dcache_invalid": 1,
+        "notify": 1
+      },
+      "phase_base_word_offset": 36864
+    },
+    {
+      "phase": "NORM",
+      "id": 6,
+      "block_label": "label195",
+      "false_join": "label196",
+      "condition": "v2112",
+      "block_line": 35939,
+      "notify_line": 35960,
+      "all_publish_operations_inside_guard": true,
+      "operations_in_block": {
+        "pipe_all": 3,
+        "dsb_ddr": 2,
+        "whole_dcache_invalid": 1,
+        "notify": 1
+      },
+      "phase_base_word_offset": 55296
+    },
+    {
+      "phase": "COMB",
+      "id": 5,
+      "block_label": "label208",
+      "false_join": "label209",
+      "condition": "v2112",
+      "block_line": 37519,
+      "notify_line": 37540,
+      "all_publish_operations_inside_guard": true,
+      "operations_in_block": {
+        "pipe_all": 3,
+        "dsb_ddr": 2,
+        "whole_dcache_invalid": 1,
+        "notify": 1
+      },
+      "phase_base_word_offset": 46080
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp",
+      "bytes": 2507076
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "bytes": 4130020
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_hc_active_notifications_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+      "bytes": 2456557
+    }
+  ],
+  "limit": "仅核对四个发布块及其真实条件控制；数学和其余源调用已由 AST/事件顺序对照保留。未声称编译器全部其它同步或指令时序相同，未验证设备缓存或数值。"
+}
