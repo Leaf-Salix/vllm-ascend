@@ -13,6 +13,7 @@ from .indexer_projection import indexer_projection
 from .input_norm import input_norm_test
 from .wkv import wkv_test
 from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
+from .wkv_profile import WKVProfile
 
 
 class CSAServiceRuntime(BaselineRuntime):
@@ -28,6 +29,11 @@ class CSAServiceRuntime(BaselineRuntime):
     def __init__(self, attention, operators, max_num_seqs, layer=None):
         super().__init__(attention, operators, max_num_seqs, layer)
         import pypto.torch
+
+        from vllm_ascend.ascend_config import get_ascend_config
+
+        self.wkv_profile = WKVProfile()
+        self.wkv_static_requested = get_ascend_config().ascend_compilation_config.enable_static_kernel
 
         self.pto_hc_pre = pypto.torch.register(hc_pre_test, "dsv4_csa_tnd_full_precision::hc_pre")
         for parameter, shape in (
@@ -96,6 +102,10 @@ class CSAServiceRuntime(BaselineRuntime):
         self.hc_comb_gates = torch.empty((tokens, 16), dtype=torch.float32, device=device)
         self.pto_hc_post = pypto.torch.register(hc_post_test, "dsv4_csa_tnd_full_precision::hc_post")
 
+    def qualify_static_wkv(self, *, metadata_sha256, reselected):
+        """加载者须先验证静态包/SDK/SOC/确定性并完成实际 reselection，再通知每层。"""
+        self.wkv_profile.qualify_static(metadata_sha256=metadata_sha256, reselected=reselected)
+
     def __call__(self, context, hidden, positions, output, kv_cache):
         from vllm_ascend.attention.utils import (
             maybe_save_kv_layer_to_connector,
@@ -134,7 +144,13 @@ class CSAServiceRuntime(BaselineRuntime):
         normed = self.normed[:tokens]
         self.pto_input_norm(mixed, self.layer.input_layernorm.weight, normed, self.norm_rstd[:tokens])
         kv_projected = self.wkv_projected[:tokens]
-        order = self.wkv_orders[WKV_TOKEN_MODES[tokens - 1]]
+        mode = self.wkv_profile.select(
+            tokens,
+            WKV_TOKEN_MODES,
+            capturing=torch.npu.is_current_stream_capturing(),
+            static_requested=self.wkv_static_requested,
+        )
+        order = self.wkv_orders[mode]
         self.pto_wkv(normed, self.wkv_weight, order, kv_projected)
         if kv_projected.dtype != torch.bfloat16 or tuple(kv_projected.shape) != (tokens, 512):
             raise ValueError("PTO WKV must publish BF16 [tokens, 512]")
