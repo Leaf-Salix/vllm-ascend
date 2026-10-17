@@ -1,0 +1,81 @@
+85: def make_fixture(config, attention, batch, history, seed, device):
+86:     import torch
+87:     from dsv4_csa_native_case import allocate_native_cache, make_cache_groups
+88: 
+89:     from vllm_ascend.attention.attention_v1 import AscendAttentionState
+90:     from vllm_ascend.attention.utils import AscendCommonAttentionMetadata
+91:     from vllm_ascend.worker.block_table import BlockTable
+92: 
+93:     torch.manual_seed(seed)
+94:     torch.npu.manual_seed(seed)
+95:     tokens = batch * 6
+96:     bounds_cpu = torch.arange(batch + 1, dtype=torch.int32) * 6
+97:     lengths_cpu = torch.full((batch,), history + 6, dtype=torch.int32)
+98:     bounds, lengths = bounds_cpu.to(device), lengths_cpu.to(device)
+99:     positions = (history + torch.arange(6)).repeat(batch).to(device=device, dtype=torch.int64)
+100:     hidden = torch.randn((tokens, 4, 4096), device=device, dtype=torch.bfloat16)
+101:     groups = make_cache_groups(config, device, attention)
+102:     metadata, common_cache, prefill_cache, decode_cache = {}, {}, {}, {}
+103:     for name, group in groups.items():
+104:         spec = group["spec"]
+105:         ratio = getattr(spec, "compress_ratio", 1)
+106:         columns = (history + 6 + spec.block_size * ratio - 1) // (spec.block_size * ratio) + 1
+107:         # 非压缩历史仅需保留滑窗/近期 state；页表保留完整逻辑列并循环映射独占物理页。
+108:         per_request = columns if name in ("compressed", "indexer") else 9
+109:         pages = batch * per_request + 1
+110:         group["layout"] = allocate_native_cache(group, pages, device)
+111:         for i, view in enumerate(group["views"]):
+112:             if view.dtype == torch.int8:
+113:                 view.random_(-64, 64)
+114:             elif name == "indexer" and i == 1:
+115:                 view.fill_(0.01)
+116:             else:
+117:                 view.normal_(0, 0.5)
+118:         group["owner"].kv_cache = [group["views"]] if name == "indexer" else group["views"]
+119:         table = BlockTable(spec.block_size, 40, columns, 256, True, device, num_speculative_tokens=5)
+120:         for row in range(batch):
+121:             table.add_row(
+122:                 [1 + row * per_request + (per_request - 1 - col) % per_request for col in range(columns)], row
+123:             )
+124:         table.commit_block_table(batch)
+125:         table.compute_slot_mapping(batch, bounds, positions // ratio)
+126:         common = AscendCommonAttentionMetadata(
+127:             query_start_loc=bounds,
+128:             query_start_loc_cpu=bounds_cpu,
+129:             seq_lens=lengths,
+130:             _seq_lens_cpu=lengths_cpu,
+131:             seq_lens_cpu=lengths_cpu,
+132:             num_reqs=batch,
+133:             num_actual_tokens=tokens,
+134:             num_input_tokens=tokens,
+135:             max_query_len=6,
+136:             max_seq_len=history + 6,
+137:             block_table_tensor=table.block_table.gpu[:batch],
+138:             slot_mapping=table.slot_mapping.gpu[:tokens],
+139:             positions=positions,
+140:             attn_state=AscendAttentionState.SpecDecoding,
+141:             causal=True,
+142:         )
+143:         metadata[group["prefix"]] = group["builder"].build(
+144:             0,
+145:             common,
+146:             num_reqs_actual=batch,
+147:             block_size=spec.block_size,
+148:             common_ratio_to_sas_metadata=common_cache,
+149:             prefill_ratio_to_sas_metadata=prefill_cache,
+150:             decode_ratio_to_sas_metadata=decode_cache,
+151:         )
+152:         group.update(table=table, common=common)
+153:     compact = {
+154:         name: attention.dsa_attn.dsa_attn.impl._compute_compressor_metadata(metadata[groups[name]["prefix"]].decode)
+155:         for name in ("compressed", "indexer")
+156:     }
+157:     for name, group in groups.items():
+158:         slots = compact[name][2] if name in compact else metadata[group["prefix"]].decode.slot_mapping
+159:         group["allowed"] = writable_bytes(group["allocation"], group["views"], slots)
+160:         group["initial"] = group["allocation"].cpu()
+161:     readonly = {"positions": positions}
+162:     for name, group in groups.items():
+163:         req = metadata[group["prefix"]].decode
+164:         for field in ("query_start_loc", "seq_lens", "block_table", "slot_mapping", "start_pos"):
+165:             value = getattr(req, field)

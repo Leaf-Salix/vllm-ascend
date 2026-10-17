@@ -1,0 +1,1020 @@
+{
+  "kind": "existing_saved_topk_only_readonly",
+  "pypto_compile": false,
+  "device_execution": false,
+  "new_weight_read": false,
+  "cache_payload_read": false,
+  "hash_computation": false,
+  "current_20261018_success_jobs": "摘要有比较结果/shape，没有实际TopK数组；本次使用9/30历史S6快照",
+  "real_service_data_limit": "优先检索canonical results：P→D bank含prefill cache/manifest，无本次decode TopK；未找到同时满足两目标S6档的真实服务层snapshot",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "tokens": 96,
+      "input_provenance": "正式W8A8第4层权重；随机hidden与随机历史cache；不是真实整网层输入",
+      "saved_arrays": "仅实际idx_topk；Q/L/positions/页表未保存在states.pt",
+      "physical_scope": "按当时保留fixture源码推导的物理地址；不是设备页表快照测量",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_accept_20260930/h131072_b16/pto_a/report.json",
+      "report_scope": "Single attention half, real layer4 weights, synthetic history; no MoE/EP16 acceptance",
+      "frozen_fixture_source": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-accept-9a983dae/tests/pypto_test/dsv4_csa_single_layer.py",
+      "seed_from_saved_driver": 1024,
+      "compressed_columns": 1026,
+      "saved_compressed_cache_shape": [
+        16417,
+        32,
+        1,
+        512
+      ],
+      "saved_metadata_readonly_checks": {
+        "metadata.positions": {
+          "status": "PASS",
+          "shape": [
+            96
+          ],
+          "dtype": "torch.int64",
+          "expected_shape": [
+            96
+          ],
+          "expected_dtype": "torch.int64",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 96,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.query_start_loc": {
+          "status": "PASS",
+          "shape": [
+            17
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            17
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 17,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.seq_lens": {
+          "status": "PASS",
+          "shape": [
+            16
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            16
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 16,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.block_table": {
+          "status": "PASS",
+          "shape": [
+            16,
+            1026
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            16,
+            1026
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 16416,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        }
+      },
+      "mapping_check": {
+        "within_request_injective": true,
+        "cross_request_page_sets_disjoint": true,
+        "all_saved_indices_valid_and_unique": true,
+        "valid_indices_per_query": {
+          "count": 96,
+          "min": 512,
+          "mean": 512,
+          "median": 512.0,
+          "p95_nearest_rank": 512,
+          "max": 512,
+          "sum": 49152
+        },
+        "logical_duplicates_total": 0,
+        "negative_total": 0,
+        "causal_invalid_total": 0,
+        "page_invalid_total": 0
+      },
+      "same_request_adjacent_query": {
+        "pairs": 80,
+        "logical_intersection": {
+          "count": 80,
+          "min": 5,
+          "mean": 27.3375,
+          "median": 25.0,
+          "p95_nearest_rank": 53,
+          "max": 85,
+          "sum": 2187
+        },
+        "inferred_physical_intersection": {
+          "count": 80,
+          "min": 5,
+          "mean": 27.3375,
+          "median": 25.0,
+          "p95_nearest_rank": 53,
+          "max": 85,
+          "sum": 2187
+        },
+        "inferred_physical_overlap_over_smaller_valid_set": {
+          "count": 80,
+          "min": 0.009765625,
+          "mean": 0.0533935546875,
+          "median": 0.048828125,
+          "p95_nearest_rank": 0.103515625,
+          "max": 0.166015625,
+          "sum": 4.271484375
+        },
+        "inferred_physical_same_128_block_intersection": {
+          "count": 320,
+          "min": 0,
+          "mean": 1.809375,
+          "median": 1.0,
+          "p95_nearest_rank": 5,
+          "max": 14,
+          "sum": 579
+        },
+        "inferred_physical_block_4x4_mean_intersection": [
+          [
+            2.875,
+            2,
+            1.6875,
+            2.025
+          ],
+          [
+            2.25,
+            1.7625,
+            1.4,
+            1.4625
+          ],
+          [
+            1.8625,
+            1.525,
+            1.3375,
+            1.3125
+          ],
+          [
+            1.85,
+            1.3125,
+            1.4125,
+            1.2625
+          ]
+        ],
+        "logical_block_4x4_mean_intersection": [
+          [
+            2.875,
+            2,
+            1.6875,
+            2.025
+          ],
+          [
+            2.25,
+            1.7625,
+            1.4,
+            1.4625
+          ],
+          [
+            1.8625,
+            1.525,
+            1.3375,
+            1.3125
+          ],
+          [
+            1.85,
+            1.3125,
+            1.4125,
+            1.2625
+          ]
+        ],
+        "physical_unique_pairs_nonzero": 80,
+        "example_first_pair": {
+          "queries": [
+            0,
+            1
+          ],
+          "logical": 9,
+          "inferred_physical": 9
+        }
+      },
+      "same_core_next_query_q_plus_24": {
+        "pairs": 72,
+        "logical_intersection": {
+          "count": 72,
+          "min": 2,
+          "mean": 12.166666666666666,
+          "median": 12.5,
+          "p95_nearest_rank": 17,
+          "max": 19,
+          "sum": 876
+        },
+        "inferred_physical_intersection": {
+          "count": 72,
+          "min": 0,
+          "mean": 0,
+          "median": 0.0,
+          "p95_nearest_rank": 0,
+          "max": 0,
+          "sum": 0
+        },
+        "inferred_physical_overlap_over_smaller_valid_set": {
+          "count": 72,
+          "min": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "p95_nearest_rank": 0.0,
+          "max": 0.0,
+          "sum": 0.0
+        },
+        "inferred_physical_same_128_block_intersection": {
+          "count": 288,
+          "min": 0,
+          "mean": 0,
+          "median": 0.0,
+          "p95_nearest_rank": 0,
+          "max": 0,
+          "sum": 0
+        },
+        "inferred_physical_block_4x4_mean_intersection": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        "logical_block_4x4_mean_intersection": [
+          [
+            0.6805555555555556,
+            0.7361111111111112,
+            0.625,
+            0.6666666666666666
+          ],
+          [
+            0.8888888888888888,
+            0.7638888888888888,
+            0.6666666666666666,
+            0.6388888888888888
+          ],
+          [
+            0.9305555555555556,
+            0.625,
+            0.7638888888888888,
+            0.9444444444444444
+          ],
+          [
+            0.9305555555555556,
+            0.7916666666666666,
+            0.7638888888888888,
+            0.75
+          ]
+        ],
+        "physical_unique_pairs_nonzero": 0,
+        "example_first_pair": {
+          "queries": [
+            0,
+            24
+          ],
+          "logical": 10,
+          "inferred_physical": 0
+        }
+      },
+      "read_evidence": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_accept_20260930/h131072_b16/pto_a/states.pt",
+        "file_bytes": 617313343,
+        "metadata_entry": "states/data.pkl",
+        "metadata_bytes_read": 846,
+        "topk_storage_entry": "states/data/1",
+        "topk_bytes_read": 196608,
+        "byteorder": "little",
+        "tensor_descriptors": {
+          "x_out": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "0",
+              "cpu",
+              1572864
+            ],
+            "offset": 0,
+            "shape": [
+              96,
+              4,
+              4096
+            ],
+            "stride": [
+              16384,
+              4096,
+              1
+            ]
+          },
+          "idx_topk": {
+            "storage": [
+              "storage",
+              "IntStorage",
+              "1",
+              "cpu",
+              49152
+            ],
+            "offset": 0,
+            "shape": [
+              96,
+              512
+            ],
+            "stride": [
+              512,
+              1
+            ]
+          },
+          "swa.0": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "2",
+              "cpu",
+              2375680
+            ],
+            "offset": 0,
+            "shape": [
+              145,
+              32,
+              1,
+              512
+            ],
+            "stride": [
+              16384,
+              512,
+              512,
+              1
+            ]
+          },
+          "compressed.0": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "3",
+              "cpu",
+              268976128
+            ],
+            "offset": 0,
+            "shape": [
+              16417,
+              32,
+              1,
+              512
+            ],
+            "stride": [
+              16384,
+              512,
+              512,
+              1
+            ]
+          },
+          "state.0": {
+            "storage": [
+              "storage",
+              "FloatStorage",
+              "4",
+              "cpu",
+              593920
+            ],
+            "offset": 0,
+            "shape": [
+              145,
+              2,
+              1,
+              2048
+            ],
+            "stride": [
+              4096,
+              2048,
+              2048,
+              1
+            ]
+          },
+          "indexer.0": {
+            "storage": [
+              "storage",
+              "CharStorage",
+              "5",
+              "cpu",
+              67244032
+            ],
+            "offset": 0,
+            "shape": [
+              16417,
+              32,
+              1,
+              128
+            ],
+            "stride": [
+              4096,
+              128,
+              128,
+              1
+            ]
+          },
+          "indexer.1": {
+            "storage": [
+              "storage",
+              "HalfStorage",
+              "6",
+              "cpu",
+              525344
+            ],
+            "offset": 0,
+            "shape": [
+              16417,
+              32,
+              1,
+              1
+            ],
+            "stride": [
+              32,
+              1,
+              1,
+              1
+            ]
+          },
+          "indexer_state.0": {
+            "storage": [
+              "storage",
+              "FloatStorage",
+              "7",
+              "cpu",
+              148480
+            ],
+            "offset": 0,
+            "shape": [
+              145,
+              2,
+              1,
+              512
+            ],
+            "stride": [
+              1024,
+              512,
+              512,
+              1
+            ]
+          }
+        },
+        "other_storage_payloads_read": false
+      }
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "tokens": 192,
+      "input_provenance": "正式W8A8第4层权重；随机hidden与随机历史cache；不是真实整网层输入",
+      "saved_arrays": "仅实际idx_topk；Q/L/positions/页表未保存在states.pt",
+      "physical_scope": "按当时保留fixture源码推导的物理地址；不是设备页表快照测量",
+      "report": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_accept_20260930/h8192_b32/pto_a/report.json",
+      "report_scope": "Single attention half, real layer4 weights, synthetic history; no MoE/EP16 acceptance",
+      "frozen_fixture_source": "/data/pyptouser/qinchuanyu/pto-eager/.cache/csa-accept-9a983dae/tests/pypto_test/dsv4_csa_single_layer.py",
+      "seed_from_saved_driver": 1024,
+      "compressed_columns": 66,
+      "saved_compressed_cache_shape": [
+        2113,
+        32,
+        1,
+        512
+      ],
+      "saved_metadata_readonly_checks": {
+        "metadata.positions": {
+          "status": "PASS",
+          "shape": [
+            192
+          ],
+          "dtype": "torch.int64",
+          "expected_shape": [
+            192
+          ],
+          "expected_dtype": "torch.int64",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 192,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.query_start_loc": {
+          "status": "PASS",
+          "shape": [
+            33
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            33
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 33,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.seq_lens": {
+          "status": "PASS",
+          "shape": [
+            32
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            32
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 32,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        },
+        "metadata.compressed.block_table": {
+          "status": "PASS",
+          "shape": [
+            32,
+            66
+          ],
+          "dtype": "torch.int32",
+          "expected_shape": [
+            32,
+            66
+          ],
+          "expected_dtype": "torch.int32",
+          "atol": 0,
+          "rtol": 0,
+          "elements": 2112,
+          "comparison": "exact",
+          "nonfinite": 0,
+          "max_abs": null,
+          "rmse": null,
+          "mismatches": 0,
+          "first_mismatches": []
+        }
+      },
+      "mapping_check": {
+        "within_request_injective": true,
+        "cross_request_page_sets_disjoint": true,
+        "all_saved_indices_valid_and_unique": true,
+        "valid_indices_per_query": {
+          "count": 192,
+          "min": 512,
+          "mean": 512,
+          "median": 512.0,
+          "p95_nearest_rank": 512,
+          "max": 512,
+          "sum": 98304
+        },
+        "logical_duplicates_total": 0,
+        "negative_total": 0,
+        "causal_invalid_total": 0,
+        "page_invalid_total": 0
+      },
+      "same_request_adjacent_query": {
+        "pairs": 160,
+        "logical_intersection": {
+          "count": 160,
+          "min": 69,
+          "mean": 153.1625,
+          "median": 153.0,
+          "p95_nearest_rank": 212,
+          "max": 241,
+          "sum": 24506
+        },
+        "inferred_physical_intersection": {
+          "count": 160,
+          "min": 69,
+          "mean": 153.1625,
+          "median": 153.0,
+          "p95_nearest_rank": 212,
+          "max": 241,
+          "sum": 24506
+        },
+        "inferred_physical_overlap_over_smaller_valid_set": {
+          "count": 160,
+          "min": 0.134765625,
+          "mean": 0.2991455078125,
+          "median": 0.298828125,
+          "p95_nearest_rank": 0.4140625,
+          "max": 0.470703125,
+          "sum": 47.86328125
+        },
+        "inferred_physical_same_128_block_intersection": {
+          "count": 640,
+          "min": 1,
+          "mean": 10.7453125,
+          "median": 10.0,
+          "p95_nearest_rank": 21,
+          "max": 37,
+          "sum": 6877
+        },
+        "inferred_physical_block_4x4_mean_intersection": [
+          [
+            15.575,
+            11.39375,
+            9.30625,
+            8.4125
+          ],
+          [
+            11.4875,
+            9.89375,
+            8.91875,
+            8.53125
+          ],
+          [
+            9.1,
+            8.9625,
+            9.0375,
+            8.45
+          ],
+          [
+            8.28125,
+            8.925,
+            8.4125,
+            8.475
+          ]
+        ],
+        "logical_block_4x4_mean_intersection": [
+          [
+            15.575,
+            11.39375,
+            9.30625,
+            8.4125
+          ],
+          [
+            11.4875,
+            9.89375,
+            8.91875,
+            8.53125
+          ],
+          [
+            9.1,
+            8.9625,
+            9.0375,
+            8.45
+          ],
+          [
+            8.28125,
+            8.925,
+            8.4125,
+            8.475
+          ]
+        ],
+        "physical_unique_pairs_nonzero": 160,
+        "example_first_pair": {
+          "queries": [
+            0,
+            1
+          ],
+          "logical": 140,
+          "inferred_physical": 140
+        }
+      },
+      "same_core_next_query_q_plus_24": {
+        "pairs": 168,
+        "logical_intersection": {
+          "count": 168,
+          "min": 92,
+          "mean": 125.625,
+          "median": 126.0,
+          "p95_nearest_rank": 146,
+          "max": 162,
+          "sum": 21105
+        },
+        "inferred_physical_intersection": {
+          "count": 168,
+          "min": 0,
+          "mean": 0,
+          "median": 0.0,
+          "p95_nearest_rank": 0,
+          "max": 0,
+          "sum": 0
+        },
+        "inferred_physical_overlap_over_smaller_valid_set": {
+          "count": 168,
+          "min": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "p95_nearest_rank": 0.0,
+          "max": 0.0,
+          "sum": 0.0
+        },
+        "inferred_physical_same_128_block_intersection": {
+          "count": 672,
+          "min": 0,
+          "mean": 0,
+          "median": 0.0,
+          "p95_nearest_rank": 0,
+          "max": 0,
+          "sum": 0
+        },
+        "inferred_physical_block_4x4_mean_intersection": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        "logical_block_4x4_mean_intersection": [
+          [
+            6.863095238095238,
+            7.089285714285714,
+            7.261904761904762,
+            8.136904761904763
+          ],
+          [
+            8.113095238095237,
+            7.809523809523809,
+            8.130952380952381,
+            7.839285714285714
+          ],
+          [
+            8.089285714285714,
+            7.857142857142857,
+            8.101190476190476,
+            7.869047619047619
+          ],
+          [
+            8.19047619047619,
+            8.386904761904763,
+            7.851190476190476,
+            8.035714285714286
+          ]
+        ],
+        "physical_unique_pairs_nonzero": 0,
+        "example_first_pair": {
+          "queries": [
+            0,
+            24
+          ],
+          "logical": 122,
+          "inferred_physical": 0
+        }
+      },
+      "read_evidence": {
+        "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/results/csa_accept_20260930/h8192_b32/pto_a/states.pt",
+        "file_bytes": 100105279,
+        "metadata_entry": "states/data.pkl",
+        "metadata_bytes_read": 851,
+        "topk_storage_entry": "states/data/1",
+        "topk_bytes_read": 393216,
+        "byteorder": "little",
+        "tensor_descriptors": {
+          "x_out": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "0",
+              "cpu",
+              3145728
+            ],
+            "offset": 0,
+            "shape": [
+              192,
+              4,
+              4096
+            ],
+            "stride": [
+              16384,
+              4096,
+              1
+            ]
+          },
+          "idx_topk": {
+            "storage": [
+              "storage",
+              "IntStorage",
+              "1",
+              "cpu",
+              98304
+            ],
+            "offset": 0,
+            "shape": [
+              192,
+              512
+            ],
+            "stride": [
+              512,
+              1
+            ]
+          },
+          "swa.0": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "2",
+              "cpu",
+              4734976
+            ],
+            "offset": 0,
+            "shape": [
+              289,
+              32,
+              1,
+              512
+            ],
+            "stride": [
+              16384,
+              512,
+              512,
+              1
+            ]
+          },
+          "compressed.0": {
+            "storage": [
+              "storage",
+              "BFloat16Storage",
+              "3",
+              "cpu",
+              34619392
+            ],
+            "offset": 0,
+            "shape": [
+              2113,
+              32,
+              1,
+              512
+            ],
+            "stride": [
+              16384,
+              512,
+              512,
+              1
+            ]
+          },
+          "state.0": {
+            "storage": [
+              "storage",
+              "FloatStorage",
+              "4",
+              "cpu",
+              1183744
+            ],
+            "offset": 0,
+            "shape": [
+              289,
+              2,
+              1,
+              2048
+            ],
+            "stride": [
+              4096,
+              2048,
+              2048,
+              1
+            ]
+          },
+          "indexer.0": {
+            "storage": [
+              "storage",
+              "CharStorage",
+              "5",
+              "cpu",
+              8654848
+            ],
+            "offset": 0,
+            "shape": [
+              2113,
+              32,
+              1,
+              128
+            ],
+            "stride": [
+              4096,
+              128,
+              128,
+              1
+            ]
+          },
+          "indexer.1": {
+            "storage": [
+              "storage",
+              "HalfStorage",
+              "6",
+              "cpu",
+              67616
+            ],
+            "offset": 0,
+            "shape": [
+              2113,
+              32,
+              1,
+              1
+            ],
+            "stride": [
+              32,
+              1,
+              1,
+              1
+            ]
+          },
+          "indexer_state.0": {
+            "storage": [
+              "storage",
+              "FloatStorage",
+              "7",
+              "cpu",
+              295936
+            ],
+            "offset": 0,
+            "shape": [
+              289,
+              2,
+              1,
+              512
+            ],
+            "stride": [
+              1024,
+              512,
+              512,
+              1
+            ]
+          }
+        },
+        "other_storage_payloads_read": false
+      }
+    }
+  ]
+}
