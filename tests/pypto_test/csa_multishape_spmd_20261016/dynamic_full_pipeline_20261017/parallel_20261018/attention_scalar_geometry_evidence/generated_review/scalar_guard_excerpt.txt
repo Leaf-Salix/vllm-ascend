@@ -1,0 +1,251 @@
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto
+12632–12655
+12632:   %3748 = arith.index_cast %c0_index : index to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":272:5)
+12633:   %3749 = arith.addi %3737, %c3_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":276:5)
+12634:   %geometry_query_inline1336, %geometry_owner_inline1351, %geometry_position_inline1319, %geometry_active_inline1317 = scf.for %qk_tick_inline1384__idx_v0 = %c0_index to %3749 step %c1_index iter_args(%geometry_query_iter = %cn1_index, %geometry_owner_iter = %cn1_index, %geometry_position_iter = %c0_index, %geometry_active_iter = %3748) -> (index, index, index, i32) {
+12635:     %3750 = arith.divsi %qk_tick_inline1384__idx_v0, %c5_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":286:9)
+12636:     %3751 = arith.muli %3750, %c24_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":286:9)
+12637:     %3752 = arith.addi %qk_core_inline1338__ssa_v0, %3751 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":286:9)
+12638:     %3753 = arith.remsi %qk_tick_inline1384__idx_v0, %c5_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":287:9)
+12639:     %3754 = arith.cmpi slt, %qk_tick_inline1384__idx_v0, %3737 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":288:9)
+12640:     %geometry_after_query_inline1376__rv_v0, %geometry_after_owner_inline1314__rv_v0, %geometry_after_position_inline1306__rv_v0, %geometry_after_active_inline1304__rv_v0 = scf.if %3754 -> (index, index, index, i32) {
+12641:       %3756 = arith.muli %3752, %c16_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+12642:       %3757 = arith.addi %3756, %3753 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+12643:       %3755 = pto.load %arg43[%3757] : !pto.ptr<i32> -> i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+12644:       %3758 = arith.index_cast %3755 : i32 to index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+12645:       %3759 = arith.cmpi slt, %c0_index, %3758 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+12646:       %geometry_valid_query_inline1302__rv_v0, %geometry_valid_owner_inline1305__rv_v0, %geometry_valid_position_inline1346__rv_v0, %geometry_valid_active_inline1300__rv_v0 = scf.if %3759 -> (index, index, index, i32) {
+12647:         %3760 = arith.muli %qk_core_inline1338__ssa_v0, %c3_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":290:17)
+12648:         %3761 = arith.remsi %qk_tick_inline1384__idx_v0, %c3_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":290:17)
+12649:         %3762 = arith.addi %3760, %3761 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":290:17)
+12650:         %3763 = arith.muli %3762, %c128_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":291:17)
+12651:         %qk_kv_half_inline1298__ssa_v0 = pto.alloc_tile addr = %c65536_i64 valid_row = %c64_index valid_col = %c512_index : !pto.tile_buf<loc=vec, dtype=bf16, rows=64, cols=512, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":292:17)
+12652:         pto.texpands ins(%cst_204 : bf16) outs(%qk_kv_half_inline1298__ssa_v0 : !pto.tile_buf<loc=vec, dtype=bf16, rows=64, cols=512, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":292:17)
+12653:         %3764 = arith.cmpi ne, %3752, %geometry_query_iter : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":298:17)
+12654:         %cached_query_inline1350__rv_v0, %cached_owner_inline1318__rv_v0, %cached_position_inline1316__rv_v0, %cached_active_inline1383__rv_v0 = scf.if %3764 -> (index, index, index, i32) {
+12655:           %3767 = arith.index_cast %c0_index : index to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_plan_stages.py":326:5)
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto
+12753–12764
+12753:           } else {
+12754:             scf.yield %3767, %c0_index, %cn1_index : i32, index, index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_plan_stages.py":336:9)
+12755:           }
+12756:           scf.yield %3752, %request_inline2836__phi_v5, %position_inline2838__phi_v5, %active_inline2839__phi_v5 : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":298:17)
+12757:         } else {
+12758:           scf.yield %geometry_query_iter, %geometry_owner_iter, %geometry_position_iter, %geometry_active_iter : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":298:17)
+12759:         }
+12760:         %3824 = arith.index_cast %cached_active_inline1383__rv_v0 : i32 to index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":312:17)
+12761:         %3825 = arith.cmpi ne, %3824, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":312:17)
+12762:         scf.if %3825 {
+12763:           %3826 = arith.cmpi eq, %3753, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":313:21)
+12764:           scf.if %3826 {
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto
+13005–13018
+13005:         %3996 = arith.addi %3763, %3739 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":357:17)
+13006:         %3997 = arith.maxsi %3996, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":357:17)
+13007:         %kv_ring__ssa_v0_pview = pto.partition_view %kv_ring__ssa_v0_view, offsets = [%3997, %c0_index], sizes = [%c64_index, %c512_index] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<64x512xbf16> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":357:17)
+13008:         pto.tstore ins(%qk_kv_half_inline1298__phi_v29 : !pto.tile_buf<loc=vec, dtype=bf16, rows=64, cols=512, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%kv_ring__ssa_v0_pview : !pto.partition_tensor_view<64x512xbf16>) loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":357:17)
+13009:         scf.yield %cached_query_inline1350__rv_v0, %cached_owner_inline1318__rv_v0, %cached_position_inline1316__rv_v0, %cached_active_inline1383__rv_v0 : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+13010:       } else {
+13011:         scf.yield %geometry_query_iter, %geometry_owner_iter, %geometry_position_iter, %geometry_active_iter : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":289:13)
+13012:       }
+13013:       scf.yield %geometry_valid_query_inline1302__rv_v0, %geometry_valid_owner_inline1305__rv_v0, %geometry_valid_position_inline1346__rv_v0, %geometry_valid_active_inline1300__rv_v0 : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":288:9)
+13014:     } else {
+13015:       scf.yield %geometry_query_iter, %geometry_owner_iter, %geometry_position_iter, %geometry_active_iter : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":288:9)
+13016:     }
+13017:     %3998 = arith.cmpi sle, %c144_index, %arg132 : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":376:9)
+13018:     scf.if %3998 {
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto
+13427–13440
+13427:     %l_after_inline1344__rv_v0_mv = pto.alloc_tile addr = %c135296_i64 valid_row = %c32_index valid_col = %c1_index : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/parser/ast_parser.py":3837:1)
+13428:     pto.tmov ins(%l_after_inline1344__rv_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%l_after_inline1344__rv_v0_mv : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/parser/ast_parser.py":3837:1)
+13429:     %m_after_inline1401__rv_v0_mv = pto.alloc_tile addr = %c135168_i64 valid_row = %c32_index valid_col = %c1_index : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/parser/ast_parser.py":3837:1)
+13430:     pto.tmov ins(%m_after_inline1401__rv_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%m_after_inline1401__rv_v0_mv : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/parser/ast_parser.py":3837:1)
+13431:     scf.yield %geometry_after_query_inline1376__rv_v0, %geometry_after_owner_inline1314__rv_v0, %geometry_after_position_inline1306__rv_v0, %geometry_after_active_inline1304__rv_v0 : index, index, index, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/attention_stream_stages.py":276:5)
+13432:   }
+13433:   pto.fence.barrier_all #pto.fence_scope<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/phase_sync.py":94:5)
+13434:   pto.cmo.cacheinvalid all #pto.address_space<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/phase_sync.py":95:5)
+13435:   pto.fence.barrier_all #pto.fence_scope<gm> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/phase_sync.py":96:5)
+13436:   %4124 = arith.muli %453, %c128_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/phase_sync.py":97:5)
+13437:   %4125 = arith.addi %4124, %c359424_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/phase_sync.py":97:5)
+13438:   pto.barrier <PIPE_ALL> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/signals.py":42:5)
+13439:   %4126 = arith.maxsi %4125, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/signals.py":43:5)
+13440:   %signal_v45__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%4126], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32> loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/source_candidate/signals.py":43:5)
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+57563–57604
+57563:   v10873 = v357;
+57564:   v10874 = v371;
+57565:   v10875 = v371;
+57566:   v10876 = v357;
+57567:   v10877 = v393;
+57568:   goto label1173;
+57569: label1173:
+57570:   // pto: %3749, %geometry_query_inline1336
+57571:   // pto: %geometry_query_inline1336
+57572:   v9056 = false;
+57573:   v9056 = v10873 < (int64_t) ((uint64_t) v9000 + (uint64_t) v353);
+57574:   if (v9056) {
+57575:     goto label1174;
+57576:   } else {
+57577:     goto label1287;
+57578:   }
+57579: label1174:
+57580:   // pto: %3752, %3750, %3751
+57581:   v9057 = (int64_t) ((uint64_t) v1513 + (uint64_t) ((int64_t) (uint64_t) (v10873 / v366) * (uint64_t) v338));
+57582:   // pto: %3753
+57583:   v9058 = v10873 % v366;
+57584:   // pto: %3754
+57585:   v9059 = v10873 < v9000;
+57586:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+57587:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+57588:   // pto: %geometry_after_query_inline1376__rv_v0
+57589:   v9060 = false;
+57590:   v9060 = v9059;
+57591:   if (v9060) {
+57592:     goto label1175;
+57593:   } else {
+57594:     v10910 = v10874;
+57595:     v10911 = v10875;
+57596:     v10912 = v10876;
+57597:     v10913 = v10877;
+57598:     goto label1255;
+57599:   }
+57600: label1175:
+57601:   // pto: %3756, %3757, %3755
+57602:   v9061 = (v44)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v9057 * (uint64_t) v343) + (uint64_t) v9058)];
+57603:   // pto: %3758, %3759
+57604:   v9062 = (int64_t) v9061 > v357;
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+57629–57647
+57629:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+57630:   // pto: %3764
+57631:   // pto: %cached_query_inline1350__rv_v0
+57632:   v9066 = false;
+57633:   v9066 = v9057 != v10874;
+57634:   if (v9066) {
+57635:     goto label1177;
+57636:   } else {
+57637:     v10903 = v10875;
+57638:     v10904 = v10876;
+57639:     v10905 = v10877;
+57640:     goto label1205;
+57641:   }
+57642: label1177:
+57643:   // pto: %3773, %3774, %3775
+57644:   // pto: %active_inline2258_inline2847__phi_v3
+57645:   v9067 = false;
+57646:   v9067 = v9057 >= v357 & v9057 < v133;
+57647:   if (v9067) {
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+57895–57918
+57895: label1204:
+57896:   v10903 = v10902;
+57897:   v10904 = v10901;
+57898:   v10905 = v10900;
+57899:   goto label1205;
+57900: label1205:
+57901:   goto label1206;
+57902: label1206:
+57903:   goto label1207;
+57904: label1207:
+57905:   // pto: %3824, %3825
+57906:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+57907:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+57908:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+57909:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
+57910:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);
+57911:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID5);
+57912:   v9103 = false;
+57913:   v9103 = (int64_t) v10905 != v357;
+57914:   if (v9103) {
+57915:     goto label1208;
+57916:   } else {
+57917:     goto label1252;
+57918:   }
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+58437–58456
+58437:   TSTORE(v9264, v1447);
+58438:   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+58439:   v10907 = v10903;
+58440:   v10908 = v10904;
+58441:   v10909 = v10905;
+58442:   goto label1254;
+58443: label1253:
+58444:   v10907 = v10875;
+58445:   v10908 = v10876;
+58446:   v10909 = v10877;
+58447:   goto label1254;
+58448: label1254:
+58449:   // pto: %geometry_valid_query_inline1302__rv_v0
+58450:   ;
+58451:   v9265 = v9062 ? v9057 : v10874;
+58452:   v10910 = v9265;
+58453:   v10911 = v10907;
+58454:   v10912 = v10908;
+58455:   v10913 = v10909;
+58456:   goto label1255;
+
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_scalar_geometry_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+59962–60016
+59962:   // pto: %geometry_query_inline1336, %geometry_owner_inline1351, %geometry_position_inline1319, %geometry_active_inline1317
+59963:   // pto: %geometry_query_inline1336
+59964:   ;
+59965:   v9792 = (int64_t) ((uint64_t) v10873 + (uint64_t) v340);
+59966:   v10873 = v9792;
+59967:   v10874 = v10910;
+59968:   v10875 = v10911;
+59969:   v10876 = v10912;
+59970:   v10877 = v10913;
+59971:   goto label1173;
+59972: label1287:
+59973:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+59974:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
+59975:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID7);
+59976:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID3);
+59977:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID6);
+59978:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+59979:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+59980:   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+59981:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+59982:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+59983:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+59984:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID4);
+59985:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID3);
+59986:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID7);
+59987:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
+59988:   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+59989:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID5);
+59990:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
+59991:   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+59992:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID6);
+59993:   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+59994:   pipe_barrier(PIPE_ALL);
+59995:   dsb(DSB_DDR);
+59996:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+59997:   pipe_barrier(PIPE_ALL);
+59998:   dsb(DSB_DDR);
+59999:   // pto: %4125
+60000:   v9793 = (int64_t) ((uint64_t) v1517 + (uint64_t) v459);
+60001:   pipe_barrier(PIPE_ALL);
+60002:   // pto: %4126
+60003:   v9794 = v9793 < v357 ? v357 : v9793;
+60004:   // pto: %signal_v45__ssa_v0_signal_pview
+60005:   v9795 = PTOAS__GLOBAL_TENSOR_DATA(v747);
+60006:   // pto: %signal_v45__ssa_v0_signal_pview
+60007:   // pto: %signal_v45__ssa_v0_signal_pview
+60008:   v9797 = pto::Shape<1, 1, 1, 1, 1>();
+60009:   // pto: %signal_v45__ssa_v0_signal_pview
+60010:   v9798 = pto::Stride<1, 1, 1, 1, 1>();
+60011:   // pto: %signal_v45__ssa_v0_signal_pview
+60012:   v9799 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v9795 + (v9796 + v9794), v9797, v9798);
+60013:   v9800 = pto::comm::NotifyOp::Set;
+60014:   pto::comm::TNOTIFY(v9799, v1526, v9800);
+60015:   // pto: %4127, %4128, %4129
+60016:   v9801 = (int64_t) ((uint64_t) ((int64_t) ((uint64_t) v133 + (uint64_t) v460) / v349) * (uint64_t) v351);

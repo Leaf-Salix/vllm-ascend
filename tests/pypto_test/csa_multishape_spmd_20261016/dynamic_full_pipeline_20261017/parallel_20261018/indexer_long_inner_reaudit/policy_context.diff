@@ -1,0 +1,38 @@
+--- 593/policy.py
++++ 668/policy.py
+@@ -26,6 +26,12 @@
+ HC消费者归约候选让门值/Sinkhorn直接加载四份投影部分和，省去RAW交接。
+ 128K/B16与8K/B32均与原分task精确一致；同进程五窗口完整L1分别慢1.06%、
+ 快2.54%，因此默认关闭，尚不据两个点划定启用区间。见统一优化日志。
++QA的M16并行仅在已有G6策略且16<tokens<32选用：此时原M32策略只有
++两个M16尾块，改分核不增加数学或权重请求。长历史T24/T30同轮完整L1
++降低1.33%/1.84%；G2的T18回退2.33%，因此沿既有G6边界保守收窄，
++不把三点视为G6收益的因果证明或全历史普遍提速。这个区间实际为长历史、
++query上界至少6、24<=T<32，混合Q与其它历史长度尚需继续回归。
++开关进入constexpr签名，关闭编译旧QA路径；T和device metadata仍动态。
+ """
+ 
+ from dataclasses import dataclass
+@@ -45,6 +51,7 @@
+     hc_row_dependencies: bool = True
+     attention_query_metadata: bool = False
+     hc_consumer_reduce: bool = False
++    qa_m16_parallel: bool = False
+ 
+     def constexprs(self) -> dict[str, int | bool]:
+         return {
+@@ -61,6 +68,7 @@
+             "HC_ROW_DEPENDENCIES": self.hc_row_dependencies,
+             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
++            "QA_M16_PARALLEL": self.qa_m16_parallel,
+         }
+ 
+ 
+@@ -99,4 +107,6 @@
+         roots=1 if long_history and group == 6 else 2,
+         oa_cols=128 if tokens <= 96 else 256,
+         ob_rows=ob_rows,
++        # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
++        qa_m16_parallel=group == 6 and 16 < tokens < 32,
+     )

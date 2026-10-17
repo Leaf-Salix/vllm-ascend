@@ -1,0 +1,88 @@
+{
+  "status": "READY_FOR_PARENT_DEVICE_VALIDATION",
+  "scope": "既有CPU产物只读，无后端/NPU",
+  "roots": 130,
+  "dynamic_axes": 58,
+  "single_mix": true,
+  "sync_start": true,
+  "controls_equal": true,
+  "reference_source_33_byte_equal": true,
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 128,
+    "OB_ROWS": 96,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false,
+    "QA_M16_PARALLEL": false
+  },
+  "roles": {
+    "aic": {
+      "allocations": 558,
+      "same_addresses_types_shapes": true,
+      "upper_bytes": {
+        "acc": 131072,
+        "left": 65536,
+        "mat": 475136,
+        "right": 65536,
+        "vec": 16384
+      },
+      "local_events": 1711,
+      "identical_flat_local_events": true,
+      "whole_function_normalized_pto_equal": true,
+      "whole_function_normalized_cpp_equal": true
+    },
+    "aiv": {
+      "allocations": 1812,
+      "same_addresses_types_shapes": true,
+      "upper_bytes": {
+        "vec": 163872
+      },
+      "local_events": 3088,
+      "identical_flat_local_events": true,
+      "whole_function_normalized_pto_equal": false,
+      "whole_function_normalized_cpp_equal": false
+    }
+  },
+  "loop_values": "源码原4数学Tile+4新Scalar；物理PTO原数学Tile沿原分配，新增4Scalar iter_args",
+  "new_scalar_types": [
+    "index",
+    "index",
+    "index",
+    "i32"
+  ],
+  "initial_values": [
+    -1,
+    -1,
+    0,
+    0
+  ],
+  "guards": [
+    "tick<block_count",
+    "mask>0",
+    "current_query!=cached_tag"
+  ],
+  "masked_and_drain_passthrough": true,
+  "inactive_updates_tag": true,
+  "PV_reset_does_not_write_cache": true,
+  "cpp_cache_vars": [
+    "v10874",
+    "v10875",
+    "v10876",
+    "v10877"
+  ],
+  "cache_var_assignments_each": 2,
+  "limitations": [
+    "AIC全文指整数学函数，归一SSA/去注释并将已有wait-backoff调用还原为TWAIT；不是整个文件/机器码逐字相同。",
+    "AIV全文因cache控制不同；数学/地址保持依据源级逆AST、实际同分配/局部events与guard/phi审阅，不称全文等价。",
+    "事件平列表不能独立证明分支路径；新增tag分支只包原Scalar几何，原mask和事件谓词保留。",
+    "CPU不证明CCEC寄存器/栈spill、设备精度或完整性能。"
+  ]
+}
