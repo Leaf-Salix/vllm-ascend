@@ -16600,3 +16600,74 @@ QK/PV已共用同一L1 KV，mi/li本核环及物理地址plan各有既有结果�
 仅补当前版本的逐tick gather、softmax、PV归并与原FFTS等待观测，不把
 插桩结果用于性能验收，也不改正式数学/同步。只读排重见attention_aiv_d253_audit
 和dense_projection_d253_audit，避免后续会话重复已否决方向。
+
+### 2026-10-18：当前版本Attention逐tick诊断完成，聚焦压缩gather
+
+唯一任务`task_20261018_032708_262386210870`完整PASS。冻结源仍为d253数学
+和调度（e581只增加上一阶段记录）；128K/B16/S6，五次原PTO精确/保护区/
+代际检查和同址图重放通过，A→B→A三轮共4896条逐tick记录。没有Native
+forward或token验收，也没有完整L1性能窗口。
+
+测试hook只向各物理核独占signal槽[32:64]写32个word，每核60条上限，
+[64]为溢出标记；原通知[0]和既有phase_clock[16:20]互不重叠。独立审查
+确认4320条容量槽唯一、真实AIC与AIV0/1索引隔离，插桩剥离后原C++逐字
+恢复且原同步序列保持。原阶段drain/DCCI/DSB/发布仍负责记录写回。审计中
+raw_cpp_path遗漏/ptoas仅补充路径映射，没有改已运行入口或为此重测。
+
+| 逐核累计中位数 μs | A0 | B | A2 |
+| --- | ---: | ---: | ---: |
+| AIV gather/ring发射区间 | 68.30 | 66.26 | 67.39 |
+| AIV softmax到prob发布发射 | 25.49 | 23.05 | 23.77 |
+| AIV PV gate/merge（含PV wait） | 24.42 | 24.39 | 24.58 |
+| AIC KV FFTS等待 | 114.12 | 108.97 | 116.65 |
+
+压缩块占逐核gather累计的比例中位数约94.94%–94.97%。单半块中位数：
+SWA约0.66–0.68μs，压缩第1块约6.12–6.20，第2块3.82–3.90，第3块
+2.64–2.68，第4块2.92–2.98。首压缩块较慢在每核四个query中反复出现，
+不只是整个helper的第一次；但没有cache事件，不能直接归因于某级cache。
+两lane没有固定慢侧，最晚发布核也不恒等于gather累计最大的核。
+
+同组两lane的gather区间并集与AIC KV等待重合约47.06–51.48μs（逐组累计
+中位数），只说明时间关系，不是可直接节省量。gather同时包含清零、几何、
+Scalar索引/页表、KV加载与ring写发射；局部wait_flag marker近零只是可能
+的Scalar发射开销，不能认定MTE/UB等待近零。tick_end不包含自身记录写入、
+下一tick初始化及最终drain；publish_end是最后TEXPANDS发射后，非完成点。
+新tick hook没有额外硬件fence，但组合的旧phase_clock仍有其DCCI/DSB。
+各区间有嵌套，不能相加冒充纯计算或完整L1，也不用于30%性能验收。
+
+基于该范围，只推进另一份独立候选：证明同代plan已过滤非法列/页后，
+删除consumer重复的两层地址guard，保留负索引、原page读取、零KV、SWA、
+行序及事件。完整CPU已通过，两档完整矩阵为
+`task_20261018_033720_281285324271`（128K/B16）和
+`task_20261018_033720_281290823741`（8K/B32），此时未预记性能收益。
+“全有效块跳清零”已有旧候选整链通过但未改善的记录；本轮不重开该方向。
+
+报告及完整原始三轮数据：parallel_20261018/attention_tick_clock_evidence/
+ANALYSIS.md/json、independent_review，以及attention_tick_h131072_b16_v1。
+首次使用的测试脚本、符号CPU、槽审查、计时限制及路径更正均已保存。
+
+## 2026-10-18：Attention地址guard候选结束，无完整L1收益
+
+上节两任务均完成，所有原PTO精确对照、A→B→A图重放、cache/state、保护区
+与72核代际检查通过。测量为同进程同输入三方交替五窗中位数：
+
+| 场景 | 原动态分task μs | d253单SPMD μs | guard候选 μs | 候选相对d253降低 |
+| --- | ---: | ---: | ---: | ---: |
+| 128K / B16 / S6 | 862.28 | 874.12 | 874.28 | -0.018% |
+| 8K / B32 / S6 | 983.60 | 995.36 | 996.02 | -0.066% |
+
+两档均3/5配对窗口略快，但中位数无改善，不采用、不扩七档，也不与其他
+失败候选叠加。CPU实际少3个比较、1个andi和1个整数除法，片上分配不变；
+数学/传输/同步调用没有变化。独立审阅确认在本入口同代plan契约下省略两层
+guard有依据，但源码或指令数量减少并未形成可用的整层收益。正式33份源
+保持d253；精度PASS不代表Native/token及S1/S5完整动态范围已全部验收。
+
+另只读审计同次作业融合2个和分task73个kernel：现有raw bin/manifest/
+compiled_meta/perf_hints均没有寄存器数、stack/spill或local scratch统计，
+不据较大二进制推断Scalar溢出或icache瓶颈；未知字段保留null。未重复已有
+官方反汇编工具的A3失败路径，没有为该审计新编译或上卡。
+
+证据位于parallel_20261018/attention_guard_elision_evidence/DEVICE_RESULTS.md
+及json、INDEPENDENT_REVIEW.md、源码/CPU差分、两档原始三方五窗；资源审计
+见scalar_resource_audit/。逐tick诊断的三份约2.4MB原始JSON属于文本证据，
+随本阶段保存；大编译产物仅登记路径和大小，不做hash校验。

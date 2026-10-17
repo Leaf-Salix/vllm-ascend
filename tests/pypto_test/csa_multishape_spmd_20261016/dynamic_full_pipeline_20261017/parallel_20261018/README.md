@@ -283,3 +283,25 @@ task-submit --device auto --max-time 1200 'bash /主工作区/dynamic_full_pipel
 当前Attention只读复核及dense排重分别保存在attention_aiv_d253_audit、
 dense_projection_d253_audit。后续当前版本Attention逐tick插桩单独归档，
 不计入正式性能证据。
+
+## 当前Attention逐tick诊断完成
+
+唯一128K/B16/S6任务完整PASS，A→B→A三轮共4896条记录。压缩块占gather
+累计约94.94%，首压缩块每query约6.2μs，SWA约0.67μs，两lane无固定慢侧。
+AIC KV等待与本组gather有较多时间重合；这是诊断范围，不是可直接节省量。
+局部wait_flag的Scalar marker不能测作MTE真实完成，区间也不能相加当完整L1。
+
+[三轮细分分析](attention_tick_clock_evidence/ANALYSIS.md)保留统计口径、最慢核、
+计时边界、历史排重和独立审阅。下一候选仅删除plan已保证的consumer两层
+地址guard，独立CPU通过、两档完整矩阵已提交；结果随后单独记录。
+
+两档随后全部完成，五窗中位数长B16为874.12→874.28μs，短B32为
+995.36→996.02μs，分别慢0.018%与0.066%。各有3/5配对窗口略快，
+不足以支持优化收益；不采用、不扩七档、不组合其他失败候选。
+[完整结果](attention_guard_elision_evidence/DEVICE_RESULTS.md)保留原分task
+对照、五窗、策略、源码、独立地址契约审阅与生成代码变化。正式源仍为d253。
+
+`scalar_resource_audit/`核对同轮融合2个和原分task73个kernel的现有raw
+二进制及元数据，没有寄存器、stack/spill/local scratch统计；不能据融合
+bin较大归因于Scalar溢出或指令缓存。缺失指标记为未知，不记零，也不重复
+编译或尝试已有失败的反汇编路径。

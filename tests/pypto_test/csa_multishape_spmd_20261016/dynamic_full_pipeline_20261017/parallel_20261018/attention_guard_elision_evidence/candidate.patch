@@ -1,0 +1,54 @@
+--- e581/attention_stream_stages.py
++++ candidate/attention_stream_stages.py
+@@ -59,8 +59,13 @@
+     KV进一次L1，QK用转置view，PV复用原L1行；PV N128/K128保留交替累加器。
+     AIV保持FP32块内softmax和在线m/l/左右oi顺序，probability及最终输出BF16均
+     rint。最终归一化仍加入sink，RoPE读取未cast的FP32值，再执行BF16边界。
+-    gather再次检查Q/L活动、causal position、页表列和物理页上下界；inactive
+-    不访问cache。plan与metadata必须保持一致，不能一侧私自改mask而破坏事件对数。
++    gather仍检查Q/L活动和causal position；SWA仍检查页表列与物理页上下界。
++    压缩候选只在同次plan已验证的INT32 indices>=0时查页并采样，复用plan的
++    列容量/物理页安全结论，不重复两个guard。索引含义仍是逻辑行号，未增加
++    物理行plan或地址缓存。plan与消费者必须使用同一批只读Q/L/positions/页表，
++    compressed_pages必须等于dim(cmp_kv_flat,0)//32，且消费前取得本代plan的
++    阶段发布并完成本核缓存维护。这个helper不能直接消费外部或过期indices。
++    inactive不访问cache，非法索引保留零KV；不改mask或任一事件配对。
+     调用前等待Q/plan/原压缩cache及cos/sin可见；各组完成尾排空后，外层再发布
+     packed-ready供O_A读取。FFTS生命周期/事件共存、真实A3同步、精度与性能
+     仍须后续整合设备验证；CPU编译和事件模型都不能替代该证据。
+@@ -304,21 +309,26 @@
+                                             valid_shape=[qk_hi - qk_lo, HEAD_DIM],
+                                         )
+                     else:
+-                        # indices已经包含plan的causal/页mask，保留顺序并再做
+-                        # 地址上界保护；非法行留在本轮初始化的零KV中。
++                        # indices来自同次已发布plan，已包含causal/列/物理页mask。
++                        # 保留逻辑顺序、非负判断与原页读取；负索引保持本轮零KV。
+                         for qk_row in pl.range(ATTN_K_TILE // 2):
+                             qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+                             if qk_cmp_k < CMP_TOPK:
+                                 qk_ridx = pl.cast(pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k]), pl.INDEX)
+                                 if qk_ridx >= 0:
+                                     qk_column = qk_ridx // BLOCK_SIZE
+-                                    if qk_column < pl.tensor.dim(cmp_block_table, 1):
+-                                        qk_page = pl.cast(pl.read(cmp_block_table, [qk_b, qk_column]), pl.INDEX)
+-                                        if qk_page >= 0 and qk_page < pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE:
+-                                            qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+-                                            qk_kv_half = pl.gather_row(
+-                                                qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+-                                            )
++                                    # 同次plan已检查这个最终INT32逻辑索引对应的列和物理页。
++                                    # 快路径仅在FP32精确区间检查整个页前缀，且仍验证
++                                    # final_index<upper；空洞/短表/大值回退逐个检查最终
++                                    # c_page_indices。两条路径均保证非负输出的页地址合法。
++                                    # 依赖外层等PHASE_ATTN_PLAN并刷新缓存，且本次
++                                    # Q/L/positions/页表及cache容量保持不变；不能将
++                                    # 任意外部Top-K或上一代indices直接接入本helper。
++                                    qk_page = pl.cast(pl.read(cmp_block_table, [qk_b, qk_column]), pl.INDEX)
++                                    qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
++                                    qk_kv_half = pl.gather_row(
++                                        qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
++                                    )
+                 pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
+         # 大档先消费上一块SCORE通知，再发布已经写好的本块KV；
+         # 先让Cube推进，再做上一块softmax，同时限制SCORE覆盖速度。

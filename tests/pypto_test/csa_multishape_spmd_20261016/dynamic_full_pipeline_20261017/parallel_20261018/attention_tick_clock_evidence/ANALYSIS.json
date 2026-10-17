@@ -1,0 +1,3855 @@
+{
+  "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/result.json",
+  "task": "task_20261018_032708_262386210870",
+  "passed": true,
+  "eligible_for_performance": false,
+  "new_candidate_proposed": false,
+  "next_candidate_scope": "仅由另一独立候选推进已证明冗余的consumer两层guard删除；本分析不实现、不编译、不追加测试。",
+  "inputs": [
+    "A",
+    "B",
+    "A"
+  ],
+  "record_count_per_round": 1632,
+  "record_count_total": 4896,
+  "method": {
+    "time_unit": "us; uint32差取模后除50，沿用50MHz共同时钟域",
+    "core_mapping": "AIC group=core(0..23); AIV group=(core-24)//2, lane=(core-24)%2",
+    "work_mapping": "AIV gather/KV=tick, softmax/SCORE=tick-1, merge/PV=tick-3; AIC QK/KV=tick, PV/PROB=tick-2",
+    "query_block_mapping": "0<=work<20时query=group+24*(work//5), block=work%5; block0=SWA,block1..4=compressed; 其它是drain",
+    "core_total": "每核有效区间先求和，再对物理核的总和求中位数；不把逐tick中位数乘次数替代",
+    "block_tick_stats": "每轮每block有192条AIV半块记录或96条AIC块记录，直接取有效区间的分布",
+    "overlap": "每group/tick把两AIV的gather区间各与对应AIC KVwait相交，合并重叠后累计；不重复计两lane；仅时间重合，不是纯计算或可节省量",
+    "slowest": "分别列最晚ATTN_VECTOR发布、最长tick累计、最大gather累计、最大AIC KVwait；不混淆起始错峰与核内耗时",
+    "missing_endpoints": "值为0的未执行路径不进入区间；保留原导出epoch/tick完整性检查"
+  },
+  "limits": [
+    "gather范围包括清零、Q/L位置几何、Scalar索引/页表、源KV加载与ring写发射；不等于纯DMA。",
+    "ring_local_join和tick_reuse的wait_flag端点是Scalar发射范围；与wait_flag_dev语义不同，近零不能证明MTE/UB真正等待近零。",
+    "旧phase_clock每notify附加DCCI/DSB；tick hook本身无新增硬件fence，但空asm/Scalar暂存/GM记录仍扰动执行。",
+    "tick_end不含自身记录store/下一tick清零和最终drain/release；publish_end为最后TEXPANDS发射后，非Vector/DMA完成。",
+    "各区间有嵌套；三轮是同一次插桩作业A/B/A，不能做完整L1收益或不同作业性能比较。",
+    "只保存已有tick/phase记录，未记录每候选物理地址/有效行数或硬件cache与DMA完成事件；首压缩块较慢的内部因果仍不能唯一识别。"
+  ],
+  "rounds": [
+    {
+      "round": 0,
+      "input": "A",
+      "source_ticks": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_0_spmd_reference/attention_ticks.json",
+      "source_phase": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_0_spmd_reference/phase_clock.json",
+      "record_count": 1632,
+      "by_role": {
+        "aiv": {
+          "gather_ring_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.56,
+                "median_us": 3.04,
+                "max_us": 11.92
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 63.56,
+                "median_us": 68.3,
+                "max_us": 77.94
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.56,
+                "median_us": 0.68,
+                "max_us": 2.04
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.08,
+                "median_us": 3.41,
+                "max_us": 4.12
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 1.96,
+                "median_us": 3.41,
+                "max_us": 11.92
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 60.16,
+                "median_us": 64.76,
+                "max_us": 74.58
+              }
+            }
+          },
+          "softmax_body_to_prob_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.28,
+                "median_us": 1.16,
+                "max_us": 7.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 16.56,
+                "median_us": 25.49,
+                "max_us": 39.7
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.38,
+                "median_us": 1.4,
+                "max_us": 7.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.7,
+                "median_us": 6.59,
+                "max_us": 17.1
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.28,
+                "median_us": 1.13,
+                "max_us": 6.58
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 10.44,
+                "median_us": 18.13,
+                "max_us": 31.48
+              }
+            }
+          },
+          "pv_gate_merge": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 1.04,
+                "median_us": 1.14,
+                "max_us": 2.42
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 22.9,
+                "median_us": 24.42,
+                "max_us": 26.38
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 1.04,
+                "median_us": 1.12,
+                "max_us": 2.42
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 4.3,
+                "median_us": 4.73,
+                "max_us": 5.84
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 1.04,
+                "median_us": 1.14,
+                "max_us": 2.1
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 18.5,
+                "median_us": 19.51,
+                "max_us": 21.16
+              }
+            }
+          },
+          "final_publish_reset_issue": {
+            "all": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.1,
+                "median_us": 3.26,
+                "max_us": 4.98
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.8,
+                "median_us": 13.45,
+                "max_us": 14.96
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 0
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0,
+                "median_us": 0.0,
+                "max_us": 0
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.1,
+                "median_us": 3.26,
+                "max_us": 4.98
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.8,
+                "median_us": 13.45,
+                "max_us": 14.96
+              }
+            }
+          },
+          "score_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 9.82
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 6.68,
+                "median_us": 15.5,
+                "max_us": 25.5
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 3.32
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 3.32
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 9.82
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 6.68,
+                "median_us": 14.97,
+                "max_us": 24.98
+              }
+            }
+          },
+          "pv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 1.22
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.7,
+                "median_us": 1.64,
+                "max_us": 2.62
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 1.22
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 1.26
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.74
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.66,
+                "median_us": 1.31,
+                "max_us": 2.6
+              }
+            }
+          },
+          "ring_local_join": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.02,
+                "median_us": 0.08,
+                "max_us": 0.16
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.04
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 0.16
+              }
+            }
+          },
+          "tick_reuse_waits": {
+            "all": {
+              "per_tick": {
+                "count": 1104,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.04,
+                "max_us": 0.1
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.06
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.1
+              }
+            }
+          }
+        },
+        "aic": {
+          "kv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.42,
+                "median_us": 5.08,
+                "max_us": 14.06
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 98.88,
+                "median_us": 114.12,
+                "max_us": 125.16
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.42,
+                "median_us": 3.31,
+                "max_us": 10.58
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 11.98,
+                "median_us": 16.34,
+                "max_us": 30.16
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 2.54,
+                "median_us": 5.37,
+                "max_us": 14.06
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 86.64,
+                "median_us": 97.76,
+                "max_us": 106.54
+              }
+            }
+          },
+          "qk_after_wait_to_score_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.78,
+                "median_us": 1.12,
+                "max_us": 6.9
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 21.34,
+                "median_us": 26.43,
+                "max_us": 38.34
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.8,
+                "median_us": 1.1,
+                "max_us": 5.26
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 4.22,
+                "median_us": 5.25,
+                "max_us": 10.42
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.78,
+                "median_us": 1.12,
+                "max_us": 6.9
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 16.42,
+                "median_us": 21.28,
+                "max_us": 32.0
+              }
+            }
+          },
+          "prob_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.8
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.62,
+                "median_us": 0.8,
+                "max_us": 0.96
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.0,
+                "median_us": 0.04,
+                "max_us": 0.08
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.8
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.62,
+                "median_us": 0.76,
+                "max_us": 0.92
+              }
+            }
+          },
+          "pv_after_wait_to_ready_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.48
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 6.88,
+                "median_us": 7.13,
+                "max_us": 7.5
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 0.3
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 1.06,
+                "median_us": 1.1,
+                "max_us": 1.16
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.48
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 5.78,
+                "median_us": 6.02,
+                "max_us": 6.38
+              }
+            }
+          }
+        }
+      },
+      "aiv_gather_by_block": {
+        "0": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 0.56,
+            "median_us": 0.68,
+            "max_us": 2.04
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 3.08,
+            "median_us": 3.41,
+            "max_us": 4.12
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.7,
+              "max_us": 2.04
+            },
+            "1": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.66,
+              "max_us": 2.04
+            }
+          }
+        },
+        "1": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 5.1,
+            "median_us": 6.2,
+            "max_us": 11.92
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 23.0,
+            "median_us": 25.66,
+            "max_us": 34.64
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 5.1,
+              "median_us": 6.2,
+              "max_us": 10.4
+            },
+            "1": {
+              "count": 96,
+              "min_us": 5.34,
+              "median_us": 6.2,
+              "max_us": 11.92
+            }
+          }
+        },
+        "2": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.88,
+            "median_us": 3.9,
+            "max_us": 6.32
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 13.76,
+            "median_us": 15.72,
+            "max_us": 17.76
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 3.1,
+              "median_us": 3.88,
+              "max_us": 5.22
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.88,
+              "median_us": 3.93,
+              "max_us": 6.32
+            }
+          }
+        },
+        "3": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 1.96,
+            "median_us": 2.68,
+            "max_us": 4.0
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 9.56,
+            "median_us": 10.85,
+            "max_us": 12.02
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.14,
+              "median_us": 2.7,
+              "max_us": 3.86
+            },
+            "1": {
+              "count": 96,
+              "min_us": 1.96,
+              "median_us": 2.64,
+              "max_us": 4.0
+            }
+          }
+        },
+        "4": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.3,
+            "median_us": 2.98,
+            "max_us": 4.1
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 10.98,
+            "median_us": 11.97,
+            "max_us": 13.32
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.5,
+              "median_us": 2.98,
+              "max_us": 3.64
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.3,
+              "median_us": 2.98,
+              "max_us": 4.1
+            }
+          }
+        }
+      },
+      "aiv_gather_by_query_ordinal": {
+        "0": {
+          "0": {
+            "count": 48,
+            "min_us": 1.18,
+            "median_us": 1.43,
+            "max_us": 2.04
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.38,
+            "median_us": 6.35,
+            "max_us": 11.62
+          },
+          "2": {
+            "count": 48,
+            "min_us": 2.88,
+            "median_us": 3.76,
+            "max_us": 5.9
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.26,
+            "median_us": 2.93,
+            "max_us": 4.0
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.3,
+            "median_us": 2.89,
+            "max_us": 4.1
+          }
+        },
+        "1": {
+          "0": {
+            "count": 48,
+            "min_us": 0.62,
+            "median_us": 0.7,
+            "max_us": 1.0
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.42,
+            "median_us": 6.23,
+            "max_us": 11.92
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.32,
+            "median_us": 3.91,
+            "max_us": 4.62
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.2,
+            "median_us": 2.6,
+            "max_us": 3.18
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.68,
+            "median_us": 3.0,
+            "max_us": 3.44
+          }
+        },
+        "2": {
+          "0": {
+            "count": 48,
+            "min_us": 0.56,
+            "median_us": 0.64,
+            "max_us": 0.84
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.1,
+            "median_us": 6.2,
+            "max_us": 7.98
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.3,
+            "median_us": 3.88,
+            "max_us": 4.78
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.32,
+            "median_us": 2.68,
+            "max_us": 3.52
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.64,
+            "median_us": 3.04,
+            "max_us": 3.44
+          }
+        },
+        "3": {
+          "0": {
+            "count": 48,
+            "min_us": 0.56,
+            "median_us": 0.62,
+            "max_us": 0.84
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.34,
+            "median_us": 6.12,
+            "max_us": 10.06
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.12,
+            "median_us": 3.97,
+            "max_us": 6.32
+          },
+          "3": {
+            "count": 48,
+            "min_us": 1.96,
+            "median_us": 2.53,
+            "max_us": 3.46
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.7,
+            "median_us": 2.95,
+            "max_us": 3.34
+          }
+        }
+      },
+      "aiv_lane_totals": {
+        "0": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 63.92,
+            "median_us": 68.01,
+            "max_us": 75.26
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 16.56,
+            "median_us": 27.13,
+            "max_us": 39.7
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 7.86,
+            "median_us": 14.06,
+            "max_us": 21.22
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 23.24,
+            "median_us": 24.3,
+            "max_us": 25.42
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 148.3,
+            "median_us": 156.33,
+            "max_us": 164.72
+          }
+        },
+        "1": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 63.56,
+            "median_us": 68.57,
+            "max_us": 77.94
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 17.94,
+            "median_us": 24.23,
+            "max_us": 30.08
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 6.68,
+            "median_us": 16.62,
+            "max_us": 25.5
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 22.9,
+            "median_us": 24.6,
+            "max_us": 26.38
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 149.0,
+            "median_us": 155.27,
+            "max_us": 164.74
+          }
+        }
+      },
+      "median_per_core_compressed_fraction_of_gather": 0.949651,
+      "latest_aiv_publication": [
+        {
+          "core": 57,
+          "group": 16,
+          "lane": 1,
+          "first_tick_begin_us": 601.68,
+          "last_tick_end_us": 767.34,
+          "tick_loop_wall_span_us": 165.66,
+          "phase_notify_start_us": 768.14,
+          "phase_notify_end_us": 768.48,
+          "interval_totals_us": {
+            "tick_span": 164.74,
+            "gather_ring_issue": 73.92,
+            "softmax_body_to_prob_issue": 19.68,
+            "pv_gate_merge": 24.34,
+            "final_publish_reset_issue": 13.82,
+            "score_ffts_wait": 25.5,
+            "pv_ffts_wait": 1.54,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 56,
+          "group": 16,
+          "lane": 0,
+          "first_tick_begin_us": 604.6,
+          "last_tick_end_us": 767.3,
+          "tick_loop_wall_span_us": 162.7,
+          "phase_notify_start_us": 768.1,
+          "phase_notify_end_us": 768.4,
+          "interval_totals_us": {
+            "tick_span": 161.78,
+            "gather_ring_issue": 70.0,
+            "softmax_body_to_prob_issue": 36.02,
+            "pv_gate_merge": 23.7,
+            "final_publish_reset_issue": 13.48,
+            "score_ffts_wait": 8.36,
+            "pv_ffts_wait": 0.9,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 37,
+          "group": 6,
+          "lane": 1,
+          "first_tick_begin_us": 597.7,
+          "last_tick_end_us": 762.98,
+          "tick_loop_wall_span_us": 165.28,
+          "phase_notify_start_us": 763.78,
+          "phase_notify_end_us": 764.06,
+          "interval_totals_us": {
+            "tick_span": 164.32,
+            "gather_ring_issue": 77.94,
+            "softmax_body_to_prob_issue": 26.06,
+            "pv_gate_merge": 24.9,
+            "final_publish_reset_issue": 12.8,
+            "score_ffts_wait": 14.36,
+            "pv_ffts_wait": 1.92,
+            "ring_local_join": 0.06,
+            "tick_reuse_waits": 0.06
+          }
+        }
+      ],
+      "largest_aiv_tick_sum": [
+        {
+          "core": 57,
+          "group": 16,
+          "lane": 1,
+          "first_tick_begin_us": 601.68,
+          "last_tick_end_us": 767.34,
+          "tick_loop_wall_span_us": 165.66,
+          "phase_notify_start_us": 768.14,
+          "phase_notify_end_us": 768.48,
+          "interval_totals_us": {
+            "tick_span": 164.74,
+            "gather_ring_issue": 73.92,
+            "softmax_body_to_prob_issue": 19.68,
+            "pv_gate_merge": 24.34,
+            "final_publish_reset_issue": 13.82,
+            "score_ffts_wait": 25.5,
+            "pv_ffts_wait": 1.54,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 48,
+          "group": 12,
+          "lane": 0,
+          "first_tick_begin_us": 597.14,
+          "last_tick_end_us": 762.84,
+          "tick_loop_wall_span_us": 165.7,
+          "phase_notify_start_us": 763.64,
+          "phase_notify_end_us": 763.94,
+          "interval_totals_us": {
+            "tick_span": 164.72,
+            "gather_ring_issue": 67.38,
+            "softmax_body_to_prob_issue": 31.48,
+            "pv_gate_merge": 24.72,
+            "final_publish_reset_issue": 13.08,
+            "score_ffts_wait": 19.96,
+            "pv_ffts_wait": 2.14,
+            "ring_local_join": 0.1,
+            "tick_reuse_waits": 0.06
+          }
+        },
+        {
+          "core": 37,
+          "group": 6,
+          "lane": 1,
+          "first_tick_begin_us": 597.7,
+          "last_tick_end_us": 762.98,
+          "tick_loop_wall_span_us": 165.28,
+          "phase_notify_start_us": 763.78,
+          "phase_notify_end_us": 764.06,
+          "interval_totals_us": {
+            "tick_span": 164.32,
+            "gather_ring_issue": 77.94,
+            "softmax_body_to_prob_issue": 26.06,
+            "pv_gate_merge": 24.9,
+            "final_publish_reset_issue": 12.8,
+            "score_ffts_wait": 14.36,
+            "pv_ffts_wait": 1.92,
+            "ring_local_join": 0.06,
+            "tick_reuse_waits": 0.06
+          }
+        }
+      ],
+      "largest_aiv_gather_sum": [
+        {
+          "core": 37,
+          "group": 6,
+          "lane": 1,
+          "first_tick_begin_us": 597.7,
+          "last_tick_end_us": 762.98,
+          "tick_loop_wall_span_us": 165.28,
+          "phase_notify_start_us": 763.78,
+          "phase_notify_end_us": 764.06,
+          "interval_totals_us": {
+            "tick_span": 164.32,
+            "gather_ring_issue": 77.94,
+            "softmax_body_to_prob_issue": 26.06,
+            "pv_gate_merge": 24.9,
+            "final_publish_reset_issue": 12.8,
+            "score_ffts_wait": 14.36,
+            "pv_ffts_wait": 1.92,
+            "ring_local_join": 0.06,
+            "tick_reuse_waits": 0.06
+          }
+        },
+        {
+          "core": 39,
+          "group": 7,
+          "lane": 1,
+          "first_tick_begin_us": 604.88,
+          "last_tick_end_us": 762.44,
+          "tick_loop_wall_span_us": 157.56,
+          "phase_notify_start_us": 763.26,
+          "phase_notify_end_us": 763.6,
+          "interval_totals_us": {
+            "tick_span": 156.66,
+            "gather_ring_issue": 75.84,
+            "softmax_body_to_prob_issue": 30.08,
+            "pv_gate_merge": 22.9,
+            "final_publish_reset_issue": 13.96,
+            "score_ffts_wait": 6.72,
+            "pv_ffts_wait": 0.88,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 38,
+          "group": 7,
+          "lane": 0,
+          "first_tick_begin_us": 601.1,
+          "last_tick_end_us": 762.52,
+          "tick_loop_wall_span_us": 161.42,
+          "phase_notify_start_us": 763.32,
+          "phase_notify_end_us": 763.66,
+          "interval_totals_us": {
+            "tick_span": 160.48,
+            "gather_ring_issue": 75.26,
+            "softmax_body_to_prob_issue": 24.74,
+            "pv_gate_merge": 25.1,
+            "final_publish_reset_issue": 13.04,
+            "score_ffts_wait": 13.5,
+            "pv_ffts_wait": 1.22,
+            "ring_local_join": 0.1,
+            "tick_reuse_waits": 0.04
+          }
+        }
+      ],
+      "largest_aic_kv_wait_sum": [
+        {
+          "core": 6,
+          "group": 6,
+          "lane": null,
+          "first_tick_begin_us": 597.38,
+          "last_tick_end_us": 756.4,
+          "tick_loop_wall_span_us": 159.02,
+          "phase_notify_start_us": 759.66,
+          "phase_notify_end_us": 760.0,
+          "interval_totals_us": {
+            "tick_span": 158.4,
+            "kv_ffts_wait": 125.16,
+            "qk_after_wait_to_score_issue": 23.34,
+            "prob_ffts_wait": 0.8,
+            "pv_after_wait_to_ready_issue": 7.02
+          }
+        },
+        {
+          "core": 8,
+          "group": 8,
+          "lane": null,
+          "first_tick_begin_us": 596.82,
+          "last_tick_end_us": 755.64,
+          "tick_loop_wall_span_us": 158.82,
+          "phase_notify_start_us": 758.6,
+          "phase_notify_end_us": 759.08,
+          "interval_totals_us": {
+            "tick_span": 158.2,
+            "kv_ffts_wait": 123.44,
+            "qk_after_wait_to_score_issue": 25.02,
+            "prob_ffts_wait": 0.78,
+            "pv_after_wait_to_ready_issue": 6.88
+          }
+        },
+        {
+          "core": 18,
+          "group": 18,
+          "lane": null,
+          "first_tick_begin_us": 597.58,
+          "last_tick_end_us": 756.26,
+          "tick_loop_wall_span_us": 158.68,
+          "phase_notify_start_us": 759.4,
+          "phase_notify_end_us": 759.74,
+          "interval_totals_us": {
+            "tick_span": 158.08,
+            "kv_ffts_wait": 121.94,
+            "qk_after_wait_to_score_issue": 26.28,
+            "prob_ffts_wait": 0.82,
+            "pv_after_wait_to_ready_issue": 7.0
+          }
+        }
+      ],
+      "paired_timeline": {
+        "per_group": [
+          {
+            "group": 0,
+            "kv_wait_total_us": 114.26,
+            "overlap_with_aiv_gather_union_us": 53.9
+          },
+          {
+            "group": 1,
+            "kv_wait_total_us": 114.3,
+            "overlap_with_aiv_gather_union_us": 47.46
+          },
+          {
+            "group": 2,
+            "kv_wait_total_us": 111.36,
+            "overlap_with_aiv_gather_union_us": 49.46
+          },
+          {
+            "group": 3,
+            "kv_wait_total_us": 115.28,
+            "overlap_with_aiv_gather_union_us": 52.64
+          },
+          {
+            "group": 4,
+            "kv_wait_total_us": 113.86,
+            "overlap_with_aiv_gather_union_us": 46.04
+          },
+          {
+            "group": 5,
+            "kv_wait_total_us": 98.88,
+            "overlap_with_aiv_gather_union_us": 35.18
+          },
+          {
+            "group": 6,
+            "kv_wait_total_us": 125.16,
+            "overlap_with_aiv_gather_union_us": 62.5
+          },
+          {
+            "group": 7,
+            "kv_wait_total_us": 119.88,
+            "overlap_with_aiv_gather_union_us": 57.64
+          },
+          {
+            "group": 8,
+            "kv_wait_total_us": 123.44,
+            "overlap_with_aiv_gather_union_us": 59.5
+          },
+          {
+            "group": 9,
+            "kv_wait_total_us": 120.56,
+            "overlap_with_aiv_gather_union_us": 56.62
+          },
+          {
+            "group": 10,
+            "kv_wait_total_us": 113.46,
+            "overlap_with_aiv_gather_union_us": 49.58
+          },
+          {
+            "group": 11,
+            "kv_wait_total_us": 106.58,
+            "overlap_with_aiv_gather_union_us": 44.56
+          },
+          {
+            "group": 12,
+            "kv_wait_total_us": 120.68,
+            "overlap_with_aiv_gather_union_us": 53.42
+          },
+          {
+            "group": 13,
+            "kv_wait_total_us": 112.34,
+            "overlap_with_aiv_gather_union_us": 51.98
+          },
+          {
+            "group": 14,
+            "kv_wait_total_us": 116.62,
+            "overlap_with_aiv_gather_union_us": 50.3
+          },
+          {
+            "group": 15,
+            "kv_wait_total_us": 108.14,
+            "overlap_with_aiv_gather_union_us": 49.56
+          },
+          {
+            "group": 16,
+            "kv_wait_total_us": 120.32,
+            "overlap_with_aiv_gather_union_us": 52.12
+          },
+          {
+            "group": 17,
+            "kv_wait_total_us": 102.26,
+            "overlap_with_aiv_gather_union_us": 43.72
+          },
+          {
+            "group": 18,
+            "kv_wait_total_us": 121.94,
+            "overlap_with_aiv_gather_union_us": 53.96
+          },
+          {
+            "group": 19,
+            "kv_wait_total_us": 109.7,
+            "overlap_with_aiv_gather_union_us": 43.56
+          },
+          {
+            "group": 20,
+            "kv_wait_total_us": 112.08,
+            "overlap_with_aiv_gather_union_us": 42.22
+          },
+          {
+            "group": 21,
+            "kv_wait_total_us": 113.98,
+            "overlap_with_aiv_gather_union_us": 46.36
+          },
+          {
+            "group": 22,
+            "kv_wait_total_us": 116.0,
+            "overlap_with_aiv_gather_union_us": 47.24
+          },
+          {
+            "group": 23,
+            "kv_wait_total_us": 104.38,
+            "overlap_with_aiv_gather_union_us": 42.48
+          }
+        ],
+        "gather_union_overlap_with_kvwait": {
+          "count": 24,
+          "min_us": 35.18,
+          "median_us": 49.57,
+          "max_us": 62.5
+        },
+        "aic_wait_end_minus_latest_aiv_ready_issue": {
+          "count": 480,
+          "min_us": 0.64,
+          "median_us": 1.12,
+          "max_us": 3.46
+        },
+        "latest_ready_issue_minus_latest_ring_store_issue": {
+          "count": 480,
+          "min_us": 0.16,
+          "median_us": 1.6,
+          "max_us": 7.98
+        },
+        "meaning": "同组同work的源码端点时间关系；send在所属pipe发射，差值仍含真实本核依赖与发送完成延迟，不能当纯通信成本。"
+      }
+    },
+    {
+      "round": 1,
+      "input": "B",
+      "source_ticks": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_1_spmd_reference/attention_ticks.json",
+      "source_phase": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_1_spmd_reference/phase_clock.json",
+      "record_count": 1632,
+      "by_role": {
+        "aiv": {
+          "gather_ring_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.56,
+                "median_us": 2.98,
+                "max_us": 9.0
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 63.98,
+                "median_us": 66.26,
+                "max_us": 69.66
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.56,
+                "median_us": 0.67,
+                "max_us": 1.96
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.0,
+                "median_us": 3.36,
+                "max_us": 4.16
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 2.14,
+                "median_us": 3.42,
+                "max_us": 9.0
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 60.8,
+                "median_us": 62.89,
+                "max_us": 65.94
+              }
+            }
+          },
+          "softmax_body_to_prob_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.26,
+                "median_us": 1.16,
+                "max_us": 5.84
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 16.96,
+                "median_us": 23.05,
+                "max_us": 32.14
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.38,
+                "median_us": 1.32,
+                "max_us": 5.84
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.68,
+                "median_us": 5.69,
+                "max_us": 11.52
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.26,
+                "median_us": 1.12,
+                "max_us": 3.48
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.34,
+                "median_us": 17.97,
+                "max_us": 24.28
+              }
+            }
+          },
+          "pv_gate_merge": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 1.02,
+                "median_us": 1.14,
+                "max_us": 2.72
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 23.22,
+                "median_us": 24.39,
+                "max_us": 26.18
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 1.04,
+                "median_us": 1.12,
+                "max_us": 2.72
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 4.46,
+                "median_us": 4.92,
+                "max_us": 6.56
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 1.02,
+                "median_us": 1.14,
+                "max_us": 1.86
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 18.58,
+                "median_us": 19.48,
+                "max_us": 20.56
+              }
+            }
+          },
+          "final_publish_reset_issue": {
+            "all": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.08,
+                "median_us": 3.22,
+                "max_us": 7.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.92,
+                "median_us": 15.08,
+                "max_us": 16.9
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 0
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0,
+                "median_us": 0.0,
+                "max_us": 0
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.08,
+                "median_us": 3.22,
+                "max_us": 7.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.92,
+                "median_us": 15.08,
+                "max_us": 16.9
+              }
+            }
+          },
+          "score_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 8.26
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 7.3,
+                "median_us": 14.28,
+                "max_us": 28.86
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 5.28
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 5.28
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 8.26
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 7.28,
+                "median_us": 14.28,
+                "max_us": 28.12
+              }
+            }
+          },
+          "pv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 1.12
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.66,
+                "median_us": 1.34,
+                "max_us": 2.64
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 1.12
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 1.14
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.62
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.62,
+                "median_us": 1.2,
+                "max_us": 2.22
+              }
+            }
+          },
+          "ring_local_join": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.02,
+                "median_us": 0.08,
+                "max_us": 0.12
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.06
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 0.1
+              }
+            }
+          },
+          "tick_reuse_waits": {
+            "all": {
+              "per_tick": {
+                "count": 1104,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.04,
+                "max_us": 0.14
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.04
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.1
+              }
+            }
+          }
+        },
+        "aic": {
+          "kv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 2.42,
+                "median_us": 4.94,
+                "max_us": 12.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 101.74,
+                "median_us": 108.97,
+                "max_us": 119.84
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 2.42,
+                "median_us": 3.19,
+                "max_us": 12.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 11.12,
+                "median_us": 16.29,
+                "max_us": 22.72
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 2.8,
+                "median_us": 5.28,
+                "max_us": 11.58
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 84.88,
+                "median_us": 94.64,
+                "max_us": 100.58
+              }
+            }
+          },
+          "qk_after_wait_to_score_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.76,
+                "median_us": 1.14,
+                "max_us": 6.08
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 22.2,
+                "median_us": 27.17,
+                "max_us": 36.14
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.84,
+                "median_us": 1.12,
+                "max_us": 3.64
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 3.88,
+                "median_us": 4.95,
+                "max_us": 9.84
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.76,
+                "median_us": 1.16,
+                "max_us": 6.08
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 17.32,
+                "median_us": 22.28,
+                "max_us": 30.0
+              }
+            }
+          },
+          "prob_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.92
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.7,
+                "median_us": 0.87,
+                "max_us": 1.12
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.0,
+                "median_us": 0.04,
+                "max_us": 0.06
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.92
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.7,
+                "median_us": 0.84,
+                "max_us": 1.08
+              }
+            }
+          },
+          "pv_after_wait_to_ready_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.42
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 6.82,
+                "median_us": 7.0,
+                "max_us": 7.28
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 0.44
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 1.04,
+                "median_us": 1.1,
+                "max_us": 1.26
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.42
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 5.7,
+                "median_us": 5.87,
+                "max_us": 6.18
+              }
+            }
+          }
+        }
+      },
+      "aiv_gather_by_block": {
+        "0": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 0.56,
+            "median_us": 0.67,
+            "max_us": 1.96
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 3.0,
+            "median_us": 3.36,
+            "max_us": 4.16
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.68,
+              "max_us": 1.96
+            },
+            "1": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.66,
+              "max_us": 1.84
+            }
+          }
+        },
+        "1": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 5.18,
+            "median_us": 6.12,
+            "max_us": 9.0
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 22.74,
+            "median_us": 24.85,
+            "max_us": 27.46
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 5.18,
+              "median_us": 6.1,
+              "max_us": 8.94
+            },
+            "1": {
+              "count": 96,
+              "min_us": 5.2,
+              "median_us": 6.12,
+              "max_us": 9.0
+            }
+          }
+        },
+        "2": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.8,
+            "median_us": 3.84,
+            "max_us": 4.94
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 14.2,
+            "median_us": 15.33,
+            "max_us": 17.02
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.8,
+              "median_us": 3.84,
+              "max_us": 4.66
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.96,
+              "median_us": 3.84,
+              "max_us": 4.94
+            }
+          }
+        },
+        "3": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.14,
+            "median_us": 2.66,
+            "max_us": 3.96
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 9.62,
+            "median_us": 10.8,
+            "max_us": 11.9
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.26,
+              "median_us": 2.7,
+              "max_us": 3.8
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.14,
+              "median_us": 2.58,
+              "max_us": 3.96
+            }
+          }
+        },
+        "4": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.14,
+            "median_us": 2.92,
+            "max_us": 4.36
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 10.96,
+            "median_us": 11.74,
+            "max_us": 13.2
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.24,
+              "median_us": 2.94,
+              "max_us": 3.76
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.14,
+              "median_us": 2.9,
+              "max_us": 4.36
+            }
+          }
+        }
+      },
+      "aiv_gather_by_query_ordinal": {
+        "0": {
+          "0": {
+            "count": 48,
+            "min_us": 1.14,
+            "median_us": 1.36,
+            "max_us": 1.96
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.34,
+            "median_us": 6.44,
+            "max_us": 9.0
+          },
+          "2": {
+            "count": 48,
+            "min_us": 2.8,
+            "median_us": 3.7,
+            "max_us": 4.7
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.22,
+            "median_us": 2.8,
+            "max_us": 3.66
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.14,
+            "median_us": 2.83,
+            "max_us": 3.54
+          }
+        },
+        "1": {
+          "0": {
+            "count": 48,
+            "min_us": 0.62,
+            "median_us": 0.7,
+            "max_us": 1.08
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.2,
+            "median_us": 6.08,
+            "max_us": 6.86
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.22,
+            "median_us": 3.93,
+            "max_us": 4.94
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.26,
+            "median_us": 2.7,
+            "max_us": 3.96
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.74,
+            "median_us": 3.0,
+            "max_us": 4.36
+          }
+        },
+        "2": {
+          "0": {
+            "count": 48,
+            "min_us": 0.58,
+            "median_us": 0.64,
+            "max_us": 0.84
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.18,
+            "median_us": 6.07,
+            "max_us": 7.64
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.24,
+            "median_us": 3.79,
+            "max_us": 4.76
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.26,
+            "median_us": 2.59,
+            "max_us": 3.16
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.66,
+            "median_us": 2.95,
+            "max_us": 3.42
+          }
+        },
+        "3": {
+          "0": {
+            "count": 48,
+            "min_us": 0.56,
+            "median_us": 0.6,
+            "max_us": 0.8
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.42,
+            "median_us": 6.03,
+            "max_us": 6.68
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.36,
+            "median_us": 3.81,
+            "max_us": 4.46
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.14,
+            "median_us": 2.5,
+            "max_us": 3.0
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.72,
+            "median_us": 2.92,
+            "max_us": 3.54
+          }
+        }
+      },
+      "aiv_lane_totals": {
+        "0": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 63.98,
+            "median_us": 66.58,
+            "max_us": 69.66
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 18.26,
+            "median_us": 25.35,
+            "max_us": 32.14
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 7.3,
+            "median_us": 11.86,
+            "max_us": 24.58
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 23.3,
+            "median_us": 24.29,
+            "max_us": 25.48
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 146.44,
+            "median_us": 151.99,
+            "max_us": 156.8
+          }
+        },
+        "1": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 64.08,
+            "median_us": 65.88,
+            "max_us": 68.42
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 16.96,
+            "median_us": 22.96,
+            "max_us": 30.62
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 9.3,
+            "median_us": 15.22,
+            "max_us": 28.86
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 23.22,
+            "median_us": 24.5,
+            "max_us": 26.18
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 148.56,
+            "median_us": 152.28,
+            "max_us": 160.78
+          }
+        }
+      },
+      "median_per_core_compressed_fraction_of_gather": 0.949443,
+      "latest_aiv_publication": [
+        {
+          "core": 37,
+          "group": 6,
+          "lane": 1,
+          "first_tick_begin_us": 600.4,
+          "last_tick_end_us": 754.94,
+          "tick_loop_wall_span_us": 154.54,
+          "phase_notify_start_us": 755.76,
+          "phase_notify_end_us": 756.02,
+          "interval_totals_us": {
+            "tick_span": 153.62,
+            "gather_ring_issue": 68.42,
+            "softmax_body_to_prob_issue": 30.54,
+            "pv_gate_merge": 23.74,
+            "final_publish_reset_issue": 13.62,
+            "score_ffts_wait": 9.64,
+            "pv_ffts_wait": 1.0,
+            "ring_local_join": 0.12,
+            "tick_reuse_waits": 0.04
+          }
+        },
+        {
+          "core": 36,
+          "group": 6,
+          "lane": 0,
+          "first_tick_begin_us": 599.86,
+          "last_tick_end_us": 754.92,
+          "tick_loop_wall_span_us": 155.06,
+          "phase_notify_start_us": 755.76,
+          "phase_notify_end_us": 756.0,
+          "interval_totals_us": {
+            "tick_span": 154.1,
+            "gather_ring_issue": 67.94,
+            "softmax_body_to_prob_issue": 22.3,
+            "pv_gate_merge": 25.48,
+            "final_publish_reset_issue": 13.8,
+            "score_ffts_wait": 16.64,
+            "pv_ffts_wait": 1.36,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.04
+          }
+        },
+        {
+          "core": 69,
+          "group": 22,
+          "lane": 1,
+          "first_tick_begin_us": 593.74,
+          "last_tick_end_us": 754.14,
+          "tick_loop_wall_span_us": 160.4,
+          "phase_notify_start_us": 754.96,
+          "phase_notify_end_us": 755.3,
+          "interval_totals_us": {
+            "tick_span": 159.48,
+            "gather_ring_issue": 65.7,
+            "softmax_body_to_prob_issue": 16.96,
+            "pv_gate_merge": 24.46,
+            "final_publish_reset_issue": 15.34,
+            "score_ffts_wait": 28.86,
+            "pv_ffts_wait": 1.88,
+            "ring_local_join": 0.1,
+            "tick_reuse_waits": 0.02
+          }
+        }
+      ],
+      "largest_aiv_tick_sum": [
+        {
+          "core": 49,
+          "group": 12,
+          "lane": 1,
+          "first_tick_begin_us": 591.66,
+          "last_tick_end_us": 753.38,
+          "tick_loop_wall_span_us": 161.72,
+          "phase_notify_start_us": 754.16,
+          "phase_notify_end_us": 754.48,
+          "interval_totals_us": {
+            "tick_span": 160.78,
+            "gather_ring_issue": 66.24,
+            "softmax_body_to_prob_issue": 22.8,
+            "pv_gate_merge": 23.5,
+            "final_publish_reset_issue": 15.22,
+            "score_ffts_wait": 25.38,
+            "pv_ffts_wait": 0.9,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.04
+          }
+        },
+        {
+          "core": 69,
+          "group": 22,
+          "lane": 1,
+          "first_tick_begin_us": 593.74,
+          "last_tick_end_us": 754.14,
+          "tick_loop_wall_span_us": 160.4,
+          "phase_notify_start_us": 754.96,
+          "phase_notify_end_us": 755.3,
+          "interval_totals_us": {
+            "tick_span": 159.48,
+            "gather_ring_issue": 65.7,
+            "softmax_body_to_prob_issue": 16.96,
+            "pv_gate_merge": 24.46,
+            "final_publish_reset_issue": 15.34,
+            "score_ffts_wait": 28.86,
+            "pv_ffts_wait": 1.88,
+            "ring_local_join": 0.1,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 35,
+          "group": 5,
+          "lane": 1,
+          "first_tick_begin_us": 594.78,
+          "last_tick_end_us": 753.48,
+          "tick_loop_wall_span_us": 158.7,
+          "phase_notify_start_us": 754.32,
+          "phase_notify_end_us": 754.6,
+          "interval_totals_us": {
+            "tick_span": 157.8,
+            "gather_ring_issue": 65.22,
+            "softmax_body_to_prob_issue": 23.1,
+            "pv_gate_merge": 25.16,
+            "final_publish_reset_issue": 15.34,
+            "score_ffts_wait": 20.58,
+            "pv_ffts_wait": 1.38,
+            "ring_local_join": 0.06,
+            "tick_reuse_waits": 0.04
+          }
+        }
+      ],
+      "largest_aiv_gather_sum": [
+        {
+          "core": 24,
+          "group": 0,
+          "lane": 0,
+          "first_tick_begin_us": 600.78,
+          "last_tick_end_us": 752.46,
+          "tick_loop_wall_span_us": 151.68,
+          "phase_notify_start_us": 753.24,
+          "phase_notify_end_us": 753.46,
+          "interval_totals_us": {
+            "tick_span": 150.7,
+            "gather_ring_issue": 69.66,
+            "softmax_body_to_prob_issue": 27.38,
+            "pv_gate_merge": 24.02,
+            "final_publish_reset_issue": 15.8,
+            "score_ffts_wait": 7.3,
+            "pv_ffts_wait": 1.46,
+            "ring_local_join": 0.06,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 28,
+          "group": 2,
+          "lane": 0,
+          "first_tick_begin_us": 600.64,
+          "last_tick_end_us": 751.28,
+          "tick_loop_wall_span_us": 150.64,
+          "phase_notify_start_us": 752.14,
+          "phase_notify_end_us": 752.48,
+          "interval_totals_us": {
+            "tick_span": 149.7,
+            "gather_ring_issue": 69.6,
+            "softmax_body_to_prob_issue": 22.08,
+            "pv_gate_merge": 24.16,
+            "final_publish_reset_issue": 15.8,
+            "score_ffts_wait": 10.14,
+            "pv_ffts_wait": 1.08,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.06
+          }
+        },
+        {
+          "core": 37,
+          "group": 6,
+          "lane": 1,
+          "first_tick_begin_us": 600.4,
+          "last_tick_end_us": 754.94,
+          "tick_loop_wall_span_us": 154.54,
+          "phase_notify_start_us": 755.76,
+          "phase_notify_end_us": 756.02,
+          "interval_totals_us": {
+            "tick_span": 153.62,
+            "gather_ring_issue": 68.42,
+            "softmax_body_to_prob_issue": 30.54,
+            "pv_gate_merge": 23.74,
+            "final_publish_reset_issue": 13.62,
+            "score_ffts_wait": 9.64,
+            "pv_ffts_wait": 1.0,
+            "ring_local_join": 0.12,
+            "tick_reuse_waits": 0.04
+          }
+        }
+      ],
+      "largest_aic_kv_wait_sum": [
+        {
+          "core": 22,
+          "group": 22,
+          "lane": null,
+          "first_tick_begin_us": 592.24,
+          "last_tick_end_us": 748.06,
+          "tick_loop_wall_span_us": 155.82,
+          "phase_notify_start_us": 750.8,
+          "phase_notify_end_us": 751.14,
+          "interval_totals_us": {
+            "tick_span": 155.12,
+            "kv_ffts_wait": 119.84,
+            "qk_after_wait_to_score_issue": 24.8,
+            "prob_ffts_wait": 0.82,
+            "pv_after_wait_to_ready_issue": 7.12
+          }
+        },
+        {
+          "core": 6,
+          "group": 6,
+          "lane": null,
+          "first_tick_begin_us": 595.92,
+          "last_tick_end_us": 748.78,
+          "tick_loop_wall_span_us": 152.86,
+          "phase_notify_start_us": 751.62,
+          "phase_notify_end_us": 751.9,
+          "interval_totals_us": {
+            "tick_span": 152.26,
+            "kv_ffts_wait": 119.48,
+            "qk_after_wait_to_score_issue": 22.2,
+            "prob_ffts_wait": 0.94,
+            "pv_after_wait_to_ready_issue": 6.96
+          }
+        },
+        {
+          "core": 21,
+          "group": 21,
+          "lane": null,
+          "first_tick_begin_us": 593.96,
+          "last_tick_end_us": 746.28,
+          "tick_loop_wall_span_us": 152.32,
+          "phase_notify_start_us": 749.0,
+          "phase_notify_end_us": 749.34,
+          "interval_totals_us": {
+            "tick_span": 151.74,
+            "kv_ffts_wait": 117.32,
+            "qk_after_wait_to_score_issue": 24.48,
+            "prob_ffts_wait": 0.82,
+            "pv_after_wait_to_ready_issue": 7.16
+          }
+        }
+      ],
+      "paired_timeline": {
+        "per_group": [
+          {
+            "group": 0,
+            "kv_wait_total_us": 112.06,
+            "overlap_with_aiv_gather_union_us": 51.5
+          },
+          {
+            "group": 1,
+            "kv_wait_total_us": 112.76,
+            "overlap_with_aiv_gather_union_us": 46.48
+          },
+          {
+            "group": 2,
+            "kv_wait_total_us": 112.9,
+            "overlap_with_aiv_gather_union_us": 48.4
+          },
+          {
+            "group": 3,
+            "kv_wait_total_us": 114.16,
+            "overlap_with_aiv_gather_union_us": 48.98
+          },
+          {
+            "group": 4,
+            "kv_wait_total_us": 111.78,
+            "overlap_with_aiv_gather_union_us": 45.58
+          },
+          {
+            "group": 5,
+            "kv_wait_total_us": 108.18,
+            "overlap_with_aiv_gather_union_us": 40.38
+          },
+          {
+            "group": 6,
+            "kv_wait_total_us": 119.48,
+            "overlap_with_aiv_gather_union_us": 51.72
+          },
+          {
+            "group": 7,
+            "kv_wait_total_us": 108.14,
+            "overlap_with_aiv_gather_union_us": 41.76
+          },
+          {
+            "group": 8,
+            "kv_wait_total_us": 106.56,
+            "overlap_with_aiv_gather_union_us": 44.86
+          },
+          {
+            "group": 9,
+            "kv_wait_total_us": 109.24,
+            "overlap_with_aiv_gather_union_us": 47.64
+          },
+          {
+            "group": 10,
+            "kv_wait_total_us": 108.7,
+            "overlap_with_aiv_gather_union_us": 48.52
+          },
+          {
+            "group": 11,
+            "kv_wait_total_us": 113.0,
+            "overlap_with_aiv_gather_union_us": 48.98
+          },
+          {
+            "group": 12,
+            "kv_wait_total_us": 116.04,
+            "overlap_with_aiv_gather_union_us": 49.02
+          },
+          {
+            "group": 13,
+            "kv_wait_total_us": 112.72,
+            "overlap_with_aiv_gather_union_us": 48.22
+          },
+          {
+            "group": 14,
+            "kv_wait_total_us": 101.74,
+            "overlap_with_aiv_gather_union_us": 39.1
+          },
+          {
+            "group": 15,
+            "kv_wait_total_us": 107.7,
+            "overlap_with_aiv_gather_union_us": 48.3
+          },
+          {
+            "group": 16,
+            "kv_wait_total_us": 107.16,
+            "overlap_with_aiv_gather_union_us": 45.16
+          },
+          {
+            "group": 17,
+            "kv_wait_total_us": 103.72,
+            "overlap_with_aiv_gather_union_us": 46.46
+          },
+          {
+            "group": 18,
+            "kv_wait_total_us": 103.34,
+            "overlap_with_aiv_gather_union_us": 42.52
+          },
+          {
+            "group": 19,
+            "kv_wait_total_us": 107.2,
+            "overlap_with_aiv_gather_union_us": 45.54
+          },
+          {
+            "group": 20,
+            "kv_wait_total_us": 103.82,
+            "overlap_with_aiv_gather_union_us": 45.68
+          },
+          {
+            "group": 21,
+            "kv_wait_total_us": 117.32,
+            "overlap_with_aiv_gather_union_us": 49.34
+          },
+          {
+            "group": 22,
+            "kv_wait_total_us": 119.84,
+            "overlap_with_aiv_gather_union_us": 49.74
+          },
+          {
+            "group": 23,
+            "kv_wait_total_us": 107.06,
+            "overlap_with_aiv_gather_union_us": 44.38
+          }
+        ],
+        "gather_union_overlap_with_kvwait": {
+          "count": 24,
+          "min_us": 39.1,
+          "median_us": 47.06,
+          "max_us": 51.72
+        },
+        "aic_wait_end_minus_latest_aiv_ready_issue": {
+          "count": 480,
+          "min_us": 0.64,
+          "median_us": 1.12,
+          "max_us": 3.14
+        },
+        "latest_ready_issue_minus_latest_ring_store_issue": {
+          "count": 480,
+          "min_us": 0.14,
+          "median_us": 1.58,
+          "max_us": 5.66
+        },
+        "meaning": "同组同work的源码端点时间关系；send在所属pipe发射，差值仍含真实本核依赖与发送完成延迟，不能当纯通信成本。"
+      }
+    },
+    {
+      "round": 2,
+      "input": "A",
+      "source_ticks": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_2_spmd_reference/attention_ticks.json",
+      "source_phase": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_tick_h131072_b16_v1/clock_round_2_spmd_reference/phase_clock.json",
+      "record_count": 1632,
+      "by_role": {
+        "aiv": {
+          "gather_ring_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.56,
+                "median_us": 2.96,
+                "max_us": 18.14
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 63.38,
+                "median_us": 67.39,
+                "max_us": 80.58
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.56,
+                "median_us": 0.66,
+                "max_us": 2.34
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.02,
+                "median_us": 3.4,
+                "max_us": 4.3
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 1.96,
+                "median_us": 3.28,
+                "max_us": 18.14
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 59.9,
+                "median_us": 63.8,
+                "max_us": 77.0
+              }
+            }
+          },
+          "softmax_body_to_prob_issue": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.28,
+                "median_us": 1.12,
+                "max_us": 11.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.96,
+                "median_us": 23.77,
+                "max_us": 38.56
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.4,
+                "median_us": 1.29,
+                "max_us": 11.5
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 3.7,
+                "median_us": 6.6,
+                "max_us": 20.76
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.28,
+                "median_us": 1.08,
+                "max_us": 5.9
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 8.28,
+                "median_us": 16.89,
+                "max_us": 27.84
+              }
+            }
+          },
+          "pv_gate_merge": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 1.02,
+                "median_us": 1.12,
+                "max_us": 3.14
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 22.72,
+                "median_us": 24.58,
+                "max_us": 26.6
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 1.02,
+                "median_us": 1.11,
+                "max_us": 2.66
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 4.36,
+                "median_us": 4.71,
+                "max_us": 5.92
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 1.02,
+                "median_us": 1.14,
+                "max_us": 3.14
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 18.26,
+                "median_us": 19.85,
+                "max_us": 22.02
+              }
+            }
+          },
+          "final_publish_reset_issue": {
+            "all": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.08,
+                "median_us": 3.22,
+                "max_us": 4.96
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.74,
+                "median_us": 13.21,
+                "max_us": 15.44
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 0
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0,
+                "median_us": 0.0,
+                "max_us": 0
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 3.08,
+                "median_us": 3.22,
+                "max_us": 4.96
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 12.74,
+                "median_us": 13.21,
+                "max_us": 15.44
+              }
+            }
+          },
+          "score_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 12.52
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 6.48,
+                "median_us": 16.85,
+                "max_us": 35.98
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 12.52
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 12.52
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 11.68
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 6.48,
+                "median_us": 13.95,
+                "max_us": 35.46
+              }
+            }
+          },
+          "pv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 2.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.5,
+                "median_us": 1.7,
+                "max_us": 4.1
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 1.46
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 1.48
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 2.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.48,
+                "median_us": 1.33,
+                "max_us": 4.06
+              }
+            }
+          },
+          "ring_local_join": {
+            "all": {
+              "per_tick": {
+                "count": 960,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 0.18
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.04
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.06,
+                "max_us": 0.14
+              }
+            }
+          },
+          "tick_reuse_waits": {
+            "all": {
+              "per_tick": {
+                "count": 1104,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.04,
+                "max_us": 0.12
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 192,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.06
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 768,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 48,
+                "min_us": 0.0,
+                "median_us": 0.02,
+                "max_us": 0.08
+              }
+            }
+          }
+        },
+        "aic": {
+          "kv_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 2.38,
+                "median_us": 4.92,
+                "max_us": 21.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 98.06,
+                "median_us": 116.65,
+                "max_us": 126.36
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 2.38,
+                "median_us": 3.24,
+                "max_us": 11.56
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 13.52,
+                "median_us": 16.77,
+                "max_us": 21.3
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 2.48,
+                "median_us": 5.33,
+                "max_us": 21.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 84.44,
+                "median_us": 99.28,
+                "max_us": 110.04
+              }
+            }
+          },
+          "qk_after_wait_to_score_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.76,
+                "median_us": 1.06,
+                "max_us": 15.64
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 20.06,
+                "median_us": 25.76,
+                "max_us": 42.96
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.8,
+                "median_us": 1.2,
+                "max_us": 15.64
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 4.5,
+                "median_us": 5.89,
+                "max_us": 21.94
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.76,
+                "median_us": 1.05,
+                "max_us": 8.06
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 15.18,
+                "median_us": 19.0,
+                "max_us": 34.7
+              }
+            }
+          },
+          "prob_ffts_wait": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.76
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.66,
+                "median_us": 0.78,
+                "max_us": 0.88
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.02
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.0,
+                "median_us": 0.03,
+                "max_us": 0.06
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.0,
+                "median_us": 0.0,
+                "max_us": 0.76
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 0.64,
+                "median_us": 0.76,
+                "max_us": 0.86
+              }
+            }
+          },
+          "pv_after_wait_to_ready_issue": {
+            "all": {
+              "per_tick": {
+                "count": 480,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.46
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 6.84,
+                "median_us": 7.1,
+                "max_us": 7.54
+              }
+            },
+            "swa": {
+              "per_tick": {
+                "count": 96,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 0.3
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 1.04,
+                "median_us": 1.12,
+                "max_us": 1.16
+              }
+            },
+            "compressed": {
+              "per_tick": {
+                "count": 384,
+                "min_us": 0.26,
+                "median_us": 0.28,
+                "max_us": 1.46
+              },
+              "per_core_totals": {
+                "count": 24,
+                "min_us": 5.76,
+                "median_us": 5.99,
+                "max_us": 6.46
+              }
+            }
+          }
+        }
+      },
+      "aiv_gather_by_block": {
+        "0": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 0.56,
+            "median_us": 0.66,
+            "max_us": 2.34
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 3.02,
+            "median_us": 3.4,
+            "max_us": 4.3
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.7,
+              "max_us": 2.08
+            },
+            "1": {
+              "count": 96,
+              "min_us": 0.56,
+              "median_us": 0.64,
+              "max_us": 2.34
+            }
+          }
+        },
+        "1": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 5.26,
+            "median_us": 6.19,
+            "max_us": 18.14
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 22.72,
+            "median_us": 25.98,
+            "max_us": 39.9
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 5.28,
+              "median_us": 6.1,
+              "max_us": 17.68
+            },
+            "1": {
+              "count": 96,
+              "min_us": 5.26,
+              "median_us": 6.24,
+              "max_us": 18.14
+            }
+          }
+        },
+        "2": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.86,
+            "median_us": 3.82,
+            "max_us": 7.34
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 14.02,
+            "median_us": 15.39,
+            "max_us": 21.56
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.96,
+              "median_us": 3.83,
+              "max_us": 7.34
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.86,
+              "median_us": 3.82,
+              "max_us": 5.88
+            }
+          }
+        },
+        "3": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 1.96,
+            "median_us": 2.64,
+            "max_us": 3.5
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 9.7,
+            "median_us": 10.64,
+            "max_us": 11.78
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.24,
+              "median_us": 2.64,
+              "max_us": 3.5
+            },
+            "1": {
+              "count": 96,
+              "min_us": 1.96,
+              "median_us": 2.62,
+              "max_us": 3.32
+            }
+          }
+        },
+        "4": {
+          "per_tick": {
+            "count": 192,
+            "min_us": 2.4,
+            "median_us": 2.92,
+            "max_us": 3.84
+          },
+          "per_core_totals": {
+            "count": 48,
+            "min_us": 10.82,
+            "median_us": 11.68,
+            "max_us": 12.64
+          },
+          "per_lane": {
+            "0": {
+              "count": 96,
+              "min_us": 2.4,
+              "median_us": 2.93,
+              "max_us": 3.84
+            },
+            "1": {
+              "count": 96,
+              "min_us": 2.5,
+              "median_us": 2.88,
+              "max_us": 3.56
+            }
+          }
+        }
+      },
+      "aiv_gather_by_query_ordinal": {
+        "0": {
+          "0": {
+            "count": 48,
+            "min_us": 1.2,
+            "median_us": 1.4,
+            "max_us": 2.34
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.26,
+            "median_us": 7.28,
+            "max_us": 18.14
+          },
+          "2": {
+            "count": 48,
+            "min_us": 2.86,
+            "median_us": 3.47,
+            "max_us": 5.36
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.34,
+            "median_us": 2.77,
+            "max_us": 3.5
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.4,
+            "median_us": 2.93,
+            "max_us": 3.84
+          }
+        },
+        "1": {
+          "0": {
+            "count": 48,
+            "min_us": 0.62,
+            "median_us": 0.7,
+            "max_us": 1.56
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.4,
+            "median_us": 6.39,
+            "max_us": 8.74
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.4,
+            "median_us": 4.09,
+            "max_us": 7.34
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.24,
+            "median_us": 2.64,
+            "max_us": 3.26
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.68,
+            "median_us": 2.91,
+            "max_us": 3.26
+          }
+        },
+        "2": {
+          "0": {
+            "count": 48,
+            "min_us": 0.56,
+            "median_us": 0.62,
+            "max_us": 0.8
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.28,
+            "median_us": 6.07,
+            "max_us": 7.44
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.32,
+            "median_us": 3.83,
+            "max_us": 6.86
+          },
+          "3": {
+            "count": 48,
+            "min_us": 2.32,
+            "median_us": 2.64,
+            "max_us": 3.08
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.68,
+            "median_us": 2.94,
+            "max_us": 3.54
+          }
+        },
+        "3": {
+          "0": {
+            "count": 48,
+            "min_us": 0.56,
+            "median_us": 0.6,
+            "max_us": 0.84
+          },
+          "1": {
+            "count": 48,
+            "min_us": 5.3,
+            "median_us": 6.01,
+            "max_us": 7.0
+          },
+          "2": {
+            "count": 48,
+            "min_us": 3.34,
+            "median_us": 3.87,
+            "max_us": 5.74
+          },
+          "3": {
+            "count": 48,
+            "min_us": 1.96,
+            "median_us": 2.53,
+            "max_us": 2.98
+          },
+          "4": {
+            "count": 48,
+            "min_us": 2.72,
+            "median_us": 2.88,
+            "max_us": 3.32
+          }
+        }
+      },
+      "aiv_lane_totals": {
+        "0": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 63.38,
+            "median_us": 67.45,
+            "max_us": 77.98
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 13.88,
+            "median_us": 25.24,
+            "max_us": 38.56
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 6.72,
+            "median_us": 12.53,
+            "max_us": 35.98
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 22.72,
+            "median_us": 24.44,
+            "max_us": 26.6
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 147.48,
+            "median_us": 157.22,
+            "max_us": 162.54
+          }
+        },
+        "1": {
+          "gather_ring_issue": {
+            "count": 24,
+            "min_us": 64.02,
+            "median_us": 67.05,
+            "max_us": 80.58
+          },
+          "softmax_body_to_prob_issue": {
+            "count": 24,
+            "min_us": 12.96,
+            "median_us": 22.95,
+            "max_us": 34.6
+          },
+          "score_ffts_wait": {
+            "count": 24,
+            "min_us": 6.48,
+            "median_us": 19.52,
+            "max_us": 35.46
+          },
+          "pv_gate_merge": {
+            "count": 24,
+            "min_us": 23.28,
+            "median_us": 24.62,
+            "max_us": 26.12
+          },
+          "tick_span": {
+            "count": 24,
+            "min_us": 147.24,
+            "median_us": 156.13,
+            "max_us": 162.0
+          }
+        }
+      },
+      "median_per_core_compressed_fraction_of_gather": 0.949396,
+      "latest_aiv_publication": [
+        {
+          "core": 34,
+          "group": 5,
+          "lane": 0,
+          "first_tick_begin_us": 597.32,
+          "last_tick_end_us": 756.46,
+          "tick_loop_wall_span_us": 159.14,
+          "phase_notify_start_us": 757.28,
+          "phase_notify_end_us": 757.56,
+          "interval_totals_us": {
+            "tick_span": 158.2,
+            "gather_ring_issue": 64.16,
+            "softmax_body_to_prob_issue": 24.82,
+            "pv_gate_merge": 24.94,
+            "final_publish_reset_issue": 13.02,
+            "score_ffts_wait": 23.48,
+            "pv_ffts_wait": 2.1,
+            "ring_local_join": 0.08,
+            "tick_reuse_waits": 0.02
+          }
+        },
+        {
+          "core": 35,
+          "group": 5,
+          "lane": 1,
+          "first_tick_begin_us": 596.52,
+          "last_tick_end_us": 756.4,
+          "tick_loop_wall_span_us": 159.88,
+          "phase_notify_start_us": 757.22,
+          "phase_notify_end_us": 757.54,
+          "interval_totals_us": {
+            "tick_span": 158.96,
+            "gather_ring_issue": 76.52,
+            "softmax_body_to_prob_issue": 27.14,
+            "pv_gate_merge": 23.6,
+            "final_publish_reset_issue": 13.0,
+            "score_ffts_wait": 11.56,
+            "pv_ffts_wait": 1.52,
+            "ring_local_join": 0.04,
+            "tick_reuse_waits": 0.04
+          }
+        },
+        {
+          "core": 25,
+          "group": 0,
+          "lane": 1,
+          "first_tick_begin_us": 593.74,
+          "last_tick_end_us": 756.22,
+          "tick_loop_wall_span_us": 162.48,
+          "phase_notify_start_us": 757.04,
+          "phase_notify_end_us": 757.42,
+          "interval_totals_us": {
+            "tick_span": 161.54,
+            "gather_ring_issue": 80.58,
+            "softmax_body_to_prob_issue": 23.22,
+            "pv_gate_merge": 25.18,
+            "final_publish_reset_issue": 13.1,
+            "score_ffts_wait": 10.76,
+            "pv_ffts_wait": 1.62,
+            "ring_local_join": 0.04,
+            "tick_reuse_waits": 0.04
+          }
+        }
+      ],
+      "largest_aiv_tick_sum": [
+        {
+          "core": 24,
+          "group": 0,
+          "lane": 0,
+          "first_tick_begin_us": 592.62,
+          "last_tick_end_us": 756.1,
+          "tick_loop_wall_span_us": 163.48,
+          "phase_notify_start_us": 756.88,
+          "phase_notify_end_us": 757.1,
+          "interval_totals_us": {
+            "tick_span": 162.54,
+            "gather_ring_issue": 77.98,
+            "softmax_body_to_prob_issue": 19.82,
+            "pv_gate_merge": 26.6,
+            "final_publish_reset_issue": 13.12,
+            "score_ffts_wait": 16.74,
+            "pv_ffts_wait": 4.1,
+            "ring_local_join": 0.02,
+            "tick_reuse_waits": 0.08
+          }
+        },
+        {
+          "core": 53,
+          "group": 14,
+          "lane": 1,
+          "first_tick_begin_us": 590.5,
+          "last_tick_end_us": 753.48,
+          "tick_loop_wall_span_us": 162.98,
+          "phase_notify_start_us": 754.32,
+          "phase_notify_end_us": 754.62,
+          "interval_totals_us": {
+            "tick_span": 162.0,
+            "gather_ring_issue": 65.62,
+            "softmax_body_to_prob_issue": 13.3,
+            "pv_gate_merge": 25.84,
+            "final_publish_reset_issue": 13.56,
+            "score_ffts_wait": 35.46,
+            "pv_ffts_wait": 3.04,
+            "ring_local_join": 0.04,
+            "tick_reuse_waits": 0.06
+          }
+        },
+        {
+          "core": 50,
+          "group": 13,
+          "lane": 0,
+          "first_tick_begin_us": 593.44,
+          "last_tick_end_us": 756.0,
+          "tick_loop_wall_span_us": 162.56,
+          "phase_notify_start_us": 756.84,
+          "phase_notify_end_us": 757.14,
+          "interval_totals_us": {
+            "tick_span": 161.64,
+            "gather_ring_issue": 77.24,
+            "softmax_body_to_prob_issue": 32.24,
+            "pv_gate_merge": 23.04,
+            "final_publish_reset_issue": 13.06,
+            "score_ffts_wait": 7.18,
+            "pv_ffts_wait": 0.9,
+            "ring_local_join": 0.02,
+            "tick_reuse_waits": 0.0
+          }
+        }
+      ],
+      "largest_aiv_gather_sum": [
+        {
+          "core": 25,
+          "group": 0,
+          "lane": 1,
+          "first_tick_begin_us": 593.74,
+          "last_tick_end_us": 756.22,
+          "tick_loop_wall_span_us": 162.48,
+          "phase_notify_start_us": 757.04,
+          "phase_notify_end_us": 757.42,
+          "interval_totals_us": {
+            "tick_span": 161.54,
+            "gather_ring_issue": 80.58,
+            "softmax_body_to_prob_issue": 23.22,
+            "pv_gate_merge": 25.18,
+            "final_publish_reset_issue": 13.1,
+            "score_ffts_wait": 10.76,
+            "pv_ffts_wait": 1.62,
+            "ring_local_join": 0.04,
+            "tick_reuse_waits": 0.04
+          }
+        },
+        {
+          "core": 24,
+          "group": 0,
+          "lane": 0,
+          "first_tick_begin_us": 592.62,
+          "last_tick_end_us": 756.1,
+          "tick_loop_wall_span_us": 163.48,
+          "phase_notify_start_us": 756.88,
+          "phase_notify_end_us": 757.1,
+          "interval_totals_us": {
+            "tick_span": 162.54,
+            "gather_ring_issue": 77.98,
+            "softmax_body_to_prob_issue": 19.82,
+            "pv_gate_merge": 26.6,
+            "final_publish_reset_issue": 13.12,
+            "score_ffts_wait": 16.74,
+            "pv_ffts_wait": 4.1,
+            "ring_local_join": 0.02,
+            "tick_reuse_waits": 0.08
+          }
+        },
+        {
+          "core": 40,
+          "group": 8,
+          "lane": 0,
+          "first_tick_begin_us": 593.6,
+          "last_tick_end_us": 756.14,
+          "tick_loop_wall_span_us": 162.54,
+          "phase_notify_start_us": 756.94,
+          "phase_notify_end_us": 757.24,
+          "interval_totals_us": {
+            "tick_span": 161.58,
+            "gather_ring_issue": 77.7,
+            "softmax_body_to_prob_issue": 25.98,
+            "pv_gate_merge": 24.56,
+            "final_publish_reset_issue": 13.62,
+            "score_ffts_wait": 10.74,
+            "pv_ffts_wait": 1.74,
+            "ring_local_join": 0.14,
+            "tick_reuse_waits": 0.04
+          }
+        }
+      ],
+      "largest_aic_kv_wait_sum": [
+        {
+          "core": 13,
+          "group": 13,
+          "lane": null,
+          "first_tick_begin_us": 593.14,
+          "last_tick_end_us": 750.06,
+          "tick_loop_wall_span_us": 156.92,
+          "phase_notify_start_us": 752.76,
+          "phase_notify_end_us": 753.08,
+          "interval_totals_us": {
+            "tick_span": 156.26,
+            "kv_ffts_wait": 126.36,
+            "qk_after_wait_to_score_issue": 20.06,
+            "prob_ffts_wait": 0.78,
+            "pv_after_wait_to_ready_issue": 6.96
+          }
+        },
+        {
+          "core": 6,
+          "group": 6,
+          "lane": null,
+          "first_tick_begin_us": 590.52,
+          "last_tick_end_us": 747.68,
+          "tick_loop_wall_span_us": 157.16,
+          "phase_notify_start_us": 750.42,
+          "phase_notify_end_us": 750.72,
+          "interval_totals_us": {
+            "tick_span": 156.52,
+            "kv_ffts_wait": 125.42,
+            "qk_after_wait_to_score_issue": 21.24,
+            "prob_ffts_wait": 0.82,
+            "pv_after_wait_to_ready_issue": 7.08
+          }
+        },
+        {
+          "core": 5,
+          "group": 5,
+          "lane": null,
+          "first_tick_begin_us": 591.5,
+          "last_tick_end_us": 750.44,
+          "tick_loop_wall_span_us": 158.94,
+          "phase_notify_start_us": 753.14,
+          "phase_notify_end_us": 753.48,
+          "interval_totals_us": {
+            "tick_span": 158.34,
+            "kv_ffts_wait": 124.48,
+            "qk_after_wait_to_score_issue": 23.84,
+            "prob_ffts_wait": 0.66,
+            "pv_after_wait_to_ready_issue": 7.2
+          }
+        }
+      ],
+      "paired_timeline": {
+        "per_group": [
+          {
+            "group": 0,
+            "kv_wait_total_us": 121.46,
+            "overlap_with_aiv_gather_union_us": 60.94
+          },
+          {
+            "group": 1,
+            "kv_wait_total_us": 119.88,
+            "overlap_with_aiv_gather_union_us": 54.92
+          },
+          {
+            "group": 2,
+            "kv_wait_total_us": 115.46,
+            "overlap_with_aiv_gather_union_us": 54.74
+          },
+          {
+            "group": 3,
+            "kv_wait_total_us": 117.68,
+            "overlap_with_aiv_gather_union_us": 51.42
+          },
+          {
+            "group": 4,
+            "kv_wait_total_us": 105.46,
+            "overlap_with_aiv_gather_union_us": 48.42
+          },
+          {
+            "group": 5,
+            "kv_wait_total_us": 124.48,
+            "overlap_with_aiv_gather_union_us": 57.04
+          },
+          {
+            "group": 6,
+            "kv_wait_total_us": 125.42,
+            "overlap_with_aiv_gather_union_us": 61.42
+          },
+          {
+            "group": 7,
+            "kv_wait_total_us": 112.66,
+            "overlap_with_aiv_gather_union_us": 51.54
+          },
+          {
+            "group": 8,
+            "kv_wait_total_us": 121.26,
+            "overlap_with_aiv_gather_union_us": 55.1
+          },
+          {
+            "group": 9,
+            "kv_wait_total_us": 115.9,
+            "overlap_with_aiv_gather_union_us": 50.72
+          },
+          {
+            "group": 10,
+            "kv_wait_total_us": 118.3,
+            "overlap_with_aiv_gather_union_us": 58.5
+          },
+          {
+            "group": 11,
+            "kv_wait_total_us": 115.46,
+            "overlap_with_aiv_gather_union_us": 50.3
+          },
+          {
+            "group": 12,
+            "kv_wait_total_us": 100.94,
+            "overlap_with_aiv_gather_union_us": 42.76
+          },
+          {
+            "group": 13,
+            "kv_wait_total_us": 126.36,
+            "overlap_with_aiv_gather_union_us": 62.74
+          },
+          {
+            "group": 14,
+            "kv_wait_total_us": 119.02,
+            "overlap_with_aiv_gather_union_us": 49.84
+          },
+          {
+            "group": 15,
+            "kv_wait_total_us": 121.52,
+            "overlap_with_aiv_gather_union_us": 57.3
+          },
+          {
+            "group": 16,
+            "kv_wait_total_us": 116.58,
+            "overlap_with_aiv_gather_union_us": 50.58
+          },
+          {
+            "group": 17,
+            "kv_wait_total_us": 122.24,
+            "overlap_with_aiv_gather_union_us": 59.36
+          },
+          {
+            "group": 18,
+            "kv_wait_total_us": 101.3,
+            "overlap_with_aiv_gather_union_us": 41.64
+          },
+          {
+            "group": 19,
+            "kv_wait_total_us": 98.06,
+            "overlap_with_aiv_gather_union_us": 40.48
+          },
+          {
+            "group": 20,
+            "kv_wait_total_us": 114.06,
+            "overlap_with_aiv_gather_union_us": 48.0
+          },
+          {
+            "group": 21,
+            "kv_wait_total_us": 107.46,
+            "overlap_with_aiv_gather_union_us": 45.12
+          },
+          {
+            "group": 22,
+            "kv_wait_total_us": 116.72,
+            "overlap_with_aiv_gather_union_us": 58.62
+          },
+          {
+            "group": 23,
+            "kv_wait_total_us": 98.42,
+            "overlap_with_aiv_gather_union_us": 43.66
+          }
+        ],
+        "gather_union_overlap_with_kvwait": {
+          "count": 24,
+          "min_us": 40.48,
+          "median_us": 51.48,
+          "max_us": 62.74
+        },
+        "aic_wait_end_minus_latest_aiv_ready_issue": {
+          "count": 480,
+          "min_us": 0.88,
+          "median_us": 1.1,
+          "max_us": 4.96
+        },
+        "latest_ready_issue_minus_latest_ring_store_issue": {
+          "count": 480,
+          "min_us": 0.2,
+          "median_us": 1.47,
+          "max_us": 11.3
+        },
+        "meaning": "同组同work的源码端点时间关系；send在所属pipe发射，差值仍含真实本核依赖与发送完成延迟，不能当纯通信成本。"
+      }
+    }
+  ],
+  "history_dedup": {
+    "zero_scoping": {
+      "source": "MASTER:6720-6745; qk_scoped_zero.py; qk_zero_result.json",
+      "result": "删除重复64KiB清零，仍保留一次；整链PASS，中位822.98us，未采用；不是现d253仅一次初始化的重复删法。"
+    },
+    "all_valid_no_zero": {
+      "source": "MASTER:6747-6848; qk_valid_gather.py; b16_cached_qk_valid_v7",
+      "task": "task_20261017_020426_59480118626",
+      "result": "64行全有效create覆盖、0次TEXPANDS/TFILLPAD，非法回退清零；8行展开，CPU末版PASS，静态PIPE_ALL9到11；全链/同图边界PASS，中位839.84us，未采用。",
+      "exact_difference": "旧版在AIV做row_min且8行展开；plan预存128行全有效位、保留原64行循环不是已做过的完全相同实现。当前观测没有分离初始化成本，因此不推进该新表达。"
+    },
+    "no_zero_conclusion": "SWA同样有64KiB初始化而其gather中位仅0.66-0.68us；不能据压缩第1块6.2us把差额全归清零或V到MTE2依赖。",
+    "previous_audit": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_attention_aiv_readonly_20261018/README.md"
+  },
+  "conclusion": "当前诊断把优先范围缩到压缩候选采集/地址与发布推进，尤其每query第1压缩块；SWA与稳定lane失衡不是主要新方向。缺少内部细分及候选地址观测，不能把gather差额唯一归为Scalar页表、DMA或cache；仅推进父任务已选两层冗余guard删除，不新增候选。"
+}

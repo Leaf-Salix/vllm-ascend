@@ -1,0 +1,158 @@
+{
+  "reference_commit": "d253d627",
+  "measurement": "完整L1 incore首尾；三方同进程同输入；五窗中位数；SPMD双方100 tick失败轮询退避",
+  "precision_scope": "原PTO精确对照、图重放、状态/保护区及72核代际；不代表Native/token或全部动态场景验收",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 16,
+      "task": "task_20261018_033720_281285324271",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h131072_b16_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            870.76,
+            862.28,
+            857.54,
+            855.4,
+            886.48
+          ],
+          "median_us": 862.28
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            869.1,
+            876.78,
+            874.28,
+            875.18,
+            873.82
+          ],
+          "median_us": 874.28
+        },
+        "spmd_reference": {
+          "samples_us": [
+            870.9,
+            874.12,
+            875.94,
+            871.4,
+            878.38
+          ],
+          "median_us": 874.12
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.018304123003698436,
+      "candidate_faster_windows": 3,
+      "candidate_vs_dynamic_reduction_pct": -1.3916593217980333,
+      "target_met": false
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "task": "task_20261018_033720_281290823741",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/attention_guard_elision_h8192_b32_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1011.98,
+            1022.32,
+            952.16,
+            969.38,
+            983.6
+          ],
+          "median_us": 983.6
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            996.02,
+            992.36,
+            996.62,
+            989.88,
+            997.14
+          ],
+          "median_us": 996.02
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1003.22,
+            995.36,
+            986.0,
+            973.38,
+            997.36
+          ],
+          "median_us": 995.36
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 2,
+          "QK_PANEL": 128,
+          "SCORE_TILE": 768,
+          "PREFETCH": 0,
+          "TO_L0": true,
+          "BALANCED": false,
+          "ROOTS": 2,
+          "OA_COLS": 256,
+          "OB_ROWS": 128,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.06630766757755868,
+      "candidate_faster_windows": 3,
+      "candidate_vs_dynamic_reduction_pct": -1.2627084180561132,
+      "target_met": false
+    }
+  ],
+  "decision": "两档功能精度完整通过但完整L1无收益，不采用、不扩七档，不与其他失败候选组合。正式源码保持d253d627。"
+}
