@@ -1,0 +1,69 @@
+
+✓ Conversion complete
+  Input:  /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/source_matrix/l1_01_dynamic_pto/chip_swimlane_records.json
+  Output: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/source_matrix/l1_01_dynamic_pto/swimlane.json
+
+To visualize: Open https://ui.perfetto.dev/ and drag in /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/source_matrix/l1_01_dynamic_pto/swimlane.json
+
+============================================================================================================================================
+Task Statistics by Function
+  Source chip_swimlane_level: 1 (AICore timing only; recorded in chip_swimlane_records.json)
+  Exec = kernel time on AICore; Latency = dispatch->finish (incl. head OH + Exec + tail OH)
+  Head OH split (v3): Prop = NoC propagation (dispatch_ts→AICore receive); Local = dcci+ack (receive→start)
+============================================================================================================================================
+Func_ID  Func_Name    Count   Avg Exec(us)  Avg Latency(us)   Exec%   Avg Head OH(us)  Avg Tail OH(us)  Avg Prop(us)  Avg Local(us)
+--------------------------------------------------------------------------------------------------------------------------------------------
+0        hc_widen_rms    12          13.48                -       -                 -                -             -           1.46
+1        hc_pre_linear    24           9.98                -       -                 -                -             -          13.33
+2        hc_pre_linear_reduce     6           1.68                -       -                 -                -             -          13.98
+3        split_pre_post    12           4.35                -       -                 -                -             -           0.52
+4        comb_sinkhorn    12          14.69                -       -                 -                -             -           1.43
+5        mix_x_rms_norm    12          17.93                -       -                 -                -             -           5.07
+6        csa_row_offsets     1           2.40                -       -                 -                -             -           0.66
+7        csa_rope_sign    16           2.37                -       -                 -                -             -           1.80
+8        q_rope_prepare    12           2.20                -       -                 -                -             -           1.10
+9        qr_proj_matmul    24          15.16                -       -                 -                -             -          18.45
+11       qr_rms_norm_quant    12           6.31                -       -                 -                -             -          11.04
+12       qproj_matmul    20          47.81                -       -                 -                -             -           0.42
+13       qproj_dequant_rms_nope_rope    48          19.49                -       -                 -                -             -           0.60
+14       kv_proj_matmul    12          29.56                -       -                 -                -             -           0.46
+16       kv_rms_norm_rope     3          11.51                -       -                 -                -             -          20.13
+17       csa_cache_writeback     8           7.57                -       -                 -                -             -           1.12
+18       kv_score_proj    24          20.72                -       -                 -                -             -           0.39
+19       scatter_softmax_pool    16          13.43                -       -                 -                -             -           7.49
+20       compress_state_commit    16           5.93                -       -                 -                -             -           1.46
+21       rmsnorm_rope_cache_write     6           8.12                -       -                 -                -             -           1.40
+22       kv_score_proj_0    24          13.40                -       -                 -                -             -           0.49
+23       scatter_softmax_pool_0    16          10.34                -       -                 -                -             -          13.22
+24       compress_state_commit_0    16           7.38                -       -                 -                -             -           0.56
+25       indexer_boundary_init    16           2.21                -       -                 -                -             -           4.44
+26       rmsnorm_rope     2          12.52                -       -                 -                -             -           0.37
+27       kv_hadamard      1           2.70                -       -                 -                -             -           0.92
+28       kv_and_cache_write     2           4.19                -       -                 -                -             -          12.38
+29       idx_kv_scale_commit     1           8.44                -       -                 -                -             -           4.12
+30       idx_qr_proj_matmul    24          17.86                -       -                 -                -             -           1.53
+31       idx_qr_dequant_rope    48          16.42                -       -                 -                -             -           7.25
+32       qr_hadamard_matmul    24           4.23                -       -                 -                -             -           4.69
+33       qr_hadamard_quant    48          16.76                -       -                 -                -             -           2.96
+34       weights_proj     8           6.88                -       -                 -                -             -           0.51
+35       weights_proj_reduce     6           3.41                -       -                 -                -             -           0.70
+36       indexer_head_coefficients    16           1.37                -       -                 -                -             -           0.76
+37       indexer_score_topk_native_pair_aic    24         226.14                -       -                 -                -             -           3.11
+38       indexer_score_topk_native_pair_aiv    48         229.19                -       -                 -                -             -           3.34
+52       indexer_topk_query_merge__2    48           6.53                -       -                 -                -             -           1.77
+53       kv_touch         1           1.92                -       -                 -                -             -          15.16
+54       csa_slots_build_valid_qk_plan    16           6.46                -       -                 -                -             -           4.95
+55       rope_cs         16           3.05                -       -                 -                -             -           0.60
+56       qk_pv_aic       24         154.49                -       -                 -                -             -           7.98
+57       qk_pv_aiv       48         157.96                -       -                 -                -             -           8.21
+62       proj_a_mm_0     64          26.63                -       -                 -                -             -           5.20
+63       quant_0         24           7.40                -       -                 -                -             -          37.52
+64       _proj_b_mm_nz_kernel__2    64          10.93                -       -                 -                -             -           2.18
+65       proj_b_act_hc_post_0    48          23.14                -       -                 -                -             -           5.20
+--------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                   973       39341.56                -
+
+AICore Observed Span: 876.04 us (from earliest AICore receive to latest AICore end)
+==============================================================================================================
+
+Scheduler-overhead deep-dive: run sched_overhead_analysis manually with a separately-captured deps.json (--enable-dep-gen).

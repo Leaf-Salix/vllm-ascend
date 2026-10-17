@@ -1,0 +1,104 @@
+{
+  "status": "PASS",
+  "scope": "只读主会话一次CPU产物；本审计未编译/未NPU",
+  "reference_kernel": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_h131072_b16_v1/build_output/decode_csa_spmd_jp7o4g2r",
+  "candidate_kernel": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_evidence/cpu_v1/kernel",
+  "cpu_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_evidence/cpu_v1/result.json",
+  "reference_role_controls_evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_h131072_b16_v1/source_matrix/result.json",
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 128,
+    "OB_ROWS": 96,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false,
+    "QA_M16_PARALLEL": false
+  },
+  "source_reference_33_byte_equal": true,
+  "roots": 130,
+  "dynamic_axes": 58,
+  "single_mix": true,
+  "sync_start": true,
+  "normalized_pto": {
+    "aic": {
+      "pto_equal": true,
+      "omitted": "only RoPE→HAD wait block"
+    },
+    "aiv": {
+      "pto_equal": true,
+      "omitted": "nothing"
+    }
+  },
+  "allocations": {
+    "aic": {
+      "count": 558,
+      "same_address_shape_dtype": true,
+      "upper_bounds": {
+        "acc": 131072,
+        "left": 65536,
+        "mat": 475136,
+        "right": 65536,
+        "vec": 16384
+      }
+    },
+    "aiv": {
+      "count": 1812,
+      "same_address_shape_dtype": true,
+      "upper_bounds": {
+        "vec": 163872
+      }
+    }
+  },
+  "cpp_local_events": {
+    "aic": {
+      "reference_count": 1711,
+      "candidate_count": 1711,
+      "identical_flat_local_sequence_and_ids": true
+    },
+    "aiv": {
+      "reference_count": 3088,
+      "candidate_count": 3088,
+      "identical_flat_local_sequence_and_ids": true
+    }
+  },
+  "generated_wait": {
+    "worker_less_than_actual_T": true,
+    "owner_count": 16,
+    "wrapper_T": "x_fp32.shape[0] → CSA_FULL_T → v133",
+    "wrapper_worker": "__pypto_spmd_block_idx → v189 → v926",
+    "owner": "((worker//8)*16+ordinal)%48",
+    "core": "24+owner",
+    "signal_words": "17*72*128+core*128",
+    "had_publish_words": "18*72*128+worker*128",
+    "maintenance_after_wait_before_HAD_TLOAD": true,
+    "original_HAD_TSTORE_FIX_completion_before_publish": true
+  },
+  "excerpts": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "first_line": 1427,
+      "last_line": 1480,
+      "excerpt": "wait_had.pto.txt"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_evidence/cpu_v1/kernel/kernels/aic/cube_schedule.cpp",
+      "first_line": 10257,
+      "last_line": 10431,
+      "excerpt": "wait_had.cpp.txt"
+    }
+  ],
+  "normalization": "按函数单独处理，去loc/SSA名、内联同值同类型常量；保留数据类型/地址/运算/控制。AIC只排除一个wait块，保留其后T*64。",
+  "audit_correction": "初查跨module的SSA常量表使不同函数同名SSA串扰，已按函数归一化。脚本首次运行缺ui32宽度而KeyError，补为4字节后只重读原件，未编译/改产物。",
+  "limitations": [
+    "参考设备辅助头启用wait-backoff，CPU默认TWAIT；不宣称辅助头/机器码全文等价。",
+    "局部事件列表相同不表示新条件分支执行次数相同；worker<T及owner集合改变是本候选目的。",
+    "后端通过与静态顺序证据不代替A3设备正确性、graph/保护区或完整性能验证。"
+  ]
+}

@@ -1,0 +1,372 @@
+
+idx_had_owner_h131072_b16_v1 / spmd_reference / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/build_output/decode_csa_spmd_kyg6wy7u/ptoas/dynamic_csa_full.pto
+1425:   %signal_v7__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%706], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1426:   pto.comm.tnotify(%signal_v7__ssa_v0_signal_pview, %203 : !pto.partition_tensor_view<1xi32>, i32) {notifyOp = #pto<notify_op set>}
+1427:   %707 = arith.addi %arg132, %c7_index : index
+1428:   %708 = arith.divsi %707, %c8_index : index
+1429:   %709 = arith.muli %708, %c16_index : index
+1430:   %710 = arith.cmpi slt, %c0_index, %709 : index
+1431:   scf.if %710 {
+1432:     %711 = arith.subi %709, %c0_index : index
+1433:     %712 = arith.minsi %711, %c48_index : index
+1434:     scf.for %ordinal_inline15627__idx_v0 = %c0_index to %712 step %c1_index {
+1435:       %713 = arith.addi %c0_index, %ordinal_inline15627__idx_v0 : index
+1436:       %714 = arith.remsi %713, %c48_index : index
+1437:       %715 = arith.addi %714, %c24_index : index
+1438:       %716 = arith.muli %715, %c128_index : index
+1439:       %717 = arith.addi %716, %c156672_index : index
+1440:       %718 = arith.maxsi %717, %c0_index : index
+1441:       %signal_v8__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%718], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1442:       pto.comm.twait(%signal_v8__ssa_v0_signal_pview, %203 : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+1443:     }
+1444:     pto.fence.barrier_all #pto.fence_scope<gm>
+1445:     pto.cmo.cacheinvalid all #pto.address_space<gm>
+1446:     pto.fence.barrier_all #pto.fence_scope<gm>
+1447:   }
+1448:   %719 = arith.muli %arg132, %c64_index : index
+1449:   %qh_hadamard_inline15635__tile = pto.alloc_tile addr = %c65536_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+idx_had_owner_h131072_b16_v1 / spmd_reference / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/build_output/decode_csa_spmd_kyg6wy7u/kernels/aic/cube_schedule.cpp
+139:   const int64_t v245 = 24;
+141:   const int64_t v247 = 1;
+144:   const int64_t v250 = 16;
+152:   const int64_t v258 = 128;
+154:   const int64_t v260 = 8;
+161:   const int64_t v267 = 0;
+165:   const int64_t v271 = 7;
+166:   const int64_t v272 = 48;
+179:   const int64_t v285 = 156672;
+1980:   const int64_t v2086 = 0;
+19360:   const int64_t v245 = 66816;
+19362:   const int64_t v247 = 66848;
+19365:   const int64_t v250 = 66944;
+19373:   const int64_t v258 = 66656;
+19375:   const int64_t v260 = 67840;
+19382:   const int64_t v267 = 69632;
+19386:   const int64_t v271 = 114720;
+19387:   const int64_t v272 = 8192;
+19400:   const int64_t v285 = 89088;
+20051:   const int64_t v936 = 1;
+21194:   const int64_t v2079 = 32;
+21204:   const int64_t v2089 = 0;
+21205:   const int64_t v2090 = 32;
+10282:   pto::comm::TNOTIFY(v2079, v936, v2080);
+10283:   // pto: %707, %708
+10284:   v2081 = (int64_t) ((uint64_t) v133 + (uint64_t) v271) / v260;
+10285:   // pto: %709
+10286:   v2082 = (int64_t) ((uint64_t) v2081 * (uint64_t) v250);
+10287:   // pto: %710
+10288:   if (v2082 > v267) {
+10289:     // pto: %712
+10290:     ;
+10291:     for (int64_t v4667 = v267; v4667 < (v2082 < v272 ? v2082 : v272); v4667 += v247) {
+10292:       // pto: %714, %715, %716, %717
+10293:       ;
+10294:       v2083 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v4667 % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v285);
+10295:       // pto: %718
+10296:       ;
+10297:       v2084 = v2083 < v267 ? v267 : v2083;
+10298:       // pto: %signal_v8__ssa_v0_signal_pview
+10299:       ;
+10300:       v2085 = PTOAS__GLOBAL_TENSOR_DATA(v709);
+10301:       // pto: %signal_v8__ssa_v0_signal_pview
+10302:       ;
+10303:       // pto: %signal_v8__ssa_v0_signal_pview
+10304:       ;
+10305:       v2087 = pto::Shape<1, 1, 1, 1, 1>();
+10306:       // pto: %signal_v8__ssa_v0_signal_pview
+10307:       ;
+10308:       v2088 = pto::Stride<1, 1, 1, 1, 1>();
+10309:       // pto: %signal_v8__ssa_v0_signal_pview
+10310:       ;
+10311:       v2089 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2085 + (v2086 + v2084), v2087, v2088);
+10312:       v2090 = pto::comm::WaitCmp::GE;
+10313:       CSA_WAIT_LOCAL_GM(v2089, v936, v2090);
+10314:     };
+10315:     pipe_barrier(PIPE_MTE2);
+10316:     pipe_barrier(PIPE_MTE3);
+10317:     pipe_barrier(PIPE_FIX);
+10318:     dsb(DSB_DDR);
+10319:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+10320:     pipe_barrier(PIPE_MTE2);
+10321:     pipe_barrier(PIPE_MTE3);
+10322:     pipe_barrier(PIPE_FIX);
+10323:     dsb(DSB_DDR);
+10324:   }
+
+idx_had_owner_h131072_b16_v1 / spmd_candidate / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/build_output/decode_csa_spmd_0du1mi6c/ptoas/dynamic_csa_full.pto
+1427:   %707 = arith.cmpi slt, %worker__ssa_v0, %arg132 : index
+1428:   scf.if %707 {
+1429:     %708 = arith.divsi %worker__ssa_v0, %c8_index : index
+1430:     %709 = arith.muli %708, %c16_index : index
+1431:     %710 = arith.divsi %worker__ssa_v0, %c8_index : index
+1432:     %711 = arith.muli %710, %c16_index : index
+1433:     %712 = arith.addi %711, %c16_index : index
+1434:     %713 = arith.subi %712, %709 : index
+1435:     %714 = arith.minsi %713, %c48_index : index
+1436:     scf.for %ordinal_inline12509__idx_v0 = %c0_index to %714 step %c1_index {
+1437:       %715 = arith.addi %709, %ordinal_inline12509__idx_v0 : index
+1438:       %716 = arith.remsi %715, %c48_index : index
+1439:       %717 = arith.addi %716, %c24_index : index
+1440:       %718 = arith.muli %717, %c128_index : index
+1441:       %719 = arith.addi %718, %c156672_index : index
+1442:       %720 = arith.maxsi %719, %c0_index : index
+1443:       %signal_v8__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%720], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1444:       pto.comm.twait(%signal_v8__ssa_v0_signal_pview, %203 : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+1445:     }
+1446:     pto.fence.barrier_all #pto.fence_scope<gm>
+1447:     pto.cmo.cacheinvalid all #pto.address_space<gm>
+1448:     pto.fence.barrier_all #pto.fence_scope<gm>
+1449:   }
+1450:   %721 = arith.muli %arg132, %c64_index : index
+1451:   %qh_hadamard_inline12518__tile = pto.alloc_tile addr = %c65536_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+idx_had_owner_h131072_b16_v1 / spmd_candidate / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h131072_b16_v1/build_output/decode_csa_spmd_0du1mi6c/kernels/aic/cube_schedule.cpp
+139:   const int64_t v245 = 24;
+141:   const int64_t v247 = 1;
+144:   const int64_t v250 = 16;
+152:   const int64_t v258 = 128;
+154:   const int64_t v260 = 8;
+161:   const int64_t v267 = 0;
+166:   const int64_t v272 = 48;
+179:   const int64_t v285 = 156672;
+1970:   const int64_t v2076 = 0;
+1978:   const int64_t v2084 = 0;
+19354:   const int64_t v245 = 66816;
+19356:   const int64_t v247 = 66848;
+19359:   const int64_t v250 = 66944;
+19367:   const int64_t v258 = 66656;
+19369:   const int64_t v260 = 67840;
+19376:   const int64_t v267 = 69632;
+19381:   const int64_t v272 = 8192;
+19394:   const int64_t v285 = 89088;
+20045:   const int64_t v936 = 1;
+21187:   const int64_t v2078 = 0;
+21188:   const int64_t v2079 = 32;
+10274:   v2077 = pto::Shape<1, 1, 1, 1, 1>();
+10275:   // pto: %signal_v7__ssa_v0_signal_pview
+10276:   v2078 = pto::Stride<1, 1, 1, 1, 1>();
+10277:   // pto: %signal_v7__ssa_v0_signal_pview
+10278:   v2079 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2075 + (v2076 + v2074), v2077, v2078);
+10279:   v2080 = pto::comm::NotifyOp::Set;
+10280:   pto::comm::TNOTIFY(v2079, v936, v2080);
+10281:   // pto: %707
+10282:   if (v926 < v133) {
+10283:     for (int64_t v4666 = v267; v4666 < v250; v4666 += v247) {
+10284:       // pto: %708, %709, %715, %716, %717, %718, %719
+10285:       ;
+10286:       v2081 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) ((int64_t) (uint64_t) (v926 / v260) * (uint64_t) v250) + (uint64_t) v4666) % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v285);
+10287:       // pto: %720
+10288:       ;
+10289:       v2082 = v2081 < v267 ? v267 : v2081;
+10290:       // pto: %signal_v8__ssa_v0_signal_pview
+10291:       ;
+10292:       v2083 = PTOAS__GLOBAL_TENSOR_DATA(v709);
+10293:       // pto: %signal_v8__ssa_v0_signal_pview
+10294:       ;
+10295:       // pto: %signal_v8__ssa_v0_signal_pview
+10296:       ;
+10297:       v2085 = pto::Shape<1, 1, 1, 1, 1>();
+10298:       // pto: %signal_v8__ssa_v0_signal_pview
+10299:       ;
+10300:       v2086 = pto::Stride<1, 1, 1, 1, 1>();
+10301:       // pto: %signal_v8__ssa_v0_signal_pview
+10302:       ;
+10303:       v2087 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2083 + (v2084 + v2082), v2085, v2086);
+10304:       v2088 = pto::comm::WaitCmp::GE;
+10305:       CSA_WAIT_LOCAL_GM(v2087, v936, v2088);
+10306:     };
+10307:     pipe_barrier(PIPE_MTE2);
+10308:     pipe_barrier(PIPE_MTE3);
+10309:     pipe_barrier(PIPE_FIX);
+10310:     dsb(DSB_DDR);
+10311:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+10312:     pipe_barrier(PIPE_MTE2);
+10313:     pipe_barrier(PIPE_MTE3);
+10314:     pipe_barrier(PIPE_FIX);
+10315:     dsb(DSB_DDR);
+10316:   }
+
+idx_had_owner_h8192_b32_v1 / spmd_reference / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h8192_b32_v1/build_output/decode_csa_spmd_lrmhgmqz/ptoas/dynamic_csa_full.pto
+1385:   %signal_v7__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%699], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1386:   pto.comm.tnotify(%signal_v7__ssa_v0_signal_pview, %196 : !pto.partition_tensor_view<1xi32>, i32) {notifyOp = #pto<notify_op set>}
+1387:   %700 = arith.addi %arg132, %c7_index : index
+1388:   %701 = arith.divsi %700, %c8_index : index
+1389:   %702 = arith.muli %701, %c16_index : index
+1390:   %703 = arith.cmpi slt, %c0_index, %702 : index
+1391:   scf.if %703 {
+1392:     %704 = arith.subi %702, %c0_index : index
+1393:     %705 = arith.minsi %704, %c48_index : index
+1394:     scf.for %ordinal_inline15628__idx_v0 = %c0_index to %705 step %c1_index {
+1395:       %706 = arith.addi %c0_index, %ordinal_inline15628__idx_v0 : index
+1396:       %707 = arith.remsi %706, %c48_index : index
+1397:       %708 = arith.addi %707, %c24_index : index
+1398:       %709 = arith.muli %708, %c128_index : index
+1399:       %710 = arith.addi %709, %c156672_index : index
+1400:       %711 = arith.maxsi %710, %c0_index : index
+1401:       %signal_v8__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%711], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1402:       pto.comm.twait(%signal_v8__ssa_v0_signal_pview, %196 : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+1403:     }
+1404:     pto.fence.barrier_all #pto.fence_scope<gm>
+1405:     pto.cmo.cacheinvalid all #pto.address_space<gm>
+1406:     pto.fence.barrier_all #pto.fence_scope<gm>
+1407:   }
+1408:   %712 = arith.muli %arg132, %c64_index : index
+1409:   %qh_hadamard_inline15635__tile = pto.alloc_tile addr = %c65536_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+idx_had_owner_h8192_b32_v1 / spmd_reference / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h8192_b32_v1/build_output/decode_csa_spmd_lrmhgmqz/kernels/aic/cube_schedule.cpp
+126:   const int64_t v232 = 24;
+128:   const int64_t v234 = 1;
+131:   const int64_t v237 = 16;
+139:   const int64_t v245 = 128;
+141:   const int64_t v247 = 8;
+148:   const int64_t v254 = 0;
+152:   const int64_t v258 = 7;
+153:   const int64_t v259 = 48;
+166:   const int64_t v272 = 156672;
+1902:   const int64_t v2008 = 0;
+16199:   const int64_t v232 = 64;
+16201:   const int64_t v234 = 256;
+16204:   const int64_t v237 = 106496;
+16212:   const int64_t v245 = 66848;
+16214:   const int64_t v247 = 66912;
+16221:   const int64_t v254 = 66592;
+16225:   const int64_t v258 = 67840;
+16226:   const int64_t v259 = 68096;
+16239:   const int64_t v272 = 98336;
+17970:   const int64_t v2003 = 0;
+9396:   pto::comm::TNOTIFY(v2001, v858, v2002);
+9397:   // pto: %700, %701
+9398:   v2003 = (int64_t) ((uint64_t) v133 + (uint64_t) v258) / v247;
+9399:   // pto: %702
+9400:   v2004 = (int64_t) ((uint64_t) v2003 * (uint64_t) v237);
+9401:   // pto: %703
+9402:   if (v2004 > v254) {
+9403:     // pto: %705
+9404:     ;
+9405:     for (int64_t v3921 = v254; v3921 < (v2004 < v259 ? v2004 : v259); v3921 += v234) {
+9406:       // pto: %707, %708, %709, %710
+9407:       ;
+9408:       v2005 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) (v3921 % v259) + (uint64_t) v232) * (uint64_t) v245) + (uint64_t) v272);
+9409:       // pto: %711
+9410:       ;
+9411:       v2006 = v2005 < v254 ? v254 : v2005;
+9412:       // pto: %signal_v8__ssa_v0_signal_pview
+9413:       ;
+9414:       v2007 = PTOAS__GLOBAL_TENSOR_DATA(v687);
+9415:       // pto: %signal_v8__ssa_v0_signal_pview
+9416:       ;
+9417:       // pto: %signal_v8__ssa_v0_signal_pview
+9418:       ;
+9419:       v2009 = pto::Shape<1, 1, 1, 1, 1>();
+9420:       // pto: %signal_v8__ssa_v0_signal_pview
+9421:       ;
+9422:       v2010 = pto::Stride<1, 1, 1, 1, 1>();
+9423:       // pto: %signal_v8__ssa_v0_signal_pview
+9424:       ;
+9425:       v2011 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2007 + (v2008 + v2006), v2009, v2010);
+9426:       v2012 = pto::comm::WaitCmp::GE;
+9427:       CSA_WAIT_LOCAL_GM(v2011, v858, v2012);
+9428:     };
+9429:     pipe_barrier(PIPE_MTE2);
+9430:     pipe_barrier(PIPE_MTE3);
+9431:     pipe_barrier(PIPE_FIX);
+9432:     dsb(DSB_DDR);
+9433:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+9434:     pipe_barrier(PIPE_MTE2);
+9435:     pipe_barrier(PIPE_MTE3);
+9436:     pipe_barrier(PIPE_FIX);
+9437:     dsb(DSB_DDR);
+9438:   }
+
+idx_had_owner_h8192_b32_v1 / spmd_candidate / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h8192_b32_v1/build_output/decode_csa_spmd_3gsduf5a/ptoas/dynamic_csa_full.pto
+1387:   %700 = arith.cmpi slt, %worker__ssa_v0, %arg132 : index
+1388:   scf.if %700 {
+1389:     %701 = arith.divsi %worker__ssa_v0, %c8_index : index
+1390:     %702 = arith.muli %701, %c16_index : index
+1391:     %703 = arith.divsi %worker__ssa_v0, %c8_index : index
+1392:     %704 = arith.muli %703, %c16_index : index
+1393:     %705 = arith.addi %704, %c16_index : index
+1394:     %706 = arith.subi %705, %702 : index
+1395:     %707 = arith.minsi %706, %c48_index : index
+1396:     scf.for %ordinal_inline12511__idx_v0 = %c0_index to %707 step %c1_index {
+1397:       %708 = arith.addi %702, %ordinal_inline12511__idx_v0 : index
+1398:       %709 = arith.remsi %708, %c48_index : index
+1399:       %710 = arith.addi %709, %c24_index : index
+1400:       %711 = arith.muli %710, %c128_index : index
+1401:       %712 = arith.addi %711, %c156672_index : index
+1402:       %713 = arith.maxsi %712, %c0_index : index
+1403:       %signal_v8__ssa_v0_signal_pview = pto.partition_view %signal__ssa_v0_view, offsets = [%713], sizes = [%c1_index] : !pto.tensor_view<?xi32> -> !pto.partition_tensor_view<1xi32>
+1404:       pto.comm.twait(%signal_v8__ssa_v0_signal_pview, %196 : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+1405:     }
+1406:     pto.fence.barrier_all #pto.fence_scope<gm>
+1407:     pto.cmo.cacheinvalid all #pto.address_space<gm>
+1408:     pto.fence.barrier_all #pto.fence_scope<gm>
+1409:   }
+1410:   %714 = arith.muli %arg132, %c64_index : index
+1411:   %qh_hadamard_inline12517__tile = pto.alloc_tile addr = %c65536_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+idx_had_owner_h8192_b32_v1 / spmd_candidate / /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_h8192_b32_v1/build_output/decode_csa_spmd_3gsduf5a/kernels/aic/cube_schedule.cpp
+126:   const int64_t v232 = 24;
+128:   const int64_t v234 = 1;
+131:   const int64_t v237 = 16;
+139:   const int64_t v245 = 128;
+141:   const int64_t v247 = 8;
+148:   const int64_t v254 = 0;
+153:   const int64_t v259 = 48;
+166:   const int64_t v272 = 156672;
+1892:   const int64_t v1998 = 0;
+1900:   const int64_t v2006 = 0;
+16193:   const int64_t v232 = 64;
+16195:   const int64_t v234 = 256;
+16198:   const int64_t v237 = 106496;
+16206:   const int64_t v245 = 66848;
+16208:   const int64_t v247 = 66912;
+16215:   const int64_t v254 = 66592;
+16220:   const int64_t v259 = 68096;
+16233:   const int64_t v272 = 98336;
+16809:   const int64_t v848 = 1;
+17964:   const int64_t v2003 = 0;
+9388:   v1999 = pto::Shape<1, 1, 1, 1, 1>();
+9389:   // pto: %signal_v7__ssa_v0_signal_pview
+9390:   v2000 = pto::Stride<1, 1, 1, 1, 1>();
+9391:   // pto: %signal_v7__ssa_v0_signal_pview
+9392:   v2001 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v1997 + (v1998 + v1996), v1999, v2000);
+9393:   v2002 = pto::comm::NotifyOp::Set;
+9394:   pto::comm::TNOTIFY(v2001, v858, v2002);
+9395:   // pto: %700
+9396:   if (v848 < v133) {
+9397:     for (int64_t v3920 = v254; v3920 < v237; v3920 += v234) {
+9398:       // pto: %701, %702, %708, %709, %710, %711, %712
+9399:       ;
+9400:       v2003 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) ((int64_t) (uint64_t) (v848 / v247) * (uint64_t) v237) + (uint64_t) v3920) % v259) + (uint64_t) v232) * (uint64_t) v245) + (uint64_t) v272);
+9401:       // pto: %713
+9402:       ;
+9403:       v2004 = v2003 < v254 ? v254 : v2003;
+9404:       // pto: %signal_v8__ssa_v0_signal_pview
+9405:       ;
+9406:       v2005 = PTOAS__GLOBAL_TENSOR_DATA(v687);
+9407:       // pto: %signal_v8__ssa_v0_signal_pview
+9408:       ;
+9409:       // pto: %signal_v8__ssa_v0_signal_pview
+9410:       ;
+9411:       v2007 = pto::Shape<1, 1, 1, 1, 1>();
+9412:       // pto: %signal_v8__ssa_v0_signal_pview
+9413:       ;
+9414:       v2008 = pto::Stride<1, 1, 1, 1, 1>();
+9415:       // pto: %signal_v8__ssa_v0_signal_pview
+9416:       ;
+9417:       v2009 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2005 + (v2006 + v2004), v2007, v2008);
+9418:       v2010 = pto::comm::WaitCmp::GE;
+9419:       CSA_WAIT_LOCAL_GM(v2009, v858, v2010);
+9420:     };
+9421:     pipe_barrier(PIPE_MTE2);
+9422:     pipe_barrier(PIPE_MTE3);
+9423:     pipe_barrier(PIPE_FIX);
+9424:     dsb(DSB_DDR);
+9425:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+9426:     pipe_barrier(PIPE_MTE2);
+9427:     pipe_barrier(PIPE_MTE3);
+9428:     pipe_barrier(PIPE_FIX);
+9429:     dsb(DSB_DDR);
+9430:   }

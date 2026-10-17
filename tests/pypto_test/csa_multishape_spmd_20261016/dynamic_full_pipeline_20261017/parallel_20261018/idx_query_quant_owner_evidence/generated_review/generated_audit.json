@@ -1,0 +1,86 @@
+{
+  "status": "PASS",
+  "cpu_compilations": 1,
+  "device_execution": false,
+  "source_frozen_unchanged": true,
+  "cpu_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_query_quant_owner_evidence/cpu_v1/result.json",
+  "reference_kernel": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_h131072_b16_v1/build_output/decode_csa_spmd_jp7o4g2r",
+  "candidate_kernel": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_query_quant_owner_evidence/cpu_v1/kernel",
+  "reference_role_controls_evidence": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_h131072_b16_v1/source_matrix/result.json",
+  "same_33_reference_source": true,
+  "roots": 130,
+  "dynamic_axes": 58,
+  "single_mix": true,
+  "sync_start": true,
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 128,
+    "OB_ROWS": 96,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false,
+    "QA_M16_PARALLEL": false
+  },
+  "roles": {
+    "aic": {
+      "normalized_pto_equal": true,
+      "omitted": "nothing",
+      "allocation_count": 558,
+      "allocation_address_shape_dtype_equal": true,
+      "upper_bounds": {
+        "acc": 131072,
+        "left": 65536,
+        "mat": 475136,
+        "right": 65536,
+        "vec": 16384
+      },
+      "local_event_count": 1711,
+      "local_event_sequence_and_ids_equal": true
+    },
+    "aiv": {
+      "normalized_pto_equal": true,
+      "omitted": "only HAD→quant wait block",
+      "allocation_count": 1812,
+      "allocation_address_shape_dtype_equal": true,
+      "upper_bounds": {
+        "vec": 163872
+      },
+      "local_event_count": 3088,
+      "local_event_sequence_and_ids_equal": true
+    }
+  },
+  "owner": "logical AIV worker % 24; physical AIC core has no +24",
+  "actual_T": "x_fp32.shape[0] → CSA_FULL_T → v133",
+  "signal_word_offset": "18*72*128 + (worker%24)*128",
+  "acquiring_worker_condition": "worker<T",
+  "business_maintenance_after_wait_before_quant_TLOAD": true,
+  "two_quant_TSTORE_and_original_publish_retained": true,
+  "successor_full_quant_wait_retained": "min(T,48) AIV owners at 24+owner, phase19",
+  "excerpts": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_query_quant_owner_evidence/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "first_line": 8366,
+      "last_line": 8477,
+      "excerpt": "wait_quant_successor.pto.txt"
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_query_quant_owner_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp",
+      "first_line": 45146,
+      "last_line": 45438,
+      "excerpt": "wait_quant.cpp.txt"
+    }
+  ],
+  "normalization": "函数作用域内仅去loc/SSA名、内联同值同类型常量。AIC全文；AIV只排除唯一wait块，保留T*64与其后完整数学/获取。",
+  "limitations": [
+    "CPU默认TWAIT，参考设备wait-backoff辅助头不同；不称全文机器码等价。",
+    "局部事件顺序相同不是运行时次数相同；新条件与单owner正是实验变量。",
+    "未NPU；不得将后端通过替代精度、graph、保护区或性能结论。"
+  ]
+}

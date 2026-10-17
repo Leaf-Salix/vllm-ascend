@@ -1,0 +1,178 @@
+原始路径：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_had_owner_evidence/cpu_v1/kernel/kernels/aic/cube_schedule.cpp
+原始行：10257–10431
+
+10257:   // pto: %707
+10258:   if (v926 < v133) {
+10259:     for (int64_t v4666 = v267; v4666 < v250; v4666 += v247) {
+10260:       // pto: %708, %709, %715, %716, %717, %718, %719
+10261:       ;
+10262:       v2081 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) ((uint64_t) ((int64_t) (uint64_t) (v926 / v260) * (uint64_t) v250) + (uint64_t) v4666) % v272) + (uint64_t) v245) * (uint64_t) v258) + (uint64_t) v285);
+10263:       // pto: %720
+10264:       ;
+10265:       v2082 = v2081 < v267 ? v267 : v2081;
+10266:       // pto: %signal_v8__ssa_v0_signal_pview
+10267:       ;
+10268:       v2083 = PTOAS__GLOBAL_TENSOR_DATA(v709);
+10269:       // pto: %signal_v8__ssa_v0_signal_pview
+10270:       ;
+10271:       // pto: %signal_v8__ssa_v0_signal_pview
+10272:       ;
+10273:       v2085 = pto::Shape<1, 1, 1, 1, 1>();
+10274:       // pto: %signal_v8__ssa_v0_signal_pview
+10275:       ;
+10276:       v2086 = pto::Stride<1, 1, 1, 1, 1>();
+10277:       // pto: %signal_v8__ssa_v0_signal_pview
+10278:       ;
+10279:       v2087 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2083 + (v2084 + v2082), v2085, v2086);
+10280:       v2088 = pto::comm::WaitCmp::GE;
+10281:       pto::comm::TWAIT(v2087, v936, v2088);
+10282:     };
+10283:     pipe_barrier(PIPE_MTE2);
+10284:     pipe_barrier(PIPE_MTE3);
+10285:     pipe_barrier(PIPE_FIX);
+10286:     dsb(DSB_DDR);
+10287:     dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+10288:     pipe_barrier(PIPE_MTE2);
+10289:     pipe_barrier(PIPE_MTE3);
+10290:     pipe_barrier(PIPE_FIX);
+10291:     dsb(DSB_DDR);
+10292:   }
+10293:   // pto: %qh_hadamard_inline1955__tile
+10294:   v2089 = Tile<TileType::Mat, bfloat16_t, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+10295:   // pto: %qh_hadamard_inline1955__tile
+10296:   v2090 = (uint64_t) v219;
+10297:   TASSIGN(v2089, v2090);
+10298:   // pto: %hadamard__ssa_v0_pview
+10299:   v2091 = PTOAS__GLOBAL_TENSOR_DATA(v502);
+10300:   // pto: %hadamard__ssa_v0_pview
+10301:   v2092 = pto::Shape<1, 1, 1, 128, 128>();
+10302:   // pto: %hadamard__ssa_v0_pview
+10303:   v2093 = pto::Stride<16384, 16384, 16384, 128, 1>();
+10304:   // pto: %hadamard__ssa_v0_pview
+10305:   v2094 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 128, 128>, pto::Stride<16384, 16384, 16384, 128, 1>, pto::Layout::ND>(v2091, v2092, v2093);
+10306:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10307:   TLOAD(v2089, v2094);
+10308:   // pto: %721, %722
+10309:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10310:   wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10311:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10312:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10313:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10314:   for (int64_t v4667 = v926; v4667 < ((int64_t) ((uint64_t) v133 * (uint64_t) v249) / v249); v4667 += v245) {
+10315:     // pto: %723
+10316:     ;
+10317:     v2095 = (int64_t) ((uint64_t) v4667 * (uint64_t) v249);
+10318:     // pto: %t__tile
+10319:     ;
+10320:     v2096 = Tile<TileType::Mat, bfloat16_t, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v249, v258);
+10321:     // pto: %t__tile
+10322:     ;
+10323:     v2097 = (uint64_t) v221;
+10324:     TASSIGN(v2096, v2097);
+10325:     // pto: %724
+10326:     ;
+10327:     v2098 = v2095 < v267 ? v267 : v2095;
+10328:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10329:     ;
+10330:     v2099 = PTOAS__GLOBAL_TENSOR_DATA(v546);
+10331:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10332:     ;
+10333:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10334:     ;
+10335:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10336:     ;
+10337:     v2102 = pto::Shape<1, 1, 1, 64, 128>();
+10338:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10339:     ;
+10340:     v2103 = pto::Stride<8192, 8192, 8192, 128, 1>();
+10341:     // pto: %idx_query_rope_heads__ssa_v0_pview
+10342:     ;
+10343:     v2104 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<8192, 8192, 8192, 128, 1>, pto::Layout::ND>(v2099 + (v2100 + v2098 * v2101), v2102, v2103);
+10344:     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10345:     TLOAD(v2096, v2104);
+10346:     set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+10347:     // pto: %t__tile_Left
+10348:     ;
+10349:     v2105 = Tile<TileType::Left, bfloat16_t, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>(v249, v258);
+10350:     // pto: %t__tile_Left
+10351:     ;
+10352:     v2106 = (uint64_t) v217;
+10353:     TASSIGN(v2105, v2106);
+10354:     wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+10355:     pipe_barrier(PIPE_MTE1);
+10356:     wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10357:     TMOV(v2105, v2096);
+10358:     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10359:     // pto: %qh_hadamard_inline1955__tile_Right
+10360:     ;
+10361:     v2107 = Tile<TileType::Right, bfloat16_t, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512, PadValue::Null, CompactMode::Null>(v258, v258);
+10362:     // pto: %qh_hadamard_inline1955__tile_Right
+10363:     ;
+10364:     v2108 = (uint64_t) v217;
+10365:     TASSIGN(v2107, v2108);
+10366:     TMOV(v2107, v2089);
+10367:     set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+10368:     // pto: %qh_acc_inline1952__tile
+10369:     ;
+10370:     v2109 = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024, PadValue::Null, CompactMode::Null>(v249, v258);
+10371:     // pto: %qh_acc_inline1952__tile
+10372:     ;
+10373:     v2110 = (uint64_t) v217;
+10374:     TASSIGN(v2109, v2110);
+10375:     wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+10376:     wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10377:     TMATMUL(v2109, v2105, v2107);
+10378:     set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10379:     set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+10380:     // pto: %idx_query_had__iter_v1_pview
+10381:     ;
+10382:     v2111 = PTOAS__GLOBAL_TENSOR_DATA(v555);
+10383:     // pto: %idx_query_had__iter_v1_pview
+10384:     ;
+10385:     // pto: %idx_query_had__iter_v1_pview
+10386:     ;
+10387:     // pto: %idx_query_had__iter_v1_pview
+10388:     ;
+10389:     v2114 = pto::Shape<1, 1, 1, 64, 128>();
+10390:     // pto: %idx_query_had__iter_v1_pview
+10391:     ;
+10392:     v2115 = pto::Stride<8192, 8192, 8192, 128, 1>();
+10393:     // pto: %idx_query_had__iter_v1_pview
+10394:     ;
+10395:     v2116 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<8192, 8192, 8192, 128, 1>, pto::Layout::ND>(v2111 + (v2112 + v2098 * v2113), v2114, v2115);
+10396:     wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+10397:     TSTORE(v2116, v2109);
+10398:     set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10399:   }
+10400:   wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10401:   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10402:   wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10403:   set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+10404:   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+10405:   set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
+10406:   pipe_barrier(PIPE_MTE2);
+10407:   pipe_barrier(PIPE_MTE3);
+10408:   pipe_barrier(PIPE_FIX);
+10409:   dsb(DSB_DDR);
+10410:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+10411:   pipe_barrier(PIPE_MTE2);
+10412:   pipe_barrier(PIPE_MTE3);
+10413:   pipe_barrier(PIPE_FIX);
+10414:   dsb(DSB_DDR);
+10415:   // pto: %727
+10416:   v2117 = (int64_t) ((uint64_t) v927 + (uint64_t) v286);
+10417:   pipe_barrier(PIPE_ALL);
+10418:   // pto: %728
+10419:   v2118 = v2117 < v267 ? v267 : v2117;
+10420:   // pto: %729
+10421:   v2119 = PTOAS__GLOBAL_TENSOR_DATA(v709);
+10422:   // pto: %729
+10423:   // pto: %729
+10424:   v2121 = pto::Shape<1, 1, 1, 1, 1>();
+10425:   // pto: %729
+10426:   v2122 = pto::Stride<1, 1, 1, 1, 1>();
+10427:   // pto: %729
+10428:   v2123 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v2119 + (v2120 + v2118), v2121, v2122);
+10429:   v2124 = pto::comm::NotifyOp::Set;
+10430:   pto::comm::TNOTIFY(v2123, v936, v2124);
+10431:   // pto: %730, %731

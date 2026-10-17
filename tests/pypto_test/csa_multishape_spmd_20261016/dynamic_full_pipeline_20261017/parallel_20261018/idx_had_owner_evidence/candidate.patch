@@ -1,0 +1,34 @@
+--- source_reference/cube_schedule.py
++++ source_candidate/cube_schedule.py
+@@ -295,11 +295,26 @@
+     kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, worker, GROUPS)
+     signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
+ 
+-    # query的8行×4head反量化块共有ceil(T/8)*16个，不把T误当作其owner数量。
+-    query_rope_tasks = ((tokens + 7) // 8) * 16
+-    signal = wait_row_owners(
+-        signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1
+-    )
++    # Indexer query Hadamard的64行正好是一个token的64个head；AIC worker
++    # 处理t=worker+24*wave。RoPE生产unit=floor(t/8)*16+head_group，
++    # 每unit写8行×4head，owner为unit%min(ceil(T/8)*16,48)。
++    # T>=17时已有48个生产者；24-token步长令unit每wave恰加48，故本核
++    # 全部token始终只依赖[16*floor(worker/8), +16)这16个AIV。
++    # T<=16为单wave，实际只16/32个生产者，但活跃worker的上述区间完全
++    # 位于实际生产者内；wait中的48模数不会改变owner。非8倍数尾行同样
++    # 由原unit写回，不能缩减为某一个head或只等第一wave的假完成标记。
++    # first_row/count在这里以RoPE unit为单位，rows_per_tile=1；AIV物理
++    # core为GROUPS+owner。仍等这些核完成本阶段全部wave，再统一执行原
++    # fence/cacheinvalid/fence，既不靠经过时间保证可见性，也不新增ACK。
++    # worker>=T没有任何HAD token，因此不读idx_query_rope_heads；仅跳过
++    # 此无关等待，原空HAD发布保留。后续QB只读前面已等待的QR，不能把本
++    # 次优化理解成删除QB/QR的真实依赖。24AIC/48AIV及64head/8行/4head
++    # 是当前调度合同；若将来改变这些常量，必须重新推导本等待集合。
++    if worker < tokens:
++        signal = wait_row_owners(
++            signal, PHASE_IDX_QUERY_ROPE, CORES, generation,
++            (worker // 8) * 16, 16, 1, VECTORS, GROUPS, 1
++        )
+     idx_query_had = indexer_query_hadamard_stage(
+         idx_query_rope_heads,
+         hadamard,

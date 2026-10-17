@@ -1,0 +1,18 @@
+--- 668/vector_schedule.py
++++ candidate/vector_schedule.py
+@@ -694,7 +694,14 @@
+     cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, worker, VECTORS)
+     signal = publish_phase(signal, PHASE_ORIGINAL_CACHE, core, CORES, generation)
+ 
+-    signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
++    # HAD每64个head行就是一个token，AIC按token=producer+24*w处理。
++    # 本AIV只量化token=worker+48*w，因此所有wave的producer恒为worker%24；
++    # 这里用逻辑AIV worker取模，不是同组AIC的worker//2，也不加AIV核编号偏移。
++    # 生产者完成本核全部HAD wave后才发布；一次获取覆盖本AIV所有64×128读块。
++    # worker>=T时量化循环为空，可跳过获取，但原QUANT空发布仍须保留。
++    # 下方系数仍获取全部有效QUANT owner，Score/weights/compact的独立等待不动。
++    if worker < tokens:
++        signal = wait_producer(signal, PHASE_IDX_QUERY_HAD, worker % GROUPS, CORES, generation)
+     idx_query_i8, idx_query_scale = indexer_query_quant_stage(
+         idx_query_had,
+         idx_query_i8,

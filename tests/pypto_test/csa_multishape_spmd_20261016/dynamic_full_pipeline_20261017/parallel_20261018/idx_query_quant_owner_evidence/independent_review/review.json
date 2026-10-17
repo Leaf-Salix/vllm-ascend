@@ -1,0 +1,14 @@
+{
+  "status": "源级依赖复审通过",
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd",
+  "reference668": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_pair_manual_evidence/source_reference",
+  "direct_byte_equal_files": 33,
+  "proposal": "仅worker<tokens时wait_producer(PHASE_IDX_QUERY_HAD,worker%GROUPS)，GROUPS=24；保留原QUANT发布与后继全QUANT等待",
+  "proof": "(worker+48*w)%24=worker%24",
+  "post_quant_hadamard_union": "{v%24 | 0<=v<min(T,48)} = {0,...,min(T,24)-1}",
+  "critical_numbering": "producer为AIC物理0..23，不加24；T25/v24必须等待0",
+  "no_runtime_or_codegen_test": true,
+  "no_source_change": true,
+  "independent_cross_check": "ultra_indexer_policy已反馈相同数学/视图/后继门槛结论；模型及候选由其维护",
+  "scope": "仅正式668独立候选；不组合执行中的Cube16owner候选"
+}

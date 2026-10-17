@@ -858,3 +858,57 @@ C++两个计算函数各仅一处阈值变化；AIC585/AIV1812项分配、1730/3
 各直接比较仅一字节不同。没有新的布局/数学/局部事件变化证据，也不能
 据该立即数字节归因异轮时延。全部五窗保留，含参考626.46μs高值，不删
 异常值或挑低值。详见oa_pair_small_t_evidence/b4_codegen_comparison。
+
+
+## 2026-10-18：Indexer RoPE→Hadamard精确owner等待，CPU通过并提交代表
+
+独立于未采用的OA候选，从正式668只修改cube_schedule一处等待：活跃AIC
+不再等全部RoPE AIV，只等16*floor(worker/8)..+15这16核；worker≥T无
+Hadamard任务，仅跳过无关获取，原空发布保留。Had每个M64块是一token的
+64heads，token=worker+24*w；Rope unit=floor(token/8)*16+hg，24token
+步长使unit恰加48，因此所有wave所需producer集合不变。T≥17已有48
+生产者；T≤16仅16/32个，但活跃消费者选段完整存在。数学与后续QB所依赖
+的QR acquire不动，全部wave后发布、业务fence/cache维护和HAD发布均保留。
+
+标准库对T0..4096、98328个AIC/T情况枚举，精确集合无漏无多；另一个
+agent独立验证24个边界×24 AIC与连续rope/head别名、无隐含QB依赖。
+固定24AIC/48AIV、64head/8token/4head布局是公式合同，不扩张到任意核数。
+
+唯一完整CPU（longG6/OA128/OB96/QAfalse）PASS，130根/58轴/singleMIX。
+生成C++确认worker<T、16次wait、获取维护在HAD TLOAD前，HAD TSTORE
+后FIX完成及原发布保持。对照668同controls：AIC558/AIV1812项分配、
+AIC1711/AIV3088局部事件相同；AIC仅剔除变化wait段后完整PTO相同，AIV
+完整PTO相同。CPU默认wait与设备退避辅助不同，不声称机器码全文相等。
+
+正式源未改。长短历史完整设备/原PTO精确/图/保护与三方五窗任务：
+- 128K/B16：task_20261018_063046_197324517994。
+- 8K/B32：task_20261018_063046_197328827670。
+
+源码、owner模型、独立复审、生成摘录与命令见idx_had_owner_evidence。
+任务刚提交，尚无设备PASS或性能结论，不把少等待次数直接等同于时延收益。
+
+
+## 2026-10-18：RoPE→HAD 16-owner两代表完整PASS，性能混合，暂不采用
+
+正式668/候选完整L1：128K/B16为875.28→884.52μs，回退1.056%、0/5窗；
+8K/B32为998.86→991.82μs，降低0.705%、4/5窗。同轮原分task分别875.78、
+977.82μs，仍未达30%目标。两任务完整精确/TopK/分数、图/状态/保护及
+代际PASS。依赖集合推导正确不保证完整流水更快；暂不迁移、不按两个点
+选启用白名单，不扩跑七档。原始样本与trace完整保留，见DEVICE_RESULTS。
+
+下一独立方向只修改Vector侧HAD→query量化获取，仍以668为参考，不组合
+本条Cube候选。量化AIV v处理t=v+48*w，对应Had producer=t%24=v%24，
+只在v<T时获取一核；原发布、后继全QUERY_QUANT及其它业务获取均保留。
+T0..4096、196656个AIV/T与8390656个token块模型PASS，独立复审确认
+到后继全QUERY_QUANT前仅新增提前读本核Had数据，全QUANT前驱并集恢复
+全部活跃Had前驱。T0仅模型，正式policy仍拒绝空shape。
+
+唯一完整CPU long/OA128/OB96/QAfalse已PASS，尚待完整生成审阅与设备验证；
+源及准备证据在idx_query_quant_owner_evidence，不预记精度或性能。
+
+## 2026-10-18：Query HAD→Quant单owner候选CPU通过并提交
+
+仅收窄活跃AIV的HAD获取为worker%24，后续全QUANT等待保持。完整CPU及生成代码复审通过，AIC全文和AIV除唯一等待块外PTO相同，分配与事件相同。独立提交128K/B16、8K/B32五窗三方完整L1对照，当前待结果，不预记收益。
+
+- 131072/B16：`task_20261018_064439_225528924817`
+- 8192/B32：`task_20261018_064439_22553316286`

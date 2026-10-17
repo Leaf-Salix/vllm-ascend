@@ -1,0 +1,296 @@
+原始路径：/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/idx_query_quant_owner_evidence/cpu_v1/kernel/kernels/aiv/vector_schedule.cpp
+原始行：45146–45438
+
+45146:   // pto: %1835
+45147:   v5667 = false;
+45148:   v5667 = v1515 < v133;
+45149:   if (v5667) {
+45150:     goto label472;
+45151:   } else {
+45152:     goto label473;
+45153:   }
+45154: label472:
+45155:   // pto: %1836, %1837, %1838
+45156:   v5668 = (int64_t) ((uint64_t) ((int64_t) (uint64_t) (v1515 % v338) * (uint64_t) v349) + (uint64_t) v421);
+45157:   // pto: %1839
+45158:   v5669 = v5668 < v357 ? v357 : v5668;
+45159:   // pto: %signal_v19__ssa_v0_signal_pview
+45160:   v5670 = PTOAS__GLOBAL_TENSOR_DATA(v747);
+45161:   // pto: %signal_v19__ssa_v0_signal_pview
+45162:   // pto: %signal_v19__ssa_v0_signal_pview
+45163:   v5672 = pto::Shape<1, 1, 1, 1, 1>();
+45164:   // pto: %signal_v19__ssa_v0_signal_pview
+45165:   v5673 = pto::Stride<1, 1, 1, 1, 1>();
+45166:   // pto: %signal_v19__ssa_v0_signal_pview
+45167:   v5674 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v5670 + (v5671 + v5669), v5672, v5673);
+45168:   v5675 = pto::comm::WaitCmp::GE;
+45169:   pto::comm::TWAIT(v5674, v1526, v5675);
+45170:   pipe_barrier(PIPE_ALL);
+45171:   dsb(DSB_DDR);
+45172:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+45173:   pipe_barrier(PIPE_ALL);
+45174:   dsb(DSB_DDR);
+45175:   goto label473;
+45176: label473:
+45177:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+45178:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
+45179:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID3);
+45180:   pipe_barrier(PIPE_ALL);
+45181:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);
+45182:   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID5);
+45183:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+45184:   ;
+45185:   v5676 = v1515;
+45186:   v10550 = v5676;
+45187:   goto label474;
+45188: label474:
+45189:   // pto: %1840, %1841
+45190:   v5677 = false;
+45191:   v5677 = v10550 < (int64_t) ((uint64_t) v133 * (uint64_t) v342) / v342;
+45192:   if (v5677) {
+45193:     goto label475;
+45194:   } else {
+45195:     goto label479;
+45196:   }
+45197: label475:
+45198:   // pto: %1842
+45199:   v5678 = (int64_t) ((uint64_t) v10550 * (uint64_t) v342);
+45200:   // pto: %qh_full_f32_inline712__tile
+45201:   v5679 = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45202:   // pto: %qh_full_f32_inline712__tile
+45203:   v5680 = (uint64_t) v215;
+45204:   TASSIGN(v5679, v5680);
+45205:   // pto: %1843
+45206:   v5681 = v5678 < v357 ? v357 : v5678;
+45207:   // pto: %idx_query_had__ssa_v0_pview
+45208:   v5682 = PTOAS__GLOBAL_TENSOR_DATA(v626);
+45209:   // pto: %idx_query_had__ssa_v0_pview
+45210:   // pto: %idx_query_had__ssa_v0_pview
+45211:   // pto: %idx_query_had__ssa_v0_pview
+45212:   v5685 = pto::Shape<1, 1, 1, 64, 128>();
+45213:   // pto: %idx_query_had__ssa_v0_pview
+45214:   v5686 = pto::Stride<8192, 8192, 8192, 128, 1>();
+45215:   // pto: %idx_query_had__ssa_v0_pview
+45216:   v5687 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<8192, 8192, 8192, 128, 1>, pto::Layout::ND>(v5682 + (v5683 + v5681 * v5684), v5685, v5686);
+45217:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+45218:   TLOAD(v5679, v5687);
+45219:   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+45220:   // pto: %qh_full_f32_v1_inline715__tile
+45221:   v5688 = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45222:   // pto: %qh_full_f32_v1_inline715__tile
+45223:   v5689 = (uint64_t) v215;
+45224:   TASSIGN(v5688, v5689);
+45225:   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+45226:   TMULS(v5688, v5679, v422);
+45227:   // pto: %qh_amax_inline719__tile
+45228:   v5690 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45229:   // pto: %qh_amax_inline719__tile
+45230:   v5691 = (uint64_t) v220;
+45231:   TASSIGN(v5690, v5691);
+45232:   TEXPANDS(v5690, v389);
+45233:   v10551 = v357;
+45234:   goto label476;
+45235: label476:
+45236:   v5692 = false;
+45237:   v5692 = v10551 < v349;
+45238:   if (v5692) {
+45239:     goto label477;
+45240:   } else {
+45241:     goto label478;
+45242:   }
+45243: label477:
+45244:   // pto: %qh_a_f32_inline717__tile_textract
+45245:   v5693 = Tile<TileType::Vec, float, 64, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v342);
+45246:   // pto: %qh_a_f32_inline717__tile_textract
+45247:   v5694 = (uint64_t) v216;
+45248:   TASSIGN(v5693, v5694);
+45249:   pipe_barrier(PIPE_V);
+45250:   v5695 = static_cast<uint16_t>(v357);
+45251:   v5696 = static_cast<uint16_t>(v10551);
+45252:   TEXTRACT(v5693, v5688, v5695, v5696);
+45253:   // pto: %qh_a_neg_inline720__tile
+45254:   v5697 = Tile<TileType::Vec, float, 64, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v342);
+45255:   // pto: %qh_a_neg_inline720__tile
+45256:   v5698 = (uint64_t) v216;
+45257:   TASSIGN(v5697, v5698);
+45258:   pipe_barrier(PIPE_V);
+45259:   TNEG(v5697, v5693);
+45260:   // pto: %291
+45261:   v5699 = Tile<TileType::Vec, float, 64, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v342);
+45262:   // pto: %291
+45263:   v5700 = (uint64_t) v219;
+45264:   TASSIGN(v5699, v5700);
+45265:   v5701 = static_cast<uint16_t>(v357);
+45266:   v5702 = static_cast<uint16_t>(v10551);
+45267:   TEXTRACT(v5699, v5688, v5701, v5702);
+45268:   // pto: %qh_a_abs_inline713__tile
+45269:   v5703 = Tile<TileType::Vec, float, 64, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v342);
+45270:   // pto: %qh_a_abs_inline713__tile
+45271:   v5704 = (uint64_t) v212;
+45272:   TASSIGN(v5703, v5704);
+45273:   pipe_barrier(PIPE_V);
+45274:   TMAX(v5703, v5699, v5697);
+45275:   // pto: %292
+45276:   v5705 = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45277:   // pto: %292
+45278:   v5706 = (uint64_t) v216;
+45279:   TASSIGN(v5705, v5706);
+45280:   // pto: %qh_a_max_col_inline709__tile
+45281:   v5707 = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v340);
+45282:   // pto: %qh_a_max_col_inline709__tile
+45283:   v5708 = (uint64_t) v300;
+45284:   TASSIGN(v5707, v5708);
+45285:   pipe_barrier(PIPE_V);
+45286:   TROWMAX(v5707, v5703, v5705);
+45287:   // pto: %qh_a_max_inline711__tile
+45288:   v5709 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45289:   // pto: %qh_a_max_inline711__tile
+45290:   v5710 = (uint64_t) v300;
+45291:   TASSIGN(v5709, v5710);
+45292:   // pto: %293
+45293:   v5711 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45294:   // pto: %293
+45295:   v5712 = (uint64_t) v220;
+45296:   TASSIGN(v5711, v5712);
+45297:   pipe_barrier(PIPE_V);
+45298:   TMAX(v5711, v5690, v5709);
+45299:   ;
+45300:   v5713 = (int64_t) ((uint64_t) v10551 + (uint64_t) v342);
+45301:   v10551 = v5713;
+45302:   goto label476;
+45303: label478:
+45304:   // pto: %qh_scale_numerator_inline702__tile
+45305:   v5714 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45306:   // pto: %qh_scale_numerator_inline702__tile
+45307:   v5715 = (uint64_t) v216;
+45308:   TASSIGN(v5714, v5715);
+45309:   TEXPANDS(v5714, v390);
+45310:   // pto: %qh_scale_quant_row_inline704__tile
+45311:   v5716 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45312:   // pto: %qh_scale_quant_row_inline704__tile
+45313:   v5717 = (uint64_t) v216;
+45314:   TASSIGN(v5716, v5717);
+45315:   pipe_barrier(PIPE_V);
+45316:   TDIV(v5716, v5714, v5690);
+45317:   // pto: %qh_scale_recip_inline718__tile
+45318:   v5718 = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v340, v342);
+45319:   // pto: %qh_scale_recip_inline718__tile
+45320:   v5719 = (uint64_t) v301;
+45321:   TASSIGN(v5718, v5719);
+45322:   pipe_barrier(PIPE_V);
+45323:   TRECIP(v5718, v5716);
+45324:   set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+45325:   // pto: %qh_scale_dq_inline701__tile
+45326:   v5720 = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v340);
+45327:   // pto: %qh_scale_dq_inline701__tile
+45328:   v5721 = (uint64_t) v301;
+45329:   TASSIGN(v5720, v5721);
+45330:   // pto: %idx_query_scale__iter_v1_pview
+45331:   v5722 = (int64_t) v150;
+45332:   // pto: %idx_query_scale__iter_v1_pview
+45333:   // pto: %idx_query_scale__iter_v1_pview
+45334:   v5724 = PTOAS__GLOBAL_TENSOR_DATA(v1174);
+45335:   // pto: %idx_query_scale__iter_v1_pview
+45336:   // pto: %idx_query_scale__iter_v1_pview
+45337:   // pto: %idx_query_scale__iter_v1_pview
+45338:   // pto: %idx_query_scale__iter_v1_pview
+45339:   v5728 = v342 * v340;
+45340:   // pto: %idx_query_scale__iter_v1_pview
+45341:   v5729 = v5727 * v5728;
+45342:   // pto: %idx_query_scale__iter_v1_pview
+45343:   v5730 = pto::Shape<1, 1, 1, 64, 1>(v5725, v5726, v5727, v342, v340);
+45344:   // pto: %idx_query_scale__iter_v1_pview
+45345:   v5731 = pto::Stride<-1, -1, -1, -1, -1>(v5726 * v5729, v5729, v5728, v340, v5722);
+45346:   // pto: %idx_query_scale__iter_v1_pview
+45347:   v5732 = GlobalTensor<float, pto::Shape<1, 1, 1, 64, 1>, pto::Stride<-1, -1, -1, -1, -1>, pto::Layout::DN>(v5724 + (v5723 + v5681 * v340 + v357 * v5722), v5730, v5731);
+45348:   wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+45349:   TSTORE(v5732, v5720);
+45350:   // pto: %qh_scale_quant_inline703__tile
+45351:   v5733 = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v340);
+45352:   // pto: %qh_scale_quant_inline703__tile
+45353:   v5734 = (uint64_t) v216;
+45354:   TASSIGN(v5733, v5734);
+45355:   // pto: %qh_q_scaled_inline708__tile
+45356:   v5735 = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45357:   // pto: %qh_q_scaled_inline708__tile
+45358:   v5736 = (uint64_t) v215;
+45359:   TASSIGN(v5735, v5736);
+45360:   TROWEXPANDMUL(v5735, v5688, v5733);
+45361:   // pto: %qh_q_i32_inline716__tile
+45362:   v5737 = Tile<TileType::Vec, int32_t, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45363:   // pto: %qh_q_i32_inline716__tile
+45364:   v5738 = (uint64_t) v215;
+45365:   TASSIGN(v5737, v5738);
+45366:   pipe_barrier(PIPE_V);
+45367:   v5739 = RoundMode::CAST_RINT;
+45368:   v5740 = SaturationMode::ON;
+45369:   TCVT(v5737, v5735, v5739, v5740);
+45370:   // pto: %qh_q_half_inline700__tile
+45371:   v5741 = Tile<TileType::Vec, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45372:   // pto: %qh_q_half_inline700__tile
+45373:   v5742 = (uint64_t) v215;
+45374:   TASSIGN(v5741, v5742);
+45375:   pipe_barrier(PIPE_V);
+45376:   v5743 = RoundMode::CAST_ROUND;
+45377:   v5744 = SaturationMode::ON;
+45378:   TCVT(v5741, v5737, v5743, v5744);
+45379:   // pto: %qh_i8_inline699__tile
+45380:   v5745 = Tile<TileType::Vec, int8_t, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v342, v349);
+45381:   // pto: %qh_i8_inline699__tile
+45382:   v5746 = (uint64_t) v215;
+45383:   TASSIGN(v5745, v5746);
+45384:   pipe_barrier(PIPE_V);
+45385:   v5747 = RoundMode::CAST_TRUNC;
+45386:   v5748 = SaturationMode::ON;
+45387:   TCVT(v5745, v5741, v5747, v5748);
+45388:   set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+45389:   // pto: %idx_query_i8__iter_v1_pview
+45390:   v5749 = PTOAS__GLOBAL_TENSOR_DATA(v635);
+45391:   // pto: %idx_query_i8__iter_v1_pview
+45392:   // pto: %idx_query_i8__iter_v1_pview
+45393:   // pto: %idx_query_i8__iter_v1_pview
+45394:   v5752 = pto::Shape<1, 1, 1, 64, 128>();
+45395:   // pto: %idx_query_i8__iter_v1_pview
+45396:   v5753 = pto::Stride<8192, 8192, 8192, 128, 1>();
+45397:   // pto: %idx_query_i8__iter_v1_pview
+45398:   v5754 = GlobalTensor<int8_t, pto::Shape<1, 1, 1, 64, 128>, pto::Stride<8192, 8192, 8192, 128, 1>, pto::Layout::ND>(v5749 + (v5750 + v5681 * v5751), v5752, v5753);
+45399:   wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+45400:   TSTORE(v5754, v5745);
+45401:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+45402:   ;
+45403:   v5755 = (int64_t) ((uint64_t) v10550 + (uint64_t) v360);
+45404:   v10550 = v5755;
+45405:   goto label474;
+45406: label479:
+45407:   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+45408:   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+45409:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
+45410:   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID3);
+45411:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+45412:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+45413:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+45414:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
+45415:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);
+45416:   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID5);
+45417:   pipe_barrier(PIPE_ALL);
+45418:   dsb(DSB_DDR);
+45419:   dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE);
+45420:   pipe_barrier(PIPE_ALL);
+45421:   dsb(DSB_DDR);
+45422:   // pto: %1847
+45423:   v5756 = (int64_t) ((uint64_t) v1517 + (uint64_t) v423);
+45424:   pipe_barrier(PIPE_ALL);
+45425:   // pto: %1848
+45426:   v5757 = v5756 < v357 ? v357 : v5756;
+45427:   // pto: %signal_v19__phi_v2_signal_pview
+45428:   v5758 = PTOAS__GLOBAL_TENSOR_DATA(v747);
+45429:   // pto: %signal_v19__phi_v2_signal_pview
+45430:   // pto: %signal_v19__phi_v2_signal_pview
+45431:   v5760 = pto::Shape<1, 1, 1, 1, 1>();
+45432:   // pto: %signal_v19__phi_v2_signal_pview
+45433:   v5761 = pto::Stride<1, 1, 1, 1, 1>();
+45434:   // pto: %signal_v19__phi_v2_signal_pview
+45435:   v5762 = GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>, pto::Layout::ND>(v5758 + (v5759 + v5757), v5760, v5761);
+45436:   v5763 = pto::comm::NotifyOp::Set;
+45437:   pto::comm::TNOTIFY(v5762, v1526, v5763);
+45438:   v5764 = false;
