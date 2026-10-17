@@ -1,0 +1,19 @@
+commit cb24844712fa4329563a8cfbdd8d9f77ba0dc20c
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Wed Sep 30 21:32:06 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Wed Sep 30 21:32:06 2026 +0800
+
+    fix(runtime): 同步 HBG 联合采集与 replay 校验优化的 Simpler 版本
+    
+    将 runtime 子模块与 SIMPLER_KERNEL_REVISION 同步至 ef6812891：
+    - 传递 HBG kernel-mode AICPU 的泳道窗口配置，补齐 replay 边界和
+      按 callable 保存的 Host 依赖图，支持同一图内 CSA→HCA 的正确归属。
+    - AICPU replay 保留格式、注册身份和镜像语义检查，去除重复的全包
+      FNV 扫描；Host 构建及提交时仍保留完整校验。
+    
+    重新构建当前工作区的 Torch NPU 适配层和 editable 包，没有绕过精确
+    revision 契约，没有复制其他工作树的二进制，也没有改变算子编译策略。
+    验证：kernel ABI 的 46 项 CPU 测试通过；单卡联合采集结果由接入仓记录。
+    
+    Signed-off-by: nalinaly <nalinaly@163.com>

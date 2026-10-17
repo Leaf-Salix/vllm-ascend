@@ -1,0 +1,302 @@
+........................................................................ [ 34%]
+...................................................FF................... [ 69%]
+..............................................................           [100%]
+=================================== FAILURES ===================================
+_____ TestL0CrossShapeReuse.test_capacity_overflow_grows_phase_arena[192] ______
+tests/ut/ir/transforms/test_memory_reuse.py:5384: in test_capacity_overflow_grows_phase_arena
+    after = _run_pipeline(Before)
+tests/ut/ir/transforms/test_memory_reuse.py:42: in _run_pipeline
+    return passes.memory_reuse()(passes.materialize_semantic_aliases()(passes.init_mem_ref()(program)))
+E   pypto.Error: Pre-verification failed before pass 'InitMemRef':
+E   IR Verification Report
+E   ======================
+E   Total diagnostics: 3 (3 errors, 0 warnings)
+E   
+E   [1] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (2 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[496, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[496, 32], pl.FP32]]) -> pl.Tensor[[496, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[192, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [192, 128], [192, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [192, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[192, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[192, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(b_out, [192, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [240, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [368, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(c_out, [240, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(d_out, [368, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   [2] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (3 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[496, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[496, 32], pl.FP32]]) -> pl.Tensor[[496, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[192, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [192, 128], [192, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [192, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[192, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[192, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(b_out, [192, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [240, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [368, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(c_out, [240, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(d_out, [368, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   [3] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (4 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[496, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[496, 32], pl.FP32]]) -> pl.Tensor[[496, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[192, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [192, 128], [192, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [192, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[192, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[192, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(b_out, [192, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [240, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [368, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(c_out, [240, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[496, 32], pl.FP32] = pl.tile.store(d_out, [368, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   Status: FAILED (3 error(s) found)
+_____ TestL0CrossShapeReuse.test_capacity_overflow_grows_phase_arena[256] ______
+tests/ut/ir/transforms/test_memory_reuse.py:5384: in test_capacity_overflow_grows_phase_arena
+    after = _run_pipeline(Before)
+tests/ut/ir/transforms/test_memory_reuse.py:42: in _run_pipeline
+    return passes.memory_reuse()(passes.materialize_semantic_aliases()(passes.init_mem_ref()(program)))
+E   pypto.Error: Pre-verification failed before pass 'InitMemRef':
+E   IR Verification Report
+E   ======================
+E   Total diagnostics: 3 (3 errors, 0 warnings)
+E   
+E   [1] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (2 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[560, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[560, 32], pl.FP32]]) -> pl.Tensor[[560, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[256, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [256, 128], [256, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [256, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[256, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[256, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(b_out, [256, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [304, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [432, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(c_out, [304, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(d_out, [432, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   [2] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (3 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[560, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[560, 32], pl.FP32]]) -> pl.Tensor[[560, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[256, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [256, 128], [256, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [256, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[256, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[256, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(b_out, [256, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [304, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [432, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(c_out, [304, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(d_out, [432, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   [3] ERROR - SSAVerify
+E     Message: Variable 'out' is assigned more than once (4 times), violating SSA form
+E     In function 'kernel':
+E   @pl.function(type=pl.FunctionType.AIC, level=pl.Level.AIC, role=pl.Role.SubWorker)
+E   def kernel(x: pl.Tensor[[560, 128], pl.FP16], w: pl.Tensor[[128, 32], pl.FP16], out: pl.Out[pl.Tensor[[560, 32], pl.FP32]]) -> pl.Tensor[[560, 32], pl.FP32]:
+E       weight: pl.Tile[[128, 32], pl.FP16, pl.Mem.Mat] = pl.tile.load(w, [0, 0], [128, 32], [128, 32], target_memory=pl.Mem.Mat)
+E       right: pl.Tile[[128, 32], pl.FP16, pl.Mem.Right] = pl.tile.move(weight, target_memory=pl.Mem.Right)
+E       a_mat: pl.Tile[[256, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [0, 0], [256, 128], [256, 128], target_memory=pl.Mem.Mat)
+E       b_mat: pl.Tile[[48, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [256, 0], [48, 128], [48, 128], target_memory=pl.Mem.Mat)
+E       a: pl.Tile[[256, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
+E       b: pl.Tile[[48, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
+E       a_out: pl.Tile[[256, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(a, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(a_out, [0, 0], out)
+E       b_out: pl.Tile[[48, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(b, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(b_out, [256, 0], out)
+E       pl.system.fence()
+E       c_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [304, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       d_mat: pl.Tile[[128, 128], pl.FP16, pl.Mem.Mat] = pl.tile.load(x, [432, 0], [128, 128], [128, 128], target_memory=pl.Mem.Mat)
+E       c: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
+E       d: pl.Tile[[128, 128], pl.FP16, pl.Mem.Left] = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
+E       c_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(c, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(c_out, [304, 0], out)
+E       d_out: pl.Tile[[128, 32], pl.FP32, pl.Mem.Acc] = pl.tile.matmul(d, right)
+E       out: pl.Tensor[[560, 32], pl.FP32] = pl.tile.store(d_out, [432, 0], out)
+E       return out
+E     Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5361:17
+E     Error Code: 1
+E   
+E   Status: FAILED (3 error(s) found)
+=============================== warnings summary ===============================
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_v2c_boundary_uses_nz_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:663: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_v2c_boundary_uses_nz_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:687: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIC, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_v2c_boundary_uses_nz_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:722: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_v2c_boundary_uses_nz_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:749: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.Group, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_c2v_boundary_preserves_vec_pop_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:775: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_c2v_boundary_preserves_vec_pop_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:798: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIC, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_c2v_boundary_preserves_vec_pop_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:826: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_c2v_boundary_preserves_vec_pop_layout_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:848: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.Group, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_gm_mediated_cross_lane_store_load_gets_handshake_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:876: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_gm_mediated_cross_lane_store_load_gets_handshake_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:899: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIC, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_gm_mediated_cross_lane_store_load_gets_handshake_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:932: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_gm_mediated_cross_lane_store_load_gets_handshake_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:957: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.Group, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_gm_sync_hoisted_before_consumer_loop_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1097: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_two_gm_syncs_hoisted_to_same_loop_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1161: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_split_slot_num_override_sizes_c2v_ring_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1222: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN, "slot_num": 16})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_split_slot_num_override_sizes_c2v_ring_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1245: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIC, attrs={"split": pl.SplitMode.UP_DOWN, "slot_num": 16})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_split_slot_num_override_sizes_c2v_ring_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1273: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN, "slot_num": 16})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_split_slot_num_override_sizes_c2v_ring_on_a2a3
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1295: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.Group, attrs={"split": pl.SplitMode.UP_DOWN, "slot_num": 16})
+
+tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py::test_transpose_hazard_backstopped_when_lowering_is_skipped
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py:1328: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.InCore, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5112: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5127: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend910b_split_aiv_does_not_reuse_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_dsa_rp_ascend910b_split_aiv_physically_separates_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend950_allows_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5918: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_iter_arg_tpop_operand_still_blocks_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5987: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_tpop_reaching_a_writer_across_the_back_edge_blocks_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:6047: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/jit/test_spmd.py::test_jit_inline_group_shared_inout_compiles_single_mix
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/jit/specializer.py:1947: DeprecationWarning: @pl.jit.inline helper 'group_wrapper' uses pl.Out[...]/pl.InOut[...] on parameter(s) ['c', 'y']. Direction annotations are deprecated for inline helpers because the body is spliced at the call site before SSA conversion — the parameter is already an in-place alias of the caller's variable. Drop the wrapper; bare pl.Tensor[...] works the same.
+    method_lines = self._specialize_function(ctx)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestL0CrossShapeReuse::test_capacity_overflow_grows_phase_arena[192]
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestL0CrossShapeReuse::test_capacity_overflow_grows_phase_arena[256]
+2 failed, 204 passed, 27 warnings in 17.06s

@@ -1,0 +1,9 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @volatile_scalar_call_probe(%base: !pto.ptr<i64>, %out: !pto.ptr<i64>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %zero = arith.constant 0 : index
+    %value = func.call @pypto_volatile_read_i64(%base, %zero) : (!pto.ptr<i64>, index) -> i64
+    pto.store %value, %out[%zero] : !pto.ptr<i64>, i64
+    return
+  }
+  func.func private @pypto_volatile_read_i64(!pto.ptr<i64>, index) -> i64
+}

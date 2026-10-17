@@ -1,0 +1,170 @@
+{
+  "date": "2026-10-15",
+  "objective": "将现有较优 CSA 动态调度固化为一个 MIX SPMD，保留计算分片到核的映射、每核顺序和必要依赖。",
+  "conclusion": "架构方向可行，现有排程没有体现出必须增加全核屏障或重新分配工作量的理由；当前工具链与记录尚不足以直接交付完整实现。",
+  "scope": {
+    "trace_shape": "B4/S6，history=131072，现存 baseline 的 L1、L4 各三个窗口",
+    "compile_scope": "当前本地调试扩展的 PyPTO passes 与 PTOAS C++ 生成；未编译设备二进制、未运行 NPU",
+    "production_code_changed_this_assessment": false,
+    "dependency_repositories_changed_this_assessment": false
+  },
+  "trace_summary": {
+    "L1_window_0": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    },
+    "L1_window_1": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    },
+    "L1_window_2": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    },
+    "L4_window_0": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    },
+    "L4_window_1": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    },
+    "L4_window_2": {
+      "physical_members": 712,
+      "compute_submissions": 66,
+      "participating_cores": 72,
+      "compute_dependency_pairs": 98,
+      "data_and_per_core_graph_acyclic": true,
+      "dependency_timing_violations": 0,
+      "logical_block_index_available": false
+    }
+  },
+  "compile_probes": [
+    {
+      "run": "cpu_v1",
+      "case": "static_roles",
+      "code_generation_completed": true,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v1/compile_results.json",
+      "assessment": "单次 MIX 提交、24 组核及按核分支的 CPU 代码生成通过；未运行 NPU。"
+    },
+    {
+      "run": "cpu_v1",
+      "case": "cross_group_signal",
+      "code_generation_completed": false,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v1/compile_results.json",
+      "assessment": "代码生成失败；具体异常见对应 compile_results.json。"
+    },
+    {
+      "run": "cpu_v1",
+      "case": "incore_helper_call",
+      "code_generation_completed": false,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v1/compile_results.json",
+      "assessment": "代码生成失败；具体异常见对应 compile_results.json。"
+    },
+    {
+      "run": "cpu_v2",
+      "case": "cross_group_signal",
+      "code_generation_completed": true,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v2/compile_results.json",
+      "assessment": "不采信：代码生成完成，但人工检查发现轮询循环状态未正确保留。"
+    },
+    {
+      "run": "cpu_v2",
+      "case": "incore_helper_call",
+      "code_generation_completed": false,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v2/compile_results.json",
+      "assessment": "代码生成失败；具体异常见对应 compile_results.json。"
+    },
+    {
+      "run": "cpu_v3",
+      "case": "inline_helper_call",
+      "code_generation_completed": true,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v3/compile_results.json",
+      "assessment": "计算体 inline 后单次 AIC 提交的 CPU 代码生成通过；不是完整 CSA 验证。"
+    },
+    {
+      "run": "cpu_v4",
+      "case": "cross_group_signal",
+      "code_generation_completed": false,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v4/compile_results.json",
+      "assessment": "代码生成失败；具体异常见对应 compile_results.json。"
+    },
+    {
+      "run": "cpu_v5",
+      "case": "cross_group_signal",
+      "code_generation_completed": false,
+      "record": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v5/compile_results.json",
+      "assessment": "代码生成失败；具体异常见对应 compile_results.json。"
+    }
+  ],
+  "gaps": [
+    {
+      "name": "精确计算分片映射缺失",
+      "evidence": "当前泳道保存 core、task token、per-core dispatch sequence、start、end、receive-to-start；第三列不是 logical block_idx。",
+      "source": "simpler/src/common/platform/include/common/chip_swimlane_profiling.h:178",
+      "needed": "补齐原 task 的 logical block_idx 与 lane/核映射，或显式构造并验证等价映射；不能按开始时间猜 block_idx。",
+      "followup": "第一次补采恢复 712 成员泳道但设备 DEBUG 未开启；CANN 在首次上下文建立时固定级别，需要进程启动前设置 ASCEND_GLOBAL_LOG_LEVEL=0。修正后的 task_20261015_204423_7444918488 已提交，尚未获得完整 block_idx 映射。"
+    },
+    {
+      "name": "混合核展开丢失轮询循环状态",
+      "evidence": "GM 标量轮询和 Vec tile 读取轮询都在 ExpandMixedKernel 后出现 ready__FREE_VAR，初值、迭代读取和 loop-carried 状态消失，随后 PyPTO codegen 失败。",
+      "before": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v5/cross_group_signal/passes_dump/24_after_LowerAutoVectorSplit.py",
+      "after": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/cpu_v5/cross_group_signal/passes_dump/25_after_ExpandMixedKernel.py",
+      "needed": "先解决当前写法的 lowering，或验证另一种不增加全核屏障的局部通知/等待表达；未穷举所有 API，不代表硬件不支持或全部 PyPTO 写法均不可实现。",
+      "followup": "独立 scalar/tile 用例均复现；tile 增加一次循环后使用 final_ready 则完成代码生成。StripDeadIterArgs 的 live 种子漏掉 WhileStmt.condition_ 使用，已提交上游 issue。"
+    }
+  ],
+  "implementation_constraints": [
+    "抽取纯计算体并 inline；不能把原有多次 pl.spmd / pl.at 调用包在外层 SPMD 就认定融合完成。",
+    "将原 logical block_idx 和原 block_num 作为计算体参数，避免把外层常驻 worker 编号误当成原任务分片编号。",
+    "固化顺序和依赖，不固化墙钟时间；保留已有同组 Cube/Vector 握手及软件流水。",
+    "同核先后可以由程序顺序表达；跨组依赖需要可见性正确的通知/等待，不能统一替换为全卡 barrier。",
+    "检查原事件编号生命周期、UB/L1/L0 分配复用、flag 初始化及 ACLGraph 重放的代际隔离；这些是实现检查项，不是必然新增同步的证明。",
+    "不同 B/history 保留各自调度模板或参数化循环；原有 device metadata 与有效长度契约继续成立。"
+  ],
+  "performance_limits": [
+    "没有测量静态 CSA 性能，也没有速度提升预测。",
+    "静态化可能省掉任务派发及重复 setup；组间通知的实现成本和整核资源分配仍须验证。",
+    "任务依赖与每核顺序无环不等于已经验证核内 pipe/event 无死锁；六份统计相同不等于它们的物理核映射相同。"
+  ],
+  "official_control_flow_reference": "https://github.com/hw-native-sys/pypto/blob/main/docs/en/user/language/02-control-flow.md",
+  "reproduce": [
+    "从本 worktree 运行：python3 tests/pypto_test/csa_static_spmd_feasibility_20261015/trace_audit.py --output /tmp/csa_static_trace_audit.json",
+    "CPU 探针先 source /data/pyptouser/qinchuanyu/pto-eager/env-dsv4-0251rc1.sh；进入 pypto 后 source .claude/skills/testing/load-env.sh；设置 TORCH_DEVICE_BACKEND_AUTOLOAD=0。",
+    "用 tests/pypto_test/hc_pre_layer_integration_20261012/bootstrap.py 启动 compile_probe.py，--case static_roles / inline_helper_call / incore_helper_call / cross_group_signal，--output 指向新结果目录；跨组轮询增加 --tile-polling 可复现 tile 读取版。",
+    "脚本捕获编译异常后保存 JSON，不能以进程退出码 0 判为通过；必须看 compile_results.json 与生成 IR。"
+  ],
+  "followup_issue": "https://github.com/hw-native-sys/pypto/issues/3009",
+  "independent_preparation": {
+    "progress_record": "tests/pypto_test/csa_static_spmd_feasibility_20261015/preparation_progress.json",
+    "manifest_generated": true,
+    "partial_order_verified": true,
+    "real_vector_bodies_cpu_codegen_passed": true,
+    "physical_mapping_capture": "第二次小档补采排队中；首次图重放检查通过，但未采到 block_idx 日志。"
+  }
+}

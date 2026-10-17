@@ -1,0 +1,884 @@
+........ssFFssFF........................................................ [ 25%]
+........................................................................ [ 50%]
+.....................................FFFFF.FF........................... [ 75%]
+.....................................................................    [100%]
+=================================== FAILURES ===================================
+_ test_host_runtime_exports_required_pipeline_symbols[a2a3-sim-host_build_graph] _
+
+arch = 'a2a3', variant = 'sim', runtime = 'host_build_graph'
+
+    @pytest.mark.parametrize(
+        ("arch", "variant", "runtime"),
+        _SIM_CASES + _ONBOARD_CASES,
+    )
+    def test_host_runtime_exports_required_pipeline_symbols(arch: str, variant: str, runtime: str):
+        runtime_dir = _PROJECT_ROOT / "build" / "lib" / arch / variant / runtime
+        runtime_libraries = tuple(runtime_dir.glob("libhost_runtime.*"))
+>       assert len(runtime_libraries) == 1, runtime_dir
+E       AssertionError: PosixPath('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/lib/a2a3/sim/host_build_graph')
+E       assert 0 == 1
+E        +  where 0 = len(())
+
+tests/ut/py/test_host_runtime_abi.py:80: AssertionError
+_ test_host_runtime_exports_required_pipeline_symbols[a2a3-sim-tensormap_and_ringbuffer] _
+
+arch = 'a2a3', variant = 'sim', runtime = 'tensormap_and_ringbuffer'
+
+    @pytest.mark.parametrize(
+        ("arch", "variant", "runtime"),
+        _SIM_CASES + _ONBOARD_CASES,
+    )
+    def test_host_runtime_exports_required_pipeline_symbols(arch: str, variant: str, runtime: str):
+        runtime_dir = _PROJECT_ROOT / "build" / "lib" / arch / variant / runtime
+        runtime_libraries = tuple(runtime_dir.glob("libhost_runtime.*"))
+>       assert len(runtime_libraries) == 1, runtime_dir
+E       AssertionError: PosixPath('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/lib/a2a3/sim/tensormap_and_ringbuffer')
+E       assert 0 == 1
+E        +  where 0 = len(())
+
+tests/ut/py/test_host_runtime_abi.py:80: AssertionError
+_ test_host_runtime_exports_required_pipeline_symbols[a5-sim-host_build_graph] _
+
+arch = 'a5', variant = 'sim', runtime = 'host_build_graph'
+
+    @pytest.mark.parametrize(
+        ("arch", "variant", "runtime"),
+        _SIM_CASES + _ONBOARD_CASES,
+    )
+    def test_host_runtime_exports_required_pipeline_symbols(arch: str, variant: str, runtime: str):
+        runtime_dir = _PROJECT_ROOT / "build" / "lib" / arch / variant / runtime
+        runtime_libraries = tuple(runtime_dir.glob("libhost_runtime.*"))
+>       assert len(runtime_libraries) == 1, runtime_dir
+E       AssertionError: PosixPath('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/lib/a5/sim/host_build_graph')
+E       assert 0 == 1
+E        +  where 0 = len(())
+
+tests/ut/py/test_host_runtime_abi.py:80: AssertionError
+_ test_host_runtime_exports_required_pipeline_symbols[a5-sim-tensormap_and_ringbuffer] _
+
+arch = 'a5', variant = 'sim', runtime = 'tensormap_and_ringbuffer'
+
+    @pytest.mark.parametrize(
+        ("arch", "variant", "runtime"),
+        _SIM_CASES + _ONBOARD_CASES,
+    )
+    def test_host_runtime_exports_required_pipeline_symbols(arch: str, variant: str, runtime: str):
+        runtime_dir = _PROJECT_ROOT / "build" / "lib" / arch / variant / runtime
+        runtime_libraries = tuple(runtime_dir.glob("libhost_runtime.*"))
+>       assert len(runtime_libraries) == 1, runtime_dir
+E       AssertionError: PosixPath('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/lib/a5/sim/tensormap_and_ringbuffer')
+E       assert 0 == 1
+E        +  where 0 = len(())
+
+tests/ut/py/test_host_runtime_abi.py:80: AssertionError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_host_inline_backing_is_released_when_the_caller_closes_it _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa20a7820>
+
+    def test_host_inline_backing_is_released_when_the_caller_closes_it(self):
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args
+
+tests/ut/py/test_task_interface.py:1262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_host_inline_descriptor_materializes_local_tensor_data _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa20a61a0>
+
+    def test_host_inline_descriptor_materializes_local_tensor_data(self):
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args
+
+tests/ut/py/test_task_interface.py:1223: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_materialize_rejects_a_wire_offset_that_disagrees_with_the_sidecar _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa27064a0>
+
+    def test_materialize_rejects_a_wire_offset_that_disagrees_with_the_sidecar(self):
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args, _RemoteBufferEntry
+
+tests/ut/py/test_task_interface.py:1398: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_materialized_args_forward_to_a_next_level_submit _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa2094040>
+
+    def test_materialized_args_forward_to_a_next_level_submit(self):
+        from simpler.orchestrator import _split_next_level_args
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args, _RemoteBufferEntry
+
+tests/ut/py/test_task_interface.py:1434: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_remote_buffer_descriptor_materializes_session_registry_address _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa20a6e00>
+
+    def test_remote_buffer_descriptor_materializes_session_registry_address(self):
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args, _RemoteBufferEntry
+
+tests/ut/py/test_task_interface.py:1304: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_tensor_extent_rejects_mismatched_shape_and_stride_counts _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa20a4760>
+
+    def test_tensor_extent_rejects_mismatched_shape_and_stride_counts(self):
+>       from simpler.remote_l3_session import _tensor_extent_bytes
+
+tests/ut/py/test_task_interface.py:1193: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+_ TestRemoteL3SessionTaskArgsMaterialization.test_two_interior_views_of_one_backing_share_its_identity _
+
+self = <tests.ut.py.test_task_interface.TestRemoteL3SessionTaskArgsMaterialization object at 0xffffa20a6020>
+
+    def test_two_interior_views_of_one_backing_share_its_identity(self):
+        from simpler.remote_l3_protocol import (
+            RemoteAddressSpace as WireRemoteAddressSpace,
+        )
+        from simpler.remote_l3_protocol import (
+            RemoteTaskArgsWire,
+            RemoteTensorDesc,
+            RemoteTensorSidecar,
+        )
+>       from simpler.remote_l3_session import _materialize_task_args, _RemoteBufferEntry
+
+tests/ut/py/test_task_interface.py:1350: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/remote_l3_session.py:104: in <module>
+    from .worker import Worker, _NoBufferConsumerError
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    # Copyright (c) PyPTO Contributors.
+    # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    # CANN Open Software License Agreement Version 2.0 (the "License").
+    # Please refer to the License for details. You may not use this file except in compliance with the License.
+    # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+    # See LICENSE in the root of the software repository for the full text of the License.
+    # -----------------------------------------------------------------------------------------------------------
+    """Worker — unified factory for all hierarchy levels.
+    
+    Callable identity is exposed as an opaque ``CallableHandle`` returned by
+    ``Worker.register(callable)``. L2 ``Worker.run`` and hierarchical
+    ``Orchestrator.submit_next_level`` / ``submit_sub`` consume handles, never raw
+    ``ChipCallable`` objects. L3+ ``Worker.run`` keeps the existing raw Python
+    orchestration-function entry point; that function captures handles and submits
+    them through the Orchestrator. L≥3 targets resolve the handle's stable SHA-256
+    digest to a private L2-side slot; later Python registrations are serialized
+    and sent through the mailbox control plane.
+    
+    Usage::
+    
+        # L2: one NPU chip
+        w = Worker(level=2, device_id=8, platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w.init()
+        chip_handle = w.register(chip_callable)                 # L2 may register pre or post init()
+        w.run(chip_handle, chip_args, config)
+        w.close()
+    
+        # L3: multiple chips + SubWorkers, auto-discovery in init()
+        w = Worker(level=3, device_ids=[8, 9], num_sub_workers=2,
+                   platform="a2a3", runtime="tensormap_and_ringbuffer")
+        chip_handle = w.register(chip_callable)                 # ChipCallable, before init()
+        sub_handle  = w.register(lambda args: postprocess())    # Python sub, before init()
+        w.init()
+    
+        def my_orch(orch, args, cfg):
+            r = orch.submit_next_level(chip_handle, chip_args_ptr, cfg, worker=0)
+            orch.submit_sub(sub_handle, sub_args)
+    
+        w.run(my_orch, my_args, my_config)
+        w.close()
+    
+        # L4: recursive composition — L3 Workers as children
+        l3 = Worker(level=3, device_ids=[8, 9], num_sub_workers=1,
+                    platform="a2a3", runtime="tensormap_and_ringbuffer")
+        w4 = Worker(level=4, num_sub_workers=1)
+        l3_handle = w4.register(my_l3_orch)
+        verify_handle = w4.register(lambda args: verify())
+        l3_worker_id = w4.add_worker(l3)
+        w4.init()
+    
+        def my_l4_orch(orch, args, config):
+            orch.submit_next_level(l3_handle, chip_args, config, worker=l3_worker_id)
+            orch.submit_sub(verify_handle)
+    
+        w4.run(my_l4_orch)
+        w4.close()
+    """
+    
+    from __future__ import annotations
+    
+    import contextlib
+    import ctypes
+    import enum
+    import hashlib
+    import importlib
+    import json
+    import logging
+    import math
+    import operator
+    import os
+    import re
+    import shutil
+    import signal
+    import socket
+    import struct
+    import subprocess
+    import sys
+    import tempfile
+    import threading
+    import time
+    import uuid
+    import warnings
+    import weakref
+    from collections.abc import Iterable, Iterator
+    from dataclasses import dataclass, field, replace
+    from multiprocessing import resource_tracker
+    from multiprocessing.shared_memory import SharedMemory
+    from typing import Any, NoReturn, cast
+    
+>   import cloudpickle
+E   ModuleNotFoundError: No module named 'cloudpickle'
+
+python/simpler/worker.py:91: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/ut/py/test_host_runtime_abi.py::test_host_runtime_exports_required_pipeline_symbols[a2a3-sim-host_build_graph]
+FAILED tests/ut/py/test_host_runtime_abi.py::test_host_runtime_exports_required_pipeline_symbols[a2a3-sim-tensormap_and_ringbuffer]
+FAILED tests/ut/py/test_host_runtime_abi.py::test_host_runtime_exports_required_pipeline_symbols[a5-sim-host_build_graph]
+FAILED tests/ut/py/test_host_runtime_abi.py::test_host_runtime_exports_required_pipeline_symbols[a5-sim-tensormap_and_ringbuffer]
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_host_inline_backing_is_released_when_the_caller_closes_it
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_host_inline_descriptor_materializes_local_tensor_data
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_materialize_rejects_a_wire_offset_that_disagrees_with_the_sidecar
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_materialized_args_forward_to_a_next_level_submit
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_remote_buffer_descriptor_materializes_session_registry_address
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_tensor_extent_rejects_mismatched_shape_and_stride_counts
+FAILED tests/ut/py/test_task_interface.py::TestRemoteL3SessionTaskArgsMaterialization::test_two_interior_views_of_one_backing_share_its_identity
+11 failed, 270 passed, 4 skipped in 4.64s

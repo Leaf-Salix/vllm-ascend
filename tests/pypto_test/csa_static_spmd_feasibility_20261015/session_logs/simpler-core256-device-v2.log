@@ -1,0 +1,318 @@
+[npu-lock] 获取设备 9 的锁 (无超时)...
+[npu-lock] 已获取设备 9 的锁 (pid=3045807)
+::group::L2 host_build_graph
+..                                                                       [100%]
+2 passed, 2 deselected in 13.10s
+--- L2 host_build_graph: PASS 15.6s ---
+::endgroup::
+::group::L2 tensormap_and_ringbuffer
+EF                                                                       [100%]
+==================================== ERRORS ====================================
+____________________ ERROR at setup of TestTmr133.test_run _____________________
+
+request = <SubRequest 'st_worker' for <Function test_run>>, st_platform = 'a2a3'
+device_pool = <conftest.DevicePool object at 0xfffde7317f40>
+_l2_worker_pool = {}, _l2_poisoned = set()
+
+    @pytest.fixture()
+    def st_worker(request, st_platform, device_pool, _l2_worker_pool, _l2_poisoned):  # noqa: PLR0912
+        """Per-test Worker.
+    
+        L2: session-scoped, reused across classes with the same (runtime, device).
+        L3: per-test (registers sub-callables at init, can't be reused).
+        """
+        cls = request.node.cls
+        if cls is None or not hasattr(cls, "_st_level"):
+            pytest.skip("st_worker requires SceneTestCase")
+    
+        level = cls._st_level
+        runtime = cls._st_runtime
+        from simpler_setup.scene_test import _class_wants_sdma  # noqa: PLC0415
+    
+        wants_sdma = _class_wants_sdma(cls)
+    
+        if level == 2:
+            # A prior test on this runtime poisoned the device and the rebuild below
+            # could not re-init it in-process (a5 op-timeout: rtStreamCreate 507899).
+            # Skip the rest for this runtime so one device error stops cascading —
+            # the triggering failure is already reported; a fresh worker process is
+            # the only real recovery.
+            if runtime in _l2_poisoned:
+                _register_l2_poison_skip(request.node)
+                pytest.skip(
+                    f"L2 device context for runtime '{runtime}' was poisoned by an earlier device-runtime error on "
+                    f"this worker process and cannot be re-initialized in-process; skipping to avoid a misleading "
+                    f"507899 cascade (a fresh worker process recovers)."
+                )
+    
+            # L2 share: reuse any Worker already created for this runtime in the
+            # current process. Under xdist, each worker process is sliced to a
+            # single device so there's at most one matching entry. On first call
+            # we allocate a device from the pool and immediately release it back —
+            # the pool is a process-scoped counter for other fixtures (e.g.
+            # st_device_ids) that also draw from it; retaining the id would drain
+            # the pool and break any non-st_worker test that runs afterward on the
+            # same xdist worker.
+            # The SDMA capability is part of the Worker's identity, not a per-run
+            # option: an enable_sdma Worker holds 48 STARS streams for its whole
+            # life, so it must never be handed to a test that did not ask for them,
+            # nor a plain Worker to one that did. It therefore takes a slot in the
+            # pool key and gates reuse. Ordering puts every sdma test after the
+            # rest, so the swap happens once, at the end.
+            for (rt, dev_id, pooled_sdma), existing in _l2_worker_pool.items():
+                if rt == runtime and pooled_sdma == wants_sdma:
+                    _register_l2_pool_recycle(request, _l2_worker_pool, (rt, dev_id, pooled_sdma), _l2_poisoned)
+                    yield existing
+                    return
+    
+            ids = device_pool.allocate(1)
+            if not ids:
+                pytest.fail(f"no devices available in --device pool (requested 1, pool has {len(device_pool._available)})")
+            dev_id = ids[0]
+            device_pool.release(ids)
+            key = (runtime, dev_id, wants_sdma)
+    
+            # At most one runtime-specific Worker may own a device: finalization
+            # resets resources that would invalidate every other Worker on it.
+            for stale_key in list(_l2_worker_pool):
+                if stale_key[1] != dev_id:
+                    continue
+                try:
+                    _l2_worker_pool.retire(stale_key)
+                except Exception:
+                    _l2_poisoned.add(stale_key[0])
+                    raise
+    
+            from simpler.worker import Worker  # noqa: PLC0415
+    
+            w = Worker(level=2, device_id=dev_id, platform=st_platform, runtime=runtime, enable_sdma=wants_sdma)
+            w._st_device_id = dev_id
+            # First rebuild after a poison-and-heal lands here. On arches where the
+            # device re-inits cleanly this just works; on a5 the op-timeout poison
+            # survives close()+reset, so Worker.init raises a device-runtime error —
+            # mark the runtime poisoned and skip (this test and every later one for
+            # the runtime) instead of surfacing a raw 507899 setup ERROR.
+            try:
+>               w.init()
+
+conftest.py:1736: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/simpler/worker.py:8160: in init
+    self._init_level2()
+python/simpler/worker.py:8242: in _init_level2
+    self._chip_worker.init(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <simpler.task_interface.ChipWorker object at 0xfffde70c5330>
+device_id = 9
+bins = RuntimeBinaries(host_path=PosixPath('/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-2026101...-args-256-20261016/build/lib/a2a3/onboard/tensormap_and_ringbuffer/aicore_kernel_mode.o'), kernel_aicore_required=True)
+log_level = None, prewarm_config = None, enable_sdma = False
+
+    def init(
+        self,
+        device_id: int,
+        # Structurally typed: any object exposing the *_path attributes below.
+        # Not RuntimeBinaries — that lives in simpler_setup, which this package
+        # must not depend on.
+        bins: Any,
+        log_level: int | None = None,
+        prewarm_config: CallConfig | None = None,
+        enable_sdma: bool = False,
+    ):
+        """Attach the calling thread to ``device_id``, load the host runtime
+        library, and cache platform binaries.
+    
+        Can only be called once — the runtime and device cannot be changed
+        after init.
+    
+        Seeds the extension-owned HostLogger state before C++ loads any
+        consumer. Each consumer contains its own logger implementation and
+        receives that state pointer during module init. On sim, C++ retains
+        libcpu_sim_context.so in a process-wide RTLD_GLOBAL registry so
+        host_runtime.so can resolve the PTO simulator hooks.
+    
+        Args:
+            device_id: NPU device ID to attach the calling thread to.
+            bins: A `simpler_setup.runtime_builder.RuntimeBinaries` (or any
+                object exposing host_path / aicpu_path / aicore_path /
+                sim_context_path / dispatcher_path / sdma_warmup_path).
+                ``dispatcher_path`` is required for onboard platforms and
+                ignored on sim (set to None). ``sdma_warmup_path`` is optional
+                everywhere: without it the first TPREFETCH_ASYNC pays the cold
+                SDMA control path instead of init absorbing it.
+            log_level: Threshold (10=DEBUG, 20=INFO, 25=TIMING, 30=WARN,
+                40=ERROR, 60=NUL). Defaults to a snapshot of the simpler
+                logger via `_log.get_current_config()`.
+    
+        For tests that need to drive the binding directly with arbitrary path
+        strings (e.g. to assert dlopen failure on `/nonexistent/foo.so`), call
+        `_ChipWorker.init(...)` from `_task_interface` instead of going
+        through this wrapper.
+        """
+        with self._lifecycle_lock:
+            if self._init_in_progress:
+                raise RuntimeError("ChipWorker.init() is already in progress")
+            if self._impl.initialized:
+                raise RuntimeError("ChipWorker is already initialized")
+            self._init_owner_thread = threading.current_thread()
+            self._init_in_progress = True
+    
+        try:
+            _initialize_host_log(log_level)
+    
+            # C++ retains libcpu_sim_context.so in the sim process registry,
+            # loads host_runtime.so, and binds both private logger copies.
+            # dispatcher_path is empty on sim; onboard consumes the real path.
+            dispatcher_path = getattr(bins, "dispatcher_path", None)
+            sim_context_path = getattr(bins, "sim_context_path", None)
+            sdma_warmup_path = getattr(bins, "sdma_warmup_path", None)
+>           self._impl.init(
+                str(bins.host_path),
+                str(bins.aicpu_path),
+                str(bins.aicore_path),
+                "" if dispatcher_path is None else str(dispatcher_path),
+                int(device_id),
+                prewarm_config,
+                bool(enable_sdma),
+                "" if sim_context_path is None else str(sim_context_path),
+                "" if sdma_warmup_path is None else str(sdma_warmup_path),
+            )
+E           RuntimeError: simpler_init failed with code 507033
+
+python/simpler/task_interface.py:1471: RuntimeError
+---------------------------- Captured stderr setup -----------------------------
+[mono_ns=1369827767363886][T0xffff99f7a020][TIMING] clock_anchor: [CLOCK_ANCHOR] v=1 pid=3061445 mono_ns=1369827767362796 wall_ns=1792114504009885076
+[mono_ns=1369988537607737][T0xffff99f7a020][ERROR] bind_current_thread: [device_runner_base.cpp:495] rtSetDevice(9) failed: 507033
+[mono_ns=1369988538090942][T0xffff99f7a020][ERROR] bind_current_thread: [device_runner_base.cpp:496] ACL recent error message: [PID: 3061445] 2026-10-16-09:37:42.262.282 Inner_Error_Device_Subprocess_Startup_Timeout(E39007): Starting a subprocess on the device timed out.
+        Possible Cause: 1.Failed to start the subprocess. 2. The HDC link is faulty.
+        Solution: Obtain the host and device logs, and contact technical support at https://www.hiascend.com/support.
+TraceBack (most recent call last):
+~
+=================================== FAILURES ===================================
+_____________________________ TestTmr256.test_run ______________________________
+
+self = <tests.st.a2a3.core_argument_capacity.test_core_argument_capacity.TestCapacity_tensormap_and_ringbuffer_256 object at 0xfffde7317520>
+st_platform = 'a2a3'
+st_worker = <simpler.worker.Worker object at 0xfffdc2a7f9a0>
+request = <FixtureRequest for <Function test_run>>
+
+    def test_run(self, st_platform, st_worker, request):
+        """Auto test method — runs matching cases for the current platform."""
+        matched = self._matching_cases(st_platform, request)
+        manual_mode = request.config.getoption("--manual", default="exclude")
+        if not matched:
+            # Skip before building and before control returns to subclass
+            # overrides: no case ran, so their post-run validators must not run.
+            import pytest  # noqa: PLC0415
+    
+            pytest.skip(f"No cases matched {type(self).__name__} (platform={st_platform}, manual={manual_mode})")
+    
+        rounds = request.config.getoption("--rounds", default=1)
+        skip_golden = request.config.getoption("--skip-golden", default=False)
+        enable_chip_swimlane = request.config.getoption("--enable-chip-swimlane", default=0)
+        enable_dump_args = request.config.getoption("--dump-args", default=0)
+        enable_pmu = request.config.getoption("--enable-pmu", default=0)
+        enable_dep_gen = request.config.getoption("--enable-dep-gen", default=False)
+        enable_scope_stats = request.config.getoption("--enable-scope-stats", default=False)
+        enable_swimlane_overhead = request.config.getoption("--enable-swimlane-overhead", default=False)
+        diagnostics = effective_diagnostic_options(
+            rounds,
+            chip_swimlane=enable_chip_swimlane,
+            dump_args=enable_dump_args,
+            pmu=enable_pmu,
+            dep_gen=enable_dep_gen,
+            scope_stats=enable_scope_stats,
+            swimlane_overhead=enable_swimlane_overhead,
+        )
+        enable_chip_swimlane = diagnostics.chip_swimlane
+        enable_dump_args = diagnostics.dump_args
+        enable_pmu = diagnostics.pmu
+        enable_dep_gen = diagnostics.dep_gen
+        enable_scope_stats = diagnostics.scope_stats
+        enable_swimlane_overhead = diagnostics.swimlane_overhead
+    
+        callable_obj = self.build_callable(st_platform)
+        sub_handles = getattr(type(self), "_st_sub_handles", {})
+        # For L3, use registered chip handles instead of raw ChipCallable
+        # objects.
+        chip_handles = getattr(type(self), "_st_chip_handles", {})
+        if self._st_level == 3 and chip_handles:
+            callable_obj = {**chip_handles}
+    
+>       run_class_cases(
+            st_worker,
+            self,
+            matched,
+            callable_obj=callable_obj,
+            sub_handles=sub_handles,
+            rounds=rounds,
+            skip_golden=skip_golden,
+            enable_chip_swimlane=enable_chip_swimlane,
+            enable_dump_args=enable_dump_args,
+            enable_pmu=enable_pmu,
+            enable_dep_gen=enable_dep_gen,
+            enable_scope_stats=enable_scope_stats,
+            enable_swimlane_overhead=enable_swimlane_overhead,
+        )
+
+simpler_setup/scene_test.py:2253: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+simpler_setup/scene_test.py:1546: in run_class_cases
+    cls_inst._run_and_validate(
+simpler_setup/scene_test.py:1965: in _run_and_validate
+    self._run_and_validate_l2(
+simpler_setup/scene_test.py:2073: in _run_and_validate_l2
+    self.compare_outputs(test_args, golden_args, output_names, params)
+simpler_setup/scene_test.py:1829: in compare_outputs
+    _compare_outputs(test_args, golden_args, output_names, self.RTOL, self.ATOL)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+test_args = <simpler_setup.scene_test.TaskArgsBuilder object at 0xfffdc4cde2f0>
+golden_args = <simpler_setup.scene_test.TaskArgsBuilder object at 0xfffdc4cdc190>
+output_names = ['out'], rtol = 0, atol = 0
+
+    def _compare_outputs(test_args, golden_args, output_names, rtol, atol):
+        """Compare output tensors against golden values."""
+        import torch  # noqa: PLC0415
+    
+        for name in output_names:
+            actual = getattr(test_args, name)
+            expected = getattr(golden_args, name)
+            if not torch.allclose(actual, expected, rtol=rtol, atol=atol):
+                diff = (actual - expected).abs().max().item()
+>               raise AssertionError(f"Golden mismatch on '{name}': max_diff={diff}, rtol={rtol}, atol={atol}")
+E               AssertionError: SceneTest case failed: TestCapacity_tensormap_and_ringbuffer_256::tensors_256_scalars_16: Golden mismatch on 'out': max_diff=20666308886528.0, rtol=0, atol=0
+
+simpler_setup/scene_test.py:1584: AssertionError
+----------------------------- Captured stderr call -----------------------------
+[WARNING] args dump disabled: --rounds > 1
+[TIMING] torch_backend_autoload setting=0 raw="0" raw_truncated=false effective=disabled torch_imported=true torch_npu_loaded=false
+[mono_ns=1369999486787147][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=2 name=chip.run.bind.args ts=1369999484371331 dur=2411086 
+[mono_ns=1369999606356112][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=2 name=chip.run.bind.prebuilt ts=1369999486819197 dur=119528475 
+[mono_ns=1369999606367452][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=1 name=chip.run.bind ts=1369999484329731 dur=122035961 
+[mono_ns=1369999609533586][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=1 name=chip.run.runner_run ts=1369999606849068 dur=2679648 
+[mono_ns=1369999609560767][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=1 name=chip.run.validate ts=1369999609541827 dur=16970 
+[mono_ns=1369999609566117][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=2 name=chip.run.runner_run.device_wall ts=0 dur=622920 clk=dev
+[mono_ns=1369999609570367][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.preamble ts=0 dur=250540 clk=dev
+[mono_ns=1369999609573107][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.graph_build ts=58760 dur=499300 clk=dev
+[mono_ns=1369999609577627][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.config_validate ts=61600 dur=9780 clk=dev
+[mono_ns=1369999609579647][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.arena_wire ts=71699 dur=16120 clk=dev
+[mono_ns=1369999609583807][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.sm_reset ts=87860 dur=25220 clk=dev
+[mono_ns=1369999609585737][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.post_orch ts=588400 dur=16980 clk=dev
+[mono_ns=1369999609589597][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.orch ts=115300 dur=105080 clk=dev
+[mono_ns=1369999609591637][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=3 name=chip.run.runner_run.device_wall.sched ts=250059 dur=306180 clk=dev
+[mono_ns=1369999609594517][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=1 name=chip.run.claim_release ts=1369999609593317 dur=220 
+[mono_ns=1369999609599347][T0xffff99f7a020][TIMING] emit_host_span: [STRACE] v=1 pid=3061445 tid=3061445 inv=1 hid=c05b0c2e2cbb0cff depth=0 name=chip.run ts=1369999484306650 dur=125291227 run_id=0 dispatch_id=0 slot_id=0 generation=1 run_epoch=1
+------------------------------ Captured log call -------------------------------
+WARNING  simpler_setup.scene_test:scene_test.py:106 args dump disabled: --rounds > 1
+TIMING   simpler:scene_test.py:127 torch_backend_autoload setting=0 raw="0" raw_truncated=false effective=disabled torch_imported=true torch_npu_loaded=false
+=========================== short test summary info ============================
+FAILED tests/st/a2a3/core_argument_capacity/test_core_argument_capacity.py::TestTmr256::test_run
+ERROR tests/st/a2a3/core_argument_capacity/test_core_argument_capacity.py::TestTmr133::test_run
+1 failed, 2 deselected, 1 error in 173.73s (0:02:53)
+--- L2 tensormap_and_ringbuffer: FAIL rc=1 175.9s ---
+::endgroup::
+*** FAIL: L2 tensormap_and_ringbuffer — expand group above ***
+
+no tests ran in 193.02s (0:03:13)
+[npu-lock] 已释放设备 9 的锁

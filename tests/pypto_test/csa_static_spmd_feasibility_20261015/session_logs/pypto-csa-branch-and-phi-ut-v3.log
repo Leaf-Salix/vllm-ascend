@@ -1,0 +1,58 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+_ TestChainedInPlaceIfPhis.test_branch_local_gather_loop_reuses_sibling_storage _
+
+self = <transforms.test_memory_reuse.TestChainedInPlaceIfPhis object at 0xfffde6df73d0>
+ascend_backend = BackendType.Ascend910B
+
+    def test_branch_local_gather_loop_reuses_sibling_storage(self, ascend_backend):
+        """A fresh gather destination in one arm is dead on the sibling path."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.AIV)
+            def kernel(
+                self,
+                pool: pl.Tensor[[64, 512], pl.BF16],
+                flags: pl.Tensor[[1], pl.INT32],
+                out: pl.Out[pl.Tensor[[64, 512], pl.BF16]],
+                state: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
+            ) -> tuple[pl.Tensor[[64, 512], pl.BF16], pl.Tensor[[64, 256], pl.FP32]]:
+                first = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                second = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                flag = pl.tensor.read(flags, [0])
+                for i, (s0, s1) in pl.range(2, init_values=(first, second)):
+                    seed = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
+                    if flag != 0:
+                        filled = pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [64, 512])
+                        selected = filled
+                    else:
+                        fresh = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
+                        for j, (carry,) in pl.range(64, init_values=(fresh,)):
+                            if j < flag:
+                                next_value = pl.tile.gather_row(
+                                    carry, pool, [j, 0], [j, 0], [1, 512]
+                                )
+                            else:
+                                next_value = carry
+                            gathered = pl.yield_(next_value)
+                        selected = gathered
+                    saved = pl.tile.store(selected, [0, 0], out)
+                    next0 = pl.tile.add(s0, 1.0)
+                    next1 = pl.tile.add(s1, 2.0)
+                    result0, result1 = pl.yield_(next0, next1)
+                state0 = pl.tile.store(result0, [0, 0], state)
+                state1 = pl.tile.store(result1, [32, 0], state0)
+                return out, state1
+    
+        after = _run_pipeline(passes.convert_to_ssa()(Before))
+>       passes.allocate_memory_addr()(after)
+E       ValueError: Vec buffer usage (196608 bytes) exceeds platform limit (188416 bytes)
+E       Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/allocate_memory_addr_pass.cpp:473
+
+tests/ut/ir/transforms/test_memory_reuse.py:7919: ValueError
+----------------------------- Captured stderr call -----------------------------
+2026-10-16 10:58:40.851 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Vec at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7884:13
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_branch_local_gather_loop_reuses_sibling_storage
+1 failed, 2 passed in 2.06s

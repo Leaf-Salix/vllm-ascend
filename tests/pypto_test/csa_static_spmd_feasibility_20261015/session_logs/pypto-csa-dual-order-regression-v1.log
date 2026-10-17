@@ -1,0 +1,212 @@
+....................................................................F... [ 42%]
+.......................................................................F [ 85%]
+F.......................                                                 [100%]
+=================================== FAILURES ===================================
+__ TestTopDownRetargeter.test_gating_vec_inplace_if_phi_is_not_acc_coalesced ___
+
+self = <transforms.test_memory_reuse.TestTopDownRetargeter object at 0xfffdd0336bc0>
+
+    def test_gating_vec_inplace_if_phi_is_not_acc_coalesced(self):
+        """Gating: the accumulator coalescer is Acc-scoped. A structurally
+        identical if-phi in Vec space -- ``else`` is an in-place
+        ``fillpad_inplace`` (reuses input, output aliases it), ``then`` a fresh
+        seed on a different Vec buffer -- must NOT be coalesced by the seed
+        retarget. ``IsInplaceAccumulatorProducer`` returns true for the Vec
+        branch, but the ``MemorySpace::Acc`` gate skips it, so the existing
+        ``YieldFixupMutator`` reconciles it with a legal Vec->Vec ``tile.move``
+        (Vec->Vec is a legal tmov pair, unlike Acc->Acc). Two Vec buffers survive.
+        """
+    
+        @pl.program
+        class Before:
+            @pl.function
+            def main(
+                self,
+                x: pl.Tensor[[64, 64], pl.FP32],
+                cond: pl.Scalar[pl.INDEX],
+                out: pl.Out[pl.Tensor[[64, 64], pl.FP32]],
+            ) -> pl.Tensor[[64, 64], pl.FP32]:
+                base: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.tile.load(
+                    x, [0, 0], [64, 64], target_memory=pl.Mem.Vec
+                )
+                prev: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.tile.fillpad_inplace(
+                    base, pad_value=pl.PadValue.zero
+                )
+                if cond < 1:
+                    # Fresh, non-in-place producer (tile.fillpad, not _inplace) so the
+                    # seed is NOT an accumulator, while still carrying a tile_view to
+                    # match the else branch (IfStmt requires consistent tile_view).
+                    seed: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.tile.fillpad(
+                        base, pad_value=pl.PadValue.max
+                    )
+                    phi: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.yield_(seed)
+                else:
+                    acc: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.tile.fillpad_inplace(
+                        prev, pad_value=pl.PadValue.max
+                    )
+                    phi: pl.Tile[[64, 64], pl.FP32, pl.Mem.Vec] = pl.yield_(acc)
+                result: pl.Tensor[[64, 64], pl.FP32] = pl.store(phi, [0, 0], out)
+                return result
+    
+        After = _run_pipeline(Before)
+        bases = {b for b in _collect_tile_memref_bases(After).values() if "vec" in b}
+        # Not acc-coalesced: the two branch buffers survive and the existing path
+        # inserts a (legal, Vec->Vec) tile.move to reconcile the phi.
+>       assert len(bases) == 2, f"Vec accumulator-shaped phi must not be acc-coalesced; bases={sorted(bases)}"
+E       AssertionError: Vec accumulator-shaped phi must not be acc-coalesced; bases=['mem_vec_2']
+E       assert 1 == 2
+E        +  where 1 = len({'mem_vec_2'})
+
+tests/ut/ir/transforms/test_memory_reuse.py:4249: AssertionError
+_ TestChainedInPlaceIfPhis.test_conditional_reset_reuses_value_read_only_in_sibling _
+
+self = <transforms.test_memory_reuse.TestChainedInPlaceIfPhis object at 0xfffdd0613a00>
+ascend_backend = BackendType.Ascend910B
+
+    def test_conditional_reset_reuses_value_read_only_in_sibling(self, ascend_backend):
+        """An earlier value survives only on the arm that does not reset it."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.AIV)
+            def kernel(
+                self,
+                pool: pl.Tensor[[64, 256], pl.FP32],
+                flags: pl.Tensor[[1], pl.INT32],
+                out: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
+            ) -> pl.Tensor[[64, 256], pl.FP32]:
+                current = pl.tile.load(pool, [0, 0], [64, 256])
+                flag = pl.tensor.read(flags, [0])
+                if flag != 0:
+                    reset = pl.tile.full([64, 256], dtype=pl.FP32, value=0.0)
+                    selected = reset
+                else:
+                    selected = current
+                saved = pl.tile.store(selected, [0, 0], out)
+                return saved
+    
+>       after = _run_pipeline(passes.convert_to_ssa()(Before))
+
+tests/ut/ir/transforms/test_memory_reuse.py:7975: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+program = <pypto.pypto_core.ir.Program object at 0xfffdd09e93d0>
+
+    def _run_pipeline(program: ir.Program) -> ir.Program:
+        """Run init_mem_ref + materialize_semantic_aliases + memory_reuse pipeline.
+    
+        The loop-carry / in-place must-alias retarget (formerly MemoryReuse "Step 0")
+        lives in materialize_semantic_aliases, which runs between init_mem_ref and
+        memory_reuse in the real pipeline — compose all three here so these unit
+        tests exercise the same combined transformation.
+        """
+>       return passes.memory_reuse()(passes.materialize_semantic_aliases()(passes.init_mem_ref()(program)))
+E       pypto.Error: Pre-verification failed before pass 'InitMemRef':
+E       IR Verification Report
+E       ======================
+E       Total diagnostics: 2 (2 errors, 0 warnings)
+E       
+E       [1] ERROR - TileMemoryInferred
+E         Message: Device function 'kernel': TileType variable 'current__ssa_v0' has no memory_space set
+E         Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7965:17
+E         Error Code: 0
+E       
+E       [2] ERROR - TileMemoryInferred
+E         Message: Device function 'kernel': TileType variable 'selected__ssa_v1' has no memory_space set
+E         Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7969:21
+E         Error Code: 0
+E       
+E       Status: FAILED (2 error(s) found)
+
+tests/ut/ir/transforms/test_memory_reuse.py:42: Error
+_ TestChainedInPlaceIfPhis.test_conditional_reset_preserves_same_branch_tail_read _
+
+self = <transforms.test_memory_reuse.TestChainedInPlaceIfPhis object at 0xfffdd07abd90>
+ascend_backend = BackendType.Ascend910B
+
+    def test_conditional_reset_preserves_same_branch_tail_read(self, ascend_backend):
+        """Reversing sibling order must preserve reads after a same-arm write."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.AIV)
+            def kernel(
+                self,
+                pool: pl.Tensor[[64, 256], pl.FP32],
+                flags: pl.Tensor[[1], pl.INT32],
+                out: pl.Out[pl.Tensor[[128, 256], pl.FP32]],
+            ) -> pl.Tensor[[128, 256], pl.FP32]:
+                current = pl.tile.load(pool, [0, 0], [64, 256])
+                flag = pl.tensor.read(flags, [0])
+                if flag != 0:
+                    reset = pl.tile.full([64, 256], dtype=pl.FP32, value=0.0)
+                    observed = pl.tile.store(current, [64, 0], out)
+                    selected = reset
+                else:
+                    selected = current
+                saved = pl.tile.store(selected, [0, 0], out)
+                return saved
+    
+>       after = _run_pipeline(passes.convert_to_ssa()(Before))
+
+tests/ut/ir/transforms/test_memory_reuse.py:8003: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+program = <pypto.pypto_core.ir.Program object at 0xfffdd0231370>
+
+    def _run_pipeline(program: ir.Program) -> ir.Program:
+        """Run init_mem_ref + materialize_semantic_aliases + memory_reuse pipeline.
+    
+        The loop-carry / in-place must-alias retarget (formerly MemoryReuse "Step 0")
+        lives in materialize_semantic_aliases, which runs between init_mem_ref and
+        memory_reuse in the real pipeline — compose all three here so these unit
+        tests exercise the same combined transformation.
+        """
+>       return passes.memory_reuse()(passes.materialize_semantic_aliases()(passes.init_mem_ref()(program)))
+E       pypto.Error: Pre-verification failed before pass 'InitMemRef':
+E       IR Verification Report
+E       ======================
+E       Total diagnostics: 2 (2 errors, 0 warnings)
+E       
+E       [1] ERROR - TileMemoryInferred
+E         Message: Device function 'kernel': TileType variable 'current__ssa_v0' has no memory_space set
+E         Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7992:17
+E         Error Code: 0
+E       
+E       [2] ERROR - TileMemoryInferred
+E         Message: Device function 'kernel': TileType variable 'selected__ssa_v1' has no memory_space set
+E         Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:7997:21
+E         Error Code: 0
+E       
+E       Status: FAILED (2 error(s) found)
+
+tests/ut/ir/transforms/test_memory_reuse.py:42: Error
+=============================== warnings summary ===============================
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5112: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_preserves_split_metadata
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5127: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend910b_split_aiv_does_not_reuse_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_dsa_rp_ascend910b_split_aiv_physically_separates_load_buffer
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_ascend950_allows_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5918: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_iter_arg_tpop_operand_still_blocks_load_buffer_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:5987: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+tests/ut/ir/transforms/test_memory_reuse.py::TestAscend910BLoadTpopHazard::test_tpop_reaching_a_writer_across_the_back_edge_blocks_reuse
+  /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/ir/transforms/test_memory_reuse.py:6047: DeprecationWarning: @pl.function(attrs={...}) is deprecated: a decorator is evaluated before the signature binds, so it cannot reference parameters. Use pl.func_attr({...}) as the first statement of the function body instead.
+    @pl.function(type=pl.FunctionType.AIV, attrs={"split": pl.SplitMode.UP_DOWN})
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestTopDownRetargeter::test_gating_vec_inplace_if_phi_is_not_acc_coalesced
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_conditional_reset_reuses_value_read_only_in_sibling
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_conditional_reset_preserves_same_branch_tail_read
+3 failed, 165 passed, 7 warnings in 16.51s

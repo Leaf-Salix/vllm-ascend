@@ -1,0 +1,49 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_ptoas_column_carry_move_uses_destination_view ______________
+
+    def test_ptoas_column_carry_move_uses_destination_view():
+        """A column carry can share storage with a row-major full initializer."""
+    
+        @pl.program
+        class ColumnCarry:
+            @pl.function(type=pl.FunctionType.InCore)
+            def kernel(
+                self,
+                flag: pl.Scalar[pl.INT32],
+                out: pl.Out[pl.Tensor[[32, 1], pl.FP32]],
+            ) -> pl.Tensor[[32, 1], pl.FP32]:
+                row_base = pl.tile.full([1, 32], dtype=pl.FP32, value=0.0)
+                base = pl.tile.reshape(row_base, [32, 1])
+                for i, (carry,) in pl.range(2, init_values=(base,)):
+                    if flag != 0:
+                        row = pl.reshape(carry, [1, 32])
+                        updated = pl.add(row, 1.0)
+                        column = pl.reshape(updated, [32, 1])
+                        value = column
+                    else:
+                        value = carry
+                    result = pl.yield_(value)
+                output = pl.store(result, [0, 0], out)
+                return output
+    
+        optimized, _ = _run_pipeline(passes.MemoryPlanner.PTOAS, ColumnCarry)
+        mlir = _codegen(optimized, emit_tile_addr=False)
+        moves = [line for line in mlir.splitlines() if "pto.tmov" in line]
+        assert moves, mlir
+        for move in moves:
+            shapes = re.findall(r"rows=(\d+), cols=(\d+)", move)
+>           assert len(shapes) == 2 and shapes[0] == shapes[1], move
+E           AssertionError:     pto.tmov ins(%value__phi_v2 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%row_base__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/codegen/test_memory_planner_switch.py":361:17)
+E           assert (2 == 2 and ('32', '1') == ('1', '32')
+E            +  where 2 = len([('32', '1'), ('1', '32')])
+E             
+E             At index 0 diff: '32' != '1'
+E             Use -v to get more diff)
+
+tests/ut/codegen/test_memory_planner_switch.py:378: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-16 11:11:09.359 I | [perf_hint PH001] TileInnermostDimGranularity: tile.store has innermost dim = 4B (tile fp32[1], target_memory=Vec); moves 128B as 32 x 4B rows; recommended >= 512B for backend a2a3 (L2 cache line = 512B). Consider increasing tile shape on the innermost axis. at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/codegen/test_memory_planner_switch.py:369:22
+=========================== short test summary info ============================
+FAILED tests/ut/codegen/test_memory_planner_switch.py::test_ptoas_column_carry_move_uses_destination_view
+1 failed in 0.16s

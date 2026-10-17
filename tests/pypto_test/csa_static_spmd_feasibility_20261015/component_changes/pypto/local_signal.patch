@@ -1,0 +1,387 @@
+diff --git a/docs/en/dev/ir/05-operators.md b/docs/en/dev/ir/05-operators.md
+index 1b599376f..946b8f5e2 100644
+--- a/docs/en/dev/ir/05-operators.md
++++ b/docs/en/dev/ir/05-operators.md
+@@ -496,6 +496,8 @@ flat gather, valid-region semantics, tile layouts, and mask patterns.
+ | `system.bar_v` | Vector barrier (lowers to `pto.barrier <PIPE_V>`) | None |
+ | `system.bar_m` | Matrix barrier (lowers to `pto.barrier <PIPE_M>`) | None |
+ | `system.fence` | Memory barrier over global memory (lowers to `pto.fence.barrier_all #pto.fence_scope<gm>`) | None |
++| `system.signal_notify` | Temporary local GM INT32 signal Set; lowers to TNOTIFY(Set). Args: signal, offsets, value | None |
++| `system.signal_wait` | Temporary non-consuming local GM INT32 wait until >= expected; lowers to TWAIT(Ge). Args: signal, offsets, expected | None |
+ | `system.cacheinvalid` | Invalidate the cache line containing a tensor sub-region's base address. Args: `tensor`, `shapes` (N-D), `offsets` (N-D). Every region size — a single element included — lowers to `pto.partition_view` + `pto.cmo.cacheinvalid %payload_view single_cache_line : !pto.partition_tensor_view<...>`; `shapes` does not make it walk every cache line. The no-argument form invalidates all GM. | None |
+ | `system.syncall` | Cross-core all-participant barrier (`pto::SYNCALL`). Attr `mode` `"hard"` (FFTS, no operands) or `"soft"` (GM-polling, operands) | `core_type` (`"aiv_only"` \| `"aic_only"` \| `"mix"`), `mode` (`"hard"` \| `"soft"`) |
+ | `system.sync_src` | Set sync flag | `set_pipe`, `wait_pipe`, `event_id` |
+@@ -517,6 +519,29 @@ The `core_type` and `mode` attributes stay strings **in the IR**, but the Python
+ 
+ `system.task_invalid` returns [`ScalarType(DataType::TASK_ID)`](02-types.md#scalartype). It is the lowering target of the Python literal `None` when `None` appears in a TaskId position (a `deps=[None]` entry or a TaskId loop iter_arg seed) inside `with pl.manual_scope():` regions. There is no `system.task_id_of` op — producer task ids are obtained from the second tuple element returned by the `pl.submit(...)` parser construct, not from a builtin. Source: `src/ir/op/sync_ops/task.cpp`.
+ 
++### Temporary ordinary-GM point-to-point signals
++
++`pl.system.signal_notify(signal, [offset], value)` and
++`pl.system.signal_wait(signal, [offset], expected)` are a local prototype for
++[issue #3020](https://github.com/hw-native-sys/pypto/issues/3020), not an upstream API.
++They use a one-dimensional ordinary GM `INT32` Tensor and existing
++`TNOTIFY(Set)` / `TWAIT(Ge)`. The offset may be dynamic; value and expected must
++be INT32. They do not require a DistributedTensor, communication window, or
++collective barrier. Wait is non-consuming and supports multiple readers.
++
++Each signal cache line must have a single writer and must not share storage
++with payload or another writer. Initialize it before launch; use monotonically
++increasing epochs without INT32 overflow. Concurrent invocations need separate
++storage. All required producer kernels must be resident or otherwise able to
++make progress. This prototype is for explicitly typed AIC/AIV bodies within a
++MIX group; automatic MIX lane placement is not specified.
++
++These operations publish and observe the signal only. Callers must separately
++complete producer data pipelines, release payload writes, and maintain consumer
++caches and ordering before reading payload. The current A3 TWAIT uses volatile
++loads with DCCI, not a promise of cache-bypassing `ld_dev` loads. Do not treat
++volatile alone as cache coherence, or a signal wait as a full payload barrier.
++
+ ## CrossCoreOp: AIC↔AIV Communication
+ 
+ **Purpose**: Cross-core synchronization, data transfer, and pipe management between AIC (Cube) and AIV (Vector) kernels
+diff --git a/docs/zh/dev/ir/05-operators.md b/docs/zh/dev/ir/05-operators.md
+index 41d72ccb9..25939ab96 100644
+--- a/docs/zh/dev/ir/05-operators.md
++++ b/docs/zh/dev/ir/05-operators.md
+@@ -456,6 +456,8 @@ UINT32 + INT32 → INT32 (signed precedence)
+ | `system.bar_v` | 向量屏障（下降为 `pto.barrier <PIPE_V>`） | 无 |
+ | `system.bar_m` | 矩阵屏障（下降为 `pto.barrier <PIPE_M>`） | 无 |
+ | `system.fence` | 全局内存屏障（下降为 `pto.fence.barrier_all #pto.fence_scope<gm>`） | 无 |
++| `system.signal_notify` | 临时普通 GM INT32 信号 Set，下降为 TNOTIFY(Set)；参数为 signal、offsets、value | 无 |
++| `system.signal_wait` | 临时普通 GM INT32 非消费式等待，直到信号 >= expected，下降为 TWAIT(Ge) | 无 |
+ | `system.cacheinvalid` | 使 tensor 子区域基地址所在的那一条 cache line 失效。参数：`tensor`、`shapes`（N 维）、`offsets`（N 维）。任意区域大小（包括单个元素）都下降为 `pto.partition_view` + `pto.cmo.cacheinvalid %payload_view single_cache_line : !pto.partition_tensor_view<...>`；`shapes` 不会让它遍历区域内的所有 cache line。无参数形式使全部 GM cache 失效。 | 无 |
+ | `system.syncall` | 跨核全员屏障（`pto::SYNCALL`）。属性 `mode` 取 `"hard"`（FFTS，无 operand）或 `"soft"`（GM 轮询，带 operand） | `core_type`（`"aiv_only"` \| `"aic_only"` \| `"mix"`）、`mode`（`"hard"` \| `"soft"`） |
+ | `system.sync_src` | 设置同步标志 | `set_pipe`, `wait_pipe`, `event_id` |
+@@ -477,6 +479,25 @@ UINT32 + INT32 → INT32 (signed precedence)
+ 
+ `system.task_invalid` 返回类型为 [`ScalarType(DataType::TASK_ID)`](02-types.md#scalartype)。当 Python 字面量 `None` 出现在 TaskId 位置（`deps=[None]` 条目或 TaskId 循环 iter_arg 种子）时，它就是 `None` 在 `with pl.manual_scope():` 区域内的下沉目标。不存在 `system.task_id_of` op —— producer task id 由 `pl.submit(...)` parser construct 返回的二元组第二个元素获得，而非来自 builtin。源码：`src/ir/op/sync_ops/task.cpp`。
+ 
++### 临时普通 GM 点对点信号
++
++`pl.system.signal_notify(signal, [offset], value)` 与
++`pl.system.signal_wait(signal, [offset], expected)` 是
++[issue #3020](https://github.com/hw-native-sys/pypto/issues/3020) 的本地原型，
++不是上游正式 API。它们使用一维普通 GM INT32 Tensor，复用
++TNOTIFY(Set) / TWAIT(Ge)。offset 可以动态变化，value / expected 必须是 INT32；
++无需 DistributedTensor、通信窗口或全体 barrier。wait 不清除信号，允许多个消费者。
++
++每条信号缓存行必须只有一个写者，不能与 payload 或其他写者共享。
++首次启动前初始化；代际必须单调递增且不得溢出 INT32。并发调用独占信号空间。
++所有必要生产者必须已驻留或能够继续执行。当前只用于 MIX group 内显式 AIC/AIV
++核体，不定义自动 MIX 展开的 lane 放置语义。
++
++这两个操作只发布和观察信号。调用者仍需单独完成生产者数据流水、payload 发布，
++以及消费者读数据前的缓存维护与内存顺序。当前 A3 TWAIT 使用 volatile 读取配合
++DCCI，不能声称使用了绕过 DCache 的 ld_dev；volatile 本身不保证缓存一致性，
++信号 wait 也不能代替完整的业务数据屏障。
++
+ ## CrossCoreOp：AIC↔AIV 跨核通信
+ 
+ **用途**：AIC (Cube) 和 AIV (Vector) 内核之间的跨核同步、数据传输和管道管理
+diff --git a/python/pypto/ir/op/system_ops.py b/python/pypto/ir/op/system_ops.py
+index 2308146d2..2a6f92a4f 100644
+--- a/python/pypto/ir/op/system_ops.py
++++ b/python/pypto/ir/op/system_ops.py
+@@ -334,6 +334,46 @@ def bar_all(*, span: Span | None = None) -> Call:
+     return _create_barrier_op("system.bar_all", span=span)
+ 
+ 
++def _local_signal_call(
++    name: str,
++    signal: Expr,
++    offsets: Sequence[int | Expr],
++    value: int | Expr,
++    span: Span | None,
++) -> Call:
++    actual_span = _get_span_or_capture(span)
++    if isinstance(value, int):
++        if not -(1 << 31) <= value < (1 << 31):
++            raise ValueError(f"{name} value is outside INT32: {value}")
++        value = ConstInt(value, DataType.INT32, actual_span)
++    return _ir_core.create_op_call(
++        name, [signal, _to_make_tuple(offsets, actual_span), value], {}, actual_span
++    )
++
++
++def signal_notify(
++    signal: Expr, offsets: Sequence[int | Expr], value: int | Expr, *, span: Span | None = None
++) -> Call:
++    """临时本地 GM 单写者通知，复用 TNOTIFY(Set)，只发布信号。
++
++    signal 必须为一维 INT32；每条信号 cacheline 独占且只有一个写者。
++    调用者负责 payload 完成、缓存发布和代际/溢出；通知不自动完成这些工作。
++    此接口用于显式 AIC/AIV 核体，不能推断自动 MIX 中应由哪条 lane 发布。
++    """
++    return _local_signal_call("system.signal_notify", signal, offsets, value, span)
++
++
++def signal_wait(
++    signal: Expr, offsets: Sequence[int | Expr], expected: int | Expr, *, span: Span | None = None
++) -> Call:
++    """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
++
++    signal 必须为一维 INT32；expected 为 INT32，消费者不得写信号所在 cacheline。
++    返回后仍须按业务数据的访问路径完成消费者缓存维护与内存顺序。
++    """
++    return _local_signal_call("system.signal_wait", signal, offsets, expected, span)
++
++
+ def fence(*, span: Span | None = None) -> Call:
+     """Memory barrier over global memory.
+ 
+diff --git a/python/pypto/language/op/system_ops.py b/python/pypto/language/op/system_ops.py
+index ce935fd10..610f9b4b9 100644
+--- a/python/pypto/language/op/system_ops.py
++++ b/python/pypto/language/op/system_ops.py
+@@ -49,6 +49,8 @@ __all__ = [
+     "sync_dst",
+     "sync_set",
+     "sync_wait",
++    "signal_notify",
++    "signal_wait",
+     "set_ffts",
+     "bar_v",
+     "bar_m",
+@@ -137,6 +139,41 @@ def sync_wait(
+     return _ir_ops.sync_wait(event_expr, pipe=pipe, core_type=kernel, span=span)
+ 
+ 
++def signal_notify(
++    signal: Tensor,
++    offsets: Sequence[IntLike],
++    value: IntLike,
++    *,
++    span: Span | None = None,
++) -> Call:
++    """临时本地 GM 单写者通知，复用 TNOTIFY(Set)，只发布信号。
++
++    signal 必须为一维 INT32；每条信号 cacheline 独占且只有一个写者。
++    调用者负责 payload 完成、缓存发布和代际/溢出；通知不自动完成这些工作。
++    此接口用于显式 AIC/AIV 核体，不能推断自动 MIX 中应由哪条 lane 发布。
++    """
++    index_exprs = [item.unwrap() if isinstance(item, Scalar) else item for item in offsets]
++    value_expr = value.unwrap() if isinstance(value, Scalar) else value
++    return _ir_ops.signal_notify(signal.unwrap(), index_exprs, value_expr, span=span)
++
++
++def signal_wait(
++    signal: Tensor,
++    offsets: Sequence[IntLike],
++    expected: IntLike,
++    *,
++    span: Span | None = None,
++) -> Call:
++    """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
++
++    signal 必须为一维 INT32；expected 为 INT32，消费者不得写信号所在 cacheline。
++    返回后仍须按业务数据的访问路径完成消费者缓存维护与内存顺序。
++    """
++    index_exprs = [item.unwrap() if isinstance(item, Scalar) else item for item in offsets]
++    expected_expr = expected.unwrap() if isinstance(expected, Scalar) else expected
++    return _ir_ops.signal_wait(signal.unwrap(), index_exprs, expected_expr, span=span)
++
++
+ def set_ffts(workspace: Tensor, *, span: Span | None = None) -> Call:
+     """Declare the A3 FFTS setup operand for explicit cross-core synchronization."""
+     if not isinstance(workspace, Tensor):
+diff --git a/src/backend/common/pto_ops_memory.cpp b/src/backend/common/pto_ops_memory.cpp
+index 728f30c99..026a56e5c 100644
+--- a/src/backend/common/pto_ops_memory.cpp
++++ b/src/backend/common/pto_ops_memory.cpp
+@@ -843,6 +843,34 @@ static std::string EmitLocalArrayValue(codegen::PTOCodegen& codegen, const ir::E
+   return out;
+ }
+ 
++// 只建立本地 GM 的单元素视图，不构造 CommContext、通信窗口或远端地址。
++static std::string MakeLocalSignalCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base,
++                                           bool notify) {
++  auto& cg = AsPto(codegen_base);
++  INTERNAL_CHECK_SPAN(op->args_.size() == 3, op->span_) << "local signal expects three operands";
++  auto signal = AsVarLike(op->args_[0]);
++  INTERNAL_CHECK_SPAN(signal, op->span_) << "local signal must be a tensor variable";
++  auto type = As<TensorType>(signal->GetType());
++  auto offsets = As<ir::MakeTuple>(op->args_[1]);
++  INTERNAL_CHECK_SPAN(type && offsets, op->span_) << "local signal operand types were not verified";
++  auto local_view = cg.GetOrCreateTensorView(signal);
++  auto local_type = cg.GetTensorViewTypeString(type.get());
++  std::vector<std::string> one_dims(type->shape_.size(), "1");
++  std::vector<std::string> one_sizes(type->shape_.size(),
++                                   cg.GetOrEmitConstant(static_cast<int64_t>(1), DataType::INDEX));
++  auto partition_type = MakePartitionTensorViewType(one_dims, cg.GetTypeString(type->dtype_));
++  auto partition = EmitPartitionViewPTO(signal->name_hint_ + "_signal", local_view, local_type,
++                                       partition_type, GetIndexOffsetCodes(offsets->elements_, cg),
++                                       one_sizes, cg);
++  const auto value = cg.GetExprAsCode(op->args_[2]);
++  // 同步信号本身使用 PTO-ISA 已有的发布/轮询；不声称它自动刷新任意 payload。
++  const auto instruction = notify ? "pto.comm.tnotify" : "pto.comm.twait";
++  const auto attribute = notify ? "notifyOp = #pto<notify_op set>" : "cmp = #pto<wait_cmp ge>";
++  cg.Emit(std::string(instruction) + "(" + partition + ", " + value + " : " + partition_type +
++          ", i32) {" + attribute + "}");
++  return "";
++}
++
+ void RegisterMemoryOps(Backend& backend, const std::unordered_set<std::string>& exclude_ops) {
+   // Register ops with custom codegen logic
+   auto reg = [&](const char* op_name, BackendCodegenFunc fn) {
+@@ -850,6 +878,13 @@ void RegisterMemoryOps(Backend& backend, const std::unordered_set<std::string>&
+     backend.RegisterOp(op_name).f_codegen(std::move(fn));
+   };
+ 
++  reg("system.signal_notify", [](const CallPtr& op, codegen::CodegenBase& cg) {
++    return MakeLocalSignalCodegenPTO(op, cg, true);
++  });
++  reg("system.signal_wait", [](const CallPtr& op, codegen::CodegenBase& cg) {
++    return MakeLocalSignalCodegenPTO(op, cg, false);
++  });
++
+   // On-core arrays (ArrayType) -> PTOAS stack-local arrays. The IR's
+   // SSA-functional update_element semantics are realized in place: PTOCodegen's
+   // AssignStmt dispatch aliases an array.update_element result Var to the input
+diff --git a/src/ir/op/sync_ops/sync.cpp b/src/ir/op/sync_ops/sync.cpp
+index f56bb0ff8..7dce5c2f8 100644
+--- a/src/ir/op/sync_ops/sync.cpp
++++ b/src/ir/op/sync_ops/sync.cpp
+@@ -31,6 +31,32 @@ TypePtr DeduceUnknownType(const std::vector<ExprPtr>& args,
+   return GetUnknownType();
+ }
+ 
++// 临时本地信号接口：单写者 Set / 非消费式 Ge 等待，复用现有通信指令。
++// 限定 INT32，避免把旧 INT64 进度静默截断；业务数据发布仍由调用者显式完成。
++TypePtr DeduceLocalSignalType(const std::vector<ExprPtr>& args,
++                             const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  CHECK(args.size() == 3) << "local signal op requires (signal, offsets, value)";
++  CHECK(kwargs.empty()) << "local signal op takes no attributes";
++  for (const auto& arg : args) {
++    CHECK(arg) << "local signal operands must not be null";
++  }
++  auto tensor = As<TensorType>(args[0]->GetType());
++  CHECK(tensor && !IsA<DistributedTensorType>(args[0]->GetType()))
++      << "local signal requires an ordinary GM Tensor";
++  CHECK(tensor->dtype_ == DataType::INT32 && tensor->shape_.size() == 1)
++      << "local signal requires a one-dimensional INT32 Tensor";
++  auto offsets = As<MakeTuple>(args[1]);
++  CHECK(offsets && offsets->elements_.size() == 1) << "local signal requires one offset";
++  auto offset = As<ScalarType>(offsets->elements_[0]->GetType());
++  CHECK(offset && (offset->dtype_ == DataType::INDEX || offset->dtype_ == DataType::INT32 ||
++                   offset->dtype_ == DataType::INT64))
++      << "local signal offset must be INDEX, INT32 or INT64";
++  auto value = As<ScalarType>(args[2]->GetType());
++  CHECK(value && value->dtype_ == DataType::INT32)
++      << "local signal value/expected must be INT32; cast only after checking the protocol range";
++  return GetUnknownType();
++}
++
+ }  // namespace
+ 
+ // ============================================================================
+@@ -91,6 +117,27 @@ REGISTER_OP("system.fence")
+     .no_argument()
+     .f_deduce_type(DeduceUnknownType);
+ 
++REGISTER_OP("system.signal_notify")
++    .set_description("Temporary local GM signal Set; single writer per cache line; signal-only publication")
++    .set_op_category("SyncOp")
++    .add_argument("signal", "Ordinary one-dimensional INT32 GM signal Tensor")
++    .add_argument("offsets", "One scalar offset")
++    .add_argument("value", "INT32 progress value")
++    .set_no_duplicate()
++    .no_memory_spec()
++    .set_arg_effect(0, ArgEffect::Write)
++    .f_deduce_type(DeduceLocalSignalType);
++
++REGISTER_OP("system.signal_wait")
++    .set_description("Temporary local GM signal wait until >= expected; does not consume the signal")
++    .set_op_category("SyncOp")
++    .add_argument("signal", "Ordinary one-dimensional INT32 GM signal Tensor")
++    .add_argument("offsets", "One scalar offset")
++    .add_argument("expected", "INT32 progress threshold")
++    .no_memory_spec()
++    .no_arg_writes()
++    .f_deduce_type(DeduceLocalSignalType);
++
+ // Register system.cacheinvalid (Cache Maintenance Operation).
+ // Two forms selected by arg count:
+ //   - No args: invalidate the whole GM address space
+diff --git a/tests/ut/codegen/test_pto_codegen_ops.py b/tests/ut/codegen/test_pto_codegen_ops.py
+index 14ffb9bc6..30d39d019 100644
+--- a/tests/ut/codegen/test_pto_codegen_ops.py
++++ b/tests/ut/codegen/test_pto_codegen_ops.py
+@@ -5049,6 +5049,30 @@ class TestSyncAllCodegen:
+         single = ir.Program([funcs[0]], funcs[0].name, optimized.span)
+         return codegen_instance.generate(single)
+ 
++    def test_local_signal_preserves_order_without_comm_context(self):
++        """本地通知/等待不能被删除、合并成全体 barrier 或增加通信上下文。"""
++
++        @pl.program
++        class Prog:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++                offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++            ) -> pl.Tensor[[256], pl.INT32]:
++                pl.system.signal_wait(signal, [offset], tag)
++                pl.system.signal_notify(signal, [offset], tag)
++                pl.system.signal_wait(signal, [offset], tag)
++                return signal
++
++        mlir = self._generate_mlir(Prog)
++        assert mlir.count("pto.comm.tnotify(") == 1
++        assert mlir.count("pto.comm.twait(") == 2
++        assert mlir.index("pto.comm.twait(") < mlir.index("pto.comm.tnotify(")
++        assert mlir.rindex("pto.comm.twait(") > mlir.index("pto.comm.tnotify(")
++        assert "notify_op set" in mlir and "wait_cmp ge" in mlir
++        assert "pto.syncall" not in mlir
++        assert "comm_ctx" not in mlir.lower()
++
+     def test_syncall_emits_hard_barrier_with_core_type(self):
+         """pl.system.syncall(core_type=...) emits pto.syncall() mode=<hard>."""
+ 
+diff --git a/tests/ut/language/parser/test_system_ops.py b/tests/ut/language/parser/test_system_ops.py
+index 782e05ce6..60d96092f 100644
+--- a/tests/ut/language/parser/test_system_ops.py
++++ b/tests/ut/language/parser/test_system_ops.py
+@@ -855,5 +855,41 @@ class TestLaunchShapeQueryParsing:
+             assert call.type.dtype == DataType.INT32
+ 
+ 
++def test_local_signal_round_trip():
++    """临时接口保留普通 GM Tensor、动态索引和 INT32 阈值。"""
++
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.AIV)
++        def kernel(
++            self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++            offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++        ) -> pl.Tensor[[256], pl.INT32]:
++            pl.system.signal_notify(signal, [offset], tag)
++            pl.system.signal_wait(signal, [offset], tag)
++            return signal
++
++    printed = Before.as_python()
++    assert "pl.system.signal_notify(" in printed
++    assert "pl.system.signal_wait(" in printed
++    ir.assert_structural_equal(Before, pl.parse_program(printed))
++
++
++@pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
++def test_local_signal_rejects_unsupported_storage(dtype):
++    """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], dtype), span)
++    with pytest.raises(ValueError, match="one-dimensional INT32"):
++        system_ops.signal_notify(signal, [0], 1)
++
++
++def test_local_signal_rejects_overflowing_literal():
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], DataType.INT32), span)
++    with pytest.raises(ValueError, match="outside INT32"):
++        system_ops.signal_wait(signal, [0], 1 << 31)
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])

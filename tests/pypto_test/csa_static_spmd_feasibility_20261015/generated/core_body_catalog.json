@@ -1,0 +1,5212 @@
+{
+  "source_ir": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/full_baseline_cpu/kernel/passes_dump/25_after_ExpandMixedKernel.py",
+  "logical_source_ir": "tests/pypto_test/results/csa_static_spmd_feasibility_20261015/full_baseline_cpu/kernel/passes_dump/10_after_OutlineIncoreScopes.py",
+  "body_bundle": "tests/pypto_test/csa_static_spmd_feasibility_20261015/generated/core_bodies_ir.py",
+  "physical_kernel_bodies": 73,
+  "logical_compute_bodies": 67,
+  "all_generated_kernel_bodies_covered": true,
+  "implicit_annotation_dimensions": [
+    "bs_heads_inline2066_inline4048__ssa_v0",
+    "cmp_block_num_inline3819__ssa_v0",
+    "cmp_block_num_inline4371__ssa_v0",
+    "hc_padded_rows__ssa_v0",
+    "key_rows_inline3222_inline4169__ssa_v0",
+    "key_rows_inline8656__ssa_v0",
+    "key_rows_inline9041__ssa_v0",
+    "key_rows_inline9391__ssa_v0",
+    "key_rows_inline9688__ssa_v0",
+    "ori_block_num_inline4369__ssa_v0",
+    "qa_tokens_inline48_inline8448__ssa_v0",
+    "qa_tokens_inline79_inline8471__ssa_v0",
+    "qproj_t_matmul_inline10_inline3586__ssa_v0",
+    "qr_t_matmul_inline2_inline3597__ssa_v0",
+    "shifted_rows_inline3223_inline4178__ssa_v0",
+    "shifted_rows_inline8748__ssa_v0",
+    "shifted_rows_inline9108__ssa_v0",
+    "shifted_rows_inline9361__ssa_v0",
+    "shifted_rows_inline9696__ssa_v0",
+    "t_dim_inline1450_inline3644__ssa_v0",
+    "t_dim_inline1474_inline3632__ssa_v0",
+    "t_dim_inline3567__ssa_v0",
+    "t_dim_inline3668__ssa_v0",
+    "t_dim_inline440__ssa_v0",
+    "t_dim_inline4518__ssa_v0",
+    "t_dim_inline4627__ssa_v0",
+    "t_dim_inline4745__ssa_v0",
+    "t_dim_inline4891__ssa_v0",
+    "t_dim_inline529__ssa_v0",
+    "t_dim_inline560__ssa_v0",
+    "t_dim_inline8493__ssa_v0",
+    "t_dim_inline8556__ssa_v0",
+    "t_heads_inline4306__ssa_v0",
+    "t_linear_inline461__ssa_v0",
+    "t_matmul_inline3663__ssa_v0",
+    "t_pad_inline523__ssa_v0"
+  ],
+  "kernel_count_by_role": {
+    "aiv": 48,
+    "aic": 25
+  },
+  "status": "EXTRACTED_NOT_YET_PARSED_OR_FUSED",
+  "kernels": [
+    {
+      "func_id": 0,
+      "name": "hc_widen_rms",
+      "core_type": "aiv",
+      "logical_task": "hc_widen_rms",
+      "original_source_line": 1179,
+      "original_end_line": 1231,
+      "parameters": [
+        {
+          "name": "inv_rms__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[hc_padded_rows__ssa_v0, 1], pl.FP32]]"
+        },
+        {
+          "name": "widen_tail__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[8, 16384], pl.FP32]]"
+        },
+        {
+          "name": "x_hc32_flat__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 16384], pl.FP32]]"
+        },
+        {
+          "name": "widen_rows__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "T_DYN",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_hc_flat__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 16384], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[hc_padded_rows__ssa_v0, 1], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "widen_rows__ssa_v0",
+        "T_DYN",
+        "original_block_idx",
+        "inv_rms__ssa_v0",
+        "widen_tail__ssa_v0",
+        "x_hc32_flat__ssa_v0",
+        "x_hc_flat__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(32, stage=4, init_values=(w_sq_sum__tile, widen_tail__iter_v1, x_hc32_flat__iter_v1))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 66
+    },
+    {
+      "func_id": 1,
+      "name": "hc_pre_linear",
+      "core_type": "aic",
+      "logical_task": "hc_pre_linear",
+      "original_source_line": 1110,
+      "original_end_line": 1153,
+      "parameters": [
+        {
+          "name": "mixes_partials_inline487__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_linear_inline461__ssa_v0 * pl.const(4, pl.INDEX), 32], pl.FP32]]"
+        },
+        {
+          "name": "linear_units_inline444__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "linear_workers_inline432__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "t_dim_inline440__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_flat_inline486__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline440__ssa_v0, 16384], pl.FP32]"
+        },
+        {
+          "name": "hc_attn_fn__ssa_v0",
+          "annotation": "pl.Tensor[[24, 16384], pl.FP32]"
+        },
+        {
+          "name": "t_linear_inline461__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_linear_inline461__ssa_v0 * pl.const(4, pl.INDEX), 32], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "linear_units_inline444__ssa_v0",
+        "linear_workers_inline432__ssa_v0",
+        "t_dim_inline440__ssa_v0",
+        "t_linear_inline461__ssa_v0",
+        "original_block_idx",
+        "mixes_partials_inline487__ssa_v0",
+        "x_flat_inline486__ssa_v0",
+        "hc_attn_fn__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(16, stage=2, init_values=(acc_inline437__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 108
+    },
+    {
+      "func_id": 2,
+      "name": "hc_pre_linear_reduce",
+      "core_type": "aiv",
+      "logical_task": "hc_pre_linear_reduce",
+      "original_source_line": 1075,
+      "original_end_line": 1094,
+      "parameters": [
+        {
+          "name": "mixes_partials_inline487__rv_v2",
+          "annotation": "pl.Tensor[[t_linear_inline461__ssa_v0 * pl.const(4, pl.INDEX), 32], pl.FP32]"
+        },
+        {
+          "name": "t_linear_inline461__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "mixes_raw_inline448__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_linear_inline461__ssa_v0",
+        "original_block_idx",
+        "mixes_partials_inline487__rv_v2",
+        "mixes_raw_inline448__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 132
+    },
+    {
+      "func_id": 3,
+      "name": "split_pre_post",
+      "core_type": "aiv",
+      "logical_task": "split_pre_post",
+      "original_source_line": 15632,
+      "original_end_line": 15693,
+      "parameters": [
+        {
+          "name": "hc_attn_scale__ssa_v0",
+          "annotation": "pl.Tensor[[3], pl.FP32]"
+        },
+        {
+          "name": "post_t__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 4], pl.FP32]]"
+        },
+        {
+          "name": "post_tail_store_inline491__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[8, 8], pl.FP32]]"
+        },
+        {
+          "name": "pre_val_store__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[hc_padded_rows__ssa_v0, 8], pl.FP32]]"
+        },
+        {
+          "name": "token_tiles_inline443__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "t_dim_inline440__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "inv_rms__rv_v2",
+          "annotation": "pl.Tensor[[hc_padded_rows__ssa_v0, 1], pl.FP32]"
+        },
+        {
+          "name": "hc_attn_base__ssa_v0",
+          "annotation": "pl.Tensor[[24], pl.FP32]"
+        },
+        {
+          "name": "mixes_raw_inline448__ssa_v1",
+          "annotation": "pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[T_DYN, 4], pl.FP32], pl.Tensor[[hc_padded_rows__ssa_v0, 8], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "token_tiles_inline443__ssa_v0",
+        "t_dim_inline440__ssa_v0",
+        "original_block_idx",
+        "hc_attn_scale__ssa_v0",
+        "post_t__ssa_v0",
+        "post_tail_store_inline491__ssa_v0",
+        "pre_val_store__ssa_v0",
+        "inv_rms__rv_v2",
+        "hc_attn_base__ssa_v0",
+        "mixes_raw_inline448__ssa_v1"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 146
+    },
+    {
+      "func_id": 4,
+      "name": "comb_sinkhorn",
+      "core_type": "aiv",
+      "logical_task": "comb_sinkhorn",
+      "original_source_line": 416,
+      "original_end_line": 585,
+      "parameters": [
+        {
+          "name": "hc_attn_scale__ssa_v0",
+          "annotation": "pl.Tensor[[3], pl.FP32]"
+        },
+        {
+          "name": "t_dim_inline440__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "inv_rms__rv_v2",
+          "annotation": "pl.Tensor[[hc_padded_rows__ssa_v0, 1], pl.FP32]"
+        },
+        {
+          "name": "mixes_raw_inline448__ssa_v1",
+          "annotation": "pl.Tensor[[t_linear_inline461__ssa_v0, 32], pl.FP32]"
+        },
+        {
+          "name": "hc_base_2d_inline462__ssa_v0",
+          "annotation": "pl.Tensor[[1, 24], pl.FP32]"
+        },
+        {
+          "name": "comb_t__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 16], pl.FP32]]"
+        },
+        {
+          "name": "comb_tail_store_inline449__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[8, 32], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[T_DYN, 16], pl.FP32], pl.Tensor[[8, 32], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline440__ssa_v0",
+        "original_block_idx",
+        "hc_attn_scale__ssa_v0",
+        "inv_rms__rv_v2",
+        "mixes_raw_inline448__ssa_v1",
+        "hc_base_2d_inline462__ssa_v0",
+        "comb_t__ssa_v0",
+        "comb_tail_store_inline449__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(19, stage=2, init_values=(row0_cur_inline388__ssa_v0, row1_cur_inline438__ssa_v0, row2_cur_inline387__ssa_v0, row3_cur_inline386__ssa_v0))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 193
+    },
+    {
+      "func_id": 5,
+      "name": "mix_x_rms_norm",
+      "core_type": "aiv",
+      "logical_task": "mix_x_rms_norm",
+      "original_source_line": 11033,
+      "original_end_line": 11132,
+      "parameters": [
+        {
+          "name": "t_dim_inline529__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "pre_val_store__rv_v2",
+          "annotation": "pl.Tensor[[hc_padded_rows__ssa_v0, 8], pl.FP32]"
+        },
+        {
+          "name": "x_mixed_inline534__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[t_pad_inline523__ssa_v0, 4096], pl.BF16]]"
+        },
+        {
+          "name": "x_flat_inline525__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline529__ssa_v0, 16384], pl.FP32]"
+        },
+        {
+          "name": "x_normed_t__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 4096], pl.BF16]]"
+        },
+        {
+          "name": "x_normed_tail_store_inline516__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[8, 4096], pl.BF16]]"
+        },
+        {
+          "name": "attn_norm_w__ssa_v0",
+          "annotation": "pl.Tensor[[4096], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[T_DYN, 4096], pl.BF16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline529__ssa_v0",
+        "original_block_idx",
+        "pre_val_store__rv_v2",
+        "x_mixed_inline534__ssa_v0",
+        "x_flat_inline525__ssa_v0",
+        "x_normed_t__ssa_v0",
+        "x_normed_tail_store_inline516__ssa_v0",
+        "attn_norm_w__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(16, stage=2, init_values=(sq_sum_inline530__tile, x_mixed_inline534__ssa_v0))",
+        "pl.pipeline(16, stage=2, init_values=(x_normed_t__ssa_v0, x_normed_tail_store_inline516__ssa_v0))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 327
+    },
+    {
+      "func_id": 6,
+      "name": "csa_row_offsets",
+      "core_type": "aiv",
+      "logical_task": "csa_row_offsets",
+      "original_source_line": 830,
+      "original_end_line": 861,
+      "parameters": [
+        {
+          "name": "cmp_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_query_start_loc__ssa_v0",
+          "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_row_offsets__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[B_DYN], pl.INT32]]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_query_start_loc__ssa_v0",
+          "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_row_offsets__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[B_DYN], pl.INT32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {},
+      "inline_parameter_order": [
+        "cmp_seq_lens__ssa_v0",
+        "cmp_query_start_loc__ssa_v0",
+        "cmp_row_offsets__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "idx_query_start_loc__ssa_v0",
+        "idx_row_offsets__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 399
+    },
+    {
+      "func_id": 7,
+      "name": "csa_rope_sign",
+      "core_type": "aiv",
+      "logical_task": "csa_rope_sign",
+      "original_source_line": 790,
+      "original_end_line": 815,
+      "parameters": [
+        {
+          "name": "rope_sign_blocks__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "T_DYN",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "freqs_sin__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "idx_sin_signed__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 64], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "rope_sign_blocks__ssa_v0",
+        "T_DYN",
+        "original_block_idx",
+        "freqs_sin__ssa_v0",
+        "idx_sin_signed__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 424
+    },
+    {
+      "func_id": 8,
+      "name": "q_rope_prepare",
+      "core_type": "aiv",
+      "logical_task": "q_rope_prepare",
+      "original_source_line": 12932,
+      "original_end_line": 13011,
+      "parameters": [
+        {
+          "name": "rope_sin_signed_view_inline3575__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline3567__ssa_v0, 64], pl.FP32]]"
+        },
+        {
+          "name": "rope_swap_idx_view_inline3564__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline3567__ssa_v0, 64], pl.INT32]]"
+        },
+        {
+          "name": "token_tiles_inline3560__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "t_dim_inline3567__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "rope_sin_view_inline3559__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline3567__ssa_v0, 64], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "token_tiles_inline3560__ssa_v0",
+        "t_dim_inline3567__ssa_v0",
+        "original_block_idx",
+        "rope_sin_signed_view_inline3575__ssa_v0",
+        "rope_swap_idx_view_inline3564__ssa_v0",
+        "rope_sin_view_inline3559__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 448
+    },
+    {
+      "func_id": 9,
+      "name": "qr_proj_matmul",
+      "core_type": "aic",
+      "logical_task": "qr_proj_matmul",
+      "original_source_line": 14182,
+      "original_end_line": 14288,
+      "parameters": [
+        {
+          "name": "qr_fp32_inline1_inline3598__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[qr_t_matmul_inline2_inline3597__ssa_v0, 1024], pl.FP32]]"
+        },
+        {
+          "name": "qr_full_rows_inline53_inline8466__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_m_groups_inline58_inline8419__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3_inline3594__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_view_inline50_inline8453__ssa_v0",
+          "annotation": "pl.Tensor[[qa_tokens_inline48_inline8448__ssa_v0, 4096], pl.BF16]"
+        },
+        {
+          "name": "wq_a__ssa_v0",
+          "annotation": "pl.Tensor[[1, 256, 64, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "qr_t_matmul_inline54_inline8450__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline4_inline3595__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[qr_t_matmul_inline2_inline3597__ssa_v0, 1024], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "qr_full_rows_inline53_inline8466__ssa_v0",
+        "qr_m_groups_inline58_inline8419__ssa_v0",
+        "tile_base_inline3_inline3594__idx_v0",
+        "qr_t_matmul_inline54_inline8450__ssa_v0",
+        "tile_rows_inline4_inline3595__ssa_v0",
+        "original_block_idx",
+        "qr_fp32_inline1_inline3598__ssa_v0",
+        "x_view_inline50_inline8453__ssa_v0",
+        "wq_a__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(16, stage=2, init_values=(dense_acc_inline44_inline8432__tile,))",
+        "pl.pipeline(16, stage=2, init_values=(q_acc_inline42_inline8413__tile,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(dense_acc_inline44_inline8432__iter_v1,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(q_acc_inline42_inline8413__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 503
+    },
+    {
+      "func_id": 10,
+      "name": "qr_proj_matmul_0",
+      "core_type": "aic",
+      "logical_task": "qr_proj_matmul_0",
+      "original_source_line": 14316,
+      "original_end_line": 14422,
+      "parameters": [
+        {
+          "name": "qr_fp32_inline1_inline3598__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[qr_t_matmul_inline2_inline3597__ssa_v0, 1024], pl.FP32]]"
+        },
+        {
+          "name": "qr_full_rows_inline82_inline8408__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_m_groups_inline80_inline8407__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3_inline3594__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_view_inline78_inline8472__ssa_v0",
+          "annotation": "pl.Tensor[[qa_tokens_inline79_inline8471__ssa_v0, 4096], pl.BF16]"
+        },
+        {
+          "name": "wq_a__ssa_v0",
+          "annotation": "pl.Tensor[[1, 256, 64, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "qr_t_matmul_inline84_inline8427__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline4_inline3595__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[qr_t_matmul_inline2_inline3597__ssa_v0, 1024], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "qr_full_rows_inline82_inline8408__ssa_v0",
+        "qr_m_groups_inline80_inline8407__ssa_v0",
+        "tile_base_inline3_inline3594__idx_v0",
+        "qr_t_matmul_inline84_inline8427__ssa_v0",
+        "tile_rows_inline4_inline3595__ssa_v0",
+        "original_block_idx",
+        "qr_fp32_inline1_inline3598__ssa_v0",
+        "x_view_inline78_inline8472__ssa_v0",
+        "wq_a__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(16, stage=2, init_values=(dense_acc_inline88_inline8438__tile,))",
+        "pl.pipeline(16, stage=2, init_values=(q_acc_inline71_inline8394__tile,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(dense_acc_inline88_inline8438__iter_v1,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(q_acc_inline71_inline8394__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 545
+    },
+    {
+      "func_id": 11,
+      "name": "qr_rms_norm_quant",
+      "core_type": "aiv",
+      "logical_task": "qr_rms_norm_quant",
+      "original_source_line": 14450,
+      "original_end_line": 14544,
+      "parameters": [
+        {
+          "name": "gamma_cq_view_inline8485__ssa_v0",
+          "annotation": "pl.Tensor[[1, 1024], pl.BF16]"
+        },
+        {
+          "name": "qr_token_tiles_inline8500__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_norm_workers_inline8483__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline4_inline3595__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3_inline3594__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_fp32_inline1_inline3598__phi_v31",
+          "annotation": "pl.Tensor[[qr_t_matmul_inline2_inline3597__ssa_v0, 1024], pl.FP32]"
+        },
+        {
+          "name": "qr_scale_pad_store_inline3589__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[512, 1], pl.FP32]]"
+        },
+        {
+          "name": "qr_scale_view_inline8490__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline8493__ssa_v0, 1], pl.FP32]]"
+        },
+        {
+          "name": "qr_i8_matmul_inline3588__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[512, 1024], pl.INT8]]"
+        },
+        {
+          "name": "qr_view_inline8492__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline8493__ssa_v0, 1024], pl.INT8]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[512, 1], pl.FP32], pl.Tensor[[t_dim_inline8493__ssa_v0, 1], pl.FP32], pl.Tensor[[512, 1024], pl.INT8], pl.Tensor[[t_dim_inline8493__ssa_v0, 1024], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "qr_token_tiles_inline8500__ssa_v0",
+        "qr_norm_workers_inline8483__ssa_v0",
+        "tile_rows_inline4_inline3595__ssa_v0",
+        "tile_base_inline3_inline3594__idx_v0",
+        "original_block_idx",
+        "gamma_cq_view_inline8485__ssa_v0",
+        "qr_fp32_inline1_inline3598__phi_v31",
+        "qr_scale_pad_store_inline3589__ssa_v0",
+        "qr_scale_view_inline8490__ssa_v0",
+        "qr_i8_matmul_inline3588__ssa_v0",
+        "qr_view_inline8492__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 1024, 256, stage=2, init_values=(qr_amax_g_inline8495__ssa_v0, qr_sq_sum_inline8484__ssa_v0))",
+        "pl.pipeline(0, 1024, 256, stage=2)"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 587
+    },
+    {
+      "func_id": 12,
+      "name": "qproj_matmul",
+      "core_type": "aic",
+      "logical_task": "qproj_matmul",
+      "original_source_line": 14007,
+      "original_end_line": 14058,
+      "parameters": [
+        {
+          "name": "q_proj_i32_inline7_inline3585__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[qproj_t_matmul_inline10_inline3586__ssa_v0, 32768], pl.INT32]]"
+        },
+        {
+          "name": "qproj_t_matmul_inline8513__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline11_inline3587__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_i8_matmul_inline3588__ssa_v0",
+          "annotation": "pl.Tensor[[512, 1024], pl.INT8]"
+        },
+        {
+          "name": "wq_b__ssa_v0",
+          "annotation": "pl.Tensor[[1, 1024, 64, 16, 32], pl.INT8, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[qproj_t_matmul_inline10_inline3586__ssa_v0, 32768], pl.INT32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "qproj_t_matmul_inline8513__ssa_v0",
+        "tile_rows_inline11_inline3587__ssa_v0",
+        "original_block_idx",
+        "q_proj_i32_inline7_inline3585__ssa_v0",
+        "qr_i8_matmul_inline3588__ssa_v0",
+        "wq_b__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(256, 1024, 256, stage=2, init_values=(col_acc_inline8523__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 651
+    },
+    {
+      "func_id": 13,
+      "name": "qproj_dequant_rms_nope_rope",
+      "core_type": "aiv",
+      "logical_task": "qproj_dequant_rms_nope_rope",
+      "original_source_line": 13785,
+      "original_end_line": 13978,
+      "parameters": [
+        {
+          "name": "tile_rows_inline11_inline3587__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline12_inline3596__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_scale_pad_store_inline3589__ssa_v0",
+          "annotation": "pl.Tensor[[512, 1], pl.FP32]"
+        },
+        {
+          "name": "freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "q_rope_sin_signed_inline558__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline560__ssa_v0, 64], pl.FP32]"
+        },
+        {
+          "name": "q_rope_swap_idx_inline557__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline560__ssa_v0, 64], pl.INT32]"
+        },
+        {
+          "name": "q_proj_i32_inline7_inline3585__ssa_v6",
+          "annotation": "pl.Tensor[[qproj_t_matmul_inline10_inline3586__ssa_v0, 32768], pl.INT32]"
+        },
+        {
+          "name": "wq_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[32768], pl.FP32]"
+        },
+        {
+          "name": "q_flat_inline8548__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline8556__ssa_v0, 32768], pl.BF16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_dim_inline8556__ssa_v0, 32768], pl.BF16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "tile_rows_inline11_inline3587__ssa_v0",
+        "tile_base_inline12_inline3596__idx_v0",
+        "original_block_idx",
+        "qr_scale_pad_store_inline3589__ssa_v0",
+        "freqs_cos__ssa_v0",
+        "q_rope_sin_signed_inline558__ssa_v0",
+        "q_rope_swap_idx_inline557__ssa_v0",
+        "q_proj_i32_inline7_inline3585__ssa_v6",
+        "wq_b_scale__ssa_v0",
+        "q_flat_inline8548__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(dq_head_tile_inline8559__phi_v4, stage=2)"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 677
+    },
+    {
+      "func_id": 14,
+      "name": "kv_proj_matmul",
+      "core_type": "aic",
+      "logical_task": "kv_proj_matmul",
+      "original_source_line": 10298,
+      "original_end_line": 10390,
+      "parameters": [
+        {
+          "name": "kv_m_groups_inline1466_inline3638__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "kv_fp32_inline3665__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_matmul_inline3663__ssa_v0, 512], pl.FP32]]"
+        },
+        {
+          "name": "kv_full_rows_inline1452_inline3639__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3655__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_view_inline1451_inline3640__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline1450_inline3644__ssa_v0, 4096], pl.BF16]"
+        },
+        {
+          "name": "wkv__ssa_v0",
+          "annotation": "pl.Tensor[[4096, 512], pl.BF16]"
+        },
+        {
+          "name": "t_matmul_inline3663__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline3661__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_matmul_inline3663__ssa_v0, 512], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "kv_m_groups_inline1466_inline3638__ssa_v0",
+        "kv_full_rows_inline1452_inline3639__ssa_v0",
+        "tile_base_inline3655__idx_v0",
+        "t_matmul_inline3663__ssa_v0",
+        "tile_rows_inline3661__ssa_v0",
+        "original_block_idx",
+        "kv_fp32_inline3665__ssa_v0",
+        "x_view_inline1451_inline3640__ssa_v0",
+        "wkv__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(dense_acc_inline1464_inline3624__tile,))",
+        "pl.pipeline(8, stage=2, init_values=(kv_acc_inline1445_inline3696__tile,))",
+        "pl.pipeline(0, 512, 128, stage=2, init_values=(dense_acc_inline1464_inline3624__iter_v1,))",
+        "pl.pipeline(0, 512, 128, stage=2, init_values=(kv_acc_inline1445_inline3696__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 813
+    },
+    {
+      "func_id": 15,
+      "name": "kv_proj_matmul_0",
+      "core_type": "aic",
+      "logical_task": "kv_proj_matmul_0",
+      "original_source_line": 10418,
+      "original_end_line": 10510,
+      "parameters": [
+        {
+          "name": "kv_m_groups_inline1490_inline3660__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "kv_fp32_inline3665__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_matmul_inline3663__ssa_v0, 512], pl.FP32]]"
+        },
+        {
+          "name": "kv_full_rows_inline1475_inline3651__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3655__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_view_inline1476_inline3614__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline1474_inline3632__ssa_v0, 4096], pl.BF16]"
+        },
+        {
+          "name": "wkv__ssa_v0",
+          "annotation": "pl.Tensor[[4096, 512], pl.BF16]"
+        },
+        {
+          "name": "t_matmul_inline3663__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_rows_inline3661__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_matmul_inline3663__ssa_v0, 512], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "kv_m_groups_inline1490_inline3660__ssa_v0",
+        "kv_full_rows_inline1475_inline3651__ssa_v0",
+        "tile_base_inline3655__idx_v0",
+        "t_matmul_inline3663__ssa_v0",
+        "tile_rows_inline3661__ssa_v0",
+        "original_block_idx",
+        "kv_fp32_inline3665__ssa_v0",
+        "x_view_inline1476_inline3614__ssa_v0",
+        "wkv__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(dense_acc_inline1489_inline3712__tile,))",
+        "pl.pipeline(8, stage=2, init_values=(kv_acc_inline1479_inline3716__tile,))",
+        "pl.pipeline(0, 512, 128, stage=2, init_values=(dense_acc_inline1489_inline3712__iter_v1,))",
+        "pl.pipeline(0, 512, 128, stage=2, init_values=(kv_acc_inline1479_inline3716__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 853
+    },
+    {
+      "func_id": 16,
+      "name": "kv_rms_norm_rope",
+      "core_type": "aiv",
+      "logical_task": "kv_rms_norm_rope",
+      "original_source_line": 10538,
+      "original_end_line": 10715,
+      "parameters": [
+        {
+          "name": "tile_rows_inline3661__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "tile_base_inline3655__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "kv_fp32_inline3665__phi_v23",
+          "annotation": "pl.Tensor[[t_matmul_inline3663__ssa_v0, 512], pl.FP32]"
+        },
+        {
+          "name": "kv_view_inline3736__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[t_dim_inline3668__ssa_v0, 512], pl.BF16]]"
+        },
+        {
+          "name": "gamma_ckv__ssa_v0",
+          "annotation": "pl.Tensor[[512], pl.BF16]"
+        },
+        {
+          "name": "freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "q_rope_sin_signed_inline558__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline560__ssa_v0, 64], pl.FP32]"
+        },
+        {
+          "name": "q_rope_swap_idx_inline557__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline560__ssa_v0, 64], pl.INT32]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[t_dim_inline3668__ssa_v0, 512], pl.BF16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "tile_rows_inline3661__ssa_v0",
+        "tile_base_inline3655__idx_v0",
+        "original_block_idx",
+        "kv_fp32_inline3665__phi_v23",
+        "kv_view_inline3736__ssa_v0",
+        "gamma_ckv__ssa_v0",
+        "freqs_cos__ssa_v0",
+        "q_rope_sin_signed_inline558__ssa_v0",
+        "q_rope_swap_idx_inline557__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 512, 64, stage=2, init_values=(kv_sq_lanes_inline3731__tile,))",
+        "pl.pipeline(0, 448, 64, stage=2, init_values=(kv_view_inline3736__ssa_v0,))",
+        "pl.pipeline(0, 512, 64, stage=2, init_values=(kv_sq_lanes_tail_inline3621__ssa_v0,))",
+        "pl.pipeline(0, 448, 64, stage=2)"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 893
+    },
+    {
+      "func_id": 17,
+      "name": "csa_cache_writeback",
+      "core_type": "aiv",
+      "logical_task": "csa_cache_writeback",
+      "original_source_line": 751,
+      "original_end_line": 775,
+      "parameters": [
+        {
+          "name": "kv_cache_flat__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[ORI_BLOCK_NUM_DYN * pl.const(32, pl.INDEX), 512], pl.BF16]]"
+        },
+        {
+          "name": "wb_blocks__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "T_DYN",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "ori_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 2], pl.INT32]"
+        },
+        {
+          "name": "kv__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 512], pl.BF16]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "wb_blocks__ssa_v0",
+        "T_DYN",
+        "original_block_idx",
+        "kv_cache_flat__ssa_v0",
+        "ori_slot_mapping__ssa_v0",
+        "kv__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1014
+    },
+    {
+      "func_id": 18,
+      "name": "kv_score_proj",
+      "core_type": "aic",
+      "logical_task": "kv_score_proj",
+      "original_source_line": 10742,
+      "original_end_line": 10910,
+      "parameters": [
+        {
+          "name": "cmp4_kv_proj_pad_inline281_inline3787__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 1024], pl.FP32]]"
+        },
+        {
+          "name": "cmp4_score_proj_pad_inline284_inline3769__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 1024], pl.FP32]]"
+        },
+        {
+          "name": "t_matmul_inline274_inline3773__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline273_inline3759__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_flat_inline278_inline3772__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 4096], pl.BF16]"
+        },
+        {
+          "name": "cmp_wkv__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 4096], pl.BF16]"
+        },
+        {
+          "name": "cmp_wgate__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 4096], pl.BF16]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_matmul_inline274_inline3773__ssa_v0",
+        "bs_inline273_inline3759__ssa_v0",
+        "original_block_idx",
+        "cmp4_kv_proj_pad_inline281_inline3787__ssa_v0",
+        "cmp4_score_proj_pad_inline284_inline3769__ssa_v0",
+        "x_flat_inline278_inline3772__ssa_v0",
+        "cmp_wkv__ssa_v0",
+        "cmp_wgate__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(kv_acc_inline277_inline3758__tile_narrowed, score_acc_inline280_inline3791__tile_narrowed))",
+        "pl.pipeline(0, 512, 256, stage=2, init_values=(kv_acc_inline277_inline3758__tile_l0_init,))",
+        "pl.pipeline(0, 512, 256, stage=2, init_values=(score_acc_inline280_inline3791__tile_l0_init,))",
+        "pl.pipeline(0, 512, 256, stage=2, init_values=(kv_acc_inline277_inline3758__iter_v1,))",
+        "pl.pipeline(0, 512, 256, stage=2, init_values=(score_acc_inline280_inline3791__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1035
+    },
+    {
+      "func_id": 19,
+      "name": "scatter_softmax_pool",
+      "core_type": "aiv",
+      "logical_task": "scatter_softmax_pool",
+      "original_source_line": 15305,
+      "original_end_line": 15427,
+      "parameters": [
+        {
+          "name": "pooled_kv_inline567__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 512], pl.FP32]]"
+        },
+        {
+          "name": "b_dim_inline308_inline3788__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "pool_workers_inline297_inline3797__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "s_dim_inline307_inline3792__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "cmp_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp4_score_proj_pad_inline299_inline3775__ssa_v0",
+          "annotation": "pl.Tensor[[384, 1024], pl.FP32]"
+        },
+        {
+          "name": "cmp_ape__ssa_v0",
+          "annotation": "pl.Tensor[[4, 1024], pl.FP32]"
+        },
+        {
+          "name": "cmp4_kv_proj_pad_inline300_inline3767__ssa_v0",
+          "annotation": "pl.Tensor[[384, 1024], pl.FP32]"
+        },
+        {
+          "name": "state_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, STATE_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "compress_state__ssa_v0",
+          "annotation": "pl.Tensor[[MAIN_STATE_BLOCK_NUM_DYN, STATE_PAGE_ELEMENTS_DYN], pl.FP32]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[384, 512], pl.FP32], pl.Tensor[[384, 512], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "b_dim_inline308_inline3788__ssa_v0",
+        "pool_workers_inline297_inline3797__ssa_v0",
+        "s_dim_inline307_inline3792__ssa_v0",
+        "original_block_idx",
+        "pooled_kv_inline567__ssa_v0",
+        "position_ids__ssa_v0",
+        "cmp_seq_lens__ssa_v0",
+        "cmp4_score_proj_pad_inline299_inline3775__ssa_v0",
+        "cmp_ape__ssa_v0",
+        "cmp4_kv_proj_pad_inline300_inline3767__ssa_v0",
+        "state_block_table__ssa_v0",
+        "compress_state__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1092
+    },
+    {
+      "func_id": 20,
+      "name": "compress_state_commit",
+      "core_type": "aiv",
+      "logical_task": "compress_state_commit",
+      "original_source_line": 607,
+      "original_end_line": 649,
+      "parameters": [
+        {
+          "name": "compress_state__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[MAIN_STATE_BLOCK_NUM_DYN, STATE_PAGE_ELEMENTS_DYN], pl.FP32]]"
+        },
+        {
+          "name": "b_dim_inline3818__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "commit_workers_inline3840__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "s_dim_inline3837__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "state_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 2], pl.INT32]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "cmp4_kv_proj_pad_inline3836__ssa_v0",
+          "annotation": "pl.Tensor[[384, 1024], pl.FP32]"
+        },
+        {
+          "name": "cmp4_score_proj_pad_inline3838__ssa_v0",
+          "annotation": "pl.Tensor[[384, 1024], pl.FP32]"
+        },
+        {
+          "name": "cmp_ape__ssa_v0",
+          "annotation": "pl.Tensor[[4, 1024], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "b_dim_inline3818__ssa_v0",
+        "commit_workers_inline3840__ssa_v0",
+        "s_dim_inline3837__ssa_v0",
+        "original_block_idx",
+        "compress_state__ssa_v0",
+        "state_slot_mapping__ssa_v0",
+        "position_ids__ssa_v0",
+        "cmp4_kv_proj_pad_inline3836__ssa_v0",
+        "cmp4_score_proj_pad_inline3838__ssa_v0",
+        "cmp_ape__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1169
+    },
+    {
+      "func_id": 21,
+      "name": "rmsnorm_rope_cache_write",
+      "core_type": "aiv",
+      "logical_task": "rmsnorm_rope_cache_write",
+      "original_source_line": 14914,
+      "original_end_line": 15058,
+      "parameters": [
+        {
+          "name": "bs_inline3815__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "cmp_row_offsets__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[COMPRESSED_ROWS_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "cmp_freqs_sin__ssa_v0",
+          "annotation": "pl.Tensor[[COMPRESSED_ROWS_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "pooled_kv_inline567__rv_v2",
+          "annotation": "pl.Tensor[[384, 512], pl.FP32]"
+        },
+        {
+          "name": "normed_kv_inline3852__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 512], pl.FP32]]"
+        },
+        {
+          "name": "norm_w_2d_inline3844__ssa_v0",
+          "annotation": "pl.Tensor[[1, 512], pl.BF16]"
+        },
+        {
+          "name": "cmp_kv_cache_flat_inline3834__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[cmp_block_num_inline3819__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]]"
+        },
+        {
+          "name": "kv_flat_inline3830__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.FP32]]"
+        },
+        {
+          "name": "cmp_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[COMPRESSED_ROWS_DYN, 2], pl.INT32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "bs_inline3815__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "cmp_row_offsets__ssa_v0",
+        "cmp_freqs_cos__ssa_v0",
+        "cmp_freqs_sin__ssa_v0",
+        "pooled_kv_inline567__rv_v2",
+        "normed_kv_inline3852__ssa_v0",
+        "norm_w_2d_inline3844__ssa_v0",
+        "cmp_kv_cache_flat_inline3834__ssa_v0",
+        "kv_flat_inline3830__ssa_v0",
+        "cmp_seq_lens__ssa_v0",
+        "cmp_slot_mapping__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1196
+    },
+    {
+      "func_id": 22,
+      "name": "kv_score_proj_0",
+      "core_type": "aic",
+      "logical_task": "kv_score_proj_0",
+      "original_source_line": 10935,
+      "original_end_line": 10996,
+      "parameters": [
+        {
+          "name": "kv_proj_pad_inline3911__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 256], pl.FP32]]"
+        },
+        {
+          "name": "score_proj_pad_inline3938__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 256], pl.FP32]]"
+        },
+        {
+          "name": "t_matmul_inline1594_inline3937__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline1593_inline3928__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_flat_inline1595_inline3942__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 4096], pl.BF16]"
+        },
+        {
+          "name": "inner_wkv__ssa_v0",
+          "annotation": "pl.Tensor[[256, 4096], pl.BF16]"
+        },
+        {
+          "name": "inner_wgate__ssa_v0",
+          "annotation": "pl.Tensor[[256, 4096], pl.BF16]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[384, 256], pl.FP32], pl.Tensor[[384, 256], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_matmul_inline1594_inline3937__ssa_v0",
+        "bs_inline1593_inline3928__ssa_v0",
+        "original_block_idx",
+        "kv_proj_pad_inline3911__ssa_v0",
+        "score_proj_pad_inline3938__ssa_v0",
+        "x_flat_inline1595_inline3942__ssa_v0",
+        "inner_wkv__ssa_v0",
+        "inner_wgate__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(kv_acc_inline1599_inline3929__tile, score_acc_inline1604_inline3930__tile))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1316
+    },
+    {
+      "func_id": 23,
+      "name": "scatter_softmax_pool_0",
+      "core_type": "aiv",
+      "logical_task": "scatter_softmax_pool_0",
+      "original_source_line": 15463,
+      "original_end_line": 15600,
+      "parameters": [
+        {
+          "name": "pooled_kv_inline3908__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 128], pl.FP32]]"
+        },
+        {
+          "name": "b_dim_inline1638_inline3904__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "pool_workers_inline1636_inline3917__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "s_dim_inline1634_inline3899__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "score_proj_pad_inline3938__rv_v2",
+          "annotation": "pl.Tensor[[384, 256], pl.FP32]"
+        },
+        {
+          "name": "inner_ape__ssa_v0",
+          "annotation": "pl.Tensor[[4, 256], pl.FP32]"
+        },
+        {
+          "name": "kv_proj_pad_inline3911__rv_v2",
+          "annotation": "pl.Tensor[[384, 256], pl.FP32]"
+        },
+        {
+          "name": "inner_state_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INNER_STATE_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "inner_compress_state__ssa_v0",
+          "annotation": "pl.Tensor[[INNER_STATE_BLOCK_NUM_DYN, INNER_STATE_PAGE_ELEMENTS_DYN], pl.FP32]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 128], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "b_dim_inline1638_inline3904__ssa_v0",
+        "pool_workers_inline1636_inline3917__ssa_v0",
+        "s_dim_inline1634_inline3899__ssa_v0",
+        "original_block_idx",
+        "pooled_kv_inline3908__ssa_v0",
+        "position_ids__ssa_v0",
+        "score_proj_pad_inline3938__rv_v2",
+        "inner_ape__ssa_v0",
+        "kv_proj_pad_inline3911__rv_v2",
+        "inner_state_block_table__ssa_v0",
+        "inner_compress_state__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1344
+    },
+    {
+      "func_id": 24,
+      "name": "compress_state_commit_0",
+      "core_type": "aiv",
+      "logical_task": "compress_state_commit_0",
+      "original_source_line": 678,
+      "original_end_line": 722,
+      "parameters": [
+        {
+          "name": "inner_compress_state__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[INNER_STATE_BLOCK_NUM_DYN, INNER_STATE_PAGE_ELEMENTS_DYN], pl.FP32]]"
+        },
+        {
+          "name": "b_dim_inline1638_inline3904__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "commit_workers_inline1662_inline3965__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "s_dim_inline1634_inline3899__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "inner_state_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 2], pl.INT32]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_proj_pad_inline3911__rv_v2",
+          "annotation": "pl.Tensor[[384, 256], pl.FP32]"
+        },
+        {
+          "name": "score_proj_pad_inline3938__rv_v2",
+          "annotation": "pl.Tensor[[384, 256], pl.FP32]"
+        },
+        {
+          "name": "inner_ape__ssa_v0",
+          "annotation": "pl.Tensor[[4, 256], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "b_dim_inline1638_inline3904__ssa_v0",
+        "commit_workers_inline1662_inline3965__ssa_v0",
+        "s_dim_inline1634_inline3899__ssa_v0",
+        "original_block_idx",
+        "inner_compress_state__ssa_v0",
+        "inner_state_slot_mapping__ssa_v0",
+        "position_ids__ssa_v0",
+        "kv_proj_pad_inline3911__rv_v2",
+        "score_proj_pad_inline3938__rv_v2",
+        "inner_ape__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1425
+    },
+    {
+      "func_id": 25,
+      "name": "indexer_boundary_init",
+      "core_type": "aiv",
+      "logical_task": "indexer_boundary_init",
+      "original_source_line": 1527,
+      "original_end_line": 1533,
+      "parameters": [
+        {
+          "name": "normed_kv_inline574__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 128], pl.BF16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 128], pl.BF16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "normed_kv_inline574__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1452
+    },
+    {
+      "func_id": 26,
+      "name": "rmsnorm_rope",
+      "core_type": "aiv",
+      "logical_task": "rmsnorm_rope",
+      "original_source_line": 15093,
+      "original_end_line": 15225,
+      "parameters": [
+        {
+          "name": "normed_kv_inline574__ssa_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 128], pl.BF16]]"
+        },
+        {
+          "name": "rms_blocks_inline1646_inline3901__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "rms_workers_inline1639_inline3967__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline1644_inline3932__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "idx_row_offsets__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "inner_freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[INDEXER_ROWS_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "inner_freqs_sin__ssa_v0",
+          "annotation": "pl.Tensor[[INDEXER_ROWS_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "pooled_kv_inline3908__rv_v2",
+          "annotation": "pl.Tensor[[384, 128], pl.FP32]"
+        },
+        {
+          "name": "norm_w_2d_inline1659_inline3897__ssa_v0",
+          "annotation": "pl.Tensor[[1, 128], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 128], pl.BF16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "rms_blocks_inline1646_inline3901__ssa_v0",
+        "rms_workers_inline1639_inline3967__ssa_v0",
+        "bs_inline1644_inline3932__ssa_v0",
+        "original_block_idx",
+        "normed_kv_inline574__ssa_v1",
+        "position_ids__ssa_v0",
+        "idx_row_offsets__ssa_v0",
+        "inner_freqs_cos__ssa_v0",
+        "inner_freqs_sin__ssa_v0",
+        "pooled_kv_inline3908__rv_v2",
+        "norm_w_2d_inline1659_inline3897__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1461
+    },
+    {
+      "func_id": 27,
+      "name": "kv_hadamard",
+      "core_type": "aic",
+      "logical_task": "kv_hadamard",
+      "original_source_line": 10267,
+      "original_end_line": 10295,
+      "parameters": [
+        {
+          "name": "kv_final_inline3998__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 128], pl.FP32]]"
+        },
+        {
+          "name": "hadamard_idx__ssa_v0",
+          "annotation": "pl.Tensor[[128, 128], pl.BF16]"
+        },
+        {
+          "name": "rms_blocks_inline4008__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "compact_rows_inline4000__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "normed_kv_inline574__rv_v3",
+          "annotation": "pl.Tensor[[384, 128], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 128], pl.FP32]",
+      "implicit_worker_replacements": {},
+      "inline_parameter_order": [
+        "rms_blocks_inline4008__ssa_v0",
+        "compact_rows_inline4000__ssa_v0",
+        "kv_final_inline3998__ssa_v0",
+        "hadamard_idx__ssa_v0",
+        "normed_kv_inline574__rv_v3"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1567
+    },
+    {
+      "func_id": 28,
+      "name": "kv_and_cache_write",
+      "core_type": "aiv",
+      "logical_task": "kv_and_cache_write",
+      "original_source_line": 10167,
+      "original_end_line": 10235,
+      "parameters": [
+        {
+          "name": "compact_rows_inline4000__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "kv_final_inline3998__rv_v2",
+          "annotation": "pl.Tensor[[384, 128], pl.FP32]"
+        },
+        {
+          "name": "idx_kv_scale_values_inline3994__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 1], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]]"
+        },
+        {
+          "name": "kv_flat_inline4003__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 128], pl.FP32]]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_row_offsets__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[384, 1], pl.FP32], pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "compact_rows_inline4000__ssa_v0",
+        "original_block_idx",
+        "kv_final_inline3998__rv_v2",
+        "idx_kv_scale_values_inline3994__ssa_v0",
+        "idx_native_kv_cache__ssa_v0",
+        "kv_flat_inline4003__ssa_v0",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "idx_row_offsets__ssa_v0",
+        "idx_slot_mapping__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1584
+    },
+    {
+      "func_id": 29,
+      "name": "idx_kv_scale_commit",
+      "core_type": "aiv",
+      "logical_task": "idx_kv_scale_commit",
+      "original_source_line": 1248,
+      "original_end_line": 1289,
+      "parameters": [
+        {
+          "name": "compact_rows_inline4000__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_row_offsets__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "idx_slot_mapping__ssa_v0",
+          "annotation": "pl.Tensor[[INDEXER_ROWS_DYN, 2], pl.INT32]"
+        },
+        {
+          "name": "idx_kv_scale_values_inline3994__ssa_v1",
+          "annotation": "pl.Tensor[[384, 1], pl.FP32]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.InOut[pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]",
+      "implicit_worker_replacements": {},
+      "inline_parameter_order": [
+        "compact_rows_inline4000__ssa_v0",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "idx_row_offsets__ssa_v0",
+        "idx_slot_mapping__ssa_v0",
+        "idx_kv_scale_values_inline3994__ssa_v1",
+        "idx_native_kv_cache__rv_v2"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1641
+    },
+    {
+      "func_id": 30,
+      "name": "idx_qr_proj_matmul",
+      "core_type": "aic",
+      "logical_task": "idx_qr_proj_matmul",
+      "original_source_line": 1454,
+      "original_end_line": 1509,
+      "parameters": [
+        {
+          "name": "qr_acc_pad_inline2007_inline4067__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.INT32]]"
+        },
+        {
+          "name": "idx_wq_b__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 8192], pl.INT8]"
+        },
+        {
+          "name": "row_blocks_inline2004_inline4047__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline1997_inline4109__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 1024], pl.INT8]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 8192], pl.INT32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "row_blocks_inline2004_inline4047__ssa_v0",
+        "bs_inline1997_inline4109__ssa_v0",
+        "original_block_idx",
+        "qr_acc_pad_inline2007_inline4067__ssa_v0",
+        "idx_wq_b__ssa_v0",
+        "qr__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 1024, 128, stage=2, init_values=(qr_acc_inline2019_inline4063__tile_l0_init,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1669
+    },
+    {
+      "func_id": 31,
+      "name": "idx_qr_dequant_rope",
+      "core_type": "aiv",
+      "logical_task": "idx_qr_dequant_rope",
+      "original_source_line": 1292,
+      "original_end_line": 1425,
+      "parameters": [
+        {
+          "name": "qr_bf16_2d_inline1995_inline4100__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.BF16]]"
+        },
+        {
+          "name": "dq_rope_units_inline2000_inline4054__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "dq_rope_workers_inline2016_inline4062__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline1997_inline4109__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_scale__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 1], pl.FP32]"
+        },
+        {
+          "name": "freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "idx_sin_signed__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "idx_wq_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[8192], pl.FP32]"
+        },
+        {
+          "name": "qr_acc_pad_inline2007_inline4067__rv_v2",
+          "annotation": "pl.Tensor[[384, 8192], pl.INT32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "dq_rope_units_inline2000_inline4054__ssa_v0",
+        "dq_rope_workers_inline2016_inline4062__ssa_v0",
+        "bs_inline1997_inline4109__ssa_v0",
+        "original_block_idx",
+        "qr_bf16_2d_inline1995_inline4100__ssa_v0",
+        "qr_scale__ssa_v0",
+        "freqs_cos__ssa_v0",
+        "idx_sin_signed__ssa_v0",
+        "idx_wq_b_scale__ssa_v0",
+        "qr_acc_pad_inline2007_inline4067__rv_v2"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(4, stage=2)",
+        "pl.pipeline(4, stage=2, init_values=(qr_bf16_2d_inline1995_inline4100__iter_v3,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1692
+    },
+    {
+      "func_id": 32,
+      "name": "qr_hadamard_matmul",
+      "core_type": "aic",
+      "logical_task": "qr_hadamard_matmul",
+      "original_source_line": 14076,
+      "original_end_line": 14097,
+      "parameters": [
+        {
+          "name": "hadamard_idx__ssa_v0",
+          "annotation": "pl.Tensor[[128, 128], pl.BF16]"
+        },
+        {
+          "name": "qh_acc_gm_inline2065_inline4066__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[bs_heads_inline2066_inline4048__ssa_v0, 128], pl.FP32]]"
+        },
+        {
+          "name": "bs_heads_inline2066_inline4048__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qr_bf16_inline4070__ssa_v0",
+          "annotation": "pl.Tensor[[24576, 128], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[bs_heads_inline2066_inline4048__ssa_v0, 128], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "bs_heads_inline2066_inline4048__ssa_v0",
+        "original_block_idx",
+        "hadamard_idx__ssa_v0",
+        "qh_acc_gm_inline2065_inline4066__ssa_v0",
+        "qr_bf16_inline4070__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1789
+    },
+    {
+      "func_id": 33,
+      "name": "qr_hadamard_quant",
+      "core_type": "aiv",
+      "logical_task": "qr_hadamard_quant",
+      "original_source_line": 14114,
+      "original_end_line": 14163,
+      "parameters": [
+        {
+          "name": "qr_hadamard_i8_inline583__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 128], pl.INT8]]"
+        },
+        {
+          "name": "qr_hadamard_scale_dq_inline582__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1], pl.FP32]]"
+        },
+        {
+          "name": "bs_heads_inline2066_inline4048__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qh_acc_gm_inline2065_inline4066__rv_v2",
+          "annotation": "pl.Tensor[[bs_heads_inline2066_inline4048__ssa_v0, 128], pl.FP32]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[24576, 128], pl.INT8], pl.Tensor[[24576, 1], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "bs_heads_inline2066_inline4048__ssa_v0",
+        "original_block_idx",
+        "qr_hadamard_i8_inline583__ssa_v0",
+        "qr_hadamard_scale_dq_inline582__ssa_v0",
+        "qh_acc_gm_inline2065_inline4066__rv_v2"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1804
+    },
+    {
+      "func_id": 34,
+      "name": "weights_proj",
+      "core_type": "aic",
+      "logical_task": "weights_proj",
+      "original_source_line": 15762,
+      "original_end_line": 15816,
+      "parameters": [
+        {
+          "name": "weights_partial_inline3185_inline4185__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[1536, 64], pl.FP32]]"
+        },
+        {
+          "name": "row_blocks_inline3179_inline4165__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "bs_inline3187_inline4159__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "x_flat_inline3180_inline4167__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 4096], pl.BF16]"
+        },
+        {
+          "name": "weights_proj__ssa_v0",
+          "annotation": "pl.Tensor[[4096, 64], pl.BF16]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[1536, 64], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "row_blocks_inline3179_inline4165__ssa_v0",
+        "bs_inline3187_inline4159__ssa_v0",
+        "original_block_idx",
+        "weights_partial_inline3185_inline4185__ssa_v0",
+        "x_flat_inline3180_inline4167__ssa_v0",
+        "weights_proj__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 512, 256, stage=2, init_values=(weights_acc_inline3182_inline4170__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1837
+    },
+    {
+      "func_id": 35,
+      "name": "weights_proj_reduce",
+      "core_type": "aiv",
+      "logical_task": "weights_proj_reduce",
+      "original_source_line": 15725,
+      "original_end_line": 15751,
+      "parameters": [
+        {
+          "name": "weights_partial_inline3185_inline4185__rv_v2",
+          "annotation": "pl.Tensor[[1536, 64], pl.FP32]"
+        },
+        {
+          "name": "weights_inline3183_inline4184__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 64], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 64], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "weights_partial_inline3185_inline4185__rv_v2",
+        "weights_inline3183_inline4184__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1862
+    },
+    {
+      "func_id": 36,
+      "name": "indexer_head_coefficients",
+      "core_type": "aiv",
+      "logical_task": "indexer_head_coefficients",
+      "original_source_line": 1542,
+      "original_end_line": 1605,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "coefficient_scales_inline1285_inline8894__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "coefficients_inline1281_inline8756__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[1024, 384], pl.FP16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[1024, 384], pl.FP16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "coefficient_scales_inline1285_inline8894__ssa_v0",
+        "weights_inline4197__ssa_v0",
+        "coefficients_inline1281_inline8756__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 1881
+    },
+    {
+      "func_id": 37,
+      "name": "indexer_score_topk_native_pair_aic",
+      "core_type": "aic",
+      "logical_task": "indexer_score_topk_native_pair",
+      "original_source_line": 2432,
+      "original_end_line": 3693,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline8757__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline8733__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 384], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline8726__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline8854__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline8656__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline8790__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline8748__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline8845__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[288, 1024], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline8726__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline8757__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline8733__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline8854__ssa_v0",
+        "idx_kv_cache_shift64_inline8790__ssa_v0",
+        "buf_score_transfer_inline8845__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline8757__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 2508
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 3691
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 3693
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 2544
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 1910
+    },
+    {
+      "func_id": 38,
+      "name": "indexer_score_topk_native_pair_aiv",
+      "core_type": "aiv",
+      "logical_task": "indexer_score_topk_native_pair",
+      "original_source_line": 3696,
+      "original_end_line": 4235,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline8757__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline8733__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 384], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline8726__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline8854__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline8656__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline8790__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline8748__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline8845__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[288, 1024], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[288, 1024], pl.FP32], pl.Tensor[[24576, 1024], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline8726__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline8757__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline8733__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline8854__ssa_v0",
+        "idx_kv_cache_shift64_inline8790__ssa_v0",
+        "buf_score_transfer_inline8845__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline8757__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 3772
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 3822
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 3826
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 2581
+    },
+    {
+      "func_id": 39,
+      "name": "indexer_head_coefficients_0",
+      "core_type": "aiv",
+      "logical_task": "indexer_head_coefficients_0",
+      "original_source_line": 1622,
+      "original_end_line": 1661,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "coefficient_scales_inline2881_inline9074__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "coefficients_inline2879_inline9040__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[3072, 128], pl.FP16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[3072, 128], pl.FP16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "coefficient_scales_inline2881_inline9074__ssa_v0",
+        "weights_inline4197__ssa_v0",
+        "coefficients_inline2879_inline9040__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 2891
+    },
+    {
+      "func_id": 40,
+      "name": "indexer_score_topk_native_pair_0_aic",
+      "core_type": "aic",
+      "logical_task": "indexer_score_topk_native_pair_0",
+      "original_source_line": 4319,
+      "original_end_line": 5413,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline8997__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9000__ssa_v0",
+          "annotation": "pl.Tensor[[3072, 128], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9037__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9127__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9041__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9079__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9108__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9167__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[96, 1024], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9037__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline8997__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9000__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9127__ssa_v0",
+        "idx_kv_cache_shift64_inline9079__ssa_v0",
+        "buf_score_transfer_inline9167__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline8997__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 4344
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 5411
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 5413
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 4376
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 2912
+    },
+    {
+      "func_id": 41,
+      "name": "indexer_score_topk_native_pair_0_aiv",
+      "core_type": "aiv",
+      "logical_task": "indexer_score_topk_native_pair_0",
+      "original_source_line": 5416,
+      "original_end_line": 6074,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline8997__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9000__ssa_v0",
+          "annotation": "pl.Tensor[[3072, 128], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9037__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9127__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9041__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9079__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9108__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9167__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[96, 1024], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[96, 1024], pl.FP32], pl.Tensor[[384, 8192], pl.FP32], pl.Tensor[[24576, 1024], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9037__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline8997__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9000__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9127__ssa_v0",
+        "idx_kv_cache_shift64_inline9079__ssa_v0",
+        "buf_score_transfer_inline9167__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline8997__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 5441
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 5487
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 5491
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 3429
+    },
+    {
+      "func_id": 42,
+      "name": "indexer_head_coefficients_1",
+      "core_type": "aiv",
+      "logical_task": "indexer_head_coefficients_1",
+      "original_source_line": 1678,
+      "original_end_line": 1741,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "coefficient_scales_inline1739_inline9508__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "coefficients_inline1735_inline9271__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[1024, 384], pl.FP16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[1024, 384], pl.FP16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "coefficient_scales_inline1739_inline9508__ssa_v0",
+        "weights_inline4197__ssa_v0",
+        "coefficients_inline1735_inline9271__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 3707
+    },
+    {
+      "func_id": 43,
+      "name": "indexer_score_topk_native_pair_1_aic",
+      "core_type": "aic",
+      "logical_task": "indexer_score_topk_native_pair_1",
+      "original_source_line": 6164,
+      "original_end_line": 6891,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline9502__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9363__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 384], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9325__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9317__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9391__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9293__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9361__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9382__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[288, 768], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9325__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline9502__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9363__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9317__ssa_v0",
+        "idx_kv_cache_shift64_inline9293__ssa_v0",
+        "buf_score_transfer_inline9382__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline9502__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 6189
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 6889
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 6891
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 6221
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 3736
+    },
+    {
+      "func_id": 44,
+      "name": "indexer_score_topk_native_pair_1_aiv",
+      "core_type": "aiv",
+      "logical_task": "indexer_score_topk_native_pair_1",
+      "original_source_line": 6894,
+      "original_end_line": 8716,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline9502__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9363__ssa_v0",
+          "annotation": "pl.Tensor[[1024, 384], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9325__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9317__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9391__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9293__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9361__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9382__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[288, 768], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[288, 768], pl.FP32], pl.Tensor[[384, 8192], pl.FP32], pl.Tensor[[24576, 1024], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9325__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline9502__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9363__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9317__ssa_v0",
+        "idx_kv_cache_shift64_inline9293__ssa_v0",
+        "buf_score_transfer_inline9382__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline9502__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 6919
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 6965
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 6969
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 4214
+    },
+    {
+      "func_id": 45,
+      "name": "indexer_head_coefficients_2",
+      "core_type": "aiv",
+      "logical_task": "indexer_head_coefficients_2",
+      "original_source_line": 1758,
+      "original_end_line": 1797,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "coefficient_scales_inline3037_inline9683__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "coefficients_inline3035_inline9660__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[3072, 128], pl.FP16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[3072, 128], pl.FP16]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "coefficient_scales_inline3037_inline9683__ssa_v0",
+        "weights_inline4197__ssa_v0",
+        "coefficients_inline3035_inline9660__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 4940
+    },
+    {
+      "func_id": 46,
+      "name": "indexer_score_topk_native_pair_2_aic",
+      "core_type": "aic",
+      "logical_task": "indexer_score_topk_native_pair_2",
+      "original_source_line": 8806,
+      "original_end_line": 9416,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline9751__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9652__ssa_v0",
+          "annotation": "pl.Tensor[[3072, 128], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9662__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9701__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9688__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9817__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9696__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9767__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[96, 768], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9662__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline9751__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9652__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9701__ssa_v0",
+        "idx_kv_cache_shift64_inline9817__ssa_v0",
+        "buf_score_transfer_inline9767__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline9751__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 8831
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 9414
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 9416
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 8863
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 4961
+    },
+    {
+      "func_id": 47,
+      "name": "indexer_score_topk_native_pair_2_aiv",
+      "core_type": "aiv",
+      "logical_task": "indexer_score_topk_native_pair_2",
+      "original_source_line": 9419,
+      "original_end_line": 10077,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "buf_score_ffts_inline9751__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "coefficients_inline9652__ssa_v0",
+          "annotation": "pl.Tensor[[3072, 128], pl.FP16]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline9662__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline9701__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline9688__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline9817__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline9696__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "buf_score_transfer_inline9767__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[96, 768], pl.FP32]]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[96, 768], pl.FP32], pl.Tensor[[384, 8192], pl.FP32], pl.Tensor[[24576, 1024], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline9662__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "buf_score_ffts_inline9751__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "coefficients_inline9652__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline9701__ssa_v0",
+        "idx_kv_cache_shift64_inline9817__ssa_v0",
+        "buf_score_transfer_inline9767__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "buf_score_ffts_inline9751__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 9444
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 9490
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 9494
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 5355
+    },
+    {
+      "func_id": 48,
+      "name": "indexer_score_topk_leaf_aic",
+      "core_type": "aic",
+      "logical_task": "indexer_score_topk_leaf",
+      "original_source_line": 1814,
+      "original_end_line": 1960,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "qr_hadamard_scale_dq_inline582__rv_v2",
+          "annotation": "pl.Tensor[[24576, 1], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline3220_inline4177__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline3234_inline4199__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline3222_inline4169__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline3230_inline4201__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline3223_inline4178__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline3220_inline4177__ssa_v0",
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "qr_hadamard_scale_dq_inline582__rv_v2",
+        "weights_inline4197__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline3234_inline4199__ssa_v0",
+        "idx_kv_cache_shift64_inline3230_inline4201__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.import_peer_buffer",
+          "arguments": [],
+          "keywords": {
+            "name": "'indexer_score_topk_leaf_c2v_slot_buffer'",
+            "peer_func": "'indexer_score_topk_leaf_aiv'"
+          },
+          "source_line": 1829
+        },
+        {
+          "operation": "pl.system.aic_initialize_pipe",
+          "arguments": [
+            "indexer_score_topk_leaf_c2v_slot_buffer_import",
+            "pl.const(0, pl.INT32)"
+          ],
+          "keywords": {
+            "dir_mask": "1",
+            "slot_size": "98304",
+            "slot_num": "1"
+          },
+          "source_line": 1830
+        },
+        {
+          "operation": "pl.tile.tpush_to_aiv",
+          "arguments": [
+            "score_i32_inline3267_inline4142__tile"
+          ],
+          "keywords": {
+            "split": "2"
+          },
+          "source_line": 1955
+        }
+      ],
+      "pipelines": [
+        "pl.pipeline(0, lane_span_inline3248_inline4222__ssa_v0, 192, stage=2, init_values=(score_arena_inline3255_inline4168__iter_v1,))",
+        "pl.pipeline(0, 128, 64, stage=2, init_values=(score_i32_inline3267_inline4142__tile_l0_init,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'slot_num': 1, 'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 5633
+    },
+    {
+      "func_id": 49,
+      "name": "indexer_score_topk_leaf_aiv",
+      "core_type": "aiv",
+      "logical_task": "indexer_score_topk_leaf",
+      "original_source_line": 1963,
+      "original_end_line": 2348,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "score_arena_inline3255_inline4168__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "qr_hadamard_i8_inline583__rv_v2",
+          "annotation": "pl.Tensor[[24576, 128], pl.INT8]"
+        },
+        {
+          "name": "qr_hadamard_scale_dq_inline582__rv_v2",
+          "annotation": "pl.Tensor[[24576, 1], pl.FP32]"
+        },
+        {
+          "name": "weights_inline4197__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "idx_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, INDEXER_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "native_page_bytes_inline3220_inline4177__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "idx_kv_cache_inline3234_inline4199__ssa_v0",
+          "annotation": "pl.Tensor[[key_rows_inline3222_inline4169__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_kv_cache_shift64_inline3230_inline4201__ssa_v0",
+          "annotation": "pl.Tensor[[shifted_rows_inline3223_inline4178__ssa_v0, 128], pl.INT8]"
+        },
+        {
+          "name": "idx_native_kv_cache__rv_v2",
+          "annotation": "pl.Tensor[[IDX_NATIVE_CACHE_BLOCK_NUM_DYN, INDEXER_PAGE_BYTES_DYN], pl.INT8]"
+        },
+        {
+          "name": "pair_arena_inline3226_inline4202__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[24576, 1024], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[384, 8192], pl.FP32], pl.Tensor[[24576, 1024], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 2
+      },
+      "inline_parameter_order": [
+        "native_page_bytes_inline3220_inline4177__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "score_arena_inline3255_inline4168__ssa_v0",
+        "qr_hadamard_i8_inline583__rv_v2",
+        "qr_hadamard_scale_dq_inline582__rv_v2",
+        "weights_inline4197__ssa_v0",
+        "idx_block_table__ssa_v0",
+        "idx_kv_cache_inline3234_inline4199__ssa_v0",
+        "idx_kv_cache_shift64_inline3230_inline4201__ssa_v0",
+        "idx_native_kv_cache__rv_v2",
+        "pair_arena_inline3226_inline4202__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.reserve_buffer",
+          "arguments": [],
+          "keywords": {
+            "name": "'indexer_score_topk_leaf_c2v_slot_buffer'",
+            "size": "98304",
+            "base": "-1"
+          },
+          "source_line": 1978
+        },
+        {
+          "operation": "pl.system.aiv_initialize_pipe",
+          "arguments": [
+            "indexer_score_topk_leaf_c2v_slot_buffer",
+            "pl.const(0, pl.INT32)"
+          ],
+          "keywords": {
+            "dir_mask": "1",
+            "slot_size": "98304",
+            "slot_num": "1"
+          },
+          "source_line": 1979
+        },
+        {
+          "operation": "pl.tile.tpop_from_aic",
+          "arguments": [],
+          "keywords": {
+            "split": "2"
+          },
+          "source_line": 2049
+        },
+        {
+          "operation": "pl.system.tfree_to_aic",
+          "arguments": [
+            "score_shard_inline3203_inline4153__tile"
+          ],
+          "keywords": {},
+          "source_line": 2051
+        }
+      ],
+      "pipelines": [
+        "pl.pipeline(0, lane_span_inline3248_inline4222__ssa_v0, 192, stage=2, init_values=(score_arena_inline3255_inline4168__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'slot_num': 1, 'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 5707
+    },
+    {
+      "func_id": 50,
+      "name": "indexer_topk_single_leaf_publish",
+      "core_type": "aiv",
+      "logical_task": "indexer_topk_single_leaf_publish",
+      "original_source_line": 256,
+      "original_end_line": 401,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "score_arena__ssa_v0",
+          "annotation": "pl.Tensor[[384, 8192], pl.FP32]"
+        },
+        {
+          "name": "topk_scores__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.FP32]]"
+        },
+        {
+          "name": "topk_indices__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.INT32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "score_arena__ssa_v0",
+        "topk_scores__ssa_v0",
+        "topk_indices__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 5884
+    },
+    {
+      "func_id": 51,
+      "name": "indexer_topk_query_merge",
+      "core_type": "aiv",
+      "logical_task": "indexer_topk_query_merge",
+      "original_source_line": 28,
+      "original_end_line": 84,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "pair_arena__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[24576, 1024], pl.FP32]]"
+        },
+        {
+          "name": "topk_scores__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.FP32]]"
+        },
+        {
+          "name": "topk_indices__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.INT32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "pair_arena__ssa_v0",
+        "topk_scores__ssa_v0",
+        "topk_indices__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 5965
+    },
+    {
+      "func_id": 52,
+      "name": "indexer_topk_query_merge__2",
+      "core_type": "aiv",
+      "logical_task": "indexer_topk_query_merge__2",
+      "original_source_line": 99,
+      "original_end_line": 241,
+      "parameters": [
+        {
+          "name": "position_ids__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "pair_arena__ssa_v0",
+          "annotation": "pl.Tensor[[24576, 1024], pl.FP32]"
+        },
+        {
+          "name": "topk_scores__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.FP32]]"
+        },
+        {
+          "name": "topk_indices__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[T_DYN, 512], pl.INT32]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "original_block_idx",
+        "position_ids__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "pair_arena__ssa_v0",
+        "topk_scores__ssa_v0",
+        "topk_indices__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6008
+    },
+    {
+      "func_id": 53,
+      "name": "kv_touch",
+      "core_type": "aiv",
+      "logical_task": "kv_touch",
+      "original_source_line": 11024,
+      "original_end_line": 11030,
+      "parameters": [
+        {
+          "name": "ori_kv_flat_inline4326__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[ori_block_num_inline4369__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[ori_block_num_inline4369__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]",
+      "implicit_worker_replacements": {},
+      "inline_parameter_order": [
+        "ori_kv_flat_inline4326__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6121
+    },
+    {
+      "func_id": 54,
+      "name": "csa_slots_build_valid_qk_plan",
+      "core_type": "aiv",
+      "logical_task": "csa_slots_build_valid_qk_plan",
+      "original_source_line": 864,
+      "original_end_line": 1045,
+      "parameters": [
+        {
+          "name": "cmp_sparse_indices_inline4329__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32]]"
+        },
+        {
+          "name": "sparse_bias_inline4301__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]]"
+        },
+        {
+          "name": "t_dim_inline4335__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "index_indices__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 512], pl.INT32]"
+        },
+        {
+          "name": "position_ids_t1__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 1], pl.INT64]"
+        },
+        {
+          "name": "valid_block_mask_inline4413__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4335__ssa_v0, 16], pl.INT32]]"
+        },
+        {
+          "name": "kv_seq_lens__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN], pl.INT32]"
+        },
+        {
+          "name": "ori_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32], pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4335__ssa_v0",
+        "original_block_idx",
+        "cmp_sparse_indices_inline4329__ssa_v0",
+        "sparse_bias_inline4301__ssa_v0",
+        "index_indices__ssa_v0",
+        "position_ids_t1__ssa_v0",
+        "valid_block_mask_inline4413__ssa_v0",
+        "kv_seq_lens__ssa_v0",
+        "ori_block_table__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6128
+    },
+    {
+      "func_id": 55,
+      "name": "rope_cs",
+      "core_type": "aiv",
+      "logical_task": "rope_cs",
+      "original_source_line": 15257,
+      "original_end_line": 15288,
+      "parameters": [
+        {
+          "name": "rope_cs_blocks_inline4315__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "t_dim_inline4335__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "freqs_sin__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "rope_sin_signed_inline4321__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 64], pl.FP32]]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 64], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "rope_cs_blocks_inline4315__ssa_v0",
+        "t_dim_inline4335__ssa_v0",
+        "original_block_idx",
+        "freqs_sin__ssa_v0",
+        "rope_sin_signed_inline4321__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6277
+    },
+    {
+      "func_id": 56,
+      "name": "qk_pv_aic",
+      "core_type": "aic",
+      "logical_task": "qk_pv",
+      "original_source_line": 13026,
+      "original_end_line": 13151,
+      "parameters": [
+        {
+          "name": "ffts_workspace_inline4361__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "t_dim_inline4335__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "q_flat_inline4389__ssa_v0",
+          "annotation": "pl.Tensor[[t_heads_inline4306__ssa_v0, 512], pl.BF16]"
+        },
+        {
+          "name": "valid_block_mask_inline4413__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 16], pl.INT32]"
+        },
+        {
+          "name": "kv_transfer_inline4342__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[9216, 512], pl.BF16]]"
+        },
+        {
+          "name": "score_transfer_inline4398__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 128], pl.FP32]]"
+        },
+        {
+          "name": "probability_transfer_inline4399__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 128], pl.BF16]]"
+        },
+        {
+          "name": "pv_transfer_inline4320__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 512], pl.FP32]]"
+        },
+        {
+          "name": "attn_sink_col_inline4382__ssa_v0",
+          "annotation": "pl.Tensor[[64, 1], pl.FP32]"
+        },
+        {
+          "name": "position_ids_t1__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 1], pl.INT64]"
+        },
+        {
+          "name": "ori_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "ori_kv_flat_inline4326__ssa_v1",
+          "annotation": "pl.Tensor[[ori_block_num_inline4369__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]"
+        },
+        {
+          "name": "cmp_sparse_indices_inline4329__rv_v2",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32]"
+        },
+        {
+          "name": "cmp_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_kv_flat_inline4388__ssa_v0",
+          "annotation": "pl.Tensor[[cmp_block_num_inline4371__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]"
+        },
+        {
+          "name": "sparse_bias_inline4301__rv_v2",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]"
+        },
+        {
+          "name": "mi_transfer_inline4318__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 1], pl.FP32]]"
+        },
+        {
+          "name": "li_transfer_inline4403__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 1], pl.FP32]]"
+        },
+        {
+          "name": "freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "rope_sin_signed_inline4321__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[3072, 4096], pl.BF16]]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4335__ssa_v0",
+        "original_block_idx",
+        "ffts_workspace_inline4361__ssa_v0",
+        "q_flat_inline4389__ssa_v0",
+        "valid_block_mask_inline4413__ssa_v0",
+        "kv_transfer_inline4342__ssa_v0",
+        "score_transfer_inline4398__ssa_v0",
+        "probability_transfer_inline4399__ssa_v0",
+        "pv_transfer_inline4320__ssa_v0",
+        "attn_sink_col_inline4382__ssa_v0",
+        "position_ids_t1__ssa_v0",
+        "ori_block_table__ssa_v0",
+        "ori_kv_flat_inline4326__ssa_v1",
+        "cmp_sparse_indices_inline4329__rv_v2",
+        "cmp_block_table__ssa_v0",
+        "cmp_kv_flat_inline4388__ssa_v0",
+        "sparse_bias_inline4301__rv_v2",
+        "mi_transfer_inline4318__ssa_v0",
+        "li_transfer_inline4403__ssa_v0",
+        "freqs_cos__ssa_v0",
+        "rope_sin_signed_inline4321__ssa_v0",
+        "o_packed_heads__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "ffts_workspace_inline4361__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 13051
+        },
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "ffts_workspace_inline4361__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 13151
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 13074
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 13097
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "2"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 13112
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "3"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.FIX",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIC"
+          },
+          "source_line": 13149
+        }
+      ],
+      "pipelines": [
+        "pl.pipeline(0, 512, 128, stage=2, init_values=(qk_scores_inline4386__ssa_v0_l0_init,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True})"
+      ],
+      "generated_line": 6302
+    },
+    {
+      "func_id": 57,
+      "name": "qk_pv_aiv",
+      "core_type": "aiv",
+      "logical_task": "qk_pv",
+      "original_source_line": 13154,
+      "original_end_line": 13627,
+      "parameters": [
+        {
+          "name": "ffts_workspace_inline4361__ssa_v0",
+          "annotation": "pl.Tensor[[256], pl.INT64]"
+        },
+        {
+          "name": "t_dim_inline4335__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "q_flat_inline4389__ssa_v0",
+          "annotation": "pl.Tensor[[t_heads_inline4306__ssa_v0, 512], pl.BF16]"
+        },
+        {
+          "name": "valid_block_mask_inline4413__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 16], pl.INT32]"
+        },
+        {
+          "name": "kv_transfer_inline4342__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[9216, 512], pl.BF16]]"
+        },
+        {
+          "name": "score_transfer_inline4398__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 128], pl.FP32]]"
+        },
+        {
+          "name": "probability_transfer_inline4399__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 128], pl.BF16]]"
+        },
+        {
+          "name": "pv_transfer_inline4320__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 512], pl.FP32]]"
+        },
+        {
+          "name": "attn_sink_col_inline4382__ssa_v0",
+          "annotation": "pl.Tensor[[64, 1], pl.FP32]"
+        },
+        {
+          "name": "position_ids_t1__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 1], pl.INT64]"
+        },
+        {
+          "name": "ori_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, ORIGINAL_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "ori_kv_flat_inline4326__ssa_v1",
+          "annotation": "pl.Tensor[[ori_block_num_inline4369__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]"
+        },
+        {
+          "name": "cmp_sparse_indices_inline4329__rv_v2",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 512], pl.INT32]"
+        },
+        {
+          "name": "cmp_block_table__ssa_v0",
+          "annotation": "pl.Tensor[[B_DYN, COMPRESSED_TABLE_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_kv_flat_inline4388__ssa_v0",
+          "annotation": "pl.Tensor[[cmp_block_num_inline4371__ssa_v0 * pl.const(32, pl.INDEX), 512], pl.BF16]"
+        },
+        {
+          "name": "sparse_bias_inline4301__rv_v2",
+          "annotation": "pl.Tensor[[t_dim_inline4335__ssa_v0, 640], pl.FP32]"
+        },
+        {
+          "name": "mi_transfer_inline4318__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 1], pl.FP32]]"
+        },
+        {
+          "name": "li_transfer_inline4403__ssa_v0",
+          "annotation": "pl.InOut[pl.Tensor[[4608, 1], pl.FP32]]"
+        },
+        {
+          "name": "freqs_cos__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 64], pl.FP32]"
+        },
+        {
+          "name": "rope_sin_signed_inline4321__ssa_v0",
+          "annotation": "pl.Tensor[[384, 64], pl.FP32]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[3072, 4096], pl.BF16]]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[9216, 512], pl.BF16], pl.Tensor[[4608, 128], pl.FP32], pl.Tensor[[4608, 128], pl.BF16], pl.Tensor[[4608, 512], pl.FP32], pl.Tensor[[4608, 1], pl.FP32], pl.Tensor[[4608, 1], pl.FP32], pl.Tensor[[3072, 4096], pl.BF16]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1,
+        "original_subblock_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4335__ssa_v0",
+        "original_block_idx",
+        "original_subblock_idx",
+        "ffts_workspace_inline4361__ssa_v0",
+        "q_flat_inline4389__ssa_v0",
+        "valid_block_mask_inline4413__ssa_v0",
+        "kv_transfer_inline4342__ssa_v0",
+        "score_transfer_inline4398__ssa_v0",
+        "probability_transfer_inline4399__ssa_v0",
+        "pv_transfer_inline4320__ssa_v0",
+        "attn_sink_col_inline4382__ssa_v0",
+        "position_ids_t1__ssa_v0",
+        "ori_block_table__ssa_v0",
+        "ori_kv_flat_inline4326__ssa_v1",
+        "cmp_sparse_indices_inline4329__rv_v2",
+        "cmp_block_table__ssa_v0",
+        "cmp_kv_flat_inline4388__ssa_v0",
+        "sparse_bias_inline4301__rv_v2",
+        "mi_transfer_inline4318__ssa_v0",
+        "li_transfer_inline4403__ssa_v0",
+        "freqs_cos__ssa_v0",
+        "rope_sin_signed_inline4321__ssa_v0",
+        "o_packed_heads__ssa_v0"
+      ],
+      "system_operations": [
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "ffts_workspace_inline4361__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 13187
+        },
+        {
+          "operation": "pl.system.set_ffts",
+          "arguments": [
+            "ffts_workspace_inline4361__ssa_v0"
+          ],
+          "keywords": {},
+          "source_line": 13191
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "2"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE3",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13414
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "3"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13428
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13375
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE3",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13379
+        },
+        {
+          "operation": "pl.system.sync_wait",
+          "arguments": [
+            "1"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13390
+        },
+        {
+          "operation": "pl.system.sync_set",
+          "arguments": [
+            "0"
+          ],
+          "keywords": {
+            "pipe": "pl.PipeType.MTE3",
+            "ffts_mode": "2",
+            "core_type": "pl.KernelType.AIV"
+          },
+          "source_line": 13419
+        }
+      ],
+      "pipelines": [],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True, 'split_aiv': True, 'dual_aiv_dispatch': True})"
+      ],
+      "generated_line": 6374
+    },
+    {
+      "func_id": 58,
+      "name": "proj_a_mm",
+      "core_type": "aic",
+      "logical_task": "proj_a_mm",
+      "original_source_line": 11152,
+      "original_end_line": 11232,
+      "parameters": [
+        {
+          "name": "t_dim_inline4518__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "row_base_o_inline4519__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v1",
+          "annotation": "pl.Tensor[[3072, 4096], pl.BF16]"
+        },
+        {
+          "name": "wo_a__ssa_v0",
+          "annotation": "pl.Tensor[[8, 64, 256, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "g_inline4502__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4514__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "out_col_g_inline4498__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 8192], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4518__ssa_v0",
+        "row_base_o_inline4519__ssa_v0",
+        "g_inline4502__idx_v0",
+        "out_col_g_inline4498__ssa_v0",
+        "original_block_idx",
+        "o_packed_heads__ssa_v1",
+        "wo_a__ssa_v0",
+        "o_r_pad_inline4514__iter_v1"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline350_inline4506__tile_l0_init,))",
+        "pl.pipeline(1, 16, stage=2, init_values=(acc_a_inline350_inline4506__tile,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline350_inline4506__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6724
+    },
+    {
+      "func_id": 59,
+      "name": "quant",
+      "core_type": "aiv",
+      "logical_task": "quant",
+      "original_source_line": 14582,
+      "original_end_line": 14637,
+      "parameters": [
+        {
+          "name": "act_scale_dq_inline4531__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[8, 384], pl.FP32]]"
+        },
+        {
+          "name": "o_r_i8_pad_inline4534__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.INT8]]"
+        },
+        {
+          "name": "t_dim_inline4518__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4514__ssa_v3",
+          "annotation": "pl.Tensor[[384, 8192], pl.FP32]"
+        },
+        {
+          "name": "col_g_inline4488__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "g_inline4502__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_padded_rows_inline4526__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[8, 384], pl.FP32], pl.Tensor[[384, 8192], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4518__ssa_v0",
+        "col_g_inline4488__ssa_v0",
+        "g_inline4502__idx_v0",
+        "proj_b_padded_rows_inline4526__ssa_v0",
+        "original_block_idx",
+        "act_scale_dq_inline4531__iter_v1",
+        "o_r_i8_pad_inline4534__iter_v1",
+        "o_r_pad_inline4514__ssa_v3"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(quant_start_inline4477__ssa_v0, pl.min(quant_start_inline4477__ssa_v0 + 32, t_dim_inline4518__ssa_v0), 8, stage=2, init_values=(act_scale_dq_inline4531__iter_v1, o_r_i8_pad_inline4534__iter_v1))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6756
+    },
+    {
+      "func_id": 60,
+      "name": "_proj_b_mm_nz_kernel",
+      "core_type": "aic",
+      "logical_task": "_proj_b_mm_nz_kernel",
+      "original_source_line": 12760,
+      "original_end_line": 12794,
+      "parameters": [
+        {
+          "name": "o_r_i8_pad__ssa_v0",
+          "annotation": "pl.Tensor[[384, 8192], pl.INT8]"
+        },
+        {
+          "name": "wo_b__ssa_v0",
+          "annotation": "pl.Tensor[[1, 128, 512, 16, 32], pl.INT8, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "partials__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 32768], pl.INT32]]"
+        },
+        {
+          "name": "g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "col_g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_t_rows__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 32768], pl.INT32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "g__ssa_v0",
+        "col_g__ssa_v0",
+        "proj_b_t_rows__ssa_v0",
+        "original_block_idx",
+        "o_r_i8_pad__ssa_v0",
+        "wo_b__ssa_v0",
+        "partials__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(4, stage=2, init_values=(acc_b__ssa_v0,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_b__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6794
+    },
+    {
+      "func_id": 61,
+      "name": "proj_b_act_hc_post",
+      "core_type": "aiv",
+      "logical_task": "proj_b_act_hc_post",
+      "original_source_line": 11552,
+      "original_end_line": 11825,
+      "parameters": [
+        {
+          "name": "act_row_step_inline4515__ssa_v1",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "wo_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[4096], pl.FP32]"
+        },
+        {
+          "name": "y_flat_inline4468__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4518__ssa_v0, 16384], pl.BF16]]"
+        },
+        {
+          "name": "t_dim_inline4518__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "partials_inline4512__rv_v2",
+          "annotation": "pl.Tensor[[384, 32768], pl.INT32]"
+        },
+        {
+          "name": "act_scale_dq_inline4531__rv_v2",
+          "annotation": "pl.Tensor[[8, 384], pl.FP32]"
+        },
+        {
+          "name": "residual_flat_inline4469__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4518__ssa_v0, 16384], pl.BF16]"
+        },
+        {
+          "name": "post_t__rv_v2",
+          "annotation": "pl.Tensor[[T_DYN, 4], pl.FP32]"
+        },
+        {
+          "name": "comb_t__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 16], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "act_row_step_inline4515__ssa_v1",
+        "t_dim_inline4518__ssa_v0",
+        "original_block_idx",
+        "wo_b_scale__ssa_v0",
+        "y_flat_inline4468__ssa_v0",
+        "partials_inline4512__rv_v2",
+        "act_scale_dq_inline4531__rv_v2",
+        "residual_flat_inline4469__ssa_v0",
+        "post_t__rv_v2",
+        "comb_t__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(acc_inline4497__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6818
+    },
+    {
+      "func_id": 62,
+      "name": "proj_a_mm_0",
+      "core_type": "aic",
+      "logical_task": "proj_a_mm_0",
+      "original_source_line": 11252,
+      "original_end_line": 11332,
+      "parameters": [
+        {
+          "name": "t_dim_inline4627__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "row_base_o_inline4605__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v1",
+          "annotation": "pl.Tensor[[3072, 4096], pl.BF16]"
+        },
+        {
+          "name": "wo_a__ssa_v0",
+          "annotation": "pl.Tensor[[8, 64, 256, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "g_inline4648__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4642__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "out_col_g_inline4626__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 8192], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4627__ssa_v0",
+        "row_base_o_inline4605__ssa_v0",
+        "g_inline4648__idx_v0",
+        "out_col_g_inline4626__ssa_v0",
+        "original_block_idx",
+        "o_packed_heads__ssa_v1",
+        "wo_a__ssa_v0",
+        "o_r_pad_inline4642__iter_v1"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline615_inline4670__tile_l0_init,))",
+        "pl.pipeline(1, 16, stage=2, init_values=(acc_a_inline615_inline4670__tile,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline615_inline4670__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6922
+    },
+    {
+      "func_id": 63,
+      "name": "quant_0",
+      "core_type": "aiv",
+      "logical_task": "quant_0",
+      "original_source_line": 14665,
+      "original_end_line": 14720,
+      "parameters": [
+        {
+          "name": "act_scale_dq_inline4655__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[8, 384], pl.FP32]]"
+        },
+        {
+          "name": "o_r_i8_pad_inline4645__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.INT8]]"
+        },
+        {
+          "name": "t_dim_inline4627__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4642__ssa_v3",
+          "annotation": "pl.Tensor[[384, 8192], pl.FP32]"
+        },
+        {
+          "name": "col_g_inline4637__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "g_inline4648__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_padded_rows_inline4630__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[8, 384], pl.FP32], pl.Tensor[[384, 8192], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4627__ssa_v0",
+        "col_g_inline4637__ssa_v0",
+        "g_inline4648__idx_v0",
+        "proj_b_padded_rows_inline4630__ssa_v0",
+        "original_block_idx",
+        "act_scale_dq_inline4655__iter_v1",
+        "o_r_i8_pad_inline4645__iter_v1",
+        "o_r_pad_inline4642__ssa_v3"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(quant_start_inline4596__ssa_v0, pl.min(quant_start_inline4596__ssa_v0 + 32, t_dim_inline4627__ssa_v0), 8, stage=2, init_values=(act_scale_dq_inline4655__iter_v1, o_r_i8_pad_inline4645__iter_v1))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6954
+    },
+    {
+      "func_id": 64,
+      "name": "_proj_b_mm_nz_kernel__2",
+      "core_type": "aic",
+      "logical_task": "_proj_b_mm_nz_kernel__2",
+      "original_source_line": 12813,
+      "original_end_line": 12847,
+      "parameters": [
+        {
+          "name": "o_r_i8_pad__ssa_v0",
+          "annotation": "pl.Tensor[[384, 8192], pl.INT8]"
+        },
+        {
+          "name": "wo_b__ssa_v0",
+          "annotation": "pl.Tensor[[1, 128, 512, 16, 32], pl.INT8, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "partials__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 32768], pl.INT32]]"
+        },
+        {
+          "name": "g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "col_g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_t_rows__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 32768], pl.INT32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "g__ssa_v0",
+        "col_g__ssa_v0",
+        "proj_b_t_rows__ssa_v0",
+        "original_block_idx",
+        "o_r_i8_pad__ssa_v0",
+        "wo_b__ssa_v0",
+        "partials__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(4, stage=2, init_values=(acc_b__ssa_v0,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_b__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 6992
+    },
+    {
+      "func_id": 65,
+      "name": "proj_b_act_hc_post_0",
+      "core_type": "aiv",
+      "logical_task": "proj_b_act_hc_post_0",
+      "original_source_line": 11854,
+      "original_end_line": 12127,
+      "parameters": [
+        {
+          "name": "act_row_step_inline4633__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "wo_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[4096], pl.FP32]"
+        },
+        {
+          "name": "y_flat_inline4588__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4627__ssa_v0, 16384], pl.BF16]]"
+        },
+        {
+          "name": "t_dim_inline4627__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "partials_inline4641__rv_v2",
+          "annotation": "pl.Tensor[[384, 32768], pl.INT32]"
+        },
+        {
+          "name": "act_scale_dq_inline4655__rv_v2",
+          "annotation": "pl.Tensor[[8, 384], pl.FP32]"
+        },
+        {
+          "name": "residual_flat_inline4663__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4627__ssa_v0, 16384], pl.BF16]"
+        },
+        {
+          "name": "post_t__rv_v2",
+          "annotation": "pl.Tensor[[T_DYN, 4], pl.FP32]"
+        },
+        {
+          "name": "comb_t__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 16], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "act_row_step_inline4633__ssa_v0",
+        "t_dim_inline4627__ssa_v0",
+        "original_block_idx",
+        "wo_b_scale__ssa_v0",
+        "y_flat_inline4588__ssa_v0",
+        "partials_inline4641__rv_v2",
+        "act_scale_dq_inline4655__rv_v2",
+        "residual_flat_inline4663__ssa_v0",
+        "post_t__rv_v2",
+        "comb_t__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(acc_inline4573__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7016
+    },
+    {
+      "func_id": 66,
+      "name": "proj_a_mm_1",
+      "core_type": "aic",
+      "logical_task": "proj_a_mm_1",
+      "original_source_line": 11352,
+      "original_end_line": 11432,
+      "parameters": [
+        {
+          "name": "t_dim_inline4745__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "row_base_o_inline4772__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v1",
+          "annotation": "pl.Tensor[[3072, 4096], pl.BF16]"
+        },
+        {
+          "name": "wo_a__ssa_v0",
+          "annotation": "pl.Tensor[[8, 64, 256, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "g_inline4747__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4770__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "out_col_g_inline4735__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 8192], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4745__ssa_v0",
+        "row_base_o_inline4772__ssa_v0",
+        "g_inline4747__idx_v0",
+        "out_col_g_inline4735__ssa_v0",
+        "original_block_idx",
+        "o_packed_heads__ssa_v1",
+        "wo_a__ssa_v0",
+        "o_r_pad_inline4770__iter_v1"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline1253_inline4743__tile_l0_init,))",
+        "pl.pipeline(1, 16, stage=2, init_values=(acc_a_inline1253_inline4743__tile,))",
+        "pl.pipeline(0, 256, 128, stage=2, init_values=(acc_a_inline1253_inline4743__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7120
+    },
+    {
+      "func_id": 67,
+      "name": "quant_1",
+      "core_type": "aiv",
+      "logical_task": "quant_1",
+      "original_source_line": 14748,
+      "original_end_line": 14803,
+      "parameters": [
+        {
+          "name": "act_scale_dq_inline4765__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[8, 384], pl.FP32]]"
+        },
+        {
+          "name": "o_r_i8_pad_inline4738__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.INT8]]"
+        },
+        {
+          "name": "t_dim_inline4745__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4770__ssa_v3",
+          "annotation": "pl.Tensor[[384, 8192], pl.FP32]"
+        },
+        {
+          "name": "col_g_inline4791__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "g_inline4747__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_padded_rows_inline4780__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[8, 384], pl.FP32], pl.Tensor[[384, 8192], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4745__ssa_v0",
+        "col_g_inline4791__ssa_v0",
+        "g_inline4747__idx_v0",
+        "proj_b_padded_rows_inline4780__ssa_v0",
+        "original_block_idx",
+        "act_scale_dq_inline4765__iter_v1",
+        "o_r_i8_pad_inline4738__iter_v1",
+        "o_r_pad_inline4770__ssa_v3"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(quant_start_inline4795__ssa_v0, pl.min(quant_start_inline4795__ssa_v0 + 32, t_dim_inline4745__ssa_v0), 8, stage=2, init_values=(act_scale_dq_inline4765__iter_v1, o_r_i8_pad_inline4738__iter_v1))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7152
+    },
+    {
+      "func_id": 68,
+      "name": "proj_b_act_hc_post_1",
+      "core_type": "aiv",
+      "logical_task": "proj_b_act_hc_post_1",
+      "original_source_line": 12156,
+      "original_end_line": 12429,
+      "parameters": [
+        {
+          "name": "act_row_step_inline4746__ssa_v1",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "wo_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[4096], pl.FP32]"
+        },
+        {
+          "name": "y_flat_inline4761__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4745__ssa_v0, 16384], pl.BF16]]"
+        },
+        {
+          "name": "t_dim_inline4745__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "partials_inline4759__rv_v2",
+          "annotation": "pl.Tensor[[384, 32768], pl.INT32]"
+        },
+        {
+          "name": "act_scale_dq_inline4765__rv_v2",
+          "annotation": "pl.Tensor[[8, 384], pl.FP32]"
+        },
+        {
+          "name": "residual_flat_inline4703__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4745__ssa_v0, 16384], pl.BF16]"
+        },
+        {
+          "name": "post_t__rv_v2",
+          "annotation": "pl.Tensor[[T_DYN, 4], pl.FP32]"
+        },
+        {
+          "name": "comb_t__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 16], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "act_row_step_inline4746__ssa_v1",
+        "t_dim_inline4745__ssa_v0",
+        "original_block_idx",
+        "wo_b_scale__ssa_v0",
+        "y_flat_inline4761__ssa_v0",
+        "partials_inline4759__rv_v2",
+        "act_scale_dq_inline4765__rv_v2",
+        "residual_flat_inline4703__ssa_v0",
+        "post_t__rv_v2",
+        "comb_t__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(acc_inline4698__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7190
+    },
+    {
+      "func_id": 69,
+      "name": "proj_a_mm_2",
+      "core_type": "aic",
+      "logical_task": "proj_a_mm_2",
+      "original_source_line": 11452,
+      "original_end_line": 11532,
+      "parameters": [
+        {
+          "name": "t_dim_inline4891__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "row_base_o_inline4886__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_packed_heads__ssa_v1",
+          "annotation": "pl.Tensor[[3072, 4096], pl.BF16]"
+        },
+        {
+          "name": "wo_a__ssa_v0",
+          "annotation": "pl.Tensor[[8, 64, 256, 16, 16], pl.BF16, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "g_inline4868__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4871__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.FP32]]"
+        },
+        {
+          "name": "out_col_g_inline4870__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 8192], pl.FP32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4891__ssa_v0",
+        "row_base_o_inline4886__ssa_v0",
+        "g_inline4868__idx_v0",
+        "out_col_g_inline4870__ssa_v0",
+        "original_block_idx",
+        "o_packed_heads__ssa_v1",
+        "wo_a__ssa_v0",
+        "o_r_pad_inline4871__iter_v1"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 256, 64, stage=2, init_values=(acc_a_inline673_inline4888__tile_l0_init,))",
+        "pl.pipeline(1, 16, stage=2, init_values=(acc_a_inline673_inline4888__tile,))",
+        "pl.pipeline(0, 256, 64, stage=2, init_values=(acc_a_inline673_inline4888__iter_v1,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7294
+    },
+    {
+      "func_id": 70,
+      "name": "quant_2",
+      "core_type": "aiv",
+      "logical_task": "quant_2",
+      "original_source_line": 14831,
+      "original_end_line": 14886,
+      "parameters": [
+        {
+          "name": "act_scale_dq_inline4892__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[8, 384], pl.FP32]]"
+        },
+        {
+          "name": "o_r_i8_pad_inline4874__iter_v1",
+          "annotation": "pl.Out[pl.Tensor[[384, 8192], pl.INT8]]"
+        },
+        {
+          "name": "t_dim_inline4891__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "o_r_pad_inline4871__ssa_v3",
+          "annotation": "pl.Tensor[[384, 8192], pl.FP32]"
+        },
+        {
+          "name": "col_g_inline4865__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "g_inline4868__idx_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_padded_rows_inline4872__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[8, 384], pl.FP32], pl.Tensor[[384, 8192], pl.INT8]]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "t_dim_inline4891__ssa_v0",
+        "col_g_inline4865__ssa_v0",
+        "g_inline4868__idx_v0",
+        "proj_b_padded_rows_inline4872__ssa_v0",
+        "original_block_idx",
+        "act_scale_dq_inline4892__iter_v1",
+        "o_r_i8_pad_inline4874__iter_v1",
+        "o_r_pad_inline4871__ssa_v3"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(quant_start_inline4895__ssa_v0, pl.min(quant_start_inline4895__ssa_v0 + 32, t_dim_inline4891__ssa_v0), 8, stage=2, init_values=(act_scale_dq_inline4892__iter_v1, o_r_i8_pad_inline4874__iter_v1))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7326
+    },
+    {
+      "func_id": 71,
+      "name": "_proj_b_mm_nz_kernel__3",
+      "core_type": "aic",
+      "logical_task": "_proj_b_mm_nz_kernel__3",
+      "original_source_line": 12882,
+      "original_end_line": 12913,
+      "parameters": [
+        {
+          "name": "o_r_i8_pad__ssa_v0",
+          "annotation": "pl.Tensor[[384, 8192], pl.INT8]"
+        },
+        {
+          "name": "wo_b__ssa_v0",
+          "annotation": "pl.Tensor[[1, 128, 512, 16, 32], pl.INT8, pl.TensorView(stride=[], layout=pl.TensorLayout.NZ)]"
+        },
+        {
+          "name": "partials__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[384, 32768], pl.INT32]]"
+        },
+        {
+          "name": "g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "col_g__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "proj_b_t_rows__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        }
+      ],
+      "return_annotation": "pl.Tensor[[384, 32768], pl.INT32]",
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "g__ssa_v0",
+        "col_g__ssa_v0",
+        "proj_b_t_rows__ssa_v0",
+        "original_block_idx",
+        "o_r_i8_pad__ssa_v0",
+        "wo_b__ssa_v0",
+        "partials__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(0, 1024, 128, stage=2, init_values=(full_acc__tile_l0_init,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'nz_tensor_views_blocked': True, 'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7364
+    },
+    {
+      "func_id": 72,
+      "name": "proj_b_act_hc_post_2",
+      "core_type": "aiv",
+      "logical_task": "proj_b_act_hc_post_2",
+      "original_source_line": 12458,
+      "original_end_line": 12731,
+      "parameters": [
+        {
+          "name": "act_row_step_inline4887__ssa_v1",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "wo_b_scale__ssa_v0",
+          "annotation": "pl.Tensor[[4096], pl.FP32]"
+        },
+        {
+          "name": "y_flat_inline4862__ssa_v0",
+          "annotation": "pl.Out[pl.Tensor[[t_dim_inline4891__ssa_v0, 16384], pl.BF16]]"
+        },
+        {
+          "name": "t_dim_inline4891__ssa_v0",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "partials_inline4880__rv_v2",
+          "annotation": "pl.Tensor[[384, 32768], pl.INT32]"
+        },
+        {
+          "name": "act_scale_dq_inline4892__rv_v2",
+          "annotation": "pl.Tensor[[8, 384], pl.FP32]"
+        },
+        {
+          "name": "residual_flat_inline4834__ssa_v0",
+          "annotation": "pl.Tensor[[t_dim_inline4891__ssa_v0, 16384], pl.BF16]"
+        },
+        {
+          "name": "post_t__rv_v2",
+          "annotation": "pl.Tensor[[T_DYN, 4], pl.FP32]"
+        },
+        {
+          "name": "comb_t__ssa_v0",
+          "annotation": "pl.Tensor[[T_DYN, 16], pl.FP32]"
+        }
+      ],
+      "return_annotation": null,
+      "implicit_worker_replacements": {
+        "original_block_idx": 1
+      },
+      "inline_parameter_order": [
+        "act_row_step_inline4887__ssa_v1",
+        "t_dim_inline4891__ssa_v0",
+        "original_block_idx",
+        "wo_b_scale__ssa_v0",
+        "y_flat_inline4862__ssa_v0",
+        "partials_inline4880__rv_v2",
+        "act_scale_dq_inline4892__rv_v2",
+        "residual_flat_inline4834__ssa_v0",
+        "post_t__rv_v2",
+        "comb_t__ssa_v0"
+      ],
+      "system_operations": [],
+      "pipelines": [
+        "pl.pipeline(8, stage=2, init_values=(acc_inline4817__tile,))"
+      ],
+      "function_attributes": [
+        "pl.func_attr({'mx_tensor_views_blocked': True})"
+      ],
+      "generated_line": 7387
+    }
+  ]
+}

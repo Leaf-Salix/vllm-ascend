@@ -1,0 +1,104 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_ptoas_column_carry_move_uses_destination_view ______________
+
+    def test_ptoas_column_carry_move_uses_destination_view():
+        """A column carry can share storage with a row-major full initializer."""
+    
+        @pl.program
+>       class ColumnCarry:
+
+tests/ut/codegen/test_memory_planner_switch.py:351: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1374: in parse_statement
+    self.parse_for_loop(stmt)
+python/pypto/language/parser/ast_parser.py:2916: in parse_for_loop
+    self._parse_body_siblings(stmt.body)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1378: in parse_statement
+    self.parse_if_statement(stmt)
+python/pypto/language/parser/ast_parser.py:3824: in parse_if_statement
+    self._parse_body_siblings(stmt.orelse)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+python/pypto/language/parser/ast_parser.py:2083: in parse_assignment
+    var = self._assign_or_let(var_name, value_expr, span)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffdde25f970>
+var_name = 'value'
+value_expr = <pypto.pypto_core.ir.IterArg object at 0xfffdde0592f0>
+span = /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/codegen/test_memory_planner_switch.py:366:21
+override_type = None
+
+    def _assign_or_let(
+        self,
+        var_name: str,
+        value_expr: ir.Expr,
+        span: ir.Span,
+        override_type: ir.Type | None = None,
+    ) -> ir.Var:
+        """Assign to existing Var if possible, otherwise create a new let binding."""
+        existing_var = self.scope_manager.lookup_var(var_name)
+    
+        # ``n = pl.tensor.dim(x, 0)`` folded to a dyn-dim symbol (see
+        # ``_fold_tensor_dim``): bind the Python name straight to the symbol. A Let
+        # would copy it, and every shape later built from ``n`` would then carry the
+        # copy rather than the symbol — the aliasing the fold exists to remove.
+        # Both guards test the Var the name is bound to, never a parallel set of
+        # names: scopes are a stack, so a name-keyed alias set desyncs the moment a
+        # non-leaking scope rebinds the name and exits.
+        # An LHS annotation that simply restates the symbol's own type (``n:
+        # pl.Scalar[pl.INDEX] = pl.tensor.dim(x, 0)`` — the form the printer emits)
+        # must not defeat the alias; only an annotation asking for a *different*
+        # type falls through to a Let of its own.
+        if (
+            ir.is_orchestration_like(self._func_type)
+            and self._is_param_dim_symbol(value_expr)
+            and (existing_var is None or self._is_param_dim_symbol(existing_var))
+            and (override_type is None or _types_match(override_type, value_expr.type))
+        ):
+            return value_expr
+    
+        # The name is bound to a symbol, which is immutable — it names an argument's
+        # extent. Rebind the name to a fresh let rather than assigning *through* the
+        # alias into the symbol itself.
+        if self._is_param_dim_symbol(existing_var):
+            return self.builder.let(var_name, value_expr, type=override_type, span=span)
+    
+        if existing_var is not None and type(existing_var) is ir.Var and not self.scope_manager.strict_ssa:
+            # Reject reassignment with a different type (#642).  Same Python
+            # variable maps to the same Var node, so the type must match.
+            value_type = override_type or value_expr.type
+            if (
+                not isinstance(value_type, ir.UnknownType)
+                and not isinstance(existing_var.type, ir.UnknownType)
+                and not _types_match(existing_var.type, value_type)
+            ):
+                if not _tile_types_differ_only_by_unset_memory_space(existing_var.type, value_type):
+>                   raise ParserTypeError(
+                        f"Cannot reassign '{var_name}' with a different type: "
+                        f"was {ir.python_print_type(existing_var.type)}, "
+                        f"got {ir.python_print_type(value_type)}",
+                        span=span,
+                        hint="Use a different variable name for tensors with different shapes or dtypes",
+                    )
+E                   pypto.language.parser.diagnostics.exceptions.ParserTypeError: Cannot reassign 'value' with a different type: was pl.Tile[[32, 1], pl.FP32, pl.Mem.Vec], got pl.Tile[[32, 1], pl.FP32, pl.Mem.Vec, pl.TileView(blayout=pl.TileLayout.row_major)]
+
+python/pypto/language/parser/ast_parser.py:1953: ParserTypeError
+=========================== short test summary info ============================
+FAILED tests/ut/codegen/test_memory_planner_switch.py::test_ptoas_column_carry_move_uses_destination_view
+1 failed in 1.19s

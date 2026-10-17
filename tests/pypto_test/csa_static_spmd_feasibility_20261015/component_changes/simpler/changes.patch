@@ -1,0 +1,1671 @@
+commit 57e499238fd4ee3548947ad860be456aaeeb16b5
+Author:     nalinaly <nalinaly@163.com>
+AuthorDate: Fri Oct 16 10:19:33 2026 +0800
+Commit:     nalinaly <nalinaly@163.com>
+CommitDate: Fri Oct 16 10:19:33 2026 +0800
+
+    Update: 扩展 CORE 参数容量并同步派发、参数转储和图缓存 ABI
+    
+    CSA 静态融合核需要 132/133 个 Tensor。原有 32 Tensor、单字转储
+    掩码及 512 字节派发结构限制了大参数内核，现统一扩到 256 Tensor
+    加 16 scalar，保持按值传输和显式容量边界检查。
+    
+    - 同步 A2/A3、A5 的 HBG/TMR 上下文槽位、派发结构、Graph Tensor
+      容量、任务参数池、依赖记录和 A5 调度步长，补充布局静态断言。
+    - 参数 dump 改为固定大小的多字 64 位掩码，覆盖超过 63 的 Tensor
+      位置及高位 scalar，保留无动态分配的设备侧 POD 结构。
+    - 修复 CCE 自定义构建缺失 ABI 头文件依赖的问题，避免增量编译
+      继续使用旧派发布局和旧 scalar 偏移。
+    - 添加边界、结构布局、选择性 dump 和大参数 program/kernel
+      回归用例，更新相关接口与依赖记录文档。
+    
+    验证：A2/A3、A5 的 HBG/TMR onboard/sim 共八种 runtime 构建通过；
+    14 个相关 C++ 测试目标通过；281 个 Python 用例通过、4 个跳过。
+    A3 真机 HBG/TMR program 及 kernel 模式均验证 133/256 Tensor
+    加 16 scalar；kernel 连续三次调用、输出保护区和高位 dump 通过。
+    尚未验证 A5 真机及完整 CSA 单核执行，不将组件验证记为整层通过。
+
+diff --git a/docs/aicore-kernel-programming.md b/docs/aicore-kernel-programming.md
+index 8685c2dda..f63710356 100644
+--- a/docs/aicore-kernel-programming.md
++++ b/docs/aicore-kernel-programming.md
+@@ -30,10 +30,13 @@ args layout (tensormap_and_ringbuffer):
+   [0 .. tensor_count-1]                = tensor GM pointers
+   [tensor_count .. +scalar_count-1]    = scalar values
+   ...
+-  [SPMD_LOCAL_CONTEXT_INDEX  = 48]     = (uint64_t)&LocalContext   per-dispatch
+-  [SPMD_GLOBAL_CONTEXT_INDEX = 49]     = (uint64_t)&GlobalContext  per-core
++  [SPMD_LOCAL_CONTEXT_INDEX  = 272]     = (uint64_t)&LocalContext   per-dispatch
++  [SPMD_GLOBAL_CONTEXT_INDEX = 273]     = (uint64_t)&GlobalContext  per-core
+ ```
+ 
++当前 CORE 容量为 256 个 Tensor 和 16 个标量；上下文槽位由容量常量推导。
++这次容量扩展改变了软件 ABI，Host、AICPU、AICore 和 callable 必须一起重编译。
++
+ The trailing two slots are written by the scheduler before each
+ dispatch and hold the **SPMD execution context** described below. They
+ exist on every dispatch — you can rely on them unconditionally.
+diff --git a/docs/dfx/dep-gen.md b/docs/dfx/dep-gen.md
+index a37ee461e..bea6beca0 100644
+--- a/docs/dfx/dep-gen.md
++++ b/docs/dfx/dep-gen.md
+@@ -393,13 +393,13 @@ slots that overlay normal record slots in the buffer.
+ | Submit `explicit_dep_count` | Chain shape | Per-submit slots used |
+ | --------------------------- | ----------- | --------------------- |
+ | `0 ≤ dc ≤ 64` | base only — fast path, no chain bookkeeping | 1 |
+-| `65 ≤ dc ≤ 588` | base (64 deps) + 1 overflow (up to 524 deps) | 2 |
+-| `589 ≤ dc ≤ 1112` | base + 2 overflow | 3 |
+-| general | base + `⌈(dc − 64) / 524⌉` overflow | `1 + ⌈(dc − 64) / 524⌉` |
++| `65 ≤ dc ≤ 3802` | base (64 deps) + 1 overflow (up to 3738 deps) | 2 |
++| `3803 ≤ dc ≤ 7540` | base + 2 overflow | 3 |
++| general | base + `⌈(dc − 64) / 3738⌉` overflow | `1 + ⌈(dc − 64) / 3738⌉` |
+ 
+-**Wire format.** An overflow record reinterprets the same 4736-byte slot
++**Wire format.** An overflow record reinterprets the same 33664-byte slot
+ as `{ task_id (8) + flags (4) + dep_count (2) + _reserved (2) +
+-deps[524] + kinds[524] }`; `kinds[]` is a byte-for-byte parallel array of
++deps[3738] + kinds[3738] }`; `kinds[]` is a byte-for-byte parallel array of
+ `DepFlags`. There are no tensor blobs (those live on the base record). Replay distinguishes
+ the two views by `flags & DEP_GEN_FLAG_OVERFLOW`. Chain records always
+ share the base's `task_id`, and the last one sets
+@@ -416,7 +416,7 @@ base via `task_id`.
+ 
+ **Truncation tail.** A submit whose chain exceeds the buffer's slot
+ budget (`PLATFORM_DEP_GEN_RECORDS_PER_BUFFER = 1024` slots → roughly
+-`64 + 1023 × 524 = 536116` deps max in the best case) is logged via
++`64 + 1023 × 3738 = 3824038` deps max in the best case) is logged via
+ `LOG_ERROR` and truncated to the largest dc that fits. Runtime
+ correctness is unaffected — `CoreTaskArgs::set_dependencies` keeps the full dep
+ list; only the dep_gen replay graph loses the tail.
+@@ -427,7 +427,7 @@ list; only the dep_gen replay graph loses the tail.
+ 
+ | Layer | File | Role |
+ | ----- | ---- | ---- |
+-| Shared-mem layout | `src/common/platform/include/common/dep_gen.h` | `DepGenRecord` (4736 B base, cache-line aligned, ≤64 inline explicit deps and parallel kinds, per-task `block_num`) + `DepGenOverflowRecord` chain view (≤524 dep/kind pairs per slot) + SPSC ring + per-thread ready queue. The layout is shared across platforms. |
++| Shared-mem layout | `src/common/platform/include/common/dep_gen.h` | `DepGenRecord` (33664 B base, cache-line aligned, ≤64 inline explicit deps and parallel kinds, per-task `block_num`) + `DepGenOverflowRecord` chain view (≤3738 dep/kind pairs per slot) + SPSC ring + per-thread ready queue. The layout is shared across platforms. |
+ | AICPU writer | `src/{a2a3,a5}/platform/include/aicpu/dep_gen_collector_aicpu.h`, `src/common/platform/shared/aicpu/dep_gen_collector_aicpu.cpp` | Single-instance write path; weak-fallback exported to host build. Both platforms share the same writer implementation — the writer accesses its own device-side view of shared memory, independent of how host↔device transport is implemented. |
+ | Host collector | `src/common/platform/include/host/dep_gen_collector.h`, `src/common/platform/shared/host/dep_gen_collector.cpp` | `ProfilerBase<DepGenCollector, DepGenModule>` — drains ring → `records_` vector. On non-SVM platforms it uses the base `alloc_paired_buffer`, which malloc's a host shadow + `copy_to_device`'s it and registers it via `add_malloc_shadow` so teardown can free it; `reconcile_counters` explicitly `copy_from_device`'s the BufferState before reading, and `finalize` lets `BufferPoolManager::clear_mappings()` release all shadows as the single source of truth. |
+ | Capture call site (device-orch) | `src/{a2a3,a5}/runtime/tensormap_and_ringbuffer/runtime/orchestrator.cpp` `submit_task_common` | One conditional block that snapshots inputs into the ring when `is_dep_gen_enabled()`; fires for both `submit_task` and `submit_dummy_task`. The schema carries `kernel_ids[3] = {aic, aiv0, aiv1}` so the swimlane post-processor can resolve `task_id → kernel` from `deps.json` at level=1 where the AICore record is the sole device-side identity source. Inactive subslots stay at `INVALID_KERNEL_ID = -1`. It also carries the SPMD logical block num (`block_num` on a2a3, `core_num` on a5's launch spec) as `tasks[].block_num`. |
+diff --git a/src/a2a3/platform/onboard/aicore/CMakeLists.txt b/src/a2a3/platform/onboard/aicore/CMakeLists.txt
+index ef6b87116..3056eb67f 100644
+--- a/src/a2a3/platform/onboard/aicore/CMakeLists.txt
++++ b/src/a2a3/platform/onboard/aicore/CMakeLists.txt
+@@ -55,6 +55,18 @@ foreach(INC_DIR ${CMAKE_CUSTOM_INCLUDE_DIRS})
+     list(APPEND CMAKE_CUSTOM_INCLUDE_DIR_FLAGS "-I${INC_DIR}")
+ endforeach()
+ 
++# 参数容量和派发偏移属于 Host/AICPU/AICore 共同 ABI。自定义 CCE 编译
++# 不会自动生成头文件依赖；显式跟踪这些头文件，避免增量构建保留旧偏移。
++set(DISPATCH_WIRE_HEADERS "")
++foreach(INC_DIR ${CMAKE_CUSTOM_INCLUDE_DIRS})
++    foreach(WIRE_HEADER IN ITEMS arg_direction.h intrinsic.h dispatch_payload.h scheduler/scheduler_graph.h)
++        if(EXISTS "${INC_DIR}/${WIRE_HEADER}")
++            list(APPEND DISPATCH_WIRE_HEADERS "${INC_DIR}/${WIRE_HEADER}")
++        endif()
++    endforeach()
++endforeach()
++list(REMOVE_DUPLICATES DISPATCH_WIRE_HEADERS)
++
+ # Compiler flags
+ set(AICORE_FLAGS
+     "-c -O3 -g -x cce -Wall -std=c++17 \
+@@ -74,9 +86,9 @@ set(ALL_AIV_OBJECTS "")
+ 
+ foreach(SRC_FILE ${ALL_SOURCES})
+     get_filename_component(SRC_NAME ${SRC_FILE} NAME_WE)
+-    set(SOURCE_WIRE_HEADERS "")
++    set(SOURCE_WIRE_HEADERS ${DISPATCH_WIRE_HEADERS})
+     if(SRC_FILE MATCHES "/tensormap_and_ringbuffer/aicore/aicore_executor\\.cpp$")
+-        set(SOURCE_WIRE_HEADERS
++        list(APPEND SOURCE_WIRE_HEADERS
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_context.h"
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_control.h"
+         )
+@@ -150,6 +162,7 @@ foreach(SRC_FILE ${ALL_SOURCES})
+             "${CMAKE_CURRENT_BINARY_DIR}/kernel_aiv.o"
+         )
+         set(TMR_KERNEL_WIRE_HEADERS
++            ${DISPATCH_WIRE_HEADERS}
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_context.h"
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_control.h"
+         )
+diff --git a/src/a2a3/runtime/host_build_graph/common/intrinsic.h b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+index 8719a64a7..124e8aa9e 100644
+--- a/src/a2a3/runtime/host_build_graph/common/intrinsic.h
++++ b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+@@ -81,6 +81,8 @@
+ 
+ #include <stdint.h>
+ 
++#include "arg_direction.h"
++
+ #include "aicore_completion_mailbox_types.h"
+ #include "host_build_graph/task_id.h"
+ 
+@@ -97,11 +99,11 @@ static constexpr int32_t EXT_PARAMS_COUNT = 2;
+ 
+ /**
+  * Args[] suffix indices for context pointers.
+- * Derived from MAX_TENSOR_ARGS(32) + MAX_SCALAR_ARGS(16).
++ * 由 CORE 参数容量推导；所有调用方须使用同一 ABI 重新编译。
+  * Users should not depend on these values; use the Get* functions below.
+  */
+-static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = 48;
+-static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = 49;
++static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS;
++static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX + 1;
+ static constexpr int32_t PAYLOAD_LOCAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX;
+ static constexpr int32_t PAYLOAD_GLOBAL_CONTEXT_INDEX = SPMD_GLOBAL_CONTEXT_INDEX;
+ 
+diff --git a/src/a2a3/runtime/host_build_graph/runtime/dispatch_payload.h b/src/a2a3/runtime/host_build_graph/runtime/dispatch_payload.h
+index a6f53bc7f..8b15b9e2a 100644
+--- a/src/a2a3/runtime/host_build_graph/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/host_build_graph/runtime/dispatch_payload.h
+@@ -41,7 +41,7 @@
+ #include "arg_direction.h"
+ #include "intrinsic.h"
+ 
+-/** Max dispatch arguments: 16 scalars + up to 32 tensor pointers + ext params */
++/** 派发参数容量：CORE Tensor + 标量 + 两个上下文指针 */
+ #ifndef DISPATCH_MAX_ARGS
+ #define DISPATCH_MAX_ARGS (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS + EXT_PARAMS_COUNT)
+ #endif
+@@ -50,7 +50,7 @@
+ #define CHIP_ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+ #endif
+ 
+-// Verify hardcoded indices in intrinsic.h match the computed values.
++// 验证 runtime 与 InCore 使用同一组参数及上下文槽位。
+ static_assert(
+     (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS) == SPMD_LOCAL_CONTEXT_INDEX, "LOCAL_CONTEXT_INDEX out of sync with intrinsic.h"
+ );
+@@ -109,7 +109,7 @@ struct alignas(64) DispatchPayload {
+      *  is never 0, so the gate flag is lossless. */
+     volatile uint64_t src_payload;
+ 
+-    // === Cache lines 1..7: kernel argument vector ===
++    // === 从 cache line 1 开始：kernel 参数数组，按 CORE 容量扩展 ===
+     /** [0..num_args) = GM tensor pointers + scalar values; [SPMD_LOCAL_CONTEXT_INDEX]
+      *  = &local_context, [SPMD_GLOBAL_CONTEXT_INDEX] = &global_context (both prefilled
+      *  once at init). On the gated path the AICPU leaves [0..num_args) unwritten and
+@@ -120,7 +120,7 @@ struct alignas(64) DispatchPayload {
+      *  at init, never per dispatch, so it lives in the tail (not the CL0 control
+      *  block). args[SPMD_GLOBAL_CONTEXT_INDEX] points here. */
+     GlobalContext global_context;
+-    // No explicit tail padding: alignas(64) rounds sizeof up to 512 (8 cache lines).
++    // alignas(64) 自动补齐尾部；这是软件派发 ABI，不受原 512 字节限制。
+ 
+     static_assert(sizeof(args[0]) == 8);
+     static_assert(
+@@ -129,6 +129,9 @@ struct alignas(64) DispatchPayload {
+     );
+ };
+ 
+-static_assert(sizeof(DispatchPayload) == 512, "DispatchPayload hardware ABI size drift");
++static_assert(
++    sizeof(DispatchPayload) == CHIP_ALIGN_UP(64 + sizeof(uint64_t) * DISPATCH_MAX_ARGS + sizeof(GlobalContext), 64),
++    "DispatchPayload software ABI size drift"
++);
+ static_assert(offsetof(DispatchPayload, args) == 64, "args[] must start at cache line 1 (control block = CL0)");
+ static_assert(offsetof(DispatchPayload, src_payload) < 64, "src_payload (gate) must live on the CL0 control block");
+diff --git a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+index f4935408d..77e55faf6 100644
+--- a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+@@ -965,8 +965,8 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime) {
+     // The two context-pointer args are also per-(core, buf_idx) constants — they
+     // target this buffer's own local_context / global_context — so prefill them
+     // here too and drop them from the per-dispatch build_payload writes. This keeps
+-    // the per-dispatch write footprint on the CL0 control block only (args[48]/[49]
+-    // live on a later line).
++    // the per-dispatch write footprint on the CL0 control block only
++    // (args[SPMD_LOCAL_CONTEXT_INDEX]/args[SPMD_GLOBAL_CONTEXT_INDEX] live on a later line).
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+index 2beeb0220..2c272dfc5 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/aicore/aicore_executor.cpp
+@@ -129,7 +129,7 @@ __aicore__ static void execute_dispatch_loop(__gm__ Handshake *my_hank) {
+                 // already invalidated src's lines, so tensor_count/scalar_count/
+                 // scalars read coherently with the orchestrator's submit writes.
+                 // args[SPMD_LOCAL_CONTEXT_INDEX]/[SPMD_GLOBAL_CONTEXT_INDEX] are
+-                // still written by the AICPU (num_args <= 48 never reaches them).
++                // 由 AICPU 预填；参数最多占 CORE Tensor + scalar 容量，不覆盖尾部上下文。
+                 __gm__ char *src = reinterpret_cast<__gm__ char *>(exec_payload->src_payload);
+                 int32_t tensor_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_TENSOR_COUNT_OFFSET);
+                 int32_t scalar_count = *reinterpret_cast<__gm__ int32_t *>(src + TASKPAYLOAD_SCALAR_COUNT_OFFSET);
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 1b4b3ef8d..f63ccdcbf 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -84,6 +84,8 @@
+ 
+ #include <stdint.h>
+ 
++#include "arg_direction.h"
++
+ #include "aicore_completion_mailbox_types.h"
+ #include "common/dma_workspace.h"
+ #include "tensormap_and_ringbuffer/task_id.h"
+@@ -101,11 +103,11 @@ static constexpr int32_t EXT_PARAMS_COUNT = 2;
+ 
+ /**
+  * Args[] suffix indices for context pointers.
+- * Derived from MAX_TENSOR_ARGS(32) + MAX_SCALAR_ARGS(16).
++ * 由 CORE 参数容量推导；所有调用方须使用同一 ABI 重新编译。
+  * Users should not depend on these values; use the Get* functions below.
+  */
+-static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = 48;
+-static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = 49;
++static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS;
++static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX + 1;
+ static constexpr int32_t PAYLOAD_LOCAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX;
+ static constexpr int32_t PAYLOAD_GLOBAL_CONTEXT_INDEX = SPMD_GLOBAL_CONTEXT_INDEX;
+ 
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+index 088f98ac9..64362fc47 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -42,7 +42,7 @@
+ #include "arg_direction.h"
+ #include "intrinsic.h"
+ 
+-/** Max dispatch arguments: 16 scalars + up to 32 tensor pointers + ext params */
++/** 派发参数容量：CORE Tensor + 标量 + 两个上下文指针 */
+ #ifndef DISPATCH_MAX_ARGS
+ #define DISPATCH_MAX_ARGS (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS + EXT_PARAMS_COUNT)
+ #endif
+@@ -51,7 +51,7 @@
+ #define CHIP_ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+ #endif
+ 
+-// Verify hardcoded indices in intrinsic.h match the computed values.
++// 验证 runtime 与 InCore 使用同一组参数及上下文槽位。
+ static_assert(
+     (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS) == SPMD_LOCAL_CONTEXT_INDEX, "LOCAL_CONTEXT_INDEX out of sync with intrinsic.h"
+ );
+@@ -70,8 +70,9 @@ constexpr uint32_t TASKPAYLOAD_TENSOR_COUNT_OFFSET = 0;
+ constexpr uint32_t TASKPAYLOAD_SCALAR_COUNT_OFFSET = 4;
+ // Cache line 9 (byte 576) holds the AICPU-only DispatchPredicate; tensors follow it.
+ constexpr uint32_t TASKPAYLOAD_TENSORS_OFFSET = 640;
+-constexpr uint32_t TASKPAYLOAD_SCALARS_OFFSET = 4736;
+ constexpr uint32_t TASKPAYLOAD_TENSOR_STRIDE = 128;  // sizeof(simpler::tmr::Tensor)
++constexpr uint32_t TASKPAYLOAD_SCALARS_OFFSET =
++    TASKPAYLOAD_TENSORS_OFFSET + CORE_MAX_TENSOR_ARGS * TASKPAYLOAD_TENSOR_STRIDE;
+ 
+ /**
+  * Per-core dispatch payload: function address + args[] + SPMD context.
+@@ -106,7 +107,7 @@ struct alignas(64) DispatchPayload {
+      *  is never 0, so the gate flag is lossless. */
+     volatile uint64_t src_payload;
+ 
+-    // === Cache lines 1..7: kernel argument vector ===
++    // === 从 cache line 1 开始：kernel 参数数组，按 CORE 容量扩展 ===
+     /** [0..num_args) = GM tensor pointers + scalar values; [SPMD_LOCAL_CONTEXT_INDEX]
+      *  = &local_context, [SPMD_GLOBAL_CONTEXT_INDEX] = &global_context (both prefilled
+      *  once at init). On the gated path the AICPU leaves [0..num_args) unwritten and
+@@ -118,7 +119,7 @@ struct alignas(64) DispatchPayload {
+      *  per dispatch, so it lives in the tail (not the CL0 control block).
+      *  args[SPMD_GLOBAL_CONTEXT_INDEX] points here. */
+     GlobalContext global_context;
+-    // No explicit tail padding: alignas(64) rounds sizeof up to 512 (8 cache lines).
++    // alignas(64) 自动补齐尾部；这是软件派发 ABI，不受原 512 字节限制。
+ 
+     static_assert(sizeof(args[0]) == 8);
+     static_assert(
+@@ -127,6 +128,9 @@ struct alignas(64) DispatchPayload {
+     );
+ };
+ 
+-static_assert(sizeof(DispatchPayload) == 512, "DispatchPayload hardware ABI size drift");
++static_assert(
++    sizeof(DispatchPayload) == CHIP_ALIGN_UP(64 + sizeof(uint64_t) * DISPATCH_MAX_ARGS + sizeof(GlobalContext), 64),
++    "DispatchPayload software ABI size drift"
++);
+ static_assert(offsetof(DispatchPayload, args) == 64, "args[] must start at cache line 1 (control block = CL0)");
+ static_assert(offsetof(DispatchPayload, src_payload) < 64, "src_payload (gate) must live on the CL0 control block");
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+index 3a34e3b53..dd9c3b2cf 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+@@ -370,9 +370,9 @@ struct TaskPayload {
+     // / scalars offsets only. Resolved at submit; evaluated by the scheduler at
+     // dispatch.
+     alignas(64) DispatchPredicate predicate;
+-    // === Cache lines 10-73 (4096B) — tensors (alignas(64) forces alignment) ===
++    // === 从 cache line 10 开始：CORE_MAX_TENSOR_ARGS 个 128 B Tensor 描述符 ===
+     simpler::tmr::Tensor tensors[MAX_TENSOR_ARGS];
+-    // === Cache lines 74-75 (128B) — scalars ===
++    // === Tensor 区之后：16 个标量，共 128 B ===
+     uint64_t scalars[MAX_SCALAR_ARGS];
+ 
+     // Layout verification (size checks that don't need offsetof).
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+index 761579b9c..6779fe7d7 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -1334,8 +1334,8 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime, simpler::tmr::Ca
+     // The two context-pointer args are also per-(core, buf_idx) constants — they
+     // target this buffer's own local_context / global_context — so prefill them
+     // here too and drop them from the per-dispatch build_payload writes. This keeps
+-    // the per-dispatch write footprint on the CL0 control block only (args[48]/[49]
+-    // live on a later line).
++    // the per-dispatch write footprint on the CL0 control block only
++    // (args[SPMD_LOCAL_CONTEXT_INDEX]/args[SPMD_GLOBAL_CONTEXT_INDEX] live on a later line).
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+index e45f105d1..649982640 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/types.h
+@@ -364,11 +364,13 @@ struct Arg : TaskArgsTpl<TensorRef, uint64_t, MaxT, MaxS, TensorArgType> {
+     }
+ 
+ #if SIMPLER_DFX
+-    uint64_t dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return dump_arg_selection_.dump_arg_index_ambiguous_mask(); }
++    ArgsDumpArgMask dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const {
++        return dump_arg_selection_.dump_arg_index_ambiguous_mask();
++    }
+ #else
+-    uint64_t dump_arg_mask() const { return 0; }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const { return 0; }
+ #endif
+ 
+     template <typename... Args>
+diff --git a/src/a5/platform/onboard/aicore/CMakeLists.txt b/src/a5/platform/onboard/aicore/CMakeLists.txt
+index f0396d3a2..fa239a02b 100644
+--- a/src/a5/platform/onboard/aicore/CMakeLists.txt
++++ b/src/a5/platform/onboard/aicore/CMakeLists.txt
+@@ -55,6 +55,18 @@ foreach(INC_DIR ${CMAKE_CUSTOM_INCLUDE_DIRS})
+     list(APPEND CMAKE_CUSTOM_INCLUDE_DIR_FLAGS "-I${INC_DIR}")
+ endforeach()
+ 
++# 参数容量和派发偏移属于 Host/AICPU/AICore 共同 ABI。自定义 CCE 编译
++# 不会自动生成头文件依赖；显式跟踪这些头文件，避免增量构建保留旧偏移。
++set(DISPATCH_WIRE_HEADERS "")
++foreach(INC_DIR ${CMAKE_CUSTOM_INCLUDE_DIRS})
++    foreach(WIRE_HEADER IN ITEMS arg_direction.h intrinsic.h dispatch_payload.h scheduler/scheduler_graph.h)
++        if(EXISTS "${INC_DIR}/${WIRE_HEADER}")
++            list(APPEND DISPATCH_WIRE_HEADERS "${INC_DIR}/${WIRE_HEADER}")
++        endif()
++    endforeach()
++endforeach()
++list(REMOVE_DUPLICATES DISPATCH_WIRE_HEADERS)
++
+ # Compiler flags
+ set(AICORE_FLAGS
+     "-c -O3 -g -x cce -Wall -std=c++17 \
+@@ -74,9 +86,9 @@ set(ALL_AIV_OBJECTS "")
+ 
+ foreach(SRC_FILE ${ALL_SOURCES})
+     get_filename_component(SRC_NAME ${SRC_FILE} NAME_WE)
+-    set(SOURCE_WIRE_HEADERS "")
++    set(SOURCE_WIRE_HEADERS ${DISPATCH_WIRE_HEADERS})
+     if(SRC_FILE MATCHES "/tensormap_and_ringbuffer/aicore/aicore_executor\\.cpp$")
+-        set(SOURCE_WIRE_HEADERS
++        list(APPEND SOURCE_WIRE_HEADERS
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_context.h"
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_control.h"
+         )
+@@ -150,6 +162,7 @@ foreach(SRC_FILE ${ALL_SOURCES})
+             "${CMAKE_CURRENT_BINARY_DIR}/kernel_aiv.o"
+         )
+         set(TMR_KERNEL_WIRE_HEADERS
++            ${DISPATCH_WIRE_HEADERS}
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_context.h"
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../../../common/task_interface/tmr_kernel_control.h"
+         )
+diff --git a/src/a5/runtime/host_build_graph/common/intrinsic.h b/src/a5/runtime/host_build_graph/common/intrinsic.h
+index 98f8289f5..c7a94d055 100644
+--- a/src/a5/runtime/host_build_graph/common/intrinsic.h
++++ b/src/a5/runtime/host_build_graph/common/intrinsic.h
+@@ -81,6 +81,8 @@
+ 
+ #include <stdint.h>
+ 
++#include "arg_direction.h"
++
+ #include "aicore_completion_mailbox_types.h"
+ #include "host_build_graph/task_id.h"
+ 
+@@ -97,11 +99,11 @@ static constexpr int32_t EXT_PARAMS_COUNT = 2;
+ 
+ /**
+  * Args[] suffix indices for context pointers.
+- * Derived from MAX_TENSOR_ARGS(32) + MAX_SCALAR_ARGS(16).
++ * 由 CORE 参数容量推导；所有调用方须使用同一 ABI 重新编译。
+  * Users should not depend on these values; use the Get* functions below.
+  */
+-static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = 48;
+-static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = 49;
++static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS;
++static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX + 1;
+ static constexpr int32_t PAYLOAD_LOCAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX;
+ static constexpr int32_t PAYLOAD_GLOBAL_CONTEXT_INDEX = SPMD_GLOBAL_CONTEXT_INDEX;
+ 
+diff --git a/src/a5/runtime/host_build_graph/runtime/dispatch_payload.h b/src/a5/runtime/host_build_graph/runtime/dispatch_payload.h
+index 795c49afc..ce2bac55c 100644
+--- a/src/a5/runtime/host_build_graph/runtime/dispatch_payload.h
++++ b/src/a5/runtime/host_build_graph/runtime/dispatch_payload.h
+@@ -42,7 +42,7 @@
+ #include "arg_direction.h"
+ #include "intrinsic.h"
+ 
+-/** Max dispatch arguments: 16 scalars + up to 32 tensor pointers + ext params */
++/** 派发参数容量：CORE Tensor + 标量 + 两个上下文指针 */
+ #ifndef DISPATCH_MAX_ARGS
+ #define DISPATCH_MAX_ARGS (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS + EXT_PARAMS_COUNT)
+ #endif
+@@ -51,7 +51,7 @@
+ #define CHIP_ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+ #endif
+ 
+-// Verify hardcoded indices in intrinsic.h match the computed values.
++// 验证 runtime 与 InCore 使用同一组参数及上下文槽位。
+ static_assert(
+     (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS) == SPMD_LOCAL_CONTEXT_INDEX, "LOCAL_CONTEXT_INDEX out of sync with intrinsic.h"
+ );
+@@ -111,7 +111,7 @@ struct alignas(64) DispatchPayload {
+      *  is never 0, so the gate flag is lossless. */
+     volatile uint64_t src_payload;
+ 
+-    // === Cache lines 1..7: kernel argument vector ===
++    // === 从 cache line 1 开始：kernel 参数数组，按 CORE 容量扩展 ===
+     /** [0..num_args) = GM tensor pointers + scalar values; [SPMD_LOCAL_CONTEXT_INDEX]
+      *  = &local_context, [SPMD_GLOBAL_CONTEXT_INDEX] = &global_context (both prefilled
+      *  once at init). On the gated path the AICPU leaves [0..num_args) unwritten and
+@@ -123,7 +123,7 @@ struct alignas(64) DispatchPayload {
+      *  the legacy scheduler seeds the equivalent per-core value at startup.
+      *  args[SPMD_GLOBAL_CONTEXT_INDEX] points here. */
+     GlobalContext global_context;
+-    // No explicit tail padding: alignas(64) rounds sizeof up to 512 (8 cache lines).
++    // alignas(64) 自动补齐尾部；这是软件派发 ABI，不受原 512 字节限制。
+ 
+     static_assert(sizeof(args[0]) == 8);
+     static_assert(
+@@ -132,6 +132,9 @@ struct alignas(64) DispatchPayload {
+     );
+ };
+ 
+-static_assert(sizeof(DispatchPayload) == 512, "DispatchPayload hardware ABI size drift");
++static_assert(
++    sizeof(DispatchPayload) == CHIP_ALIGN_UP(64 + sizeof(uint64_t) * DISPATCH_MAX_ARGS + sizeof(GlobalContext), 64),
++    "DispatchPayload software ABI size drift"
++);
+ static_assert(offsetof(DispatchPayload, args) == 64, "args[] must start at cache line 1 (control block = CL0)");
+ static_assert(offsetof(DispatchPayload, src_payload) < 64, "src_payload (gate) must live on the CL0 control block");
+diff --git a/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp b/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+index bf2b57449..27ad53a97 100644
+--- a/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+@@ -932,8 +932,8 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime) {
+     // The two context-pointer args are also per-(core, buf_idx) constants — they
+     // target this buffer's own local_context / global_context — so prefill them
+     // here too and drop them from the per-dispatch build_payload writes. This keeps
+-    // the per-dispatch write footprint on the CL0 control block only (args[48]/[49]
+-    // live on a later line).
++    // the per-dispatch write footprint on the CL0 control block only
++    // (args[SPMD_LOCAL_CONTEXT_INDEX]/args[SPMD_GLOBAL_CONTEXT_INDEX] live on a later line).
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
+diff --git a/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_graph.h b/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_graph.h
+index 44a401895..058741909 100644
+--- a/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_graph.h
++++ b/src/a5/runtime/host_build_graph/runtime/scheduler/scheduler_graph.h
+@@ -30,7 +30,7 @@
+ // record sits at a fixed offset inside it. These are literals because the AICore
+ // .o cannot include runtime_types.h; scheduler.h checks them against the types at
+ // compile time, and the contract UT again at run time.
+-inline constexpr uint32_t SCHEDULER_GRAPH_TASK_STORAGE_STRIDE = 320;
++inline constexpr uint32_t SCHEDULER_GRAPH_TASK_STORAGE_STRIDE = 384;
+ inline constexpr uint32_t SCHEDULER_GRAPH_DESCRIPTOR_OFFSET = 0;
+ // TaskPayload includes the early-dispatch cache line in this wire layout.
+ inline constexpr uint32_t SCHEDULER_GRAPH_PAYLOAD_OFFSET = 128;
+@@ -39,7 +39,7 @@ inline constexpr uint32_t SCHEDULER_GRAPH_KERNEL_IDS_OFFSET = 8;
+ inline constexpr uint32_t SCHEDULER_GRAPH_FANIN_COUNT_OFFSET = 8;
+ inline constexpr uint32_t SCHEDULER_GRAPH_PREDICATE_OFFSET = 128;
+ inline constexpr int32_t SCHEDULER_GRAPH_MAX_FANIN = 128;
+-inline constexpr uint32_t SCHEDULER_CORE_CALLABLE_RESOLVED_ADDR_OFFSET = 136;
++inline constexpr uint32_t SCHEDULER_CORE_CALLABLE_RESOLVED_ADDR_OFFSET = 1032;
+ inline constexpr int32_t SCHEDULER_GRAPH_INVALID_KERNEL_ID = -1;
+ 
+ enum class SchedulerGraphResult : uint64_t {
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 4aa6c1182..3b6156dae 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -84,6 +84,8 @@
+ 
+ #include <stdint.h>
+ 
++#include "arg_direction.h"
++
+ #include "aicore_completion_mailbox_types.h"
+ #include "common/dma_workspace.h"
+ #include "tensormap_and_ringbuffer/task_id.h"
+@@ -101,11 +103,11 @@ static constexpr int32_t EXT_PARAMS_COUNT = 2;
+ 
+ /**
+  * Args[] suffix indices for context pointers.
+- * Derived from MAX_TENSOR_ARGS(32) + MAX_SCALAR_ARGS(16).
++ * 由 CORE 参数容量推导；所有调用方须使用同一 ABI 重新编译。
+  * Users should not depend on these values; use the Get* functions below.
+  */
+-static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = 48;
+-static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = 49;
++static constexpr int32_t SPMD_LOCAL_CONTEXT_INDEX = CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS;
++static constexpr int32_t SPMD_GLOBAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX + 1;
+ static constexpr int32_t PAYLOAD_LOCAL_CONTEXT_INDEX = SPMD_LOCAL_CONTEXT_INDEX;
+ static constexpr int32_t PAYLOAD_GLOBAL_CONTEXT_INDEX = SPMD_GLOBAL_CONTEXT_INDEX;
+ 
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h b/src/a5/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+index c10d05e21..e2161230b 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
++++ b/src/a5/runtime/tensormap_and_ringbuffer/runtime/dispatch_payload.h
+@@ -42,7 +42,7 @@
+ #include "arg_direction.h"
+ #include "intrinsic.h"
+ 
+-/** Max dispatch arguments: 16 scalars + up to 32 tensor pointers + ext params */
++/** 派发参数容量：CORE Tensor + 标量 + 两个上下文指针 */
+ #ifndef DISPATCH_MAX_ARGS
+ #define DISPATCH_MAX_ARGS (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS + EXT_PARAMS_COUNT)
+ #endif
+@@ -51,7 +51,7 @@
+ #define CHIP_ALIGN_UP(x, align) (((x) + (align) - 1) & ~((align) - 1))
+ #endif
+ 
+-// Verify hardcoded indices in intrinsic.h match the computed values.
++// 验证 runtime 与 InCore 使用同一组参数及上下文槽位。
+ static_assert(
+     (MAX_TENSOR_ARGS + MAX_SCALAR_ARGS) == SPMD_LOCAL_CONTEXT_INDEX, "LOCAL_CONTEXT_INDEX out of sync with intrinsic.h"
+ );
+@@ -70,8 +70,9 @@ constexpr uint32_t TASKPAYLOAD_TENSOR_COUNT_OFFSET = 0;
+ constexpr uint32_t TASKPAYLOAD_SCALAR_COUNT_OFFSET = 4;
+ // Cache line 9 (byte 576) holds the AICPU-only DispatchPredicate; tensors follow it.
+ constexpr uint32_t TASKPAYLOAD_TENSORS_OFFSET = 640;
+-constexpr uint32_t TASKPAYLOAD_SCALARS_OFFSET = 4736;
+ constexpr uint32_t TASKPAYLOAD_TENSOR_STRIDE = 128;  // sizeof(simpler::tmr::Tensor)
++constexpr uint32_t TASKPAYLOAD_SCALARS_OFFSET =
++    TASKPAYLOAD_TENSORS_OFFSET + CORE_MAX_TENSOR_ARGS * TASKPAYLOAD_TENSOR_STRIDE;
+ 
+ /**
+  * Per-core dispatch payload: function address + args[] + SPMD context.
+@@ -106,7 +107,7 @@ struct alignas(64) DispatchPayload {
+      *  is never 0, so the gate flag is lossless. */
+     volatile uint64_t src_payload;
+ 
+-    // === Cache lines 1..7: kernel argument vector ===
++    // === 从 cache line 1 开始：kernel 参数数组，按 CORE 容量扩展 ===
+     /** [0..num_args) = GM tensor pointers + scalar values; [SPMD_LOCAL_CONTEXT_INDEX]
+      *  = &local_context, [SPMD_GLOBAL_CONTEXT_INDEX] = &global_context (both prefilled
+      *  once at init). On the gated path the AICPU leaves [0..num_args) unwritten and
+@@ -118,7 +119,7 @@ struct alignas(64) DispatchPayload {
+      *  per dispatch, so it lives in the tail (not the CL0 control block).
+      *  args[SPMD_GLOBAL_CONTEXT_INDEX] points here. */
+     GlobalContext global_context;
+-    // No explicit tail padding: alignas(64) rounds sizeof up to 512 (8 cache lines).
++    // alignas(64) 自动补齐尾部；这是软件派发 ABI，不受原 512 字节限制。
+ 
+     static_assert(sizeof(args[0]) == 8);
+     static_assert(
+@@ -127,6 +128,9 @@ struct alignas(64) DispatchPayload {
+     );
+ };
+ 
+-static_assert(sizeof(DispatchPayload) == 512, "DispatchPayload hardware ABI size drift");
++static_assert(
++    sizeof(DispatchPayload) == CHIP_ALIGN_UP(64 + sizeof(uint64_t) * DISPATCH_MAX_ARGS + sizeof(GlobalContext), 64),
++    "DispatchPayload software ABI size drift"
++);
+ static_assert(offsetof(DispatchPayload, args) == 64, "args[] must start at cache line 1 (control block = CL0)");
+ static_assert(offsetof(DispatchPayload, src_payload) < 64, "src_payload (gate) must live on the CL0 control block");
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h b/src/a5/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+index 99b70d589..0eb9cc2f5 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
++++ b/src/a5/runtime/tensormap_and_ringbuffer/runtime/runtime_types.h
+@@ -370,9 +370,9 @@ struct TaskPayload {
+     // / scalars offsets only. Resolved at submit; evaluated by the scheduler at
+     // dispatch.
+     alignas(64) DispatchPredicate predicate;
+-    // === Cache lines 10-73 (4096B) — tensors (alignas(64) forces alignment) ===
++    // === 从 cache line 10 开始：CORE_MAX_TENSOR_ARGS 个 128 B Tensor 描述符 ===
+     simpler::tmr::Tensor tensors[MAX_TENSOR_ARGS];
+-    // === Cache lines 74-75 (128B) — scalars ===
++    // === Tensor 区之后：16 个标量，共 128 B ===
+     uint64_t scalars[MAX_SCALAR_ARGS];
+ 
+     // Layout verification (size checks that don't need offsetof).
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp b/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+index 82565ac85..dcc19484a 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -1294,8 +1294,8 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime, simpler::tmr::Ca
+     // The two context-pointer args are also per-(core, buf_idx) constants — they
+     // target this buffer's own local_context / global_context — so prefill them
+     // here too and drop them from the per-dispatch build_payload writes. This keeps
+-    // the per-dispatch write footprint on the CL0 control block only (args[48]/[49]
+-    // live on a later line).
++    // the per-dispatch write footprint on the CL0 control block only
++    // (args[SPMD_LOCAL_CONTEXT_INDEX]/args[SPMD_GLOBAL_CONTEXT_INDEX] live on a later line).
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/runtime/types.h b/src/a5/runtime/tensormap_and_ringbuffer/runtime/types.h
+index 410638d79..c06d9f81f 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/runtime/types.h
++++ b/src/a5/runtime/tensormap_and_ringbuffer/runtime/types.h
+@@ -365,11 +365,13 @@ struct Arg : TaskArgsTpl<TensorRef, uint64_t, MaxT, MaxS, TensorArgType> {
+     }
+ 
+ #if SIMPLER_DFX
+-    uint64_t dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return dump_arg_selection_.dump_arg_index_ambiguous_mask(); }
++    ArgsDumpArgMask dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const {
++        return dump_arg_selection_.dump_arg_index_ambiguous_mask();
++    }
+ #else
+-    uint64_t dump_arg_mask() const { return 0; }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const { return 0; }
+ #endif
+ 
+     template <typename... Args>
+diff --git a/src/common/host_build_graph/graph_execution.h b/src/common/host_build_graph/graph_execution.h
+index 4c031537d..19dbfd560 100644
+--- a/src/common/host_build_graph/graph_execution.h
++++ b/src/common/host_build_graph/graph_execution.h
+@@ -279,7 +279,7 @@ static_assert(std::is_standard_layout_v<InGraphTaskDefinition>);
+ // is the one part of the in-graph task section no writer reaches. Nothing reads it
+ // either, but pinning the size makes a new field's padding cost visible in the diff
+ // that adds it rather than silently.
+-static_assert(sizeof(InGraphTaskDefinition) == 80, "an InGraphTaskDefinition field changed the wire layout");
++static_assert(sizeof(InGraphTaskDefinition) == 144, "an InGraphTaskDefinition field changed the wire layout");
+ static_assert(std::is_trivially_copyable_v<GraphPredicate>);
+ static_assert(std::is_standard_layout_v<GraphPredicate>);
+ static_assert(std::is_trivially_copyable_v<GraphBoundarySignature>);
+diff --git a/src/common/host_build_graph/host/orchestrator.cpp b/src/common/host_build_graph/host/orchestrator.cpp
+index 0595d2dfd..662235483 100644
+--- a/src/common/host_build_graph/host/orchestrator.cpp
++++ b/src/common/host_build_graph/host/orchestrator.cpp
+@@ -337,7 +337,7 @@ struct RecordedInGraphTask {
+ // from the previous body into the next recording -- silently, as a Definition that body
+ // never had. Adding a field changes this size, so the build stops here instead.
+ static_assert(
+-    sizeof(RecordedInGraphTask) == 104, "RecordedInGraphTask gained or lost a field: extend reset() to match, then "
++    sizeof(RecordedInGraphTask) == 168, "RecordedInGraphTask gained or lost a field: extend reset() to match, then "
+                                         "update this size"
+ );
+ 
+@@ -401,8 +401,8 @@ struct GraphRecording {
+     // Every recorded task's tensor arguments, packed end to end in one region this
+     // recording bumps through, and the reason a task holds an offset rather than its own
+     // buffer: a body's tensors then occupy the bytes they need instead of a page per task
+-    // (a per-task buffer at the cap is 32 x 128 B = exactly one page, so dsv4's 1679 tasks
+-    // touched 1679 pages to hold ~210 KB). Allocated once per thread at the cap and never
++    // （按 256 个 Tensor 预留时每任务 32 KiB；紧凑排列只使用实际参数对应的页面）。
++    // Allocated once per thread at the cap and never
+     // grown, which is what keeps a task's borrowed element addresses valid for the rest of
+     // the recording. `new[]` default-initializes a trivially-default-constructible Tensor,
+     // so the region costs no page until a body writes one; each element a task uses is
+diff --git a/src/common/host_build_graph/runtime_types.h b/src/common/host_build_graph/runtime_types.h
+index ef84e47be..d1506fc5d 100644
+--- a/src/common/host_build_graph/runtime_types.h
++++ b/src/common/host_build_graph/runtime_types.h
+@@ -403,7 +403,7 @@ struct TaskPayload {
+     // reinitialization. READY records that producer release observed OWNER;
+     // only cancellation clears OWNER during the current task lifetime.
+     std::atomic<uint8_t> early_sync_drain_state{EARLY_SYNC_DRAIN_NONE};
+-    // === Cache line 2 — dispatch predicate + dump metadata (AICPU-only) ===
++    // === Cache lines 2..3 — dispatch predicate + 扩展 dump metadata (AICPU-only) ===
+     // AICore never reads either — args are materialized from line 0's counts and
+     // region deltas. Resolved at submit; evaluated by the scheduler at dispatch.
+     alignas(64) DispatchPredicate predicate;
+@@ -539,7 +539,7 @@ struct TaskPayload {
+ 
+ // TaskPayload layout verification (offsetof requires complete type). The counts
+ // and region deltas share the first cache line, the early-dispatch atomics own the
+-// second, and the AICPU-only predicate + dump metadata own the third.
++// second；AICPU-only predicate + 扩展 dump metadata 使用后续两行。
+ static_assert(offsetof(TaskPayload, tensors) == 12, "region deltas must follow the three counts");
+ static_assert(
+     offsetof(TaskPayload, fanin) + sizeof(simpler::hbg::SelfRelativePtr<int32_t>) <= 64,
+@@ -552,10 +552,10 @@ static_assert(
+ );
+ static_assert(offsetof(TaskPayload, predicate) == 128, "dispatch predicate owns cache line 2");
+ static_assert(
+-    offsetof(TaskPayload, dump_metadata) + sizeof(ArgsDumpTaskMetadata) <= 192,
+-    "dump metadata must fit the predicate's cache line"
++    offsetof(TaskPayload, dump_metadata) + sizeof(ArgsDumpTaskMetadata) <= 256,
++    "predicate and dump metadata must fit two cache lines"
+ );
+-static_assert(sizeof(TaskPayload) == 192, "TaskPayload is three cache lines and independent of every argument cap");
++static_assert(sizeof(TaskPayload) == 256, "TaskPayload contains four cache lines with expanded dump masks");
+ // compact_live_image restacks the payload segment with one memcpy and the device
+ // copy moves the whole image, so the payload has to be a POD wire struct. Deleting
+ // SelfRelativePtr's copy operations does not cost it that — a deleted special member
+@@ -798,7 +798,7 @@ struct alignas(64) ChipTaskStorage {
+ // offsetof is defined for a standard-layout type, which is what the accessors need.
+ static_assert(std::is_standard_layout_v<ChipTaskStorage>);
+ static_assert(std::is_trivially_destructible_v<ChipTaskStorage>);
+-static_assert(sizeof(ChipTaskStorage) == 320);
++static_assert(sizeof(ChipTaskStorage) == 384);
+ static_assert(offsetof(ChipTaskStorage, slot) == sizeof(TaskDescriptor));
+ static_assert(offsetof(ChipTaskStorage, payload) == offsetof(ChipTaskStorage, slot) + sizeof(ChipTaskSlotState));
+ 
+diff --git a/src/common/host_build_graph/types.h b/src/common/host_build_graph/types.h
+index ad433b966..d9902a5da 100644
+--- a/src/common/host_build_graph/types.h
++++ b/src/common/host_build_graph/types.h
+@@ -378,11 +378,13 @@ public:
+     }
+ 
+ #if SIMPLER_DFX
+-    uint64_t dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return dump_arg_selection_.dump_arg_index_ambiguous_mask(); }
++    ArgsDumpArgMask dump_arg_mask() const { return dump_arg_selection_.dump_arg_mask(); }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const {
++        return dump_arg_selection_.dump_arg_index_ambiguous_mask();
++    }
+ #else
+-    uint64_t dump_arg_mask() const { return 0; }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_mask() const { return 0; }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const { return 0; }
+ #endif
+ 
+     template <typename... Args>
+@@ -849,7 +851,8 @@ private:
+ using CoreTaskArgs = Arg<MAX_TENSOR_ARGS, MAX_SCALAR_ARGS>;
+ 
+ // Tensor and scalar capacity of a Graph boundary.
+-inline constexpr int32_t GRAPH_MAX_TENSOR_ARGS = 128;
++// Graph 边界至少能容纳一个完整 CORE 任务的 Tensor，避免融合后在外层再次触顶。
++inline constexpr int32_t GRAPH_MAX_TENSOR_ARGS = CHIP_MAX_TENSOR_ARGS;
+ inline constexpr int32_t GRAPH_MAX_SCALAR_ARGS = 64;
+ 
+ /**
+diff --git a/src/common/platform/include/aicpu/dump_arg_selection.h b/src/common/platform/include/aicpu/dump_arg_selection.h
+index 7fe7d03ff..d1f2d4cb2 100644
+--- a/src/common/platform/include/aicpu/dump_arg_selection.h
++++ b/src/common/platform/include/aicpu/dump_arg_selection.h
+@@ -16,10 +16,9 @@
+ #include <string.h>
+ 
+ #include "arg_direction.h"
++#include "common/args_dump_task_metadata.h"
+ 
+ struct DumpArgSelection {
+-    static_assert(CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS <= 64, "dump arg mask assumes at most 64 arguments");
+-
+     void clear() {
+         dump_arg_mask_ = 0;
+         dump_arg_index_ambiguous_mask_ = 0;
+@@ -27,15 +26,15 @@ struct DumpArgSelection {
+         clear_scalar_dtypes(0, CORE_MAX_SCALAR_ARGS);
+     }
+ 
+-    uint64_t dump_arg_mask() const { return dump_arg_mask_; }
+-    uint64_t dump_arg_index_ambiguous_mask() const { return dump_arg_index_ambiguous_mask_; }
++    ArgsDumpArgMask dump_arg_mask() const { return dump_arg_mask_; }
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask() const { return dump_arg_index_ambiguous_mask_; }
+     const uint8_t *scalar_dtypes() const { return scalar_dtypes_; }
+ 
+     void mark_index(int32_t index) {
+         if (!is_valid_arg_index(index)) {
+             return;
+         }
+-        dump_arg_mask_ |= (uint64_t{1} << index);
++        dump_arg_mask_.set(index);
+     }
+ 
+     void mark_all(int32_t tensor_count, int32_t scalar_count) {
+@@ -106,7 +105,7 @@ struct DumpArgSelection {
+     }
+ 
+ private:
+-    static constexpr int32_t kDumpArgBitCount = 64;
++    static constexpr int32_t kDumpArgBitCount = ARGS_DUMP_ARG_MASK_BITS;
+ 
+     static bool is_valid_arg_index(int32_t index) { return index >= 0 && index < kDumpArgBitCount; }
+ 
+@@ -132,7 +131,7 @@ private:
+         if (!is_valid_arg_index(index)) {
+             return;
+         }
+-        dump_arg_index_ambiguous_mask_ |= (uint64_t{1} << index);
++        dump_arg_index_ambiguous_mask_.set(index);
+     }
+ 
+     void clear_scalar_sources() { clear_scalar_sources(0, CORE_MAX_SCALAR_ARGS); }
+@@ -153,8 +152,8 @@ private:
+         memset(&scalar_dtypes_[start], 0, count * sizeof(uint8_t));
+     }
+ 
+-    uint64_t dump_arg_mask_{0};
+-    uint64_t dump_arg_index_ambiguous_mask_{0};
++    ArgsDumpArgMask dump_arg_mask_{};
++    ArgsDumpArgMask dump_arg_index_ambiguous_mask_{};
+     uintptr_t scalar_source_ptrs_[CORE_MAX_SCALAR_ARGS]{};
+     uint8_t scalar_dtypes_[CORE_MAX_SCALAR_ARGS]{};
+ };
+diff --git a/src/common/platform/include/common/args_dump_task_metadata.h b/src/common/platform/include/common/args_dump_task_metadata.h
+index 1b2e3f83f..288279a1e 100644
+--- a/src/common/platform/include/common/args_dump_task_metadata.h
++++ b/src/common/platform/include/common/args_dump_task_metadata.h
+@@ -16,13 +16,39 @@
+ 
+ #include "arg_direction.h"
+ 
+-using ArgsDumpArgMask = uint64_t;
++// 按实际参数槽编号选择 dump：Tensor 在前，标量紧随实际 Tensor 数量。
++// 使用定长 POD 多字掩码，保证跨 Host/AICPU memcpy 时不携带指针，
++// 并避免参数编号 >= 64 时移位溢出或静默丢失选择信息。
++constexpr uint32_t ARGS_DUMP_ARG_MASK_BITS = CORE_MAX_TENSOR_ARGS + CORE_MAX_SCALAR_ARGS;
++constexpr uint32_t ARGS_DUMP_ARG_MASK_WORDS = (ARGS_DUMP_ARG_MASK_BITS + 63) / 64;
+ 
+-// Bitmask stored with each task when orchestration selects specific
+-// tensor/scalar arguments for dump. Bit N corresponds to the payload argument
+-// index: tensors first, then scalars.
+-constexpr ArgsDumpArgMask ARGS_DUMP_ARG_MASK_NONE = 0;
+-constexpr uint32_t ARGS_DUMP_ARG_MASK_BITS = 64;
++struct ArgsDumpArgMask {
++    uint64_t words[ARGS_DUMP_ARG_MASK_WORDS]{};
++
++    constexpr ArgsDumpArgMask() = default;
++    // 保留低 64 位掩码的构造方式；高位参数通过 set() 指定。
++    constexpr ArgsDumpArgMask(uint64_t low_word) :
++        words{low_word} {}
++
++    constexpr void set(int32_t index) {
++        if (index >= 0 && index < static_cast<int32_t>(ARGS_DUMP_ARG_MASK_BITS)) {
++            words[index / 64] |= uint64_t{1} << (index % 64);
++        }
++    }
++    constexpr bool test(int32_t index) const {
++        return index >= 0 && index < static_cast<int32_t>(ARGS_DUMP_ARG_MASK_BITS) &&
++               (words[index / 64] & (uint64_t{1} << (index % 64))) != 0;
++    }
++    constexpr bool operator==(const ArgsDumpArgMask &other) const {
++        for (uint32_t i = 0; i < ARGS_DUMP_ARG_MASK_WORDS; ++i) {
++            if (words[i] != other.words[i]) return false;
++        }
++        return true;
++    }
++    constexpr bool operator!=(const ArgsDumpArgMask &other) const { return !(*this == other); }
++};
++
++constexpr ArgsDumpArgMask ARGS_DUMP_ARG_MASK_NONE{};
+ constexpr uint8_t ARGS_DUMP_RECORD_FLAG_ARG_INDEX_AMBIGUOUS = 1u << 0;
+ 
+ struct ArgsDumpTaskMetadata {
+@@ -33,4 +59,6 @@ struct ArgsDumpTaskMetadata {
+ 
+ static_assert(std::is_trivially_copyable_v<ArgsDumpTaskMetadata>);
+ static_assert(std::is_standard_layout_v<ArgsDumpTaskMetadata>);
+-static_assert(sizeof(ArgsDumpTaskMetadata) == 32);
++static_assert(std::is_trivially_copyable_v<ArgsDumpArgMask>);
++static_assert(std::is_standard_layout_v<ArgsDumpArgMask>);
++static_assert(sizeof(ArgsDumpTaskMetadata) == 2 * ARGS_DUMP_ARG_MASK_WORDS * sizeof(uint64_t) + CORE_MAX_SCALAR_ARGS);
+diff --git a/src/common/platform/include/common/dep_gen.h b/src/common/platform/include/common/dep_gen.h
+index d82257855..61345b84e 100644
+--- a/src/common/platform/include/common/dep_gen.h
++++ b/src/common/platform/include/common/dep_gen.h
+@@ -94,13 +94,11 @@ enum DepGenRecordFlags : uint32_t {
+  * Layout:
+  *   - task_id, flags, counts, explicit_deps, explicit_dep_kinds, arg_types,
+  *     kernel_id in the first cache lines
+- *   - tensors[] (32 × 128 B opaque blobs) at the tail; covers ~88% of the entry
++ *   - tensors[]（CORE_MAX_TENSOR_ARGS × 128 B）位于尾部。
+  *
+- * Total size: 8 + 4 + 4 + 64*8 + 64 + 32 + 12 (kernel_id) + 4 (block_num) + 32*128
+- *           = 4736 bytes.
+- * Aligned to 64 B → 4736 B (already a multiple of 64). kernel_id + block_num
+- * together pad tensors[] up to offset 640 = 10 * 64 so each 128-byte tensor
+- * blob covers exactly two cache lines instead of straddling three.
++ * 256 个 Tensor 时，描述符从 896 字节开始，记录共 33664 字节。
++ * tensors 显式按 64 字节对齐，每个描述符恰占两行；参数容量变化时
++ * 不依赖 kernel_id/block_num 恰好补齐前面的字段。
+  */
+ struct DepGenRecord {
+     uint64_t task_id;                                       // TaskId::raw, in the minting runtime's layout
+@@ -112,13 +110,13 @@ struct DepGenRecord {
+     uint8_t arg_types[CORE_MAX_TENSOR_ARGS];                // TensorArgType, length = tensor_count
+     int32_t kernel_id[3];  // per-subslot kernel id (AIC, AIV0, AIV1); INVALID_KERNEL_ID = -1
+     uint32_t block_num;    // SPMD logical block count; 1 means non-SPMD
+-    uint8_t tensors[CORE_MAX_TENSOR_ARGS][DEP_GEN_TENSOR_SIZE];  // opaque ChipTensor blobs
++    alignas(64) uint8_t tensors[CORE_MAX_TENSOR_ARGS][DEP_GEN_TENSOR_SIZE];  // opaque ChipTensor blobs
+ } __attribute__((aligned(64)));
+ 
+-static_assert(sizeof(DepGenRecord) == 4736, "DepGenRecord size changed — update header comment + docs/dfx/dep-gen.md");
++static_assert(sizeof(DepGenRecord) == 33664, "DepGenRecord size changed — update header comment + docs/dfx/dep-gen.md");
+ static_assert(sizeof(DepGenRecord) % 64 == 0, "DepGenRecord must be cache-line aligned");
+ static_assert(offsetof(DepGenRecord, tensors) % 64 == 0, "DepGenRecord::tensors[] must start on a cache-line boundary");
+-static_assert(offsetof(DepGenRecord, tensors) == 640, "DepGenRecord::tensors offset changed — update header comment");
++static_assert(offsetof(DepGenRecord, tensors) == 896, "DepGenRecord::tensors offset changed — update header comment");
+ static_assert(std::is_trivially_copyable_v<DepGenRecord>, "DepGenRecord must remain trivially copyable");
+ static_assert(std::is_standard_layout_v<DepGenRecord>, "DepGenRecord must remain standard layout");
+ 
+@@ -132,9 +130,9 @@ static_assert(std::is_standard_layout_v<DepGenRecord>, "DepGenRecord must remain
+  *
+  * Layout: 16-byte header (task_id + flags + dep_count + _reserved) + parallel
+  * deps[] and kinds[] arrays. The largest pair of arrays that fits in one
+- * DepGenRecord slot carries 524 entries.
++ * DepGenRecord slot 的容量从实际记录大小推导。
+  */
+-constexpr int DEP_GEN_OVERFLOW_DEPS_PER_RECORD = 524;
++constexpr int DEP_GEN_OVERFLOW_DEPS_PER_RECORD = (sizeof(DepGenRecord) - 16) / (sizeof(uint64_t) + sizeof(uint8_t));
+ 
+ /**
+  * Reinterpret-view of a DepGenRecord slot when flags & DEP_GEN_FLAG_OVERFLOW.
+diff --git a/src/common/platform/shared/aicpu/args_dump_aicpu.cpp b/src/common/platform/shared/aicpu/args_dump_aicpu.cpp
+index 6f973e8ab..dc49fb907 100644
+--- a/src/common/platform/shared/aicpu/args_dump_aicpu.cpp
++++ b/src/common/platform/shared/aicpu/args_dump_aicpu.cpp
+@@ -312,14 +312,10 @@ bool should_dump_arg(ArgsDumpArgMask arg_mask, int32_t arg_index) {
+     if (!is_dump_args_selective_mode()) {
+         return true;
+     }
+-    if (arg_index < 0 || arg_index >= static_cast<int32_t>(ARGS_DUMP_ARG_MASK_BITS)) return false;
+-    return (arg_mask & (ArgsDumpArgMask{1} << arg_index)) != 0;
++    return arg_mask.test(arg_index);
+ }
+ 
+-bool has_dump_arg_flag(ArgsDumpArgMask arg_mask, int32_t arg_index) {
+-    if (arg_index < 0 || arg_index >= static_cast<int32_t>(ARGS_DUMP_ARG_MASK_BITS)) return false;
+-    return (arg_mask & (ArgsDumpArgMask{1} << arg_index)) != 0;
+-}
++bool has_dump_arg_flag(ArgsDumpArgMask arg_mask, int32_t arg_index) { return arg_mask.test(arg_index); }
+ 
+ bool try_log_dump_args_layout_mismatch() {
+     if (s_logged_dump_args_layout_mismatch) {
+diff --git a/src/common/task_interface/arg_direction.h b/src/common/task_interface/arg_direction.h
+index 3a3758533..a24720db4 100644
+--- a/src/common/task_interface/arg_direction.h
++++ b/src/common/task_interface/arg_direction.h
+@@ -26,7 +26,9 @@ enum class ArgDirection : int32_t {
+     INOUT = 3,
+ };
+ 
+-inline constexpr int CORE_MAX_TENSOR_ARGS = 32;
++// 整层融合 InCore 任务可能超过 128 个 Tensor；容量属于软件 ABI，
++// Host、AICPU、AICore 以及 callable 必须使用同一套头文件重新编译。
++inline constexpr int CORE_MAX_TENSOR_ARGS = 256;
+ // Chip-level entry-tensor cap. Sizes ChipCallable::signature_[] and
+ // ChipStorageTaskArgs::tensors_[], both of which cross the host->device wire
+ // as fixed POD — raising this is an additive ABI change (existing callers
+diff --git a/src/common/task_interface/callable.h b/src/common/task_interface/callable.h
+index 83f9f1826..22e200aff 100644
+--- a/src/common/task_interface/callable.h
++++ b/src/common/task_interface/callable.h
+@@ -198,7 +198,7 @@ static_assert(
+ 
+ // Callable bytes are shipped through L3/L4 IPC and the on-disk kernel cache,
+ // so the header layout is wire ABI. The constants below encode
+-// CHIP_MAX_TENSOR_ARGS = 256, CORE_MAX_TENSOR_ARGS = 32,
++// CHIP_MAX_TENSOR_ARGS = 256, CORE_MAX_TENSOR_ARGS = 256,
+ // CALLABLE_FUNC_NAME_MAX = 64, and MaxChildren = 1024; a deliberate capacity
+ // change updates them in the same commit.
+ static_assert(
+@@ -224,12 +224,12 @@ static_assert(
+ static_assert(offsetof(ChipCallable, storage_) == 9376, "ChipCallable wire ABI: storage offset changed");
+ static_assert(sizeof(ChipCallable) == 9376, "ChipCallable wire ABI: header size changed");
+ static_assert(offsetof(CoreCallable, signature_) == 0, "CoreCallable wire ABI: signature offset changed");
+-static_assert(offsetof(CoreCallable, sig_count_) == 128, "CoreCallable wire ABI: sig_count offset changed");
+-static_assert(offsetof(CoreCallable, binary_size_) == 132, "CoreCallable wire ABI: binary_size offset changed");
+-static_assert(offsetof(CoreCallable, resolved_addr_) == 136, "CoreCallable wire ABI: resolved_addr offset changed");
+-static_assert(offsetof(CoreCallable, storage_) == 144, "CoreCallable wire ABI: storage offset changed");
+-static_assert(sizeof(CoreCallable) == 144, "CoreCallable wire ABI: header size changed");
+-static_assert(CoreCallable::binary_data_offset() == 192, "CoreCallable wire ABI: binary data offset changed");
++static_assert(offsetof(CoreCallable, sig_count_) == 1024, "CoreCallable wire ABI: sig_count offset changed");
++static_assert(offsetof(CoreCallable, binary_size_) == 1028, "CoreCallable wire ABI: binary_size offset changed");
++static_assert(offsetof(CoreCallable, resolved_addr_) == 1032, "CoreCallable wire ABI: resolved_addr offset changed");
++static_assert(offsetof(CoreCallable, storage_) == 1040, "CoreCallable wire ABI: storage offset changed");
++static_assert(sizeof(CoreCallable) == 1040, "CoreCallable wire ABI: header size changed");
++static_assert(CoreCallable::binary_data_offset() == 1088, "CoreCallable wire ABI: binary data offset changed");
+ 
+ // ============================================================================
+ // Factory: make_callable for static leaf
+diff --git a/tests/st/a2a3/core_argument_capacity/README.md b/tests/st/a2a3/core_argument_capacity/README.md
+new file mode 100644
+index 000000000..156964e81
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/README.md
+@@ -0,0 +1,63 @@
++# CORE 大参数 MIX 验证
++
++本用例验证 Simpler 的 CORE 参数容量从 32 扩到 256，保留 16 个标量。
++目标是整层融合后的大 InCore 任务；本用例不代表完整 CSA 编译或 CSA 性能验证。
++
++## 覆盖范围
++
++- 133 个 Tensor：覆盖当前 CSA 原型最大的共享签名。
++- 256 个 Tensor + 16 个标量：覆盖传输容量上界，最后一个标量位于槽 271。
++- 每项任务为 24 个 MIX 核组，每组 AIC + AIV0 + AIV1，检查逻辑核编号和 lane 身份。
++- 每次入口连续提交两项任务，第二项依赖第一项，并启用 early resolve 与 sync_start。
++- 每个核读取所有输入和全部标量，写入独立 cache line；完整比较输出和未写区域。
++- program 模式与调用方持有设备 Tensor/stream 的 kernel 模式分别运行。
++- 选择性 dump 验证第 63/64/128、最后一个 Tensor、最后一个标量；无截断或丢记录。
++
++## 复现
++
++先在独立 worktree 的 `.venv` 中安装本版本，按仓库环境文档加载 CANN。
++所有真机命令通过 `task-submit`，核型号预检使用：
++
++```bash
++.claude/skills/onboard-arch-precheck/check.sh a2a3
++python -m simpler_setup.tools.scene_test_compile tests/st/a2a3/core_argument_capacity \
++    --platform a2a3 --compile-workers 4
++```
++
++选择一个 runtime，每次进程只加载一种 runtime；例如 program 模式：
++
++```bash
++task-submit --device auto --device-num 1 --timeout 600 --max-time 600 \
++    --run 'python -m pytest tests/st/a2a3/core_argument_capacity --platform a2a3 \
++    --runtime host_build_graph --level 2 --device "$TASK_DEVICE" --rounds 1 --dump-args 1 -s -q'
++```
++
++将 runtime 改为 `tensormap_and_ringbuffer` 可验证 TMR。多轮正确性用 `--rounds 3`；
++框架会在多轮运行时禁用 dump，因此采集 dump 必须用 `--rounds 1`。
++用 `verify_dump.py <args_dump.json> --count 133` 或 `--count 256` 验证实际生成的文件。
++
++kernel 模式沿用仓库已有 Worker/ACL 测试工具，独立执行：
++
++```bash
++task-submit --device auto --device-num 1 --timeout 600 --max-time 600 \
++    --run 'python -m tests.st.a2a3.core_argument_capacity.kernel_mode \
++    --device "$TASK_DEVICE" --runtime host_build_graph --count 133 \
++    --output outputs/core_capacity/kernel_hbg_133.json'
++```
++
++同样可切换 runtime 和参数数量。每个进程准备一次 callable 并执行三次 launch，
++结果 JSON 只在输出和保护区全部比较通过后标记 `passed: true`。
++
++## ABI 与构建要求
++
++- `CoreCallable` 固定头部 1040 B，核二进制偏移 1088 B。
++- CORE 参数区 272 个槽，上下文位于 272/273；派发结构 2304 B，保留首行控制区。
++- dump 掩码为 5 个 64 位字，覆盖实际 272 位；记录结构保持 POD。
++- HBG TaskPayload 为 256 B，ChipTaskStorage 为 384 B；Graph 边界 Tensor 容量为 256。
++- TMR 的 Tensor 数组为 256 × 128 B，标量偏移从 Tensor 容量计算。
++- Host、AICPU、AICore、Python binding 和 callable 必须成套重编译。旧二进制不兼容。
++- callable 缓存已有序列化 ABI token，InCore 缓存已有头文件内容依赖；本次另补齐
++  runtime 自定义 CCE 编译的 ABI 头文件依赖，防止增量构建复用旧派发偏移。
++
++扩容会增加固定参数池的预留空间；HBG 的设备 live image 仍按实际用量压紧。
++本用例未测试性能，也不改变 PyPTO/PTOAS/PTO-ISA/pypto-lib 源码。
+diff --git a/tests/st/a2a3/core_argument_capacity/kernel_mode.py b/tests/st/a2a3/core_argument_capacity/kernel_mode.py
+new file mode 100644
+index 000000000..17c5fa068
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/kernel_mode.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++"""沿用 Worker 的 kernel 模式，以调用方持有的设备 Tensor 验证大参数 MIX。"""
++
++import argparse
++import json
++from pathlib import Path
++
++from simpler.task_interface import CallConfig, ChipStorageTaskArgs, ChipTensor, DataType
++
++from tests.st.a2a3.core_argument_capacity.test_core_argument_capacity import (
++    TestHbg133,
++    TestHbg256,
++    TestTmr133,
++    TestTmr256,
++)
++from tests.ut.py.test_worker.test_worker_kernel_mode_hw import (
++    _COUNT,
++    _assert_closed_cleanly,
++    _caller_device,
++    _kernel_worker,
++)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--device", type=int, required=True)
++    parser.add_argument("--runtime", choices=["host_build_graph", "tensormap_and_ringbuffer"], required=True)
++    parser.add_argument("--count", choices=[133, 256], type=int, required=True)
++    parser.add_argument("--output", type=Path, required=True)
++    options = parser.parse_args()
++    cases = {
++        ("host_build_graph", 133): TestHbg133,
++        ("host_build_graph", 256): TestHbg256,
++        ("tensormap_and_ringbuffer", 133): TestTmr133,
++        ("tensormap_and_ringbuffer", 256): TestTmr256,
++    }
++    chip = cases[options.runtime, options.count]().build_callable("a2a3")
++    result = {
++        "runtime": options.runtime,
++        "tensor_count": options.count,
++        "core_scalar_count": 16,
++        "mode": "kernel",
++        "passed": False,
++    }
++    options.output.parent.mkdir(parents=True, exist_ok=True)
++    try:
++        with _caller_device(options.device) as caller, _kernel_worker(caller, "a2a3", options.runtime) as worker:
++            config = CallConfig()
++            config.runtime_env.ring_task_window = 64
++            worker.init(config=config)
++            pin = worker._kernel_pin_finalizer
++            print("kernel init 完成", flush=True)
++            callable_id = worker.kernel_prepare_callable(chip)
++            args = ChipStorageTaskArgs()
++            for i in range(options.count - 1):
++                value = options.count if i == 0 else i + 1
++                address = caller.device_buffer([float(value)])
++                args.add_tensor(ChipTensor.make(address, (1,), DataType.FLOAT32, child_memory=True))
++            output = caller.device_buffer([-1.0] * _COUNT)
++            args.add_tensor(ChipTensor.make(output, (_COUNT,), DataType.FLOAT32, child_memory=True))
++            expected = [-1.0] * _COUNT
++            value = options.count + sum((i + 1) ** 2 for i in range(1, options.count - 1))
++            value += sum((101 + i) * (i + 1) for i in range(16))
++            for block in range(24):
++                for lane in range(3):
++                    expected[(block * 3 + lane) * 16] = float(value + block * 1000 + lane * 100 + 24)
++            # 重复 launch 同一 callable/地址，检查三次运行及所有未写入保护区。
++            for repeat in range(3):
++                worker.kernel_launch(callable_id, args, caller_stream=caller.stream)
++                assert caller.synchronize() == 0
++                actual = caller.read(output)
++                assert actual == expected, f"第 {repeat} 次输出或保护区不符"
++                print(f"kernel launch {repeat + 1}/3 完整输出通过", flush=True)
++            worker.close()
++            _assert_closed_cleanly(worker, pin)
++            result["passed"] = True
++            result["launches"] = 3
++    except Exception as exc:
++        result["error"] = str(exc)
++        raise
++    finally:
++        options.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
++        print(json.dumps(result, ensure_ascii=False), flush=True)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/st/a2a3/core_argument_capacity/kernels/aic.cpp b/tests/st/a2a3/core_argument_capacity/kernels/aic.cpp
+new file mode 100644
+index 000000000..29f8147ee
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/kernels/aic.cpp
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (c) PyPTO Contributors.
++ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++ * CANN Open Software License Agreement Version 2.0 (the "License").
++ * Please refer to the License for details. You may not use this file except in compliance with the License.
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++ * See LICENSE in the root of the software repository for the full text of the License.
++ * -----------------------------------------------------------------------------------------------------------
++ */
++#define CAPACITY_AIV 0
++#include "large_args.h"
+diff --git a/tests/st/a2a3/core_argument_capacity/kernels/aiv.cpp b/tests/st/a2a3/core_argument_capacity/kernels/aiv.cpp
+new file mode 100644
+index 000000000..bed997d37
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/kernels/aiv.cpp
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (c) PyPTO Contributors.
++ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++ * CANN Open Software License Agreement Version 2.0 (the "License").
++ * Please refer to the License for details. You may not use this file except in compliance with the License.
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++ * See LICENSE in the root of the software repository for the full text of the License.
++ * -----------------------------------------------------------------------------------------------------------
++ */
++#define CAPACITY_AIV 1
++#include "large_args.h"
+diff --git a/tests/st/a2a3/core_argument_capacity/kernels/large_args.h b/tests/st/a2a3/core_argument_capacity/kernels/large_args.h
+new file mode 100644
+index 000000000..9c21ca6bf
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/kernels/large_args.h
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (c) PyPTO Contributors.
++ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++ * CANN Open Software License Agreement Version 2.0 (the "License").
++ * Please refer to the License for details. You may not use this file except in compliance with the License.
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++ * See LICENSE in the root of the software repository for the full text of the License.
++ * -----------------------------------------------------------------------------------------------------------
++ */
++
++#pragma once
++#include <cstdint>
++#include <pto/pto-inst.hpp>
++#include "tensor.h"
++#include "intrinsic.h"
++
++// 每个核使用独立 cache line，避免标量写回造成核间覆盖。
++// 输入 0 的值携带实际 Tensor 数，最后一个 Tensor 为输出。
++extern "C" __aicore__ void kernel_entry(__gm__ int64_t *args) {
++    auto *first = reinterpret_cast<__gm__ Tensor *>(args[0]);
++    auto *first_data = reinterpret_cast<__gm__ float *>(first->buffer.addr) + first->start_offset;
++    int32_t count = static_cast<int32_t>(first_data[0]);
++    float value = 0;
++    for (int32_t i = 0; i < count - 1; ++i) {
++        auto *tensor = reinterpret_cast<__gm__ Tensor *>(args[i]);
++        auto *data = reinterpret_cast<__gm__ float *>(tensor->buffer.addr) + tensor->start_offset;
++        value += data[0] * static_cast<float>(i + 1);
++    }
++    // 刻意读取全部 16 个标量；count=256 时最后一项位于槽 271。
++    for (int32_t i = 0; i < CORE_MAX_SCALAR_ARGS; ++i) {
++        value += static_cast<float>(args[count + i] * (i + 1));
++    }
++    int32_t lane = 0;
++#if CAPACITY_AIV
++    lane = 1 + get_sub_block_id(args);
++#endif
++    int32_t block = get_block_idx(args);
++    auto *tensor = reinterpret_cast<__gm__ Tensor *>(args[count - 1]);
++    auto *out = reinterpret_cast<__gm__ float *>(tensor->buffer.addr) + tensor->start_offset;
++    int32_t offset = (block * 3 + lane) * 16;
++    out[offset] = value + block * 1000 + lane * 100 + get_block_num(args);
++#ifndef PTO_CPUSTUB_HPP
++    dcci(&out[offset], SINGLE_CACHE_LINE, CACHELINE_OUT);
++#endif
++}
+diff --git a/tests/st/a2a3/core_argument_capacity/kernels/orchestration.cpp b/tests/st/a2a3/core_argument_capacity/kernels/orchestration.cpp
+new file mode 100644
+index 000000000..8f298c0f4
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/kernels/orchestration.cpp
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) PyPTO Contributors.
++ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++ * CANN Open Software License Agreement Version 2.0 (the "License").
++ * Please refer to the License for details. You may not use this file except in compliance with the License.
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++ * See LICENSE in the root of the software repository for the full text of the License.
++ * -----------------------------------------------------------------------------------------------------------
++ */
++
++#include "orchestration_api.h"
++
++extern "C" __attribute__((visibility("default"))) OrchestrationConfig
++aicpu_orchestration_config(const ChipTaskArgs &args) {
++    return OrchestrationConfig{.expected_arg_count = args.tensor_count()};
++}
++
++extern "C" __attribute__((visibility("default"))) void aicpu_orchestration_entry(const ChipTaskArgs &entry) {
++    // 第二次提交依赖同一输出；同时覆盖任务复用与 sync_start 上下文。
++    for (int repeat = 0; repeat < 2; ++repeat) {
++        CoreTaskArgs args;
++        for (int i = 0; i < entry.tensor_count() - 1; ++i)
++            args.add_input(entry.tensor(i).ref());
++        args.add_inout(entry.tensor(entry.tensor_count() - 1).ref());
++        int64_t scalars[CORE_MAX_SCALAR_ARGS];
++        for (int i = 0; i < CORE_MAX_SCALAR_ARGS; ++i) {
++            scalars[i] = 101 + i;
++            args.add_scalar(scalars[i]);
++        }
++        // 选择跨 64/128 位边界的 Tensor，以及最后一个标量。
++        args.dump(
++            entry.tensor(63).ref(), entry.tensor(64).ref(), entry.tensor(128).ref(),
++            entry.tensor(entry.tensor_count() - 1).ref(), scalars[15]
++        );
++        args.launch_spec.set_block_num(24);
++        args.launch_spec.set_require_sync_start(true);
++        args.set_allow_early_resolve(true);
++        MixedKernels kernels;
++        kernels.aic_kernel_id = 0;
++        kernels.aiv0_kernel_id = 1;
++        kernels.aiv1_kernel_id = 2;
++        rt_submit_task(kernels, args);
++    }
++}
+diff --git a/tests/st/a2a3/core_argument_capacity/test_core_argument_capacity.py b/tests/st/a2a3/core_argument_capacity/test_core_argument_capacity.py
+new file mode 100644
+index 000000000..27bc9c08a
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/test_core_argument_capacity.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++"""大参数 MIX：验证完整参数数组、尾部标量、双 AIV 身份与 sync_start。"""
++
++import torch
++from simpler.task_interface import ArgDirection as D
++
++from simpler_setup import SceneTestCase, TaskArgsBuilder, TensorArg, scene_test
++
++
++def capacity_case(runtime, count):
++    signature = [D.IN] * (count - 1) + [D.INOUT]
++
++    class CapacityCase(SceneTestCase):
++        RTOL = 0
++        ATOL = 0
++        CALLABLE = {
++            "orchestration": {
++                "source": "kernels/orchestration.cpp",
++                "function_name": "aicpu_orchestration_entry",
++                "signature": signature,
++            },
++            "incores": [
++                {"func_id": i, "source": f"kernels/{kind}.cpp", "core_type": kind, "signature": signature}
++                for i, kind in enumerate(("aic", "aiv", "aiv"))
++            ],
++        }
++        CASES = [{"name": f"tensors_{count}_scalars_16", "platforms": ["a2a3sim", "a2a3"], "params": {}}]
++
++        def generate_args(self, params):
++            return TaskArgsBuilder(
++                *(
++                    TensorArg(f"x{i}", torch.tensor([count if i == 0 else i + 1], dtype=torch.float32))
++                    for i in range(count - 1)
++                ),
++                TensorArg("out", torch.full((24 * 3 * 16,), -1.0, dtype=torch.float32)),
++            )
++
++        def compute_golden(self, args, params):
++            value = count + sum((i + 1) ** 2 for i in range(1, count - 1))
++            value += sum((101 + i) * (i + 1) for i in range(16))
++            for block in range(24):
++                for lane in range(3):
++                    args.out[(block * 3 + lane) * 16] = value + block * 1000 + lane * 100 + 24
++
++    name = f"TestCapacity_{runtime}_{count}"
++    CapacityCase.__name__ = name
++    CapacityCase.__qualname__ = name
++    return scene_test(level=2, runtime=runtime)(CapacityCase)
++
++
++TestHbg133 = capacity_case("host_build_graph", 133)
++TestHbg256 = capacity_case("host_build_graph", 256)
++TestTmr133 = capacity_case("tensormap_and_ringbuffer", 133)
++TestTmr256 = capacity_case("tensormap_and_ringbuffer", 256)
++
++if __name__ == "__main__":
++    SceneTestCase.run_module(__name__)
+diff --git a/tests/st/a2a3/core_argument_capacity/verify_dump.py b/tests/st/a2a3/core_argument_capacity/verify_dump.py
+new file mode 100644
+index 000000000..90f5b7888
+--- /dev/null
++++ b/tests/st/a2a3/core_argument_capacity/verify_dump.py
+@@ -0,0 +1,55 @@
++#!/usr/bin/env python3
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++"""只读检查设备生成的选择性 dump，包括超过 128 的 Tensor 和最后一个标量。"""
++
++import argparse
++import json
++import struct
++from pathlib import Path
++
++
++def verify(path: Path, count: int):
++    data = json.loads(path.read_text())
++    assert data["dump_args_level"] == 1
++    assert data["truncated_args"] == data["dropped_records"] == 0
++    records = data["args"]
++    selected = {63, 64, 128, count - 1, count + 15}
++    assert {record["arg_index"] for record in records} == selected
++    blob = (path.parent / data["bin_file"]).read_bytes()
++    tasks = {record["task_id"] for record in records}
++    assert len(tasks) == 2
++    for task in tasks:
++        current = [record for record in records if record["task_id"] == task]
++        assert {record["arg_index"] for record in current} == selected
++        for record in current:
++            if record["kind"] == "scalar":
++                assert record["arg_index"] == count + 15
++                assert record["dtype"] == "INT64" and record["value"] == 116
++            elif record["arg_index"] in (63, 64, 128):
++                value = struct.unpack_from("<f", blob, record["bin_offset"])[0]
++                assert value == record["arg_index"] + 1
++        outputs = [record for record in current if record["stage"] == "after_completion"]
++        assert len(outputs) == 1 and outputs[0]["arg_index"] == count - 1
++    return {
++        "path": str(path),
++        "tensor_count": count,
++        "selected_indices": sorted(selected),
++        "tasks": len(tasks),
++        "records": len(records),
++        "passed": True,
++    }
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("path", type=Path)
++    parser.add_argument("--count", type=int, required=True)
++    options = parser.parse_args()
++    print(json.dumps(verify(options.path, options.count), ensure_ascii=False, indent=2))
+diff --git a/tests/ut/cpp/CMakeLists.txt b/tests/ut/cpp/CMakeLists.txt
+index 429cefa81..d12ab6e64 100644
+--- a/tests/ut/cpp/CMakeLists.txt
++++ b/tests/ut/cpp/CMakeLists.txt
+@@ -667,6 +667,10 @@ set_tests_properties(test_sim_run_completion PROPERTIES LABELS "no_hardware")
+ add_task_interface_test(test_buffer types/test_buffer.cpp)
+ add_task_interface_test(test_child_memory types/test_child_memory.cpp)
+ add_task_interface_test(test_chip_max_tensor_args types/test_chip_max_tensor_args.cpp)
++add_task_interface_test(test_core_argument_capacity types/test_core_argument_capacity.cpp)
++target_include_directories(test_core_argument_capacity PRIVATE
++    ${CMAKE_SOURCE_DIR}/../../../src/common/platform/include
++)
+ add_task_interface_test(test_callable_scalar_count types/test_callable_scalar_count.cpp)
+ add_task_interface_test(test_call_config types/test_call_config.cpp)
+ add_task_interface_test(test_kernel_invocation_header types/test_kernel_invocation_header.cpp)
+diff --git a/tests/ut/cpp/a2a3/test_args_dump.cpp b/tests/ut/cpp/a2a3/test_args_dump.cpp
+index 840491eb1..49f317973 100644
+--- a/tests/ut/cpp/a2a3/test_args_dump.cpp
++++ b/tests/ut/cpp/a2a3/test_args_dump.cpp
+@@ -323,3 +323,22 @@ TEST_F(ArgsDumpTest, Level3UsesTaskMaskForTensorPayload) {
+ 
+     set_platform_dump_base(0);
+ }
++
++// 多字掩码经过 task_id 元数据池后，高编号 Tensor 和尾部标量仍可选择。
++TEST_F(ArgsDumpTest, ExpandedMaskPoolPreservesHighArguments) {
++    ArgsDumpArgMask mask;
++    ArgsDumpArgMask flags;
++    for (int index : {63, 64, 128, 132, 255, 256, 271})
++        mask.set(index);
++    flags.set(271);
++    const uint64_t task_id = (uint64_t{19} << 32) | 333;
++    set_dump_args_task_mask(task_id, mask, flags);
++    ArgsDumpArgMask got_mask, got_flags;
++    get_dump_args_task_masks(task_id, &got_mask, &got_flags);
++    EXPECT_EQ(got_mask, mask);
++    EXPECT_EQ(got_flags, flags);
++    EXPECT_TRUE(has_dump_arg_flag(got_mask, 132));
++    EXPECT_TRUE(has_dump_arg_flag(got_flags, 271));
++    EXPECT_FALSE(has_dump_arg_flag(got_flags, 270));
++    EXPECT_FALSE(has_dump_arg_flag(got_flags, 272));
++}
+diff --git a/tests/ut/cpp/a5/test_args_dump.cpp b/tests/ut/cpp/a5/test_args_dump.cpp
+index 301a0c2e1..8f0a9f4cd 100644
+--- a/tests/ut/cpp/a5/test_args_dump.cpp
++++ b/tests/ut/cpp/a5/test_args_dump.cpp
+@@ -260,3 +260,22 @@ TEST_F(ArgsDumpTest, ArenaBackpressureChecksBeforePayloadOverwrite) {
+ 
+     set_platform_dump_base(0);
+ }
++
++// 多字掩码经过 task_id 元数据池后，高编号 Tensor 和尾部标量仍可选择。
++TEST_F(ArgsDumpTest, ExpandedMaskPoolPreservesHighArguments) {
++    ArgsDumpArgMask mask;
++    ArgsDumpArgMask flags;
++    for (int index : {63, 64, 128, 132, 255, 256, 271})
++        mask.set(index);
++    flags.set(271);
++    const uint64_t task_id = (uint64_t{19} << 32) | 333;
++    set_dump_args_task_mask(task_id, mask, flags);
++    ArgsDumpArgMask got_mask, got_flags;
++    get_dump_args_task_masks(task_id, &got_mask, &got_flags);
++    EXPECT_EQ(got_mask, mask);
++    EXPECT_EQ(got_flags, flags);
++    EXPECT_TRUE(has_dump_arg_flag(got_mask, 132));
++    EXPECT_TRUE(has_dump_arg_flag(got_flags, 271));
++    EXPECT_FALSE(has_dump_arg_flag(got_flags, 270));
++    EXPECT_FALSE(has_dump_arg_flag(got_flags, 272));
++}
+diff --git a/tests/ut/cpp/common/test_hbg_graph_cache.cpp b/tests/ut/cpp/common/test_hbg_graph_cache.cpp
+index b073411a7..89e484705 100644
+--- a/tests/ut/cpp/common/test_hbg_graph_cache.cpp
++++ b/tests/ut/cpp/common/test_hbg_graph_cache.cpp
+@@ -548,12 +548,10 @@ TEST(GraphBoundaryPool, TensorSlotsCoverPackedBytesMinimally) {
+     }
+ }
+ 
+-// A Graph boundary is GraphTaskArgs-wide while the pools budget MAX_TENSOR_ARGS /
+-// MAX_SCALAR_ARGS per window slot, so the widest legal boundary draws several slots'
+-// worth. graph_submit_outer's preflight exists because of that gap; pin the gap itself
+-// so a cap or type-size change cannot quietly close or widen it unnoticed.
+-TEST(GraphBoundaryPool, WidestBoundaryExceedsOneSlotBudget) {
+-    EXPECT_GT(graph_boundary_tensor_pool_slots(GRAPH_MAX_TENSOR_ARGS), static_cast<size_t>(MAX_TENSOR_ARGS));
++// Tensor 容量扩到 256 后，最宽 Graph 边界的紧凑 Tensor 描述符已能放入一个
++// CORE 任务槽的预算；标量池仍然更宽，需要保留独立的预检。
++TEST(GraphBoundaryPool, WidestBoundaryFitsTensorBudgetButExceedsScalarBudget) {
++    EXPECT_LE(graph_boundary_tensor_pool_slots(GRAPH_MAX_TENSOR_ARGS), static_cast<size_t>(MAX_TENSOR_ARGS));
+     EXPECT_GT(
+         static_cast<size_t>(
+             CHIP_ALIGN_UP(static_cast<int32_t>(GRAPH_MAX_SCALAR_ARGS), ARG_POOL_ALIGN / (int32_t)sizeof(uint64_t))
+diff --git a/tests/ut/cpp/common/test_hbg_self_relative_ptr.cpp b/tests/ut/cpp/common/test_hbg_self_relative_ptr.cpp
+index fbadf8e24..f3f8eb1ed 100644
+--- a/tests/ut/cpp/common/test_hbg_self_relative_ptr.cpp
++++ b/tests/ut/cpp/common/test_hbg_self_relative_ptr.cpp
+@@ -127,7 +127,7 @@ TEST(HbgSelfRelativePtr, KeepsTheSharedMemoryAbiSizes) {
+     EXPECT_EQ(sizeof(TaskDescriptor), 64u);
+     EXPECT_EQ(sizeof(SelfRelativePtr<simpler::hbg::Tensor>), 4u);
+     EXPECT_EQ(offsetof(TaskDescriptor, packed_buffer_base), 24u);
+-    EXPECT_EQ(sizeof(ChipTaskStorage), 320u);
++    EXPECT_EQ(sizeof(ChipTaskStorage), 384u);
+     EXPECT_EQ(offsetof(ChipTaskStorage, slot), sizeof(TaskDescriptor));
+     EXPECT_EQ(offsetof(ChipTaskStorage, payload), offsetof(ChipTaskStorage, slot) + sizeof(ChipTaskSlotState));
+ }
+diff --git a/tests/ut/cpp/types/test_core_argument_capacity.cpp b/tests/ut/cpp/types/test_core_argument_capacity.cpp
+new file mode 100644
+index 000000000..05920450d
+--- /dev/null
++++ b/tests/ut/cpp/types/test_core_argument_capacity.cpp
+@@ -0,0 +1,83 @@
++/*
++ * Copyright (c) PyPTO Contributors.
++ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++ * CANN Open Software License Agreement Version 2.0 (the "License").
++ * Please refer to the License for details. You may not use this file except in compliance with the License.
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++ * See LICENSE in the root of the software repository for the full text of the License.
++ * -----------------------------------------------------------------------------------------------------------
++ */
++#include <gtest/gtest.h>
++
++#include "aicpu/dump_arg_selection.h"
++#include "kernel_callable_validation.h"
++#include "task_args.h"
++
++TEST(CoreArgumentCapacity, LargeCallableAndAllStorageSlotsRoundTrip) {
++    static_assert(CORE_MAX_TENSOR_ARGS == 256);
++    // 包含 CSA 的 132/133 参数以及新容量上界；检查真实序列化布局。
++    for (int count : {32, 64, 132, 133, 256}) {
++        std::vector<ArgDirection> signature(count, ArgDirection::IN);
++        signature.back() = ArgDirection::INOUT;
++        const uint64_t code = 0x123456789abcdef0;
++        auto child = make_callable<CORE_MAX_TENSOR_ARGS>(signature.data(), count, &code, sizeof(code));
++        const auto &core = *reinterpret_cast<const CoreCallable *>(child.data());
++        EXPECT_EQ(core.sig_count(), count);
++        EXPECT_EQ(core.sig(count - 1), ArgDirection::INOUT);
++        EXPECT_EQ(std::memcmp(core.binary_data(), &code, sizeof(code)), 0);
++        const int32_t id = 0;
++        auto parent = make_callable<CoreCallable, CHIP_MAX_TENSOR_ARGS, 1024>(
++            signature.data(), count, "large_core", nullptr, 0, &id, &child, 1, ""
++        );
++        EXPECT_TRUE(simpler::kernel::valid_kernel_callable_image(parent.data(), parent.size()));
++    }
++    TaskArgsTpl<ChipTensor, uint64_t, CORE_MAX_TENSOR_ARGS, CORE_MAX_SCALAR_ARGS> args;
++    for (int i = 0; i < CORE_MAX_TENSOR_ARGS; ++i) {
++        ChipTensor tensor{};
++        tensor.buffer.addr = 0x1000 + i * 128;
++        args.add_tensor(tensor);
++    }
++    EXPECT_THROW(args.add_tensor(ChipTensor{}), std::out_of_range);
++    for (int i = 0; i < CORE_MAX_SCALAR_ARGS; ++i)
++        args.add_scalar(0x2000 + i);
++    EXPECT_THROW(args.add_scalar(0), std::out_of_range);
++    for (int i = 0; i < CORE_MAX_TENSOR_ARGS; ++i)
++        EXPECT_EQ(args.tensor(i).buffer.addr, 0x1000 + i * 128);
++    EXPECT_EQ(args.scalar(CORE_MAX_SCALAR_ARGS - 1), 0x2000 + CORE_MAX_SCALAR_ARGS - 1);
++    std::vector<ArgDirection> too_many(CORE_MAX_TENSOR_ARGS + 1, ArgDirection::IN);
++    EXPECT_THROW(
++        make_callable<CORE_MAX_TENSOR_ARGS>(too_many.data(), too_many.size(), nullptr, 0), std::invalid_argument
++    );
++}
++
++TEST(CoreArgumentCapacity, DumpSelectionCoversWordBoundariesAndLastScalar) {
++    DumpArgSelection selection;
++    for (int index : {0, 31, 32, 63, 64, 127, 128, 132, 255, 256, 271})
++        selection.mark_index(index);
++    auto mask = selection.dump_arg_mask();
++    for (int index : {0, 31, 32, 63, 64, 127, 128, 132, 255, 256, 271})
++        EXPECT_TRUE(mask.test(index));
++    for (int index : {-1, 1, 65, 129, 257, 270, 272, 320})
++        EXPECT_FALSE(mask.test(index));
++    selection.mark_index(-1);
++    selection.mark_index(272);
++    EXPECT_EQ(selection.dump_arg_mask(), mask);
++    selection.clear();
++    EXPECT_EQ(selection.dump_arg_mask(), ARGS_DUMP_ARG_MASK_NONE);
++    selection.mark_all(256, 16);
++    for (int i = 0; i < 272; ++i)
++        EXPECT_TRUE(selection.dump_arg_mask().test(i));
++    EXPECT_FALSE(selection.dump_arg_mask().test(272));
++
++    // 共享标量源的歧义标记也要覆盖高字，clear 后不得残留上一次选择。
++    selection.clear();
++    selection.record_scalar_source(14, 0x1000, 3);
++    selection.record_scalar_source(15, 0x1000, 3);
++    EXPECT_TRUE(selection.mark_scalar_by_ptr(0x1000, 16, 256));
++    EXPECT_TRUE(selection.dump_arg_mask().test(270));
++    EXPECT_TRUE(selection.dump_arg_index_ambiguous_mask().test(270));
++    EXPECT_FALSE(selection.dump_arg_mask().test(271));
++    selection.clear();
++    EXPECT_EQ(selection.dump_arg_index_ambiguous_mask(), ARGS_DUMP_ARG_MASK_NONE);
++}

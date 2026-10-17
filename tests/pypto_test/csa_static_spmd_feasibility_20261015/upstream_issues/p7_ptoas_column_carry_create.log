@@ -1,0 +1,152 @@
+ISSUE_CREATE_PUBLISHING
+Host: github.com
+Repository: hw-native-sys/pypto
+Title: [Bug] PTOAS 行缓冲承载列向量 loop-carry 时生成形状不匹配的 TMOV
+Labels (1):
+- bug
+Body (5747 bytes):
+### Component
+
+Codegen
+
+### Description
+
+以 [1,32] 行向量 full 初始化，经 reshape 得到 [32,1] 列向量作为循环 carry。
+循环内包含条件更新，PTOAS 路径的 carry 逻辑类型为列向量，但其底层已声明 handle 仍是行向量。
+tile.move codegen 直接向底层行 handle 发出列→行 tmov，源和目标形状不一致，PTOAS 拒绝编译。
+
+这不是要求硬件支持新搬运方式，而是 codegen 应对同一存储使用正确的目标 view。
+
+### Steps to Reproduce
+
+在已构建的 PyPTO 开发环境中，将下面完整代码保存为 test_p7_ptoas_column_carry.py，运行：
+
+```bash
+python -m pytest -q -o addopts='' test_p7_ptoas_column_carry.py
+```
+
+CPU 编译/IR 检查即可，无需模型权重或 NPU。
+
+```python
+# Copyright (c) PyPTO Contributors.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+import re
+import pypto.language as pl
+import pytest
+from pypto import backend, ir, passes
+from pypto.backend import BackendType
+from pypto.ir.pass_manager import OptimizationStrategy, PassManager
+from pypto.pypto_core import codegen
+
+
+@pytest.fixture(autouse=True)
+def ascend_backend():
+    backend.reset_for_testing()
+    backend.set_backend_type(BackendType.Ascend910B)
+    yield
+    backend.reset_for_testing()
+
+
+def _run_pipeline(
+    memory_planner: passes.MemoryPlanner, program: ir.Program
+) -> tuple[ir.Program, list[str]]:
+    """Run the Default pipeline under a PassContext with the given planner.
+
+    Returns the optimized program and the concrete list of executed pass names.
+    """
+    backend.reset_for_testing()
+    backend.set_backend_type(BackendType.Ascend910B)
+    with passes.PassContext([], memory_planner=memory_planner):
+        pm = PassManager.get_strategy(OptimizationStrategy.Default)
+        optimized = pm.run_passes(program)
+    return optimized, list(pm.pass_names)
+
+def _codegen(optimized: ir.Program, *, emit_tile_addr: bool) -> str:
+    func = next(f for f in optimized.functions.values() if f.name == "kernel")
+    single = ir.Program([func], "kernel", optimized.span)
+    return codegen.PTOCodegen().generate(single, emit_tile_addr=emit_tile_addr)
+
+def test_ptoas_column_carry_move_uses_destination_view():
+    """A column carry can share storage with a row-major full initializer."""
+
+    @pl.program
+    class ColumnCarry:
+        @pl.function(type=pl.FunctionType.InCore)
+        def kernel(
+            self,
+            flag: pl.Scalar[pl.INT32],
+            out: pl.Out[pl.Tensor[[32, 1], pl.FP32]],
+        ) -> pl.Tensor[[32, 1], pl.FP32]:
+            row_base = pl.tile.full([1, 32], dtype=pl.FP32, value=0.0)
+            base = pl.tile.reshape(row_base, [32, 1])
+            for i, (carry,) in pl.range(2, init_values=(base,)):
+                if flag != 0:
+                    row = pl.reshape(carry, [1, 32])
+                    updated = pl.add(row, 1.0)
+                    column = pl.reshape(updated, [32, 1])
+                    value = column
+                else:
+                    value = carry
+                result = pl.yield_(value)
+            output = pl.store(result, [0, 0], out)
+            return output
+
+    optimized, _ = _run_pipeline(passes.MemoryPlanner.PTOAS, ColumnCarry)
+    mlir = _codegen(optimized, emit_tile_addr=False)
+    moves = [line for line in mlir.splitlines() if "pto.tmov" in line]
+    assert moves, mlir
+    for move in moves:
+        shapes = re.findall(r"rows=(\d+), cols=(\d+)", move)
+        assert len(shapes) == 2 and shapes[0] == shapes[1], move
+```
+
+### Expected Behavior
+
+写回 carry 时先在现有存储上建立匹配 [32,1] 的目标 view，然后发出源/目标形状匹配的 tmov。不新增无意义 allocation，不改变循环结果。
+
+### Actual Behavior
+
+完整 CSA 报错：
+`'pto.tmov' op expects A2/A3 non-mat tmov to use matching src/dst shapes`。
+最小回归检查每条 tmov 的实际源/目标 tile_buf rows/cols，要求均匹配。
+
+### Git Commit ID
+
+最初发现于调试分支基线 `cb24844712fa4329563a8cfbdd8d9f77ba0dc20c`。
+另已核对上游 PR #3013 head `72b7ffb98ea3cee12bf7bbf533ab89b848a8980c` 中对应逻辑仍在；
+该 PR 的 while-condition 修复不覆盖本 issue。上游 head 的独立构建与复现结果另行记录。
+
+### NPU Kind
+
+Ascend 910B
+
+本例选择 BackendType.Ascend910B，即 A2/A3 编译后端；复现本身不执行设备。
+
+### Host Platform
+
+Linux (aarch64)
+
+### Additional Context
+
+定位及本地候选方向：
+
+src/backend/common/pto_ops_elementwise.cpp 的 tile.move PTOAS 分支。
+本地候选对比逻辑 destination type 与底层 handle type，必要时建立同存储的静态
+treshape view，再按实际 view 类型发出搬运；保留静态有效形状约束。
+
+验证边界：
+
+附带最小 CPU 回归在本地候选上通过。完整 CSA 已越过此类 MLIR 合法性错误，
+随后遇到独立的 PTOAS Mat 容量限制；因此没有宣称完整 PTOAS 编译或设备通过。
+当前默认 PYPTO 路径不依赖本项。
+
+Related: #1649（sub-column spill 的 valid_shape 问题，与这里行/列 carry 的底层 handle 形状不同）、#2693。
+
+ISSUE_CREATE_PUBLISHING_END

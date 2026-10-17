@@ -1,0 +1,34 @@
+{
+  "updated_at": "2026-10-16T02:07:13.484115+00:00",
+  "conclusion": "Simpler CORE 扩容已完成并上卡通过；共享 InOut 及融合编译问题已缩小至 PyPTO 组件复现，无完整静态 CSA 运行或性能结论",
+  "current_record": "preparation_progress.json",
+  "historical_record": "assessment_initial.json",
+  "resolved_gaps": [
+    "七档同轮 logical block/subslot 映射",
+    "完整核体和原参数绑定",
+    "静态表、工作区及代际模型",
+    "独立 Simpler 的 256 Tensor + 16 scalar CORE ABI，A3 HBG/TMR program/kernel 设备验证",
+    "非共享 InOut 的 inline JIT Group 单 MIX CPU 编译与 Meta 注册"
+  ],
+  "remaining_blockers": [
+    {
+      "name": "自动 MIX 拆分 while 状态丢失",
+      "component": "PyPTO",
+      "issue": "https://github.com/hw-native-sys/pypto/issues/3009",
+      "scope": "独立复现仍有效；当前显式 Group 路径的 pass25 保留轮询 carry，不能混用两条路径的结论"
+    },
+    {
+      "name": "完整融合核片上布局及视图 lowering 尚未通过",
+      "component": "PyPTO/PTOAS 编译链，需进一步归因",
+      "evidence": "COMPILE_AND_RESUME.md",
+      "scope": "默认 PYPTO Left 81920 > 65536；DSA_RP 无布局；PTOAS 路径生成的 qk_pv AIV MLIR 存在不支配使用点的 SSA 定义。没有证明硬件不可实现"
+    },
+    {
+      "name": "Group ABI 统一未追溯成员调用返回的共享 InOut 别名",
+      "component": "PyPTO ExpandMixedKernel",
+      "evidence": "PYPTO_GROUP_SHARED_INOUT_REPRO.md"
+    }
+  ],
+  "performance_limit": "DEBUG 映射补采不代表历史最佳排程；这里只固定工作与依赖，不固定墙钟时间",
+  "allocation_followup": "保持原 Tile 的真实两阶段 DSA 地址分配通过；直接 DSA_RP 编译改变分块导致 O-proj 单段失败，见 MEMORY_REUSE_PHASES_REPRO.md"
+}

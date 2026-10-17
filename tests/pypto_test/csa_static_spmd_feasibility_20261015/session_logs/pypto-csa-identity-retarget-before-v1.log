@@ -1,0 +1,82 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestChainedInPlaceIfPhis.test_nested_phi_identity_does_not_resurrect_old_buffer _
+
+self = <transforms.test_memory_reuse.TestChainedInPlaceIfPhis object at 0xfffdd26196c0>
+ascend_backend = BackendType.Ascend910B
+
+    def test_nested_phi_identity_does_not_resurrect_old_buffer(self, ascend_backend):
+        """An inner phi's aliases must settle before the outer yield is reconciled."""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.AIV)
+            def kernel(
+                self,
+                flags: pl.Tensor[[2], pl.INT32],
+                out: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
+            ) -> pl.Tensor[[64, 256], pl.FP32]:
+                first = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                second = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
+                limit = pl.tensor.read(flags, [0])
+                branch = pl.tensor.read(flags, [1])
+                for i, (s0, s1) in pl.range(3, init_values=(first, second)):
+                    if i < limit:
+                        if branch != 0:
+                            a0 = pl.tile.add(s0, 1.0)
+                            a1 = pl.tile.add(s1, 2.0)
+                        else:
+                            a0 = pl.tile.add(s0, 3.0)
+                            a1 = pl.tile.add(s1, 4.0)
+                        b0 = a0
+                        b1 = a1
+                    else:
+                        b0 = s0
+                        b1 = s1
+                    result0, result1 = pl.yield_(b0, b1)
+                out0 = pl.tile.store(result0, [0, 0], out)
+                out1 = pl.tile.store(result1, [32, 0], out0)
+                return out1
+    
+        after = _run_pipeline(passes.convert_to_ssa()(Before))
+        allocated = passes.allocate_memory_addr()(after)
+        func = allocated.get_function("kernel")
+        assert func is not None
+        windows = []
+    
+        def collect(stmt):
+            if isinstance(stmt, ir.AssignStmt) and isinstance(stmt.var.type, ir.TileType):
+                ref = stmt.var.type.memref
+                if ref is not None:
+                    windows.append(ref.byte_offset_.value + ref.size_)
+            if isinstance(stmt, ir.SeqStmts):
+                for child in stmt.stmts:
+                    collect(child)
+            elif isinstance(stmt, (ir.ForStmt, ir.WhileStmt)):
+                collect(stmt.body)
+            elif isinstance(stmt, ir.IfStmt):
+                collect(stmt.then_body)
+                if stmt.else_body is not None:
+                    collect(stmt.else_body)
+    
+        collect(func.body)
+        assert max(windows) <= 131072
+>       assert "pl.tile.move(" not in func.as_python(), (
+            "Pure aliases of nested if-results must not prevent safe carry producer retargeting"
+        )
+E       AssertionError: Pure aliases of nested if-results must not prevent safe carry producer retargeting
+E       assert 'pl.tile.move(' not in '@pl.functio...out1__ssa_v0'
+E         
+E         'pl.tile.move(' is contained here:
+E           em.Vec] = pl.tile.move(b0__ssa_v1, target_memory=pl.Mem.Vec)
+E         ?           +++++++++++++
+E                       b1__ssa_v1_mv: pl.Tile[[32, 256], pl.FP32, pl.MemRef(mem_vec_5, pl.const(98304, pl.INT64), 32768), pl.Mem.Vec] = pl.tile.move(b1__ssa_v1, target_memory=pl.Mem.Vec)
+E                       b0__phi_v2, b1__phi_v2 = pl.yield_(b0__ssa_v1_mv, b1__ssa_v1_mv)
+E                   b1__phi_v2_mv: pl.Tile[[32, 256], pl.FP32, pl.MemRef(mem_vec_3, pl.const(32768, pl.INT64), 32768), pl.Mem.Vec] = pl.tile.move(b1__phi_v2, target_memory=pl.Mem.Vec)...
+E         
+E         ...Full output truncated (5 lines hidden), use '-vv' to show
+
+tests/ut/ir/transforms/test_memory_reuse.py:8094: AssertionError
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_nested_phi_identity_does_not_resurrect_old_buffer
+1 failed, 147 deselected in 1.49s

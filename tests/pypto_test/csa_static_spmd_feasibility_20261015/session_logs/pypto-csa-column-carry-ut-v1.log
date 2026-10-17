@@ -1,0 +1,218 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_ptoas_column_carry_move_uses_destination_view ______________
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffdf29cf5e0>
+module = <module 'pypto.language.op' from '/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/__init__.py'>
+module_name = 'pl', op_name = 'store'
+call = <ast.Call object at 0xfffdf29cf1f0>
+
+    def _dispatch_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -> ir.Expr:
+        """Dispatch an op call to a DSL wrapper module.
+    
+        The wrapper owns type-checking and dispatch (e.g. ``tile.add`` already
+        routes scalar rhs to ``tile.adds``); the parser only parses args, wraps
+        them as DSL types via :func:`invoke_dsl`, pins the call-site span
+        through a contextvar, and unwraps the result.
+    
+        Args:
+            module: A DSL op submodule (``_dsl_tensor`` / ``_dsl_tile`` /
+                ``_dsl_system``) or the unified ``pypto.language.op`` namespace.
+            module_name: Human-readable module name for error messages.
+            op_name: Name of the operation to look up on the module.
+            call: Call AST node.
+    
+        Returns:
+            IR expression from the operation.
+        """
+        if not hasattr(module, op_name):
+            raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+        args = [self._parse_op_positional_arg(arg) for arg in call.args]
+        kwargs = self._parse_op_kwargs(call)
+        attrs = self._parse_op_attrs(call)
+        op_func = getattr(module, op_name)
+        span = self.span_tracker.get_span(call)
+        try:
+>           return self._attach_op_attrs(invoke_dsl(op_func, args, kwargs, span), attrs)
+
+python/pypto/language/parser/ast_parser.py:8981: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/language/parser/_dsl_invoker.py:150: in invoke_dsl
+    result = fn(*wrapped_args, **wrapped_kwargs)
+python/pypto/language/op/tile_ops.py:538: in store
+    call_expr = _ir_ops.store(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+tile = <pypto.pypto_core.ir.Var object at 0xfffdf2962160>
+offsets = [<pypto.pypto_core.ir.ConstInt object at 0xfffdf27956f0>, <pypto.pypto_core.ir.ConstInt object at 0xfffdf27957d0>]
+output_tensor = <pypto.pypto_core.ir.Var object at 0xfffdf2853110>
+shapes = None, span = None
+
+    def store(
+        tile: Expr,
+        offsets: Sequence[int | Expr] | _ir_core.MakeTuple,
+        output_tensor: Expr,
+        shapes: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+        span: Span | None = None,
+        *,
+        atomic: int = 0,
+        st_phase: STPhase = STPhase.Unspecified,
+        pre_quant: float | Expr | None = None,
+        pre_relu: bool | Expr = False,
+    ) -> Call:
+        """Copy data from unified buffer (tile) to tensor.
+    
+        Args:
+            tile: Source tile (TileType)
+            offsets: Offsets in each dimension (sequence of scalars), or a MakeTuple
+            output_tensor: Output tensor (TensorType)
+            shapes: ND partition shape (sequence of ints), or None for 2D tiles. Normally
+                injected automatically by FlattenTileNdTo2D for ND tensors. Every element
+                must be an integer scalar, as for ``offsets``.
+            span: Optional source span for debugging (auto-captured if not provided)
+            atomic: ``AtomicType`` underlying int — 0 (``kNone``, plain overwrite) or
+                1 (``kAdd``, atomic-add into global memory). The kwarg is omitted
+                entirely when 0 so non-atomic stores are unchanged.
+            st_phase: Unit-flag-aware store phase. ``STPhase.Unspecified`` (default)
+                preserves ordinary stores; ``STPhase.Final`` checks and clears the
+                flag published by a final phased accumulator producer. The kwarg is
+                omitted entirely for the default so existing stores remain unchanged.
+            pre_quant: FIXPIPE pre-quantization scale for an ``Acc`` source. The
+                accumulator is multiplied by it in FP32 on the way out, before the
+                destination clamp, which is what lets an INT32 accumulator reach an
+                FP16 or INT8 tensor without a vector round-trip. ``None`` (default)
+                emits no scale at all — distinct from ``1.0``, which still selects
+                the quantizing instruction form.
+            pre_relu: Apply ReLU inside the same writeback, *after* ``pre_quant`` and
+                the clamp — it reproduces ``maximum(tile * pre_quant, 0)``.
+    
+        Returns:
+            Call expression that returns the output tensor
+        """
+        actual_span = _get_span_or_capture(span)
+        offsets_tuple = _to_make_tuple(offsets, actual_span)
+        if shapes is not None:
+            args: list[Expr] = [tile, offsets_tuple, output_tensor, _to_make_tuple(shapes, actual_span)]
+        else:
+            args = [tile, offsets_tuple, output_tensor]
+    
+        kwargs: dict[str, Any] = {"atomic": atomic} if atomic else {}
+        if st_phase != STPhase.Unspecified:
+            kwargs["st_phase"] = int(st_phase)
+        kwargs.update(_fixpipe_epilogue_kwargs("tile.store", pre_quant, pre_relu))
+>       return _ir_core.create_op_call("tile.store", args, kwargs, actual_span)
+E       ValueError: The operator tile.store requires first argument to be a TileType, but got TensorType
+E       Check failed: tile_type at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/op/tile_ops/memory.cpp:396 at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/tests/ut/codegen/test_memory_planner_switch.py:368:22
+
+python/pypto/ir/op/tile_ops.py:364: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    def test_ptoas_column_carry_move_uses_destination_view():
+        """A column carry can share storage with a row-major full initializer."""
+    
+        @pl.program
+>       class ColumnCarry:
+
+tests/ut/codegen/test_memory_planner_switch.py:351: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+python/pypto/language/parser/ast_parser.py:2082: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+python/pypto/language/parser/ast_parser.py:6814: in parse_op_call
+    return self._parse_unified_op(op_name, call)
+python/pypto/language/parser/ast_parser.py:9493: in _parse_unified_op
+    return self._dispatch_op(_pl_op, "pl", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffdf29cf5e0>
+module = <module 'pypto.language.op' from '/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/op/__init__.py'>
+module_name = 'pl', op_name = 'store'
+call = <ast.Call object at 0xfffdf29cf1f0>
+
+    def _dispatch_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -> ir.Expr:
+        """Dispatch an op call to a DSL wrapper module.
+    
+        The wrapper owns type-checking and dispatch (e.g. ``tile.add`` already
+        routes scalar rhs to ``tile.adds``); the parser only parses args, wraps
+        them as DSL types via :func:`invoke_dsl`, pins the call-site span
+        through a contextvar, and unwraps the result.
+    
+        Args:
+            module: A DSL op submodule (``_dsl_tensor`` / ``_dsl_tile`` /
+                ``_dsl_system``) or the unified ``pypto.language.op`` namespace.
+            module_name: Human-readable module name for error messages.
+            op_name: Name of the operation to look up on the module.
+            call: Call AST node.
+    
+        Returns:
+            IR expression from the operation.
+        """
+        if not hasattr(module, op_name):
+            raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+        args = [self._parse_op_positional_arg(arg) for arg in call.args]
+        kwargs = self._parse_op_kwargs(call)
+        attrs = self._parse_op_attrs(call)
+        op_func = getattr(module, op_name)
+        span = self.span_tracker.get_span(call)
+        try:
+            return self._attach_op_attrs(invoke_dsl(op_func, args, kwargs, span), attrs)
+        except ParserError:
+            raise
+        except BUG_CLASS_EXCEPTIONS:
+            # Compiler bug, not a bad kernel - surface it with its type and trace intact.
+            raise
+        except (TypeError, ValueError) as e:
+            # Wrapper may have prefixed its message (``pl.<op>:`` from
+            # ``_raise_type_dispatch_error`` or ``pl.<module>.<op>:``) or raised
+            # bare text from a deeper helper (e.g. ``ValueError("Invalid
+            # rounding mode ...")``). Make sure the surfaced error always names
+            # the op so users can locate the bad call. When any operand was a
+            # Scalar, append a hint pointing at Python operators.
+            #
+            # Sanitize first: most ops type-check in C++, and a ``CHECK`` throws
+            # ``pypto::ValueError`` -- so backend op-validation failures land *here*, not
+            # in the ``except Exception`` branch below. Their message still carries
+            # FatalLogger's "Check failed: <C++ expr> at <absolute path>.cpp:<line>" tail,
+            # which the renderer would splice into the bold ``Error:`` header ahead of the
+            # ``-->`` source arrow. It stays reachable through ``__cause__`` under
+            # PTO_BACKTRACE=1. A pure-Python ValueError has no tail, so this is a no-op.
+            # ``strip_trailing_span`` additionally drops the ``[<file>:<line>:<col>]`` a
+            # ``CHECK_SPAN`` leaves in the payload: we raise with ``span=`` below, so the
+            # arrow and snippet locate the call anyway, and the inline copy is an absolute
+            # path in the middle of the header (often naming an operand's *definition*,
+            # not the call, which reads as a contradiction against the arrow).
+            msg = concise_error_message(e, strip_trailing_span=True)
+            if not msg.startswith(f"pl.{op_name}") and not msg.startswith(f"{module_name}.{op_name}"):
+                msg = f"{module_name} operation '{op_name}': {msg}"
+            hint = self._scalar_operand_hint(args, kwargs)
+>           raise InvalidOperationError(msg, span=span, hint=hint) from e
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: pl operation 'store': The operator tile.store requires first argument to be a TileType, but got TensorType
+
+python/pypto/language/parser/ast_parser.py:9011: InvalidOperationError
+=========================== short test summary info ============================
+FAILED tests/ut/codegen/test_memory_planner_switch.py::test_ptoas_column_carry_move_uses_destination_view
+1 failed in 1.78s
