@@ -91,3 +91,67 @@ WKV 证据归档：`evidence_tnd_precision/full_pto_20261016/formal-wkv-evidence
 `e4d95bef5c68224d143545ae694e1ca70ff4b85a0327869896b6a6e60c3e4bea`。
 其中整模型 `wkv-service-v1` 是新显式资格 API 的复现加载助手，本次没有重新执行其完整
 128K 整模型任务；上表数值来自已完成的单卡 `oproj-v1`。
+
+## PTO O-proj 逐阶段进展：先定位首差
+
+本段实验仍在独立候选，不修改正式 O-proj 调用。正式精度版的 WKV 修正为
+`57cb732f6`；O-proj 暂时继续复用 Native，直至跨形状误差修正完成。
+
+所有任务单卡、上限 780 秒；使用同一静态包资格、真实 L20 权重和保存的真实 heads。
+Native 的同输入 O-proj 必须先逐 bit 复现保存的整模型输出，之后才比较 PTO。
+未新增整模型 Native2，也未运行新的 128K 大配置。
+
+| 候选 | 任务 | 首差/结果 |
+| --- | --- | --- |
+| v2 | `task_20261017_204137_220302120329` | 编译前变量类型检查失败，未比较数值 |
+| v3 | `task_20261017_205119_23835115161` | T6：WO-A、INT8、scale 一致；WO-B 输出 1 元素差 1 BF16 ULP |
+| v4 | `task_20261017_205800_250699231052` | 只交换两个 scale 的顺序，原首差消失，但另一元素差 1 ULP |
+| v4b | `task_20261017_210209_258344519210` | 先合并 FP32 scale，再乘整数点积；eager 和 Graph A/B/A 全部逐 bit 一致 |
+| v5 | `task_20261017_210446_26335847493` | 再去掉非 Native 量化下限；41 项检查全逐 bit 一致 |
+| v6 | `task_20261017_210752_2691503387` | task-submit 附带 device 参数未被 CLI 接受，启动退出，未比较数值 |
+| v6a | `task_20261017_211006_272968021910` | 真实 126 行补到原 FULL144 档位，首差在 WO-A：434 元素不同；立即停止 |
+
+### 已定位并验证的两个边界
+
+1. WO-B 反量化：Native 先计算 `FP32(channel_scale * token_scale)`，再乘
+   `FP32(INT32_dot)`，最后 RINT 到 BF16。不能逐次用 dot 乘两个 scale。
+   8 个实际 Native 有限值样本区分了这三种计算顺序，均支持合并系数路径。
+2. Native 动态量化没有旧候选的 `1e-12` 下限。直接观测零行得到 scale=0、INT8=0；
+   非零微值按实际 amax 计算 scale。候选仅在量化分母副本为零时改成 1，原 scale 保持零。
+
+v3 首差为 `[0,198]`：PTO `-0.1015625`、Native `-0.10205078125`。
+该点整数点积为 -5003；通道 scale 为 0.004058837890625，token scale 为
+0.005013533402234316。先乘通道 scale 恰好落在 BF16 舍入中点。
+v4 的新首差为 `[3,2158]`，说明交换顺序也不能复现 Native 的合并系数边界。
+
+v5 覆盖 eager A、Graph A/B/A、零行、真实 heads 缩放 `2^-40` 与 `2^-20`；
+逐阶段比较 WO-A BF16、INT8、FP32 scale、最终 BF16，并检查输出保护区、输入和权重不变。
+独立审查 11 份生成 C++：amax、dequant 和分母副本分配独立；设备标量读写的 V/S
+同步完整；合并系数及最终 RINT 顺序正确；阶段 RAW 依赖和尾行 valid shape 完整。
+
+### 当前未解决：FULL144 的 WO-A
+
+v6a 使用保存的 `step010.pt`：126 条 token 行，补到原图的全局 144 行容量，
+不改变请求边界，也不是把每个请求补齐到 S6。输入文件 SHA256：
+`8ded12000a7f58a5567d28b7f57a1baf334a4de8b6d969174ac8aca456f256b6`。
+Native 同输入结果先复现了保存的整模型 O-proj，PTO 首差才在 WO-A 被发现。
+
+首差坐标 `[0,3720]`，PTO 为 1.0967254638671875e-5，Native 为
+1.0907649993896484e-5；WO-A 总共 434 元素不同，max_abs=0.001953125。
+未继续验收后面的量化、WO-B 或整模型。T6 的自然 K256 次序不能外推 FULL144。
+后续仅定位 Native 按输出组/列块变化的累加次序，再回到同输入复测。
+
+完整阶段诊断复现命令与第一项相同，替换助手目录和 label：
+
+```bash
+bash "$BASE/wkv-production-oproj-20261017/oproj-v5/run.sh" oproj-zero5
+bash "$BASE/wkv-production-oproj-20261017/oproj-v6a/run.sh" \
+  oproj-real126-v6a --layer 20 --step 10 --pad 144
+```
+
+这两条均需通过同样的 `task-submit --device auto --max-time 780` 提交。
+按历史 Native 输入 SHA 与原静态包清单校验后执行，首差保存并退出。
+
+本阶段归档 `evidence_tnd_precision/full_pto_20261016/oproj-stages-through-full144.tar.gz`，43 个文件，SHA256：
+`64f61bcf561beb3a9d8c8bf823fe40754f9c226fa3d8518c42120d155b2fbc19`。
+包括成功、失败的原始 JSON、日志、版本化助手及生成 C++ 证据包。
