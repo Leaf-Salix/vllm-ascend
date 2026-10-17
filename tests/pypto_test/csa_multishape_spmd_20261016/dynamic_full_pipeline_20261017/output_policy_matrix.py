@@ -38,15 +38,16 @@ def run_matrix(
     from compile_diagnostics import compilation_probe
 
     from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.binding import PreparedDynamicCSA
-    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT
+    from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT, PHASE_RAW
 
     output = Path(output)
-    if axis not in ("output", "hc_rows", "attention_query"):
+    if axis not in ("output", "hc_rows", "attention_query", "hc_consumer"):
         raise ValueError("未知策略矩阵轴")
     matrix_dir = output / {
         "output": "output_policy_matrix",
         "hc_rows": "hc_row_policy_matrix",
         "attention_query": "attention_query_policy_matrix",
+        "hc_consumer": "hc_consumer_policy_matrix",
     }[axis]
     matrix_dir.mkdir(exist_ok=False)
     report = dict(
@@ -57,6 +58,8 @@ def run_matrix(
         (matrix_dir / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
     def name_for(policy):
+        if axis == "hc_consumer":
+            return "spmd_hc_" + ("consumer_reduce" if policy.hc_consumer_reduce else "raw_stage")
         if axis == "attention_query":
             return "spmd_attention_query_" + ("plan" if policy.attention_query_metadata else "scan")
         if axis == "hc_rows":
@@ -77,7 +80,10 @@ def run_matrix(
     assert len(initial_tables) == 1
     configs = {name_for(existing.policy): next(iter(initial_tables))}
     try:
-        if axis == "attention_query":
+        if axis == "hc_consumer":
+            # 保持行依赖、tile与全部其它阶段不变，只比较RAW独立交接/消费者归约。
+            policies = [replace(existing.policy, hc_consumer_reduce=enabled) for enabled in (False, True)]
+        elif axis == "attention_query":
             # 只比较复用plan与重复扫描Q/L，不混入HC、OA或其它数学策略。
             policies = [replace(existing.policy, attention_query_metadata=enabled) for enabled in (False, True)]
         elif axis == "hc_rows":
@@ -124,6 +130,13 @@ def run_matrix(
             report["checks"][name + "_eager"] = checked()
             signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
             assert bool((signal[0, :, 0] == 1).all() and (signal[:, :, 1:] == 0).all())
+            if policy.hc_consumer_reduce:
+                # RAW保持填毒且没有RAW通知，直接消费路径不得隐式依赖旧中间量。
+                untouched = bool((candidate.buffers["raw"].cpu() == 37).all())
+                no_publish = bool((signal[PHASE_RAW, :, 0] == 0).all())
+                report.setdefault("raw_elision", {})[name] = dict(
+                    raw_stays_poisoned=untouched, no_raw_phase_publish=no_publish)
+                assert untouched and no_publish
             new_tables = tables() - previous_tables
             assert len(new_tables) == 1, (name, new_tables)
             configs[name] = next(iter(new_tables))

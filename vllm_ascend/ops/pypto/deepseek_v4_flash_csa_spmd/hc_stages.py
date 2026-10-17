@@ -42,6 +42,13 @@
     数学来自相邻 deepseek_v4_flash_csa/{decode_csa,hc_pre,rmsnorm}.py，
     保持 FP32 投影输入、BF16 norm 权重及原舍入点。CPU 源码/编译证据不能
     替代设备数值、尾块、核间同步或完整 CSA 验证。
+
+    HC_CONSUMER_REDUCE候选借鉴独立hc_pre的消费者就地归约：门控和Sinkhorn
+    直接从四份partials按原左折叠顺序读/加所需列，不再经独立RAW阶段交接。
+    两消费者按M8行分工，外层必须先等该行块四个AIC生产者；inv仍由同一AIV
+    的widen阶段产生。只删RAW写回/重读/通知，不更改投影、RMS或Sinkhorn数学。
+    raw容量暂留供同进程开关消融，开启时不读写其数值。两档完整对照精确
+    通过，但128K/B16慢1.06%、8K/B32快2.54%；默认关闭，区间收益尚待确认。
 """
 
 import pypto.language as pl
@@ -227,6 +234,36 @@ def hc_reduce_range(
 
 
 @pl.jit.inline(auto_scope=False)
+def hc_projection_piece(
+    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
+    raw: pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32],
+    row: pl.Scalar[pl.INDEX],
+    valid_rows: pl.Scalar[pl.INDEX],
+    COLUMN: pl.constexpr,
+    VALID_COLUMNS: pl.constexpr,
+    CONSUMER_REDUCE: pl.constexpr,
+):
+    """加载消费者需要的M8×N8片段；直接路径保持((p0+p1)+p2)+p3。
+
+    VALID_COLUMNS=4用于Sinkhorn，8用于门值，尾行由调用方显式给出。
+    partials四段各占PAD16行，列仍为32；所有访问只读已由AIC发布的区域。
+    raw仅在旧路径load；直接路径只取其容量描述符，绝不消费填毒的raw内容。
+    """
+    if CONSUMER_REDUCE:
+        rows_per_split = pl.tensor.dim(raw, 0)
+        result = pl.load(partials, [row, COLUMN], [T_TILE, HC_PAD],
+                         valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+        for split in pl.range(1, LINEAR_OK):
+            piece = pl.load(partials, [split * rows_per_split + row, COLUMN], [T_TILE, HC_PAD],
+                            valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+            result = pl.add(result, piece)
+    else:
+        result = pl.load(raw, [row, COLUMN], [T_TILE, HC_PAD],
+                         valid_shape=[valid_rows, VALID_COLUMNS], target_memory=pl.MemorySpace.Vec)
+    return result
+
+
+@pl.jit.inline(auto_scope=False)
 def hc_gates_range(
     inv_rms: pl.Tensor[[PAD_ROWS_DYN, 1], pl.FP32],
     mixes_raw: pl.Tensor[[PAD_ROWS_DYN, MIX_PAD], pl.FP32],
@@ -237,10 +274,12 @@ def hc_gates_range(
     post_tail_store: pl.InOut[pl.Tensor[[T_TILE, HC_PAD], pl.FP32]],
     vector_worker: pl.Scalar[pl.INDEX],
     vector_workers: pl.Scalar[pl.INDEX],
+    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
+    CONSUMER_REDUCE: pl.constexpr,
 ):
     """AIV：保留原 pre/post sigmoid、scale 乘法和 eps 顺序。
 
-    调用前等待 HC_INPUT 与 HC_RAW；返回后发布 HC_GATES，供 mix/norm
+    调用前等待 HC_INPUT 与 HC_RAW（直接归约时改等四个HC_PARTIAL）；返回后发布 HC_GATES，供 mix/norm
     和最终 HCpost 消费。pre 按八列物理布局保留，post 只有四列有效。"""
     t_dim = pl.tensor.dim(post, 0)
     token_tiles = (t_dim + T_TILE - 1) // T_TILE
@@ -252,26 +291,27 @@ def hc_gates_range(
         if ob < token_tiles:
             t0 = ob * T_TILE
             valid_rows = pl.min(T_TILE, t_dim - t0)
-            inv_col = inv_rms[t0 : t0 + T_TILE, 0:1]
-            pre_base = pl.reshape(hc_base[0:HC_PAD], [1, HC_PAD])
-            pre_scaled = pl.mul(pl.row_expand_mul(mixes_raw[t0 : t0 + T_TILE, 0:HC_PAD], inv_col), scale0)
+            # partial归约直接返回UB Tile，其余参与运算的输入也显式load，
+            # 避免把GM Tensor表达式与UB Tile混用于同一个算术操作。
+            inv_col = pl.load(inv_rms, [t0, 0], [T_TILE, 1])
+            pre_base = pl.reshape(pl.load(hc_base, [0], [HC_PAD]), [1, HC_PAD])
+            pre_raw = hc_projection_piece(partials, mixes_raw, t0, T_TILE, 0, HC_PAD, CONSUMER_REDUCE)
+            pre_scaled = pl.mul(pl.row_expand_mul(pre_raw, inv_col), scale0)
             pre_logits = pl.add(pre_scaled, pl.col_expand(pre_scaled, pre_base))
             pre_sig = pl.recip(pl.add(pl.exp(pl.neg(pre_logits)), 1.0))
             pre_val = pl.add(pre_sig, HC_EPS)
-            pre_val_store[t0 : t0 + T_TILE, 0:HC_PAD] = pre_val
-            post_base = pl.reshape(hc_base[HC_MULT : HC_MULT + HC_PAD], [1, HC_PAD])
-            post_scaled = pl.mul(
-                pl.row_expand_mul(mixes_raw[t0 : t0 + T_TILE, HC_MULT : HC_MULT + HC_PAD], inv_col), scale1
-            )
+            pl.store(pre_val, [t0, 0], pre_val_store)
+            post_base = pl.reshape(pl.load(hc_base, [HC_MULT], [HC_PAD]), [1, HC_PAD])
+            post_raw = hc_projection_piece(partials, mixes_raw, t0, T_TILE, HC_MULT, HC_PAD, CONSUMER_REDUCE)
+            post_scaled = pl.mul(pl.row_expand_mul(post_raw, inv_col), scale1)
             post_logits = pl.add(post_scaled, pl.col_expand(post_scaled, post_base))
             post_sig = pl.recip(pl.add(pl.exp(pl.neg(post_logits)), 1.0))
             post_pad = pl.mul(post_sig, 2.0)
             if valid_rows == T_TILE:
-                post[t0 : t0 + T_TILE, 0:HC_MULT] = pl.slice(
-                    post_pad, [T_TILE, HC_PAD], [0, 0], valid_shape=[T_TILE, HC_MULT]
-                )
+                post_valid = pl.set_validshape(post_pad, T_TILE, HC_MULT)
+                pl.store(post_valid, [t0, 0], post)
             else:
-                post_tail_store[0:T_TILE, 0:HC_PAD] = post_pad
+                pl.store(post_pad, [0, 0], post_tail_store)
                 post_tile = pl.load(
                     post_tail_store,
                     [0, 0],
@@ -293,10 +333,12 @@ def hc_comb_range(
     comb_tail_store: pl.InOut[pl.Tensor[[COMB_T_TILE, HC_PAD * HC_MULT], pl.FP32]],
     vector_worker: pl.Scalar[pl.INDEX],
     vector_workers: pl.Scalar[pl.INDEX],
+    partials: pl.Tensor[[PARTIAL_ROWS_DYN, MIX_PAD], pl.FP32],
+    CONSUMER_REDUCE: pl.constexpr,
 ):
     """AIV：CSA 原除法路径的二十轮 Sinkhorn，保持行列归约树。
 
-    调用前等待 HC_INPUT 与 HC_RAW；与 hc_gates_range/mix 独立，返回后
+    调用前等待 HC_INPUT 与 HC_RAW（直接归约时改等四个HC_PARTIAL）；与 hc_gates_range/mix 独立，返回后
     发布 HC_COMB。不引入 HCA 的 recip 替代路径，不改变迭代次数。"""
     t_dim = pl.tensor.dim(comb, 0)
     token_tiles = (t_dim + COMB_T_TILE - 1) // COMB_T_TILE
@@ -313,33 +355,17 @@ def hc_comb_range(
             comb_off = HC_MULT * 2
             # 24 个投影值前八项为 pre/post，其后 16 项按 4×4 的行存储。
             # UB 物理列宽为八，但各行只有前四列有效；以下 load 显式保留此边界。
-            mix_g0 = pl.load(
-                mixes_raw,
-                [t0, comb_off + 0 * HC_MULT],
-                [COMB_T_TILE, HC_PAD],
-                valid_shape=[valid_rows, HC_MULT],
-                target_memory=pl.MemorySpace.Vec,
+            mix_g0 = hc_projection_piece(
+                partials, mixes_raw, t0, valid_rows, HC_MULT * 2, HC_MULT, CONSUMER_REDUCE
             )
-            mix_g1 = pl.load(
-                mixes_raw,
-                [t0, comb_off + 1 * HC_MULT],
-                [COMB_T_TILE, HC_PAD],
-                valid_shape=[valid_rows, HC_MULT],
-                target_memory=pl.MemorySpace.Vec,
+            mix_g1 = hc_projection_piece(
+                partials, mixes_raw, t0, valid_rows, HC_MULT * 3, HC_MULT, CONSUMER_REDUCE
             )
-            mix_g2 = pl.load(
-                mixes_raw,
-                [t0, comb_off + 2 * HC_MULT],
-                [COMB_T_TILE, HC_PAD],
-                valid_shape=[valid_rows, HC_MULT],
-                target_memory=pl.MemorySpace.Vec,
+            mix_g2 = hc_projection_piece(
+                partials, mixes_raw, t0, valid_rows, HC_MULT * 4, HC_MULT, CONSUMER_REDUCE
             )
-            mix_g3 = pl.load(
-                mixes_raw,
-                [t0, comb_off + 3 * HC_MULT],
-                [COMB_T_TILE, HC_PAD],
-                valid_shape=[valid_rows, HC_MULT],
-                target_memory=pl.MemorySpace.Vec,
+            mix_g3 = hc_projection_piece(
+                partials, mixes_raw, t0, valid_rows, HC_MULT * 5, HC_MULT, CONSUMER_REDUCE
             )
             cb0 = pl.load(
                 hc_base_2d,

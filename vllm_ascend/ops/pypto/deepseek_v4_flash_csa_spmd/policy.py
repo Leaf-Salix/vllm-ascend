@@ -23,6 +23,9 @@ HC行依赖只按现有M16/K4与M8布局缩小等待，不改变数学、分工�
 Attention查询几何复用候选使用已有mask行空余列，按次写入/发布，不缓存
 上一轮请求信息。完整同进程对照已通过：128K/B16慢1.66%，8K/B32快1.33%，
 收益不一致，默认保持关闭；候选和原始证据保留，不据此建立新的策略分界。
+HC消费者归约候选让门值/Sinkhorn直接加载四份投影部分和，省去RAW交接。
+128K/B16与8K/B32均与原分task精确一致；同进程五窗口完整L1分别慢1.06%、
+快2.54%，因此默认关闭，尚不据两个点划定启用区间。见统一优化日志。
 """
 
 from dataclasses import dataclass
@@ -41,6 +44,7 @@ class CSASPMDPolicy:
     output_group_pipeline: bool = True
     hc_row_dependencies: bool = True
     attention_query_metadata: bool = False
+    hc_consumer_reduce: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -56,6 +60,7 @@ class CSASPMDPolicy:
             "OUTPUT_GROUP_PIPELINE": self.output_group_pipeline,
             "HC_ROW_DEPENDENCIES": self.hc_row_dependencies,
             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
+            "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
         }
 
 

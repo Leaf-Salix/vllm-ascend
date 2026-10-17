@@ -299,6 +299,7 @@ def vector_schedule(
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
     ATTENTION_QUERY_METADATA: pl.constexpr,
+    HC_CONSUMER_REDUCE: pl.constexpr,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -421,73 +422,84 @@ def vector_schedule(
         # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
         signal = publish_phase(signal, PHASE_META, core, CORES, generation)
 
-    # 投影 task=(M16 行块*4+K4096 split)，一维 task % 24 决定真实 AIC owner。
-    if HC_ROW_DEPENDENCIES:
-        # 本AIV归约M16行块rb=worker+wave*48，四个K片的AIC owner是
-        # (4*rb+k)%24。48*4能被24整除，所有wave均对应相同四个producer。
-        # 空归约者不读取partials，也不应为无关行等待；仍照合同发布RAW。
-        if worker < (tokens + 15) // 16:
+    if HC_CONSUMER_REDUCE:
+        # 门控/comb的M8块ob=worker+wave*48，投影M16块为ob//2。
+        # 四个K片归AIC (4*(ob//2)+k)%24；后续wave增加96，owner不变。
+        # 只等本核所有真实消费行的四个producer，随后直接归约所需列。
+        # inv来自本AIV已经发布的INPUT；RAW缓冲不再读写，也没有RAW通知。
+        if worker < (tokens + 7) // 8:
             signal = wait_row_owners(
                 signal, PHASE_PARTIAL, CORES, generation,
-                worker * 4, 4, 1, GROUPS, 0, 1
+                (worker // 2) * 4, 4, 1, GROUPS, 0, 1
             )
     else:
-        projection_tasks = ((tokens + 15) // 16) * 4
-        signal = wait_row_owners(
-            signal,
-            PHASE_PARTIAL,
-            CORES,
-            generation,
-            0,
-            projection_tasks,
-            1,
-            GROUPS,
-            0,
-            1,
-        )
-    raw = hc_reduce_range(partials, raw, worker, VECTORS)
-    signal = publish_phase(signal, PHASE_RAW, core, CORES, generation)
-    if HC_ROW_DEPENDENCIES:
-        # gates/comb按M8块ob=worker+wave*48分工；对应RAW M16 owner
-        # 为floor(ob/2)%48，随wave只在worker//2及worker//2+24间交替。
-        # 一波只等前者，多波至多等两者。inv由同一个AIV的widen先写完，
-        # PHASE_INPUT发布已保证本核写回，因此无需再等其它核的INPUT。
-        hc_gate_tiles = (tokens + 7) // 8
-        if worker < hc_gate_tiles:
+        # 投影 task=(M16 行块*4+K4096 split)，一维 task % 24 决定真实 AIC owner。
+        if HC_ROW_DEPENDENCIES:
+            # 本AIV归约M16行块rb=worker+wave*48，四个K片的AIC owner是
+            # (4*rb+k)%24。48*4能被24整除，所有wave均对应相同四个producer。
+            # 空归约者不读取partials，也不应为无关行等待；仍照合同发布RAW。
+            if worker < (tokens + 15) // 16:
+                signal = wait_row_owners(
+                    signal, PHASE_PARTIAL, CORES, generation,
+                    worker * 4, 4, 1, GROUPS, 0, 1
+                )
+        else:
+            projection_tasks = ((tokens + 15) // 16) * 4
             signal = wait_row_owners(
-                signal, PHASE_RAW, CORES, generation,
-                worker // 2, 1, 1, VECTORS, GROUPS, 1
+                signal,
+                PHASE_PARTIAL,
+                CORES,
+                generation,
+                0,
+                projection_tasks,
+                1,
+                GROUPS,
+                0,
+                1,
             )
-            if worker + VECTORS < hc_gate_tiles:
+        raw = hc_reduce_range(partials, raw, worker, VECTORS)
+        signal = publish_phase(signal, PHASE_RAW, core, CORES, generation)
+        if HC_ROW_DEPENDENCIES:
+            # gates/comb按M8块ob=worker+wave*48分工；对应RAW M16 owner
+            # 为floor(ob/2)%48，随wave只在worker//2及worker//2+24间交替。
+            # 一波只等前者，多波至多等两者。inv由同一个AIV的widen先写完，
+            # PHASE_INPUT发布已保证本核写回，因此无需再等其它核的INPUT。
+            hc_gate_tiles = (tokens + 7) // 8
+            if worker < hc_gate_tiles:
                 signal = wait_row_owners(
                     signal, PHASE_RAW, CORES, generation,
-                    worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1
+                    worker // 2, 1, 1, VECTORS, GROUPS, 1
                 )
-    else:
-        signal = wait_row_owners(
-            signal,
-            PHASE_RAW,
-            CORES,
-            generation,
-            0,
-            tokens,
-            16,
-            VECTORS,
-            GROUPS,
-            1,
-        )
-        signal = wait_row_owners(
-            signal,
-            PHASE_INPUT,
-            CORES,
-            generation,
-            0,
-            tokens,
-            8,
-            VECTORS,
-            GROUPS,
-            1,
-        )
+                if worker + VECTORS < hc_gate_tiles:
+                    signal = wait_row_owners(
+                        signal, PHASE_RAW, CORES, generation,
+                        worker // 2 + VECTORS // 2, 1, 1, VECTORS, GROUPS, 1
+                    )
+        else:
+            signal = wait_row_owners(
+                signal,
+                PHASE_RAW,
+                CORES,
+                generation,
+                0,
+                tokens,
+                16,
+                VECTORS,
+                GROUPS,
+                1,
+            )
+            signal = wait_row_owners(
+                signal,
+                PHASE_INPUT,
+                CORES,
+                generation,
+                0,
+                tokens,
+                8,
+                VECTORS,
+                GROUPS,
+                1,
+            )
     pre, post = hc_gates_range(
         inv,
         raw,
@@ -498,6 +510,8 @@ def vector_schedule(
         post_tail,
         worker,
         VECTORS,
+        partials,
+        HC_CONSUMER_REDUCE,
     )
     signal = publish_phase(signal, PHASE_GATES, core, CORES, generation)
     # gates与mix_norm按相同M8条带归同一AIV；pre由本核写，且GATES发布
@@ -505,7 +519,9 @@ def vector_schedule(
     # AIC便可开始QA；后面的Sinkhorn只供最终HCpost，不是QA的依赖。
     mixed, normed = hc_mix_norm_range(x_fp32, pre, norm_w, mixed, normed, norm_tail, worker, VECTORS)
     signal = publish_phase(signal, PHASE_NORM, core, CORES, generation)
-    comb = hc_comb_range(inv, raw, hc_scale, hc_base_2d, comb, comb_tail, worker, VECTORS)
+    comb = hc_comb_range(
+        inv, raw, hc_scale, hc_base_2d, comb, comb_tail, worker, VECTORS, partials, HC_CONSUMER_REDUCE
+    )
     signal = publish_phase(signal, PHASE_COMB, core, CORES, generation)
 
     # Q_A 每个 M 组有八个 N128 列块；不能只等每行的一个 owner。

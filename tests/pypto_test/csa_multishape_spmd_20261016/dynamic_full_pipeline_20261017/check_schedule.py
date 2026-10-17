@@ -45,7 +45,7 @@ def owners(start, count, tile, workers, base, stride):
 
 def run_case(
     tokens, q_lengths, histories, seed, query_group, output_group_pipeline=True, oa_cols=256,
-    hc_row_dependencies=False,
+    hc_row_dependencies=False, hc_consumer_reduce=False,
 ):
     rng = random.Random(seed)
     phases = {"PHASE_" + k: v for k, v in INTERFACE["phases"].items()}
@@ -170,7 +170,11 @@ def run_case(
                         needed.add((phases["PHASE_PARTIAL"], (rb * 4 + k) % 24))
             elif name in ("hc_gates_range", "hc_comb_range"):
                 for rb in range(core - 24, (tokens + 7) // 8, 48):
-                    needed.add((phases["PHASE_RAW"], 24 + (rb // 2) % 48))
+                    if hc_consumer_reduce:
+                        for k in range(4):
+                            needed.add((phases["PHASE_PARTIAL"], (rb // 2 * 4 + k) % 24))
+                    else:
+                        needed.add((phases["PHASE_RAW"], 24 + (rb // 2) % 48))
                     needed.add((phases["PHASE_INPUT"], core))
             elif name == "hc_mix_norm_range" and core - 24 < (tokens + 7) // 8:
                 needed.update(((phases["PHASE_GATES"], core), (phases["PHASE_INPUT"], core)))
@@ -224,6 +228,7 @@ def run_case(
         OUTPUT_GROUP_PIPELINE=output_group_pipeline,
         HC_ROW_DEPENDENCIES=hc_row_dependencies,
         ATTENTION_QUERY_METADATA=True,
+        HC_CONSUMER_REDUCE=hc_consumer_reduce,
     )
     generators = {}
     for role in ("cube", "vector"):

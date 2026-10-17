@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native只做S5正确性参照；不测性能、不改变原S6数学配置或共享安装。
+# Native只做实际query的正确性参照；不测性能、不改变原S6数学配置或共享安装。
 set -eo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd -- "$here/../../../.." && pwd)

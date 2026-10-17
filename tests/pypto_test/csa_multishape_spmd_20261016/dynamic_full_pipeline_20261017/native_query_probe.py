@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""用真实Native半层核对S5动态CSA；不借用仍假定S6的原分task参考。
+"""用真实Native半层核对S1/S5动态CSA；可另采原分task真实S6因果前缀。
 
 复用正式权重、Native builder、页布局和保护区；直接绑定Native device输入。
 Dspark上限保持5，仅本轮实际query长度为命令行值。Native只作功能/精度参照，
@@ -8,8 +8,11 @@ shape/有限值/写保护与eager/graph稳定性和Native精度分别记账，�
 """
 
 import argparse
+import importlib
+import importlib.util
 import json
 import os
+import sys
 import traceback
 from pathlib import Path
 
@@ -58,7 +61,9 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--batch", type=int, required=True)
     parser.add_argument("--history", type=int, required=True)
-    parser.add_argument("--query-tokens", type=int, choices=(5, 6), default=5)
+    parser.add_argument("--query-tokens", type=int, choices=(1, 5, 6), default=5)
+    parser.add_argument("--causal-extension-reference", action="store_true")
+    parser.add_argument("--spmd-source", type=Path)
     parser.add_argument("--device", type=int, default=int(os.environ.get("TASK_DEVICE", "-1")))
     args = parser.parse_args()
     if "TASK_DEVICE" not in os.environ:
@@ -112,11 +117,23 @@ def main():
         from pypto.runtime import CompileOptions
         from compile_diagnostics import compilation_probe
         from vllm_ascend.ops.pypto.deepseek_v4_flash_csa import native_adapter as adapter
+        if args.spmd_source:
+            # 只在本测试进程导入明确版本的正式动态源码，不切换共享工作区。
+            package_name = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd"
+            if any(name == package_name or name.startswith(package_name + ".") for name in sys.modules):
+                raise RuntimeError("SPMD包已导入，不能在进程中途换源码")
+            source = args.spmd_source.resolve()
+            spec = importlib.util.spec_from_file_location(
+                package_name, source / "__init__.py", submodule_search_locations=[str(source)])
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[package_name] = module
+            spec.loader.exec_module(module)
+            report["isolated_spmd_source"] = str(source)
         from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.binding import PreparedDynamicCSA
         from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT
         from vllm_ascend.ops.pypto.variant import ring_sizing_kwargs
 
-        package = Path(adapter.__file__).parent.parent / "deepseek_v4_flash_csa_spmd"
+        package = Path(importlib.import_module(PreparedDynamicCSA.__module__).__file__).parent
         (args.output / "source").mkdir()
         for path in package.glob("*.py"):
             (args.output / "source" / path.name).write_text(path.read_text())
@@ -212,15 +229,26 @@ def main():
                     v["status"] == "PASS" for v in (*checks.values(), *guards.values()))
                 report["rounds"].append(dict(replay=generation + 1, passed=passed, protocol=protocol,
                                              same_addresses=same, comparisons=checks, guards=guards, scratch=scratch))
-                assert passed, "S5 eager/graph或保护区/代际失败"
+                assert passed, "实际query的eager/graph或保护区/代际失败"
             report["functional_passed"] = all(v["status"] == "PASS" for v in report["eager_guards"].values()) and all(
                 v.get("nonfinite") == 0 for v in report["native_comparison"].values()) and report["native_topk_selection"]["status"] != "FAIL"
             report["precision_exact"] = all(v["status"] == "PASS" for v in report["native_comparison"].values())
             report["passed"] = report["functional_passed"] and report["precision_exact"]
+            # 先保存真实SQ的数值证据；后续因果参照失败也不丢失已完成的比较。
             if not report["precision_exact"]:
                 torch.save({"native_output": reference["x_out"], "spmd_output": eager["x_out"],
                             "native_topk": reference["idx_topk"], "spmd_topk": eager["idx_topk"]},
                            args.output / "numerical_diagnostic.pt")
+            if args.causal_extension_reference:
+                from causal_extension import validate as validate_causal_extension
+
+                (args.output / "causal_extension.py").write_text(
+                    Path(__file__).with_name("causal_extension.py").read_text())
+                report["stage"] = "causal_extension_reference"
+                save()
+                report["causal_extension"] = validate_causal_extension(
+                    adapter, layer, config, fixture, eager, root["idx_topk_scores"].cpu(),
+                    options, args.output / "causal_extension.json")
             report["stage"] = "complete"
     except BaseException as exc:
         report.update(error=str(exc), traceback=traceback.format_exc())

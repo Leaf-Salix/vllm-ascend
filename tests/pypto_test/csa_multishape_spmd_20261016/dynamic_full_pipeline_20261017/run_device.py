@@ -48,6 +48,8 @@ def main():
     parser.add_argument("--output-policy-matrix", action="store_true")
     parser.add_argument("--hc-row-dependencies", choices=("on", "off"), default=None)
     parser.add_argument("--hc-policy-matrix", action="store_true")
+    parser.add_argument("--hc-consumer-reduce", choices=("on", "off"), default=None)
+    parser.add_argument("--hc-consumer-matrix", action="store_true")
     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default=None)
     parser.add_argument("--attention-query-matrix", action="store_true")
     parser.add_argument("--device", type=int, default=int(os.environ.get("TASK_DEVICE", "-1")))
@@ -64,9 +66,9 @@ def main():
         raise ValueError("metadata重放要求无阶段插桩、history>=2")
     if args.padding_replay and (args.phase_clock or args.batch < 2):
         raise ValueError("padding重放要求无阶段插桩、batch>=2")
-    if sum((args.output_policy_matrix, args.hc_policy_matrix, args.attention_query_matrix)) > 1:
+    if sum((args.output_policy_matrix, args.hc_policy_matrix, args.attention_query_matrix, args.hc_consumer_matrix)) > 1:
         raise ValueError("每轮只比较一个策略轴，避免组合过多掩盖收益来源")
-    if (args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix) and not args.l1_windows:
+    if (args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix) and not args.l1_windows:
         raise ValueError("输出策略矩阵需要显式指定配对L1窗口数")
     args.output.mkdir(parents=True, exist_ok=False)
     report = dict(
@@ -242,6 +244,8 @@ def main():
                 policy = replace(policy, output_group_pipeline=args.output_group_pipeline == "on")
             if args.hc_row_dependencies is not None:
                 policy = replace(policy, hc_row_dependencies=args.hc_row_dependencies == "on")
+            if args.hc_consumer_reduce is not None:
+                policy = replace(policy, hc_consumer_reduce=args.hc_consumer_reduce == "on")
             if args.attention_query_metadata is not None:
                 policy = replace(policy, attention_query_metadata=args.attention_query_metadata == "on")
             candidate = PreparedDynamicCSA(
@@ -436,12 +440,13 @@ def main():
                 before_l1 = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
                 if not bool((before_l1 == before_l1[0]).all()):
                     raise AssertionError("L1前参与核代际不一致")
-                if args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix:
+                if args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix:
                     from output_policy_matrix import run_matrix
 
-                    matrix_axis = "attention_query" if args.attention_query_matrix else "hc_rows" if args.hc_policy_matrix else "output"
+                    matrix_axis = "hc_consumer" if args.hc_consumer_matrix else "attention_query" if args.attention_query_matrix else "hc_rows" if args.hc_policy_matrix else "output"
                     matrix_key = {
                         "attention_query": "attention_query_policy_matrix",
+                        "hc_consumer": "hc_consumer_policy_matrix",
                         "hc_rows": "hc_row_policy_matrix",
                         "output": "output_policy_matrix",
                     }[matrix_axis]

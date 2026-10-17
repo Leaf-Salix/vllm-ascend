@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--strategy", choices=("long", "medium"), default="long")
     parser.add_argument("--hc-row-dependencies", choices=("on", "off"), default="on")
+    parser.add_argument("--hc-consumer-reduce", choices=("on", "off"), default="off")
     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default="on")
     args = parser.parse_args()
     output = args.output.resolve()
@@ -66,6 +67,7 @@ def main():
         OUTPUT_GROUP_PIPELINE=True,
         HC_ROW_DEPENDENCIES=args.hc_row_dependencies == "on",
         ATTENTION_QUERY_METADATA=args.attention_query_metadata == "on",
+        HC_CONSUMER_REDUCE=args.hc_consumer_reduce == "on",
     )
     if args.strategy == "medium":
         controls.update(
