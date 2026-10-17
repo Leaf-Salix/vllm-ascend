@@ -1,0 +1,158 @@
+{
+  "reference_commit": "d253d627",
+  "measurement": "完整L1 incore首尾；三方同进程同输入；五窗中位数；SPMD双方100 tick失败轮询退避",
+  "precision_scope": "原PTO精确对照、图重放、状态/保护区及72核代际；不代表Native/token或全部动态场景验收",
+  "cases": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "task": "task_20261018_044522_413498115985",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qa_small_m16_h131072_b4_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            502.44,
+            509.8,
+            496.58,
+            490.22,
+            563.36
+          ],
+          "median_us": 502.44
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            520.3,
+            536.42,
+            516.76,
+            529.94,
+            523.9
+          ],
+          "median_us": 523.9
+        },
+        "spmd_reference": {
+          "samples_us": [
+            551.46,
+            532.22,
+            540.66,
+            543.6,
+            565.48
+          ],
+          "median_us": 543.6
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 32,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": 3.6239882266372425,
+      "candidate_faster_windows": 4,
+      "candidate_vs_dynamic_reduction_pct": -4.271156755035421,
+      "target_met": false
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "task": "task_20261018_044522_413502612248",
+      "output": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/qa_small_m16_h131072_b8_v1",
+      "full_validation_passed": true,
+      "statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            635.7,
+            651.28,
+            648.0,
+            625.86,
+            673.78
+          ],
+          "median_us": 648.0
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            683.58,
+            687.26,
+            682.06,
+            698.3,
+            679.42
+          ],
+          "median_us": 683.58
+        },
+        "spmd_reference": {
+          "samples_us": [
+            674.38,
+            680.16,
+            679.66,
+            672.9,
+            685.12
+          ],
+          "median_us": 679.66
+        }
+      },
+      "policies": {
+        "spmd_candidate": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        },
+        "spmd_reference": {
+          "QUERY_GROUP": 6,
+          "QK_PANEL": 64,
+          "SCORE_TILE": 1024,
+          "PREFETCH": 1,
+          "TO_L0": true,
+          "BALANCED": true,
+          "ROOTS": 1,
+          "OA_COLS": 128,
+          "OB_ROWS": 96,
+          "OUTPUT_GROUP_PIPELINE": true,
+          "HC_ROW_DEPENDENCIES": true,
+          "ATTENTION_QUERY_METADATA": false,
+          "HC_CONSUMER_REDUCE": false
+        }
+      },
+      "candidate_vs_reference_reduction_pct": -0.5767589677191598,
+      "candidate_faster_windows": 1,
+      "candidate_vs_dynamic_reduction_pct": -5.4907407407407405,
+      "target_met": false
+    }
+  ],
+  "decision": "T<=48统一M16不采用：B4改善但B8回退。下一版按原纯M16尾块区间收窄，另建constexpr接线防止未命中区间事件重排；本结果不作为新版本结果。"
+}

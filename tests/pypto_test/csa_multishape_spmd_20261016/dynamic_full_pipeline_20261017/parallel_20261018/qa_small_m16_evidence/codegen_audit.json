@@ -1,0 +1,291 @@
+{
+  "passed": true,
+  "scope": "已有生成物只读文本/分配/调用列表审计，无编译、无设备执行",
+  "baseline_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_attention_tick_clock_20261018/cpu_v1/result.json",
+  "candidate_result": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_qa_small_m16_20261018/cpu_v1/result.json",
+  "reference_sources_33_direct_text_equal": true,
+  "controls_equal": true,
+  "compiled_abi_equal": true,
+  "compiled_abi_entries": 130,
+  "controls": {
+    "QUERY_GROUP": 6,
+    "QK_PANEL": 64,
+    "SCORE_TILE": 1024,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": true,
+    "ROOTS": 1,
+    "OA_COLS": 256,
+    "OB_ROWS": 128,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false
+  },
+  "allocation_method": "按 PTO 顺序比较 source 文件名与完整 alloc 右式；仅去 source 路径/行号、inline 编号、数值 SSA 编号及 iter/ssa 版本。动态 valid 关系另由源 AST 与整数 owner 审计覆盖。地址/类型/形状/静态 valid 均保留。",
+  "reference_allocation_count": 2365,
+  "candidate_allocation_count": 2380,
+  "retained_allocation_records_equal": true,
+  "retained_qkv_allocations": 121,
+  "outside_qkv_allocations": 2244,
+  "address_envelope_bytes_both": {
+    "acc": 131072,
+    "mat": 475136,
+    "left": 65536,
+    "right": 65536,
+    "vec": 163872
+  },
+  "address_envelope_limit": "各空间 max(addr+声明形状字节数)，不是累加分配量，也不是运行时 live 峰值。",
+  "new_small_branch_allocations": [
+    {
+      "source": "qkv_stages.py",
+      "source_line": 165,
+      "pto_line": 440,
+      "signature": "pto.alloc_tile addr = %c0_i64 valid_row = %c16_index valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>",
+      "address": 0,
+      "space": "acc",
+      "dtype": "f32",
+      "rows": 16,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 170,
+      "pto_line": 449,
+      "signature": "pto.alloc_tile addr = %c196608_i64 valid_row = %ssa valid_col = %c256_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=16, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>",
+      "address": 196608,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 256
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 172,
+      "pto_line": 454,
+      "signature": "pto.alloc_tile addr = %c65536_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>",
+      "address": 65536,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 256
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 170,
+      "pto_line": 461,
+      "signature": "pto.alloc_tile addr = %c204800_i64 valid_row = %ssa valid_col = %c256_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=16, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>",
+      "address": 204800,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 256
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 172,
+      "pto_line": 466,
+      "signature": "pto.alloc_tile addr = %c131072_i64 valid_row = %c128_index valid_col = %c256_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=256, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>",
+      "address": 131072,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 256
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 473,
+      "signature": "pto.alloc_tile addr = %c65536_i64 valid_row = %c256_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 65536,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 256,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 474,
+      "signature": "pto.alloc_tile addr = %c0_i64 valid_row = %ssa valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>",
+      "address": 0,
+      "space": "left",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 476,
+      "signature": "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 0,
+      "space": "right",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 478,
+      "signature": "pto.alloc_tile addr = %c4096_i64 valid_row = %ssa valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>",
+      "address": 4096,
+      "space": "left",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 480,
+      "signature": "pto.alloc_tile addr = %c32768_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 32768,
+      "space": "right",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 489,
+      "signature": "pto.alloc_tile addr = %c131072_i64 valid_row = %c256_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 131072,
+      "space": "mat",
+      "dtype": "bf16",
+      "rows": 256,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 490,
+      "signature": "pto.alloc_tile addr = %c8192_i64 valid_row = %ssa valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>",
+      "address": 8192,
+      "space": "left",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 492,
+      "signature": "pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 0,
+      "space": "right",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 494,
+      "signature": "pto.alloc_tile addr = %c12288_i64 valid_row = %ssa valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=row_major, fractal=512, pad=0, compact=1>",
+      "address": 12288,
+      "space": "left",
+      "dtype": "bf16",
+      "rows": 16,
+      "cols": 128
+    },
+    {
+      "source": "qkv_stages.py",
+      "source_line": 173,
+      "pto_line": 496,
+      "signature": "pto.alloc_tile addr = %c32768_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>",
+      "address": 32768,
+      "space": "right",
+      "dtype": "bf16",
+      "rows": 128,
+      "cols": 128
+    }
+  ],
+  "event_method": "依生成顺序提取 set/wait_flag、wait_flag_dev、FFTS、pipe_barrier、dsb、dcci；SSA 变量重命名归一。局部 event ID 归一只用于明确标出的比较，不代表完整指令时序一致。",
+  "before_qa_event_records_equal": true,
+  "before_qa_event_records": 86,
+  "small_branch_event_records": 59,
+  "retained_qa_event_records_each": 272,
+  "retained_qa_event_multiset_equal_after_id_normalization": true,
+  "retained_qa_event_order_equal_after_id_normalization": false,
+  "after_qa_event_records_each": 4716,
+  "after_qa_event_order_equal_after_id_normalization": true,
+  "after_qa_actual_event_id_differences": [
+    {
+      "old_cpp_lines": [
+        8082,
+        8105
+      ],
+      "new_cpp_lines": [
+        8560,
+        8583
+      ],
+      "pipe": "M→FIX",
+      "old_id": 5,
+      "new_id": 6
+    },
+    {
+      "old_cpp_lines": [
+        8369,
+        8397
+      ],
+      "new_cpp_lines": [
+        8847,
+        8875
+      ],
+      "pipe": "M→FIX",
+      "old_id": 6,
+      "new_id": 7
+    },
+    {
+      "old_cpp_lines": [
+        8607,
+        8630
+      ],
+      "new_cpp_lines": [
+        9085,
+        9108
+      ],
+      "pipe": "M→FIX",
+      "old_id": 7,
+      "new_id": 0
+    }
+  ],
+  "small_cpp_region": [
+    6285,
+    6656
+  ],
+  "qa_release_cpp_region": [
+    8155,
+    8186
+  ],
+  "vector_qa_wait_pto_region": [
+    6349,
+    6408
+  ],
+  "limits": [
+    "CPU 不验证真机位一致、同步活性或性能",
+    "T>48 源数学/owner 保留，但编译器 QA 内事件编号和局部排序改变，不能宣称其机器码或时序完全不变",
+    "本次 CPU 控制 OA256/OB128；长历史设备策略由主入口独立选择"
+  ],
+  "artifacts": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_attention_tick_clock_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "bytes": 4083559
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_attention_tick_clock_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+      "bytes": 2456553
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_qa_small_m16_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+      "bytes": 4032631
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/ultra_qa_small_m16_20261018/cpu_v1/kernel/ptoas/dynamic_csa_full.cpp",
+      "bytes": 2479732
+    }
+  ]
+}
