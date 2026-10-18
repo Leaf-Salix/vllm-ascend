@@ -1,0 +1,19 @@
+[
+  {
+    "attempt": "cpu_v1",
+    "passed": false,
+    "reason": "不同同条件分支之间直接使用分支局部Tile，ConvertToSSA拒绝作用域越界",
+    "repair": "在外层声明Tile占位并由分支赋值，CPU产物必须确认未选分支裁剪及真实资源容量；没有修改编译器"
+  },
+  {
+    "attempt": "cpu_v2",
+    "passed": false,
+    "reason": "占位Left Tile的valid_shape必须匹配随后赋值的M3/N192 view",
+    "repair": "初始占位同样声明valid_shape=[3,192]；不放宽类型检查"
+  },
+  {
+    "attempt": "cpu_v3",
+    "passed": true,
+    "detail": "58动态轴130根，单MIX；两个WS Right各24KiB，Left/Right地址上界不超64KiB，需真机精度/性能"
+  }
+]
