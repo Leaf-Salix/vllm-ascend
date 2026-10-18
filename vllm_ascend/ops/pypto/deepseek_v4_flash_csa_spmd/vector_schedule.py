@@ -13,15 +13,16 @@ HC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等�
 重叠，再进入QR、RoPE与KV/query处理。这里只算
 请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。
 
-第二段：先Indexer query反量化、head权重与压缩pool/norm，再KV处理、
-Indexer query量化/系数、compact key量化与scale提交，再主Query反量化及主压缩。
-让已具备Indexer输入的AIC提前填充Score双槽，本AIV仍先完成主分支再消费Score；
-没有等整段Score或跳过ACK。前移等待的代价须由整层实测判断。主/Indexer
+第二段：默认先Indexer压缩pool/norm，再Indexer query反量化/head权重，
+提前消费主压缩，然后Indexer query量化/系数、compact key量化与scale提交，
+完成主Query反量化后进入Score。主压缩消费与AIC上的Q_B/Hadamard重叠，
+原KV后处理留到本核Score完成后。没有等整段Score或跳过ACK。主/Indexer
 两条压缩分支直接读写各自Native state。pool全部读完共享prefix历史后才
 提交state。Indexer key并行写槽，32个FP16 scale所在64B区按物理page%48
 分配唯一writer，同页更新顺序执行，避免读改写覆盖；其地址计划由早期planner准备。
 
-第三段：与AIC并发执行Score/双槽ACK→跨叶TopK→Attention有效块计划→
+第三段：与AIC并发执行Score/双槽ACK→实际owner处理原KV norm/cache→
+跨叶TopK→Attention有效块计划→
 与AIC并发执行三槽QK/PV的采KV/softmax/归并→分组量化→反量化和HCpost。
 Attention查询几何复用开启时，plan在原64B mask行内同时发布request/position；
 消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时
@@ -29,6 +30,13 @@ Attention查询几何复用开启时，plan在原64B mask行内同时发布reque
 组流水启用时，量化只等本输出组的O_A owner；末块尾零属于同组通知合同，
 每组独立槽位。HCpost仍等待所有O_B partial，保留八组反量化左折叠顺序。
 数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。
+
+COOPERATIVE_PREFIX策略同步改变两种角色的顺序：Indexer压缩先于query RoPE，
+主压缩pool/state/cache在主Q_B期间消费已前移的投影；主Query反量化完成后
+进入Score。原KV的norm/cache在本核Score归还环槽后执行，无相关行块的AIV
+直接继续Top-K。三条AIV阶段链拆到vector_prefix_stages.py；开关关闭维持旧次序。
+这是完整前段协作策略，T/B和有效请求仍动态；默认由select_policy启用，
+完整同轮收益及当前验证边界见policy.py与统一优化日志。
 
 每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要
 在业务写回完成之后，wait之后做读侧维护；单写者免atomic不等于cache一致。
@@ -41,17 +49,8 @@ import pypto.language as pl
 
 from .attention_plan_stages import attention_inverse_rope_sign_stage, attention_slot_plan_stage
 from .attention_stream_stages import attention_qk_pv_vector_lane_stage
-from .cache_stages import original_kv_writeback_stage
-from .compressor_output_stages import compressor_norm_rope_cache_stage
-from .compressor_pool_stages import (
-    compressor_pool_stage,
-    compressor_state_commit_stage,
-    indexer_compressor_pool_stage,
-    indexer_compressor_state_commit_stage,
-)
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_reduce_range, hc_widen_rms_range
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
-from .indexer_compressor_output_stages import indexer_compressor_norm_rope_stage
 from .indexer_group_stages import indexer_group_plan_stage, indexer_head_coefficients_stage
 from .indexer_publish_stages import indexer_pair_publish_stage
 from .indexer_query_stages import (
@@ -61,7 +60,11 @@ from .indexer_query_stages import (
 )
 from .indexer_scale_plan_stages import indexer_scale_page_commit_stage, indexer_scale_page_plan_stage
 from .indexer_score_stages import indexer_score_vector_lane_stage
-from .kv_stages import kv_norm_rope_stage
+from .vector_prefix_stages import (
+    indexer_compressor_vector_stage,
+    main_compressor_vector_stage,
+    original_kv_vector_stage,
+)
 from .metadata_stages import compact_offsets_and_count_stage
 from .output_projection_a_stages import o_projection_group_quant_stage, o_projection_groups_quant_stage
 from .output_projection_b_stages import o_dequant_hc_post_stage
@@ -303,6 +306,7 @@ def vector_schedule(
     ATTENTION_QUERY_METADATA: pl.constexpr,
     HC_CONSUMER_REDUCE: pl.constexpr,
     QA_M16_PARALLEL: pl.constexpr = False,
+    COOPERATIVE_PREFIX: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -588,6 +592,33 @@ def vector_schedule(
         GROUPS,
         1,
     )
+    idx_requests = pl.tensor.dim(idx_lengths, 0)
+    main_requests = pl.tensor.dim(main_lengths, 0)
+    if COOPERATIVE_PREFIX:
+        idx_pooled, idx_state, idx_normed, signal = indexer_compressor_vector_stage(
+            positions,
+            idx_value,
+            idx_score,
+            idx_state,
+            idx_state_table,
+            idx_ape,
+            idx_bounds,
+            idx_lengths,
+            idx_state_slots,
+            idx_pooled,
+            idx_gamma,
+            idx_cos,
+            idx_sin,
+            idx_offsets,
+            idx_normed,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            planner,
+            COOPERATIVE_PREFIX,
+        )
     # 前段QR及RoPE已等待过；Indexer INT8投影按32个N256列块归24个AIC。
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_PROJECT, CORES, generation, 0, 32, 1, GROUPS, 0, 1)
     idx_query_rope = indexer_query_dequant_rope_stage(
@@ -605,95 +636,75 @@ def vector_schedule(
     signal = wait_row_owners(signal, PHASE_WEIGHTS_PROJECT, CORES, generation, 0, weights_tasks, 1, GROUPS, 0, 1)
     head_weights = indexer_weights_reduce_stage(weights_partial, head_weights, tokens, worker, VECTORS)
     signal = publish_phase(signal, PHASE_WEIGHTS, core, CORES, generation)
-    # Indexer压缩只依赖自身投影/Native state；不必排在主压缩输出之后。
-    # 先取得compact offsets，再做pool→读完集合→commit→norm，和AIC上的
-    # 主压缩投影重叠。仍需所有pool读完后才能写共享prefix state。
-    signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
-    # Indexer压缩与主压缩独立state/metadata；其M16/N32分工也不能照搬主分支。
-    idx_requests = pl.tensor.dim(idx_lengths, 0)
-    idx_tasks = ((tokens + 15) // 16) * 8
-    signal = wait_row_owners(signal, PHASE_IDX_PROJECT, CORES, generation, 0, idx_tasks, 1, GROUPS, 0, 1)
-    idx_pooled = indexer_compressor_pool_stage(
-        idx_value,
-        idx_score,
-        idx_state,
-        idx_state_table,
-        idx_ape,
-        positions,
-        idx_bounds,
-        idx_lengths,
-        idx_pooled,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_POOL, core, CORES, generation)
-    signal = wait_row_owners(signal, PHASE_IDX_POOL, CORES, generation, 0, idx_requests, 1, VECTORS, GROUPS, 1)
-    idx_state = indexer_compressor_state_commit_stage(
-        idx_value,
-        idx_score,
-        idx_ape,
-        positions,
-        idx_bounds,
-        idx_lengths,
-        idx_state_slots,
-        idx_state,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_COMMIT, core, CORES, generation)
-    idx_normed = indexer_compressor_norm_rope_stage(
-        idx_pooled,
-        idx_gamma,
-        idx_cos,
-        idx_sin,
-        positions,
-        idx_bounds,
-        idx_lengths,
-        idx_offsets,
-        idx_normed,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_NORM, core, CORES, generation)
-    # 每个最多512行的KV分段有4个N128列块与最多3个M组；第一段的owner
-    # 集合覆盖后续各段（完整512行段为12个owner，短尾段只是它的子集）。
-    first_segment = pl.min(tokens, 512)
-    if first_segment < 128:
-        kv_tasks = 4 * pl.min(3, pl.max(1, first_segment // 32))
-        signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)
+    if COOPERATIVE_PREFIX:
+        main_pooled, main_state, main_normed, main_debug, main_cache, signal = main_compressor_vector_stage(
+            main_value,
+            main_score,
+            main_state,
+            main_state_table,
+            main_ape,
+            positions,
+            main_bounds,
+            main_lengths,
+            main_state_slots,
+            main_pooled,
+            main_gamma,
+            main_cos,
+            main_sin,
+            main_offsets,
+            main_slots,
+            main_normed,
+            main_debug,
+            main_cache,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            COOPERATIVE_PREFIX,
+        )
     else:
-        kv_tasks = 4 * pl.min(3, pl.max(1, first_segment // 64))
-        signal = wait_row_owners(signal, PHASE_KV_PROJECT, CORES, generation, 0, kv_tasks, 1, GROUPS, 0, 1)
-    signal = wait_row_owners(
-        signal,
-        PHASE_ROPE,
-        CORES,
-        generation,
-        0,
-        tokens,
-        8,
-        VECTORS,
-        GROUPS,
-        1,
-    )
-    kv = kv_norm_rope_stage(kv_fp32, gamma_ckv, rope_cos, rope_signed, rope_swap, kv, worker, VECTORS)
-    signal = publish_phase(signal, PHASE_KV_NORM, core, CORES, generation)
-    # KVnorm每32行一个owner，写cache每8行一个owner，不能误用同一分块公式。
-    signal = wait_row_owners(
-        signal,
-        PHASE_KV_NORM,
-        CORES,
-        generation,
-        0,
-        tokens,
-        32,
-        VECTORS,
-        GROUPS,
-        1,
-    )
-    cache_rows = original_kv_writeback_stage(kv, native_slots, cache_rows, worker, VECTORS)
-    signal = publish_phase(signal, PHASE_ORIGINAL_CACHE, core, CORES, generation)
-
+        idx_pooled, idx_state, idx_normed, signal = indexer_compressor_vector_stage(
+            positions,
+            idx_value,
+            idx_score,
+            idx_state,
+            idx_state_table,
+            idx_ape,
+            idx_bounds,
+            idx_lengths,
+            idx_state_slots,
+            idx_pooled,
+            idx_gamma,
+            idx_cos,
+            idx_sin,
+            idx_offsets,
+            idx_normed,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            planner,
+            COOPERATIVE_PREFIX,
+        )
+    if not COOPERATIVE_PREFIX:
+        kv, cache_rows, signal = original_kv_vector_stage(
+            rope_cos,
+            rope_signed,
+            rope_swap,
+            gamma_ckv,
+            kv_fp32,
+            kv,
+            native_slots,
+            cache_rows,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            COOPERATIVE_PREFIX,
+        )
     signal = wait_row_owners(signal, PHASE_IDX_QUERY_HAD, CORES, generation, 0, tokens, 1, GROUPS, 0, 1)
     idx_query_i8, idx_query_scale = indexer_query_quant_stage(
         idx_query_had,
@@ -772,57 +783,33 @@ def vector_schedule(
     )
     signal = publish_phase(signal, PHASE_QUERY, core, CORES, generation)
 
-    # 主压缩投影M64/N64；请求级pool会读共享prefix历史，必须全部pool读完才能
-    # 提交任何state。不能因为本核pool结束就覆盖其他核仍可能读取的Native页。
-    main_requests = pl.tensor.dim(main_lengths, 0)
-    main_tasks = ((tokens + 63) // 64) * 16
-    signal = wait_row_owners(signal, PHASE_MAIN_PROJECT, CORES, generation, 0, main_tasks, 1, GROUPS, 0, 1)
-    main_pooled = compressor_pool_stage(
-        main_value,
-        main_score,
-        main_state,
-        main_state_table,
-        main_ape,
-        positions,
-        main_bounds,
-        main_lengths,
-        main_pooled,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_MAIN_POOL, core, CORES, generation)
-    signal = wait_row_owners(signal, PHASE_MAIN_POOL, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
-    main_state = compressor_state_commit_stage(
-        main_value,
-        main_score,
-        main_ape,
-        positions,
-        main_bounds,
-        main_lengths,
-        main_state_slots,
-        main_state,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_MAIN_COMMIT, core, CORES, generation)
-    main_normed, main_debug, main_cache = compressor_norm_rope_cache_stage(
-        main_pooled,
-        main_gamma,
-        main_cos,
-        main_sin,
-        main_bounds,
-        main_lengths,
-        positions,
-        main_offsets,
-        main_slots,
-        main_normed,
-        main_debug,
-        main_cache,
-        worker,
-        VECTORS,
-    )
-    signal = publish_phase(signal, PHASE_MAIN_OUTPUT, core, CORES, generation)
-
+    if not COOPERATIVE_PREFIX:
+        main_pooled, main_state, main_normed, main_debug, main_cache, signal = main_compressor_vector_stage(
+            main_value,
+            main_score,
+            main_state,
+            main_state_table,
+            main_ape,
+            positions,
+            main_bounds,
+            main_lengths,
+            main_state_slots,
+            main_pooled,
+            main_gamma,
+            main_cos,
+            main_sin,
+            main_offsets,
+            main_slots,
+            main_normed,
+            main_debug,
+            main_cache,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            COOPERATIVE_PREFIX,
+        )
     # Score两种角色必须同时可推进。不能先等PHASE_SCORE_CUBE“整段完成”，否则
     # Cube等待AIV归还双缓冲槽，而AIV等待Cube退出，形成环。这里只等输入就绪。
     signal = wait_row_owners(signal, PHASE_IDX_SCALE, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
@@ -849,6 +836,24 @@ def vector_schedule(
         1,
     )
     signal = publish_phase(signal, PHASE_SCORE_VECTOR, core, CORES, generation)
+    if COOPERATIVE_PREFIX:
+        # Score已归还本组环槽后，处理原KV；无工作AIV继续Top-K，不额外集合。
+        kv, cache_rows, signal = original_kv_vector_stage(
+            rope_cos,
+            rope_signed,
+            rope_swap,
+            gamma_ckv,
+            kv_fp32,
+            kv,
+            native_slots,
+            cache_rows,
+            signal,
+            tokens,
+            worker,
+            core,
+            generation,
+            COOPERATIVE_PREFIX,
+        )
     # 叶按(group,leaf)%24分工，最终merge按query%48分工，首版等待所有明确
     # 发布的48个AIV，包含处理尾group时只ACK的空lane，避免遗漏跨叶根节点。
     signal = wait_row_owners(signal, PHASE_SCORE_VECTOR, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)

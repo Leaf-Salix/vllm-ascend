@@ -32,6 +32,12 @@ QA的M16并行仅在已有G6策略且16<tokens<32选用：此时原M32策略只�
 不把三点视为G6收益的因果证明或全历史普遍提速。这个区间实际为长历史、
 query上界至少6、24<=T<32，混合Q与其它历史长度尚需继续回归。
 开关进入constexpr签名，关闭编译旧QA路径；T和device metadata仍动态。
+COOPERATIVE_PREFIX同时调整AIC/AIV前段：主压缩先生产并在Q_B期间消费，
+4核Hadamard与20核Q_B重叠，原KV后处理退出Score前驱链。核资源比例来源于
+M256 Hadamard与N256 Q_B的负载分工，不按七个shape白名单选择。七个S6回归点
+同轮完整L1相对旧动态下降1.97%～6.49%；真实B1/S1、B5/S5相对旧动态精确
+回归和B16同图metadata/padding通过，因此select_policy默认启用。其它区间的
+性能、mixed-query及连续轨迹仍须继续验证，不将本次收益称为已达30%目标。
 """
 
 from dataclasses import dataclass
@@ -52,6 +58,7 @@ class CSASPMDPolicy:
     attention_query_metadata: bool = False
     hc_consumer_reduce: bool = False
     qa_m16_parallel: bool = False
+    cooperative_prefix: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -69,6 +76,7 @@ class CSASPMDPolicy:
             "ATTENTION_QUERY_METADATA": self.attention_query_metadata,
             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
             "QA_M16_PARALLEL": self.qa_m16_parallel,
+            "COOPERATIVE_PREFIX": self.cooperative_prefix,
         }
 
 
@@ -109,4 +117,5 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         ob_rows=ob_rows,
         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
         qa_m16_parallel=group == 6 and 16 < tokens < 32,
+        cooperative_prefix=True,
     )

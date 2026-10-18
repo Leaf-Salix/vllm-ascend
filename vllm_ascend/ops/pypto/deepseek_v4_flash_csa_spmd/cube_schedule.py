@@ -5,14 +5,15 @@
 两个独立kernel。24个AIC按真实T及device请求计划循环，数学tile由constexpr
 策略选择；没有输入规格白名单、固定S推导请求或冻结的历史DAG。
 
-阅读顺序：HC投影→QA→Indexer压缩/query/head权重→KV→query Hadamard→
-主QB→compact Hadamard→主压缩投影→Indexer score→Attention→O_A/O_B。矩阵计算调用各
+默认阅读顺序：HC投影→QA→Indexer压缩/query投影→projection_overlap_stage
+中的主压缩/head权重、Hadamard与Q_B分核、KV→Indexer Score→Attention→O_A/O_B。矩阵计算调用各
 *_stages.py的inline函数；本文件只描述何时允许消费数据，不另写数学。
 HC行依赖路径按每个AIC实际消费的M16行等待M8输入，不等无关行；
 每个producer仍发布自己的完整阶段，消费者等待后保留业务缓存获取。
-先发投影再等其AIV消费者，避免融合后造成环形等待。KV插在Indexer query和
-等待其RoPE之间，使AIV有推进窗口。两种压缩独立，先发Indexer投影，让其AIV pool/norm
-与主压缩投影重叠。当前阶段粒度仍较保守，收益以成对实测为准。
+先发投影再等其AIV消费者，避免融合后造成环形等待。默认主压缩先发出，
+让AIV在4核Hadamard/20核Q_B期间消费；KV后处理退出Score输入链。
+COOPERATIVE_PREFIX关闭时保留旧次序：head权重/KV→query Hadamard→Q_B→
+compact Hadamard→主压缩。两种压缩独立state，仍保留真实owner及共享读完约束。
 输出尾段按策略选择整阶段或逐输出组通知；逐组路径不改变本核O_A任务序，
 已做完自己O_A的AIC可读就绪量化组做O_B，而不等待其它组完成量化。
 
@@ -44,6 +45,7 @@ from .indexer_query_stages import (
 )
 from .indexer_score_stages import indexer_score_cube_stage
 from .kv_stages import kv_project_stage
+from .projection_overlap_stages import projection_overlap_stage
 from .output_projection_a_stages import o_projection_a_groups_stage_nz, o_projection_a_stage_nz
 from .output_projection_b_stages import o_b_groups_stage, o_b_stage
 from .phase_sync import begin_invocation, publish_phase, wait_producer, wait_row_owners
@@ -187,6 +189,7 @@ def cube_schedule(
     OUTPUT_GROUP_PIPELINE: pl.constexpr,
     HC_ROW_DEPENDENCIES: pl.constexpr,
     QA_M16_PARALLEL: pl.constexpr = False,
+    COOPERATIVE_PREFIX: pl.constexpr = False,
 ):
     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
@@ -288,62 +291,76 @@ def cube_schedule(
     # 不能在写出这些结果之前等待Indexer归一化或量化，否则会形成等待环。
     idx_query_acc = indexer_query_project_stage(qr, idx_wq_b, idx_query_acc, worker, GROUPS)
     signal = publish_phase(signal, PHASE_IDX_QUERY_PROJECT, worker, CORES, generation)
-    weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
-    signal = publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)
-    # normed已经等待HC_NORM；KV与QA读取同一BF16输入，wkv固定ND。
-    # 原GM别名显式返回cluster，实际KV写回与通知次序必须另查编译产物。
-    kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, worker, GROUPS)
-    signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
+    if COOPERATIVE_PREFIX:
+        # 主压缩先生产；4核Hadamard/20核Q_B并行，KV仍由24个逻辑worker
+        # 分摊。AIV同时调整消费者顺序，不能单独启用这一侧。
+        (
+            main_value, main_score, weights_partial, idx_query_had,
+            q_proj, idx_had, kv_fp32, signal,
+        ) = projection_overlap_stage(
+            normed, main_wkv, main_wgate, main_value, main_score,
+            weights_proj, weights_partial, idx_query_rope_heads, hadamard,
+            idx_query_had, qr_matmul, wq_b, q_proj, idx_lengths, idx_count,
+            idx_normed, idx_had, wkv, kv_fp32, signal, worker, generation, 4,
+        )
+    else:
+        weights_partial = indexer_weights_project_stage(normed, weights_proj, weights_partial, worker, GROUPS)
+        signal = publish_phase(signal, PHASE_WEIGHTS_PROJECT, worker, CORES, generation)
+        # normed已经等待HC_NORM；KV与QA读取同一BF16输入，wkv固定ND。
+        # 原GM别名显式返回cluster，实际KV写回与通知次序必须另查编译产物。
+        kv_fp32 = kv_project_stage(normed, wkv, kv_fp32, worker, GROUPS)
+        signal = publish_phase(signal, PHASE_KV_PROJECT, worker, CORES, generation)
 
-    # query的8行×4head反量化块共有ceil(T/8)*16个，不把T误当作其owner数量。
-    query_rope_tasks = ((tokens + 7) // 8) * 16
-    signal = wait_row_owners(
-        signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1
-    )
-    idx_query_had = indexer_query_hadamard_stage(
-        idx_query_rope_heads,
-        hadamard,
-        idx_query_had,
-        tokens,
-        worker,
-        GROUPS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
-    # Q_B列块n归n%24；每个owner处理所有实际M128行块。返回原GM别名给cluster。
-    q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
-    signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
+        # query的8行×4head反量化块共有ceil(T/8)*16个，不把T误当作其owner数量。
+        query_rope_tasks = ((tokens + 7) // 8) * 16
+        signal = wait_row_owners(
+            signal, PHASE_IDX_QUERY_ROPE, CORES, generation, 0, query_rope_tasks, 1, VECTORS, GROUPS, 1
+        )
+        idx_query_had = indexer_query_hadamard_stage(
+            idx_query_rope_heads,
+            hadamard,
+            idx_query_had,
+            tokens,
+            worker,
+            GROUPS,
+        )
+        signal = publish_phase(signal, PHASE_IDX_QUERY_HAD, worker, CORES, generation)
+        # Q_B列块n归n%24；每个owner处理所有实际M128行块。返回原GM别名给cluster。
+        q_proj = q_b_stage(wq_b, qr_matmul, q_proj, tokens, worker, GROUPS)
+        signal = publish_phase(signal, PHASE_QB, worker, CORES, generation)
 
-    # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。
-    # 本轮META早于投影完成；仍显式获取本次计划与所有IDX_NORM生产者。
-    # 不假定CPU时序已保证可见性。每次从真实T重新计算同一planner owner。
-    planner = pl.min((tokens + 7) // 8, VECTORS - 1)
-    signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
-    requests = pl.tensor.dim(idx_lengths, 0)
-    signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1)
-    compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
-    idx_had = indexer_compressor_hadamard_stage(
-        idx_normed,
-        hadamard,
-        idx_had,
-        compact_count,
-        worker,
-        GROUPS,
-    )
-    signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
+        # 主QB之后优先完成已就绪的Indexer compact Hadamard，随后做独立主压缩。
+        # 本轮META早于投影完成；仍显式获取本次计划与所有IDX_NORM生产者。
+        # 不假定CPU时序已保证可见性。每次从真实T重新计算同一planner owner。
+        planner = pl.min((tokens + 7) // 8, VECTORS - 1)
+        signal = wait_producer(signal, PHASE_META, GROUPS + planner, CORES, generation)
+        requests = pl.tensor.dim(idx_lengths, 0)
+        signal = wait_row_owners(signal, PHASE_IDX_NORM, CORES, generation, 0, requests, 1, VECTORS, GROUPS, 1)
+        compact_count = pl.cast(pl.read(idx_count, [0]), pl.INDEX)
+        idx_had = indexer_compressor_hadamard_stage(
+            idx_normed,
+            hadamard,
+            idx_had,
+            compact_count,
+            worker,
+            GROUPS,
+        )
+        signal = publish_phase(signal, PHASE_IDX_HADAMARD, worker, CORES, generation)
 
-    # compact Hadamard已发布；AIV可在这段主压缩投影期间量化并提交Indexer
-    # cache/scale。主压缩的数学、owner和累加顺序均不变。若别的形状下
-    # IDX_NORM较晚，前移的等待可能抵消收益，因此必须实测，不能假定免费。
-    main_value, main_score = compressor_project_stage(
-        normed,
-        main_wkv,
-        main_wgate,
-        main_value,
-        main_score,
-        worker,
-        GROUPS,
-    )
-    signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
+        # compact Hadamard已发布；AIV可在这段主压缩投影期间量化并提交Indexer
+        # cache/scale。主压缩的数学、owner和累加顺序均不变。若别的形状下
+        # IDX_NORM较晚，前移的等待可能抵消收益，因此必须实测，不能假定免费。
+        main_value, main_score = compressor_project_stage(
+            normed,
+            main_wkv,
+            main_wgate,
+            main_value,
+            main_score,
+            worker,
+            GROUPS,
+        )
+        signal = publish_phase(signal, PHASE_MAIN_PROJECT, worker, CORES, generation)
+
 
     # Score消费query INT8、系数和Native key/scale。Key写回与scale RMW不是一件事：
     # 后者按物理页分配唯一AIV写者；全部48个writer发布后，cache才可整体消费。
