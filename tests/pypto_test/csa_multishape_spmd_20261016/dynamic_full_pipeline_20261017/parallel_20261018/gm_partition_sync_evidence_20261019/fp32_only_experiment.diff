@@ -1,0 +1,15 @@
+diff --git a/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp b/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
+index 8de88916..1d772ea3 100644
+--- a/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
++++ b/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
+@@ -321,6 +321,10 @@ static std::optional<GMColumnWindow> getGMColumnWindow(Value value) {
+     return std::nullopt;
+ 
+   Type elementType = viewType.getElementType();
++  // 本地消融候选：先只作用于FP32列窗口，隔离本CSA四处FIX与两处BF16
++  // MTE3 barrier删除的效果；不宣称所有FP32访问都由FIX执行。
++  if (!elementType.isF32())
++    return std::nullopt;
+   if (!elementType.isIntOrFloat())
+     return std::nullopt;
+   unsigned bits = elementType.getIntOrFloatBitWidth();
