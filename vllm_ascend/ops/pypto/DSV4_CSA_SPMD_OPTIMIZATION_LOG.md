@@ -18352,3 +18352,23 @@ volatile、发布DSB、payload fence、FFTS和全部72核分工保持；正式op
 原二进制不动。诊断副本改变轮询时间语义，不可当作正式等待/完整耗时证据。
 有界版任务task_20261019_004740_6124323569已启动，待完整输出及轨迹验收；
 记录位于incore_pipeline_profiling_20261018。七档性能目标仍0/7。
+
+有界诊断版模型已完整结束，总tick2493765，CPU运行888440ms；77份完整
+可写storage共756895848字节与原真机after逐字节相同。最终72核trace仍在
+msopprof解析导出，尚不能记全部采集完成。SYS_CNT只用于轮询退避，非同步
+正确性必需；但旧版B16 cached 0/100tick曾为1047.58/851.32μs，不能据模型
+兼容性问题直接删除有收益依据的退避。当前无新增真机性能结论，正式代码未改。
+
+### 2026-10-19：完整72核导出完成，开始从实际流水定位Attention写回
+
+同一有界诊断任务最终completed、exit=0，原版skill manifest为exported，
+72条核trace和72份指令CSV全部存在。后处理确认24 AIC各有MMAD、48 AIV
+各有非同步Vector计算，原始图23707837个事件；77份完整可写storage的
+逐字节PASS沿用既有结果，不重复测试。原始大图、逐核图、概览和报告集中到
+downloads/CSA_dynamic_128K_B16_S6_all72_incore_model_bounded_20261019。
+
+已将长FIX指令对应回正式attention_stream_stages.py的QK score与四段PV
+写出。24个AIC均执行20次score写出、4×20次PV写出；Score示例MMAD每核
+22次，与实际计划一致。不能先把该档差距归因为工作数量不均。下一步结合
+L0C生命周期、生成事件边与双AIV供数检查Cube/FIX重叠。当前仅为模型中的
+定位线索，没有修改正式算子或新增真机性能结论；详见PIPELINE_FINDINGS.md。

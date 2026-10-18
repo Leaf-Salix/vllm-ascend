@@ -118,4 +118,42 @@ cacheinvalid，组内仍有硬件事件；没有CSA可选wait helper的计时退
 因此HC_pre成功证明那条多核交接路径可执行；本次CSA停滞需限定为当前模型
 SYS_CNT恒零触发的退避问题，不能概括成多核通信或所有GM读写无法模拟。
 机器可读核对在`HC_PRE_SYNC_COMPARISON.json`。有界诊断版已在实时dump中
-出现实际MMAD并推进到不同PC，完整结果仍待验收，不能提前记采集PASS。
+出现实际MMAD并推进到不同PC，当时尚未完成输出/最终trace验收。
+
+## 有界诊断版模型输出通过，最终轨迹仍在导出
+
+`task_20261019_004740_6124323569`的模型程序于01:02:29结束，打印完整
+`CSA_REPLAY_COMPLETE`，模型总tick为2493765，模型执行墙钟888440ms。
+后者是CPU模拟运行时间，绝不是算子性能。外层msopprof仍在解析dump，尚未
+取得最终72核trace manifest，不能把模型完成写成全部采集交付已完成。
+
+`validate_replay.py`已核对模拟after：77份可写完整storage、756895848字节
+与原真机调用after全部逐字节相同，见`REPLAY_VALIDATION.json`。这证明
+有界退避副本保留了本用例数据/同步结果，不证明原100tick等待的时间语义。
+
+用户询问get_sys_cnt必要性：它只服务未就绪轮询的退避，不参与信号值、
+代际或正确性条件。历史旧版B16的同一cached helper，0tick/100tick完整L1
+分别1047.58/851.32μs，说明不能因模型不支持计时器就无依据删除退避。
+记录位于统一优化日志“22:44：退避对照与原动态实测成本”。这些旧数据不
+代表当前动态版本，不能把更换时钟或固定循环视作已获性能收益。
+
+新增`extract_model_phase_writes.py`只解读ST指令的模型cycle和阶段槽，不把
+ST时刻当作写后DCCI/DSB可见或消费者已返回。初次忽略B32的XM元素索引，
+72核代际覆盖断言拒绝；修正为base+4×索引后核对72核owner通过。该解析器
+不更改算子或计时，不作为性能验收。结果留在build_output/model_phase_writes。
+
+## 最终采集状态：72核覆盖通过
+
+同一任务最终completed、exit=0，原版skill的`manifest_export.csv`显示
+exported、72条核轨迹、72份指令CSV。`analyze_incore.py`核对24个AIC都有
+MMAD、48个AIV都有实际Vector计算，完整总图共23707837个事件。先前
+“导出中”的记录是中间状态，现已结束；精度沿用上述77份完整storage的PASS。
+
+全核概览、逐核原始图、CSV与验证报告集中在工作区
+`downloads/CSA_dynamic_128K_B16_S6_all72_incore_model_bounded_20261019/`。
+时间轴保留整次launch的共同坐标。首轮指令/源码对应见
+`PIPELINE_FINDINGS.md`，下一步先检查Attention的QK/PV写回与Cube/FIX重叠。
+不根据有界退避模拟副本的时间更新正式性能表；七档性能目标仍0/7。
+
+清理已完成：72核，1392602个事件；原工具有2460条SET/WAIT_FLAG连线未能
+重建，原始数据完整保留。不将这些缺失的展示连线解释为算子缺失同步。
