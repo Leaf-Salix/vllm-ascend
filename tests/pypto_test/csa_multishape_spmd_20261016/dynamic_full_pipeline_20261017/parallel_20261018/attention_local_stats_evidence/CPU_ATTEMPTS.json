@@ -1,0 +1,15 @@
+[
+  {
+    "version": 1,
+    "passed": false,
+    "error": "Vec 255104>188416",
+    "analysis": "动态slice→reshape链保留非ConstInt MemRef；当前MemoryReuse为避免下游偏移丢失，关闭整个Vec空间的子区间装箱。768B环自身未膨胀。"
+  },
+  {
+    "version": 2,
+    "change": "显式ND extract两个128B行再reshape；保留copy，不绕过安全门槛",
+    "status": "passed",
+    "full_codegen": true,
+    "vec_max_visible_end": 163872
+  }
+]
