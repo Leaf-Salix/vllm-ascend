@@ -1,0 +1,177 @@
+{
+  "passed": true,
+  "scope": "同源AST整数语义+独立边界oracle；无PyPTO编译/设备/性能模型",
+  "case_count": 1235,
+  "families": {
+    "S1": 123,
+    "S1_gaps": 123,
+    "S5": 123,
+    "S5_gaps": 123,
+    "S6": 123,
+    "S6_gaps": 123,
+    "T_boundary": 441,
+    "mixed": 27,
+    "mixed_gaps": 27,
+    "empty_groups": 2
+  },
+  "fallback_cases": 23,
+  "largest_tokens": 4096,
+  "largest_groups": 4096,
+  "largest_wave_count": 512,
+  "contracts": {
+    "ordered_group_exact_coverage": true,
+    "query_exact_coverage_including_dummy_gaps": true,
+    "non_final_query_boundaries_aligned_8": true,
+    "M8_plan_block_does_not_cross_wave": true,
+    "first_wave_query_begin_zero": true,
+    "last_wave_query_end_actual_T": true,
+    "wave_count_le_ceil_groups_8_le_ceil_T_8": true,
+    "metadata_not_mutated": true,
+    "no_capacity_tail_read": true,
+    "global_group_ids_not_rebased": true
+  },
+  "invalid_contract_cases_rejected": 4,
+  "signal_capacity_contract": {
+    "fixed_prefix_phases": 60,
+    "phases_per_wave": 3,
+    "wave_capacity": "ceil(T/8)",
+    "signal_phase_capacity": "60+3*ceil(T/8)",
+    "signal_words": "(60+3*ceil(T/8))*72*128",
+    "empty_groups": "原不交错路径，不增加实际wave"
+  },
+  "examples": [
+    {
+      "name": "S1_G6_B16",
+      "family": "S1",
+      "tokens": 16,
+      "groups": 16,
+      "waves": [
+        {
+          "first_group": 0,
+          "next_group": 8,
+          "query_begin": 0,
+          "query_end": 8
+        },
+        {
+          "first_group": 8,
+          "next_group": 16,
+          "query_begin": 8,
+          "query_end": 16
+        }
+      ],
+      "fallback": false,
+      "reads": 4
+    },
+    {
+      "name": "S5_G6_B16",
+      "family": "S5",
+      "tokens": 80,
+      "groups": 16,
+      "waves": [
+        {
+          "first_group": 0,
+          "next_group": 8,
+          "query_begin": 0,
+          "query_end": 40
+        },
+        {
+          "first_group": 8,
+          "next_group": 16,
+          "query_begin": 40,
+          "query_end": 80
+        }
+      ],
+      "fallback": false,
+      "reads": 4
+    },
+    {
+      "name": "S6_G6_B16",
+      "family": "S6",
+      "tokens": 96,
+      "groups": 16,
+      "waves": [
+        {
+          "first_group": 0,
+          "next_group": 8,
+          "query_begin": 0,
+          "query_end": 48
+        },
+        {
+          "first_group": 8,
+          "next_group": 16,
+          "query_begin": 48,
+          "query_end": 96
+        }
+      ],
+      "fallback": false,
+      "reads": 4
+    },
+    {
+      "name": "S6_G6_B16_gaps",
+      "family": "S6_gaps",
+      "tokens": 104,
+      "groups": 13,
+      "waves": [
+        {
+          "first_group": 0,
+          "next_group": 13,
+          "query_begin": 0,
+          "query_end": 104
+        }
+      ],
+      "fallback": false,
+      "reads": 11
+    },
+    {
+      "name": "mixed_3_G6_gapsTrue",
+      "family": "mixed_gaps",
+      "tokens": 145,
+      "groups": 30,
+      "waves": [
+        {
+          "first_group": 0,
+          "next_group": 11,
+          "query_begin": 0,
+          "query_end": 56
+        },
+        {
+          "first_group": 11,
+          "next_group": 26,
+          "query_begin": 56,
+          "query_end": 120
+        },
+        {
+          "first_group": 26,
+          "next_group": 30,
+          "query_begin": 120,
+          "query_end": 145
+        }
+      ],
+      "fallback": false,
+      "reads": 27
+    },
+    {
+      "name": "all_dummy",
+      "family": "empty_groups",
+      "tokens": 27,
+      "groups": 0,
+      "waves": [],
+      "fallback": true,
+      "reads": 1
+    },
+    {
+      "name": "padding_only",
+      "family": "empty_groups",
+      "tokens": 17,
+      "groups": 0,
+      "waves": [],
+      "fallback": true,
+      "reads": 1
+    }
+  ],
+  "source_syntax_parsed": true,
+  "pypto_imported": false,
+  "pypto_lowering_run": false,
+  "device_execution": false,
+  "performance_model": false
+}

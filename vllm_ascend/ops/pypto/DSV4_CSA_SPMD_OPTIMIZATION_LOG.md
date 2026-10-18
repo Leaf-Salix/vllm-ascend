@@ -17379,3 +17379,25 @@ runner复用正式权重、原动态PTO精确oracle、状态/保护区及图代�
 同次阶段端点与独立统计见DEVICE_DIAGNOSTIC_CHECKS.json和analysis/；实际事件/生产消费来源见wait_mapping/。三个核组body与ACK呈相同分组趋势，而固定j8页/WS无相同单调趋势，最多支持进一步核对消费相位/背压，不能据此归因硬件慢核。历史全局G3/N128已测并后被G6替代，当前观察不足以重试；另一个G6内部双M192/N128负例独立列出，不混淆两者。
 
 完整探针、runner、源快照、初稿修正、离线/独立审阅、真机结果/日志均在score_service_clock_evidence。无额外L1窗口、无七档重测、无新增正式优化。当前仅继续只读评估不同请求波次的Score/Attention块交错，与旧whole-stage两wave方案排重，核对有向事件顺序和同时live资源；未开始实现或编译。
+
+## 2026-10-18：三路并行审查 Score/Attention 跨请求交错，完成两L1槽源码准备
+
+本轮继续七档逐档相对原动态分task PTO完整L1降低至少30%的目标，正式动态33源仍为66882634。Score服务插桩证据已单独提交4fe299d1；插桩数据不计入性能验收。三路并行审查分别负责同步拓扑、Mat/UB/Left容量、可暂停step的源码状态；归档见parallel_20261018/score_attention_interleave_design。
+
+候选机制为同组AIC先Score step再前波Attention tick、双AIV先前波Attention tick再消费当前Score。前波的叶根、TopK和plan必须先完整发布获取，各组有独立游标，不能把ACK当根写回完成。旧整helper排空切换的负例不直接否定此机制。保留原owner时B16连续四group的24叶只覆盖12个AIC，因此不能以总任务数等于24宣称均衡；混合query和dummy行的覆盖、M8 plan切点也须显式处理。
+
+原两helper直接同驻留不成立：Score Left60KiB与Attention临时16KiB相冲突，原Attention Mat448KiB加Score临时112KiB也超限。三L1槽借已释放槽的想法受boxed Tile reinterpret限制，未用低层IR绕过。优先准备仅AIC内部KV两槽、每tick先PV后QK的源码，GM三槽和AIV函数完全保留；Query48KiB驻Mat并每次切回重TMOV、系数12KiB留Left。保守容量496KiB，额外计入leaf初始化系数暂态508KiB，只有容量依据，不代表联合planner或性能已通过。
+
+两槽源码准备在parallel_20261018/score_attention_two_l1_source，完整diff与源级审查显示：AIV装饰器至末逐字节不变；QK/PV子树除内部L1模数外保持；GM地址五项相同；动态T、mask、首尾tick保留。尚未PyPTO编译或NPU验证，不作为独立性能候选提交任务。需验证真实MTE1→MTE2槽复用、48KiB重装和PV先行损失的原流水重叠。
+
+状态拆分进一步发现当前@pl.jit.inline特化层未保留Tile参数注解；底层pl.function支持Tile不等于JIT入口能发现外部Inline函数。下一步先在新的独立Python源码overlay复现必要接口缺口，复用只读既有二进制，不改共享安装、旧隔离依赖或正式算子；只考虑最小注解保留修复，不扩展其它功能。另两路继续动态wave边界源码与按波隔离phase容量设计。当前没有新增完整L1性能、没有新精度PASS、没有全七档重测，目标仍未达成。
+
+### 本阶段收口：动态helper源码与窄接口CPU验证完成
+
+三路源码准备均已保存：`score_attention_cube_step_source`提取完整AIC G6 Score step；`score_attention_vector_step_source`提取AIV叶状态初始化、完整step及根发布；`score_attention_tick_source`提取Attention两角色的初始化/tick。固定维度仅是原G6/N64/1024、head与数学tile；B/T、Q/L、位置、页表与有效候选继续动态。源级AST还原相等，原数学/排序/事件保留；联合状态机仍未接入，不能记完整CSA编译或精度PASS。
+
+`score_attention_wave_boundaries`的纯整数检查共1235场景通过，覆盖S1/S5/S6、G1/G2/G6、mixed/odd、dummy/gaps及T至4096；只证明分波边界和容量关系，不是动态CSA功能验收。`score_attention_interleave_design/wave_progress`明确保留原60阶段并为各wave追加ROOT/TOPK/PLAN，原根ABI不变，runner固定60的回读/保护检查须配套修改。Attention还必须把query_first与物理qk_core分开：6处query地址用前者，5处GM ring仍用后者；每wave相对tick从0起并排空，不可用global tick跳过首部，当前冻结helper尚未接此参数。
+
+`jit_tile_parameter_evidence`归档独立overlay最小补丁与56项小文本。实际最小失败为inline参数缺注解；specializer只增加Tile注解保留和已有模块常量折叠。普通Tile原样返回以及实际full-valid状态的assemble/tuple/loop carry均完成CPU lowering/PTOAS，动态T仍为运行时参数。full-state生成Vec roots/segments在0/12288B，incoming在36864B；仅原assemble的两次TMOV，无helper整体复制。旧隔离依赖文件保持原文，共享安装未动。
+
+边界如实保留：首次夹具把pl放局部引发注解命名空间失败，修正为与正式源一致的模块导入后再次参考/候选对照；动态valid_shape的loop carry仍因valid类型不一致失败；同helper constexpr维度注解仍不支持，InOut仅specialize通过。Mat/Left的新helper及联合CSA尚未编译，不扩大Vec小例结论。所有失败、小生成PTO/C++和本地大文件路径大小清单均保存；没有新增NPU任务或性能采样。下一阶段先组装动态wave控制、查询基址和全部状态，再做一次有理由的代表性联合lowering。

@@ -1,0 +1,38 @@
+Traceback (most recent call last):
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/reproduce_tile.py", line 56, in main
+    compiled = ir.compile(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/pypto_overlay/python/pypto/ir/compile.py", line 385, in compile
+    return _compile_impl(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/pypto_overlay/python/pypto/ir/compile.py", line 480, in _compile_impl
+    pipeline = _run_pass_pipeline(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/pypto_overlay/python/pypto/ir/compile.py", line 250, in _run_pass_pipeline
+    transformed_program = pm.run_passes(
+  File "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/pypto_overlay/python/pypto/ir/pass_manager.py", line 585, in run_passes
+    return self._pipeline.run(input_ir)
+pypto.Error: Verification failed after 'pipeline_input' for properties {TypeChecked, NoRedundantBlocks, BreakContinueValid, InOutUseValid, ManualDepsOnSubmitOnly, AtomicAddDtypeValid}:
+IR Verification Report
+======================
+Total diagnostics: 4 (4 errors, 0 warnings)
+
+[1] ERROR - TypeCheck
+  Message: Valid shape dimension mismatch in ForStmt: declared iter_arg[0] dimension[0] = pl.min(rows, 3), but yield value[0] dimension[0] = 3; equality is not provable and this boundary has no runtime guard
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/state_kernels.py:35:5
+  Error Code: 104
+
+[2] ERROR - TypeCheck
+  Message: Valid shape dimension mismatch in ForStmt: yield value[0] dimension[0] = 3, but return_var[0] dimension[0] = pl.min(rows, 3); equality is not provable and this boundary has no runtime guard
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/state_kernels.py:35:5
+  Error Code: 104
+
+[3] ERROR - TypeCheck
+  Message: Valid shape dimension mismatch in ForStmt: declared iter_arg[1] dimension[0] = pl.min(rows, 6), but yield value[1] dimension[0] = 6; equality is not provable and this boundary has no runtime guard
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/state_kernels.py:35:5
+  Error Code: 104
+
+[4] ERROR - TypeCheck
+  Message: Valid shape dimension mismatch in ForStmt: yield value[1] dimension[0] = 6, but return_var[1] dimension[0] = pl.min(rows, 6); equality is not provable and this boundary has no runtime guard
+  Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/state_kernels.py:35:5
+  Error Code: 104
+
+Status: FAILED (4 error(s) found)
+

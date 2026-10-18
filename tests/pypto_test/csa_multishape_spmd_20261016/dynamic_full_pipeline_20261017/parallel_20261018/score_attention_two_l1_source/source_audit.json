@@ -1,0 +1,65 @@
+{
+  "passed": true,
+  "reference_revision": "66882634",
+  "reference_path": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_stream_stages.py",
+  "aiv_decorator_through_body_byte_equal": true,
+  "module_ast_only_expected_changes": true,
+  "expected_execution_changes": [
+    "新增QK_L1_SLOTS=2",
+    "qk_l1容量使用两槽",
+    "qk_l1_row/pv_l1_row仅内部L1取模改2",
+    "AIC每tick完整PV块移到完整QK块之前"
+  ],
+  "l1_assignment_names": [
+    "pv_l1_row",
+    "qk_l1",
+    "qk_l1",
+    "qk_l1_row"
+  ],
+  "qk_subtree_equal_after_l1_modulus_normalization": true,
+  "pv_subtree_equal_after_l1_modulus_normalization": true,
+  "gm_address_ast_equal": {
+    "qk_slot": true,
+    "qk_kv_row": true,
+    "qk_transfer_row": true,
+    "pv_slot": true,
+    "pv_transfer_row": true
+  },
+  "signature_equal": true,
+  "dynamic_loop_bound_and_device_mask_preserved": true,
+  "python_syntax_passed": true,
+  "pypto_imported": false,
+  "pypto_lowering_run": false,
+  "npu_run": false,
+  "performance_claim": false,
+  "old_cube_lines": [
+    117,
+    201
+  ],
+  "new_cube_lines": [
+    125,
+    223
+  ],
+  "old_aiv_lines": [
+    205,
+    485
+  ],
+  "new_aiv_lines": [
+    227,
+    507
+  ],
+  "files": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/score_attention_two_l1_candidate_20261018/source_reference/attention_stream_stages.py",
+      "bytes": 30201
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/score_attention_two_l1_candidate_20261018/source_candidate/attention_stream_stages.py",
+      "bytes": 31772
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/score_attention_two_l1_candidate_20261018/candidate.patch",
+      "bytes": 11780
+    }
+  ]
+}

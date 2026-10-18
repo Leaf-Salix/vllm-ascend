@@ -1,0 +1,189 @@
+--- source_reference/attention_stream_stages.py
++++ source_candidate/attention_stream_stages.py
+@@ -7,15 +7,21 @@
+ # See LICENSE in the root of the software repository for the full text of the License.
+ # -----------------------------------------------------------------------------------------------------------
+ 
+-"""动态 CSA Attention 的成对 AIC / 双 AIV 三槽流水与最终头向量发布。
++"""动态 CSA Attention 源码准备：GM三槽、AIC L1双槽与双AIV最终发布。
++
++候选边界
++    这是未来Score/Attention同核交错的源码准备，不是独立性能候选。
++    只把AIC内部KV Mat改为两槽，tick内先PV(tick-2)再QK(tick)；
++    GM全部ring、AIV函数正文、动态T/device mask和每块算术均保持正式668。
++    尚未lowering/上卡，不能以源码顺序代替MTE1→MTE2覆盖依赖或性能证据。
+ 
+ 整体数据流与阅读顺序
+-    attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
++    attention_qk_pv_cube_stage 先执行滞后两拍PV，再执行本拍QK；
+     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
+     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
+     最终发布直接消费本核live Tile；当前inline接口不支持Tile参数，不为拆函数
+     额外写GM。数学来自canonical decode_sparse_attn_csa，
+-    首版保留其5块/3槽/提前KV分支，不用全阶段barrier替代循环流水。
++    保留其5块/GM三槽/提前KV分支，仅AIC L1改双槽；不加入全阶段barrier。
+ 
+ 真实动态输入、布局与工作区
+     q_flat为BF16[Q_ROWS,512]，Q_ROWS=64*T；两份cache直接使用Native连续
+@@ -29,7 +35,7 @@
+     cos/sin/sink需覆盖所有实际T行且有限，包含约定写出零attention的dummy行。
+     packed为BF16[PACK_ROWS,4096]，PACK_ROWS须整除8；P_PACK=PACK_ROWS//8>=T，
+     第g组第t行地址为g*P_PACK+t。只写实际T，不触碰每组的pad。
+-    所有业务容量轴均为pl.dynamic；64头、512列、128候选块、5块和3槽是模型/流水
++    所有业务容量轴均为pl.dynamic；64头、512列、128候选块、5块、GM三槽和AIC L1双槽是模型/流水
+     常量，不是冻结batch/sequence。FFTS独立硬件控制区为INT64[256]；当前set_ffts接口要求静态长度，
+     256不随T/B变化，也不影响其它业务动态轴。
+     ring独立GM：KV BF16[KV_RING_ROWS,512]至少G*3*128行；score FP32[HEAD_RING_ROWS,128]、
+@@ -48,7 +54,8 @@
+     实际硬件基址由Simpler运行时绑定，不把传入Tensor声称为最终硬件事件存储。
+     同组两AIV的半块写入都就绪后AIC才可读，
+     AIC通知需被两个lane分别消费。这里只保留canonical协议，不另造GM flag。
+-    AIC第tick拍做QK(tick)、PV(tick-2)；AIV做gather(tick)、softmax(tick-1)、
++    AIC第tick拍先做PV(tick-2)、再QK(tick)，L1位置分别用work%2；
++    GM位置仍用core_id*3+work%3。AIV做gather(tick)、softmax(tick-1)、
+     merge(tick-3)。槽序跨query延续，只有最后一次排空。有效块由同一plan判断，
+     失效块在两侧同时跳过事件与ring访存，但query末块仍发布/清零运行状态。
+     T>=144时必须先consume前一块SCORE，才发布本块KV；小档先做前一块softmax，
+@@ -97,7 +104,8 @@
+ ATTN_K_TILE = 128
+ SPARSE_BLOCKS = 5
+ QK_PRE_LAUNCH = 2
+-QK_TRANSFER_SLOTS = 3
++QK_TRANSFER_SLOTS = 3  # 所有GM ring仍三槽；不得与AIC内部L1槽数合并。
++QK_L1_SLOTS = 2  # 本候选仅AIC KV Mat双槽，依赖每tick先PV后QK。
+ PV_N_TILE = 128
+ SWA_RUNS = 5
+ FINAL_HEAD_TILE = 16
+@@ -126,7 +134,13 @@
+     CORE_GROUPS: pl.constexpr,
+     EVENT_BASE: pl.constexpr = 0,
+ ):
+-    """AIC侧：QK领先PV两拍；必须与本组两个AIV helper并发。"""
++    """AIC侧：PV仍处理两拍前数据，但每tick先PV后QK以保护L1双槽。
++
++    首两拍仅QK，末两拍仅PV排空；每块仍使用原device mask。
++    r与r-2共享L1槽，必须完成旧PV的MTE1读取后才能覆盖新KV。
++    GM三槽保持不变，避免AIV的mi/li(tick-1)与归并(tick-3)撞槽。
++    与双AIV并发、局部复用事件及真实资源分配仍需后端与设备验证。
++    """
+     t_dim = pl.tensor.dim(q_flat, 0) // H
+     qk_core = core_id
+     # 固定硬件控制区声明，不搬运业务Tensor；最终Simpler包装使用运行时FFTS基址。
+@@ -134,11 +148,58 @@
+     qk_query_count = (t_dim + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
+     qk_block_count = qk_query_count * SPARSE_BLOCKS
+     qk_q = pl.create_tile([H, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat)
+-    # KV 只进一次 L1：QK 用它的转置视图，PV 用同一份的行切片。
+-    # 原先 QK 与 PV 各自从 GM 搬一遍，同一块 KV 过两次 GM->L1。
+-    qk_l1 = pl.create_tile([QK_TRANSFER_SLOTS * ATTN_K_TILE, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat)
+-    # 多走两拍排空最后PV；空组仅走控制分支，不读plan或环槽。
++    # KV仍只进一次L1：QK用转置view，之后PV用同一份行切片。
++    # 本候选只缩AIC内部同dtype Mat，不改GM环，不做混类型槽别名。
++    # 原来三槽允许先QK后PV；双槽必须先消费旧PV，再覆盖同一槽。
++    qk_l1 = pl.create_tile([QK_L1_SLOTS * ATTN_K_TILE, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat)
++    # 循环界仍为真实query块数+2：首两拍填充、末两拍排空；空组不读环槽。
++    # mask无效则该块两端均跳过事件/访存，不能为了双槽无条件读取旧KV。
+     for qk_tick in pl.range(qk_block_count + QK_PRE_LAUNCH):
++        # 先消耗两拍前的L1 KV：r与r-2同属一个%2槽，必须先PV后覆盖。
++        # 本段的GM概率/PV地址仍按%3，FFTS的PROB/PV事件沿用原条件。
++        if qk_tick >= QK_PRE_LAUNCH:
++            pv_work = qk_tick - QK_PRE_LAUNCH
++            pv_sb = pv_work % SPARSE_BLOCKS
++            pv_t = qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
++            if pl.read(valid_block_mask, [pv_t, pv_sb]) > 0:
++                pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
++                pv_transfer_row = pv_slot * H
++                pl.system.sync_wait(
++                    EVENT_BASE + QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
++                )
++                pv_probability = pl.load(
++                    probability_transfer,
++                    [pv_transfer_row, 0],
++                    [H, ATTN_K_TILE],
++                    target_memory=pl.MemorySpace.Mat,
++                )
++                pv_l1_row = (pv_work % QK_L1_SLOTS) * ATTN_K_TILE
++                # PV沿用N128/K128，保留每128候选一次softmax和query流水顺序。
++                pv_probability_left = pl.tile.move(pv_probability, target_memory=pl.MemorySpace.Left)
++                pv_first_right = pl.tile.extract(
++                    qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
++                )
++                pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
++                for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
++                    pv_next_right = pl.tile.extract(
++                        qk_l1,
++                        pv_l1_row,
++                        pv_n * PV_N_TILE,
++                        [ATTN_K_TILE, PV_N_TILE],
++                        target_memory=pl.MemorySpace.Right,
++                    )
++                    # 同时保留前后两个累加器，让前块FIX写回与后块Cube重叠。
++                    pv_current = pl.tile.matmul(pv_probability_left, pv_next_right)
++                    pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
++                    pv_previous = pv_current
++                pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
++                pl.system.sync_set(
++                    EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
++                )
++
++        # 再写入本拍KV并做QK。这里的源级先后只建立所需数据顺序；
++        # 后端仍须在最后PV MTE1读取与新KV MTE2覆盖间生成正确依赖。
++        # 不能把Scalar走过PV语句当作异步搬运已经完成。
+         if qk_tick < qk_block_count:
+             qk_sb = qk_tick % SPARSE_BLOCKS
+             qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
+@@ -149,7 +210,7 @@
+                 qk_kv_row = qk_slot * ATTN_K_TILE
+                 qk_transfer_row = qk_slot * H
+                 pl.system.sync_wait(EVENT_BASE + QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+-                qk_l1_row = (qk_tick % QK_TRANSFER_SLOTS) * ATTN_K_TILE
++                qk_l1_row = (qk_tick % QK_L1_SLOTS) * ATTN_K_TILE
+                 qk_l1 = pl.gather_row(qk_l1, kv_transfer, [qk_l1_row, 0], [qk_kv_row, 0], [ATTN_K_TILE, HEAD_DIM])
+                 qk_l1_t = pl.tile.transpose_view(qk_l1)
+                 qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_K_TILE], [0, qk_l1_row])
+@@ -157,45 +218,6 @@
+                 pl.store(qk_scores, [qk_transfer_row, 0], score_transfer)
+                 pl.system.sync_set(
+                     EVENT_BASE + QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+-                )
+-        if qk_tick >= QK_PRE_LAUNCH:
+-            pv_work = qk_tick - QK_PRE_LAUNCH
+-            pv_sb = pv_work % SPARSE_BLOCKS
+-            pv_t = qk_core + (pv_work // SPARSE_BLOCKS) * CORE_GROUPS
+-            if pl.read(valid_block_mask, [pv_t, pv_sb]) > 0:
+-                pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
+-                pv_transfer_row = pv_slot * H
+-                pl.system.sync_wait(
+-                    EVENT_BASE + QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
+-                )
+-                pv_probability = pl.load(
+-                    probability_transfer,
+-                    [pv_transfer_row, 0],
+-                    [H, ATTN_K_TILE],
+-                    target_memory=pl.MemorySpace.Mat,
+-                )
+-                pv_l1_row = (pv_work % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+-                # PV沿用N128/K128，保留每128候选一次softmax和query流水顺序。
+-                pv_probability_left = pl.tile.move(pv_probability, target_memory=pl.MemorySpace.Left)
+-                pv_first_right = pl.tile.extract(
+-                    qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+-                )
+-                pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
+-                for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
+-                    pv_next_right = pl.tile.extract(
+-                        qk_l1,
+-                        pv_l1_row,
+-                        pv_n * PV_N_TILE,
+-                        [ATTN_K_TILE, PV_N_TILE],
+-                        target_memory=pl.MemorySpace.Right,
+-                    )
+-                    # 同时保留前后两个累加器，让前块FIX写回与后块Cube重叠。
+-                    pv_current = pl.tile.matmul(pv_probability_left, pv_next_right)
+-                    pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
+-                    pv_previous = pv_current
+-                pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
+-                pl.system.sync_set(
+-                    EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                 )
+ 
+     return score_transfer, pv_transfer

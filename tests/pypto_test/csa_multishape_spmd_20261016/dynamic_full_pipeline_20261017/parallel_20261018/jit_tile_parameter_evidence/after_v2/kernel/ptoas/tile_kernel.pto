@@ -1,0 +1,19 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @tile_kernel(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>, %arg2: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %c0_i64 = arith.constant 0 : i64
+  %c64_index = arith.constant 64 : index
+  %c1_index = arith.constant 1 : index
+  %c8_index = arith.constant 8 : index
+  %c0_index = arith.constant 0 : index
+  %source__ssa_v0_view = pto.make_tensor_view %arg0, shape = [%arg2, %c64_index], strides = [%c64_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":15:1)
+  %output__ssa_v0_view = pto.make_tensor_view %arg1, shape = [%arg2, %c64_index], strides = [%c64_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":15:1)
+  %0 = arith.minsi %arg2, %c8_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":19:5)
+  %tile__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %0 valid_col = %c64_index : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":20:5)
+  %source__ssa_v0_pview = pto.partition_view %source__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%0, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x64xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":20:5)
+  pto.tload ins(%source__ssa_v0_pview : !pto.partition_tensor_view<?x64xf32>) outs(%tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":20:5)
+  %same_tile__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %0 valid_col = %c64_index : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":21:5)
+  %output__ssa_v0_pview = pto.partition_view %output__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%0, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x64xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":22:5)
+  pto.tstore ins(%same_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%output__ssa_v0_pview : !pto.partition_tensor_view<?x64xf32>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/tile_kernels.py":22:5)
+  return
+  }
+}

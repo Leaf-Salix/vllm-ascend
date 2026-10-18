@@ -1,0 +1,79 @@
+{
+  "passed": true,
+  "scope": "源码提取及直接AST对照，不导入/编译PyPTO，不运行设备",
+  "reference": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/score_attention_cube_step_source_20261018/source_reference/indexer_score_stages.py",
+  "candidate": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/score_attention_cube_step_source_20261018/source_candidate/indexer_score_stages.py",
+  "reference_bytes": 44690,
+  "candidate_bytes": 57855,
+  "helper": "indexer_score_cube_step_g6",
+  "source_step_lines": [
+    174,
+    375
+  ],
+  "strategy_name_mapping": {
+    "query_group_size": {
+      "constant": "G6_QUERY_GROUP",
+      "value": 6
+    },
+    "qk_panel_cols": {
+      "constant": "G6_QK_PANEL",
+      "value": 64
+    },
+    "score_tile": {
+      "constant": "G6_SCORE_TILE",
+      "value": 1024
+    },
+    "key_prefetch_panels": {
+      "constant": "G6_PREFETCH",
+      "value": 1
+    },
+    "key_prefetch_to_l0": {
+      "constant": "G6_TO_L0",
+      "value": true
+    },
+    "balance_leaves": {
+      "constant": "G6_BALANCED",
+      "value": true
+    }
+  },
+  "complete_step_ast_equal_after_only_strategy_name_reversal": true,
+  "complete_original_file_text_restored_after_removing_added_module_doc_constants_helper": true,
+  "existing_functions_text_unchanged": [
+    "indexer_score_cube_stage",
+    "indexer_score_vector_lane_stage"
+  ],
+  "docstring_change": "只在模块总览新增一段，并为新增helper编写docstring；不声称完整文件AST原样一致",
+  "typed_tile_inputs": {
+    "buf_query_left": "pl.Tile[[384, 128], pl.INT8, pl.MemorySpace.Left]",
+    "buf_coefficient_pair": "pl.Tile[[16, 384], pl.FP16, pl.MemorySpace.Left]"
+  },
+  "readonly_tile_uses_are_matmul_lhs_only": true,
+  "explicit_arguments": {
+    "buf_query_left": "pl.Tile[[384, 128], pl.INT8, pl.MemorySpace.Left]",
+    "buf_coefficient_pair": "pl.Tile[[16, 384], pl.FP16, pl.MemorySpace.Left]",
+    "idx_kv_cache": "pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+    "idx_kv_cache_shift64": "pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8]",
+    "idx_native_kv_cache": "pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8]",
+    "idx_block_table": "pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32]",
+    "buf_score_transfer": "pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]]",
+    "buf_worker": "pl.Scalar[pl.INDEX]",
+    "buf_batch_idx": "pl.Scalar[pl.INDEX]",
+    "buf_cache_len": "pl.Scalar[pl.INDEX]",
+    "buf_logical_begin": "pl.Scalar[pl.INDEX]",
+    "buf_lane_span": "pl.Scalar[pl.INDEX]",
+    "buf_score_step": "pl.Scalar[pl.INDEX]",
+    "native_page_bytes": "pl.Scalar[pl.INDEX]",
+    "SCORE_READY_EVENT": "pl.constexpr",
+    "SCORE_CONSUMED_EVENT": "pl.constexpr"
+  },
+  "unresolved_free_names": [],
+  "source_step_statement_count": 14,
+  "sync_wait_syntax_sites": 1,
+  "sync_set_syntax_sites": 1,
+  "panel_loop_retained_without_manual_expansion": true,
+  "leaf_initialization_and_tail_ack_drain_not_extracted": true,
+  "schedule_callers_added": false,
+  "pypto_compilation_performed": false,
+  "device_execution": false,
+  "typed_tile_callability_verified": false
+}

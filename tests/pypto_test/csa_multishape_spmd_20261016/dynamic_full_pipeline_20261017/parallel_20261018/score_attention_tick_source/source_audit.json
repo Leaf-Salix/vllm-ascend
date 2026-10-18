@@ -1,0 +1,342 @@
+{
+  "passed": true,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/score_attention_tick_source_20261018/source_reference/attention_stream_stages.py",
+  "source_bytes": 31772,
+  "output": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-compact-priority-20261018/tests/pypto_test/score_attention_tick_source_20261018/source_candidate/attention_tick_stages.py",
+  "output_bytes": 31647,
+  "checks": {
+    "module_imports_constants_equal": true,
+    "cube_init_math_ast_equal": true,
+    "vector_init_math_ast_equal": true,
+    "cube_tick_body_ast_equal": true,
+    "vector_tick_body_ast_equal_except_outer_backedge": true,
+    "original_gm_returns_preserved": true,
+    "four_vector_carries_explicit": true,
+    "swap_not_reassigned_in_tick": true,
+    "decorators_unchanged": true,
+    "no_free_local_variables": true,
+    "syntax_passed": true
+  },
+  "structural_changes": [
+    "两个整体stage拆为各自init+tick",
+    "AIC Q/KV Tile新增显式参数/返回",
+    "AIV四Tile与swap新增typed参数，四Tile显式返回",
+    "外层range不在tick helper内；调用者负责原tick界及尾拍",
+    "原AIV最外pl.yield改为return；内部if yields不变"
+  ],
+  "interface": [
+    {
+      "name": "attention_cube_init",
+      "parameters": [
+        {
+          "name": "q_flat",
+          "annotation": "pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "ffts_workspace",
+          "annotation": "pl.Tensor[[FFTS_WORDS], pl.INT64]"
+        },
+        {
+          "name": "core_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "return_annotation": "tuple[pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Tile[[H, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat], pl.Tile[[QK_L1_SLOTS * ATTN_K_TILE, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat]]",
+      "returns": [
+        "t_dim",
+        "qk_core",
+        "qk_block_count",
+        "qk_q",
+        "qk_l1"
+      ],
+      "free_variables": [],
+      "lines": [
+        99,
+        127
+      ]
+    },
+    {
+      "name": "attention_cube_tick",
+      "parameters": [
+        {
+          "name": "q_flat",
+          "annotation": "pl.Tensor[[Q_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "valid_block_mask",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]"
+        },
+        {
+          "name": "kv_transfer",
+          "annotation": "pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "score_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]]"
+        },
+        {
+          "name": "probability_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]"
+        },
+        {
+          "name": "pv_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]]"
+        },
+        {
+          "name": "qk_tick",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_block_count",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_core",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_q",
+          "annotation": "pl.Tile[[H, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat]"
+        },
+        {
+          "name": "qk_l1",
+          "annotation": "pl.Tile[[QK_L1_SLOTS * ATTN_K_TILE, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        },
+        {
+          "name": "EVENT_BASE",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32], pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32], pl.Tile[[H, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat], pl.Tile[[QK_L1_SLOTS * ATTN_K_TILE, HEAD_DIM], pl.BF16, pl.MemorySpace.Mat]]",
+      "returns": [
+        "score_transfer",
+        "pv_transfer",
+        "qk_q",
+        "qk_l1"
+      ],
+      "free_variables": [],
+      "lines": [
+        131,
+        219
+      ]
+    },
+    {
+      "name": "attention_vector_init",
+      "parameters": [
+        {
+          "name": "position_ids",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "attn_sink_col",
+          "annotation": "pl.Tensor[[H, 1], pl.FP32]"
+        },
+        {
+          "name": "ffts_workspace",
+          "annotation": "pl.Tensor[[FFTS_WORDS], pl.INT64]"
+        },
+        {
+          "name": "core_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "lane_id",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "return_annotation": "tuple[pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Scalar[pl.INDEX], pl.Tile[[1, FINAL_HEAD_TILE * ROPE_DIM], pl.INT32, pl.MemorySpace.Vec], pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec]]",
+      "returns": [
+        "t_dim",
+        "qk_core",
+        "qk_block_count",
+        "qk_lane_head",
+        "qk_lane_kv",
+        "m_swap_idx",
+        "running_m",
+        "running_l",
+        "running_left",
+        "running_right"
+      ],
+      "free_variables": [],
+      "lines": [
+        223,
+        273
+      ]
+    },
+    {
+      "name": "attention_vector_tick",
+      "parameters": [
+        {
+          "name": "ori_kv_flat",
+          "annotation": "pl.Tensor[[ORIGINAL_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "cmp_kv_flat",
+          "annotation": "pl.Tensor[[COMPRESSED_ROWS_DYN, HEAD_DIM], pl.BF16]"
+        },
+        {
+          "name": "ori_block_table",
+          "annotation": "pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "cmp_block_table",
+          "annotation": "pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32]"
+        },
+        {
+          "name": "bounds",
+          "annotation": "pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32]"
+        },
+        {
+          "name": "lengths",
+          "annotation": "pl.Tensor[[REQUESTS_DYN], pl.INT32]"
+        },
+        {
+          "name": "position_ids",
+          "annotation": "pl.Tensor[[T_DYN], pl.INT64]"
+        },
+        {
+          "name": "cmp_sparse_indices",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, CMP_TOPK], pl.INT32]"
+        },
+        {
+          "name": "sparse_bias",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32]"
+        },
+        {
+          "name": "valid_block_mask",
+          "annotation": "pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]"
+        },
+        {
+          "name": "attn_sink_col",
+          "annotation": "pl.Tensor[[H, 1], pl.FP32]"
+        },
+        {
+          "name": "freqs_cos",
+          "annotation": "pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32]"
+        },
+        {
+          "name": "rope_sin_signed",
+          "annotation": "pl.Tensor[[ROPE_CAP_DYN, ROPE_DIM], pl.FP32]"
+        },
+        {
+          "name": "kv_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16]]"
+        },
+        {
+          "name": "score_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.FP32]"
+        },
+        {
+          "name": "probability_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16]]"
+        },
+        {
+          "name": "pv_transfer",
+          "annotation": "pl.Tensor[[HEAD_RING_ROWS_DYN, HEAD_DIM], pl.FP32]"
+        },
+        {
+          "name": "mi_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]]"
+        },
+        {
+          "name": "li_transfer",
+          "annotation": "pl.InOut[pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32]]"
+        },
+        {
+          "name": "o_packed_heads",
+          "annotation": "pl.InOut[pl.Tensor[[PACK_ROWS_DYN, O_GROUP_IN], pl.BF16]]"
+        },
+        {
+          "name": "qk_tick",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_block_count",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_core",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_lane_head",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "qk_lane_kv",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "t_dim",
+          "annotation": "pl.Scalar[pl.INDEX]"
+        },
+        {
+          "name": "m_swap_idx",
+          "annotation": "pl.Tile[[1, FINAL_HEAD_TILE * ROPE_DIM], pl.INT32, pl.MemorySpace.Vec]"
+        },
+        {
+          "name": "m_iter",
+          "annotation": "pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec]"
+        },
+        {
+          "name": "l_iter",
+          "annotation": "pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec]"
+        },
+        {
+          "name": "left_iter",
+          "annotation": "pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec]"
+        },
+        {
+          "name": "right_iter",
+          "annotation": "pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec]"
+        },
+        {
+          "name": "CORE_GROUPS",
+          "annotation": "pl.constexpr"
+        },
+        {
+          "name": "EVENT_BASE",
+          "annotation": "pl.constexpr"
+        },
+        {
+          "name": "CACHE_QUERY_METADATA",
+          "annotation": "pl.constexpr"
+        }
+      ],
+      "return_annotation": "tuple[pl.Tensor[[KV_RING_ROWS_DYN, HEAD_DIM], pl.BF16], pl.Tensor[[HEAD_RING_ROWS_DYN, ATTN_K_TILE], pl.BF16], pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32], pl.Tensor[[HEAD_RING_ROWS_DYN, 1], pl.FP32], pl.Tensor[[PACK_ROWS_DYN, O_GROUP_IN], pl.BF16], pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, 1], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec], pl.Tile[[H // 2, HEAD_DIM // 2], pl.FP32, pl.MemorySpace.Vec]]",
+      "returns": [
+        "kv_transfer",
+        "probability_transfer",
+        "mi_transfer",
+        "li_transfer",
+        "o_packed_heads",
+        "m_after",
+        "l_after",
+        "left_after",
+        "right_after"
+      ],
+      "free_variables": [],
+      "lines": [
+        277,
+        547
+      ]
+    }
+  ],
+  "pypto_imported": false,
+  "pypto_parse_or_lowering_run": false,
+  "device_execution": false,
+  "typed_tile_jit_patch_validated": false,
+  "performance_claim": false
+}

@@ -1,0 +1,274 @@
+--- source_reference/indexer_score_stages.py
++++ source_candidate/indexer_score_stages.py
+@@ -52,6 +52,18 @@
+     同时存活的QK/WS与两Key L0B沿原tile布局，不增加永久L1/L0 reserve。
+     所有输入metadata在本次阶段中固定；工作区只有协议规定的owner写。
+     返回别名不等于跨核完成。当前源码/CPU证据不能代替设备同步、精度和性能。
++
++独立单步源码准备
++    indexer_score_cube_step_g6只提取AIC的一次完整score step，固定数学策略为
++    G6/N64/score1024/balanced/prefetch1/toL0；原Cube/Vector整leaf入口不变，
++    尚未由任何schedule调用。本入口显式接收只读Left Query[384,128] INT8
++    与Coeff[16,384] FP16，原始Native Tensor和页/leaf/step地址仍在设备动态
++    计算。caller必须先按原leaf初始化set_validshape(384,128)并补齐尾组，
++    再在每次调用前将驻Mat Query重新TMOV成full-valid Left；Coeff也须保持
++    完整有效，不能被Attention覆盖。这里不支持任意动态valid的Tile入参。
++    step内部保留复用ACK、所有Key页/16个N64 panel、末WS及FIX READY；
++    leaf最后min(steps,2)个ACK drain仍由caller完成，不能把helper返回当完成。
++    新入口仅为typed-Tile源码准备，尚无PyPTO/CCEC/设备可调用性证据。
+ """
+ 
+ import pypto.language as pl
+@@ -376,6 +388,252 @@
+             # 即使只有1轮也排空已发消息；下个leaf才能重新从slot0开始，不携带旧ACK。
+             for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
+                 pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
++    return buf_score_transfer
++
++
++# 只固定数学tile策略，T/B/Q/L/页表/leaf地址与有效范围继续动态。
++G6_QUERY_GROUP = 6
++G6_QK_PANEL = 64
++G6_SCORE_TILE = 1024
++G6_PREFETCH = 1
++G6_TO_L0 = True
++G6_BALANCED = True
++
++
++@pl.jit.inline(auto_scope=False)
++def indexer_score_cube_step_g6(
++    buf_query_left: pl.Tile[[384, 128], pl.INT8, pl.MemorySpace.Left],
++    buf_coefficient_pair: pl.Tile[[16, 384], pl.FP16, pl.MemorySpace.Left],
++    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
++    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
++    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
++    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
++    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
++    buf_worker: pl.Scalar[pl.INDEX],
++    buf_batch_idx: pl.Scalar[pl.INDEX],
++    buf_cache_len: pl.Scalar[pl.INDEX],
++    buf_logical_begin: pl.Scalar[pl.INDEX],
++    buf_lane_span: pl.Scalar[pl.INDEX],
++    buf_score_step: pl.Scalar[pl.INDEX],
++    native_page_bytes: pl.Scalar[pl.INDEX],
++    SCORE_READY_EVENT: pl.constexpr,
++    SCORE_CONSUMED_EVENT: pl.constexpr,
++) -> pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]:
++    """执行原balanced G6的一步；只读两份Left，返回原FP32 transfer别名。
++
++    caller已取得query/系数/Native cache和plan，设置相同FFTS域，并从同一
++    leaf几何给出worker、batch、cache_len、logical_begin、lane_span与step。
++    native_page_bytes必须是Native cache实际第二维，不能固定为某一页容量。
++    Query先沿原leaf初始化set_validshape(384,128)并补齐，再TMOV传full-valid
++    Left；Coeff保持完整16x384及无效query零系数，非任意动态valid Tile接口。
++    本入口不重新加载Query/Coeff、不前移READY、不替代两AIV消费或根发布。
++    buf_lane_span仅为保留原完整step AST而显式传入；balanced地址仍由原
++    balance分支覆盖，不把该值改写成Host已知shape。六个固定策略常量保留
++    原if/unroll形态，由后续前端按数学策略折叠，不在此生成展开的panel代码。
++    """
++    # step>=2先等两个AIV的原MTE2 ACK，随后才复用本组双槽。
++    if buf_score_step >= 2:
++        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
++    buf_score_begin = buf_score_step * (G6_SCORE_TILE // 2)
++    if G6_BALANCED:
++        buf_score_begin = buf_score_step * G6_SCORE_TILE
++    buf_transfer_row = buf_worker * 2 * G6_QUERY_GROUP + buf_score_step % 2 * G6_QUERY_GROUP
++    buf_previous_l1 = pl.tile.create(
++        [G6_QUERY_GROUP * IDX_N_HEADS, G6_QK_PANEL], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
++    )
++    buf_current_key = pl.tile.create(
++        [IDX_HEAD_DIM, G6_QK_PANEL], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
++    )
++    buf_prefetched_key = pl.tile.create(
++        [IDX_HEAD_DIM, G6_QK_PANEL], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
++    )
++    buf_key_l1_pool = pl.tile.create(
++        [2 * G6_QK_PANEL, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
++    )
++    if G6_PREFETCH > 0:
++        buf_prime_col = 0
++        for buf_prime_key_page in pl.unroll(G6_QK_PANEL // BLOCK_SIZE):
++            buf_prime_key_row = (
++                buf_logical_begin
++                + buf_score_begin
++                + buf_prime_col // (G6_SCORE_TILE // 2) * buf_lane_span
++                + buf_prime_col % (G6_SCORE_TILE // 2)
++                + buf_prime_key_page * BLOCK_SIZE
++            )
++            if G6_BALANCED:
++                buf_prime_key_row = (
++                    buf_logical_begin + buf_score_begin + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
++                )
++            buf_prime_safe_page = pl.min(
++                buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++            )
++            if buf_prime_safe_page >= 0 and buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1):
++                buf_prime_physical_page = pl.cast(
++                    pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX
++                )
++                if buf_prime_physical_page >= 0 and buf_prime_physical_page < pl.tensor.dim(
++                    idx_native_kv_cache, 0
++                ):
++                    buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
++                    if buf_prime_native_byte % IDX_HEAD_DIM == 0:
++                        buf_key_l1_pool = pl.gather_row(
++                            buf_key_l1_pool,
++                            idx_kv_cache,
++                            [buf_prime_key_page * BLOCK_SIZE, 0],
++                            [buf_prime_native_byte // IDX_HEAD_DIM, 0],
++                            [BLOCK_SIZE, IDX_HEAD_DIM],
++                        )
++                    else:
++                        buf_key_l1_pool = pl.gather_row(
++                            buf_key_l1_pool,
++                            idx_kv_cache_shift64,
++                            [buf_prime_key_page * BLOCK_SIZE, 0],
++                            [buf_prime_native_byte // IDX_HEAD_DIM, 0],
++                            [BLOCK_SIZE, IDX_HEAD_DIM],
++                        )
++        if G6_TO_L0:
++            buf_current_key = pl.tile.extract(
++                pl.tile.transpose_view(buf_key_l1_pool),
++                0,
++                0,
++                [IDX_HEAD_DIM, G6_QK_PANEL],
++                target_memory=pl.MemorySpace.Right,
++            )
++    # 固定panel顺序：本panel QK与前panel head归约同时存活，保留FP16舍入位置。
++    for buf_qk_panel in pl.unroll(G6_SCORE_TILE // G6_QK_PANEL):
++        buf_panel_col = buf_qk_panel * G6_QK_PANEL
++        buf_load_col = (buf_qk_panel + G6_PREFETCH) * G6_QK_PANEL
++        buf_load_slot = (buf_qk_panel + G6_PREFETCH) % 2 * G6_QK_PANEL
++        if G6_PREFETCH > 0:
++            if not G6_TO_L0:
++                buf_current_key = pl.tile.extract(
++                    pl.tile.transpose_view(buf_key_l1_pool),
++                    0,
++                    buf_qk_panel % 2 * G6_QK_PANEL,
++                    [IDX_HEAD_DIM, G6_QK_PANEL],
++                    target_memory=pl.MemorySpace.Right,
++                )
++        if buf_qk_panel + G6_PREFETCH < G6_SCORE_TILE // G6_QK_PANEL:
++            buf_panel_keys = pl.tile.create(
++                [G6_QK_PANEL, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
++            )
++            for buf_key_page in pl.unroll(G6_QK_PANEL // BLOCK_SIZE):
++                buf_key_row = (
++                    buf_logical_begin
++                    + buf_score_begin
++                    + buf_load_col // (G6_SCORE_TILE // 2) * buf_lane_span
++                    + buf_load_col % (G6_SCORE_TILE // 2)
++                    + buf_key_page * BLOCK_SIZE
++                )
++                if G6_BALANCED:
++                    buf_key_row = (
++                        buf_logical_begin + buf_score_begin + buf_load_col + buf_key_page * BLOCK_SIZE
++                    )
++                buf_safe_page = pl.min(
++                    buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
++                )
++                if buf_safe_page >= 0 and buf_safe_page < pl.tensor.dim(idx_block_table, 1):
++                    buf_physical_page = pl.cast(
++                        pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX
++                    )
++                    if buf_physical_page >= 0 and buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0):
++                        buf_native_byte = buf_physical_page * native_page_bytes
++                        if buf_native_byte % IDX_HEAD_DIM == 0:
++                            if G6_PREFETCH > 0:
++                                buf_key_l1_pool = pl.gather_row(
++                                    buf_key_l1_pool,
++                                    idx_kv_cache,
++                                    [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_native_byte // IDX_HEAD_DIM, 0],
++                                    [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
++                            else:
++                                buf_panel_keys = pl.gather_row(
++                                    buf_panel_keys,
++                                    idx_kv_cache,
++                                    [buf_key_page * BLOCK_SIZE, 0],
++                                    [buf_native_byte // IDX_HEAD_DIM, 0],
++                                    [BLOCK_SIZE, IDX_HEAD_DIM],
++                                )
++                        elif G6_PREFETCH > 0:
++                            buf_key_l1_pool = pl.gather_row(
++                                buf_key_l1_pool,
++                                idx_kv_cache_shift64,
++                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
++                                [buf_native_byte // IDX_HEAD_DIM, 0],
++                                [BLOCK_SIZE, IDX_HEAD_DIM],
++                            )
++                        else:
++                            buf_panel_keys = pl.gather_row(
++                                buf_panel_keys,
++                                idx_kv_cache_shift64,
++                                [buf_key_page * BLOCK_SIZE, 0],
++                                [buf_native_byte // IDX_HEAD_DIM, 0],
++                                [BLOCK_SIZE, IDX_HEAD_DIM],
++                            )
++            if G6_PREFETCH > 0:
++                if G6_TO_L0:
++                    buf_prefetched_key = pl.tile.extract(
++                        pl.tile.transpose_view(buf_key_l1_pool),
++                        0,
++                        buf_load_slot,
++                        [IDX_HEAD_DIM, G6_QK_PANEL],
++                        target_memory=pl.MemorySpace.Right,
++                    )
++            else:
++                buf_prefetched_key = pl.tile.move(
++                    pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right
++                )
++        if G6_PREFETCH > 0:
++            buf_key_panel = buf_current_key
++        else:
++            buf_key_panel = buf_prefetched_key
++        buf_scores_l1 = pl.tile.create(
++            [G6_QUERY_GROUP * IDX_N_HEADS, G6_QK_PANEL], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
++        )
++        if buf_qk_panel > 0:
++            buf_previous_pair = pl.tile.extract(
++                buf_previous_l1,
++                0,
++                0,
++                [G6_QUERY_GROUP * IDX_N_HEADS, G6_QK_PANEL],
++                target_memory=pl.MemorySpace.Right,
++            )
++            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
++            buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
++            buf_scores_l1 = pl.tile.assemble(
++                buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
++            )
++            pl.store(
++                pl.set_validshape(buf_reduced_pair, G6_QUERY_GROUP, G6_QK_PANEL),
++                [buf_transfer_row, buf_panel_col - G6_QK_PANEL],
++                buf_score_transfer,
++            )
++        else:
++            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
++            buf_scores_l1 = pl.tile.assemble(
++                buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
++            )
++        buf_previous_l1 = buf_scores_l1
++        if G6_PREFETCH > 0:
++            if G6_TO_L0:
++                if buf_qk_panel + 1 < G6_SCORE_TILE // G6_QK_PANEL:
++                    buf_current_key = buf_prefetched_key
++    buf_last_pair = pl.tile.extract(
++        buf_previous_l1,
++        0,
++        0,
++        [G6_QUERY_GROUP * IDX_N_HEADS, G6_QK_PANEL],
++        target_memory=pl.MemorySpace.Right,
++    )
++    buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
++    pl.store(
++        pl.set_validshape(buf_last_scores, G6_QUERY_GROUP, G6_QK_PANEL),
++        [buf_transfer_row, G6_SCORE_TILE - G6_QK_PANEL],
++        buf_score_transfer,
++    )
++    # 最后WS已store后仍由FIX发布READY；叶末ACK drain留给caller。
++    pl.system.sync_set(SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+     return buf_score_transfer
+ 
+ 
