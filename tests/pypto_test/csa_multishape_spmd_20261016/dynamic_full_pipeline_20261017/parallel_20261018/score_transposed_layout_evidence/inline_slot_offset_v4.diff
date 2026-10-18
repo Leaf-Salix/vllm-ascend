@@ -1,0 +1,16 @@
+--- pooled_v3/indexer_score_stages.py
++++ pooled_inline_v4/indexer_score_stages.py
+@@ -476,11 +476,10 @@
+                     if buf_qk_panel > 0:
+                         buf_previous_left = pl.tile.extract(buf_previous_l1, 0, 0, [qk_panel_cols, query_group_size * IDX_N_HEADS], target_memory=pl.MemorySpace.Left)
+                         buf_scores = pl.tile.matmul(buf_key_panel, buf_query_right)
+-                        buf_ws_row = (buf_qk_panel - 1) % 8 * qk_panel_cols
+-                        buf_ws_part = pl.tile.slice(buf_ws_pool, [qk_panel_cols, NATIVE_QLI_WEIGHT_ROWS], [buf_ws_row, 0])
++                        buf_ws_part = pl.tile.slice(buf_ws_pool, [qk_panel_cols, NATIVE_QLI_WEIGHT_ROWS], [(buf_qk_panel - 1) % 8 * qk_panel_cols, 0])
+                         # 每个子片独立初始化；K384和FP32累加次序与原WS一致。
+                         buf_ws_part = pl.tile.matmul_acc(buf_ws_part, buf_previous_left, buf_coefficient_right, init_cond=True)
+-                        buf_ws_pool = pl.tile.assemble(buf_ws_pool, buf_ws_part, [buf_ws_row, 0])
++                        buf_ws_pool = pl.tile.assemble(buf_ws_pool, buf_ws_part, [(buf_qk_panel - 1) % 8 * qk_panel_cols, 0])
+                         buf_scores_l1 = pl.tile.assemble(buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True)
+                         if buf_qk_panel % 8 == 0:
+                             # 凑齐8片后一次FIX写回；仍须在覆盖该pool前等待FIX完成。

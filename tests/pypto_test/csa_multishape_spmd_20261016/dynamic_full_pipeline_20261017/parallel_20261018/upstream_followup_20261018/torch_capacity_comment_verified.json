@@ -1,0 +1,6 @@
+{
+  "html_url": "https://github.com/pytorch/pytorch/issues/162870#issuecomment-6246687515",
+  "body": "Additional reproduction from an inference-kernel integration on Linux aarch64, PyTorch `2.10.0+cpu`: defining 64 individually named Tensor arguments succeeds, while 65 and 132 fail with the same build-limit error. This occurs at `torch.library.define`, before accelerator execution.\n\nOur fused kernel needs 132 independently described tensors (inputs, mutable cache/state, and caller-owned workspaces). The accelerator runtime can transport them; this is a separate dispatcher-schema limit. A CPU/Meta prototype using two `Tensor[]` arguments preserves all 132 tensor identities, but the tested mutable-alias schema failed functionalization, so list packing was not a drop-in integration solution. We currently use the existing direct native binding path.\n\nIt would help to document the build-time limit and the supported alternative for many individually mutable tensors, or support a larger configurable schema capacity. This is additional evidence for this existing issue, not a new duplicate report or PR. No claim is made about other PyTorch builds/versions.\n",
+  "created_at": "2026-10-18T06:43:49Z",
+  "updated_at": "2026-10-18T06:43:49Z"
+}

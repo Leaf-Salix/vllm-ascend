@@ -1,0 +1,49 @@
+bringing up nodes...
+bringing up nodes...
+
+FF.FF...F..                                                              [100%]
+=================================== FAILURES ===================================
+_____ TestL0CrossShapeReuse.test_capacity_overflow_grows_phase_arena[192] ______
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:5445: in test_capacity_overflow_grows_phase_arena
+    assert all(ref.base_ is ranges["a"].base_ for ref in ranges.values())
+E   assert False
+E    +  where False = all(<generator object TestL0CrossShapeReuse.test_capacity_overflow_grows_phase_arena.<locals>.<genexpr> at 0xfffdd8449e00>)
+----------------------------- Captured stderr call -----------------------------
+2026-10-18 14:34:54.719 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Left at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:5412:13
+_ TestChainedInPlaceIfPhis.test_branch_local_gather_loop_reuses_sibling_storage _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:7974: in test_branch_local_gather_loop_reuses_sibling_storage
+    passes.allocate_memory_addr()(after)
+E   ValueError: Vec buffer usage (262144 bytes) exceeds platform limit (188416 bytes)
+E   Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/src/ir/transforms/allocate_memory_addr_pass.cpp:483
+----------------------------- Captured stderr call -----------------------------
+2026-10-18 14:34:54.761 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Vec at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:7939:13
+_ TestChainedInPlaceIfPhis.test_branch_gather_keeps_independently_observed_outer_seed _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:8003: in test_branch_gather_keeps_independently_observed_outer_seed
+    allocated = passes.allocate_memory_addr()(after)
+E   ValueError: Vec buffer usage (196608 bytes) exceeds platform limit (188416 bytes)
+E   Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/src/ir/transforms/allocate_memory_addr_pass.cpp:483
+----------------------------- Captured stderr call -----------------------------
+2026-10-18 14:34:55.308 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Vec at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:7982:13
+_ TestChainedInPlaceIfPhis.test_conditional_reset_reuses_value_read_only_in_sibling _
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:8033: in test_conditional_reset_reuses_value_read_only_in_sibling
+    allocated = passes.allocate_memory_addr()(after)
+E   ValueError: Vec buffer usage (262144 bytes) exceeds platform limit (188416 bytes)
+E   Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/src/ir/transforms/allocate_memory_addr_pass.cpp:483
+----------------------------- Captured stderr call -----------------------------
+2026-10-18 14:34:55.394 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Vec at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:8014:13
+_ TestDynamicLocalTensorMetadata.test_reshape_dim_arithmetic_reaches_dependency _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/jit/test_decorator.py:2148: in test_reshape_dim_arithmetic_reaches_dependency
+    assert local["flat"].dtype == DataType.INT8
+E   KeyError: 'flat'
+=========================== short test summary info ============================
+FAILED ../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py::TestL0CrossShapeReuse::test_capacity_overflow_grows_phase_arena[192]
+FAILED ../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_branch_local_gather_loop_reuses_sibling_storage
+FAILED ../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_branch_gather_keeps_independently_observed_outer_seed
+FAILED ../pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py::TestChainedInPlaceIfPhis::test_conditional_reset_reuses_value_read_only_in_sibling
+FAILED ../pypto-csa-memory-reuse-20261018/tests/ut/jit/test_decorator.py::TestDynamicLocalTensorMetadata::test_reshape_dim_arithmetic_reaches_dependency
+5 failed, 6 passed in 7.72s

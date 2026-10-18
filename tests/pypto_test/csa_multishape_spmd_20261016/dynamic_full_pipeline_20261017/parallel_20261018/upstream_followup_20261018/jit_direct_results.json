@@ -1,0 +1,26 @@
+[
+  {
+    "compiler": "main",
+    "case": "jit_reshape",
+    "exit_code": 1,
+    "error_tail": "20261018/python/pypto/jit/specializer.py\", line 1990, in specialize\n    method_lines = self._specialize_function(ctx)\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/python/pypto/jit/specializer.py\", line 2143, in _specialize_function\n    params = self._build_params(\n  File \"/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/python/pypto/jit/specializer.py\", line 2416, in _build_params\n    raise ValueError(\nValueError: @pl.jit: missing inferred tensor metadata for parameter 'keys' of 'copy_key'. This usually means the tensor's shape/dtype could not be statically determined, or that the call site passing it was not resolved (no call to 'copy_key' found in its caller). Pass the tensor directly as a function argument, or ensure any intermediate pl.create_tensor() used for this parameter has a statically inferable shape and dtype.\n"
+  },
+  {
+    "compiler": "main",
+    "case": "jit_inline_tile",
+    "exit_code": 1,
+    "error_tail": "Error: Parameter 'tile' missing type annotation\n  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/upstream_followup_20261018/jit_inline_tile_repro.py:10:1\n   |\n 8 | \n 9 | @pl.jit.inline(auto_scope=False)\n10 | def keep_tile(tile: pl.Tile[[8, 64], pl.FP32, pl.MemorySpace.Vec]) -> pl.Tile:\n   | ^^^ Parameter 'tile' missing type annotation\n11 |     return tile\n12 | \n   |\n   = help: Add a type annotation like: x: pl.Tensor[[64], pl.FP32]\n\nnote: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.\n"
+  },
+  {
+    "compiler": "fixed",
+    "case": "jit_reshape",
+    "exit_code": 0,
+    "error_tail": ""
+  },
+  {
+    "compiler": "fixed",
+    "case": "jit_inline_tile",
+    "exit_code": 0,
+    "error_tail": ""
+  }
+]

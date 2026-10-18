@@ -1,0 +1,16 @@
+bringing up nodes...
+bringing up nodes...
+
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestL0CrossShapeReuse.test_constant_named_acc_subview_preserves_capacity_reuse _
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+tests/ut/ir/transforms/test_memory_reuse.py:5393: in test_constant_named_acc_subview_preserves_capacity_reuse
+    allocated = passes.allocate_memory_addr()(after)
+E   ValueError: Acc buffer usage (163840 bytes) exceeds platform limit (131072 bytes)
+E   Check failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/src/ir/transforms/allocate_memory_addr_pass.cpp:473
+----------------------------- Captured stderr call -----------------------------
+2026-10-18 14:14:04.497 W | [warning] [MemoryReuse] (MemoryReuse) capacity-gated reuse could not fit memory space Acc at any double-buffering depth; fell back to the legacy packing (which also overflows — reduce tile size or stage count). at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/tests/ut/ir/transforms/test_memory_reuse.py:5355:13
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_memory_reuse.py::TestL0CrossShapeReuse::test_constant_named_acc_subview_preserves_capacity_reuse
+1 failed in 3.46s

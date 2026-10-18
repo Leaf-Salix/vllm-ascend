@@ -1,0 +1,3 @@
+补充本次整层 SPMD 的历史修复排重：旧分支还保存了“内层 phi 后 identity 别名阻断外层 loop-carry retarget”的局部修改（原记录 P3/P9）。本次在 main `14736f65c` 派生构建、仅带本 issue 的 view 修正及 #3028 While 修正的环境中，已有 `test_nested_phi_identity_does_not_resurrect_old_buffer` 与 chained conditional gather 回归已经通过。因此不再为这些历史症状重复建 issue，也不建议直接叠加旧 retarget 放宽逻辑；后续依赖迁移应以当前最小修正为准，保留独立旧值读取/非零视图偏移等负例。
+
+分支 lifetime 的三项假容量问题仍失败，已另报 #3035；它们不等同于这里的 view 地址传播。这里只追加核对结果，不提交 PR。
