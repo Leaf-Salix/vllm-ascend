@@ -1,0 +1,90 @@
+diff --git a/lib/PTO/Transforms/InsertSync/PTOIRTranslator.cpp b/lib/PTO/Transforms/InsertSync/PTOIRTranslator.cpp
+index efc60851..21aec057 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOIRTranslator.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOIRTranslator.cpp
+@@ -24,7 +24,9 @@
+ // [P0 新增] 引入副作用接口和 PTO 接口
+ #include "mlir/Interfaces/SideEffectInterfaces.h"
+ 
++#include <limits>
+ #include <optional>
++#include <utility>
+ 
+ #define DEBUG_TYPE "pto-ir-translator"
+ 
+@@ -183,12 +185,65 @@ static int64_t getTileMajorStride(pto::TileBufType type) {
+   return stride;
+ }
+ 
++// L0C按16×16块存储。覆盖父Tile全部行、按16列对齐的列窗口是连续物理
++// 区间；不能把它扩大成整个父池，否则独立QK/PV窗口也会形成FIX→M等待。
++// 这里只识别可直接证明的FP32/INT32普通布局。部分行、动态offset、compact
++// 或其它布局仍由原保守路径处理，不能用逻辑矩形冒充任意boxed布局的跨度。
++static std::optional<std::pair<uint64_t, uint64_t>>
++getContiguousAccColumnRange(pto::SubViewOp op, pto::TileBufType sourceType,
++                            int64_t elemBytes) {
++  if (getTileAddressSpace(sourceType) != pto::AddressSpace::ACC ||
++      !isStaticRank2Shape(sourceType.getShape()) || elemBytes != 4 ||
++      sourceType.getBLayoutValueI32() !=
++          static_cast<int32_t>(pto::BLayout::ColMajor) ||
++      sourceType.getSLayoutValueI32() !=
++          static_cast<int32_t>(pto::SLayout::RowMajor) ||
++      sourceType.getSFractalSizeI32() != 1024 ||
++      sourceType.getCompactModeI32() !=
++          static_cast<int32_t>(pto::CompactMode::Null) ||
++      op.getOffsets().size() != kTileRank2D) {
++    return std::nullopt;
++  }
++  auto sizes = op.getSizes();
++  if (!sizes || sizes.size() != kTileRank2D) {
++    return std::nullopt;
++  }
++  int64_t rowOffset = 0, colOffset = 0;
++  if (!getConstIndexValue(op.getOffsets()[0], rowOffset) ||
++      !getConstIndexValue(op.getOffsets()[1], colOffset)) {
++    return std::nullopt;
++  }
++  int64_t rows = sourceType.getShape()[0];
++  int64_t cols = sourceType.getShape()[1];
++  int64_t rowSize = cast<IntegerAttr>(sizes[0]).getInt();
++  int64_t colSize = cast<IntegerAttr>(sizes[1]).getInt();
++  if (rows <= 0 || cols <= 0 || rows % 16 != 0 || cols % 16 != 0 ||
++      rowOffset != 0 || rowSize != rows || colOffset < 0 ||
++      colOffset > cols || colSize <= 0 || colSize > cols - colOffset ||
++      colOffset % 16 != 0 || colSize % 16 != 0) {
++    return std::nullopt;
++  }
++  uint64_t maxBytes = std::numeric_limits<uint64_t>::max();
++  if (static_cast<uint64_t>(rows) > maxBytes / elemBytes) {
++    return std::nullopt;
++  }
++  uint64_t columnBytes = static_cast<uint64_t>(rows) * elemBytes;
++  if (static_cast<uint64_t>(cols) > maxBytes / columnBytes) {
++    return std::nullopt;
++  }
++  return std::make_pair(static_cast<uint64_t>(colOffset) * columnBytes,
++                        static_cast<uint64_t>(colSize) * columnBytes);
++}
++
+ static std::optional<SmallVector<uint64_t>>
+ getPtoSubViewBaseAddresses(pto::SubViewOp op, pto::TileBufType sourceType,
+                            int64_t elemBytes) {
+   if (!isStaticRank2Shape(sourceType.getShape())) {
+     return std::nullopt;
+   }
++  if (auto range = getContiguousAccColumnRange(op, sourceType, elemBytes)) {
++    return SmallVector<uint64_t>{range->first};
++  }
+   if (sourceType.getSLayoutValueI32() !=
+       static_cast<int32_t>(pto::SLayout::NoneBox)) {
+     return std::nullopt;
+@@ -1019,6 +1074,9 @@ void PTOIRTranslator::UpdateSlotSelectedAliasBufferInfo(Value result,
+ static uint64_t getSubViewSegmentSize(pto::SubViewOp op,
+                                       pto::TileBufType sourceType,
+                                       unsigned elemBytes) {
++  if (auto range = getContiguousAccColumnRange(op, sourceType, elemBytes)) {
++    return range->second;
++  }
+   auto sizesAttr = op.getSizes();
+   int64_t rowSize = cast<IntegerAttr>(sizesAttr[0]).getInt();
+   int64_t colSize = cast<IntegerAttr>(sizesAttr[1]).getInt();

@@ -1,0 +1,92 @@
+turn stride;
+}
+
+static std::optional<SmallVector<uint64_t>>
+getPtoSubViewBaseAddresses(pto::SubViewOp op, pto::TileBufType sourceType,
+                           int64_t elemBytes) {
+  if (!isStaticRank2Shape(sourceType.getShape())) {
+    return std::nullopt;
+  }
+  if (sourceType.getSLayoutValueI32() !=
+      static_cast<int32_t>(pto::SLayout::NoneBox)) {
+    return std::nullopt;
+  }
+  if (op.getOffsets().size() != kTileRank2D) {
+    return std::nullopt;
+  }
+
+  int64_t rowOffset = 0;
+  int64_t colOffset = 0;
+  if (!getConstIndexValue(op.getOffsets()[0], rowOffset) ||
+      !getConstIndexValue(op.getOffsets()[1], colOffset)) {
+    return std::nullopt;
+  }
+  if (rowOffset < 0 || colOffset < 0) {
+    return std::nullopt;
+  }
+
+  auto sizesAttr = op.getSizes();
+  if (!sizesAttr || sizesAttr.size() != kTileRank2D) {
+    return std::nullopt;
+  }
+  int64_t rowSize = cast<IntegerAttr>(sizesAttr[0]).getInt();
+  int64_t colSize = cast<IntegerAttr>(sizesAttr[1]).getInt();
+  if (rowSize <= 0 || colSize <= 0) {
+    return std::nullopt;
+  }
+
+  bool rowMajor =
+      sourceType.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  int64_t majorStride = getTileMajorStride(sourceType);
+
+  SmallVector<uint64_t> addresses;
+  if (rowMajor) {
+    addresses.reserve(static_cast<size_t>(rowSize));
+    for (int64_t row = 0; row < rowSize; ++row) {
+      int64_t elemOffset = (rowOffset + row) * majorStride + colOffset;
+      addresses.push_back(static_cast<uint64_t>(elemOffset * elemBytes));
+    }
+  } else {
+    addresses.reserve(static_cast<size_t>(colSize));
+    for (int64_t col = 0; col < colSize; ++col) {
+      int64_t elemOffset = (colOffset + col) * majorStride + rowOffset;
+      addresses.push_back(static_cast<uint64_t>(elemOffset * elemBytes));
+    }
+  }
+
+  return addresses;
+}
+
+namespace {
+
+static func::FuncOp lookupSyncHelper(func::CallOp callOp) {
+  auto module = callOp->getParentOfType<ModuleOp>();
+  if (!module || callOp.getCallee().empty()) {
+    return {};
+  }
+  auto callee = module.lookupSymbol<func::FuncOp>(callOp.getCallee());
+  if (!callee) {
+    return {};
+  }
+  if (!callee->hasAttr("pto.tileop.helper") &&
+      !callee->hasAttr("pto.ptodsl.subkernel_helper")) {
+    return {};
+  }
+  return callee;
+}
+
+static std::optional<pto::PipelineType> getSyncHelperPipe(func::FuncOp callee) {
+  if (auto roleAttr = callee->getAttrOfType<mlir::StringAttr>(
+          "pto.ptodsl.subkernel_helper")) {
+    return llvm::StringSwitch<std::optional<pto::PipelineType>>(
+               roleAttr.getValue())
+        .Case("cube", pto::PipelineType::PIPE_M)
+        .Case("simd", pto::PipelineType::PIPE_V)
+        .Default(std::nullopt);
+  }
+
+  auto kindAttr = callee->getAttrOfType<mlir::StringAttr>("pto.tileop.kind");
+  if (!kindAttr) {
+    return std::nullopt;
+  }
+  return llvm::StringSwitch<std::optional<pto::PipelineType>>
