@@ -1,0 +1,21 @@
+PTOIRTranslator::dispatchAliasViewOp(Operation *op) {
+  if (auto makeViewOp = dyn_cast<pto::MakeTensorViewOp>(op)) {
+    UpdateAliasBufferInfo(makeViewOp.getResult(), makeViewOp.getPtr());
+  } else if (auto subViewOp = dyn_cast<pto::PartitionViewOp>(op)) {
+    UpdateAliasBufferInfo(subViewOp.getResult(), subViewOp.getSource());
+  } else if (auto addPtrOp = dyn_cast<pto::AddPtrOp>(op)) {
+    UpdateAliasBufferInfo(addPtrOp.getResult(), addPtrOp.getPtr());
+  } else if (auto castPtrOp = dyn_cast<pto::CastPtrOp>(op)) {
+    if (isa<pto::PtrType>(castPtrOp.getInput().getType()) &&
+        isa<pto::PtrType>(castPtrOp.getResult().getType())) {
+      UpdateAliasBufferInfo(castPtrOp.getResult(), castPtrOp.getInput());
+    } else if (isa<pto::PtrType>(castPtrOp.getInput().getType()) &&
+               isa<IntegerType>(castPtrOp.getResult().getType())) {
+      UpdateAliasBufferInfo(castPtrOp.getResult(), castPtrOp.getInput());
+    } else if (isa<IntegerType>(castPtrOp.getInput().getType()) &&
+               isa<pto::PtrType>(castPtrOp.getResult().getType()) &&
+               failed(UpdateIntegerToPtrCastMemInfo(castPtrOp))) {
+      return WalkResult::interrupt();
+    }
+  } else if (auto subViewOp = dyn_cast<pto::SubViewOp>(op)) {
+    UpdateTile

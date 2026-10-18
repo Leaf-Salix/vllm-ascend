@@ -1,0 +1,98 @@
+--- reference/attention_stream_stages.py
++++ candidate/attention_stream_stages.py
+@@ -13,6 +13,10 @@
+     attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
+     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
+     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
++    本轮PV候选按32head×512列写回，用两个K64矩阵乘覆盖原K128；每个K片
++    的Right供两个head半区复用，保证L0B≤64KiB且不翻倍读取KV。两份64KiB
++    Acc同时存活，第一半写回与第二半最后的MMA可重叠；正确性和性能均待真机。
++    只改变固定模型维度的分块，所有动态T/B、页表、mask、三槽协议和AIV不变。
+     LOCAL_ATTENTION_STATS由policy按已有历史/投影区间选择。开启时将每块
+     softmax的mi/li保存在本AIV独占的三槽UB环中，隔两拍
+     在线归并直接复用，删除只由本lane消费的mi/li GM写出与回读。
+@@ -63,7 +67,7 @@
+     阶段级phase没有逐槽ACK，不能拿它替代这些通知；此处没有创建task或新SPMD。
+ 
+ 算术边界、安全与外层责任
+-    KV进一次L1，QK用转置view，PV复用原L1行；PV N128/K128保留交替累加器。
++    KV进一次L1，QK用转置view，PV复用原L1行；PV采用M32/N512/K64双累加器。
+     AIV保持FP32块内softmax和在线m/l/左右oi顺序，probability及最终输出BF16均
+     rint。最终归一化仍加入sink，RoPE读取未cast的FP32值，再执行BF16边界。
+     gather再次检查Q/L活动、causal position、页表列和物理页上下界；inactive
+@@ -105,7 +109,8 @@
+ SPARSE_BLOCKS = 5
+ QK_PRE_LAUNCH = 2
+ QK_TRANSFER_SLOTS = 3
+-PV_N_TILE = 128
++PV_HEAD_TILE = 32
++PV_K_TILE = 64
+ SWA_RUNS = 5
+ FINAL_HEAD_TILE = 16
+ O_GROUPS = 8
+@@ -182,25 +187,46 @@
+                     target_memory=pl.MemorySpace.Mat,
+                 )
+                 pv_l1_row = (pv_work % QK_TRANSFER_SLOTS) * ATTN_K_TILE
+-                # PV沿用N128/K128，保留每128候选一次softmax和query流水顺序。
+-                pv_probability_left = pl.tile.move(pv_probability, target_memory=pl.MemorySpace.Left)
+-                pv_first_right = pl.tile.extract(
+-                    qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+-                )
+-                pv_previous = pl.tile.matmul(pv_probability_left, pv_first_right)
+-                for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
+-                    pv_next_right = pl.tile.extract(
+-                        qk_l1,
+-                        pv_l1_row,
+-                        pv_n * PV_N_TILE,
+-                        [ATTN_K_TILE, PV_N_TILE],
+-                        target_memory=pl.MemorySpace.Right,
+-                    )
+-                    # 同时保留前后两个累加器，让前块FIX写回与后块Cube重叠。
+-                    pv_current = pl.tile.matmul(pv_probability_left, pv_next_right)
+-                    pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
+-                    pv_previous = pv_current
+-                pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
++                # PV按32个head写完整512列：两个连续64KiB写回，替代四个
++                # 64×128跨行写回。每块仍覆盖128候选，不改AIV的softmax/merge。
++                # L0B最多64KiB，故按K64拆两次；同一份64×512 Right先供
++                # head0..31，再供head32..63，总Right搬运量仍128KiB，不复制KV。
++                # 两个Acc各64KiB，已知连续列别名保持不同地址；完整128KiB池
++                # 在当前PV分支内创建，QK score已经交付，不能额外再保留其Acc。
++                pv_acc_pool = pl.create_tile(
++                    [PV_HEAD_TILE, 2 * HEAD_DIM], dtype=pl.FP32,
++                    target_memory=pl.MemorySpace.Acc,
++                )
++                pv_first_half = pl.slice(pv_acc_pool, [PV_HEAD_TILE, HEAD_DIM], [0, 0])
++                pv_second_half = pl.slice(pv_acc_pool, [PV_HEAD_TILE, HEAD_DIM], [0, HEAD_DIM])
++                # 仅展开模型固定K=128的两片，不展开T/B/query循环。每个输出
++                # 仍按候选0..127升序累加；跨K64分界是否逐bit一致须由真机验收。
++                for pv_k in pl.unroll(ATTN_K_TILE // PV_K_TILE):
++                    pv_shared_right = pl.tile.extract(
++                        qk_l1, pv_l1_row + pv_k * PV_K_TILE, 0,
++                        [PV_K_TILE, HEAD_DIM], target_memory=pl.MemorySpace.Right,
++                    )
++                    pv_first_left = pl.tile.extract(
++                        pv_probability, 0, pv_k * PV_K_TILE,
++                        [PV_HEAD_TILE, PV_K_TILE], target_memory=pl.MemorySpace.Left,
++                    )
++                    pv_first_half = pl.tile.matmul_acc(
++                        pv_first_half, pv_first_left, pv_shared_right,
++                        init_cond=pv_k == 0,
++                    )
++                    if pv_k == ATTN_K_TILE // PV_K_TILE - 1:
++                        # 先交付第一半，让其FIX写回有机会与第二半最后一次MMA重叠。
++                        # 不提前通知AIV；两半均提交后才沿原协议发布一次PV_READY。
++                        pl.store(pv_first_half, [pv_transfer_row, 0], pv_transfer)
++                    pv_second_left = pl.tile.extract(
++                        pv_probability, PV_HEAD_TILE, pv_k * PV_K_TILE,
++                        [PV_HEAD_TILE, PV_K_TILE], target_memory=pl.MemorySpace.Left,
++                    )
++                    pv_second_half = pl.tile.matmul_acc(
++                        pv_second_half, pv_second_left, pv_shared_right,
++                        init_cond=pv_k == 0,
++                    )
++                pl.store(pv_second_half, [pv_transfer_row + PV_HEAD_TILE, 0], pv_transfer)
+                 pl.system.sync_set(
+                     EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                 )

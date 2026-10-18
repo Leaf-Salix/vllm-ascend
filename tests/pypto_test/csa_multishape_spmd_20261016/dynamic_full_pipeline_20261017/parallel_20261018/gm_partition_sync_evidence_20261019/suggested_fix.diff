@@ -1,0 +1,104 @@
+diff --git a/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp b/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
+index 3ea40e17..8de88916 100644
+--- a/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
++++ b/lib/PTO/Transforms/InsertSync/MemoryDependentAnalyzer.cpp
+@@ -14,6 +14,7 @@
+ #include "PTO/Transforms/InsertSync/MemoryDependentAnalyzer.h"
+ #include "PTO/Transforms/InsertSync/InsertSyncDebug.h"
+ #include "mlir/Dialect/Arith/IR/Arith.h"
++#include <limits>
+ 
+ using namespace mlir;
+ using namespace mlir::pto;
+@@ -274,8 +275,91 @@ bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
+   return crossRootOverlap;
+ }
+  
++namespace {
++struct GMColumnWindow {
++  Value pointer;
++  Type elementType;
++  int64_t rowStride;
++  int64_t begin;
++  int64_t end;
++};
++
++static std::optional<int64_t> getStaticIndex(Value value) {
++  auto constant = value.getDefiningOp<arith::ConstantOp>();
++  if (!constant)
++    return std::nullopt;
++  auto integer = dyn_cast<IntegerAttr>(constant.getValue());
++  if (!integer || integer.getValue().getBitWidth() > 64)
++    return std::nullopt;
++  return integer.getValue().getSExtValue();
++}
++
++// 只证明一层二维ND partition的固定列窗口。行起点可以动态：同一pointer、
++// 同一正的2次幂行距下，列窗口在每一行内互斥，就不可能因不同行起点
++// 变成重叠；2次幂限制也保留整数地址环绕时的低位列关系。
++// 不跨addptr/cast/嵌套view猜基址，也不推断动态列、动态行距或NZ布局。
++// 64B对齐的窗口保守覆盖DMA/FP32 FIX的最小写粒度，禁止按未对齐的
++// 逻辑小切片消除可能仍共享物理写粒度的依赖。
++static std::optional<GMColumnWindow> getGMColumnWindow(Value value) {
++  auto partition = value.getDefiningOp<pto::PartitionViewOp>();
++  if (!partition || partition.getOffsets().size() != 2 ||
++      partition.getSizes().size() != 2)
++    return std::nullopt;
++  auto view = partition.getSource().getDefiningOp<pto::MakeTensorViewOp>();
++  if (!view || view.getShape().size() != 2 || view.getStrides().size() != 2)
++    return std::nullopt;
++  auto viewType = dyn_cast<pto::TensorViewType>(view.getResult().getType());
++  if (!viewType)
++    return std::nullopt;
++  auto layout = view.getLayoutAttr();
++  if (!layout)
++    layout = viewType.getLayoutAttr();
++  if (layout && layout.getLayout() != pto::Layout::ND)
++    return std::nullopt;
++  auto partitionLayout = partition.getResult().getType().getLayoutAttr();
++  if (partitionLayout && partitionLayout.getLayout() != pto::Layout::ND)
++    return std::nullopt;
++
++  Type elementType = viewType.getElementType();
++  if (!elementType.isIntOrFloat())
++    return std::nullopt;
++  unsigned bits = elementType.getIntOrFloatBitWidth();
++  if (bits != 8 && bits != 16 && bits != 32 && bits != 64)
++    return std::nullopt;
++  auto stride = getStaticIndex(view.getStrides()[0]);
++  auto innerStride = getStaticIndex(view.getStrides()[1]);
++  auto begin = getStaticIndex(partition.getOffsets()[1]);
++  auto count = getStaticIndex(partition.getSizes()[1]);
++  if (!stride || !innerStride || !begin || !count || *stride <= 0 ||
++      *innerStride != 1 || *begin < 0 || *count <= 0 || *count > *stride ||
++      *begin > *stride - *count)
++    return std::nullopt;
++  if ((*stride & (*stride - 1)) != 0 ||
++      *stride > std::numeric_limits<int64_t>::max() / (bits / 8))
++    return std::nullopt;
++  int64_t alignmentElements = 64 / (bits / 8);
++  if (*stride % alignmentElements != 0 || *begin % alignmentElements != 0 ||
++      *count % alignmentElements != 0)
++    return std::nullopt;
++  return GMColumnWindow{view.getPtr(), elementType, *stride, *begin,
++                        *begin + *count};
++}
++
++static bool haveDisjointGMColumns(const BaseMemInfo *a, const BaseMemInfo *b) {
++  auto left = getGMColumnWindow(a->baseBuffer);
++  auto right = getGMColumnWindow(b->baseBuffer);
++  return left && right && left->pointer == right->pointer &&
++         left->elementType == right->elementType &&
++         left->rowStride == right->rowStride &&
++         (left->end <= right->begin || right->end <= left->begin);
++}
++} // namespace
++
+ bool MemoryDependentAnalyzer::isGMBufferOverlap(const BaseMemInfo *a,
+                                                 const BaseMemInfo *b) const {
++  // 未命中的情况全部沿用原范围/根分析；不删除循环复用、真实重叠或未知地址依赖。
++  if (haveDisjointGMColumns(a, b))
++    return false;
+   if (a->baseAddresses.empty() || b->baseAddresses.empty()) {
+     return true;
+   }
