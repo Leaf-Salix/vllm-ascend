@@ -9,7 +9,7 @@
 
 阅读顺序与范围
     【Key-major候选】G6/N64/1024/prefetch1/toL0/balanced区间的QK和WS
-    同时转置，WS从Left读取FP16中间值。双槽GM改为[24*2*1024,8]，每槽
+    同时转置，WS从Left读取FP16中间值。双槽GM改为[24*2*1024,16]，每槽
     前6列为有效query分数；AIV经片上转置回原布局后做同一TopK。其它策略
     沿用原布局。此候选尚未设备验证，不能将容量/CPU通过当性能结论。
     阅读新增的_cube_key_major_stage及原公开wrapper；_cube_query_major_stage
@@ -393,7 +393,8 @@ def _indexer_score_cube_key_major_stage(qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_RO
     输入T/B、device页表、有效叶与尾组全部沿用；只改变固定数学tile的
     M/N方向。query与系数常驻Right，两Key与WS共用Left的不同区域。
     QK的INT8点积、FIX缩放/ReLU/FP16位置和WS的K累加顺序保持。
-    每槽GM布局[score_tile,8]，只写前G列；两AIV读同一槽并恢复原
+    每槽GM布局[score_tile,16]，整行64B写出全部已计算列；前G列有效。
+    两AIV仅读前8列并恢复原
     query-major后继续原排序，收到两个ACK后才可覆盖。未验证收益。
     """
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -447,6 +448,9 @@ def _indexer_score_cube_key_major_stage(qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_RO
                 buf_current_key = pl.tile.extract(buf_key_l1_pool, 0, 0, [qk_panel_cols, IDX_HEAD_DIM], target_memory=pl.MemorySpace.Left)
                 buf_prefetched_key = buf_current_key
                 # Key双Left与前面板WS Left同时存活；预取一面板，QK/WS交错。
+                # 8份独立WS结果共32KiB，和QK的96KiB Acc恰合128KiB。
+                # slice/assemble必须编译成同一Acc的子片地址，不能额外复制。
+                buf_ws_pool = pl.tile.create([8 * qk_panel_cols, NATIVE_QLI_WEIGHT_ROWS], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
                 for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
                     buf_panel_col = buf_qk_panel * qk_panel_cols
                     buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
@@ -472,9 +476,15 @@ def _indexer_score_cube_key_major_stage(qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_RO
                     if buf_qk_panel > 0:
                         buf_previous_left = pl.tile.extract(buf_previous_l1, 0, 0, [qk_panel_cols, query_group_size * IDX_N_HEADS], target_memory=pl.MemorySpace.Left)
                         buf_scores = pl.tile.matmul(buf_key_panel, buf_query_right)
-                        buf_reduced_pair = pl.tile.matmul(buf_previous_left, buf_coefficient_right)
+                        buf_ws_row = (buf_qk_panel - 1) % 8 * qk_panel_cols
+                        buf_ws_part = pl.tile.slice(buf_ws_pool, [qk_panel_cols, NATIVE_QLI_WEIGHT_ROWS], [buf_ws_row, 0])
+                        # 每个子片独立初始化；K384和FP32累加次序与原WS一致。
+                        buf_ws_part = pl.tile.matmul_acc(buf_ws_part, buf_previous_left, buf_coefficient_right, init_cond=True)
+                        buf_ws_pool = pl.tile.assemble(buf_ws_pool, buf_ws_part, [buf_ws_row, 0])
                         buf_scores_l1 = pl.tile.assemble(buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True)
-                        pl.store(pl.set_validshape(buf_reduced_pair, qk_panel_cols, query_group_size), [buf_transfer_row + buf_panel_col - qk_panel_cols, 0], buf_score_transfer)
+                        if buf_qk_panel % 8 == 0:
+                            # 凑齐8片后一次FIX写回；仍须在覆盖该pool前等待FIX完成。
+                            pl.store(buf_ws_pool, [buf_transfer_row + buf_panel_col - 8 * qk_panel_cols, 0], buf_score_transfer)
                     else:
                         buf_scores = pl.tile.matmul(buf_key_panel, buf_query_right)
                         buf_scores_l1 = pl.tile.assemble(buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True)
@@ -482,8 +492,11 @@ def _indexer_score_cube_key_major_stage(qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_RO
                     if buf_qk_panel + 1 < score_tile // qk_panel_cols:
                         buf_current_key = buf_prefetched_key
                 buf_last_left = pl.tile.extract(buf_previous_l1, 0, 0, [qk_panel_cols, query_group_size * IDX_N_HEADS], target_memory=pl.MemorySpace.Left)
-                buf_last_scores = pl.tile.matmul(buf_last_left, buf_coefficient_right)
-                pl.store(pl.set_validshape(buf_last_scores, qk_panel_cols, query_group_size), [buf_transfer_row + score_tile - qk_panel_cols, 0], buf_score_transfer)
+                buf_last_part = pl.tile.slice(buf_ws_pool, [qk_panel_cols, NATIVE_QLI_WEIGHT_ROWS], [7 * qk_panel_cols, 0])
+                buf_last_part = pl.tile.matmul_acc(buf_last_part, buf_last_left, buf_coefficient_right, init_cond=True)
+                buf_ws_pool = pl.tile.assemble(buf_ws_pool, buf_last_part, [7 * qk_panel_cols, 0])
+                # 末片填满第二半pool；READY仍在全部1024候选写回之后。
+                pl.store(buf_ws_pool, [buf_transfer_row + score_tile - 8 * qk_panel_cols, 0], buf_score_transfer)
                 pl.system.sync_set(SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
             for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
                 pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
@@ -612,7 +625,7 @@ def indexer_score_vector_lane_stage(
                     single_kv_scale = pl.cast(single_scale_half, pl.FP32)
                     pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
                     if query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024 and key_prefetch_panels == 1 and key_prefetch_to_l0 and balance_leaves:
-                        # Key-major GM每槽[1024,8]；一次32KiB读取和片上转置，
+                        # Key-major GM每槽[1024,16]，仅读取前8列；一次32KiB读取和片上转置，
                         # 再取本lane的3条query，后续scale/sort/merge逐字保持。
                         key_major_row = (buf_worker * 2 + single_step % 2) * score_tile
                         key_major = pl.load(buf_score_transfer, [key_major_row, 0], [score_tile, 8])

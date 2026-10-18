@@ -17811,3 +17811,42 @@ Score Key-major候选已经过完整A→B→A精确/图检查，正在编译同�
 不能无证据称其进入Scalar尾路；AIC M/N方向、WS的Left搬运、GM小列写回
 和AIV布局恢复都仍可能影响结果。下一步只采相同Score helper的PMU，
 不靠整层数字猜具体根因。原算法及共享依赖未改，七档30%目标仍未完成。
+
+### 2026-10-18：Key-major回退定位到FIX/交接方向，准备整行写回
+
+同helper任务task_20261018_133558_38898924592 exit0，三次完整pair/score
+逐bit一致。三步PMU中位AIC MTE1 63.471、矩阵112.801、FIX876.487、
+MTE2 549.857μs；AIV Vector108.386、MTE2 707.563μs。原路径独立
+PMU约MTE1155/矩阵104/FIX133/Vector99，非同轮端到端配对，不能据此
+精确拆分654μs回退，但大幅变化明确在FIX/交接方向，而非AIV向量工作量。
+
+只做一项修正消融：WS本来已算64×16，原候选只写64×6且GM行stride8，
+改为完整64×16、64B整行写回，GM stride16。AIV仍load前8列，32KiB
+及原transpose/scale/sort/事件保持；不扩UB、不增MMA、不改前六列数学。
+原v1源码在首次设备source及提交57ced237保留，当前两文件改动和
+aligned_store_v2.diff可核对。aligned_cpu_v1完整符号编译正在执行，
+尚无该修正的设备或性能结论，不提前将窄列假设称为根因。
+
+### 2026-10-18：64B整行修正版通过，但仍有约24%回退
+
+任务task_20261018_134422_286630303 exit0，全部原精确/状态/图/保护/代际
+通过，同轮五窗原分task880.58、正式SPMD863.32、整行候选1072.02μs，
+相对正式回退24.174%。前轮1533.96不得作为验收基线；当前
+仍不采用、不扩七档。已确认AIV生成C++去注释与前版相同。
+
+下一步只检查一个新的FIX减量接口：把8份64×16 FP32 WS结果汇集于
+32KiB Acc后一次写回，QK96KiB加它恰128KiB。矩阵/FP32累加次序不改，
+不增加GM暂存；需要确认Tile slice/assemble能否保持Acc别名及真实地址，
+不能从容量计算直接上卡。小探针在score_transposed_layout_evidence/
+ws_output_pool_cpu；尚无完整CSA或性能结论。
+
+### 2026-10-18：Acc输出集合小探针通过，完整内存规划待改进
+
+独立小探针8个WS子片实际共享32KiB Acc，8次MMA/1次TSTORE且无
+TINSERT。完整动态pool候选却分配163840B而超过Acc131072B上限。
+MemoryReuse后QK的视图98304B位于公共mem_acc_382，但该公共slot
+受早期Q_B大tile影响保留131072B；WS的mem_acc_502另占32768B。
+当前仅发现全局slot大小与本阶段真实视图不同，仍需最小复现核对生命周期
+与别名，不能放宽平台容量、删同步或直接硬改地址。没有为此上卡。
+所有NPU任务已终态，正式动态源和依赖均未改。整行已测版独立保存于
+source_aligned_v2，source_candidate保留未编译成功的pool源码供后续接续。

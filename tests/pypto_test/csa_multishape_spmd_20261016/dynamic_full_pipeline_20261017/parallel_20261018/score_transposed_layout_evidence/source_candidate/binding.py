@@ -202,7 +202,7 @@ class PreparedDynamicCSA:
             "group_plan": ((8,), torch.int32),
             "coefficients": ((t * 16, group * 64), torch.float16),
             "indexer_transfer": (
-                (24 * 2 * self.policy.score_tile, 8)
+                (24 * 2 * self.policy.score_tile, 16)
                 if (group == 6 and self.policy.qk_panel == 64 and self.policy.score_tile == 1024
                     and self.policy.prefetch == 1 and self.policy.constexprs()["TO_L0"] and self.policy.balanced)
                 else (24 * 2 * group, self.policy.score_tile), torch.float32),

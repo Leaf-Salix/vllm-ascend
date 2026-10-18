@@ -1,0 +1,23 @@
+{
+  "compiled": false,
+  "error": "Acc buffer usage (163840 bytes) exceeds platform limit (131072 bytes)\nCheck failed: limit == 0 || used <= limit at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-memory-reuse-20261018/src/ir/transforms/allocate_memory_addr_pass.cpp:473",
+  "allocations": [
+    {
+      "base": "mem_acc_382",
+      "bytes": 131072
+    },
+    {
+      "base": "mem_acc_502",
+      "bytes": 32768
+    }
+  ],
+  "qk_view_bytes": 98304,
+  "ws_pool_bytes": 32768,
+  "theoretical_coexistence_bytes": 131072,
+  "actual_allocated_bytes": 163840,
+  "hypothesis": "复用slot的全局最大128KiB与独立32KiB pool直接累加，未利用Score阶段仅使用96KiB的空余区；需最小复现确认可改进的别名/生命周期规划",
+  "dependency_modified": false,
+  "device_run": false,
+  "memory_reuse_dump": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_transposed_layout_evidence/pooled_cpu_v1/kernel/passes_dump/37_after_MemoryReuse.py",
+  "memory_reuse_dump_bytes": 1560845
+}
