@@ -62,6 +62,14 @@ SCALE_PAGE_COALESCING独立控制META页布局证明与Score连续scale搬运。
 路径未回退，不将其测量差归因已关闭的连续读取。G2/G6短档关闭编译通过，
 未重测短档性能。Native碎片页在启用区间仍逐轮证明失败后回退；未覆盖的
 不等长query、其它历史和持续轨迹不能据这几项扩大为已验证。
+Key预取在独立精确L1范围工具链下重新评估：长历史沿用提前一块；短历史
+只在既有G2且半叶工作量上界<=2048项时开启。每步768列、每AIV取384列，
+以已有max_seq_len估算最大步数，对应最多5步/3840压缩行。实际visible、
+页址、循环与尾块仍在device计算；这不是B16/B32白名单。该范围的四个
+S6验证点完整L1改善0.96%～3.16%，S1/S5精确回归通过；短G6及较大
+半叶范围未获收益，保留原值。排序资源边界是实测分档依据，不等于已证明
+回退由排序导致。收益证据基于PTOAS b7b4a82c隔离v3，旧工具链不作性能
+保证，全部窗口及未覆盖范围见统一日志。
 """
 
 from dataclasses import dataclass
@@ -70,6 +78,10 @@ from dataclasses import dataclass
 EARLY_GEOMETRY_MIN_TOKENS = 64
 # 与既有O_A N128输出区间一致；不是按七个测试点枚举。
 LOCAL_STATS_MAX_TOKENS = 96
+# 非balanced Score既有交接宽度；两AIV各消费一半。对应indexer_score_stages。
+SHORT_SCORE_TILE = 768
+# 既有TopK半叶直接归并的资源边界；更大范围用2560/3072/4096分支。
+SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 
 
 @dataclass(frozen=True)
@@ -140,13 +152,19 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         request_waves = (requests + 23) // 24
         if 4 * 6 * request_waves <= 5 * 2 * pair_waves:
             group = 6
+    # visible受请求length//4钳制，不超过这里已有的Host长度上界。用上界
+    # 保守估算半叶工作量，不新增device回读，不代替核内真实范围与尾块检查。
+    # 该资源区间实测支持预取；较大半叶与短G6仍保持原路径。
+    short_steps_upper = (cache_rows + SHORT_SCORE_TILE - 1) // SHORT_SCORE_TILE
+    short_half_span_upper = short_steps_upper * (SHORT_SCORE_TILE // 2)
+    short_key_prefetch = group == 2 and short_half_span_upper <= SHORT_PREFETCH_HALF_SORT_LIMIT
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
     parallel_small_qa = group == 6 and 16 < tokens < 32
     return CSASPMDPolicy(
         query_group=group,
         qk_panel=64 if group == 6 else 128,
-        score_tile=1024 if long_history else 768,
-        prefetch=1 if long_history else 0,
+        score_tile=1024 if long_history else SHORT_SCORE_TILE,
+        prefetch=1 if long_history or short_key_prefetch else 0,
         balanced=long_history and group == 6,
         roots=1 if long_history and group == 6 else 2,
         oa_cols=128 if tokens <= 96 else 256,
