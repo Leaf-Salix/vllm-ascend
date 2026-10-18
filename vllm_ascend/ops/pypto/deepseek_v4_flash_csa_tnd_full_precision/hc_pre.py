@@ -10,6 +10,7 @@ Original Native weights are used unchanged. No compiler interception.
 import pypto.language as pl
 
 from ..deepseek_v4_flash_csa_tnd_precision.config import FLASH as M
+from .hc_pre_panel import hcpre_linear_panel
 
 # Dynamic shape variables.
 T_DYN = pl.dynamic("T_DYN")  # actual token rows, independent request lengths
@@ -40,6 +41,7 @@ D_SPMD = 4096
 LINEAR_OK = 22
 LINEAR_K_PER_SPLIT = 768
 LINEAR_WORKERS = 24  # hc_pre_linear workers, one per AIC
+PANEL_MIN_TOKENS = 16  # measured break-even; keep short-query scalar path
 
 # pre0..pre3 / row0..row3 are hand-unrolled over the hc lanes.
 assert HC_MULT == 4, f"hc_pre is specialized to HC_MULT == 4, got {HC_MULT}"
@@ -317,10 +319,13 @@ def hc_pre_gates_from_rms(
     x_flat = pl.reshape(x, [t_dim, HC_DIM])
     hc_base_2d = pl.reshape(hc_base, [1, MIX_HC])  # for per-group comb base loads in comb_sinkhorn
 
-    # linear: split-K matmul -> per-split partials. The t_dim..t_linear pad rows are
-    # zero-filled by valid_shape, never materialized.
+    # Both paths zero-fill padded partial rows. The panel path explicitly
+    # initializes the transposed input tail before sharing weight loads.
     mixes_partials = pl.create_tensor([LINEAR_OK * t_linear, MIX_PAD], dtype=pl.FP32)
-    mixes_partials = hcpre_linear_dsl(x_flat, hc_fn, mixes_partials)
+    if t_dim < PANEL_MIN_TOKENS:
+        mixes_partials = hcpre_linear_dsl(x_flat, hc_fn, mixes_partials)
+    else:
+        mixes_partials = hcpre_linear_panel(x_flat, hc_fn, mixes_partials)
 
     # Partials are reduced in ascending K order.
     mixes_raw = pl.create_tensor([t_linear, MIX_PAD], dtype=pl.FP32)
