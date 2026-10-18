@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HC-pre eight-token panels; preserve Native exact-eight-product rounding.
+"""A3 Native HF32 K8边界的BF16单次K16实现；保持真实TND。
 
-The scalar path stays in hc_pre.py for short T. Only independent token rows
-share weight loads here; K partitioning and each element's FP32 operation order
-are identical. The expansion is explicit because existing DSL has no HF32 MAD.
+HF32权重精确拆为BF16高8/低4位，单次K16消费8个高位与8个低位。
+这不是两次独立matmul相加。宽指数硬件行为按Native HF32实测验收；
+不声称整数无限精确求和。只使用现有DSL，没有Native算术或C++回调。
 """
 
 import pypto.language as pl
@@ -28,271 +28,75 @@ def _hcpre_linear_panel(
     padded_tokens = pl.tensor.dim(partials, 0) // LINEAR_OK
     # HF32 operand conversion is explicit bit arithmetic on original FP32 weight.
     # Transpose is DSL layout work, not a Native arithmetic callback.
-    rounded_weight = pl.create_tensor([HC_DIM, MIX_PAD], dtype=pl.FP32)
-    for block in pl.spmd(HC_DIM // 32, name_hint="hcpre_hf32_weight", allow_early_resolve=True):
-        raw: pl.Tile[[32, 32], pl.FP32] = pl.load(weight, [0, block * 32], [32, 32], valid_shape=[MIX_HC, 32])
+    packed_weight = pl.create_tensor([HC_DIM * 2, MIX_PAD], dtype=pl.BF16)
+    for block in pl.spmd(HC_DIM // 256, name_hint="hcpre_hf32_weight", allow_early_resolve=True):
+        raw: pl.Tile[[32, 256], pl.FP32] = pl.load(weight, [0, block * 256], [32, 256], valid_shape=[MIX_HC, 256])
         transposed = pl.tile.transpose(raw, axis1=0, axis2=1)
+        for pad_column in pl.range(MIX_HC, MIX_PAD):
+            for pad_k in pl.range(256):
+                pl.write(transposed, [pad_k, pad_column], 0.0)
+        transposed = pl.set_validshape(transposed, 256, 32)
         bits = pl.tile.reinterpret_view(transposed, pl.INT32)
         converted = pl.tile.reinterpret_view(
-            pl.tile.and_(pl.tile.add(bits, 2048), pl.tile.full([32, 32], dtype=pl.INT32, value=-4096)), pl.FP32
+            pl.tile.and_(pl.tile.add(bits, 2048), pl.tile.full([256, 32], dtype=pl.INT32, value=-4096)), pl.FP32
         )
-        for pad_column in pl.range(MIX_HC, MIX_PAD):
-            for pad_k in pl.range(32):
-                pl.write(converted, [pad_k, pad_column], 0.0)
-        pl.store(pl.set_validshape(converted, 32, 32), [block * 32, 0], rounded_weight)
-    # Pure layout conversion: each contiguous 8-token load becomes a legal
-    # 8x1 ColMajor carrier. Padded rows are explicitly initialized to zero.
-    transposed_flat = pl.create_tensor([HC_DIM, padded_tokens], dtype=pl.FP32)
-    for transpose_unit in pl.spmd(
-        (padded_tokens // 16) * (HC_DIM // 32), name_hint="hcpre_input_panel", allow_early_resolve=True
+        # Truncate the HF32 value into exact BF16 high8 and low4 pieces.
+        hi_bits = pl.tile.and_(
+            pl.tile.reinterpret_view(converted, pl.INT32), pl.tile.full([256, 32], dtype=pl.INT32, value=-65536)
+        )
+        hi_fp32 = pl.tile.reinterpret_view(hi_bits, pl.FP32)
+        lo_fp32 = pl.tile.sub(converted, hi_fp32)
+        hi_bf16 = pl.tile.cast(hi_fp32, pl.BF16)
+        lo_bf16 = pl.tile.cast(lo_fp32, pl.BF16)
+        packed_block = pl.tile.full([512, 32], dtype=pl.BF16, value=0.0)
+        for chunk in pl.range(32):
+            high8 = pl.tile.slice(hi_bf16, [8, 32], [chunk * 8, 0])
+            low8 = pl.tile.slice(lo_bf16, [8, 32], [chunk * 8, 0])
+            packed_block = pl.tile.assemble(packed_block, high8, [chunk * 16, 0])
+            packed_block = pl.tile.assemble(packed_block, low8, [chunk * 16 + 8, 0])
+        pl.store(packed_block, [block * 512, 0], packed_weight)
+    packed_flat = pl.create_tensor([padded_tokens, HC_DIM * 2], dtype=pl.BF16)
+    inputs_per_task = 1
+    if tokens >= 64:
+        inputs_per_task = 4
+    for input_group in pl.spmd(
+        ((padded_tokens // 16) * (HC_DIM // 256)) // inputs_per_task,
+        name_hint="hcpre_input_panel",
+        allow_early_resolve=True,
     ):
-        t0 = (transpose_unit // (HC_DIM // 32)) * 16
-        k0 = (transpose_unit % (HC_DIM // 32)) * 32
-        values = pl.load(flat, [t0, k0], [16, 32], valid_shape=[pl.min(16, tokens - t0), 32])
-        for invalid_row in pl.range(pl.min(16, tokens - t0), 16):
-            for invalid_col in pl.range(32):
-                pl.write(values, [invalid_row, invalid_col], 0.0)
-        pl.store(pl.tile.transpose(pl.set_validshape(values, 16, 32), axis1=0, axis2=1), [k0, t0], transposed_flat)
-    for unit in pl.spmd(LINEAR_OK * (padded_tokens // 8), name_hint="hcpre_hf32_exact8", allow_early_resolve=True):
-        split = unit // (padded_tokens // 8)
-        row = (unit % (padded_tokens // 8)) * 8
-        zero = pl.tile.full([8, 32], dtype=pl.FP32, value=0.0)
-        one = pl.tile.full([8, 32], dtype=pl.FP32, value=1.0)
-        sel_tmp = pl.create_tile([8, 16], dtype=pl.UINT32)
-        accumulator = pl.tile.full([8, 32], dtype=pl.FP32, value=0.0)
-        if row < tokens:
-            count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - split * LINEAR_K_PER_SPLIT) // 8
-            for kb in pl.range(count):
-                k = split * LINEAR_K_PER_SPLIT + kb * 8
-                weight0 = pl.load(rounded_weight, [k + 0, 0], [1, 32])
-                shared_weight0 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight0)
-                input_row0 = pl.load(transposed_flat, [k + 0, row], [1, 8])
-                input0 = pl.tile.transpose_view(input_row0)
-                product0 = pl.row_expand_mul(shared_weight0, input0)
-                weight1 = pl.load(rounded_weight, [k + 1, 0], [1, 32])
-                shared_weight1 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight1)
-                input_row1 = pl.load(transposed_flat, [k + 1, row], [1, 8])
-                input1 = pl.tile.transpose_view(input_row1)
-                product1 = pl.row_expand_mul(shared_weight1, input1)
-                weight2 = pl.load(rounded_weight, [k + 2, 0], [1, 32])
-                shared_weight2 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight2)
-                input_row2 = pl.load(transposed_flat, [k + 2, row], [1, 8])
-                input2 = pl.tile.transpose_view(input_row2)
-                product2 = pl.row_expand_mul(shared_weight2, input2)
-                weight3 = pl.load(rounded_weight, [k + 3, 0], [1, 32])
-                shared_weight3 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight3)
-                input_row3 = pl.load(transposed_flat, [k + 3, row], [1, 8])
-                input3 = pl.tile.transpose_view(input_row3)
-                product3 = pl.row_expand_mul(shared_weight3, input3)
-                weight4 = pl.load(rounded_weight, [k + 4, 0], [1, 32])
-                shared_weight4 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight4)
-                input_row4 = pl.load(transposed_flat, [k + 4, row], [1, 8])
-                input4 = pl.tile.transpose_view(input_row4)
-                product4 = pl.row_expand_mul(shared_weight4, input4)
-                weight5 = pl.load(rounded_weight, [k + 5, 0], [1, 32])
-                shared_weight5 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight5)
-                input_row5 = pl.load(transposed_flat, [k + 5, row], [1, 8])
-                input5 = pl.tile.transpose_view(input_row5)
-                product5 = pl.row_expand_mul(shared_weight5, input5)
-                weight6 = pl.load(rounded_weight, [k + 6, 0], [1, 32])
-                shared_weight6 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight6)
-                input_row6 = pl.load(transposed_flat, [k + 6, row], [1, 8])
-                input6 = pl.tile.transpose_view(input_row6)
-                product6 = pl.row_expand_mul(shared_weight6, input6)
-                weight7 = pl.load(rounded_weight, [k + 7, 0], [1, 32])
-                shared_weight7 = pl.col_expand(pl.create_tile([8, 32], dtype=pl.FP32), weight7)
-                input_row7 = pl.load(transposed_flat, [k + 7, row], [1, 8])
-                input7 = pl.tile.transpose_view(input_row7)
-                product7 = pl.row_expand_mul(shared_weight7, input7)
-                e0_0_hi = pl.tile.add(product0, accumulator)
-                e0_0_v = pl.tile.sub(e0_0_hi, product0)
-                e0_0_lo = pl.tile.add(
-                    pl.tile.sub(product0, pl.tile.sub(e0_0_hi, e0_0_v)), pl.tile.sub(accumulator, e0_0_v)
-                )
-                e1_0_hi = pl.tile.add(product1, e0_0_lo)
-                e1_0_v = pl.tile.sub(e1_0_hi, product1)
-                e1_0_lo = pl.tile.add(pl.tile.sub(product1, pl.tile.sub(e1_0_hi, e1_0_v)), pl.tile.sub(e0_0_lo, e1_0_v))
-                e1_1_hi = pl.tile.add(e1_0_hi, e0_0_hi)
-                e1_1_v = pl.tile.sub(e1_1_hi, e1_0_hi)
-                e1_1_lo = pl.tile.add(pl.tile.sub(e1_0_hi, pl.tile.sub(e1_1_hi, e1_1_v)), pl.tile.sub(e0_0_hi, e1_1_v))
-                e2_0_hi = pl.tile.add(product2, e1_0_lo)
-                e2_0_v = pl.tile.sub(e2_0_hi, product2)
-                e2_0_lo = pl.tile.add(pl.tile.sub(product2, pl.tile.sub(e2_0_hi, e2_0_v)), pl.tile.sub(e1_0_lo, e2_0_v))
-                e2_1_hi = pl.tile.add(e2_0_hi, e1_1_lo)
-                e2_1_v = pl.tile.sub(e2_1_hi, e2_0_hi)
-                e2_1_lo = pl.tile.add(pl.tile.sub(e2_0_hi, pl.tile.sub(e2_1_hi, e2_1_v)), pl.tile.sub(e1_1_lo, e2_1_v))
-                e2_2_hi = pl.tile.add(e2_1_hi, e1_1_hi)
-                e2_2_v = pl.tile.sub(e2_2_hi, e2_1_hi)
-                e2_2_lo = pl.tile.add(pl.tile.sub(e2_1_hi, pl.tile.sub(e2_2_hi, e2_2_v)), pl.tile.sub(e1_1_hi, e2_2_v))
-                e3_0_hi = pl.tile.add(product3, e2_0_lo)
-                e3_0_v = pl.tile.sub(e3_0_hi, product3)
-                e3_0_lo = pl.tile.add(pl.tile.sub(product3, pl.tile.sub(e3_0_hi, e3_0_v)), pl.tile.sub(e2_0_lo, e3_0_v))
-                e3_1_hi = pl.tile.add(e3_0_hi, e2_1_lo)
-                e3_1_v = pl.tile.sub(e3_1_hi, e3_0_hi)
-                e3_1_lo = pl.tile.add(pl.tile.sub(e3_0_hi, pl.tile.sub(e3_1_hi, e3_1_v)), pl.tile.sub(e2_1_lo, e3_1_v))
-                e3_2_hi = pl.tile.add(e3_1_hi, e2_2_lo)
-                e3_2_v = pl.tile.sub(e3_2_hi, e3_1_hi)
-                e3_2_lo = pl.tile.add(pl.tile.sub(e3_1_hi, pl.tile.sub(e3_2_hi, e3_2_v)), pl.tile.sub(e2_2_lo, e3_2_v))
-                e3_3_hi = pl.tile.add(e3_2_hi, e2_2_hi)
-                e3_3_v = pl.tile.sub(e3_3_hi, e3_2_hi)
-                e3_3_lo = pl.tile.add(pl.tile.sub(e3_2_hi, pl.tile.sub(e3_3_hi, e3_3_v)), pl.tile.sub(e2_2_hi, e3_3_v))
-                e4_0_hi = pl.tile.add(product4, e3_0_lo)
-                e4_0_v = pl.tile.sub(e4_0_hi, product4)
-                e4_0_lo = pl.tile.add(pl.tile.sub(product4, pl.tile.sub(e4_0_hi, e4_0_v)), pl.tile.sub(e3_0_lo, e4_0_v))
-                e4_1_hi = pl.tile.add(e4_0_hi, e3_1_lo)
-                e4_1_v = pl.tile.sub(e4_1_hi, e4_0_hi)
-                e4_1_lo = pl.tile.add(pl.tile.sub(e4_0_hi, pl.tile.sub(e4_1_hi, e4_1_v)), pl.tile.sub(e3_1_lo, e4_1_v))
-                e4_2_hi = pl.tile.add(e4_1_hi, e3_2_lo)
-                e4_2_v = pl.tile.sub(e4_2_hi, e4_1_hi)
-                e4_2_lo = pl.tile.add(pl.tile.sub(e4_1_hi, pl.tile.sub(e4_2_hi, e4_2_v)), pl.tile.sub(e3_2_lo, e4_2_v))
-                e4_3_hi = pl.tile.add(e4_2_hi, e3_3_lo)
-                e4_3_v = pl.tile.sub(e4_3_hi, e4_2_hi)
-                e4_3_lo = pl.tile.add(pl.tile.sub(e4_2_hi, pl.tile.sub(e4_3_hi, e4_3_v)), pl.tile.sub(e3_3_lo, e4_3_v))
-                e4_4_hi = pl.tile.add(e4_3_hi, e3_3_hi)
-                e4_4_v = pl.tile.sub(e4_4_hi, e4_3_hi)
-                e4_4_lo = pl.tile.add(pl.tile.sub(e4_3_hi, pl.tile.sub(e4_4_hi, e4_4_v)), pl.tile.sub(e3_3_hi, e4_4_v))
-                e5_0_hi = pl.tile.add(product5, e4_0_lo)
-                e5_0_v = pl.tile.sub(e5_0_hi, product5)
-                e5_0_lo = pl.tile.add(pl.tile.sub(product5, pl.tile.sub(e5_0_hi, e5_0_v)), pl.tile.sub(e4_0_lo, e5_0_v))
-                e5_1_hi = pl.tile.add(e5_0_hi, e4_1_lo)
-                e5_1_v = pl.tile.sub(e5_1_hi, e5_0_hi)
-                e5_1_lo = pl.tile.add(pl.tile.sub(e5_0_hi, pl.tile.sub(e5_1_hi, e5_1_v)), pl.tile.sub(e4_1_lo, e5_1_v))
-                e5_2_hi = pl.tile.add(e5_1_hi, e4_2_lo)
-                e5_2_v = pl.tile.sub(e5_2_hi, e5_1_hi)
-                e5_2_lo = pl.tile.add(pl.tile.sub(e5_1_hi, pl.tile.sub(e5_2_hi, e5_2_v)), pl.tile.sub(e4_2_lo, e5_2_v))
-                e5_3_hi = pl.tile.add(e5_2_hi, e4_3_lo)
-                e5_3_v = pl.tile.sub(e5_3_hi, e5_2_hi)
-                e5_3_lo = pl.tile.add(pl.tile.sub(e5_2_hi, pl.tile.sub(e5_3_hi, e5_3_v)), pl.tile.sub(e4_3_lo, e5_3_v))
-                e5_4_hi = pl.tile.add(e5_3_hi, e4_4_lo)
-                e5_4_v = pl.tile.sub(e5_4_hi, e5_3_hi)
-                e5_4_lo = pl.tile.add(pl.tile.sub(e5_3_hi, pl.tile.sub(e5_4_hi, e5_4_v)), pl.tile.sub(e4_4_lo, e5_4_v))
-                e5_5_hi = pl.tile.add(e5_4_hi, e4_4_hi)
-                e5_5_v = pl.tile.sub(e5_5_hi, e5_4_hi)
-                e5_5_lo = pl.tile.add(pl.tile.sub(e5_4_hi, pl.tile.sub(e5_5_hi, e5_5_v)), pl.tile.sub(e4_4_hi, e5_5_v))
-                e6_0_hi = pl.tile.add(product6, e5_0_lo)
-                e6_0_v = pl.tile.sub(e6_0_hi, product6)
-                e6_0_lo = pl.tile.add(pl.tile.sub(product6, pl.tile.sub(e6_0_hi, e6_0_v)), pl.tile.sub(e5_0_lo, e6_0_v))
-                e6_1_hi = pl.tile.add(e6_0_hi, e5_1_lo)
-                e6_1_v = pl.tile.sub(e6_1_hi, e6_0_hi)
-                e6_1_lo = pl.tile.add(pl.tile.sub(e6_0_hi, pl.tile.sub(e6_1_hi, e6_1_v)), pl.tile.sub(e5_1_lo, e6_1_v))
-                e6_2_hi = pl.tile.add(e6_1_hi, e5_2_lo)
-                e6_2_v = pl.tile.sub(e6_2_hi, e6_1_hi)
-                e6_2_lo = pl.tile.add(pl.tile.sub(e6_1_hi, pl.tile.sub(e6_2_hi, e6_2_v)), pl.tile.sub(e5_2_lo, e6_2_v))
-                e6_3_hi = pl.tile.add(e6_2_hi, e5_3_lo)
-                e6_3_v = pl.tile.sub(e6_3_hi, e6_2_hi)
-                e6_3_lo = pl.tile.add(pl.tile.sub(e6_2_hi, pl.tile.sub(e6_3_hi, e6_3_v)), pl.tile.sub(e5_3_lo, e6_3_v))
-                e6_4_hi = pl.tile.add(e6_3_hi, e5_4_lo)
-                e6_4_v = pl.tile.sub(e6_4_hi, e6_3_hi)
-                e6_4_lo = pl.tile.add(pl.tile.sub(e6_3_hi, pl.tile.sub(e6_4_hi, e6_4_v)), pl.tile.sub(e5_4_lo, e6_4_v))
-                e6_5_hi = pl.tile.add(e6_4_hi, e5_5_lo)
-                e6_5_v = pl.tile.sub(e6_5_hi, e6_4_hi)
-                e6_5_lo = pl.tile.add(pl.tile.sub(e6_4_hi, pl.tile.sub(e6_5_hi, e6_5_v)), pl.tile.sub(e5_5_lo, e6_5_v))
-                e6_6_hi = pl.tile.add(e6_5_hi, e5_5_hi)
-                e6_6_v = pl.tile.sub(e6_6_hi, e6_5_hi)
-                e6_6_lo = pl.tile.add(pl.tile.sub(e6_5_hi, pl.tile.sub(e6_6_hi, e6_6_v)), pl.tile.sub(e5_5_hi, e6_6_v))
-                e7_0_hi = pl.tile.add(product7, e6_0_lo)
-                e7_0_v = pl.tile.sub(e7_0_hi, product7)
-                e7_0_lo = pl.tile.add(pl.tile.sub(product7, pl.tile.sub(e7_0_hi, e7_0_v)), pl.tile.sub(e6_0_lo, e7_0_v))
-                e7_1_hi = pl.tile.add(e7_0_hi, e6_1_lo)
-                e7_1_v = pl.tile.sub(e7_1_hi, e7_0_hi)
-                e7_1_lo = pl.tile.add(pl.tile.sub(e7_0_hi, pl.tile.sub(e7_1_hi, e7_1_v)), pl.tile.sub(e6_1_lo, e7_1_v))
-                e7_2_hi = pl.tile.add(e7_1_hi, e6_2_lo)
-                e7_2_v = pl.tile.sub(e7_2_hi, e7_1_hi)
-                e7_2_lo = pl.tile.add(pl.tile.sub(e7_1_hi, pl.tile.sub(e7_2_hi, e7_2_v)), pl.tile.sub(e6_2_lo, e7_2_v))
-                e7_3_hi = pl.tile.add(e7_2_hi, e6_3_lo)
-                e7_3_v = pl.tile.sub(e7_3_hi, e7_2_hi)
-                e7_3_lo = pl.tile.add(pl.tile.sub(e7_2_hi, pl.tile.sub(e7_3_hi, e7_3_v)), pl.tile.sub(e6_3_lo, e7_3_v))
-                e7_4_hi = pl.tile.add(e7_3_hi, e6_4_lo)
-                e7_4_v = pl.tile.sub(e7_4_hi, e7_3_hi)
-                e7_4_lo = pl.tile.add(pl.tile.sub(e7_3_hi, pl.tile.sub(e7_4_hi, e7_4_v)), pl.tile.sub(e6_4_lo, e7_4_v))
-                e7_5_hi = pl.tile.add(e7_4_hi, e6_5_lo)
-                e7_5_v = pl.tile.sub(e7_5_hi, e7_4_hi)
-                e7_5_lo = pl.tile.add(pl.tile.sub(e7_4_hi, pl.tile.sub(e7_5_hi, e7_5_v)), pl.tile.sub(e6_5_lo, e7_5_v))
-                e7_6_hi = pl.tile.add(e7_5_hi, e6_6_lo)
-                e7_6_v = pl.tile.sub(e7_6_hi, e7_5_hi)
-                e7_6_lo = pl.tile.add(pl.tile.sub(e7_5_hi, pl.tile.sub(e7_6_hi, e7_6_v)), pl.tile.sub(e6_6_lo, e7_6_v))
-                e7_7_hi = pl.tile.add(e7_6_hi, e6_6_hi)
-                e7_7_v = pl.tile.sub(e7_7_hi, e7_6_hi)
-                e7_7_lo = pl.tile.add(pl.tile.sub(e7_6_hi, pl.tile.sub(e7_7_hi, e7_7_v)), pl.tile.sub(e6_6_hi, e7_7_v))
-                tail_prefix_1 = pl.tile.sel(pl.tile.cmp(e7_1_lo, zero, cmp_type=1), e7_1_lo, e7_0_lo, sel_tmp)
-                tail_prefix_2 = pl.tile.sel(pl.tile.cmp(e7_2_lo, zero, cmp_type=1), e7_2_lo, tail_prefix_1, sel_tmp)
-                tail_prefix_3 = pl.tile.sel(pl.tile.cmp(e7_3_lo, zero, cmp_type=1), e7_3_lo, tail_prefix_2, sel_tmp)
-                tail_prefix_4 = pl.tile.sel(pl.tile.cmp(e7_4_lo, zero, cmp_type=1), e7_4_lo, tail_prefix_3, sel_tmp)
-                tail_prefix_5 = pl.tile.sel(pl.tile.cmp(e7_5_lo, zero, cmp_type=1), e7_5_lo, tail_prefix_4, sel_tmp)
-                tail_prefix_6 = pl.tile.sel(pl.tile.cmp(e7_6_lo, zero, cmp_type=1), e7_6_lo, tail_prefix_5, sel_tmp)
-                rounded = e7_7_hi
-                residual = zero
-                remaining = zero
-                active = one
-                round7_sum = pl.tile.add(rounded, e7_7_lo)
-                round7_error = pl.tile.sub(e7_7_lo, pl.tile.sub(round7_sum, rounded))
-                round7_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round7_active, round7_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round7_active, round7_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round7_active, tail_prefix_6, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round7_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round6_sum = pl.tile.add(rounded, e7_6_lo)
-                round6_error = pl.tile.sub(e7_6_lo, pl.tile.sub(round6_sum, rounded))
-                round6_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round6_active, round6_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round6_active, round6_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round6_active, tail_prefix_5, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round6_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round5_sum = pl.tile.add(rounded, e7_5_lo)
-                round5_error = pl.tile.sub(e7_5_lo, pl.tile.sub(round5_sum, rounded))
-                round5_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round5_active, round5_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round5_active, round5_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round5_active, tail_prefix_4, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round5_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round4_sum = pl.tile.add(rounded, e7_4_lo)
-                round4_error = pl.tile.sub(e7_4_lo, pl.tile.sub(round4_sum, rounded))
-                round4_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round4_active, round4_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round4_active, round4_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round4_active, tail_prefix_3, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round4_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round3_sum = pl.tile.add(rounded, e7_3_lo)
-                round3_error = pl.tile.sub(e7_3_lo, pl.tile.sub(round3_sum, rounded))
-                round3_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round3_active, round3_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round3_active, round3_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round3_active, tail_prefix_2, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round3_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round2_sum = pl.tile.add(rounded, e7_2_lo)
-                round2_error = pl.tile.sub(e7_2_lo, pl.tile.sub(round2_sum, rounded))
-                round2_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round2_active, round2_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round2_active, round2_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round2_active, tail_prefix_1, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round2_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round1_sum = pl.tile.add(rounded, e7_1_lo)
-                round1_error = pl.tile.sub(e7_1_lo, pl.tile.sub(round1_sum, rounded))
-                round1_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round1_active, round1_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round1_active, round1_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round1_active, e7_0_lo, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round1_error, zero, cmp_type=0), active, zero, sel_tmp)
-                round0_sum = pl.tile.add(rounded, e7_0_lo)
-                round0_error = pl.tile.sub(e7_0_lo, pl.tile.sub(round0_sum, rounded))
-                round0_active = pl.tile.cmp(active, zero, cmp_type=1)
-                rounded = pl.tile.sel(round0_active, round0_sum, rounded, sel_tmp)
-                residual = pl.tile.sel(round0_active, round0_error, residual, sel_tmp)
-                remaining = pl.tile.sel(round0_active, zero, remaining, sel_tmp)
-                active = pl.tile.sel(pl.tile.cmp(round0_error, zero, cmp_type=0), active, zero, sel_tmp)
-                positive_tail = pl.tile.sel(pl.tile.cmp(remaining, zero, cmp_type=4), one, zero, sel_tmp)
-                negative_tail = pl.tile.sel(pl.tile.cmp(remaining, zero, cmp_type=2), one, zero, sel_tmp)
-                positive = pl.tile.sel(pl.tile.cmp(residual, zero, cmp_type=4), positive_tail, zero, sel_tmp)
-                negative = pl.tile.sel(pl.tile.cmp(residual, zero, cmp_type=2), negative_tail, zero, sel_tmp)
-                same_sign = pl.tile.cmp(pl.tile.add(positive, negative), zero, cmp_type=4)
-                twice = pl.tile.mul(residual, 2.0)
-                adjusted = pl.tile.add(rounded, twice)
-                exact_half = pl.tile.cmp(pl.tile.sub(adjusted, rounded), twice, cmp_type=0)
-                tie_adjusted = pl.tile.sel(exact_half, adjusted, rounded, sel_tmp)
-                rounded = pl.tile.sel(same_sign, tie_adjusted, rounded, sel_tmp)
-                accumulator = rounded
-        pl.store(accumulator, [split * padded_tokens + row, 0], partials)
+        for input_local in pl.range(inputs_per_task):
+            transpose_unit = input_group * inputs_per_task + input_local
+            t0 = (transpose_unit // (HC_DIM // 256)) * 16
+            k0 = (transpose_unit % (HC_DIM // 256)) * 256
+            values = pl.load(flat, [t0, k0], [16, 256], valid_shape=[pl.min(16, tokens - t0), 256])
+            for invalid_row in pl.range(pl.min(16, tokens - t0), 16):
+                for invalid_col in pl.range(256):
+                    pl.write(values, [invalid_row, invalid_col], 0.0)
+            values = pl.set_validshape(values, 16, 256)
+            # Keep source/destination column widths equal for existing TMOV lowering.
+            transposed_values = pl.tile.transpose(values, axis1=0, axis2=1)
+            packed_transposed = pl.tile.full([512, 16], dtype=pl.FP32, value=0.0)
+            for chunk in pl.range(32):
+                input8 = pl.tile.slice(transposed_values, [8, 16], [chunk * 8, 0])
+                packed_transposed = pl.tile.assemble(packed_transposed, input8, [chunk * 16, 0])
+                packed_transposed = pl.tile.assemble(packed_transposed, input8, [chunk * 16 + 8, 0])
+            packed_values = pl.tile.transpose(packed_transposed, axis1=0, axis2=1)
+            pl.store(pl.tile.cast(packed_values, pl.BF16), [t0, k0 * 2], packed_flat)
+    for unit in pl.spmd(
+        LINEAR_OK * (padded_tokens // 16), name_hint="hcpre_bf16_half_exact8", allow_early_resolve=True
+    ):
+        split = unit // (padded_tokens // 16)
+        row = (unit % (padded_tokens // 16)) * 16
+        count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - split * LINEAR_K_PER_SPLIT) // 64
+        accumulator = pl.create_tensor([16, MIX_PAD], dtype=pl.FP32)
+        for kb in pl.range(count):
+            packed_k = split * LINEAR_K_PER_SPLIT * 2 + kb * 128
+            x16 = pl.slice(packed_flat, [16, 128], [row, packed_k])
+            w16 = pl.slice(packed_weight, [128, MIX_PAD], [packed_k, 0])
+            accumulator = pl.matmul_acc(accumulator, x16, w16, init_cond=(kb == 0))
+        partials = pl.assemble(partials, accumulator, [split * padded_tokens + row, 0])
     return partials
 
 
 hcpre_linear_panel = pl.jit.inline(auto_scope=False)(_hcpre_linear_panel)
+hcpre_linear_test = pl.jit(_hcpre_linear_panel)

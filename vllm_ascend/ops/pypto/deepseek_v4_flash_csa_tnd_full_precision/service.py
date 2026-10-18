@@ -6,6 +6,7 @@ import torch_npu
 
 from ..deepseek_v4_flash_csa_tnd_precision.native_adapter import NativeCSACall
 from ..deepseek_v4_flash_csa_tnd_precision.service import CSAServiceRuntime as BaselineRuntime
+from .hc_pre_contract import qualify_hc_pre_weight
 from .indexer_order_data import INDEXER_K_ORDERS, INDEXER_TILE_ORDERS, INDEXER_TOKEN_MODES
 from .oproj_order_data import OPROJ_TILE_STARTS, OPROJ_TOKEN_MODES
 from .wkv_order_data import WKV_COLUMN_ORDERS, WKV_K_ORDERS, WKV_TOKEN_MODES
@@ -30,6 +31,8 @@ class CSAServiceRuntime(BaselineRuntime):
         return True
 
     def __init__(self, attention, operators, max_num_seqs, layer=None):
+        if torch.npu.is_current_stream_capturing():
+            raise RuntimeError("PTO HC weight qualification must finish before graph capture")
         super().__init__(attention, operators, max_num_seqs, layer)
         from vllm_ascend.ascend_config import get_ascend_config
 
@@ -45,6 +48,7 @@ class CSAServiceRuntime(BaselineRuntime):
                 raise ValueError("PTO HC-pre requires original contiguous FP32 Native HC parameters")
             if torch_npu.get_npu_format(parameter) not in (0, 2):
                 raise ValueError("PTO HC-pre requires original ND Native HC parameters")
+        self.hc_weight_qualification = qualify_hc_pre_weight(layer.hc_attn_fn, self.layer_name)
         device = attention.wq_a.weight.device
         norm = layer.input_layernorm
         if norm.variance_epsilon != 1e-6 or norm.bias_loaded:

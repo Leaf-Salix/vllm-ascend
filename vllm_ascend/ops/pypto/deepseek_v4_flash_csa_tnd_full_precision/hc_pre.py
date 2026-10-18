@@ -41,7 +41,7 @@ D_SPMD = 4096
 LINEAR_OK = 22
 LINEAR_K_PER_SPLIT = 768
 LINEAR_WORKERS = 24  # hc_pre_linear workers, one per AIC
-PANEL_MIN_TOKENS = 16  # measured break-even; keep short-query scalar path
+PANEL_MIN_TOKENS = 1  # All qualified nonempty queries use the Cube panel path.
 
 # pre0..pre3 / row0..row3 are hand-unrolled over the hc lanes.
 assert HC_MULT == 4, f"hc_pre is specialized to HC_MULT == 4, got {HC_MULT}"
@@ -609,19 +609,25 @@ def hc_pre_gates(
 
     # Diagnostic scope T<=256/AIC24; matched Native Gram partials, then exact K order.
     sq_partials = pl.create_tensor([LINEAR_OK * t_linear, 16], dtype=pl.FP32)
-    sq_units = (t_linear // 16) * LINEAR_OK
+    sq_group = 1
+    if t_dim >= 64:
+        sq_group = 4
+    sq_groups = (LINEAR_OK + sq_group - 1) // sq_group
+    sq_units = (t_linear // 16) * sq_groups
     for sq_unit in pl.spmd(sq_units, name_hint="hc_pre_square_partial", allow_early_resolve=True):
-        sq_t0 = (sq_unit // LINEAR_OK) * 16
-        sq_part = sq_unit % LINEAR_OK
+        sq_t0 = (sq_unit // sq_groups) * 16
+        sq_part_base = (sq_unit % sq_groups) * sq_group
         sq_rows = pl.min(16, t_dim - sq_t0)
-        sq_count = pl.min(768, HC_DIM - sq_part * 768) // 32
-        native_sq_acc = pl.create_tensor([16, 16], dtype=pl.FP32)
-        for sq_kb in pl.pipeline(0, sq_count, stage=2):
-            sq_k = sq_part * 768 + sq_kb * 32
-            sq_lhs = pl.slice(x_flat, [16, 32], [sq_t0, sq_k], valid_shape=[sq_rows, 32])
-            native_sq_acc = pl.matmul_acc(native_sq_acc, sq_lhs, sq_lhs, b_trans=True, init_cond=(sq_kb == 0))
-        sq_out_row = sq_part * t_linear + sq_t0
-        sq_partials[sq_out_row : sq_out_row + 16, 0:16] = native_sq_acc
+        for sq_group_item in pl.range(pl.min(sq_group, LINEAR_OK - sq_part_base)):
+            sq_part = sq_part_base + sq_group_item
+            sq_count = pl.min(768, HC_DIM - sq_part * 768) // 32
+            native_sq_acc = pl.create_tensor([16, 16], dtype=pl.FP32)
+            for sq_kb in pl.pipeline(0, sq_count, stage=2):
+                sq_k = sq_part * 768 + sq_kb * 32
+                sq_lhs = pl.slice(x_flat, [16, 32], [sq_t0, sq_k], valid_shape=[sq_rows, 32])
+                native_sq_acc = pl.matmul_acc(native_sq_acc, sq_lhs, sq_lhs, b_trans=True, init_cond=(sq_kb == 0))
+            sq_out_row = sq_part * t_linear + sq_t0
+            sq_partials[sq_out_row : sq_out_row + 16, 0:16] = native_sq_acc
     for rms_block in pl.spmd(token_tiles, name_hint="hc_pre_native_rms", allow_early_resolve=True):
         rms_t0 = rms_block * T_TILE
         rms_lanes = pl.arange(0, [1, T_TILE], dtype=pl.INT32)

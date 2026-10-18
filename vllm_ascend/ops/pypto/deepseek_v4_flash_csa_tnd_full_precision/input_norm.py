@@ -14,11 +14,18 @@ SQRT_CORRECTION_STEPS = 2
 FP32_INFINITY_BITS = 0x7F800000
 
 
-def _square_sum(x: pl.Tensor[[T, 4096], pl.BF16], sums: pl.Out[pl.Tensor[[T, 8], pl.FP32]]):
+def _input_norm_test(
+    x: pl.Tensor[[T, 4096], pl.BF16],
+    weight: pl.Tensor[[4096], pl.BF16],
+    output: pl.Out[pl.Tensor[[T, 4096], pl.BF16]],
+    rstd: pl.Out[pl.Tensor[[T, 8], pl.FP32]],
+):
     x.bind_dynamic(0, T)
-    sums.bind_dynamic(0, T)
+    output.bind_dynamic(0, T)
+    rstd.bind_dynamic(0, T)
     rows = pl.tensor.dim(x, 0)
-    for row in pl.spmd(rows, name_hint="input_rms_sum_dsl", allow_early_resolve=True):
+    weight_view = pl.reshape(weight, [1, 4096])
+    for row in pl.spmd(rows, name_hint="input_rms_fused", allow_early_resolve=True):
         raw = pl.load(x, [row, 0], [1, 4096], target_memory=pl.MemorySpace.Vec)
         wide = pl.cast(raw, pl.FP32)
         square = pl.mul(wide, wide)
@@ -32,29 +39,8 @@ def _square_sum(x: pl.Tensor[[T, 4096], pl.BF16], sums: pl.Out[pl.Tensor[[T, 8],
         # reduction input without changing its order; no 8x4096 UB expansion.
         repeated = pl.col_expand(pl.create_tile([8, 64], dtype=pl.FP32), fold64)
         total = pl.row_sum(repeated, pl.create_tile([8, 64], dtype=pl.FP32))
-        pl.store(pl.reshape(total, [1, 8]), [row, 0], sums)
-    return sums
-
-
-square_sum = pl.jit.inline(auto_scope=False)(_square_sum)
-square_sum_test = pl.jit(_square_sum)
-
-
-def _input_norm_test(
-    x: pl.Tensor[[T, 4096], pl.BF16],
-    weight: pl.Tensor[[4096], pl.BF16],
-    output: pl.Out[pl.Tensor[[T, 4096], pl.BF16]],
-    rstd: pl.Out[pl.Tensor[[T, 8], pl.FP32]],
-):
-    x.bind_dynamic(0, T)
-    output.bind_dynamic(0, T)
-    rstd.bind_dynamic(0, T)
-    rows = pl.tensor.dim(x, 0)
-    sums = pl.create_tensor([rows, 8], dtype=pl.FP32)
-    sums = square_sum(x, sums)
-    for row in pl.spmd(rows, name_hint="input_rms_inverse", allow_early_resolve=True):
-        total = pl.read(sums, [row, 0])
-        total_vector = pl.mul(pl.full([1, 8], dtype=pl.FP32, value=1.0), total)
+        total_scalar = pl.read(total, [0, 0])
+        total_vector = pl.mul(pl.full([1, 8], dtype=pl.FP32, value=1.0), total_scalar)
         variance = pl.add(pl.mul(total_vector, 1.0 / 4096.0), 1e-6)
         root_value = pl.sqrt(variance)
         # Native uses a device scalar square root, while A3 VSQRT may be 1 ULP off.
@@ -92,13 +78,13 @@ def _input_norm_test(
         scalar_inv = 1.0 / scalar_root_value
         inverse = pl.mul(pl.full([1, 8], dtype=pl.FP32, value=1.0), scalar_inv)
         rstd[row : row + 1, 0:8] = inverse
-    for row in pl.spmd(rows, name_hint="input_rms_apply", allow_early_resolve=True):
-        apply_value = pl.cast(x[row : row + 1, 0:4096], pl.FP32)
-        w = pl.cast(pl.reshape(weight, [1, 4096]), pl.FP32)
-        inv = pl.read(rstd, [row, 0])
+        apply_value = wide
+        w_raw = pl.load(weight_view, [0, 0], [1, 4096], target_memory=pl.MemorySpace.Vec)
+        w = pl.cast(w_raw, pl.FP32)
+        inv = pl.read(inverse, [0, 0])
         scaled = pl.mul(apply_value, inv)
         result = pl.col_expand_mul(scaled, w)
-        output[row : row + 1, 0:4096] = pl.cast(result, pl.BF16, mode="rint")
+        pl.store(pl.cast(result, pl.BF16, mode="rint"), [row, 0], output)
     return output, rstd
 
 

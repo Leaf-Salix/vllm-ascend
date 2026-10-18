@@ -219,6 +219,7 @@ def sparse_attn_csa(
     attn_sink: pl.Tensor[[H], pl.FP32],
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+    plan_workers: pl.Scalar[pl.INDEX],
 ):
     """Plan and run CSA QK/PV over sparse blocks, and build inverse-RoPE metadata."""
     # Compressed index contract.
@@ -242,9 +243,9 @@ def sparse_attn_csa(
     valid_block_mask = pl.create_tensor([t_dim, VALID_BLOCK_MASK_COLS], dtype=pl.INT32)
     # Scalar stores are flushed at task exit before the Vector planner reads GM.
     # A same-task PIPE_S/MTE2 event does not flush the Scalar data cache.
-    with pl.spmd(CSA_PLAN_WORKERS, name_hint="csa_checked_indices") as checked_tid:
+    with pl.spmd(plan_workers, name_hint="csa_checked_indices") as checked_tid:
         checked_worker = pl.tile.get_block_idx()
-        for checked_t0 in pl.range(checked_worker * BIAS_T_TILE, t_dim, CSA_PLAN_WORKERS * BIAS_T_TILE):
+        for checked_t0 in pl.range(checked_worker * BIAS_T_TILE, t_dim, plan_workers * BIAS_T_TILE):
             for checked_dt in pl.range(pl.min(BIAS_T_TILE, t_dim - checked_t0)):
                 checked_t = checked_t0 + checked_dt
                 c_position = pl.cast(pl.read(position_ids, [checked_t, 0]), pl.INDEX)
@@ -269,9 +270,9 @@ def sparse_attn_csa(
 
     # Read Native positions/page tables at the consumer. No expanded SWA index
     # matrix or intermediate INT32 position buffer is needed.
-    with pl.spmd(CSA_PLAN_WORKERS, name_hint="csa_slots_build_valid_qk_plan", deps=[checked_tid]) as qk_plan_tid:
+    with pl.spmd(plan_workers, name_hint="csa_slots_build_valid_qk_plan", deps=[checked_tid]) as qk_plan_tid:
         plan_worker = pl.tile.get_block_idx()
-        for bias_t0 in pl.range(plan_worker * BIAS_T_TILE, t_dim, CSA_PLAN_WORKERS * BIAS_T_TILE):
+        for bias_t0 in pl.range(plan_worker * BIAS_T_TILE, t_dim, plan_workers * BIAS_T_TILE):
             bias_rows = pl.min(BIAS_T_TILE, t_dim - bias_t0)
             for bias_dt in pl.range(bias_rows):
                 bias_t = bias_t0 + bias_dt
@@ -623,6 +624,7 @@ def sparse_attn_csa_tp1(
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+    plan_workers: pl.Scalar[pl.INDEX],
 ) -> tuple[pl.Tensor, pl.Scalar[pl.TASK_ID]]:
     """Write CSA heads as ``[group, T_PAD, O_GROUP_IN]`` slabs.
 
@@ -650,6 +652,7 @@ def sparse_attn_csa_tp1(
         attn_sink,
         freqs_cos,
         freqs_sin,
+        plan_workers,
     )
     t_dim = pl.tensor.dim(q, 0)
 

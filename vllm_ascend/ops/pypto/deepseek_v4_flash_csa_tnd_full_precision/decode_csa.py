@@ -54,12 +54,12 @@ from ..deepseek_v4_flash_csa_tnd_precision.decode_csa import (
     compressor_ratio4,
     indexer,
     indexer_compressor,
-    publish_native_heads,
     qkv_proj_rope,
-    sparse_attn_csa_tp1,
 )
+from ..deepseek_v4_flash_csa_tnd_precision.decode_sparse_attn_csa import sparse_attn_csa_tp1
 from .hc_post import hc_post_entry
 from .hc_pre import hc_pre_entry
+from .heads import publish_native_heads
 from .indexer_projection import indexer_projection_entry
 from .input_norm import input_norm_entry
 from .o_proj import o_proj_entry
@@ -381,6 +381,7 @@ def _full_csa_tnd(
             freqs_cos,
             freqs_sin,
             o_packed_heads,
+            32,
         )
         with pl.scope():
             _published_heads = publish_native_heads(o_packed_heads, heads, t_dim, heads_dep)

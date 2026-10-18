@@ -465,6 +465,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 freqs_cos,
                 freqs_sin,
                 o_packed_heads,
+                16,
             )
             with pl.scope():
                 native_heads = publish_native_heads(o_packed_heads, native_heads, t_dim, heads_dep)
