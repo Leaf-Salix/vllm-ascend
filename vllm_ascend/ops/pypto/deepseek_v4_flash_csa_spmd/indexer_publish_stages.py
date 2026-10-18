@@ -35,8 +35,9 @@
 
 分工、同步与生命周期
     worker按query编号轮转，owner=query%WORKERS；每行恰好一个AIV写者。
-    helper不创建task/spmd，不包含跨核等待。调用前必须等待plan、Q/L/position
-    及该worker将消费的全部score根已写回并可见，期间不得覆盖arena。
+    helper不创建task/spmd。plan、Q/L/position在调用前已就绪；pair路径每条
+    query在读取根前只等待其真正的Score写者，随后获取业务缓存。其它query
+    可以继续生产，不将48个AIV的全部Score完成设成统一集合点。
     非balanced路径逐根调用二路归并并原位更新本query根0，因此pair为InOut，
     不能与读取旧根0的其它消费者并发。balanced路径只读根；两者均不读本轮
     visible之外的未写根。阶段通知只能表示完成，不等于循环临时槽消费ACK。
@@ -54,10 +55,12 @@
 import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.config import FP32_NEG_INF
+from .attention_dependencies import wait_indexer_query_roots
 from .indexer_group_stages import (
     CANDIDATES_PER_LEAF,
     MAX_CANDIDATES,
     MAX_LEAVES,
+    OFFSET_ROWS_DYN,
     PLAN_WORDS,
     SCORE_TILE,
     TOKENS_DYN,
@@ -72,6 +75,7 @@ from .indexer_topk_stages import (
     merge_top512_roots,
 )
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN, query_request
+from .phase_sync import SIGNAL_WORDS
 
 TOPK_CANDIDATES_PER_LEAF = CANDIDATES_PER_LEAF
 TOPK_ROWS_PER_QUERY = MAX_LEAVES * 2
@@ -124,6 +128,8 @@ def indexer_pair_publish_stage(
     lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
     positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
     pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
     topk_scores: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]],
     topk_indices: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.INT32]],
@@ -131,6 +137,8 @@ def indexer_pair_publish_stage(
     WORKERS: pl.constexpr,
     ROOTS_PER_LEAF: pl.constexpr,
     BALANCED: pl.constexpr,
+    generation: pl.Scalar[pl.INT32],
+    QUERY_GROUP: pl.constexpr,
 ):
     """AIV发布pair根；保持非balanced根0原位归并及原多路平局优先顺序。"""
     tokens = pl.tensor.dim(positions, 0)
@@ -146,6 +154,14 @@ def indexer_pair_publish_stage(
             and root_count <= TOPK_ROWS_PER_QUERY
             and arena_base + root_count <= pl.tensor.dim(pair_arena, 0)
         ):
+            # 复用本query已算出的唯一request及begin，不额外扫描Q/L，也不把
+            # request_begin替换成固定S的除法。根数与下方归并完全相同。
+            local_query = query - _begin
+            group = pl.cast(pl.read(offsets, [request]), pl.INDEX) + local_query // QUERY_GROUP
+            signals = wait_indexer_query_roots(
+                signals, plan, group, local_query % QUERY_GROUP, root_count,
+                generation, QUERY_GROUP, BALANCED,
+            )
             if BALANCED:
                 # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
                 root_pairs = merge_top512_roots(pair_arena, arena_base, root_count)
@@ -173,7 +189,7 @@ def indexer_pair_publish_stage(
             # 每轮覆盖所有物理T行，包括dummy/gap，避免输出复用上一轮TopK。
             pl.store(pl.tile.full([1, IDX_TOPK], dtype=pl.FP32, value=FP32_NEG_INF), [query, 0], topk_scores)
             pl.store(pl.tile.full([1, IDX_TOPK], dtype=pl.INT32, value=-1), [query, 0], topk_indices)
-    return topk_scores, topk_indices
+    return topk_scores, topk_indices, signals
 
 
 @pl.jit.inline(auto_scope=False)

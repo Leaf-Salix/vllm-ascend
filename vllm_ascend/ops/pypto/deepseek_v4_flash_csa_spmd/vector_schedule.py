@@ -47,6 +47,7 @@ COOPERATIVE_PREFIX策略同步改变两种角色的顺序：Indexer压缩先于q
 
 import pypto.language as pl
 
+from .attention_dependencies import wait_attention_plan_rows
 from .attention_plan_stages import attention_inverse_rope_sign_stage, attention_slot_plan_stage
 from .attention_stream_stages import attention_qk_pv_vector_lane_stage
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_reduce_range, hc_widen_rms_range
@@ -854,14 +855,15 @@ def vector_schedule(
             generation,
             COOPERATIVE_PREFIX,
         )
-    # 叶按(group,leaf)%24分工，最终merge按query%48分工，首版等待所有明确
-    # 发布的48个AIV，包含处理尾group时只ACK的空lane，避免遗漏跨叶根节点。
-    signal = wait_row_owners(signal, PHASE_SCORE_VECTOR, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
-    topk_scores, topk_indices = indexer_pair_publish_stage(
+    # 每条query按本轮group/leaf映射获取真正的根写者；完整Score阶段信号
+    # 保持不变，不能用槽ACK替代它。数学helper在实际读根之前执行获取。
+    topk_scores, topk_indices, signal = indexer_pair_publish_stage(
         idx_bounds,
         idx_lengths,
         positions,
         group_plan,
+        group_offsets,
+        signal,
         pair_arena,
         topk_scores,
         topk_indices,
@@ -869,10 +871,11 @@ def vector_schedule(
         VECTORS,
         ROOTS,
         BALANCED,
+        generation,
+        QUERY_GROUP,
     )
     signal = publish_phase(signal, PHASE_TOPK, core, CORES, generation)
-    signal = wait_row_owners(signal, PHASE_TOPK, CORES, generation, 0, tokens, 1, VECTORS, GROUPS, 1)
-    attention_indices, attention_bias, attention_mask = attention_slot_plan_stage(
+    attention_indices, attention_bias, attention_mask, signal = attention_slot_plan_stage(
         topk_indices,
         positions,
         idx_bounds,
@@ -882,6 +885,8 @@ def vector_schedule(
         attention_indices,
         attention_bias,
         attention_mask,
+        signal,
+        generation,
         pl.tensor.dim(cache_rows, 0) // 32,
         pl.tensor.dim(main_cache, 0) // 32,
         worker,
@@ -890,9 +895,9 @@ def vector_schedule(
     )
     signal = publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)
 
-    # 每组Attention处理q=group+k*24，与计划8行条带不同；读取前等全体真实plan
-    # owner，同时确保两种Native cache写回与反向RoPE行已对当前AIV可见。
-    signal = wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+    # 每组Attention处理q=group+k*24，只等这些query对应的八行plan owner。
+    # Native cache可包含共享页，继续保留原完整写者依赖，不擅自按request缩窄。
+    signal = wait_attention_plan_rows(signal, tokens, pl.tile.get_block_idx(), generation)
     signal = wait_row_owners(signal, PHASE_ORIGINAL_CACHE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
     signal = wait_row_owners(signal, PHASE_MAIN_OUTPUT, CORES, generation, 0, main_requests, 1, VECTORS, GROUPS, 1)
     signal = wait_row_owners(signal, PHASE_ROPE, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)

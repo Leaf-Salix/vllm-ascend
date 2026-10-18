@@ -35,6 +35,7 @@ Score与Attention内部还有组内环槽READY/ACK，必须让双AIV同时推进
 import pypto.language as pl
 
 from .attention_stream_stages import attention_qk_pv_cube_stage
+from .attention_dependencies import wait_attention_plan_rows
 from .compressor_projection_stages import compressor_project_stage, indexer_compressor_project_stage
 from .hc_stages import hc_project_range
 from .indexer_compressor_output_stages import indexer_compressor_hadamard_stage
@@ -394,8 +395,8 @@ def cube_schedule(
     signal = publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)
 
     # Attention有效块依赖本层TopK，不能合进前置的公共metadata扫描。
-    # AIV计划完成包含“Score双缓冲已排空→TopK全部owner完成”，故可进入下一段。
-    signal = wait_row_owners(signal, PHASE_ATTN_PLAN, CORES, generation, 0, tokens, 8, VECTORS, GROUPS, 1)
+    # 每个实际读取的计划行都在对应Top-K根可见后发布；无需等待无关行。
+    signal = wait_attention_plan_rows(signal, tokens, worker, generation)
     # query反量化head分组随T变化，首版等待48个明确发布的角色完成；没有猜测tile公式。
     signal = wait_row_owners(signal, PHASE_QUERY, CORES, generation, 0, VECTORS, 1, VECTORS, GROUPS, 1)
     score_ring, pv_ring = attention_qk_pv_cube_stage(

@@ -49,7 +49,8 @@
     SWA 保留128行窗口、最多五个32-token页run；正常页走整块bias，页空洞及
     越界页才按合法run重建本行。非法候选 index=-1、bias=-1e20、块有效位=0。
     逆 RoPE 的偶数列乘+1、奇数列乘-1，与 query 正向 RoPE 的符号相反。
-    外层先等 Top-K 与 Native metadata 可见；plan 完成后再发布阶段给 QK/AIV。
+    Native metadata在外层已就绪；每个八行tile只获取对应Top-K行的生产者，
+    不等待无关query。plan完成后仍由外层发布整个worker阶段给QK/AIV。
     缓存的请求几何与五个块标志同次计算、同次发布，不跨调用沿用；Q/L/位置
     和页表在整个Attention阶段必须保持不变。attention_query_geometry读取
     这份已验证几何，或者在关闭分支保留原逐块Q/L扫描，不改页表容量保护。
@@ -60,6 +61,8 @@
 import pypto.language as pl
 
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN, query_request
+from .phase_sync import SIGNAL_WORDS, wait_row_owners
+from .runtime_abi import CORES, GROUPS, PHASE_TOPK
 
 T_DYN = pl.dynamic("CSA_ATTN_PLAN_T")
 PLAN_CAP_DYN = pl.dynamic("CSA_ATTN_PLAN_CAP")
@@ -143,6 +146,8 @@ def attention_slot_plan_stage(
     indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]],
     bias: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, BIAS_COLS], pl.FP32]],
     valid_blocks: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, MASK_COLS], pl.INT32]],
+    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
+    generation: pl.Scalar[pl.INT32],
     original_pages: pl.Scalar[pl.INDEX],
     compressed_pages: pl.Scalar[pl.INDEX],
     worker_id: pl.Scalar[pl.INDEX],
@@ -154,6 +159,12 @@ def attention_slot_plan_stage(
     # 固定8是向量tile，不是请求长度。一个tile可跨请求，逐行用Q/L判断owner。
     for first in pl.range(worker_id * ROWS, tokens, WORKERS * ROWS):
         rows = pl.min(ROWS, tokens - first)
+        # Top-K按query%48写，plan按八行tile%48写。只等这个tile真正读取的
+        # 最多八个owner；尾部仅rows行。wait内仍保留业务缓存的获取语义。
+        signals = wait_row_owners(
+            signals, PHASE_TOPK, CORES, generation, first, rows, 1,
+            WORKERS, GROUPS, 1,
+        )
         c_raw_tile = pl.cast(
             pl.load(topk, [first, 0], [ROWS, TOPK], valid_shape=[rows, TOPK]),
             target_type=pl.FP32,
@@ -303,7 +314,7 @@ def attention_slot_plan_stage(
             for row in pl.range(rows):
                 c_valid = pl.cast(pl.read(c_blk_valid, [row, 0]), pl.INT32)
                 pl.write(valid_blocks, [first + row, block], c_valid)
-    return indices, bias, valid_blocks
+    return indices, bias, valid_blocks, signals
 
 
 @pl.jit.inline(auto_scope=False)

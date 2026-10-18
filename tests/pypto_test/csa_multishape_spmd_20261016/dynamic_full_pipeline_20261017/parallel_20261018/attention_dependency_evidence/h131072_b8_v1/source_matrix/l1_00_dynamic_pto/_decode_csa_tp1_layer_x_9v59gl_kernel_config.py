@@ -1,0 +1,96 @@
+# Kernel and Orchestration Configuration
+
+from pathlib import Path
+
+from simpler.task_interface import ArgDirection as _D
+
+_ROOT_DIR = Path(__file__).parent
+
+# Runtime configuration for tensormap_and_ringbuffer.
+# AICPU thread count 0 selects the runtime's architecture default (a2a3: 4; a5: 5).
+RUNTIME_CONFIG = {
+	"runtime": "tensormap_and_ringbuffer",
+	"aicpu_thread_num": 0,
+}
+
+ORCHESTRATION = {
+	"source": str(_ROOT_DIR / "orchestration" / "_decode_csa_tp1_layer.cpp"),
+	"function_name": "aicpu_orchestration_entry",
+	"signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.OUT, _D.OUT, _D.OUT],
+}
+
+KERNELS = [
+	{"func_id": 0, "name": "hc_widen_rms", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_widen_rms.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.INOUT, _D.OUT, _D.IN]},
+	{"func_id": 1, "name": "hc_pre_linear", "source": str(_ROOT_DIR / "kernels" / "aic" / "hc_pre_linear.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 2, "name": "hc_pre_linear_reduce", "source": str(_ROOT_DIR / "kernels" / "aiv" / "hc_pre_linear_reduce.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT]},
+	{"func_id": 3, "name": "split_pre_post", "source": str(_ROOT_DIR / "kernels" / "aiv" / "split_pre_post.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.INOUT, _D.OUT, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 4, "name": "comb_sinkhorn", "source": str(_ROOT_DIR / "kernels" / "aiv" / "comb_sinkhorn.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.OUT, _D.INOUT]},
+	{"func_id": 5, "name": "mix_x_rms_norm", "source": str(_ROOT_DIR / "kernels" / "aiv" / "mix_x_rms_norm.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.INOUT, _D.IN, _D.OUT, _D.INOUT, _D.IN]},
+	{"func_id": 6, "name": "csa_row_offsets", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_row_offsets.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.OUT, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 7, "name": "csa_rope_sign", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_rope_sign.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT]},
+	{"func_id": 8, "name": "q_rope_prepare", "source": str(_ROOT_DIR / "kernels" / "aiv" / "q_rope_prepare.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 9, "name": "qr_proj_matmul", "source": str(_ROOT_DIR / "kernels" / "aic" / "qr_proj_matmul.cpp"), "core_type": "aic", "signature": [_D.INOUT, _D.IN, _D.IN]},
+	{"func_id": 10, "name": "qr_proj_matmul_0", "source": str(_ROOT_DIR / "kernels" / "aic" / "qr_proj_matmul_0.cpp"), "core_type": "aic", "signature": [_D.INOUT, _D.IN, _D.IN]},
+	{"func_id": 11, "name": "qr_rms_norm_quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qr_rms_norm_quant.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT]},
+	{"func_id": 12, "name": "qproj_matmul", "source": str(_ROOT_DIR / "kernels" / "aic" / "qproj_matmul.cpp"), "core_type": "aic", "signature": [_D.INOUT, _D.IN, _D.IN]},
+	{"func_id": 13, "name": "qproj_dequant_rms_nope_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qproj_dequant_rms_nope_rope.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT]},
+	{"func_id": 14, "name": "kv_proj_matmul", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_proj_matmul.cpp"), "core_type": "aic", "signature": [_D.INOUT, _D.IN, _D.IN]},
+	{"func_id": 15, "name": "kv_proj_matmul_0", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_proj_matmul_0.cpp"), "core_type": "aic", "signature": [_D.INOUT, _D.IN, _D.IN]},
+	{"func_id": 16, "name": "kv_rms_norm_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "kv_rms_norm_rope.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 17, "name": "csa_cache_writeback", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_cache_writeback.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 18, "name": "kv_score_proj", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_score_proj.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.OUT, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 19, "name": "scatter_softmax_pool", "source": str(_ROOT_DIR / "kernels" / "aiv" / "scatter_softmax_pool.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 20, "name": "compress_state_commit", "source": str(_ROOT_DIR / "kernels" / "aiv" / "compress_state_commit.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 21, "name": "rmsnorm_rope_cache_write", "source": str(_ROOT_DIR / "kernels" / "aiv" / "rmsnorm_rope_cache_write.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.OUT, _D.OUT, _D.IN, _D.IN]},
+	{"func_id": 22, "name": "kv_score_proj_0", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_score_proj_0.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.OUT, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 23, "name": "scatter_softmax_pool_0", "source": str(_ROOT_DIR / "kernels" / "aiv" / "scatter_softmax_pool_0.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 24, "name": "compress_state_commit_0", "source": str(_ROOT_DIR / "kernels" / "aiv" / "compress_state_commit_0.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 25, "name": "indexer_boundary_init", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_boundary_init.cpp"), "core_type": "aiv", "signature": [_D.OUT]},
+	{"func_id": 26, "name": "rmsnorm_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "rmsnorm_rope.cpp"), "core_type": "aiv", "signature": [_D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 27, "name": "kv_hadamard", "source": str(_ROOT_DIR / "kernels" / "aic" / "kv_hadamard.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 28, "name": "kv_and_cache_write", "source": str(_ROOT_DIR / "kernels" / "aiv" / "kv_and_cache_write.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.INOUT, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 29, "name": "idx_kv_scale_commit", "source": str(_ROOT_DIR / "kernels" / "aiv" / "idx_kv_scale_commit.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT]},
+	{"func_id": 30, "name": "idx_qr_proj_matmul", "source": str(_ROOT_DIR / "kernels" / "aic" / "idx_qr_proj_matmul.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 31, "name": "idx_qr_dequant_rope", "source": str(_ROOT_DIR / "kernels" / "aiv" / "idx_qr_dequant_rope.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 32, "name": "qr_hadamard_matmul", "source": str(_ROOT_DIR / "kernels" / "aic" / "qr_hadamard_matmul.cpp"), "core_type": "aic", "signature": [_D.IN, _D.OUT, _D.IN]},
+	{"func_id": 33, "name": "qr_hadamard_quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qr_hadamard_quant.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 34, "name": "weights_proj", "source": str(_ROOT_DIR / "kernels" / "aic" / "weights_proj.cpp"), "core_type": "aic", "signature": [_D.OUT, _D.IN, _D.IN]},
+	{"func_id": 35, "name": "weights_proj_reduce", "source": str(_ROOT_DIR / "kernels" / "aiv" / "weights_proj_reduce.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT]},
+	{"func_id": 36, "name": "indexer_head_coefficients", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_head_coefficients.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 37, "name": "indexer_score_topk_native_pair_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_score_topk_native_pair_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.OUT]},
+	{"func_id": 38, "name": "indexer_score_topk_native_pair_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_score_topk_native_pair_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.OUT]},
+	{"func_id": 39, "name": "indexer_head_coefficients_0", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_head_coefficients_0.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 40, "name": "indexer_score_topk_native_pair_0_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_score_topk_native_pair_0_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 41, "name": "indexer_score_topk_native_pair_0_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_score_topk_native_pair_0_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 42, "name": "indexer_head_coefficients_1", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_head_coefficients_1.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 43, "name": "indexer_score_topk_native_pair_1_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_score_topk_native_pair_1_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 44, "name": "indexer_score_topk_native_pair_1_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_score_topk_native_pair_1_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 45, "name": "indexer_head_coefficients_2", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_head_coefficients_2.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 46, "name": "indexer_score_topk_native_pair_2_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_score_topk_native_pair_2_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 47, "name": "indexer_score_topk_native_pair_2_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_score_topk_native_pair_2_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.OUT]},
+	{"func_id": 48, "name": "indexer_score_topk_leaf_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "indexer_score_topk_leaf_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.OUT, _D.OUT]},
+	{"func_id": 49, "name": "indexer_score_topk_leaf_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_score_topk_leaf_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.OUT, _D.OUT]},
+	{"func_id": 50, "name": "indexer_topk_single_leaf_publish", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_topk_single_leaf_publish.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT, _D.OUT]},
+	{"func_id": 51, "name": "indexer_topk_query_merge", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_topk_query_merge.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.OUT, _D.OUT]},
+	{"func_id": 52, "name": "indexer_topk_query_merge__2", "source": str(_ROOT_DIR / "kernels" / "aiv" / "indexer_topk_query_merge__2.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.OUT, _D.OUT]},
+	{"func_id": 53, "name": "kv_touch", "source": str(_ROOT_DIR / "kernels" / "aiv" / "kv_touch.cpp"), "core_type": "aiv", "signature": [_D.INOUT]},
+	{"func_id": 54, "name": "csa_slots_build_valid_qk_plan", "source": str(_ROOT_DIR / "kernels" / "aiv" / "csa_slots_build_valid_qk_plan.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN, _D.IN, _D.OUT, _D.IN, _D.IN]},
+	{"func_id": 55, "name": "rope_cs", "source": str(_ROOT_DIR / "kernels" / "aiv" / "rope_cs.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT]},
+	{"func_id": 56, "name": "qk_pv_aic", "source": str(_ROOT_DIR / "kernels" / "aic" / "qk_pv_aic.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 57, "name": "qk_pv_aiv", "source": str(_ROOT_DIR / "kernels" / "aiv" / "qk_pv_aiv.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.OUT]},
+	{"func_id": 58, "name": "proj_a_mm", "source": str(_ROOT_DIR / "kernels" / "aic" / "proj_a_mm.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 59, "name": "quant", "source": str(_ROOT_DIR / "kernels" / "aiv" / "quant.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 60, "name": "_proj_b_mm_nz_kernel", "source": str(_ROOT_DIR / "kernels" / "aic" / "_proj_b_mm_nz_kernel.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 61, "name": "proj_b_act_hc_post", "source": str(_ROOT_DIR / "kernels" / "aiv" / "proj_b_act_hc_post.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 62, "name": "proj_a_mm_0", "source": str(_ROOT_DIR / "kernels" / "aic" / "proj_a_mm_0.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 63, "name": "quant_0", "source": str(_ROOT_DIR / "kernels" / "aiv" / "quant_0.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 64, "name": "_proj_b_mm_nz_kernel__2", "source": str(_ROOT_DIR / "kernels" / "aic" / "_proj_b_mm_nz_kernel__2.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 65, "name": "proj_b_act_hc_post_0", "source": str(_ROOT_DIR / "kernels" / "aiv" / "proj_b_act_hc_post_0.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 66, "name": "proj_a_mm_1", "source": str(_ROOT_DIR / "kernels" / "aic" / "proj_a_mm_1.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 67, "name": "quant_1", "source": str(_ROOT_DIR / "kernels" / "aiv" / "quant_1.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 68, "name": "proj_b_act_hc_post_1", "source": str(_ROOT_DIR / "kernels" / "aiv" / "proj_b_act_hc_post_1.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+	{"func_id": 69, "name": "proj_a_mm_2", "source": str(_ROOT_DIR / "kernels" / "aic" / "proj_a_mm_2.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 70, "name": "quant_2", "source": str(_ROOT_DIR / "kernels" / "aiv" / "quant_2.cpp"), "core_type": "aiv", "signature": [_D.OUT, _D.OUT, _D.IN]},
+	{"func_id": 71, "name": "_proj_b_mm_nz_kernel__3", "source": str(_ROOT_DIR / "kernels" / "aic" / "_proj_b_mm_nz_kernel__3.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.OUT]},
+	{"func_id": 72, "name": "proj_b_act_hc_post_2", "source": str(_ROOT_DIR / "kernels" / "aiv" / "proj_b_act_hc_post_2.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.OUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN]},
+]
