@@ -36,6 +36,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
+    parser.add_argument("--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original")
     parser.add_argument("--launches", type=int, choices=(1, 3), default=3)
     parser.add_argument("--l1-windows", type=int, default=0)
     parser.add_argument("--wait-backoff", action="store_true")
@@ -58,7 +59,7 @@ def main():
     parser.add_argument("--candidate-ptoas-root", type=Path, required=True)
     parser.add_argument("--spmd-source", type=Path, default=HERE / "source_candidate")
     parser.add_argument("--policy-json", type=Path)
-    parser.add_argument("--source-matrix-reference", type=Path)
+    parser.add_argument("--source-matrix-reference", type=Path, required=True)
     parser.add_argument("--static-reference", action="store_true",
                         help="加入历史selected静态SPMD，同Native根/独立暂存/原冻结调度")
     parser.add_argument("--failure-snapshot", action="store_true",
@@ -180,10 +181,15 @@ def main():
         from compiler_context import bind_compiler, record_invocations
         record_invocations(args.output / "COMPILER_INVOCATIONS.jsonl")
         PreparedDynamicCSA = bind_compiler(PreparedDynamicCSA, args.candidate_ptoas_root)
+        candidate_files = {path.name: path.read_bytes() for path in isolated.source.glob("*.py")}
+        reference_files = {path.name: path.read_bytes() for path in args.source_matrix_reference.glob("*.py")}
+        source_differences = sorted(name for name in candidate_files.keys() | reference_files.keys()
+                                    if candidate_files.get(name) != reference_files.get(name))
         report["compiler_comparison"] = {
             "candidate": str(args.candidate_ptoas_root),
             "reference": os.environ["PTOAS_ROOT"],
-            "same_operator_source": True,
+            "same_operator_source": not source_differences,
+            "operator_source_differences": source_differences,
         }
         report["source_package"] = str(isolated.source)
 
@@ -235,6 +241,26 @@ def main():
             report["stage"] = "formal_weights_loaded"
             save(args.output, report)
             fixture = make_fixture(config, layer.self_attn, args.batch, args.history, 1024, device)
+            # 功能扩展只重排完整历史页，保留当前写入页及Native slot_mapping。
+            # 默认original仍是七档已有输入；扩展样例不能混入正式七档性能表。
+            full_history_pages = args.history // (4 * 32)
+            if args.indexer_page_pattern != "original":
+                if full_history_pages < 4:
+                    raise ValueError("页序功能样例至少需要四个完整历史页")
+                indexer_table = fixture["groups"]["indexer"]["common"].block_table_tensor
+                if args.indexer_page_pattern == "ascending_history":
+                    indexer_table[:, :full_history_pages].copy_(
+                        indexer_table[:, :full_history_pages].flip([1]))
+                else:
+                    page_one = indexer_table[:, 1].clone()
+                    indexer_table[:, 1].copy_(indexer_table[:, 2])
+                    indexer_table[:, 2].copy_(page_one)
+            report["indexer_page_pattern"] = {
+                "pattern": args.indexer_page_pattern,
+                "full_history_pages": full_history_pages,
+                "current_slot_mapping_unchanged": True,
+                "canonical_seven_input": args.indexer_page_pattern == "original",
+            }
             # 保留原对照用非均匀scale，避免常量scale掩盖页/行索引错误。
             idx_group = fixture["groups"]["indexer"]
             scale = idx_group["views"][1]

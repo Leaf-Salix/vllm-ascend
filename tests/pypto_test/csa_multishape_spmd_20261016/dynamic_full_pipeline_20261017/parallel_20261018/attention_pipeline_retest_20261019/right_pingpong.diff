@@ -1,0 +1,54 @@
+--- acc_isolated/attention_stream_stages.py
++++ acc_right_pingpong/attention_stream_stages.py
+@@ -13,6 +13,10 @@
+     attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
+     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
+     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
++    本候选在已验证的QK独立Acc/双PV Acc基础上，给PV增加一片前瞻Right：
++    计算当前N128前先提取下一片，使当前和下一片同时存活，要求实际L0B
++    使用两个32KiB槽。只展开固定512列，不固定B/T/metadata。需要生成物
++    核对物理地址及依赖，再由真机完整L1判定收益；不是仅添加pipeline标签。
+     LOCAL_ATTENTION_STATS由policy按已有历史/投影区间选择。开启时将每块
+     softmax的mi/li保存在本AIV独占的三槽UB环中，隔两拍
+     在线归并直接复用，删除只由本lane消费的mi/li GM写出与回读。
+@@ -206,23 +210,32 @@
+                 pv_first_right = pl.tile.extract(
+                     qk_l1, pv_l1_row, 0, [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right
+                 )
++                # 序言先备好第0/1片；两片都将在后续使用，禁止复用同一个L0B地址。
++                # 每片128×128 BF16=32KiB，两片合计64KiB，不增加GM或L1搬运。
++                pv_current_right = pl.tile.extract(
++                    qk_l1, pv_l1_row, PV_N_TILE, [ATTN_K_TILE, PV_N_TILE],
++                    target_memory=pl.MemorySpace.Right,
++                )
+                 pv_previous = pl.tile.slice(qkpv_acc_pool, [H, PV_N_TILE], [0, PV_N_TILE])
+                 pv_previous = pl.tile.matmul_acc(pv_previous, pv_probability_left, pv_first_right, init_cond=True)
+                 for pv_n in pl.unroll(1, HEAD_DIM // PV_N_TILE):
+-                    pv_next_right = pl.tile.extract(
+-                        qk_l1,
+-                        pv_l1_row,
+-                        pv_n * PV_N_TILE,
+-                        [ATTN_K_TILE, PV_N_TILE],
+-                        target_memory=pl.MemorySpace.Right,
+-                    )
++                    # 当前片尚未消费时提取下一片，让生存期相交，促成真实双槽。
++                    # 尾部第3片不再预取，不能越过512列。只有N的固定四片展开；
++                    # query/页表/三槽行地址及有效块仍按本轮device输入动态计算。
++                    if pv_n + 1 < HEAD_DIM // PV_N_TILE:
++                        pv_prefetched_right = pl.tile.extract(
++                            qk_l1, pv_l1_row, (pv_n + 1) * PV_N_TILE,
++                            [ATTN_K_TILE, PV_N_TILE], target_memory=pl.MemorySpace.Right,
++                        )
+                     # 同时保留前后两个累加器，让前块FIX写回与后块Cube重叠。
+                     # 只在第二、第三窗口轮转，第一窗口始终留给QK。
+                     # 原前一PV写回/后一PV计算的顺序保持，原依赖继续由编译器维护。
+                     pv_current = pl.tile.slice(qkpv_acc_pool, [H, PV_N_TILE], [0, (1 + pv_n % 2) * PV_N_TILE])
+-                    pv_current = pl.tile.matmul_acc(pv_current, pv_probability_left, pv_next_right, init_cond=True)
++                    pv_current = pl.tile.matmul_acc(pv_current, pv_probability_left, pv_current_right, init_cond=True)
+                     pl.store(pv_previous, [pv_transfer_row, (pv_n - 1) * PV_N_TILE], pv_transfer)
+                     pv_previous = pv_current
++                    if pv_n + 1 < HEAD_DIM // PV_N_TILE:
++                        pv_current_right = pv_prefetched_right
+                 pl.store(pv_previous, [pv_transfer_row, HEAD_DIM - PV_N_TILE], pv_transfer)
+                 pl.system.sync_set(
+                     EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC

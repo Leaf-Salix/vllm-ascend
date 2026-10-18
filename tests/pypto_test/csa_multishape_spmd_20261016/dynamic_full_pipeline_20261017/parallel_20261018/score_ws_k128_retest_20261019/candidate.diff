@@ -1,0 +1,104 @@
+--- reference/indexer_score_stages.py
++++ candidate/indexer_score_stages.py
+@@ -13,6 +13,11 @@
+     两AIV读取分数、乘Native key scale并生成叶Top512根。二者必须在一个
+     MIX内并发推进，不能先等完整AIC阶段后才调用AIV。本模块不含short Vector
+     score、最终query Top-K发布或完整CSA入口；不创建spmd/task/阶段通知。
++    本轮重验G6的WS K128流水：原完整K384搬入48KiB Right后归约，改为
++    0/128/256三片升序累计，右操作数用两个16KiB槽。仍一次写出16×N
++    （实际G行），不拆query或改变GM布局；G2沿用原路径。仅固定模型/策略
++    tile，T/B、页表、叶数和循环边界保持device动态。CPU分配及真机精确结果
++    都须验证，不能因累计顺序看似相同便声称精度或性能通过。
+ 
+ 动态布局和分组
+     Q/L/positions与group_offsets/plan来自正式indexer_group_stages，T/B、
+@@ -91,6 +96,7 @@
+ BUFFERED_LONG_SCORE_TILE = 1024
+ BUFFERED_SCORE_SCALE = 1024.0
+ NATIVE_QLI_WEIGHT_ROWS = 16
++WS_REDUCTION_K_TILE = 128
+ 
+ 
+ @pl.jit.inline(auto_scope=False)
+@@ -332,15 +338,34 @@
+                         [query_group_size * IDX_N_HEADS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat
+                     )
+                     if buf_qk_panel > 0:
+-                        buf_previous_pair = pl.tile.extract(
+-                            buf_previous_l1,
+-                            0,
+-                            0,
+-                            [query_group_size * IDX_N_HEADS, qk_panel_cols],
+-                            target_memory=pl.MemorySpace.Right,
+-                        )
+-                        buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
+-                        buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
++                        if query_group_size == 6:
++                            # 先发当前QK；其结果留在原96KiB Acc，不改变FP16落点。
++                            # WS只分K，不增加GM写回。两个16KiB Right给MTE1/Cube
++                            # 留出重叠空间，仍按0、128、256顺序累加全部head。
++                            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
++                            buf_reduced_pair = pl.tile.create(
++                                [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32,
++                                target_memory=pl.MemorySpace.Acc,
++                            )
++                            for ws_k in pl.pipeline(0, query_group_size * IDX_N_HEADS, WS_REDUCTION_K_TILE, stage=2):
++                                ws_coeff = pl.tile.slice(
++                                    buf_coefficient_pair, [NATIVE_QLI_WEIGHT_ROWS, WS_REDUCTION_K_TILE], [0, ws_k]
++                                )
++                                ws_right = pl.tile.extract(
++                                    buf_previous_l1, ws_k, 0, [WS_REDUCTION_K_TILE, qk_panel_cols],
++                                    target_memory=pl.MemorySpace.Right,
++                                )
++                                buf_reduced_pair = pl.tile.matmul_acc(
++                                    buf_reduced_pair, ws_coeff, ws_right, init_cond=(ws_k == 0)
++                                )
++                        else:
++                            buf_previous_pair = pl.tile.extract(
++                                buf_previous_l1, 0, 0,
++                                [query_group_size * IDX_N_HEADS, qk_panel_cols],
++                                target_memory=pl.MemorySpace.Right,
++                            )
++                            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
++                            buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
+                         buf_scores_l1 = pl.tile.assemble(
+                             buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
+                         )
+@@ -359,14 +384,29 @@
+                         if key_prefetch_to_l0:
+                             if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                 buf_current_key = buf_prefetched_key
+-                buf_last_pair = pl.tile.extract(
+-                    buf_previous_l1,
+-                    0,
+-                    0,
+-                    [query_group_size * IDX_N_HEADS, qk_panel_cols],
+-                    target_memory=pl.MemorySpace.Right,
+-                )
+-                buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
++                if query_group_size == 6:
++                    # 最后一块WS同样排空三段K，最后一次QK的FP16结果仍完整保留。
++                    buf_last_scores = pl.tile.create(
++                        [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32,
++                        target_memory=pl.MemorySpace.Acc,
++                    )
++                    for ws_last_k in pl.pipeline(0, query_group_size * IDX_N_HEADS, WS_REDUCTION_K_TILE, stage=2):
++                        ws_last_coeff = pl.tile.slice(
++                            buf_coefficient_pair, [NATIVE_QLI_WEIGHT_ROWS, WS_REDUCTION_K_TILE], [0, ws_last_k]
++                        )
++                        ws_last_right = pl.tile.extract(
++                            buf_previous_l1, ws_last_k, 0, [WS_REDUCTION_K_TILE, qk_panel_cols],
++                            target_memory=pl.MemorySpace.Right,
++                        )
++                        buf_last_scores = pl.tile.matmul_acc(
++                            buf_last_scores, ws_last_coeff, ws_last_right, init_cond=(ws_last_k == 0)
++                        )
++                else:
++                    buf_last_pair = pl.tile.extract(
++                        buf_previous_l1, 0, 0,
++                        [query_group_size * IDX_N_HEADS, qk_panel_cols], target_memory=pl.MemorySpace.Right,
++                    )
++                    buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
+                 pl.store(
+                     pl.set_validshape(buf_last_scores, query_group_size, qk_panel_cols),
+                     [buf_transfer_row, score_tile - qk_panel_cols],

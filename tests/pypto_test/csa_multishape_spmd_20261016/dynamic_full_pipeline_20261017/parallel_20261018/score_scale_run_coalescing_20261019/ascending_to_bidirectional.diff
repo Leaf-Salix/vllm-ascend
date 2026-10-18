@@ -1,0 +1,90 @@
+--- ascending
++++ bidirectional
+@@ -14,7 +14,7 @@
+     MIX内并发推进，不能先等完整AIC阶段后才调用AIV。本模块不含short Vector
+     score、最终query Top-K发布或完整CSA入口；不创建spmd/task/阶段通知。
+     本候选只优化balanced路径的Native scale读取：每个叶先用Vector验证
+-    实际页表在该叶内是否构成连续物理页。成立时每个score块以一次二维
++    实际页表在该叶内是否构成正序或逆序连续物理页。成立时每个score块以一次二维
+     stride搬运取得至多32页scale；不成立时执行原逐页gather。证明每叶做一次，
+     不是每个score块再扫描。没有Host回读、额外GM工作区或缓存格式转换。
+     页表、容量、尾页均按实际metadata检查；只能在完整精度及真机L1通过后采用。
+@@ -450,11 +450,19 @@
+                                 valid_shape=[1, single_page_count],
+                             )
+                             scale_first = pl.cast(pl.tile.read(scale_page_ids, [0, 0]), pl.INDEX)
+-                            if scale_first >= 0 and scale_first + single_page_count <= pl.tensor.dim(idx_native_kv_cache, 0):
++                            # Native BlockTable可正序或逆序分配。先选方向，再对
++                            # 全部有效页证明；仅看首尾不足以允许跳跃/重复页。
++                            scale_last = pl.cast(pl.tile.read(scale_page_ids, [0, single_page_count - 1]), pl.INDEX)
++                            scale_direction = pl.cast(1, pl.INT32)
++                            if scale_last < scale_first:
++                                scale_direction = pl.cast(-1, pl.INT32)
++                            scale_end = scale_first + pl.cast(scale_direction, pl.INDEX) * (single_page_count - 1)
++                            if pl.min(scale_first, scale_end) >= 0 and pl.max(scale_first, scale_end) < pl.tensor.dim(idx_native_kv_cache, 0):
+                                 # 页号范围<2^24时整数可无损表示为FP32。比较完整有效
+-                                # 前缀与first+[0..count)，非法/重复/跳跃页都不能通过。
++                                # 前缀与first±[0..count)，非法/重复/跳跃页都不能通过。
+                                 scale_expected = pl.set_validshape(
+-                                    pl.add(pl.cast(pl.tile.ci(0, [1, SCALE_RUN_MAX_PAGES], dtype=pl.INT32), pl.FP32),
++                                    pl.add(pl.mul(pl.cast(pl.tile.ci(0, [1, SCALE_RUN_MAX_PAGES], dtype=pl.INT32), pl.FP32),
++                                                  pl.cast(scale_direction, pl.FP32)),
+                                            pl.cast(pl.cast(scale_first, pl.INT32), pl.FP32)), 1, single_page_count,
+                                 )
+                                 scale_difference = pl.abs(pl.sub(pl.cast(scale_page_ids, pl.FP32), scale_expected))
+@@ -469,7 +477,7 @@
+                                 scale_reduce_tmp = pl.create_tile([SCALE_PROOF_ROWS, SCALE_RUN_MAX_PAGES], dtype=pl.FP32)
+                                 scale_max_difference = pl.row_max(scale_repeated, scale_reduce_tmp)
+                                 if pl.tile.read(scale_max_difference, [0, 0]) == 0.0:
+-                                    single_contiguous = pl.cast(1, pl.INT32)
++                                    single_contiguous = scale_direction
+                                     single_first_page = scale_first
+                 single_roots = pl.tile.full([query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF)
+                 single_segments = pl.tile.full(
+@@ -490,14 +498,18 @@
+                         pl.fillpad(pl.tile.full([1, score_tile], dtype=pl.FP16, value=0.0),
+                                    pad_value=pl.PadValue.zero), pl.INT8
+                     )
+-                    if single_contiguous > 0:
++                    if single_contiguous != 0:
+                         # Native每页的key后仍是原64B scale；源行距由Tensor描述符
+                         # 的page_bytes提供。一次二维MTE2搬入多页，不碰key区域。
+                         run_pages = pl.min(score_tile // BLOCK_SIZE,
+                                            single_page_count - single_step * (score_tile // BLOCK_SIZE))
++                        run_first = single_first_page + single_step * (score_tile // BLOCK_SIZE) * pl.cast(single_contiguous, pl.INDEX)
++                        run_lowest = run_first
++                        if single_contiguous < 0:
++                            run_lowest = run_first - run_pages + 1
+                         run_bytes = pl.load(
+                             idx_native_kv_cache,
+-                            [single_first_page + single_step * (score_tile // BLOCK_SIZE), INDEXER_KEY_BYTES],
++                            [run_lowest, INDEXER_KEY_BYTES],
+                             [score_tile // BLOCK_SIZE, BLOCK_SIZE * 2], valid_shape=[run_pages, BLOCK_SIZE * 2],
+                         )
+                         # 尾块只加载真实页。按FP16填零未加载的行，再展平，避免
+@@ -505,7 +517,24 @@
+                         run_half = pl.tile.reinterpret_view(run_bytes, pl.FP16)
+                         run_clean = pl.fillpad(run_half, pad_value=pl.PadValue.zero)
+                         run_full = pl.set_validshape(run_clean, score_tile // BLOCK_SIZE, BLOCK_SIZE)
+-                        single_scale_bytes = pl.tile.reinterpret_view(pl.reshape(run_full, [1, score_tile]), pl.INT8)
++                        run_flat = pl.reshape(run_full, [1, score_tile])
++                        if single_contiguous < 0:
++                            # MTE2始终按物理地址递增读。逆序页在UB按64B页倒序，
++                            # 每页内部32个FP16保持原顺序。TGATHERB每索引搬32B，
++                            # 两个索引组成一页，仅需64个UINT32字节偏移。
++                            run_blocks = pl.tile.ci(0, [1, 2 * (score_tile // BLOCK_SIZE)], dtype=pl.INT32)
++                            run_page_ids = pl.tile.shrs(run_blocks, 1)
++                            run_halves = pl.sub(run_blocks, pl.mul(run_page_ids, 2))
++                            run_reverse_pages = pl.maximum(
++                                pl.add(pl.neg(run_page_ids), pl.cast(run_pages - 1, pl.INT32)), 0
++                            )
++                            run_offsets = pl.add(pl.mul(run_reverse_pages, BLOCK_SIZE * 2), pl.mul(run_halves, 32))
++                            run_reversed = pl.tile.gatherb(run_flat, pl.tile.reinterpret_view(run_offsets, pl.UINT32))
++                            # 尾页后的索引钳制到已加载第0页，不访问未加载或负地址；
++                            # 随后按真实页数补零，保证无效区不会带入陈旧UB数据。
++                            run_used = pl.set_validshape(run_reversed, 1, run_pages * BLOCK_SIZE)
++                            run_flat = pl.set_validshape(pl.fillpad(run_used, pad_value=pl.PadValue.zero), 1, score_tile)
++                        single_scale_bytes = pl.tile.reinterpret_view(run_flat, pl.INT8)
+                     else:
+                         # 两AIV读取同一候选区间的scale；页表与slab容量检查先于gather。
+                         for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
