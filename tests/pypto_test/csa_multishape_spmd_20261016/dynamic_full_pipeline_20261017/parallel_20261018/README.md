@@ -1042,3 +1042,8 @@ runner复用正式权重、原动态PTO精确oracle、状态/保护区及图代�
 `jit_tile_parameter_evidence`归档独立overlay最小补丁与56项小文本。实际最小失败为inline参数缺注解；specializer只增加Tile注解保留和已有模块常量折叠。普通Tile原样返回以及实际full-valid状态的assemble/tuple/loop carry均完成CPU lowering/PTOAS，动态T仍为运行时参数。full-state生成Vec roots/segments在0/12288B，incoming在36864B；仅原assemble的两次TMOV，无helper整体复制。旧隔离依赖文件保持原文，共享安装未动。
 
 边界如实保留：首次夹具把pl放局部引发注解命名空间失败，修正为与正式源一致的模块导入后再次参考/候选对照；动态valid_shape的loop carry仍因valid类型不一致失败；同helper constexpr维度注解仍不支持，InOut仅specialize通过。Mat/Left的新helper及联合CSA尚未编译，不扩大Vec小例结论。所有失败、小生成PTO/C++和本地大文件路径大小清单均保存；没有新增NPU任务或性能采样。下一阶段先组装动态wave控制、查询基址和全部状态，再做一次有理由的代表性联合lowering。
+
+
+## 动态 Score/Attention wave 联合候选
+
+`score_attention_interleave_candidate/README.md` 保存完整接入、三次CPU编译及源码规避证据。v3已过Inline/Unroll/SSA，但实际Left需要77824B、超过65536B，未上卡、无新性能结果。正式33源仍为66882634；动态wave、实际owner、独立ROOT/TOPK/PLAN容量与失败边界均在该目录说明。

@@ -1,0 +1,72 @@
+{
+  "passed": true,
+  "scope": "仅源级SSA规避与归一化AST审计；未PyPTO编译/设备",
+  "failure_summary": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v2_summary.json",
+  "large_result_read": false,
+  "archives": [
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/ssa_v2_source/interleave_vector_wave.py",
+    "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/ssa_v2_source/vector_schedule.py"
+  ],
+  "executor": {
+    "scalar_bridges": {
+      "next_item_iter": "score_next_item_value",
+      "leaf_iter": "score_leaf_value",
+      "batch_iter": "score_batch_value",
+      "query_iter": "score_query_value",
+      "live_iter": "score_live_value",
+      "cache_len_iter": "score_cache_len_value",
+      "begin_iter": "score_begin_value",
+      "steps_iter": "score_steps_value",
+      "step_iter": "score_step_value",
+      "wrote_iter": "score_wrote_value"
+    },
+    "gm_return_aliases": {
+      "kv_transfer": "tick_kv_alias",
+      "probability_transfer": "tick_probability_alias",
+      "mi_transfer": "tick_mi_alias",
+      "li_transfer": "tick_li_alias",
+      "o_packed_heads": "tick_output_alias",
+      "pair_arena": "leaf_pair_alias"
+    },
+    "normalize_aliases_whole_module_equal": true,
+    "explicit_range_carry_count": 16,
+    "math_shapes_dependencies_unchanged": true
+  },
+  "schedule": {
+    "explicit_while_scalar_count": 5,
+    "gm_carried_explicitly": false,
+    "discarded_return_aliases": {
+      "wave_return_0_signal": "signal",
+      "wave_return_1_signal": "signal",
+      "wave_return_2_signal": "signal",
+      "wave_return_3_signal": "signal",
+      "wave_return_4_pair_arena": "pair_arena",
+      "wave_return_5_kv_ring": "kv_ring",
+      "wave_return_6_probability_ring": "probability_ring",
+      "wave_return_7_mi_ring": "mi_ring",
+      "wave_return_8_li_ring": "li_ring",
+      "wave_return_9_packed": "packed",
+      "wave_return_10_signal": "signal",
+      "wave_return_11_signal": "signal",
+      "wave_return_12_topk_scores": "topk_scores",
+      "wave_return_13_topk_indices": "topk_indices",
+      "wave_return_14_signal": "signal",
+      "wave_return_15_signal": "signal",
+      "wave_return_16_attention_indices": "attention_indices",
+      "wave_return_17_attention_bias": "attention_bias",
+      "wave_return_18_attention_mask": "attention_mask",
+      "wave_return_19_signal": "signal"
+    },
+    "normalize_while_and_aliases_whole_module_equal": true,
+    "original_phase_call_order_preserved": true
+  },
+  "compiler_boundary": {
+    "evidence": "独立agent报告00/01 Inline FREE_VAR=0，02 UnrollLoops首次102个；未读取622MB文件。",
+    "source": "unroll_loops.cpp:98 DeepClone(clone_def_vars=false)，deep_clone_utils.cpp:101 IterArg未映射时仍fresh clone。",
+    "workaround": "含unroll的helper调用前建立普通Scalar Var bridge；不在unroll体内才做别名。",
+    "status": "根因有阶段证据；源码规避仍待下一轮联合lowering确认，不修改依赖。"
+  },
+  "python_syntax_passed": true,
+  "device_execution": false,
+  "pypto_compile_executed": false
+}

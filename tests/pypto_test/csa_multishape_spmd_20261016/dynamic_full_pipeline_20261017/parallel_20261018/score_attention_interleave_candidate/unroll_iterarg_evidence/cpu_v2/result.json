@@ -1,0 +1,112 @@
+{
+  "cpu_only": true,
+  "whole_csa_compiled": false,
+  "npu_execution": false,
+  "sample_shapes_supplied": false,
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/jit_tile_parameter_overlay_20261018/pypto_overlay/python/pypto/__init__.py",
+  "binary": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/pypto_core.cpython-310-aarch64-linux-gnu.so",
+  "cases": {
+    "direct": {
+      "ssa_passed": false,
+      "stage": "verify_ssa",
+      "passes": [
+        {
+          "stage": "00_frontend",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/00_frontend.py",
+          "bytes": 2493,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "01_inline",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/01_inline.py",
+          "bytes": 1975,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "02_unroll",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/02_unroll.py",
+          "bytes": 2116,
+          "free_var_count": 4,
+          "free_var_names": [
+            "live_iter_1__FREE_VAR",
+            "live_iter_2__FREE_VAR",
+            "step_iter_1__FREE_VAR",
+            "step_iter_2__FREE_VAR"
+          ]
+        },
+        {
+          "stage": "03_control_flow",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/03_control_flow.py",
+          "bytes": 2116,
+          "free_var_count": 4,
+          "free_var_names": [
+            "live_iter_1__FREE_VAR",
+            "live_iter_2__FREE_VAR",
+            "step_iter_1__FREE_VAR",
+            "step_iter_2__FREE_VAR"
+          ]
+        },
+        {
+          "stage": "04_ssa",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/04_ssa.py",
+          "bytes": 2454,
+          "free_var_count": 4,
+          "free_var_names": [
+            "live_iter_1__FREE_VAR",
+            "live_iter_2__FREE_VAR",
+            "step_iter_1__FREE_VAR",
+            "step_iter_2__FREE_VAR"
+          ]
+        }
+      ],
+      "error_type": "Error",
+      "error_preview": "IR Verification Report\n======================\nTotal diagnostics: 8 (8 errors, 0 warnings)\n\n[1] ERROR - SSAVerify\n  Message: Variable 'step_iter' used outside its defining scope\n  In function 'direct_kernel':\n@pl.function(type=pl.FunctionType.InCore, level=pl.Level.CHIP_DIE, role=pl.Role.SubWorker)\ndef direct_kernel(output__ssa_v0: pl.InOut[pl.Tensor[[LOOP_SCOPE_DYNAMIC_ROWS, 64], pl.FP32]]) -> pl.Tensor[[LOOP_SCOPE_DYNAMIC_ROWS, 64], pl.FP32]:\n    rows__ssa_v0: pl.Scalar[pl.INDEX] = pl.tensor.dim(output__ssa_v0, 0)\n    state__ssa_v0: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec] = pl.tile.full([2, 64], dtype=pl.FP32, value=0.0)\n    row__ssa_v0: pl.Tile[[1, 64], pl.FP32, pl.Mem.Vec] = pl.tile.full([1, 64], dtype=pl.FP32, value=1.0)\n    initial_step__ssa_v0: pl.Scalar[pl.INDEX] = pl.cast(0, pl.INDEX)\n    initial_live__ssa_v0: pl.Scalar[pl.INDEX] = pl.min(rows__ssa_v0, 1)\n    for tick__idx_v0, (state_iter, step_iter, live_iter) in pl.range(pl.min(rows__ssa_v0, 2), init_values=(state__ssa_v0, initial_step__ssa_v0, initial_live__ssa_v0)):\n        state_local_inline1__ssa_v0: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec] = state_iter\n        state_local_inline1__ssa_v1: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec] = pl.tile.assemble(state_local_inline1__ssa_v0, row__ssa_v0, [(step_iter_1__FREE_VAR + 0 + live_iter_1__FREE_VAR) % 2, 0])\n        state_local_inline1__ssa_v2: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec] = pl.tile.assemble(state_local_inline1__ssa_v1, row__ssa_v0, [(step_iter_2__FREE_VAR + 1 + live_iter_2__FREE_VAR) % 2, 0])\n        next_state__ssa_v0: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec] = state_local_inline1__ssa_v2\n        final_state, final_step, final_live = pl.yield_(next_state__ssa_v0, step_iter + 1, live_iter)\n    valid_state__ssa_v0: pl.Tile[[2, 64], pl.FP32, pl.Mem.Vec, pl.TileView(valid_shape=[pl.min(rows__ssa_v0, pl.const(2, pl.INDEX)), 64])] = pl.tile.set_validshape(final_state, pl.min(rows__ssa_v0, 2), 64)\n    output_v1__ssa_v0: pl.Tensor[[LOOP_SCOPE_DYNAMIC_ROWS, 64], pl.FP32] = pl.tile.store(valid_state__ssa_v0, [0, 0], ",
+      "error_path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/direct/error_full.txt",
+      "error_bytes": 17746
+    },
+    "alias": {
+      "ssa_passed": true,
+      "stage": "verify_ssa",
+      "passes": [
+        {
+          "stage": "00_frontend",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/alias/00_frontend.py",
+          "bytes": 2594,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "01_inline",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/alias/01_inline.py",
+          "bytes": 2076,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "02_unroll",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/alias/02_unroll.py",
+          "bytes": 2167,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "03_control_flow",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/alias/03_control_flow.py",
+          "bytes": 2167,
+          "free_var_count": 0,
+          "free_var_names": []
+        },
+        {
+          "stage": "04_ssa",
+          "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-indexer-20261018/tests/pypto_test/inline_loop_scope_repro_20261018/cpu_v2/alias/04_ssa.py",
+          "bytes": 2493,
+          "free_var_count": 0,
+          "free_var_names": []
+        }
+      ]
+    }
+  },
+  "hypothesis_confirmed": true
+}

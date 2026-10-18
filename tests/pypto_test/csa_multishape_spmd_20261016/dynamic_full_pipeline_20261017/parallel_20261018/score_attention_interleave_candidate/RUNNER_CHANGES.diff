@@ -1,0 +1,355 @@
+--- original_runner/run_device.py
++++ candidate_runner/run_device.py
+@@ -16,7 +16,10 @@
+ from types import SimpleNamespace
+ 
+ HERE = Path(__file__).resolve().parent
+-REPO = HERE.parents[3]
++BASE_D = HERE.parents[1]
++REPO = BASE_D.parents[3]
++
++from signal_checks import signal_padding_ok, signal_padding_status, signal_view
+ 
+ 
+ def save(output, report):
+@@ -52,11 +55,13 @@
+     parser.add_argument("--hc-consumer-matrix", action="store_true")
+     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default=None)
+     parser.add_argument("--attention-query-matrix", action="store_true")
+-    parser.add_argument("--spmd-source", type=Path)
++    parser.add_argument("--spmd-source", type=Path, default=HERE / "source_candidate")
+     parser.add_argument("--policy-json", type=Path)
+     parser.add_argument("--source-matrix-reference", type=Path)
+     parser.add_argument("--device", type=int, default=int(os.environ.get("TASK_DEVICE", "-1")))
+     args = parser.parse_args()
++    if args.phase_clock:
++        raise ValueError("交错候选runner保持扩展padding全零；本入口不支持phase-clock插桩")
+     if "TASK_DEVICE" not in os.environ:
+         raise RuntimeError("必须通过task-submit --device auto取得设备")
+     if args.device != int(os.environ["TASK_DEVICE"]):
+@@ -160,12 +165,17 @@
+ 
+         pypto_root = Path(os.environ["CSA_STATIC_PYPTO_ROOT"]).resolve()
+         simpler_root = Path(os.environ["HCA_SIMPLER_ROOT"]).resolve()
++        assert pypto_root in Path(pypto.__file__).resolve().parents
+         for module in (pypto_core, _torch_npu):
+-            assert pypto_root in Path(module.__file__).resolve().parents
++            # overlay只复用原二进制符号链接，不能要求其resolve目标位于overlay。
++            expected_binary = pypto_root / "python/pypto" / Path(module.__file__).name
++            assert Path(module.__file__).resolve() == expected_binary.resolve()
+         for module in (simpler, _task_interface):
+             assert simpler_root in Path(module.__file__).resolve().parents
+         report["environment"] = {
+             "pypto": pypto_core.__file__,
++            "pypto_python": pypto.__file__,
++            "pypto_binary_resolved": str(Path(pypto_core.__file__).resolve()),
+             "adapter": _torch_npu.__file__,
+             "simpler": _task_interface.__file__,
+             "device": device_id,
+@@ -187,6 +197,8 @@
+             HERE / "output_policy_matrix.py",
+             HERE / "check_output_phase_signals.py",
+             HERE / "source_loader.py",
++            HERE / "signal_checks.py",
++            HERE / "run_device.sh",
+         ):
+             (args.output / script.name).write_text(script.read_text())
+         with native_session(config, device_id), torch.inference_mode():
+@@ -340,12 +352,9 @@
+                     name: bool((base[:g].cpu() == 37).all() and (base[-g:].cpu() == 37).all())
+                     for name, (base, g) in allocations.items()
+                 }
+-                signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
+-                padding_ok = (
+-                    (signal[:, :, 1:16] == 0).all() and (signal[:, :, 20:] == 0).all()
+-                    if args.phase_clock
+-                    else (signal[:, :, 1:] == 0).all()
+-                )
++                signal = signal_view(candidate)
++                padding_status = signal_padding_status(signal)
++                padding_ok = all(padding_status.values())
+                 protocol = bool((signal[0, :, 0] == generation).all() and padding_ok)
+                 if args.phase_clock:
+                     from compile_diagnostics import export_clock
+@@ -360,7 +369,11 @@
+                     guards=guards,
+                     scratch_guards=scratch_guards,
+                     protocol=protocol,
+-                    observed_phase_slots=signal[:, :, 0].tolist(),
++                    # 原输出owner检查继续只接收完全相同的60-phase前缀。
++                    observed_phase_slots=signal[:PHASE_COUNT, :, 0].tolist(),
++                    observed_wave_phase_slots=signal[PHASE_COUNT:, :, 0].tolist(),
++                    signal_phase_count=signal.shape[0],
++                    signal_padding=padding_status,
+                 )
+                 checks["passed"] = (
+                     all(c["status"] == "PASS" for c in comparisons.values())
+@@ -448,7 +461,7 @@
+                     report["stage"] = stage
+                     save(args.output, report)
+ 
+-                before_l1 = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
++                before_l1 = signal_view(candidate)[0, :, 0]
+                 if not bool((before_l1 == before_l1[0]).all()):
+                     raise AssertionError("L1前参与核代际不一致")
+                 if args.output_policy_matrix or args.hc_policy_matrix or args.attention_query_matrix or args.hc_consumer_matrix or args.source_matrix_reference:
+@@ -497,10 +510,10 @@
+                         output=args.output,
+                         windows=args.l1_windows,
+                     )
+-                    signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
++                    signal = signal_view(candidate)
+                     expected_generation = before_l1 + report["l1"]["spmd_calls"]
+                     report["post_l1_protocol"] = bool(
+-                        (signal[0, :, 0] == expected_generation).all() and (signal[:, :, 1:] == 0).all()
++                        (signal[0, :, 0] == expected_generation).all() and signal_padding_ok(signal)
+                     )
+                 report["post_l1_guards"] = guard_checks(fixture)
+                 report["post_l1_scratch_guards"] = {
+--- original_runner/check_cpu.py
++++ candidate_runner/check_cpu.py
+@@ -8,6 +8,8 @@
+ import re
+ import traceback
+ from pathlib import Path
++
++from cpu_failure_report import record_compilation_failure
+ 
+ 
+ def audit_codegen(kernel, report):
+@@ -50,7 +52,7 @@
+     parser.add_argument("--hc-row-dependencies", choices=("on", "off"), default="on")
+     parser.add_argument("--hc-consumer-reduce", choices=("on", "off"), default="off")
+     parser.add_argument("--attention-query-metadata", choices=("on", "off"), default="on")
+-    parser.add_argument("--spmd-source", type=Path)
++    parser.add_argument("--spmd-source", type=Path, default=Path(__file__).resolve().parent / "source_candidate")
+     parser.add_argument("--controls-json", type=Path)
+     args = parser.parse_args()
+     output = args.output.resolve()
+@@ -147,7 +149,7 @@
+         audit_codegen(kernel, report)
+         report["passed"] = True
+     except BaseException as exc:
+-        report.update(error=str(exc), traceback=traceback.format_exc())
++        report.update(record_compilation_failure(output, exc))
+     finally:
+         (output / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+         print(
+--- original_runner/output_policy_matrix.py
++++ candidate_runner/output_policy_matrix.py
+@@ -14,6 +14,7 @@
+ from pathlib import Path
+ 
+ from l1_compare import export_window
++from signal_checks import signal_padding_ok, signal_padding_status, signal_view
+ 
+ 
+ def run_matrix(
+@@ -89,7 +90,7 @@
+             if reference_source is None:
+                 raise ValueError("源码矩阵必须显式提供基线包目录")
+             reference = load_binding(reference_source, "reference")
+-            assert reference.phase_count == PHASE_COUNT, "源码矩阵尚不允许改变信号ABI"
++            assert reference.phase_count == PHASE_COUNT, "源码矩阵必须保留原60-phase语义前缀"
+             reference_policy = reference.select_policy(
+                 tokens=existing.tokens, requests=existing.requests, max_query_tokens=6, max_seq_len=max_seq_len)
+             reference_dir = matrix_dir / "reference_source"
+@@ -148,8 +149,8 @@
+                 candidate(config=compile_options)
+             torch.npu.synchronize()
+             report["checks"][name + "_eager"] = checked()
+-            signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
+-            assert bool((signal[0, :, 0] == 1).all() and (signal[:, :, 1:] == 0).all())
++            signal = signal_view(candidate)
++            assert bool((signal[0, :, 0] == 1).all() and signal_padding_ok(signal))
+             if axis == "hc_consumer" and policy.hc_consumer_reduce:
+                 # RAW保持填毒且没有RAW通知，直接消费路径不得隐式依赖旧中间量。
+                 untouched = bool((candidate.buffers["raw"].cpu() == 37).all())
+@@ -170,7 +171,7 @@
+         report["kernel_configs"] = {name: str(config) for name, config in configs.items()}
+         before = {}
+         for name, item in candidates.items():
+-            signal = item.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
++            signal = signal_view(item)[0, :, 0]
+             assert bool((signal == signal[0]).all())
+             before[name] = int(signal[0])
+         calls = dict.fromkeys(candidates, 0)
+@@ -246,9 +247,11 @@
+                 latency_reduction_pct=(1 - candidate_us / reference_us) * 100)
+         report["protocol"] = {}
+         for name, item in candidates.items():
+-            signal = item.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
+-            passed = bool((signal[0, :, 0] == before[name] + calls[name]).all() and (signal[:, :, 1:] == 0).all())
+-            report["protocol"][name] = dict(passed=passed, before=before[name], calls=calls[name])
++            signal = signal_view(item)
++            passed = bool((signal[0, :, 0] == before[name] + calls[name]).all() and signal_padding_ok(signal))
++            report["protocol"][name] = dict(
++                passed=passed, before=before[name], calls=calls[name],
++                phase_count=signal.shape[0], padding=signal_padding_status(signal))
+             assert passed, name
+         report["passed"] = True
+         return report
+--- original_runner/metadata_replay.py
++++ candidate_runner/metadata_replay.py
+@@ -14,7 +14,7 @@
+ from dsv4_csa_validation import compare_tensor
+ 
+ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa import native_adapter as adapter
+-from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT
++from signal_checks import signal_padding_ok, signal_view
+ 
+ METADATA_ARGUMENTS = (
+     "position_ids",
+@@ -156,7 +156,7 @@
+         for name, value in candidate.allocations.items():
+             if name not in ("signal", "ffts"):
+                 value.fill_(37)
+-        before = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
++        before = signal_view(candidate)[0, :, 0]
+         graph.replay()
+         torch.npu.synchronize()
+         actual = collect()
+@@ -166,9 +166,9 @@
+             name: bool((base[:g].cpu() == 37).all() and (base[-g:].cpu() == 37).all())
+             for name, (base, g) in allocations.items()
+         }
+-        signals = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
++        signals = signal_view(candidate)
+         same_addresses = addresses == {name: value.data_ptr() for name, value in candidate.buffers.items()}
+-        protocol = bool((signals[0, :, 0] == before + 1).all() and (signals[:, :, 1:] == 0).all())
++        protocol = bool((signals[0, :, 0] == before + 1).all() and signal_padding_ok(signals))
+         passed = (
+             same_addresses
+             and protocol
+--- original_runner/padding_replay.py
++++ candidate_runner/padding_replay.py
+@@ -23,7 +23,7 @@
+ from metadata_replay import METADATA_ARGUMENTS
+ 
+ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa import native_adapter as adapter
+-from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import PHASE_COUNT
++from signal_checks import signal_padding_ok, signal_view
+ 
+ OUTPUT_ARGUMENTS = ("x_out", "idx_topk", "idx_topk_scores")
+ COMPACT_ARGUMENTS = (
+@@ -180,7 +180,7 @@
+             for name, value in candidate.allocations.items():
+                 if name not in ("signal", "ffts"):
+                     value.fill_(37)
+-            before = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)[0, :, 0]
++            before = signal_view(candidate)[0, :, 0]
+             graph.replay()
+             torch.npu.synchronize()
+             actual = collect(active)
+@@ -190,8 +190,8 @@
+                 name: bool((base[:g].cpu() == 37).all() and (base[-g:].cpu() == 37).all())
+                 for name, (base, g) in allocations.items()
+             }
+-            signal = candidate.buffers["signal"].cpu().view(PHASE_COUNT, 72, 128)
+-            protocol = bool((signal[0, :, 0] == before + 1).all() and (signal[:, :, 1:] == 0).all())
++            signal = signal_view(candidate)
++            protocol = bool((signal[0, :, 0] == before + 1).all() and signal_padding_ok(signal))
+             same_addresses = addresses == {name: value.data_ptr() for name, value in candidate.buffers.items()}
+             passed = (
+                 protocol and same_addresses and all(scratch.values())
+--- source_reference/runtime_abi.py
++++ source_candidate/runtime_abi.py
+@@ -9,6 +9,8 @@
+ 阶段0保存每核调用代际；其余阶段一个核每调用只发布一次。阶段编号只标识数据，
+ 不强制数字顺序。META由一个AIV写，其他完成槽归各核；512B隔离步长见phase_sync。
+ 同一signal工作区必须固定本文件阶段含义、72参与者、单流顺序生命周期。
++前60个阶段保持原ABI；交错wave追加独立ROOT/TOPK/PLAN槽，不能复用同代旧槽。
++Host只按输入T的shape预留ceil(T/8)个wave，实际边界与数量仍由device描述符决定。
+ """
+ 
+ import pypto.language as pl
+@@ -124,3 +126,22 @@
+ PHASE_OA_GROUP_BASE = 44
+ PHASE_O_QUANT_GROUP_BASE = 52
+ PHASE_COUNT = 60
++
++# PHASE_COUNT继续表示原有前缀，不能改写既有阶段编号。每个wave拥有三个
++# 独立phase，所有角色仍只使用begin_invocation产生的同一个本次generation。
++# wave边界保证除末波外至少8个非空group；每group至少一行，故波数不超过
++# ceil(T/8)。无真实group时走原路径，预留槽可完全不发布。
++WAVE_PHASE_BASE = PHASE_COUNT
++WAVE_PHASE_STRIDE = 3
++WAVE_ROOT = 0
++WAVE_TOPK = 1
++WAVE_PLAN = 2
++WAVE_MIN_QUERY_ROWS = 8
++
++
++def signal_phase_count(tokens: int) -> int:
++    """仅按Host已有Tensor行容量预留信号；不读取Q/L/position等device值。"""
++    if type(tokens) is not int or tokens < 0:
++        raise ValueError("signal容量要求非负整数Tensor行数")
++    waves = (tokens + WAVE_MIN_QUERY_ROWS - 1) // WAVE_MIN_QUERY_ROWS
++    return WAVE_PHASE_BASE + WAVE_PHASE_STRIDE * waves
+--- source_reference/binding.py
++++ source_candidate/binding.py
+@@ -221,9 +221,14 @@
+             "o_scales": ((8, p128), torch.float32),
+             "o_partials": ((mm, 32768), torch.int32),
+         }
+-        from .runtime_abi import PHASE_COUNT
+-
+-        specs["signal"] = ((PHASE_COUNT * 72 * 128,), torch.int32)
++        from .phase_sync import SIGNAL_SLOT_WORDS
++        from .runtime_abi import CORES, signal_phase_count
++
++        # 仅以真实输入shape T预留wave进度，不用B*S或Host读取Q/L推导实际wave。
++        # 原60个phase保持前缀；新增每wave三个phase、每核128个INT32独占槽。
++        # WORDS仍是原动态根轴，generation仍只存在每核phase0，不按wave重编码。
++        self.signal_phase_count = signal_phase_count(t)
++        specs["signal"] = ((self.signal_phase_count * CORES * SIGNAL_SLOT_WORDS,), torch.int32)
+         self.allocations = {}
+         for name, (shape, dtype) in specs.items():
+             value = (
+--- /dev/null
++++ candidate_runner/cpu_failure_report.py
+@@ -0,0 +1,44 @@
++# SPDX-License-Identifier: Apache-2.0
++"""保留完整本地编译诊断，限制result/stdout大小；不截断原始错误文件。"""
++
++import re
++import traceback
++from collections import Counter
++
++ERROR_PREVIEW_CHARS = 4096
++MAX_SUMMARY_KINDS = 64
++SUMMARY_KEY_CHARS = 512
++
++
++def _bounded_counts(values):
++    counts = Counter(value[:SUMMARY_KEY_CHARS] for value in values)
++    top = counts.most_common(MAX_SUMMARY_KINDS)
++    return dict(top), sum(counts.values()), len(counts)
++
++
++def record_compilation_failure(output, error):
++    """大IR在独立文件只保存一次；traceback仅保存栈，不重复附加完整exception。"""
++    message = str(error)
++    detail = output / "failure_error_full.txt"
++    detail.write_text(message + "\n")
++    stack = output / "failure_traceback_stack.txt"
++    stack.write_text("".join(traceback.format_tb(error.__traceback__)) + type(error).__name__ + "\n")
++    messages, message_total, message_kinds = _bounded_counts(
++        match.group(1) for match in re.finditer(r"(?m)^\s*Message: ([^\n]*)", message)
++    )
++    locations, location_total, location_kinds = _bounded_counts(
++        match.group(1) for match in re.finditer(r"(?m)^\s*Location: ([^\n]*)", message)
++    )
++    return {
++        "error_type": type(error).__name__,
++        "error": message[:ERROR_PREVIEW_CHARS],
++        "error_preview_truncated": len(message) > ERROR_PREVIEW_CHARS,
++        "error_full": {"path": str(detail), "bytes": detail.stat().st_size},
++        "traceback_stack": {"path": str(stack), "bytes": stack.stat().st_size},
++        "diagnostics_summary": {
++            "message_counts": messages, "message_total": message_total, "message_kinds": message_kinds,
++            "location_counts": locations, "location_total": location_total, "location_kinds": location_kinds,
++            "summary_kind_limit": MAX_SUMMARY_KINDS,
++            "summary_truncated": message_kinds > MAX_SUMMARY_KINDS or location_kinds > MAX_SUMMARY_KINDS,
++        },
++    }

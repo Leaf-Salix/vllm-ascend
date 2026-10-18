@@ -1,0 +1,50 @@
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/utils/deep_clone_utils.cpp:92
+92:   ExprPtr VisitExpr_(const VarPtr& op) override {
+93:     auto it = expr_map_.find(op.get());
+94:     if (it != expr_map_.end()) {
+95:       return it->second;
+96:     }
+97:     // External variable not in map — return as-is
+98:     return op;
+99:   }
+100: 
+101:   ExprPtr VisitExpr_(const IterArgPtr& op) override {
+102:     auto it = expr_map_.find(op.get());
+103:     if (it != expr_map_.end()) {
+104:       return it->second;
+105:     }
+106:     // Create fresh IterArg with cloned initValue_ and a remapped type — the
+107:     // type may embed expressions (shape dims, TileView/TensorView fields,
+108:     // MemRef byte_offset) that reference Vars in expr_map_.
+109:     INTERNAL_CHECK_SPAN(op->initValue_, op->span_) << "IterArg has null initValue";
+110:     auto new_init = IRMutator::VisitExpr(op->initValue_);
+111:     auto new_type = RemapType(op->GetType());
+112:     auto fresh =
+113:         std::make_shared<IterArg>(op->name_hint_, std::move(new_type), std::move(new_init), op->span_);
+114:     expr_map_[op.get()] = fresh;
+115:     return fresh;
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/unroll_loops_pass.cpp:88
+88:     // Generate unrolled bodies. With shared Var pointers (parser reuses the
+89:     // same Var object for reassignments), we pass clone_def_vars=false so
+90:     // DeepClone keeps the original Var pointers. The SSA pass (which always
+91:     // runs after unrolling) handles versioning naturally.
+92:     std::vector<StmtPtr> unrolled;
+93: 
+94:     auto emit_iteration = [&](int64_t i) {
+95:       auto const_expr = std::make_shared<ConstInt>(i, DataType::INDEX, op->loop_var_->span_);
+96:       std::unordered_map<const Var*, ExprPtr> sub_map;
+97:       sub_map[op->loop_var_.get()] = const_expr;
+98:       auto [cloned_body, def_var_map] = DeepClone(op->body_, sub_map, /*clone_def_vars=*/false);
+99:       unrolled.push_back(VisitStmt(cloned_body));
+
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/python/pypto/language/parser/ast_parser.py:2753
+2753:         for i, iter_arg_node in enumerate(iter_args_node.elts):
+2754:             if not isinstance(iter_arg_node, ast.Name):
+2755:                 raise ParserSyntaxError(
+2756:                     "Iter arg must be a simple name",
+2757:                     span=self.span_tracker.get_span(iter_arg_node),
+2758:                     hint="Use simple variable names for iteration variables",
+2759:                 )
+2760:             iter_arg_var = loop.iter_arg(iter_arg_node.id, init_values[i])
+2761:             self.scope_manager.define_var(iter_arg_node.id, iter_arg_var, allow_redef=True)

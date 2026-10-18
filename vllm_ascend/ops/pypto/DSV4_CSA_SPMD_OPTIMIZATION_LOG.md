@@ -17401,3 +17401,28 @@ runner复用正式权重、原动态PTO精确oracle、状态/保护区及图代�
 `jit_tile_parameter_evidence`归档独立overlay最小补丁与56项小文本。实际最小失败为inline参数缺注解；specializer只增加Tile注解保留和已有模块常量折叠。普通Tile原样返回以及实际full-valid状态的assemble/tuple/loop carry均完成CPU lowering/PTOAS，动态T仍为运行时参数。full-state生成Vec roots/segments在0/12288B，incoming在36864B；仅原assemble的两次TMOV，无helper整体复制。旧隔离依赖文件保持原文，共享安装未动。
 
 边界如实保留：首次夹具把pl放局部引发注解命名空间失败，修正为与正式源一致的模块导入后再次参考/候选对照；动态valid_shape的loop carry仍因valid类型不一致失败；同helper constexpr维度注解仍不支持，InOut仅specialize通过。Mat/Left的新helper及联合CSA尚未编译，不扩大Vec小例结论。所有失败、小生成PTO/C++和本地大文件路径大小清单均保存；没有新增NPU任务或性能采样。下一阶段先组装动态wave控制、查询基址和全部状态，再做一次有理由的代表性联合lowering。
+
+
+## 2026-10-18：动态wave联合接入完成，编译推进至Left容量约束
+
+继续三路并行，分别负责AIC step/tick、双AIV状态与所有权、隔离runner/JIT边界，主会话接入动态wave控制、根/TopK/plan依赖及完整schedule。候选和所有过程在 `parallel_20261018/score_attention_interleave_candidate`；正式33源和独立reference经直接逐字节比对仍为66882634，没有hash。
+
+本轮首次真正把此前拆出的数学helper接进完整动态CSA。只在已有G6/N64/Score1024/prefetch1/toL0/balanced/roots1策略且device描述符可形成多个M8对齐wave时启用；其余保留原路径。Score保持global item%24，TopK q%48，plan M8条带，Attention q%24，query_first和物理ring owner分离。首wave生成Score/TopK/plan，中间wave在同组中AIC先Score后前波Attention、AIV反序，末wave独立排空。根ACK与排序写回明确分离；每波ROOT/TOPK/PLAN只由真实writer整波完成后发布，原60阶段与每核generation保留，容量按Host已有T扩为60+3*ceil(T/8)，没有新的根或Host数值metadata。
+
+源码核对通过：range仅裁范围，原数学body AST相同；AIC初始化/末叶ACK、Attention六query五ring地址分别审计；18个代表整数场景覆盖S1/S5/S6、mixed、dummy/gap、陈旧位置、zero-visible和T0，44wave/1503有效叶的分工、步数及根等待均有对应producer。33824个同组事件DAG案例未发现新增等待环；这些都不是硬件同步、精度或性能验证。runner保留原检查并加扩展padding；新的wave word0完整writer/代际递推验收仍需接入，已有独立设计，不能省略。
+
+实际联合CPU尝试逐项保存：
+
+- v1：58动态轴解析通过，Inline因Tile形参原地重绑定遇实际tuple元素而导致AssignStmt左侧非Var。仅在两个helper给被重绑Tile加局部别名，去别名逆rename后整模块AST相同；没有改依赖。独立Mat/Left full-valid helper、tuple与loop carry已完成CPU/PTOAS，不能把v1泛化为全部Tile接口不可用。
+- v2：Inline通过，ConvertToSSA共228条诊断。自然while更新被提前版本化造成cursor/total/wave退出值越作用域；显式Tile返回与隐式GM重绑混用造成phi数量不符。改成显式pl.while_/cond/yield，固定GM仅接局部返回别名。另102个FREE_VAR首次在UnrollLoops出现：底层DeepClone克隆了外部IterArg。最小对照直接IterArg失败、helper调用前局部Scalar别名SSA通过；在AIV保留数学不变地增加桥接，没有修改编译器。
+- v3：58动态轴保留，无sample shape；通过Inline/Unroll/SSA，直到实际AllocateMemoryAddr因Left77824B>65536B失败。实际pass37中Score Query48KiB与Attention临时16KiB已经复用同一64KiB池；64KiB上界来自更早主压缩器的两份32KiB槽。超出的12KiB来自单列的持久Coeff池，不能归因为Query与Attention未复用。Mat同时存在48+48+256+384=736KiB四个池，AllocateMemoryAddr逐base计入容量；Left先失败掩盖了Mat超限，简单把Coeff搬至Mat也不能解决。进一步核对pass35→36发现gather结果被MaterializeSemanticAliases换到新MemRef，但紧随的transpose_view仍保留旧MemRef，无实际copy。这是必须优先修复的别名正确性缺口，不能靠合池隐藏。
+
+v2诊断把整函数对每条错误重复打印，产生622MB result等大文件；原件本地保留，仓库仅保存错误类型/位置摘要及路径大小。后续私有runner将完整异常单独保存，stdout/result限长而不删失败信息。一次从工作区根启动wrapper exit128且无编译产物，切仓库cwd后正常；新wrapper在激活环境前明确cd仓库，记为环境启动问题。
+
+本阶段没有NPU任务、没有新的精度PASS或完整L1性能样本，没有七档重测。正式实现不受这些未验证候选影响；七档逐档相较原动态分task PTO至少降低30%的目标仍未达成。下一步先解决实际Left活跃区间与容量，再做代表档位联合验证。
+
+### 用户授权内存复用改进，建立新的依赖对照工作区
+
+用户明确允许合理改进PyPTO或PTOAS的内存复用。新建`.worktrees/pypto-csa-memory-reuse-20261018`，分支`csa-spmd-memory-reuse-20261018`，基于旧静态SPMD依赖同一`cb2484471`；继承旧工作区全部31个常规跟踪文件源码修改，加此前已验证的Tile参数注解六行修复。旧`.worktrees/pypto-csa-static-fixes-20261016`保持原状，不是本轮新工作区。runtime仍要求`57e499238`，构建必须在新树独立进行，不复制或软链旧core二进制。初始继承用直接字节比较确认，补丁及来源存于候选的`compiler_memory_reuse_worktree/`。
+
+首先修复MaterializeSemanticAliases未传播view别名的问题，再依据真实活跃区间处理其它内存池；不放宽硬件容量，不改变数学或异步完成约束。当前候选仍未通过完整编译，更无新增精度或性能结果。

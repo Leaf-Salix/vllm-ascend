@@ -1,0 +1,55 @@
+{
+  "passed": true,
+  "scope": "仅标准库AST/文本；尚未验证ConvertToSSA修复通过，不导入PyPTO、不编译、不NPU、不hash",
+  "before_directory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/ssa_v2_source",
+  "source_directory": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate",
+  "files": [
+    {
+      "name": "interleave_cube_wave.py",
+      "before_bytes": 14765,
+      "after_bytes": 14990
+    },
+    {
+      "name": "cube_schedule.py",
+      "before_bytes": 23807,
+      "after_bytes": 24385
+    }
+  ],
+  "executor_complete_ast_equal_after_only_three_return_target_renames": true,
+  "executor_fixed_gm_parameters_not_reassigned": [
+    "indexer_transfer",
+    "pv_transfer",
+    "score_transfer"
+  ],
+  "schedule_complete_ast_equal_after_explicit_while_reverse_transform": true,
+  "explicit_while_state": [
+    "wave",
+    "group_begin",
+    "query_begin",
+    "previous_query_begin",
+    "previous_query_end"
+  ],
+  "explicit_while_condition": "group_begin_iter < wave_groups",
+  "explicit_yield_values": [
+    "wave_iter + 1",
+    "group_end",
+    "query_end",
+    "query_begin_iter",
+    "query_end"
+  ],
+  "fixed_loop_gm_not_reassigned": [
+    "indexer_transfer",
+    "pv_ring",
+    "score_ring",
+    "signal"
+  ],
+  "score_and_attention_fallback_ast_unchanged": true,
+  "all_other_source_ast_unchanged": true,
+  "math_and_helper_arguments_unchanged": true,
+  "notify_wait_order_and_predicates_unchanged": true,
+  "limits": [
+    "自然while→显式状态按原五条有序更新构造，GM调用仍保留InOut副作用；没有将Tensor加入loop state。",
+    "返回名不再覆盖固定GM形参，仍需下一次联合ConvertToSSA确认不追加隐式phi。",
+    "未改依赖/编译器/数学helper，不读取622MB result.json或巨大log。"
+  ]
+}

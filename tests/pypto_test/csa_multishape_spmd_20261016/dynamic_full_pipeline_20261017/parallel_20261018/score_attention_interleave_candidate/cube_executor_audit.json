@@ -1,0 +1,318 @@
+{
+  "passed": true,
+  "scope": "标准库AST/原init和drain对照/调用接口；未导入PyPTO、未lowering、未CCEC、未NPU",
+  "source": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/interleave_cube_wave.py",
+    "bytes": 14765
+  },
+  "reference": {
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/score_attention_cube_step_source_20261018/source_reference/indexer_score_stages.py",
+    "bytes": 44690
+  },
+  "leaf_init": {
+    "normalized_original_subtrees_equal": true,
+    "subtree_count": 5,
+    "only_normalization": "query_group_size -> 6；原Query Mat到Left单次TMOV从init移到每step之前，未纳入init对照",
+    "read_guard": "found > 0才load/pad；steps_ready > 0才读取Query/Coeff并执行Score"
+  },
+  "step_before_attention_tick": true,
+  "leaf_ack_drain_ast_equal_after_variable_rename": true,
+  "per_leaf_drain_before_current_attention": true,
+  "explicit_carry": {
+    "tile_count": 4,
+    "scalar_count": 7,
+    "names": [
+      "query_iter",
+      "coeff_iter",
+      "attention_q_iter",
+      "attention_kv_iter",
+      "cursor_iter",
+      "step_iter",
+      "steps_iter",
+      "batch_iter",
+      "cache_iter",
+      "begin_iter",
+      "span_iter"
+    ]
+  },
+  "branch_phis": [
+    {
+      "line": 198,
+      "condition": "local_round < score_steps",
+      "arity": 9
+    },
+    {
+      "line": 272,
+      "condition": "local_round < attention_ticks",
+      "arity": 2
+    },
+    {
+      "line": 199,
+      "condition": "steps_iter == 0",
+      "arity": 9
+    },
+    {
+      "line": 231,
+      "condition": "steps_ready > 0",
+      "arity": 2
+    },
+    {
+      "line": 207,
+      "condition": "found > 0",
+      "arity": 2
+    },
+    {
+      "line": 242,
+      "condition": "next_step == steps_ready",
+      "arity": 2
+    }
+  ],
+  "interfaces": {
+    "score_wave_step_count": {
+      "caller_line": 162,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/interleave_control.py",
+      "callee_line": 89,
+      "parameters": [
+        "bounds",
+        "lengths",
+        "positions",
+        "offsets",
+        "plan",
+        "worker",
+        "group_begin",
+        "group_end"
+      ],
+      "arguments": [
+        "bounds",
+        "kv_seq_lens",
+        "position_ids",
+        "offsets",
+        "plan",
+        "worker",
+        "score_group_begin",
+        "score_group_end"
+      ]
+    },
+    "next_score_leaf": {
+      "caller_line": 203,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/interleave_control.py",
+      "callee_line": 37,
+      "parameters": [
+        "bounds",
+        "lengths",
+        "positions",
+        "offsets",
+        "plan",
+        "item_start",
+        "group_begin",
+        "group_end"
+      ],
+      "arguments": [
+        "bounds",
+        "kv_seq_lens",
+        "position_ids",
+        "offsets",
+        "plan",
+        "cursor_iter",
+        "score_group_begin",
+        "score_group_end"
+      ]
+    },
+    "score_cube_leaf_init_g6": {
+      "caller_line": 208,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/interleave_cube_wave.py",
+      "callee_line": 71,
+      "parameters": [
+        "qr_hadamard_i8",
+        "coefficients",
+        "buf_group",
+        "buf_query",
+        "buf_live"
+      ],
+      "arguments": [
+        "qr_hadamard_i8",
+        "coefficients",
+        "group",
+        "query",
+        "live"
+      ]
+    },
+    "indexer_score_cube_step_g6": {
+      "caller_line": 235,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/indexer_score_stages.py",
+      "callee_line": 404,
+      "parameters": [
+        "buf_query_left",
+        "buf_coefficient_pair",
+        "idx_kv_cache",
+        "idx_kv_cache_shift64",
+        "idx_native_kv_cache",
+        "idx_block_table",
+        "buf_score_transfer",
+        "buf_worker",
+        "buf_batch_idx",
+        "buf_cache_len",
+        "buf_logical_begin",
+        "buf_lane_span",
+        "buf_score_step",
+        "native_page_bytes",
+        "SCORE_READY_EVENT",
+        "SCORE_CONSUMED_EVENT"
+      ],
+      "arguments": [
+        "query_left",
+        "coeff_ready",
+        "idx_kv_cache",
+        "idx_kv_cache_shift64",
+        "idx_native_kv_cache",
+        "idx_block_table",
+        "indexer_transfer",
+        "worker",
+        "batch_ready",
+        "cache_ready",
+        "begin_ready",
+        "span_ready",
+        "step_ready",
+        "native_page_bytes",
+        "SCORE_READY_EVENT",
+        "SCORE_CONSUMED_EVENT"
+      ]
+    },
+    "attention_cube_init": {
+      "caller_line": 166,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/attention_tick_stages.py",
+      "callee_line": 102,
+      "parameters": [
+        "q_flat",
+        "ffts_workspace",
+        "core_id",
+        "CORE_GROUPS"
+      ],
+      "arguments": [
+        "q_flat",
+        "ffts_workspace",
+        "worker",
+        "CORE_GROUPS"
+      ]
+    },
+    "attention_cube_tick": {
+      "caller_line": 275,
+      "callee_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/attention_tick_stages.py",
+      "callee_line": 134,
+      "parameters": [
+        "q_flat",
+        "valid_block_mask",
+        "kv_transfer",
+        "score_transfer",
+        "probability_transfer",
+        "pv_transfer",
+        "qk_tick",
+        "qk_block_count",
+        "qk_core",
+        "query_first",
+        "qk_q",
+        "qk_l1",
+        "CORE_GROUPS",
+        "EVENT_BASE"
+      ],
+      "arguments": [
+        "q_flat",
+        "valid_block_mask",
+        "kv_transfer",
+        "score_transfer",
+        "probability_transfer",
+        "pv_transfer",
+        "local_round",
+        "block_count",
+        "qk_core",
+        "query_first",
+        "attention_q_iter",
+        "attention_kv_iter",
+        "CORE_GROUPS",
+        "ATTN_EVENT_BASE"
+      ]
+    }
+  },
+  "no_phase_or_extra_business_fence": true,
+  "limits": [
+    "实际Mat/Left/Right/Acc分配、全valid Tile传参与loop回边尚未联合lowering。",
+    "静态先后不能代替异步MTE1/M/FIX完成；需检查Left复用与L1两槽覆盖事件。",
+    "额外计数扫描和每Score step 48KiB Query TMOV有成本，不预称性能收益。",
+    "未创建新排程模型；无环依据是现有tick的跨核依赖均来自较早AIC tick。"
+  ],
+  "schedule_calls": [
+    {
+      "line": 402,
+      "arguments": [
+        "idx_query_i8",
+        "coefficients",
+        "idx_key0",
+        "idx_key64",
+        "idx_cache",
+        "indexer_table",
+        "positions",
+        "idx_lengths",
+        "idx_bounds",
+        "group_offsets",
+        "group_plan",
+        "indexer_transfer",
+        "q_heads",
+        "attention_mask",
+        "kv_ring",
+        "score_ring",
+        "probability_ring",
+        "pv_ring",
+        "ffts",
+        "worker",
+        "wave_groups",
+        "wave_groups",
+        "previous_query_begin",
+        "previous_query_end",
+        "GROUPS",
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "line": 384,
+      "arguments": [
+        "idx_query_i8",
+        "coefficients",
+        "idx_key0",
+        "idx_key64",
+        "idx_cache",
+        "indexer_table",
+        "positions",
+        "idx_lengths",
+        "idx_bounds",
+        "group_offsets",
+        "group_plan",
+        "indexer_transfer",
+        "q_heads",
+        "attention_mask",
+        "kv_ring",
+        "score_ring",
+        "probability_ring",
+        "pv_ring",
+        "ffts",
+        "worker",
+        "group_begin",
+        "group_end",
+        "previous_query_begin",
+        "previous_query_end",
+        "GROUPS",
+        "0",
+        "1",
+        "2"
+      ]
+    }
+  ],
+  "event_dag": {
+    "passed": true,
+    "cases": 33824,
+    "path": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/csa-ultra-sync-20261018/tests/pypto_test/score_attention_cube_wave_source_20261018/event_dag_result.json",
+    "scope": "固定同组AIC+两个AIV的FFTS源码偏序；ROOT/TopK/PLAN外层另审，不包含编译器局部事件和DMA耗时"
+  },
+  "ready_for_joint_cpu_source_review": true
+}

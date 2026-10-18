@@ -1,0 +1,54 @@
+{
+  "passed": true,
+  "scope": "源级局部别名规避及归一化整模块AST审计；未重新PyPTO编译/设备验证",
+  "original_failure": {
+    "result_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v1/result.json",
+    "log_path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v1.log",
+    "symbolic_parse_passed": true,
+    "error": "AssignStmt var is not a Var after mutation [/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/attention_tick_stages.py:208:13]\nCheck failed: new_var at /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-static-fixes-20261016/src/ir/transforms/mutator.cpp:632\n\nC++ Traceback (most recent call last):\n File \"./src/ir/transforms/passes.cpp\", line 270\n File \"./src/ir/transforms/passes.cpp\", line 55\n File \"./src/ir/transforms/passes.cpp\", line 110\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 1060\n File \"./src/ir/transforms/mutator.cpp\", line 198\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 719\n File \"./src/ir/transforms/mutator.cpp\", line 198\n File \"./include/pypto/ir/transforms/base/functor.h\", line 223\n File \"./src/ir/transforms/mutator.cpp\", line 781\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 719\n File \"./src/ir/transforms/mutator.cpp\", line 198\n File \"./include/pypto/ir/transforms/base/functor.h\", line 220\n File \"./src/ir/transforms/mutator.cpp\", line 648\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 712\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 913\n File \"./src/ir/transforms/inline_functions_pass.cpp\", line 290\n File \"./src/ir/transforms/utils/deep_clone_utils.cpp\", line 266\n File \"./src/ir/transforms/mutator.cpp\", line 198\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\n File \"./src/ir/transforms/mutator.cpp\", line 1056\n File \"./include/pypto/ir/transforms/base/functor.h\", line 220\n File \"./src/ir/transforms/utils/deep_clone_utils.cpp\", line 84\n File \"./src/ir/transforms/mutator.cpp\", line 648\n File \"./include/pypto/ir/transforms/base/functor.h\", line 233\n File \"./src/ir/transforms/mutator.cpp\", line 1056\n File \"./include/pypto/ir/transforms/base/functor.h\", line 220\n File \"./src/ir/transforms/utils/deep_clone_utils.cpp\", line 84\n File \"./src/ir/transforms/mutator.cpp\", line 648\n File \"./include/pypto/ir/transforms/base/functor.h\", line 219\n File \"./src/ir/transforms/utils/deep_clone_utils.cpp\", line 74\n File \"./src/ir/transforms/mutator.cpp\", line 632\n",
+    "device_execution": false
+  },
+  "cause": "Inline把Tile形参映射为调用实参TupleGetItem；原形参重绑定时AssignStmt的左侧也被替换为非Var。",
+  "workaround": "只对四个被重绑定的Tile形参，在docstring之后创建fresh局部别名；函数数学与return引用统一改局部名。无Tile拷贝调用、无新工作区、无Tensor形参或数学/同步改动。",
+  "normalization": "删除每函数两个已核对的local=parameter赋值，再逆rename局部Name；与归档v1整个模块AST逐结构相同（忽略位置属性）。",
+  "files": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/attention_tick_stages.py",
+      "archive_v1": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/inline_rebind_v1/attention_tick_stages.py",
+      "function": "attention_cube_tick",
+      "aliases": {
+        "qk_q": "qk_q_local",
+        "qk_l1": "qk_l1_local"
+      },
+      "v1_bytes": 32231,
+      "current_bytes": 32649,
+      "normalized_whole_module_ast_equal": true,
+      "remaining_rebound_tile_parameters": [],
+      "signature_unchanged": true,
+      "tensor_parameters_unchanged": true,
+      "math_order_shapes_and_sync_unchanged": true,
+      "python_syntax_passed": true
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/source_candidate/score_vector_steps_g6.py",
+      "archive_v1": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/inline_rebind_v1/score_vector_steps_g6.py",
+      "function": "score_vector_step_g6",
+      "aliases": {
+        "single_roots": "single_roots_local",
+        "single_segments": "single_segments_local"
+      },
+      "v1_bytes": 14353,
+      "current_bytes": 14807,
+      "normalized_whole_module_ast_equal": true,
+      "remaining_rebound_tile_parameters": [],
+      "signature_unchanged": true,
+      "tensor_parameters_unchanged": true,
+      "math_order_shapes_and_sync_unchanged": true,
+      "python_syntax_passed": true
+    }
+  ],
+  "limitations": [
+    "仅Python语法与AST审计；不能声称已解决后端编译，下一轮联合lowering负责确认。",
+    "未修改PyPTO/Simpler/PTO-ISA或共享正式ops，未新增编译/设备任务。"
+  ]
+}

@@ -1,0 +1,611 @@
+{
+  "passed": true,
+  "scope": "v2/v3现成IR的有限语句/目标分类；非执行次数、非性能、非最终C++证明",
+  "v2_v3_inline_operation_totals_equal": true,
+  "v2_v3_inline_critical_target_counts_equal": true,
+  "v3_simplify_to_normalize_return_critical_targets_equal": true,
+  "v3_simplify_to_normalize_return_sync_counts_equal": true,
+  "synchronization_always_standalone_eval": true,
+  "critical_outputs_do_not_use_tensor_assemble": true,
+  "records": [
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v2/kernel/passes_dump/01_after_InlineFunctions.py",
+      "bytes": 1004608,
+      "operation_totals": {
+        "pl.system.bar_all": 56,
+        "pl.system.cacheinvalid": 120,
+        "pl.system.fence": 238,
+        "pl.system.signal_notify": 56,
+        "pl.system.signal_wait": 64,
+        "pl.system.sync_set": 22,
+        "pl.system.sync_wait": 25,
+        "pl.tensor.assemble": 45,
+        "pl.tensor.write": 32,
+        "pl.tile.assemble": 18,
+        "pl.tile.store": 125
+      },
+      "critical_targets": {
+        "pl.tensor.write:attention_mask": 8,
+        "pl.tile.store:attention_bias": 6,
+        "pl.tile.store:attention_indices": 2,
+        "pl.tile.store:indexer_transfer": 6,
+        "pl.tile.store:kv_ring": 3,
+        "pl.tile.store:li_ring": 3,
+        "pl.tile.store:mi_ring": 3,
+        "pl.tile.store:packed": 6,
+        "pl.tile.store:pair_arena": 12,
+        "pl.tile.store:probability_ring": 3,
+        "pl.tile.store:pv_ring": 6,
+        "pl.tile.store:score_ring": 3,
+        "pl.tile.store:topk_indices": 6,
+        "pl.tile.store:topk_scores": 4
+      },
+      "statement_forms": {
+        "pl.system.bar_all:Expr": 56,
+        "pl.system.cacheinvalid:Expr": 120,
+        "pl.system.fence:Expr": 238,
+        "pl.system.signal_notify:Expr": 56,
+        "pl.system.signal_wait:Expr": 64,
+        "pl.system.sync_set:Expr": 22,
+        "pl.system.sync_wait:Expr": 25,
+        "pl.tensor.assemble:AnnAssign": 45,
+        "pl.tensor.write:Expr": 32,
+        "pl.tile.assemble:AnnAssign": 18,
+        "pl.tile.store:AnnAssign": 1,
+        "pl.tile.store:Expr": 124
+      },
+      "critical_examples": {
+        "pl.tensor.write:attention_mask": {
+          "line": 9321,
+          "operation": "pl.tensor.write",
+          "target_argument": "attention_mask"
+        },
+        "pl.tile.store:attention_bias": {
+          "line": 9210,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_bias"
+        },
+        "pl.tile.store:attention_indices": {
+          "line": 9326,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_indices"
+        },
+        "pl.tile.store:indexer_transfer": {
+          "line": 2028,
+          "operation": "pl.tile.store",
+          "target_argument": "indexer_transfer"
+        },
+        "pl.tile.store:kv_ring": {
+          "line": 9569,
+          "operation": "pl.tile.store",
+          "target_argument": "kv_ring"
+        },
+        "pl.tile.store:li_ring": {
+          "line": 9597,
+          "operation": "pl.tile.store",
+          "target_argument": "li_ring"
+        },
+        "pl.tile.store:mi_ring": {
+          "line": 9596,
+          "operation": "pl.tile.store",
+          "target_argument": "mi_ring"
+        },
+        "pl.tile.store:packed": {
+          "line": 9667,
+          "operation": "pl.tile.store",
+          "target_argument": "packed"
+        },
+        "pl.tile.store:pair_arena": {
+          "line": 9071,
+          "operation": "pl.tile.store",
+          "target_argument": "pair_arena"
+        },
+        "pl.tile.store:probability_ring": {
+          "line": 9595,
+          "operation": "pl.tile.store",
+          "target_argument": "probability_ring"
+        },
+        "pl.tile.store:pv_ring": {
+          "line": 2479,
+          "operation": "pl.tile.store",
+          "target_argument": "pv_ring"
+        },
+        "pl.tile.store:score_ring": {
+          "line": 2455,
+          "operation": "pl.tile.store",
+          "target_argument": "score_ring"
+        },
+        "pl.tile.store:topk_indices": {
+          "line": 9086,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_indices"
+        },
+        "pl.tile.store:topk_scores": {
+          "line": 9075,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_scores"
+        }
+      },
+      "tensor_assemble_targets": [
+        "cache_rows",
+        "head_weights",
+        "idx_had",
+        "idx_query_acc",
+        "idx_query_had",
+        "idx_query_i8",
+        "idx_query_rope",
+        "idx_query_scale",
+        "idx_score",
+        "idx_value",
+        "inv",
+        "kv",
+        "kv_fp32",
+        "main_cache",
+        "main_debug",
+        "main_score",
+        "main_value",
+        "mixed",
+        "norm_sq_sum_inline224",
+        "norm_tail",
+        "normed",
+        "o_partials",
+        "o_r",
+        "output",
+        "partials",
+        "q_proj",
+        "qa",
+        "raw",
+        "rope_signed",
+        "rope_swap",
+        "weights_partial",
+        "widen_tail",
+        "x_hc32_flat_inline39",
+        "y_inv_inline200"
+      ]
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v3/kernel/passes_dump/01_after_InlineFunctions.py",
+      "bytes": 1032393,
+      "operation_totals": {
+        "pl.system.bar_all": 56,
+        "pl.system.cacheinvalid": 120,
+        "pl.system.fence": 238,
+        "pl.system.signal_notify": 56,
+        "pl.system.signal_wait": 64,
+        "pl.system.sync_set": 22,
+        "pl.system.sync_wait": 25,
+        "pl.tensor.assemble": 45,
+        "pl.tensor.write": 32,
+        "pl.tile.assemble": 18,
+        "pl.tile.store": 125
+      },
+      "critical_targets": {
+        "pl.tensor.write:attention_mask": 8,
+        "pl.tile.store:attention_bias": 6,
+        "pl.tile.store:attention_indices": 2,
+        "pl.tile.store:indexer_transfer": 6,
+        "pl.tile.store:kv_ring": 3,
+        "pl.tile.store:li_ring": 3,
+        "pl.tile.store:mi_ring": 3,
+        "pl.tile.store:packed": 6,
+        "pl.tile.store:pair_arena": 12,
+        "pl.tile.store:probability_ring": 3,
+        "pl.tile.store:pv_ring": 6,
+        "pl.tile.store:score_ring": 3,
+        "pl.tile.store:topk_indices": 6,
+        "pl.tile.store:topk_scores": 4
+      },
+      "statement_forms": {
+        "pl.system.bar_all:Expr": 56,
+        "pl.system.cacheinvalid:Expr": 120,
+        "pl.system.fence:Expr": 238,
+        "pl.system.signal_notify:Expr": 56,
+        "pl.system.signal_wait:Expr": 64,
+        "pl.system.sync_set:Expr": 22,
+        "pl.system.sync_wait:Expr": 25,
+        "pl.tensor.assemble:AnnAssign": 45,
+        "pl.tensor.write:Expr": 32,
+        "pl.tile.assemble:AnnAssign": 18,
+        "pl.tile.store:AnnAssign": 1,
+        "pl.tile.store:Expr": 124
+      },
+      "critical_examples": {
+        "pl.tensor.write:attention_mask": {
+          "line": 9802,
+          "operation": "pl.tensor.write",
+          "target_argument": "attention_mask"
+        },
+        "pl.tile.store:attention_bias": {
+          "line": 9691,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_bias"
+        },
+        "pl.tile.store:attention_indices": {
+          "line": 9807,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_indices"
+        },
+        "pl.tile.store:indexer_transfer": {
+          "line": 2186,
+          "operation": "pl.tile.store",
+          "target_argument": "indexer_transfer"
+        },
+        "pl.tile.store:kv_ring": {
+          "line": 10050,
+          "operation": "pl.tile.store",
+          "target_argument": "kv_ring"
+        },
+        "pl.tile.store:li_ring": {
+          "line": 10078,
+          "operation": "pl.tile.store",
+          "target_argument": "li_ring"
+        },
+        "pl.tile.store:mi_ring": {
+          "line": 10077,
+          "operation": "pl.tile.store",
+          "target_argument": "mi_ring"
+        },
+        "pl.tile.store:packed": {
+          "line": 10148,
+          "operation": "pl.tile.store",
+          "target_argument": "packed"
+        },
+        "pl.tile.store:pair_arena": {
+          "line": 9552,
+          "operation": "pl.tile.store",
+          "target_argument": "pair_arena"
+        },
+        "pl.tile.store:probability_ring": {
+          "line": 10076,
+          "operation": "pl.tile.store",
+          "target_argument": "probability_ring"
+        },
+        "pl.tile.store:pv_ring": {
+          "line": 2638,
+          "operation": "pl.tile.store",
+          "target_argument": "pv_ring"
+        },
+        "pl.tile.store:score_ring": {
+          "line": 2614,
+          "operation": "pl.tile.store",
+          "target_argument": "score_ring"
+        },
+        "pl.tile.store:topk_indices": {
+          "line": 9567,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_indices"
+        },
+        "pl.tile.store:topk_scores": {
+          "line": 9556,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_scores"
+        }
+      },
+      "tensor_assemble_targets": [
+        "cache_rows",
+        "head_weights",
+        "idx_had",
+        "idx_query_acc",
+        "idx_query_had",
+        "idx_query_i8",
+        "idx_query_rope",
+        "idx_query_scale",
+        "idx_score",
+        "idx_value",
+        "inv",
+        "kv",
+        "kv_fp32",
+        "main_cache",
+        "main_debug",
+        "main_score",
+        "main_value",
+        "mixed",
+        "norm_sq_sum_inline199",
+        "norm_tail",
+        "normed",
+        "o_partials",
+        "o_r",
+        "output",
+        "partials",
+        "q_proj",
+        "qa",
+        "raw",
+        "rope_signed",
+        "rope_swap",
+        "weights_partial",
+        "widen_tail",
+        "x_hc32_flat_inline42",
+        "y_inv_inline197"
+      ]
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v3/kernel/passes_dump/05_after_Simplify.py",
+      "bytes": 1934336,
+      "operation_totals": {
+        "pl.system.bar_all": 54,
+        "pl.system.cacheinvalid": 110,
+        "pl.system.fence": 218,
+        "pl.system.signal_notify": 54,
+        "pl.system.signal_wait": 56,
+        "pl.system.sync_set": 21,
+        "pl.system.sync_wait": 24,
+        "pl.tensor.assemble": 45,
+        "pl.tensor.write": 28,
+        "pl.tile.assemble": 83,
+        "pl.tile.store": 170
+      },
+      "critical_targets": {
+        "pl.tensor.write:attention_mask": 4,
+        "pl.tile.store:attention_bias": 6,
+        "pl.tile.store:attention_indices": 2,
+        "pl.tile.store:indexer_transfer": 48,
+        "pl.tile.store:kv_ring": 3,
+        "pl.tile.store:li_ring": 3,
+        "pl.tile.store:mi_ring": 3,
+        "pl.tile.store:packed": 12,
+        "pl.tile.store:pair_arena": 9,
+        "pl.tile.store:probability_ring": 3,
+        "pl.tile.store:pv_ring": 12,
+        "pl.tile.store:score_ring": 3,
+        "pl.tile.store:topk_indices": 6,
+        "pl.tile.store:topk_scores": 4
+      },
+      "statement_forms": {
+        "pl.system.bar_all:Expr": 54,
+        "pl.system.cacheinvalid:Expr": 110,
+        "pl.system.fence:Expr": 218,
+        "pl.system.signal_notify:Expr": 54,
+        "pl.system.signal_wait:Expr": 56,
+        "pl.system.sync_set:Expr": 21,
+        "pl.system.sync_wait:Expr": 24,
+        "pl.tensor.assemble:AnnAssign": 45,
+        "pl.tensor.write:Expr": 28,
+        "pl.tile.assemble:AnnAssign": 83,
+        "pl.tile.store:AnnAssign": 1,
+        "pl.tile.store:Expr": 169
+      },
+      "critical_examples": {
+        "pl.tensor.write:attention_mask": {
+          "line": 17418,
+          "operation": "pl.tensor.write",
+          "target_argument": "attention_mask__ssa_v0"
+        },
+        "pl.tile.store:attention_bias": {
+          "line": 17240,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_bias__ssa_v0"
+        },
+        "pl.tile.store:attention_indices": {
+          "line": 17428,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_indices__ssa_v0"
+        },
+        "pl.tile.store:indexer_transfer": {
+          "line": 3794,
+          "operation": "pl.tile.store",
+          "target_argument": "indexer_transfer__ssa_v0"
+        },
+        "pl.tile.store:kv_ring": {
+          "line": 17926,
+          "operation": "pl.tile.store",
+          "target_argument": "kv_ring__ssa_v0"
+        },
+        "pl.tile.store:li_ring": {
+          "line": 17960,
+          "operation": "pl.tile.store",
+          "target_argument": "li_ring__ssa_v0"
+        },
+        "pl.tile.store:mi_ring": {
+          "line": 17959,
+          "operation": "pl.tile.store",
+          "target_argument": "mi_ring__ssa_v0"
+        },
+        "pl.tile.store:packed": {
+          "line": 18041,
+          "operation": "pl.tile.store",
+          "target_argument": "packed__ssa_v0"
+        },
+        "pl.tile.store:pair_arena": {
+          "line": 16757,
+          "operation": "pl.tile.store",
+          "target_argument": "pair_arena__ssa_v0"
+        },
+        "pl.tile.store:probability_ring": {
+          "line": 17958,
+          "operation": "pl.tile.store",
+          "target_argument": "probability_ring__ssa_v0"
+        },
+        "pl.tile.store:pv_ring": {
+          "line": 6809,
+          "operation": "pl.tile.store",
+          "target_argument": "pv_ring__ssa_v0"
+        },
+        "pl.tile.store:score_ring": {
+          "line": 6780,
+          "operation": "pl.tile.store",
+          "target_argument": "score_ring__ssa_v0"
+        },
+        "pl.tile.store:topk_indices": {
+          "line": 17059,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_indices__ssa_v0"
+        },
+        "pl.tile.store:topk_scores": {
+          "line": 17048,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_scores__ssa_v0"
+        }
+      },
+      "tensor_assemble_targets": [
+        "cache_rows__iter_v3",
+        "head_weights__iter_v1",
+        "idx_had__iter_v1",
+        "idx_query_acc__iter_v3",
+        "idx_query_had__iter_v1",
+        "idx_query_i8__iter_v1",
+        "idx_query_rope__iter_v5",
+        "idx_query_rope__ssa_v7",
+        "idx_query_scale__iter_v1",
+        "idx_score__iter_v1",
+        "idx_value__iter_v1",
+        "inv__iter_v1",
+        "kv__iter_v3",
+        "kv__rv_v4",
+        "kv_fp32__iter_v13",
+        "kv_fp32__iter_v16",
+        "kv_fp32__iter_v5",
+        "kv_fp32__iter_v8",
+        "main_cache__iter_v5",
+        "main_debug__iter_v5",
+        "main_score__iter_v1",
+        "main_value__iter_v1",
+        "mixed__iter_v3",
+        "norm_sq_sum_inline199__ssa_v0",
+        "norm_tail__iter_v3",
+        "normed__iter_v3",
+        "o_partials__iter_v7",
+        "o_r__iter_v3",
+        "output__iter_v1",
+        "output__ssa_v3",
+        "output__ssa_v4",
+        "output__ssa_v5",
+        "partials__iter_v1",
+        "q_proj__iter_v3",
+        "qa__iter_v14",
+        "qa__iter_v17",
+        "qa__iter_v6",
+        "qa__iter_v9",
+        "raw__iter_v1",
+        "rope_signed__iter_v1",
+        "rope_swap__iter_v1",
+        "weights_partial__iter_v1",
+        "widen_tail__iter_v3",
+        "x_hc32_flat_inline42__iter_v3",
+        "y_inv_inline197__ssa_v0"
+      ]
+    },
+    {
+      "path": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/cpu_long_v3/kernel/passes_dump/29_after_NormalizeReturnOrder.py",
+      "bytes": 2221743,
+      "operation_totals": {
+        "pl.system.bar_all": 54,
+        "pl.system.cacheinvalid": 110,
+        "pl.system.fence": 218,
+        "pl.system.signal_notify": 54,
+        "pl.system.signal_wait": 56,
+        "pl.system.sync_set": 21,
+        "pl.system.sync_wait": 24,
+        "pl.tensor.write": 28,
+        "pl.tile.assemble": 87,
+        "pl.tile.store": 213
+      },
+      "critical_targets": {
+        "pl.tensor.write:attention_mask": 4,
+        "pl.tile.store:attention_bias": 6,
+        "pl.tile.store:attention_indices": 2,
+        "pl.tile.store:indexer_transfer": 48,
+        "pl.tile.store:kv_ring": 3,
+        "pl.tile.store:li_ring": 3,
+        "pl.tile.store:mi_ring": 3,
+        "pl.tile.store:packed": 12,
+        "pl.tile.store:pair_arena": 9,
+        "pl.tile.store:probability_ring": 3,
+        "pl.tile.store:pv_ring": 12,
+        "pl.tile.store:score_ring": 3,
+        "pl.tile.store:topk_indices": 6,
+        "pl.tile.store:topk_scores": 4
+      },
+      "statement_forms": {
+        "pl.system.bar_all:Expr": 54,
+        "pl.system.cacheinvalid:Expr": 110,
+        "pl.system.fence:Expr": 218,
+        "pl.system.signal_notify:Expr": 54,
+        "pl.system.signal_wait:Expr": 56,
+        "pl.system.sync_set:Expr": 21,
+        "pl.system.sync_wait:Expr": 24,
+        "pl.tensor.write:Expr": 28,
+        "pl.tile.assemble:AnnAssign": 87,
+        "pl.tile.store:AnnAssign": 44,
+        "pl.tile.store:Expr": 169
+      },
+      "critical_examples": {
+        "pl.tensor.write:attention_mask": {
+          "line": 19208,
+          "operation": "pl.tensor.write",
+          "target_argument": "attention_mask__ssa_v0"
+        },
+        "pl.tile.store:attention_bias": {
+          "line": 18960,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_bias__ssa_v0"
+        },
+        "pl.tile.store:attention_indices": {
+          "line": 19222,
+          "operation": "pl.tile.store",
+          "target_argument": "attention_indices__ssa_v0"
+        },
+        "pl.tile.store:indexer_transfer": {
+          "line": 4246,
+          "operation": "pl.tile.store",
+          "target_argument": "indexer_transfer__ssa_v0"
+        },
+        "pl.tile.store:kv_ring": {
+          "line": 19732,
+          "operation": "pl.tile.store",
+          "target_argument": "kv_ring__ssa_v0"
+        },
+        "pl.tile.store:li_ring": {
+          "line": 19771,
+          "operation": "pl.tile.store",
+          "target_argument": "li_ring__ssa_v0"
+        },
+        "pl.tile.store:mi_ring": {
+          "line": 19770,
+          "operation": "pl.tile.store",
+          "target_argument": "mi_ring__ssa_v0"
+        },
+        "pl.tile.store:packed": {
+          "line": 19898,
+          "operation": "pl.tile.store",
+          "target_argument": "packed__ssa_v0"
+        },
+        "pl.tile.store:pair_arena": {
+          "line": 18419,
+          "operation": "pl.tile.store",
+          "target_argument": "pair_arena__ssa_v0"
+        },
+        "pl.tile.store:probability_ring": {
+          "line": 19769,
+          "operation": "pl.tile.store",
+          "target_argument": "probability_ring__ssa_v0"
+        },
+        "pl.tile.store:pv_ring": {
+          "line": 7403,
+          "operation": "pl.tile.store",
+          "target_argument": "pv_ring__ssa_v0"
+        },
+        "pl.tile.store:score_ring": {
+          "line": 7373,
+          "operation": "pl.tile.store",
+          "target_argument": "score_ring__ssa_v0"
+        },
+        "pl.tile.store:topk_indices": {
+          "line": 18748,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_indices__ssa_v0"
+        },
+        "pl.tile.store:topk_scores": {
+          "line": 18734,
+          "operation": "pl.tile.store",
+          "target_argument": "topk_scores__ssa_v0"
+        }
+      },
+      "tensor_assemble_targets": []
+    }
+  ],
+  "limits": [
+    "静态出现次数包含runtime分支和fallback，不能用数量代替逐路径数据/地址正确性。",
+    "Simplify前后会因unroll/constexpr折叠改变计数，因此没有跨该边界强行要求计数相同。",
+    "v3当前在AllocateMemoryAddr报Left容量超限，没有最终设备binary，不能宣称最终流水正确。"
+  ]
+}
