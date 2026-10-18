@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""动态CSA的区间策略：Host只选择数学tile，逐请求有效范围仍由device计算。
+"""动态CSA的区间策略：Host选择数学与调度策略，逐请求有效范围仍由device计算。
 
 输入tokens/requests/max_query_tokens来自已有Tensor shape和Native描述符；
 max_seq_len来自Native已有Host上界，禁止为了调用此函数新增device回读。
@@ -38,9 +38,21 @@ M256 Hadamard与N256 Q_B的负载分工，不按七个shape白名单选择。七
 同轮完整L1相对旧动态下降1.97%～6.49%；真实B1/S1、B5/S5相对旧动态精确
 回归和B16同图metadata/padding通过，因此select_policy默认启用。其它区间的
 性能、mixed-query及连续轨迹仍须继续验证，不将本次收益称为已达30%目标。
+前置几何沿已存在的G6小M16并行域或T>=64区间开启，中间区间沿用后置
+几何。T>=64对应至少两个完整M32行块，作为初始调度窗口分界；这不是
+理论最优阈值，须结合边界实测调整。前/后置共用相同有效性与页保护规则，
+只改变执行时点和同轮暂存，不能把关闭前置理解为跳过metadata检查。
+首版前置七档精确/图通过且六档改善，B8回退；本区间版新增T30/T66边界与
+长B16、短B32完整同轮检查，分别改善4.68%/2.58%/1.22%/1.76%。B8保持
+原可执行C++，本轮仍有0.63%测量差，完整保留而不解释为确定的代码收益。
+原前置版S1/S5和metadata/padding证据保留；区间版不重复声明已新测所有
+动态场景。14项实际生成C++核对确认开关不增加额外算子运算或同步协议。
 """
 
 from dataclasses import dataclass
+
+# 沿CSA已有投影行块选择窗口；不是按B/S/history测试点枚举。
+EARLY_GEOMETRY_MIN_TOKENS = 64
 
 
 @dataclass(frozen=True)
@@ -59,6 +71,7 @@ class CSASPMDPolicy:
     hc_consumer_reduce: bool = False
     qa_m16_parallel: bool = False
     cooperative_prefix: bool = False
+    early_attention_geometry: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -77,6 +90,7 @@ class CSASPMDPolicy:
             "HC_CONSUMER_REDUCE": self.hc_consumer_reduce,
             "QA_M16_PARALLEL": self.qa_m16_parallel,
             "COOPERATIVE_PREFIX": self.cooperative_prefix,
+            "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
         }
 
 
@@ -106,6 +120,7 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         if 4 * 6 * request_waves <= 5 * 2 * pair_waves:
             group = 6
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
+    parallel_small_qa = group == 6 and 16 < tokens < 32
     return CSASPMDPolicy(
         query_group=group,
         qk_panel=64 if group == 6 else 128,
@@ -116,6 +131,10 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         oa_cols=128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
-        qa_m16_parallel=group == 6 and 16 < tokens < 32,
+        qa_m16_parallel=parallel_small_qa,
         cooperative_prefix=True,
+        # 前置几何在小M16并行域及较大T区间有已测收益；中间单M32主体加尾块
+        # 的域先保留后置算法，避免把metadata放到RoPE关键路径。64表示至少
+        # 两个完整M32行块，仍须边界验证；不代表所有形状下都是理论最优。
+        early_attention_geometry=parallel_small_qa or tokens >= EARLY_GEOMETRY_MIN_TOKENS,
     )

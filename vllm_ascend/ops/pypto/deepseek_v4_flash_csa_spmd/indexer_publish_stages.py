@@ -17,8 +17,12 @@
 
 输入输出和动态布局
     原始 Native Q/L/positions 给出实际请求边界、总KV长度和因果位置；Q与B
-    独立动态，T来自positions。每query先找唯一请求，再验证位置与本轮Q/L
-    一致。输出 scores FP32[T,512]、indices INT32[T,512] 的T必须相同。
+    独立动态，T来自positions。pair在EARLY_ATTENTION_GEOMETRY开启时，
+    读取本轮前段已验证的请求/可见范围，
+    暂存在attention_indices行前缀；原ROPE phase负责发布，本行Top-K完成
+    发布后plan才覆盖该前缀。关闭时在本阶段按原规则验证Q/L/位置，
+    不读取这份前缀。输出scores和indices
+    均为[T,512]且T相同，不用暂存容量反推实际query数。
     pair_arena FP32[PAIR_ROWS,1024] 每项是交错score/index位模式；每query
     固定64行跨度，即 MAX_LEAVES*2，与本轮叶数、G、roots_per_leaf无关。
     ROOTS_PER_LEAF=2：slot=q*64+leaf*2+lane；=1：slot=q*64+leaf。
@@ -56,6 +60,12 @@ import pypto.language as pl
 
 from ..deepseek_v4_flash_csa.config import FP32_NEG_INF
 from .attention_dependencies import wait_indexer_query_roots
+from .attention_plan_stages import (
+    EARLY_QUERY_BEGIN_COL,
+    EARLY_QUERY_OWNER_COL,
+    EARLY_QUERY_VISIBLE_COL,
+    PLAN_CAP_DYN,
+)
 from .indexer_group_stages import (
     CANDIDATES_PER_LEAF,
     MAX_CANDIDATES,
@@ -129,6 +139,7 @@ def indexer_pair_publish_stage(
     positions: pl.Tensor[[TOKENS_DYN], pl.INT64],
     plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
     offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+    attention_metadata: pl.Tensor[[PLAN_CAP_DYN, IDX_TOPK], pl.INT32],
     signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
     pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
     topk_scores: pl.InOut[pl.Tensor[[TOKENS_DYN, IDX_TOPK], pl.FP32]],
@@ -139,14 +150,26 @@ def indexer_pair_publish_stage(
     BALANCED: pl.constexpr,
     generation: pl.Scalar[pl.INT32],
     QUERY_GROUP: pl.constexpr,
+    EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
 ):
     """AIV发布pair根；保持非balanced根0原位归并及原多路平局优先顺序。"""
     tokens = pl.tensor.dim(positions, 0)
     for query in pl.range(worker, tokens, WORKERS):
-        request, _begin, _end, active = query_request(bounds, lengths, query, tokens)
+        # 两条调度路径共用根数、等待与归并数学。前置路径读取原ROPE阶段
+        # 已发布的本轮几何；后置路径只读Native Q/L/positions，不碰前缀。
+        # 先声明跨constexpr分支的Scalar，保证SSA合并后的类型和定义域明确。
+        request = pl.cast(-1, pl.INDEX)
+        _begin = pl.cast(0, pl.INDEX)
         visible_count = pl.cast(0, pl.INDEX)
-        if active != 0:
-            visible_count, _causal = indexer_query_visibility(bounds, lengths, positions, request, query)
+        if EARLY_ATTENTION_GEOMETRY:
+            request = pl.cast(pl.read(attention_metadata, [query, EARLY_QUERY_OWNER_COL]), pl.INDEX)
+            if request >= 0:
+                _begin = pl.cast(pl.read(attention_metadata, [query, EARLY_QUERY_BEGIN_COL]), pl.INDEX)
+                visible_count = pl.cast(pl.read(attention_metadata, [query, EARLY_QUERY_VISIBLE_COL]), pl.INDEX)
+        else:
+            request, _begin, _end, active = query_request(bounds, lengths, query, tokens)
+            if active != 0:
+                visible_count, _causal = indexer_query_visibility(bounds, lengths, positions, request, query)
         root_count = indexer_visible_root_count(visible_count, plan, ROOTS_PER_LEAF, BALANCED)
         arena_base = query * TOPK_ROWS_PER_QUERY
         if (

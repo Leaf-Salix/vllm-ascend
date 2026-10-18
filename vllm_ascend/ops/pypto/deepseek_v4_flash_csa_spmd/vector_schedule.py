@@ -38,6 +38,12 @@ COOPERATIVE_PREFIX策略同步改变两种角色的顺序：Indexer压缩先于q
 这是完整前段协作策略，T/B和有效请求仍动态；默认由select_policy启用，
 完整同轮收益及当前验证边界见policy.py与统一优化日志。
 
+EARLY_ATTENTION_GEOMETRY由policy按工作量区间选择；开启时，
+attention_geometry_prepare_stage在QR之后、ROPE发布之前计算本轮只读几何
+和页范围，将结果暂放最终attention_indices的前五列。该区此时尚无最终
+索引，Top-K获取既有ROPE阶段后读取；晚期plan等Top-K完成再覆盖。复用
+已有buffer和发布，不新建Host适配或GM根，候选范围与页保护仍逐轮生效。
+
 每个GM写缓冲有独立生存期，源码没有跨阶段复用以偷减依赖。phase发布要
 在业务写回完成之后，wait之后做读侧维护；单写者免atomic不等于cache一致。
 计划本轮只写一次、后续只读，signal另占512B隔离槽。组内环槽另有READY/ACK，
@@ -48,7 +54,11 @@ COOPERATIVE_PREFIX策略同步改变两种角色的顺序：Indexer压缩先于q
 import pypto.language as pl
 
 from .attention_dependencies import wait_attention_plan_rows
-from .attention_plan_stages import attention_inverse_rope_sign_stage, attention_slot_plan_stage
+from .attention_plan_stages import (
+    attention_geometry_prepare_stage,
+    attention_inverse_rope_sign_stage,
+    attention_slot_plan_stage,
+)
 from .attention_stream_stages import attention_qk_pv_vector_lane_stage
 from .hc_stages import hc_comb_range, hc_gates_range, hc_mix_norm_range, hc_reduce_range, hc_widen_rms_range
 from .indexer_cache_stages import indexer_compact_quant_cache_stage
@@ -308,6 +318,7 @@ def vector_schedule(
     HC_CONSUMER_REDUCE: pl.constexpr,
     QA_M16_PARALLEL: pl.constexpr = False,
     COOPERATIVE_PREFIX: pl.constexpr = False,
+    EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -565,6 +576,14 @@ def vector_schedule(
     # RoPE只依赖输入sin；放在QR发布后，与AIC的QB阶段并行，不等待QB。
     rope_signed, rope_swap = q_rope_prepare_stage(rope_sin, rope_signed, rope_swap, worker, VECTORS)
     inverse_sin = attention_inverse_rope_sign_stage(rope_sin, inverse_sin, worker, VECTORS)
+    # 区间策略开启时，只读几何和页合法性与投影并行；关闭则在Top-K/plan
+    # 原位置计算，不读未初始化的前缀。每个八行writer与原ROPE owner相同，
+    # 后面的既有ROPE获取同时保护该前缀；不能移到发布之后而不补依赖。
+    if EARLY_ATTENTION_GEOMETRY:
+        attention_indices = attention_geometry_prepare_stage(
+            positions, idx_bounds, idx_lengths, compressed_table, attention_indices,
+            pl.tensor.dim(main_cache, 0) // 32, worker, VECTORS,
+        )
     signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
     # 主Query与Indexer query数学独立；先完成后者的RoPE/pool/norm，
     # 让AIC继续query Hadamard并在其主Q_B期间做量化/系数。QR/ROPE获取
@@ -863,6 +882,7 @@ def vector_schedule(
         positions,
         group_plan,
         group_offsets,
+        attention_indices,
         signal,
         pair_arena,
         topk_scores,
@@ -873,6 +893,7 @@ def vector_schedule(
         BALANCED,
         generation,
         QUERY_GROUP,
+        EARLY_ATTENTION_GEOMETRY,
     )
     signal = publish_phase(signal, PHASE_TOPK, core, CORES, generation)
     attention_indices, attention_bias, attention_mask, signal = attention_slot_plan_stage(
@@ -892,6 +913,7 @@ def vector_schedule(
         worker,
         VECTORS,
         ATTENTION_QUERY_METADATA,
+        EARLY_ATTENTION_GEOMETRY,
     )
     signal = publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)
 

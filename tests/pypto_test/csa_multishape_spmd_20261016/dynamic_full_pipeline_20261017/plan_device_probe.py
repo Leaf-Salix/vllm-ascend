@@ -22,6 +22,9 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.attention_plan_stages impo
     compressed_pages_all_valid,
 )
 
+from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.phase_sync import SIGNAL_WORDS, signal_word_count
+from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_spmd.runtime_abi import GROUPS, PHASE_COUNT
+
 
 @pl.jit.incore
 def page_validity_core(
@@ -57,6 +60,42 @@ def page_validity_probe(
     return flags
 
 
+@pl.jit.incore
+def plan_probe_core(
+    topk: pl.Tensor[[T_DYN, 512], pl.INT32],
+    positions: pl.Tensor[[T_DYN], pl.INT64],
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+    original_table: pl.Tensor[[REQUESTS_DYN, ORIGINAL_COLUMNS_DYN], pl.INT32],
+    compressed_table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
+    indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 512], pl.INT32]],
+    bias: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32]],
+    mask: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]],
+    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
+):
+    worker = pl.tile.get_block_idx()
+    indices, bias, mask, signals = attention_slot_plan_stage(
+        topk,
+        positions,
+        bounds,
+        lengths,
+        original_table,
+        compressed_table,
+        indices,
+        bias,
+        mask,
+        signals,
+        pl.cast(1, pl.INT32),
+        23,
+        19,
+        worker,
+        48,
+        True,
+        False,  # standalone探针使用后置几何；constexpr依赖调用必须显式绑定。
+    )
+    return indices, bias, mask, signals
+
+
 @pl.jit
 def plan_probe(
     topk: pl.Tensor[[T_DYN, 512], pl.INT32],
@@ -68,24 +107,12 @@ def plan_probe(
     indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 512], pl.INT32]],
     bias: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 640], pl.FP32]],
     mask: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, 16], pl.INT32]],
+    signals: pl.InOut[pl.Tensor[[SIGNAL_WORDS], pl.INT32]],
 ):
     with pl.spmd(48, name_hint="attention_page_plan_regression"):
-        worker = pl.tile.get_block_idx()
-        indices, bias, mask = attention_slot_plan_stage(
-            topk,
-            positions,
-            bounds,
-            lengths,
-            original_table,
-            compressed_table,
-            indices,
-            bias,
-            mask,
-            23,
-            19,
-            worker,
-            48,
-            True,
+        indices, bias, mask, signals = plan_probe_core(
+            topk, positions, bounds, lengths, original_table, compressed_table,
+            indices, bias, mask, signals,
         )
     return indices, bias, mask
 
@@ -94,7 +121,8 @@ def validate(device, compile_options, output):
     import numpy as np
     import torch
 
-    path = Path(__file__).resolve().parents[1] / "dynamic_attention_plan_20261017/check_oracle.py"
+    pipeline = next(p for p in Path(__file__).resolve().parents if p.name == "dynamic_full_pipeline_20261017")
+    path = pipeline.parent / "dynamic_attention_plan_20261017/check_oracle.py"
     spec = importlib.util.spec_from_file_location("attention_plan_cpu_expected", path)
     oracle = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(oracle)
@@ -160,7 +188,11 @@ def validate(device, compile_options, output):
         indices = torch.full((24, 512), -777, dtype=torch.int32, device=device)
         bias = torch.full((24, 640), 777.0, dtype=torch.float32, device=device)
         mask = torch.full((24, 16), -777, dtype=torch.int32, device=device)
-        plan_probe(*inputs, indices, bias, mask, config=compile_options)
+        # 输入Top-K已由Host准备完成；只给plan所需的阶段状态置当前代际，
+        # 探针不模拟真实生产者、不测同步性能。普通页检查使用后置几何默认值。
+        signals = torch.ones((signal_word_count(phase_count=PHASE_COUNT, core_groups=GROUPS),),
+                             dtype=torch.int32, device=device)
+        plan_probe(*inputs, indices, bias, mask, signals, config=compile_options)
         torch.npu.synchronize()
         actual_i, actual_b, actual_m = (t.cpu().numpy() for t in (indices, bias, mask))
         np.testing.assert_array_equal(actual_i[:13], expected_i)

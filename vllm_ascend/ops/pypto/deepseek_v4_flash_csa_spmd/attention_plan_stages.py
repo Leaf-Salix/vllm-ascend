@@ -9,7 +9,8 @@
 """动态 CSA Attention 的候选计划与逆 RoPE 正负号准备。
 
 整体范围与阅读顺序
-    先读 attention_slot_plan_stage：将 Indexer 的逻辑 Top-K 转为可安全消费的
+    先读 attention_geometry_prepare_stage 的可选前段准备，再读
+    attention_slot_plan_stage：将 Indexer 的逻辑 Top-K 转为可安全消费的
     压缩索引、640 列 softmax bias 和五个候选块的有效标志；再读
     attention_inverse_rope_sign_stage：准备最终 attention 输出所需的逆旋转
     sin 符号。两段来自 canonical decode_sparse_attn_csa.py 的 plan/rope_cs，
@@ -49,6 +50,15 @@
     SWA 保留128行窗口、最多五个32-token页run；正常页走整块bias，页空洞及
     越界页才按合法run重建本行。非法候选 index=-1、bias=-1e20、块有效位=0。
     逆 RoPE 的偶数列乘+1、奇数列乘-1，与 query 正向 RoPE 的符号相反。
+    EARLY_ATTENTION_GEOMETRY由policy按工作量区间选择。开启时，
+    attention_geometry_prepare_stage在前段执行不依赖Top-K的请求/位置/页检查；
+    attention_slot_plan_stage在Top-K后完成候选相关的工作。前段暂借indices
+    每行前五项保存owner/begin/position/pages_ok/visible，由原PHASE_ROPE
+    发布；Top-K读取这些几何，plan最后再覆盖为512项最终索引。不增加Host
+    适配、根Tensor或跨调用缓存。preparer与plan均按八行tile%48分工，plan
+    等本行Top-K发布后才覆盖。失活行每轮重写owner=-1及其它零值。
+    关闭时，本阶段按原规则读取Q/L/position并执行同一个页检查函数，完全
+    不读几何前缀。两路共用候选数学、页保护、最终store及后续同步协议。
     Native metadata在外层已就绪；每个八行tile只获取对应Top-K行的生产者，
     不等待无关query。plan完成后仍由外层发布整个worker阶段给QK/AIV。
     缓存的请求几何与五个块标志同次计算、同次发布，不跨调用沿用；Q/L/位置
@@ -61,6 +71,7 @@
 import pypto.language as pl
 
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN, query_request
+from .indexer_group_stages import MAX_CANDIDATES
 from .phase_sync import SIGNAL_WORDS, wait_row_owners
 from .runtime_abi import CORES, GROUPS, PHASE_TOPK
 
@@ -87,6 +98,12 @@ NEG_INF = -1.0e20
 PAGE_CHECK_TILE = 1024
 # FP32可精确表达此范围内的页号和长度；超出时走原INT32/INDEX逐候选检查。
 EXACT_FP32_INT = 16777216
+# 最终indices产生前的短期行前缀；阶段37发布后，这五项不再是metadata。
+EARLY_QUERY_OWNER_COL = 0
+EARLY_QUERY_BEGIN_COL = 1
+EARLY_QUERY_POSITION_COL = 2
+EARLY_QUERY_PAGES_COL = 3
+EARLY_QUERY_VISIBLE_COL = 4
 
 
 @pl.jit.inline(auto_scope=False)
@@ -136,6 +153,67 @@ def compressed_pages_all_valid(
 
 
 @pl.jit.inline(auto_scope=False)
+def attention_geometry_prepare_stage(
+    positions: pl.Tensor[[T_DYN], pl.INT64],
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    lengths: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+    compressed_table: pl.Tensor[[REQUESTS_DYN, COMPRESSED_COLUMNS_DYN], pl.INT32],
+    indices: pl.InOut[pl.Tensor[[PLAN_CAP_DYN, TOPK], pl.INT32]],
+    compressed_pages: pl.Scalar[pl.INDEX],
+    worker: pl.Scalar[pl.INDEX],
+    WORKERS: pl.constexpr,
+):
+    """准备只读metadata，与投影重叠；不读Top-K或cache payload。
+
+    保留原Q/L唯一owner、因果位置及页范围规则。页检查复用同一函数；返回0
+    仍由晚期plan逐候选回退，不能据此把整行判为非法。每八行tile沿用原
+    request缓存粒度。先在UB写五项，再用MTE3写八列对齐前缀（余三列为零），
+    后续最终索引同样用MTE3，避免同一个GM根混用Scalar与MTE3写。仅写实际T。
+    原ROPE phase负责发布；Top-K此前已获取该phase。整个调用的Q/L、位置、
+    页表不变，压缩器更新cache payload不会改变这个只读判定。
+    """
+    tokens = pl.tensor.dim(positions, 0)
+    for first in pl.range(worker * ROWS, tokens, WORKERS * ROWS):
+        rows = pl.min(ROWS, tokens - first)
+        # 一行32B对齐；UB Scalar写由编译器接入MTE3依赖，不产生GM DCache脏副本。
+        geometry = pl.tile.full([ROWS, 8], dtype=pl.INT32, value=0)
+        checked_request = pl.cast(-1, pl.INDEX)
+        checked_pages = pl.cast(0, pl.INT32)
+        for row in pl.range(rows):
+            token = first + row
+            owner = pl.cast(-1, pl.INT32)
+            saved_begin = pl.cast(0, pl.INT32)
+            saved_position = pl.cast(0, pl.INT32)
+            pages_ok = pl.cast(0, pl.INT32)
+            visible = pl.cast(0, pl.INDEX)
+            request, begin, end, active = query_request(bounds, lengths, token, tokens)
+            if active != 0:
+                position = pl.cast(pl.read(positions, [token]), pl.INDEX)
+                length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
+                if position == length - (end - begin) + token - begin:
+                    owner = pl.cast(request, pl.INT32)
+                    saved_begin = pl.cast(begin, pl.INT32)
+                    saved_position = pl.cast(position, pl.INT32)
+                    # 沿用indexer_query_visibility的整数边界，不由FP32值反推根数。
+                    # 合法position<L且L为INT32，故可无损暂存。
+                    visible = pl.max(pl.min(pl.min(length // 4, (position + 1) // 4), MAX_CANDIDATES), 0)
+                    if request != checked_request:
+                        checked_pages = compressed_pages_all_valid(
+                            compressed_table, request, length, compressed_pages
+                        )
+                        checked_request = request
+                    pages_ok = checked_pages
+            # dummy和陈旧位置同样覆盖，不能把上轮最终索引解释为本轮几何。
+            pl.tile.write(geometry, [row, EARLY_QUERY_OWNER_COL], owner)
+            pl.tile.write(geometry, [row, EARLY_QUERY_BEGIN_COL], saved_begin)
+            pl.tile.write(geometry, [row, EARLY_QUERY_POSITION_COL], saved_position)
+            pl.tile.write(geometry, [row, EARLY_QUERY_PAGES_COL], pages_ok)
+            pl.tile.write(geometry, [row, EARLY_QUERY_VISIBLE_COL], pl.cast(visible, pl.INT32))
+        pl.store(pl.set_validshape(geometry, rows, 8), [first, 0], indices)
+    return indices
+
+
+@pl.jit.inline(auto_scope=False)
 def attention_slot_plan_stage(
     topk: pl.Tensor[[T_DYN, TOPK], pl.INT32],
     positions: pl.Tensor[[T_DYN], pl.INT64],
@@ -153,6 +231,7 @@ def attention_slot_plan_stage(
     worker_id: pl.Scalar[pl.INDEX],
     WORKERS: pl.constexpr,
     CACHE_QUERY_METADATA: pl.constexpr = False,
+    EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
 ):
     """每个八行块独占 indices/bias/mask 行；只访问合法 owner 的 Native 页表。"""
     tokens = pl.tensor.dim(positions, 0)
@@ -174,20 +253,28 @@ def attention_slot_plan_stage(
         c_pos = pl.reshape(pl.tile.full([1, ROWS], dtype=pl.FP32, value=0.0), [ROWS, 1])
         v_len_col = pl.reshape(pl.tile.full([1, ROWS], dtype=pl.FP32, value=0.0), [ROWS, 1])
         owners = pl.reshape(pl.tile.full([1, ROWS], dtype=pl.INT32, value=-1), [ROWS, 1])
-        # 先确认请求活动再读position。owner保存于本核UB，后面的页检查无需再次扫Q。
-        # 尾部未用行保留owner=-1/length=0，且永远不写出这些物理tile填充行。
+        # 先读完同轮几何前缀，末尾才覆盖为最终索引。Top-K的读取已由上方
+        # 依赖保护；保留原FP32数学转换，尾部未用行仍不写入物理pad。
         for row in pl.range(rows):
             token = first + row
-            request, begin, end, active = query_request(bounds, lengths, token, tokens)
-            if active != 0:
-                position = pl.cast(pl.read(positions, [token]), pl.INDEX)
-                length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
-                if position == length - (end - begin) + token - begin:
+            if EARLY_ATTENTION_GEOMETRY:
+                request = pl.cast(pl.read(indices, [token, EARLY_QUERY_OWNER_COL]), pl.INDEX)
+                if request >= 0:
+                    position = pl.cast(pl.read(indices, [token, EARLY_QUERY_POSITION_COL]), pl.INDEX)
                     pl.tile.write(owners, [row, 0], pl.cast(request, pl.INT32))
-                    # L为INT32且已证明position位于[0,L)，INT32中转不会损失
-                    # 地址值；显式中转适配Scalar不支持INDEX直接转FP32的接口。
                     pl.tile.write(c_pos, [row, 0], pl.cast(pl.cast(position, pl.INT32), pl.FP32))
                     pl.tile.write(v_len_col, [row, 0], pl.cast(pl.cast(pl.min(position + 1, WIN), pl.INT32), pl.FP32))
+            else:
+                request, begin, end, active = query_request(bounds, lengths, token, tokens)
+                if active != 0:
+                    position = pl.cast(pl.read(positions, [token]), pl.INDEX)
+                    length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
+                    if position == length - (end - begin) + token - begin:
+                        pl.tile.write(owners, [row, 0], pl.cast(request, pl.INT32))
+                        # L为INT32且已证明position位于[0,L)，INT32中转不会损失
+                        # 地址值；显式中转适配Scalar不支持INDEX直接转FP32的接口。
+                        pl.tile.write(c_pos, [row, 0], pl.cast(pl.cast(position, pl.INT32), pl.FP32))
+                        pl.tile.write(v_len_col, [row, 0], pl.cast(pl.cast(pl.min(position + 1, WIN), pl.INT32), pl.FP32))
             if CACHE_QUERY_METADATA:
                 # 复用本次已验证的owner，不能把未通过causal检查的request发布出去。
                 # 正常position属于[0,L)，L为正INT32，所以这里无损存为INT32；
@@ -218,8 +305,9 @@ def attention_slot_plan_stage(
         v_col_tile = pl.col_expand_mul(pl.tile.full([ROWS, WIN], dtype=pl.FP32, value=1.0), v_columns)
         v_valid_tile = pl.minimum(pl.maximum(pl.neg(pl.row_expand_sub(v_col_tile, v_len_col)), 0.0), 1.0)
         pl.store(pl.set_validshape(pl.mul(pl.sub(v_valid_tile, 1.0), -NEG_INF), rows, WIN), [first, 0], bias)
-        # 页表在本次调用只读。缓存只在本核当前八行tile存活，换请求就重新验证，
-        # 不把上一次decode的合法页判断沿用到本次。常见全合法请求无需512次Scalar查页。
+        # 前置策略读取同轮页检查；后置策略在这里调用同一检查函数，并保持
+        # 同八行tile内的请求缓存。返回0都走原逐候选回退。前置路径的indices
+        # 几何前缀直到末尾store才覆盖；后置路径从不读取未初始化前缀。
         checked_request = pl.cast(-1, pl.INDEX)
         checked_pages_valid = pl.cast(0, pl.INT32)
         for row in pl.range(rows):
@@ -228,12 +316,15 @@ def attention_slot_plan_stage(
             v_block_valid = pl.cast(0, pl.INT32)
             if request >= 0:
                 upper = pl.cast(pl.cast(pl.read(c_pos_q, [row, 0]), pl.INT32), pl.INDEX)
-                if request != checked_request:
-                    length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
-                    checked_pages_valid = compressed_pages_all_valid(
-                        compressed_table, request, length, compressed_pages
-                    )
-                    checked_request = request
+                if EARLY_ATTENTION_GEOMETRY:
+                    checked_pages_valid = pl.read(indices, [token, EARLY_QUERY_PAGES_COL])
+                else:
+                    if request != checked_request:
+                        length = pl.cast(pl.read(lengths, [request]), pl.INDEX)
+                        checked_pages_valid = compressed_pages_all_valid(
+                            compressed_table, request, length, compressed_pages
+                        )
+                        checked_request = request
                 if checked_pages_valid != 0:
                     # 最终INT32索引仍须满足原0<=index<upper检查；不能只验证原始Top-K，
                     # 因为原浮点(raw+1)-1可能改变极大数边界。这里只把逐元素判断向量化。
