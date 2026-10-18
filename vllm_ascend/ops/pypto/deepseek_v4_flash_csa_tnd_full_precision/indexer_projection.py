@@ -6,8 +6,7 @@ import pypto.language as pl
 T = pl.dynamic("INDEXER_PROJ_T")
 
 
-@pl.jit
-def indexer_projection(
+def _indexer_projection(
     x: pl.Tensor[[T, 4096], pl.BF16],
     weight: pl.Tensor[[64, 4096], pl.BF16],
     order: pl.Tensor[[16, 4, 16], pl.INT32],
@@ -49,3 +48,7 @@ def indexer_projection(
         result = pl.cast(weighted, pl.FP16, mode="rint")
         pl.store(result, [row, 0], output)
     return raw, scaled, output
+
+
+indexer_projection_entry = pl.jit.inline(auto_scope=False)(_indexer_projection)
+indexer_projection = pl.jit(_indexer_projection)

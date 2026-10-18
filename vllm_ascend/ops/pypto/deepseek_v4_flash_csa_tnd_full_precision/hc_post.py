@@ -6,4 +6,11 @@
 不采用950/310的MulAddDst路径；实际安装的Native算子仍须同输入逐bit验证。
 """
 
-from ..deepseek_v4_flash_csa_tnd_precision.hc_post import hc_post_test  # noqa: F401
+import pypto.language as pl
+
+from ..deepseek_v4_flash_csa_tnd_precision.hc_post import (
+    _hc_post,
+    hc_post_test,  # noqa: F401
+)
+
+hc_post_entry = pl.jit.inline(auto_scope=False)(_hc_post)

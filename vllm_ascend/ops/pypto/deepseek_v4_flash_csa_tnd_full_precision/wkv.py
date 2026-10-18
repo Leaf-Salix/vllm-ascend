@@ -6,8 +6,7 @@ import pypto.language as pl
 T = pl.dynamic("WKV_INPUT_T")
 
 
-@pl.jit
-def wkv_test(
+def _wkv_test(
     x: pl.Tensor[[T, 4096], pl.BF16],
     weight: pl.Tensor[[512, 4096], pl.BF16],
     order: pl.Tensor[[32, 16], pl.INT32],
@@ -38,3 +37,7 @@ def wkv_test(
         rounded = pl.cast(projected, pl.BF16, mode="rint")
         pl.store(rounded, [out_row, 0], output)
     return output
+
+
+wkv_entry = pl.jit.inline(auto_scope=False)(_wkv_test)
+wkv_test = pl.jit(_wkv_test)

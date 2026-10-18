@@ -11,8 +11,7 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.nz_mode import (
 T = pl.dynamic("FULL_PRECISION_OPROJ_T")
 
 
-@pl.jit
-def o_proj_test(
+def _o_proj_test(
     heads: pl.Tensor[[T, 32768], pl.BF16],
     wo_a: pl.Tensor[[8, 4096, 1024], pl.BF16, WO_A_WEIGHT_LAYOUT],
     wo_b: pl.Tensor[[8192, 4096], pl.INT8, QUANT_WEIGHT_LAYOUT],
@@ -108,3 +107,7 @@ def o_proj_test(
         ob_scaled = pl.mul(pl.cast(ob_integer, pl.FP32), coefficient)
         pl.store(pl.cast(ob_scaled, pl.BF16, mode="rint"), [row, col], output)
     return output
+
+
+o_proj_entry = pl.jit.inline(auto_scope=False)(_o_proj_test)
+o_proj_test = pl.jit(_o_proj_test)

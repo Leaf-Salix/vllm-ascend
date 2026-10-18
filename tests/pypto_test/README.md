@@ -1,5 +1,11 @@
 # DeepSeek-V4 Flash CSA 验证入口
 
+2026-10-18最新完整精度变体已收敛为单PTO顶层入口、全部DSL，未扩展编译器/SDK；
+8K/B40及128K/B24真实整模型192 token均与各自Native黄金一致，见
+[单入口全DSL实现、精度与复现记录](DSV4_FLASH_CSA_TND_SINGLE_ENTRY_DSL_20261018.md)。
+两档实际占卡8分23秒/8分41秒；后续同类任务按该方案780秒上限拆分。
+以下链接保留各历史阶段的具体边界，不将旧性能数字套用到新实现。
+
 2026-10-16逐模块恢复HC-pre至HC-post完整PTO替换，第一步HC-post的真实权重TND逐bit对拍见
 [完整PTO恢复记录](DSV4_FLASH_CSA_TND_FULL_PRECISION_20261016.md)。
 后续HC-pre的Native分片观测、HF32根因及逐bit恢复见
@@ -47,7 +53,7 @@ metadata + QR组合的七档对拍见
 任务、约束和验收状态以 [任务清单](DSV4_FLASH_CSA_TASK_CHECKLIST.md) 为准。
 历史与当前执行过程持续记录在 [验证日志](DSV4_FLASH_CSA_VALIDATION_LOG.md)，
 本轮从 [第 99 节](DSV4_FLASH_CSA_VALIDATION_LOG.md#log-20260926) 开始。
-当前基线为 vLLM 0.25.1 / vLLM-Ascend 0.25.1rc1、A3 / CANN 9.0，
+早期基线为 vLLM 0.25.1 / vLLM-Ascend 0.25.1rc1、A3 / CANN 9.0；本轮完整精度使用CANN9.2，
 正式权重固定为 `/data/model/DeepSeek-V4-Flash-0731-w8a8`。
 环境、PyPTO/Simpler 分支及 PTOAS/ISA 版本见清单第 2 节与 A4。
 

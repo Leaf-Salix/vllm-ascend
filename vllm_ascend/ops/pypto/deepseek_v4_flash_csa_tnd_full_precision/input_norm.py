@@ -14,12 +14,33 @@ SQRT_CORRECTION_STEPS = 2
 FP32_INFINITY_BITS = 0x7F800000
 
 
-@pl.jit.extern(source="input_norm_sum.cpp", core_type="aiv")
-def square_sum(
-    x: pl.Tensor[[T, 4096], pl.BF16], sums: pl.Out[pl.Tensor[[T, 8], pl.FP32]]
-) -> pl.Tensor[[T, 8], pl.FP32]: ...
-@pl.jit
-def input_norm_test(
+def _square_sum(x: pl.Tensor[[T, 4096], pl.BF16], sums: pl.Out[pl.Tensor[[T, 8], pl.FP32]]):
+    x.bind_dynamic(0, T)
+    sums.bind_dynamic(0, T)
+    rows = pl.tensor.dim(x, 0)
+    for row in pl.spmd(rows, name_hint="input_rms_sum_dsl", allow_early_resolve=True):
+        raw = pl.load(x, [row, 0], [1, 4096], target_memory=pl.MemorySpace.Vec)
+        wide = pl.cast(raw, pl.FP32)
+        square = pl.mul(wide, wide)
+        fold2048 = pl.add(pl.slice(square, [1, 2048], [0, 0]), pl.slice(square, [1, 2048], [0, 2048]))
+        fold1024 = pl.add(pl.slice(fold2048, [1, 1024], [0, 0]), pl.slice(fold2048, [1, 1024], [0, 1024]))
+        fold512 = pl.add(pl.slice(fold1024, [1, 512], [0, 0]), pl.slice(fold1024, [1, 512], [0, 512]))
+        fold256 = pl.add(pl.slice(fold512, [1, 256], [0, 0]), pl.slice(fold512, [1, 256], [0, 256]))
+        fold128 = pl.add(pl.slice(fold256, [1, 128], [0, 0]), pl.slice(fold256, [1, 128], [0, 128]))
+        fold64 = pl.add(pl.slice(fold128, [1, 64], [0, 0]), pl.slice(fold128, [1, 64], [0, 64]))
+        # ColMajor 8x1 is a full 32B result. Replicate the final 64-value
+        # reduction input without changing its order; no 8x4096 UB expansion.
+        repeated = pl.col_expand(pl.create_tile([8, 64], dtype=pl.FP32), fold64)
+        total = pl.row_sum(repeated, pl.create_tile([8, 64], dtype=pl.FP32))
+        pl.store(pl.reshape(total, [1, 8]), [row, 0], sums)
+    return sums
+
+
+square_sum = pl.jit.inline(auto_scope=False)(_square_sum)
+square_sum_test = pl.jit(_square_sum)
+
+
+def _input_norm_test(
     x: pl.Tensor[[T, 4096], pl.BF16],
     weight: pl.Tensor[[4096], pl.BF16],
     output: pl.Out[pl.Tensor[[T, 4096], pl.BF16]],
@@ -30,8 +51,7 @@ def input_norm_test(
     rstd.bind_dynamic(0, T)
     rows = pl.tensor.dim(x, 0)
     sums = pl.create_tensor([rows, 8], dtype=pl.FP32)
-    with pl.spmd(rows):
-        sums = square_sum(x, sums)
+    sums = square_sum(x, sums)
     for row in pl.spmd(rows, name_hint="input_rms_inverse", allow_early_resolve=True):
         total = pl.read(sums, [row, 0])
         total_vector = pl.mul(pl.full([1, 8], dtype=pl.FP32, value=1.0), total)
@@ -80,3 +100,7 @@ def input_norm_test(
         result = pl.col_expand_mul(scaled, w)
         output[row : row + 1, 0:4096] = pl.cast(result, pl.BF16, mode="rint")
     return output, rstd
+
+
+input_norm_entry = pl.jit.inline(auto_scope=False)(_input_norm_test)
+input_norm_test = pl.jit(_input_norm_test)
