@@ -1,5 +1,14 @@
 # 完整动态 CSA 的 72 核 incore 流水采集
 
+**阅读入口（2026-10-19补充）**：原始总图19.34GB、完整清理图1.31GB，
+不适合直接作为默认阅读入口。已用既有数据生成
+`downloads/CSA_dynamic_128K_B16_S6_all72_incore_model_bounded_20261019/readable/index.html`
+（10.40MB），可离线筛选核组/角色、展开pipe和缩放时间。上一级的
+`CSA_128K_B16_S6_72cores_readable.zip`为19.54MB，包含总览及全部24份核组图，
+覆盖72核。单核图2.18～3.46MB、核组图6.82～9.43MB。
+来源、大小和转换核对见`READABLE_ARTIFACTS.json`，生成脚本为
+`make_readable_traces.py`；没有重新采集，也没有改动指令时间或时长。
+
 2026-10-18开始，2026-10-19继续。用户明确要求采集所有核：当前完整CSA虽为
 一次MIX kernel启动，内部按AIC/AIV及worker分工，具有MPMD特征。单核或独立
 Score的轨迹无法代表24个核组的负载、跨核等待和整体长尾。

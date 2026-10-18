@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSA · 全72核流水</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#172639;background:#f3f6fa}*{box-sizing:border-box}body{margin:0;padding:22px}main{max-width:1700px;margin:auto}h1{font-size:23px;margin:0 0 8px}.note{font-size:13px;color:#54657b;margin:6px 0 18px;line-height:1.7}.panel{background:#fff;border:1px solid #d7e0eb;border-radius:10px;padding:14px;margin-bottom:14px}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#536277}select,input,button{height:34px;border:1px solid #b8c6d7;border-radius:5px;background:white;color:#172639;padding:5px 9px;font:inherit}input{width:110px}button{cursor:pointer}button:hover{background:#edf3fc}.legend{display:flex;flex-wrap:wrap;gap:18px;font-size:12px;margin:12px 0 0}.dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}#axis{display:block;width:100%;height:34px}#scroll{max-height:68vh;overflow-y:auto;position:relative}#content{position:relative}#plot{position:sticky;top:0;display:block;width:100%;touch-action:none}#tooltip{position:fixed;pointer-events:none;display:none;z-index:5;max-width:420px;background:#18283ded;color:white;font-size:12px;line-height:1.6;padding:9px 12px;border-radius:6px;white-space:pre-line}#status{color:#65748a;font-size:12px;margin-top:9px}.links{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}.links a{color:#2258a0;border:1px solid #dce5f2;border-radius:5px;text-decoration:none;padding:9px;font-size:12px}.links a:hover{background:#eef4fd}.caption{font-size:13px;color:#536277;margin-bottom:12px}h2{font-size:16px;margin:0 0 10px}@media(max-width:700px){body{padding:9px}h1{font-size:20px}}
+</style>
+<main>
+<h1>CSA · 全72核流水</h1>
+<p class="note">128K / B16 / S6 · 24 AIC + 48 AIV · 既有数据离线阅读版<br>有界退避的模拟诊断结果；退避变化也可能影响访存竞争和流水重叠，仅作结构排查，不能作为正式时延。概览保留实际计算与搬运区间，指令和同步箭头请看下方核组图。</p>
+<section class="panel">
+<div class="controls">
+<label>核组<select id="group"><option value="all">全部24组</option></select></label>
+<label>角色<select id="role"><option value="all">全部角色</option><option value="0">AIC</option><option value="1">AIV0</option><option value="2">AIV1</option></select></label>
+<label>展示<select id="mode"><option value="overview">每核三条细带</option><option value="pipes">逐流水展开</option></select></label>
+<label>开始 / μs<input id="begin" type="number" step="1"></label>
+<label>结束 / μs<input id="end" type="number" step="1"></label>
+<button id="apply">应用范围</button><button id="reset">完整时间</button>
+</div>
+<div class="legend"><span><i class="dot" style="background:#2470cb"></i>CUBE / VECTOR 计算</span><span><i class="dot" style="background:#70a4b4"></i>MTE1 / MTE2 读入</span><span><i class="dot" style="background:#d38a34"></i>FIXP / MTE3 写出</span><span>滚轮：以鼠标位置缩放时间；拖动：平移时间</span></div>
+</section>
+<section class="panel"><canvas id="axis"></canvas><div id="scroll"><div id="content"><canvas id="plot"></canvas></div></div><div id="status"></div></section>
+<section class="panel"><h2>核组指令图</h2><div class="caption">每份包含1个AIC与2个AIV，导入Perfetto / Chrome tracing。全部24份合计覆盖72核；时间、时长和已有同步箭头保持。</div><div id="links" class="links"></div></section>
+</main><div id="tooltip"></div>
+<script id="trace-data" type="application/json">__TRACE_DATA__</script>
+<script>
+"use strict";
+const DATA=JSON.parse(document.getElementById("trace-data").textContent);
+const $=id=>document.getElementById(id);
+const plot=$("plot"),axis=$("axis"),scroller=$("scroll"),content=$("content"),tip=$("tooltip");
+let rows=[],left=DATA.begin,right=DATA.end,width=1000,height=600,rowH=26,margin=174,queued=false,drag=null;
+const colors={CUBE:"#2470cb",VECTOR:"#2470cb",MTE1:"#70a4b4",MTE2:"#70a4b4",FIXP:"#d38a34",FIXPIPE:"#d38a34",MTE3:"#d38a34"};
+const band=pipe=>["CUBE","VECTOR"].includes(pipe)?0:["MTE1","MTE2"].includes(pipe)?1:2;
+for(let i=0;i<24;i++){const o=document.createElement("option");o.value=i;o.textContent=`G${String(i).padStart(2,"0")}`;$("group").append(o);}
+for(const g of DATA.groups){const a=document.createElement("a");a.href=g.file;a.download="";a.textContent=`G${String(g.group).padStart(2,"0")} · ${(g.bytes/1e6).toFixed(2)} MB`;$("links").append(a);}
+function inputs(){ $("begin").value=left.toFixed(3);$("end").value=right.toFixed(3); }
+function range(a,b){if(!Number.isFinite(a)||!Number.isFinite(b)||b<=a)return;const span=Math.min(DATA.end-DATA.begin,Math.max(.05,b-a));left=Math.max(DATA.begin,Math.min(a,DATA.end-span));right=left+span;inputs();schedule();}
+function rebuild(){const selected=DATA.cores.filter(c=>($("group").value==="all"||c.group===Number($("group").value))&&($("role").value==="all"||c.role===Number($("role").value)));rows=[];const details=$("mode").value==="pipes";rowH=details?23:28;for(const core of selected){if(details){for(const [pipe,spans] of Object.entries(core.pipes))rows.push({core,label:`${core.name} · ${pipe}`,lanes:[[pipe,spans]]});}else rows.push({core,label:core.name,lanes:Object.entries(core.pipes)});}scroller.scrollTop=0;content.style.height=`${Math.max(60,rows.length*rowH)}px`;$("status").textContent=`${selected.length} 核 · ${rows.length} 行 · 共同时间轴；空白可能包含Scalar或同步，不能直接解释为空闲。`;resize();}
+function resize(){width=Math.max(360,scroller.clientWidth);margin=width<600?132:174;height=Math.min(Math.max(90,rows.length*rowH),Math.max(280,window.innerHeight*.65));scroller.style.height=`${height}px`;const dpr=window.devicePixelRatio||1;for(const [c,h] of [[plot,height],[axis,34]]){c.width=Math.round(width*dpr);c.height=Math.round(h*dpr);c.style.height=`${h}px`;c.getContext("2d").setTransform(dpr,0,0,dpr,0,0);}schedule();}
+function firstRelevant(spans,t){let lo=0,hi=spans.length;while(lo<hi){const m=(lo+hi)>>1;if(spans[m][0]+spans[m][1]<t)lo=m+1;else hi=m;}return lo;}
+function schedule(){if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;draw();});}}
+function ticks(){const span=right-left,target=span/8,power=10**Math.floor(Math.log10(target));const step=[1,2,5,10].map(v=>v*power).find(v=>v>=target);const result=[];for(let v=Math.ceil(left/step)*step;v<=right;v+=step)result.push(v);return result;}
+function draw(){const ctx=plot.getContext("2d"),ax=axis.getContext("2d"),viewW=width-margin-10;ctx.clearRect(0,0,width,height);ax.clearRect(0,0,width,34);ctx.fillStyle="#fff";ctx.fillRect(0,0,width,height);ctx.font="11px system-ui";ax.font="11px system-ui";const tick=ticks();for(const t of tick){const x=margin+(t-left)/(right-left)*viewW;ctx.strokeStyle="#e6edf5";ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();ax.fillStyle="#65748a";ax.fillText(`${Number(t.toFixed(3))} μs`,x+3,24);}const offset=scroller.scrollTop,first=Math.max(0,Math.floor(offset/rowH)),last=Math.min(rows.length,Math.ceil((offset+height)/rowH));for(let i=first;i<last;i++){const row=rows[i],y=i*rowH-offset;if(row.core.group%2===0){ctx.fillStyle="#f5f8fc";ctx.fillRect(0,y,width,rowH);}ctx.fillStyle="#2d4059";ctx.fillText(row.label,7,y+rowH*.63);for(const [pipe,spans] of row.lanes){ctx.fillStyle=colors[pipe]||"#6f8095";const all=$("mode").value==="overview",by=all?y+3+band(pipe)*7:y+4,bh=all?6:rowH-8;for(let j=firstRelevant(spans,left);j<spans.length&&spans[j][0]<=right;j++){const [t,d]=spans[j],a=Math.max(left,t),b=Math.min(right,t+d);if(b<a)continue;const x=margin+(a-left)/(right-left)*viewW,w=(b-a)/(right-left)*viewW;ctx.fillRect(x,by,Math.max(.4,w),bh);}}}ctx.strokeStyle="#cad6e5";ctx.beginPath();ctx.moveTo(margin-5,0);ctx.lineTo(margin-5,height);ctx.stroke();}
+function hover(e){if(drag)return;const rect=plot.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;const idx=Math.floor((scroller.scrollTop+y)/rowH);if(x<margin||idx<0||idx>=rows.length){tip.style.display="none";return;}const row=rows[idx],t=left+(x-margin)/(width-margin-10)*(right-left);const found=[];for(const [pipe,spans] of row.lanes){const n=firstRelevant(spans,t),s=spans[n];if(s&&s[0]<=t&&s[0]+s[1]>=t)found.push(`${pipe}: ${s[0].toFixed(6)} → ${(s[0]+s[1]).toFixed(6)} μs`);}tip.textContent=`${row.core.name} · ${t.toFixed(6)} μs\n${found.length?found.join("\n"):"此处未绘制计算/搬运指令；可能执行Scalar或同步。"}`;tip.style.display="block";tip.style.left=`${Math.max(5,Math.min(window.innerWidth-430,e.clientX+14))}px`;tip.style.top=`${Math.min(window.innerHeight-120,e.clientY+14)}px`;}
+for(const id of ["group","role","mode"])$(id).addEventListener("change",rebuild);
+$("apply").addEventListener("click",()=>range(Number($("begin").value),Number($("end").value)));
+$("reset").addEventListener("click",()=>range(DATA.begin,DATA.end));
+scroller.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",resize);
+plot.addEventListener("wheel",e=>{if(e.ctrlKey)return;e.preventDefault();const x=e.clientX-plot.getBoundingClientRect().left;if(x<margin)return;const f=Math.max(0,Math.min(1,(x-margin)/(width-margin-10))),anchor=left+f*(right-left),span=(right-left)*(e.deltaY>0?1.25:.8);range(anchor-f*span,anchor+(1-f)*span);},{passive:false});
+plot.addEventListener("pointerdown",e=>{if(e.clientX-plot.getBoundingClientRect().left<margin)return;drag={x:e.clientX,left,right};plot.setPointerCapture(e.pointerId);tip.style.display="none";});
+plot.addEventListener("pointermove",e=>{if(drag){const delta=(e.clientX-drag.x)/(width-margin-10)*(drag.right-drag.left);range(drag.left-delta,drag.right-delta);}else hover(e);});
+plot.addEventListener("pointerup",()=>drag=null);plot.addEventListener("pointercancel",()=>drag=null);plot.addEventListener("pointerleave",()=>tip.style.display="none");
+inputs();rebuild();
+</script>
+</html>
