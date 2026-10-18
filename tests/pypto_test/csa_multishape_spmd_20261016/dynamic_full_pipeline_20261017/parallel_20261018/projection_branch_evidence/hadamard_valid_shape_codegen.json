@@ -1,0 +1,54 @@
+{
+  "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/projection_branch_evidence/cpu_v4/kernel/ptoas/dynamic_csa_full.pto",
+  "scope": "M256真实有效行在load/matmul/store中保持；不是设备精度验证",
+  "operations": [
+    {
+      "line": 1213,
+      "text": "    %weight_inline3347__tile = pto.alloc_tile addr = %c131072_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":82:5)"
+    },
+    {
+      "line": 1214,
+      "text": "    %hadamard__ssa_v0_pview = pto.partition_view %hadamard__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c128_index, %c128_index] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<128x128xbf16> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":82:5)"
+    },
+    {
+      "line": 1215,
+      "text": "    pto.tload ins(%hadamard__ssa_v0_pview : !pto.partition_tensor_view<128x128xbf16>) outs(%weight_inline3347__tile : !pto.tile_buf<loc=mat, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":82:5)"
+    },
+    {
+      "line": 1222,
+      "text": "      %source_inline3342__tile = pto.alloc_tile addr = %c65536_i64 valid_row = %598 valid_col = %c128_index : !pto.tile_buf<loc=mat, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":87:9)"
+    },
+    {
+      "line": 1224,
+      "text": "      %idx_query_rope_heads__ssa_v0_pview = pto.partition_view %idx_query_rope_heads__ssa_v0_view, offsets = [%599, %c0_index], sizes = [%598, %c128_index] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<?x128xbf16> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":87:9)"
+    },
+    {
+      "line": 1225,
+      "text": "      pto.tload ins(%idx_query_rope_heads__ssa_v0_pview : !pto.partition_tensor_view<?x128xbf16>) outs(%source_inline3342__tile : !pto.tile_buf<loc=mat, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":87:9)"
+    },
+    {
+      "line": 1226,
+      "text": "      %source_inline3342__tile_Left = pto.alloc_tile addr = %c0_i64 valid_row = %598 valid_col = %c128_index : !pto.tile_buf<loc=left, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":88:9)"
+    },
+    {
+      "line": 1228,
+      "text": "      %weight_inline3347__tile_Right = pto.alloc_tile addr = %c0_i64 valid_row = %c128_index valid_col = %c128_index : !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":88:9)"
+    },
+    {
+      "line": 1230,
+      "text": "      %result_inline3344__tile = pto.alloc_tile addr = %c0_i64 valid_row = %598 valid_col = %c128_index : !pto.tile_buf<loc=acc, dtype=f32, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":88:9)"
+    },
+    {
+      "line": 1231,
+      "text": "      pto.tmatmul ins(%source_inline3342__tile_Left, %weight_inline3347__tile_Right : !pto.tile_buf<loc=left, dtype=bf16, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=bf16, rows=128, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%result_inline3344__tile : !pto.tile_buf<loc=acc, dtype=f32, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":88:9)"
+    },
+    {
+      "line": 1233,
+      "text": "      %idx_query_had__iter_v1_pview = pto.partition_view %idx_query_had__ssa_v0_view, offsets = [%600, %c0_index], sizes = [%598, %c128_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x128xf32> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":90:9)"
+    },
+    {
+      "line": 1234,
+      "text": "      pto.tstore ins(%result_inline3344__tile : !pto.tile_buf<loc=acc, dtype=f32, rows=256, cols=128, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0, compact=1>) outs(%idx_query_had__iter_v1_pview : !pto.partition_tensor_view<?x128xf32>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/projection_branches.py\":90:9)"
+    }
+  ]
+}
