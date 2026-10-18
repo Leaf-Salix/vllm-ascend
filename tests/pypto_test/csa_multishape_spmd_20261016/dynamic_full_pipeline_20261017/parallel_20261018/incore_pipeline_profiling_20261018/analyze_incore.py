@@ -17,7 +17,7 @@ from prepare_standalone import HERE
 
 
 WORKSPACE = HERE.parents[6]
-DESTINATION = WORKSPACE / "downloads/CSA_dynamic_128K_B16_S6_all72_incore_20261019"
+DESTINATION = WORKSPACE / "downloads/CSA_dynamic_128K_B16_S6_all72_incore_model_bounded_20261019"
 SYNC = frozenset({"BAR", "SET_FLAG", "WAIT_FLAG", "PIPE_BARRIER", "SYNC_ALL", "WAIT_EVENT"})
 COMPUTE_PIPES = frozenset({"CUBE", "VECTOR", "MTE1", "MTE2", "MTE3", "FIXP"})
 
@@ -43,6 +43,8 @@ def intervals_union(intervals):
 
 def main():
     case = Path((HERE / "ACTIVE_CASE_PATH.txt").read_text().strip())
+    bindings = json.loads((case / "workload_bindings.json").read_text())
+    assert bindings.get("bounded_model_backoff") is True
     run = case.parents[2]
     manifest = list(csv.DictReader((run / "manifest_export.csv").open()))
     assert len(manifest) == 1 and manifest[0]["status"] == "exported", manifest
@@ -122,7 +124,7 @@ def main():
                 overview.append(dict(name="thread_name", ph="M", pid=core, tid=pipe, args=dict(name=pipe)))
                 overview.extend(dict(name=pipe, ph="X", pid=core, tid=pipe, ts=b, dur=e-b) for b,e in spans)
     # 小型概览便于同时查看72核；详细指令/同步仍以原始轨迹为准。
-    (DESTINATION / "CSA_128K_B16_S6_72cores.pipe_overview.json").write_text(json.dumps(dict(displayTimeUnit="ns",traceEvents=overview)))
+    (DESTINATION / "CSA_128K_B16_S6_72cores_model_bounded.pipe_overview.json").write_text(json.dumps(dict(displayTimeUnit="ns",traceEvents=overview)))
     with (DESTINATION / "pipeline_summary.csv").open("w") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
     (DESTINATION / "core_ranges_and_gaps.json").write_text(json.dumps(core_rows,ensure_ascii=False,indent=2)+"\n")
@@ -133,10 +135,12 @@ def main():
                   timestamp_policy="保留完整launch共同时间轴，不逐核归零；us来自原始Chrome事件字段",
                   cycle_policy="cycles_sum是可重叠的指令周期求和，不能当作墙钟耗时或直接相减求收益",
                   gaps_policy="计算/MTE指令区间之外的空隙；可能包含合法Scalar、等待或控制，尚未归因为浪费",
-                  output_validation=str(HERE / "REPLAY_VALIDATION.json"), simulator_only=True)
+                  output_validation=str(HERE / "REPLAY_VALIDATION.json"), simulator_only=True,
+                  bounded_model_backoff=True, backoff_read_limit=128, timing_semantics_changed=True,
+                  timing_limit="本地模拟诊断副本；计算/数据/依赖条件不变，轮询退避不同，不能作为正式完整耗时或等待定量证据")
     (HERE / "INCORE_COVERAGE.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
     (DESTINATION / "incore_coverage.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")
-    shutil.copy2(HERE / "WORKLOAD_BINDINGS.json", DESTINATION / "workload_bindings.json")
+    shutil.copy2(case / "workload_bindings.json", DESTINATION / "workload_bindings.json")
     shutil.copy2(run / "manifest_export.csv", DESTINATION / "manifest_export.csv")
     shutil.copy2(run / "summary.txt", DESTINATION / "skill_summary.txt")
     # 原始数据必须独立保留；同一文件系统硬链接避免重复复制巨量数据，不改原文件。

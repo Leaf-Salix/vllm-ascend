@@ -29,11 +29,12 @@ def main():
         if event.get("name") == "process_sort_index":
             group, role = core_key(event["pid"])
             event["args"]["sort_index"] = group * 3 + role
-    target = DESTINATION / "CSA_128K_B16_S6_72cores.clean.json"
+    target = DESTINATION / "CSA_128K_B16_S6_72cores_model_bounded.clean.json"
     target.write_text(json.dumps(result, ensure_ascii=False) + "\n")
     report = dict(cleaner_source=str(path), raw_source=coverage["source_trace"], cleaned=str(target),
                   cores=len(core_names), raw_events=len(raw["traceEvents"]), clean_events=len(result["traceEvents"]),
                   skipped_sync_arrows=skipped, timestamps_changed=False,
+                  bounded_model_backoff=True, timing_semantics_changed=True,
                   scalar_and_original_sync="raw_simulator/trace.json中完整保留",
                   flow_scope="清理箭头仅对应SET/WAIT_FLAG；普通GM notify/wait需结合Scalar原始事件和源码分析")
     (HERE / "TRACE_CLEANING.json").write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n")

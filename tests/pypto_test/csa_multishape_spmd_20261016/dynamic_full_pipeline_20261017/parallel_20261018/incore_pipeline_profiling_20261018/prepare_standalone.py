@@ -39,7 +39,7 @@ def tokens(text):
     return re.findall(r"\w+|[^\s\w]", text)
 
 
-def prepare_source():
+def prepare_source(*, bounded_model_backoff=False):
     result = json.loads((CAPTURE / "result.json").read_text())
     capture = json.loads((CAPTURE / "replay/capture.json").read_text())
     assert result["passed"] and result["stage"] == "complete" and capture["capture_complete"]
@@ -61,6 +61,20 @@ def prepare_source():
         _, b = function_parts(path.read_text(), name)
         matches[name] = tokens(a) == tokens(b)
         assert matches[name], f"{name}数学体与真机wrapper不一致"
+    if bounded_model_backoff:
+        # CANN9.2当前模型在72核上SYS_CNT均为0，按时间差循环永不退出。
+        # 只给本地诊断helper增加128次读取上限；外层仍须等真实GM进度，
+        # DCCI/volatile/发布与payload fence不变。此版本不能用于定量等待时延。
+        original = """    while ((uint64_t)(get_sys_cnt() - csa_wait_start) < 100) {
+      __asm__ __volatile__(\"\" ::: \"memory\");
+    }"""
+        bounded = """    // 仅用于CANN模拟诊断：SYS_CNT可能始终为零。
+    for (uint32_t csa_model_backoff_reads = 0; csa_model_backoff_reads < 128; ++csa_model_backoff_reads) {
+      if ((uint64_t)(get_sys_cnt() - csa_wait_start) >= 100) break;
+      __asm__ __volatile__(\"\" ::: \"memory\");
+    }"""
+        assert body.count(original) == 1
+        body = body.replace(original, bounded)
     params, _ = function_parts(body, "cube_schedule")
     vector_params, _ = function_parts(body, "vector_schedule")
     assert vector_params[:-1] == params and len(params) == 190
@@ -111,7 +125,8 @@ def prepare_source():
         f"  vector_schedule({', '.join(names)}, static_cast<int32_t>(get_subblockid()));\n"
         "#endif\n}\n"
     )
-    out = BUILD / "ptoas"
+    build = HERE / "build_output/source_build_model_bounded" if bounded_model_backoff else BUILD
+    out = build / "ptoas"
     out.mkdir(parents=True, exist_ok=True)
     (out / (FUNCTION + ".cpp")).write_text(body)
     shutil.copy2(original_build / "ptoas/dynamic_csa_full.pto", out / (FUNCTION + ".pto"))
@@ -121,7 +136,11 @@ def prepare_source():
                   physical_cores="24 AIC + 48 AIV", arguments=bindings,
                   entry_changes="FFTS由rtGetC2cCtrlAddr传入；hardware core/lane id；MIX起始会合对应require_sync_start",
                   math_changed=False, all_storage_aliases_preserved=True)
-    (HERE / "WORKLOAD_BINDINGS.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    report.update(bounded_model_backoff=bounded_model_backoff, backoff_read_limit=128 if bounded_model_backoff else None,
+                  dependency_wait_condition_changed=False, timing_semantics_changed=bounded_model_backoff,
+                  timing_limit="有界退避诊断版：不可将等待长度或完整模拟耗时作为正式算子性能" if bounded_model_backoff else None)
+    binding_name = "WORKLOAD_BINDINGS_MODEL_BOUNDED.json" if bounded_model_backoff else "WORKLOAD_BINDINGS.json"
+    (HERE / binding_name).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print("Standalone source ready: 132 pointers, 56 shape scalars, 24 groups; math matches actual device wrapper")
     return report
 

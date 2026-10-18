@@ -57,8 +57,9 @@ wait-backoff helper签名使用设备专有的`pto::comm::WaitCmp`。真机wrapp
 ## 当前状态
 
 第二轮独立构建`full_csa_all72_20261019_000900`通过，CPU模拟任务
-`task_20261019_001135_28286531625`已启动。日志确认AIC0..23分别带两个AIV，
-正在完整执行，尚无终态和完整轨迹。
+`task_20261019_001135_28286531625`确认AIC0..23分别带两个AIV；最终触发
+本地1500秒队列时限，exit=143，没有完整轨迹。最初只观察到模型tick增长，
+当时尚不能区分慢采集和业务停滞；后续dump定位到下述恒零计时器问题。
 
 为先排除独立包装/ABI错误，复用**同一份kernel.so**另建真实runtime的Host
 入口，只将设备号取自队列TASK_DEVICE；模拟与真机输出使用不同目录。
@@ -76,3 +77,45 @@ AIC各执行22个Score步骤。因此不能先把此档的差距归因为Score�
 `clean_incore.py`。原始Scalar/同步事件完整保留，清理图只重建原版工具
 支持的SET/WAIT_FLAG连线，不伪造普通GM notify/wait的跨核箭头。采集结果、
 72核完整性和逐角色瓶颈结论仍须等待实际导出，不预记PASS。
+
+## 2026-10-19：模拟卡住的实际原因与诊断副本边界
+
+复用原二进制延长时限并开启dump，任务`task_20261019_003909_39257231668`。
+读取所有72核的instr_log尾部发现：指令周期持续增长，但`MOV_XD_SPR ...
+SPR:SYS_CNT`均返回0，随后SUB结果为0、和100比较继续跳回退避内循环。
+证据在`SYS_CNT_ZERO_EVIDENCE.json`；完整dump本地保留。这是当前模型中的
+计时寄存器行为，不能将它误认为CSA生产者没有发布信号或A3硬件不支持通信。
+同二进制无profiler诊断`task_20261019_003418_37280037769`亦未完成，但
+其本身不提供寄存器归因。定位后两任务均主动终止，终态exit=143。
+
+上游记录：
+
+- [pypto-lib #1486](https://github.com/hw-native-sys/pypto-lib/issues/1486)：skill把
+  CANN分钟参数写成秒，并直接使用秒级外层时限。与本次SYS_CNT停滞独立。
+- [pypto-lib #1487](https://github.com/hw-native-sys/pypto-lib/issues/1487)：报告
+  模型SYS_CNT恒零的兼容性及skill检测/文档建议，明确不称作PyPTO编译bug。
+  CANN缩减probe只作为建议代码，尚未另跑；实际证据来自完整72核回放。
+
+`run_profile_model_bounded.py`构建**单独的模拟诊断副本**：只为计时退避
+内循环增加128次读取上限，外层仍需DCCI/volatile读取真实GM进度，满足
+expected后才能继续。写侧DCCI/DSB、payload fence、FFTS READY/ACK、
+metadata、数学体和24组核分工保持。正式ops源码与原二进制不变。
+
+该副本改变轮询退避间隔，不能把它的等待区间或完整模拟耗时当作正式算子
+的定量性能。主要用途是查看计算/MTE流水、角色分工与依赖关系；后续优化
+仍用真机完整L1验收。工作区与代码绑定另存
+`WORKLOAD_BINDINGS_MODEL_BOUNDED.json`，下载目录及文件名包含model_bounded。
+任务`task_20261019_004740_6124323569`已开始，仍待完整输出与72核轨迹验收。
+
+## 与此前HC_pre成功采集的区别
+
+用户指出hc_pre.py此前incore采集正常，已直接核对当时全核结果：
+`downloads/hc_pre_B16_S6_allcores_20261012`确实导出72条核轨迹/72份CSV，
+五份输出与真机逐bit一致；72份指令CSV中没有SYS_CNT读取。
+当前hc_pre.py:355-373的跨组交接是cacheinvalid、fence、硬件syncall(MIX)、
+cacheinvalid，组内仍有硬件事件；没有CSA可选wait helper的计时退避。
+
+因此HC_pre成功证明那条多核交接路径可执行；本次CSA停滞需限定为当前模型
+SYS_CNT恒零触发的退避问题，不能概括成多核通信或所有GM读写无法模拟。
+机器可读核对在`HC_PRE_SYNC_COMPARISON.json`。有界诊断版已在实时dump中
+出现实际MMAD并推进到不同PC，完整结果仍待验收，不能提前记采集PASS。

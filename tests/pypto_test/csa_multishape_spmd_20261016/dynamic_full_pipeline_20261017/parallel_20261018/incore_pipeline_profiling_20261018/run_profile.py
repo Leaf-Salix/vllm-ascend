@@ -22,6 +22,8 @@ WORKSPACE = REPO.parent
 SKILL = HERE / "skill_snapshot/.claude/skills/incore-profiling"
 ISA = WORKSPACE / ".worktrees/simpler-csa-core-args-256-20261016/build/pto-isa"
 TOOLKIT = Path("/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2")
+BINDINGS = HERE / "WORKLOAD_BINDINGS.json"
+RUN_NAME = "full_csa_all72"
 
 
 def host_main(original, bindings, capture):
@@ -120,7 +122,7 @@ int main() {
 
 
 def wire_case(case):
-    bindings = json.loads((HERE / "WORKLOAD_BINDINGS.json").read_text())
+    bindings = json.loads(BINDINGS.read_text())
     capture = json.loads((CAPTURE / "replay/capture.json").read_text())
     path = case / "main.cpp"
     original = path.read_text()
@@ -164,6 +166,8 @@ def main():
 
     def run_cmd(command, **kwargs):
         if command[:3] == ["msprof", "op", "simulator"]:
+            if not any(arg.startswith("--export=") for arg in command):
+                command = [*command, "--dump=on"]
             script = Path(kwargs["log_path"]).parent / "collect_queued.sh"
             env = kwargs["env"]
             lines = ["#!/usr/bin/env bash", "set -eo pipefail",
@@ -177,9 +181,9 @@ def main():
                     lines.append("export " + key + "=" + shlex.quote(value))
             lines += ["export ACL_DEVICE_ID=0", "exec " + shlex.join(command)]
             script.write_text("\n".join(lines) + "\n")
-            return original(["task-submit", "--no-device", "--max-time", "1500", "--timeout", "1600", "--run",
+            return original(["task-submit", "--no-device", "--max-time", "7200", "--timeout", "7300", "--run",
                              "bash " + shlex.quote(str(script))],
-                            log_path=kwargs["log_path"], timeout=1650, check=False)
+                            log_path=kwargs["log_path"], timeout=7350, check=False)
         if command[:2] == ["cmake", "--build"]:
             command = [*command, "--parallel", "4"]
         result = original(command, **kwargs)
@@ -194,8 +198,9 @@ def main():
         "--ptoas-root", str(WORKSPACE / "ptoas-src"), "--pto-isa-root", str(ISA),
         "--cann-set-env", str(TOOLKIT / "set_env.sh"),
         "--soc-version", "Ascend910_9392", "--aicore-arch", "dav-c220",
-        "--output-root", str(HERE / "build_output"), "--name", "full_csa_all72",
-        "--msprof-timeout", "900", "--step-timeout", "600", "--build-timeout", "900", "--no-keep-going",
+        "--output-root", str(HERE / "build_output"), "--name", RUN_NAME,
+        # CANN参数单位为分钟；本地queue保护为7200秒，预留导出时间。
+        "--msprof-timeout", "90", "--step-timeout", "600", "--build-timeout", "900", "--no-keep-going",
     ])
 
 
