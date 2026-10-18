@@ -240,26 +240,16 @@ def main():
             layer, report["weights"] = make_layer(config, Path(config.model_config.model), device, 4)
             report["stage"] = "formal_weights_loaded"
             save(args.output, report)
-            fixture = make_fixture(config, layer.self_attn, args.batch, args.history, 1024, device)
-            # 功能扩展只重排完整历史页，保留当前写入页及Native slot_mapping。
-            # 默认original仍是七档已有输入；扩展样例不能混入正式七档性能表。
-            full_history_pages = args.history // (4 * 32)
-            if args.indexer_page_pattern != "original":
-                if full_history_pages < 4:
-                    raise ValueError("页序功能样例至少需要四个完整历史页")
-                indexer_table = fixture["groups"]["indexer"]["common"].block_table_tensor
-                if args.indexer_page_pattern == "ascending_history":
-                    indexer_table[:, :full_history_pages].copy_(
-                        indexer_table[:, :full_history_pages].flip([1]))
-                else:
-                    page_one = indexer_table[:, 1].clone()
-                    indexer_table[:, 1].copy_(indexer_table[:, 2])
-                    indexer_table[:, 2].copy_(page_one)
+            fixture = make_fixture(
+                config, layer.self_attn, args.batch, args.history, 1024, device,
+                indexer_page_pattern=args.indexer_page_pattern,
+            )
             report["indexer_page_pattern"] = {
                 "pattern": args.indexer_page_pattern,
-                "full_history_pages": full_history_pages,
+                "full_history_pages": args.history // (4 * 32),
                 "current_slot_mapping_unchanged": True,
                 "canonical_seven_input": args.indexer_page_pattern == "original",
+                "native_metadata_generated_after_page_layout": True,
             }
             # 保留原对照用非均匀scale，避免常量scale掩盖页/行索引错误。
             idx_group = fixture["groups"]["indexer"]
@@ -369,6 +359,8 @@ def main():
                 baseline[label] = collect_state(fixture, output, call.args["idx_topk"])
                 baseline[label]["idx_topk_scores"] = call.args["idx_topk_scores"].cpu()
                 reference_guards = guard_checks(fixture)
+                report.setdefault("reference_guards", {})[label] = reference_guards
+                save(args.output, report)
                 assert all(c["status"] == "PASS" for c in reference_guards.values())
             report["stage"] = "reference_complete"
             save(args.output, report)

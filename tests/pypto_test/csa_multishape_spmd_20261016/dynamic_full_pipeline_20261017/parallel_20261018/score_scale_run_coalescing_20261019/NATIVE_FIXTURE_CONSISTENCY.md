@@ -1,0 +1,18 @@
+# 扩展页序输入生成的修正
+
+v1在make_fixture返回后改GPU页表，但只读快照仍是旧页表，参考侧保护失败。
+v2补快照时误访问合法缺省的indexer.slot_mapping（None项不在readonly），
+启动阶段退出。v3处理可选项后可进入候选，但复核发现这种后置修改仍没有
+重建CPU BlockTable和历史compact slots。因此v3只保留为诊断，不作为规范
+Native输入的功能证据；没有通过删检查或修改输出阈值接受它。
+
+v4将页序选择放入make_fixture的BlockTable.add_row之前，随后由原Native
+路径依次commit、生成slot_mapping、metadata、compact metadata、允许写区
+和readonly。默认original的页号列表及随机调用顺序不变。扩展模式只改变
+完整历史前缀，当前页后缀按构造断言保持，所有保护按新输入自然生成。
+
+这样测试比较的是一致的Native输入，不是几个视图互不一致的手工状态。
+两个v4任务重新验证正序/碎片路径及同图变换，结果未完成前不记PASS。
+
+v4两项最终全门槛PASS，包括metadata和padding图回放。保护阈值未放宽，
+readonly基准由规范Native构造自然生成，未在运行后修改参考输出。

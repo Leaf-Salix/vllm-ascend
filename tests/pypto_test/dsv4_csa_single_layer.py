@@ -82,11 +82,14 @@ def make_layer(config, checkpoint, device, layer_index=2):
     return layer, {"weights": records, "quant_methods": methods}
 
 
-def make_fixture(config, attention, batch, history, seed, device, table_history=None, reverse_pages=False, *, query_tokens=6):
+def make_fixture(config, attention, batch, history, seed, device, table_history=None, reverse_pages=False, *, query_tokens=6, indexer_page_pattern="original"):
     """按实际本轮长度构造Native输入；Dspark配置上限与本轮有效长度分开。
 
     默认S6保持既有用例。S5用于置信度导致本轮长度缩短的验证，不把模型的
     num_speculative_tokens从5改为4。此fixture只构造等长请求；混合Q另行验证。
+    indexer_page_pattern只改变完整历史前缀的页顺序；须在Native metadata、
+    compact slots及只读快照生成之前完成，避免测试输入的不同视图不一致。
+    original保持所有旧调用的原输入；升序/碎片样例不并入原七档性能统计。
     """
     import torch
     from dsv4_csa_native_case import allocate_native_cache, make_cache_groups
@@ -99,6 +102,8 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
     torch.npu.manual_seed(seed)
     if type(query_tokens) is not int or not 1 <= query_tokens <= 6:
         raise ValueError("本fixture支持Dspark=5下的1..6个实际query token")
+    if indexer_page_pattern not in ("original", "ascending_history", "fragmented_history"):
+        raise ValueError("未知Indexer历史页排列")
     tokens = batch * query_tokens
     bounds_cpu = torch.arange(batch + 1, dtype=torch.int32) * query_tokens
     lengths_cpu = torch.full((batch,), history + query_tokens, dtype=torch.int32)
@@ -133,9 +138,18 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
         table = BlockTable(spec.block_size, 40, columns, 256, True, device, num_speculative_tokens=5)
         for row in range(batch):
             owner = batch - 1 - row if reverse_pages else row
-            table.add_row(
-                [1 + owner * per_request + (per_request - 1 - col) % per_request for col in range(columns)], row
-            )
+            page_ids = [1 + owner * per_request + (per_request - 1 - col) % per_request for col in range(columns)]
+            if name == "indexer" and indexer_page_pattern != "original":
+                full_history_pages = history // (spec.block_size * ratio)
+                if full_history_pages < 4:
+                    raise ValueError("页序功能样例至少需要四个完整历史页")
+                current_suffix = page_ids[full_history_pages:]
+                if indexer_page_pattern == "ascending_history":
+                    page_ids[:full_history_pages] = reversed(page_ids[:full_history_pages])
+                else:
+                    page_ids[1], page_ids[2] = page_ids[2], page_ids[1]
+                assert page_ids[full_history_pages:] == current_suffix
+            table.add_row(page_ids, row)
         table.commit_block_table(batch)
         table.compute_slot_mapping(batch, bounds, positions // ratio)
         common = AscendCommonAttentionMetadata(
