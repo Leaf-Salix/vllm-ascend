@@ -17682,3 +17682,29 @@ HEAD相同后，仅恢复本轮4文件并移除已归档helper。正式目录恢
 B28已有优化Native1701.75、分task1312.22、动态1337.28；静态无成功记录，
 按要求留空。动态B28仍是9d5327e5的记录，明确当前新增QA小档不作用于T168、
 最新依赖环境未重测；其余Native沿用10月12日历史环境。完整L1七档30%目标仍0/7。
+
+### 2026-10-18：七档新增包含AICPU的多task外部跨度，仅补测B28
+
+用户追加外部可见的多task完整耗时。读取Simpler原始schema确认L1 aicore_tasks
+第六列为receive_to_start增量，不是AICPU完成时间；现有L1缺少scheduler/lifecycle
+边界，不能从这些列伪造完整AICPU跨度。采用已有校准口径：PyTorch profiler所有
+设备流首个CSA kernel开始至最后一个结束，剔除图外reset/poison，保留AICPU和
+AICore整体。它不是incore时长加所有AICPU工作量，重叠时间只计一次。
+
+六档沿用10月12日a00afa9f原分task外部记录，30次中位：128K/B4 624.50、B8
+730.00、B16 952.75、B24 1223.75；8K/B16 706.75、B32 1038.375μs。原始CSV
+确认每步一个simpler_aicpu_kernel_exec和一个aicore_kernel_mode_0。
+这些是历史版本和设备环境，不与当前L1列相减宣称纯调度开销。
+
+缺失B28单独复用整层服务npugraph_ex图测试，task_20261018_122158_10688028513
+队列device8、exit0。当前正式分task源码、独立PyPTO memory-reuse及Simpler
+参数扩容环境；5次预热、20次Event、独立30次profiling。外部跨度中位
+1357.75μs，范围1312.50～1438.75；Event中位1366.26μs单列。
+固定图输出、Top-K、六份cache/state及保护区检查通过，PTO服务派发计数3，
+无Native fallback。每步两类kernel各一条，完整跨度统计无reset混入。
+
+所有复现脚本、实际环境、源文件快照、CSV和原始report位于
+dynamic_full_pipeline_20261017/multitask_outer_profile_20261018。
+七档MD/JSON新增外层列并保留旧六档日期/B28本轮设备；其余Native/L1/静态没有
+重新测试，B28静态继续留空。目标仍是动态单SPMD对同轮分task完整L1降低30%，
+新增外层指标不更改验收分母，目标未完成。

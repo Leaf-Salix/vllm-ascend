@@ -28,9 +28,50 @@ def checked_statistics(value):
     return {"median_us": median, "samples_us": samples, "count": len(samples)}
 
 
+def outer_multitask_records():
+    """外部跨度明确含AICPU/AICore；旧六档不与当前L1相减冒充纯调度开销。"""
+    historical = HERE.parents[4] / ".worktrees/hc-pre-layer-integration-20261012/tests/pypto_test/hc_pre_layer_integration_20261012/summary.json"
+    report = read(historical)
+    records = {}
+    for case in report["cases"]:
+        key = (case["history"], case["batch"])
+        if case["kind"] != "csa" or key == (8192, 24):
+            continue
+        baseline = case["passes"]["baseline"]
+        corrected_path = Path(baseline["report"]).parent / "device_profile_layer_only.json"
+        corrected = read(corrected_path)
+        samples = corrected["span_us_all"]
+        assert len(samples) == 30 and statistics.median(samples) == corrected["span_us"] == baseline["p50_us"]
+        records[key] = {
+            "status": "MEASURED", "median_us": statistics.median(samples),
+            "samples_us": samples, "count": len(samples), "date": "2026-10-12",
+            "source_commit": "a00afa9f671803228280c2f200373b062ff36cf5",
+            "source": str(corrected_path), "raw_csv": corrected["raw_csv"],
+            "kernels_per_replay": corrected["kernels_per_replay"],
+            "kernel_roles": ["simpler_aicpu_kernel_exec", "aicore_kernel_mode_0"],
+            "metric": "全部设备流最早CSA kernel开始至最晚结束，包含AICPU/AICore完整调度，剔除图外reset/poison",
+            "same_run_as_current_l1": False,
+        }
+    b28_path = HERE / "multitask_outer_profile_20261018/h131072_b28_v1/summary.json"
+    if b28_path.exists():
+        value = read(b28_path)
+        assert value["status"] == "MEASURED" and value["count"] == 30
+        assert statistics.median(value["samples_us"]) == value["median_us"]
+        records[(131072, 28)] = {
+            **value, "date": "2026-10-18", "source": str(b28_path),
+            "task": "task_20261018_122158_10688028513",
+            "source_commit": "6e23806d", "same_run_as_current_l1": False,
+        }
+    else:
+        records[(131072, 28)] = {"status": "PENDING", "median_us": None,
+                                 "task": "task_20261018_122158_10688028513"}
+    return records
+
+
 def main():
     historical = read(HERE / "FOUR_WAY_PERFORMANCE_REFERENCE_20261018.json")
     rows = deepcopy(historical["rows"])
+    outer_records = outer_multitask_records()
     for row in rows:
         if (row["history"], row["batch"]) == (131072, 16):
             paired_path = PARALLEL / "score_attention_interleave_candidate/static_same_process_h131072_b16_v1/result.json"
@@ -86,6 +127,7 @@ def main():
             "B28最近数据来自9d5327e5；之后66882634仅新增G6且16<T<32的QA路径，T168不选用；最新依赖环境未重测"
             if row["batch"] == 28 else "正式66882634算法的最近可用测量；后续失败候选未采用"
         )
+        row["multitask_outer_profile"] = outer_records[(row["history"], row["batch"])]
     native_b28 = read(HERE.parents[1] / "native_h131072_b28_optimized_20261018/device_v1/summary.json")
     b28 = next(row for row in rows if row["batch"] == 28)
     assert statistics.median(native_b28["profiled_all_stream_layer_span_us"]["samples"]) == b28["native_historical_external_profiler"]["median_us"]
@@ -99,9 +141,10 @@ def main():
     }]
     report = {
         "date": "2026-10-18", "scope": "完整CSA含HC_pre/HC_post；正式第4层W8A8；合成历史；S6",
-        "new_measurements": False,
+        "new_measurements": outer_records[(131072, 28)]["status"] == "MEASURED",
+        "new_measurement_scope": "只补128K/B28的原分task外部完整跨度；其余四列及六档外层值使用已有数据",
         "metric_native": historical["native_metric"], "metric_pto": historical["pto_metric"],
-        "comparability": "每行PTO多task和动态SPMD同轮；Native与静态是独立历史轮次；不同计时边界不计算相互加速比",
+        "comparability": "每行PTO多task L1和动态SPMD L1同轮；Native、外层多task及静态是独立轮次；外层与L1不可跨轮相减为纯调度开销",
         "selection": "保留正式采用策略的最近结果，不取所有试验中的最小值；最新失败候选另列",
         "rows": rows, "latest_unadopted_candidates": candidates,
         "b28_data_complete_except_static": True,
@@ -112,17 +155,19 @@ def main():
     stem.with_suffix(".json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     lines = [
         "# CSA七档最新已有性能对照（2026-10-18）", "",
-        "正式第4层W8A8、S=6、完整CSA含HC_pre/HC_post，单位μs，均为中位数。本次未启动新测试。", "",
-        "动态列选当前正式采用策略的最近实测，不从实验候选中挑最小值。每行多task与动态SPMD同轮；静态列取已有独立轮次。", "",
-        "Native是外部profiler完整设备kernel跨度，包含调度；PTO是完整L1 incore首尾，排除外围首尾。两种口径不能直接算加速比。", "",
-        "| 历史 / Batch | Native外部profiling | PTO多task L1 | 静态SPMD L1（历史） | 动态单SPMD L1 | 动态相对多task耗时 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "正式第4层W8A8、S=6、完整CSA含HC_pre/HC_post，单位μs，均为中位数。仅补缺失的B28多task外层profiling，其余使用已有结果。", "",
+        "动态列选当前正式采用策略的最近实测，不从实验候选中挑最小值。每行多task L1与动态SPMD L1同轮；外层多task和静态列取独立轮次。", "",
+        "Native和新增多task外层列是外部profiler完整设备kernel跨度，包含AICPU调度；L1三列是完整incore首尾，排除外围首尾。两种口径不能直接算加速比。", "",
+        "| 历史 / Batch | Native外部profiling | PTO多task含AICPU外层 | PTO多task L1 | 静态SPMD L1（历史） | 动态单SPMD L1 | 动态相对多task L1耗时 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         static_us = row["static_spmd_historical_reference"]["median_us"]
         static_text = "—" if static_us is None else f"{static_us:.2f}"
+        outer = row["multitask_outer_profile"]["median_us"]
+        outer_text = "待补测结束" if outer is None else f"{outer:.2f}"
         lines.append(f"| {row['history']//1024}K / B{row['batch']} | {row['native_historical_external_profiler']['median_us']:.2f} | "
-                     f"{row['dynamic_pto_full_l1_us']:.2f} | {static_text} | {row['single_spmd_full_l1_us']:.2f} | "
+                     f"{outer_text} | {row['dynamic_pto_full_l1_us']:.2f} | {static_text} | {row['single_spmd_full_l1_us']:.2f} | "
                      f"{row['spmd_time_change_percent']:+.2f}% |")
     lines += [
         "", "耗时变化正值为更慢，负值为更快。七档均未达到至少降低30%的目标。", "",
@@ -132,8 +177,10 @@ def main():
         "- 历史B16多task905.08及静态807.16保留。905.08→880.06涉及编译环境和采样流程差异，未隔离具体成因；核对见projection_branch_evidence/MULTITASK_905_VS_880_AUDIT.json。",
         "- B28 Native为10月18日优化测量，已开静态编译、SuperKernel及NZ29投影权重，30次外部profiling中位1701.75；不带profiler的Event20次中位1653.08，未混入表格。",
         "- B28多task/动态列已有5次同轮采样，动态版本为9d5327e5；66882634新增的QA小档分支不作用于T168。最新依赖环境没有重测B28。",
-        "- B28静态既有任务在导入阶段失败，无性能数据；按只用已有静态结果的要求留空，不补跑静态。其他三项齐全，无需补测。",
+        "- B28静态既有任务在导入阶段失败，无性能数据；按只用已有静态结果的要求留空，不补跑静态。Native/多task L1/动态L1已有数据；新增含AICPU外层列独立补测。",
         "- 其余Native来自10月12日已有前后两轮各30次合并中位数，不能当作10月18日同轮环境。其他静态列来自各档已验收历史记录。", "",
+        "- 含AICPU的多task外层列：六档沿用10月12日a00afa9f原分task，每次包含一个simpler_aicpu_kernel_exec和一个aicore_kernel_mode_0，取两者整体跨度。B28为当前源码补测。",
+        "- 这些外层记录与表内L1并非同轮同版本，不能用两列相减得出纯AICPU开销。L1 incore首尾本来就包含中间调度造成的空隙；新增列补的是完整外部可见边界，不累加重叠时间。", "",
         "## 逐档PTO配对来源", "",
     ]
     for row in rows:
@@ -143,7 +190,7 @@ def main():
     print(stem.with_suffix(".md"))
     for row in rows:
         print(row["history"], row["batch"], row["native_historical_external_profiler"]["median_us"],
-              row["dynamic_pto_full_l1_us"], row["static_spmd_historical_reference"]["median_us"],
+              row["multitask_outer_profile"]["median_us"], row["dynamic_pto_full_l1_us"], row["static_spmd_historical_reference"]["median_us"],
               row["single_spmd_full_l1_us"], round(row["spmd_time_change_percent"], 2))
 
 
