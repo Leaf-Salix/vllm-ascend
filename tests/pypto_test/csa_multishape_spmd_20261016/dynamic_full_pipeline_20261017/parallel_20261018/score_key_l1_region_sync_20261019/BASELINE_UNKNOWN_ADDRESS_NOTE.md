@@ -1,0 +1,15 @@
+# 既有动态基址别名缺失
+
+九项检查中，unknown_physical_address预期需要MTE2→MTE1及MTE1→MTE2
+同步，参考和首版候选均没有。没有将其改为PASS；这是已有#1620同类问题。
+PTOIRTranslator对显式动态alloc_tile地址只标hasKnownPhysicalAddresses=false，
+却没有将aliasesUnknownRange标真，导致不同alloc根的可能重叠被忽略。
+
+准备将显式未知的本地地址保守标为unknown scope alias。无addr的独立
+逻辑分配维持原行为，已知常量地址也不改变。本轮完整CSA IR的2394个
+alloc_tile地址全部直接来自arith.constant，因此该保守修正不改变这份
+CSA的同步分析路径，仍将Boxed L1作为性能试验因素。
+
+首版完整CSA只改变同步语句，静态wait总数+1；依赖已由立即前驱改为
+两个真实槽各自的旧读取，不能用wait数量推断性能。下一版会合并物理
+连续的分段，保持完整Tile读取与原alias表示一致，再复核生成物。

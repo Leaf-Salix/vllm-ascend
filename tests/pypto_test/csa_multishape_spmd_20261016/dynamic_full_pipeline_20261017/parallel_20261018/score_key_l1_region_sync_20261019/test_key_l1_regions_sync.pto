@@ -1,0 +1,346 @@
+// RUN: ptoas %s --enable-insert-sync --pto-level=level3 --pto-arch=a3 | FileCheck %s
+// CPU同步范围复现；不执行设备，不以此判断真实性能。
+module {
+// CHECK-LABEL: AICORE void boxed_disjoint(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @boxed_disjoint(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void boxed_overlap(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @boxed_overlap(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void separate_disjoint(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @separate_disjoint(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a16384 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void dynamic_unknown(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @dynamic_unknown(%src: !pto.ptr<i8>, %row: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%row, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+
+// CHECK-LABEL: AICORE void unsupported_fp16(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @unsupported_fp16(%src: !pto.ptr<f16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xf16>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<32x128xf16>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=f16, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xf16>) outs(%first : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xf16>) outs(%second : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=f16, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=f16, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xf16>) outs(%later : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void unknown_extract_offset(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @unknown_extract_offset(%src: !pto.ptr<i8>, %extract_col: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %extract_col : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void unknown_physical_address(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @unknown_physical_address(%src: !pto.ptr<i8>, %base: i64) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %base : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %base : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %base : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %base : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void aligned_non_power2_window(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @aligned_non_power2_window(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c48 = arith.constant 48 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=48, v_row=128, v_col=48, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c48, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=48, v_row=128, v_col=48, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void loop_true_reuse(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @loop_true_reuse(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    scf.for %iv = %c0 to %c2 step %c1 {
+      pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+      pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    }
+    return
+  }
+
+// CHECK-LABEL: AICORE void narrowing_cast_address(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK-NOT: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @narrowing_cast_address(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %a65536 = arith.constant 65536 : i64
+    %trunc_addr = arith.trunci %a65536 : i64 to i16
+    %cast_addr = arith.extui %trunc_addr : i16 to i64
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %cast_addr : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%c64, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=128, v_row=128, v_col=128, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+// CHECK-LABEL: AICORE void narrowing_cast_offset(
+// CHECK: TLOAD(
+// CHECK: TLOAD(
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1,
+// CHECK: TEXTRACT(
+// CHECK: wait_flag(PIPE_MTE1, PIPE_MTE2,
+// CHECK: TLOAD(
+  func.func @narrowing_cast_offset(%src: !pto.ptr<i8>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %a0 = arith.constant 0 : i64
+    %a16384 = arith.constant 16384 : i64
+    %c256_i16 = arith.constant 256 : i16
+    %trunc_offset = arith.trunci %c256_i16 : i16 to i8
+    %cast_offset = arith.index_cast %trunc_offset : i8 to index
+    %tv = pto.make_tensor_view %src, shape = [%c32, %c128], strides = [%c128, %c1] : !pto.tensor_view<?x?xi8>
+    %input = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c128] : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<32x128xi8>
+    %pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=384, cols=128, v_row=384, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %transposed = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=384, v_row=128, v_col=384, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %right = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %write_pool = pto.alloc_tile addr = %a0 : !pto.tile_buf<loc=mat, dtype=i8, rows=384, cols=128, v_row=384, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %first = pto.subview %pool[%c0, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=384, cols=128, v_row=384, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %second = pto.subview %pool[%c32, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=384, cols=128, v_row=384, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %later = pto.subview %write_pool[%cast_offset, %c0] sizes [32, 128] : !pto.tile_buf<loc=mat, dtype=i8, rows=384, cols=128, v_row=384, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0> -> !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%first : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%second : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%transposed, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=i8, rows=128, cols=384, v_row=128, v_col=384, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index) outs(%right : !pto.tile_buf<loc=right, dtype=i8, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tload ins(%input : !pto.partition_tensor_view<32x128xi8>) outs(%later : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=128, v_row=32, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
