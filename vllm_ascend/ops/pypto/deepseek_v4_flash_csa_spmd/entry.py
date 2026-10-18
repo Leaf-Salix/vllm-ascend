@@ -38,8 +38,11 @@
     idx_key0/idx_key64分别是idx_cache字节0/64开始的128列只读别名，在JIT
     编排内部建立，避免作为独立外部参数触发部分重叠别名检查；不复制数据。业务
     写回发生后先发布、读方等待后才用别名，不能单凭Python对象别名假设可见。
-    group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32，
-    依次为前缀/组描述符/scale页writer链表头/合法关闭行地址；
+    group_offsets至少pad16(pad16(B+1)+4*T)+48+4*T个INT32；
+    SCALE_PAGE_COALESCING启用时尾部另加2*B项，关闭时保留原容量。
+    依次为前缀/组描述符/scale页writer链表头/合法关闭行地址/连续页布局；
+    最后每请求两项(first_page,direction)由META唯一writer覆盖后发布，
+    balanced Score复用证明；方向0保留原逐页读取，旧分区偏移均不变化。
     group_plan固定8项；系数至少16*T行、
     QUERY_GROUP*64列。Indexer双槽transfer/score至少24*2*QUERY_GROUP行，
     transfer列为SCORE_TILE，pair至少T*64行。计划容量覆盖pad8(T)。
@@ -279,6 +282,7 @@ def _csa_core_group(
     COOPERATIVE_PREFIX: pl.constexpr = False,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+    SCALE_PAGE_COALESCING: pl.constexpr = False,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -566,6 +570,7 @@ def _csa_core_group(
             COOPERATIVE_PREFIX,
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
+            SCALE_PAGE_COALESCING,
         )
     return (
         x_fp32,
@@ -797,6 +802,7 @@ def decode_csa_spmd(
     COOPERATIVE_PREFIX: pl.constexpr = False,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+    SCALE_PAGE_COALESCING: pl.constexpr = False,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1043,6 +1049,7 @@ def decode_csa_spmd(
             COOPERATIVE_PREFIX,
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
+            SCALE_PAGE_COALESCING,
         )
     return (
         x_fp32,

@@ -11,7 +11,10 @@ Tensor；不能用T/固定S反推请求，Native dummy及不等长请求由各�
 HC归约、门值、混合归一化，然后Sinkhorn；HC行依赖路径只等本核
 消费的四个K片及一到两个RAW owner，数学、发布协议与其它阶段依赖不变。归一化先发布，让QA与Sinkhorn
 重叠，再进入QR、RoPE与KV/query处理。这里只算
-请求分组、compact前缀和scale页所有权，TopK依赖的Attention有效块计划保留到TopK之后。
+请求分组、compact前缀和scale页所有权；SCALE_PAGE_COALESCING启用时，
+同一planner还证明整请求页表连续性，写group_offsets尾部2*B项供Score复用。
+关闭不额外扫描证明页表或分配这块尾区；碎片页保持原逐页读取。TopK依赖的
+Attention有效块计划仍保留到TopK之后。
 
 第二段：默认先Indexer压缩pool/norm，再Indexer query反量化/head权重，
 提前消费主压缩，然后Indexer query量化/系数、compact key量化与scale提交，
@@ -70,6 +73,7 @@ from .indexer_query_stages import (
     indexer_weights_reduce_stage,
 )
 from .indexer_scale_plan_stages import indexer_scale_page_commit_stage, indexer_scale_page_plan_stage
+from .indexer_scale_layout_stages import indexer_scale_layout_plan_stage
 from .indexer_score_stages import indexer_score_vector_lane_stage
 from .vector_prefix_stages import (
     indexer_compressor_vector_stage,
@@ -320,6 +324,7 @@ def vector_schedule(
     COOPERATIVE_PREFIX: pl.constexpr = False,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+    SCALE_PAGE_COALESCING: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -438,6 +443,13 @@ def vector_schedule(
             pl.tensor.dim(idx_scales, 0),
             VECTORS,
         )
+        if BALANCED and SCALE_PAGE_COALESCING:
+            # 整个请求的连续页证明与数值无关，移到同一 META producer；
+            # 每叶两条 AIV 复用结果。碎片/越界/失活请求记录0方向，保留原读取。
+            group_offsets = indexer_scale_layout_plan_stage(
+                idx_bounds, idx_lengths, indexer_table, group_offsets,
+                tokens, pl.tensor.dim(idx_cache, 0), VECTORS,
+            )
         # publish先排空业务写回并维护缓存，随后发单写者完成信号；不是atomic计数器。
         # 计划在本次调用保持只读，消费者直到首次使用才等这个真实producer。
         signal = publish_phase(signal, PHASE_META, core, CORES, generation)
@@ -853,6 +865,7 @@ def vector_schedule(
         PREFETCH,
         TO_L0,
         BALANCED,
+        SCALE_PAGE_COALESCING,
         0,
         1,
     )

@@ -13,6 +13,12 @@
     两AIV读取分数、乘Native key scale并生成叶Top512根。二者必须在一个
     MIX内并发推进，不能先等完整AIC阶段后才调用AIV。本模块不含short Vector
     score、最终query Top-K发布或完整CSA入口；不创建spmd/task/阶段通知。
+    连续页策略只优化balanced路径的Native scale读取：前置META唯一planner已
+    在设备证明整请求页表是否为正序/逆序连续物理页。每叶两条AIV只读证明，
+    成立时每个score块以一次二维stride搬运取得至多32页scale；不成立时执行
+    原逐页gather。证明写在group_offsets尾部2*B项，无Host回读或cache转换。
+    页表、容量、尾页均按实际metadata检查；启用区间及真机证据见policy与统一日志。
+    关闭策略不读证明，仍逐页gather；保留等价FP16零初始化，不宣称C++逐字未变。
 
 动态布局和分组
     Q/L/positions与group_offsets/plan来自正式indexer_group_stages，T/B、
@@ -68,6 +74,7 @@ from .indexer_group_stages import (
     indexer_query_visibility,
     indexer_work_item,
 )
+from .indexer_scale_layout_stages import LAYOUT_WORDS_PER_REQUEST, indexer_scale_layout_base
 from .indexer_topk_stages import PAIR_ROWS_DYN, SCORE_ROWS_DYN, indexer_topk_half_leaf
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN
 
@@ -399,6 +406,7 @@ def indexer_score_vector_lane_stage(
     key_prefetch_panels: pl.constexpr,
     key_prefetch_to_l0: pl.constexpr,
     balance_leaves: pl.constexpr,
+    scale_page_coalescing: pl.constexpr,
     SCORE_READY_EVENT: pl.constexpr,
     SCORE_CONSUMED_EVENT: pl.constexpr,
 ):
@@ -428,6 +436,22 @@ def indexer_score_vector_lane_stage(
                 single_capacity = buf_leaf_capacity
                 single_valid = pl.min(single_capacity, single_visible - single_begin)
                 single_steps = (single_valid + score_tile - 1) // score_tile
+                # 叶起点按1024对齐，且META已检查整请求所有有效页。
+                # 当前角色在外层取得PHASE_META，方向/页号来自同一次调用。
+                # 不再对每叶、每lane重复做Vector证明；0方向保留原逐页路径。
+                single_page_begin = single_begin // BLOCK_SIZE
+                single_page_count = (single_valid + BLOCK_SIZE - 1) // BLOCK_SIZE
+                single_contiguous = pl.cast(0, pl.INT32)
+                single_first_page = pl.cast(0, pl.INDEX)
+                if scale_page_coalescing:
+                    layout_base = indexer_scale_layout_base(
+                        pl.cast(pl.tensor.dim(kv_seq_lens, 0), pl.INDEX),
+                        pl.tensor.dim(position_ids, 0), TOPK_SCORE_WORKERS * 2,
+                    )
+                    layout_row = layout_base + LAYOUT_WORDS_PER_REQUEST * single_batch
+                    single_contiguous = pl.read(offsets, [layout_row + 1])
+                    single_first_page = pl.cast(pl.read(offsets, [layout_row]), pl.INDEX)
+                    single_first_page = single_first_page + pl.cast(single_contiguous, pl.INDEX) * single_page_begin
                 single_roots = pl.tile.full([query_group_size // 2, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF)
                 single_segments = pl.tile.full(
                     [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
@@ -440,30 +464,71 @@ def indexer_score_vector_lane_stage(
                         + single_step % 2 * query_group_size
                         + buf_score_lane * (query_group_size // 2)
                     )
-                    # A3没有INT8常量填充指令；INT16零按位展开为相同全零字节，不做数值转换。
+                    # A3没有INT8常量填充。FP16零的所有字节同样为零；显式
+                    # 标记zero padding，使快慢两条路径的Tile类型一致。
+                    # 此处全区域有效，fillpad不改变数值；尾页路径才实际补零。
                     single_scale_bytes = pl.tile.reinterpret_view(
-                        pl.tile.full([1, score_tile], dtype=pl.INT16, value=0), pl.INT8
+                        pl.fillpad(pl.tile.full([1, score_tile], dtype=pl.FP16, value=0.0),
+                                   pad_value=pl.PadValue.zero), pl.INT8
                     )
-                    # 两AIV读取同一候选区间的scale；页表与slab容量检查先于gather。
-                    for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
-                        single_scale_logical = pl.min(
-                            single_score_begin // BLOCK_SIZE + single_scale_page,
-                            pl.max((single_cache_len - 1) // BLOCK_SIZE, 0),
+                    if scale_page_coalescing and single_contiguous != 0:
+                        # Native每页的key后仍是原64B scale；源行距由Tensor描述符
+                        # 的page_bytes提供。一次二维MTE2搬入多页，不碰key区域。
+                        run_pages = pl.min(score_tile // BLOCK_SIZE,
+                                           single_page_count - single_step * (score_tile // BLOCK_SIZE))
+                        run_first = single_first_page + single_step * (score_tile // BLOCK_SIZE) * pl.cast(single_contiguous, pl.INDEX)
+                        run_lowest = run_first
+                        if single_contiguous < 0:
+                            run_lowest = run_first - run_pages + 1
+                        run_bytes = pl.load(
+                            idx_native_kv_cache,
+                            [run_lowest, INDEXER_KEY_BYTES],
+                            [score_tile // BLOCK_SIZE, BLOCK_SIZE * 2], valid_shape=[run_pages, BLOCK_SIZE * 2],
                         )
-                        if single_scale_logical >= 0 and single_scale_logical < pl.tensor.dim(idx_block_table, 1):
-                            single_scale_physical = pl.cast(
-                                pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX
+                        # 尾块只加载真实页。按FP16填零未加载的行，再展平，避免
+                        # INT8常量填充的不支持及将UB未初始化数据带入后续数学。
+                        run_half = pl.tile.reinterpret_view(run_bytes, pl.FP16)
+                        run_clean = pl.fillpad(run_half, pad_value=pl.PadValue.zero)
+                        run_full = pl.set_validshape(run_clean, score_tile // BLOCK_SIZE, BLOCK_SIZE)
+                        run_flat = pl.reshape(run_full, [1, score_tile])
+                        if single_contiguous < 0:
+                            # MTE2始终按物理地址递增读。逆序页在UB按64B页倒序，
+                            # 每页内部32个FP16保持原顺序。TGATHERB每索引搬32B，
+                            # 两个索引组成一页，仅需64个UINT32字节偏移。
+                            run_blocks = pl.tile.ci(0, [1, 2 * (score_tile // BLOCK_SIZE)], dtype=pl.INT32)
+                            run_page_ids = pl.tile.shrs(run_blocks, 1)
+                            run_halves = pl.sub(run_blocks, pl.mul(run_page_ids, 2))
+                            run_reverse_pages = pl.maximum(
+                                pl.add(pl.neg(run_page_ids), pl.cast(run_pages - 1, pl.INT32)), 0
                             )
-                            if single_scale_physical >= 0 and single_scale_physical < pl.tensor.dim(
-                                idx_native_kv_cache, 0
-                            ):
-                                single_scale_bytes = pl.gather_row(
-                                    single_scale_bytes,
-                                    idx_native_kv_cache,
-                                    [0, single_scale_page * BLOCK_SIZE * 2],
-                                    [single_scale_physical, INDEXER_KEY_BYTES],
-                                    [1, BLOCK_SIZE * 2],
+                            run_offsets = pl.add(pl.mul(run_reverse_pages, BLOCK_SIZE * 2), pl.mul(run_halves, 32))
+                            run_reversed = pl.tile.gatherb(run_flat, pl.tile.reinterpret_view(run_offsets, pl.UINT32))
+                            # 尾页后的索引钳制到已加载第0页，不访问未加载或负地址；
+                            # 随后按真实页数补零，保证无效区不会带入陈旧UB数据。
+                            run_used = pl.set_validshape(run_reversed, 1, run_pages * BLOCK_SIZE)
+                            run_flat = pl.set_validshape(pl.fillpad(run_used, pad_value=pl.PadValue.zero), 1, score_tile)
+                        single_scale_bytes = pl.tile.reinterpret_view(run_flat, pl.INT8)
+                    else:
+                        # 两AIV读取同一候选区间的scale；页表与slab容量检查先于gather。
+                        for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
+                            single_scale_logical = pl.min(
+                                single_score_begin // BLOCK_SIZE + single_scale_page,
+                                pl.max((single_cache_len - 1) // BLOCK_SIZE, 0),
+                            )
+                            if single_scale_logical >= 0 and single_scale_logical < pl.tensor.dim(idx_block_table, 1):
+                                single_scale_physical = pl.cast(
+                                    pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX
                                 )
+                                if single_scale_physical >= 0 and single_scale_physical < pl.tensor.dim(
+                                    idx_native_kv_cache, 0
+                                ):
+                                    single_scale_bytes = pl.gather_row(
+                                        single_scale_bytes,
+                                        idx_native_kv_cache,
+                                        [0, single_scale_page * BLOCK_SIZE * 2],
+                                        [single_scale_physical, INDEXER_KEY_BYTES],
+                                        [1, BLOCK_SIZE * 2],
+                                    )
                     single_scale_half = pl.tile.reinterpret_view(single_scale_bytes, pl.FP16)
                     single_kv_scale = pl.cast(single_scale_half, pl.FP32)
                     pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)

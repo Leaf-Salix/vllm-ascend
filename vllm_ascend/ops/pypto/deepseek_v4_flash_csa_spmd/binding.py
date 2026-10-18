@@ -197,8 +197,9 @@ class PreparedDynamicCSA:
             "idx_query_scale": ((t * 64, 1), torch.float32),
             "weights_partial": ((p16 * 4, 64), torch.float32),
             "head_weights": ((p16, 64), torch.float32),
-            # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符。
-            "group_offsets": ((_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t,), torch.int32),
+            # 前缀+4*T组描述符，16项对齐后接48个scale链表头和4*T项地址描述符；
+            # 启用连续页策略时尾部2*B项为(first_page,direction)，关闭时维持原容量。
+            "group_offsets": ((_pad(_pad(b + 1, 16) + 4 * t, 16) + 48 + 4 * t + (2 * b if self.policy.scale_page_coalescing else 0),), torch.int32),
             "group_plan": ((8,), torch.int32),
             "coefficients": ((t * 16, group * 64), torch.float16),
             "indexer_transfer": ((24 * 2 * group, self.policy.score_tile), torch.float32),

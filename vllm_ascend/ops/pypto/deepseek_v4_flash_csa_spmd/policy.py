@@ -53,6 +53,15 @@ Attention同lane统计只在长历史G6且T<=96启用UB三槽，其余共用原G
 同轮完整L1改善6.01%/2.63%/1.31%/1.23%；短历史收益未稳定，默认关闭。
 本轮未重测S1/S5/混合Q/连续轨迹，不把已有S6证据扩大为这些场景通过。
 完整原始窗口及依赖修复在dead_state_dce_fix_evidence；30%目标仍0/7。
+SCALE_PAGE_COALESCING独立控制META页布局证明与Score连续scale搬运。
+只在长历史G6的小M16并行域或T>96的O_A N256域启用；中间域和G2仍走原
+逐页路径，关闭时不分配证明尾区、不额外扫描页表做证明，也不读取证明。
+选择依据为已有投影资源分区和整链实测取舍，不能理解成所有连续页输入都
+一定更快。T30/T102两边界与B8关闭/B28开启均通过完整精确、状态、保护、
+协议及图；边界完整L1分别降低2.00%/1.11%，B28复测降低2.42%。B8关闭
+路径未回退，不将其测量差归因已关闭的连续读取。G2/G6短档关闭编译通过，
+未重测短档性能。Native碎片页在启用区间仍逐轮证明失败后回退；未覆盖的
+不等长query、其它历史和持续轨迹不能据这几项扩大为已验证。
 """
 
 from dataclasses import dataclass
@@ -81,6 +90,7 @@ class CSASPMDPolicy:
     cooperative_prefix: bool = False
     early_attention_geometry: bool = False
     local_attention_stats: bool = False
+    scale_page_coalescing: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -101,6 +111,7 @@ class CSASPMDPolicy:
             "COOPERATIVE_PREFIX": self.cooperative_prefix,
             "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
+            "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
         }
 
 
@@ -151,4 +162,10 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # B4/B8/B15/B16重复测得收益；短历史T>96两点方向不一致，保留原GM。
         # 实际T/请求边界仍在device读取；依赖编译器删除关闭分支的死Tile状态。
         local_attention_stats=long_history and group == 6 and tokens <= LOCAL_STATS_MAX_TOKENS,
+        # 连续scale读取需要先在META证明页布局；该工作并非所有负载都划算。
+        # 沿已有小M16并行域和O_A N256的较大T域启用，中间域保留逐页读取。
+        # 不按B/history验收点枚举；页是否连续仍由本轮device表完整证明。
+        # 小M16与较大T边界已做完整同轮验证；其余验证边界见统一优化日志。
+        scale_page_coalescing=(long_history and group == 6 and
+                               (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS)),
     )
