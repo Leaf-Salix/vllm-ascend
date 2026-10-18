@@ -17457,3 +17457,135 @@ Top-K/score、完整 cache/state 逐 bit 一致，Native/arena 保护区、72 �
 128K/B28尚无可执行验收通过的静态参考，其旧driver导入失败按用户要求保留、不修复。
 本次静态归档与测试完成，不代表动态交错候选通过，也不计入动态单SPMD逐档降低30%的
 目标完成度。主优化工作仍为正式动态源码及其候选。
+
+## 2026-10-18：修正内存别名后进入设备验证，定位并复现两项标量编译错误
+
+本节证据均在 `tests/pypto_test/csa_multishape_spmd_20261016/`
+`dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/`。
+正式动态33源仍保持66882634；未将失败候选合入正式入口，也未放宽精度阈值。
+
+独立 PyPTO worktree 完成两组最小修复：MaterializeSemanticAliases 重新绑定父
+Tile 后，view 别名随父分配更新且保留 byte offset/window；内存复用的 For/If-phi
+遍历补入 While body，避免漏掉内层 Mat carry/累加器。相关 `test_memory_reuse.py`
+158项唯一用例通过：初轮153通过，5个新fixture违反Mat/Left使用约束，修正测试
+构造后5项通过；旧核心负对照准确复现两项缺陷。证据与完整补丁在
+`compiler_memory_reuse_worktree/VALIDATION_RESULTS.json` 等文件，新核心独立构建。
+
+整层CPU v4已满足Left64KiB、Mat496KiB及Vec188416B容量，但代码生成遇到内联
+参数位置上的tile核心ID表达式；源内先绑定Scalar再传参后，v5完成58动态轴、
+无sample shape实值化的完整lowering/PTOAS。没有通过扩大硬件容量来掩盖溢出。
+
+设备首轮 `task_20261018_092846_145569930612` 与诊断轮
+`task_20261018_095309_236293230276` 均卡在候选首次调用，返回507018。原多task
+输入对照已完成；候选没有精度或性能结果。第二轮失败后用ACL同步回读信号、
+group_plan/offsets，保留实际生成PTO/C++与本任务日志路径。phase34/38只有core0
+前进，第二波ROOT只有AIV24/25写入，定位到实际控制流而不是笼统归因AICPU。
+
+第一项缺陷在 PTOAS：循环 `scf.yield` 的多变量更新应同时取旧值，C++ 回边却
+先覆盖 current，再把已覆盖的 current 赋给 previous。实际AIC/AIV各一处外层
+wave回边存在该错误；其它普通前向边的重复赋值不能一律判错。独立最小程序包含
+shift、三变量轮换和条件交换，原0.66生成C++在CPU执行20例有12例失败。例如
+两轮应得到 `(current, previous)=(96,48)`，实际为 `(96,96)`。
+
+PTOAS候选修复仅扩展 `materializeControlFlowOperands`，在生成边赋值前物化
+BlockArgument旧值；独立工作区 `.worktrees/ptoas-csa-parallel-copy-20261018`，
+基线f5eff3ee。管理脚本遇到源仓已跟踪的异机workspace元数据而回滚，保留该文件
+后手动完成隔离；pip代理及CMake原生入口问题分别记录，当前复用已有LLVM依赖、
+独立构建PTOAS本体，未复制旧对象或替换共享二进制。截至本节记录仍在编译，
+不宣称修复后的二进制已通过。完整CSA先通过等价重排carry顺序避开该覆盖问题。
+
+第二项缺陷在 PyPTO：FloorMod直接发射`arith.remsi`，与IR/简化器采用的floor
+语义不一致。`(worker-begin)%24`在负数输入时得到负余数，部分AIV会选到wave
+开始之前的query，形成与AIC不一致的工作/等待次数。新工作区修正signed/INDEX
+的余数符号，浮点及其它类型原路径保持；未顺带宣称修复负数FloorDiv。10项实际
+生成C++数值测试涵盖INT32/INT64/INDEX、正负与动态除数及query owner：旧核心
+10失败，新核心10通过。初始fixture误用InCore标量返回且未锁定PTOAS路径，
+明确记为无效测试；改用Tensor输出和显式PTOAS_ROOT后的v2才是有效证据。
+
+用户要求核对[PyPTO PR #2962](https://github.com/hw-native-sys/pypto/pull/2962)
+所要求的PTOAS0.67。本轮隔离安装官方ARM64/Python3.10 wheel并实测：回边20例
+仍12失败；旧PyPTO+0.67的FloorMod10例仍全部失败，修正PyPTO+0.67全部通过。
+PR当前head也仍直接发射remsi。FP4打包/别名及all_to_all_v计数发布修复与上述
+缺陷不是同一问题，不能靠版本升级替代。源码定位、版本、命令、结果及边界见
+候选目录 `PTOAS_067_RECHECK.md`；共享安装未改。
+
+采用两处修正/规避的128K/B16/S6设备轮
+`task_20261018_103107_374461711536` 已正常返回，随后测试检查器失败：实际
+plan中的true经i1符号扩展表示为-1，原检查器只接受1。保存控制区的两波
+ROOT/TOPK/PLAN实际写者离线核对全部匹配。检查器现只接受1/-1两种true表示，
+仍拒绝0/2/-2/37并保留完整writer、generation与padding验证；没有跳过协议。
+当轮数值比较未在该异常前落盘，不能补记精度PASS。runner另在协议检查前落盘
+独立数值/保护区结果，后续异常不会再掩盖已完成的比较。
+
+重提 `task_20261018_103852_401858324030`：同一正式权重、128K/B16/S6，A→B→A、
+完整cache/state/Top-K/score、保护区与图重放通过后，才执行5窗三方完整L1。
+截至本节记录仍运行，候选尚无已验收性能结果。metadata/padding专用重放的新增
+wave写者递推检查尚未全部接入，仍需后续处理；不把单个规格扩大成七档完成。
+
+另保存一次同进程对照 `task_20261018_092130_124935114251`，原多task、正式动态
+单SPMD、历史静态单SPMD的5窗中位数分别869.78、889.40、792.78μs，A/B/A与图
+重放等检查通过。动态对静态96.62μs差距在同轮确实存在，不能用跨轮环境差异
+解释。用户要求的Native128K/B28优化对照也已完成，独立目录
+`tests/pypto_test/native_h131072_b28_optimized_20261018/`保存实际静态编译、
+superkernel与图配置证据；30窗外部kernel跨度中位1701.75μs，20次非profiling
+Event中位1653.08μs。Native外部口径与PTO内部L1不同，不计算混口径收益。
+
+### 同轮动态交错候选完成：功能通过，性能未改善
+
+`task_20261018_103852_401858324030` 后续完成PASS，详见
+`interleave_floor_mod_h131072_b16_v4/result.json`。A→B→A 的输出、Top-K/score、
+完整cache/state逐bit一致，Native与所有工作区保护区、实际wave写者/代际和基本
+图重放全部通过。完整L1五窗如下，均为同进程、同根Tensor与正式权重：
+
+| 实现 | 五窗耗时（μs） | 中位数（μs） |
+| --- | --- | --- |
+| 原动态分task PTO | 877.84 / 861.94 / 874.54 / 879.18 / 882.02 | 877.84 |
+| 动态单SPMD交错候选 | 888.00 / 888.54 / 894.44 / 896.40 / 889.96 | 889.96 |
+| 历史静态单SPMD | 784.06 / 787.30 / 789.80 / 783.72 / 799.00 | 787.30 |
+
+候选相较原分task慢1.38%，静态仍快102.66μs；这轮不采纳候选为性能优化版本。
+没有用修复编译错误来宣称性能达标，也不以这一点的功能通过替代S1/S5、混合长度、
+策略边界及其余六档验证。后续优化继续针对动态版本的真实开销。
+
+用户明确授权PyPTO缺陷直接提交上游PR、PTOAS缺陷直接提交issue。PTOAS已提交
+[#1622](https://github.com/hw-native-sys/PTOAS/issues/1622)，有独立CPU最小复现和
+0.66/0.67负对照，并说明本地补丁尚在编译。首次pass模板引用的ir-pass标签不存在，
+确认未创建issue后换用官方通用Bug模板，未创建重复issue。PyPTO从最新主线
+14736f65c建立`.worktrees/pypto-floor-mod-pr-20261018`，只迁移FloorMod修复、
+测试及中英文文档，独立构建；内存别名/while遍历修复核对主线后另行提交，
+不把31项历史SPMD兼容修改混入上游PR。
+
+### 2026-10-18：按最新要求改为四份issue，附最小补丁并保留本地验证
+
+用户随后明确要求PyPTO修改以issue和修改建议提供，不直接提修改PR，并要求不再
+添加bug标签。按此执行：此前准备的PyPTO本地分支和提交保留，未推送、未创建PR；
+新问题只提交issue。四份issue均已补充最小代码diff、对应源码版本、验证范围，
+编辑后读取远端正文核对一致，标签未修改：
+
+| Issue | 具体缺陷 | 建议修正 |
+| --- | --- | --- |
+| [PyPTO #3026](https://github.com/hw-native-sys/pypto/issues/3026) | signed/INDEX FloorMod直接变为remsi，负数余数语义错误 | remsi后按非零余数与除数符号修正，常量除数简化条件 |
+| [PyPTO #3027](https://github.com/hw-native-sys/pypto/issues/3027) | 原地输出重绑定后下游view仍引用陈旧MemRef | 同一正向遍历传播must-alias关系，保留窗口/slot与未决phi |
+| [PyPTO #3028](https://github.com/hw-native-sys/pypto/issues/3028) | For/Acc别名规则的遍历遗漏While子树 | 两个递归入口补While body，继续使用已有合法性约束 |
+| [PTOAS #1622](https://github.com/hw-native-sys/PTOAS/issues/1622) | CFG回边顺序写回覆盖并行赋值的旧源值 | 边赋值前物化源BlockArgument临时值，保护链式依赖及交换/轮换 |
+
+PyPTO当前主线14736f65c的干净本地构建：FloorMod相关codegen首次175项通过，
+1项旧多缓冲测试错误地要求slot直接定义为rem；改为检查完整SSA依赖链、逻辑余数
+及非字节缩放后该项通过，合计176项唯一用例。另实际用官方PTOAS0.67编译多缓冲
+IR，动态slot与event id仍保留，不仅放宽断言。10项负数取模数值回归已通过。
+
+两项内存缺陷另在最新主线原样memory_reuse_pass上复现：新增10例6失败/4通过。
+本地联合补丁重新构建后，完整test_memory_reuse.py的154项通过；此前158项属于
+旧CSA兼容基线，不能混作同一套结果。两份issue中的diff按缺陷分别拆分，明确
+154项是联合构建的验证，未声称拆分补丁分别独立跑过全套。
+
+PTOAS独立原生构建完成527/527，源码基线f5eff3ee。本地新二进制版本仍显示0.66，
+实际重新编译parallel_copy.pto，再保留函数原文执行Scalar C++，shift/三变量轮换/
+条件交换20项全部通过；官方0.66/0.67同组均12失败。结果在候选目录
+`ptoas_parallel_copy_repro/fixed_host_v1/result.json`，编译命令与版本在
+`fixed_compile_v1.json`。仅验证Scalar状态变换，不验证NPU缓存一致性、完整CSA或
+性能；共享安装未替换，已完成的CSA v4仍使用原PTOAS加源级carry顺序规避。
+
+全部issue正文、源码diff、最小复现和远端编辑前后快照在候选目录
+`upstream_issues_20261018/`。`ISSUE_DIFFS_UPDATED.json`记录四份远端正文核对结果。
+这些编译正确性修正不构成性能收益，动态CSA七档30%目标仍未完成。

@@ -1,0 +1,26 @@
+diff --git a/tools/ptoas/ptoas_cpp_rewrite.cpp b/tools/ptoas/ptoas_cpp_rewrite.cpp
+index 648c2c37..271d7444 100644
+--- a/tools/ptoas/ptoas_cpp_rewrite.cpp
++++ b/tools/ptoas/ptoas_cpp_rewrite.cpp
+@@ -477,6 +477,12 @@ static Type getEmitCVariableStorageType(Type valueType) {
+ // emitter prints cf.br/cf.cond_br operands by variable name rather than by
+ // recursively emitting an expression. Materialize such operands so CFG-based
+ // lowering (e.g. scf.while -> cf.*) stays valid.
++// The emitter also assigns successor block arguments one by one. A branch
++// operand that is itself a block argument can alias an earlier destination:
++// (current, previous) <- (next, current) would incorrectly become
++// current = next; previous = current. Snapshot block-argument operands before
++// any edge assignment to preserve the parallel-copy semantics, including
++// swaps, cycles, and conditionals with operands on either successor edge.
+ void materializeControlFlowOperands(Operation *rootOp) {
+   llvm::SmallVector<Operation *, kBranchInlineCapacity> branches;
+   rootOp->walk([&branches](Operation *op) {
+@@ -491,7 +497,7 @@ void materializeControlFlowOperands(Operation *rootOp) {
+     for (OpOperand &operand : op->getOpOperands()) {
+       Value value = operand.get();
+       auto expr = dyn_cast_or_null<emitc::ExpressionOp>(value.getDefiningOp());
+-      if (!expr) {
++      if (!expr && !isa<BlockArgument>(value)) {
+         continue;
+       }
+ 

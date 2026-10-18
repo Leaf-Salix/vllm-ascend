@@ -1,0 +1,62 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @shift_prev(%out: !pto.ptr<i64>, %limit: index) {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %step = arith.constant 48 : index
+    %final_i, %final_current, %final_previous = scf.while (%i = %zero, %current = %zero, %previous = %zero) : (index, index, index) -> (index, index, index) {
+      %keep = arith.cmpi slt, %i, %limit : index
+      scf.condition(%keep) %i, %current, %previous : index, index, index
+    } do {
+    ^bb0(%i_body: index, %current_body: index, %previous_body: index):
+      %next_i = arith.addi %i_body, %one : index
+      %next_current = arith.addi %current_body, %step : index
+      scf.yield %next_i, %next_current, %current_body : index, index, index
+    }
+    %current64 = arith.index_cast %final_current : index to i64
+    %previous64 = arith.index_cast %final_previous : index to i64
+    pto.store %current64, %out[%zero] : !pto.ptr<i64>, i64
+    pto.store %previous64, %out[%one] : !pto.ptr<i64>, i64
+    return
+  }
+
+  func.func @rotate_state(%out: !pto.ptr<i64>, %limit: index) {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %two = arith.constant 2 : index
+    %three = arith.constant 3 : index
+    %ri, %rx, %ry, %rz = scf.while (%i = %zero, %x = %one, %y = %two, %z = %three) : (index, index, index, index) -> (index, index, index, index) {
+      %keep = arith.cmpi slt, %i, %limit : index
+      scf.condition(%keep) %i, %x, %y, %z : index, index, index, index
+    } do {
+    ^bb0(%ib: index, %xb: index, %yb: index, %zb: index):
+      %next_i = arith.addi %ib, %one : index
+      scf.yield %next_i, %yb, %zb, %xb : index, index, index, index
+    }
+    %x64 = arith.index_cast %rx : index to i64
+    %y64 = arith.index_cast %ry : index to i64
+    %z64 = arith.index_cast %rz : index to i64
+    pto.store %x64, %out[%zero] : !pto.ptr<i64>, i64
+    pto.store %y64, %out[%one] : !pto.ptr<i64>, i64
+    pto.store %z64, %out[%two] : !pto.ptr<i64>, i64
+    return
+  }
+  func.func @conditional_swap(%out: !pto.ptr<i64>, %limit: index, %swap: i1) {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %eleven = arith.constant 11 : index
+    %twenty_two = arith.constant 22 : index
+    cf.br ^loop(%zero, %eleven, %twenty_two : index, index, index)
+  ^loop(%i: index, %x: index, %y: index):
+    %keep = arith.cmpi slt, %i, %limit : index
+    cf.cond_br %keep, ^body, ^exit(%x, %y : index, index)
+  ^body:
+    %next_i = arith.addi %i, %one : index
+    cf.cond_br %swap, ^loop(%next_i, %y, %x : index, index, index), ^loop(%next_i, %x, %y : index, index, index)
+  ^exit(%rx: index, %ry: index):
+    %x64 = arith.index_cast %rx : index to i64
+    %y64 = arith.index_cast %ry : index to i64
+    pto.store %x64, %out[%zero] : !pto.ptr<i64>, i64
+    pto.store %y64, %out[%one] : !pto.ptr<i64>, i64
+    return
+  }
+}

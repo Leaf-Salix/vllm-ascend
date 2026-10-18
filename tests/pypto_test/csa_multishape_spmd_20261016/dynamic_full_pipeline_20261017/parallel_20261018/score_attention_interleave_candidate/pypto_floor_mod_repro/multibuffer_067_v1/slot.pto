@@ -1,0 +1,31 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @kernel(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %c64_index = arith.constant 64 : index
+  %c256_index = arith.constant 256 : index
+  %c1_index = arith.constant 1 : index
+  %c0_index = arith.constant 0 : index
+  %c4_index = arith.constant 4 : index
+  %c2_index = arith.constant 2 : index
+  %a__ssa_v0_view = pto.make_tensor_view %arg0, shape = [%c256_index, %c64_index], strides = [%c64_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":53:9)
+  %output__ssa_v0_view = pto.make_tensor_view %arg1, shape = [%c64_index, %c64_index], strides = [%c64_index, %c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":54:9)
+  %ROTATING_mb = pto.alloc_multi_tile valid_row = %c64_index valid_col = %c64_index : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, count=2> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:43)
+  %seed__ssa_v0 = pto.alloc_tile valid_row = %c64_index valid_col = %c64_index : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":56:9)
+  %a__ssa_v0_pview = pto.partition_view %a__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c64_index, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x64xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":56:44)
+  pto.tload ins(%a__ssa_v0_pview : !pto.partition_tensor_view<64x64xf32>) outs(%seed__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":56:44)
+  scf.for %i__idx_v0 = %c0_index to %c4_index step %c1_index {
+    %0 = arith.remsi %i__idx_v0, %c2_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:13)
+    %1 = arith.cmpi slt, %0, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:13)
+    %2 = arith.addi %0, %c2_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:13)
+    %3 = arith.select %1, %2, %0 : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:13)
+    %t__ssa_v0 = pto.multi_tile_get %ROTATING_mb[%3] : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, count=2> -> !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:13)
+    %4 = arith.muli %i__idx_v0, %c64_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:74)
+    %5 = arith.maxsi %4, %c0_index : index loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:74)
+    %6 = pto.partition_view %a__ssa_v0_view, offsets = [%5, %c0_index], sizes = [%c64_index, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x64xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:74)
+    pto.tload ins(%6 : !pto.partition_tensor_view<64x64xf32>) outs(%t__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":58:74)
+    pto.tadd ins(%seed__ssa_v0, %t__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%seed__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":61:52)
+  }
+  %output__ssa_v0_pview = pto.partition_view %output__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c64_index, %c64_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<64x64xf32> loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":63:45)
+  pto.tstore ins(%seed__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%output__ssa_v0_pview : !pto.partition_tensor_view<64x64xf32>) loc("/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-floor-mod-pr-20261018/tests/ut/codegen/test_multi_buffer_codegen.py":63:45)
+  return
+  }
+}

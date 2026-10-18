@@ -1,0 +1,110 @@
+--- a/src/ir/transforms/memory_reuse_pass.cpp
++++ b/src/ir/transforms/memory_reuse_pass.cpp
+@@ -5153,8 +5153,8 @@
+   NormalizeIdentityCopyBuffersMutator() = default;
+ 
+   /// `unsettled` seeds the IfStmt return_vars whose buffer YieldFixup has not
+-  /// chosen yet; the traversal grows it with their bare-Var renames.  See
+-  /// `ReanchorInplaceOutput` for why anchoring onto one is wrong.
++  /// chosen yet; the traversal grows it with their semantic aliases. See
++  /// `ReanchorAliasingOutput` for why anchoring onto one is wrong.
+   explicit NormalizeIdentityCopyBuffersMutator(std::set<const Var*> unsettled)
+       : unsettled_(std::move(unsettled)) {}
+ 
+@@ -5170,7 +5170,7 @@
+       auto new_src = AsVarLike(VisitExpr(op->value_));  // follow prior substitutions
+       // A rename of an unsettled value denotes that same storage, so it is just as
+       // unsettled: `tmp = phi` then `t = <in-place>(tmp, ...)` would otherwise walk
+-      // straight past the guard in ReanchorInplaceOutput and anchor onto the phi's
++      // straight past the guard in ReanchorAliasingOutput and anchor onto the phi's
+       // stale buffer through the alias.
+       if (IsUnsettled(src_var) || IsUnsettled(new_src)) {
+         unsettled_.insert(op->var_.get());
+@@ -5190,17 +5190,11 @@
+     // Retargeting and pipeline/control-flow lowering can expose a stale output
+     // type; normalize it even when the input itself was not substituted during
+     // this traversal (the non-divisor K-peel matmul_acc tail is one example).
+-    if (auto reanchored = ReanchorInplaceOutput(op)) return reanchored;
++    if (auto reanchored = ReanchorAliasingOutput(op)) return reanchored;
+     return IRMutator::VisitStmt_(op);
+   }
+ 
+  private:
+-  /// Re-anchor an in-place op's output onto its reused input's buffer, preserving
+-  /// the output's tile metadata (shape/dtype/space) and swapping only the MemRef.
+-  /// This also repairs a producer/output mismatch introduced by control-flow or
+-  /// pipeline lowering even when the input itself was not substituted in this
+-  /// traversal. Returns nullptr when the allocation already agrees.
+-  ///
+   /// True when `var` denotes storage whose buffer YieldFixup has not chosen yet —
+   /// an IfStmt return_var seeded into `unsettled_`, or a bare-Var rename of one.
+   [[nodiscard]] bool IsUnsettled(const VarPtr& var) const {
+@@ -5218,24 +5212,51 @@
+   /// can lower, while the post-fixup run silently re-anchors the producer back —
+   /// leaving the phi buffer unwritten on the taken arm.  Two conditionals over
+   /// one in-place tile (what `pl.unroll(2)` around an `if` produces) are enough.
+-  StmtPtr ReanchorInplaceOutput(const AssignStmtPtr& op) {
++  /// Reconcile a registered in-place result or metadata view with its current
++  /// input. A gather may be re-anchored here after RetypeApplier has already
++  /// visited the body; its downstream transpose_view/slice must follow in this
++  /// same forward walk. These are required aliases, not new reuse decisions.
++  /// Real data-moving transpose is excluded by IsBufferAliasingViewOp.
++  StmtPtr ReanchorAliasingOutput(const AssignStmtPtr& op) {
+     auto call = As<Call>(op->value_);
+     if (!call || !call->op_) return nullptr;
+     auto reuse_idx = op_predicates::BuiltinWritebackArgIndex(call->op_, call->args_.size());
+-    if (!reuse_idx.has_value()) return nullptr;
+-    auto in_var = AsVarLike(call->args_[*reuse_idx]);
++    const bool is_view = op_predicates::IsBufferAliasingViewOp(call->op_->name_);
++    if (!reuse_idx.has_value() && (!is_view || call->args_.empty())) return nullptr;
++    auto in_var = AsVarLike(call->args_[is_view ? 0 : *reuse_idx]);
+     if (!in_var) return nullptr;
+     auto new_in = AsVarLike(VisitExpr(in_var));  // follow prior subst_ renames
+     if (!new_in) return nullptr;
+-    if (IsUnsettled(in_var) || IsUnsettled(new_in)) return nullptr;
++    if (IsUnsettled(in_var) || IsUnsettled(new_in)) {
++      // The whole alias chain remains unsettled until YieldFixup chooses the
++      // phi's storage. Otherwise a view would hide that status from a later
++      // in-place writer and pin it to the phi's stale allocation.
++      unsettled_.insert(op->var_.get());
++      return nullptr;
++    }
+     auto lhs_tile = GetTileTypeWithMemRef(op->var_->GetType());
+     auto in_new_tile = GetTileTypeWithMemRef(new_in->GetType());
+-    if (!lhs_tile || !in_new_tile ||
+-        SamePhysicalWindow(GetDefinedMemRef(lhs_tile), GetDefinedMemRef(in_new_tile))) {
++    if (!lhs_tile || !in_new_tile) return nullptr;
++    const auto& input_memref = GetDefinedMemRef(in_new_tile);
++    MemRefPtr target = input_memref;
++    if (is_view) {
++      const auto& output_memref = GetDefinedMemRef(lhs_tile);
++      ExprPtr additional = ComputeViewByteOffset(call, new_in->GetType());
++      auto zero = As<ConstInt>(additional);
++      if (!zero || zero->value_ != 0 || output_memref->size_ != input_memref->size_) {
++        // Preserve the view's window and the input's pipeline-slot identity;
++        // neither a subview nor a carried slot denotes the whole allocation.
++        target = std::make_shared<MemRef>(
++            input_memref->base_, AddByteOffsets(input_memref->byte_offset_, additional),
++            output_memref->size_, output_memref->span_, input_memref->is_pinned_,
++            input_memref->slot_count_, input_memref->slot_index_);
++      }
++    }
++    if (SamePhysicalWindow(GetDefinedMemRef(lhs_tile), target) &&
++        lhs_tile->GetMemorySpace() == in_new_tile->GetMemorySpace()) {
+       return nullptr;
+     }
+-    auto new_type = CloneTypeWithMemRef(op->var_->GetType(), GetDefinedMemRef(in_new_tile),
+-                                        in_new_tile->GetMemorySpace());
++    auto new_type = CloneTypeWithMemRef(op->var_->GetType(), target, in_new_tile->GetMemorySpace());
+     auto new_lhs = std::make_shared<Var>(op->var_->name_hint_, new_type, op->var_->span_);
+     subst_[op->var_] = new_lhs;
+     auto recursed = As<AssignStmt>(IRMutator::VisitStmt_(op));
+@@ -5261,7 +5282,7 @@
+ 
+ /// The pre-YieldFixup half of the identity-copy normalization bracket: identical
+ /// to the plain run except that an in-place producer is never anchored onto a phi
+-/// whose buffer YieldFixup has yet to choose (`ReanchorInplaceOutput`).
++/// whose buffer YieldFixup has yet to choose (`ReanchorAliasingOutput`).
+ StmtPtr NormalizeIdentityCopyBuffersBeforeYieldFixup(const StmtPtr& body) {
+   IfPhiReturnVarCollector collector;
+   collector.VisitStmt(body);

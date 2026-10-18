@@ -1,0 +1,107 @@
+--- a/src/codegen/pto/pto_scalar_expr_codegen.cpp
++++ b/src/codegen/pto/pto_scalar_expr_codegen.cpp
+@@ -196,7 +196,40 @@
+   VisitBinaryArithExpr(op, "arith.divsi", "arith.divf");
+ }
+ void PTOCodegen::VisitExpr_(const ir::FloorModPtr& op) {
+-  VisitBinaryArithExpr(op, "arith.remsi", "arith.remf");
++  const auto dtype = ir::GetScalarDtype(op);
++  if (dtype != DataType::INDEX && !dtype.IsSignedInt()) {
++    // Preserve other dtype paths; this correction covers signed integer and
++    // index arithmetic, matching the scalar simplifier's floor semantics.
++    VisitBinaryArithExpr(op, "arith.remsi", "arith.remf");
++    return;
++  }
++
++  const std::string type = dtype == DataType::INDEX ? "index" : GetTypeString(dtype);
++  const std::string lhs = EmitArithOperand(op->left_, type);
++  const std::string rhs = EmitArithOperand(op->right_, type);
++  const std::string remainder = EmitArithBinaryOp("arith.remsi", lhs, rhs, type);
++
++  // FloorMod and the arithmetic simplifier use the divisor's sign. remsi
++  // instead follows the dividend; for example (1 - 48) % 24 must be 1, not
++  // -23. Correct the nonzero remainder when the signs differ. Constant
++  // divisors, as used by core ownership, need only one sign comparison.
++  const std::string zero = GetOrEmitConstant(static_cast<int64_t>(0), dtype);
++  std::string needs_correction;
++  if (auto divisor = As<ir::ConstInt>(op->right_); divisor && divisor->value_ != 0) {
++    needs_correction = EmitArithCmpi(divisor->value_ > 0 ? "slt" : "sgt", remainder, zero, type);
++  } else {
++    const std::string remainder_negative = EmitArithCmpi("slt", remainder, zero, type);
++    const std::string divisor_negative = EmitArithCmpi("slt", rhs, zero, type);
++    const std::string signs_differ =
++        EmitArithBinaryOp("arith.xori", remainder_negative, divisor_negative, "i1");
++    const std::string nonzero = EmitArithCmpi("ne", remainder, zero, type);
++    needs_correction = EmitArithBinaryOp("arith.andi", nonzero, signs_differ, "i1");
++  }
++  const std::string corrected = EmitArithBinaryOp("arith.addi", remainder, rhs, type);
++  const std::string result = NewTemp();
++  Emit(result + " = arith.select " + needs_correction + ", " + corrected + ", " + remainder +
++       " : " + type);
++  fs_.current_expr_value = result;
+ }
+ 
+ // ========================================================================
+--- a/include/pypto/ir/transforms/utils/tensor_view_semantics.h
++++ b/include/pypto/ir/transforms/utils/tensor_view_semantics.h
+@@ -458,11 +458,9 @@
+   // non-negative. This is what a split-K block index reaches for --
+   // ``(block % OK) * K_SLICE`` names the K half.
+   //
+-  // The dividend has to be proven too, rather than resting on the name:
+-  // ``FloorMod`` lowers to ``arith.remsi`` (``pto_scalar_expr_codegen.cpp``),
+-  // which truncates toward zero, so a negative dividend yields a negative
+-  // remainder -- and a negative partition offset is clamped to 0 rather than
+-  // caught, which is the silent wrong read this whole proof exists to prevent.
++  // Keep view-legality proofs restricted to non-negative source indices.
++  // Scalar codegen now corrects remsi to floor remainder for negative inputs;
++  // that fix does not broaden this conservative source-index proof.
+   if (auto mod = As<FloorMod>(expr)) {
+     auto divisor = As<ConstInt>(mod->right_);
+     return divisor && divisor->value_ > 0 && IsProvableNonNegative(mod->left_, facts, budget);
+--- a/docs/en/dev/codegen/00-pto_codegen.md
++++ b/docs/en/dev/codegen/00-pto_codegen.md
+@@ -40,6 +40,22 @@
+ constants block is finalized, so a constant that appears only inside a shape or
+ stride expression — e.g. the `2` in a composite parameter dim `M * 2` — is still
+ declared in the constants block before its use.
++
++### Signed scalar floor remainder
++
++For signed integer and `INDEX` operands, `FloorMod(a, b)` preserves floor
++remainder semantics: a nonzero result has the divisor's sign. Codegen emits
++`arith.remsi`, then adds `b` when the remainder is nonzero and its sign differs
++from `b`, selecting the corrected value. For a constant divisor, its known
++sign reduces the required comparison. For example, `-97 % 24` produces `23`,
++not the truncating remainder `-1`.
++
++This is semantic lowering of one IR operation, not an arithmetic simplification.
++It matters after the arithmetic analyzer simplifies `(x % n + n) % n` to
++`x % n`: emitting only `arith.remsi` would change the meaning for negative `x`.
++The divisor must be nonzero and operands must avoid the signed division
++overflow case. This rule does not change floating-point remainder or
++`FloorDiv` lowering.
+ 
+ ## Architecture
+ 
+--- a/docs/zh/dev/codegen/00-pto_codegen.md
++++ b/docs/zh/dev/codegen/00-pto_codegen.md
+@@ -38,6 +38,18 @@
+ 
+ 张量视图与分配前缀会**先**渲染到缓冲区、再定稿常量块, 因此只出现在某个 shape 或
+ stride 表达式里的常量 (例如复合参数维度 `M * 2` 中的 `2`) 也会在使用前被声明到常量块。
++
++### 有符号标量的 floor 余数
++
++对于有符号整数和 `INDEX` 操作数，`FloorMod(a, b)` 保留向下取整除法的余数
++语义：非零结果与除数同号。代码生成先发射 `arith.remsi`，在余数非零且与
++`b` 异号时加上 `b`，再选择修正值。除数为常量时，其已知符号可以减少必要的
++比较。例如 `-97 % 24` 得到 `23`，而不是截断除法的余数 `-1`。
++
++这是单个 IR 操作的语义下沉，不是算术优化。算术分析器将
++`(x % n + n) % n` 简化为 `x % n` 后，仅发射 `arith.remsi` 会改变负数 `x`
++的含义。除数必须非零，操作数必须避开有符号除法溢出的情况。此规则不改变
++浮点余数或 `FloorDiv` 的下沉方式。
+ 
+ ## 架构
+ 

@@ -4,7 +4,29 @@
 
 本目录是在正式动态源码 `66882634` 上联合接入的实验候选。正式 `ops/pypto/deepseek_v4_flash_csa_spmd` 的 33 份源码没有修改；`REFERENCE_SOURCE_CHECK.json` 用直接逐字节比较确认参考和正式代码均与该提交相同，没有计算校验和。
 
-没有新增 NPU 精度或 L1 性能结果。`cpu_long_v1` 已保留58个动态轴，但在 inline 参数重绑定处失败；源级局部别名规避后 `cpu_long_v2` 通过 inline，又在 ConvertToSSA 失败。显式循环/条件状态与外部Scalar迭代变量桥接后，`cpu_long_v3` 已通过 Inline/Unroll/SSA 并到达实际地址分配，随后因 Left 77824B 超过 65536B 失败。实际Left为64KiB可复用池加12KiB持久Coeff，Score Query与Attention临时Left已经共享前者；Mat还存在48+48+256+384=736KiB四个池。当前优先修复pass36未随父Tile传播的transpose_view MemRef，随后再核对真实活跃区间；不把前端通过记作完整CSA通过。
+截至 2026-10-18：`cpu_long_v5` 已完成保留58个动态轴的整层编译/PTOAS。
+独立 PyPTO 的 view 别名传播及 while 内存复用遍历修复使 Left/Mat 分别降到
+64/496 KiB，相关158项 CPU 测试通过。此前 v1～v4 的失败全部保留。
+
+设备 v1/v2 卡在首轮等待；实际生成 C++ 定位到两个独立问题：循环回边并行赋值
+被覆盖，以及负数 FloorMod 被当成截断余数。采用源级 carry 顺序规避与独立
+PyPTO FloorMod 修正后，v3 已从设备正常返回，随后在测试检查器把布尔 true 的
+`-1` 表示误判为非法计划处失败。保存快照的两波信号实际写者离线核对通过，
+完整数值与性能随后在修正检查器后的 v4 验证完成。官方 PTOAS 0.67 仍能复现
+两项问题，详见 [定点核对及复现](PTOAS_067_RECHECK.md)。
+
+`interleave_floor_mod_h131072_b16_v4/result.json`，任务
+`task_20261018_103852_401858324030`：128K/B16/S6 的 A→B→A 输出、Top-K/score、
+完整 cache/state、Native/工作区保护区、信号写者与代际、基本图重放全部通过。
+同轮5窗完整L1中位数：原多task **877.84 μs**，动态交错候选 **889.96 μs**，
+历史静态 **787.30 μs**。候选较原多task慢1.38%，未达到30%目标，不采用为性能
+优化结果；其它规格与 metadata/padding 专用场景没有在这一轮重测。
+
+组件问题现已提交为 PyPTO #3026/#3027/#3028 与 PTOAS #1622，四份issue正文均附
+最小修改diff、源码版本及验证边界，索引见
+[上游问题与建议补丁](upstream_issues_20261018/README.md)。用户已明确改为提供issue
+和修改建议，不直接提PR，也不添加标签。PTOAS独立构建已完成，20项Scalar数值
+回归全通过；完整CSA尚未使用这个新二进制验证，不能据此改写上面的设备结论。
 
 ## 区间策略与执行方式
 
@@ -21,7 +43,10 @@
 
 每核在整 wave 的所属业务写回完成后才发布一次。根等待使用当前 query 实际可见的叶及其真实 AIV owner，不等待空 lane；Top-K 与 plan 只发布自己的真实行。A3 非一致性 Scalar cache 仍使用原信号发布/轮询及业务 fence/cacheinvalid。ACK 只释放 Score FIFO，不能替代叶根完成通知。
 
-`signal_checks.py` 保留原60阶段检查并检查扩展 padding。新 wave word0 的完整实际writer/代际递推验收尚待接入，设计见 `WAVE_PHASE_CHECK_DESIGN.md`；因此 runner 准备好不等于可以省略同步验收。
+`signal_checks.py` 保留原60阶段检查并检查扩展 padding。`wave_signal_checks.py`
+已接入 eager A/B/A、基本图重放及 L1 前后检查点，核对实际 writer/代际递推；
+metadata/padding 专用重放和 source-matrix 入口尚未全部接入，不能扩大验收范围。
+设计与进度见 `WAVE_PHASE_CHECK_DESIGN.md`。
 
 ## 并行分工与源码
 
@@ -60,7 +85,11 @@ python tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261
 bash tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/reproduce_cpu.sh NEW_OUTPUT --strategy long --attention-query-metadata off
 ```
 
-CPU入口使用独立Tile注解overlay与已有隔离二进制，不修改共享安装。来源与Mat/Left边界见 `mat_left_smoke_evidence/` 和前阶段 `../jit_tile_parameter_evidence/`。设备任务必须经过 `task-submit --device auto`，本轮尚未提交。后续先完成联合编译和同步检查，再做代表档位的原分task PTO/冻结单SPMD/候选三方同轮完整L1比较，不重复整套七档来诊断编译问题。
+上面 `reproduce_cpu.sh` 是早期 Tile 注解 overlay 入口。当前编译器修复版本使用
+`reproduce_memory_reuse_cpu.sh` 与 `run_device_memory_reuse.sh`，加载新工作区独立
+构建的核心库；旧源码与共享安装保持不变。设备任务必须经过
+`task-submit --device auto`。先完成代表档位的精度/同步检查，再采原分task PTO、
+历史静态SPMD及候选的同轮完整L1；不重复整套七档来诊断编译问题。
 
 ## 本轮独立编译器工作区
 

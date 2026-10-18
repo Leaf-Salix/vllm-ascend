@@ -1,0 +1,139 @@
+### Component
+
+Other (please specify in description)
+
+### Description
+
+MaterializeSemanticAliases / 内存复用：`VisitForStmts` 和 `VisitIfPhisForAccumulator` 的递归分派没有 WhileStmt，导致原本支持的内层For carry及累加器if-phi规则在外面包一层Scalar while后失效。动态SPMD流水会因此多分配Mat/Acc池，并可能触发不必要的容量失败。
+
+### Steps to Reproduce
+
+在已构建的 PyPTO 环境中将下面内容保存为 `while_reuse_repro.py`，执行 `python while_reuse_repro.py`。这是 CPU IR/codegen 复现，不需要 NPU。
+
+```python
+# SPDX-License-Identifier: Apache-2.0
+import pypto.language as pl
+from pypto import backend, ir
+from pypto.backend import BackendType
+from pypto.pypto_core import passes
+
+backend.reset_for_testing()
+backend.set_backend_type(BackendType.Ascend910B)
+
+def _collect_named_tile_memrefs(program: ir.Program, names: set[str]) -> dict[str, ir.MemRef]:
+    """Collect MemRefs for named tile definitions anywhere in a function body."""
+    result: dict[str, ir.MemRef] = {}
+    function = next(iter(program.functions.values()))
+
+    class _MemRefCollector(ir.IRVisitor):
+        def visit_assign_stmt(self, stmt):  # type: ignore[override]
+            tile_type = stmt.var.type
+            if stmt.var.name_hint in names and isinstance(tile_type, ir.TileType):
+                assert tile_type.memref is not None
+                result[stmt.var.name_hint] = tile_type.memref
+            super().visit_assign_stmt(stmt)
+
+    _MemRefCollector().visit_stmt(function.body)
+    missing = names - result.keys()
+    assert not missing, f"tile definitions not found: {sorted(missing)}"
+    return result
+
+
+@pl.program
+class Before:
+    @pl.function(type=pl.FunctionType.InCore)
+    def kernel(
+        self,
+        pool: pl.Tensor[[16, 32], pl.FP16],
+        waves: pl.Scalar[pl.INDEX],
+        out: pl.Out[pl.Tensor[[16, 32], pl.FP16]],
+    ) -> pl.Tensor[[16, 32], pl.FP16]:
+        seed = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
+        for (wave,) in pl.while_(init_values=(0,)):
+            pl.cond(wave < waves)
+            for i, (carry,) in pl.range(2, init_values=(seed,)):
+                replacement = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
+                result = pl.yield_(replacement)
+            _read_result = pl.tile.extract(result, 0, 0, [16, 32], target_memory=pl.Mem.Left)
+            _wave_out = pl.yield_(wave + 1)
+        return out
+
+refs = _collect_named_tile_memrefs(passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before)), {"seed", "replacement"})
+assert ir.MemRef.same_allocation(refs["seed"], refs["replacement"])
+```
+
+### Expected Behavior
+
+外层Scalar while不应使内层For原有的合法Mat carry别名规则消失。该例的seed与replacement应共享同一分配；没有改变原规则对生命周期或独立旧值读取的限制。
+
+### Actual Behavior
+
+最新主线原样内存实现执行示例时，seed/replacement落在不同allocation，断言失败。另一最小例在Scalar while内进行matmul/matmul_acc的if-phi选择，previous/fresh的累加器别名也未合并。
+
+这组5个回归在未修正时2失败、3通过；零次while、独立旧carry读取及同时活跃的两份carry对照通过。本问题的独立证据是IR内存身份与复用规则缺失，不宣称该最小例已经证明NPU精度错误。
+
+### Git Commit ID
+
+基线 `14736f65c04a7db06547edb656f515054950555c`。负对照的 `memory_reuse_pass.cpp` 与该主线相同；代码生成层独立的FloorMod补丁不参与该IR pass测试。
+
+### NPU Kind
+
+N/A (not hardware-specific)
+
+### Host Platform
+
+Linux (aarch64)
+
+### Additional Context
+
+建议在 `src/ir/transforms/memory_reuse_pass.cpp` 的两个递归函数中补充While子树遍历，继续调用原有规则，而不是额外发明一套while复用策略：
+
+```cpp
+// VisitForStmts:
+} else if (auto while_stmt = As<WhileStmt>(stmt)) {
+  VisitForStmts(while_stmt->body_);
+}
+
+// VisitIfPhisForAccumulator:
+} else if (auto while_stmt = As<WhileStmt>(stmt)) {
+  VisitIfPhisForAccumulator(while_stmt->body_);
+}
+```
+
+保持嵌套if/for原有访问次序；检查零迭代、外部初始payload、仍需读取的旧carry、同时活跃的两份carry以及while内累加器分支，不能把“遍历到”变成无条件合并内存。
+
+这两处局部遍历修正与view传播修正已在最新主线独立核心上完成整个 `test_memory_reuse.py` 154项验证。两个问题是独立缺口，应分别评估；这里仅提交issue和修改建议，不提交PR。
+
+### 建议代码 diff（2026-10-18，仅供参考，未提交 PR）
+
+以下补丁针对 PyPTO 主线 `14736f65c04a7db06547edb656f515054950555c` 的
+`src/ir/transforms/memory_reuse_pass.cpp`，仅补两个递归入口的While子树遍历，
+未混入 #3027 的view传播修改。继续使用原有For carry与accumulator phi规则；
+没有增加无条件合并While内存的规则。
+
+验证边界：新增5例在原实现上2失败/3通过；**与 #3027 补丁合用**的独立构建
+已通过整个 `test_memory_reuse.py` 的154项。拆分diff没有另外重复跑全套。
+建议回归保留零次While、外部初始值、旧carry仍需读取、同时活跃的两份carry及累加器分支。
+
+```diff
+--- a/src/ir/transforms/memory_reuse_pass.cpp
++++ b/src/ir/transforms/memory_reuse_pass.cpp
+@@ -1288,6 +1288,8 @@
+     } else if (auto for_stmt = As<ForStmt>(stmt)) {
+       PropagateFromForStmt(for_stmt);
+       VisitForStmts(for_stmt->body_);
++    } else if (auto while_stmt = As<WhileStmt>(stmt)) {
++      VisitForStmts(while_stmt->body_);
+     } else if (auto if_stmt = As<IfStmt>(stmt)) {
+       VisitForStmts(if_stmt->then_body_);
+       if (if_stmt->else_body_.has_value()) VisitForStmts(if_stmt->else_body_.value());
+@@ -1328,6 +1330,8 @@
+       for (const auto& s : seq->stmts_) VisitIfPhisForAccumulator(s);
+     } else if (auto for_stmt = As<ForStmt>(stmt)) {
+       VisitIfPhisForAccumulator(for_stmt->body_);
++    } else if (auto while_stmt = As<WhileStmt>(stmt)) {
++      VisitIfPhisForAccumulator(while_stmt->body_);
+     } else if (auto if_stmt = As<IfStmt>(stmt)) {
+       // Coalesce nested accumulator phis before their enclosing K-window phi.
+       // Otherwise a later child rewrite can overwrite the outer target and
+```

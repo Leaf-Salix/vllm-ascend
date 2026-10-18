@@ -1,0 +1,16 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @floor_mod(%arg0: !pto.ptr<i32>, %arg1: i32) {
+  %c1_index = arith.constant 1 : index
+  %c24_i32 = arith.constant 24 : i32
+  %c0_i32 = arith.constant 0 : i32
+  %c0_index = arith.constant 0 : index
+  %out_view = pto.make_tensor_view %arg0, shape = [%c1_index], strides = [%c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?xi32>
+  %0 = arith.remsi %arg1, %c24_i32 : i32
+  %1 = arith.cmpi slt, %0, %c0_i32 : i32
+  %2 = arith.addi %0, %c24_i32 : i32
+  %3 = arith.select %1, %2, %0 : i32
+  pto.store %3, %arg0[%c0_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_attention_interleave_candidate/upstream_issues_20261018/floor_mod_repro.py":18:1)
+  return
+  }
+}
+
