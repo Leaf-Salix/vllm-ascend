@@ -1,0 +1,402 @@
+{
+  "comparison": "同进程、相同根地址、正式第4层W8A8权重；完整L1五窗口中位数",
+  "scope": "输出/TopK/score、完整cache/state、保护区、A→B→A图和代际；历史为既有合成输入",
+  "reference": "f222a917动态单SPMD；S6另含原多task PTO",
+  "goal_rule": "候选完整L1 <= 同轮原多task完整L1 * 0.70",
+  "decision": "不默认采用：8K大T有小收益，但长历史与短历史上沿均退步；不继续为小收益扫描更细分界",
+  "rows": [
+    {
+      "case": "h131072_b24_v1",
+      "purpose": "K64首版",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h131072_b24_v1/result.json",
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "tokens": 144,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1161.24,
+            1157.92,
+            1164.82,
+            1168.3,
+            1173.02
+          ],
+          "median_us": 1164.82
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1111.54,
+            1132.54,
+            1110.56,
+            1118.04,
+            1124.64
+          ],
+          "median_us": 1118.04
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1121.2,
+            1117.1,
+            1116.8,
+            1116.7,
+            1127.36
+          ],
+          "median_us": 1117.1
+        }
+      },
+      "candidate_latency_reduction_pct": -0.08414645063110326,
+      "candidate_display_speedup_pct": -0.08407570391041953,
+      "candidate_faster_window_pairs": 3,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b32_v1",
+      "purpose": "K64首版",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b32_v1/result.json",
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "tokens": 192,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            969.16,
+            985.4,
+            986.46,
+            987.92,
+            978.24
+          ],
+          "median_us": 985.4
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            949.12,
+            938.52,
+            941.14,
+            946.0,
+            941.06
+          ],
+          "median_us": 941.14
+        },
+        "spmd_reference": {
+          "samples_us": [
+            949.06,
+            945.72,
+            946.3,
+            948.0,
+            943.76
+          ],
+          "median_us": 946.3
+        }
+      },
+      "candidate_latency_reduction_pct": 0.5452816231638982,
+      "candidate_display_speedup_pct": 0.5482712455107601,
+      "candidate_faster_window_pairs": 4,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h131072_b24_v4",
+      "purpose": "K128显式交错",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h131072_b24_v4/result.json",
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "tokens": 144,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1167.64,
+            1130.66,
+            1153.04,
+            1176.64,
+            1171.24
+          ],
+          "median_us": 1167.64
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1119.6,
+            1117.9,
+            1119.38,
+            1120.06,
+            1129.14
+          ],
+          "median_us": 1119.6
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1109.8,
+            1100.96,
+            1110.56,
+            1105.86,
+            1120.3
+          ],
+          "median_us": 1109.8
+        }
+      },
+      "candidate_latency_reduction_pct": -0.8830419895476622,
+      "candidate_display_speedup_pct": -0.8753126116470129,
+      "candidate_faster_window_pairs": 0,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b32_v4",
+      "purpose": "K128显式交错",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b32_v4/result.json",
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "tokens": 192,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            975.08,
+            954.12,
+            971.24,
+            973.84,
+            1006.98
+          ],
+          "median_us": 973.84
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            932.44,
+            931.82,
+            934.26,
+            936.84,
+            936.84
+          ],
+          "median_us": 934.26
+        },
+        "spmd_reference": {
+          "samples_us": [
+            948.14,
+            952.36,
+            948.26,
+            949.94,
+            947.38
+          ],
+          "median_us": 948.26
+        }
+      },
+      "candidate_latency_reduction_pct": 1.4763883323139224,
+      "candidate_display_speedup_pct": 1.4985121914670434,
+      "candidate_faster_window_pairs": 5,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b22_s6_region_boundary_v4",
+      "purpose": "T132区间代表",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b22_s6_region_boundary_v4/result.json",
+      "history": 8192,
+      "batch": 22,
+      "query_tokens": 6,
+      "tokens": 132,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            819.4,
+            840.1,
+            847.8,
+            870.12,
+            816.2
+          ],
+          "median_us": 840.1
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            816.56,
+            813.12,
+            819.5,
+            806.08,
+            821.88
+          ],
+          "median_us": 816.56
+        },
+        "spmd_reference": {
+          "samples_us": [
+            812.52,
+            826.56,
+            822.86,
+            813.82,
+            827.74
+          ],
+          "median_us": 822.86
+        }
+      },
+      "candidate_latency_reduction_pct": 0.7656223415891,
+      "candidate_display_speedup_pct": 0.7715293426080225,
+      "candidate_faster_window_pairs": 4,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b129_s1_boundary_v4_fixture_v3",
+      "purpose": "T129/S1下沿",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b129_s1_boundary_v4_fixture_v3/result.json",
+      "history": 8192,
+      "batch": 129,
+      "query_tokens": 1,
+      "tokens": 129,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "reference": {
+          "samples_us": [
+            984.76,
+            985.02,
+            988.34,
+            992.4,
+            986.38
+          ],
+          "median_us": 986.38
+        },
+        "candidate": {
+          "samples_us": [
+            981.54,
+            980.34,
+            980.58,
+            982.42,
+            980.92
+          ],
+          "median_us": 980.92
+        }
+      },
+      "candidate_latency_reduction_pct": 0.5535392039579103,
+      "candidate_display_speedup_pct": 0.5566203156220728,
+      "candidate_faster_window_pairs": 5,
+      "goal_passed_against_multitask_l1": null,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b32_s5_boundary_v4",
+      "purpose": "T160/S5代表",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b32_s5_boundary_v4/result.json",
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 5,
+      "tokens": 160,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "reference": {
+          "samples_us": [
+            933.48,
+            943.96,
+            938.46,
+            937.68,
+            945.42
+          ],
+          "median_us": 938.46
+        },
+        "candidate": {
+          "samples_us": [
+            940.72,
+            932.76,
+            936.54,
+            939.24,
+            928.62
+          ],
+          "median_us": 936.54
+        }
+      },
+      "candidate_latency_reduction_pct": 0.20459049932869516,
+      "candidate_display_speedup_pct": 0.2050099301685003,
+      "candidate_faster_window_pairs": 3,
+      "goal_passed_against_multitask_l1": null,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h8192_b256_s1_boundary_v4_fixture_v3",
+      "purpose": "T256/S1容量上沿",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h8192_b256_s1_boundary_v4_fixture_v3/result.json",
+      "history": 8192,
+      "batch": 256,
+      "query_tokens": 1,
+      "tokens": 256,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "reference": {
+          "samples_us": [
+            1564.94,
+            1558.84,
+            1554.22,
+            1553.98,
+            1566.52
+          ],
+          "median_us": 1558.84
+        },
+        "candidate": {
+          "samples_us": [
+            1559.66,
+            1582.24,
+            1569.1,
+            1578.38,
+            1561.6
+          ],
+          "median_us": 1569.1
+        }
+      },
+      "candidate_latency_reduction_pct": -0.6581817248723404,
+      "candidate_display_speedup_pct": -0.6538780192467014,
+      "candidate_faster_window_pairs": 2,
+      "goal_passed_against_multitask_l1": null,
+      "candidate_adopted": false
+    },
+    {
+      "case": "h32760_b32_s6_history_boundary_v4",
+      "purpose": "短历史上沿",
+      "source_result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/oa_row_pair_weight_reuse_evidence/h32760_b32_s6_history_boundary_v4/result.json",
+      "history": 32760,
+      "batch": 32,
+      "query_tokens": 6,
+      "tokens": 192,
+      "precision_and_protocol_passed": true,
+      "all_statistics_us": {
+        "dynamic_pto": {
+          "samples_us": [
+            1165.24,
+            1176.76,
+            1180.62,
+            1175.54,
+            1200.54
+          ],
+          "median_us": 1176.76
+        },
+        "spmd_candidate": {
+          "samples_us": [
+            1139.96,
+            1161.08,
+            1142.22,
+            1138.9,
+            1138.38
+          ],
+          "median_us": 1139.96
+        },
+        "spmd_reference": {
+          "samples_us": [
+            1132.84,
+            1138.98,
+            1133.44,
+            1130.08,
+            1128.12
+          ],
+          "median_us": 1132.84
+        }
+      },
+      "candidate_latency_reduction_pct": -0.6285088803361568,
+      "candidate_display_speedup_pct": -0.6245833187129476,
+      "candidate_faster_window_pairs": 0,
+      "goal_passed_against_multitask_l1": false,
+      "candidate_adopted": false
+    }
+  ]
+}
