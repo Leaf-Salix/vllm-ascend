@@ -1,0 +1,89 @@
+--- formal/query_projection_stages.py
++++ candidate/query_projection_stages.py
+@@ -22,7 +22,7 @@
+     T、QR 暂存行数和投影工作区行数均为动态 Tensor 轴。
+ 
+ 数学 tile 与分工
+-    NZ 保留 M128/N256/K256，ND 保留 M64/N512/K128；按实际 T 计算
++    NZ 候选使用 M128/N256/K128双槽，ND 保留 M64/N512/K128；按实际 T 计算
+     ceil(T/128)*128 个工作区行，不按缓存容量扫描额外行。每个显式 AIC
+     worker 负责列块 n=worker+k*WORKERS，沿 K 顺序做原 INT32 累加。
+     反量化用八行、4/8/16/32/64 个独立 head 的分组策略；完整八行时选
+@@ -79,6 +79,7 @@
+ QPROJ_N_BLOCKS = H * HEAD_DIM // QPROJ_MM_N_TILE
+ QPROJ_PIPE_M_TILE = 128
+ QPROJ_PIPE_K_TILE = 256
++QPROJ_PREFETCH_K_TILE = 128
+ Q_ROPE_T_TILE = 8
+ Q_ROPE_H_TILE = 4
+ Q_DEQUANT_WORKERS = 48
+@@ -125,33 +126,49 @@
+     worker_id: pl.Scalar[pl.INDEX],
+     WORKERS: pl.constexpr,
+ ):
+-    """NZ Q_B：显式 AIC 按列块条带领取，原 K 流水不变；调用前必须等待 QR。"""
++    """NZ Q_B：K128双Left/Right；真实T尾行与N256 owner保持。"""
+     qproj_worker = pl.max(worker_id, 0)
+     qproj_t_matmul = (tokens + QPROJ_PIPE_M_TILE - 1) // QPROJ_PIPE_M_TILE * QPROJ_PIPE_M_TILE
+-    # 由实际 tokens 决定最后一个 M128，不能用较大的工作区容量延长循环。
+     for qproj_round in pl.range(0, (QPROJ_N_BLOCKS - qproj_worker + WORKERS - 1) // WORKERS):
+-        # 用非负 worker+round*WORKERS 表达 NZ 列偏移，保留编译器的非负证明。
+         qproj_n_idx = qproj_worker + qproj_round * WORKERS
+         w_col0 = qproj_n_idx * QPROJ_MM_N_TILE
+         for t0 in pl.range(0, qproj_t_matmul, QPROJ_PIPE_M_TILE):
+-            # 最后一盒不足128行时，用实际有效行约束载入及矩阵计算。
+             m_rows = pl.min(QPROJ_PIPE_M_TILE, tokens - t0)
+-            qr_first = pl.slice(
+-                qr_i8_matmul, [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE], [t0, 0], valid_shape=[m_rows, QPROJ_PIPE_K_TILE]
+-            )
+-            wq_first = wq_b[0:QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-            # 第一段 matmul 初始化 INT32 累加器，后三段按 K256 原顺序追加。
+-            col_acc = pl.matmul(qr_first, wq_first, out_dtype=pl.INT32)
+-            for k0 in pl.pipeline(QPROJ_PIPE_K_TILE, Q_LORA, QPROJ_PIPE_K_TILE, stage=2):
+-                qr_chunk = pl.slice(
+-                    qr_i8_matmul,
+-                    [QPROJ_PIPE_M_TILE, QPROJ_PIPE_K_TILE],
+-                    [t0, k0],
+-                    valid_shape=[m_rows, QPROJ_PIPE_K_TILE],
+-                )
+-                wq_chunk = wq_b[k0 : k0 + QPROJ_PIPE_K_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE]
+-                col_acc = pl.matmul_acc(col_acc, qr_chunk, wq_chunk)
+-            q_proj_i32[t0 : t0 + QPROJ_PIPE_M_TILE, w_col0 : w_col0 + QPROJ_MM_N_TILE] = col_acc
++            # 首片与下一片同时存活，强制分配不同L0地址；实际地址仍须审阅。
++            qr0_mat = pl.load(qr_i8_matmul, [t0, 0],
++                [QPROJ_PIPE_M_TILE, QPROJ_PREFETCH_K_TILE],
++                valid_shape=[m_rows, QPROJ_PREFETCH_K_TILE], target_memory=pl.MemorySpace.Mat)
++            b0_mat = pl.load(wq_b, [0, w_col0],
++                [QPROJ_PREFETCH_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat)
++            qr0 = pl.tile.move(qr0_mat, target_memory=pl.MemorySpace.Left)
++            b0 = pl.tile.move(b0_mat, target_memory=pl.MemorySpace.Right)
++            qr1_mat = pl.load(qr_i8_matmul, [t0, QPROJ_PREFETCH_K_TILE],
++                [QPROJ_PIPE_M_TILE, QPROJ_PREFETCH_K_TILE],
++                valid_shape=[m_rows, QPROJ_PREFETCH_K_TILE], target_memory=pl.MemorySpace.Mat)
++            b1_mat = pl.load(wq_b, [QPROJ_PREFETCH_K_TILE, w_col0],
++                [QPROJ_PREFETCH_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat)
++            qr_current = pl.tile.move(qr1_mat, target_memory=pl.MemorySpace.Left)
++            b_current = pl.tile.move(b1_mat, target_memory=pl.MemorySpace.Right)
++            col_acc = pl.tile.matmul(qr0, b0)
++            # 只展开模型固定的K=1024，不展开T/B；每轮的下一片先发射，
++            # 当前矩阵仅依赖当前槽。重用旧槽的M→MTE1依赖交给编译器保留。
++            # 刻意不套pipeline，避免自动IO前移让三个Right同时存活。
++            for part in pl.unroll(1, Q_LORA // QPROJ_PREFETCH_K_TILE - 1):
++                next_k = (part + 1) * QPROJ_PREFETCH_K_TILE
++                qr_next_mat = pl.load(qr_i8_matmul, [t0, next_k],
++                    [QPROJ_PIPE_M_TILE, QPROJ_PREFETCH_K_TILE],
++                    valid_shape=[m_rows, QPROJ_PREFETCH_K_TILE], target_memory=pl.MemorySpace.Mat)
++                b_next_mat = pl.load(wq_b, [next_k, w_col0],
++                    [QPROJ_PREFETCH_K_TILE, QPROJ_MM_N_TILE], target_memory=pl.MemorySpace.Mat)
++                qr_next = pl.tile.move(qr_next_mat, target_memory=pl.MemorySpace.Left)
++                b_next = pl.tile.move(b_next_mat, target_memory=pl.MemorySpace.Right)
++                col_acc = pl.tile.matmul_acc(col_acc, qr_current, b_current)
++                qr_current = qr_next
++                b_current = b_next
++            # 最后一个K128只消费，不再预取；避免两个独立if之间传递Tile定义。
++            col_acc = pl.tile.matmul_acc(col_acc, qr_current, b_current)
++            # 动态valid行由Left传递至Acc；仅发布本轮真实T，不能写padding。
++            pl.store(col_acc, [t0, w_col0], q_proj_i32)
+     return q_proj_i32
+ 
+ 

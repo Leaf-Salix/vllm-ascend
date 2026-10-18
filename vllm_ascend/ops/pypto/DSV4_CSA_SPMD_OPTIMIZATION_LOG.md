@@ -17751,3 +17751,63 @@ MTE2 77.640μs，AIV Vector99.168μs。独立图外Event308.340μs包含外调�
 cpu_v2通过。任务task_20261018_130455_238129612172待设备结果，先验证实际
 中间Tensor的完整Score逐bit结果，再看硬件流水；未改正式算法和共享依赖。
 过程目录parallel_20261018/score_load2d_evidence；七档30%目标仍未完成。
+
+### 2026-10-18：WS load2d无整体收益，Q_B实现真实双L0槽
+
+load2d任务task_20261018_130455_238129612172 exit0。两种搬运的Score三次
+完整pair/score逐bit一致；独立图Event原329.790/新328.700μs，所有慢样本
+保留；PMU kernel Duration287.120/286.780μs，MTE1活跃154.691/152.870μs。
+不是完整CSA L1或交错配对证据，没有足够收益，不合入、不扩测七档。
+
+按用户double buffer要求，继续检查主Q_B供数：原N256/K256 Right已占满
+64KiB，stage2并没有真实双Right。新候选保留N256与动态M128尾行，K改为
+八个128整数块，先预取下一片再消费当前片；不改变T/B动态性或列owner。
+CPU v1遇独立if之间Tile定义作用域问题，v2显式排空末K后完整符号编译通过。
+实际生成Left0/16384、Right0/32768；八次MMA按槽交替，只等当前槽MTE1
+事件，Acc的CompactMode::Normal及动态有效行保留。L1仍复用，未把地址
+检查当实测收益。原32模块不变，完整源在qb_k128_pipeline_evidence。
+任务task_20261018_131417_2840949760待设备：128K/B16正式权重，原分task/
+正式SPMD/候选五窗完整L1；先经过全部精确、图、保护与代际检查再计时。
+
+### 2026-10-18：Score转置片上布局完成符号编译，提交完整CSA对照
+
+load2d无整体收益后，改评估更大的数据流变化：QK与WS同时转置，Query48KiB
+和系数12KiB常驻Right，WS FP16中间值48KiB改走Left非转置读取，两Key
+8KiB双槽也在Left。原INT8点积、FIX/FP16/ReLU及WS K顺序保留；GM双槽
+改为[1024,8]，AIV片上转回query-major后继续原scale/TopK。交接区增加
+393216B；没有新根、Host metadata或全局barrier。
+
+覆盖G6/N64/1024/prefetch1/toL0/balanced策略区间，B/T和device数据完全
+动态；其余保留原路径。AIV布局小探针通过；完整v1因Left create/extract的
+TileView不同被类型检查拒绝，v2取消不可能分支并用真实首Key初始化后，
+完整CPU通过130根/58动态轴/一个MIX。实际Right0/49152、Left WS0与
+Key49152/57344在64KiB内，首Key临时0仅在WS加载前使用；保留原事件保护。
+
+原16卡整机任务结束后，Q_B已开始运行。Score布局任务
+task_20261018_132551_345883327524也已提交：只测128K/B16一个代表，
+先精确功能再同轮三方五窗完整L1，不叠加Q_B候选。结果尚待收齐，不预记
+设备PASS和性能收益。全部过程在parallel_20261018/score_transposed_layout_evidence。
+
+### 2026-10-18：Q_B双L0候选完整通过但回退4.71%
+
+任务task_20261018_131417_2840949760 exit0；原精确数值、Top-K、score、
+六份cache/state、A→B→A、图、保护区及代际检查全部通过。同轮三方五窗
+完整L1中位为原分task885.24、原正式SPMD854.66、K128双L0候选894.94μs，
+相对正式回退4.712985%，五窗均更慢。没有剔除样本，不采用、不扩测七档。
+真实双槽和current-slot等待已确认，但同时存在K块/MMA数量增加、L1仍复用
+等变化；当前完整L1不能把40.28μs全部归给某一项。源/CPU/设备结果留存。
+
+Score Key-major候选已经过完整A→B→A精确/图检查，正在编译同轮正式参考
+用于完整L1采样。精度通过不提前等同性能收益，正式目录仍为原已验证算法。
+
+### 2026-10-18：Key-major首版数值通过但回退，先定位大段成本
+
+任务task_20261018_132551_345883327524 exit0，完整精确输出/Top-K/score、
+六cache/state、A→B→A、图、保护区、代际全部通过。同轮五窗原分task
+874.56、原正式SPMD880.26、Key-major候选1533.96μs，回退74.262%。
+未合入、不扩七档，不把数学等价/双槽容量通过当性能收益。
+
+[1024,8] AIV TTRANS按真实PTO-ISA源码满足向量路径的stride对齐条件，
+不能无证据称其进入Scalar尾路；AIC M/N方向、WS的Left搬运、GM小列写回
+和AIV布局恢复都仍可能影响结果。下一步只采相同Score helper的PMU，
+不靠整层数字猜具体根因。原算法及共享依赖未改，七档30%目标仍未完成。
