@@ -1,0 +1,117 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [ 40%]
+...................................F......................F............. [ 80%]
+...................................                                      [100%]
+=================================== FAILURES ===================================
+_ TestAutoDeriveTaskDependencies.test_debug_logs_auto_no_dep_candidate_buckets _
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv/bin/python
+
+self = <transforms.test_auto_derive_task_dependencies.TestAutoDeriveTaskDependencies object at 0xfffdf7d1a6e0>
+
+    def test_debug_logs_auto_no_dep_candidate_buckets(self):
+        result = _run_auto_deps_debug_subprocess(
+            """
+            @pl.program
+            class Prog:
+                @pl.function(type=pl.FunctionType.InCore)
+                def fill(
+                    self,
+                    out: pl.Out[pl.Tensor[[64], pl.FP32]],
+                ) -> pl.Tensor[[64], pl.FP32]:
+                    return out
+    
+                @pl.function(type=pl.FunctionType.InCore)
+                def mutate(self, x: pl.InOut[pl.Tensor[[64], pl.FP32]]) -> pl.Tensor[[64], pl.FP32]:
+                    return x
+    
+                @pl.function(type=pl.FunctionType.Orchestration, auto_scope=False)
+                def main(self, scratch: pl.Tensor[[64], pl.FP32]) -> pl.Tensor[[64], pl.FP32]:
+                    with pl.scope(mode=pl.ScopeMode.AUTO):
+                        produced, _producer_tid = pl.submit(self.fill, scratch)
+                        out, _ = pl.submit(self.mutate, produced)
+                    return out
+    
+            _run_auto_deps(Prog, analyze_auto_scopes=True)
+            """
+        )
+    
+>       assert result.returncode == 0, result.stderr + result.stdout
+E       AssertionError: Traceback (most recent call last):
+E           File "<string>", line 1, in <module>
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/__init__.py", line 21, in <module>
+E             from . import compile_profiling, ir, language, runtime
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/__init__.py", line 46, in <module>
+E             from .compile import compile
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 21, in <module>
+E             from pypto.backend.pto_backend import PartialCodegenError, generate, multi_chip_orch_names
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 682, in <module>
+E             {_ir_core.get_op("system.read_clock").name, _ir_core.get_op("system.physical_core_id").name}
+E         ValueError: Operator 'system.read_clock' not found in registry
+E         Check failed: it != registry_.end() at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/op_registry.cpp:542
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['/data/pyptouser/qinchuanyu/pto-eager/.venv/bin/python', '-c', 'import pypto.language as pl\nfr...istry\nCheck failed: it != registry_.end() at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/op_registry.cpp:542\n').returncode
+
+tests/ut/ir/transforms/test_auto_derive_task_dependencies.py:465: AssertionError
+_ TestAutoDeriveTaskDependencies.test_debug_bucket_prefers_inactive_dynamic_fallback_reason _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv/bin/python
+
+self = <transforms.test_auto_derive_task_dependencies.TestAutoDeriveTaskDependencies object at 0xfffde8036c20>
+
+    def test_debug_bucket_prefers_inactive_dynamic_fallback_reason(self):
+        result = _run_auto_deps_debug_subprocess(
+            """
+            @pl.program
+            class Prog:
+                @pl.function(type=pl.FunctionType.InCore)
+                def fill(
+                    self,
+                    out: pl.Out[pl.Tensor[[64], pl.FP32]],
+                ) -> pl.Tensor[[64], pl.FP32]:
+                    return out
+    
+                @pl.function(type=pl.FunctionType.InCore)
+                def consume(self, x: pl.Tensor[[64], pl.FP32]) -> pl.Tensor[[64], pl.FP32]:
+                    return x
+    
+                @pl.function(type=pl.FunctionType.Orchestration)
+                def main(
+                    self,
+                    scratch: pl.Tensor[[64], pl.FP32],
+                    n_steps: pl.Scalar[pl.INDEX],
+                ) -> pl.Tensor[[64], pl.FP32]:
+                    carried = scratch
+                    for _i, (carried,) in pl.range(0, n_steps, init_values=(carried,)):
+                        carried = self.fill(carried)
+                        carried = pl.yield_(carried)
+                    out = self.consume(carried)
+                    return out
+    
+            _run_auto_deps(Prog, analyze_auto_scopes=True)
+            """
+        )
+    
+>       assert result.returncode == 0, result.stderr + result.stdout
+E       AssertionError: Traceback (most recent call last):
+E           File "<string>", line 1, in <module>
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/__init__.py", line 21, in <module>
+E             from . import compile_profiling, ir, language, runtime
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/__init__.py", line 46, in <module>
+E             from .compile import compile
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/compile.py", line 21, in <module>
+E             from pypto.backend.pto_backend import PartialCodegenError, generate, multi_chip_orch_names
+E           File "/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/backend/pto_backend.py", line 682, in <module>
+E             {_ir_core.get_op("system.read_clock").name, _ir_core.get_op("system.physical_core_id").name}
+E         ValueError: Operator 'system.read_clock' not found in registry
+E         Check failed: it != registry_.end() at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/op_registry.cpp:542
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['/data/pyptouser/qinchuanyu/pto-eager/.venv/bin/python', '-c', 'import pypto.language as pl\nfr...istry\nCheck failed: it != registry_.end() at /data/pyptouser/qinchuanyu/pto-eager/pypto/src/ir/op_registry.cpp:542\n').returncode
+
+tests/ut/ir/transforms/test_auto_derive_task_dependencies.py:1350: AssertionError
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_auto_derive_task_dependencies.py::TestAutoDeriveTaskDependencies::test_debug_logs_auto_no_dep_candidate_buckets
+FAILED tests/ut/ir/transforms/test_auto_derive_task_dependencies.py::TestAutoDeriveTaskDependencies::test_debug_bucket_prefers_inactive_dynamic_fallback_reason
+2 failed, 177 passed in 3.86s

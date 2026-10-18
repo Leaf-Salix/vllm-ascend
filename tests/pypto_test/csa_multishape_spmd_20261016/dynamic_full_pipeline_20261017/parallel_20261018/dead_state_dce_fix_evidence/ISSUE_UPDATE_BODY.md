@@ -1,0 +1,539 @@
+补充一版本地验证过的修改建议（仅 issue 反馈，没有提交 PR）。
+
+当前最小复现的 `ghost[6,32] FP32` 已在分配前消失；`after_AllocateMemoryAddr` 中无 ghost/unused，没有为其保留 768B UB。
+
+建议在 `EliminateDeadYieldSlots` 中把“语法引用计数”换成“从语义消费者求可达性”：
+
+- 纯别名、if yield、loop carry 构造依赖边；运算、store、条件、返回、描述符和调度 metadata 为根。
+- 对循环显式保留 `return_var -> iter_arg -> init_value`，否则零次迭代且循环体只覆盖不读的情形会丢初值。
+- 从根用 worklist 遍历，再一次性删除不可达的传递槽、别名和原始未初始化 `tile.create`。只认可这一种分配调用，不对其它算子做纯度推断；分配的参数/属性里若还有调用也保留。
+- TaskId/TaskId Array 循环通道即使没有普通变量读者仍保留；包含调用的初值/yield、while 条件、SPMD 核数、Expr 属性、Submit deps/predicate 均保留。通信域暂采取保守策略。
+- 每个语句/表达式固定次数遍历，图 worklist 为 O(N+E)，不靠反复扫描整个 IR 收敛。
+
+验证：新增 7 个回归覆盖 if-phi 死闭环、纯 alias 死闭环、真实 Tile 读取、循环后读取/零次迭代、while 条件、TaskId 通道、SPMD core_num。与已有 Simplify、AutoDeriveTaskDependencies、ExpandManualPhaseFence 合计 **179 passed**。最小完整 CPU lowering 已通过，ghost_retained=false。工作区独立构建，不修改共享安装。
+
+完整动态 CSA 的长/短历史开关路径已完成 4 种符号编译，保持 58 个动态轴、130 根入参和一个 MIX 提交。关闭本地统计的两类路径，在**同一修复后编译器**下与原源码路径生成 C++ 一致（仅忽略整行注释）。新编译器还消除了其它阶段的死分配，因此不能把跨编译器 C++ 称为逐字相同；设备回归仍在进行，不把 CPU 结果当成设备精度或性能通过。
+
+下面给出完整建议 patch（C++、新增回归与双语文档），供组件维护者取舍。测试中的 pytest 导入隔离辅助只用于本机多 worktree，不需要进入上游。
+
+<details>
+<summary>建议修改代码及回归用例</summary>
+
+```diff
+diff --git a/docs/en/dev/passes/05-simplify.md b/docs/en/dev/passes/05-simplify.md
+index 2067c4b37..5062bc7e7 100644
+--- a/docs/en/dev/passes/05-simplify.md
++++ b/docs/en/dev/passes/05-simplify.md
+@@ -68,6 +68,22 @@ Implemented by `TransformSimplify` in `src/ir/transforms/simplify_pass.cpp` in f
+ 4. **Scalar DCE + dead yield-slot prune** — after the mutator finishes, `dce::EliminateDeadScalarAssignments` walks the flattened body and drops scalar `AssignStmt`s whose only uses were folded away. The DCE is conservative: it never removes call-backed assignments because the IR has no purity annotations yet and a `Call` may have observable side effects. Between the two scalar-DCE runs, `dce::EliminateDeadYieldSlots` drops the yielded slots nobody reads — an `IfStmt` phi whose `return_vars_[i]` has no user, and a `ForStmt` / `WhileStmt` carry whose `iter_args_[i]` (read inside the body) *and* `return_vars_[i]` (read after the loop) are both unused — together with the matching `YieldStmt` slot. Reusing one Python local across two scopes produces exactly that dead carry: SSA seeds the second loop with the first scope's value, every trip overwrites it, and nothing reads either end. Left in place it makes the earlier scope's value live-out, which for a device scope would force a `Scalar` into the outlined kernel's return set — see [08-outline_incore_scopes.md](09-outline_incore_scopes.md).
+ 5. **Loop-state repair** — if DCE removed any statements, `loop_repair::MakeBody` reassembles the function body so loop-carried metadata (yield/return mappings) stays consistent.
+ 
++### Forwarding cycles in loop state
++
++Yield-slot liveness follows semantic consumers rather than counting every
++syntactic use. Plain aliases and loop/if yield channels form dependency edges;
++operations, conditions, descriptor expressions, returns and scheduling metadata
++are roots. A worklist visits each variable and edge once, so an isolated
++forwarding cycle does not keep a dead Tile allocation alive. The rewrite also
++removes unreachable plain aliases and primitive, uninitialized `tile.create`
++bindings. Other calls remain conservative; no general operator purity is assumed.
++
++Loop results also depend on the initializer, preserving zero-trip behavior.
++TaskId carries, call-backed initializers/yields, `while` conditions, SPMD core
++counts, scope/call attributes and Submit dependencies/predicates remain live.
++Communication-domain bodies are left conservative. This prevents a disabled
++constexpr branch from retaining a useless UB ring solely through loop carries.
++
+ ### Control-flow folding
+ 
+ Two folds run inside the `SimplifyMutator` traversal so they share the analyzer's constraint stack with the surrounding expression-level work:
+diff --git a/docs/zh/dev/passes/05-simplify.md b/docs/zh/dev/passes/05-simplify.md
+index 528cdaee6..3ec094af9 100644
+--- a/docs/zh/dev/passes/05-simplify.md
++++ b/docs/zh/dev/passes/05-simplify.md
+@@ -68,6 +68,20 @@ program_simplified = simplify_pass(program)
+ 4. **标量 DCE + 死 yield 槽位裁剪**：mutator 完成后，`dce::EliminateDeadScalarAssignments` 在展平的函数体上运行，删除所有「全部使用都被折掉了」的标量 `AssignStmt`。该 DCE 是保守的：永远不会删除 Call 支撑的赋值，因为 IR 目前还没有纯度标注，`Call` 可能存在可观察的副作用。两次标量 DCE 之间由 `dce::EliminateDeadYieldSlots` 裁掉没有任何读者的 yield 槽位——`IfStmt` 中无人使用的 phi `return_vars_[i]`，以及 `ForStmt` / `WhileStmt` 中 `iter_args_[i]`（循环体内读）与 `return_vars_[i]`（循环后读）都未被使用的循环携带槽位——同时删除对应的 `YieldStmt` 槽位。跨两个 scope 复用同一个 Python 局部变量恰好会产生这种死携带：SSA 用前一个 scope 的值给第二个循环做初值，循环体每一轮都覆盖它，两端都没有人读。若保留下来，它会让前一个 scope 的值变成 live-out；对设备 scope 而言，这会迫使外提出的 kernel 返回一个 `Scalar`——参见 [08-outline_incore_scopes.md](09-outline_incore_scopes.md)。
+ 5. **循环状态修复**：如果 DCE 删除了任何语句，由 `loop_repair::MakeBody` 重新组装函数体，确保循环携带元信息（yield/return 映射）保持一致。
+ 
++### 循环状态中的纯传递闭环
++
++yield 槽位的存活性根据语义消费者判断，而非简单统计所有语法引用。
++纯别名和循环／if 的 yield 通道构成依赖边；操作、条件、描述符表达式、
++返回值和调度 metadata 构成根。工作列表对每个变量与依赖边只访问一次，
++因此没有实际消费者的传递闭环不再使无用 Tile 分配存活。随后同时删除
++不可达的纯别名与原始未初始化 `tile.create` 绑定。其它调用继续保守保留，
++不推断一般算子的纯度。
++
++循环结果还依赖初值，以保留零次迭代的语义。TaskId 通道、包含调用的
++初值／yield、`while` 条件、SPMD 核数、scope／call 属性与 Submit 的
++依赖／谓词均作为存活用途。通信域内部暂按保守方式处理。这样，关闭的
++constexpr 分支不会仅因循环传递而保留无用 UB 环。
++
+ ### 控制流折叠
+ 
+ 两个折叠在 `SimplifyMutator` 遍历内部运行，因此与周围的表达式级处理共享分析器的约束栈：
+diff --git a/src/ir/transforms/utils/dead_code_elimination.cpp b/src/ir/transforms/utils/dead_code_elimination.cpp
+index 450fe3447..30104094a 100644
+--- a/src/ir/transforms/utils/dead_code_elimination.cpp
++++ b/src/ir/transforms/utils/dead_code_elimination.cpp
+@@ -17,6 +17,7 @@
+ #include <memory>
+ #include <optional>
+ #include <string>
++#include <unordered_map>
+ #include <unordered_set>
+ #include <utility>
+ #include <vector>
+@@ -442,11 +443,13 @@ bool IsRemovableForDefaultDce(const StmtPtr& stmt) {
+ class CallLikeFinder : public IRVisitor {
+  public:
+   bool found = false;
++  size_t count = 0;
+ 
+  private:
+   using IRVisitor::VisitExpr_;
+   void VisitExpr_(const CallPtr& op) override {
+     found = true;
++    ++count;
+     // Keep walking — nested args may also contain Calls, but early-exit
+     // would require throwing. The overhead is bounded by the expression
+     // size which is small.
+@@ -454,6 +457,7 @@ class CallLikeFinder : public IRVisitor {
+   }
+   void VisitExpr_(const SubmitPtr& op) override {
+     found = true;
++    ++count;
+     IRVisitor::VisitExpr_(op);
+   }
+ };
+@@ -581,8 +585,7 @@ StmtPtr RebuildScopeWithBody(const std::shared_ptr<const ScopeStmt>& scope_stmt,
+ /// `live_uses`: an IfStmt's `return_vars_[i]`, or a loop's carried slot (both
+ /// `iter_args_[i]` and `return_vars_[i]` unused), plus the matching slot from
+ /// the trailing YieldStmt that feeds it. Recurses into nested branches, scope
+-/// bodies, and loop bodies. Sets `*changed` when any node was rewritten (used
+-/// by the fixed-point loop in EliminateDeadYieldSlots).
++/// bodies, and loop bodies. Sets `*changed` when any node was rewritten.
+ std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts,
+                                                const std::unordered_set<const Var*>& live_uses,
+                                                bool* changed);
+@@ -600,6 +603,167 @@ bool IsTaskIdCarrier(const TypePtr& type) {
+   return false;
+ }
+ 
++/// Only forwarding bindings and a local, uninitialized tile allocation are
++/// removable here. Other calls/computations retain all their operand uses as
++/// roots; this is not a new general-purpose purity inference for operators.
++bool IsForwardingAssign(const AssignStmtPtr& assign) {
++  if (!assign || IsTaskIdCarrier(assign->var_->GetType())) return false;
++  if (AsVarLike(assign->value_)) return true;
++  // A primitive allocation is a plain Call, never an asynchronous Submit.
++  const auto call = As<Call>(assign->value_);
++  if (!call || !IsOp(call, "tile.create")) return false;
++  CallLikeFinder finder;
++  finder.VisitExpr(call);
++  // Preserve a nested call in a shape/attribute rather than deleting its effect.
++  return finder.count == 1;
++}
++
++/// Build a graph for aliases and structured yield channels. A syntactic use
++/// inside a forwarding cycle is not a root: the cycle survives only if a real
++/// operation, condition, descriptor, return or scheduling channel reaches it.
++/// Each expression/statement is visited a constant number of times; the
++/// worklist visits each variable and edge once (O(N + E), expected hash cost).
++class ForwardingUseGraph {
++ public:
++  std::unordered_set<const Var*> Analyze(const std::vector<StmtPtr>& stmts) {
++    MarkBinderTypeRefsLive(stmts, roots_);
++    CollectBody(stmts);
++    std::vector<const Var*> worklist(roots_.begin(), roots_.end());
++    auto live = roots_;
++    for (size_t next = 0; next < worklist.size(); ++next) {
++      auto found = dependencies_.find(worklist[next]);
++      if (found == dependencies_.end()) continue;
++      for (const Var* source : found->second) {
++        if (live.insert(source).second) worklist.push_back(source);
++      }
++    }
++    return live;
++  }
++
++ private:
++  void AddRoots(const ExprPtr& expr) {
++    if (!expr) return;
++    var_collectors::VarDefUseCollector collector;
++    collector.VisitExpr(expr);
++    roots_.insert(collector.var_uses.begin(), collector.var_uses.end());
++  }
++
++  void AddDependency(const Var* target, const ExprPtr& expr) {
++    if (!expr) return;
++    var_collectors::VarDefUseCollector collector;
++    collector.VisitExpr(expr);
++    auto& inputs = dependencies_[target];
++    inputs.insert(inputs.end(), collector.var_uses.begin(), collector.var_uses.end());
++  }
++
++  void AddAttrs(const std::vector<std::pair<std::string, std::any>>& attrs) {
++    for (const auto& [key, value] : attrs) {
++      ForEachAttrExpr(value, [this](const ExprPtr& expr) { AddRoots(expr); });
++    }
++  }
++
++  void AddYieldDependencies(const StmtPtr& body, const std::vector<VarPtr>& targets) {
++    auto flat = FlattenBody(body);
++    auto yielded = flat.empty() ? nullptr : As<YieldStmt>(flat.back());
++    if (!yielded || yielded->value_.size() != targets.size()) {
++      // Do not infer dead channels from an unrecognized/malformed yield shape.
++      for (const auto& target : targets) roots_.insert(target.get());
++      if (yielded) {
++        for (const auto& value : yielded->value_) AddRoots(value);
++      }
++      return;
++    }
++    for (size_t i = 0; i < targets.size(); ++i) {
++      AddDependency(targets[i].get(), yielded->value_[i]);
++      if (ExprContainsCallLike(yielded->value_[i])) roots_.insert(targets[i].get());
++    }
++  }
++
++  template <typename LoopT>
++  void CollectLoop(const std::shared_ptr<const LoopT>& loop) {
++    INTERNAL_CHECK_SPAN(loop->iter_args_.size() == loop->return_vars_.size(), loop->span_)
++        << "Internal error: mismatched loop carry and return slots";
++    std::vector<VarPtr> iter_targets;
++    iter_targets.reserve(loop->iter_args_.size());
++    for (size_t i = 0; i < loop->iter_args_.size(); ++i) {
++      const auto& argument = loop->iter_args_[i];
++      const auto& returned = loop->return_vars_[i];
++      iter_targets.push_back(argument);
++      AddDependency(argument.get(), argument->initValue_);
++      // A post-loop user also needs the initializer when the loop takes zero
++      // trips, even if the body overwrites the value without reading it.
++      dependencies_[returned.get()].push_back(argument.get());
++      if (IsTaskIdCarrier(argument->GetType()) || ExprContainsCallLike(argument->initValue_)) {
++        roots_.insert(argument.get());
++        roots_.insert(returned.get());
++      }
++    }
++    AddYieldDependencies(loop->body_, iter_targets);
++    CollectBody(FlattenBody(loop->body_));
++  }
++
++  void CollectBody(const std::vector<StmtPtr>& stmts) {
++    for (const auto& stmt : stmts) {
++      if (auto assign = As<AssignStmt>(stmt)) {
++        // Shape/view/slot expressions on a retained descriptor are uses even
++        // when they do not occur in the RHS expression. Keep these references
++        // conservatively also for removable bindings (as for loop binders).
++        for (const Var* ref : var_collectors::CollectTypeVars(assign->var_->GetType())) {
++          roots_.insert(ref);
++        }
++        if (IsForwardingAssign(assign)) {
++          AddDependency(assign->var_.get(), assign->value_);
++        } else {
++          // Includes Call and Submit args, deps, predicate and Expr-valued attrs
++          // through the shared IR visitor. Never treat a submit as a plain call.
++          AddRoots(assign->value_);
++        }
++      } else if (auto loop = As<ForStmt>(stmt)) {
++        AddRoots(loop->start_);
++        AddRoots(loop->stop_);
++        AddRoots(loop->step_);
++        AddAttrs(loop->attrs_);
++        CollectLoop(loop);
++      } else if (auto loop = As<WhileStmt>(stmt)) {
++        // The condition is a semantic use of an IterArg, not an implicit yield.
++        AddRoots(loop->condition_);
++        CollectLoop(loop);
++      } else if (auto branch = As<IfStmt>(stmt)) {
++        AddRoots(branch->condition_);
++        AddYieldDependencies(branch->then_body_, branch->return_vars_);
++        CollectBody(FlattenBody(branch->then_body_));
++        if (branch->else_body_.has_value()) {
++          AddYieldDependencies(*branch->else_body_, branch->return_vars_);
++          CollectBody(FlattenBody(*branch->else_body_));
++        } else {
++          for (const auto& returned : branch->return_vars_) roots_.insert(returned.get());
++        }
++      } else if (auto scope = As<ScopeStmt>(stmt)) {
++        if (As<CommDomainScopeStmt>(stmt)) {
++          // This utility does not rebuild communication-domain scopes. Keep
++          // their full body conservative rather than pruning an unknown
++          // execution-model channel.
++          var_collectors::VarDefUseCollector collector;
++          collector.VisitStmt(stmt);
++          roots_.insert(collector.var_uses.begin(), collector.var_uses.end());
++          continue;
++        }
++        AddAttrs(scope->attrs_);
++        if (auto spmd = As<SpmdScopeStmt>(stmt)) AddRoots(spmd->core_num_);
++        CollectBody(FlattenBody(scope->body_));
++      } else if (!As<YieldStmt>(stmt)) {
++        // Returns, evals and unhandled node kinds remain conservative roots.
++        var_collectors::VarDefUseCollector collector;
++        collector.VisitStmt(stmt);
++        roots_.insert(collector.var_uses.begin(), collector.var_uses.end());
++      }
++    }
++  }
++
++  std::unordered_map<const Var*, std::vector<const Var*>> dependencies_;
++  std::unordered_set<const Var*> roots_;
++};
++
+ /// Prune dead carried slots from one loop node. `LoopT` is `ForStmt` or
+ /// `WhileStmt`; both expose `iter_args_`, `body_` and `return_vars_`.
+ ///
+@@ -658,10 +822,12 @@ std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts
+   std::vector<StmtPtr> result;
+   result.reserve(stmts.size());
+   for (const auto& stmt : stmts) {
+-    if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+-      // Recurse into branches first so a dead inner phi observed in this same
+-      // pass also gets cleared. The outer fixed-point still iterates until
+-      // convergence; the inner recursion just shortens the iteration count.
++    if (auto assign = As<AssignStmt>(stmt);
++        assign && IsForwardingAssign(assign) && !live_uses.count(assign->var_.get())) {
++      *changed = true;
++    } else if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
++      // Reachability already resolves transitive aliases and nested phis.
++      // Recurse once to remove every unreachable forwarding channel together.
+       auto then_stmts = FlattenBody(if_stmt->then_body_);
+       auto new_then = RewriteDeadYieldSlotsOnce(then_stmts, live_uses, changed);
+       std::optional<std::vector<StmtPtr>> else_stmts;
+@@ -709,6 +875,12 @@ std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts
+         *changed = true;
+       }
+ 
++      if (new_then.empty() && (!new_else.has_value() || new_else->empty()) &&
++          new_return_vars.empty() && !ExprContainsCallLike(if_stmt->condition_)) {
++        *changed = true;
++        continue;
++      }
++
+       auto new_if = MutableCopy(if_stmt);
+       new_if->then_body_ = MakeBody(new_then, if_stmt->span_);
+       new_if->else_body_ =
+@@ -722,6 +894,10 @@ std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts
+     } else if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+       result.push_back(RewriteLoopCarrySlots(while_stmt, live_uses, changed));
+     } else if (auto scope_stmt = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
++      if (As<CommDomainScopeStmt>(stmt)) {
++        result.push_back(stmt);
++        continue;
++      }
+       auto original = FlattenBody(scope_stmt->body_);
+       auto rewritten = RewriteDeadYieldSlotsOnce(original, live_uses, changed);
+       if (SameFlattenedBody(rewritten, original)) {
+@@ -747,20 +923,12 @@ std::vector<StmtPtr> EliminateDeadScalarAssignments(const std::vector<StmtPtr>&
+ }
+ 
+ std::vector<StmtPtr> EliminateDeadYieldSlots(const std::vector<StmtPtr>& stmts) {
+-  std::vector<StmtPtr> cur = stmts;
+-  while (true) {
+-    // Collect every Var* that appears as a use anywhere in `cur`. The base
+-    // visitor walks ScopeStmt attrs via VisitScopeAttrs and Submit::deps_
+-    // through Call/Submit traversal, so all known reference channels are
+-    // covered without extra plumbing.
+-    var_collectors::VarDefUseCollector collector;
+-    for (const auto& s : cur) collector.VisitStmt(s);
+-
+-    bool changed = false;
+-    auto next = RewriteDeadYieldSlotsOnce(cur, collector.var_uses, &changed);
+-    if (!changed) return cur;
+-    cur = std::move(next);
+-  }
++  ForwardingUseGraph graph;
++  auto live = graph.Analyze(stmts);
++  bool changed = false;
++  // Reachability already accounts for arbitrarily long forwarding chains and
++  // cycles, so one structural rewrite suffices; no repeated whole-IR scans.
++  return RewriteDeadYieldSlotsOnce(stmts, live, &changed);
+ }
+ 
+ }  // namespace dce
+diff --git a/tests/ut/ir/transforms/test_dead_forwarding_carry.py b/tests/ut/ir/transforms/test_dead_forwarding_carry.py
+new file mode 100644
+--- /dev/null
++++ b/tests/ut/ir/transforms/test_dead_forwarding_carry.py
+@@ -0,0 +1,177 @@
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++
++"""Dead forwarding cycles must not retain tiles; semantic users still keep carries."""
++
++import pypto.language as pl
++from pypto import ir, passes
++
++
++class _Inventory(ir.IRVisitor):
++    def __init__(self):
++        super().__init__()
++        self.loops = []
++        self.assigns = []
++
++    def visit_for_stmt(self, stmt):
++        self.loops.append(stmt)
++        super().visit_for_stmt(stmt)
++
++    def visit_while_stmt(self, stmt):
++        self.loops.append(stmt)
++        super().visit_while_stmt(stmt)
++
++    def visit_assign_stmt(self, stmt):
++        self.assigns.append(stmt)
++        super().visit_assign_stmt(stmt)
++
++
++def _simplified(program):
++    after = passes.simplify()(program)
++    props = passes.IRPropertySet()
++    props.insert(passes.IRProperty.UseAfterDef)
++    errors = [
++        diagnostic
++        for diagnostic in passes.PropertyVerifierRegistry.verify(props, after)
++        if diagnostic.severity == passes.DiagnosticSeverity.Error
++    ]
++    assert not errors, [diagnostic.message for diagnostic in errors]
++    ir.assert_structural_equal(passes.simplify()(after), after)
++    inventory = _Inventory()
++    for function in after.functions.values():
++        inventory.visit_stmt(function.body)
++    return after, inventory
++
++
++def test_dead_tile_forwarded_through_if_phi_is_removed():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(self, src: pl.Tensor[[1, 32], pl.FP32], n: pl.Scalar[pl.INDEX],
++                   out: pl.Tensor[[1, 32], pl.FP32]):
++            seed = pl.tile.load(src, [0, 0], [1, 32])
++            ghost = pl.tile.create([6, 32], dtype=pl.FP32)
++            for i, (live, unused) in pl.range(n, init_values=(seed, ghost)):
++                if i % 2 == 0:
++                    forwarded = pl.yield_(unused)
++                else:
++                    forwarded = pl.yield_(unused)
++                updated = pl.tile.add(live, 1.0)
++                result, _ghost_result = pl.yield_(updated, forwarded)
++            pl.tile.store(result, [0, 0], out)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops) == 1
++    assert len(inventory.loops[0].iter_args) == 1
++    create_name = ir.get_op("tile.create").name
++    assert not any(
++        isinstance(stmt.value, ir.Call) and stmt.value.op.name == create_name
++        for stmt in inventory.assigns
++    )
++
++
++def test_dead_tile_forwarded_through_plain_alias_is_removed():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(self, src: pl.Tensor[[1, 32], pl.FP32], n: pl.Scalar[pl.INDEX],
++                   out: pl.Tensor[[1, 32], pl.FP32]):
++            seed = pl.tile.load(src, [0, 0], [1, 32])
++            ghost = pl.tile.create([6, 32], dtype=pl.FP32)
++            for i, (live, unused) in pl.range(n, init_values=(seed, ghost)):
++                renamed = unused
++                updated = pl.tile.add(live, 1.0)
++                result, _ghost_result = pl.yield_(updated, renamed)
++            pl.tile.store(result, [0, 0], out)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops[0].iter_args) == 1
++
++
++def test_tile_read_in_loop_keeps_forwarded_state():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(self, src: pl.Tensor[[6, 32], pl.FP32], n: pl.Scalar[pl.INDEX],
++                   out: pl.Tensor[[6, 32], pl.FP32]):
++            seed = pl.tile.load(src, [0, 0], [6, 32])
++            for i, (live,) in pl.range(n, init_values=(seed,)):
++                renamed = live
++                pl.tile.store(renamed, [0, 0], out)
++                _ignored_result = pl.yield_(renamed)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops[0].iter_args) == 1
++
++
++def test_post_loop_read_keeps_initializer_alias_for_zero_iterations():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(self, src: pl.Tensor[[1, 32], pl.FP32], n: pl.Scalar[pl.INDEX],
++                   out: pl.Tensor[[1, 32], pl.FP32]):
++            seed = pl.tile.load(src, [0, 0], [1, 32])
++            initial = seed
++            for i, (live,) in pl.range(n, init_values=(initial,)):
++                fresh = pl.tile.full([1, 32], dtype=pl.FP32, value=2.0)
++                result = pl.yield_(fresh)
++            pl.tile.store(result, [0, 0], out)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops[0].iter_args) == 1
++    assert any(stmt.var.name_hint == "initial" for stmt in inventory.assigns)
++
++
++def test_while_condition_keeps_scalar_but_drops_dead_tile():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(self, n: pl.Scalar[pl.INDEX], out: pl.Tensor[[1], pl.INDEX]):
++            zero: pl.Scalar[pl.INDEX] = 0
++            ghost = pl.tile.create([6, 32], dtype=pl.FP32)
++            for (i, unused) in pl.while_(init_values=(zero, ghost)):
++                pl.cond(i < n)
++                renamed = unused
++                next_i: pl.Scalar[pl.INDEX] = i + 1
++                final_i, _ghost_result = pl.yield_(next_i, renamed)
++            pl.tensor.write(out, [0], final_i)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops) == 1
++    assert isinstance(inventory.loops[0], ir.WhileStmt)
++    assert len(inventory.loops[0].iter_args) == 1
++
++
++def test_unused_task_id_channel_survives():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.Orchestration)
++        def main(self, tid: pl.Scalar[pl.TASK_ID], n: pl.Scalar[pl.INDEX]):
++            for i, (carried_tid,) in pl.range(n, init_values=(tid,)):
++                renamed = carried_tid
++                _final_tid = pl.yield_(renamed)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops[0].iter_args) == 1
++
++
++def test_spmd_core_count_is_a_semantic_use():
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.Orchestration)
++        def main(self, count: pl.Scalar[pl.INDEX], n: pl.Scalar[pl.INDEX],
++                 out: pl.Tensor[[32], pl.INDEX]):
++            for i, (workers,) in pl.range(n, init_values=(count,)):
++                renamed = workers
++                with pl.spmd(renamed):
++                    block = pl.tile.get_block_idx()
++                    pl.tensor.write(out, [block], pl.const(1, pl.INDEX))
++                _final_workers = pl.yield_(renamed)
++
++    _, inventory = _simplified(Before)
++    assert len(inventory.loops[0].iter_args) == 1
+```
+
+</details>

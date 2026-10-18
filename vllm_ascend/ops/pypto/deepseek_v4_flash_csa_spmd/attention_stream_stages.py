@@ -13,6 +13,13 @@
     attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
+    LOCAL_ATTENTION_STATS由policy按已有历史/投影区间选择。开启时将每块
+    softmax的mi/li保存在本AIV独占的三槽UB环中，隔两拍
+    在线归并直接复用，删除只由本lane消费的mi/li GM写出与回读。
+    两个GM形参保留入口ABI兼容；开启时不读写，关闭时执行原GM路径。
+    无用的UB环和别名在关闭分支编译时消除，不能只凭源码if就声称没有额外成本。
+    外部输出与cache/state不变，两条路径共用全部softmax和在线归并数学。
+    不新增跨核信号，不改变 READY/ACK、三槽复用、失效块跳过及尾部排空。
     最终发布直接消费本核live Tile；当前inline接口不支持Tile参数，不为拆函数
     额外写GM。数学来自canonical decode_sparse_attn_csa，
     首版保留其5块/3槽/提前KV分支，不用全阶段barrier替代循环流水。
@@ -229,6 +236,7 @@ def attention_qk_pv_vector_lane_stage(
     CORE_GROUPS: pl.constexpr,
     EVENT_BASE: pl.constexpr = 0,
     CACHE_QUERY_METADATA: pl.constexpr = False,
+    LOCAL_ATTENTION_STATS: pl.constexpr = False,
 ):
     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
     t_dim = pl.tensor.dim(position_ids, 0)
@@ -256,11 +264,19 @@ def attention_qk_pv_vector_lane_stage(
     running_l = pl.tile.muls(running_m, 0.0)
     running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
     running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
+    # mi/li 只由当前 lane 产生并由同一 lane 消费，无跨核可见性要求。
+    # 每块 softmax 在 tick=work+1 写入，merge 在 tick=work+3 消费；
+    # 同槽下一次写入为 tick=work+4，严格晚于旧值消费。跨 query 的 work
+    # 连续编号和最终三拍 drain 均保留，不能在 query 边界清掉统计环。
+    # 一个 [6,32] 连续行缓存交错保存每槽 mi/li，避免两个独立 loop-carried
+    # 对象分别参与全循环干涉图。第2s行是mi，第2s+1行是li，逻辑共768 B。
+    # 不用 [96,1] 列向量布局；无效块不写也不读，首次使用不需要清零。
+    local_stats_ring = pl.create_tile([QK_TRANSFER_SLOTS * 2, H // 2], dtype=pl.FP32)
     # 多走三拍排空末块归并；循环携带的m/l/oi仅属于当前query，
     # 原始t_dim决定提前KV策略，不能用pad容量代替。
-    for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
+    for qk_tick, (m_iter, l_iter, left_iter, right_iter, stats_cache_iter) in pl.range(
         qk_block_count + QK_PRE_LAUNCH + 1,
-        init_values=(running_m, running_l, running_left, running_right),
+        init_values=(running_m, running_l, running_left, running_right, local_stats_ring),
     ):
         qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * CORE_GROUPS
         qk_sb = qk_tick % SPARSE_BLOCKS
@@ -370,11 +386,32 @@ def attention_qk_pv_vector_lane_stage(
                 # 是为了复刻 Native SAS 的 CAST_ROUND——半数远离零。
                 qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
                 pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
-                pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
-                pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                if LOCAL_ATTENTION_STATS:
+                    # mi/li没有跨核消费者，完整CSA也不读取其GM副本；本轮直接
+                    # 写入同lane UB环，省去两个MTE3写回及随后两个MTE2回读。
+                    # 这里只做 FP32 reshape/搬运，不改变 row_max/row_sum 的归约树。
+                    stats_cache_mi = pl.tile.assemble(
+                        stats_cache_iter, pl.reshape(qk_mi, [1, H // 2]), [(softmax_work % QK_TRANSFER_SLOTS) * 2, 0]
+                    )
+                    stats_cache_updated = pl.tile.assemble(
+                        stats_cache_mi, pl.reshape(qk_li, [1, H // 2]), [(softmax_work % QK_TRANSFER_SLOTS) * 2 + 1, 0]
+                    )
+                    stats_cache_updated_path = pl.yield_(stats_cache_updated)
+                else:
+                    # 关闭路径保留原GM写出/回读；未使用的UB环由constexpr消除。
+                    pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
+                    pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                    stats_cache_updated_path = pl.yield_(stats_cache_iter)
                 pl.system.sync_set(
                     EVENT_BASE + QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
                 )
+                stats_cache_valid = pl.yield_(stats_cache_updated_path)
+            else:
+                # 与现有事件谓词一致：失效块不产生可消费的统计值。
+                stats_cache_valid = pl.yield_(stats_cache_iter)
+            stats_cache_ready = pl.yield_(stats_cache_valid)
+        else:
+            stats_cache_ready = pl.yield_(stats_cache_iter)
         if t_dim < EARLY_KV_MIN_TOKENS:
             if qk_tick < qk_block_count:
                 if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
@@ -389,8 +426,30 @@ def attention_qk_pv_vector_lane_stage(
                 pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
                 pv_transfer_row = pv_slot * H
                 pl.system.sync_wait(EVENT_BASE + QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
-                pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                # 同一 work 的 mi/li 已在两拍前产生；使用本 tick 更新后的环，
+                # 当前 softmax 与 merge 相差两槽，互不覆盖。仍先等 PV_READY，
+                # 此优化不代替 Cube 写回完成通知，也不缩短原流水排空。
+                if LOCAL_ATTENTION_STATS:
+                    # 动态slice后直接reshape存在已知运行时偏移保留限制；显式
+                    # extract两个128B行到本地临时Tile后reshape，保留真实copy与
+                    # 编译器依赖。不放开内存规划的安全门槛，也不经GM绕行。
+                    pv_m = pl.reshape(
+                        pl.tile.extract(
+                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2, 0,
+                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                        ),
+                        [H // 2, 1],
+                    )
+                    pv_l = pl.reshape(
+                        pl.tile.extract(
+                            stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2 + 1, 0,
+                            [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                        ),
+                        [H // 2, 1],
+                    )
+                else:
+                    pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                    pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
                 next_m = pl.maximum(m_iter, pv_m)
                 alpha = pl.exp(pl.sub(m_iter, next_m))
                 beta = pl.exp(pl.sub(pv_m, next_m))
@@ -481,5 +540,7 @@ def attention_qk_pv_vector_lane_stage(
             )
         else:
             m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-        running_m, running_l, running_left, running_right = pl.yield_(m_after, l_after, left_after, right_after)
+        running_m, running_l, running_left, running_right, local_stats_ring = pl.yield_(
+            m_after, l_after, left_after, right_after, stats_cache_ready
+        )
     return kv_transfer, probability_transfer, mi_transfer, li_transfer, o_packed_heads

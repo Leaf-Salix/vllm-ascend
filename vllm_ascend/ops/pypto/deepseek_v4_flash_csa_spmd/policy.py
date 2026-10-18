@@ -47,12 +47,20 @@ M256 Hadamard与N256 Q_B的负载分工，不按七个shape白名单选择。七
 原可执行C++，本轮仍有0.63%测量差，完整保留而不解释为确定的代码收益。
 原前置版S1/S5和metadata/padding证据保留；区间版不重复声明已新测所有
 动态场景。14项实际生成C++核对确认开关不增加额外算子运算或同步协议。
+Attention同lane统计只在长历史G6且T<=96启用UB三槽，其余共用原GM数学。
+修复独立PyPTO死状态闭环后，关闭路径生成代码与同编译器原路径一致。
+七档及T90/T102边界的完整精确/图/保护检查通过，长B4/B8/B15/B16的
+同轮完整L1改善6.01%/2.63%/1.31%/1.23%；短历史收益未稳定，默认关闭。
+本轮未重测S1/S5/混合Q/连续轨迹，不把已有S6证据扩大为这些场景通过。
+完整原始窗口及依赖修复在dead_state_dce_fix_evidence；30%目标仍0/7。
 """
 
 from dataclasses import dataclass
 
 # 沿CSA已有投影行块选择窗口；不是按B/S/history测试点枚举。
 EARLY_GEOMETRY_MIN_TOKENS = 64
+# 与既有O_A N128输出区间一致；不是按七个测试点枚举。
+LOCAL_STATS_MAX_TOKENS = 96
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,7 @@ class CSASPMDPolicy:
     qa_m16_parallel: bool = False
     cooperative_prefix: bool = False
     early_attention_geometry: bool = False
+    local_attention_stats: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -91,6 +100,7 @@ class CSASPMDPolicy:
             "QA_M16_PARALLEL": self.qa_m16_parallel,
             "COOPERATIVE_PREFIX": self.cooperative_prefix,
             "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
+            "LOCAL_ATTENTION_STATS": self.local_attention_stats,
         }
 
 
@@ -137,4 +147,8 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 的域先保留后置算法，避免把metadata放到RoPE关键路径。64表示至少
         # 两个完整M32行块，仍须边界验证；不代表所有形状下都是理论最优。
         early_attention_geometry=parallel_small_qa or tokens >= EARLY_GEOMETRY_MIN_TOKENS,
+        # 同一AIV生产和消费的mi/li留在UB三槽；只在长历史G6/N128域默认启用。
+        # B4/B8/B15/B16重复测得收益；短历史T>96两点方向不一致，保留原GM。
+        # 实际T/请求边界仍在device读取；依赖编译器删除关闭分支的死Tile状态。
+        local_attention_stats=long_history and group == 6 and tokens <= LOCAL_STATS_MAX_TOKENS,
     )

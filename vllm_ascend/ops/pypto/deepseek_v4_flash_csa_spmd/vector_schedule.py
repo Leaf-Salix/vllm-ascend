@@ -319,6 +319,7 @@ def vector_schedule(
     QA_M16_PARALLEL: pl.constexpr = False,
     COOPERATIVE_PREFIX: pl.constexpr = False,
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
+    LOCAL_ATTENTION_STATS: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -952,6 +953,7 @@ def vector_schedule(
         GROUPS,
         2,
         ATTENTION_QUERY_METADATA,
+        LOCAL_ATTENTION_STATS,
     )
     signal = publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)
     if OUTPUT_GROUP_PIPELINE:

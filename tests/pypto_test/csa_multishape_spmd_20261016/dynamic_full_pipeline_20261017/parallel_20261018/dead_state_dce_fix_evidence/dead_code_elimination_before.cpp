@@ -1,0 +1,768 @@
+/*
+ * Copyright (c) PyPTO Contributors.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ * -----------------------------------------------------------------------------------------------------------
+ */
+
+#include "pypto/ir/transforms/utils/dead_code_elimination.h"
+
+#include <any>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "pypto/core/dtype.h"
+#include "pypto/core/logging.h"
+#include "pypto/ir/expr.h"
+#include "pypto/ir/kind_traits.h"
+#include "pypto/ir/op_registry.h"
+#include "pypto/ir/stmt.h"
+#include "pypto/ir/transforms/base/visitor.h"
+#include "pypto/ir/transforms/utils/loop_state_repair.h"
+#include "pypto/ir/transforms/utils/mutable_copy.h"
+#include "pypto/ir/transforms/utils/transform_utils.h"
+#include "pypto/ir/transforms/utils/var_collectors.h"
+#include "pypto/ir/type.h"
+
+namespace pypto {
+namespace ir {
+namespace dce {
+
+const auto& FlattenBody = transform_utils::FlattenToStmts;
+
+std::string GetStmtOpName(const StmtPtr& stmt) {
+  CallPtr call;
+  if (auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt)) {
+    call = std::dynamic_pointer_cast<const Call>(assign->value_);
+  } else if (auto eval = std::dynamic_pointer_cast<const EvalStmt>(stmt)) {
+    call = std::dynamic_pointer_cast<const Call>(eval->expr_);
+  }
+  if (call && call->op_) {
+    if (auto op = std::dynamic_pointer_cast<const Op>(call->op_)) {
+      return op->name_;
+    }
+  }
+  return "";
+}
+
+bool IsSideEffectOp(const StmtPtr& stmt) {
+  // The operators whose execution is observable, so a statement carrying one is
+  // never a removal candidate.
+  //
+  // Every name is routed through the registry getter instead of being compared
+  // as a bare literal: `GetOp` throws on a name no operator registers, so a typo
+  // or a renamed operator fails loudly the first time this runs, rather than
+  // silently evaluating to "not side-effecting" and letting DCE delete the
+  // statement (.claude/rules/operator-identity-checks.md). The validated names
+  // are cached so the predicate itself stays one hash lookup per statement —
+  // `IsOp` is the right helper for testing a single operator, not a twelve-way
+  // membership test on a hot path.
+  //
+  // The list is hand-maintained and is not derived from operator metadata,
+  // because no registry property answers "is a call to this operator
+  // removable"; the write predicates (`WritesAnyArg` and friends) answer
+  // whether an operator writes *through an argument*, which is a different
+  // question and unsound as a stand-in.
+  static const std::unordered_set<std::string> side_effect_ops = [] {
+    const auto& registry = OpRegistry::GetInstance();
+    auto validated = [&registry](const char* op_name) { return registry.GetOp(op_name)->name_; };
+    return std::unordered_set<std::string>{validated("tile.tpush_to_aiv"),
+                                           validated("tile.tpush_to_aic"),
+                                           validated("tile.tpop_from_aic"),
+                                           validated("tile.tpop_from_aiv"),
+                                           validated("tile.store"),
+                                           validated("tile.assemble"),
+                                           validated("system.tfree_to_aic"),
+                                           validated("system.tfree_to_aiv"),
+                                           validated("system.reserve_buffer"),
+                                           validated("system.import_peer_buffer"),
+                                           validated("system.aic_initialize_pipe"),
+                                           validated("system.aiv_initialize_pipe")};
+  }();
+  // A Submit launches an asynchronous task — intrinsically side-effecting
+  // regardless of the kernel's body. Short-circuit so a Submit assignment is
+  // never classified as a removal candidate.
+  ExprPtr value;
+  if (auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt)) value = assign->value_;
+  if (auto eval = std::dynamic_pointer_cast<const EvalStmt>(stmt)) value = eval->expr_;
+  if (value && As<Submit>(value)) return true;
+  return side_effect_ops.count(GetStmtOpName(stmt)) > 0;
+}
+
+void CollectAllAssignStmts(const std::vector<StmtPtr>& stmts,
+                           std::vector<std::shared_ptr<const AssignStmt>>& assigns) {
+  for (const auto& stmt : stmts) {
+    if (auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt)) {
+      assigns.push_back(assign);
+    }
+    if (auto for_stmt = std::dynamic_pointer_cast<const ForStmt>(stmt)) {
+      CollectAllAssignStmts(FlattenBody(for_stmt->body_), assigns);
+    } else if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+      CollectAllAssignStmts(FlattenBody(if_stmt->then_body_), assigns);
+      if (if_stmt->else_body_.has_value()) {
+        CollectAllAssignStmts(FlattenBody(if_stmt->else_body_.value()), assigns);
+      }
+    } else if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+      CollectAllAssignStmts(FlattenBody(while_stmt->body_), assigns);
+    } else if (auto scope_stmt = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
+      CollectAllAssignStmts(FlattenBody(scope_stmt->body_), assigns);
+    }
+  }
+}
+
+namespace {
+
+using loop_repair::MakeBody;
+using RemovablePredicate = std::function<bool(const StmtPtr&)>;
+
+/// Collect live-root variables.
+///
+/// A statement is a "live root" when it is NOT classified as a removal
+/// candidate by `is_removable`. Its own Var references (expressions and
+/// direct fields, not nested-body refs) are added to the live set; the
+/// nested body, if any, is recursed into separately so its own candidate
+/// assignments remain eligible for removal.
+void FindLiveRootsRecursiveImpl(const std::vector<StmtPtr>& stmts, const RemovablePredicate& is_removable,
+                                std::unordered_set<const Var*>& live) {
+  auto collect_expr_refs = [&](const ExprPtr& expr) {
+    if (!expr) return;
+    var_collectors::VarDefUseCollector collector;
+    collector.VisitExpr(expr);
+    live.insert(collector.var_uses.begin(), collector.var_uses.end());
+  };
+  auto collect_iter_arg_refs = [&](const auto& loop_stmt) {
+    for (const auto& iter_arg : loop_stmt->iter_args_) {
+      collect_expr_refs(iter_arg->initValue_);
+    }
+  };
+
+  for (const auto& stmt : stmts) {
+    // Live-root: non-candidate leaf statements contribute their refs. For
+    // AssignStmt/EvalStmt/ReturnStmt/YieldStmt we use the full subtree
+    // collector because they have no nested bodies — it is equivalent to
+    // walking their direct Expr fields.
+    bool is_leaf = std::dynamic_pointer_cast<const AssignStmt>(stmt) ||
+                   std::dynamic_pointer_cast<const EvalStmt>(stmt) ||
+                   std::dynamic_pointer_cast<const ReturnStmt>(stmt) ||
+                   std::dynamic_pointer_cast<const YieldStmt>(stmt);
+    if (is_leaf && !is_removable(stmt)) {
+      var_collectors::VarDefUseCollector collector;
+      collector.VisitStmt(stmt);
+      auto all_refs = collector.GetAllVarRefs();
+      live.insert(all_refs.begin(), all_refs.end());
+    }
+
+    // Control-flow headers: add direct-field refs (bounds, conditions,
+    // iter-arg initializers) but defer body traversal to the recursive
+    // call so nested candidate assignments remain eligible for removal.
+    if (auto for_stmt = std::dynamic_pointer_cast<const ForStmt>(stmt)) {
+      collect_expr_refs(for_stmt->start_);
+      collect_expr_refs(for_stmt->stop_);
+      collect_expr_refs(for_stmt->step_);
+      collect_iter_arg_refs(for_stmt);
+      FindLiveRootsRecursiveImpl(FlattenBody(for_stmt->body_), is_removable, live);
+    } else if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+      collect_expr_refs(if_stmt->condition_);
+      FindLiveRootsRecursiveImpl(FlattenBody(if_stmt->then_body_), is_removable, live);
+      if (if_stmt->else_body_.has_value()) {
+        FindLiveRootsRecursiveImpl(FlattenBody(if_stmt->else_body_.value()), is_removable, live);
+      }
+    } else if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+      collect_expr_refs(while_stmt->condition_);
+      collect_iter_arg_refs(while_stmt);
+      FindLiveRootsRecursiveImpl(FlattenBody(while_stmt->body_), is_removable, live);
+    } else if (auto scope_stmt = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
+      // ScopeStmt's own attrs_ can reference Vars defined in the enclosing
+      // scope:
+      //   - manual_dep_edges (vector<VarPtr>)        — pl.at(..., deps=[tid])
+      //   - task_id_var      (VarPtr)                — pl.at(...) as tid
+      //   - arg_direction_overrides_vars (vector<VarPtr>) — direction overrides
+      // These are real uses; without adding them to ``live`` the only
+      // assignment that feeds the attr (e.g. ``dep_tid = stage1_tid`` after
+      // an inline-helper return) is mis-identified as dead and removed,
+      // leaving a dangling attr Var reference (issue #1456).
+      //
+      // SpmdScopeStmt additionally has a ``core_num_`` Expr field (e.g.
+      // ``with pl.spmd(n):``) that can reference scalar Vars; we collect
+      // those refs too so a scalar assigned only for the block count is
+      // not deleted.
+      auto add_var = [&](const VarPtr& v) {
+        if (v) live.insert(v.get());
+      };
+      for (const auto& [k, v] : scope_stmt->attrs_) {
+        if (k == kAttrManualDepEdges || k == kAttrArgDirOverrideVars || k == kAttrDumpVars) {
+          if (const auto* edges = std::any_cast<std::vector<VarPtr>>(&v)) {
+            for (const auto& e : *edges) add_var(e);
+          }
+        } else if (k == kAttrTaskIdVar) {
+          if (const auto* var = std::any_cast<VarPtr>(&v)) add_var(*var);
+        } else if (k == kAttrPredicate) {
+          // ``with pl.spmd(..., predicate=(t[i] > 0)):`` — an Expr, so collect
+          // every Var it references (the operand tensor and its indices)
+          // rather than remapping a single Var. DCE runs at pass 5, well
+          // before OutlineSpmdScopes moves this onto Submit::predicate_, so
+          // the attr is live IR here: without this the operand's feeding
+          // assignment looks dead and its removal leaves a dangling reference
+          // — the same failure mode as issue #1456 above.
+          if (const auto* pred = std::any_cast<ExprPtr>(&v)) collect_expr_refs(*pred);
+        }
+      }
+      if (auto spmd = std::dynamic_pointer_cast<const SpmdScopeStmt>(scope_stmt)) {
+        collect_expr_refs(spmd->core_num_);
+      }
+      FindLiveRootsRecursiveImpl(FlattenBody(scope_stmt->body_), is_removable, live);
+    }
+  }
+}
+
+/// True when a filtered vector is pointer-identical to the original's
+/// flattened form — lets callers avoid cloning a control-flow node whose
+/// body did not change.
+bool SameFlattenedBody(const std::vector<StmtPtr>& filtered, const std::vector<StmtPtr>& original) {
+  if (filtered.size() != original.size()) return false;
+  for (size_t i = 0; i < filtered.size(); ++i) {
+    if (filtered[i].get() != original[i].get()) return false;
+  }
+  return true;
+}
+
+std::vector<StmtPtr> FilterDeadCodeImpl(const std::vector<StmtPtr>& stmts,
+                                        const RemovablePredicate& is_removable,
+                                        const std::unordered_set<const Var*>& live) {
+  std::vector<StmtPtr> result;
+  for (const auto& stmt : stmts) {
+    if (auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt)) {
+      if (is_removable(stmt) && !live.count(assign->var_.get())) continue;
+      result.push_back(stmt);
+    } else if (auto for_stmt = std::dynamic_pointer_cast<const ForStmt>(stmt)) {
+      auto original = FlattenBody(for_stmt->body_);
+      auto filtered = FilterDeadCodeImpl(original, is_removable, live);
+      if (SameFlattenedBody(filtered, original)) {
+        result.push_back(stmt);
+        continue;
+      }
+      auto new_for = MutableCopy(for_stmt);
+      new_for->body_ = MakeBody(filtered, for_stmt->span_);
+      result.push_back(new_for);
+    } else if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+      auto then_orig = FlattenBody(if_stmt->then_body_);
+      auto filtered_then = FilterDeadCodeImpl(then_orig, is_removable, live);
+      bool then_unchanged = SameFlattenedBody(filtered_then, then_orig);
+      bool else_unchanged = true;
+      std::optional<StmtPtr> filtered_else;
+      if (if_stmt->else_body_.has_value()) {
+        auto else_orig = FlattenBody(if_stmt->else_body_.value());
+        auto fe = FilterDeadCodeImpl(else_orig, is_removable, live);
+        else_unchanged = SameFlattenedBody(fe, else_orig);
+        filtered_else = MakeBody(fe, if_stmt->span_);
+      }
+      if (then_unchanged && else_unchanged) {
+        result.push_back(stmt);
+        continue;
+      }
+      auto new_if = MutableCopy(if_stmt);
+      new_if->then_body_ = MakeBody(filtered_then, if_stmt->span_);
+      new_if->else_body_ = filtered_else;
+      result.push_back(new_if);
+    } else if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+      auto original = FlattenBody(while_stmt->body_);
+      auto filtered = FilterDeadCodeImpl(original, is_removable, live);
+      if (SameFlattenedBody(filtered, original)) {
+        result.push_back(stmt);
+        continue;
+      }
+      auto new_while = MutableCopy(while_stmt);
+      new_while->body_ = MakeBody(filtered, while_stmt->span_);
+      result.push_back(new_while);
+    } else if (auto scope_stmt = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
+      auto original = FlattenBody(scope_stmt->body_);
+      auto filtered = FilterDeadCodeImpl(original, is_removable, live);
+      if (SameFlattenedBody(filtered, original)) {
+        result.push_back(stmt);
+        continue;
+      }
+      auto new_body = MakeBody(filtered, scope_stmt->span_);
+      // ScopeStmt is abstract; dispatch on the concrete subtype so
+      // MutableCopy instantiates the correct class.
+      StmtPtr new_scope;
+      if (auto incore = std::dynamic_pointer_cast<const InCoreScopeStmt>(stmt)) {
+        auto copy = MutableCopy(incore);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto cluster = std::dynamic_pointer_cast<const ClusterScopeStmt>(stmt)) {
+        auto copy = MutableCopy(cluster);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto hierarchy = std::dynamic_pointer_cast<const HierarchyScopeStmt>(stmt)) {
+        auto copy = MutableCopy(hierarchy);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto spmd = std::dynamic_pointer_cast<const SpmdScopeStmt>(stmt)) {
+        auto copy = MutableCopy(spmd);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto split_aiv = std::dynamic_pointer_cast<const SplitAivScopeStmt>(stmt)) {
+        auto copy = MutableCopy(split_aiv);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto runtime = std::dynamic_pointer_cast<const RuntimeScopeStmt>(stmt)) {
+        auto copy = MutableCopy(runtime);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else if (auto graph = std::dynamic_pointer_cast<const GraphScopeStmt>(stmt)) {
+        auto copy = MutableCopy(graph);
+        copy->body_ = new_body;
+        new_scope = copy;
+      } else {
+        INTERNAL_CHECK(false) << "Unhandled ScopeStmt subtype in DCE: " << scope_stmt->TypeName();
+      }
+      result.push_back(new_scope);
+    } else {
+      result.push_back(stmt);
+    }
+  }
+  return result;
+}
+
+/// Control-flow binders carry types too, and an SSA binder is not an AssignStmt,
+/// so the per-assign type sweep below never sees it. A loop carry or branch
+/// result whose TileView::valid_shape is a per-lane extent over the region's
+/// subblock index would therefore leave that index looking unused. Seed those
+/// references as live roots.
+void MarkBinderTypeRefsLive(const std::vector<StmtPtr>& stmts, std::unordered_set<const Var*>& live) {
+  auto mark = [&live](const VarPtr& var) {
+    if (!var) {
+      return;
+    }
+    for (const Var* ref : var_collectors::CollectTypeVars(var->GetType())) {
+      live.insert(ref);
+    }
+  };
+  auto mark_all = [&mark](const auto& binders) {
+    for (const auto& binder : binders) {
+      mark(binder);
+    }
+  };
+  for (const auto& stmt : stmts) {
+    if (auto for_stmt = std::dynamic_pointer_cast<const ForStmt>(stmt)) {
+      mark_all(for_stmt->iter_args_);
+      mark_all(for_stmt->return_vars_);
+      MarkBinderTypeRefsLive(transform_utils::FlattenToStmts(for_stmt->body_), live);
+      continue;
+    }
+    if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+      mark_all(while_stmt->iter_args_);
+      mark_all(while_stmt->return_vars_);
+      MarkBinderTypeRefsLive(transform_utils::FlattenToStmts(while_stmt->body_), live);
+      continue;
+    }
+    if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+      mark_all(if_stmt->return_vars_);
+      MarkBinderTypeRefsLive(transform_utils::FlattenToStmts(if_stmt->then_body_), live);
+      if (if_stmt->else_body_.has_value()) {
+        MarkBinderTypeRefsLive(transform_utils::FlattenToStmts(*if_stmt->else_body_), live);
+      }
+      continue;
+    }
+    if (auto seq = std::dynamic_pointer_cast<const SeqStmts>(stmt)) {
+      MarkBinderTypeRefsLive(seq->stmts_, live);
+      continue;
+    }
+    if (auto scope = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
+      MarkBinderTypeRefsLive(transform_utils::FlattenToStmts(scope->body_), live);
+    }
+  }
+}
+
+std::vector<StmtPtr> EliminateDeadCodeCore(const std::vector<StmtPtr>& stmts,
+                                           const RemovablePredicate& is_removable) {
+  std::unordered_set<const Var*> live;
+  FindLiveRootsRecursiveImpl(stmts, is_removable, live);
+  MarkBinderTypeRefsLive(stmts, live);
+
+  std::vector<std::shared_ptr<const AssignStmt>> all_assigns;
+  CollectAllAssignStmts(stmts, all_assigns);
+
+  // Cache each assignment's RHS uses once so the fixed-point loop does not
+  // re-walk the expression every iteration — the outer loop can iterate
+  // O(chain length) times on long dependency chains.
+  std::vector<std::unordered_set<const Var*>> assign_uses;
+  assign_uses.reserve(all_assigns.size());
+  for (const auto& assign : all_assigns) {
+    var_collectors::VarDefUseCollector collector;
+    collector.VisitExpr(assign->value_);
+    auto uses = std::move(collector.var_uses);
+    // A Var can also be referenced from a TYPE, not just from an expression: a
+    // tile's valid_shape may be a per-lane extent over the region's subblock
+    // index (split_axis::LocalizeExplicitBoundaryValid). Those are real uses —
+    // the use-after-def verifier already walks type expr fields
+    // (verify_use_after_def.cpp) — so missing them here would delete the
+    // subblock-index binding and leave the type dangling.
+    for (const Var* ref : var_collectors::CollectTypeVars(assign->var_->GetType())) {
+      uses.insert(ref);
+    }
+    assign_uses.emplace_back(std::move(uses));
+  }
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t i = all_assigns.size(); i-- > 0;) {
+      if (!live.count(all_assigns[i]->var_.get())) continue;
+      for (const Var* ref : assign_uses[i]) {
+        if (live.insert(ref).second) changed = true;
+      }
+    }
+  }
+
+  return FilterDeadCodeImpl(stmts, is_removable, live);
+}
+
+/// Predicate for the default `EliminateDeadCode`: any AssignStmt that is not
+/// a known side-effect op is a removal candidate.
+bool IsRemovableForDefaultDce(const StmtPtr& stmt) {
+  return std::dynamic_pointer_cast<const AssignStmt>(stmt) != nullptr && !IsSideEffectOp(stmt);
+}
+
+/// Walk an expression tree and report whether any Call or Submit appears.
+/// Both are call-like and side-effecting from the DCE perspective: a Call
+/// may invoke a kernel with arbitrary side effects, and a Submit launches
+/// an asynchronous task. Either form must be preserved conservatively
+/// because the IR has no purity annotations yet.
+class CallLikeFinder : public IRVisitor {
+ public:
+  bool found = false;
+
+ private:
+  using IRVisitor::VisitExpr_;
+  void VisitExpr_(const CallPtr& op) override {
+    found = true;
+    // Keep walking — nested args may also contain Calls, but early-exit
+    // would require throwing. The overhead is bounded by the expression
+    // size which is small.
+    IRVisitor::VisitExpr_(op);
+  }
+  void VisitExpr_(const SubmitPtr& op) override {
+    found = true;
+    IRVisitor::VisitExpr_(op);
+  }
+};
+
+bool ExprContainsCallLike(const ExprPtr& expr) {
+  if (!expr) return false;
+  CallLikeFinder finder;
+  finder.VisitExpr(expr);
+  return finder.found;
+}
+
+bool IsTaskIdTupleElement(const AssignStmtPtr& assign) {
+  auto tuple_get = As<TupleGetItemExpr>(assign ? assign->value_ : ExprPtr{});
+  if (!tuple_get) return false;
+
+  auto tuple_var = AsVarLike(tuple_get->tuple_);
+  auto tuple_ty = As<TupleType>(tuple_var ? tuple_var->GetType() : TypePtr{});
+  if (!tuple_ty || tuple_ty->types_.empty()) return false;
+
+  const int task_id_index = static_cast<int>(tuple_ty->types_.size()) - 1;
+  if (tuple_get->index_ != task_id_index) return false;
+
+  auto scalar_ty = As<ScalarType>(tuple_ty->types_.back());
+  return scalar_ty && scalar_ty->dtype_ == DataType::TASK_ID;
+}
+
+/// Predicate for `EliminateDeadScalarAssignments`: an AssignStmt with a
+/// scalar-typed LHS whose RHS contains no `Call` anywhere. Any expression
+/// containing a Call is conservatively preserved because the IR has no
+/// purity annotations yet. TaskId tuple extractions are also preserved: a
+/// later manual-scope dependency pass uses them to recover submit producers.
+bool IsRemovableScalarAssign(const StmtPtr& stmt) {
+  auto assign = std::dynamic_pointer_cast<const AssignStmt>(stmt);
+  if (!assign) return false;
+  if (!As<ScalarType>(assign->var_->GetType())) return false;
+  if (IsTaskIdTupleElement(assign)) return false;
+  if (ExprContainsCallLike(assign->value_)) return false;
+  return true;
+}
+
+// ============================================================================
+// EliminateDeadYieldSlots — drop yielded slots with no Var* user: IfStmt phi
+// return_vars, and ForStmt / WhileStmt loop-carried slots.
+// ============================================================================
+
+/// Filter a branch's trailing YieldStmt in place, keeping only `kept_indices`.
+/// When `kept_indices` is empty, the trailing YieldStmt is removed entirely.
+/// No-op when the branch does not end in a YieldStmt.
+void FilterTrailingYieldSlots(std::vector<StmtPtr>& branch, const std::vector<size_t>& kept_indices) {
+  if (branch.empty()) return;
+  auto yield = std::dynamic_pointer_cast<const YieldStmt>(branch.back());
+  if (!yield) return;
+  if (kept_indices.empty()) {
+    branch.pop_back();
+    return;
+  }
+  std::vector<ExprPtr> new_values;
+  new_values.reserve(kept_indices.size());
+  for (size_t idx : kept_indices) {
+    INTERNAL_CHECK_SPAN(idx < yield->value_.size(), yield->span_)
+        << "Internal error: yield index " << idx << " out of range " << yield->value_.size();
+    new_values.push_back(yield->value_[idx]);
+  }
+  branch.back() = std::make_shared<YieldStmt>(std::move(new_values), yield->span_);
+}
+
+/// True when the trailing `YieldStmt` of @p body feeds slot @p slot with an
+/// expression containing a `Call` / `Submit`.
+///
+/// Dropping a slot deletes that expression, and until `FlattenCallExpr` runs a
+/// yielded value can still BE a call — a task launch or any other effectful op.
+/// The IR has no purity annotations, so an effect there keeps the slot alive,
+/// matching how `IsRemovableScalarAssign` refuses to drop a call-backed
+/// assignment.
+bool YieldSlotHasCallLike(const std::vector<StmtPtr>& body, size_t slot) {
+  if (body.empty()) return false;
+  auto yield = std::dynamic_pointer_cast<const YieldStmt>(body.back());
+  if (!yield || slot >= yield->value_.size()) return false;
+  return ExprContainsCallLike(yield->value_[slot]);
+}
+
+/// MutableCopy + replace body, dispatching on concrete ScopeStmt subtype.
+/// Mirrors the dispatch in FilterDeadCodeImpl below.
+StmtPtr RebuildScopeWithBody(const std::shared_ptr<const ScopeStmt>& scope_stmt, const StmtPtr& new_body) {
+  if (auto incore = std::dynamic_pointer_cast<const InCoreScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(incore);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto cluster = std::dynamic_pointer_cast<const ClusterScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(cluster);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto hierarchy = std::dynamic_pointer_cast<const HierarchyScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(hierarchy);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto spmd = std::dynamic_pointer_cast<const SpmdScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(spmd);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto split_aiv = std::dynamic_pointer_cast<const SplitAivScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(split_aiv);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto graph = std::dynamic_pointer_cast<const GraphScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(graph);
+    copy->body_ = new_body;
+    return copy;
+  }
+  if (auto runtime = std::dynamic_pointer_cast<const RuntimeScopeStmt>(scope_stmt)) {
+    auto copy = MutableCopy(runtime);
+    copy->body_ = new_body;
+    return copy;
+  }
+  INTERNAL_CHECK_SPAN(false, scope_stmt->span_) << "Unhandled ScopeStmt subtype: " << scope_stmt->TypeName();
+  return scope_stmt;
+}
+
+/// Walk `stmts` and drop every yielded slot whose consuming Var* is not in
+/// `live_uses`: an IfStmt's `return_vars_[i]`, or a loop's carried slot (both
+/// `iter_args_[i]` and `return_vars_[i]` unused), plus the matching slot from
+/// the trailing YieldStmt that feeds it. Recurses into nested branches, scope
+/// bodies, and loop bodies. Sets `*changed` when any node was rewritten (used
+/// by the fixed-point loop in EliminateDeadYieldSlots).
+std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts,
+                                               const std::unordered_set<const Var*>& live_uses,
+                                               bool* changed);
+
+/// A TaskId carry is a scheduling channel, not data: `AutoDeriveTaskDependencies`
+/// and `ExpandManualPhaseFence` read the *shape* of a `Scalar[TASK_ID]` /
+/// `Array[TASK_ID]` carry — a task id produced in a loop and carried out is how
+/// the compiler learns to fan every iteration's handle in to a later consumer —
+/// so no ordinary Var use marks it live. Pruning one silently drops the
+/// dependency edges those passes would have derived, so keep every such slot.
+bool IsTaskIdCarrier(const TypePtr& type) {
+  if (!type) return false;
+  if (auto scalar_type = As<ScalarType>(type)) return scalar_type->dtype_ == DataType::TASK_ID;
+  if (auto array_type = As<ArrayType>(type)) return array_type->dtype_ == DataType::TASK_ID;
+  return false;
+}
+
+/// Prune dead carried slots from one loop node. `LoopT` is `ForStmt` or
+/// `WhileStmt`; both expose `iter_args_`, `body_` and `return_vars_`.
+///
+/// A carried slot has two consumers — the `IterArg` read inside the body and
+/// the `return_var` read after the loop — so it survives if *either* is used.
+/// A body that assigns the carried name before reading it (the same Python
+/// local reused across scopes) uses neither: SSA seeds the loop with the
+/// incoming value, every trip overwrites it, and nothing downstream reads the
+/// result. That spurious carry is what makes an earlier device scope look like
+/// it must return the scalar (see `PlanScalarOutputHoist`).
+template <typename LoopT>
+StmtPtr RewriteLoopCarrySlots(const std::shared_ptr<const LoopT>& loop,
+                              const std::unordered_set<const Var*>& live_uses, bool* changed) {
+  auto original = FlattenBody(loop->body_);
+  auto rewritten = RewriteDeadYieldSlotsOnce(original, live_uses, changed);
+
+  INTERNAL_CHECK_SPAN(loop->iter_args_.size() == loop->return_vars_.size(), loop->span_)
+      << "Internal error: loop carries " << loop->iter_args_.size() << " iter_args but "
+      << loop->return_vars_.size() << " return_vars";
+
+  std::vector<size_t> kept_indices;
+  std::vector<IterArgPtr> new_iter_args;
+  std::vector<VarPtr> new_return_vars;
+  kept_indices.reserve(loop->iter_args_.size());
+  new_iter_args.reserve(loop->iter_args_.size());
+  new_return_vars.reserve(loop->return_vars_.size());
+  for (size_t i = 0; i < loop->iter_args_.size(); ++i) {
+    if (live_uses.count(loop->iter_args_[i].get()) || live_uses.count(loop->return_vars_[i].get()) ||
+        IsTaskIdCarrier(loop->iter_args_[i]->GetType()) ||
+        ExprContainsCallLike(loop->iter_args_[i]->initValue_) || YieldSlotHasCallLike(rewritten, i)) {
+      kept_indices.push_back(i);
+      new_iter_args.push_back(loop->iter_args_[i]);
+      new_return_vars.push_back(loop->return_vars_[i]);
+    }
+  }
+  const bool dropped_any = kept_indices.size() < loop->iter_args_.size();
+
+  if (!dropped_any && SameFlattenedBody(rewritten, original)) return loop;
+
+  if (dropped_any) {
+    FilterTrailingYieldSlots(rewritten, kept_indices);
+    *changed = true;
+  }
+  auto new_loop = MutableCopy(loop);
+  new_loop->body_ = MakeBody(rewritten, loop->span_);
+  if (dropped_any) {
+    new_loop->iter_args_ = std::move(new_iter_args);
+    new_loop->return_vars_ = std::move(new_return_vars);
+  }
+  return new_loop;
+}
+
+std::vector<StmtPtr> RewriteDeadYieldSlotsOnce(const std::vector<StmtPtr>& stmts,
+                                               const std::unordered_set<const Var*>& live_uses,
+                                               bool* changed) {
+  std::vector<StmtPtr> result;
+  result.reserve(stmts.size());
+  for (const auto& stmt : stmts) {
+    if (auto if_stmt = std::dynamic_pointer_cast<const IfStmt>(stmt)) {
+      // Recurse into branches first so a dead inner phi observed in this same
+      // pass also gets cleared. The outer fixed-point still iterates until
+      // convergence; the inner recursion just shortens the iteration count.
+      auto then_stmts = FlattenBody(if_stmt->then_body_);
+      auto new_then = RewriteDeadYieldSlotsOnce(then_stmts, live_uses, changed);
+      std::optional<std::vector<StmtPtr>> else_stmts;
+      std::optional<std::vector<StmtPtr>> new_else;
+      // Both optionals are engaged together, so compare them here: a branch with
+      // no else body is trivially unchanged.
+      bool else_unchanged = true;
+      if (if_stmt->else_body_.has_value()) {
+        else_stmts = FlattenBody(if_stmt->else_body_.value());
+        new_else = RewriteDeadYieldSlotsOnce(*else_stmts, live_uses, changed);
+        else_unchanged = SameFlattenedBody(*new_else, *else_stmts);
+      }
+
+      // Identify which return_vars are dead at this level.
+      std::vector<size_t> kept_indices;
+      std::vector<VarPtr> new_return_vars;
+      kept_indices.reserve(if_stmt->return_vars_.size());
+      new_return_vars.reserve(if_stmt->return_vars_.size());
+      for (size_t i = 0; i < if_stmt->return_vars_.size(); ++i) {
+        const bool branch_effect =
+            YieldSlotHasCallLike(new_then, i) || (new_else.has_value() && YieldSlotHasCallLike(*new_else, i));
+        if (live_uses.count(if_stmt->return_vars_[i].get()) || branch_effect) {
+          kept_indices.push_back(i);
+          new_return_vars.push_back(if_stmt->return_vars_[i]);
+        }
+      }
+      const bool dropped_any = kept_indices.size() < if_stmt->return_vars_.size();
+
+      const bool then_unchanged = SameFlattenedBody(new_then, then_stmts);
+
+      if (!dropped_any && then_unchanged && else_unchanged) {
+        result.push_back(stmt);
+        continue;
+      }
+
+      if (dropped_any) {
+        FilterTrailingYieldSlots(new_then, kept_indices);
+        if (new_else.has_value()) FilterTrailingYieldSlots(*new_else, kept_indices);
+        // Removing every synthetic phi yield can leave an engaged but empty
+        // else, which prints as `else: pass` but reparses as no else. Reset the
+        // optional here; non-empty branches and surviving phis stay intact.
+        if (new_else.has_value() && new_else->empty() && new_return_vars.empty()) {
+          new_else.reset();
+        }
+        *changed = true;
+      }
+
+      auto new_if = MutableCopy(if_stmt);
+      new_if->then_body_ = MakeBody(new_then, if_stmt->span_);
+      new_if->else_body_ =
+          new_else.has_value() ? std::optional<StmtPtr>(MakeBody(*new_else, if_stmt->span_)) : std::nullopt;
+      if (dropped_any) {
+        new_if->return_vars_ = std::move(new_return_vars);
+      }
+      result.push_back(new_if);
+    } else if (auto for_stmt = std::dynamic_pointer_cast<const ForStmt>(stmt)) {
+      result.push_back(RewriteLoopCarrySlots(for_stmt, live_uses, changed));
+    } else if (auto while_stmt = std::dynamic_pointer_cast<const WhileStmt>(stmt)) {
+      result.push_back(RewriteLoopCarrySlots(while_stmt, live_uses, changed));
+    } else if (auto scope_stmt = std::dynamic_pointer_cast<const ScopeStmt>(stmt)) {
+      auto original = FlattenBody(scope_stmt->body_);
+      auto rewritten = RewriteDeadYieldSlotsOnce(original, live_uses, changed);
+      if (SameFlattenedBody(rewritten, original)) {
+        result.push_back(stmt);
+        continue;
+      }
+      result.push_back(RebuildScopeWithBody(scope_stmt, MakeBody(rewritten, scope_stmt->span_)));
+    } else {
+      result.push_back(stmt);
+    }
+  }
+  return result;
+}
+
+}  // namespace
+
+std::vector<StmtPtr> EliminateDeadCode(const std::vector<StmtPtr>& stmts) {
+  return EliminateDeadCodeCore(stmts, IsRemovableForDefaultDce);
+}
+
+std::vector<StmtPtr> EliminateDeadScalarAssignments(const std::vector<StmtPtr>& stmts) {
+  return EliminateDeadCodeCore(stmts, IsRemovableScalarAssign);
+}
+
+std::vector<StmtPtr> EliminateDeadYieldSlots(const std::vector<StmtPtr>& stmts) {
+  std::vector<StmtPtr> cur = stmts;
+  while (true) {
+    // Collect every Var* that appears as a use anywhere in `cur`. The base
+    // visitor walks ScopeStmt attrs via VisitScopeAttrs and Submit::deps_
+    // through Call/Submit traversal, so all known reference channels are
+    // covered without extra plumbing.
+    var_collectors::VarDefUseCollector collector;
+    for (const auto& s : cur) collector.VisitStmt(s);
+
+    bool changed = false;
+    auto next = RewriteDeadYieldSlotsOnce(cur, collector.var_uses, &changed);
+    if (!changed) return cur;
+    cur = std::move(next);
+  }
+}
+
+}  // namespace dce
+}  // namespace ir
+}  // namespace pypto
