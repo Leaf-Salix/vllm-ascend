@@ -1,0 +1,934 @@
+{
+  "root_arguments": {
+    "x_hc": {
+      "allocation": "argument:x_hc",
+      "shape": [
+        96,
+        4,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        16384,
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "x_hc",
+      "manual_dep": false
+    },
+    "hc_attn_fn": {
+      "allocation": "argument:hc_attn_fn",
+      "shape": [
+        24,
+        16384
+      ],
+      "dtype": "FP32",
+      "strides": [
+        16384,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "hc_attn_fn",
+      "manual_dep": false
+    },
+    "hc_attn_scale": {
+      "allocation": "argument:hc_attn_scale",
+      "shape": [
+        3
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "hc_attn_scale",
+      "manual_dep": false
+    },
+    "hc_attn_base": {
+      "allocation": "argument:hc_attn_base",
+      "shape": [
+        24
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "hc_attn_base",
+      "manual_dep": false
+    },
+    "attn_norm_w": {
+      "allocation": "argument:attn_norm_w",
+      "shape": [
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "attn_norm_w",
+      "manual_dep": false
+    },
+    "wq_a": {
+      "allocation": "argument:wq_a",
+      "shape": [
+        1024,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "NZ",
+      "label": "wq_a",
+      "manual_dep": false
+    },
+    "wq_b": {
+      "allocation": "argument:wq_b",
+      "shape": [
+        1024,
+        32768
+      ],
+      "dtype": "INT8",
+      "strides": [
+        32768,
+        1
+      ],
+      "offset": 0,
+      "layout": "NZ",
+      "label": "wq_b",
+      "manual_dep": false
+    },
+    "wq_b_scale": {
+      "allocation": "argument:wq_b_scale",
+      "shape": [
+        32768
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "wq_b_scale",
+      "manual_dep": false
+    },
+    "wkv": {
+      "allocation": "argument:wkv",
+      "shape": [
+        4096,
+        512
+      ],
+      "dtype": "BF16",
+      "strides": [
+        512,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "wkv",
+      "manual_dep": false
+    },
+    "gamma_cq": {
+      "allocation": "argument:gamma_cq",
+      "shape": [
+        1024
+      ],
+      "dtype": "BF16",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "gamma_cq",
+      "manual_dep": false
+    },
+    "gamma_ckv": {
+      "allocation": "argument:gamma_ckv",
+      "shape": [
+        512
+      ],
+      "dtype": "BF16",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "gamma_ckv",
+      "manual_dep": false
+    },
+    "freqs_cos": {
+      "allocation": "argument:freqs_cos",
+      "shape": [
+        96,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "freqs_cos",
+      "manual_dep": false
+    },
+    "freqs_sin": {
+      "allocation": "argument:freqs_sin",
+      "shape": [
+        96,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "freqs_sin",
+      "manual_dep": false
+    },
+    "cmp_freqs_cos": {
+      "allocation": "argument:cmp_freqs_cos",
+      "shape": [
+        40,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_freqs_cos",
+      "manual_dep": false
+    },
+    "cmp_freqs_sin": {
+      "allocation": "argument:cmp_freqs_sin",
+      "shape": [
+        40,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_freqs_sin",
+      "manual_dep": false
+    },
+    "inner_freqs_cos": {
+      "allocation": "argument:inner_freqs_cos",
+      "shape": [
+        40,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_freqs_cos",
+      "manual_dep": false
+    },
+    "inner_freqs_sin": {
+      "allocation": "argument:inner_freqs_sin",
+      "shape": [
+        40,
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_freqs_sin",
+      "manual_dep": false
+    },
+    "cmp_wkv": {
+      "allocation": "argument:cmp_wkv",
+      "shape": [
+        1024,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_wkv",
+      "manual_dep": false
+    },
+    "cmp_wgate": {
+      "allocation": "argument:cmp_wgate",
+      "shape": [
+        1024,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_wgate",
+      "manual_dep": false
+    },
+    "cmp_ape": {
+      "allocation": "argument:cmp_ape",
+      "shape": [
+        4,
+        1024
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1024,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_ape",
+      "manual_dep": false
+    },
+    "cmp_norm_w": {
+      "allocation": "argument:cmp_norm_w",
+      "shape": [
+        512
+      ],
+      "dtype": "BF16",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_norm_w",
+      "manual_dep": false
+    },
+    "compress_state": {
+      "allocation": "argument:compress_state",
+      "shape": [
+        145,
+        8192
+      ],
+      "dtype": "FP32",
+      "strides": [
+        8192,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "compress_state",
+      "manual_dep": false
+    },
+    "state_block_table": {
+      "allocation": "argument:state_block_table",
+      "shape": [
+        16,
+        4100
+      ],
+      "dtype": "INT32",
+      "strides": [
+        4100,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "state_block_table",
+      "manual_dep": false
+    },
+    "idx_wq_b": {
+      "allocation": "argument:idx_wq_b",
+      "shape": [
+        1024,
+        8192
+      ],
+      "dtype": "INT8",
+      "strides": [
+        8192,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_wq_b",
+      "manual_dep": false
+    },
+    "idx_wq_b_scale": {
+      "allocation": "argument:idx_wq_b_scale",
+      "shape": [
+        8192
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_wq_b_scale",
+      "manual_dep": false
+    },
+    "weights_proj": {
+      "allocation": "argument:weights_proj",
+      "shape": [
+        4096,
+        64
+      ],
+      "dtype": "BF16",
+      "strides": [
+        64,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "weights_proj",
+      "manual_dep": false
+    },
+    "hadamard_idx": {
+      "allocation": "argument:hadamard_idx",
+      "shape": [
+        128,
+        128
+      ],
+      "dtype": "BF16",
+      "strides": [
+        128,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "hadamard_idx",
+      "manual_dep": false
+    },
+    "inner_wkv": {
+      "allocation": "argument:inner_wkv",
+      "shape": [
+        256,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_wkv",
+      "manual_dep": false
+    },
+    "inner_wgate": {
+      "allocation": "argument:inner_wgate",
+      "shape": [
+        256,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_wgate",
+      "manual_dep": false
+    },
+    "inner_ape": {
+      "allocation": "argument:inner_ape",
+      "shape": [
+        4,
+        256
+      ],
+      "dtype": "FP32",
+      "strides": [
+        256,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_ape",
+      "manual_dep": false
+    },
+    "inner_norm_w": {
+      "allocation": "argument:inner_norm_w",
+      "shape": [
+        128
+      ],
+      "dtype": "BF16",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_norm_w",
+      "manual_dep": false
+    },
+    "inner_compress_state": {
+      "allocation": "argument:inner_compress_state",
+      "shape": [
+        145,
+        1040
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1040,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_compress_state",
+      "manual_dep": false
+    },
+    "inner_state_block_table": {
+      "allocation": "argument:inner_state_block_table",
+      "shape": [
+        16,
+        4100
+      ],
+      "dtype": "INT32",
+      "strides": [
+        4100,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_state_block_table",
+      "manual_dep": false
+    },
+    "kv_cache": {
+      "allocation": "argument:kv_cache",
+      "shape": [
+        145,
+        32,
+        1,
+        512
+      ],
+      "dtype": "BF16",
+      "strides": [
+        16384,
+        512,
+        512,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "kv_cache",
+      "manual_dep": false
+    },
+    "cmp_kv": {
+      "allocation": "argument:cmp_kv",
+      "shape": [
+        1057,
+        32,
+        1,
+        512
+      ],
+      "dtype": "BF16",
+      "strides": [
+        16384,
+        512,
+        512,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_kv",
+      "manual_dep": false
+    },
+    "cmp_block_table": {
+      "allocation": "argument:cmp_block_table",
+      "shape": [
+        16,
+        66
+      ],
+      "dtype": "INT32",
+      "strides": [
+        66,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_block_table",
+      "manual_dep": false
+    },
+    "idx_native_kv_cache": {
+      "allocation": "argument:idx_native_kv_cache",
+      "shape": [
+        1057,
+        4160
+      ],
+      "dtype": "INT8",
+      "strides": [
+        4160,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_native_kv_cache",
+      "manual_dep": false
+    },
+    "idx_block_table": {
+      "allocation": "argument:idx_block_table",
+      "shape": [
+        16,
+        66
+      ],
+      "dtype": "INT32",
+      "strides": [
+        66,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_block_table",
+      "manual_dep": false
+    },
+    "ori_slot_mapping": {
+      "allocation": "argument:ori_slot_mapping",
+      "shape": [
+        96,
+        2
+      ],
+      "dtype": "INT32",
+      "strides": [
+        2,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "ori_slot_mapping",
+      "manual_dep": false
+    },
+    "ori_block_table": {
+      "allocation": "argument:ori_block_table",
+      "shape": [
+        16,
+        258
+      ],
+      "dtype": "INT32",
+      "strides": [
+        258,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "ori_block_table",
+      "manual_dep": false
+    },
+    "cmp_slot_mapping": {
+      "allocation": "argument:cmp_slot_mapping",
+      "shape": [
+        40,
+        2
+      ],
+      "dtype": "INT32",
+      "strides": [
+        2,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_slot_mapping",
+      "manual_dep": false
+    },
+    "idx_slot_mapping": {
+      "allocation": "argument:idx_slot_mapping",
+      "shape": [
+        40,
+        2
+      ],
+      "dtype": "INT32",
+      "strides": [
+        2,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_slot_mapping",
+      "manual_dep": false
+    },
+    "state_slot_mapping": {
+      "allocation": "argument:state_slot_mapping",
+      "shape": [
+        96,
+        2
+      ],
+      "dtype": "INT32",
+      "strides": [
+        2,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "state_slot_mapping",
+      "manual_dep": false
+    },
+    "inner_state_slot_mapping": {
+      "allocation": "argument:inner_state_slot_mapping",
+      "shape": [
+        96,
+        2
+      ],
+      "dtype": "INT32",
+      "strides": [
+        2,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "inner_state_slot_mapping",
+      "manual_dep": false
+    },
+    "position_ids": {
+      "allocation": "argument:position_ids",
+      "shape": [
+        96
+      ],
+      "dtype": "INT64",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "position_ids",
+      "manual_dep": false
+    },
+    "kv_seq_lens": {
+      "allocation": "argument:kv_seq_lens",
+      "shape": [
+        16
+      ],
+      "dtype": "INT32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "kv_seq_lens",
+      "manual_dep": false
+    },
+    "cmp_query_start_loc": {
+      "allocation": "argument:cmp_query_start_loc",
+      "shape": [
+        17
+      ],
+      "dtype": "INT32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_query_start_loc",
+      "manual_dep": false
+    },
+    "cmp_seq_lens": {
+      "allocation": "argument:cmp_seq_lens",
+      "shape": [
+        16
+      ],
+      "dtype": "INT32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "cmp_seq_lens",
+      "manual_dep": false
+    },
+    "idx_query_start_loc": {
+      "allocation": "argument:idx_query_start_loc",
+      "shape": [
+        17
+      ],
+      "dtype": "INT32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_query_start_loc",
+      "manual_dep": false
+    },
+    "attn_sink": {
+      "allocation": "argument:attn_sink",
+      "shape": [
+        64
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "attn_sink",
+      "manual_dep": false
+    },
+    "wo_a": {
+      "allocation": "argument:wo_a",
+      "shape": [
+        8,
+        4096,
+        1024
+      ],
+      "dtype": "BF16",
+      "strides": [
+        4194304,
+        1024,
+        1
+      ],
+      "offset": 0,
+      "layout": "NZ",
+      "label": "wo_a",
+      "manual_dep": false
+    },
+    "wo_b": {
+      "allocation": "argument:wo_b",
+      "shape": [
+        8192,
+        4096
+      ],
+      "dtype": "INT8",
+      "strides": [
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "NZ",
+      "label": "wo_b",
+      "manual_dep": false
+    },
+    "wo_b_scale": {
+      "allocation": "argument:wo_b_scale",
+      "shape": [
+        4096
+      ],
+      "dtype": "FP32",
+      "strides": [
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "wo_b_scale",
+      "manual_dep": false
+    },
+    "idx_topk_scores": {
+      "allocation": "argument:idx_topk_scores",
+      "shape": [
+        96,
+        512
+      ],
+      "dtype": "FP32",
+      "strides": [
+        512,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_topk_scores",
+      "manual_dep": false
+    },
+    "idx_topk": {
+      "allocation": "argument:idx_topk",
+      "shape": [
+        96,
+        512
+      ],
+      "dtype": "INT32",
+      "strides": [
+        512,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "idx_topk",
+      "manual_dep": false
+    },
+    "x_out": {
+      "allocation": "argument:x_out",
+      "shape": [
+        96,
+        4,
+        4096
+      ],
+      "dtype": "BF16",
+      "strides": [
+        16384,
+        4096,
+        1
+      ],
+      "offset": 0,
+      "layout": "ND",
+      "label": "x_out",
+      "manual_dep": false
+    }
+  },
+  "selected_control_path": [
+    {
+      "expression": "tile_rows_inline4_inline3595__ssa_v0 < 128",
+      "value": true,
+      "source_line": 13438
+    },
+    {
+      "expression": "tile_rows_inline3661__ssa_v0 < 128",
+      "value": true,
+      "source_line": 13572
+    },
+    {
+      "expression": "2048 <= max_topk_cache_len_inline3209_inline4203__ssa_v0",
+      "value": true,
+      "source_line": 13955
+    },
+    {
+      "expression": "8192 < max_topk_cache_len_inline3209_inline4203__ssa_v0",
+      "value": false,
+      "source_line": 13956
+    },
+    {
+      "expression": "144 <= short_queries_inline3239_inline4183__ssa_v0",
+      "value": false,
+      "source_line": 14082
+    },
+    {
+      "expression": "pl.cast(short_use_request_inline3219_inline4208__phi_v3, pl.INDEX) == 1",
+      "value": false,
+      "source_line": 14091
+    },
+    {
+      "expression": "max_topk_cache_len_inline3209_inline4203__ssa_v0 < 2048",
+      "value": false,
+      "source_line": 14240
+    },
+    {
+      "expression": "max_topk_cache_len_inline3209_inline4203__ssa_v0 <= 8192",
+      "value": true,
+      "source_line": 14244
+    },
+    {
+      "expression": "t_dim_inline587__ssa_v0 <= 32",
+      "value": false,
+      "source_line": 14350
+    },
+    {
+      "expression": "t_dim_inline587__ssa_v0 == 96",
+      "value": true,
+      "source_line": 14446
+    }
+  ]
+}

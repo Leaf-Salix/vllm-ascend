@@ -1,0 +1,24 @@
+
+✓ Conversion complete
+  Input:  /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_static_reference/h131072_b16_v1/l1_02_static_spmd/chip_swimlane_records.json
+  Output: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_static_reference/h131072_b16_v1/l1_02_static_spmd/swimlane.json
+
+To visualize: Open https://ui.perfetto.dev/ and drag in /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_static_reference/h131072_b16_v1/l1_02_static_spmd/swimlane.json
+
+============================================================================================================================================
+Task Statistics by Function
+  Source chip_swimlane_level: 1 (AICore timing only; recorded in chip_swimlane_records.json)
+  Exec = kernel time on AICore; Latency = dispatch->finish (incl. head OH + Exec + tail OH)
+  Head OH split (v3): Prop = NoC propagation (dispatch_ts→AICore receive); Local = dcci+ack (receive→start)
+============================================================================================================================================
+Func_ID  Func_Name    Count   Avg Exec(us)  Avg Latency(us)   Exec%   Avg Head OH(us)  Avg Tail OH(us)  Avg Prop(us)  Avg Local(us)
+--------------------------------------------------------------------------------------------------------------------------------------------
+0        csa_static_aic    24         755.56                -       -                 -                -             -           1.82
+1        csa_static_aiv    48         780.86                -       -                 -                -             -           3.37
+--------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                    72       55614.72                -
+
+AICore Observed Span: 788.58 us (from earliest AICore receive to latest AICore end)
+==============================================================================================================
+
+Scheduler-overhead deep-dive: run sched_overhead_analysis manually with a separately-captured deps.json (--enable-dep-gen).
