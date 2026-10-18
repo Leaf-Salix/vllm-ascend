@@ -17708,3 +17708,46 @@ dynamic_full_pipeline_20261017/multitask_outer_profile_20261018。
 七档MD/JSON新增外层列并保留旧六档日期/B28本轮设备；其余Native/L1/静态没有
 重新测试，B28静态继续留空。目标仍是动态单SPMD对同轮分task完整L1降低30%，
 新增外层指标不更改验收分母，目标未完成。
+
+### 2026-10-18：停止投影分核微调，转向大阶段硬件证据
+
+依据上一轮KV阻塞证据，在正式动态源码做第二版：head权重/KV恢复24核，4辅助核
+只做Hadamard、20核做Q_B，各核随后做原owner主压缩；AIV先完成Indexer量化/
+系数/key/scale再处理KV。动态shape和全部数学保留，450项控制检查及完整符号
+编译通过。task_20261018_123227_5932334047 exit0，A→B→A、输出/Top-K/score、
+完整cache/state、保护区、代际和图通过。
+
+同轮五窗完整L1：原多task878.08、原正式动态SPMD878.64、候选882.20μs。
+没有收益，不继续扫4/8核或扩档；正式源码已恢复，完整34份候选及33份原版、
+所有结果留在projection_hadamard_overlap_evidence。没有用上一轮947.16的
+跨轮差值冒充本版收益。
+
+用户明确要求抓大放小。转向Score约230μs和Attention约160μs的大阶段。
+先试CPU保留真实CCEC对象核对资源：动态AIC .text50200B，entry2048B、主体
+48152B；固定stack record32768等于编译预算，不是实际spill证据。CCEC拒绝
+print-after/###诊断选项，save-temps未给出汇编，停止继续猜选项。
+命令、对象本地路径及失败在compiler_resource_capture_20261018。
+
+新增indexer_score_hardware_evidence：完整CSA正式权重运行后，复用真实query/
+系数/cache/metadata与完全相同Score数学helper，独立24组MIX测3步PipeUtilization。
+测量前后须对完整pair/score allocation逐bit匹配完整CSA，保留两槽协议；只补
+供数链硬件证据，不做理想GEMM、不以局部吞吐替代完整L1。首次有效CPU符号编译
+通过，13根Tensor、单MIX/sync_start；task_20261018_125149_165487929633已在运行，
+尚不预记设备PASS或硬件瓶颈结论。正式动态七档30%目标仍未完成。
+
+### 2026-10-18：Score硬件归因通过，验证WS搬运方式
+
+任务task_20261018_125149_165487929633 exit0；完整CSA A→B→A及独立Score
+eager/graph/profiling后三次完整pair/score allocation逐bit一致。保留全部三步
+原始CSV。AIC MTE1活跃中位154.814μs、矩阵103.951μs、FIX133.343μs、
+MTE2 77.640μs，AIV Vector99.168μs。独立图外Event308.340μs包含外调度，
+不作为整层L1；pipeline时间可重叠，不相加/相减换算收益。
+
+用户要求核内double buffer/cache预取。当前Score已存在Key两槽及提前一个
+面板到L0B，旧WS后移/Key成对预取也已验证，不重复当新方案。新证据指向
+进一步检查WS的48KiB FP16 NZ→L0B：底层当前使用load3d，尝试等价load2d
+分形转置搬运。只改变16处搬运实现，原数学、地址、事件及双缓冲保留，
+去helper和还原调用后实际C++逐字符相同。两次CPU准备错误已记录，实际CCEC
+cpu_v2通过。任务task_20261018_130455_238129612172待设备结果，先验证实际
+中间Tensor的完整Score逐bit结果，再看硬件流水；未改正式算法和共享依赖。
+过程目录parallel_20261018/score_load2d_evidence；七档30%目标仍未完成。
