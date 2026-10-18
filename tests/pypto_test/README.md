@@ -21,6 +21,10 @@ O-proj继续保留Native。
 前74轮outer摘要一致，第75轮首次实际FULL6出现位差；截至停止全部16rank输入/入场相同。
 首差原件与复现方法已保存，尚未定位具体模块，不能将8K通过结果外推到128K。
 
+2026-10-18完整HC-pre至HC-post PTO精度版的真实整模型性能对照见
+[完整PTO性能记录](DSV4_FLASH_CSA_TND_COMPLETE_PTO_REAL_MODEL_PERFORMANCE_20261018.md)，
+与此前保留部分Native数学的精度版分开记录。
+
 2026-10-16真实整模型8K/B40 Native与TND精度CSA的三轮性能对照见
 [整模型性能记录](DSV4_FLASH_CSA_TND_REAL_MODEL_PERFORMANCE_20261016.md)，包含完整输出验收、计时边界和可复现证据。
 
