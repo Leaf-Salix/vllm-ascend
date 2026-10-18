@@ -6,6 +6,10 @@
 两档实际占卡8分23秒/8分41秒；后续同类任务按该方案780秒上限拆分。
 以下链接保留各历史阶段的具体边界，不将旧性能数字套用到新实现。
 
+单入口纯DSL版真实整模型性能与Native的两档对照见
+[单入口DSL整模型性能](DSV4_FLASH_CSA_TND_SINGLE_ENTRY_DSL_REAL_MODEL_PERFORMANCE_20261018.md)。
+两档完整输出/接受事件保持一致，性能存在明显回退；计时范围、轮数、任务时间和原始证据均独立记录。
+
 2026-10-16逐模块恢复HC-pre至HC-post完整PTO替换，第一步HC-post的真实权重TND逐bit对拍见
 [完整PTO恢复记录](DSV4_FLASH_CSA_TND_FULL_PRECISION_20261016.md)。
 后续HC-pre的Native分片观测、HF32根因及逐bit恢复见
