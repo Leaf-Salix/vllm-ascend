@@ -10,7 +10,6 @@ Original Native weights are used unchanged. No compiler interception.
 import pypto.language as pl
 
 from ..deepseek_v4_flash_csa_tnd_precision.config import FLASH as M
-from .hc_pre_panel import hcpre_linear_panel
 
 # Dynamic shape variables.
 T_DYN = pl.dynamic("T_DYN")  # actual token rows, independent request lengths
@@ -322,10 +321,117 @@ def hc_pre_gates_from_rms(
     # Both paths zero-fill padded partial rows. The panel path explicitly
     # initializes the transposed input tail before sharing weight loads.
     mixes_partials = pl.create_tensor([LINEAR_OK * t_linear, MIX_PAD], dtype=pl.FP32)
-    if t_dim < PANEL_MIN_TOKENS:
-        mixes_partials = hcpre_linear_dsl(x_flat, hc_fn, mixes_partials)
+    panel64_packed_weight = pl.create_tensor([HC_DIM * 2, MIX_PAD], dtype=pl.BF16)
+    for panel64_block in pl.spmd(HC_DIM // 256, name_hint="hcpre_hf32_weight", allow_early_resolve=True):
+        panel64_raw: pl.Tile[[32, 256], pl.FP32] = pl.load(
+            hc_fn, [0, panel64_block * 256], [32, 256], valid_shape=[MIX_HC, 256]
+        )
+        panel64_transposed = pl.tile.transpose(panel64_raw, axis1=0, axis2=1)
+        for panel64_pad_column in pl.range(MIX_HC, MIX_PAD):
+            for panel64_pad_k in pl.range(256):
+                pl.write(panel64_transposed, [panel64_pad_k, panel64_pad_column], 0.0)
+        panel64_transposed = pl.set_validshape(panel64_transposed, 256, 32)
+        panel64_bits = pl.tile.reinterpret_view(panel64_transposed, pl.INT32)
+        panel64_converted = pl.tile.reinterpret_view(
+            pl.tile.and_(pl.tile.add(panel64_bits, 2048), pl.tile.full([256, 32], dtype=pl.INT32, value=-4096)), pl.FP32
+        )
+        panel64_hi_bits = pl.tile.and_(
+            pl.tile.reinterpret_view(panel64_converted, pl.INT32), pl.tile.full([256, 32], dtype=pl.INT32, value=-65536)
+        )
+        panel64_hi_fp32 = pl.tile.reinterpret_view(panel64_hi_bits, pl.FP32)
+        panel64_lo_fp32 = pl.tile.sub(panel64_converted, panel64_hi_fp32)
+        panel64_hi_bf16 = pl.tile.cast(panel64_hi_fp32, pl.BF16)
+        panel64_lo_bf16 = pl.tile.cast(panel64_lo_fp32, pl.BF16)
+        panel64_packed_block = pl.tile.full([512, 32], dtype=pl.BF16, value=0.0)
+        for panel64_chunk in pl.range(32):
+            panel64_high8 = pl.tile.slice(panel64_hi_bf16, [8, 32], [panel64_chunk * 8, 0])
+            panel64_low8 = pl.tile.slice(panel64_lo_bf16, [8, 32], [panel64_chunk * 8, 0])
+            panel64_packed_block = pl.tile.assemble(panel64_packed_block, panel64_high8, [panel64_chunk * 16, 0])
+            panel64_packed_block = pl.tile.assemble(panel64_packed_block, panel64_low8, [panel64_chunk * 16 + 8, 0])
+        pl.store(panel64_packed_block, [panel64_block * 512, 0], panel64_packed_weight)
+    panel64_packed_flat = pl.create_tensor([t_linear, HC_DIM * 2], dtype=pl.BF16)
+    panel64_inputs_per_task = 1
+    if t_dim >= 64:
+        panel64_inputs_per_task = 4
+    for panel64_input_group in pl.spmd(
+        t_linear // 16 * (HC_DIM // 256) // panel64_inputs_per_task,
+        name_hint="hcpre_input_panel",
+        allow_early_resolve=True,
+    ):
+        for panel64_input_local in pl.range(panel64_inputs_per_task):
+            panel64_transpose_unit = panel64_input_group * panel64_inputs_per_task + panel64_input_local
+            panel64_t0 = panel64_transpose_unit // (HC_DIM // 256) * 16
+            panel64_k0 = panel64_transpose_unit % (HC_DIM // 256) * 256
+            panel64_values = pl.load(
+                x_flat, [panel64_t0, panel64_k0], [16, 256], valid_shape=[pl.min(16, t_dim - panel64_t0), 256]
+            )
+            for panel64_invalid_row in pl.range(pl.min(16, t_dim - panel64_t0), 16):
+                for panel64_invalid_col in pl.range(256):
+                    pl.write(panel64_values, [panel64_invalid_row, panel64_invalid_col], 0.0)
+            panel64_values = pl.set_validshape(panel64_values, 16, 256)
+            panel64_transposed_values = pl.tile.transpose(panel64_values, axis1=0, axis2=1)
+            panel64_packed_transposed = pl.tile.full([512, 16], dtype=pl.FP32, value=0.0)
+            for panel64_chunk in pl.range(32):
+                panel64_input8 = pl.tile.slice(panel64_transposed_values, [8, 16], [panel64_chunk * 8, 0])
+                panel64_packed_transposed = pl.tile.assemble(
+                    panel64_packed_transposed, panel64_input8, [panel64_chunk * 16, 0]
+                )
+                panel64_packed_transposed = pl.tile.assemble(
+                    panel64_packed_transposed, panel64_input8, [panel64_chunk * 16 + 8, 0]
+                )
+            panel64_packed_values = pl.tile.transpose(panel64_packed_transposed, axis1=0, axis2=1)
+            pl.store(pl.tile.cast(panel64_packed_values, pl.BF16), [panel64_t0, panel64_k0 * 2], panel64_packed_flat)
+    if t_dim >= 64:
+        for panel64_wide_unit in pl.spmd(
+            LINEAR_OK * ((t_linear + 63) // 64), name_hint="hcpre_bf16_half_exact8_m64", allow_early_resolve=True
+        ):
+            panel64_wide_split = panel64_wide_unit // ((t_linear + 63) // 64)
+            panel64_wide_row = panel64_wide_unit % ((t_linear + 63) // 64) * 64
+            panel64_wide_valid = pl.min(64, t_linear - panel64_wide_row)
+            panel64_wide_count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - panel64_wide_split * LINEAR_K_PER_SPLIT) // 64
+            panel64_wide_first_k = panel64_wide_split * LINEAR_K_PER_SPLIT * 2
+            panel64_wide_first_x = pl.slice(
+                panel64_packed_flat,
+                [64, 128],
+                [panel64_wide_row, panel64_wide_first_k],
+                valid_shape=[panel64_wide_valid, 128],
+            )
+            panel64_wide_first_w = pl.slice(panel64_packed_weight, [128, MIX_PAD], [panel64_wide_first_k, 0])
+            panel64_wide_accumulator = pl.matmul(panel64_wide_first_x, panel64_wide_first_w, out_dtype=pl.FP32)
+            for panel64_wide_kb in pl.range(1, panel64_wide_count):
+                panel64_wide_packed_k = panel64_wide_split * LINEAR_K_PER_SPLIT * 2 + panel64_wide_kb * 128
+                panel64_wide_x = pl.slice(
+                    panel64_packed_flat,
+                    [64, 128],
+                    [panel64_wide_row, panel64_wide_packed_k],
+                    valid_shape=[panel64_wide_valid, 128],
+                )
+                panel64_wide_w = pl.slice(panel64_packed_weight, [128, MIX_PAD], [panel64_wide_packed_k, 0])
+                panel64_wide_accumulator = pl.matmul_acc(
+                    panel64_wide_accumulator, panel64_wide_x, panel64_wide_w, init_cond=False
+                )
+            panel64_wide_store = pl.tensor.set_validshape(panel64_wide_accumulator, panel64_wide_valid, MIX_PAD)
+            mixes_partials = pl.assemble(
+                mixes_partials, panel64_wide_store, [panel64_wide_split * t_linear + panel64_wide_row, 0]
+            )
     else:
-        mixes_partials = hcpre_linear_panel(x_flat, hc_fn, mixes_partials)
+        for panel64_unit in pl.spmd(
+            LINEAR_OK * (t_linear // 16), name_hint="hcpre_bf16_half_exact8", allow_early_resolve=True
+        ):
+            panel64_split = panel64_unit // (t_linear // 16)
+            panel64_row = panel64_unit % (t_linear // 16) * 16
+            panel64_count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - panel64_split * LINEAR_K_PER_SPLIT) // 64
+            panel64_accumulator = pl.create_tensor([16, MIX_PAD], dtype=pl.FP32)
+            for panel64_kb in pl.range(panel64_count):
+                panel64_packed_k = panel64_split * LINEAR_K_PER_SPLIT * 2 + panel64_kb * 128
+                panel64_x16 = pl.slice(panel64_packed_flat, [16, 128], [panel64_row, panel64_packed_k])
+                panel64_w16 = pl.slice(panel64_packed_weight, [128, MIX_PAD], [panel64_packed_k, 0])
+                panel64_accumulator = pl.matmul_acc(
+                    panel64_accumulator, panel64_x16, panel64_w16, init_cond=panel64_kb == 0
+                )
+            mixes_partials = pl.assemble(
+                mixes_partials, panel64_accumulator, [panel64_split * t_linear + panel64_row, 0]
+            )
 
     # Partials are reduced in ascending K order.
     mixes_raw = pl.create_tensor([t_linear, MIX_PAD], dtype=pl.FP32)

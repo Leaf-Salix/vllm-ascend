@@ -1,4 +1,6 @@
-# TND性能调优V4：在227以新标签复现
+# TND性能调优：在227以新标签复现V4与V6
+
+前半保留V4历史步骤，后半为当前V6三轮复现；使用仓库助手时请显式选择 `--profile v6`，省略该参数仍为V4。
 
 仓库工具源码见 [prepare_tnd_precision_performance_repro.py](prepare_tnd_precision_performance_repro.py)。下面命令使用227已冻结、已验证的同逻辑原助手文件名。
 
@@ -67,3 +69,68 @@ python3 "$AUDIT/independent8k.py" \
 ## 本次工具验证
 
 6项合成边界检查通过；227实际创建新job并分别完成8K和128K无设备预检，两者均输出`PERFORMANCE_BOOTSTRAP_NO_DEVICE_OK`，旧助手SHA未变。实际检查job使用独立`whole-formal-v4-fresh-cpu-check`，没有提交任何NPU任务。
+
+## V6：三轮性能复现
+
+上文V4部分仍对应提交`da3b2d9fc`，保留原V4参数、结果和证据身份。下面是独立V6复现步骤，不能把V4报告或历史验收重新标记为V6。V6两档已完成三轮验收，结果见[最终性能与精度报告](DSV4_FLASH_CSA_TND_PRECISION_PERFORMANCE_FINAL_20261019.md)。
+
+V6冻结源码manifest为`6d9656de4580ba5f768881c417f3093a7744808ac6518c594e9db881971e7ab2`（3365全文件、43运行源码）；原whole helper manifest为`6e3d416475783fd7ceb77154c7a5fb69f17418c30f97563c970d23dead792f1f`。V6是192-token warmup加**3轮各192-token measured**，使用`PERF_REPEATS=3`，不跑Native2。
+
+### 用同一仓库助手准备新的V6标签
+
+仓库脚本新增`--profile v6`；省略profile仍为V4，旧CLI保持。V6 profile严格锁定上面两个manifest，不接受V4参考目录。227 snapshot内归档的旧版工具不一定支持V6；应上传本仓库含V6 profile的工具，不能误用旧冻结脚本。
+
+在包含本增补的仓库根目录，本机先创建远端工具目录再上传：
+
+```bash
+ssh pto227 'mkdir -p /data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-overnight-20261019/repro-tools-v6'
+/opt/homebrew/bin/rsync -av --exclude='._*' --exclude='.DS_Store' \
+ tests/pypto_test/prepare_tnd_precision_performance_repro.py \
+ pto227:/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-overnight-20261019/repro-tools-v6/
+```
+
+在227执行，若标签或destination已用过，二者一起改成全新的值：
+
+```bash
+BASE=/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex
+EXP="$BASE/precision-overnight-20261019"
+NEW="$EXP/whole-formal-v6-repro-a"
+python3 "$EXP/repro-tools-v6/prepare_tnd_precision_performance_repro.py" \
+ --profile v6 --reference-job "$EXP/whole-formal-v6" \
+ --destination "$NEW" --label repro-v6-20261019-a
+export PERF_REPEATS=3
+bash "$NEW/preflight.sh" 8k
+bash "$NEW/preflight.sh" 128k
+sha256sum "$NEW/helper-manifest.json" "$NEW/snapshot/manifest.json"
+```
+
+新source及manifest字节保持6d9656不变。只有env/preflight/run三脚本的job/output路径重定位，重建的新helper manifest SHA会变化；原6e3d41仅用于核验参考目录，**不能作为新job的helper身份**。`reproduction.json`记录前后助手SHA及新job，`reference-helper-manifest.json`保留原身份。预检应均输出`PERFORMANCE_BOOTSTRAP_NO_DEVICE_OK`；不重跑`prepare_snapshot.py`，不复制模型、bank或运行缓存。原helper清单中的`FINAL_SOURCE_BOUND.json`等资格JSON和reference文件一起照单保留，其原路径只是来源记录，新实际imports/source由preflight再次核验。
+
+### 先8K，审计通过再128K
+
+```bash
+task-submit --device auto --device-num 16 --max-time 780 --ptoas 0.63 \
+ --env PYTHONNOUSERSITE=1 --env PERF_REPEATS=3 \
+ --env ASCEND_HOME_PATH=/data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 \
+ --env PTOAS_ROOT=/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/experiments/nalinaly-71153bb3/reference-env/bin \
+ --env CCACHE_DIR=/data/pyptouser/yejia/vllm-cann901-csa-0251rc1/src/pypto/.ccache \
+ --env CMAKE_BUILD_PARALLEL_LEVEL=4 \
+ "bash $NEW/run-case.sh 8k pto"
+```
+
+任务完整exit0后，显式指向新输出和新job执行独立CPU审计：
+
+```bash
+AUDIT="$EXP/whole-formal-v6-audit"
+python3 "$AUDIT/independent8k.py" \
+ --root /data/pyptouser/yejia/lc128/perf-repro-v6-20261019-a-8k-pto \
+ --identity FormalV6-repro-v6-20261019-a --repeats 3 \
+ --expected-source-manifest 6d9656de4580ba5f768881c417f3093a7744808ac6518c594e9db881971e7ab2 \
+ --candidate-math "$NEW/candidate-math.json" > "$NEW/independent8k.json"
+```
+
+审计重新哈希actual43/3365源码、新job全部helper及其实际manifest，逐rank逐轮检查token/事件、零抢占、21层CSA资格/62ABI和实际工作负载几何；三轮forward各20步、cycle各19步，以每步16rank最大值汇总。新configuration中的`helper_manifest_sha256`必须等于上面新job的实际SHA，不沿用6e3d41或旧PASS。128K采用固定measured阶段配对：candidate第1轮→Native第1轮，candidate第2/3轮→Native第2轮。所选pair所有CPU字段（含input_ids）仅除call严格逐字相同；不同phase仍保留差异并只允许既有0/-1范围，不做normalize。首差即停。
+
+只有8K审计退出0、`pass=true`且三轮全部验收后，才能用同样的task-submit选项提交`"bash $NEW/run-case.sh 128k pto"`，仍为独立780秒任务。128K完成后，使用同样审计参数调用新`independent128k_phase_matched.py`（不要误用保留原失败的`independent128k.py`），将root改为`...-128k-pto`，输出新`independent128k.json`。实际仍是24条提交、计时窗21并发的既有口径。没有定时调度，也不将两档合成长期占卡任务。
+
+阶段规则policy SHA：`fa3be8eebcde5fada53af07219431a1b1ea7949c89864348f154701bced86335`；新128K auditor SHA：`b5d38e84ad49093fdcbca471128f4c8809f6decd6b15ce3859219142d08e0244`。需保留同目录`phase-policy.json`，新脚本不会忽略input_ids。旧严格审计SHA：`544bc0a7935c5f403ae0ce74841fb637537d8dfaab63cde55216dca3b4934cbb`，原失败SHA：`04f9211f88f9ddb15443bef01dd02e71ecf56e1b026d57938aa5d8416dcf1c80`，均留存；独立review及对应raw差异随证据归档。只称first/repeated measured阶段，不归因为cold/init或首次capture。

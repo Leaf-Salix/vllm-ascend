@@ -26,8 +26,6 @@ def _hcpre_linear_panel(
     partials.bind_dynamic(0, LINEAR_ROWS_DYN)
     tokens = pl.tensor.dim(flat, 0)
     padded_tokens = pl.tensor.dim(partials, 0) // LINEAR_OK
-    # HF32 operand conversion is explicit bit arithmetic on original FP32 weight.
-    # Transpose is DSL layout work, not a Native arithmetic callback.
     packed_weight = pl.create_tensor([HC_DIM * 2, MIX_PAD], dtype=pl.BF16)
     for block in pl.spmd(HC_DIM // 256, name_hint="hcpre_hf32_weight", allow_early_resolve=True):
         raw: pl.Tile[[32, 256], pl.FP32] = pl.load(weight, [0, block * 256], [32, 256], valid_shape=[MIX_HC, 256])
@@ -40,7 +38,6 @@ def _hcpre_linear_panel(
         converted = pl.tile.reinterpret_view(
             pl.tile.and_(pl.tile.add(bits, 2048), pl.tile.full([256, 32], dtype=pl.INT32, value=-4096)), pl.FP32
         )
-        # Truncate the HF32 value into exact BF16 high8 and low4 pieces.
         hi_bits = pl.tile.and_(
             pl.tile.reinterpret_view(converted, pl.INT32), pl.tile.full([256, 32], dtype=pl.INT32, value=-65536)
         )
@@ -60,20 +57,19 @@ def _hcpre_linear_panel(
     if tokens >= 64:
         inputs_per_task = 4
     for input_group in pl.spmd(
-        ((padded_tokens // 16) * (HC_DIM // 256)) // inputs_per_task,
+        padded_tokens // 16 * (HC_DIM // 256) // inputs_per_task,
         name_hint="hcpre_input_panel",
         allow_early_resolve=True,
     ):
         for input_local in pl.range(inputs_per_task):
             transpose_unit = input_group * inputs_per_task + input_local
-            t0 = (transpose_unit // (HC_DIM // 256)) * 16
-            k0 = (transpose_unit % (HC_DIM // 256)) * 256
+            t0 = transpose_unit // (HC_DIM // 256) * 16
+            k0 = transpose_unit % (HC_DIM // 256) * 256
             values = pl.load(flat, [t0, k0], [16, 256], valid_shape=[pl.min(16, tokens - t0), 256])
             for invalid_row in pl.range(pl.min(16, tokens - t0), 16):
                 for invalid_col in pl.range(256):
                     pl.write(values, [invalid_row, invalid_col], 0.0)
             values = pl.set_validshape(values, 16, 256)
-            # Keep source/destination column widths equal for existing TMOV lowering.
             transposed_values = pl.tile.transpose(values, axis1=0, axis2=1)
             packed_transposed = pl.tile.full([512, 16], dtype=pl.FP32, value=0.0)
             for chunk in pl.range(32):
@@ -82,19 +78,39 @@ def _hcpre_linear_panel(
                 packed_transposed = pl.tile.assemble(packed_transposed, input8, [chunk * 16 + 8, 0])
             packed_values = pl.tile.transpose(packed_transposed, axis1=0, axis2=1)
             pl.store(pl.tile.cast(packed_values, pl.BF16), [t0, k0 * 2], packed_flat)
-    for unit in pl.spmd(
-        LINEAR_OK * (padded_tokens // 16), name_hint="hcpre_bf16_half_exact8", allow_early_resolve=True
-    ):
-        split = unit // (padded_tokens // 16)
-        row = (unit % (padded_tokens // 16)) * 16
-        count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - split * LINEAR_K_PER_SPLIT) // 64
-        accumulator = pl.create_tensor([16, MIX_PAD], dtype=pl.FP32)
-        for kb in pl.range(count):
-            packed_k = split * LINEAR_K_PER_SPLIT * 2 + kb * 128
-            x16 = pl.slice(packed_flat, [16, 128], [row, packed_k])
-            w16 = pl.slice(packed_weight, [128, MIX_PAD], [packed_k, 0])
-            accumulator = pl.matmul_acc(accumulator, x16, w16, init_cond=(kb == 0))
-        partials = pl.assemble(partials, accumulator, [split * padded_tokens + row, 0])
+    if tokens >= 64:
+        for wide_unit in pl.spmd(
+            LINEAR_OK * ((padded_tokens + 63) // 64), name_hint="hcpre_bf16_half_exact8_m64", allow_early_resolve=True
+        ):
+            wide_split = wide_unit // ((padded_tokens + 63) // 64)
+            wide_row = wide_unit % ((padded_tokens + 63) // 64) * 64
+            wide_valid = pl.min(64, padded_tokens - wide_row)
+            wide_count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - wide_split * LINEAR_K_PER_SPLIT) // 64
+            wide_first_k = wide_split * LINEAR_K_PER_SPLIT * 2
+            wide_first_x = pl.slice(packed_flat, [64, 128], [wide_row, wide_first_k], valid_shape=[wide_valid, 128])
+            wide_first_w = pl.slice(packed_weight, [128, MIX_PAD], [wide_first_k, 0])
+            wide_accumulator = pl.matmul(wide_first_x, wide_first_w, out_dtype=pl.FP32)
+            for wide_kb in pl.range(1, wide_count):
+                wide_packed_k = wide_split * LINEAR_K_PER_SPLIT * 2 + wide_kb * 128
+                wide_x = pl.slice(packed_flat, [64, 128], [wide_row, wide_packed_k], valid_shape=[wide_valid, 128])
+                wide_w = pl.slice(packed_weight, [128, MIX_PAD], [wide_packed_k, 0])
+                wide_accumulator = pl.matmul_acc(wide_accumulator, wide_x, wide_w, init_cond=False)
+            wide_store = pl.tensor.set_validshape(wide_accumulator, wide_valid, MIX_PAD)
+            partials = pl.assemble(partials, wide_store, [wide_split * padded_tokens + wide_row, 0])
+    else:
+        for unit in pl.spmd(
+            LINEAR_OK * (padded_tokens // 16), name_hint="hcpre_bf16_half_exact8", allow_early_resolve=True
+        ):
+            split = unit // (padded_tokens // 16)
+            row = unit % (padded_tokens // 16) * 16
+            count = pl.min(LINEAR_K_PER_SPLIT, HC_DIM - split * LINEAR_K_PER_SPLIT) // 64
+            accumulator = pl.create_tensor([16, MIX_PAD], dtype=pl.FP32)
+            for kb in pl.range(count):
+                packed_k = split * LINEAR_K_PER_SPLIT * 2 + kb * 128
+                x16 = pl.slice(packed_flat, [16, 128], [row, packed_k])
+                w16 = pl.slice(packed_weight, [128, MIX_PAD], [packed_k, 0])
+                accumulator = pl.matmul_acc(accumulator, x16, w16, init_cond=kb == 0)
+            partials = pl.assemble(partials, accumulator, [split * padded_tokens + row, 0])
     return partials
 
 

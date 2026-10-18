@@ -34,6 +34,38 @@ def _artifact(record):
 def _manifest():
     data = json.loads((_EVIDENCE / "manifest.json").read_text())
     assert data["schema_version"] == 2 and data["status"] == "accepted"
+    phase = data.get("reference_phase_policy")
+    if phase is not None:
+        assert phase["candidate_to_native_iteration"] == {"1": 1, "2": 2, "3": 2}
+        assert phase["excluded_metadata_fields"] == ["call"]
+        assert phase["input_ids_cpu_normalization"] is False
+        _artifact(phase["archive"])
+        with tarfile.open(_EVIDENCE / phase["archive"]["path"]) as bundle:
+            read = lambda name: bundle.extractfile(name).read()
+            policy = json.loads(read("phase-policy.json"))
+            for field in ("candidate_to_native_iteration", "excluded_metadata_fields", "input_ids_cpu_normalization"):
+                assert policy[field] == phase[field]
+            assert _sha(read("original-independent128k.py")) == policy["original_strict_auditor_sha256"]
+            assert _sha(read("original-strict-failure.log")) == policy["original_strict_failure_sha256"]
+            assert _sha(read("independent-review.json")) == policy["independent_review_sha256"]
+            audit = json.loads(read("phase-audit.json"))
+            assert audit["pass"] and audit["source_manifest_sha256"] == data["source_manifest_sha256"]
+            assert audit["auditor_sha256"] == _sha(read("independent128k_phase_matched.py"))
+            assert audit["reference_phase_policy_sha256"] == _sha(read("phase-policy.json"))
+            assert audit["reference_phase_policy"] == policy
+            fixtures = json.loads(read("phase-fixture-results.json"))
+            assert fixtures["pass"] and fixtures["normalization_used"] is False
+            assert len(fixtures["checks"]) == 7
+            assert {item["case"]: item["expected_success"] for item in fixtures["checks"]} == {
+                "unmodified_copy_of_actual_three_rounds": True,
+                "first_phase_input_0_to_negative1": False,
+                "repeated_phase2_input_negative1_to0": False,
+                "repeated_phase3_input_negative1_to0": False,
+                "non_input_geometry_changed": False,
+                "missing_final_round": False,
+                "final_round_output_token_changed": False,
+            }
+            assert all((item["actual_exit"] == 0) == item["expected_success"] for item in fixtures["checks"])
     return data
 
 
@@ -81,7 +113,7 @@ def test_full_model_saved_tokens_events_and_replacement_qualification(case):
         assert cfg["runtime_manifest_sha256"] == m["runtime_manifest_sha256"]
         assert cfg["batch"] == expected_batch and cfg["decode_tokens"] == 192
         assert cfg["capture_sizes"] == [6, bucket] and cfg["warmup_tokens"] == 192
-        assert cfg["repeats"] >= 1
+        assert cfg["repeats"] == m.get("expected_repeats", 1)
         layers = {f"model.layers.{i}.self_attn.attn" for i in range(2, 43, 2)}
         for rank in range(16):
             actual = read(f"results/rank{rank}.real_perf.json")
@@ -106,6 +138,7 @@ def test_full_model_saved_tokens_events_and_replacement_qualification(case):
                 assert worker["hccl_deterministic"] == "true" and not worker["dynamic_eplb"]
                 assert worker["cann_event_work_mode"] == 1
             assert len(actual["rounds"]) == cfg["repeats"]
+            assert [row["iteration"] for row in actual["rounds"]] == list(range(1, cfg["repeats"] + 1))
             for phase in [actual["warmup"], *actual["rounds"]]:
                 requests = phase["requests"]
                 assert len(requests) == expected_batch
@@ -223,6 +256,10 @@ def test_saved_CPU_workload_geometry_and_maxrank_timing(case):
                 for r in map(json.loads, bundle.extractfile(f"gold/request_stats_rank{rank}.jsonl"))
             }
             for round_record in actual["rounds"]:
+                reference_iteration = 1
+                if case == "128k" and "reference_phase_policy" in m:
+                    reference_iteration = 1 if round_record["iteration"] == 1 else 2
+                    assert [row["iteration"] for row in control["rounds"]] == [1, 2]
                 timing = round_record["timing"][0]
                 before = round_record["identity_before"][0]["cache_stats"]
                 after = timing["identity"]["cache_stats"]
@@ -246,7 +283,9 @@ def test_saved_CPU_workload_geometry_and_maxrank_timing(case):
                     assert len(right_rows) == 20
                     for left, right in zip(left_rows, right_rows, strict=True):
                         omitted = (
-                            {"call"} if case == "8k" or native_round["iteration"] == 1 else {"call", "input_ids_cpu"}
+                            {"call"}
+                            if case == "8k" or native_round["iteration"] == reference_iteration
+                            else {"call", "input_ids_cpu"}
                         )
                         assert {k: v for k, v in left.items() if k not in omitted} == {
                             k: v for k, v in right.items() if k not in omitted
@@ -254,7 +293,7 @@ def test_saved_CPU_workload_geometry_and_maxrank_timing(case):
                         if case == "128k":
                             assert control["rounds"][0]["iteration"] == 1
                             assert len(left["input_ids_cpu"]) == len(right["input_ids_cpu"]) == left["actual_tokens"]
-                            # Later Native windows have known CPU zero/-1 sentinel
+                            # Unmatched measured phases have known CPU zero/-1 sentinel
                             # differences inside this observer slice. Never label
                             # these as proof of GPU padding or GPU input equality.
                             for a, b in zip(left["input_ids_cpu"], right["input_ids_cpu"], strict=True):

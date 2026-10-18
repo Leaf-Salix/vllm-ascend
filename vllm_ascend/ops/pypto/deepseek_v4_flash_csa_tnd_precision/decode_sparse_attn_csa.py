@@ -243,30 +243,28 @@ def sparse_attn_csa(
     valid_block_mask = pl.create_tensor([t_dim, VALID_BLOCK_MASK_COLS], dtype=pl.INT32)
     # Scalar stores are flushed at task exit before the Vector planner reads GM.
     # A same-task PIPE_S/MTE2 event does not flush the Scalar data cache.
-    with pl.spmd(plan_workers, name_hint="csa_checked_indices") as checked_tid:
+    with pl.spmd(48, name_hint="csa_checked_indices") as checked_tid:
         checked_worker = pl.tile.get_block_idx()
-        for checked_t0 in pl.range(checked_worker * BIAS_T_TILE, t_dim, plan_workers * BIAS_T_TILE):
-            for checked_dt in pl.range(pl.min(BIAS_T_TILE, t_dim - checked_t0)):
-                checked_t = checked_t0 + checked_dt
-                c_position = pl.cast(pl.read(position_ids, [checked_t, 0]), pl.INDEX)
-                c_request = pl.read(token_request, [checked_t])
-                for c_pair in pl.range(IDX_TOPK // 2):
-                    c_slot = c_pair * 2
-                    first = checked_compressed_index(
-                        pl.read(idx_topk, [checked_t, c_slot]), c_request, c_position, seq_lens, cmp_block_table
-                    )
-                    second = checked_compressed_index(
-                        pl.read(idx_topk, [checked_t, c_slot + 1]), c_request, c_position, seq_lens, cmp_block_table
-                    )
-                    swap = native_compressed_pair_swap(
-                        first, second, c_request, (c_position + 1) // COMPRESS_RATIO, cmp_block_table
-                    )
-                    if swap > 0:
-                        pl.write(cmp_sparse_indices, [checked_t, c_slot], second)
-                        pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], first)
-                    else:
-                        pl.write(cmp_sparse_indices, [checked_t, c_slot], first)
-                        pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], second)
+        for checked_t in pl.range(checked_worker, t_dim, 48):
+            c_position = pl.cast(pl.read(position_ids, [checked_t, 0]), pl.INDEX)
+            c_request = pl.read(token_request, [checked_t])
+            for c_pair in pl.range(IDX_TOPK // 2):
+                c_slot = c_pair * 2
+                first = checked_compressed_index(
+                    pl.read(idx_topk, [checked_t, c_slot]), c_request, c_position, seq_lens, cmp_block_table
+                )
+                second = checked_compressed_index(
+                    pl.read(idx_topk, [checked_t, c_slot + 1]), c_request, c_position, seq_lens, cmp_block_table
+                )
+                swap = native_compressed_pair_swap(
+                    first, second, c_request, (c_position + 1) // COMPRESS_RATIO, cmp_block_table
+                )
+                if swap > 0:
+                    pl.write(cmp_sparse_indices, [checked_t, c_slot], second)
+                    pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], first)
+                else:
+                    pl.write(cmp_sparse_indices, [checked_t, c_slot], first)
+                    pl.write(cmp_sparse_indices, [checked_t, c_slot + 1], second)
 
     # Read Native positions/page tables at the consumer. No expanded SWA index
     # matrix or intermediate INT32 position buffer is needed.
@@ -359,6 +357,9 @@ def sparse_attn_csa(
         qk_kv_base = qk_core * ATTN_K_TILE
         qk_head_base = qk_core * H
         pl.system.set_ffts(ffts_workspace)
+        # K512 Native math is unchanged. Keep final two K128 KV panels in L1.
+        # Slot0 is scratch for parts0/1; slots1/2 retain parts2/3 through PV.
+        qk_l1 = pl.create_tile([3 * ATTN_CUBE_KV_TILE, HEAD_DIM], dtype=pl.BF16, target_memory=pl.MemorySpace.Mat)
         for qk_t in pl.range(qk_core, t_dim, NUM_QK_CORES):
             qk_b = pl.max(pl.read(token_request, [qk_t]), 0)
             qk_q = pl.load(q_flat, [qk_t * H, 0], [H, HEAD_DIM], target_memory=pl.MemorySpace.Mat)
@@ -367,13 +368,19 @@ def sparse_attn_csa(
                     pl.system.sync_wait(QK_KV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
                     for qk_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
                         qk_col = qk_part * ATTN_CUBE_KV_TILE
-                        qk_kv = pl.load(
+                        qk_slot_row = pl.max(qk_part - 1, 0) * ATTN_CUBE_KV_TILE
+                        qk_l1 = pl.gather_row(
+                            qk_l1,
                             kv_transfer,
+                            [qk_slot_row, 0],
                             [qk_kv_base + qk_col, 0],
                             [ATTN_CUBE_KV_TILE, HEAD_DIM],
-                            target_memory=pl.MemorySpace.Mat,
                         )
-                        qk_scores = pl.matmul(qk_q, pl.tile.transpose_view(qk_kv), out_dtype=pl.FP32)
+                        # Transpose the complete carrier before slicing: the current
+                        # backend preserves the slice's column offset in matmul.
+                        qk_l1_t = pl.tile.transpose_view(qk_l1)
+                        qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_CUBE_KV_TILE], [0, qk_slot_row])
+                        qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
                         pl.store(qk_scores, [qk_head_base, qk_col], score_transfer)
                     pl.system.sync_set(
                         QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
@@ -389,12 +396,16 @@ def sparse_attn_csa(
                             [H, ATTN_CUBE_KV_TILE],
                             target_memory=pl.MemorySpace.Mat,
                         )
-                        pv_kv = pl.load(
-                            kv_transfer,
-                            [qk_kv_base + pv_col, 0],
-                            [ATTN_CUBE_KV_TILE, HEAD_DIM],
-                            target_memory=pl.MemorySpace.Mat,
-                        )
+                        pv_slot_row = pl.max(pv_part - 1, 0) * ATTN_CUBE_KV_TILE
+                        if pv_part < 2:
+                            qk_l1 = pl.gather_row(
+                                qk_l1,
+                                kv_transfer,
+                                [pv_slot_row, 0],
+                                [qk_kv_base + pv_col, 0],
+                                [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                            )
+                        pv_kv = pl.tile.slice(qk_l1, [ATTN_CUBE_KV_TILE, HEAD_DIM], [pv_slot_row, 0])
                         pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
                     pl.store(pv_acc, [qk_head_base, 0], pv_transfer)
                     pl.system.sync_set(

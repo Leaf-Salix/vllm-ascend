@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-本报告记录正式V4检查点。原精度交付 `c87e278e55cea4becd627f174bd5e3a382e9d895`、本轮起点 `15a9c1a3ec97da9dd91340e675429b7a55589821` 及性能TND变体保留，可以按Git历史回退。本轮没有改变SDK/codegen或增加手写C++算子。
+本报告记录正式V4检查点 `da3b2d9fc`；V4源码/48项CPU结果须在该提交复核。最新V6见[最终精度与性能报告](DSV4_FLASH_CSA_TND_PRECISION_PERFORMANCE_FINAL_20261019.md)，本页历史结果不重标为V6。原精度交付 `c87e278e55cea4becd627f174bd5e3a382e9d895`、本轮起点 `15a9c1a3ec97da9dd91340e675429b7a55589821` 及性能TND变体保留，可以按Git历史回退。本轮没有改变SDK/codegen或增加手写C++算子。
 
 正式V4在真实8K/B40的16卡预热及测量中，共245,760个输出token与52,576个接受事件全部匹配Native黄金，零抢占。128K/B24也通过：147,456个输出token和30,784个接受事件全一致，零抢占。结论绑定正式43个runtime源和两档实际快照，未用中间候选的验收代替最终源文件。
 
@@ -95,7 +95,7 @@ nalinaly性能版K128局部softmax后归并的边界与当前Native K512不同�
 
 Python3.12、Torch2.10.0+cpu、Torch-NPU2.10.0.post2、vLLM0.25.1、vLLM-Ascend0.25.1rc1；CANN/ATB9.2.0-beta.2、A3 Ascend910_9392、实际PTOAS0.66、原私有PyPTO3e87a843/Simpler a54c0509。提交参数 --ptoas0.63 不代表runner实际工具，显式PTOAS_ROOT及preflight为准。全程不重装vLLM、PyPTO或Simpler，使用已核验PYTHONPATH和源快照。
 
-正式V4源快照3365文件SHA `6107e6ed747925793dcfe0e5188dee8486c3a8b91d0c1b7e073b62d38215bc28`，当前43个runtime文件逐项匹配正式源；完整快照含历史测试/文档，不冒称新增报告也曾在该快照内运行。
+正式V4源快照3365文件SHA `6107e6ed747925793dcfe0e5188dee8486c3a8b91d0c1b7e073b62d38215bc28`，该V4检查点的43个runtime文件逐项匹配其正式源；完整快照含历史测试/文档，不冒称新增报告也曾在该快照内运行。
 
 证据、CPU复核和227复现命令将在验收完成后附于本节。设备任务均以780秒上限提交，拆成单因素/单配置小任务；排队不计占卡，执行时间另以实际start/finish记录核实。没有自动化调度。
 
@@ -107,7 +107,7 @@ Python3.12、Torch2.10.0+cpu、Torch-NPU2.10.0.post2、vLLM0.25.1、vLLM-Ascend0
 
 ### 证据与本地CPU复核
 
-当前正式证据位于 [current_full_precision/manifest.json](evidence_tnd_precision/current_full_precision/manifest.json)，schema v2，identity FormalV4。三份压缩原始包约4.27MB：实际mixed21 source/helper/数值报告、8K全部16rank结果/Native gold/历史Native性能窗、128K同类完整数据。共253个载荷SHA逐项核验；不含模型权重或`.pt`。
+V4历史证据位于 [formal-v4-manifest.json](evidence_tnd_precision/current_full_precision/formal-v4-manifest.json)，schema v2，identity FormalV4。三份压缩原始包约4.27MB：实际mixed21 source/helper/数值报告、8K全部16rank结果/Native gold/历史Native性能窗、128K同类完整数据。共253个载荷SHA逐项核验；不含模型权重或`.pt`。
 
 新增 [CPU证据测试](test_full_precision_current_evidence_cpu.py)直接重读raw token/events、实际PTO替换/图捕获资格、43个当前源SHA和完整helper身份，并重新计算maxrank时延。它是保存证据的CPU重放，不是一次新的NPU数值测试。WKV/Oproj/Indexer原校准表及历史raw源锁定仍保留，没有降低数值验收阈值。
 

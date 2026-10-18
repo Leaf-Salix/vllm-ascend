@@ -1,4 +1,4 @@
-"""Prepare a fresh FormalV4 job using only verified files; never run NPU work."""
+"""Prepare a fresh pinned formal job using only verified files; never run NPU work."""
 
 import argparse
 import hashlib
@@ -11,6 +11,24 @@ HELPER_SHA = "b52d07a160c144704e2cf9def48a03ee5706efd9f155a1765515548d3eb1e24a"
 OLD_JOB = "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-overnight-20261019/whole-formal-v4"
 OLD_REL = "$base/precision-overnight-20261019/whole-formal-v4"
 OLD_OUT = "/data/pyptouser/yejia/lc128/perf-overnight-formal-v4-$case_name-$backend-20261019"
+
+
+PROFILES = {
+    "v4": {
+        "source_sha": SOURCE_SHA,
+        "helper_sha": HELPER_SHA,
+        "old_job": OLD_JOB,
+        "job_expression": OLD_REL,
+        "old_output": OLD_OUT,
+    },
+    "v6": {
+        "source_sha": "6d9656de4580ba5f768881c417f3093a7744808ac6518c594e9db881971e7ab2",
+        "helper_sha": "6e3d416475783fd7ceb77154c7a5fb69f17418c30f97563c970d23dead792f1f",
+        "old_job": OLD_JOB.replace("whole-formal-v4", "whole-formal-v6"),
+        "job_expression": OLD_JOB.replace("whole-formal-v4", "whole-formal-v6"),
+        "old_output": OLD_OUT.replace("formal-v4", "formal-v6"),
+    },
+}
 
 
 def sha(path):
@@ -35,7 +53,10 @@ def replace(text, old, new, count):
     return text.replace(old, new)
 
 
-def prepare(reference, destination, label, source_sha=SOURCE_SHA, helper_sha=HELPER_SHA):
+def prepare(reference, destination, label, source_sha=None, helper_sha=None, profile="v4"):
+    selected = PROFILES[profile]
+    source_sha = selected["source_sha"] if source_sha is None else source_sha
+    helper_sha = selected["helper_sha"] if helper_sha is None else helper_sha
     reference = reference.resolve(strict=True)
     destination = destination.absolute()
     if destination.resolve() != destination:
@@ -57,7 +78,7 @@ def prepare(reference, destination, label, source_sha=SOURCE_SHA, helper_sha=HEL
     hm = reference / "helper-manifest.json"
     sm = reference / "snapshot/manifest.json"
     if sha(hm) != helper_sha or sha(sm) != source_sha:
-        raise ValueError("reference manifest is not the pinned FormalV4 checkpoint")
+        raise ValueError("reference manifest is not the pinned checkpoint for this profile")
     helpers = json.loads(hm.read_text())["files"]
     sources = json.loads(sm.read_text())["files"]
     # Validate everything before creating the destination. No recursive copy.
@@ -66,11 +87,11 @@ def prepare(reference, destination, label, source_sha=SOURCE_SHA, helper_sha=HEL
     for name, digest in sources.items():
         checked(reference / "snapshot/source", name, digest)
     texts = {name: (reference / name).read_text() for name in ("env.sh", "preflight.sh", "run-case.sh")}
-    texts["env.sh"] = replace(texts["env.sh"], OLD_REL, str(destination), 3)
-    texts["preflight.sh"] = replace(texts["preflight.sh"], OLD_JOB, str(destination), 1)
-    texts["run-case.sh"] = replace(texts["run-case.sh"], OLD_REL, str(destination), 1)
+    texts["env.sh"] = replace(texts["env.sh"], selected["job_expression"], str(destination), 3)
+    texts["preflight.sh"] = replace(texts["preflight.sh"], selected["old_job"], str(destination), 1)
+    texts["run-case.sh"] = replace(texts["run-case.sh"], selected["job_expression"], str(destination), 1)
     out = f"/data/pyptouser/yejia/lc128/perf-{label}-$case_name-$backend"
-    texts["run-case.sh"] = replace(texts["run-case.sh"], OLD_OUT, out, 1)
+    texts["run-case.sh"] = replace(texts["run-case.sh"], selected["old_output"], out, 1)
     # Existing output dirs would fail mkdir at runtime; reject them now as well.
     for case in ("8k", "128k"):
         for backend in ("native", "pto"):
@@ -95,7 +116,8 @@ def prepare(reference, destination, label, source_sha=SOURCE_SHA, helper_sha=HEL
     for name, text in texts.items():
         (destination / name).write_text(text)
     record = {
-        "identity": "FormalV4",
+        "identity": "Formal" + profile.upper(),
+        "profile": profile,
         "reference_job": str(reference),
         "destination": str(destination),
         "label": label,
@@ -126,8 +148,9 @@ def main():
     parser.add_argument("--reference-job", required=True, type=Path)
     parser.add_argument("--destination", required=True, type=Path)
     parser.add_argument("--label", required=True)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="v4")
     args = parser.parse_args()
-    prepare(args.reference_job, args.destination, args.label)
+    prepare(args.reference_job, args.destination, args.label, profile=args.profile)
 
 
 if __name__ == "__main__":
