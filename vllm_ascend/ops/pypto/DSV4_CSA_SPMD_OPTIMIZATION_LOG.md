@@ -17999,3 +17999,33 @@ padding四次重放也通过；empty-rank、mixed-query和连续轨迹未在此�
 AST与被测快照一致，七档和S1/S5默认constexpr逐项相同；采纳时只改Host默认
 选择、完善中文总览并删无用import。没有启用失败的Attention索引缓存，也未
 更改共享依赖。证据/采纳审查/失败记录均在cooperative_prefix_evidence。
+
+### 2026-10-18：协同前段新端点完成；NZ写回负例收口
+
+任务task_20261018_163026_21993375548 exit0，新默认动态与历史静态完整数值、
+状态、图和保护检查通过。Score AIV完成端点514.36/514.62μs，Top-K
+534.60/526.60μs，Attention729.58/694.16μs，OB846.98/812.62μs。
+动态1619/静态794条时钟，扰动不等量，不能把端点差精确拆成完整L1收益。
+证据在cooperative_prefix_evidence/h131072_b16_phase_alignment_v1。
+
+Score转置+NZ写回task_20261018_165718_32204744106 exit0，完整原PTO精确、
+Top-K/score、状态、A→B→A、图和保护检查通过。同进程五窗完整L1：原多task
+884.40，正式动态855.58，候选1412.62μs，回退65.11%，不采用、不扩七档。
+候选同时改变转置数据流与AIV布局读取，不能将整层回退全归因于NZ store。
+测试侧hook只换16个匹配的Score Acc写回，不改共享编译器。API只读限制
+另提PyPTO #3036（无标签、无PR），已向issue补充负收益终态，不宣称必要bug
+或加速。全部尝试、最小复现、源/结果/回读在score_nz_writeback_evidence。
+
+### 2026-10-18：继续抓大放小，恢复静态已有的动态行依赖
+
+Score端点已接近静态，优先处理Top-K→plan→Attention仍扩大的区间。
+新候选从正式ops动态源修改：Top-K按实际query根获取Score writer，八行plan
+只等对应Top-K行，Attention只等本组q=group+k*24的plan owner；不固化
+sample，不改数学/页保护/FFTS，不省业务缓存获取，原共享cache依赖保留。
+原静态row_dependencies同样收窄这些边，本次把映射改为实际device group
+前缀、有效根数和动态T；B16/G6每query根只有3个不同AIV写者，旧版等48个。
+
+107457项根依赖、4992项plan依赖、600项mixed映射离线检查通过；数学AST
+和未涉及模块逐字核对通过。完整CPU保留58动态轴、130根、一个MIX，通过。
+已提128K/B16、128K/B28、8K/B32三个代表任务，暂未记设备或性能PASS；
+记录在attention_dependency_evidence。目标仍0/7，不重跑已完成的旧版验证。

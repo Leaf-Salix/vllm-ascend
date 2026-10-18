@@ -88,3 +88,9 @@ S1/S5首轮在argparse阶段遗漏bootstrap追加的 `--device`，两任务exit2
 测试脚本问题，记录在 `query_cli_v1_failure`、`query_import_v2_failure`。
 第三轮保存原纯Native入参绑定函数到 `query_inputs.py` 后完成上述回归。
 没有将这些失败登记成PyPTO/Simpler/PTOAS问题，没有修改依赖仓。
+
+## 新默认版本的静态配对诊断终态
+
+任务 `task_20261018_163026_21993375548` 已 exit0，完整数值、状态、A→B→A、图和保护检查通过。新动态/静态三轮完成端点中位：Score AIV 514.36/514.62 μs，Top-K 534.60/526.60 μs，Attention AIV 729.58/694.16 μs，OB 846.98/812.62 μs。原始时钟、报告见 `h131072_b16_phase_alignment_v1/`。Score剩余差距已很小，后续优先处理Top-K、plan和Attention。
+
+动态1619条/静态794条时钟记录，探针扰动不等量；这些是阶段完成时刻，不能当作纯计算耗时或相对静态的完整L1成绩。此前CURRENT_STATE中的running已更新为终态，不重复七档和S1/S5验证。

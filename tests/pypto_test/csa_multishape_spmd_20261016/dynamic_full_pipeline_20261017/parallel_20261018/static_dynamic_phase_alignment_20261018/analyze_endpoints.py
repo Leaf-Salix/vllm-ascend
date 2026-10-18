@@ -27,7 +27,7 @@ ENDPOINTS = (
 )
 
 
-def analyze(directory):
+def analyze(directory, task_id="task_20261018_152604_395917310445"):
     """读取冻结的原始时钟；保留所有轮次，不挑选较快样本。"""
     result = json.loads((directory / "result.json").read_text())
     assert result["passed"] and result["full_csa_validated"]
@@ -71,7 +71,7 @@ def analyze(directory):
         })
     report = {
         "result": str(directory / "result.json"),
-        "task_id": "task_20261018_152604_395917310445",
+        "task_id": task_id,
         "eligible_for_performance": False,
         "input_sequence": result["input_sequence"],
         "clock_records_per_round": {
@@ -81,7 +81,7 @@ def analyze(directory):
             "只诊断128K/B16/S6，不外推其它档位；基于正式权重与合成历史。",
             "时刻从各侧最早BEGIN发布点起算，包含核启动偏斜，未测完整L1。",
             "两侧每次发布都加相同四字时钟，但发布次数不同，扰动不等量。",
-            "端点差含计算、等待、搬运、缓存维护和插桩，不能精确拆分未插桩的96.62微秒。",
+            "端点差含计算、等待、搬运、缓存维护和插桩，不能作为未插桩完整L1差值的精确拆分。",
             "静态Attention AIC、最终HC_post没有完整发布端点，未填造其耗时。",
             "本次只有完成端点；不能区分Attention的入场等待与核内流水各占多少。",
         ],
@@ -93,7 +93,7 @@ def analyze(directory):
     lines = [
         "# 静态/动态 CSA 阶段完成端点对齐",
         "",
-        "任务 `task_20261018_152604_395917310445`，128K/B16/S6，A→B→A 三轮。",
+        f"任务 `{task_id}`，128K/B16/S6，A→B→A 三轮。",
         "完整数值、Top-K、score、cache/state、图重放和原有保护检查通过。",
         "以下为插桩完成时刻，不是阶段净耗时，也不是完整 L1 性能。",
         "",
@@ -120,6 +120,7 @@ def analyze(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--task-id", default="task_20261018_152604_395917310445")
     arguments = parser.parse_args()
-    summary = analyze(arguments.directory.resolve())
+    summary = analyze(arguments.directory.resolve(), arguments.task_id)
     print(json.dumps({"endpoints": len(summary["endpoints"]), "eligible_for_performance": False}))

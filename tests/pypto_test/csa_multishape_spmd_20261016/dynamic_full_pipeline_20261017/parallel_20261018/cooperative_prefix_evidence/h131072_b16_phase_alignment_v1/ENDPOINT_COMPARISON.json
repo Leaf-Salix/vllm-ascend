@@ -1,0 +1,241 @@
+{
+  "result": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/cooperative_prefix_evidence/h131072_b16_phase_alignment_v1/result.json",
+  "task_id": "task_20261018_163026_21993375548",
+  "eligible_for_performance": false,
+  "input_sequence": [
+    "A",
+    "B",
+    "A"
+  ],
+  "clock_records_per_round": {
+    "spmd_reference": [
+      1619,
+      1619,
+      1619
+    ],
+    "static_reference": [
+      794,
+      794,
+      794
+    ]
+  },
+  "limitations": [
+    "只诊断128K/B16/S6，不外推其它档位；基于正式权重与合成历史。",
+    "时刻从各侧最早BEGIN发布点起算，包含核启动偏斜，未测完整L1。",
+    "两侧每次发布都加相同四字时钟，但发布次数不同，扰动不等量。",
+    "端点差含计算、等待、搬运、缓存维护和插桩，不能作为未插桩完整L1差值的精确拆分。",
+    "静态Attention AIC、最终HC_post没有完整发布端点，未填造其耗时。",
+    "本次只有完成端点；不能区分Attention的入场等待与核内流水各占多少。"
+  ],
+  "endpoints": [
+    {
+      "label": "HC 线性投影",
+      "dynamic_phase": "PARTIAL",
+      "static_kernel": "hc_pre_linear",
+      "dynamic_samples_us": [
+        42.72,
+        43.54,
+        40.86
+      ],
+      "static_samples_us": [
+        40.02,
+        40.14,
+        39.56
+      ],
+      "dynamic_median_us": 42.72,
+      "static_median_us": 40.02,
+      "difference_of_medians_us": 2.6999999999999957,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "HC 归一化输出",
+      "dynamic_phase": "NORM",
+      "static_kernel": "mix_x_rms_norm",
+      "dynamic_samples_us": [
+        65.03999999999999,
+        66.26,
+        63.06
+      ],
+      "static_samples_us": [
+        70.24,
+        68.2,
+        68.22
+      ],
+      "dynamic_median_us": 65.03999999999999,
+      "static_median_us": 68.22,
+      "difference_of_medians_us": -3.180000000000007,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "QA 投影",
+      "dynamic_phase": "QA",
+      "static_kernel": "qr_proj_matmul",
+      "dynamic_samples_us": [
+        84.69999999999999,
+        85.58,
+        82.22
+      ],
+      "static_samples_us": [
+        93.89999999999999,
+        91.98,
+        91.48
+      ],
+      "dynamic_median_us": 84.69999999999999,
+      "static_median_us": 91.98,
+      "difference_of_medians_us": -7.280000000000015,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Indexer query RoPE",
+      "dynamic_phase": "IDX_QUERY_ROPE",
+      "static_kernel": "idx_qr_dequant_rope",
+      "dynamic_samples_us": [
+        173.44,
+        177.76,
+        174.12
+      ],
+      "static_samples_us": [
+        179.9,
+        178.44,
+        180.9
+      ],
+      "dynamic_median_us": 174.12,
+      "static_median_us": 179.9,
+      "difference_of_medians_us": -5.780000000000001,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Indexer query 量化",
+      "dynamic_phase": "IDX_QUERY_QUANT",
+      "static_kernel": "qr_hadamard_quant",
+      "dynamic_samples_us": [
+        249.20000000000002,
+        251.08,
+        244.66
+      ],
+      "static_samples_us": [
+        263.0,
+        254.85999999999999,
+        257.62
+      ],
+      "dynamic_median_us": 249.20000000000002,
+      "static_median_us": 257.62,
+      "difference_of_medians_us": -8.419999999999987,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "主 QB 投影",
+      "dynamic_phase": "QB",
+      "static_kernel": "qproj_matmul",
+      "dynamic_samples_us": [
+        253.1,
+        254.74,
+        250.46
+      ],
+      "static_samples_us": [
+        264.15999999999997,
+        260.04,
+        262.7
+      ],
+      "dynamic_median_us": 253.1,
+      "static_median_us": 262.7,
+      "difference_of_medians_us": -9.599999999999994,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Indexer Score AIC",
+      "dynamic_phase": "SCORE_CUBE",
+      "static_kernel": "indexer_score_topk_native_pair_aic",
+      "dynamic_samples_us": [
+        508.42,
+        517.56,
+        507.78
+      ],
+      "static_samples_us": [
+        509.92,
+        514.44,
+        509.86
+      ],
+      "dynamic_median_us": 508.42,
+      "static_median_us": 509.92,
+      "difference_of_medians_us": -1.5,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Indexer Score AIV",
+      "dynamic_phase": "SCORE_VECTOR",
+      "static_kernel": "indexer_score_topk_native_pair_aiv",
+      "dynamic_samples_us": [
+        514.36,
+        523.48,
+        512.46
+      ],
+      "static_samples_us": [
+        514.62,
+        517.96,
+        514.1
+      ],
+      "dynamic_median_us": 514.36,
+      "static_median_us": 514.62,
+      "difference_of_medians_us": -0.2599999999999909,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Top-K 合并",
+      "dynamic_phase": "TOPK",
+      "static_kernel": "indexer_topk_query_merge__2",
+      "dynamic_samples_us": [
+        534.5999999999999,
+        544.58,
+        534.4200000000001
+      ],
+      "static_samples_us": [
+        526.88,
+        526.6,
+        521.58
+      ],
+      "dynamic_median_us": 534.5999999999999,
+      "static_median_us": 526.6,
+      "difference_of_medians_us": 7.999999999999886,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "Attention AIV",
+      "dynamic_phase": "ATTN_VECTOR",
+      "static_kernel": "qk_pv_aiv",
+      "dynamic_samples_us": [
+        729.5799999999999,
+        732.96,
+        725.6600000000001
+      ],
+      "static_samples_us": [
+        718.88,
+        694.1600000000001,
+        694.12
+      ],
+      "dynamic_median_us": 729.5799999999999,
+      "static_median_us": 694.1600000000001,
+      "difference_of_medians_us": 35.419999999999845,
+      "static_endpoint_complete": true
+    },
+    {
+      "label": "输出 OB 投影",
+      "dynamic_phase": "OB",
+      "static_kernel": "_proj_b_mm_nz_kernel__2",
+      "dynamic_samples_us": [
+        846.9799999999999,
+        850.1600000000001,
+        841.3000000000001
+      ],
+      "static_samples_us": [
+        835.6,
+        810.96,
+        812.62
+      ],
+      "dynamic_median_us": 846.9799999999999,
+      "static_median_us": 812.62,
+      "difference_of_medians_us": 34.3599999999999,
+      "static_endpoint_complete": true
+    }
+  ]
+}
