@@ -1,0 +1,11 @@
+--- a/include/pto/npu/a2a3/MGather.hpp
++++ b/include/pto/npu/a2a3/MGather.hpp
+@@ -307,6 +307,8 @@
+         constexpr uint32_t kColBlocks = kTileCols / kC0;
+         int64_t repeatConfig = (static_cast<int64_t>(kTileRows) << 16) | static_cast<int64_t>(kColBlocks);
+         pto_create_cbuf_matrix((__cbuf__ uint16_t*)dstPtr, repeatConfig, 0);
++        // ZERO initialization and ND2NZ write overlapping L1 rows; complete fill first.
++        pipe_barrier(PIPE_MTE2);
+     }
+ 
+     for (uint32_t r = 0; r < validRow; r++) {

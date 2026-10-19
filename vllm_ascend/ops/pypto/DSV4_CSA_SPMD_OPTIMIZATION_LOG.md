@@ -18909,3 +18909,86 @@ Flatten修复能完成整链不意味着这个算子写法有收益。正式仍2
 
 用户再次明确只允许push vllm-ascend；组件源码修改均保留独立本地工作区，
 上游仅按已有授权提交issue及建议patch，不提交代码PR或push组件分支。
+
+### 2026-10-19：当前前段与编译器下重新组合动态Score/Attention交错
+
+双行DMA的两种实现均精度通过却无收益，停止扩测。继续针对阶段级重叠：
+旧动态逐step交错曾889.96μs无收益，但该结果发生在前段协作与L1范围同步
+优化之前。本轮从正式289cc072进行三方迁移，复用原已验证的动态wave边界、
+root/TopK/plan独立槽及无环次序；保留原owner与数学，不改100tick退避。
+
+先生成冲突预览，再在正式动态文件解决调度接线并冻结44份候选源，随后
+恢复37份正式源。Cube/Vector的前段、非交错分支与输出后段AST同当前正式；
+交错仅在既有G6/N64/1024资源组合且device存在多个wave时启用，未写B白名单。
+交错helper暂保留旧逻辑plan、逐页scale、GM mi/li；当前三个访存优化只在
+非交错分支，不能把其constexpr存在当作交错已经受益。性能对比按整套组合
+实测，不以旧889.96减当前时延进行归因。
+
+CPU v1暴露旧helper需要core_group/subblock命名Scalar，当前入口已改用
+直接表达式的迁移遗漏；仅交错分支补同值别名，保留失败，不当组件bug。
+v2完整通过58动态轴/单MIX；无新依赖改动，使用原独立PyPTO及同一PTOAS v3。
+128K/B16唯一真机三方五窗已提交，额外检查metadata/padding和wave真实写者，
+尚无设备结论。过程score_attention_interleave_current_20261019；目标仍0/7。
+
+### 2026-10-19：交错流水迁移的原KV生产链遗漏定位与修复待验
+
+上一阶段两个诊断任务均已终态exit=1，本轮读取实际控制区获得新的定位证据。
+当前交错在首wave后停住：phase13/14从未发布，而首wave ROOT/TOPK/PLAN已完成；
+同工具链旧源码对照实际kernel结束，但新harness对旧policy的属性假设导致数值检查前退出，
+不记完整PASS。根因为协同前段把原KV后处理延后，迁移交错分支漏接该生产链。
+已在正式动态源码接线，再冻结E34/source_candidate_v2并恢复已采用源码；
+首wave Score完成并发布root后运行原KV norm/RoPE/cache，只执行一次且沿用真实owner
+与fence/cacheinvalid/notify。没有用虚假发布、放宽同步或省略计算绕过失败。
+该问题是算子迁移错误，不上报为组件bug。CPU及真机结果仍须实际验证。
+证据：score_attention_interleave_current_20261019/DEADLOCK_DIAGNOSIS.json。
+仓库范围：只push vllm-ascend；组件实现与commit继续留在独立本地worktree。
+
+### 2026-10-19：修复后的动态交错完整通过，但整层回退6.16%，不采用
+
+E34 CPU v4通过58动态轴/单MIX；task_20261019_104350_24961196376已exit0，
+完整A→B→A、输出/Top-K/score/cache/state、保护、metadata/padding及同址图、
+代际和真实wave写者均通过。此前原KV生产链遗漏已获得完整设备修复证据。
+同轮五窗原多task872.48μs、正式参考811.10μs、交错861.06μs，回退6.1595%；
+不采用、不扩七档。候选沿旧逐step逻辑plan和GM统计，不能把回退归因成
+所有交错方案或某一个成本；保持已采用的正式289cc072数学源。
+继续评估更大的访存路径变化：AIC直接GM→L1采集压缩KV，减少AIV→GM→AIC中转。
+E35只先检查动态三槽能力，没有把小探针当完整CSA性能证据。
+
+### 2026-10-19：直接GM→L1的能力核实、两项上游问题与完整动态候选
+
+E35实测Mat行MGATHER支持三槽动态携带；不同存储选成Mat phi会生成非法
+Mat→Mat TMOV。无MGATHER/GM子视图/循环的最小复现在未修改的上游
+72b7ffb9通过公开IR编译接口同样失败，已提PyPTO #3049，附代码与保留
+输入存活性的建议。算子暂把消费者留在各槽分支，不强行合并不同Mat地址。
+
+三槽原语真机发现部分非零值不稳定变零。定位PTO-ISA327cd5869的
+MGatherGm2L1RowImpl：ZERO先整块清零，后逐行ND2NZ写同一L1，二者之间无
+MTE2屏障。仅私有头文件副本补pipe_barrier(PIPE_MTE2)，三槽5/8步各A/B/A
+六项精确/保护/固定地址检查通过。另用不含GM子视图、循环或三槽的单Mat
+最小复现：原版12次差异数[0,0,1,4,3,2,0,0,0,0,0,0]，补屏障后12次均0。
+已提PTO-ISA #352，附完整脚本及最小patch。没有改共享安装、没有组件PR、
+没有组件代码push，也未添加label。源码/实际CCEC头文件路径有审计记录。
+
+E36已从正式动态源码接线完整CSA：共同physical-plan谓词控制AIV停止压缩块
+中转、AIC直接采集三个L1槽；SWA和所有FFTS事件计数/顺序保留，新增AIC
+对MAIN_OUTPUT真实写者的获取。入口不增加Host回读、不实值化T/B/metadata，
+保留全部原数学；默认开关关闭，仅私有三方对照开启。冻结后恢复正式37源。
+当前只进入完整CPU编译；原语通过不记作整层功能/精度/性能通过。30%仍0/7。
+
+### 2026-10-19：直接L1完整功能通过，耗时回退64.53%，冻结负例
+
+E36完整CPU on/large两个资源组合均通过58动态轴和一个MIX。B16设备任务
+402547725611 completed/exit0，A/B/A完整精度、cache/state、保护、metadata/
+padding及同址图、代际全部通过。五窗多task857.88、原单SPMD814.76、
+直接L1候选1340.56μs，回退64.5343%，不采用、不扩大设备规格。
+直接路径用AIC逐行ND2NZ替代双AIV并行采集与GM中转；少搬数据不等于更快。
+不移除原语已经证明必需的ZERO屏障，不把编译通过或子原语正确当性能收益。
+当前正式37份动态源码保持289cc072数学源，目标仍0/7。
+
+另查明E36 v1内嵌dim空SSA不是新的GM子视图问题：NEWP父工具链也失败，
+未修改72b7ffb9通过；本地基础缺PR #3013 FlattenCallExpr中保留Var/IterArg
+身份和类型表达式的两条VisitExpr覆写。已有上游修复，不重复报新issue。
+命名shape Scalar版本完整编译及真机均通过；未在运行任务中替换编译器二进制。
+
+本轮上游新增PyPTO #3049、PTO-ISA #352，仅issue和建议代码，无PR、无label。
+代码推送范围严格只有vllm-ascend；组件托管仓库、共享安装均未修改或push。
