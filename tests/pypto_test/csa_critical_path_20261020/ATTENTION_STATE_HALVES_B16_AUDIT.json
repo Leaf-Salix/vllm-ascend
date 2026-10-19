@@ -1,0 +1,82 @@
+{
+  "passed": true,
+  "compile_dir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/cpu_attention_state_halves_b16_v1",
+  "ir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/cpu_attention_state_halves_b16_v1/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/cpu_attention_state_halves_b16_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "vec_bytes": 182016,
+  "vec_limit": 188416,
+  "kv": {
+    "name": "kv_dma_buffer_inline1206__ssa_v0",
+    "memory": [
+      "mem_vec_1709",
+      5120,
+      65536
+    ],
+    "line": 13552,
+    "operation": "pl.tile.create([64, 512], dtype=pl.BF16, target_memory=pl.Mem.Vec)"
+  },
+  "fallback": {
+    "memory": [
+      "mem_vec_1709",
+      5120,
+      65536
+    ],
+    "line": 13620,
+    "operation": "pl.tile.fillpad_inplace(kv_empty_inline1157__ssa_v0, pad_value=pl.PadValue.zero)"
+  },
+  "zero_view": {
+    "memory": [
+      "mem_vec_1709",
+      5120,
+      65536
+    ],
+    "line": 13617,
+    "operation": "pl.tile.set_validshape(kv_dma_buffer_inline1206__ssa_v0, 0, 512)"
+  },
+  "states": {
+    "left0": {
+      "initial": "running_left0_inline1127__ssa_v0",
+      "updated": "next_left0_inline1208__ssa_v0",
+      "memory": [
+        "mem_vec_1861",
+        83712,
+        16384
+      ]
+    },
+    "left1": {
+      "initial": "running_left1_inline1121__ssa_v0",
+      "updated": "next_left1_inline1161__ssa_v0",
+      "memory": [
+        "mem_vec_1861",
+        100096,
+        16384
+      ]
+    },
+    "right0": {
+      "initial": "running_right0_inline1142__ssa_v0",
+      "updated": "next_right0_inline1189__ssa_v0",
+      "memory": [
+        "mem_vec_1862",
+        116480,
+        16384
+      ]
+    },
+    "right1": {
+      "initial": "running_right1_inline1111__ssa_v0",
+      "updated": "next_right1_inline1118__ssa_v0",
+      "memory": [
+        "mem_vec_1862",
+        132864,
+        16384
+      ]
+    }
+  },
+  "full_32head_state_copies": [],
+  "math_kv_overlap": [],
+  "softmax_reduction_count": 2,
+  "hardware_fillpad_inplace": true,
+  "single_mix": true,
+  "dynamic_axes": 58,
+  "device_validated": false,
+  "note": "地址/代码机制审计；真实页保护、舍入、同步与完整L1须设备验证"
+}

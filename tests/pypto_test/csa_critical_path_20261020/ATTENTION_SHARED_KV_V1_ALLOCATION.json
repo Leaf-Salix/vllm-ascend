@@ -1,0 +1,46 @@
+{
+  "source": "tests/pypto_test/csa_critical_path_20261020/cpu_attention_shared_kv_b28_v1/kernel/passes_dump/37_after_MemoryReuse.py",
+  "vec_color_bytes": {
+    "mem_vec_1736": 65536,
+    "mem_vec_1731": 4096,
+    "mem_vec_1732": 128,
+    "mem_vec_1733": 128,
+    "mem_vec_1734": 32768,
+    "mem_vec_1735": 32768,
+    "mem_vec_1786": 32768,
+    "mem_vec_1787": 32768,
+    "mem_vec_1778": 128,
+    "mem_vec_1780": 128,
+    "mem_vec_1782": 128,
+    "mem_vec_1785": 128
+  },
+  "sum": 201472,
+  "selected": {
+    "kv_dma_buffer_inline1108__ssa_v0": {
+      "root": "mem_vec_1736",
+      "bytes": 65536,
+      "operation": "pl.tile.create([64, 512], dtype=pl.BF16, target_memory=pl.Mem.Vec)"
+    },
+    "pv_left_inline1088__ssa_v0": {
+      "root": "mem_vec_1786",
+      "bytes": 32768,
+      "operation": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1167__ssa_v0 + qk_lane_head_inline1138__ssa_v0, 0], [32, 256], [32, 256], target_memory=pl.Mem.Vec)"
+    },
+    "pv_right_inline1156__ssa_v0": {
+      "root": "mem_vec_1786",
+      "bytes": 32768,
+      "operation": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1167__ssa_v0 + qk_lane_head_inline1138__ssa_v0, 256], [32, 256], [32, 256], target_memory=pl.Mem.Vec)"
+    },
+    "kv_empty_inline1091__ssa_v0": {
+      "root": "mem_vec_1736",
+      "bytes": 65536,
+      "operation": "pl.tile.set_validshape(kv_dma_buffer_inline1108__ssa_v0, 0, 512)"
+    },
+    "qk_kv_half_inline1116__ssa_v0": {
+      "root": "mem_vec_1736",
+      "bytes": 65536,
+      "operation": "pl.tile.fillpad_inplace(kv_empty_inline1091__ssa_v0, pad_value=pl.PadValue.zero)"
+    }
+  },
+  "device_tested": false
+}

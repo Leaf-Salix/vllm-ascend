@@ -117,3 +117,12 @@ Q_B流式驻留候选终态：完整精确/状态/保护/metadata/padding/图/�
 同轮五窗正式1198.38→候选1198.84μs，净省-0.46μs，3/5窗较快，未达
 20μs门槛。结束、不采用、不扩档。完整数据见QB_STREAM_PERFORMANCE.json。
 B16关闭版代码相同，未重复设备测试，正式E49和依赖仓均未改。
+
+## Attention独立64KiB供数与四半段在线状态已结束
+
+旧64KiB方案的201472B资源失败经共址KV/分拆oi状态解决，两档UB最终
+181248/182016B，低于188416B；完整动态精确、状态、保护、metadata/
+padding图和代际通过。完整L1却无收益：B16正式827.00→候选827.60μs，
+B28为1198.26→1203.52μs，各仅1/5窗较快，未达20μs门槛。
+结束、不采用、不扩档。完整记录见ATTENTION_SHARED_KV_DESIGN.md，
+三方五窗见ATTENTION_STATE_HALVES_PERFORMANCE.json，正式E49不变。

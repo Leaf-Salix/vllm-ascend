@@ -1,0 +1,219 @@
+{
+  "ir": "tests/pypto_test/csa_critical_path_20261020/cpu_attention_state_halves_b28_v1/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "index_name": "index_values_inline4182__ssa_v0",
+  "index_memory": [
+    "mem_vec_1889",
+    149504,
+    256
+  ],
+  "shared_operations": [
+    {
+      "name": "qk_reduce_tmp_inline1165__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.create([32, 128], dtype=pl.FP32, target_memory=pl.Mem.Vec)"
+    },
+    {
+      "name": "qk_probability_inline1176__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        8192
+      ],
+      "op": "pl.tile.cast(qk_exp_inline1174__ssa_v0, target_type=pl.BF16, mode='rint')"
+    },
+    {
+      "name": "pv_left0_inline1210__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1203__ssa_v0 + qk_lane_head_inline1119__ssa_v0, 0], [16, 256], [16, 256], target_memory=pl.Mem.Vec)"
+    },
+    {
+      "name": "t__tmp_v785",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_mul(pv_left0_inline1210__ssa_v0, merge_beta0_inline1139__ssa_v0)"
+    },
+    {
+      "name": "pv_right0_inline1151__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1203__ssa_v0 + qk_lane_head_inline1119__ssa_v0, 256], [16, 256], [16, 256], target_memory=pl.Mem.Vec)"
+    },
+    {
+      "name": "t__tmp_v787",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_mul(pv_right0_inline1151__ssa_v0, merge_beta0_inline1139__ssa_v0)"
+    },
+    {
+      "name": "pv_left1_inline1213__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1203__ssa_v0 + qk_lane_head_inline1119__ssa_v0 + 16, 0], [16, 256], [16, 256], target_memory=pl.Mem.Vec)"
+    },
+    {
+      "name": "t__tmp_v793",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_mul(pv_left1_inline1213__ssa_v0, merge_beta1_inline1190__ssa_v0)"
+    },
+    {
+      "name": "pv_right1_inline1215__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.load(pv_ring__ssa_v0, [pv_transfer_row_inline1203__ssa_v0 + qk_lane_head_inline1119__ssa_v0 + 16, 256], [16, 256], [16, 256], target_memory=pl.Mem.Vec)"
+    },
+    {
+      "name": "t__tmp_v795",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_mul(pv_right1_inline1215__ssa_v0, merge_beta1_inline1190__ssa_v0)"
+    },
+    {
+      "name": "n_left_inline1084__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_div(m_left_inline1087__ssa_v0, n_denom_inline1141__ssa_v0)"
+    },
+    {
+      "name": "n_right_inline1082__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_div(m_right_inline1214__ssa_v0, n_denom_inline1141__ssa_v0)"
+    },
+    {
+      "name": "t__tmp_v805",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        4096
+      ],
+      "op": "pl.tile.col_expand_mul(m_rope_inline1170__ssa_v0_textract, m_cos_il_inline1081__ssa_v0)"
+    },
+    {
+      "name": "m_rot_inline1077__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        4096
+      ],
+      "op": "pl.tile.add(t__tmp_v805, t__tmp_v806)"
+    },
+    {
+      "name": "n_rope_bf16_inline1076__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        2048
+      ],
+      "op": "pl.tile.cast(m_rot_inline1077__ssa_v0, target_type=pl.BF16, mode='rint')"
+    },
+    {
+      "name": "n_full_bf16_inline1073__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.concat(n_left_bf16_inline1083__ssa_v0, n_right_rotated_inline1075__ssa_v0)"
+    },
+    {
+      "name": "n_left_inline1084__ssa_v1",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_div(m_left_inline1087__ssa_v4, n_denom_inline1141__ssa_v1)"
+    },
+    {
+      "name": "n_right_inline1082__ssa_v1",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.row_expand_div(m_right_inline1214__ssa_v4, n_denom_inline1141__ssa_v1)"
+    },
+    {
+      "name": "t__tmp_v816",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        4096
+      ],
+      "op": "pl.tile.col_expand_mul(m_rope_inline1170__ssa_v1_textract, m_cos_il_inline1081__ssa_v1)"
+    },
+    {
+      "name": "m_rot_inline1077__ssa_v1",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        4096
+      ],
+      "op": "pl.tile.add(t__tmp_v816, t__tmp_v817)"
+    },
+    {
+      "name": "n_rope_bf16_inline1076__ssa_v1",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        2048
+      ],
+      "op": "pl.tile.cast(m_rot_inline1077__ssa_v1, target_type=pl.BF16, mode='rint')"
+    },
+    {
+      "name": "n_full_bf16_inline1073__ssa_v1",
+      "memory": [
+        "mem_vec_1889",
+        148480,
+        16384
+      ],
+      "op": "pl.tile.concat(n_left_bf16_inline1083__ssa_v1, n_right_rotated_inline1075__ssa_v1)"
+    },
+    {
+      "name": "index_values_inline4182__ssa_v0",
+      "memory": [
+        "mem_vec_1889",
+        149504,
+        256
+      ],
+      "op": "pl.tile.load(attention_indices__ssa_v1, [qk_t_inline1107__ssa_v0, physical_column_inline1106__ssa_v0], [1, 64], [1, 64], target_memory=pl.Mem.Vec)"
+    }
+  ],
+  "note": "物理复用事实，不证明具体事件等待耗时；不改运行中的候选"
+}
