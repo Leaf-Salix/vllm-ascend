@@ -342,18 +342,36 @@ def test_kv_actual_slot_expressions_lifetimes_and_L1_capacity():
     qloop = next(n for n in ast.walk(actual) if isinstance(n, ast.For) and ast.unparse(n.target) == "qk_part")
     ploop = next(n for n in ast.walk(actual) if isinstance(n, ast.For) and ast.unparse(n.target) == "pv_part")
     assert evaluate(qloop.iter.args[0]) == evaluate(ploop.iter.args[0]) == 4
-    reload_if = next(n for n in ploop.body if isinstance(n, ast.If))
-    for token in range(256):
-        slots = [None] * 3
-        for part in range(4):
-            row = evaluate(byname["qk_slot_row"], qk_part=part)
-            assert row % 128 == 0 and row + 128 <= kvshape[0]
-            slots[row // 128] = (token, part)
-        assert slots[1:] == [(token, 2), (token, 3)]
-        for part in range(4):
-            row = evaluate(byname["pv_slot_row"], pv_part=part)
-            if evaluate(reload_if.test, pv_part=part):
+    qk_guard = next(n for n in qloop.body if isinstance(n, ast.If))
+    pv_guard = next(n for n in ploop.body if isinstance(n, ast.If))
+    reload_if = next(n for n in pv_guard.body if isinstance(n, ast.If))
+    pv_update = next(
+        n.value
+        for n in ast.walk(ploop)
+        if isinstance(n, ast.Assign)
+        and isinstance(n.value, ast.Call)
+        and isinstance(n.value.func, ast.Attribute)
+        and n.value.func.attr == "matmul_acc"
+    )
+    init_cond = next(k.value for k in pv_update.keywords if k.arg == "init_cond")
+    # Exercise both SWA and compressed guards from the actual source. QK still
+    # loads all four KV panels; only selected products/PV reloads are skipped.
+    for sb in (0, 1, 2):
+        qk_parts = [part for part in range(4) if evaluate(qk_guard.test, qk_sb=sb, qk_part=part)]
+        pv_parts = [part for part in range(4) if evaluate(pv_guard.test, qk_sb=sb, pv_part=part)]
+        assert qk_parts == pv_parts == ([0] if sb == 0 else [0, 1, 2, 3])
+        assert [evaluate(init_cond, pv_part=part) for part in pv_parts] == [True] + [False] * (len(pv_parts) - 1)
+        for token in range(256):
+            slots = [None] * 3
+            for part in range(4):
+                row = evaluate(byname["qk_slot_row"], qk_part=part)
+                assert row % 128 == 0 and row + 128 <= kvshape[0]
                 slots[row // 128] = (token, part)
-            assert slots[row // 128] == (token, part)
+            assert slots[1:] == [(token, 2), (token, 3)]
+            for part in pv_parts:
+                row = evaluate(byname["pv_slot_row"], pv_part=part)
+                if evaluate(reload_if.test, pv_part=part):
+                    slots[row // 128] = (token, part)
+                assert slots[row // 128] == (token, part)
     # Logical memory budget and ownership only; backend addresses/fences require
     # source-bound generated-code review and NPU evidence, not this CPU mock.

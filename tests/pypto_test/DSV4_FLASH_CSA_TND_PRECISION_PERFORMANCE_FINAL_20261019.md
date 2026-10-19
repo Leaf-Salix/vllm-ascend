@@ -107,7 +107,7 @@ HC内部widen为109.26～135.30µs，input-pack为119.18～156.08µs，M64 linea
 
 ## 证据、复现与校验
 
-当前证据见 [V6验收manifest](evidence_tnd_precision/current_full_precision/manifest.json)；原V4独立保存在 [V4 manifest](evidence_tnd_precision/current_full_precision/formal-v4-manifest.json)。原始包包含16rank结果、Native黄金token/事件、历史Native性能窗、实际43源码/完整快照清单、受哈希校验的助手；不含模型权重或`.pt`。
+当前证据见 [V6验收manifest](evidence_tnd_precision/current_full_precision/formal-v6-manifest.json)；原V4独立保存在 [V4 manifest](evidence_tnd_precision/current_full_precision/formal-v4-manifest.json)。原始包包含16rank结果、Native黄金token/事件、历史Native性能窗、实际43源码/完整快照清单、受哈希校验的助手；不含模型权重或`.pt`。
 
 - [V6 mixed索引](evidence_tnd_precision/current_full_precision/formal-v6-mixed-index.json)、[8K索引](evidence_tnd_precision/current_full_precision/formal-v6-8k-index.json)、[128K索引](evidence_tnd_precision/current_full_precision/formal-v6-128k-index.json)。
 - [单因素、实际编译和三方证据](evidence_tnd_precision/current_full_precision/formal-v6-tuning-index.json)。模块私有候选证据与正式V6源绑定验收分层保存，不将中间候选冒称最终源码测试。
@@ -131,3 +131,7 @@ python -m pytest -q \
 最终增量pre-commit及三份相关Markdown检查均通过。隔离全仓 `format.sh ci` 仍有与干净V4/旧基线相同的8类既有失败、575条相同Ruff记录，本轮文件无新增诊断；不将其报告为全仓CI通过。
 
 本轮正式整模型任务为8K `task_20261019_064154_8716615272`、128K `task_20261019_065130_4934354508`，均正常退出，约9分钟；各小任务独立提交，均限780秒。性能变化仍需在其它batch、模型/硬件以及EPLB等配置下另测，不将这两档外推为完整服务性能结论。
+
+## 后续SWA单因素优化
+
+本页V6历史结果与证据保持不变。后续SWA候选的测量、两档精度、性能限制和 `--profile swa128` 复现见 [QK/PV与SWA报告](DSV4_FLASH_CSA_TND_QKPV_SWA_PRECISION_OPTIMIZATION_20261019.md)。128K cycle均值仍有0.85%回退，不能概括为整模型普遍提速。

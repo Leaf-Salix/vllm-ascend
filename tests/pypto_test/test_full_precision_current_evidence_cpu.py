@@ -4,9 +4,11 @@
 This verifies recorded acceptance evidence; it does not execute PTO numerics.
 """
 
+import ast
 import hashlib
 import json
 import math
+import runpy
 import statistics
 import tarfile
 from pathlib import Path
@@ -313,3 +315,122 @@ def test_saved_CPU_workload_geometry_and_maxrank_timing(case):
     for label, records in (("candidate", candidate), ("historical_native", native)):
         for kind in ("forward", "cycle"):
             assert run["recomputed"][label + "_" + kind + "_ms"] == pytest.approx(maxrank_ms(records, kind), rel=1e-12)
+
+
+def test_recorded_qkpv_single_factor_precision_and_paired_timings():
+    """Replay recorded provenance/timing arithmetic; does not execute PTO math."""
+    m = _manifest()
+    item = m["qkpv_swa"]
+    _artifact(item["archive"])
+    with tarfile.open(_EVIDENCE / item["archive"]["path"]) as bundle:
+        raw = lambda name: bundle.extractfile(name).read()
+        records = json.loads(raw("ARCHIVE_MANIFEST.json"))["files"]
+        for name, record in records.items():
+            assert _sha(raw(name)) == record["sha256"]
+        candidate_bytes = raw("candidate-swa-cube/candidate_sparse.py")
+        candidate_sha = "8f3ddd066cbf4f7111b554baaa0f3720f940c5db96bb32235cecdfad201ea20c"
+        assert _sha(candidate_bytes) == candidate_sha
+        candidate = candidate_bytes.decode()
+        candidate = candidate.replace(
+            "from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.config import (",
+            "from .config import (",
+        ).replace(
+            "from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.layout import ",
+            "from .layout import ",
+        )
+        formal = _ROOT / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision/decode_sparse_attn_csa.py"
+        assert _sha(formal.read_bytes()) == "248d8b11bb0a045f7863c0b264d962845dcabafa51cbf1e5fafee413fa8dc6d5"
+        assert ast.dump(ast.parse(candidate)) == ast.dump(ast.parse(formal.read_text()))
+        fields = ("mi", "li", "oi", "heads")
+        labels = {"Q_B_actual_input", "baseline.Native_heads", "candidate.Native_heads"}
+        labels.update(f"device_readonly.{i}" for i in range(12))
+        labels.update(
+            f"{arm}.{phase}.{field}"
+            for arm in ("baseline", "candidate")
+            for phase in ("raw_replay", "A_restored", "final_gold")
+            for field in fields
+        )
+        labels.update(
+            f"{phase}.{field}"
+            for phase in (
+                "A",
+                "B_Q_changed",
+                "Q_zero",
+                "A_restored",
+                "timing_round4",
+                "timing_round9",
+                "timing_round14",
+                "timing_round19",
+            )
+            for field in fields
+        )
+        boundaries = {
+            "x_out",
+            "idx_topk",
+            "swa.0",
+            "compressed.0",
+            "state.0",
+            "indexer.0",
+            "indexer.1",
+            "indexer_state.0",
+        }
+        for batch, capture_path in (
+            (4, "capture-b4-results/data/result.json"),
+            (40, "capture-b40-results/result.json"),
+        ):
+            capture = json.loads(raw(capture_path))
+            assert capture["pass"] and capture["complete"]
+            assert capture["true_tokens"] == batch * 6
+            assert set(capture["capture_matches_Native_FULL"]) == boundaries
+            assert all(row["bit_equal"] for row in capture["capture_matches_Native_FULL"].values())
+            for repetition in (1, 2):
+                prefix = "sparse-graph" + ("-b40" if batch == 40 else "")
+                result = json.loads(raw(f"{prefix}-results-r{repetition}/data/result.json"))
+                assert result["pass"] and result["complete"]
+                helper_dir = "sparse-graph-ab" + ("-b40" if batch == 40 else "")
+                assert _sha(raw(helper_dir + "/manifest.json")) == result["helper_manifest_sha"]
+                for provider in ("baseline_root", "candidate_root", "candidate_sparse"):
+                    assert (
+                        _sha(raw(helper_dir + "/" + provider + ".py")) == result["source_modules"][provider]["sha256"]
+                    )
+                expected_stats = (
+                    "eb43040864b3b1209d1533f8ce0f2de68b6cee6be322905f45fba6b44e82feb2"
+                    if batch == 4
+                    else "85b7fc7845dfe2b56e088db861c1277a26d0da16b233db25c73670c5a065bf1f"
+                )
+                assert result["stats_sha"] == expected_stats
+                assert result["source_modules"]["candidate_sparse"]["sha256"] == candidate_sha
+                baseline_source = "vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.decode_sparse_attn_csa"
+                assert (
+                    result["source_modules"][baseline_source]["sha256"]
+                    == "f5558603e25711de2a0ae9422dc62de977c36159c668f13d4451b176b9ca17c6"
+                )
+                assert {row["label"] for row in result["checks"]} == labels
+                assert not result["PMU"] and not result["DFX"] and not result["depgen"]
+                assert result["bank_sha"] == capture["captured_bank"]["sha256"]
+                assert len(result["checks"]) == 71 and all(row["bit_equal"] for row in result["checks"])
+                assert result["timing_rounds"] == 20 and result["replays_per_round"] == 100
+                baseline = result["timing_us"]["baseline"]
+                optimized = result["timing_us"]["candidate"]
+                assert len(baseline["samples"]) == len(optimized["samples"]) == 20
+                for arm in (baseline, optimized):
+                    assert all(math.isfinite(x) and x > 0 for x in arm["samples"])
+                    assert arm["mean"] == pytest.approx(statistics.mean(arm["samples"]), rel=1e-12)
+                gains = [100 * (a - b) / a for a, b in zip(baseline["samples"], optimized["samples"], strict=True)]
+                assert all(value > 0 for value in gains)
+                assert result["paired_speedup_percent"] == pytest.approx(gains, rel=1e-12)
+
+
+def test_swa_reproduction_profile_is_bound_to_actual_npu_package():
+    """The public replay command must select the recorded source and helpers."""
+    m = _manifest()
+    tool = _ROOT / "tests/pypto_test/prepare_tnd_precision_performance_repro.py"
+    profile = runpy.run_path(str(tool))["PROFILES"]["swa128"]
+    assert profile["source_sha"] == m["source_manifest_sha256"]
+    for run in m["whole_model"]:
+        _artifact(run["archive"])
+        with tarfile.open(_EVIDENCE / run["archive"]["path"]) as bundle:
+            cfg = json.load(bundle.extractfile("results/configuration.json"))
+        assert profile["helper_sha"] == cfg["helper_manifest_sha256"]
+        assert profile["old_job"] == str(Path(cfg["snapshot"]).parents[1])
+        assert profile["job_expression"] == profile["old_job"]

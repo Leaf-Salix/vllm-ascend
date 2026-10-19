@@ -28,6 +28,15 @@ PROFILES = {
         "job_expression": OLD_JOB.replace("whole-formal-v4", "whole-formal-v6"),
         "old_output": OLD_OUT.replace("formal-v4", "formal-v6"),
     },
+    "swa128": {
+        "source_sha": "639b1280dc682dad23195509ddd51970d0d16da55fa11efa302e9edc97da7e03",
+        "helper_sha": "7669087a700325b00ab64e145470f1ecc1e770998510f6a0f567f4c9c2c646ab",
+        "old_job": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/"
+        "qkpv-measurement-20261019-codex/whole-swa-cube-v2",
+        "job_expression": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/"
+        "qkpv-measurement-20261019-codex/whole-swa-cube-v2",
+        "old_output": "/data/pyptouser/yejia/lc128/perf-swa-cube-20261019-v2-$case_name-$backend",
+    },
 }
 
 

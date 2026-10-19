@@ -134,3 +134,7 @@ python3 "$AUDIT/independent8k.py" \
 只有8K审计退出0、`pass=true`且三轮全部验收后，才能用同样的task-submit选项提交`"bash $NEW/run-case.sh 128k pto"`，仍为独立780秒任务。128K完成后，使用同样审计参数调用新`independent128k_phase_matched.py`（不要误用保留原失败的`independent128k.py`），将root改为`...-128k-pto`，输出新`independent128k.json`。实际仍是24条提交、计时窗21并发的既有口径。没有定时调度，也不将两档合成长期占卡任务。
 
 阶段规则policy SHA：`fa3be8eebcde5fada53af07219431a1b1ea7949c89864348f154701bced86335`；新128K auditor SHA：`b5d38e84ad49093fdcbca471128f4c8809f6decd6b15ce3859219142d08e0244`。需保留同目录`phase-policy.json`，新脚本不会忽略input_ids。旧严格审计SHA：`544bc0a7935c5f403ae0ce74841fb637537d8dfaab63cde55216dca3b4934cbb`，原失败SHA：`04f9211f88f9ddb15443bef01dd02e71ecf56e1b026d57938aa5d8416dcf1c80`，均留存；独立review及对应raw差异随证据归档。只称first/repeated measured阶段，不归因为cold/init或首次capture。
+
+## 后续SWA单因素优化
+
+本页V6历史结果与证据保持不变。后续SWA候选的测量、两档精度、性能限制和 `--profile swa128` 复现见 [QK/PV与SWA报告](DSV4_FLASH_CSA_TND_QKPV_SWA_PRECISION_OPTIMIZATION_20261019.md)。128K cycle均值仍有0.85%回退，不能概括为整模型普遍提速。

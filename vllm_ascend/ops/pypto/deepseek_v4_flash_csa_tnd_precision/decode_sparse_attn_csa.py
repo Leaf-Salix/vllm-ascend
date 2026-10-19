@@ -376,12 +376,13 @@ def sparse_attn_csa(
                             [qk_kv_base + qk_col, 0],
                             [ATTN_CUBE_KV_TILE, HEAD_DIM],
                         )
-                        # Transpose the complete carrier before slicing: the current
-                        # backend preserves the slice's column offset in matmul.
-                        qk_l1_t = pl.tile.transpose_view(qk_l1)
-                        qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_CUBE_KV_TILE], [0, qk_slot_row])
-                        qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
-                        pl.store(qk_scores, [qk_head_base, qk_col], score_transfer)
+                        if qk_sb > 0 or qk_part == 0:
+                            # Transpose the complete carrier before slicing: the current
+                            # backend preserves the slice's column offset in matmul.
+                            qk_l1_t = pl.tile.transpose_view(qk_l1)
+                            qk_kv_t = pl.tile.slice(qk_l1_t, [HEAD_DIM, ATTN_CUBE_KV_TILE], [0, qk_slot_row])
+                            qk_scores = pl.matmul(qk_q, qk_kv_t, out_dtype=pl.FP32)
+                            pl.store(qk_scores, [qk_head_base, qk_col], score_transfer)
                     pl.system.sync_set(
                         QK_SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
                     )
@@ -389,24 +390,25 @@ def sparse_attn_csa(
                     # Keep a single FP32 PV accumulator across the Native 512-candidate block.
                     pv_acc = pl.create_tile([H, HEAD_DIM], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc)
                     for pv_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                        pv_col = pv_part * ATTN_CUBE_KV_TILE
-                        pv_probability = pl.load(
-                            probability_transfer,
-                            [qk_head_base, pv_col],
-                            [H, ATTN_CUBE_KV_TILE],
-                            target_memory=pl.MemorySpace.Mat,
-                        )
-                        pv_slot_row = pl.max(pv_part - 1, 0) * ATTN_CUBE_KV_TILE
-                        if pv_part < 2:
-                            qk_l1 = pl.gather_row(
-                                qk_l1,
-                                kv_transfer,
-                                [pv_slot_row, 0],
-                                [qk_kv_base + pv_col, 0],
-                                [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                        if qk_sb > 0 or pv_part == 0:
+                            pv_col = pv_part * ATTN_CUBE_KV_TILE
+                            pv_probability = pl.load(
+                                probability_transfer,
+                                [qk_head_base, pv_col],
+                                [H, ATTN_CUBE_KV_TILE],
+                                target_memory=pl.MemorySpace.Mat,
                             )
-                        pv_kv = pl.tile.slice(qk_l1, [ATTN_CUBE_KV_TILE, HEAD_DIM], [pv_slot_row, 0])
-                        pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
+                            pv_slot_row = pl.max(pv_part - 1, 0) * ATTN_CUBE_KV_TILE
+                            if pv_part < 2:
+                                qk_l1 = pl.gather_row(
+                                    qk_l1,
+                                    kv_transfer,
+                                    [pv_slot_row, 0],
+                                    [qk_kv_base + pv_col, 0],
+                                    [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                                )
+                            pv_kv = pl.tile.slice(qk_l1, [ATTN_CUBE_KV_TILE, HEAD_DIM], [pv_slot_row, 0])
+                            pv_acc = pl.matmul_acc(pv_acc, pv_probability, pv_kv, init_cond=(pv_part == 0))
                     pl.store(pv_acc, [qk_head_base, 0], pv_transfer)
                     pl.system.sync_set(
                         QK_PV_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
@@ -480,7 +482,15 @@ def sparse_attn_csa(
                         for sm_part in pl.range((H // 2) // SOFTMAX_HEAD_TILE):
                             sm_h = sm_part * SOFTMAX_HEAD_TILE
                             sm_row = qk_head_base + qk_lane_head + sm_h
-                            sm_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, ATTN_K_TILE])
+                            if qk_sb == 0:
+                                # Skipped Cube columns are explicit +0, never stale GM/NaN.
+                                sm_live_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, WIN])
+                                sm_scores = pl.concat(
+                                    sm_live_scores,
+                                    pl.tile.full([SOFTMAX_HEAD_TILE, ATTN_K_TILE - WIN], dtype=pl.FP32, value=0.0),
+                                )
+                            else:
+                                sm_scores = pl.load(score_transfer, [sm_row, 0], [SOFTMAX_HEAD_TILE, ATTN_K_TILE])
                             sm_bias = pl.load(sparse_bias, [qk_t, qk_sb * ATTN_K_TILE], [1, ATTN_K_TILE])
                             sm_masked = pl.col_expand_add(pl.mul(sm_scores, SOFTMAX_SCALE), sm_bias)
                             sm_block_max = pl.row_max(sm_masked, qk_reduce_tmp)
