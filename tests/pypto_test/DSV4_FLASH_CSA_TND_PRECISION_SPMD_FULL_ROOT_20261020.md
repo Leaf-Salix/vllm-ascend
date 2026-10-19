@@ -9,7 +9,7 @@
 本次把已验证的HC-pre、输入Norm、WKV和Indexer权重投影SPMD前缀接入完整CSA顶层入口。
 后续Q路径、compressor、Indexer score/TopK、attention、O-proj和HC-post仍为原精度PTO实现。
 **这是一个完整CSA入口内的SPMD前缀，不是HC-pre至HC-post全链路单SPMD。**
-当前不能宣称新版本已完成真实整模型token验收，或性能已追平nalinaly。
+当前已完成8K/B40与128K/B24真实整模型token验收，详见末节链接；性能尚未追平Native或nalinaly。
 
 ## ABI、常量与工作区
 
@@ -24,7 +24,7 @@
 - capture限于同一捕获stream；replay必须按设备执行顺序串行使用工作区。
   未捕获暖身可以在计算stream借用工作区，借用前等待设备、调用返回前等待当前stream。
   已验证同权重、不同输入及cache的两个完整根共享工作区；
-  尚未证明不同层权重的整模型复用和并发stream安全。
+  后续整模型验证覆盖不同层权重的串行复用；并发stream仍不支持。
 
 无设备门禁包含program生成、kernel ABI生成、CCEC和**实际Torch注册64参数**。
 program与kernel生成物具有各自哈希，不混用两类生成物身份。
@@ -158,3 +158,10 @@ Native RoPE使用共享runtime buffer，创建6行fixture会覆盖原21行fixtur
 包括首次初始化失败摘要、两次生命周期结果、原始helpers、旧workspace与当前编译receipt。
 
 该门禁仍为单层真实权重、合成hidden/history，不代表整模型token或性能验收。
+
+## 后续整模型验收
+
+当前14源随后完成8K/B40与128K/B24真实整模型验收，全部保存token及接受事件与Native金值一致。
+详细配置、性能限制及可离线复算的原始证据见
+[整模型报告](DSV4_FLASH_CSA_TND_PRECISION_SPMD_REAL_MODEL_20261020.md)。
+前文各单层结果和首次失败仍保留原验证范围，不用整模型通过覆盖或改写失败记录。
