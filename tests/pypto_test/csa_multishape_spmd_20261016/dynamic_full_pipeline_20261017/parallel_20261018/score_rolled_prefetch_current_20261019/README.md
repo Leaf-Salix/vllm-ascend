@@ -25,3 +25,7 @@ CODEGEN_AUDIT.json。短G2关闭路径CPU v2通过，AIC/AIV C++去行注释后�
 B16/H131072/S6完整三方五窗任务task_20261019_123559_352253015113已提交；
 包含metadata/padding/A→B→A、所有原精度/保护/信号检查，尚在排队，未记PASS。
 较短生成体不等于机器码或性能已改善，暂不改变七档最佳或正式源码。
+
+设备任务已completed/exit0，完整冻结门槛、metadata/padding、同址图与代际全部通过。
+同轮五窗多task 870.42、正式参考 817.32、候选 828.66 μs。
+两面板循环五窗全部较慢，完整中位回退1.387%，不采用/不扩档。全部窗口与协议证据见DEVICE_RESULT.json及原source_matrix。
