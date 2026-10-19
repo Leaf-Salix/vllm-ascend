@@ -2,6 +2,10 @@
 
 ## 范围与当前状态
 
+当前正式已在本地提交13259f92采用Score区间优化，完整快照为source_after_score_split；
+source_reference是此前E49历史基线。新关键路径诊断见CURRENT_SCORE_PRESSURE_DESIGN.md。
+以下按时间保留此前过程，涉及“正式未改”等表述以各段发生时为准。
+
 目标和验收口径完整保存在 GOAL.md。正式源码基于 5df25698 / E49；本目录
 source_reference 为开始本轮时的完整 37 文件快照。未启用 SDMA，不修改共享环境。
 上一轮是在用户设置 goal 前提供描述，没有新的性能进展；本轮以正式源和任务终态为准。
@@ -143,3 +147,13 @@ T36的590.72→589.62μs仅基本持平。正式只改四个算子文件，算�
 与验证版本一致，详情SCORE_SPLIT_ADOPTION.json。当前数据按所选代码
 映射于SCORE_SPLIT_CURRENT_PERFORMANCE.json；原始七档（含回退）仍在
 SCORE_SPLIT_ALL_PERFORMANCE.json。128K五档30%仍0/5，未push。
+
+## 新正式关键路径与KV置换候选终态
+
+13259f92之后的B16/B28全72角色阶段及Score READY/ACK诊断完成，见
+CURRENT_SCORE_PRESSURE_ANALYSIS.json。识别B28部分核前段KV与较多Q_B叠加，
+据此试了一次KV逻辑worker置换，仍24核原数学/发布，区别于旧四核KV方案。
+CPU及关闭代码等价通过；B28完整冻结验证通过，但同轮当前1152.44→候选
+1156.20μs，慢3.76，仅2/5窗快。未达20μs，结束、不采用、不扩档，不扫
+核编号。完整过程见PREFIX_KV_BALANCE_DESIGN.md及PERFORMANCE报告。
+正式保持Score区间版，所有任务终态；没有把跨轮1166.04→1152.44计成收益。
