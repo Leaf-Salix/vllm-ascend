@@ -126,3 +126,20 @@ padding图和代际通过。完整L1却无收益：B16正式827.00→候选827.6
 B28为1198.26→1203.52μs，各仅1/5窗较快，未达20μs门槛。
 结束、不采用、不扩档。完整记录见ATTENTION_SHARED_KV_DESIGN.md，
 三方五窗见ATTENTION_STATE_HALVES_PERFORMANCE.json，正式E49不变。
+
+## Score早FIX与单次WS写回取得三档明确收益，正在收口区间
+
+B16/B24/B28同轮完整L1分别净省15.38/40.72/43.80μs，全部冻结检查通过；
+满足20μs扩档门槛后，七档已测齐。B8净省7.30μs，B4回退5.56μs，故
+区间候选仅在原长G6域且T>=32开启，沿已有M16资源边界保留小档旧代码。
+两8K执行C++与参考相同，保留原始测量波动。所有原三方五窗见
+SCORE_SPLIT_ALL_PERFORMANCE.json，具体选路与生成等价性见
+SCORE_SPLIT_INTERVAL_CODEGEN_COMPARISONS.json。
+真实B1/S1、B16/S5图回归完成通过；T30关闭与T36开启边界正在验证。
+正式源暂未替换，最终30%目标未达。完整过程见SCORE_SPLIT_STORE_DESIGN.md。
+
+Score区间方案现已正式采用。T30关闭回归、T36开启完整检查均通过，
+T36的590.72→589.62μs仅基本持平。正式只改四个算子文件，算法AST
+与验证版本一致，详情SCORE_SPLIT_ADOPTION.json。当前数据按所选代码
+映射于SCORE_SPLIT_CURRENT_PERFORMANCE.json；原始七档（含回退）仍在
+SCORE_SPLIT_ALL_PERFORMANCE.json。128K五档30%仍0/5，未push。

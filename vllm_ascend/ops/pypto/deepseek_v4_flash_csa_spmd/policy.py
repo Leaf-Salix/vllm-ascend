@@ -74,6 +74,11 @@ S6验证点完整L1改善0.96%～3.16%，S1/S5精确回归通过；短G6及较�
 容量是否支持在device判定；关闭或容量外保留原逻辑表示。全开七档六档
 中位耗时下降，但小T的B4回退、B8收益不足1微秒，故保留小区间原路径。
 这是基于完整L1实测的区间选择，不是证明所有输入都加速，也不改变精度门槛。
+SPLIT_SCORE_ROWS在既有长G6域、T>=32时选择双QK早FIX和每panel单次WS
+写回。32沿QA小M16区间的已有资源边界，不是B4/B8白名单或理论最优声明。
+长B8/B16/B24/B28完整实测改善，小域保留原Score。关闭/开启代码等价、
+真实S1/S5及T30/T36边界已核对后采用；范围和原始数据见统一优化日志。
+这不是所有动态输入都已测过或五档30%目标已完成的声明。
 """
 
 from dataclasses import dataclass
@@ -86,6 +91,8 @@ LOCAL_STATS_MAX_TOKENS = 96
 SHORT_SCORE_TILE = 768
 # 既有TopK半叶直接归并的资源边界；更大范围用2560/3072/4096分支。
 SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
+# 沿已有QA的小M16并行区间边界，两个完整M16行块起再启用Score新流水。
+SCORE_SPLIT_MIN_TOKENS = 32
 
 
 @dataclass(frozen=True)
@@ -108,6 +115,7 @@ class CSASPMDPolicy:
     local_attention_stats: bool = False
     scale_page_coalescing: bool = False
     plan_physical_rows: bool = False
+    split_score_rows: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -130,6 +138,7 @@ class CSASPMDPolicy:
             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
             "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
+            "SPLIT_SCORE_ROWS": self.split_score_rows,
         }
 
 
@@ -198,4 +207,8 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 此处只选策略；容量合法性和全部地址仍由device元数据决定，三阶段
         # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
         plan_physical_rows=tokens >= EARLY_GEOMETRY_MIN_TOKENS,
+        # 小T保持原Score，中大T使用早FIX与单次WS写回。分界沿已有M16
+        # 前段资源区间；依据完整实测取舍，不把回退唯一归因于QA或假定最优。
+        # 实际有效query/长度/页表仍在device读取，不按B4/B8等测试点枚举。
+        split_score_rows=long_history and group == 6 and tokens >= SCORE_SPLIT_MIN_TOKENS,
     )

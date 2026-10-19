@@ -191,6 +191,7 @@ def cube_schedule(
     HC_ROW_DEPENDENCIES: pl.constexpr,
     QA_M16_PARALLEL: pl.constexpr = False,
     COOPERATIVE_PREFIX: pl.constexpr = False,
+    SPLIT_SCORE_ROWS: pl.constexpr = False,
 ):
     # 恢复原分task五份流式权重的BYPASS；预定义incore使用函数属性表达。
     # 当前PyPTO此属性只接受(参数序号,策略整数)，1表示CachePolicy.BYPASS。
@@ -391,6 +392,7 @@ def cube_schedule(
         BALANCED,
         0,
         1,
+        SPLIT_SCORE_ROWS,
     )
     signal = publish_phase(signal, PHASE_SCORE_CUBE, worker, CORES, generation)
 

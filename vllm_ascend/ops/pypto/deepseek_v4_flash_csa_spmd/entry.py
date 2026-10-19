@@ -288,6 +288,7 @@ def _csa_core_group(
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    SPLIT_SCORE_ROWS: pl.constexpr = False,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -380,6 +381,7 @@ def _csa_core_group(
             HC_ROW_DEPENDENCIES,
             QA_M16_PARALLEL,
             COOPERATIVE_PREFIX,
+            SPLIT_SCORE_ROWS,
         )
         (
             x_fp32,
@@ -810,6 +812,7 @@ def decode_csa_spmd(
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
     PLAN_PHYSICAL_ROWS: pl.constexpr = False,
+    SPLIT_SCORE_ROWS: pl.constexpr = False,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1058,6 +1061,7 @@ def decode_csa_spmd(
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
             PLAN_PHYSICAL_ROWS,
+            SPLIT_SCORE_ROWS,
         )
     return (
         x_fp32,

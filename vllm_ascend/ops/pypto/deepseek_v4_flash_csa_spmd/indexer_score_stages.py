@@ -58,6 +58,15 @@
     同时存活的QK/WS与两Key L0B沿原tile布局，不增加永久L1/L0 reserve。
     所有输入metadata在本次阶段中固定；工作区只有协议规定的owner写。
     返回别名不等于跨核完成。当前源码/CPU证据不能代替设备同步、精度和性能。
+
+长历史G6区间实现总览
+    原M=G*64是逻辑query/head域。长G6/N64区间将其按行拆成两M192，
+    以独立Acc支持FIX0与QK1重叠；WS保留完整六query系数，按K192两段
+    累计到同一FP32 Acc并只做一次原六行写回。其它资源区间走原函数。
+    与旧双M192各三行STORE不同，不能仅以双Acc存在当作新收益依据。
+    全部T/B/历史/页表和合法尾组仍动态；SPLIT_SCORE_ROWS仅按既有Host
+    容量T>=32选择编译策略，小域及其它资源组合沿原helper。完整验证范围
+    与性能证据见统一优化日志，不能把数学helper数量当成多个incore task。
 """
 
 import pypto.language as pl
@@ -98,10 +107,11 @@ TOPK_SCORE_WORKERS = 24
 BUFFERED_LONG_SCORE_TILE = 1024
 BUFFERED_SCORE_SCALE = 1024.0
 NATIVE_QLI_WEIGHT_ROWS = 16
+SPLIT_QK_ROWS = 3 * IDX_N_HEADS  # 既有G6一半的数学M，非batch专用shape。
 
 
 @pl.jit.inline(auto_scope=False)
-def indexer_score_cube_stage(
+def _indexer_score_cube_original(
     qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
     coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
     idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
@@ -384,6 +394,447 @@ def indexer_score_cube_stage(
             for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
                 pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
     return buf_score_transfer
+
+
+
+@pl.jit.inline(auto_scope=False)
+def _indexer_score_cube_split_store(
+    qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+    plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
+    buf_worker: pl.Scalar[pl.INDEX],
+    query_group_size: pl.constexpr,
+    qk_panel_cols: pl.constexpr,
+    score_tile: pl.constexpr,
+    key_prefetch_panels: pl.constexpr,
+    key_prefetch_to_l0: pl.constexpr,
+    balance_leaves: pl.constexpr,
+    SCORE_READY_EVENT: pl.constexpr,
+    SCORE_CONSUMED_EVENT: pl.constexpr,
+):
+    """长G6/N64：两半QK早FIX；原完整16行系数分K累加后一次写回。
+
+    本helper保留原group/leaf/device页检查、尾query安全填充和双槽协议。
+    QK两份48KiB Acc及WS一份4KiB跨panel保留，各次init_cond=True重新初始化。
+    两次WS按原K顺序累计到同一Acc，不能把两个三query结果分别写回。
+    是否减少等待、保持舍入和产生完整收益，分别由代码审计与真机检查决定。
+    """
+    native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
+    groups = pl.cast(pl.read(plan, [0]), pl.INDEX)
+    buf_max_leaves = pl.cast(pl.read(plan, [2]), pl.INDEX)
+    buf_leaf_tiles = pl.cast(pl.read(plan, [3]), pl.INDEX)
+    buf_extra_leaves = pl.cast(pl.read(plan, [4]), pl.INDEX)
+    # 每个core独立读取同一device计划；空core不触发任何FFTS事件。
+    for buf_item in pl.range(buf_worker, groups * buf_max_leaves, TOPK_SCORE_WORKERS):
+        buf_group, buf_leaf = indexer_work_item(buf_item, groups, buf_max_leaves)
+        buf_batch_idx, buf_query, buf_live, buf_visible_count = indexer_decode_group(
+            bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
+        )
+        buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
+            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
+        )
+        if work_valid > 0:
+            buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
+            buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+            buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+            buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+            buf_score_iters = (buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
+            buf_query_vector = pl.load(
+                qr_hadamard_i8,
+                [buf_query * IDX_N_HEADS, 0],
+                [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                target_memory=pl.MemorySpace.Mat,
+                valid_shape=[buf_live * IDX_N_HEADS, IDX_HEAD_DIM],
+            )
+            # A3当前TINSERT(Acc→Mat)忽略紧凑L0C的动态行距：若QK仅算
+            # live*64行而物理M=G*64，每个16列分形之后都会读错源地址。
+            # 因此在L1安全补满M，再做完整QK。补齐行只复制本组首条有效
+            # query，绝不访问下一请求；对应head系数为0，整数点积/ReLU
+            # 均有限，补齐行不会影响任何真实query。无需Host分支或GM搬运。
+            buf_query_vector = pl.set_validshape(
+                buf_query_vector, query_group_size * IDX_N_HEADS, IDX_HEAD_DIM
+            )
+            for padding_lane in pl.unroll(query_group_size):
+                if padding_lane >= buf_live:
+                    buf_query_vector = pl.gather_row(
+                        buf_query_vector,
+                        qr_hadamard_i8,
+                        [padding_lane * IDX_N_HEADS, 0],
+                        [buf_query * IDX_N_HEADS, 0],
+                        [IDX_N_HEADS, IDX_HEAD_DIM],
+                    )
+            buf_coefficients_l1 = pl.load(
+                coefficients,
+                [buf_group * NATIVE_QLI_WEIGHT_ROWS, 0],
+                [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                target_memory=pl.MemorySpace.Mat,
+            )
+            # 两份query共48KiB Left，两份完整16行系数共12KiB Left。
+            # 系数按K截成两半，仍保留六个query的原行号与零项，尾组语义不变。
+            split_query0 = pl.tile.extract(
+                buf_query_vector, 0 * SPLIT_QK_ROWS, 0, [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                target_memory=pl.MemorySpace.Left,
+            )
+            split_coefficient0 = pl.tile.extract(
+                buf_coefficients_l1, 0, 0 * SPLIT_QK_ROWS, [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                target_memory=pl.MemorySpace.Left,
+            )
+            split_qk_acc0 = pl.tile.create(
+                [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc,
+            )
+            split_query1 = pl.tile.extract(
+                buf_query_vector, 1 * SPLIT_QK_ROWS, 0, [SPLIT_QK_ROWS, IDX_HEAD_DIM],
+                target_memory=pl.MemorySpace.Left,
+            )
+            split_coefficient1 = pl.tile.extract(
+                buf_coefficients_l1, 0, 1 * SPLIT_QK_ROWS, [NATIVE_QLI_WEIGHT_ROWS, SPLIT_QK_ROWS],
+                target_memory=pl.MemorySpace.Left,
+            )
+            split_qk_acc1 = pl.tile.create(
+                [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.INT32, target_memory=pl.MemorySpace.Acc,
+            )
+            # 独立WS句柄避免FIX仍读QK时又被WS覆盖；实际地址必须审计。
+            split_ws_acc = pl.tile.create(
+                [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc,
+            )
+            # 双槽最多允许两份未消费分数；第2轮起等两个AIV的MTE2 ACK后才重用。
+            for buf_score_step in pl.range(buf_score_iters):
+                if buf_score_step >= 2:
+                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                buf_score_begin = buf_score_step * (score_tile // 2)
+                if balance_leaves:
+                    buf_score_begin = buf_score_step * score_tile
+                buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+                split_previous0 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+                )
+                split_previous1 = pl.tile.create(
+                    [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+                )
+                buf_current_key = pl.tile.create(
+                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                )
+                buf_prefetched_key = pl.tile.create(
+                    [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                )
+                buf_key_l1_pool = pl.tile.create(
+                    [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                )
+                if key_prefetch_panels > 0:
+                    buf_prime_col = 0
+                    for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                        buf_prime_key_row = (
+                            buf_logical_begin
+                            + buf_score_begin
+                            + buf_prime_col // (score_tile // 2) * buf_lane_span
+                            + buf_prime_col % (score_tile // 2)
+                            + buf_prime_key_page * BLOCK_SIZE
+                        )
+                        if balance_leaves:
+                            buf_prime_key_row = (
+                                buf_logical_begin + buf_score_begin + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
+                            )
+                        buf_prime_safe_page = pl.min(
+                            buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                        )
+                        if buf_prime_safe_page >= 0 and buf_prime_safe_page < pl.tensor.dim(idx_block_table, 1):
+                            buf_prime_physical_page = pl.cast(
+                                pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX
+                            )
+                            if buf_prime_physical_page >= 0 and buf_prime_physical_page < pl.tensor.dim(
+                                idx_native_kv_cache, 0
+                            ):
+                                buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
+                                if buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                                else:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache_shift64,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                    if key_prefetch_to_l0:
+                        buf_current_key = pl.tile.extract(
+                            pl.tile.transpose_view(buf_key_l1_pool),
+                            0,
+                            0,
+                            [IDX_HEAD_DIM, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                # 固定panel顺序：本panel QK与前panel head归约同时存活，保留FP16舍入位置。
+                for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                    buf_panel_col = buf_qk_panel * qk_panel_cols
+                    buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                    buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                    if key_prefetch_panels > 0:
+                        if not key_prefetch_to_l0:
+                            buf_current_key = pl.tile.extract(
+                                pl.tile.transpose_view(buf_key_l1_pool),
+                                0,
+                                buf_qk_panel % 2 * qk_panel_cols,
+                                [IDX_HEAD_DIM, qk_panel_cols],
+                                target_memory=pl.MemorySpace.Right,
+                            )
+                    if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                        buf_panel_keys = pl.tile.create(
+                            [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                        )
+                        for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                            buf_key_row = (
+                                buf_logical_begin
+                                + buf_score_begin
+                                + buf_load_col // (score_tile // 2) * buf_lane_span
+                                + buf_load_col % (score_tile // 2)
+                                + buf_key_page * BLOCK_SIZE
+                            )
+                            if balance_leaves:
+                                buf_key_row = (
+                                    buf_logical_begin + buf_score_begin + buf_load_col + buf_key_page * BLOCK_SIZE
+                                )
+                            buf_safe_page = pl.min(
+                                buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                            )
+                            if buf_safe_page >= 0 and buf_safe_page < pl.tensor.dim(idx_block_table, 1):
+                                buf_physical_page = pl.cast(
+                                    pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX
+                                )
+                                if buf_physical_page >= 0 and buf_physical_page < pl.tensor.dim(idx_native_kv_cache, 0):
+                                    buf_native_byte = buf_physical_page * native_page_bytes
+                                    if buf_native_byte % IDX_HEAD_DIM == 0:
+                                        if key_prefetch_panels > 0:
+                                            buf_key_l1_pool = pl.gather_row(
+                                                buf_key_l1_pool,
+                                                idx_kv_cache,
+                                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            buf_panel_keys = pl.gather_row(
+                                                buf_panel_keys,
+                                                idx_kv_cache,
+                                                [buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                    elif key_prefetch_panels > 0:
+                                        buf_key_l1_pool = pl.gather_row(
+                                            buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        buf_panel_keys = pl.gather_row(
+                                            buf_panel_keys,
+                                            idx_kv_cache_shift64,
+                                            [buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                        if key_prefetch_panels > 0:
+                            if key_prefetch_to_l0:
+                                buf_prefetched_key = pl.tile.extract(
+                                    pl.tile.transpose_view(buf_key_l1_pool),
+                                    0,
+                                    buf_load_slot,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        else:
+                            buf_prefetched_key = pl.tile.move(
+                                pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right
+                            )
+                    if key_prefetch_panels > 0:
+                        buf_key_panel = buf_current_key
+                    else:
+                        buf_key_panel = buf_prefetched_key
+                    split_current0 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+                    )
+                    split_current1 = pl.tile.create(
+                        [SPLIT_QK_ROWS, qk_panel_cols], dtype=pl.FP16, target_memory=pl.MemorySpace.Mat,
+                    )
+                    if buf_qk_panel > 0:
+                        # 先备齐上一panel的两个24KiB Right；与两份8KiB Key
+                        # 同时存在恰为64KiB，不额外创建第三份Key或WS全K Right。
+                        split_right0 = pl.tile.extract(
+                            split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                        split_right1 = pl.tile.extract(
+                            split_previous1, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                        split_qk0 = pl.tile.matmul_acc(
+                            split_qk_acc0, split_query0, buf_key_panel, init_cond=True,
+                        )
+                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+                        split_current0 = pl.tile.assemble(
+                            split_current0, split_qk0, [0, 0],
+                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                        )
+                        split_qk1 = pl.tile.matmul_acc(
+                            split_qk_acc1, split_query1, buf_key_panel, init_cond=True,
+                        )
+                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+                        split_current1 = pl.tile.assemble(
+                            split_current1, split_qk1, [0, 0],
+                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                        )
+                        split_ws_first = pl.tile.matmul_acc(
+                            split_ws_acc, split_coefficient0, split_right0, init_cond=True,
+                        )
+                        split_ws_done = pl.tile.matmul_acc(
+                            split_ws_first, split_coefficient1, split_right1,
+                        )
+                        # 每panel仅一次原六行写回，保留1024列FIFO布局和顺序。
+                        pl.store(
+                            pl.set_validshape(split_ws_done, query_group_size, qk_panel_cols),
+                            [buf_transfer_row, buf_panel_col - qk_panel_cols], buf_score_transfer,
+                        )
+                    else:
+                        split_qk0 = pl.tile.matmul_acc(
+                            split_qk_acc0, split_query0, buf_key_panel, init_cond=True,
+                        )
+                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+                        split_current0 = pl.tile.assemble(
+                            split_current0, split_qk0, [0, 0],
+                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                        )
+                        split_qk1 = pl.tile.matmul_acc(
+                            split_qk_acc1, split_query1, buf_key_panel, init_cond=True,
+                        )
+                        # 第一份FIX位于第二份QK之前；两份Acc明确独立才有重叠机会。
+                        split_current1 = pl.tile.assemble(
+                            split_current1, split_qk1, [0, 0],
+                            pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True,
+                        )
+                    split_previous0 = split_current0
+                    split_previous1 = split_current1
+                    if key_prefetch_panels > 0:
+                        if key_prefetch_to_l0:
+                            if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                buf_current_key = buf_prefetched_key
+                split_right0_last = pl.tile.extract(
+                    split_previous0, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
+                    target_memory=pl.MemorySpace.Right,
+                )
+                split_right1_last = pl.tile.extract(
+                    split_previous1, 0, 0, [SPLIT_QK_ROWS, qk_panel_cols],
+                    target_memory=pl.MemorySpace.Right,
+                )
+                split_ws_first_last = pl.tile.matmul_acc(
+                    split_ws_acc, split_coefficient0, split_right0_last, init_cond=True,
+                )
+                split_ws_done_last = pl.tile.matmul_acc(
+                    split_ws_first_last, split_coefficient1, split_right1_last,
+                )
+                pl.store(
+                    pl.set_validshape(split_ws_done_last, query_group_size, qk_panel_cols),
+                    [buf_transfer_row, score_tile - qk_panel_cols], buf_score_transfer,
+                )
+                pl.system.sync_set(SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC)
+            # 即使只有1轮也排空已发消息；下个leaf才能重新从slot0开始，不携带旧ACK。
+            for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
+                pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+    return buf_score_transfer
+
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_score_cube_stage(
+    qr_hadamard_i8: pl.Tensor[[QUERY_HEAD_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    coefficients: pl.Tensor[[COEFF_ROWS_DYN, COEFF_COLS_DYN], pl.FP16],
+    idx_kv_cache: pl.Tensor[[KEY0_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    idx_kv_cache_shift64: pl.Tensor[[KEY64_ROWS_DYN, IDX_HEAD_DIM], pl.INT8],
+    idx_native_kv_cache: pl.Tensor[[CACHE_PAGES_DYN, PAGE_BYTES_DYN], pl.INT8],
+    idx_block_table: pl.Tensor[[REQUESTS_DYN, TABLE_COLUMNS_DYN], pl.INT32],
+    position_ids: pl.Tensor[[TOKENS_DYN], pl.INT64],
+    kv_seq_lens: pl.Tensor[[REQUESTS_DYN], pl.INT32],
+    bounds: pl.Tensor[[QUERY_BOUNDS_DYN], pl.INT32],
+    offsets: pl.Tensor[[OFFSET_ROWS_DYN], pl.INT32],
+    plan: pl.Tensor[[PLAN_WORDS], pl.INT32],
+    buf_score_transfer: pl.InOut[pl.Tensor[[TRANSFER_ROWS_DYN, TRANSFER_COLS_DYN], pl.FP32]],
+    buf_worker: pl.Scalar[pl.INDEX],
+    query_group_size: pl.constexpr,
+    qk_panel_cols: pl.constexpr,
+    score_tile: pl.constexpr,
+    key_prefetch_panels: pl.constexpr,
+    key_prefetch_to_l0: pl.constexpr,
+    balance_leaves: pl.constexpr,
+    SCORE_READY_EVENT: pl.constexpr,
+    SCORE_CONSUMED_EVENT: pl.constexpr,
+    SPLIT_SCORE_ROWS: pl.constexpr = False,
+):
+    """按已选长G6资源区间执行双QK早FIX；小域及其它组合保留原helper。"""
+    if SPLIT_SCORE_ROWS and balance_leaves and query_group_size == 6 and qk_panel_cols == 64 and score_tile == 1024:
+        result = _indexer_score_cube_split_store(
+            qr_hadamard_i8,
+            coefficients,
+            idx_kv_cache,
+            idx_kv_cache_shift64,
+            idx_native_kv_cache,
+            idx_block_table,
+            position_ids,
+            kv_seq_lens,
+            bounds,
+            offsets,
+            plan,
+            buf_score_transfer,
+            buf_worker,
+            6,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            64,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            1024,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            key_prefetch_panels,
+            key_prefetch_to_l0,
+            True,  # 此helper固定的数学资源合同；不是T/B/历史实值。
+            SCORE_READY_EVENT,
+            SCORE_CONSUMED_EVENT,
+        )
+    else:
+        result = _indexer_score_cube_original(
+            qr_hadamard_i8,
+            coefficients,
+            idx_kv_cache,
+            idx_kv_cache_shift64,
+            idx_native_kv_cache,
+            idx_block_table,
+            position_ids,
+            kv_seq_lens,
+            bounds,
+            offsets,
+            plan,
+            buf_score_transfer,
+            buf_worker,
+            query_group_size,
+            qk_panel_cols,
+            score_tile,
+            key_prefetch_panels,
+            key_prefetch_to_l0,
+            balance_leaves,
+            SCORE_READY_EVENT,
+            SCORE_CONSUMED_EVENT,
+        )
+    return result
 
 
 @pl.jit.inline(auto_scope=False)
