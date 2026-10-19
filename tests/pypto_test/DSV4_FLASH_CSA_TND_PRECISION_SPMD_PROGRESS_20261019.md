@@ -2,6 +2,9 @@
 
 ## 状态与代码位置
 
+2026-10-20增补：[完整CSA入口、T6静态Indexer首差定位及修复](DSV4_FLASH_CSA_TND_PRECISION_SPMD_FULL_ROOT_20261020.md)。
+本页保留前缀阶段的历史范围和结果；完整CSA入口不等于全链路单SPMD。
+
 当前分支仍为`dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex`，没有创建或切换分支。
 新增同级包`vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision_spmd/`。
 原`7d5202300`精度版43个源码文件保持不变，原服务路由和已验收基准保留。
