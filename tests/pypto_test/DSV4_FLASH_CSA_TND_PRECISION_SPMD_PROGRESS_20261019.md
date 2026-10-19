@@ -1,4 +1,4 @@
-# TND精度版的单SPMD迁移：Norm/WKV与HC前缀进展
+# TND精度版的单SPMD迁移：HC前缀与Indexer权重投影进展
 
 ## 状态与代码位置
 
@@ -6,7 +6,7 @@
 新增同级包`vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision_spmd/`。
 原`7d5202300`精度版43个源码文件保持不变，原服务路由和已验收基准保留。
 
-**当前完成Norm→WKV切片及HC-pre→Norm→WKV前缀的单SPMD实现。尚未完成HC-pre至HC-post完整单SPMD替换，
+**当前完成Norm→WKV切片及HC-pre→Norm→WKV→Indexer权重投影前缀的单SPMD实现。尚未完成HC-pre至HC-post完整单SPMD替换，
 没有新SPMD版本的整模型token验收或完整CSA性能结论。**
 
 ## 设计
@@ -122,6 +122,48 @@ T1为`task_20261019_191025_63335019606`；T21为`task_20261019_184715_3496426140
 使用真实C4权重和合成HC输入，不是完整CSA、vLLM FULL或真实整模型token验收。
 真实T保持不变，M16/M64工作区尾块容量不等于把每个请求padding到S6。
 
+## 前缀继续纳入Indexer权重投影
+
+新增`hc_prefix_indexer.py`、`hc_prefix_indexer_stages.py`，已验收六个SPMD源与冻结43源不变。
+这里仅融合Indexer的权重投影，尚不含score/TopK。保留原16次K256标定顺序、FP32累加、
+BF16 raw发布、乘0.011048543456039806、BF16 scaled发布及FP16输出。
+Cube在第八和第九次handoff之间顺序执行WKV与Indexer；Vector在第九次之后完成两路舍入。
+
+当前SDK每个MIX callable最多32个Tensor描述符。直接追加后并集37，被运行时拒绝；
+现将六块仅Vector使用的FP32工作区合成一个`vec_ws[P16+8,64]`，公开31参数、实际MIX并集32。
+保留四组跨角色同对象读别名、24组SPMD和两角色各十次无条件HARD MIX屏障。
+Arena仅改变地址整理，不改变数学：raw、pre、每8行连续inverse、rstd及两个tail区互不交叠。
+生成物确认WKV→Indexer复用L0C前的FIX等待、第九次屏障后读取Indexer累加值。
+
+| T | 源码身份 | Native与冻结control对拍 | 其他检查 | 候选median μs |
+| --- | --- | --- | --- | --- |
+| 21 | 归档草稿；12函数与正式两源完整AST一致 | 151项全部逐bit一致 | A/B/A各三次replay、poison、guard、计时后复核 | 249.019 |
+| 1 | 正式八源包 | 151项全部逐bit一致 | 同上，包含大量零工作核 | 245.019 |
+| 240 | 正式八源包，program/kernel重新编译 | 151项全部逐bit一致 | 同上，多波次与M64尾块 | 390.982 |
+
+T21为`task_20261019_231824_53995123760`，T1为`task_20261019_232658_97272023097`，
+T240为`task_20261019_232447_8471313079`，均exit0。
+八类公开量mixed、post、comb、Norm、WKV、Indexer raw/scaled/FP16对同输入Native；rstd仅对冻结control。
+采用真实C4层权重及合成HC输入，仍为direct ACLGraph前缀测试，未证明完整CSA或整模型token。
+表中只测候选，不得与上节不同阶段的候选数字直接相减宣称收益。
+
+首次T21任务`task_20261019_231150_25725419143`在候选启动前因观测脚本遗漏一层`dsa_attn`包装退出，
+修复观测路径后才取得上述通过结果；该次既不算设备精度失败，也不算通过。
+无设备迭代还修复了inline可变参数返回顺序、inverse连续Vec加载以及Tensor/Tile显式读写形式，
+所有失败源码和编译日志保留在证据工具包。没有修改SDK或绕过ABI、类型检查。
+
+### Indexer前缀复现
+
+证据目录为`evidence_tnd_precision/spmd_prefix_indexer_20261019/`，
+`manifest.json`绑定两份编译receipt、三个通过结果、一份harness失败结果、summary与tools共八文件。
+
+1. 核对manifest、冻结43源及正式八源SHA，沿用上节227环境；解开tools到独立实验目录。
+2. 运行`compile-prefix-indexer-packaged.sh`，program/kernel ABI、原HC及Indexer control检查、CCEC须全部成功。
+3. 分别单卡运行`run-prefix-indexer-packaged.sh <独立输出名> 1`和`... 240`，调度max-time780、内部timeout750秒。
+4. T21原记录绑定tools内v7草稿三源与原六源；也可重新编译正式八源后另交tokens21，不能改写旧记录身份。
+5. 检查result的complete/pass、151项bit_equal、输入权重只读和guard。首差保存张量并退出。
+6. CPU合约覆盖T1至256区间、尾块、返回顺序、32参数并集；证据测试核对源码和实际运行harness SHA。
+
 ## 环境与复现
 
 227/A3，CANN9.2beta2、Torch2.10.0、Torch-NPU2.10.0.post2、vLLM0.25.1、vLLM-Ascend0.25.1rc1。
@@ -158,7 +200,7 @@ T1/T240结果直接绑定当前正式包六源SHA。两类结果按真实provena
 
 ## 后续验收范围
 
-继续在同一分支增加文件：已迁移HC-pre至WKV，接下来扩展QKV、压缩、Indexer、Attention、O-proj和HC-post。
+继续在同一分支增加文件：已迁移HC-pre至WKV及Indexer权重投影，接下来接入完整根并扩展QKV、压缩、Indexer、Attention、O-proj和HC-post。
 每个阶段按Native同输入对拍。完整候选仍须先8K/B40，再128K/B24，复用冻结Native金值，
 检查warm192加三轮192 token及调度事件一致性；每任务不超过15分钟。
 后续性能需同环境、同数学边界、同输入对拍，不能将本切片耗时与nalinaly完整CSA数字直接比较。
