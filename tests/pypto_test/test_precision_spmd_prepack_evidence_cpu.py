@@ -65,6 +65,14 @@ def test_final_full_root_prepack_identity_and_exactness():
     check_exact_tree(full["cross_bucket_warmup"]["checks"])
     assert full["per_request_padding"] == 0 and full["physical_graph_tokens"] == 21
     assert len(full["cross_bucket_replay_checks"]) == 9
+    assert full["model_loading_prepare_context"] == {
+        "grad_enabled_after_constructor": True,
+        "source_requires_grad": True,
+        "source_inference": False,
+        "packed_requires_grad": False,
+    }
+    previous = json.loads((EVIDENCE / "six-source-before-nograd/full-lifecycle.json").read_text())
+    assert full["hc_weight_qualification"]["raw_sha256"] == previous["hc_weight_qualification"]["raw_sha256"]
 
 
 def test_both_prefix_shapes_preserve_every_comparison():

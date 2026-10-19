@@ -45,7 +45,7 @@ manifest_sha=hashlib.sha256((ROOT/'manifest.json').read_bytes()).hexdigest()
 report = {'helper_sha':helper_sha,'manifest_sha256':manifest_sha,'complete':False,'pass':False,'scope':'real layer weights, synthetic hidden/history, Native/TND complete CSA half-layer FULL graph; not whole model',
           'lengths':lengths,'true_tokens':tokens,'physical_graph_tokens':tokens,'per_request_padding':0,
           'hypothetical_s6_tokens':batch*6,'hypothetical_s6_extra_rows':batch*6-tokens,
-          'baseline_experiment':'Native direct HC-pre through HC-post', 'candidate_experiment':'precision-spmd-prepack-full-root-v2',
+          'baseline_experiment':'Native direct HC-pre through HC-post', 'candidate_experiment':'precision-spmd-prepack-full-root-v3',
           'candidate_variant':'one SPMD prefix, original PTO suffix; full HC-pre through HC-post',
           'layer':args.layer,'history':args.history,'graphs':{},'comparisons':{},'static':{}}
 def save():
@@ -176,7 +176,14 @@ try:
         runtime=None
         if arm!='native':
             operators=CSAOperators.register()
-            runtime=CSAServiceRuntime(layer.self_attn,operators,40,layer)
+            with torch.inference_mode(False), torch.enable_grad():
+                keepalive.append(layer.hc_attn_fn)  # Retain captured Native weight storage.
+                layer.hc_attn_fn=torch.nn.Parameter(layer.hc_attn_fn.detach().clone(),requires_grad=True)
+                runtime=CSAServiceRuntime(layer.self_attn,operators,40,layer)
+                report['model_loading_prepare_context']={'grad_enabled_after_constructor':torch.is_grad_enabled(),'source_requires_grad':layer.hc_attn_fn.requires_grad,'source_inference':torch.is_inference(layer.hc_attn_fn),'packed_requires_grad':runtime.weights['hc_packed_weight'].requires_grad}
+                assert torch.is_grad_enabled() and layer.hc_attn_fn.requires_grad
+                assert not runtime.weights['hc_packed_weight'].requires_grad
+
             from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.workspace import NORM_PARAMETERS
             norm_offset=0
             norm_packet_checks={}

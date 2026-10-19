@@ -34,7 +34,10 @@ class CSAServiceRuntime(PrecisionSPMDRuntime):
         # inference_mode. This does not add tracking to the Native source.
         with torch.inference_mode(False):
             packed = torch.empty(PACKED_HC_SHAPE, dtype=torch.bfloat16, device=self._hc_source.device)
-        operators.workspace.prepare_hc_weight(self._hc_source, packed)
+        # Model loading can have grad enabled and Parameter.requires_grad=True;
+        # the preparer is inference-only and never constructs an autograd graph.
+        with torch.no_grad():
+            operators.workspace.prepare_hc_weight(self._hc_source, packed)
         torch.npu.current_stream(self._hc_source.device).synchronize()
         self.weights["hc_packed_weight"] = packed
         self._hc_packed_weight = packed

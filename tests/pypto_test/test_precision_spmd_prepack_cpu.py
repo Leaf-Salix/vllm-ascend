@@ -122,15 +122,18 @@ def runtime_factory(monkeypatch):
         raising=False,
     )
 
-    def make(inference=False):
+    def make(inference=False, requires_grad=False):
         class Layer:
             pass
 
         layer = Layer()
         with torch.inference_mode(inference):
-            layer.hc_attn_fn = torch.nn.Parameter(torch.ones((24, 16384)), requires_grad=False)
+            layer.hc_attn_fn = torch.nn.Parameter(torch.ones((24, 16384)), requires_grad=requires_grad)
 
         def prepare(source, packed):
+            if torch.is_grad_enabled() and source.requires_grad:
+                raise ValueError("PyPTO torch operators are inference-only; no autograd is registered")
+            assert not torch.is_grad_enabled()
             assert calls[-1] == "parent-qualified"
             assert source is layer.hc_attn_fn and tuple(packed.shape) == (32768, 32)
             calls.append("prepare")
@@ -155,6 +158,14 @@ def test_prepare_once_before_capture_and_no_prepare_on_forward(runtime_factory, 
     for _ in range(3):
         assert runtime(1, 2, 3, 4, 5) == (1, 2, 3, 4, 5)
     assert calls.count("prepare") == calls.count("sync") == 1
+
+
+def test_model_loading_grad_context_is_scoped_to_preparation(runtime_factory):
+    with torch.enable_grad():
+        runtime, layer, calls, _ = runtime_factory(requires_grad=True)
+        assert torch.is_grad_enabled() and layer.hc_attn_fn.requires_grad
+        assert not runtime._hc_packed_weight.requires_grad
+        assert calls.count("prepare") == calls.count("sync") == 1
 
 
 @pytest.mark.parametrize("change", ["source-object", "source-version", "packed-object", "packed-version"])

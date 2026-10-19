@@ -3,10 +3,10 @@
     "binding.json": "c8810e93673f3e2162eccff1fefc8ce3a3f25cbbf72ff7d1b9a5fde962651d77",
     "source_identity.py": "e5118405bad875bc80b5654abf5542ef2d99ece7d3a7663766d50328df06f569",
     "ragged_fixture.py": "e20e16fd15843afe330e79b101307782c2883bc6ecb276952fe0dcee48fb7aca",
-    "probe_csa.py": "5354bfa8334d6b75da6292c905eb9b4ae367c4fbf8ddaf145817efdf248450ed",
+    "probe_csa.py": "92fa1bf0c031e6d051b7c5adb2fd79590e27ce989097193353f8f5e7673372d4",
     "run-full-csa.sh": "76d18cf927c6aed133475433ee5d35bce49fe9eba861766311c3d9ccf13841e4"
   },
-  "manifest_sha256": "251a375c5efffdf74eed382abed78d9e609e7a3e4584d453319c8ef41b510eca",
+  "manifest_sha256": "16ec82774cc64695ceb7be2cb48e00e6c1747e7da2b32089e66f31a15a94ba04",
   "complete": true,
   "pass": true,
   "scope": "real layer weights, synthetic hidden/history, Native/TND complete CSA half-layer FULL graph; not whole model",
@@ -24,7 +24,7 @@
   "hypothetical_s6_tokens": 36,
   "hypothetical_s6_extra_rows": 15,
   "baseline_experiment": "Native direct HC-pre through HC-post",
-  "candidate_experiment": "precision-spmd-prepack-full-root-v2",
+  "candidate_experiment": "precision-spmd-prepack-full-root-v3",
   "candidate_variant": "one SPMD prefix, original PTO suffix; full HC-pre through HC-post",
   "layer": 4,
   "history": 8191,
@@ -1450,12 +1450,12 @@
     "__init__.py": "3395885ff1d65da2a58a63ad4eb34f9943b4ef55d04a7adae97c5a8268fe028a",
     "decode_csa.py": "91ca9605a7a09488238a61a40adfdd3502465258192cb7d3d71d8e2e0abe54fe",
     "prefix.py": "5d3cd7661a8ae69639488c7eed0491347369b384360e4b1d950825c12eb88de5",
-    "service.py": "fa22ac10c7e6de6f90cf90932dcb96e7319080c184fc377da5c012726bc7bdcb",
+    "service.py": "bae872cd91a32e6174dabc432d1e1124069f94fd90ffa87691fad93433cea898",
     "qkv_proj_rope.py": "800372cb23073287bf17a8f24e70cb205e1de7e25d58a43315f92977c1225aa3",
     "native_adapter.py": "3f5377ed46cade4b3e42a55902f8a230cb7ba975735b71212e9fb842fecc2797"
   },
   "candidate_package": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-spmd-20261019/src/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision_spmd_prepack",
-  "compile_receipt_sha256": "96353c8b2972031006eef1d1784eebdc7a76ece0365dda7a28f1990759cbf838",
+  "compile_receipt_sha256": "61a3d5f3c08a5345e36d18ac4b182f69172d2d7d426de8e12dd5ab66b779a932",
   "formal_root_file": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/precision-spmd-20261019/src/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision_spmd_prepack/decode_csa.py",
   "weight_details": {
     "weights": [
@@ -1790,6 +1790,12 @@
       "indexer.compressor.wgate": "vllm_ascend.ops.linear.AscendUnquantizedLinearMethod"
     }
   },
+  "model_loading_prepare_context": {
+    "grad_enabled_after_constructor": true,
+    "source_requires_grad": true,
+    "source_inference": false,
+    "packed_requires_grad": false
+  },
   "packet_checks": {
     "norm_byte_equal": {
       "attn_norm_w": true,
@@ -1984,7 +1990,7 @@
   },
   "workspace_bytes": 1869824,
   "hc_packed_weight_bytes": 2097152,
-  "workspace_capture_stream": 187652212081240,
+  "workspace_capture_stream": 187652314421112,
   "readonly_after_second_fixture": {
     "positions": {
       "bit_equal": true,
@@ -2355,8 +2361,8 @@
         "first_coordinates": []
       }
     },
-    "capture_stream": 187652212081240,
-    "compute_stream": 187652209151880,
+    "capture_stream": 187652314421112,
+    "compute_stream": 187652311491752,
     "second_actual_FULL_graph": true,
     "checks_count": 80,
     "concurrent_replay_tested": false
@@ -2889,36 +2895,36 @@
     "unit": "us/complete HC-pre through HC-post raw graph replay, SK0",
     "samples": {
       "native": [
-        569.9359893798828,
-        570.826005935669,
-        570.5140113830566,
-        572.215986251831,
-        569.5000171661377,
-        571.6400146484375,
-        568.366003036499,
-        571.1559772491455
+        563.8279914855957,
+        564.4579887390137,
+        563.0799770355225,
+        565.664005279541,
+        563.8440132141113,
+        568.3239936828613,
+        563.9979839324951,
+        565.96999168396
       ],
       "candidate": [
-        827.7460098266602,
-        825.8740425109863,
-        837.9019737243652,
-        827.0560264587402,
-        827.2800445556641,
-        847.2319602966309,
-        836.2580299377441,
-        835.9180450439453
+        831.309986114502,
+        830.5080413818359,
+        840.4899597167969,
+        832.8140258789062,
+        832.588005065918,
+        832.3519706726074,
+        847.681999206543,
+        837.3740196228027
       ]
     },
     "summary": {
       "native": {
-        "min": 568.366003036499,
-        "mean": 570.5192506313324,
-        "max": 572.215986251831
+        "min": 563.0799770355225,
+        "mean": 564.8957431316376,
+        "max": 568.3239936828613
       },
       "candidate": {
-        "min": 825.8740425109863,
-        "mean": 833.158266544342,
-        "max": 847.2319602966309
+        "min": 830.5080413818359,
+        "mean": 835.639750957489,
+        "max": 847.681999206543
       }
     }
   },
