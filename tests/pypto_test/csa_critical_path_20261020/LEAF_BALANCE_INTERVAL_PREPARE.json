@@ -1,0 +1,113 @@
+{
+  "wiring": {
+    "entry.py": {
+      "definitions": {
+        "_csa_core_group": 1,
+        "decode_csa_spmd": 1
+      },
+      "calls": {
+        "cube_schedule": 1,
+        "vector_schedule": 1,
+        "_csa_core_group": 1
+      }
+    },
+    "cube_schedule.py": {
+      "definitions": {
+        "cube_schedule": 1
+      },
+      "calls": {
+        "indexer_score_cube_stage": 1
+      }
+    },
+    "vector_schedule.py": {
+      "definitions": {
+        "vector_schedule": 1
+      },
+      "calls": {
+        "indexer_score_vector_lane_stage": 1,
+        "indexer_pair_publish_stage": 1,
+        "indexer_group_plan_stage": 1
+      }
+    },
+    "indexer_group_stages.py": {
+      "definitions": {
+        "indexer_long_leaf_plan": 1,
+        "indexer_group_plan_stage": 1
+      },
+      "calls": {
+        "indexer_long_leaf_plan": 1
+      }
+    },
+    "indexer_score_stages.py": {
+      "definitions": {
+        "indexer_score_cube_stage": 1,
+        "indexer_score_vector_lane_stage": 1
+      },
+      "calls": {}
+    },
+    "indexer_publish_stages.py": {
+      "definitions": {
+        "indexer_pair_publish_stage": 1
+      },
+      "calls": {
+        "wait_indexer_query_roots": 1
+      }
+    },
+    "attention_dependencies.py": {
+      "definitions": {
+        "wait_indexer_query_roots": 1
+      },
+      "calls": {}
+    }
+  },
+  "controls": {
+    "16": {
+      "QUERY_GROUP": 6,
+      "QK_PANEL": 64,
+      "SCORE_TILE": 1024,
+      "PREFETCH": 1,
+      "TO_L0": true,
+      "BALANCED": true,
+      "ROOTS": 1,
+      "OA_COLS": 128,
+      "OB_ROWS": 96,
+      "OUTPUT_GROUP_PIPELINE": true,
+      "HC_ROW_DEPENDENCIES": true,
+      "ATTENTION_QUERY_METADATA": false,
+      "HC_CONSUMER_REDUCE": false,
+      "QA_M16_PARALLEL": false,
+      "COOPERATIVE_PREFIX": true,
+      "EARLY_ATTENTION_GEOMETRY": true,
+      "LOCAL_ATTENTION_STATS": true,
+      "SCALE_PAGE_COALESCING": false,
+      "PLAN_PHYSICAL_ROWS": true,
+      "ROUND_LEAF_BALANCE": false
+    },
+    "28": {
+      "QUERY_GROUP": 6,
+      "QK_PANEL": 64,
+      "SCORE_TILE": 1024,
+      "PREFETCH": 1,
+      "TO_L0": true,
+      "BALANCED": true,
+      "ROOTS": 1,
+      "OA_COLS": 256,
+      "OB_ROWS": 128,
+      "OUTPUT_GROUP_PIPELINE": true,
+      "HC_ROW_DEPENDENCIES": true,
+      "ATTENTION_QUERY_METADATA": false,
+      "HC_CONSUMER_REDUCE": false,
+      "QA_M16_PARALLEL": false,
+      "COOPERATIVE_PREFIX": true,
+      "EARLY_ATTENTION_GEOMETRY": true,
+      "LOCAL_ATTENTION_STATS": false,
+      "SCALE_PAGE_COALESCING": true,
+      "PLAN_PHYSICAL_ROWS": true,
+      "ROUND_LEAF_BALANCE": true
+    }
+  },
+  "formal_source_changed": false,
+  "added_tensor_roots": 0,
+  "host_descriptor_only": true,
+  "device_validated": false
+}
