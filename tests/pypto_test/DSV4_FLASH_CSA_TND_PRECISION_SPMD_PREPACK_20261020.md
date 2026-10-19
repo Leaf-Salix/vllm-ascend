@@ -66,5 +66,11 @@ inference Tensor原地写入、`.data`写入及直接graph replay不能提供完
 当前在单次准备调用外显式使用`torch.no_grad()`，不改权重和外部grad状态。
 新增CPU及真实NPU强grad加载回归，源权重FP32 SHA与修复前相同，后续FULL逐bit门禁全部通过。
 第二次失败没有token结果，原六源记录保留于`six-source-before-nograd/`。
-真实整模型将在新快照重测，尚不能称该预打包候选整模型通过。
+当时整模型尚未完成；后续新快照的验收结果见末节。
 只有8K token/接受事件一致后才执行128K/B24；任何首差都停止扩展并保留原精度基准。
+
+## 后续整模型验收
+
+当前六源已完成8K/B40及128K/B24，两档所有保存token、接受事件均与Native一致，零抢占。
+性能均值仅较父SPMD小约0.4%～0.5%，不认定稳定整模型加速。完整配置与原始证据见
+[真实整模型报告](DSV4_FLASH_CSA_TND_PRECISION_SPMD_PREPACK_REAL_MODEL_20261020.md)。
