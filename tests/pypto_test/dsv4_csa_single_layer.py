@@ -135,7 +135,12 @@ def make_fixture(config, attention, batch, history, seed, device, table_history=
             else:
                 view.normal_(0, 0.5)
         group["owner"].kv_cache = [group["views"]] if name == "indexer" else group["views"]
-        table = BlockTable(spec.block_size, 40, columns, 256, True, device, num_speculative_tokens=5)
+        # 保留原七档的 40 请求 / 256 token 容量；较大的单层边界用例按实际
+        # 请求数和 token 数扩容，避免 fixture 在进入算子前发生页表越界。
+        table = BlockTable(
+            spec.block_size, max(40, batch), columns, max(256, tokens),
+            True, device, num_speculative_tokens=5,
+        )
         for row in range(batch):
             owner = batch - 1 - row if reverse_pages else row
             page_ids = [1 + owner * per_request + (per_request - 1 - col) % per_request for col in range(columns)]

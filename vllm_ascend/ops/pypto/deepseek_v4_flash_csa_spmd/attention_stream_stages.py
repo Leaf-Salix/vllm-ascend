@@ -13,7 +13,8 @@
     PLAN_PHYSICAL_ROWS开启时，压缩块读取本轮plan已经验证的物理行，删除重复的Q/L扫描、
     除32及Scalar查页。表示由plan与本函数共同的device容量谓词决定，不能
     只改消费者或拿原逻辑索引直接当物理行。几何/页合法性在同代plan执行，
-    消费者保留最终行范围保护；SWA和能力外回退原逻辑。所有事件和数学保持。
+    消费者由MGATHER(row, zero)执行最终行范围保护；一次载入64项物理索引，
+    替代逐行Scalar读GM，ISA内部仍逐行DMA。SWA/能力外回退及所有事件保持。
     attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
@@ -294,7 +295,6 @@ def attention_qk_pv_vector_lane_stage(
             if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                 qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
                 qk_kv_row = qk_slot * ATTN_K_TILE
-                qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
                 # mask是两角色共同事件谓词；额外地址guard只限制gather，不改变
                 # 事件对数。合法调用必须使用与plan同一批Q/L/positions/页表。
                 # 显式constexpr使关闭路径在Tile状态构建前裁掉此分支；仅靠
@@ -304,14 +304,21 @@ def attention_qk_pv_vector_lane_stage(
                     # 获取其phase和业务缓存；mask来自同一plan，不是外部任意标记。
                     # 因此这里无需再次扫描Q/L或逐行查页，仍检查最终物理行容量。
                     # 无效候选为-1，保持本块初始化的零KV；顺序及64行分工不变。
-                    for physical_row in pl.range(ATTN_K_TILE // 2):
-                        physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + physical_row
-                        physical_src = pl.cast(pl.read(cmp_sparse_indices, [qk_t, physical_column]), pl.INDEX)
-                        if physical_src >= 0 and physical_src < pl.tensor.dim(cmp_kv_flat, 0):
-                            qk_kv_half = pl.gather_row(
-                                qk_kv_half, cmp_kv_flat, [physical_row, 0], [physical_src, 0], [1, HEAD_DIM]
-                            )
+                    # 索引来自已发布的本轮物理plan；一次DMA读64项到UB，避免
+                    # 每行Scalar读GM。MGATHER仍逐行DMA，不能称为硬件单指令
+                    # 并行采64行；zero模式保留负哨兵/容量外地址的零填充。
+                    physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv
+                    physical_rows = pl.load(
+                        cmp_sparse_indices, [qk_t, physical_column], [1, ATTN_K_TILE // 2],
+                        target_memory=pl.MemorySpace.Vec,
+                    )
+                    qk_kv_half = pl.tile.mgather(
+                        cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero"
+                    )
                 else:
+                    # 只有原SWA/逻辑回退需要先清零；物理分支由MGATHER完整写出，
+                    # 不让旧零Tile与新64KiB结果跨分支同时存活。
+                    qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
                     qk_b, qk_pos, q_active = attention_query_geometry(
                         position_ids, bounds, lengths, valid_block_mask, qk_t, CACHE_QUERY_METADATA
                     )

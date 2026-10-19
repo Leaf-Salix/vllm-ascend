@@ -18839,3 +18839,33 @@ attention_physical_plan_current_retest_20261019。大产物仅本地路径/大�
 的GM描述符；必须维护offset/stride/validity与别名语义，继续拒绝真正
 Tile转GM，不能直接删除保护。过程保存在attention_pair_dma_feasibility_20261019，
 已独立中文提交fe6dd19d。
+
+### 2026-10-19：物理行plan后复试MGATHER并正式采用
+
+
+六项 S6（五个目标启用档和 T66 边界）均 completed/exit0。每行是同进程、
+同根地址、同 v3 工具链的五窗中位；数值、Top-K/score、完整 cache/state、
+保护区、graph/eager、代际协议通过；长B16另有metadata/padding通过。
+
+|历史/B|多task μs|本轮参考 μs|MGATHER μs|较参考耗时降低|
+|---|---:|---:|---:|---:|
+|131072/11|751.82|727.62|722.32|0.728%|
+|131072/16|862.44|823.76|815.42|1.012%|
+|131072/24|1156.14|1074.32|1055.58|1.744%|
+|131072/28|1285.20|1209.78|1205.14|0.384%|
+|8192/16|665.16|661.90|658.12|0.571%|
+|8192/32|980.60|940.72|938.68|0.217%|
+
+短历史B64/S1与B16/S5均在真实policy启用物理plan，A→B→A同址图输出、
+Top-K、score、完整allocation、输入只读、保护区与协议均通过，不采性能。
+S1前两次在进入算子前分别遇到测试配置draft slots不足、BlockTable固定
+40请求越界。只扩充fixture容量，七档原40/256容量不变；保留失败报告和
+原query脚本。B64是单层边界验证，不声称整网服务已支持B64。
+
+正式仅采用attention_stream_stages.py这一处改动，37份文件与source_candidate
+逐文件一致；policy、生产者、事件、数学不变。B4/B8关闭的完整AIC/AIV
+C++已等价，不重复上卡。最终七档结果及原始任务见COMPLETED_RESULTS.json，
+采用证据ADOPTION_AUDIT.json。目标30%仍0/7，短B16跨轮636.24与658.12的
+差异不能算作候选退化；本轮配对参考为661.90。没有挑历史最小值。
+
+过程目录：mgather_physical_plan_retest_20261019。旧静态负例并未删除；当前物理行plan使一次加载64项索引可替代逐行Scalar读GM，但ISA仍逐行DMA。
