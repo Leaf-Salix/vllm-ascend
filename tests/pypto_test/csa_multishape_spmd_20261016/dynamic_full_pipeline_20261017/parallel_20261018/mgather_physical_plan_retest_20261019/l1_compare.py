@@ -34,7 +34,8 @@ def export_window(source, destination, side, *, kernel_config=None):
     names = {}
     # 独立边界probe也会生成kernel_config，其func_id从0重新编号，不能混入
     # CSA名称表覆盖基线。每侧只接受自己的唯一编译入口；原始时间戳不受命名影响。
-    prefix = "decode_csa_spmd_" if is_spmd else "_decode_csa_tp1_layer_"
+    # 同时识别旧入口名和新JIT保留的_jit_前缀，唯一性检查保持。
+    prefix = "*decode_csa_spmd_" if is_spmd else "*decode_csa_tp1_layer_"
     tables = (
         [Path(kernel_config)]
         if kernel_config is not None

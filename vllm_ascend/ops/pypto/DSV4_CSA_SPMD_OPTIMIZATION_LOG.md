@@ -19268,3 +19268,82 @@ metadata/padding、图重放和信号代际通过。B22 作为额外边界，不
 没有修改 PyPTO/Simpler/PTOAS，没有重跑已完成的验证或提交检查。
 完整结果、逐次原始 L1、源码冻结、采用审计和本地大产物清单在
 `tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/ob_active_rows_20261019/`。
+
+
+## 2026-10-19：恢复优化，迁入 kernel SDMA 作为主要方向
+
+用户确认优先使 128K 五档相对同轮多 task 完整 L1 降耗时 30%，先做 B16/B28，
+8K 避免明显退步；只做区间策略，最终保持完整单 SPMD。先完成有证据的关键
+路径诊断再约定门槛，非逐 bit 数学改动采用前另行确认。所有仓库未经再次明确
+允许不得 push。
+
+本轮在独立 worktree 从已固化工具链迁入 Simpler #2583、PyPTO #3001，
+保留 256 Tensor + 16 scalar 与已有动态编译修复。Simpler 本地 09478f27e、
+PyPTO 本地 56cca2c40，未 push。解决旧 editable finder 抢先导入后重新构建
+TMR/HBG native runtime；两个原 PR 五场景各全部通过（69.04 / 74.15 秒），
+任务 20261019_211547_34556672723 与 20261019_211548_34557179457。
+PyPTO 独立 core/adapter 构建及单 MIX 48 AIV、完整 CSA 验证继续进行；
+不将组件通过记为算子精度或性能通过。
+
+过程与候选证据统一记录于 tests/pypto_test/csa_sdma_prefetch_20261019。
+第一项拟利用 AIV 等待 Q_A 的区间预取主 Q_B 权重，保持现有数学、依赖和
+消费者读取策略；实际是否缩短关键路径由无插桩完整 CSA 配对 L1 判定。
+
+
+### 2026-10-19：kernel SDMA 真机验收、两个融合缺陷与Q_B预取负例
+
+两个PR迁入后，PyPTO core/adapter构建完成，180项配置/注册UT通过。
+独立PyPTO分支再提交7614f4eb0，保留#3042的连续整行GM描述符原型，
+修复NZ完整物理一维展平跨JIT helper丢失TensorMeta（上游#3062，9+2项UT）。
+完整动态候选CPU仍为58轴、一个MIX；没有改共享安装、PTOAS或PTO-ISA。
+
+完整MIX首次扩大到48AIV时发现并真机定位两项缺陷，已按用户要求直接评论
+PyPTO #3001与Simpler #2583，附完整可运行复现和局部修正对照：
+
+1. 自动SDMA channel取原生CCE block id，两个AIV共享同一通道。48条角色
+   只用24个channel，有效event/session的Wait仍失败。单个全卡MIX的诊断
+   显式分配0..47后，初次及10次eager通过；单发起者图重放也通过。通用修复
+   应提供物理AIV唯一通道，不能拿逻辑task编号替代。
+2. PrefetchAsyncContext内部把256B scratch固定绑到UB0，与存活Tile冲突。
+   单发起者的load→prefetch/wait→消费旧Tile，Wait成功但8个FP32被覆盖。
+   排除未完成TLOAD后仍复现；隔离scratch后初次及10次eager通过。正式修复
+   需要内存规划和生命周期契约，不能在大算子中硬编码另一个地址。
+
+通道完整复现：https://github.com/hw-native-sys/pypto/pull/3001#issuecomment-6269309892
+scratch复现：https://github.com/hw-native-sys/pypto/pull/3001#issuecomment-6269721600
+Simpler同步：https://github.com/hw-native-sys/simpler/pull/2583#issuecomment-6269727287
+另外Scalar BOOL→INT32将true符号扩展成-1，独立CPU复现并报#3063；未将
+这个编译问题混记为单发起者SDMA故障，没有提交修改PR或添加标签。
+
+当前Q_B预取候选只在没有跨越存活Tile的阶段边界调用。完整B16/B28、S6、
+128K三方配对均973项PASS、max_abs=0，状态/保护区/metadata/padding/
+图重放与代际通过。单AIV32MiB：原单SPMD/候选为809.06/849.52μs、
+1224.66/1233.68μs；8组各AIV0发4MiB：812.12/838.00μs、
+1222.44/1230.18μs。均为完整CSA无阶段插桩L1五窗中位数，均不采用。
+选择每组仅AIV0避免本单MIX内通道别名，不代表runtime通用修复。
+
+72核阶段时戳诊断同样精确通过：B16原版/8通道版的最后HC PARTIAL发布
+35.42/75.06μs、NORM56.64/97.32μs；QB阶段角色中位区间66.73/38.42μs，
+但最后QB完成仍为241.46/260.74μs。QB自身缩短而前段延后，收益被抵消。
+这些是带探针的一次调用，只用于归因；没有拿探针时长作为正式性能，也没
+把访存争用推断表述为已测得HBM饱和。尾部发起者本来就没有HC M8/M16工作，
+所以单纯把预取搬到函数入口不能创造明显新窗口。
+
+后续仅试推迟到真实NORM生产者发布后再发起，尝试避免与HC输入/投影重叠。
+本核仍等待原QA写者，其他40条AIV正常推进，没有新增全核集合。按device T
+计算NORM owner，仍是区间策略和一个完整SPMD。B16/B28任务已提交，
+尚未预记性能收益；若无稳定收益，不扩其余档。正式37个算子源保持E49版。
+
+测试CLI、标记类型、漏split_aiv、诊断hook绑定、旧输出目录/前缀等测试自身
+错误也全部记录于tests/pypto_test/csa_sdma_prefetch_20261019/README.md，
+未将它们算为组件缺陷或数值失败。大编译产物仅本地保留，不做hash校验。
+所有仓库均未push。
+
+
+NORM后预取的两档已收齐：973项PASS、max_abs=0；B16多task/原单SPMD/
+候选873.36/804.66/841.62μs，B28为1295.38/1204.78/1222.40μs，均为
+三方轮转五窗无阶段插桩L1中位数。仍回退，三种Q_B投放均不采用，本组到此
+结束，不扩七档。阶段诊断揭示前段干扰，但仅调整到NORM之后仍无净收益，
+不能声称已解决全部性能原因。后续应寻找更长的Indexer/Attention窗口。
+已询问用户是否以重点档至少净省20μs、另一档无明显回退作为扩档门槛，
+当前尚待答复；整体30%目标不变。正式算子未修改，所有仓库未push。

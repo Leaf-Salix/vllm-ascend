@@ -1,0 +1,10 @@
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @bool_cast(%arg0: !pto.ptr<i32>, %arg1: i1) {
+  %c1_index = arith.constant 1 : index
+  %c0_index = arith.constant 0 : index
+  %out_view = pto.make_tensor_view %arg0, shape = [%c1_index], strides = [%c1_index] {layout = #pto.layout<nd>} : !pto.tensor_view<?xi32>
+  %0 = arith.extsi %arg1 : i1 to i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/repro_bool_cast.py":32:1)
+  pto.store %0, %arg0[%c0_index] : !pto.ptr<i32>, i32 loc("/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/repro_bool_cast.py":32:1)
+  return
+  }
+}

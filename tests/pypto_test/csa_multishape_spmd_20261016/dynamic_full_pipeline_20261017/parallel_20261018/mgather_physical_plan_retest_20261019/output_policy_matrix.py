@@ -71,7 +71,7 @@ def run_matrix(
         return f"spmd_n{policy.oa_cols}_" + ("grouped" if policy.output_group_pipeline else "global")
 
     def tables():
-        return set(Path(os.environ["PYPTO_PROG_BUILD_DIR"]).glob("decode_csa_spmd_*/kernel_config.py"))
+        return set(Path(os.environ["PYPTO_PROG_BUILD_DIR"]).glob("*decode_csa_spmd_*/kernel_config.py"))
 
     def checked():
         numerical = verify()
@@ -166,7 +166,7 @@ def run_matrix(
         entries = {"dynamic_pto": baseline_entry}
         entries.update({name: lambda item=item: item(config=compile_options) for name, item in candidates.items()})
         configs["dynamic_pto"] = next(
-            Path(os.environ["PYPTO_PROG_BUILD_DIR"]).glob("_decode_csa_tp1_layer_*/kernel_config.py")
+            Path(os.environ["PYPTO_PROG_BUILD_DIR"]).glob("*decode_csa_tp1_layer_*/kernel_config.py")
         )
         report["kernel_configs"] = {name: str(config) for name, config in configs.items()}
         before = {}

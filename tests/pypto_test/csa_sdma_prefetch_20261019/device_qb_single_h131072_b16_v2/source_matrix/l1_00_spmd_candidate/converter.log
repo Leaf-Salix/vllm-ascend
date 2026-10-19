@@ -1,0 +1,24 @@
+
+✓ Conversion complete
+  Input:  /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/device_qb_single_h131072_b16_v2/source_matrix/l1_00_spmd_candidate/chip_swimlane_records.json
+  Output: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/device_qb_single_h131072_b16_v2/source_matrix/l1_00_spmd_candidate/swimlane.json
+
+To visualize: Open https://ui.perfetto.dev/ and drag in /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/device_qb_single_h131072_b16_v2/source_matrix/l1_00_spmd_candidate/swimlane.json
+
+============================================================================================================================================
+Task Statistics by Function
+  Source chip_swimlane_level: 1 (AICore timing only; recorded in chip_swimlane_records.json)
+  Exec = kernel time on AICore; Latency = dispatch->finish (incl. head OH + Exec + tail OH)
+  Head OH split (v3): Prop = NoC propagation (dispatch_ts→AICore receive); Local = dcci+ack (receive→start)
+============================================================================================================================================
+Func_ID  Func_Name    Count   Avg Exec(us)  Avg Latency(us)   Exec%   Avg Head OH(us)  Avg Tail OH(us)  Avg Prop(us)  Avg Local(us)
+--------------------------------------------------------------------------------------------------------------------------------------------
+0        cube_schedule    24         816.41                -       -                 -                -             -           4.53
+1        vector_schedule    48         853.09                -       -                 -                -             -           4.31
+--------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                    72       60542.44                -
+
+AICore Observed Span: 860.50 us (from earliest AICore receive to latest AICore end)
+==============================================================================================================
+
+Scheduler-overhead deep-dive: run sched_overhead_analysis manually with a separately-captured deps.json (--enable-dep-gen).

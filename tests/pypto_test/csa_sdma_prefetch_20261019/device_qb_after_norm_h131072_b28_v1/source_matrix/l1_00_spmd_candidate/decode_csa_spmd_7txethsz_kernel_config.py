@@ -1,0 +1,26 @@
+# Kernel and Orchestration Configuration
+
+from pathlib import Path
+
+from simpler.task_interface import ArgDirection as _D
+
+_ROOT_DIR = Path(__file__).parent
+
+# Runtime configuration for tensormap_and_ringbuffer.
+# AICPU thread count 0 selects the runtime's architecture default (a2a3: 4; a5: 5).
+RUNTIME_CONFIG = {
+	"runtime": "tensormap_and_ringbuffer",
+	"aicpu_thread_num": 0,
+	"enable_sdma": True,
+}
+
+ORCHESTRATION = {
+	"source": str(_ROOT_DIR / "orchestration" / "decode_csa_spmd.cpp"),
+	"function_name": "aicpu_orchestration_entry",
+	"signature": [_D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT],
+}
+
+KERNELS = [
+	{"func_id": 0, "name": "cube_schedule", "source": str(_ROOT_DIR / "kernels" / "aic" / "cube_schedule.cpp"), "core_type": "aic", "signature": [_D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN]},
+	{"func_id": 1, "name": "vector_schedule", "source": str(_ROOT_DIR / "kernels" / "aiv" / "vector_schedule.cpp"), "core_type": "aiv", "signature": [_D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.IN, _D.IN, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.INOUT, _D.INOUT, _D.IN, _D.INOUT, _D.IN]},
+]

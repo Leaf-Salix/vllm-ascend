@@ -389,7 +389,8 @@ def main():
                 if generation == 1 and (args.wait_backoff or args.phase_clock):
                     report["codegen_probe"] = json.loads((args.output / "codegen_probe/audit.json").read_text())
                     # 不把命令行开关当作编译实际生效的证据；检查最终CCEC输入。
-                    artifacts = list((args.output / "build_output").glob("decode_csa_spmd_*/kernels/*/*.cpp"))
+                    # JIT版本可能保留_jit_前缀；仍严格要求唯一的一对AIC/AIV。
+                    artifacts = list((args.output / "build_output").glob("*decode_csa_spmd_*/kernels/*/*.cpp"))
                     if len(artifacts) != 2:
                         raise AssertionError("无法唯一定位候选实际AIC/AIV生成源码")
                     for artifact in artifacts:

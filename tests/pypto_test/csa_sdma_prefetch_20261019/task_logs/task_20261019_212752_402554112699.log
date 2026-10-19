@@ -1,0 +1,31 @@
+[npu-lock] 获取设备 9 的锁 (无超时)...
+[npu-lock] 已获取设备 9 的锁 (pid=4026354)
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/lib/python3.10/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /data/pyptouser/yejia/vllm-cann92-main/env/Ascend/cann-9.2.0-beta.2/aarch64-linux/ascend_toolkit_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+[mono_ns=1671814722887363][T0xfffd5bfff120][TIMING] clock_anchor: [CLOCK_ANCHOR] v=1 pid=4026531 mono_ns=1671814722886773 wall_ns=1792416490965408563
+[SDMA] Created 48 STARS streams OK
+[SDMA] STARS query AICPU kernel completed OK
+[mono_ns=1671815159098976][T0xfffd5bfff120][TIMING] report_sdma_warmup_status: [device_runner_base.cpp:1607] sdma warmup: 48/48 channels warmed in 252.29 ms
+/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/smoke_kernel.py:96: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  vector_out = torch.full_like(x, -999)
+Error: pl operation 'write': tensor.write requires value dtype to match tensor dtype, but got value dtype index and tensor dtype int32
+  --> /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_sdma_prefetch_20261019/smoke_kernel.py:41:9
+   |
+39 |         value = pl.load(x, [worker, 0], [1, 1024])
+40 |         out = pl.store(pl.add(value, 1.0), [worker, 0], out)
+41 |         pl.write(done, [worker], 1)
+   |         ^^^^^^^^
+42 |     return out, done
+43 | 
+   |
+   = help: For scalar arithmetic / comparison, use Python operators directly (e.g. `s1 + s2`, `s1 % s2`, `s1 == s2`).
+
+note: run with `PTO_BACKTRACE=1` environment variable to display a backtrace.
+[ERROR] 2026-10-19-21:28:13 (PID:4026531, Device:9, RankID:-1) ERR99999 UNKNOWN applicaiton exception
+[npu-lock] 已释放设备 9 的锁
