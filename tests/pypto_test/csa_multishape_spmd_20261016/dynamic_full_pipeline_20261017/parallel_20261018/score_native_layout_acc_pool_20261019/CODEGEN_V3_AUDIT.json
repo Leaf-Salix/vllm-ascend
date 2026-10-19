@@ -1,0 +1,68 @@
+{
+  "scope": "仅C++代码生成对比，尚无设备或性能结论",
+  "on_v2_v3": {
+    "aic/cube_schedule.cpp": {
+      "equal_ignoring_line_comments": true,
+      "bytes_without_line_comments": [
+        2217428,
+        2217428
+      ]
+    },
+    "aiv/vector_schedule.cpp": {
+      "equal_ignoring_line_comments": true,
+      "bytes_without_line_comments": [
+        2217527,
+        2217527
+      ]
+    }
+  },
+  "cpu_on_v3": {
+    "full_codegen_passed": true,
+    "single_mix": true,
+    "pool_operations": [
+      "%buf_ws_pool_inline2069__ssa_v0 = pto.alloc_tile addr = %c98304_i64 valid_row = %c16_index valid_col = %c512_index : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=512, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0> loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_native_layout_acc_pool_20261019/source_candidate_v3/indexer_score_stages.py\":196:17)",
+      "pto.tstore ins(%buf_ws_pool_inline2069__ssa_v0 : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=512, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%indexer_transfer__ssa_v0_pview : !pto.partition_tensor_view<6x512xf32>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_native_layout_acc_pool_20261019/source_candidate_v3/indexer_score_stages.py\":389:33)",
+      "pto.tstore ins(%buf_ws_pool_inline2069__ssa_v0 : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=512, v_row=?, v_col=?, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) outs(%2128 : !pto.partition_tensor_view<6x512xf32>) loc(\"/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/score_native_layout_acc_pool_20261019/source_candidate_v3/indexer_score_stages.py\":425:21)"
+    ],
+    "symbolic_axes": 58,
+    "required_root_axes": 56
+  },
+  "cpu_short_v3": {
+    "full_codegen_passed": true,
+    "single_mix": true,
+    "pool_operations": [],
+    "symbolic_axes": 58,
+    "required_root_axes": 56
+  },
+  "short_reference_controls": {
+    "QUERY_GROUP": 2,
+    "QK_PANEL": 128,
+    "SCORE_TILE": 768,
+    "PREFETCH": 1,
+    "TO_L0": true,
+    "BALANCED": false,
+    "ROOTS": 2,
+    "OA_COLS": 128,
+    "OB_ROWS": 96,
+    "OUTPUT_GROUP_PIPELINE": true,
+    "HC_ROW_DEPENDENCIES": true,
+    "ATTENTION_QUERY_METADATA": false,
+    "HC_CONSUMER_REDUCE": false,
+    "QA_M16_PARALLEL": false,
+    "COOPERATIVE_PREFIX": true,
+    "EARLY_ATTENTION_GEOMETRY": true,
+    "LOCAL_ATTENTION_STATS": false,
+    "SCALE_PAGE_COALESCING": false,
+    "PLAN_PHYSICAL_ROWS": true
+  },
+  "short_off_vs_reference": {
+    "aic/cube_schedule.cpp": {
+      "equal_ignoring_line_comments": true,
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/mgather_physical_plan_retest_20261019/cpu_short_v1/kernel/kernels/aic/cube_schedule.cpp"
+    },
+    "aiv/vector_schedule.cpp": {
+      "equal_ignoring_line_comments": true,
+      "reference": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/mgather_physical_plan_retest_20261019/cpu_short_v1/kernel/kernels/aiv/vector_schedule.cpp"
+    }
+  }
+}
