@@ -13,7 +13,7 @@ def main():
     directories = [
         "attention_fifo_wait_20261019", "attention_explicit_row_dma_20261019",
         "attention_kv_reserved_ub_20261019", "attention_kv_half_reserved_20261019",
-        "oa_n192_balanced_columns_20261019",
+        "oa_n192_balanced_columns_20261019", "oa_row_rotation_20261019",
     ]
     selected = set()
     for name in directories:

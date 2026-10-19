@@ -41,3 +41,12 @@ v3完整CPU通过58动态轴/单MIX。实际IR分别生成NZ权重N64/N192及最
 真机完整B16 v3已提交（见V3_DEVICE_SUBMISSION.json），未预记功能或性能。
 run_cpu.sh/run_device.sh默认改为v3；历史runner原文在runner_revisions，
 旧版源码只作失败参考，不应拿v1作为可用算子。正式ops仍为已采用版。
+
+v3算子报告complete/true，完整精确、保护、metadata/padding、图和代际检查
+全部完成，五窗多task862.46、参考819.12、候选831.50μs，回退1.511%，
+五窗全慢，不采用。队列终态却为exit2：本会话在Python运行期间修改了同一个
+run_device.sh默认source，Bash恢复读文件时遇引号EOF错误，发生在完整结果
+写出之后。原日志尾保存在WRAPPER_EXIT_V3.txt；当前脚本bash -n通过。
+不把任务总状态写成exit0或完整任务PASS，不将包装错误归因PyPTO。由于
+已有负面性能证据，本轮不为修复包装退出码重复占卡；若将来重新考虑该候选，
+须使用冻结runner重新验证。后续已提交任务依赖的脚本直到终态保持不变。
