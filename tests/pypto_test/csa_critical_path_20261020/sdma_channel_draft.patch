@@ -1,0 +1,114 @@
+diff --git a/src/a2a3/runtime/host_build_graph/common/intrinsic.h b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+index b4004c865..fa335defb 100644
+--- a/src/a2a3/runtime/host_build_graph/common/intrinsic.h
++++ b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+@@ -120,6 +120,9 @@ struct GlobalContext {
+     // Used by AIV to select the correct intra-cluster hw instruction.
+     // Not meaningful for AIC kernels or single-AIV tasks.
+     int32_t sub_block_id;
++    // 驻留 AIV 独占的 SDMA 通道，与每个 task 重新编号的 block_idx 无关。
++    // 占用原有的 4 字节对齐空隙；AIC 为 -1，不得提交 SDMA。
++    int32_t sdma_channel_id;
+     uint64_t dma_workspace[DMA_WORKSPACE_KIND_COUNT];
+ };
+ 
+@@ -187,6 +190,17 @@ static __aicore__ inline __gm__ uint8_t *get_dma_workspace(__gm__ int64_t *args,
+     return reinterpret_cast<__gm__ uint8_t *>(ctx->dma_workspace[kind]);
+ }
+ 
++/**
++ * 返回本驻留 AIV 的独占 SDMA 通道编号。编号在调度器初始化时绑定，
++ * 多个 task 的逻辑 block_idx 可以重复，此编号仍不与其他驻留 AIV 冲突。
++ * AIC 返回 -1；调用方必须只在 AIV 上使用。
++ */
++static __aicore__ inline int32_t get_sdma_channel_id(__gm__ int64_t *args) {
++    __gm__ GlobalContext *ctx =
++        reinterpret_cast<__gm__ GlobalContext *>(static_cast<uint64_t>(args[SPMD_GLOBAL_CONTEXT_INDEX]));
++    return ctx->sdma_channel_id;
++}
++
+ /**
+  * Return the logical block index assigned to the current worker.
+  * Range: [0, get_block_num(args)).
+diff --git a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+index 4965eb490..6bc6446d1 100644
+--- a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+@@ -949,6 +949,13 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime) {
+             int32_t cluster_offset = c * 3;  // Each cluster = 1 AIC + 2 AIV
+             auto aiv0_id = tracker.get_core_id_by_offset(tracker.get_aiv0_core_offset(cluster_offset));
+             auto aiv1_id = tracker.get_core_id_by_offset(tracker.get_aiv1_core_offset(cluster_offset));
++            auto aic_id = tracker.get_core_id_by_offset(tracker.get_aic_core_offset(cluster_offset));
++            // 用驻留 AIC 的唯一编号映射两个 AIV 通道，不能使用 task 内的逻辑编号。
++            for (int32_t buf = 0; buf < 2; ++buf) {
++                payload_per_core_[aic_id][buf].global_context.sdma_channel_id = -1;
++                payload_per_core_[aiv0_id][buf].global_context.sdma_channel_id = 2 * aic_id;
++                payload_per_core_[aiv1_id][buf].global_context.sdma_channel_id = 2 * aic_id + 1;
++            }
+             payload_per_core_[aiv0_id][0].global_context.sub_block_id = 0;
+             payload_per_core_[aiv0_id][1].global_context.sub_block_id = 0;
+             payload_per_core_[aiv1_id][0].global_context.sub_block_id = 1;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index f63ccdcbf..06ac46435 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -122,6 +122,9 @@ struct GlobalContext {
+     // Used by AIV to select the correct intra-cluster hw instruction.
+     // Not meaningful for AIC kernels or single-AIV tasks.
+     int32_t sub_block_id;
++    // 驻留 AIV 独占的 SDMA 通道，与每个 task 重新编号的 block_idx 无关。
++    // 占用原有的 4 字节对齐空隙；AIC 为 -1，不得提交 SDMA。
++    int32_t sdma_channel_id;
+     // Per-engine async-DMA workspace device addresses (0 when unavailable),
+     // indexed by DmaWorkspaceKind. The scheduler copies them from the resident
+     // config into every core's context during cold start.
+@@ -185,6 +188,17 @@ static __aicore__ inline int32_t get_sub_block_id(__gm__ int64_t *args) {
+     return ctx->sub_block_id;
+ }
+ 
++/**
++ * 返回本驻留 AIV 的独占 SDMA 通道编号。编号在调度器初始化时绑定，
++ * 多个 task 的逻辑 block_idx 可以重复，此编号仍不与其他驻留 AIV 冲突。
++ * AIC 返回 -1；调用方必须只在 AIV 上使用。
++ */
++static __aicore__ inline int32_t get_sdma_channel_id(__gm__ int64_t *args) {
++    __gm__ GlobalContext *ctx =
++        reinterpret_cast<__gm__ GlobalContext *>(static_cast<uint64_t>(args[SPMD_GLOBAL_CONTEXT_INDEX]));
++    return ctx->sdma_channel_id;
++}
++
+ /**
+  * Return the device-global async-DMA workspace address for one engine kind
+  * (see DmaWorkspaceKind), or nullptr when unavailable. Runtime-provided (like
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+index 873f9c353..925477ce4 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -974,6 +974,13 @@ void SchedulerContext::assign_own_clusters(int32_t tidx, Runtime *runtime) {
+         int32_t cluster_offset = c * PLATFORM_CORES_PER_BLOCKDIM;
+         int32_t aiv0_id = tracker.get_core_id_by_offset(tracker.get_aiv0_core_offset(cluster_offset));
+         int32_t aiv1_id = tracker.get_core_id_by_offset(tracker.get_aiv1_core_offset(cluster_offset));
++        auto aic_id = tracker.get_core_id_by_offset(tracker.get_aic_core_offset(cluster_offset));
++        // 用驻留 AIC 的唯一编号映射两个 AIV 通道，不能使用 task 内的逻辑编号。
++        for (int32_t buf = 0; buf < 2; ++buf) {
++            payload_per_core_[aic_id][buf].global_context.sdma_channel_id = -1;
++            payload_per_core_[aiv0_id][buf].global_context.sdma_channel_id = 2 * aic_id;
++            payload_per_core_[aiv1_id][buf].global_context.sdma_channel_id = 2 * aic_id + 1;
++        }
+         payload_per_core_[aiv0_id][0].global_context.sub_block_id = 0;
+         payload_per_core_[aiv0_id][1].global_context.sub_block_id = 0;
+         payload_per_core_[aiv1_id][0].global_context.sub_block_id = 1;
+@@ -1318,6 +1325,13 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime, simpler::tmr::Ca
+             int32_t cluster_offset = c * PLATFORM_CORES_PER_BLOCKDIM;  // Each cluster = 1 AIC + 2 AIV
+             auto aiv0_id = tracker.get_core_id_by_offset(tracker.get_aiv0_core_offset(cluster_offset));
+             auto aiv1_id = tracker.get_core_id_by_offset(tracker.get_aiv1_core_offset(cluster_offset));
++            auto aic_id = tracker.get_core_id_by_offset(tracker.get_aic_core_offset(cluster_offset));
++            // 用驻留 AIC 的唯一编号映射两个 AIV 通道，不能使用 task 内的逻辑编号。
++            for (int32_t buf = 0; buf < 2; ++buf) {
++                payload_per_core_[aic_id][buf].global_context.sdma_channel_id = -1;
++                payload_per_core_[aiv0_id][buf].global_context.sdma_channel_id = 2 * aic_id;
++                payload_per_core_[aiv1_id][buf].global_context.sdma_channel_id = 2 * aic_id + 1;
++            }
+             payload_per_core_[aiv0_id][0].global_context.sub_block_id = 0;
+             payload_per_core_[aiv0_id][1].global_context.sub_block_id = 0;
+             payload_per_core_[aiv1_id][0].global_context.sub_block_id = 1;
