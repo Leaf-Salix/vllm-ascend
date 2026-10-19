@@ -369,14 +369,14 @@ def sparse_attn_csa(
                     for qk_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
                         qk_col = qk_part * ATTN_CUBE_KV_TILE
                         qk_slot_row = pl.max(qk_part - 1, 0) * ATTN_CUBE_KV_TILE
-                        qk_l1 = pl.gather_row(
-                            qk_l1,
-                            kv_transfer,
-                            [qk_slot_row, 0],
-                            [qk_kv_base + qk_col, 0],
-                            [ATTN_CUBE_KV_TILE, HEAD_DIM],
-                        )
                         if qk_sb > 0 or qk_part == 0:
+                            qk_l1 = pl.gather_row(
+                                qk_l1,
+                                kv_transfer,
+                                [qk_slot_row, 0],
+                                [qk_kv_base + qk_col, 0],
+                                [ATTN_CUBE_KV_TILE, HEAD_DIM],
+                            )
                             # Transpose the complete carrier before slicing: the current
                             # backend preserves the slice's column offset in matmul.
                             qk_l1_t = pl.tile.transpose_view(qk_l1)
@@ -434,47 +434,49 @@ def sparse_attn_csa(
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                         # Gather in 64-row pieces per AIV; a whole 512x512 KV tile would exceed UB.
                         for qk_part in pl.range(ATTN_K_TILE // ATTN_CUBE_KV_TILE):
-                            qk_part_row = qk_part * ATTN_CUBE_KV_TILE + qk_lane_kv
-                            qk_kv_half = pl.tile.full([ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
-                            if qk_sb == 0:
-                                qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
-                                qk_win_len = pl.min(qk_pos + 1, WIN)
-                                qk_win_start = qk_pos - qk_win_len + 1
-                                qk_head = qk_win_start % BLOCK_SIZE
-                                qk_rows = pl.min(pl.max(qk_win_len - qk_part_row, 0), ATTN_CUBE_KV_TILE // 2)
-                                for qk_run in pl.unroll(SWA_RUNS):
-                                    qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_part_row, 0)
-                                    qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_part_row, qk_rows)
-                                    if qk_hi > qk_lo:
-                                        qk_absolute = qk_win_start + qk_part_row + qk_lo
-                                        qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
-                                        if qk_raw_page >= 0:
-                                            qk_raw_row = (
-                                                pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
-                                            )
-                                            qk_kv_half = pl.gather_row(
-                                                qk_kv_half,
-                                                ori_kv_flat,
-                                                [qk_lo, 0],
-                                                [qk_raw_row, 0],
-                                                [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
-                                                valid_shape=[qk_hi - qk_lo, HEAD_DIM],
-                                            )
-                            else:
-                                for qk_row in pl.range(ATTN_CUBE_KV_TILE // 2):
-                                    qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_part_row + qk_row
-                                    if qk_cmp_k < CMP_TOPK:
-                                        qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
-                                        if qk_ridx >= 0:
-                                            qk_page = pl.cast(
-                                                pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
-                                            )
-                                            if qk_page >= 0:
-                                                qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
-                                                qk_kv_half = pl.gather_row(
-                                                    qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                            if qk_sb > 0 or qk_part == 0:
+                                qk_part_row = qk_part * ATTN_CUBE_KV_TILE + qk_lane_kv
+                                qk_kv_half = pl.tile.full([ATTN_CUBE_KV_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
+                                if qk_sb == 0:
+                                    qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                                    qk_win_len = pl.min(qk_pos + 1, WIN)
+                                    qk_win_start = qk_pos - qk_win_len + 1
+                                    qk_head = qk_win_start % BLOCK_SIZE
+                                    qk_rows = pl.min(pl.max(qk_win_len - qk_part_row, 0), ATTN_CUBE_KV_TILE // 2)
+                                    for qk_run in pl.unroll(SWA_RUNS):
+                                        qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_part_row, 0)
+                                        qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_part_row, qk_rows)
+                                        if qk_hi > qk_lo:
+                                            qk_absolute = qk_win_start + qk_part_row + qk_lo
+                                            qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
+                                            if qk_raw_page >= 0:
+                                                qk_raw_row = (
+                                                    pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE
+                                                    + qk_absolute % BLOCK_SIZE
                                                 )
-                            pl.store(qk_kv_half, [qk_kv_base + qk_part_row, 0], kv_transfer)
+                                                qk_kv_half = pl.gather_row(
+                                                    qk_kv_half,
+                                                    ori_kv_flat,
+                                                    [qk_lo, 0],
+                                                    [qk_raw_row, 0],
+                                                    [ATTN_CUBE_KV_TILE // 2, HEAD_DIM],
+                                                    valid_shape=[qk_hi - qk_lo, HEAD_DIM],
+                                                )
+                                else:
+                                    for qk_row in pl.range(ATTN_CUBE_KV_TILE // 2):
+                                        qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_part_row + qk_row
+                                        if qk_cmp_k < CMP_TOPK:
+                                            qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
+                                            if qk_ridx >= 0:
+                                                qk_page = pl.cast(
+                                                    pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
+                                                )
+                                                if qk_page >= 0:
+                                                    qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                                                    qk_kv_half = pl.gather_row(
+                                                        qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                                    )
+                                pl.store(qk_kv_half, [qk_kv_base + qk_part_row, 0], kv_transfer)
                         pl.system.sync_set(
                             QK_KV_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
                         )

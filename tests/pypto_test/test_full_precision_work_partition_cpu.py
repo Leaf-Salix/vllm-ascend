@@ -354,8 +354,15 @@ def test_kv_actual_slot_expressions_lifetimes_and_L1_capacity():
         and n.value.func.attr == "matmul_acc"
     )
     init_cond = next(k.value for k in pv_update.keywords if k.arg == "init_cond")
-    # Exercise both SWA and compressed guards from the actual source. QK still
-    # loads all four KV panels; only selected products/PV reloads are skipped.
+    # Read the actual live-panel guards. SWA stages only part0; compressed
+    # panels retain their original slots, reloads and accumulation order.
+    assert any(
+        isinstance(n, ast.Assign)
+        and isinstance(n.value, ast.Call)
+        and isinstance(n.value.func, ast.Attribute)
+        and n.value.func.attr == "gather_row"
+        for n in qk_guard.body
+    ), "KV gather must share the existing live Cube panel guard"
     for sb in (0, 1, 2):
         qk_parts = [part for part in range(4) if evaluate(qk_guard.test, qk_sb=sb, qk_part=part)]
         pv_parts = [part for part in range(4) if evaluate(pv_guard.test, qk_sb=sb, pv_part=part)]
@@ -363,11 +370,11 @@ def test_kv_actual_slot_expressions_lifetimes_and_L1_capacity():
         assert [evaluate(init_cond, pv_part=part) for part in pv_parts] == [True] + [False] * (len(pv_parts) - 1)
         for token in range(256):
             slots = [None] * 3
-            for part in range(4):
+            for part in qk_parts:
                 row = evaluate(byname["qk_slot_row"], qk_part=part)
                 assert row % 128 == 0 and row + 128 <= kvshape[0]
                 slots[row // 128] = (token, part)
-            assert slots[1:] == [(token, 2), (token, 3)]
+            assert slots[1:] == ([None, None] if sb == 0 else [(token, 2), (token, 3)])
             for part in pv_parts:
                 row = evaluate(byname["pv_slot_row"], pv_part=part)
                 if evaluate(reload_if.test, pv_part=part):

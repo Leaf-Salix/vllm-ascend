@@ -5,7 +5,9 @@ This verifies recorded acceptance evidence; it does not execute PTO numerics.
 """
 
 import ast
+import csv
 import hashlib
+import io
 import json
 import math
 import runpy
@@ -338,9 +340,10 @@ def test_recorded_qkpv_single_factor_precision_and_paired_timings():
             "from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.layout import ",
             "from .layout import ",
         )
-        formal = _ROOT / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision/decode_sparse_attn_csa.py"
-        assert _sha(formal.read_bytes()) == "248d8b11bb0a045f7863c0b264d962845dcabafa51cbf1e5fafee413fa8dc6d5"
-        assert ast.dump(ast.parse(candidate)) == ast.dump(ast.parse(formal.read_text()))
+        # Preserved SWA128 checkpoint; the live-staging test binds current code.
+        formal = raw("formatted_candidate_sparse.py")
+        assert _sha(formal) == "248d8b11bb0a045f7863c0b264d962845dcabafa51cbf1e5fafee413fa8dc6d5"
+        assert ast.dump(ast.parse(candidate)) == ast.dump(ast.parse(formal))
         fields = ("mi", "li", "oi", "heads")
         labels = {"Q_B_actual_input", "baseline.Native_heads", "candidate.Native_heads"}
         labels.update(f"device_readonly.{i}" for i in range(12))
@@ -423,9 +426,155 @@ def test_recorded_qkpv_single_factor_precision_and_paired_timings():
 
 def test_swa_reproduction_profile_is_bound_to_actual_npu_package():
     """The public replay command must select the recorded source and helpers."""
-    m = _manifest()
+    current = _manifest()
+    m = json.loads(_artifact(current["qkpv_swa"]["baseline_manifest"]))
     tool = _ROOT / "tests/pypto_test/prepare_tnd_precision_performance_repro.py"
     profile = runpy.run_path(str(tool))["PROFILES"]["swa128"]
+    assert profile["source_sha"] == m["source_manifest_sha256"]
+    for run in m["whole_model"]:
+        _artifact(run["archive"])
+        with tarfile.open(_EVIDENCE / run["archive"]["path"]) as bundle:
+            cfg = json.load(bundle.extractfile("results/configuration.json"))
+        assert profile["helper_sha"] == cfg["helper_manifest_sha256"]
+        assert profile["old_job"] == str(Path(cfg["snapshot"]).parents[1])
+        assert profile["job_expression"] == profile["old_job"]
+
+
+def test_recorded_live_staging_precision_counters_and_paired_timings():
+    """Replay raw evidence, preserving all gates; this does not execute PTO math.
+
+    This long replay deliberately binds the frozen source, program counters and
+    graph evidence together so successful fragments cannot be mixed across runs.
+    """
+    m = _manifest()
+    item = m["qkpv_live_staging"]
+    _artifact(item["archive"])
+    sparse = "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_tnd_precision/decode_sparse_attn_csa.py"
+    history = json.loads(_artifact(m["qkpv_swa"]["baseline_manifest"]))
+    assert history["sources"][sparse] == "248d8b11bb0a045f7863c0b264d962845dcabafa51cbf1e5fafee413fa8dc6d5"
+    assert {k: v for k, v in m["sources"].items() if k != sparse} == {
+        k: v for k, v in history["sources"].items() if k != sparse
+    }
+    with tarfile.open(_EVIDENCE / m["qkpv_swa"]["archive"]["path"]) as old:
+        old_result = json.load(old.extractfile("sparse-graph-results-r1/data/result.json"))
+        expected_graph_labels = {row["label"] for row in old_result["checks"]}
+    assert len(expected_graph_labels) == 71
+    with tarfile.open(_EVIDENCE / item["archive"]["path"]) as bundle:
+        raw = lambda name: bundle.extractfile(name).read()
+        records = json.loads(raw("ARCHIVE_MANIFEST.json"))["files"]
+        assert len(records) == 105
+        for name, record in records.items():
+            data = raw(name)
+            assert _sha(data) == record["sha256"] and len(data) == record["bytes"]
+            data.decode("utf8")
+        assert _sha(raw("baseline_sparse.py")) == history["sources"][sparse]
+        formal = raw("formatted_live_sparse_v2.py")
+        assert _sha(formal) == m["sources"][sparse] == _sha((_ROOT / sparse).read_bytes())
+        private = raw("helpers/live_staging_sparse.py")
+        assert _sha(private) == "36a3b7ebb2ab42ed4dd8c081f66b2ea60a07d40c55ba021da8552f4de5f2ab12"
+        normalized = (
+            private.decode()
+            .replace(
+                "from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.config import (",
+                "from .config import (",
+            )
+            .replace(
+                "from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.layout import ", "from .layout import "
+            )
+        )
+        assert ast.dump(ast.parse(normalized)) == ast.dump(ast.parse(formal))
+        manifest = json.loads(raw("helpers/manifest.json"))
+        for name, digest in manifest.items():
+            assert _sha(raw("helpers/" + name)) == digest
+        gates = json.loads(raw("graph/micro-gates.json"))
+        assert gates["pass"] and len(gates["graph_runs"]) == 4
+        assert sorted(x["batch"] for x in gates["graph_runs"]) == [4, 4, 40, 40]
+        assert len({x["label"] for x in gates["graph_runs"]}) == 4
+        assert len({x["result_sha256"] for x in gates["graph_runs"]}) == 4
+        for gate in gates["graph_runs"]:
+            result_bytes = raw("graph/results/" + gate["label"] + "/data/result.json")
+            assert _sha(result_bytes) == gate["result_sha256"]
+            r = json.loads(result_bytes)
+            assert r["pass"] and r["complete"] and r["task_device"] == "9"
+            assert not r["DFX"] and not r["PMU"] and not r["depgen"]
+            assert len(r["checks"]) == 71 and {row["label"] for row in r["checks"]} == expected_graph_labels
+            assert all(row["bit_equal"] for row in r["checks"])
+            assert _sha(raw("helpers/manifest.json")) == r["helper_manifest_sha"]
+            for module in ("baseline_root", "candidate_root", "live_staging_sparse", "baseline_sparse"):
+                assert _sha(raw("helpers/" + module + ".py")) == r["source_modules"][module]["sha256"]
+            assert (
+                r["source_modules"]["vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision.decode_sparse_attn_csa"][
+                    "sha256"
+                ]
+                == history["sources"][sparse]
+            )
+            assert r["timing_rounds"] == 20 and r["replays_per_round"] == 100
+            a, b = r["timing_us"]["baseline"], r["timing_us"]["candidate"]
+            assert len(a["samples"]) == len(b["samples"]) == 20
+            for arm in (a, b):
+                assert all(math.isfinite(x) and x > 0 for x in arm["samples"])
+                assert arm["mean"] == pytest.approx(statistics.mean(arm["samples"]), rel=1e-12)
+            differences = [x - y for x, y in zip(a["samples"], b["samples"], strict=True)]
+            lower = statistics.mean(differences) - 2.093 * statistics.stdev(differences) / math.sqrt(20)
+            assert lower > 0 and sum(x > 0 for x in differences) >= 15
+            assert gate["paired_ci_lower_us"] == pytest.approx(lower, rel=1e-12)
+            assert gate["positive_pairs"] == sum(x > 0 for x in differences)
+            expected_stats = (
+                "eb43040864b3b1209d1533f8ce0f2de68b6cee6be322905f45fba6b44e82feb2"
+                if gate["batch"] == 4
+                else "85b7fc7845dfe2b56e088db861c1277a26d0da16b233db25c73670c5a065bf1f"
+            )
+            assert r["stats_sha"] == expected_stats
+            expected_bank = (
+                "66158da293867dc48626083df47404b919ee859fb9719c8d55c0f88f4809668e"
+                if gate["batch"] == 4
+                else "ee36fbef78c0ad255408fe7796e212eabb1b45ccc29070214ade2110c1b27b8a"
+            )
+            assert r["bank_sha"] == expected_bank
+        program_labels = set()
+        for iteration in range(3):
+            program_labels.add(f"run{iteration}.Native.pre_inverse_heads")
+            program_labels.update(f"run{iteration}.baseline_PTO.{field}" for field in ("mi", "li", "oi", "heads"))
+            program_labels.update(f"run{iteration}.readonly.{index}" for index in range(12))
+            if iteration:
+                program_labels.update(f"run{iteration}.repeat.{field}" for field in ("mi", "li", "oi", "heads"))
+        for prefix, variant, physical_card in (
+            ("pmu/results/pmu-baseline", "baseline", "9"),
+            ("pmu/results/pmu-read-only", "read_only", "9"),
+            ("pmu/results/pmu-live-staging", "live_staging", "8"),
+            ("pmu-card9", "live_staging", "9"),
+        ):
+            r = json.loads(raw(prefix + "/data/result.json"))
+            assert r["pass"] and r["complete"] and len(r["checks"]) == len(program_labels) == 59
+            assert {row["label"] for row in r["checks"]} == program_labels and all(
+                row["bit_equal"] for row in r["checks"]
+            )
+            assert r["bank_sha"] == "66158da293867dc48626083df47404b919ee859fb9719c8d55c0f88f4809668e"
+            assert r["helper_manifest_sha256"] == _sha(raw("helpers/manifest.json"))
+            assert all(row["different_bytes"] == 0 for row in r["checks"])
+            assert [x["pmu"] for x in r["runs"]] == [0, 0, 2] and r["variant"] == variant
+            receipt = json.loads(raw("generated/" + variant + "-compiled.json"))
+            assert r["artifact_manifest"] == receipt and r["task_device"] == physical_card
+            for key in (
+                "kernel_config.py",
+                "kernels/aic/qk_pv_aic.cpp",
+                "kernels/aiv/qk_pv_aiv.cpp",
+                "ptoas/qk_pv.cpp",
+            ):
+                assert _sha(raw("generated/" + variant + "-artifact/" + key)) == receipt["files"][key]
+            # Busy counters overlap. Verify valid AIC/AIV rows without deriving wait.
+            rows = list(csv.DictReader(io.StringIO(raw(prefix + "/data/pmu-2.csv").decode())))
+            for function, core_type, count in ((3, 0, 24), (4, 1, 48)):
+                values = [x for x in rows if int(x["func_id"]) == function and int(x["core_type"]) == core_type]
+                assert len(values) == count and len({x["core_id"] for x in values}) == count
+                assert all(int(x["pmu_total_cycles"]) > 0 and int(x["event_type"]) == 2 for x in values)
+
+
+def test_live_staging_reproduction_profile_matches_actual_whole_runs():
+    """The profile binds both completed whole-model runs, not just preparation."""
+    m = _manifest()
+    tool = _ROOT / "tests/pypto_test/prepare_tnd_precision_performance_repro.py"
+    profile = runpy.run_path(str(tool))["PROFILES"]["swa_live"]
     assert profile["source_sha"] == m["source_manifest_sha256"]
     for run in m["whole_model"]:
         _artifact(run["archive"])

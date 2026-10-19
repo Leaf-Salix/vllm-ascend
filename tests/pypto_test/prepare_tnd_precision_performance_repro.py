@@ -37,6 +37,15 @@ PROFILES = {
         "qkpv-measurement-20261019-codex/whole-swa-cube-v2",
         "old_output": "/data/pyptouser/yejia/lc128/perf-swa-cube-20261019-v2-$case_name-$backend",
     },
+    "swa_live": {
+        "source_sha": "11219447daf4f0c0024e02cb983d08885d9870777fbe10d55ed38837a9aee01b",
+        "helper_sha": "59f9c9c460036579c6f42b6ea4fb0b3720ad8ca18a179eedaeb70d9524cc7258",
+        "old_job": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/"
+        "vector-mte2-20261019-codex/whole-live-staging-v2",
+        "job_expression": "/data/pyptouser/yejia/vllm-nalinaly-tnd-20261008-codex/"
+        "vector-mte2-20261019-codex/whole-live-staging-v2",
+        "old_output": "/data/pyptouser/yejia/lc128/perf-live-staging-20261019-v2-$case_name-$backend",
+    },
 }
 
 

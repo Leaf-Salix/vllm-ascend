@@ -167,7 +167,7 @@ python3 "$AUDIT/independent8k.py" \
 
 ## 原始证据和回放检查
 
-本目录 [current_full_precision证据](evidence_tnd_precision/current_full_precision/manifest.json) 为当前源绑定。旧manifest另存formal-v6-manifest.json，原V4/V6归档保留；所有新归档为UTF-8 JSON/CSV/源码/日志，无模型或.pt。
+本目录 [current_full_precision证据](evidence_tnd_precision/current_full_precision/swa-cube128-v2-manifest.json) 为本报告历史源绑定。旧manifest另存formal-v6-manifest.json，原V4/V6归档保留；所有新归档为UTF-8 JSON/CSV/源码/日志，无模型或.pt。
 
 | 归档 | SHA256 |
 | --- | --- |
@@ -192,3 +192,7 @@ micro归档先于整模型完成冻结，内含当时pending的过程清单只�
 8个相关CPU文件共54项全部通过；增量pre-commit及Markdown检查通过，独立源码/证据/复现审查通过。CPU最初一次暴露旧KV生命周期测试误将新增PV外层if当成reload_if，已修正实际AST定位，同时增加SWA/ compressed guard与首片累加初始化检查；原容量与256-token槽位检查保留。该问题属于测试定位错误，未修改已验收的NPU算子字节或放宽精度门禁。本轮未宣称仓库全量CI通过。
 
 两项整模型实际运行分别为540秒和581秒；所有本轮登记任务均已结束，没有残余排队或运行任务。
+
+## 后续优化记录
+
+本报告保留7078bc644的SWA128历史验收身份。后续staging清理及新源11219447的实测见 [Vector/MTE2优化报告](DSV4_FLASH_CSA_TND_VECTOR_MTE2_LIVE_STAGING_20261019.md)，旧归档和金值未覆盖。
