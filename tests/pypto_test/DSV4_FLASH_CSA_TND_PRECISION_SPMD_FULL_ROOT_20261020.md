@@ -21,7 +21,9 @@
 - 每模型共享工作区1,869,824字节；Norm常量每层12,544字节；33份顺序组合每模型337,920字节。
   T6保留原静态资格选择；实际选择的三元组和字节SHA单独记录。
 - 较大的HC临时tensor放在前缀子scope，输出及跨阶段tensor在父scope持有。
-- 仅支持同一stream串行capture/replay。已验证同权重、不同输入及cache的两个完整根共享工作区；
+- capture限于同一捕获stream；replay必须按设备执行顺序串行使用工作区。
+  未捕获暖身可以在计算stream借用工作区，借用前等待设备、调用返回前等待当前stream。
+  已验证同权重、不同输入及cache的两个完整根共享工作区；
   尚未证明不同层权重的整模型复用和并发stream安全。
 
 无设备门禁包含program生成、kernel ABI生成、CCEC和**实际Torch注册64参数**。
@@ -118,6 +120,41 @@ helper的`run-full-csa.sh <新输出名> <逗号分隔长度> <层号> <history>
 输出目录须全新，fixture固定seed1024，Native与PTO使用独立cache、相同初态。
 单层例子为`1,1,1,1 4 8191`、`1,2,3,4,5,6 4 8191`及`6 26 8189`。
 
-上述内部TopK首差已在该样本上修复。接着做真实8K/B40 warm192＋三轮192 token，
-复用冻结Native金值和入场轨迹；8K通过后再测128K/B24。
-这些未来验收尚未执行，不能沿用原精度版token结果冒充SPMD结果。
+上述内部TopK首差已在该样本上修复。真实8K/B40首次启动遇到下节的工作区限制；
+修复后重新做warm192＋三轮192 token，复用冻结Native金值和入场轨迹。
+8K通过后再测128K/B24；不能沿用原精度版token结果冒充SPMD结果。
+
+## 多bucket暖身与工作区生命周期
+
+真实8K/B40首次任务`task_20261020_010239_45278030583`在初始化阶段退出：
+16个rank均遇到第二bucket未捕获暖身的stream限制。没有生成token对拍或性能结果，
+因此不能将此故障描述为精度失败。vLLM逐bucket在计算stream暖身，再在共享side stream捕获；
+原SPMD工作区错误地把后续未捕获暖身也限定在捕获stream。
+
+修复只改新实现的`workspace.py`：已经绑定捕获stream后，其他stream的未捕获调用先等待设备；
+保留service原有的未捕获调用返回前同步。真正capture仍检查同一stream，捕获路径不新增同步或分配。
+两个graph必须按设备执行顺序串行replay；单纯不同stream上按Python调用先后入队不足以保证安全。
+不支持并发模型调用、并发graph replay或跨stream同时使用同一个工作区。
+
+独立验证复现了T21捕获→另一计算stream暖身T6→同一捕获stream捕获T6→交替replay：
+
+| 阶段 | 实测结果 |
+| --- | --- |
+| T21，请求1～6行，完整Native/PTO FULL graph | A/B各8边界全部逐bit一致，实际21行、每请求padding为0 |
+| 另一计算stream暖身T6 | 8边界全部逐bit一致 |
+| 第二个T6 FULL graph | 实际捕获成功，绑定stream不变 |
+| 三轮T21→T6→T21，共9次replay | 每次8边界，共72项全部逐bit一致；工作区及输出poison后仍通过 |
+
+`task_20261020_012615_16133544094`为通过结果。
+前一诊断任务`task_20261020_012013_134550819657`曾在交替replay首差停止，原失败记录保留：
+Native RoPE使用共享runtime buffer，创建6行fixture会覆盖原21行fixture的前缀。
+实际地址与storage相同，cos改变314个、sin改变320个元素。
+修正验证脚本，在每次replay前把**当前fixture原先保存的只读输入**恢复到原地址，并检查输入guard；
+没有重新生成gold或修改正式数学。恢复后交替replay通过。
+
+这一轮编译receipt绑定当前14个源码；与前节T6通过时相比，仅`workspace.py`发生变化。
+旧T4/T21/T6结果继续绑定旧workspace，证据中保留其原文件，不将旧硬件结果重标为新源。
+新增证据在`evidence_tnd_precision/spmd_workspace_lifecycle_20261020/`，
+包括首次初始化失败摘要、两次生命周期结果、原始helpers、旧workspace与当前编译receipt。
+
+该门禁仍为单层真实权重、合成hidden/history，不代表整模型token或性能验收。

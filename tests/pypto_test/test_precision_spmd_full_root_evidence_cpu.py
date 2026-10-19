@@ -42,8 +42,15 @@ def test_archived_identity_preserves_old_sources_and_qualifies_current_root():
     assert all(sha((EVIDENCE / n).read_bytes()) == h for n, h in manifest.items())
     old, new = read("compile-before-static.json.gz"), read("compile-static.json.gz")
     assert len(new["sources"]) == len(old["sources"]) == 14
+    # These runs preceded the separately qualified cross-bucket warmup fence.
+    # Keep their historical workspace identity; the lifecycle evidence binds all
+    # fourteen current sources instead of relabelling these old hardware runs.
+    lifecycle = EVIDENCE.parent / "spmd_workspace_lifecycle_20261020"
+    with tarfile.open(lifecycle / "tools.tar.gz", mode="r:gz") as tools:
+        historical_workspace = tools.extractfile("workspace-before-lifecycle.py").read()
     for name, digest in new["sources"].items():
-        assert sha((PACKAGE / name).read_bytes()) == digest
+        value = historical_workspace if name == "workspace.py" else (PACKAGE / name).read_bytes()
+        assert sha(value) == digest
     assert {n for n in old["sources"] if old["sources"][n] != new["sources"][n]} == {"service.py"}
     assert sha(archive("tools.tar.gz")["service-before-static.py"]) == old["sources"]["service.py"]
     assert old["baseline_sources"] == new["baseline_sources"] and len(new["baseline_sources"]) == 43

@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Small model-owned alias pool for serial full-CSA roots and graph replay.
 
-Captured graphs keep these addresses. They must be replayed serially on the
-capture stream, even if Python is not entered. Concurrent model execution or
-replay on another stream is outside this experiment's contract.
+Captured graphs keep these addresses and must be replayed serially. Uncaptured
+warmup on another stream waits for the device before borrowing the pool; the
+service completes that call before returning. Concurrent model execution and
+capture on a different stream remain outside this experiment's contract.
 """
 
 MAX_TOKENS = 256
@@ -102,7 +103,12 @@ class PrecisionWorkspace:
             raise ValueError("SPMD prefix requires 1..256 real token rows")
         stream = torch.npu.current_stream(hidden.device).npu_stream
         if self.capture_stream is not None and stream != self.capture_stream:
-            raise RuntimeError("SPMD captured workspace requires serial execution on its capture stream")
+            if torch.npu.is_current_stream_capturing():
+                raise RuntimeError("SPMD workspace requires a single capture stream")
+            # vLLM warms each new bucket on the compute stream, then captures
+            # on torch.npu.graph's shared side stream. Finish prior replay
+            # before borrowing these same addresses; service fences the return.
+            torch.npu.synchronize(self.device)
         if torch.npu.is_current_stream_capturing():
             self.capture_stream = stream
         return self.views[tokens]

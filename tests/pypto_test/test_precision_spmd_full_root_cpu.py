@@ -146,14 +146,14 @@ def workspace(monkeypatch):
     spec = importlib.util.spec_from_file_location("spmd_workspace_cpu", PACKAGE / "workspace.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    state = SimpleNamespace(capturing=False, stream=7)
+    state = SimpleNamespace(capturing=False, stream=7, sync_calls=[])
     monkeypatch.setattr(
         torch,
         "npu",
         SimpleNamespace(
             is_current_stream_capturing=lambda: state.capturing,
             current_stream=lambda device: SimpleNamespace(npu_stream=state.stream),
-            synchronize=lambda device: None,
+            synchronize=lambda device: state.sync_calls.append((device, state.capturing)),
         ),
         raising=False,
     )
@@ -197,8 +197,15 @@ def test_no_cold_capture_or_cross_stream_access(workspace):
     with pytest.raises(RuntimeError, match="capture stream"):
         pool.arguments(hidden)
     state.capturing = False
-    with pytest.raises(RuntimeError, match="capture stream"):
-        pool.arguments(hidden)
+    before = len(state.sync_calls)
+    assert pool.arguments(hidden) is pool.views[1]
+    assert len(state.sync_calls) == before + 1
+    assert state.sync_calls[-1] == (torch.device("cpu"), False)
+    assert pool.capture_stream == 7
+    state.stream = 7
+    state.capturing = True
+    assert pool.arguments(hidden) is pool.views[1]
+    assert len(state.sync_calls) == before + 1
 
 
 def test_pool_isolation_and_capacity(workspace):
