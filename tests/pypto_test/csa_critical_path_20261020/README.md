@@ -70,3 +70,14 @@ KEY_BLOCK_PERFORMANCE.json。
 扩档门槛已获用户确认并记入 GOAL.md：重点档至少净省20μs，另一档无明确
 退步后再扩档。下一步只补 B28 原正式源的 Indexer READY/ACK 等待证据，
 以决定是否值得改生产消费流水；task_20261020_022224_28339126381 尚待结果。
+
+## Score背压与下一候选
+
+背压任务已终态exit0，单次完整输出/Top-K/score、cache/state及保护/信号
+通过，72角色计数配对一致。B28 AIC等ACK中位38.14μs、AIV等READY中位
+151.17μs；只作为Scalar插桩证据，优先检查Cube生产链，暂不扩大FIFO。
+
+等待期间的64KiB独立KV缓冲资源尝试仍因201472B>188416B失败，停止不上卡。
+随后QK提前FIX的v1因Acc同址复用而重新串行，也不上卡；v2以已有
+matmul_acc(init_cond=True)保留独立WS Acc，CPU地址与事件机制审计通过，
+已进入B28完整验证。详细边界和停止条件见SCORE_FIX_EARLY_DESIGN.md。
