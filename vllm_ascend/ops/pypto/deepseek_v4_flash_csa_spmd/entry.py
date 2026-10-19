@@ -19,6 +19,10 @@
     HC_ROW_DEPENDENCIES按动态行归属缩小HC前段依赖，不改变任何数学块与生产者；
     ATTENTION_QUERY_METADATA让AIV复用本轮plan已验证的request/position，
     使用mask现有第5/6列，不新增Tensor/phase，也不改变候选块或环槽事件。
+    PLAN_PHYSICAL_ROWS在已有T>=64前置几何区间，将内部压缩indices改存
+    本轮校验后的INT32物理行，删除采集端重复的Q/L和页表查询。几何准备、
+    plan和采集共用开关及device容量谓词；不支持时一起回到逻辑索引。
+    外部Top-K、工作区容量、softmax数学和通知顺序保持，不能混用两种表示。
     单核可消费自己所需行，不必等待其它行完成。关闭路径保留作同轮消融。
     OUTPUT_GROUP_PIPELINE选择输出阶段的通知粒度：开启后O_A/量化各有8个
     模型输出组完成槽，保留原全局任务owner和动态行循环，不增加kernel。
@@ -283,6 +287,7 @@ def _csa_core_group(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    PLAN_PHYSICAL_ROWS: pl.constexpr = False,
 ):
     # cluster将两种角色合成同一个MIX任务；这里的源码顺序不把AIC/AIV串行执行。
     with pl.cluster(name_hint="dynamic_csa_full"):
@@ -571,6 +576,7 @@ def _csa_core_group(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            PLAN_PHYSICAL_ROWS,
         )
     return (
         x_fp32,
@@ -803,6 +809,7 @@ def decode_csa_spmd(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    PLAN_PHYSICAL_ROWS: pl.constexpr = False,
 ):
     # Native cache只作为一个根入参传入。两份Key是编排内的零拷贝描述符，
     # 避免把“可写cache+部分重叠只读视图”当作独立外部入参触发Torch别名拒绝。
@@ -1050,6 +1057,7 @@ def decode_csa_spmd(
             EARLY_ATTENTION_GEOMETRY,
             LOCAL_ATTENTION_STATS,
             SCALE_PAGE_COALESCING,
+            PLAN_PHYSICAL_ROWS,
         )
     return (
         x_fp32,

@@ -10,6 +10,10 @@
 """动态 CSA Attention 的成对 AIC / 双 AIV 三槽流水与最终头向量发布。
 
 整体数据流与阅读顺序
+    PLAN_PHYSICAL_ROWS开启时，压缩块读取本轮plan已经验证的物理行，删除重复的Q/L扫描、
+    除32及Scalar查页。表示由plan与本函数共同的device容量谓词决定，不能
+    只改消费者或拿原逻辑索引直接当物理行。几何/页合法性在同代plan执行，
+    消费者保留最终行范围保护；SWA和能力外回退原逻辑。所有事件和数学保持。
     attention_qk_pv_cube_stage 执行QK与滞后两拍的PV；
     attention_qk_pv_vector_lane_stage 执行采KV、滞后一拍的局部softmax、
     滞后三拍的在线归并与最终归一化/逆RoPE/BF16和8组packed发布。
@@ -85,6 +89,7 @@ from .attention_plan_stages import (
     ROPE_CAP_DYN,
     T_DYN,
     attention_query_geometry,
+    physical_plan_supported,
 )
 
 Q_ROWS_DYN = pl.dynamic("CSA_ATTN_STREAM_Q_ROWS")
@@ -237,9 +242,14 @@ def attention_qk_pv_vector_lane_stage(
     EVENT_BASE: pl.constexpr = 0,
     CACHE_QUERY_METADATA: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
+    PLAN_PHYSICAL_ROWS: pl.constexpr = False,
 ):
     """双AIV各32头/64候选；同一mask和事件次序保证与AIC配对。"""
     t_dim = pl.tensor.dim(position_ids, 0)
+    physical_mode = physical_plan_supported(
+        pl.tensor.dim(cmp_block_table, 1), pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE,
+        PLAN_PHYSICAL_ROWS,
+    )
     qk_core = core_id
     qk_aiv = lane_id
     qk_query_count = (t_dim + CORE_GROUPS - 1 - qk_core) // CORE_GROUPS
@@ -287,54 +297,69 @@ def attention_qk_pv_vector_lane_stage(
                 qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
                 # mask是两角色共同事件谓词；额外地址guard只限制gather，不改变
                 # 事件对数。合法调用必须使用与plan同一批Q/L/positions/页表。
-                qk_b, qk_pos, q_active = attention_query_geometry(
-                    position_ids, bounds, lengths, valid_block_mask, qk_t, CACHE_QUERY_METADATA
-                )
-                if q_active != 0:
-                    if qk_sb == 0:
-                        qk_win_len = pl.min(qk_pos + 1, WIN)
-                        qk_win_start = qk_pos - qk_win_len + 1
-                        qk_head = qk_win_start % BLOCK_SIZE
-                        qk_rows = pl.min(pl.max(qk_win_len - qk_lane_kv, 0), ATTN_K_TILE // 2)
-                        # 最多五个页run，每个lane只采自己的64候选；尾run只读
-                        # qk_hi-qk_lo行，先检查页表列再检查物理page容量。
-                        for qk_run in pl.unroll(SWA_RUNS):
-                            qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_lane_kv, 0)
-                            qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_lane_kv, qk_rows)
-                            if qk_hi > qk_lo:
-                                qk_absolute = qk_win_start + qk_lane_kv + qk_lo
-                                qk_column = qk_absolute // BLOCK_SIZE
-                                if qk_column >= 0 and qk_column < pl.tensor.dim(ori_block_table, 1):
-                                    qk_raw_page = pl.cast(pl.read(ori_block_table, [qk_b, qk_column]), pl.INDEX)
-                                    if (
-                                        qk_raw_page >= 0
-                                        and qk_raw_page < pl.tensor.dim(ori_kv_flat, 0) // BLOCK_SIZE
-                                    ):
-                                        qk_raw_row = qk_raw_page * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
-                                        qk_kv_half = pl.gather_row(
-                                            qk_kv_half,
-                                            ori_kv_flat,
-                                            [qk_lo, 0],
-                                            [qk_raw_row, 0],
-                                            [ATTN_K_TILE // 2, HEAD_DIM],
-                                            valid_shape=[qk_hi - qk_lo, HEAD_DIM],
-                                        )
-                    else:
-                        # indices已经包含plan的causal/页mask，保留顺序并再做
-                        # 地址上界保护；非法行留在本轮初始化的零KV中。
-                        for qk_row in pl.range(ATTN_K_TILE // 2):
-                            qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
-                            if qk_cmp_k < CMP_TOPK:
-                                qk_ridx = pl.cast(pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k]), pl.INDEX)
-                                if qk_ridx >= 0:
-                                    qk_column = qk_ridx // BLOCK_SIZE
-                                    if qk_column < pl.tensor.dim(cmp_block_table, 1):
-                                        qk_page = pl.cast(pl.read(cmp_block_table, [qk_b, qk_column]), pl.INDEX)
-                                        if qk_page >= 0 and qk_page < pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE:
-                                            qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                # 显式constexpr使关闭路径在Tile状态构建前裁掉此分支；仅靠
+                # physical_mode最后化简为0仍可能留下额外loop-carried Tile。
+                if PLAN_PHYSICAL_ROWS and physical_mode != 0 and qk_sb > 0:
+                    # 本轮plan已验证唯一owner、causal位置和每个被选中页。外层已
+                    # 获取其phase和业务缓存；mask来自同一plan，不是外部任意标记。
+                    # 因此这里无需再次扫描Q/L或逐行查页，仍检查最终物理行容量。
+                    # 无效候选为-1，保持本块初始化的零KV；顺序及64行分工不变。
+                    for physical_row in pl.range(ATTN_K_TILE // 2):
+                        physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + physical_row
+                        physical_src = pl.cast(pl.read(cmp_sparse_indices, [qk_t, physical_column]), pl.INDEX)
+                        if physical_src >= 0 and physical_src < pl.tensor.dim(cmp_kv_flat, 0):
+                            qk_kv_half = pl.gather_row(
+                                qk_kv_half, cmp_kv_flat, [physical_row, 0], [physical_src, 0], [1, HEAD_DIM]
+                            )
+                else:
+                    qk_b, qk_pos, q_active = attention_query_geometry(
+                        position_ids, bounds, lengths, valid_block_mask, qk_t, CACHE_QUERY_METADATA
+                    )
+                    if q_active != 0:
+                        if qk_sb == 0:
+                            qk_win_len = pl.min(qk_pos + 1, WIN)
+                            qk_win_start = qk_pos - qk_win_len + 1
+                            qk_head = qk_win_start % BLOCK_SIZE
+                            qk_rows = pl.min(pl.max(qk_win_len - qk_lane_kv, 0), ATTN_K_TILE // 2)
+                            # 最多五个页run，每个lane只采自己的64候选；尾run只读
+                            # qk_hi-qk_lo行，先检查页表列再检查物理page容量。
+                            for qk_run in pl.unroll(SWA_RUNS):
+                                qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_lane_kv, 0)
+                                qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_lane_kv, qk_rows)
+                                if qk_hi > qk_lo:
+                                    qk_absolute = qk_win_start + qk_lane_kv + qk_lo
+                                    qk_column = qk_absolute // BLOCK_SIZE
+                                    if qk_column >= 0 and qk_column < pl.tensor.dim(ori_block_table, 1):
+                                        qk_raw_page = pl.cast(pl.read(ori_block_table, [qk_b, qk_column]), pl.INDEX)
+                                        if (
+                                            qk_raw_page >= 0
+                                            and qk_raw_page < pl.tensor.dim(ori_kv_flat, 0) // BLOCK_SIZE
+                                        ):
+                                            qk_raw_row = qk_raw_page * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
                                             qk_kv_half = pl.gather_row(
-                                                qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                                qk_kv_half,
+                                                ori_kv_flat,
+                                                [qk_lo, 0],
+                                                [qk_raw_row, 0],
+                                                [ATTN_K_TILE // 2, HEAD_DIM],
+                                                valid_shape=[qk_hi - qk_lo, HEAD_DIM],
                                             )
+                        else:
+                            # indices已经包含plan的causal/页mask，保留顺序并再做
+                            # 地址上界保护；非法行留在本轮初始化的零KV中。
+                            for qk_row in pl.range(ATTN_K_TILE // 2):
+                                qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+                                if qk_cmp_k < CMP_TOPK:
+                                    qk_ridx = pl.cast(pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k]), pl.INDEX)
+                                    if qk_ridx >= 0:
+                                        qk_column = qk_ridx // BLOCK_SIZE
+                                        if qk_column < pl.tensor.dim(cmp_block_table, 1):
+                                            qk_page = pl.cast(pl.read(cmp_block_table, [qk_b, qk_column]), pl.INDEX)
+                                            if qk_page >= 0 and qk_page < pl.tensor.dim(cmp_kv_flat, 0) // BLOCK_SIZE:
+                                                qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                                                qk_kv_half = pl.gather_row(
+                                                    qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                                )
                 pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
         # 大档先消费上一块SCORE通知，再发布已经写好的本块KV；
         # 先让Cube推进，再做上一块softmax，同时限制SCORE覆盖速度。

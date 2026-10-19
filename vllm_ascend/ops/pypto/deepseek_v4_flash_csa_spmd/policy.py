@@ -70,6 +70,10 @@ S6验证点完整L1改善0.96%～3.16%，S1/S5精确回归通过；短G6及较�
 半叶范围未获收益，保留原值。排序资源边界是实测分档依据，不等于已证明
 回退由排序导致。收益证据基于PTOAS b7b4a82c隔离v3，旧工具链不作性能
 保证，全部窗口及未覆盖范围见统一日志。
+物理行plan沿已有T>=64的前置几何区间启用，消费者省去重复Q/L和页表查询。
+容量是否支持在device判定；关闭或容量外保留原逻辑表示。全开七档六档
+中位耗时下降，但小T的B4回退、B8收益不足1微秒，故保留小区间原路径。
+这是基于完整L1实测的区间选择，不是证明所有输入都加速，也不改变精度门槛。
 """
 
 from dataclasses import dataclass
@@ -103,6 +107,7 @@ class CSASPMDPolicy:
     early_attention_geometry: bool = False
     local_attention_stats: bool = False
     scale_page_coalescing: bool = False
+    plan_physical_rows: bool = False
 
     def constexprs(self) -> dict[str, int | bool]:
         return {
@@ -124,6 +129,7 @@ class CSASPMDPolicy:
             "EARLY_ATTENTION_GEOMETRY": self.early_attention_geometry,
             "LOCAL_ATTENTION_STATS": self.local_attention_stats,
             "SCALE_PAGE_COALESCING": self.scale_page_coalescing,
+            "PLAN_PHYSICAL_ROWS": self.plan_physical_rows,
         }
 
 
@@ -186,4 +192,10 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         # 小M16与较大T边界已做完整同轮验证；其余验证边界见统一优化日志。
         scale_page_coalescing=(long_history and group == 6 and
                                (parallel_small_qa or tokens > LOCAL_STATS_MAX_TOKENS)),
+        # 沿已有至少两个M32行块的前置几何区间，统一在plan验证选中页，
+        # 并把压缩逻辑索引转换成物理行；消费者不再重复Q/L扫描和页表查询。
+        # 小T的计划生产者更少，搬移地址工作未稳定获益，保留原逻辑表示。
+        # 此处只选策略；容量合法性和全部地址仍由device元数据决定，三阶段
+        # 共享同一谓词，不能仅开启生产者或消费者。区间实测与限制见优化日志。
+        plan_physical_rows=tokens >= EARLY_GEOMETRY_MIN_TOKENS,
     )

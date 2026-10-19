@@ -30,6 +30,10 @@ Attention有效块计划仍保留到TopK之后。
 Attention查询几何复用开启时，plan在原64B mask行内同时发布request/position；
 消费者取得同一PHASE_ATTN_PLAN后读取，避免逐候选块重复Q/L扫描。关闭时
 两侧都采用原约定；该开关不能只作用于生产者或消费者一侧。
+PLAN_PHYSICAL_ROWS统一转发给前置几何、最终plan及采KV；在容量支持时，
+页合法性集中到最终选中地址的Vector检查，内部indices保存INT32物理行。
+消费者仍检查最终物理行边界；无效行每轮写-1。SWA、能力外回退和通知顺序
+不变。该开关只依赖已有Host描述符选区间，真实地址和有效范围仍在device求。
 组流水启用时，量化只等本输出组的O_A owner；末块尾零属于同组通知合同，
 每组独立槽位。HCpost仍等待所有O_B partial，保留八组反量化左折叠顺序。
 数学、精度顺序、循环尾块均保留在各*_stages.py，编排只指定owner和依赖。
@@ -325,6 +329,7 @@ def vector_schedule(
     EARLY_ATTENTION_GEOMETRY: pl.constexpr = False,
     LOCAL_ATTENTION_STATS: pl.constexpr = False,
     SCALE_PAGE_COALESCING: pl.constexpr = False,
+    PLAN_PHYSICAL_ROWS: pl.constexpr = False,
 ):
     pl.func_attr({"split_aiv": True})
     x_fp32_gm = x_fp32
@@ -596,6 +601,7 @@ def vector_schedule(
         attention_indices = attention_geometry_prepare_stage(
             positions, idx_bounds, idx_lengths, compressed_table, attention_indices,
             pl.tensor.dim(main_cache, 0) // 32, worker, VECTORS,
+            PLAN_PHYSICAL_ROWS,
         )
     signal = publish_phase(signal, PHASE_ROPE, core, CORES, generation)
     # 主Query与Indexer query数学独立；先完成后者的RoPE/pool/norm，
@@ -928,6 +934,7 @@ def vector_schedule(
         VECTORS,
         ATTENTION_QUERY_METADATA,
         EARLY_ATTENTION_GEOMETRY,
+        PLAN_PHYSICAL_ROWS,
     )
     signal = publish_phase(signal, PHASE_ATTN_PLAN, core, CORES, generation)
 
@@ -967,6 +974,7 @@ def vector_schedule(
         2,
         ATTENTION_QUERY_METADATA,
         LOCAL_ATTENTION_STATS,
+        PLAN_PHYSICAL_ROWS,
     )
     signal = publish_phase(signal, PHASE_ATTN_VECTOR, core, CORES, generation)
     if OUTPUT_GROUP_PIPELINE:
