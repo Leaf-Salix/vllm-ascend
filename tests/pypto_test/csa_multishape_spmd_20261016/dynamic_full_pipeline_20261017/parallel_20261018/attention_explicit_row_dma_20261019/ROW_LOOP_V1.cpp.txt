@@ -1,0 +1,132 @@
+  // pto: %result_inline4150__ssa_v0
+  v9581 = Tile<TileType::Vec, bfloat16_t, 64, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v349);
+  // pto: %result_inline4150__ssa_v0
+  v9582 = (uint64_t) v209;
+  TASSIGN(v9581, v9582);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  v11392 = v358;
+  goto label1088;
+label1088:
+  v9583 = false;
+  v9583 = v11392 < v343;
+  if (v9583) {
+    goto label1089;
+  } else {
+    goto label1093;
+  }
+label1089:
+  // pto: %3970, %3971, %3965, %3966, %3967, %3969, %3968
+  v9584 = (v124)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v9571 * (uint64_t) v349) + (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v9573 - (uint64_t) v341) * (uint64_t) v350) + (uint64_t) v9517) + (uint64_t) v11392))];
+  // pto: %3972
+  v9585 = (int64_t) v9584;
+  // pto: %3973, %3974, %3975
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  v9586 = false;
+  v9586 = v9585 >= v358 & v9585 < v173;
+  if (v9586) {
+    goto label1090;
+  } else {
+    goto label1091;
+  }
+label1090:
+  // pto: %3976
+  ;
+  // pto: %3976
+  v9588 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v11392 * (uint64_t) v324) + (uint64_t) v209);
+  TASSIGN(v9587, v9588);
+  // pto: %3977
+  v9589 = v9585 < v358 ? v358 : v9585;
+  // pto: %main_cache__ssa_v14_pview
+  v9590 = PTOAS__GLOBAL_TENSOR_DATA(v1070);
+  // pto: %main_cache__ssa_v14_pview
+  // pto: %main_cache__ssa_v14_pview
+  // pto: %main_cache__ssa_v14_pview
+  v9593 = pto::Shape<1, 1, 1, 1, 512>();
+  // pto: %main_cache__ssa_v14_pview
+  v9594 = pto::Stride<512, 512, 512, 512, 1>();
+  // pto: %main_cache__ssa_v14_pview
+  v9595 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND>(v9590 + (v9591 + v9589 * v9592), v9593, v9594);
+  TLOAD(v9587, v9595);
+  goto label1092;
+label1091:
+  // pto: %zero_row_inline4146__ssa_v0
+  v9596 = Tile<TileType::Vec, bfloat16_t, 1, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v341, v349);
+  // pto: %zero_row_inline4146__ssa_v0
+  v9597 = (uint64_t) v328;
+  TASSIGN(v9596, v9597);
+  pipe_barrier(PIPE_V);
+  TEXPANDS(v9596, v407);
+  // pto: %3978
+  ;
+  // pto: %3978
+  v9599 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v11392 * (uint64_t) v324) + (uint64_t) v209);
+  TASSIGN(v9598, v9599);
+  pipe_barrier(PIPE_V);
+  TMOV(v9598, v9596);
+  goto label1092;
+label1092:
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  ;
+  v9600 = (int64_t) ((uint64_t) v11392 + (uint64_t) v341);
+  v11392 = v9600;
+  goto label1088;
+label1093:
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  // pto: %qk_kv_half_inline1081__ssa_v0
+  v9601 = Tile<TileType::Vec, bfloat16_t, 64, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v349);
+  // pto: %qk_kv_half_inline1081__ssa_v0
+  v9602 = (uint64_t) v209;
+  TASSIGN(v9601, v9602);
+  goto label1168;
+label1094:
+  // pto: %qk_kv_half_inline1081__ssa_v1
+  v9603 = Tile<TileType::Vec, bfloat16_t, 64, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v349);
+  // pto: %qk_kv_half_inline1081__ssa_v1
+  v9604 = (uint64_t) v209;
+  TASSIGN(v9603, v9604);
+  pipe_barrier(PIPE_V);
+  TEXPANDS(v9603, v407);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID4);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID5);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID6);
+  // pto: %3987, %3988, %3989
+  // pto: %active_inline2400_inline4170__phi_v3
+  v9605 = false;
+  v9605 = v9571 >= v358 & v9571 < v133;
+  if (v9605) {
+    goto label1095;
+  } else {
+    goto label1116;
+  }
+label1095:
+  v11393 = v358;
+  v11394 = v358;
+  v11395 = v358;
+  v11396 = v358;
+  v11397 = v371;
+  goto label1096;
+label1096:
+  // pto: %matches_inline2401_inline4169__rv_v2
+  // pto: %matches_inline2401_inline4169__rv_v2
+  v9606 = false;
+  v9606 = v11393 < v142;
+  if (v9606) {
+    goto label1097;
+  } else {
+    goto label1115;
+  }
+label1097:
+  // pto: %3993, %3994, %3995
+  // pto: %active_inline4746__phi_v6
+  v9607 = false;
+  v9607 = v11393 >= v358 & v11393 < v142;
+  if (v9607) {
+    goto label1098;
+  } else {

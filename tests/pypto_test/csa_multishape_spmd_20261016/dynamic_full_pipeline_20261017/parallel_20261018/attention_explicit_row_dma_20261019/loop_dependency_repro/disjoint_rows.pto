@@ -1,0 +1,33 @@
+// CPU-only InsertSync reproducer: each iteration writes one disjoint UB row.
+!parent = !pto.tile_buf<loc=vec, dtype=bf16, rows=64, cols=512, v_row=64, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!row = !pto.tile_buf<loc=vec, dtype=bf16, rows=1, cols=512, v_row=1, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!src = !pto.partition_tensor_view<1x512xbf16>
+!out = !pto.partition_tensor_view<64x512xbf16>
+module {
+  func.func @disjoint_rows(%src: !src, %out: !out) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %c512 = arith.constant 512 : index
+    %a0 = arith.constant 0 : i64
+    %a65536 = arith.constant 65536 : i64
+    %zero = arith.constant 0.0 : bf16
+    %parent = pto.alloc_tile addr = %a0 : !parent
+    %zero_row = pto.alloc_tile addr = %a65536 : !row
+    pto.texpands ins(%zero : bf16) outs(%parent : !parent)
+    pto.texpands ins(%zero : bf16) outs(%zero_row : !row)
+    scf.for %r = %c0 to %c64 step %c1 {
+      %target = pto.subview %parent[%r, %c0] sizes [1, 512] : !parent -> !row
+      %parity = arith.remui %r, %c2 : index
+      %take_dma = arith.cmpi eq, %parity, %c0 : index
+      scf.if %take_dma {
+        pto.tload ins(%src : !src) outs(%target : !row)
+      } else {
+        pto.tmov ins(%zero_row : !row) outs(%target : !row)
+      }
+    }
+    pto.tstore ins(%parent : !parent) outs(%out : !out)
+    return
+  }
+}

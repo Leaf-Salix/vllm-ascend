@@ -1,0 +1,132 @@
+  // pto: %result_inline4156__ssa_v0
+  v9586 = Tile<TileType::Vec, bfloat16_t, 64, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v349);
+  // pto: %result_inline4156__ssa_v0
+  v9587 = (uint64_t) v209;
+  TASSIGN(v9586, v9587);
+  v11405 = v358;
+  v11406 = v393;
+  goto label1088;
+label1088:
+  // pto: %invalid_found_inline4154__rv_v2
+  // pto: %invalid_found_inline4154__rv_v2
+  v9588 = false;
+  v9588 = v11405 < v343;
+  if (v9588) {
+    goto label1089;
+  } else {
+    goto label1092;
+  }
+label1089:
+  // pto: %3971, %3972, %3970, %3969
+  v9589 = (v124)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v9575 * (uint64_t) v349) + (uint64_t) ((int64_t) (uint64_t) v9585 + (uint64_t) v11405))];
+  // pto: %3973
+  v9590 = (int64_t) v9589;
+  // pto: %3974, %3975, %3976
+  v9591 = v9590 >= v358 & v9590 < v173;
+  // pto: %invalid_found_inline4154__phi_v4
+  // pto: %invalid_found_inline4154__phi_v4
+  v9592 = false;
+  v9592 = v9591;
+  if (v9592) {
+    goto label1090;
+  } else {
+    goto label1091;
+  }
+label1090:
+  // pto: %3977
+  ;
+  // pto: %3977
+  v9594 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v11405 * (uint64_t) v324) + (uint64_t) v209);
+  TASSIGN(v9593, v9594);
+  // pto: %3978
+  v9595 = v9590 < v358 ? v358 : v9590;
+  // pto: %main_cache__ssa_v14_pview
+  v9596 = PTOAS__GLOBAL_TENSOR_DATA(v1070);
+  // pto: %main_cache__ssa_v14_pview
+  // pto: %main_cache__ssa_v14_pview
+  // pto: %main_cache__ssa_v14_pview
+  v9599 = pto::Shape<1, 1, 1, 1, 512>();
+  // pto: %main_cache__ssa_v14_pview
+  v9600 = pto::Stride<512, 512, 512, 512, 1>();
+  // pto: %main_cache__ssa_v14_pview
+  v9601 = GlobalTensor<bfloat16_t, pto::Shape<1, 1, 1, 1, 512>, pto::Stride<512, 512, 512, 512, 1>, pto::Layout::ND>(v9596 + (v9597 + v9595 * v9598), v9599, v9600);
+  TLOAD(v9593, v9601);
+  goto label1091;
+label1091:
+  // pto: %invalid_found_inline4154__rv_v2
+  // pto: %invalid_found_inline4154__rv_v2
+  ;
+  v9602 = (int64_t) ((uint64_t) v11405 + (uint64_t) v341);
+  // pto: %invalid_found_inline4154__rv_v2
+  ;
+  v9603 = v9591 ? v11406 : v457;
+  v11405 = v9602;
+  v11406 = v9603;
+  goto label1088;
+label1092:
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  // pto: %3980, %3981
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  v9604 = false;
+  v9604 = (int64_t) v11406 != v358;
+  if (v9604) {
+    goto label1093;
+  } else {
+    goto label1099;
+  }
+label1093:
+  v11407 = v358;
+  goto label1094;
+label1094:
+  v9605 = false;
+  v9605 = v11407 < v343;
+  if (v9605) {
+    goto label1095;
+  } else {
+    goto label1098;
+  }
+label1095:
+  // pto: %3984, %3985, %3983, %3982
+  v9606 = (v124)[(int64_t) ((uint64_t) ((int64_t) (uint64_t) v9575 * (uint64_t) v349) + (uint64_t) ((int64_t) (uint64_t) v9585 + (uint64_t) v11407))];
+  // pto: %3986
+  v9607 = (int64_t) v9606;
+  // pto: %3987, %3988, %3989
+  v9608 = false;
+  v9608 = v9607 < v358 | v173 <= v9607;
+  if (v9608) {
+    goto label1096;
+  } else {
+    goto label1097;
+  }
+label1096:
+  // pto: %zero_values_inline4149__ssa_v0
+  v9609 = Tile<TileType::Vec, bfloat16_t, 1, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v341, v349);
+  // pto: %zero_values_inline4149__ssa_v0
+  v9610 = (uint64_t) v328;
+  TASSIGN(v9609, v9610);
+  pipe_barrier(PIPE_V);
+  TEXPANDS(v9609, v407);
+  // pto: %3990
+  ;
+  // pto: %3990
+  v9612 = (uint64_t) ((int64_t) (uint64_t) ((int64_t) (uint64_t) v11407 * (uint64_t) v324) + (uint64_t) v209);
+  TASSIGN(v9611, v9612);
+  pipe_barrier(PIPE_V);
+  TMOV(v9611, v9609);
+  goto label1097;
+label1097:
+  ;
+  v9613 = (int64_t) ((uint64_t) v11407 + (uint64_t) v341);
+  v11407 = v9613;
+  goto label1094;
+label1098:
+  goto label1099;
+label1099:
+  // pto: %qk_kv_half_inline1172__ssa_v0
+  v9614 = Tile<TileType::Vec, bfloat16_t, 64, 512, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>(v343, v349);
+  // pto: %qk_kv_half_inline1172__ssa_v0
+  v9615 = (uint64_t) v209;
+  TASSIGN(v9614, v9615);
+  goto label1174;
+label1100:
+  // pto: %qk_kv_half_inline1172__ssa_v1
