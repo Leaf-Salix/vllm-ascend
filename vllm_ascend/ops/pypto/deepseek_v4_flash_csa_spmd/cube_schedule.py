@@ -433,7 +433,8 @@ def cube_schedule(
         quant_per_group = (tokens + 31) // 32
         # 本核自己的O_A全部完成后，即可处理已量化的O_B组，不再等无关组。
         # O_B的NZ owner为(group*8+dc)%24，每个dc内部保留所有动态行块。
-        # 量化末块发布包含INT8尾零，因此等待这些owner才允许整OB_ROWS读取。
+        # 量化末块发布仍包含INT8尾零，保留这些owner的原依赖。
+        # NZ大M路径在O_B内部按真实T截断；其它路径仍可安全读取完整OB_ROWS。
         for ob_group in pl.range(8):
             ob_first = ob_group * 8
             ob_owned = worker + ((ob_first + GROUPS - 1 - worker) // GROUPS) * GROUPS

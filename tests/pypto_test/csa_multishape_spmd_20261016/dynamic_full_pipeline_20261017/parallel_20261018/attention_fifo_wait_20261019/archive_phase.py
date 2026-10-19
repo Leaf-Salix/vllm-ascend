@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""归档Attention FIFO诊断、两遍DMA及独立缓冲尝试的轻量证据，生成显式Git路径；不提交、不push。"""
+"""归档 CSA 阶段诊断、DMA/缓冲、O_A 与 O_B 有效行尝试的轻量证据；不提交、不 push。"""
 import json
 import subprocess
 from pathlib import Path
@@ -14,6 +14,7 @@ def main():
         "attention_fifo_wait_20261019", "attention_explicit_row_dma_20261019",
         "attention_kv_reserved_ub_20261019", "attention_kv_half_reserved_20261019",
         "oa_n192_balanced_columns_20261019", "oa_row_rotation_20261019",
+        "ob_active_rows_20261019",
     ]
     selected = set()
     for name in directories:

@@ -19200,3 +19200,71 @@ E48关注128K/B24/B28的O_A分工：T>128、N256时每组两个M行块×四列�
 模块说明后AST与正式源一致。候选在ops编写、冻结后恢复，未叠加E46/E47。
 128K/B24任务9144014122、B28任务91508823394已提交完整三方五窗及全部冻结
 功能/图/保护门槛，尚待结果；本轮不扩8K。正式37源仍未变化，目标0/7。
+
+### 2026-10-19：用户限定完成O_B尾行优化后暂停
+
+用户最新明确要求“把O_B的多余尾行计算这个优化结束掉之后就停下来”。
+当前只完成E49（ob_active_rows_20261019）的必要精度/性能验证、采用或撤回
+判断及过程归档，随后将长期goal置为paused；不启动其它优化方向。七档30%
+目标未完成，不能改记complete。已提交的128K/B24任务20861594920与B28任务
+208874914753继续使用原handle等待，不重复提交；当前均pending。
+
+
+## 2026-10-19：CSA 配套三仓公开复现分支
+
+按用户要求，将当前实测工具链整理到 nalinaly 的同名分支
+`dsv4-csa-spmd-repro-20261019`，没有向上游提交 PR，也没有切换共享安装。
+
+- PyPTO：`2dfa7f120ba5e577566046d920845aa241bfa7bb`，在新的复现 worktree
+  保留已用的编译/内存/同步补丁；runtime URL 指向 nalinaly/simpler，gitlink
+  与 kernel ABI revision 同时固定到扩容版。
+- Simpler：`57e499238fd4ee3548947ad860be456aaeeb16b5`，直接发布原已验证
+  的 256 Tensor + 16 scalar 提交，没有新增运行时修改。
+- PTOAS：`e5c1c432af8249bac2f905c7648ebafefec3c20a`，将 toolchain_v3 的
+  实际源码组合固化。保留 Acc/L1 分区与 CFG 并行赋值修复，GM analyzer
+  恢复为实测覆盖文件，未采用的 GM 列分片试验仍留原工作区。
+
+PyPTO core/torch_npu adapter 与 PTOAS 均在新树从源码构建。PTOAS 对历史
+七档输入生成的完整 C++ 与选定编译器逐字一致；20 项 CPU Scalar 控制流
+验证通过。完整源级动态 CSA lowering 保留 58 个动态轴和一个 MIX 提交；
+AIC/AIV、编排和 PTOAS C++ 去掉独立注释行后逐字一致，原始文本存在 inline
+临时编号注释差异，不声称原始 IR 逐字一致。没有新增工具链七档真机结果。
+
+新增测试目录 `tests/pypto_test/csa_toolchain_repro_20261019`，含中文复现说明、
+准确版本清单、验证范围、CPU 参数和显式路径 bootstrap，随 vllm-ascend
+`3ee076ee` 推送。启动器只替换测试环境定位，不改正式算子、数学或阈值。
+权重、二进制及完整构建缓存未入 Git；没有做文件 hash 校验。
+
+复现指南：
+https://github.com/nalinaly/vllm-ascend/tree/dsv4-flash-pto-v0.25.1rc1/tests/pypto_test/csa_toolchain_repro_20261019
+
+
+## 2026-10-19：E49 O_B 有效行裁剪采用，按用户要求收尾
+
+用户将当前目标明确为“O_B 修改按照测试效果，按需合入”。四个原定任务均已
+退出 0，核对原始 result 后采用通用有效行方案，不继续开启性能优化方向。
+
+正式修改仅作用于 NZ ROW_TILE>96 的 O_B：activation slice 带
+`min(ROW_TILE,T-t0)`，INT8 matmul 和 assemble 沿用有效 M，裁掉真实 T 外
+的算术 padding。T 内 dummy、工作区容量、上游补零、权重驻留、K/N、归约
+顺序与阶段依赖保留。partial 尾区不再写零，HC post 仍严格按 T 加载。
+ND 与 NZ 小中路径、区间 policy 保持；cube_schedule 只更新同步注释。
+
+| 场景 | 原单 SPMD μs | 采用版 μs | 耗时降低 | 任务 |
+| --- | ---: | ---: | ---: | --- |
+| 128K/B24 | 1070.32 | 1065.94 | 0.409% | `task_20261019_150123_20861594920` |
+| 128K/B28 | 1230.20 | 1208.10 | 1.796% | `task_20261019_150124_208874914753` |
+| 8K/B32 | 935.14 | 929.54 | 0.599% | `task_20261019_153803_20735913517` |
+| 128K/B22 | 1056.04 | 1057.66 | -0.153% | `task_20261019_153803_2074367971` |
+
+同轮完整 CSA L1 首尾、五窗中位数；降低比例以原单 SPMD 为分母。三档目标
+均改善；B22 的 4 行尾块边界慢 1.62 μs，未伪记收益，不针对它增加孤立分支。
+每场景 973 项 PASS，浮点精确对照 max_abs=0；Top-K、cache/state、保护区、
+metadata/padding、图重放和信号代际通过。B22 作为额外边界，不增加七档
+性能验收清单。既有 30% 总目标未达成，不在本次 O_B 完成声明范围内。
+
+合入前正式 37 个文件与 source_reference 逐字一致；合入后去掉文档字符串，
+逐文件 AST 与真机已测 source_candidate 一致，ND 和 NZ 小中分支保持。
+没有修改 PyPTO/Simpler/PTOAS，没有重跑已完成的验证或提交检查。
+完整结果、逐次原始 L1、源码冻结、采用审计和本地大产物清单在
+`tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/ob_active_rows_20261019/`。

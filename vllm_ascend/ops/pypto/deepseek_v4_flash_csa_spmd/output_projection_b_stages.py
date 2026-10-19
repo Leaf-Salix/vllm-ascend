@@ -10,6 +10,11 @@
 """动态 CSA 输出后段：O_B INT8 投影、八组反量化与 HC post。
 
 整体数据流与阅读顺序
+    NZ 大 M128 路径只计算真实 T 内的行：每个 activation 切片显式带
+    min(128,T-t0) 有效行，matmul 和 partial 写回沿用这一动态范围。
+    T 内的 dummy/inactive 行仍完整计算，不按请求 metadata 跳算。
+    权重驻留、K1024 整数点积、N256 和八组 FP32 反量化顺序保持不变。
+    工作区容量和上游 INT8 补零合同保留；HC post 本来就只读取 T 行。
     上游 O_A/按组量化产生 INT8 activation[P_MM,8192] 和 FP32 scale[8,P_SCALE]。
     先阅读 o_b_stage 所选择的 ND/NZ AIC helper，再阅读末尾的 AIV
     o_dequant_hc_post_stage；其中 hc_post_row_block 是最后一步的单行数学。
@@ -39,9 +44,12 @@
 
 同步、工作区和生命周期
     本文件没有 notify/wait。外层先等待 O_A 量化的真实 owner，包括所有
-    [T,ceil(T/ROW_TILE)*ROW_TILE) INT8 填充行清零，再让 O_B 读完整 M tile。
-    O_B 不读原始 FP32 O_A padding；P_MM 必须容纳完整 M tile，P_SCALE>=T。
-    每个 partial 区域唯一写入且首 K 块初始化 Acc，无需整份 partial 清零。
+    [T,ceil(T/ROW_TILE)*ROW_TILE) INT8 填充行清零，保持原有阶段依赖。
+    ND 和 NZ 小中 tile 仍读完整 M；NZ 大 M128 用有效行数截断最后一块。
+    O_B 不读原始 FP32 O_A padding；P_MM 保留整块容量，P_SCALE>=T。
+    每个有效 partial 区域唯一写入且首 K 块初始化 Acc，无需整份清零。
+    大 M128 路径不再初始化 [T,P_MM) partial 尾区；唯一消费者按真实 T
+    逐行加载 [1,4096]，不得把这段未写区域当作有效输出或跨调用初值。
     终端 AIV 必须等待所读 token 的八组 O_B partial、八个 activation scale、
     HC pre post/comb 完成并可见。ND/NZ 的 owner 不同，不能套单纯行 tile 的
     wait_row_owners。返回 Tensor 引用只表达数据流，不等于其它核已经完成。
@@ -179,9 +187,18 @@ def _o_b_nz_groups_stage(
                     weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
                     for tb in pl.range(proj_b_t_rows):
                         t0 = tb * ROW_TILE
-                        b_act_full = o_r_i8_pad[t0 : t0 + ROW_TILE, col_g : col_g + O_LORA]
+                        # 当前tb来自ceil(T/ROW_TILE)，所以有效行数在1..ROW_TILE。
+                        # 这是删去T以外的算术padding，T内的dummy或inactive行仍完整计算。
+                        # ND activation允许动态有效M；NZ权重的K/N范围没有变化。
+                        active_rows = pl.min(ROW_TILE, tokens - t0)
+                        b_act_full = pl.slice(
+                            o_r_i8_pad, [ROW_TILE, O_LORA], [t0, col_g],
+                            valid_shape=[active_rows, O_LORA],
+                        )
                         full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
-                        partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = full_acc
+                        # assemble沿用源Acc的有效行，不能仍按完整ROW_TILE写回。
+                        # [T,P_MM)不再由此路径初始化；所有消费者必须只读取真实T。
+                        partials = pl.assemble(partials, full_acc, [t0, g * D + n0])
     return partials
 
 
