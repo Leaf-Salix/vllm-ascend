@@ -18869,3 +18869,43 @@ C++已等价，不重复上卡。最终七档结果及原始任务见COMPLETED_R
 差异不能算作候选退化；本轮配对参考为661.90。没有挑历史最小值。
 
 过程目录：mgather_physical_plan_retest_20261019。旧静态负例并未删除；当前物理行plan使一次加载64项索引可替代逐行Scalar读GM，但ISA仍逐行DMA。
+
+### 2026-10-19：独立GM子视图原型与双行DMA整链候选
+
+PyPTO #3042 的显式 tensor.slice(..., gm_view=True) 原型在新的独立
+pypto-csa-gm-subview-20261019 构建，继承旧工具链的源码修复；没有复制
+.so或修改共享安装。限制连续rank2 ND整行窗口，gm_view默认false，真
+Tile输入仍拒绝。推进一次GM base后保持shape/stride，不物化整个span。
+初版缺显式stride、后续pass verifier未接入导致的失败均记录；v3的52项
+相关UT通过，动态R17/97的26项同址图地址/全部BF16位型/输入只读/guard
+真机检查通过。默认关闭新能力时完整CSA AIC/AIV C++仅去整行注释后与
+原工具链相同；这不是新能力在完整CSA中的性能结论。
+
+原型建议与最小patch已补PyPTO #3042评论6257775143；无PR/label。
+过程位于gm_subview_pair_dma_20261019，早期快照/补丁均保留。
+
+在正式动态attention_stream_stages.py开发双行DMA，再冻结候选并恢复
+已采用MGATHER正式源。每两个物理地址检查有效域、delta的32位byte gap
+和整个2*delta span，按正stride搬入，UB恢复降序，重复/非法/不完整span
+回退逐行；不变更Top-K序、数学、事件、根入参或分档。
+
+完整CPU首版在FlattenTileNdTo2D后产生GM view的FREE_VAR。独立最小复现
+仅用已有tensor.view，无gm_view新接口，在父工具链同样复现；原因是
+Scalar被重写后非tile结果类型仍留旧引用。只读核对main同逻辑；不冒称
+干净main构建。新工作区将GM view/slice纳入既有remote_load元数据重写
+路径，4项CPU回归通过，完整候选cpu_v2通过58轴/单MIX；提交PyPTO
+#3046附最小复现与建议patch。整链128K/B16真机已提交，仍待精度/性能，
+不预记通过。过程pair_dma_full_pipeline_20261019；七档30%仍0/7。
+
+双行DMA+UB重排首个完整真机任务已终态exit0，全部冻结精确、状态、保护、
+图及metadata/padding通过。同轮完整L1五窗中位多task860.74、MGATHER参考
+803.96、候选933.56μs，回退16.120%；不采用、不扩七档。新GM接口与
+Flatten修复能完成整链不意味着这个算子写法有收益。正式仍289cc072。
+
+根据实际生成代码中的临时Tile、MTE2→V与TMOV成本，在正式动态文件准备
+只合并原序递增相邻两行、gather_row直写最终KV Tile的独立候选，随后冻结
+并恢复正式源。CPU通过58轴/单MIX，待测任务task_20261019_095520_2364018490；
+过程pair_dma_direct_rows_20261019。仍不预记性能、保持所有原精度门槛。
+
+用户再次明确只允许push vllm-ascend；组件源码修改均保留独立本地工作区，
+上游仅按已有授权提交issue及建议patch，不提交代码PR或push组件分支。

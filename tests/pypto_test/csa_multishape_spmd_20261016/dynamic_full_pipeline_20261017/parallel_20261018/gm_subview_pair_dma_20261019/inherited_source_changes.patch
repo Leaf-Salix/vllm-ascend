@@ -1,0 +1,2818 @@
+diff --git a/docs/en/dev/codegen/00-pto_codegen.md b/docs/en/dev/codegen/00-pto_codegen.md
+index baa977aac..059a26f91 100644
+--- a/docs/en/dev/codegen/00-pto_codegen.md
++++ b/docs/en/dev/codegen/00-pto_codegen.md
+@@ -41,6 +41,22 @@ constants block is finalized, so a constant that appears only inside a shape or
+ stride expression — e.g. the `2` in a composite parameter dim `M * 2` — is still
+ declared in the constants block before its use.
+ 
++### Signed scalar floor remainder
++
++For signed integer and `INDEX` operands, `FloorMod(a, b)` preserves floor
++remainder semantics: a nonzero result has the divisor's sign. Codegen emits
++`arith.remsi`, then adds `b` when the remainder is nonzero and its sign differs
++from `b`, selecting the corrected value. For a constant divisor, its known
++sign reduces the required comparison. For example, `-97 % 24` produces `23`,
++not the truncating remainder `-1`.
++
++This is semantic lowering of one IR operation, not an arithmetic simplification.
++It matters after the arithmetic analyzer simplifies `(x % n + n) % n` to
++`x % n`: emitting only `arith.remsi` would change the meaning for negative `x`.
++The divisor must be nonzero and operands must avoid the signed division
++overflow case. This rule does not change floating-point remainder or
++`FloorDiv` lowering.
++
+ ## Architecture
+ 
+ ### Explicit Buffer input
+@@ -173,6 +189,23 @@ print(pto_code)
+ | `tile.xor(lhs, rhs, tmp)` / `tile.xors(lhs, scalar, tmp)` | `pto.txor` / `pto.txors`; scalar is same-width signless `iN` |
+ | `tile.fillpad_expand(src, shape)` | `pto.tfillpad_expand ins(%src) outs(%dst)` (the `shape` tuple is type-deduction only; the larger `dst` and its pad come from the result type) |
+ 
++**Reshape and transpose views after control flow.** With physical addresses
++baked into tile handles, an existing handle of the requested type can express
++the view directly. Under the PTOAS memory planner, a matching type alone does
++not establish aliasing: an if-phi may have a different handle from its old
++MemRef representative. Codegen omits the view only if the actual source is
++already the result handle; otherwise it emits `pto.treshape` from the current
++source, preserving both buffer identity and SSA dominance across branches.
++
++**Shared phi handles and tile moves.** An in-place conditional gather retains
++its already-declared tile handle even when later transpose/reshape views give
++the same storage additional types. Reuse requires the existing handle's exact
++type; a handle is never retyped. For a loop-carry move whose backing handle is a
++row but whose logical destination is a column, codegen emits a destination
++`pto.treshape` view with the static valid shape before `pto.tmov`. This preserves
++storage identity and matches the source/destination shapes without adding an
++allocation or an unsupported Mat-to-Mat copy.
++
+ **`tile.slice` / `tile.assemble` lowering details.**  Both ops are lowered
+ through `pto.subview`, which is a pure view alias of the source tile (no
+ data movement, no extra `pto.alloc_tile`).  `pto.subview` requires the
+diff --git a/docs/en/dev/ir/05-operators.md b/docs/en/dev/ir/05-operators.md
+index 1b599376f..946b8f5e2 100644
+--- a/docs/en/dev/ir/05-operators.md
++++ b/docs/en/dev/ir/05-operators.md
+@@ -496,6 +496,8 @@ flat gather, valid-region semantics, tile layouts, and mask patterns.
+ | `system.bar_v` | Vector barrier (lowers to `pto.barrier <PIPE_V>`) | None |
+ | `system.bar_m` | Matrix barrier (lowers to `pto.barrier <PIPE_M>`) | None |
+ | `system.fence` | Memory barrier over global memory (lowers to `pto.fence.barrier_all #pto.fence_scope<gm>`) | None |
++| `system.signal_notify` | Temporary local GM INT32 signal Set; lowers to TNOTIFY(Set). Args: signal, offsets, value | None |
++| `system.signal_wait` | Temporary non-consuming local GM INT32 wait until >= expected; lowers to TWAIT(Ge). Args: signal, offsets, expected | None |
+ | `system.cacheinvalid` | Invalidate the cache line containing a tensor sub-region's base address. Args: `tensor`, `shapes` (N-D), `offsets` (N-D). Every region size — a single element included — lowers to `pto.partition_view` + `pto.cmo.cacheinvalid %payload_view single_cache_line : !pto.partition_tensor_view<...>`; `shapes` does not make it walk every cache line. The no-argument form invalidates all GM. | None |
+ | `system.syncall` | Cross-core all-participant barrier (`pto::SYNCALL`). Attr `mode` `"hard"` (FFTS, no operands) or `"soft"` (GM-polling, operands) | `core_type` (`"aiv_only"` \| `"aic_only"` \| `"mix"`), `mode` (`"hard"` \| `"soft"`) |
+ | `system.sync_src` | Set sync flag | `set_pipe`, `wait_pipe`, `event_id` |
+@@ -517,6 +519,29 @@ The `core_type` and `mode` attributes stay strings **in the IR**, but the Python
+ 
+ `system.task_invalid` returns [`ScalarType(DataType::TASK_ID)`](02-types.md#scalartype). It is the lowering target of the Python literal `None` when `None` appears in a TaskId position (a `deps=[None]` entry or a TaskId loop iter_arg seed) inside `with pl.manual_scope():` regions. There is no `system.task_id_of` op — producer task ids are obtained from the second tuple element returned by the `pl.submit(...)` parser construct, not from a builtin. Source: `src/ir/op/sync_ops/task.cpp`.
+ 
++### Temporary ordinary-GM point-to-point signals
++
++`pl.system.signal_notify(signal, [offset], value)` and
++`pl.system.signal_wait(signal, [offset], expected)` are a local prototype for
++[issue #3020](https://github.com/hw-native-sys/pypto/issues/3020), not an upstream API.
++They use a one-dimensional ordinary GM `INT32` Tensor and existing
++`TNOTIFY(Set)` / `TWAIT(Ge)`. The offset may be dynamic; value and expected must
++be INT32. They do not require a DistributedTensor, communication window, or
++collective barrier. Wait is non-consuming and supports multiple readers.
++
++Each signal cache line must have a single writer and must not share storage
++with payload or another writer. Initialize it before launch; use monotonically
++increasing epochs without INT32 overflow. Concurrent invocations need separate
++storage. All required producer kernels must be resident or otherwise able to
++make progress. This prototype is for explicitly typed AIC/AIV bodies within a
++MIX group; automatic MIX lane placement is not specified.
++
++These operations publish and observe the signal only. Callers must separately
++complete producer data pipelines, release payload writes, and maintain consumer
++caches and ordering before reading payload. The current A3 TWAIT uses volatile
++loads with DCCI, not a promise of cache-bypassing `ld_dev` loads. Do not treat
++volatile alone as cache coherence, or a signal wait as a full payload barrier.
++
+ ## CrossCoreOp: AIC↔AIV Communication
+ 
+ **Purpose**: Cross-core synchronization, data transfer, and pipe management between AIC (Cube) and AIV (Vector) kernels
+diff --git a/docs/en/dev/passes/24-expand_mixed_kernel.md b/docs/en/dev/passes/24-expand_mixed_kernel.md
+index edb6d5c35..efeba0610 100644
+--- a/docs/en/dev/passes/24-expand_mixed_kernel.md
++++ b/docs/en/dev/passes/24-expand_mixed_kernel.md
+@@ -34,6 +34,14 @@ members to that Group signature and rewrites both inner `Call` or `Submit` nodes
+ to forward the complete list. Unused parameters remain valid wrapper arguments;
+ each cloned body still references only the values from its original call.
+ 
++An `InOut` result may be rebound and passed to the next member, as in
++`sink = cube(sink); sink = vec(sink)`. The result is an SSA alias of the same
++whole GM parameter. Before cloning, the pass traces member arguments through
++writebacks, including tuple results and `Submit`, and binds these aliases to the
++corresponding fresh adapter parameters. `pl.no_dep` overrides follow the same
++mapping. Tensor views and newly allocated buffers are not whole-parameter
++aliases; bind them outside the Group and pass them as explicit Group parameters.
++
+ When both member kernels are exclusive to the Group, their names are preserved.
+ If either kernel has another call site, the pass creates a Group-private adapter
+ pair and rewrites `import_peer_buffer(peer_func=...)` to the adapter peer names,
+diff --git a/docs/en/dev/passes/35-materialize_semantic_aliases.md b/docs/en/dev/passes/35-materialize_semantic_aliases.md
+index 8127bbe16..320ed8402 100644
+--- a/docs/en/dev/passes/35-materialize_semantic_aliases.md
++++ b/docs/en/dev/passes/35-materialize_semantic_aliases.md
+@@ -52,6 +52,9 @@ its own fresh MemRef. This pass closes that gap:
+    and its producer chain (following in-place `output-reuses-input` ops and
+    view inputs). `IfStmt` return values are retargeted into both branch yields,
+    then the collected type rewrites are applied.
++   The traversal also enters Scalar `WhileStmt` bodies, so nested `ForStmt`
++   carries retain the same alias rules. It does not retarget the `WhileStmt`
++   carry itself or move writes outside the loop.
+ 2. **Normalize peeled accumulator phis**: visit nested `IfStmt` nodes in
+    post-order and recognize both direct in-place accumulator producers and
+    branch-local loops carried by an accumulator seeded outside that branch.
+@@ -67,8 +70,14 @@ its own fresh MemRef. This pass closes that gap:
+ 3. **Normalize semantic identity chains**
+    (`NormalizeIdentityCopyBuffersMutator`): make bare SSA copies share their
+    source allocation and make every registered in-place result share its reused
+-   input allocation. This closes lowering-created type drift before any memory
+-   planner observes lifetimes or PTOAS emits tile handles.
++   input allocation. Metadata views follow the current input in the same
++   forward traversal, including when an in-place result was just re-anchored.
++   Subviews retain their relative byte offset and window size; pipeline-slot
++   identity follows the input. A real data-moving `tile.transpose` still owns
++   separate storage. An unresolved `if` phi and its view/in-place alias chain
++   remain deferred until yield fixup chooses the phi storage. This closes
++   lowering-created type drift before any memory planner observes lifetimes or
++   PTOAS emits tile handles, without relaxing lifetime or pipeline constraints.
+ 
+ The pass is a no-op when there is nothing to retarget (`Compute` returns no
+ rewrites), and skips `Orchestration` functions (no TileType variables).
+diff --git a/docs/en/dev/passes/36-memory_reuse.md b/docs/en/dev/passes/36-memory_reuse.md
+index e67ad3b15..40683016d 100644
+--- a/docs/en/dev/passes/36-memory_reuse.md
++++ b/docs/en/dev/passes/36-memory_reuse.md
+@@ -60,9 +60,9 @@ program_optimized = reuse_pass(program)
+ 2. **Interference Check**: Identify variables with overlapping lifetimes
+ 3. **MemRef Sharing** (global first-fit-decreasing packing, `IdentifyReuseOpportunities`): Within each memory space, intervals are packed **largest-first**; every later interval joins the first existing buffer all of whose members it can share with (non-overlapping lifetime + hazard/no-alias safe — see `can_share`). A buffer's allocated size is fixed by its first (largest) member, so admitting a smaller member afterwards costs nothing — and a *later, larger* interval can now host an *earlier, smaller* one. (The previous definition-order greedy had a one-directional size gate `source.size >= target.size`, so two lifetime-disjoint tiles whose small one was defined first were never coalesced.) The representative each member is rebased onto is the buffer's largest member; its `tile.alloc` dominates the whole function because InitMemRef hoists every alloc to the function-body head, so a representative defined after some of its members is safe. Because the packer no longer runs in program order, every pairwise gate (hazard, no-alias) is checked in both directions.
+ 
+-   **Capacity-overflow subrange fallback (PYPTO only).** The pass first computes the legacy whole-buffer packing above and keeps it byte-for-byte when its exact allocator footprint fits the backend capacity. Only when that footprint overflows does it retry packing smaller roots into aligned subranges of an existing largest-member arena. For example, after a dead 64 KiB root has reserved `[0, 65536)`, two later 32 KiB roots that are live together may occupy `[0, 32768)` and `[32768, 65536)`. The 64 KiB lifetime must not overlap either smaller root; the two smaller roots must occupy disjoint byte ranges because they interfere. The retry selects the lowest aligned gap not blocked by a member that cannot share bytes with the candidate. It never grows an arena, so two 32 KiB arenas do not become a new 64 KiB arena; the 64 KiB representative must already exist. If subdivision still does not fit, the existing pipeline-depth shed and legacy fallback run unchanged.
++   **Capacity-overflow subrange fallback (PYPTO only).** The pass first computes the legacy whole-buffer packing above and keeps it byte-for-byte when its exact allocator footprint fits the backend capacity. Only when that footprint overflows does it retry packing smaller roots into aligned subranges of an existing largest-member arena. For example, after a dead 64 KiB root has reserved `[0, 65536)`, two later 32 KiB roots that are live together may occupy `[0, 32768)` and `[32768, 65536)`. The 64 KiB lifetime must not overlap either smaller root; the two smaller roots must occupy disjoint byte ranges because they interfere. The retry selects the lowest aligned gap not blocked by a member that cannot share bytes with the candidate. If fixed-size subdivision still overflows, one additional packing attempt may grow an eligible zero-based compiler-owned arena, bounded by the available capacity. For example, a 48+12 KiB phase followed by a 32+32 KiB phase can share a 64 KiB arena even though no individual root originally spans 64 KiB. The retry is accepted only if it reduces the allocator footprint. It preserves every lifetime, hazard and pipeline-separation constraint; genuinely co-live 64+12 KiB buffers still overflow. Pipeline-depth shedding and the legacy fallback remain the final options.
+ 
+-   Subdivision moves a complete root allocation; it never packs into holes outside an alias/view's accessed window. The candidate and arena roots must therefore have constant, non-negative allocation offsets. A symbolic offset is supported only on a direct internal `tile.slice`, whose runtime address PTO reconstructs from the translated source tile and the slice operands. If a memory space contains another dynamic-offset member, such as a reshape, reinterpret, or transpose view of that slice, subdivision is disabled for the complete space so compacting unrelated roots cannot turn a legacy overflow into wrong code. Constant member offsets are still checked to be non-negative and in bounds; supported symbolic slices keep the exact relative expression `arena_offset + placement + (member_offset - root_offset)`. A dynamic root offset remains ineligible, and pinned/declared allocations remain closed. Lifetime interference, pipeline separation, target hazards, and op no-alias rules still call `can_share`; if any such rule prevents byte overlap, the two root address intervals must be disjoint. `AllocateMemoryAddr` sizes the physical slot from the arena root's complete allocation capacity; every constant subrange was already checked to stay within that capacity. A pure dynamic `tile.slice` MemRef then retains the legacy bare-base address because PTO lowers its actual window as `pto.subview` of the already placed source tile using the slice operands. Downstream reshape folding compares base plus offset and tile signature, while PTO DPS aliasing also compares the extent. Sibling root subranges therefore cannot be mistaken for the same tile merely because their base pointers match.
++   Subdivision moves a complete root allocation; it never packs into holes outside an alias/view's accessed window. The candidate and arena roots must therefore have constant, non-negative allocation offsets. A symbolic offset is supported only on a direct internal `tile.slice`, whose runtime address PTO reconstructs from the translated source tile and the slice operands. If a memory space contains another dynamic-offset member, such as a reshape, reinterpret, or transpose view of that slice, subdivision is disabled for the complete space so compacting unrelated roots cannot turn a legacy overflow into wrong code. Constant member offsets are still checked to be non-negative and in bounds; supported symbolic slices keep the exact relative expression `arena_offset + placement + (member_offset - root_offset)`. A dynamic root offset remains ineligible, and pinned/declared allocations remain closed. Lifetime interference, pipeline separation, target hazards, and op no-alias rules still call `can_share`; if any such rule prevents byte overlap, the two root address intervals must be disjoint. The physical allocation records the grown arena capacity while each tile retains its original window size. `AllocateMemoryAddr` reserves the maximum static member end (`offset + size`), so another allocation cannot overlap the enlarged arena; every constant subrange is checked against that capacity. A pure dynamic `tile.slice` MemRef then retains the legacy bare-base address because PTO lowers its actual window as `pto.subview` of the already placed source tile using the slice operands. Downstream reshape folding compares base plus offset and tile signature, while PTO DPS aliasing also compares the extent. Sibling root subranges therefore cannot be mistaken for the same tile merely because their base pointers match.
+ 4. **Loop-carry re-alignment** (`AlignLoopCarriesToInitMutator`): Sharing (step 3) only retypes `AssignStmt`-defined vars (producers/init); loop-carried `iter_arg`/`return_var` nodes are excluded from the lifetime/sharing maps and keep their original MemRef. This step walks `ForStmt`s **top-down** and retypes each loop's `iter_arg`/`return_var` to its (now-reused) `initValue` MemRef, seeding `var_remap_` before recursing so a nested loop observes the corrected outer `iter_arg` as its init. Without it, a reused **nested pipelined `matmul_acc`** accumulator splits across two Acc buffers and step 7 emits invalid `acc→acc tile.move` ops that ptoas rejects on Ascend 910B ([#1352](https://github.com/hw-native-sys/pypto/issues/1352))
+ 5. **Accumulator if-phi coalescing** (`TopDownRetargeter::CoalesceAccumulatorIfPhis`): `LowerPipelineLoops` peels a stage-2 K-loop into `if`-phis whose live branch is an in-place `matmul_acc` (on the accumulator buffer) and whose dead `if k==0` branch is a fresh `matmul` seed on a *different* Acc buffer. Left alone, step 7 would try to reconcile them with an `acc→acc tile.move` — a second co-live L0C buffer (overflow) that ptoas also rejects (no legal Acc→Acc `tmov`). This step identifies the in-place-accumulator branch by its `reuses_input` producer and retargets the *other* branch's seed onto the accumulator buffer, so both branches share it and no move is emitted (matching `mad_acc`'s shared-`%dst` semantics). Scoped to `Acc`; the retarget is **mandatory** (a declined retarget is an `INTERNAL_CHECK`, never a move — no legal Acc→Acc move exists). It bypasses the *global* dead-at-assign liveness check (which would false-decline on the legitimate post-if phi consumer), but only after verifying the two preconditions branch exclusivity actually needs: (a) the seed producer is a `Call` lexically **inside** the branch (a pre-if value yielded through the branch runs unconditionally and would clobber the accumulator the sibling in-place branch reads), and (b) a **branch-scoped** `IsTargetDeadAtAssign` (bounded to stop at the enclosing `if`) finds no same-branch tail read of the accumulator buffer. When either fails, the phi remains uncoalesced and step 7 fails loudly rather than manufacturing unsupported Acc→Acc IR
+ 
+@@ -119,6 +119,38 @@ program_optimized = reuse_pass(program)
+ 
+ After MemRef sharing, some MemRef objects become unreferenced (their variables now point to a different shared MemRef). The pass traverses the surrounding `SeqStmts` and removes any `tile.alloc` `AssignStmt` whose LHS MemRef pointer is not in the set of still-used MemRefs.
+ 
++## Control-flow lifetime and alias handling
++
++An if-result keeps its branch-local sources alive until its last use. Sources
++for the same return slot belong to one phi family, so mutually exclusive arms
++can share storage despite that lifetime extension. This also covers branch-local
++aliases of an in-place gather loop's allocation; definitions outside the arm
++remain independent and can still prevent reuse.
++
++Under capacity pressure only, the packer can analyze the opposite branch order
++(else before then) once and retry. Disjoint lifetimes in either order establish
++non-interference without changing execution order. For example, a value read
++only in the else arm can share with a fresh replacement in the then arm. Reads
++after the if, same-arm tail reads, loop recurrence, pipeline separation and
++target hazards remain constraints. Layouts that already fit are unchanged.
++This adds a bounded traversal and packing attempt, not a search over branch
++permutations.
++
++Yield fixup immediately retypes pure aliases of an updated inner phi before
++resolving an outer phi. For all planners, when both arms already refer to the
++same physical window, their phi retains that window. This does not introduce
++opportunistic sharing or divergent-arm copies under PTOAS.
++
++During loop-carry retargeting, a pure SSA identity may still carry a stale
++MemRef after an inner phi has moved. The loop initializer independently fixes
++the destination, so `TopDownRetargeter` follows the identity to its producer
++without requiring the old identity window to match first. Producer liveness,
++no-alias and view-offset checks still apply. This exception is scoped to
++loop-carry propagation: accumulator if-phi coalescing still requires matching
++identity windows, because it derives the destination from the alias itself.
++The nested-phi regression checks that no redundant carry move is introduced;
++the divergent-accumulator-alias regression must continue to fail closed.
++
+ ## Declared allocations
+ 
+ Reuse is opportunistic: any two tiles whose lifetimes do not overlap are candidates
+diff --git a/docs/en/user/language/01-functions.md b/docs/en/user/language/01-functions.md
+index 36dcefdf4..60e872e2c 100644
+--- a/docs/en/user/language/01-functions.md
++++ b/docs/en/user/language/01-functions.md
+@@ -183,10 +183,15 @@ pipeline judges whatever the program then does with it (loading the whole tensor
+ say, gets you `InitMemRef requires static shape` — the same error the equivalent
+ `@pl.program` earns).
+ 
++For `pl.reshape`, a target dimension may also be an integer expression over named
++tensor-dimension aliases, such as `rows * width` after `rows = pl.tensor.dim(x, 0)` and
++`width = pl.tensor.dim(x, 1)`. The view keeps that expression in IR; consumers bind its
++dynamic dimension from the actual descriptor. This metadata propagation does not prove
++that an arbitrary reshape preserves the element count.
++
+ What does not resolve is a returned tensor whose shape the specializer cannot *reach* at
+-all: a `pl.reshape` whose target shape is not static (a reshape is constrained by its
+-source's element count, so no dynamic dimension can stand in for it), or a result rebound
+-through an operation the specializer does not model. That surfaces as
++all: a `pl.reshape` sized from an unrelated runtime scalar (for example a value read from
++another tensor), or a result rebound through an operation the specializer does not model. That surfaces as
+ `missing inferred tensor metadata for parameter '<name>'` at the *next* call that consumes
+ it — the error names the consumer, but the fix belongs at the producer: give the producing
+ statement a statically inferable shape, or pass the buffer in as a `pl.Out[...]` parameter.
+diff --git a/docs/zh/dev/codegen/00-pto_codegen.md b/docs/zh/dev/codegen/00-pto_codegen.md
+index 02ad3aa4e..ac47e6c48 100644
+--- a/docs/zh/dev/codegen/00-pto_codegen.md
++++ b/docs/zh/dev/codegen/00-pto_codegen.md
+@@ -39,6 +39,18 @@ PTO 代码生成 (CodeGen) (`PTOCodegen`) 从 PyPTO 中间表示 (IR) 生成 PTO
+ 张量视图与分配前缀会**先**渲染到缓冲区、再定稿常量块, 因此只出现在某个 shape 或
+ stride 表达式里的常量 (例如复合参数维度 `M * 2` 中的 `2`) 也会在使用前被声明到常量块。
+ 
++### 有符号标量的 floor 余数
++
++对于有符号整数和 `INDEX` 操作数，`FloorMod(a, b)` 保留向下取整除法的余数
++语义：非零结果与除数同号。代码生成先发射 `arith.remsi`，在余数非零且与
++`b` 异号时加上 `b`，再选择修正值。除数为常量时，其已知符号可以减少必要的
++比较。例如 `-97 % 24` 得到 `23`，而不是截断除法的余数 `-1`。
++
++这是单个 IR 操作的语义下沉，不是算术优化。算术分析器将
++`(x % n + n) % n` 简化为 `x % n` 后，仅发射 `arith.remsi` 会改变负数 `x`
++的含义。除数必须非零，操作数必须避开有符号除法溢出的情况。此规则不改变
++浮点余数或 `FloorDiv` 的下沉方式。
++
+ ## 架构
+ 
+ ### 显式 Buffer 输入
+@@ -167,6 +179,19 @@ print(pto_code)
+ | `tile.xor(lhs, rhs, tmp)` / `tile.xors(lhs, scalar, tmp)` | `pto.txor` / `pto.txors`；scalar 使用同位宽 signless `iN` |
+ | `tile.fillpad_expand(src, shape)` | `pto.tfillpad_expand ins(%src) outs(%dst)`（`shape` 元组仅用于类型推导；更大的 `dst` 及其 pad 来自结果类型） |
+ 
++**控制流之后的 reshape 与 transpose view。** 固定物理地址模式下，相同类型的
++已有 handle 可以直接表达 view。使用 PTOAS 规划内存时，仅类型相同不足以证明
++别名关系：if-phi 的当前 handle 可能不同于旧 MemRef 代表。只有实际源就是结果
++handle 时才省略 view，否则从当前源发出 `pto.treshape`，保持缓冲身份以及跨分支
++SSA 定义对使用点的支配关系。
++
++**共享 phi handle 与 tile 搬运。** 条件原地 gather 保留已声明的 tile handle，
++即使后续 transpose/reshape 为同一存储增加了其他视图类型。复用要求已有
++handle 的类型完全匹配，不修改已有 handle 的类型。循环携带值的底层 handle
++为行、逻辑目标为列时，先按静态 valid shape 生成目标 `pto.treshape` 视图，
++再执行 `pto.tmov`，保持同一存储以及源/目标形状匹配，不增加 allocation，
++也不引入不支持的 Mat→Mat 拷贝。
++
+ **`tile.slice` / `tile.assemble` 下沉细节。** 两个 op 都通过 `pto.subview`
+ 下沉，它是源 tile 的纯视图别名（不搬数据，也不会额外发 `pto.alloc_tile`）。
+ `pto.subview` 要求结果 `tile_buf` 与源 `tile_buf` 在 `dtype`、`memory_space`、
+diff --git a/docs/zh/dev/ir/05-operators.md b/docs/zh/dev/ir/05-operators.md
+index 41d72ccb9..25939ab96 100644
+--- a/docs/zh/dev/ir/05-operators.md
++++ b/docs/zh/dev/ir/05-operators.md
+@@ -456,6 +456,8 @@ UINT32 + INT32 → INT32 (signed precedence)
+ | `system.bar_v` | 向量屏障（下降为 `pto.barrier <PIPE_V>`） | 无 |
+ | `system.bar_m` | 矩阵屏障（下降为 `pto.barrier <PIPE_M>`） | 无 |
+ | `system.fence` | 全局内存屏障（下降为 `pto.fence.barrier_all #pto.fence_scope<gm>`） | 无 |
++| `system.signal_notify` | 临时普通 GM INT32 信号 Set，下降为 TNOTIFY(Set)；参数为 signal、offsets、value | 无 |
++| `system.signal_wait` | 临时普通 GM INT32 非消费式等待，直到信号 >= expected，下降为 TWAIT(Ge) | 无 |
+ | `system.cacheinvalid` | 使 tensor 子区域基地址所在的那一条 cache line 失效。参数：`tensor`、`shapes`（N 维）、`offsets`（N 维）。任意区域大小（包括单个元素）都下降为 `pto.partition_view` + `pto.cmo.cacheinvalid %payload_view single_cache_line : !pto.partition_tensor_view<...>`；`shapes` 不会让它遍历区域内的所有 cache line。无参数形式使全部 GM cache 失效。 | 无 |
+ | `system.syncall` | 跨核全员屏障（`pto::SYNCALL`）。属性 `mode` 取 `"hard"`（FFTS，无 operand）或 `"soft"`（GM 轮询，带 operand） | `core_type`（`"aiv_only"` \| `"aic_only"` \| `"mix"`）、`mode`（`"hard"` \| `"soft"`） |
+ | `system.sync_src` | 设置同步标志 | `set_pipe`, `wait_pipe`, `event_id` |
+@@ -477,6 +479,25 @@ UINT32 + INT32 → INT32 (signed precedence)
+ 
+ `system.task_invalid` 返回类型为 [`ScalarType(DataType::TASK_ID)`](02-types.md#scalartype)。当 Python 字面量 `None` 出现在 TaskId 位置（`deps=[None]` 条目或 TaskId 循环 iter_arg 种子）时，它就是 `None` 在 `with pl.manual_scope():` 区域内的下沉目标。不存在 `system.task_id_of` op —— producer task id 由 `pl.submit(...)` parser construct 返回的二元组第二个元素获得，而非来自 builtin。源码：`src/ir/op/sync_ops/task.cpp`。
+ 
++### 临时普通 GM 点对点信号
++
++`pl.system.signal_notify(signal, [offset], value)` 与
++`pl.system.signal_wait(signal, [offset], expected)` 是
++[issue #3020](https://github.com/hw-native-sys/pypto/issues/3020) 的本地原型，
++不是上游正式 API。它们使用一维普通 GM INT32 Tensor，复用
++TNOTIFY(Set) / TWAIT(Ge)。offset 可以动态变化，value / expected 必须是 INT32；
++无需 DistributedTensor、通信窗口或全体 barrier。wait 不清除信号，允许多个消费者。
++
++每条信号缓存行必须只有一个写者，不能与 payload 或其他写者共享。
++首次启动前初始化；代际必须单调递增且不得溢出 INT32。并发调用独占信号空间。
++所有必要生产者必须已驻留或能够继续执行。当前只用于 MIX group 内显式 AIC/AIV
++核体，不定义自动 MIX 展开的 lane 放置语义。
++
++这两个操作只发布和观察信号。调用者仍需单独完成生产者数据流水、payload 发布，
++以及消费者读数据前的缓存维护与内存顺序。当前 A3 TWAIT 使用 volatile 读取配合
++DCCI，不能声称使用了绕过 DCache 的 ld_dev；volatile 本身不保证缓存一致性，
++信号 wait 也不能代替完整的业务数据屏障。
++
+ ## CrossCoreOp：AIC↔AIV 跨核通信
+ 
+ **用途**：AIC (Cube) 和 AIV (Vector) 内核之间的跨核同步、数据传输和管道管理
+diff --git a/docs/zh/dev/passes/24-expand_mixed_kernel.md b/docs/zh/dev/passes/24-expand_mixed_kernel.md
+index 10b764a2d..b9f2b18ae 100644
+--- a/docs/zh/dev/passes/24-expand_mixed_kernel.md
++++ b/docs/zh/dev/passes/24-expand_mixed_kernel.md
+@@ -32,6 +32,13 @@ active lane 共用同一份 `CoreTaskArgs` payload。因此，两个已编译 ke
+ 或 `Submit`，使其转发完整参数列表。未使用的参数仍是合法的 wrapper 参数；克隆后的
+ 函数体依旧只引用原调用实际使用的值。
+ 
++`InOut` 返回值可以重新绑定后传给下一个成员，例如
++`sink = cube(sink); sink = vec(sink)`。返回值是同一个完整 GM 参数的 SSA 别名。
++克隆前，Pass 会沿写回关系追踪成员参数（包括 tuple 返回值和 `Submit`），
++将这些别名绑定到 adapter 中对应的新参数；`pl.no_dep` 覆盖位置也沿同一映射更新。
++Tensor view 和新分配的缓冲不属于完整参数别名，应在 Group 外绑定后作为显式
++Group 参数传入。
++
+ 当两个成员 kernel 都只属于该 Group 时，保留其原函数名。如果任一 kernel 还有其他
+ 调用点，Pass 会生成一对 Group 私有 adapter，并把
+ `import_peer_buffer(peer_func=...)` 改写为 adapter 的 peer 名称，从而为其他调用者保留
+diff --git a/docs/zh/dev/passes/35-materialize_semantic_aliases.md b/docs/zh/dev/passes/35-materialize_semantic_aliases.md
+index ec8e0f5ff..694e3493b 100644
+--- a/docs/zh/dev/passes/35-materialize_semantic_aliases.md
++++ b/docs/zh/dev/passes/35-materialize_semantic_aliases.md
+@@ -46,6 +46,8 @@ program = passes.materialize_semantic_aliases()(program)
+    的规范 MemRef 作为目标，推送到 yield 值及其 producer 链上（跟随原地
+    `output-reuses-input` 算子与 view 输入）。`IfStmt` 的返回值被推送到两个分支的
+    yield，然后应用收集到的类型改写。
++   遍历也进入 Scalar `WhileStmt` 的循环体，保证嵌套 `ForStmt` 沿用相同的
++   别名规则；这不会重定向 `WhileStmt` 自身的 carry，也不会把写入移到循环外。
+ 2. **规范化 peeled accumulator phi**：按后序访问嵌套 `IfStmt`，同时识别直接的
+    in-place accumulator producer，以及由分支外 accumulator seed 驱动的分支内
+    loop。当且仅当一个分支是 accumulator continuation 时，把另一个分支的局部
+@@ -57,8 +59,12 @@ program = passes.materialize_semantic_aliases()(program)
+    路径上，重定向后的 producer 会覆盖仍可观察的值。
+ 3. **规范化语义 identity chain**（`NormalizeIdentityCopyBuffersMutator`）：让 bare SSA
+    copy 与 source 共享 allocation，并让每个注册的 in-place result 与其 reused input
+-   共享 allocation。这样可在任何 memory planner 观察 lifetime 或 PTOAS 发射 tile
+-   handle 之前消除 lowering 引入的类型漂移。
++   共享 allocation。同一正向遍历中的元数据视图（metadata view）跟随当前 input，
++   包括刚被重新锚定的 in-place result。子视图保留相对字节偏移和窗口大小，流水槽
++   身份跟随 input；真正搬运数据的 `tile.transpose` 仍占独立存储。尚未确定存储的
++   `if` phi 及其 view/in-place 别名链会继续延迟处理，直到 yield fixup 选定 phi
++   存储。这样可在任何 memory planner 观察 lifetime 或 PTOAS 发射 tile handle
++   之前消除 lowering 引入的类型漂移，不放宽生命周期或流水约束。
+ 
+ 当没有可重定向的内容时（`Compute` 返回空）本 pass 是 no-op，并跳过
+ `Orchestration` 函数（无 TileType 变量）。
+diff --git a/docs/zh/dev/passes/36-memory_reuse.md b/docs/zh/dev/passes/36-memory_reuse.md
+index 01f9680d0..c76ed7e29 100644
+--- a/docs/zh/dev/passes/36-memory_reuse.md
++++ b/docs/zh/dev/passes/36-memory_reuse.md
+@@ -56,9 +56,9 @@ program_optimized = reuse_pass(program)
+ 2. **干涉检查**：识别生命周期重叠的变量
+ 3. **MemRef 共享**（全局「最大优先 + first-fit」装箱，`IdentifyReuseOpportunities`）：在每个内存空间内，按 **大小从大到小** 装箱；后续每个区间加入第一个其全部成员都能与之共享的缓冲区（生命周期不重叠 + hazard / no-alias 安全，见 `can_share`）。缓冲区的分配大小由其首个（最大）成员固定，因此之后纳入更小的成员是「免费」的 —— 且 *后定义的较大区间* 现在可以承载 *先定义的较小区间*。（此前的定义序贪心带有单向的大小门槛 `source.size >= target.size`，因此两个生命周期不相交、但较小者先定义的 tile 永远无法合并。）每个成员被重定位到的「代表」是该缓冲区的最大成员；由于 InitMemRef 会把所有 `tile.alloc` 提升到函数体头部，代表的 alloc 支配整个函数，因此代表即使定义在其部分成员之后也是安全的。由于装箱器不再按程序序处理，每个成对门槛（hazard、no-alias）都会在两个方向上检查。
+ 
+-   **容量溢出时的子区间回退（仅 PYPTO）。** 本 pass 先计算上述旧式整块装箱；只要其精确 allocator footprint 不超过 backend 容量，就逐字节保留原布局。只有确认溢出后，才重试把较小 root 放到现有最大成员 arena 的对齐子区间。例如，一块已经失活的 64 KiB root 预留 `[0, 65536)` 后，两个随后且同时存活的 32 KiB root 可以分别占 `[0, 32768)` 与 `[32768, 65536)`。64 KiB root 的生命周期必须与两个小 root 都不重叠；两个小 root 互相干涉，所以它们的字节区间必须分离。重试为候选选择不被「不能与它共享字节」的成员阻塞的最低对齐空洞。arena 永不扩容，所以两个 32 KiB arena 不会拼成新的 64 KiB arena；64 KiB 代表必须原本就存在。若子区间装箱后仍放不下，原有的流水线深度削减与 legacy 回退照常执行。
++   **容量溢出时的子区间回退（仅 PYPTO）。** 本 pass 先计算上述旧式整块装箱；只要其精确 allocator footprint 不超过 backend 容量，就逐字节保留原布局。只有确认溢出后，才重试把较小 root 放到现有最大成员 arena 的对齐子区间。例如，一块已经失活的 64 KiB root 预留 `[0, 65536)` 后，两个随后且同时存活的 32 KiB root 可以分别占 `[0, 32768)` 与 `[32768, 65536)`。64 KiB root 的生命周期必须与两个小 root 都不重叠；两个小 root 互相干涉，所以它们的字节区间必须分离。重试为候选选择不被「不能与它共享字节」的成员阻塞的最低对齐空洞。固定容量的子区间重试仍超限时，增加一次允许扩展复用区的重试：仅扩展编译器拥有、根偏移为零的复用区，且不超过可用片上容量。例如先使用 48＋12 KiB、后使用 32＋32 KiB 的两个阶段可以共用 64 KiB。只有总分配量降低时才采用新布局，所有生命周期、hazard 和流水分离约束仍然生效；真正同时存活的 64＋12 KiB 仍报超限。原有流水线深度削减与 legacy 回退作为最后的选择。
+ 
+-   子区间复用移动的是完整 root allocation；它不会利用 alias/view 未访问的内部空洞。候选 root 与 arena root 的 allocation offset 因此仍须是静态非负值。只有直接内部 `tile.slice` 才支持动态 offset，因为 PTO 能使用已经重定位的 source tile 与 slice 操作数重建其运行时地址。如果某个 memory space 中存在其他动态 offset 成员，例如动态 slice 之后的 reshape、reinterpret 或 transpose view，则整个 space 都禁用子区间回退，避免压缩无关 root 后把原本的 legacy overflow 变成错误代码。常量成员 offset 继续检查非负且不越过 root；受支持的动态 slice 原样保留相对表达式 `arena_offset + placement + (member_offset - root_offset)`。动态 root offset 仍不具备资格，声明式/pinned allocation 也保持封闭。生命周期干涉、pipeline 分离、目标 hazard 与算子 no-alias 规则仍由 `can_share` 判断；任何规则只要禁止字节重叠，两个 root 地址区间就必须分离。`AllocateMemoryAddr` 使用 arena root 的完整 allocation capacity 计算物理槽大小；所有常量子区间在 placement 阶段已经验证不会越过该容量。纯动态 `tile.slice` 的 MemRef 随后沿用旧行为记录 bare-base 地址，实际窗口由 PTO 使用 source tile 和 slice 操作数生成 `pto.subview`。后续 reshape fold 比较 base、offset 与 tile signature，PTO DPS alias 还会比较 extent。因此不会只因 base pointer 相同就把同一 arena 的兄弟 root 子区间误认为同一个 tile。
++   子区间复用移动的是完整 root allocation；它不会利用 alias/view 未访问的内部空洞。候选 root 与 arena root 的 allocation offset 因此仍须是静态非负值。只有直接内部 `tile.slice` 才支持动态 offset，因为 PTO 能使用已经重定位的 source tile 与 slice 操作数重建其运行时地址。如果某个 memory space 中存在其他动态 offset 成员，例如动态 slice 之后的 reshape、reinterpret 或 transpose view，则整个 space 都禁用子区间回退，避免压缩无关 root 后把原本的 legacy overflow 变成错误代码。常量成员 offset 继续检查非负且不越过 root；受支持的动态 slice 原样保留相对表达式 `arena_offset + placement + (member_offset - root_offset)`。动态 root offset 仍不具备资格，声明式/pinned allocation 也保持封闭。生命周期干涉、pipeline 分离、目标 hazard 与算子 no-alias 规则仍由 `can_share` 判断；任何规则只要禁止字节重叠，两个 root 地址区间就必须分离。物理 allocation 记录扩展容量，各 Tile 保留自己的窗口大小。`AllocateMemoryAddr` 按成员最大 `offset + size` 保留完整区间，避免另一 allocation 与扩展区重叠；所有常量子区间在 placement 阶段均验证不会越过该容量。纯动态 `tile.slice` 的 MemRef 随后沿用旧行为记录 bare-base 地址，实际窗口由 PTO 使用 source tile 和 slice 操作数生成 `pto.subview`。后续 reshape fold 比较 base、offset 与 tile signature，PTO DPS alias 还会比较 extent。因此不会只因 base pointer 相同就把同一 arena 的兄弟 root 子区间误认为同一个 tile。
+ 4. **循环携带变量重对齐**（`AlignLoopCarriesToInitMutator`）：共享（步骤 3）只会重写由 `AssignStmt` 定义的变量（producer/init），而循环携带的 `iter_arg`/`return_var` 节点被排除在生命周期/共享映射之外、仍保留原始 MemRef。本步骤**自外向内**遍历 `ForStmt`，将每个循环的 `iter_arg`/`return_var` 重对齐到其（已复用的）`initValue` 的 MemRef，并在递归前写入 `var_remap_`，使嵌套循环能观察到已修正的外层 `iter_arg` 作为其 init。若缺少本步骤，被复用的**嵌套流水化 `matmul_acc`** 累加器会分裂到两个 Acc 缓冲区，导致步骤 7 插入非法的 `acc→acc tile.move`，被 Ascend 910B 的 ptoas 拒绝（[#1352](https://github.com/hw-native-sys/pypto/issues/1352)）
+ 5. **累加器 if-phi 合并**（`TopDownRetargeter::CoalesceAccumulatorIfPhis`）：`LowerPipelineLoops` 会把 stage-2 的 K 循环剥离成 `if`-phi，其活跃分支是就地累加的 `matmul_acc`（位于累加器缓冲区），而失效的 `if k==0` 分支是位于*不同* Acc 缓冲区上的全新 `matmul` seed。若不处理，步骤 7 会尝试用 `acc→acc tile.move` 协调二者 —— 产生第二个同时存活的 L0C 缓冲区（溢出），且 ptoas 也会拒绝（不存在合法的 Acc→Acc `tmov`）。本步骤通过 `reuses_input` 的 producer 识别就地累加分支，并把*另一*分支的 seed 重定向到累加器缓冲区，使两个分支共享同一缓冲区、不再产生 move（符合 `mad_acc` 共享 `%dst` 的语义）。仅作用于 `Acc`；重定向是**强制的**（被拒绝的重定向会触发 `INTERNAL_CHECK`，绝不退化为 move —— 因为不存在合法的 Acc→Acc move）。它会跳过*全局* dead-at-assign 活跃性检查（否则会因 if 之后合法的 phi 消费者而误判拒绝），但仅在验证分支互斥真正所需的两个前提之后：(a) seed 的 producer 是词法上位于该分支**内部**的 `Call`（经由分支透传的 if 前值会无条件执行，从而破坏 sibling 就地分支所读取的累加器），以及 (b) **限定分支范围** 的 `IsTargetDeadAtAssign`（在所属 `if` 处停止）确认分支内 seed 之后没有对累加器缓冲区的尾部读取。任一前提不满足时，该 phi 保持未合并，步骤 7 会明确失败，而不会生成不受支持的 Acc→Acc IR
+ 
+@@ -115,6 +115,29 @@ program_optimized = reuse_pass(program)
+ 
+ MemRef 共享完成后，部分 MemRef 对象变为无引用状态（其变量现在指向不同的共享 MemRef）。该 Pass 遍历周围的 `SeqStmts`，移除所有左值 MemRef 指针不在仍使用集合中的 `tile.alloc` `AssignStmt`。
+ 
++## 控制流生命周期与别名
++
++if 结果的后续使用会延长各分支局部源的生命周期。同一返回位置的源属于同一
++phi family，因此互斥分支可以共享存储。原地 gather 循环的分支局部 allocation
++别名也属于该 family；分支外定义保持独立，仍可阻止不安全复用。
++
++仅在容量超限时，装箱器额外按 else 在前、then 在后的顺序分析一次并重试。
++任一顺序下生命周期不相交即可证明不干涉，不改变实际执行顺序。例如，仅在
++else 分支读取的旧值可以与 then 分支的新值共享。if 后读取、同分支后续读取、
++循环再次读取、流水分离以及硬件 hazard 约束继续保留。原本能放下的布局不变。
++这里只增加有界的一次遍历与装箱，不枚举分支排列。
++
++Yield fixup 在内层 phi 更新后立即同步纯别名的类型，再处理外层 phi。所有
++planner 都保留两分支已经共用的同一物理窗口；这不会在 PTOAS 模式下引入
++机会性复用或不同窗口之间的额外拷贝。
++
++循环 carry 重定向时，内层 phi 改变位置后，纯 SSA identity 仍可能带着旧
++MemRef。循环初始化值独立确定了目标，因此 TopDownRetargeter 可以沿纯别名
++追到 producer，无须先要求别名的旧窗口一致；producer 的生命周期、no-alias
++和 view-offset 检查仍然保留。这个例外只用于循环 carry 传播：累加器 if-phi
++合并从别名本身推导目标，仍必须检查 identity 的窗口一致。嵌套 phi 回归检查
++不再引入冗余 carry 搬运；不一致累加器别名的反例仍须被明确拒绝。
++
+ ## 声明式分配
+ 
+ 复用是机会主义的：任意两个生命周期不重叠的 tile 都是合并到同一块 buffer 的候选。就容量而言
+diff --git a/docs/zh/user/language/01-functions.md b/docs/zh/user/language/01-functions.md
+index f3bfd26c2..d04e751e0 100644
+--- a/docs/zh/user/language/01-functions.md
++++ b/docs/zh/user/language/01-functions.md
+@@ -149,9 +149,14 @@ def entry(x: pl.Tensor[[1, 8], pl.FP32], out: pl.Out[pl.Tensor[[1, 8], pl.FP32]]
+ tile 加载，就会得到 `InitMemRef requires static shape` —— 与等价的 `@pl.program` 写法
+ 报出的错误完全相同）。
+ 
+-真正无法解析的情况是：返回张量的 shape 特化器根本**触及不到** —— 例如目标 shape 非静态的
+-`pl.reshape`（reshape 受源张量元素总数约束，因此不能用动态维度顶替），或者经过特化器未
+-建模的操作重新绑定的结果。它会在**下一个**消费该张量的调用处报出
++`pl.reshape` 的目标维度也可以是张量维度别名的整数运算，例如先定义
++`rows = pl.tensor.dim(x, 0)`、`width = pl.tensor.dim(x, 1)`，再使用 `rows * width`。
++视图在 IR 中保留该表达式，消费者从实际描述符绑定动态维度；这种元数据传递并不证明
++任意 reshape 都保持了元素总数。
++
++真正无法解析的情况是：返回张量的 shape 特化器根本**触及不到** —— 例如用无关运行时标量
++（从另一个张量读取的值）决定尺寸的 `pl.reshape`，或者经过特化器未建模的操作重新绑定的
++结果。它会在**下一个**消费该张量的调用处报出
+ `missing inferred tensor metadata for parameter '<name>'` —— 错误指向的是消费方，但要改的
+ 是生产方：让产生该张量的语句具有可静态推导的 shape，或者把缓冲区作为 `pl.Out[...]`
+ 参数传入。
+diff --git a/include/pypto/codegen/pto/pto_codegen.h b/include/pypto/codegen/pto/pto_codegen.h
+index 091b874cf..2a5e77155 100644
+--- a/include/pypto/codegen/pto/pto_codegen.h
++++ b/include/pypto/codegen/pto/pto_codegen.h
+@@ -868,7 +868,8 @@ class PTOCodegen : public CodegenBase {
+    * there is no baked `addr` to alias through. Returns "" when addresses are
+    * baked, when `memref` is null, or when no handle is bound yet.
+    */
+-  [[nodiscard]] std::string TryGetSharedTileBufHandle(const ir::MemRefPtr& memref) const;
++  [[nodiscard]] std::string TryGetSharedTileBufHandle(const ir::MemRefPtr& memref,
++                                                      const std::string& required_type) const;
+ 
+   /**
+    * @brief Declare `ssa_name`'s `pto.alloc_tile` in the function head.
+@@ -1016,8 +1017,9 @@ class PTOCodegen : public CodegenBase {
+     /// a `[1, N]` row-major op result and its `[N, 1]` col-major reshape view,
+     /// which occupy the same bytes. Their shared handle carries exactly one type
+     /// (differently-typed reads become `pto.treshape` views of it), so it must
+-    /// never be re-typed to suit another var. `TryGetSharedTileBufHandle` refuses
+-    /// these identities.
++    /// never be re-typed to suit another var. `TryGetSharedTileBufHandle` accepts
++    /// these identities only when an already-emitted handle has the exact
++    /// requested tile_buf type.
+     std::set<std::string> memref_identity_mixed_types;
+     /// alloc_tile SSA handles already emitted — dedups the alloc when several
+     /// vars share one handle (PTOAS in-place aliasing).
+diff --git a/include/pypto/ir/transforms/utils/tensor_view_semantics.h b/include/pypto/ir/transforms/utils/tensor_view_semantics.h
+index dc373d61d..66e8c1ba3 100644
+--- a/include/pypto/ir/transforms/utils/tensor_view_semantics.h
++++ b/include/pypto/ir/transforms/utils/tensor_view_semantics.h
+@@ -458,11 +458,9 @@ inline bool IsProvableNonNegative(const ExprPtr& expr, const NzOffsetFacts& fact
+   // non-negative. This is what a split-K block index reaches for --
+   // ``(block % OK) * K_SLICE`` names the K half.
+   //
+-  // The dividend has to be proven too, rather than resting on the name:
+-  // ``FloorMod`` lowers to ``arith.remsi`` (``pto_scalar_expr_codegen.cpp``),
+-  // which truncates toward zero, so a negative dividend yields a negative
+-  // remainder -- and a negative partition offset is clamped to 0 rather than
+-  // caught, which is the silent wrong read this whole proof exists to prevent.
++  // Keep view-legality proofs restricted to non-negative source indices.
++  // Scalar codegen now corrects remsi to floor remainder for negative inputs;
++  // that fix does not broaden this conservative source-index proof.
+   if (auto mod = As<FloorMod>(expr)) {
+     auto divisor = As<ConstInt>(mod->right_);
+     return divisor && divisor->value_ > 0 && IsProvableNonNegative(mod->left_, facts, budget);
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index f375e2ec6..ba4e16fcc 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "ef6812891575eaf2a15051fc9abc659f5415c2e2"
++SIMPLER_KERNEL_REVISION = "57e499238fd4ee3548947ad860be456aaeeb16b5"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
+diff --git a/python/pypto/ir/op/system_ops.py b/python/pypto/ir/op/system_ops.py
+index 2308146d2..2a6f92a4f 100644
+--- a/python/pypto/ir/op/system_ops.py
++++ b/python/pypto/ir/op/system_ops.py
+@@ -334,6 +334,46 @@ def bar_all(*, span: Span | None = None) -> Call:
+     return _create_barrier_op("system.bar_all", span=span)
+ 
+ 
++def _local_signal_call(
++    name: str,
++    signal: Expr,
++    offsets: Sequence[int | Expr],
++    value: int | Expr,
++    span: Span | None,
++) -> Call:
++    actual_span = _get_span_or_capture(span)
++    if isinstance(value, int):
++        if not -(1 << 31) <= value < (1 << 31):
++            raise ValueError(f"{name} value is outside INT32: {value}")
++        value = ConstInt(value, DataType.INT32, actual_span)
++    return _ir_core.create_op_call(
++        name, [signal, _to_make_tuple(offsets, actual_span), value], {}, actual_span
++    )
++
++
++def signal_notify(
++    signal: Expr, offsets: Sequence[int | Expr], value: int | Expr, *, span: Span | None = None
++) -> Call:
++    """临时本地 GM 单写者通知，复用 TNOTIFY(Set)，只发布信号。
++
++    signal 必须为一维 INT32；每条信号 cacheline 独占且只有一个写者。
++    调用者负责 payload 完成、缓存发布和代际/溢出；通知不自动完成这些工作。
++    此接口用于显式 AIC/AIV 核体，不能推断自动 MIX 中应由哪条 lane 发布。
++    """
++    return _local_signal_call("system.signal_notify", signal, offsets, value, span)
++
++
++def signal_wait(
++    signal: Expr, offsets: Sequence[int | Expr], expected: int | Expr, *, span: Span | None = None
++) -> Call:
++    """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
++
++    signal 必须为一维 INT32；expected 为 INT32，消费者不得写信号所在 cacheline。
++    返回后仍须按业务数据的访问路径完成消费者缓存维护与内存顺序。
++    """
++    return _local_signal_call("system.signal_wait", signal, offsets, expected, span)
++
++
+ def fence(*, span: Span | None = None) -> Call:
+     """Memory barrier over global memory.
+ 
+diff --git a/python/pypto/jit/decorator.py b/python/pypto/jit/decorator.py
+index 2d89d14ef..8fcb8a5bc 100644
+--- a/python/pypto/jit/decorator.py
++++ b/python/pypto/jit/decorator.py
+@@ -1444,8 +1444,10 @@ def _extract_local_tensor_metas(
+     A ``pl.create_tensor`` / ``pld.window`` dim that no static rule resolves —
+     a runtime extent such as ``pld.world_size()``, ``pl.tensor.read(cfg, [0])``,
+     or arithmetic over a ``DynDim`` — becomes a synthesized ``DynDim`` (see
+-    :func:`_synthesized_dyn_dim`) rather than voiding the whole meta. Everything
+-    else not statically resolvable is still skipped silently, and the clear
++    :func:`_synthesized_dyn_dim`) rather than voiding the whole meta. Reshape
++    dimensions derived solely from tensor dimensions and integer arithmetic
++    use the same descriptor-bound symbols; their expressions remain in IR.
++    Other unresolved reshape dimensions are still skipped, and the clear
+     ``ValueError`` in ``Specializer._build_params`` fires for that variable.
+     When ``stop_at_dep`` is provided, extraction stops
+     immediately before the first source-ordered call to that dependency. This
+@@ -1506,8 +1508,8 @@ def _extract_local_tensor_metas(
+             rhs = _resolve_shape_elt(elt.right)
+             # Arithmetic over DynDim is not statically resolvable here; we
+             # only fold int·int. Anything else (DynDim+int, DynDim*DynDim)
+-            # is left unresolved — the parent-dim fallback in _slice_meta /
+-            # the silent skip in _create_tensor_meta is the right behaviour.
++            # is left unresolved — the caller can use a parent bound or a
++            # synthesized descriptor dimension, depending on the operation.
+             if isinstance(lhs, int) and isinstance(rhs, int):
+                 return _fold_int_arith(elt.op, lhs, rhs)
+             return None
+@@ -1596,11 +1598,18 @@ def _extract_local_tensor_metas(
+         )
+         if shape_node is None:
+             return None
+-        # Strict on purpose (no ``target``): a reshape's dims are constrained by
+-        # the source's element count, which a freshly invented symbol cannot
+-        # express. ``pl.slice`` below is strict for the mirror reason — it
+-        # already has a better answer, the parent dim's static bound.
+         shape = _resolve_shape(shape_node)
++        if (
++            shape is None
++            and isinstance(shape_node, ast.List)
++            and all(_is_dimension_arithmetic(elt) for elt in shape_node.elts)
++        ):
++            # Rank/dtype discovery need not fold a descriptor-derived extent.
++            # Keep its arithmetic in the reshape IR, and let dependency
++            # parameters bind the resulting dimension from the view's actual
++            # descriptor. This does not assert an element-count equality or
++            # replace a runtime dimension by the placeholder's static bound.
++            shape = _resolve_shape(shape_node, target)
+         if shape is None:
+             return None
+         # A reshape re-groups the dims a layout describes, so the source layout
+@@ -1611,6 +1620,18 @@ def _extract_local_tensor_metas(
+             return None
+         return TensorMeta(shape=shape, dtype=src_meta.dtype)
+ 
++    def _is_dimension_arithmetic(elt: ast.expr) -> bool:
++        """Accept dimension-derived arithmetic, not arbitrary runtime values."""
++        if _resolve_shape_elt(elt) is not None:
++            return True
++        if isinstance(elt, ast.BinOp) and isinstance(elt.op, (ast.Add, ast.Sub, ast.Mult, ast.FloorDiv)):
++            if isinstance(elt.op, ast.FloorDiv) and _resolve_shape_elt(elt.right) == 0:
++                return False
++            return _is_dimension_arithmetic(elt.left) and _is_dimension_arithmetic(elt.right)
++        if isinstance(elt, ast.UnaryOp) and isinstance(elt.op, (ast.UAdd, ast.USub)):
++            return _is_dimension_arithmetic(elt.operand)
++        return False
++
+     def _slice_meta(call: ast.Call, target: str | None = None) -> TensorMeta | None:
+         # pl.slice(tensor, shape, offset, ...) — shape is positional index 1 or kw `shape=`.
+         src = call.args[0] if call.args else None
+diff --git a/python/pypto/jit/specializer.py b/python/pypto/jit/specializer.py
+index a7aa5c2c8..69ff6e690 100644
+--- a/python/pypto/jit/specializer.py
++++ b/python/pypto/jit/specializer.py
+@@ -49,6 +49,7 @@ from typing import Any, cast
+ from pypto._external_source import EXTERNAL_INCLUDE_DIRS_ATTR, encode_external_include_dirs
+ from pypto._function_attrs import DUAL_AIV_DISPATCH_ATTR
+ from pypto.language.typing.array import Array as _LangArray
++from pypto.language.typing.tile import Tile as _LangTile
+ from pypto.pypto_core import DataType
+ from pypto.pypto_core.ir import TensorLayout
+ 
+@@ -2098,6 +2099,11 @@ class Specializer:
+                 continue
+             if isinstance(ann_obj, _LangArray) and ann_obj.extent is not None and ann_obj.dtype is not None:
+                 array_param_anns[arg.arg] = f"pl.Array[{ann_obj.extent}, {_array_dtype_str(ann_obj.dtype)}]"
++            elif is_inline and isinstance(ann_obj, _LangTile):
++                # Inline Tile parameters already have a complete type. Keep its
++                # shape, dtype and memory space instead of emitting a bare name;
++                # module/closure constants use the existing annotation folder.
++                array_param_anns[arg.arg] = ast.unparse(_fold_const_names(arg.annotation, ctx.py_globals))
+ 
+         params = self._build_params(
+             all_param_names,
+diff --git a/python/pypto/language/op/system_ops.py b/python/pypto/language/op/system_ops.py
+index ce935fd10..610f9b4b9 100644
+--- a/python/pypto/language/op/system_ops.py
++++ b/python/pypto/language/op/system_ops.py
+@@ -49,6 +49,8 @@ __all__ = [
+     "sync_dst",
+     "sync_set",
+     "sync_wait",
++    "signal_notify",
++    "signal_wait",
+     "set_ffts",
+     "bar_v",
+     "bar_m",
+@@ -137,6 +139,41 @@ def sync_wait(
+     return _ir_ops.sync_wait(event_expr, pipe=pipe, core_type=kernel, span=span)
+ 
+ 
++def signal_notify(
++    signal: Tensor,
++    offsets: Sequence[IntLike],
++    value: IntLike,
++    *,
++    span: Span | None = None,
++) -> Call:
++    """临时本地 GM 单写者通知，复用 TNOTIFY(Set)，只发布信号。
++
++    signal 必须为一维 INT32；每条信号 cacheline 独占且只有一个写者。
++    调用者负责 payload 完成、缓存发布和代际/溢出；通知不自动完成这些工作。
++    此接口用于显式 AIC/AIV 核体，不能推断自动 MIX 中应由哪条 lane 发布。
++    """
++    index_exprs = [item.unwrap() if isinstance(item, Scalar) else item for item in offsets]
++    value_expr = value.unwrap() if isinstance(value, Scalar) else value
++    return _ir_ops.signal_notify(signal.unwrap(), index_exprs, value_expr, span=span)
++
++
++def signal_wait(
++    signal: Tensor,
++    offsets: Sequence[IntLike],
++    expected: IntLike,
++    *,
++    span: Span | None = None,
++) -> Call:
++    """临时本地 GM 等待，复用 TWAIT(Ge)，不消费信号或建立全体 barrier。
++
++    signal 必须为一维 INT32；expected 为 INT32，消费者不得写信号所在 cacheline。
++    返回后仍须按业务数据的访问路径完成消费者缓存维护与内存顺序。
++    """
++    index_exprs = [item.unwrap() if isinstance(item, Scalar) else item for item in offsets]
++    expected_expr = expected.unwrap() if isinstance(expected, Scalar) else expected
++    return _ir_ops.signal_wait(signal.unwrap(), index_exprs, expected_expr, span=span)
++
++
+ def set_ffts(workspace: Tensor, *, span: Span | None = None) -> Call:
+     """Declare the A3 FFTS setup operand for explicit cross-core synchronization."""
+     if not isinstance(workspace, Tensor):
+diff --git a/src/backend/common/pto_ops_datamove.cpp b/src/backend/common/pto_ops_datamove.cpp
+index 93ef4465b..df183e6d0 100644
+--- a/src/backend/common/pto_ops_datamove.cpp
++++ b/src/backend/common/pto_ops_datamove.cpp
+@@ -1467,8 +1467,12 @@ void RegisterDataMoveOps(Backend& backend, const std::unordered_set<std::string>
+     }
+     // The no-op check compares against the pre-declared alloc_tile, whose type is
+     // always the dynamic-valid form — so it must use `result_type`, not `view_type`.
++    // Without baked addresses, matching types alone do not establish aliasing:
++    // an if-phi can bind the source to a different handle than its old MemRef
++    // representative. Read the actual source unless it is already that handle.
+     auto existing_type = codegen.GetSSATileBufType(result_target);
+-    if (result_has_memref && !existing_type.empty() && existing_type == result_type) {
++    if (result_has_memref && !existing_type.empty() && existing_type == result_type &&
++        (codegen.EmitTileAddr() || codegen.GetExprAsCode(op->args_[0]) == result_target)) {
+       return std::string("");
+     }
+ 
+@@ -1541,7 +1545,8 @@ void RegisterDataMoveOps(Backend& backend, const std::unordered_set<std::string>
+     // The result's own alloc_tile already declares the transposed type: it IS
+     // the view, so emit nothing. Mirrors tile.reshape's no-op check.
+     auto existing_type = codegen.GetSSATileBufType(result_target);
+-    if (result_has_memref && !existing_type.empty() && existing_type == result_type) {
++    if (result_has_memref && !existing_type.empty() && existing_type == result_type &&
++        (codegen.EmitTileAddr() || codegen.GetExprAsCode(op->args_[0]) == result_target)) {
+       return std::string("");
+     }
+ 
+diff --git a/src/backend/common/pto_ops_elementwise.cpp b/src/backend/common/pto_ops_elementwise.cpp
+index 0e8c8f997..2e95e51a9 100644
+--- a/src/backend/common/pto_ops_elementwise.cpp
++++ b/src/backend/common/pto_ops_elementwise.cpp
+@@ -1128,6 +1128,21 @@ void RegisterElementwiseOps(Backend& backend, const std::unordered_set<std::stri
+       if (!src_ssa.empty() && src_ssa == codegen.GetCurrentResultTarget()) {
+         return std::string("");  // no-op: one handle, the op already wrote in place
+       }
++      auto dst_var = codegen.GetCurrentResultVar();
++      const std::string logical_dst_type = codegen.GetCurrentResultTileBufTypeStringFromTileType();
++      const std::string actual_dst_type = codegen.GetSSATileBufType(codegen.GetCurrentResultTarget());
++      if (dst_var && !actual_dst_type.empty() && actual_dst_type != logical_dst_type) {
++        // A column carry may be backed by its row-major initializer's handle.
++        // Write through the carry's typed view; copying [N, 1] directly into
++        // that [1, N] handle is not a legal A2/A3 TMOV.
++        auto dst_tile = As<ir::TileType>(dst_var->GetType());
++        RequireStaticValidShapeForPtoas(dst_tile, "tile.move", "dst", op->span_);
++        const std::string dst = EnsureStaticViewTileSsa(dst_var, codegen, "move_dst_view");
++        EmitInsOutsWithViewTypes(codegen, "pto.tmov",
++                                 {{src_ssa, codegen.GetExprTypeAnnotation(op->args_[0])}}, dst, dst_tile);
++        codegen.SetCurrentResultBuf(dst);
++        return std::string("");
++      }
+       codegen.Emit("pto.tmov " + GenerateInsOutsClause(op, codegen));
+       return std::string("");
+     }
+diff --git a/src/backend/common/pto_ops_memory.cpp b/src/backend/common/pto_ops_memory.cpp
+index 728f30c99..026a56e5c 100644
+--- a/src/backend/common/pto_ops_memory.cpp
++++ b/src/backend/common/pto_ops_memory.cpp
+@@ -843,6 +843,34 @@ static std::string EmitLocalArrayValue(codegen::PTOCodegen& codegen, const ir::E
+   return out;
+ }
+ 
++// 只建立本地 GM 的单元素视图，不构造 CommContext、通信窗口或远端地址。
++static std::string MakeLocalSignalCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base,
++                                           bool notify) {
++  auto& cg = AsPto(codegen_base);
++  INTERNAL_CHECK_SPAN(op->args_.size() == 3, op->span_) << "local signal expects three operands";
++  auto signal = AsVarLike(op->args_[0]);
++  INTERNAL_CHECK_SPAN(signal, op->span_) << "local signal must be a tensor variable";
++  auto type = As<TensorType>(signal->GetType());
++  auto offsets = As<ir::MakeTuple>(op->args_[1]);
++  INTERNAL_CHECK_SPAN(type && offsets, op->span_) << "local signal operand types were not verified";
++  auto local_view = cg.GetOrCreateTensorView(signal);
++  auto local_type = cg.GetTensorViewTypeString(type.get());
++  std::vector<std::string> one_dims(type->shape_.size(), "1");
++  std::vector<std::string> one_sizes(type->shape_.size(),
++                                   cg.GetOrEmitConstant(static_cast<int64_t>(1), DataType::INDEX));
++  auto partition_type = MakePartitionTensorViewType(one_dims, cg.GetTypeString(type->dtype_));
++  auto partition = EmitPartitionViewPTO(signal->name_hint_ + "_signal", local_view, local_type,
++                                       partition_type, GetIndexOffsetCodes(offsets->elements_, cg),
++                                       one_sizes, cg);
++  const auto value = cg.GetExprAsCode(op->args_[2]);
++  // 同步信号本身使用 PTO-ISA 已有的发布/轮询；不声称它自动刷新任意 payload。
++  const auto instruction = notify ? "pto.comm.tnotify" : "pto.comm.twait";
++  const auto attribute = notify ? "notifyOp = #pto<notify_op set>" : "cmp = #pto<wait_cmp ge>";
++  cg.Emit(std::string(instruction) + "(" + partition + ", " + value + " : " + partition_type +
++          ", i32) {" + attribute + "}");
++  return "";
++}
++
+ void RegisterMemoryOps(Backend& backend, const std::unordered_set<std::string>& exclude_ops) {
+   // Register ops with custom codegen logic
+   auto reg = [&](const char* op_name, BackendCodegenFunc fn) {
+@@ -850,6 +878,13 @@ void RegisterMemoryOps(Backend& backend, const std::unordered_set<std::string>&
+     backend.RegisterOp(op_name).f_codegen(std::move(fn));
+   };
+ 
++  reg("system.signal_notify", [](const CallPtr& op, codegen::CodegenBase& cg) {
++    return MakeLocalSignalCodegenPTO(op, cg, true);
++  });
++  reg("system.signal_wait", [](const CallPtr& op, codegen::CodegenBase& cg) {
++    return MakeLocalSignalCodegenPTO(op, cg, false);
++  });
++
+   // On-core arrays (ArrayType) -> PTOAS stack-local arrays. The IR's
+   // SSA-functional update_element semantics are realized in place: PTOCodegen's
+   // AssignStmt dispatch aliases an array.update_element result Var to the input
+diff --git a/src/codegen/pto/pto_codegen.cpp b/src/codegen/pto/pto_codegen.cpp
+index ee514cf87..b825f667b 100644
+--- a/src/codegen/pto/pto_codegen.cpp
++++ b/src/codegen/pto/pto_codegen.cpp
+@@ -1944,18 +1944,27 @@ std::string PTOCodegen::AllocNewTileBuf(const std::string& tile_buf_type_string,
+   return name;
+ }
+ 
+-std::string PTOCodegen::TryGetSharedTileBufHandle(const ir::MemRefPtr& memref) const {
++std::string PTOCodegen::TryGetSharedTileBufHandle(const ir::MemRefPtr& memref,
++                                                  const std::string& required_type) const {
+   if (emit_tile_addr_ || !memref) {
+     return "";
+   }
+   const std::string ident = MemRefIdentityKey(memref);
++  auto it = fs_.memref_identity_to_mlir.find(ident);
++  if (it == fs_.memref_identity_to_mlir.end()) return "";
+   // A mixed-type identity's handle already carries another var's type; re-typing
+   // it would make one SSA value have two types and ptoas would reject the module.
+   if (fs_.memref_identity_mixed_types.count(ident) != 0) {
+-    return "";
++    // A later transpose/reshape view does not invalidate an already-declared
++    // handle of exactly the requested type. Reuse it without retyping it; this
++    // is essential for a conditional in-place Mat gather followed by a view.
++    auto type = fs_.ssa_to_tile_buf_type.find(it->second);
++    if (fs_.emitted_tile_alloc_names.count(it->second) == 0 || type == fs_.ssa_to_tile_buf_type.end() ||
++        type->second != required_type) {
++      return "";
++    }
+   }
+-  auto it = fs_.memref_identity_to_mlir.find(ident);
+-  return it != fs_.memref_identity_to_mlir.end() ? it->second : std::string{};
++  return it->second;
+ }
+ 
+ bool PTOCodegen::DeclareTileBufAtHead(const std::string& ssa_name, const AllocTileFields& fields) {
+diff --git a/src/codegen/pto/pto_control_flow_codegen.cpp b/src/codegen/pto/pto_control_flow_codegen.cpp
+index 2c6c62d4a..d0ec16d34 100644
+--- a/src/codegen/pto/pto_control_flow_codegen.cpp
++++ b/src/codegen/pto/pto_control_flow_codegen.cpp
+@@ -285,7 +285,8 @@ void PTOCodegen::VisitStmt_(const IfStmtPtr& op) {
+         // branch producers write the phi handle (they are re-bound to it below,
+         // fix #1956) while the loop result and every post-if read still resolve
+         // to the shared one, which no branch ever wrote.
+-        std::string ret_name = TryGetSharedTileBufHandle(ir::GetDefinedMemRef(tile_type));
++        std::string ret_name =
++            TryGetSharedTileBufHandle(ir::GetDefinedMemRef(tile_type), alloc_fields.type_str);
+         if (!ret_name.empty()) {
+           // The shared handle must dominate both branches and the post-if read.
+           // Hoist its declaration to the function head unless the body already
+diff --git a/src/codegen/pto/pto_scalar_expr_codegen.cpp b/src/codegen/pto/pto_scalar_expr_codegen.cpp
+index 5b37addc6..70bd910cc 100644
+--- a/src/codegen/pto/pto_scalar_expr_codegen.cpp
++++ b/src/codegen/pto/pto_scalar_expr_codegen.cpp
+@@ -196,7 +196,40 @@ void PTOCodegen::VisitExpr_(const ir::FloorDivPtr& op) {
+   VisitBinaryArithExpr(op, "arith.divsi", "arith.divf");
+ }
+ void PTOCodegen::VisitExpr_(const ir::FloorModPtr& op) {
+-  VisitBinaryArithExpr(op, "arith.remsi", "arith.remf");
++  const auto dtype = ir::GetScalarDtype(op);
++  if (dtype != DataType::INDEX && !dtype.IsSignedInt()) {
++    // Preserve other dtype paths; this correction covers signed integer and
++    // index arithmetic, matching the scalar simplifier's floor semantics.
++    VisitBinaryArithExpr(op, "arith.remsi", "arith.remf");
++    return;
++  }
++
++  const std::string type = dtype == DataType::INDEX ? "index" : GetTypeString(dtype);
++  const std::string lhs = EmitArithOperand(op->left_, type);
++  const std::string rhs = EmitArithOperand(op->right_, type);
++  const std::string remainder = EmitArithBinaryOp("arith.remsi", lhs, rhs, type);
++
++  // FloorMod and the arithmetic simplifier use the divisor's sign. remsi
++  // instead follows the dividend; for example (1 - 48) % 24 must be 1, not
++  // -23. Correct the nonzero remainder when the signs differ. Constant
++  // divisors, as used by core ownership, need only one sign comparison.
++  const std::string zero = GetOrEmitConstant(static_cast<int64_t>(0), dtype);
++  std::string needs_correction;
++  if (auto divisor = As<ir::ConstInt>(op->right_); divisor && divisor->value_ != 0) {
++    needs_correction = EmitArithCmpi(divisor->value_ > 0 ? "slt" : "sgt", remainder, zero, type);
++  } else {
++    const std::string remainder_negative = EmitArithCmpi("slt", remainder, zero, type);
++    const std::string divisor_negative = EmitArithCmpi("slt", rhs, zero, type);
++    const std::string signs_differ =
++        EmitArithBinaryOp("arith.xori", remainder_negative, divisor_negative, "i1");
++    const std::string nonzero = EmitArithCmpi("ne", remainder, zero, type);
++    needs_correction = EmitArithBinaryOp("arith.andi", nonzero, signs_differ, "i1");
++  }
++  const std::string corrected = EmitArithBinaryOp("arith.addi", remainder, rhs, type);
++  const std::string result = NewTemp();
++  Emit(result + " = arith.select " + needs_correction + ", " + corrected + ", " + remainder +
++       " : " + type);
++  fs_.current_expr_value = result;
+ }
+ 
+ // ========================================================================
+diff --git a/src/ir/op/sync_ops/sync.cpp b/src/ir/op/sync_ops/sync.cpp
+index f56bb0ff8..7dce5c2f8 100644
+--- a/src/ir/op/sync_ops/sync.cpp
++++ b/src/ir/op/sync_ops/sync.cpp
+@@ -31,6 +31,32 @@ TypePtr DeduceUnknownType(const std::vector<ExprPtr>& args,
+   return GetUnknownType();
+ }
+ 
++// 临时本地信号接口：单写者 Set / 非消费式 Ge 等待，复用现有通信指令。
++// 限定 INT32，避免把旧 INT64 进度静默截断；业务数据发布仍由调用者显式完成。
++TypePtr DeduceLocalSignalType(const std::vector<ExprPtr>& args,
++                             const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  CHECK(args.size() == 3) << "local signal op requires (signal, offsets, value)";
++  CHECK(kwargs.empty()) << "local signal op takes no attributes";
++  for (const auto& arg : args) {
++    CHECK(arg) << "local signal operands must not be null";
++  }
++  auto tensor = As<TensorType>(args[0]->GetType());
++  CHECK(tensor && !IsA<DistributedTensorType>(args[0]->GetType()))
++      << "local signal requires an ordinary GM Tensor";
++  CHECK(tensor->dtype_ == DataType::INT32 && tensor->shape_.size() == 1)
++      << "local signal requires a one-dimensional INT32 Tensor";
++  auto offsets = As<MakeTuple>(args[1]);
++  CHECK(offsets && offsets->elements_.size() == 1) << "local signal requires one offset";
++  auto offset = As<ScalarType>(offsets->elements_[0]->GetType());
++  CHECK(offset && (offset->dtype_ == DataType::INDEX || offset->dtype_ == DataType::INT32 ||
++                   offset->dtype_ == DataType::INT64))
++      << "local signal offset must be INDEX, INT32 or INT64";
++  auto value = As<ScalarType>(args[2]->GetType());
++  CHECK(value && value->dtype_ == DataType::INT32)
++      << "local signal value/expected must be INT32; cast only after checking the protocol range";
++  return GetUnknownType();
++}
++
+ }  // namespace
+ 
+ // ============================================================================
+@@ -91,6 +117,27 @@ REGISTER_OP("system.fence")
+     .no_argument()
+     .f_deduce_type(DeduceUnknownType);
+ 
++REGISTER_OP("system.signal_notify")
++    .set_description("Temporary local GM signal Set; single writer per cache line; signal-only publication")
++    .set_op_category("SyncOp")
++    .add_argument("signal", "Ordinary one-dimensional INT32 GM signal Tensor")
++    .add_argument("offsets", "One scalar offset")
++    .add_argument("value", "INT32 progress value")
++    .set_no_duplicate()
++    .no_memory_spec()
++    .set_arg_effect(0, ArgEffect::Write)
++    .f_deduce_type(DeduceLocalSignalType);
++
++REGISTER_OP("system.signal_wait")
++    .set_description("Temporary local GM signal wait until >= expected; does not consume the signal")
++    .set_op_category("SyncOp")
++    .add_argument("signal", "Ordinary one-dimensional INT32 GM signal Tensor")
++    .add_argument("offsets", "One scalar offset")
++    .add_argument("expected", "INT32 progress threshold")
++    .no_memory_spec()
++    .no_arg_writes()
++    .f_deduce_type(DeduceLocalSignalType);
++
+ // Register system.cacheinvalid (Cache Maintenance Operation).
+ // Two forms selected by arg count:
+ //   - No args: invalidate the whole GM address space
+diff --git a/src/ir/transforms/allocate_memory_addr_pass.cpp b/src/ir/transforms/allocate_memory_addr_pass.cpp
+index 05e6b0861..2ee8ad90a 100644
+--- a/src/ir/transforms/allocate_memory_addr_pass.cpp
++++ b/src/ir/transforms/allocate_memory_addr_pass.cpp
+@@ -13,6 +13,7 @@
+ #include <any>
+ #include <cstddef>
+ #include <cstdint>
++#include <limits>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -320,7 +321,7 @@ class PinnedAllocCollector : public IRVisitor {
+  * @brief Allocate memory addresses using the given allocation policy
+  *
+  * MemRefs sharing the same ``base_`` Ptr are co-located in a single bumped
+- * slot sized by the largest member.size_ in the group.  This handles view
++ * slot sized by the largest static member end in the group. This handles view
+  * MemRefs (e.g. produced by ``tile.slice``) — every view physically aliases
+  * its parent allocation, so they should share one address slot rather than
+  * each consuming size_ bytes of fresh L1.
+@@ -373,14 +374,23 @@ std::vector<std::pair<const MemRef*, MemRefPtr>> AllocateMemoryAddresses(
+     for (const Var* base_key : base_order) {
+       const auto& group = base_groups.at(base_key);
+ 
+-      // Slot size = max member.size_.  The root MemRef (byte_offset == 0) is
+-      // sized to the full alloc; views are sub-regions and never exceed it.
++      // A grown reuse arena may contain windows extending past the original
++      // representative. Reserve their union, not just the largest tile size.
++      // Dynamic views remain covered by their root's complete static extent.
+       uint64_t slot_size = 0;
+       for (const auto& ref : group) {
+         INTERNAL_CHECK_SPAN(ref->size_ > 0, ref->span_)
+             << "AllocateMemoryAddr encountered zero-sized MemRef '" << ref->name_hint_
+             << "'. InitMemRef should reject dynamic or invalid allocation shapes before address assignment.";
+-        slot_size = std::max(slot_size, static_cast<uint64_t>(ref->size_));
++        uint64_t end = ref->size_;
++        if (auto offset = As<ConstInt>(ref->byte_offset_)) {
++          INTERNAL_CHECK_SPAN(offset->value_ >= 0 && static_cast<uint64_t>(offset->value_) <=
++                                                         std::numeric_limits<uint64_t>::max() - end,
++                              ref->span_)
++              << "Internal error: allocation window has an invalid static range";
++          end += static_cast<uint64_t>(offset->value_);
++        }
++        slot_size = std::max(slot_size, end);
+       }
+       // A declared allocation reserves what its alloc statement says, which for a
+       // multi-slot declaration exceeds any single member. Everything else is sized
+diff --git a/src/ir/transforms/expand_mixed_kernel_pass.cpp b/src/ir/transforms/expand_mixed_kernel_pass.cpp
+index db7e3c38a..7d3784a07 100644
+--- a/src/ir/transforms/expand_mixed_kernel_pass.cpp
++++ b/src/ir/transforms/expand_mixed_kernel_pass.cpp
+@@ -2517,9 +2517,44 @@ class PeerFuncRewriter : public IRMutator {
+   std::unordered_map<std::string, std::string> rename_map_;
+ };
+ 
++using GroupTensorAliases = std::unordered_map<const Var*, VarPtr>;
++
++// A member's InOut result is a new SSA value for the same GM parameter. Resolve
++// those aliases before cloning onto the shared ABI; copying the caller-local
++// result into the member body would leave an unbound variable in that function.
++// Index the Group once for all member arguments, using the shared lineage rules
++// (including tuple returns and Submit), rather than rescanning it per argument.
++GroupTensorAliases CollectGroupTensorAliases(const FunctionPtr& group, const ProgramPtr& program,
++                                             const std::vector<WrapperCallInfo>& members) {
++  std::unordered_set<const Var*> seen;
++  for (const auto& param : group->params_) seen.insert(param.get());
++  std::vector<VarPtr> aliases;
++  for (const auto& member : members) {
++    for (const auto& arg : member.inner_call->args_) {
++      auto var = AsVarLike(arg);
++      if (var && AsTensorTypeLike(var->GetType()) && seen.insert(var.get()).second) {
++        aliases.push_back(var);
++      }
++    }
++  }
++  if (aliases.empty()) return {};
++  const auto indices = return_lineage::TraceToParamIndicesForOutlining(aliases, group->body_, group->params_,
++                                                                       program, /*trace_if_merges=*/false);
++  GroupTensorAliases result;
++  for (size_t i = 0; i < aliases.size(); ++i) {
++    CHECK_SPAN(indices[i].has_value(), aliases[i]->span_)
++        << "Mixed Group '" << group->name_ << "' member tensor argument '" << aliases[i]->name_hint_
++        << "' is not a whole-parameter writeback alias. Bind tensor views or new buffers before entering "
++           "the Group and pass them as explicit Group parameters.";
++    result.emplace(aliases[i].get(), group->params_[indices[i].value()]);
++  }
++  return result;
++}
++
+ FunctionPtr BuildGroupAbiAdapter(const FunctionPtr& group, const WrapperCallInfo& member,
+                                  const std::string& adapter_name,
+-                                 const std::unordered_map<std::string, std::string>& peer_renames) {
++                                 const std::unordered_map<std::string, std::string>& peer_renames,
++                                 const GroupTensorAliases& tensor_aliases) {
+   const auto& callee = member.inner_callee;
+   const auto& call = member.inner_call;
+   INTERNAL_CHECK(group != nullptr && callee != nullptr && call != nullptr)
+@@ -2536,6 +2571,9 @@ FunctionPtr BuildGroupAbiAdapter(const FunctionPtr& group, const WrapperCallInfo
+     adapter_params.push_back(fresh);
+     group_to_adapter.emplace(param.get(), fresh);
+   }
++  for (const auto& [alias, param] : tensor_aliases) {
++    group_to_adapter.emplace(alias, group_to_adapter.at(param.get()));
++  }
+ 
+   // Bind every original member parameter to the corresponding Group call-site
+   // expression, rewritten onto the adapter's fresh canonical parameters.
+@@ -2559,11 +2597,14 @@ FunctionPtr BuildGroupAbiAdapter(const FunctionPtr& group, const WrapperCallInfo
+ class GroupMemberCallRewriter : public IRMutator {
+  public:
+   GroupMemberCallRewriter(std::unordered_map<std::string, std::string> callee_renames,
+-                          std::vector<VarPtr> canonical_args)
++                          std::vector<VarPtr> canonical_args, const GroupTensorAliases& tensor_aliases)
+       : callee_renames_(std::move(callee_renames)), canonical_args_(std::move(canonical_args)) {
+     for (size_t i = 0; i < canonical_args_.size(); ++i) {
+       canonical_arg_indices_.emplace(canonical_args_[i].get(), static_cast<int32_t>(i));
+     }
++    for (const auto& [alias, param] : tensor_aliases) {
++      canonical_arg_indices_.emplace(alias, canonical_arg_indices_.at(param.get()));
++    }
+   }
+ 
+  protected:
+@@ -2702,8 +2743,9 @@ NormalizedGroups NormalizeHandWrittenGroupAbis(const ProgramPtr& program,
+     const std::unordered_map<std::string, std::string> peer_renames = {{aic.inner_callee->name_, aic_name},
+                                                                        {aiv.inner_callee->name_, aiv_name}};
+ 
+-    auto normalized_aic = BuildGroupAbiAdapter(group, aic, aic_name, peer_renames);
+-    auto normalized_aiv = BuildGroupAbiAdapter(group, aiv, aiv_name, peer_renames);
++    const auto tensor_aliases = CollectGroupTensorAliases(group, program, {aic, aiv});
++    auto normalized_aic = BuildGroupAbiAdapter(group, aic, aic_name, peer_renames, tensor_aliases);
++    auto normalized_aiv = BuildGroupAbiAdapter(group, aiv, aiv_name, peer_renames, tensor_aliases);
+     if (needs_dual_aiv_dispatch) normalized_aiv = WithDualAivDispatch(normalized_aiv);
+     if (exclusive_pair) {
+       replacements[aic_name] = normalized_aic;
+@@ -2716,8 +2758,8 @@ NormalizedGroups NormalizeHandWrittenGroupAbis(const ProgramPtr& program,
+     std::unordered_map<std::string, std::string> callee_renames = {{aic.inner_callee->name_, aic_name},
+                                                                    {aiv.inner_callee->name_, aiv_name}};
+     auto mutable_group = MutableCopy(group);
+-    mutable_group->body_ =
+-        GroupMemberCallRewriter(std::move(callee_renames), group->params_).VisitStmt(group->body_);
++    mutable_group->body_ = GroupMemberCallRewriter(std::move(callee_renames), group->params_, tensor_aliases)
++                               .VisitStmt(group->body_);
+     replacements[group->name_] = mutable_group;
+   }
+ 
+diff --git a/src/ir/transforms/memory_reuse_pass.cpp b/src/ir/transforms/memory_reuse_pass.cpp
+index 941aa8806..784f10c20 100644
+--- a/src/ir/transforms/memory_reuse_pass.cpp
++++ b/src/ir/transforms/memory_reuse_pass.cpp
+@@ -801,7 +801,9 @@ class TopDownRetargeter {
+   /// Runs the analysis. Returns map: old VarPtr -> new Type (with target MemRef).
+   std::map<VarPtr, TypePtr> Compute(const StmtPtr& func_body) {
+     BuildAnalysis(func_body);
++    retargeting_loop_carry_ = true;
+     VisitForStmts(func_body);
++    retargeting_loop_carry_ = false;
+     return std::move(rewrites_);
+   }
+ 
+@@ -919,6 +921,7 @@ class TopDownRetargeter {
+   std::map<VarPtr, TypePtr> rewrites_;
+   std::vector<RewriteJournalEntry> rewrite_journal_;
+   std::set<VarPtr> visiting_;  // cycle guard
++  bool retargeting_loop_carry_ = false;
+   std::map<const Var*, size_t> storage_handle_counts_;
+   std::set<const Var*> pinned_branch_bases_;
+   uint64_t branch_storage_counter_ = 0;
+@@ -1287,6 +1290,8 @@ class TopDownRetargeter {
+     } else if (auto for_stmt = As<ForStmt>(stmt)) {
+       PropagateFromForStmt(for_stmt);
+       VisitForStmts(for_stmt->body_);
++    } else if (auto while_stmt = As<WhileStmt>(stmt)) {
++      VisitForStmts(while_stmt->body_);
+     } else if (auto if_stmt = As<IfStmt>(stmt)) {
+       VisitForStmts(if_stmt->then_body_);
+       if (if_stmt->else_body_.has_value()) VisitForStmts(if_stmt->else_body_.value());
+@@ -1327,6 +1332,8 @@ class TopDownRetargeter {
+       for (const auto& s : seq->stmts_) VisitIfPhisForAccumulator(s);
+     } else if (auto for_stmt = As<ForStmt>(stmt)) {
+       VisitIfPhisForAccumulator(for_stmt->body_);
++    } else if (auto while_stmt = As<WhileStmt>(stmt)) {
++      VisitIfPhisForAccumulator(while_stmt->body_);
+     } else if (auto if_stmt = As<IfStmt>(stmt)) {
+       // Coalesce nested accumulator phis before their enclosing K-window phi.
+       // Otherwise a later child rewrite can overwrite the outer target and
+@@ -1622,10 +1629,16 @@ class TopDownRetargeter {
+       if (!alias) return false;
+       auto alias_tile = GetTileTypeWithMemRef(alias->GetType());
+       auto var_tile = GetTileTypeWithMemRef(var->GetType());
+-      if (!alias_tile || !var_tile ||
++      if (!alias_tile || !var_tile) return false;
++      if (!retargeting_loop_carry_ &&
+           !SamePhysicalWindow(GetDefinedMemRef(alias_tile), GetDefinedMemRef(var_tile))) {
+         return false;
+       }
++      // A loop carry's initializer establishes the destination independently
++      // of a nested phi's stale identity-alias metadata. Follow the producer
++      // before fixing the alias, retaining liveness/no-alias/view-offset gates.
++      // Other callers can infer their destination from that alias itself (the
++      // accumulator coalescer); preserve their fail-closed consistency check.
+       if (!TryRetargetVar(alias, target, target_memory)) return false;
+       PlanRewrite(var, target, target_memory);
+       return true;
+@@ -2155,6 +2168,8 @@ class RetypeApplier : public IRMutator {
+  */
+ class LifetimeAnalyzer : public IRVisitor {
+  public:
++  explicit LifetimeAnalyzer(bool reverse_branches = false) : reverse_branches_(reverse_branches) {}
++
+   struct Result {
+     std::vector<VarPtr> ordered_defs;        // TileType vars in definition order
+     std::map<VarPtr, int> var_def_order;     // var -> def order
+@@ -2214,6 +2229,9 @@ class LifetimeAnalyzer : public IRVisitor {
+       ordered_defs_.push_back(op->var_);
+       var_def_order_[op->var_] = order;
+       var_def_stmt_[op->var_] = op;
++      if (tile_type->memref_.has_value()) {
++        definitions_by_base_[GetDefinedMemRef(tile_type)->base_.get()].push_back(op->var_);
++      }
+     }
+ 
+     // Collect variable uses from value expression (for ALL AssignStmt)
+@@ -2234,17 +2252,29 @@ class LifetimeAnalyzer : public IRVisitor {
+     // Visit condition uses at the current order point (before branches)
+     CollectUsesFromExpr(op->condition_, current_order_);
+ 
+-    // Visit then body first, else body second (sequential ordering), recording
+-    // each branch's order range so we can tell branch-local yield-sources apart.
+-    int then_start = current_order_;
+-    VisitStmt(op->then_body_);
+-    int then_end = current_order_ - 1;
++    // Record each arm's range in the chosen lexical order so branch-local
++    // yield-sources can be distinguished from values defined before the if.
++    int then_start = -1;
++    int then_end = -1;
+     int else_start = -1;
+     int else_end = -1;
+-    if (op->else_body_.has_value()) {
++    auto visit_then = [&]() {
++      then_start = current_order_;
++      VisitStmt(op->then_body_);
++      then_end = current_order_ - 1;
++    };
++    auto visit_else = [&]() {
++      if (!op->else_body_) return;
+       else_start = current_order_;
+       VisitStmt(*op->else_body_);
+       else_end = current_order_ - 1;
++    };
++    if (reverse_branches_) {
++      visit_else();
++      visit_then();
++    } else {
++      visit_then();
++      visit_else();
+     }
+ 
+     // An scf.if return_var (phi) is NOT itself a tracked def -- it is materialized
+@@ -2280,6 +2310,7 @@ class LifetimeAnalyzer : public IRVisitor {
+       int family_id = next_family_id_++;
+       std::vector<VarPtr> local_sources;
+       std::set<const Var*> seen_phi;
++      std::set<std::pair<const Var*, int>> seen_local_groups;
+       // Flatten a nested-if phi source down to its terminal tracked tiles, and
+       // tag THOSE with this (outer) slot's family id -- otherwise the terminals
+       // only carry the inner slot's id and `overlap_blocks_sharing` (which sees
+@@ -2296,6 +2327,25 @@ class LifetimeAnalyzer : public IRVisitor {
+         if (!branch_local(src, start, end)) return;
+         local_sources.push_back(src);
+         var_family_ids_[src.get()].insert(family_id);
++        // A branch can yield a rename of an in-place gather loop. The whole
++        // branch-local allocation family is exclusive with the sibling arm,
++        // not just its final rename; otherwise that rename's extended phi
++        // lifetime falsely conflicts with the sibling's earlier loop writes.
++        // Keep outside definitions untagged: an independently live pre-if
++        // handle must still prevent sharing. Do not extend these aliases' uses.
++        auto type = GetTileTypeWithMemRef(src->GetType());
++        if (!type) return;
++        const auto* base = GetDefinedMemRef(type)->base_.get();
++        if (!seen_local_groups.emplace(base, start).second) return;
++        const auto group = definitions_by_base_.find(base);
++        if (group == definitions_by_base_.end()) return;
++        const auto begin =
++            std::lower_bound(group->second.begin(), group->second.end(), start,
++                             [this](const VarPtr& var, int order) { return var_def_order_.at(var) < order; });
++        for (auto member = begin; member != group->second.end() && var_def_order_.at(*member) <= end;
++             ++member) {
++          var_family_ids_[member->get()].insert(family_id);
++        }
+       };
+       auto add_source = [&](const ExprPtr& val, int start, int end) {
+         if (auto src = AsVarLike(val)) add_source_var(src, start, end);
+@@ -2324,6 +2374,7 @@ class LifetimeAnalyzer : public IRVisitor {
+   }
+ 
+  private:
++  bool reverse_branches_ = false;
+   int current_order_ = 0;
+ 
+   // Loop boundaries recorded during Phase 1
+@@ -2339,6 +2390,11 @@ class LifetimeAnalyzer : public IRVisitor {
+   std::map<VarPtr, int> var_raw_last_use_;  // Raw last use (without loop extension)
+   std::map<VarPtr, StmtPtr> var_def_stmt_;
+ 
++  // Definitions in lexical order, indexed by allocation. Each phi family tags
++  // only its own branch's range, once per base. The O(log N + K) range query
++  // avoids a full body scan; K is the number of family memberships emitted.
++  std::map<const Var*, std::vector<VarPtr>> definitions_by_base_;
++
+   // Maps ForStmt/WhileStmt return_vars to their corresponding initValue vars.
+   // YieldFixup will place return_vars into initValue's MemRef buffer,
+   // so any post-loop use of a return_var must extend the initValue's lifetime.
+@@ -3183,6 +3239,7 @@ std::map<const Var*, uint64_t> CollectPinnedAllocSizes(const StmtPtr& body, cons
+ struct ReusePlacement {
+   VarPtr representative;
+   uint64_t byte_offset = 0;
++  uint64_t arena_capacity = 0;
+ };
+ 
+ using ReuseMap = std::map<VarPtr, ReusePlacement>;
+@@ -3256,12 +3313,35 @@ ReuseMap IdentifyReuseOpportunities(
+     auto iy = phi_family_ids.find(y);
+     return ix != phi_family_ids.end() && iy != phi_family_ids.end() && ids_intersect(ix->second, iy->second);
+   };
++  // The alternate lexical order moves each else arm before its then arm. An
++  // outside value read only in the else arm need not coexist with the then
++  // arm's replacement. Both traversals preserve statement order within an arm,
++  // post-if observations, and loop recurrence, so disjointness in either order
++  // is sufficient. Compute this at most once, only for an overlapping pair.
++  std::optional<LifetimeAnalyzer::Result> reverse_lifetimes;
++  bool refine_branch_order = false;
+   // Precise per-var overlap (touching allowed: last_use == def is fine).
+-  auto var_overlap = [&](const Var* x, const Var* y) {
+-    auto ix = var_liveness.find(x);
+-    auto iy = var_liveness.find(y);
++  auto var_overlap = [&](const VarPtr& x, const VarPtr& y) {
++    auto ix = var_liveness.find(x.get());
++    auto iy = var_liveness.find(y.get());
+     if (ix == var_liveness.end() || iy == var_liveness.end()) return true;  // unknown -> conservative
+-    return !(ix->second.second <= iy->second.first || iy->second.second <= ix->second.first);
++    if (ix->second.second <= iy->second.first || iy->second.second <= ix->second.first) return false;
++    if (!refine_branch_order) return true;
++    if (!reverse_lifetimes.has_value()) {
++      reverse_lifetimes = LifetimeAnalyzer(/*reverse_branches=*/true).Analyze(func->body_);
++    }
++    // The indexed maps are keyed by shared Var handles. The sharing groups
++    // retain those handles, so no raw-pointer lookup needs an IR scan.
++    const auto rx = reverse_lifetimes->var_def_order.find(x);
++    const auto ry = reverse_lifetimes->var_def_order.find(y);
++    if (rx == reverse_lifetimes->var_def_order.end() || ry == reverse_lifetimes->var_def_order.end()) {
++      return true;
++    }
++    const auto ux = reverse_lifetimes->var_last_use.find(x);
++    const auto uy = reverse_lifetimes->var_last_use.find(y);
++    const int last_x = ux == reverse_lifetimes->var_last_use.end() ? rx->second : ux->second;
++    const int last_y = uy == reverse_lifetimes->var_last_use.end() ? ry->second : uy->second;
++    return !(last_x <= ry->second || last_y <= rx->second);
+   };
+   // Decide whether a group-interval overlap between two intervals actually
+   // blocks sharing.  This is invoked ONLY when their merged intervals overlap.
+@@ -3283,7 +3363,7 @@ ReuseMap IdentifyReuseOpportunities(
+       for (const auto& y : (gb ? *gb : sb)) {
+         if (same_phi_family_var(x.get(), y.get())) {
+           family_pair = true;
+-        } else if (var_overlap(x.get(), y.get())) {
++        } else if (var_overlap(x, y)) {
+           return true;  // genuine non-family conflict
+         }
+       }
+@@ -3509,6 +3589,7 @@ ReuseMap IdentifyReuseOpportunities(
+     // and capturing a structured binding name directly is only a C++20 extension (project is C++17).
+     auto& space = space_binding;
+     auto& indices = indices_binding;
++    refine_branch_order = false;
+     // Largest-first; ties broken by definition order for determinism and so that
+     // equal-size workloads reproduce the prior definition-order grouping.
+     std::sort(indices.begin(), indices.end(), [&lifetimes](size_t a, size_t b) {
+@@ -3572,7 +3653,11 @@ ReuseMap IdentifyReuseOpportunities(
+     // cannot share bytes with the candidate as address blockers and picks the
+     // lowest aligned gap. Members stay sorted by offset, so one candidate scans
+     // each arena once and the pack remains O(M^2).
+-    auto pack = [&](bool allow_subranges) {
++    const auto reserved_it = reserved_end_by_space.find(space);
++    const uint64_t reserved_bytes = reserved_it == reserved_end_by_space.end() ? 0 : reserved_it->second;
++    const uint64_t space_capacity = pack_be ? pack_be->GetMemSize(space) : 0;
++    const uint64_t growth_limit = space_capacity > reserved_bytes ? space_capacity - reserved_bytes : 0;
++    auto pack = [&](bool allow_subranges, bool allow_growth = false) {
+       std::vector<PackedBuffer> buffers;
+       for (size_t idx : indices) {
+         if (is_pinned[idx]) {
+@@ -3614,7 +3699,14 @@ ReuseMap IdentifyReuseOpportunities(
+             }
+             if (!chosen_offset.has_value()) {
+               const uint64_t aligned = alloc_policy->AlignAddress(cursor, space);
+-              if (aligned <= buffer.capacity && cand.size <= buffer.capacity - aligned) {
++              const auto owner_memref =
++                  GetTypeMemRef(lifetimes[buffer.members.front().interval_index].variable->GetType());
++              const auto owner_offset = As<ConstInt>((*owner_memref)->byte_offset_);
++              // Only compiler-owned zero-based roots can grow. The same
++              // interference/hazard checks above still protect every byte.
++              const uint64_t limit =
++                  allow_growth && owner_offset && owner_offset->value_ == 0 ? growth_limit : buffer.capacity;
++              if (aligned <= limit && cand.size <= limit - aligned) {
+                 chosen_offset = aligned;
+               }
+             }
+@@ -3622,6 +3714,7 @@ ReuseMap IdentifyReuseOpportunities(
+ 
+           if (!chosen_offset.has_value()) continue;
+           const PackedMember placement{idx, *chosen_offset};
++          buffer.capacity = std::max(buffer.capacity, *chosen_offset + cand.size);
+           auto pos = std::upper_bound(buffer.members.begin(), buffer.members.end(), placement,
+                                       [](const PackedMember& lhs, const PackedMember& rhs) {
+                                         return lhs.byte_offset < rhs.byte_offset;
+@@ -3662,7 +3755,27 @@ ReuseMap IdentifyReuseOpportunities(
+         if (!subrange_space_safe || cap == 0 || footprint(buffers) <= cap) return;
+         auto subdivided = pack(/*allow_subranges=*/true);
+         if (footprint(subdivided) < footprint(buffers)) buffers = std::move(subdivided);
++        if (footprint(buffers) > cap) {
++          // A 48+12 KiB phase followed by a 32+32 KiB phase fits in 64 KiB,
++          // but no existing representative owns that complete extent. Permit
++          // arena growth only after fixed-size subdivision still overflows.
++          // One additional bounded pack preserves the existing complexity.
++          auto grown = pack(/*allow_subranges=*/true, /*allow_growth=*/true);
++          if (footprint(grown) < footprint(buffers)) buffers = std::move(grown);
++        }
+       };
++      // Preserve fitting layouts. Under capacity pressure, discard interference
++      // caused solely by visiting one mutually-exclusive arm before the other.
++      // This is one additional bounded pack; all hazard and pipeline gates stay.
++      if (cap != 0 && footprint(buffers) > cap && !phi_family_ids.empty()) {
++        refine_branch_order = true;
++        auto branch_refined = pack(/*allow_subranges=*/false);
++        if (footprint(branch_refined) <= footprint(buffers)) {
++          buffers = std::move(branch_refined);
++        } else {
++          refine_branch_order = false;
++        }
++      }
+       // Preserve the legacy layout whenever it fits. Only an actual overflow
+       // enables subdivision, before sacrificing software-pipeline depth.
+       retry_with_subranges();
+@@ -3747,7 +3860,7 @@ ReuseMap IdentifyReuseOpportunities(
+       for (const PackedMember& member : buf.members) {
+         if (member.interval_index == representative_index) continue;
+         const auto& cand = lifetimes[member.interval_index];
+-        reuse_map[cand.variable] = ReusePlacement{representative, member.byte_offset};
++        reuse_map[cand.variable] = ReusePlacement{representative, member.byte_offset, buf.capacity};
+         if (const Var* cb = TileMemRefBase(cand.variable)) {
+           if (const Var* rb = physical_base(representative)) {
+             if (cb != rb) base_remap[cb] = rb;
+@@ -3826,9 +3939,32 @@ StmtPtr ApplyMemRefSharing(const StmtPtr& stmt, const ReuseMap& reuse_map,
+    public:
+     explicit MemRefSharingMutator(const ReuseMap& reuse_map,
+                                   const std::map<VarPtr, std::vector<VarPtr>>& sharing_groups)
+-        : reuse_map_(reuse_map), sharing_groups_(sharing_groups) {}
++        : reuse_map_(reuse_map), sharing_groups_(sharing_groups) {
++      for (const auto& entry : reuse_map_) {
++        const auto& placement = entry.second;
++        const auto memref = GetTypeMemRef(placement.representative->GetType());
++        if (memref && *memref && placement.arena_capacity > (*memref)->size_) {
++          arena_sizes_[(*memref)->base_.get()] = placement.arena_capacity;
++        }
++      }
++    }
+ 
+     StmtPtr VisitStmt_(const AssignStmtPtr& op) override {
++      // Preserve each tile's own window while resizing the physical allocation
++      // that backs the union of all its static subranges.
++      auto arena = arena_sizes_.find(op->var_.get());
++      if (arena != arena_sizes_.end()) {
++        auto call = As<Call>(op->value_);
++        INTERNAL_CHECK_SPAN(call && IsOp(call, "tile.alloc") && call->args_.size() >= 2, op->span_)
++            << "Internal error: grown reuse arena must have a compiler-owned tile.alloc";
++        auto args = call->args_;
++        args[1] = std::make_shared<ConstInt>(static_cast<int64_t>(arena->second), DataType::INDEX, op->span_);
++        return std::make_shared<AssignStmt>(
++            op->var_,
++            std::make_shared<Call>(call->op_, std::move(args), call->kwargs_, call->attrs_, call->GetType(),
++                                   call->span_),
++            op->span_);
++      }
+       // Check if this variable should reuse another's MemRef
+       if (reuse_map_.count(op->var_)) {
+         const ReusePlacement& placement = reuse_map_.at(op->var_);
+@@ -3892,10 +4028,10 @@ StmtPtr ApplyMemRefSharing(const StmtPtr& stmt, const ReuseMap& reuse_map,
+           const __int128 wide_rel = static_cast<__int128>(old_off->value_) - curr_off->value_;
+           const __int128 wide_placement = placement.byte_offset;
+           INTERNAL_CHECK_SPAN(wide_rel >= 0 && wide_rel <= std::numeric_limits<int64_t>::max() &&
+-                                  wide_placement + wide_rel + old->size_ <= (*source_memref)->size_,
++                                  wide_placement + wide_rel + old->size_ <= placement.arena_capacity,
+                               old->span_)
+               << "Internal error: sharing-group member offset " << old_off->value_
+-              << " cannot be represented inside reuse target (size " << (*source_memref)->size_ << ")";
++              << " cannot be represented inside reuse target (size " << placement.arena_capacity << ")";
+           const int64_t placed_rel = static_cast<int64_t>(wide_placement + wide_rel);
+           if (placed_rel == 0 && old->size_ == (*source_memref)->size_) return source_memref;
+           auto rel_expr = std::make_shared<ConstInt>(placed_rel, DataType::INDEX, Span::unknown());
+@@ -3966,6 +4102,7 @@ StmtPtr ApplyMemRefSharing(const StmtPtr& stmt, const ReuseMap& reuse_map,
+ 
+    private:
+     const ReuseMap& reuse_map_;
++    std::unordered_map<const Var*, uint64_t> arena_sizes_;
+     const std::map<VarPtr, std::vector<VarPtr>>& sharing_groups_;  // var -> sharing group
+     // Maps old variable objects to new variable objects (with reused MemRef)
+     // This is needed because IR nodes are immutable, so we create new Var objects
+@@ -4122,6 +4259,28 @@ class YieldFixupMutator : public StorageBoundaryMutator {
+   explicit YieldFixupMutator(bool fixup_if_stmts, bool canonical_branch_storage = false)
+       : fixup_if_stmts_(fixup_if_stmts), canonical_branch_storage_(canonical_branch_storage) {}
+ 
++  StmtPtr VisitStmt_(const AssignStmtPtr& op) override {
++    auto result = As<AssignStmt>(IRMutator::VisitStmt_(op));
++    INTERNAL_CHECK_SPAN(result != nullptr, op->span_) << "Assignment mutation must preserve AssignStmt";
++    auto source = AsVarLike(result->value_);
++    auto source_tile = source ? GetTileTypeWithMemRef(source->GetType()) : nullptr;
++    auto target_tile = GetTileTypeWithMemRef(result->var_->GetType());
++    if (!source_tile || !target_tile ||
++        SamePhysicalWindow(GetDefinedMemRef(source_tile), GetDefinedMemRef(target_tile))) {
++      return result;
++    }
++    // An inner branch may have just changed its phi's storage. Propagate that
++    // decision through identity aliases before an enclosing boundary chooses
++    // its destination, rather than manufacturing copies into stale phi buffers
++    // and repairing the alias only after all boundaries have been processed.
++    auto type = CloneTypeWithMemRefAndRemapExprs(
++        result->var_->GetType(), GetDefinedMemRef(source_tile),
++        [this](const ExprPtr& expr) { return VisitExpr(expr); }, source_tile->GetMemorySpace());
++    auto target = std::make_shared<Var>(result->var_->name_hint_, type, result->var_->span_);
++    var_remap_[op->var_.get()] = target;
++    return std::make_shared<AssignStmt>(target, source, result->span_);
++  }
++
+   StmtPtr VisitStmt_(const ForStmtPtr& op) override {
+     // First recurse into nested control flow
+     auto result = IRMutator::VisitStmt_(op);
+@@ -4235,7 +4394,6 @@ class YieldFixupMutator : public StorageBoundaryMutator {
+   StmtPtr VisitStmt_(const IfStmtPtr& op) override {
+     // First recurse into nested control flow
+     auto result = IRMutator::VisitStmt_(op);
+-    if (!fixup_if_stmts_) return result;
+     auto if_stmt = As<IfStmt>(result);
+     if (!if_stmt || if_stmt->return_vars_.empty()) return result;
+     if (canonical_branch_storage_) return FixupCanonicalIf(if_stmt);
+@@ -4269,6 +4427,16 @@ class YieldFixupMutator : public StorageBoundaryMutator {
+       auto else_tile = else_var ? GetTileTypeWithMemRef(else_var->GetType()) : nullptr;
+       if (!then_tile && !else_tile) continue;
+ 
++      // PTOAS owns divergent branch storage, but an in-place operation in both
++      // arms already writes one physical window. Preserve that semantic alias
++      // on the phi instead of making codegen invent a second destination and
++      // copy into it (Mat->Mat is not even a legal instruction).
++      if (!fixup_if_stmts_ &&
++          (!then_tile || !else_tile ||
++           !SamePhysicalWindow(GetDefinedMemRef(then_tile), GetDefinedMemRef(else_tile)))) {
++        continue;
++      }
++
+       // Use then-branch MemRef as canonical target (fall back to else if then absent)
+       auto target_tile = then_tile ? then_tile : else_tile;
+       auto target_memref = GetDefinedMemRef(target_tile);
+@@ -5037,8 +5205,8 @@ class NormalizeIdentityCopyBuffersMutator : public StorageBoundaryMutator {
+   NormalizeIdentityCopyBuffersMutator() = default;
+ 
+   /// `unsettled` seeds the IfStmt return_vars whose buffer YieldFixup has not
+-  /// chosen yet; the traversal grows it with their bare-Var renames.  See
+-  /// `ReanchorInplaceOutput` for why anchoring onto one is wrong.
++  /// chosen yet; the traversal grows it with their semantic aliases. See
++  /// `ReanchorAliasingOutput` for why anchoring onto one is wrong.
+   explicit NormalizeIdentityCopyBuffersMutator(std::set<const Var*> unsettled)
+       : unsettled_(std::move(unsettled)) {}
+ 
+@@ -5054,7 +5222,7 @@ class NormalizeIdentityCopyBuffersMutator : public StorageBoundaryMutator {
+       auto new_src = AsVarLike(VisitExpr(op->value_));  // follow prior substitutions
+       // A rename of an unsettled value denotes that same storage, so it is just as
+       // unsettled: `tmp = phi` then `t = <in-place>(tmp, ...)` would otherwise walk
+-      // straight past the guard in ReanchorInplaceOutput and anchor onto the phi's
++      // straight past the guard in ReanchorAliasingOutput and anchor onto the phi's
+       // stale buffer through the alias.
+       if (IsUnsettled(src_var) || IsUnsettled(new_src)) {
+         unsettled_.insert(op->var_.get());
+@@ -5074,17 +5242,11 @@ class NormalizeIdentityCopyBuffersMutator : public StorageBoundaryMutator {
+     // Retargeting and pipeline/control-flow lowering can expose a stale output
+     // type; normalize it even when the input itself was not substituted during
+     // this traversal (the non-divisor K-peel matmul_acc tail is one example).
+-    if (auto reanchored = ReanchorInplaceOutput(op)) return reanchored;
++    if (auto reanchored = ReanchorAliasingOutput(op)) return reanchored;
+     return IRMutator::VisitStmt_(op);
+   }
+ 
+  private:
+-  /// Re-anchor an in-place op's output onto its reused input's buffer, preserving
+-  /// the output's tile metadata (shape/dtype/space) and swapping only the MemRef.
+-  /// This also repairs a producer/output mismatch introduced by control-flow or
+-  /// pipeline lowering even when the input itself was not substituted in this
+-  /// traversal. Returns nullptr when the allocation already agrees.
+-  ///
+   /// True when `var` denotes storage whose buffer YieldFixup has not chosen yet —
+   /// an IfStmt return_var seeded into `unsettled_`, or a bare-Var rename of one.
+   [[nodiscard]] bool IsUnsettled(const VarPtr& var) const {
+@@ -5102,24 +5264,51 @@ class NormalizeIdentityCopyBuffersMutator : public StorageBoundaryMutator {
+   /// can lower, while the post-fixup run silently re-anchors the producer back —
+   /// leaving the phi buffer unwritten on the taken arm.  Two conditionals over
+   /// one in-place tile (what `pl.unroll(2)` around an `if` produces) are enough.
+-  StmtPtr ReanchorInplaceOutput(const AssignStmtPtr& op) {
++  /// Reconcile a registered in-place result or metadata view with its current
++  /// input. A gather may be re-anchored here after RetypeApplier has already
++  /// visited the body; its downstream transpose_view/slice must follow in this
++  /// same forward walk. These are required aliases, not new reuse decisions.
++  /// Real data-moving transpose is excluded by IsBufferAliasingViewOp.
++  StmtPtr ReanchorAliasingOutput(const AssignStmtPtr& op) {
+     auto call = As<Call>(op->value_);
+     if (!call || !call->op_) return nullptr;
+     auto reuse_idx = op_predicates::BuiltinWritebackArgIndex(call->op_, call->args_.size());
+-    if (!reuse_idx.has_value()) return nullptr;
+-    auto in_var = AsVarLike(call->args_[*reuse_idx]);
++    const bool is_view = op_predicates::IsBufferAliasingViewOp(call->op_->name_);
++    if (!reuse_idx.has_value() && (!is_view || call->args_.empty())) return nullptr;
++    auto in_var = AsVarLike(call->args_[is_view ? 0 : *reuse_idx]);
+     if (!in_var) return nullptr;
+     auto new_in = AsVarLike(VisitExpr(in_var));  // follow prior subst_ renames
+     if (!new_in) return nullptr;
+-    if (IsUnsettled(in_var) || IsUnsettled(new_in)) return nullptr;
++    if (IsUnsettled(in_var) || IsUnsettled(new_in)) {
++      // The whole alias chain remains unsettled until YieldFixup chooses the
++      // phi's storage. Otherwise a view would hide that status from a later
++      // in-place writer and pin it to the phi's stale allocation.
++      unsettled_.insert(op->var_.get());
++      return nullptr;
++    }
+     auto lhs_tile = GetTileTypeWithMemRef(op->var_->GetType());
+     auto in_new_tile = GetTileTypeWithMemRef(new_in->GetType());
+-    if (!lhs_tile || !in_new_tile ||
+-        SamePhysicalWindow(GetDefinedMemRef(lhs_tile), GetDefinedMemRef(in_new_tile))) {
++    if (!lhs_tile || !in_new_tile) return nullptr;
++    const auto& input_memref = GetDefinedMemRef(in_new_tile);
++    MemRefPtr target = input_memref;
++    if (is_view) {
++      const auto& output_memref = GetDefinedMemRef(lhs_tile);
++      ExprPtr additional = ComputeViewByteOffset(call, new_in->GetType());
++      auto zero = As<ConstInt>(additional);
++      if (!zero || zero->value_ != 0 || output_memref->size_ != input_memref->size_) {
++        // Preserve the view's window and the input's pipeline-slot identity;
++        // neither a subview nor a carried slot denotes the whole allocation.
++        target = std::make_shared<MemRef>(
++            input_memref->base_, AddByteOffsets(input_memref->byte_offset_, additional),
++            output_memref->size_, output_memref->span_, input_memref->is_pinned_,
++            input_memref->slot_count_, input_memref->slot_index_);
++      }
++    }
++    if (SamePhysicalWindow(GetDefinedMemRef(lhs_tile), target) &&
++        lhs_tile->GetMemorySpace() == in_new_tile->GetMemorySpace()) {
+       return nullptr;
+     }
+-    auto new_type = CloneTypeWithMemRef(op->var_->GetType(), GetDefinedMemRef(in_new_tile),
+-                                        in_new_tile->GetMemorySpace());
++    auto new_type = CloneTypeWithMemRef(op->var_->GetType(), target, in_new_tile->GetMemorySpace());
+     auto new_lhs = std::make_shared<Var>(op->var_->name_hint_, new_type, op->var_->span_);
+     subst_[op->var_] = new_lhs;
+     auto recursed = As<AssignStmt>(IRMutator::VisitStmt_(op));
+@@ -5145,7 +5334,7 @@ class IfPhiReturnVarCollector : public IRVisitor {
+ 
+ /// The pre-YieldFixup half of the identity-copy normalization bracket: identical
+ /// to the plain run except that an in-place producer is never anchored onto a phi
+-/// whose buffer YieldFixup has yet to choose (`ReanchorInplaceOutput`).
++/// whose buffer YieldFixup has yet to choose (`ReanchorAliasingOutput`).
+ StmtPtr NormalizeIdentityCopyBuffersBeforeYieldFixup(const StmtPtr& body) {
+   IfPhiReturnVarCollector collector;
+   collector.VisitStmt(body);
+diff --git a/tests/ut/codegen/test_memory_planner_switch.py b/tests/ut/codegen/test_memory_planner_switch.py
+index 55595114e..021d487c7 100644
+--- a/tests/ut/codegen/test_memory_planner_switch.py
++++ b/tests/ut/codegen/test_memory_planner_switch.py
+@@ -27,6 +27,8 @@ both passes run and codegen bakes ``addr`` for ``--pto-level=level3``.
+ # DSL function bodies are parsed as AST, not executed — suppress pyright errors.
+ # pyright: reportUndefinedVariable=false
+ 
++import re
++
+ import pypto.language as pl
+ import pytest
+ from pypto import backend, ir
+@@ -266,6 +268,116 @@ def test_ptoas_loop_carry_is_in_place_single_handle():
+     assert len(acc_allocs) == 1, f"accumulator buffer must have exactly one alloc_tile:\n{mlir}"
+ 
+ 
++def test_ptoas_reshape_reads_phi_handle_after_branch():
++    """A post-if view cannot reuse a same-typed but branch-local old handle."""
++
++    @pl.program
++    class BranchView:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(
++            self,
++            x: pl.Tensor[[32, 1], pl.FP32],
++            flag: pl.Scalar[pl.INT32],
++            out: pl.Out[pl.Tensor[[1, 16], pl.FP32]],
++        ) -> pl.Tensor[[1, 16], pl.FP32]:
++            base = pl.load(x, [0, 0], [32, 1])
++            if flag != 0:
++                row = pl.reshape(base, [1, 32])
++                updated = pl.add(row, 1.0)
++                column = pl.reshape(updated, [32, 1])
++                result = column
++            else:
++                result = base
++            after = pl.reshape(result, [1, 32])
++            head = pl.tile.extract(after, 0, 0, [1, 16], target_memory=pl.Mem.Vec)
++            output = pl.store(head, [0, 0], out)
++            return output
++
++    optimized, _ = _run_pipeline(passes.MemoryPlanner.PTOAS, BranchView)
++    mlir = _codegen(optimized, emit_tile_addr=False)
++    extract = next(line for line in mlir.splitlines() if "pto.textract ins(" in line)
++    source = extract.split("ins(", 1)[1].split(",", 1)[0]
++    view = next((line.strip() for line in mlir.splitlines() if line.strip().startswith(source + " =")), "")
++    assert "= pto.treshape " in view, mlir
++    phi = view.split("= pto.treshape ", 1)[1].split()[0]
++    assert any("pto.tmov" in line and "outs(" + phi + " :" in line for line in mlir.splitlines()), mlir
++
++
++def test_ptoas_conditional_gather_preserves_one_mat_buffer():
++    """Two in-place branch writes must not introduce an illegal Mat->Mat copy."""
++
++    @pl.program
++    class ConditionalGather:
++        @pl.function(type=pl.FunctionType.AIC)
++        def kernel(
++            self,
++            x: pl.Tensor[[64, 64], pl.FP16],
++            flag: pl.Scalar[pl.INT32],
++            out: pl.Out[pl.Tensor[[64, 16], pl.FP32]],
++        ) -> pl.Tensor[[64, 16], pl.FP32]:
++            base = pl.tile.create([32, 64], dtype=pl.FP16, target_memory=pl.Mem.Mat)
++            if flag != 0:
++                first = pl.tile.gather_row(base, x, [0, 0], [0, 0], [16, 64])
++            else:
++                first = pl.tile.gather_row(base, x, [0, 0], [16, 0], [16, 64])
++            if flag != 0:
++                second = pl.tile.gather_row(first, x, [16, 0], [32, 0], [16, 64])
++            else:
++                second = pl.tile.gather_row(first, x, [16, 0], [48, 0], [16, 64])
++            transposed = pl.tile.transpose_view(second)
++            rhs = pl.tile.load(x, [0, 0], [32, 16], target_memory=pl.Mem.Mat)
++            left = pl.tile.move(transposed, target_memory=pl.Mem.Left)
++            right = pl.tile.move(rhs, target_memory=pl.Mem.Right)
++            product = pl.tile.matmul(left, right)
++            output = pl.tile.store(product, [0, 0], out)
++            return output
++
++    optimized, _ = _run_pipeline(passes.MemoryPlanner.PTOAS, ConditionalGather)
++    mlir = _codegen(optimized, emit_tile_addr=False)
++    moves = [line for line in mlir.splitlines() if "pto.tmov" in line]
++    assert not any(line.count("loc=mat") == 2 for line in moves), mlir
++    bases = {
++        line.split("pto.subview ", 1)[1].split("[", 1)[0]
++        for line in mlir.splitlines()
++        if "pto.subview " in line
++    }
++    assert len(bases) == 1, mlir
++
++
++def test_ptoas_column_carry_move_uses_destination_view():
++    """A column carry can share storage with a row-major full initializer."""
++
++    @pl.program
++    class ColumnCarry:
++        @pl.function(type=pl.FunctionType.InCore)
++        def kernel(
++            self,
++            flag: pl.Scalar[pl.INT32],
++            out: pl.Out[pl.Tensor[[32, 1], pl.FP32]],
++        ) -> pl.Tensor[[32, 1], pl.FP32]:
++            row_base = pl.tile.full([1, 32], dtype=pl.FP32, value=0.0)
++            base = pl.tile.reshape(row_base, [32, 1])
++            for i, (carry,) in pl.range(2, init_values=(base,)):
++                if flag != 0:
++                    row = pl.reshape(carry, [1, 32])
++                    updated = pl.add(row, 1.0)
++                    column = pl.reshape(updated, [32, 1])
++                    value = column
++                else:
++                    value = carry
++                result = pl.yield_(value)
++            output = pl.store(result, [0, 0], out)
++            return output
++
++    optimized, _ = _run_pipeline(passes.MemoryPlanner.PTOAS, ColumnCarry)
++    mlir = _codegen(optimized, emit_tile_addr=False)
++    moves = [line for line in mlir.splitlines() if "pto.tmov" in line]
++    assert moves, mlir
++    for move in moves:
++        shapes = re.findall(r"rows=(\d+), cols=(\d+)", move)
++        assert len(shapes) == 2 and shapes[0] == shapes[1], move
++
++
+ def test_pypto_loop_carry_uses_shared_addr():
+     optimized, _ = _run_pipeline(passes.MemoryPlanner.PYPTO, LoopCarriedAdd)
+     mlir = _codegen(optimized, emit_tile_addr=True)
+diff --git a/tests/ut/codegen/test_pto_codegen_ops.py b/tests/ut/codegen/test_pto_codegen_ops.py
+index 14ffb9bc6..30d39d019 100644
+--- a/tests/ut/codegen/test_pto_codegen_ops.py
++++ b/tests/ut/codegen/test_pto_codegen_ops.py
+@@ -5049,6 +5049,30 @@ class TestSyncAllCodegen:
+         single = ir.Program([funcs[0]], funcs[0].name, optimized.span)
+         return codegen_instance.generate(single)
+ 
++    def test_local_signal_preserves_order_without_comm_context(self):
++        """本地通知/等待不能被删除、合并成全体 barrier 或增加通信上下文。"""
++
++        @pl.program
++        class Prog:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++                offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++            ) -> pl.Tensor[[256], pl.INT32]:
++                pl.system.signal_wait(signal, [offset], tag)
++                pl.system.signal_notify(signal, [offset], tag)
++                pl.system.signal_wait(signal, [offset], tag)
++                return signal
++
++        mlir = self._generate_mlir(Prog)
++        assert mlir.count("pto.comm.tnotify(") == 1
++        assert mlir.count("pto.comm.twait(") == 2
++        assert mlir.index("pto.comm.twait(") < mlir.index("pto.comm.tnotify(")
++        assert mlir.rindex("pto.comm.twait(") > mlir.index("pto.comm.tnotify(")
++        assert "notify_op set" in mlir and "wait_cmp ge" in mlir
++        assert "pto.syncall" not in mlir
++        assert "comm_ctx" not in mlir.lower()
++
+     def test_syncall_emits_hard_barrier_with_core_type(self):
+         """pl.system.syncall(core_type=...) emits pto.syncall() mode=<hard>."""
+ 
+diff --git a/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py b/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py
+index 66a272be5..cea935af0 100644
+--- a/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py
++++ b/tests/ut/ir/transforms/test_expand_mixed_kernel_a2a3.py
+@@ -358,6 +358,104 @@ def test_hand_written_group_members_share_canonical_abi():
+         assert [arg.name_hint for arg in call.args] == expected_names
+ 
+ 
++def test_hand_written_group_rebinds_shared_inout_results():
++    """A preceding member's writeback must bind to a parameter in the next member."""
++
++    @pl.program
++    class Program:
++        @pl.function(type=pl.FunctionType.AIC)
++        def cube_side(
++            self,
++            sink: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> pl.Tensor[[16, 16], pl.FP32]:
++            return sink
++
++        @pl.function(type=pl.FunctionType.AIV)
++        def vec_side(
++            self,
++            sink: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++            out: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> tuple[pl.Tensor[[16, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32]]:
++            return sink, out
++
++        @pl.function(type=pl.FunctionType.Group)
++        def mixed(
++            self,
++            out: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++            sink: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> tuple[pl.Tensor[[16, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32]]:
++            sink = self.cube_side(sink)
++            sink, out = self.vec_side(sink, out)
++            return sink, out
++
++    after = _run_pipeline(Program)
++    cube = after.get_function("cube_side")
++    vec = after.get_function("vec_side")
++    group = after.get_function("mixed")
++    assert cube is not None and vec is not None and group is not None
++    for member, indices in ((cube, [1]), (vec, [1, 0])):
++        returns = [stmt for stmt in ir.flatten_to_stmts(member.body) if isinstance(stmt, ir.ReturnStmt)]
++        assert len(returns) == 1
++        expected = ir.ReturnStmt([member.params[i] for i in indices], returns[0].span)
++        ir.assert_structural_equal(returns[0], expected)
++        assert "FREE_VAR" not in member.as_python()
++    calls = [
++        stmt.value
++        for stmt in ir.flatten_to_stmts(group.body)
++        if isinstance(stmt, ir.AssignStmt) and isinstance(stmt.value, ir.Call)
++    ]
++    assert len(calls) == 2
++    assert all(list(call.args) == list(group.params) for call in calls)
++
++
++def test_hand_written_group_submit_rebinds_tuple_writeback_no_dep():
++    """Tuple/Submit lineage preserves both buffer identity and the no_dep position."""
++
++    @pl.program
++    class Program:
++        @pl.function(type=pl.FunctionType.AIC)
++        def cube_side(
++            self,
++            first: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++            second: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> tuple[pl.Tensor[[16, 16], pl.FP32], pl.Tensor[[16, 16], pl.FP32]]:
++            return second, first
++
++        @pl.function(type=pl.FunctionType.AIV)
++        def vec_side(
++            self,
++            sink: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> pl.Tensor[[16, 16], pl.FP32]:
++            return sink
++
++        @pl.function(type=pl.FunctionType.Group)
++        def mixed(
++            self,
++            first: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++            second: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        ) -> pl.Tensor[[16, 16], pl.FP32]:
++            (second, first), _cube_tid = pl.submit(self.cube_side, first, second)
++            second, _vec_tid = pl.submit(self.vec_side, pl.no_dep(second))
++            return second
++
++    after = _run_pipeline(Program)
++    vec = after.get_function("vec_side")
++    group = after.get_function("mixed")
++    assert vec is not None and group is not None
++    returns = [stmt for stmt in ir.flatten_to_stmts(vec.body) if isinstance(stmt, ir.ReturnStmt)]
++    assert len(returns) == 1
++    ir.assert_structural_equal(returns[0], ir.ReturnStmt([vec.params[1]], returns[0].span))
++    submits = [
++        stmt.value
++        for stmt in ir.flatten_to_stmts(group.body)
++        if isinstance(stmt, ir.AssignStmt) and isinstance(stmt.value, ir.Submit)
++    ]
++    vec_submit = next(submit for submit in submits if submit.op.name == "vec_side")
++    assert list(vec_submit.args) == list(group.params)
++    assert vec_submit.attrs["arg_direction_overrides"] == [1]
++    assert "FREE_VAR" not in vec.as_python()
++
++
+ def test_hand_written_no_split_pipe_group_infers_dual_aiv_dispatch():
+     """910B explicit pipe members get the same lane-1 handshake replay as auto-expanded mixed kernels."""
+ 
+diff --git a/tests/ut/ir/transforms/test_memory_reuse.py b/tests/ut/ir/transforms/test_memory_reuse.py
+index eda50fa89..d4e8dc746 100644
+--- a/tests/ut/ir/transforms/test_memory_reuse.py
++++ b/tests/ut/ir/transforms/test_memory_reuse.py
+@@ -5344,6 +5344,113 @@ class TestL0CrossShapeReuse:
+     This is what lets fused-attention reuse the QK Right buffer ([k, SEQ]) for
+     the PV Right buffer ([k', HEAD]) (issue #1595)."""
+ 
++    def test_constant_named_acc_subview_preserves_capacity_reuse(self):
++        """A constant SSA offset must not hide a legal 96+32 KiB Acc packing."""
++        backend.reset_for_testing()
++        backend.set_backend_type(BackendType.Ascend910B)
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIC)
++            def kernel(
++                self,
++                large_x: pl.Tensor[[128, 128], pl.INT8],
++                large_w: pl.Tensor[[128, 256], pl.INT8],
++                keys: pl.Tensor[[64, 128], pl.INT8],
++                queries: pl.Tensor[[128, 384], pl.INT8],
++                values: pl.Tensor[[64, 384], pl.FP16],
++                coefficients: pl.Tensor[[384, 16], pl.FP16],
++                large_out: pl.Out[pl.Tensor[[128, 256], pl.INT32]],
++                qk_out: pl.Out[pl.Tensor[[64, 384], pl.INT32]],
++                ws_out: pl.Out[pl.Tensor[[64, 16], pl.FP32]],
++            ) -> pl.Tensor[[64, 16], pl.FP32]:
++                large_a_mat = pl.tile.load(large_x, [0, 0], [128, 128], target_memory=pl.Mem.Mat)
++                large_b_mat = pl.tile.load(large_w, [0, 0], [128, 256], target_memory=pl.Mem.Mat)
++                large_a = pl.tile.move(large_a_mat, target_memory=pl.Mem.Left)
++                large_b = pl.tile.move(large_b_mat, target_memory=pl.Mem.Right)
++                large_acc = pl.tile.matmul(large_a, large_b)
++                _large_stored = pl.tile.store(large_acc, [0, 0], large_out)
++                pl.system.fence()
++
++                key_mat = pl.tile.load(keys, [0, 0], [64, 128], target_memory=pl.Mem.Mat)
++                query_mat = pl.tile.load(queries, [0, 0], [128, 384], target_memory=pl.Mem.Mat)
++                value_mat = pl.tile.load(values, [0, 0], [64, 384], target_memory=pl.Mem.Mat)
++                coefficient_mat = pl.tile.load(coefficients, [0, 0], [384, 16], target_memory=pl.Mem.Mat)
++                key = pl.tile.move(key_mat, target_memory=pl.Mem.Left)
++                query = pl.tile.move(query_mat, target_memory=pl.Mem.Right)
++                value = pl.tile.move(value_mat, target_memory=pl.Mem.Left)
++                coefficient = pl.tile.move(coefficient_mat, target_memory=pl.Mem.Right)
++                pool = pl.tile.create([512, 16], dtype=pl.FP32, target_memory=pl.Mem.Acc)
++                qk = pl.tile.matmul(key, query)
++                row: pl.Scalar[pl.INDEX] = 64
++                part = pl.tile.slice(pool, [64, 16], [row, 0])
++                updated = pl.tile.matmul_acc(part, value, coefficient, init_cond=True)
++                _qk_stored = pl.tile.store(qk, [0, 0], qk_out)
++                stored = pl.tile.store(updated, [0, 0], ws_out)
++                return stored
++
++        after = _run_pipeline(Before)
++        allocated = passes.allocate_memory_addr()(after)
++        refs = _collect_named_tile_memrefs(allocated, {"large_acc", "pool", "qk", "part", "updated"})
++        assert refs["large_acc"].base_ is refs["pool"].base_ is refs["qk"].base_
++        assert isinstance(refs["pool"].byte_offset_, ir.ConstInt)
++        assert refs["pool"].byte_offset_.value == 98304
++        assert isinstance(refs["updated"].byte_offset_, ir.ConstInt)
++        assert refs["updated"].byte_offset_.value == 98304 + 64 * 16 * 4
++        assert refs["pool"].byte_offset_.value + refs["pool"].size_ == 131072
++
++    @pytest.mark.parametrize("first_rows", [192, 256])
++    def test_capacity_overflow_grows_phase_arena(self, first_rows):
++        """48+12 then 32+32 KiB fits; a genuinely co-live 64+12 KiB does not."""
++        backend.reset_for_testing()
++        backend.set_backend_type(BackendType.Ascend910B)
++        total_rows = first_rows + 48 + 256
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIC)
++            def kernel(
++                self,
++                x: pl.Tensor[[total_rows, 128], pl.FP16],
++                w: pl.Tensor[[128, 32], pl.FP16],
++                out: pl.Out[pl.Tensor[[total_rows, 32], pl.FP32]],
++            ) -> pl.Tensor[[total_rows, 32], pl.FP32]:
++                weight = pl.tile.load(w, [0, 0], [128, 32], target_memory=pl.Mem.Mat)
++                right = pl.tile.move(weight, target_memory=pl.Mem.Right)
++                a_mat = pl.tile.load(x, [0, 0], [first_rows, 128], target_memory=pl.Mem.Mat)
++                b_mat = pl.tile.load(x, [first_rows, 0], [48, 128], target_memory=pl.Mem.Mat)
++                a = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
++                b = pl.tile.move(b_mat, target_memory=pl.Mem.Left)
++                a_out = pl.tile.matmul(a, right)
++                out_a = pl.tile.store(a_out, [0, 0], out)
++                b_out = pl.tile.matmul(b, right)
++                out_b = pl.tile.store(b_out, [first_rows, 0], out_a)
++                pl.system.fence()
++                c_mat = pl.tile.load(x, [first_rows + 48, 0], [128, 128], target_memory=pl.Mem.Mat)
++                d_mat = pl.tile.load(x, [first_rows + 176, 0], [128, 128], target_memory=pl.Mem.Mat)
++                c = pl.tile.move(c_mat, target_memory=pl.Mem.Left)
++                d = pl.tile.move(d_mat, target_memory=pl.Mem.Left)
++                c_out = pl.tile.matmul(c, right)
++                out_c = pl.tile.store(c_out, [first_rows + 48, 0], out_b)
++                d_out = pl.tile.matmul(d, right)
++                out_d = pl.tile.store(d_out, [first_rows + 176, 0], out_c)
++                return out_d
++
++        after = _run_pipeline(Before)
++        if first_rows == 256:
++            with pytest.raises(ValueError, match="exceeds.*capacity|exceeds.*limit"):
++                passes.allocate_memory_addr()(after)
++            return
++        ranges = _collect_named_tile_memrefs(after, {"a", "b", "c", "d"})
++        assert all(ref.base_ is ranges["a"].base_ for ref in ranges.values())
++        expected = {"a": (0, 49152), "b": (49152, 12288), "c": (0, 32768), "d": (32768, 32768)}
++        for name, ref in ranges.items():
++            assert isinstance(ref.byte_offset_, ir.ConstInt)
++            assert (ref.byte_offset_.value, ref.size_) == expected[name]
++        allocated = passes.allocate_memory_addr()(after)
++        physical = _collect_named_tile_memrefs(allocated, set(ranges))
++        assert max(ref.byte_offset_.value + ref.size_ for ref in physical.values()) == 65536
++
+     def test_capacity_overflow_subdivides_dead_right_buffer(self):
+         """A dead 64 KiB L0B panel backs two later co-live 32 KiB panels."""
+         backend.reset_for_testing()
+@@ -7823,6 +7930,226 @@ class TestChainedInPlaceIfPhis:
+     phi buffer unwritten on the taken arm.
+     """
+ 
++    def test_branch_local_gather_loop_reuses_sibling_storage(self, ascend_backend):
++        """A fresh gather destination in one arm is dead on the sibling path."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                pool: pl.Tensor[[64, 512], pl.BF16],
++                flags: pl.Tensor[[1], pl.INT32],
++                out: pl.Out[pl.Tensor[[64, 512], pl.BF16]],
++                state: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
++            ) -> tuple[pl.Tensor[[64, 512], pl.BF16], pl.Tensor[[64, 256], pl.FP32]]:
++                first = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
++                second = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
++                flag = pl.tensor.read(flags, [0])
++                for i, (s0, s1) in pl.range(2, init_values=(first, second)):
++                    seed = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
++                    if flag != 0:
++                        filled = pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [64, 512])
++                        selected = filled
++                    else:
++                        fresh = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
++                        for j, (carry,) in pl.range(64, init_values=(fresh,)):
++                            if j < flag:
++                                next_value = pl.tile.gather_row(
++                                    carry, pool, [j, 0], [j, 0], [1, 512]
++                                )
++                            else:
++                                next_value = carry
++                            gathered = pl.yield_(next_value)
++                        selected = gathered
++                    saved = pl.tile.store(selected, [0, 0], out)  # noqa: F841 - observe the selected tile
++                    next0 = pl.tile.add(s0, 1.0)
++                    next1 = pl.tile.add(s1, 2.0)
++                    result0, result1 = pl.yield_(next0, next1)
++                state0 = pl.tile.store(result0, [0, 0], state)
++                state1 = pl.tile.store(result1, [32, 0], state0)
++                return out, state1
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        passes.allocate_memory_addr()(after)
++
++    def test_branch_gather_keeps_independently_observed_outer_seed(self, ascend_backend):
++        """A branch-local alias must not hide a surviving pre-if allocation."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                pool: pl.Tensor[[64, 512], pl.BF16],
++                flags: pl.Tensor[[1], pl.INT32],
++                out: pl.Out[pl.Tensor[[128, 512], pl.BF16]],
++            ) -> pl.Tensor[[128, 512], pl.BF16]:
++                seed = pl.tile.full([64, 512], dtype=pl.BF16, value=0.0)
++                flag = pl.tensor.read(flags, [0])
++                if flag != 0:
++                    selected = pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [64, 512])
++                else:
++                    fresh = pl.tile.full([64, 512], dtype=pl.BF16, value=1.0)
++                    for j, (carry,) in pl.range(64, init_values=(fresh,)):
++                        updated = pl.tile.gather_row(carry, pool, [j, 0], [j, 0], [1, 512])
++                        gathered = pl.yield_(updated)
++                    selected = gathered
++                saved = pl.tile.store(selected, [0, 0], out)
++                original = pl.tile.store(seed, [64, 0], saved)
++                return original
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        allocated = passes.allocate_memory_addr()(after)
++        ranges = _collect_allocated_tile_ranges(allocated)
++        seed, fresh = ranges["seed__ssa_v0"], ranges["fresh__ssa_v0"]
++        assert seed[0] + seed[1] <= fresh[0] or fresh[0] + fresh[1] <= seed[0]
++
++    def test_conditional_reset_reuses_value_read_only_in_sibling(self, ascend_backend):
++        """An earlier value survives only on the arm that does not reset it."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                pool: pl.Tensor[[128, 256], pl.FP32],
++                flags: pl.Tensor[[1], pl.INT32],
++                out: pl.Out[pl.Tensor[[128, 256], pl.FP32]],
++            ) -> pl.Tensor[[128, 256], pl.FP32]:
++                held = pl.tile.load(pool, [64, 0], [64, 256], target_memory=pl.Mem.Vec)
++                current = pl.tile.load(pool, [0, 0], [64, 256], target_memory=pl.Mem.Vec)
++                flag = pl.tensor.read(flags, [0])
++                if flag != 0:
++                    reset = pl.tile.full([64, 256], dtype=pl.FP32, value=0.0)
++                    selected = reset
++                else:
++                    selected = current
++                saved = pl.tile.store(selected, [0, 0], out)
++                result = pl.tile.store(held, [64, 0], saved)
++                return result
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        allocated = passes.allocate_memory_addr()(after)
++        ranges = _collect_allocated_tile_ranges(allocated)
++        assert ranges["current__ssa_v0"] == ranges["reset__ssa_v0"]
++
++    def test_conditional_reset_preserves_same_branch_tail_read(self, ascend_backend):
++        """Reversing sibling order must preserve reads after a same-arm write."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                pool: pl.Tensor[[128, 256], pl.FP32],
++                flags: pl.Tensor[[1], pl.INT32],
++                out: pl.Out[pl.Tensor[[192, 256], pl.FP32]],
++            ) -> pl.Tensor[[192, 256], pl.FP32]:
++                held = pl.tile.load(pool, [64, 0], [64, 256], target_memory=pl.Mem.Vec)
++                current = pl.tile.load(pool, [0, 0], [64, 256], target_memory=pl.Mem.Vec)
++                flag = pl.tensor.read(flags, [0])
++                if flag != 0:
++                    reset = pl.tile.full([64, 256], dtype=pl.FP32, value=0.0)
++                    observed = pl.tile.store(current, [64, 0], out)  # noqa: F841 - preserve the tail read
++                    selected = reset
++                else:
++                    selected = current
++                saved = pl.tile.store(selected, [0, 0], out)
++                result = pl.tile.store(held, [128, 0], saved)
++                return result
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        with pytest.raises(Exception, match="exceeds"):
++            passes.allocate_memory_addr()(after)
++
++    def test_conditional_reset_preserves_loop_invariant(self, ascend_backend):
++        """A sibling-only read can recur on a later loop iteration."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                pool: pl.Tensor[[128, 256], pl.FP32],
++                out: pl.Out[pl.Tensor[[128, 256], pl.FP32]],
++            ) -> pl.Tensor[[128, 256], pl.FP32]:
++                held = pl.tile.load(pool, [64, 0], [64, 256], target_memory=pl.Mem.Vec)
++                current = pl.tile.load(pool, [0, 0], [64, 256], target_memory=pl.Mem.Vec)
++                for i in pl.range(2):
++                    if i == 0:
++                        reset = pl.tile.full([64, 256], dtype=pl.FP32, value=0.0)
++                        selected = reset
++                    else:
++                        selected = current
++                    out = pl.tile.store(selected, [0, 0], out)
++                result = pl.tile.store(held, [64, 0], out)
++                return result
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        with pytest.raises(Exception, match="exceeds"):
++            passes.allocate_memory_addr()(after)
++
++    def test_nested_phi_identity_does_not_resurrect_old_buffer(self, ascend_backend):
++        """An inner phi's aliases must settle before the outer yield is reconciled."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.AIV)
++            def kernel(
++                self,
++                flags: pl.Tensor[[2], pl.INT32],
++                out: pl.Out[pl.Tensor[[64, 256], pl.FP32]],
++            ) -> pl.Tensor[[64, 256], pl.FP32]:
++                first = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
++                second = pl.tile.full([32, 256], dtype=pl.FP32, value=0.0)
++                limit = pl.tensor.read(flags, [0])
++                branch = pl.tensor.read(flags, [1])
++                for i, (s0, s1) in pl.range(3, init_values=(first, second)):
++                    if i < limit:
++                        if branch != 0:
++                            a0 = pl.tile.add(s0, 1.0)
++                            a1 = pl.tile.add(s1, 2.0)
++                        else:
++                            a0 = pl.tile.add(s0, 3.0)
++                            a1 = pl.tile.add(s1, 4.0)
++                        b0 = a0
++                        b1 = a1
++                    else:
++                        b0 = s0
++                        b1 = s1
++                    result0, result1 = pl.yield_(b0, b1)
++                out0 = pl.tile.store(result0, [0, 0], out)
++                out1 = pl.tile.store(result1, [32, 0], out0)
++                return out1
++
++        after = _run_pipeline(passes.convert_to_ssa()(Before))
++        allocated = passes.allocate_memory_addr()(after)
++        func = allocated.get_function("kernel")
++        assert func is not None
++        windows = []
++
++        def collect(stmt):
++            if isinstance(stmt, ir.AssignStmt) and isinstance(stmt.var.type, ir.TileType):
++                ref = stmt.var.type.memref
++                if ref is not None:
++                    windows.append(ref.byte_offset_.value + ref.size_)
++            if isinstance(stmt, ir.SeqStmts):
++                for child in stmt.stmts:
++                    collect(child)
++            elif isinstance(stmt, (ir.ForStmt, ir.WhileStmt)):
++                collect(stmt.body)
++            elif isinstance(stmt, ir.IfStmt):
++                collect(stmt.then_body)
++                if stmt.else_body is not None:
++                    collect(stmt.else_body)
++
++        collect(func.body)
++        assert max(windows) <= 131072
++        assert "pl.tile.move(" not in func.as_python(), (
++            "Pure aliases of nested if-results must not prevent safe carry producer retargeting"
++        )
++
+     def test_chained_conditional_gather_row_shares_one_l1_buffer(self, ascend_backend):
+         """Two chained `if`s over one in-place `gather_row` keep a single L1 buffer.
+ 
+@@ -7881,5 +8208,380 @@ class TestChainedInPlaceIfPhis:
+         )
+ 
+ 
++class TestSemanticAliasViewReanchoring:
++    """Metadata views follow alias normalization, including deferred phi storage."""
++
++    def test_gather_reanchor_preserves_transpose_view_chain(self):
++        """A post-InitMemRef gather result can drift from its destination."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[16, 32], pl.FP16],
++                out: pl.Out[pl.Tensor[[8, 64], pl.FP16]],
++            ) -> pl.Tensor[[8, 64], pl.FP16]:
++                current: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 1024)
++                stale: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 1024)
++                seed: pl.Tile[[16, 32], pl.FP16, pl.MemRef(current, 0, 1024), pl.Mem.Mat] = (
++                    pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                )
++                gathered: pl.Tile[[16, 32], pl.FP16, pl.MemRef(stale, 0, 1024), pl.Mem.Mat] = (
++                    pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [16, 32])
++                )
++                transposed: pl.Tile[[32, 16], pl.FP16, pl.MemRef(stale, 0, 1024), pl.Mem.Mat] = (
++                    pl.tile.transpose_view(gathered)
++                )
++                reshaped: pl.Tile[[8, 64], pl.FP16, pl.MemRef(stale, 0, 1024), pl.Mem.Mat] = (
++                    pl.tile.reshape(transposed, [8, 64])
++                )
++                return pl.tile.store(reshaped, [0, 0], out)
++
++        after = passes.materialize_semantic_aliases()(Before)
++        refs = _collect_named_tile_memrefs(after, {"seed", "gathered", "transposed", "reshaped"})
++        for name in ("gathered", "transposed", "reshaped"):
++            assert ir.MemRef.same_allocation(refs[name], refs["seed"])
++            assert ir.structural_equal(refs[name].byte_offset_, refs["seed"].byte_offset_)
++            assert refs[name].size_ == 1024
++        # A second fixed pass is a no-op; this must not need a fixed-point loop.
++        ir.assert_structural_equal(passes.materialize_semantic_aliases()(after), after)
++
++    @pytest.mark.parametrize("same_allocation", [False, True])
++    def test_reanchor_preserves_nonzero_slice_and_extract(self, same_allocation):
++        """View offsets compose with the new parent, even on the same base."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[32, 32], pl.FP16],
++                out: pl.Out[pl.Tensor[[32, 32], pl.FP16]],
++            ) -> pl.Tensor[[32, 32], pl.FP16]:
++                current: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 4096)
++                stale: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 4096)
++                left: pl.Ptr = pl.tile.alloc(pl.Mem.Left, 1024)
++                seed: pl.Tile[[32, 32], pl.FP16, pl.MemRef(current, 1024, 2048), pl.Mem.Mat] = (
++                    pl.tile.load(pool, [0, 0], [32, 32], target_memory=pl.Mem.Mat)
++                )
++                gathered: pl.Tile[[32, 32], pl.FP16, pl.MemRef(stale, 0, 2048), pl.Mem.Mat] = (
++                    pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [32, 32])
++                )
++                sliced: pl.Tile[[16, 32], pl.FP16, pl.MemRef(stale, 1024, 1024), pl.Mem.Mat] = (
++                    pl.tile.slice(gathered, [16, 32], [16, 0])
++                )
++                transposed: pl.Tile[[32, 16], pl.FP16, pl.MemRef(stale, 1024, 1024), pl.Mem.Mat] = (
++                    pl.tile.transpose_view(sliced)
++                )
++                _extracted: pl.Tile[[16, 32], pl.FP16, pl.MemRef(left, 0, 1024), pl.Mem.Left] = (
++                    pl.tile.extract(sliced, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                )
++                return pl.tile.store(transposed, [0, 0], out)
++
++        program = Before
++        if same_allocation:
++            # Preserve the stale byte window while making its base identical to
++            # the destination. Comparing base identity alone must not miss it.
++            refs = _collect_named_tile_memrefs(Before, {"seed", "gathered"})
++            current_base, stale_base = refs["seed"].base_, refs["gathered"].base_
++
++            class ShareBase(ir.IRMutator):
++                def __init__(self):
++                    super().__init__()
++                    self.replacements = {}
++
++                def visit_var(self, op):
++                    tile_type = op.type
++                    if (
++                        isinstance(tile_type, ir.TileType)
++                        and tile_type.memref is not None
++                        and tile_type.memref.base_ is stale_base
++                    ):
++                        if op not in self.replacements:
++                            old = tile_type.memref
++                            new_memref = ir.MemRef(current_base, old.byte_offset_, old.size_, op.span)
++                            new_type = ir.TileType(
++                                tile_type.shape,
++                                tile_type.dtype,
++                                new_memref,
++                                tile_type.tile_view,
++                                tile_type.memory_space,
++                            )
++                            self.replacements[op] = ir.Var(op.name_hint, new_type, op.span)
++                        return self.replacements[op]
++                    return super().visit_var(op)
++
++            program = ShareBase().visit_program(Before)
++
++        after = passes.materialize_semantic_aliases()(program)
++        refs = _collect_named_tile_memrefs(after, {"seed", "gathered", "sliced", "transposed", "_extracted"})
++        for name in ("gathered", "sliced", "transposed"):
++            assert ir.MemRef.same_allocation(refs[name], refs["seed"])
++        assert refs["gathered"].byte_offset_.value == 1024
++        for name in ("sliced", "transposed"):
++            assert refs[name].byte_offset_.value == 2048
++            assert refs[name].size_ == 1024
++        assert not ir.MemRef.same_allocation(refs["_extracted"], refs["seed"])
++        assert refs["_extracted"].byte_offset_.value == 0
++        assert refs["_extracted"].size_ == 1024
++
++    def test_reanchor_does_not_alias_data_moving_transpose(self):
++        """Real transpose owns storage even when its input has been re-anchored."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[16, 32], pl.FP16],
++                out: pl.Out[pl.Tensor[[32, 16], pl.FP16]],
++            ) -> pl.Tensor[[32, 16], pl.FP16]:
++                current: pl.Ptr = pl.tile.alloc(pl.Mem.Vec, 1024)
++                stale: pl.Ptr = pl.tile.alloc(pl.Mem.Vec, 1024)
++                destination: pl.Ptr = pl.tile.alloc(pl.Mem.Vec, 1024)
++                scratch_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Vec, 1024)
++                seed: pl.Tile[[16, 32], pl.FP16, pl.MemRef(current, 0, 1024), pl.Mem.Vec] = (
++                    pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Vec)
++                )
++                gathered: pl.Tile[[16, 32], pl.FP16, pl.MemRef(stale, 0, 1024), pl.Mem.Vec] = (
++                    pl.tile.gather_row(seed, pool, [0, 0], [0, 0], [16, 32])
++                )
++                scratch: pl.Tile[[16, 32], pl.FP16, pl.MemRef(scratch_mem, 0, 1024), pl.Mem.Vec] = (
++                    pl.tile.create([16, 32], dtype=pl.FP16, target_memory=pl.Mem.Vec)
++                )
++                transposed: pl.Tile[[32, 16], pl.FP16, pl.MemRef(destination, 0, 1024), pl.Mem.Vec] = (
++                    pl.tile.transpose(gathered, 0, 1, scratch)
++                )
++                return pl.tile.store(transposed, [0, 0], out)
++
++        before = _collect_named_tile_memrefs(Before, {"transposed"})["transposed"]
++        after = passes.materialize_semantic_aliases()(Before)
++        refs = _collect_named_tile_memrefs(after, {"seed", "gathered", "transposed"})
++        assert ir.MemRef.same_allocation(refs["gathered"], refs["seed"])
++        assert ir.MemRef.same_allocation(refs["transposed"], before)
++        assert not ir.MemRef.same_allocation(refs["transposed"], refs["seed"])
++
++    def test_unsettled_loop_phi_defers_view_and_inplace_chain(self):
++        """A view must not hide an unresolved phi from a later in-place op."""
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[32, 32], pl.FP16],
++                flag: pl.Scalar[pl.INDEX],
++                out: pl.Out[pl.Tensor[[32, 32], pl.FP16]],
++            ) -> pl.Tensor[[32, 32], pl.FP16]:
++                first_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
++                second_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
++                phi_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
++                view_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
++                result_mem: pl.Ptr = pl.tile.alloc(pl.Mem.Mat, 2048)
++                first: pl.Tile[[32, 32], pl.FP16, pl.MemRef(first_mem, 0, 2048), pl.Mem.Mat] = (
++                    pl.tile.load(pool, [0, 0], [32, 32], target_memory=pl.Mem.Mat)
++                )
++                second: pl.Tile[[32, 32], pl.FP16, pl.MemRef(second_mem, 0, 2048), pl.Mem.Mat] = (
++                    pl.tile.load(pool, [0, 0], [32, 32], target_memory=pl.Mem.Mat)
++                )
++                for i in pl.range(2):
++                    if i < flag:
++                        selected: pl.Tile[[32, 32], pl.FP16, pl.MemRef(phi_mem, 0, 2048), pl.Mem.Mat] = (
++                            pl.yield_(first)
++                        )
++                    else:
++                        selected: pl.Tile[[32, 32], pl.FP16, pl.MemRef(phi_mem, 0, 2048), pl.Mem.Mat] = (
++                            pl.yield_(second)
++                        )
++                    viewed: pl.Tile[[32, 32], pl.FP16, pl.MemRef(view_mem, 0, 2048), pl.Mem.Mat] = (
++                        pl.tile.transpose_view(selected)
++                    )
++                    updated: pl.Tile[[32, 32], pl.FP16, pl.MemRef(result_mem, 0, 2048), pl.Mem.Mat] = (
++                        pl.tile.gather_row(viewed, pool, [0, 0], [0, 0], [32, 32])
++                    )
++                    pl.tile.store(updated, [0, 0], out)
++                return out
++
++        # Default MaterializeSemanticAliases has not selected a canonical phi
++        # destination yet. Neither the view nor its writer may pick one early.
++        after = passes.materialize_semantic_aliases()(Before)
++        ir.assert_structural_equal(after, Before)
++
++
++class TestScalarWhileNestedSemanticAliases:
++    """Scalar While must not hide existing nested For/Acc alias rules."""
++
++    def test_scalar_while_visits_nested_for_mat_carry(self):
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[16, 32], pl.FP16],
++                waves: pl.Scalar[pl.INDEX],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP16]],
++            ) -> pl.Tensor[[16, 32], pl.FP16]:
++                seed = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                for (wave,) in pl.while_(init_values=(0,)):
++                    pl.cond(wave < waves)
++                    for i, (carry,) in pl.range(2, init_values=(seed,)):
++                        replacement = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                        result = pl.yield_(replacement)
++                    _read_result = pl.tile.extract(result, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                    _wave_out = pl.yield_(wave + 1)
++                return out
++
++        refs = _collect_named_tile_memrefs(passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before)), {"seed", "replacement"})
++        assert ir.MemRef.same_allocation(refs["seed"], refs["replacement"])
++
++
++    def test_scalar_while_visits_accumulator_if_phi(self):
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                lhs: pl.Tensor[[16, 32], pl.FP16],
++                rhs: pl.Tensor[[32, 32], pl.FP16],
++                waves: pl.Scalar[pl.INDEX],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP32]],
++            ) -> pl.Tensor[[16, 32], pl.FP32]:
++                a_mat = pl.tile.load(lhs, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                a = pl.tile.move(a_mat, target_memory=pl.Mem.Left)
++                b_mat = pl.tile.load(rhs, [0, 0], [32, 32], target_memory=pl.Mem.Mat)
++                b = pl.tile.move(b_mat, target_memory=pl.Mem.Right)
++                previous = pl.tile.matmul(a, b)
++                for (wave,) in pl.while_(init_values=(0,)):
++                    pl.cond(wave < waves)
++                    if wave == 0:
++                        fresh = pl.tile.matmul(a, b)
++                        selected = pl.yield_(fresh)
++                    else:
++                        accumulated = pl.tile.matmul_acc(previous, a, b)
++                        selected = pl.yield_(accumulated)
++                    pl.tile.store(selected, [0, 0], out)
++                    _wave_out = pl.yield_(wave + 1)
++                return out
++
++        refs = _collect_named_tile_memrefs(passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before)), {"previous", "fresh", "accumulated"})
++        assert ir.MemRef.same_allocation(refs["previous"], refs["accumulated"])
++        assert ir.MemRef.same_allocation(refs["previous"], refs["fresh"])
++
++
++    def test_zero_trip_scalar_while_preserves_initial_payload(self):
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[16, 32], pl.FP16],
++                out: pl.Out[pl.Tensor[[16, 32], pl.FP16]],
++            ) -> pl.Tensor[[16, 32], pl.FP16]:
++                seed = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                for (wave,) in pl.while_(init_values=(0,)):
++                    pl.cond(wave < 0)
++                    for i, (carry,) in pl.range(2, init_values=(seed,)):
++                        replacement = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                        result = pl.yield_(replacement)
++                    _read_result = pl.tile.extract(result, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                    _wave_out = pl.yield_(wave + 1)
++                _read_seed = pl.tile.extract(seed, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                return out
++
++        after = passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before))
++        function = after.get_function("kernel")
++        assert isinstance(function.body, ir.SeqStmts)
++        body = function.body.stmts
++        while_nodes = [node for node in body if isinstance(node, ir.WhileStmt)]
++        assert len(while_nodes) == 1
++        while_node = while_nodes[0]
++        assert len(while_node.iter_args) == 1
++        assert isinstance(while_node.iter_args[0].initValue, ir.ConstInt)
++        assert while_node.iter_args[0].initValue.value == 0
++        # No reload may be hoisted out of the never-entered body. The final extract
++        # still reads the original initializer, not a value defined in the loop.
++        top_level_loads = [
++            node for node in body if isinstance(node, ir.AssignStmt)
++            and isinstance(node.value, ir.Call) and node.value.op.name == ir.get_op("tile.load").name
++        ]
++        assert [node.var.name_hint for node in top_level_loads] == ["seed"]
++        outside_reads = []
++
++        class OutsideReadCollector(ir.IRVisitor):
++            def __init__(self):
++                super().__init__()
++                self.in_while = False
++
++            def visit_while_stmt(self, node):
++                was_in_while = self.in_while
++                self.in_while = True
++                super().visit_while_stmt(node)
++                self.in_while = was_in_while
++
++            def visit_call(self, node):
++                if not self.in_while and node.op.name == ir.get_op("tile.extract").name:
++                    outside_reads.append(node.args[0].name_hint)
++                super().visit_call(node)
++
++        OutsideReadCollector().visit_stmt(function.body)
++        assert outside_reads == ["seed"]
++
++
++    def test_scalar_while_preserves_independent_old_carry_read(self):
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[16, 32], pl.FP16],
++                waves: pl.Scalar[pl.INDEX],
++                out: pl.Out[pl.Tensor[[32, 32], pl.FP16]],
++            ) -> pl.Tensor[[32, 32], pl.FP16]:
++                seed = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                for (wave,) in pl.while_(init_values=(0,)):
++                    pl.cond(wave < waves)
++                    for i, (carry,) in pl.range(2, init_values=(seed,)):
++                        replacement = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                        old_view = pl.tile.reshape(carry, [16, 32])
++                        _read_old = pl.tile.extract(old_view, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                        result = pl.yield_(replacement)
++                    _read_result = pl.tile.extract(result, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                    _wave_out = pl.yield_(wave + 1)
++                return out
++
++        refs = _collect_named_tile_memrefs(passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before)), {"seed", "replacement", "old_view"})
++        assert ir.MemRef.same_allocation(refs["seed"], refs["old_view"])
++        assert not ir.MemRef.same_allocation(refs["seed"], refs["replacement"])
++
++
++    def test_scalar_while_keeps_two_simultaneously_live_carries_distinct(self):
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def kernel(
++                self,
++                pool: pl.Tensor[[32, 32], pl.FP16],
++                waves: pl.Scalar[pl.INDEX],
++                out: pl.Out[pl.Tensor[[32, 32], pl.FP16]],
++            ) -> pl.Tensor[[32, 32], pl.FP16]:
++                first = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                second = pl.tile.load(pool, [16, 0], [16, 32], target_memory=pl.Mem.Mat)
++                for (wave,) in pl.while_(init_values=(0,)):
++                    pl.cond(wave < waves)
++                    for i, (carry0, carry1) in pl.range(2, init_values=(first, second)):
++                        replacement0 = pl.tile.load(pool, [0, 0], [16, 32], target_memory=pl.Mem.Mat)
++                        replacement1 = pl.tile.load(pool, [16, 0], [16, 32], target_memory=pl.Mem.Mat)
++                        _read_first = pl.tile.extract(replacement0, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                        _read_second = pl.tile.extract(replacement1, 0, 0, [16, 32], target_memory=pl.Mem.Left)
++                        _result0, _result1 = pl.yield_(replacement0, replacement1)
++                    _wave_out = pl.yield_(wave + 1)
++                return out
++
++        refs = _collect_named_tile_memrefs(passes.materialize_semantic_aliases()(passes.init_mem_ref()(Before)), {"first", "second", "replacement0", "replacement1"})
++        assert not ir.MemRef.same_allocation(refs["first"], refs["second"])
++        assert not ir.MemRef.same_allocation(refs["replacement0"], refs["replacement1"])
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])
+diff --git a/tests/ut/jit/test_decorator.py b/tests/ut/jit/test_decorator.py
+index e3e64ca73..3a94fb4c0 100644
+--- a/tests/ut/jit/test_decorator.py
++++ b/tests/ut/jit/test_decorator.py
+@@ -2128,6 +2128,76 @@ class TestDynamicLocalTensorMetadata:
+         assert metas["flat"].shape == (128, t_dim)
+         assert metas["flat"].dtype == DataType.BF16
+ 
++    def test_reshape_dim_arithmetic_reaches_dependency(self):
++        """Flatten and offset cache views retain runtime descriptor dimensions."""
++        pages = DynDim(name="PAGES", literal="PAGES", static_bound=3)
++        seed = {
++            "src": TensorMeta(shape=(pages, 4160), dtype=DataType.INT8),
++            "out": TensorMeta(shape=(1, 128), dtype=DataType.INT8),
++        }
++
++        def body(src, out):
++            rows = pl.tensor.dim(src, 0)
++            width = pl.tensor.dim(src, 1)
++            flat = pl.reshape(src, [rows * width])
++            shifted = flat[64 : 64 + ((rows * width - 64) // 128) * 128]
++            keys = pl.reshape(shifted, [(rows * width - 64) // 128, 128])
++            return _synth_dim_kernel(keys, out)
++
++        local = _extract_local_tensor_metas(body, seed_meta=seed)
++        assert local["flat"].dtype == DataType.INT8
++        assert isinstance(local["flat"].shape[0], DynDim)
++        assert local["flat"].shape[0].synthesized
++        assert local["keys"].shape[1] == 128
++        metas, _ = _resolve_dep_call_metadata(_synth_dim_kernel, body, seed, {}, {})
++        assert metas["t"] == local["keys"]
++
++    def test_reshape_dim_arithmetic_rejects_unknown_scalar(self):
++        """Mixing an unrelated runtime scalar into a shape stays uninferred."""
++        pages = DynDim(name="PAGES", literal="PAGES", static_bound=3)
++        seed = {
++            "src": TensorMeta(shape=(pages, 4160), dtype=DataType.INT8),
++            "cfg": TensorMeta(shape=(1,), dtype=DataType.INT32),
++        }
++
++        def body(src, cfg):
++            rows = pl.tensor.dim(src, 0)
++            width = pl.tensor.read(cfg, [0])
++            flat = pl.reshape(src, [rows * width])
++            return flat
++
++        assert "flat" not in _extract_local_tensor_metas(body, seed_meta=seed)
++
++    def test_reshape_dim_arithmetic_full_compile(self, tmp_path, monkeypatch):
++        """The derived dimensions remain descriptor-based through codegen."""
++        torch = pytest.importorskip("torch")
++        monkeypatch.setenv("PTOAS_ROOT", str(tmp_path / "missing_ptoas"))
++
++        @jit.incore
++        def copy_key(keys: pl.Tensor, out: pl.Out[pl.Tensor]) -> pl.Tensor:
++            tile = pl.load(keys, [0, 0], [1, 128])
++            pl.store(tile, [0, 0], out)
++            return out
++
++        @jit
++        def entry(
++            src: pl.Tensor[[_M_1524, 4160], pl.INT8],
++            out: pl.Out[pl.Tensor[[1, 128], pl.INT8]],
++        ):
++            rows = pl.tensor.dim(src, 0)
++            width = pl.tensor.dim(src, 1)
++            flat = pl.reshape(src, [rows * width])
++            shifted = flat[64 : 64 + ((rows * width - 64) // 128) * 128]
++            keys = pl.reshape(shifted, [(rows * width - 64) // 128, 128])
++            return copy_key(keys, out)
++
++        compiled = entry.compile(
++            torch.empty(3, 4160, dtype=torch.int8),
++            torch.empty(1, 128, dtype=torch.int8),
++            config=RunConfig(platform="a2a3", save_kernels_dir=str(tmp_path / "compiled")),
++        )
++        assert compiled.output_dir is not None
++
+ 
+ # ---------------------------------------------------------------------------
+ # Per-rank sliced dispatch (chip_orch(x[r], ...)) and pld.window metadata.
+diff --git a/tests/ut/jit/test_spmd.py b/tests/ut/jit/test_spmd.py
+index f0674770e..bbd6a7860 100644
+--- a/tests/ut/jit/test_spmd.py
++++ b/tests/ut/jit/test_spmd.py
+@@ -25,6 +25,7 @@ import pypto.language as pl
+ import pytest
+ from pypto.jit.decorator import jit
+ from pypto.pypto_core import ir
++from pypto.runtime import RunConfig
+ 
+ # Module-level constants — the JIT specializer inlines module-level ints at
+ # their use sites, but does NOT capture function-local closure variables.
+@@ -35,6 +36,64 @@ _HALF = _HIDDEN // 2  # columns of `hidden` handled by each SPMD block
+ _CHUNKS = _HALF // _K_CHUNK  # pl.pipeline iterations per block
+ 
+ 
++def test_jit_inline_group_shared_inout_compiles_single_mix(tmp_path):
++    """Compile the actual JIT/cluster path, including post-call SSA aliases."""
++
++    @jit.incore
++    def cube(
++        a: pl.Tensor[[16, 16], pl.BF16],
++        b: pl.Tensor[[16, 16], pl.BF16],
++        c: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++    ):
++        left = pl.load(a, [0, 0], [16, 16], target_memory=pl.Mem.Mat)
++        right = pl.load(b, [0, 0], [16, 16], target_memory=pl.Mem.Mat)
++        c = pl.store(pl.matmul(left, right), [0, 0], c)
++        return c
++
++    @jit.incore
++    def vector(
++        c: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        x: pl.Tensor[[16, 16], pl.FP32],
++        y: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++    ):
++        value = pl.load(x, [0, 0], [16, 16])
++        y = pl.store(pl.add(value, value), [0, 0], y)
++        return c, y
++
++    @jit.inline
++    def group_wrapper(
++        a: pl.Tensor[[16, 16], pl.BF16],
++        b: pl.Tensor[[16, 16], pl.BF16],
++        c: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        x: pl.Tensor[[16, 16], pl.FP32],
++        y: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++    ):
++        with pl.cluster():
++            c = cube(a, b, c)
++            c, y = vector(c, x, y)
++        return c, y
++
++    @jit
++    def entry(
++        a: pl.Tensor[[16, 16], pl.BF16],
++        b: pl.Tensor[[16, 16], pl.BF16],
++        c: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++        x: pl.Tensor[[16, 16], pl.FP32],
++        y: pl.InOut[pl.Tensor[[16, 16], pl.FP32]],
++    ):
++        with pl.spmd(1, sync_start=True):
++            c, y = group_wrapper(a, b, c, x, y)
++        return c, y
++
++    compiled = entry.compile(
++        config=RunConfig(platform="a2a3", save_kernels=True, save_kernels_dir=str(tmp_path / "kernel"))
++    )
++    source = "\n".join(path.read_text() for path in (compiled.output_dir / "orchestration").glob("*.cpp"))
++    assert source.count("rt_submit_task(") == 1
++    assert "MixedKernels" in source
++    assert "set_require_sync_start(true)" in source
++
++
+ def test_jit_spmd_for_loop():
+     """``for i in pl.spmd(N)`` inside a plain @pl.jit entry compiles end-to-end."""
+     torch = pytest.importorskip("torch")
+diff --git a/tests/ut/language/parser/test_system_ops.py b/tests/ut/language/parser/test_system_ops.py
+index 782e05ce6..60d96092f 100644
+--- a/tests/ut/language/parser/test_system_ops.py
++++ b/tests/ut/language/parser/test_system_ops.py
+@@ -855,5 +855,41 @@ class TestLaunchShapeQueryParsing:
+             assert call.type.dtype == DataType.INT32
+ 
+ 
++def test_local_signal_round_trip():
++    """临时接口保留普通 GM Tensor、动态索引和 INT32 阈值。"""
++
++    @pl.program
++    class Before:
++        @pl.function(type=pl.FunctionType.AIV)
++        def kernel(
++            self, signal: pl.InOut[pl.Tensor[[256], pl.INT32]],
++            offset: pl.Scalar[pl.INDEX], tag: pl.Scalar[pl.INT32],
++        ) -> pl.Tensor[[256], pl.INT32]:
++            pl.system.signal_notify(signal, [offset], tag)
++            pl.system.signal_wait(signal, [offset], tag)
++            return signal
++
++    printed = Before.as_python()
++    assert "pl.system.signal_notify(" in printed
++    assert "pl.system.signal_wait(" in printed
++    ir.assert_structural_equal(Before, pl.parse_program(printed))
++
++
++@pytest.mark.parametrize("dtype", [DataType.INT64, DataType.FP32])
++def test_local_signal_rejects_unsupported_storage(dtype):
++    """不允许把旧 INT64 进度或浮点 Tensor 静默当成 INT32 信号。"""
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], dtype), span)
++    with pytest.raises(ValueError, match="one-dimensional INT32"):
++        system_ops.signal_notify(signal, [0], 1)
++
++
++def test_local_signal_rejects_overflowing_literal():
++    span = ir.Span.unknown()
++    signal = ir.Var("signal", ir.TensorType([64], DataType.INT32), span)
++    with pytest.raises(ValueError, match="outside INT32"):
++        system_ops.signal_wait(signal, [0], 1 << 31)
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])

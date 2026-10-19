@@ -1,0 +1,119 @@
+/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-gm-subview-20261019/python/pypto/__init__.py /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-gm-subview-20261019/python/pypto/pypto_core.cpython-310-aarch64-linux-gnu.so
+bringing up nodes...
+bringing up nodes...
+
+.................................................F.F                     [100%]
+=================================== FAILURES ===================================
+_ TestConvertTensorToTileOps.test_explicit_gm_view_slice_stays_descriptor_before_load _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <transforms.test_convert_tensor_to_tile_ops.TestConvertTensorToTileOps object at 0xfffde51e8940>
+
+    def test_explicit_gm_view_slice_stays_descriptor_before_load(self):
+        """整行GM子视图不提前搬运大span，后续显式load保持原读取范围。"""
+    
+        @pl.program
+        class Before:
+            @pl.function(type=pl.FunctionType.InCore)
+            def kernel(self, x: pl.Tensor[[16, 512], pl.BF16],
+                       out: pl.Out[pl.Tensor[[2, 512], pl.BF16]]) -> pl.Tensor[[2, 512], pl.BF16]:
+                span = pl.tensor.slice(x, [4, 512], [3, 0], gm_view=True)
+                pitched = pl.tensor.view(span, shape=[2, 1024])
+                value = pl.tile.load(pitched, [0, 0], [2, 512])
+                result = pl.tile.store(value, [0, 0], out)
+                return result
+    
+>       After = passes.convert_tensor_to_tile_ops()(Before)
+E       pypto.Error: Post-verification failed after pass 'ConvertTensorToTileOps':
+E       IR Verification Report
+E       ======================
+E       Total diagnostics: 1 (1 errors, 0 warnings)
+E       
+E       [1] ERROR - IncoreTileOps
+E         Message: Tensor op 'tensor.slice' found in InCore function (should have been converted)
+E         Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-gm-subview-20261019/tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py:585:17
+E         Error Code: 0
+E       
+E       Status: FAILED (1 error(s) found)
+
+tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py:591: Error
+_ TestB01PrecisionAndRowExpandAddCodegen.test_explicit_gm_view_subview_advances_pointer_once _
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <test_pto_codegen_ops.TestB01PrecisionAndRowExpandAddCodegen object at 0xfffde0aac490>
+
+    def test_explicit_gm_view_subview_advances_pointer_once(self):
+        """非零行偏移必须传到后续view，不额外加载四行中间span。"""
+        @pl.program
+        class Prog:
+            @pl.function(type=pl.FunctionType.InCore)
+            def kernel(self, x: pl.Tensor[[16, 512], pl.BF16],
+                       out: pl.Out[pl.Tensor[[2, 512], pl.BF16]]):
+                span = pl.tensor.slice(x, [4, 512], [3, 0], gm_view=True)
+                pitched = pl.tensor.view(span, shape=[2, 1024])
+                value = pl.load(pitched, [0, 0], [2, 512])
+                pl.store(value, [0, 0], out)
+    
+>       mlir = self._generate_mlir(Prog)
+
+tests/ut/codegen/test_pto_codegen_ops.py:811: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/codegen/test_pto_codegen_ops.py:823: in _generate_mlir
+    optimized = PassManager.get_strategy(OptimizationStrategy.Default).run_passes(program_cls)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.ir.pass_manager.PassManager object at 0xfffde0aac550>
+input_ir = <pypto.pypto_core.ir.Program object at 0xfffde071d570>
+dump_ir = False, output_dir = None, prefix = 'pl'
+
+    def run_passes(
+        self,
+        input_ir: core_ir.Program,
+        dump_ir: "bool | PassDumpLevel" = False,
+        output_dir: str | None = None,
+        prefix: str = "pl",
+    ) -> core_ir.Program:
+        """Execute all passes in sequence on a Program.
+    
+        Args:
+            input_ir: Input Program to transform
+            dump_ir: Per-pass dump control. Accepts a :class:`PassDumpLevel`
+                (``NONE`` / ``CONCISE`` / ``EXPLICIT``) or a ``bool``
+                (``True`` -> ``CONCISE``, ``False`` -> ``NONE``). Default: no dump.
+            output_dir: Directory to dump IR files. Required when dumping.
+            prefix: Module prefix for python_print (default: 'pl')
+    
+        Returns:
+            Transformed Program after all passes have been applied
+    
+        Raises:
+            ValueError: If dumping is enabled but output_dir is None
+            RuntimeError: If the run-time memory planner or Buffer IR mode differs
+                from the configuration used to construct the PassManager
+                (see _check_planner_consistency).
+        """
+        self._check_planner_consistency()
+        dump_level = coerce_dump_level(dump_ir)
+        if dump_level is PassDumpLevel.NONE:
+            prof = CompileProfiler.current()
+            if prof is not None:
+                return self._run_with_profiling(input_ir, prof)
+>           return self._pipeline.run(input_ir)
+E           pypto.Error: Post-verification failed after pass 'ConvertTensorToTileOps':
+E           IR Verification Report
+E           ======================
+E           Total diagnostics: 1 (1 errors, 0 warnings)
+E           
+E           [1] ERROR - IncoreTileOps
+E             Message: Tensor op 'tensor.slice' found in InCore function (should have been converted)
+E             Location: /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-gm-subview-20261019/tests/ut/codegen/test_pto_codegen_ops.py:806:17
+E             Error Code: 0
+E           
+E           Status: FAILED (1 error(s) found)
+
+python/pypto/ir/pass_manager.py:461: Error
+- generated xml file: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multishape_spmd_20261016/dynamic_full_pipeline_20261017/parallel_20261018/gm_subview_pair_dma_20261019/ut_v2.xml -
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_convert_tensor_to_tile_ops.py::TestConvertTensorToTileOps::test_explicit_gm_view_slice_stays_descriptor_before_load
+FAILED tests/ut/codegen/test_pto_codegen_ops.py::TestB01PrecisionAndRowExpandAddCodegen::test_explicit_gm_view_subview_advances_pointer_once
+2 failed, 50 passed in 6.78s

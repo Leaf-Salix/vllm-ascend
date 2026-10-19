@@ -1,0 +1,58 @@
+--- a/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp
++++ b/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp
+@@ -905,15 +905,15 @@
+ 
+     const auto& op_name = call->op_->name_;
+ 
+-    // remote_load is a non-"tile." op that nevertheless produces a TileType
+-    // whose valid_shape can embed variables remapped by this pass. Rebuild both
+-    // the call and its defining Var together; otherwise a later Substitute on
+-    // the consumer remaps only the Var's type and creates a definition-less
+-    // clone (printed as __FREE_VAR).
+-    if (IsOp(call, "pld.tile.remote_load")) {
++    // remote_load 的 valid_shape、GM view/slice 的 shape/stride 都可能引用
++    // 本 pass 重建的 Scalar。必须一起重写 Call 类型和定义 Var，再登记映射；
++    // 只替换参数、保留旧类型会让消费者单独克隆 Var，产生没有定义的引用。
++    // 这是描述符元数据更新，不物化 Tile，也不改变 GM 别名的物理地址。
++    if (IsOp(call, "pld.tile.remote_load") || IsOp(call, "tensor.view") ||
++        IsOp(call, "tensor.slice")) {
+       auto new_value = As<Call>(Substitute(assign->value_, ctx.var_map));
+       INTERNAL_CHECK_SPAN(new_value, assign->span_)
+-          << "FlattenTileNdTo2D: remote_load substitution must remain a Call";
++          << "FlattenTileNdTo2D: descriptor substitution must remain a Call";
+       if (new_value.get() == call.get()) {
+         result.push_back(stmt);
+         ctx.Insert(assign->var_, assign->var_);
+--- a/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py
++++ b/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py
+@@ -33,6 +33,30 @@
+ _OP_TILE_MATMUL_ACC = ir.get_op("tile.matmul_acc").name
+ _OP_TILE_RESHAPE = ir.get_op("tile.reshape").name
+ _OP_TILE_STORE = ir.get_op("tile.store").name
++
++
++def test_runtime_gm_view_keeps_definition_identity():
++    """Tile Scalar 参与 GM shape 时，重写后 load 必须仍引用对应的定义。"""
++    @pl.program
++    class Repro:
++        @pl.function(type=pl.FunctionType.InCore)
++        def core(self, x: pl.Tensor[[4, 512], pl.BF16],
++                 indices: pl.Tensor[[1, 16], pl.INT32],
++                 out: pl.Tensor[[2, 512], pl.BF16]) -> pl.Tensor[[2, 512], pl.BF16]:
++            ids = pl.tile.load(indices, [0, 0], [1, 16])
++            pitch = pl.cast(pl.tile.read(ids, [0, 0]), pl.INDEX)
++            if pitch == 1024:
++                alias = pl.tensor.view(x, shape=[2, pitch])
++                value = pl.tile.load(alias, [0, 0], [2, 512])
++                out = pl.tile.store(value, [0, 0], out)
++            return out
++
++    from pypto.ir.printer import python_print
++
++    # 打印器的 FREE_VAR 标记基于 IR Var 对象定义集合，不只比较变量名。
++    assert "__FREE_VAR" not in python_print(Repro)
++    result = passes.flatten_tile_nd_to_2d()(Repro)
++    assert "__FREE_VAR" not in python_print(result)
+ 
+ # ----------------------------------------------------------------------------
+ # Helpers
