@@ -157,3 +157,13 @@ CPU及关闭代码等价通过；B28完整冻结验证通过，但同轮当前11
 1156.20μs，慢3.76，仅2/5窗快。未达20μs，结束、不采用、不扩档，不扫
 核编号。完整过程见PREFIX_KV_BALANCE_DESIGN.md及PERFORMANCE报告。
 正式保持Score区间版，所有任务终态；没有把跨轮1166.04→1152.44计成收益。
+
+## N128宽面板流水已结束
+
+实际生成单96KiB QK/独立8KiB WS Acc，前面板WS0位于当前QK的FIX复用
+等待前，每1024列QK/FIX各16次、WS STORE8次；两档完整精确/状态/保护/
+metadata/padding/图/代际通过。完整L1却全部五窗更慢：B16当前795.54→
+候选823.50，B28为1175.42→1223.84μs。不采用、不扩档、不扫宽度，正式
+仍13259f92。SCORE_WIDE_PIPELINE_DESIGN及PERFORMANCE保存全部证据，
+真实私有N128与公共选择条件64显式区分。下一整段方向的旧负例差异审查
+见NEXT_WAVE_COMPOSITION_REVIEW.md，尚无新交错候选或任务。
