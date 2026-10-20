@@ -17949,3 +17949,60 @@ L1为首个incore开始至最后一个incore结束的AICore首尾跨度，包含
 七个`h{history}_b{batch}_matrix_v1/result.json`；取值字段分别为
 `l1.outer.statistics_us.multitask_current`、
 `l1.statistics_us.multitask_current`与`l1.statistics_us.single_spmd`。
+
+## 672. 2026-10-20：补入Native的七档四路对比及版本、布局和精度说明
+
+按用户要求在671节正式PTO数据上补入10月20日已有Native实测，最后一列
+改为Native与动态单SPMD的均值对比，以单SPMD mean为分母。本节只整理
+已有记录，没有新增设备测试，也没有恢复暂停中的优化。
+
+**Native列仅代表当前可获取版本的实测值。按用户提供的信息，客户侧优化
+版本会有更好的性能；本表不代表客户侧最终性能，也不代表Native性能上限。**
+当前未取得客户侧对应七档的实测值，不将其性能差额计入此表。
+
+单位μs，各耗时列均为min / mean / max。最后一列由未舍入的原始均值计算：
+`(Native mean − 单SPMD mean) / 单SPMD mean × 100%`。
+该比例不是以Native为分母的耗时降幅。
+
+| 档位 | Native（TND） | 多task含AICPU | 多task仅L1 | 动态单SPMD L1 | Native vs 单SPMD |
+|---|---|---|---|---|---|
+| 128K/B4 | 769.50 / 793.88 / 828.00 | 569.42 / 602.40 / 619.60 | 476.78 / 483.55 / 497.10 | 468.54 / 480.90 / 503.42 | 65.08% |
+| 128K/B8 | 875.00 / 888.98 / 916.75 | 689.40 / 758.51 / 830.08 | 603.40 / 621.55 / 664.38 | 625.26 / 632.06 / 644.70 | 40.65% |
+| 128K/B16 | 1160.00 / 1178.23 / 1212.00 | 930.12 / 986.24 / 1083.50 | 821.40 / 832.97 / 843.04 | 792.86 / 801.68 / 808.24 | 46.97% |
+| 128K/B24 | 1336.00 / 1342.88 / 1351.00 | 1142.66 / 1187.00 / 1301.40 | 1043.20 / 1058.38 / 1090.52 | 1031.06 / 1038.21 / 1046.76 | 29.35% |
+| 128K/B28 | 1688.50 / 1707.72 / 1735.00 | 1266.16 / 1345.30 / 1479.36 | 1173.48 / 1191.71 / 1210.76 | 1167.84 / 1172.86 / 1184.96 | 45.60% |
+| 8K/B16 | 785.75 / 804.48 / 860.50 | 725.74 / 757.28 / 790.40 | 642.02 / 653.45 / 673.56 | 629.52 / 638.35 / 646.62 | 26.02% |
+| 8K/B32 | 1090.75 / 1111.89 / 1172.25 | 1051.00 / 1084.92 / 1149.28 | 946.08 / 968.45 / 991.28 | 942.58 / 947.04 / 951.64 | 17.41% |
+
+范围统一为HC_pre＋输入RMSNorm＋CSA＋HC_post，S6、NZ2、正式W8A8第4层、
+单卡TP1。Native使用CANN 9.2、npugraph_ex、dynamic=False、静态编译、
+SuperKernel及inplace_pass，已核验实际编译安装和trace，统计30次；
+PTO沿用671节正式plan_workers_v1与同轮单SPMD的五窗结果。
+
+Native列为Profiler外层全流设备跨度，多task外层为NPU Event，L1为
+incore最早开始至最晚结束，包含内部任务间隙。Native与本表最新PTO
+来自不同测量轮次，且外层与L1边界不同；最后一列是上述历史口径的
+对照，不能作为四路同轮A/B收益或整模型吞吐提升，也不能把外层减L1
+直接当作纯AICPU耗时。
+
+布局按当前源码区分：Native attention传入`layout_q="TND"`；当前动态
+单SPMD直接消费Native的`query_start_loc`、`seq_lens`及TND请求边界，
+内部使用展平view。固定S6时可以按B×S理解连续形状，但不能据此把它
+标成独立BSH算子接口。对应
+[Native调用](../../vllm_ascend/attention/dsa_v1.py)与
+[单SPMD请求边界](../../vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/request_geometry.py)。
+
+精度结论与计时结果分别保留：Native与PTO浮点输出非bit一致；已测
+简单重复类问题输出token一致，复杂问题存在token差异；DSpark接受
+表现随问题和实现组合变化，各有优劣，不能认定某一路始终更好。
+这些token及接受统计来自既有整模型用例，不是本轮最新动态单SPMD
+版本的新增整模型验收；也不能据token不同直接判断哪一路答案更正确。
+详见[简单用例](matched_requests_20261001/RESULTS.md)与
+[复杂混合用例](low_acceptance_20261001/RESULTS.md)。
+
+原始性能证据：
+[Native七档](csa_five_way_latest_20261020/PERFORMANCE.json)中每档
+`evidence.h{history}_b{batch}.native.samples_us`（本节计算mean，
+不沿用旧表的median），以及
+[PTO七档](csa_multitask_backport_20261020/MATRIX_cooperative_policy_v1_matrix_v1.json)；
+PTO逐窗字段及路径见671节。
