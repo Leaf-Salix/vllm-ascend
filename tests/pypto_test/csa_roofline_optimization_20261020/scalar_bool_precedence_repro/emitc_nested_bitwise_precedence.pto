@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch=a3 %s -o - | FileCheck %s
+//
+// 低优先级子表达式必须保留分组；不能把 a & b & (c | d) & e
+// 展平成 (a & b & c | d) & e。CPU真值表回归另外原样执行生成函数。
+module {
+  func.func @mixed_bool(%a: i1, %b: i1, %c: i1, %d: i1, %e: i1) -> i1 {
+    %ab = arith.andi %a, %b : i1
+    %cd = arith.ori %c, %d : i1
+    %x = arith.andi %ab, %cd : i1
+    %y = arith.andi %x, %e : i1
+    return %y : i1
+  }
+  func.func @mixed_bits(%a: i32, %b: i32, %c: i32, %d: i32) -> i32 {
+    %bc = arith.ori %b, %c : i32
+    %bcd = arith.xori %bc, %d : i32
+    %result = arith.andi %a, %bcd : i32
+    return %result : i32
+  }
+}
+// CHECK-LABEL: mixed_bool(
+// CHECK: bool [[OR:v[0-9]+]] = {{.*}} | {{.*}};
+// CHECK: return {{.*}} & [[OR]]{{.*}};
+// CHECK-LABEL: mixed_bits(

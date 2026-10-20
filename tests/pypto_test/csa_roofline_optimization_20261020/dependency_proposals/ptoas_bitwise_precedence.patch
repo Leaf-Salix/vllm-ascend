@@ -1,0 +1,33 @@
+diff --git a/tools/ptoas/ptoas_pipeline.cpp b/tools/ptoas/ptoas_pipeline.cpp
+index 54be74b5..f7e579b5 100644
+--- a/tools/ptoas/ptoas_pipeline.cpp
++++ b/tools/ptoas/ptoas_pipeline.cpp
+@@ -46,14 +46,17 @@ struct ApplySIMTEntryNoInlinePass final
+ /// parentheses around a nested expression. Keep conditional expressions as
+ /// explicit temporaries when another C expression consumes them so a ternary
+ /// can never be flattened into an arithmetic expression with changed meaning.
++/// 同一问题也会改变嵌套 & / | / ^ 的分组。将低优先级的位或、位异或和逻辑
++/// 组合保留为普通SSA临时量；后续C++编译器仍可优化它们，不引入volatile访存。
+ struct FormEmitCExpressionsCompatPass final
+     : public PassWrapper<FormEmitCExpressionsCompatPass,
+                          OperationPass<ModuleOp>> {
+   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(FormEmitCExpressionsCompatPass)
+ 
+-  static bool containsConditionalOperator(emitc::ExpressionOp expression) {
++  static bool requiresExplicitTemporary(emitc::ExpressionOp expression) {
+     for (Operation &op : expression.getBody()->without_terminator()) {
+-      if (isa<emitc::ConditionalOp>(op)) {
++      if (isa<emitc::ConditionalOp, emitc::BitwiseOrOp, emitc::BitwiseXorOp,
++              emitc::LogicalAndOp, emitc::LogicalOrOp>(op)) {
+         return true;
+       }
+     }
+@@ -83,7 +86,7 @@ struct FormEmitCExpressionsCompatPass final
+           continue;
+         }
+ 
+-        if (containsConditionalOperator(producer)) {
++        if (requiresExplicitTemporary(producer)) {
+           producer.setDoNotInline(true);
+           changed = true;
+           continue;
