@@ -1,0 +1,1085 @@
+{
+  "passed": true,
+  "ir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/score_split_pool/cpu_b28_v1/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/score_split_pool/cpu_b28_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "dynamic_axes": 58,
+  "root_tensors": 130,
+  "single_mix": true,
+  "allocation_totals": {
+    "cube_schedule": {
+      "pl.Mem.Vec": 16384,
+      "pl.Mem.Left": 65536,
+      "pl.Mem.Acc": 131072,
+      "pl.Mem.Right": 65536,
+      "pl.Mem.Mat": 475136
+    },
+    "vector_schedule": {
+      "pl.Mem.Vec": 163872
+    }
+  },
+  "qk_acc": [
+    {
+      "name": "split_qk_acc0_inline4744__ssa_v0",
+      "line": 2403,
+      "memory": [
+        "mem_acc_366",
+        0,
+        49152
+      ],
+      "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+      "loops": [
+        "buf_item_inline4787__idx_v0"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_qk_acc1_inline4756__ssa_v0",
+      "line": 2412,
+      "memory": [
+        "mem_acc_366",
+        49152,
+        49152
+      ],
+      "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+      "loops": [
+        "buf_item_inline4787__idx_v0"
+      ],
+      "in_wave": false
+    }
+  ],
+  "ws_pool": {
+    "name": "split_ws_pool_inline4778__ssa_v0",
+    "line": 2415,
+    "memory": [
+      "mem_acc_366",
+      98304,
+      32768
+    ],
+    "operation": "pl.tile.create([16, 512], dtype=pl.FP32, target_memory=pl.Mem.Acc)",
+    "loops": [
+      "buf_item_inline4787__idx_v0"
+    ],
+    "in_wave": false
+  },
+  "slots": [
+    {
+      "name": "split_ws_slot_inline4757__ssa_v1",
+      "line": 2759,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__iter_v1, [16, 64], [0, 0])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v2",
+      "line": 2902,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v5, [16, 64], [0, 64])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v3",
+      "line": 3045,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v7, [16, 64], [0, 128])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v4",
+      "line": 3188,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v9, [16, 64], [0, 192])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v5",
+      "line": 3331,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v11, [16, 64], [0, 256])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v6",
+      "line": 3474,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v13, [16, 64], [0, 320])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v7",
+      "line": 3617,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v15, [16, 64], [0, 384])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v8",
+      "line": 3761,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v17, [16, 64], [0, 448])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v9",
+      "line": 3908,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v19, [16, 64], [0, 0])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v10",
+      "line": 4051,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v21, [16, 64], [0, 64])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v11",
+      "line": 4194,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v23, [16, 64], [0, 128])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v12",
+      "line": 4337,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v25, [16, 64], [0, 192])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v13",
+      "line": 4480,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v27, [16, 64], [0, 256])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v14",
+      "line": 4623,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v29, [16, 64], [0, 320])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_slot_inline4757__ssa_v15",
+      "line": 4664,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v31, [16, 64], [0, 384])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_last_slot_inline4712__ssa_v0",
+      "line": 4685,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.slice(split_ws_pool_inline4778__ssa_v33, [16, 64], [0, 448])",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "ws_init": [
+    {
+      "name": "split_ws_first_inline4746__ssa_v1",
+      "line": 2762,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v1, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v1, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v2",
+      "line": 2905,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v2, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v2, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v3",
+      "line": 3048,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v3, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v3, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v4",
+      "line": 3191,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v4, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v4, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v5",
+      "line": 3334,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v5, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v5, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v6",
+      "line": 3477,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v6, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v6, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v7",
+      "line": 3620,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v7, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v7, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v8",
+      "line": 3764,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v8, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v8, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v9",
+      "line": 3911,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v9, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v9, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v10",
+      "line": 4054,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v10, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v10, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v11",
+      "line": 4197,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v11, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v11, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v12",
+      "line": 4340,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v12, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v12, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v13",
+      "line": 4483,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v13, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v13, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v14",
+      "line": 4626,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v14, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v14, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_inline4746__ssa_v15",
+      "line": 4667,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_slot_inline4757__ssa_v15, split_coefficient0_inline4750__ssa_v0, split_right0_inline4741__ssa_v15, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_first_last_inline4708__ssa_v0",
+      "line": 4688,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_last_slot_inline4712__ssa_v0, split_coefficient0_inline4750__ssa_v0, split_right0_last_inline4725__ssa_v0, pl.const(1, pl.BOOL))",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "ws_acc": [
+    {
+      "name": "split_ws_done_inline4710__ssa_v1",
+      "line": 2765,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v1, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v1)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v2",
+      "line": 2908,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v2, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v2)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v3",
+      "line": 3051,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v3, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v3)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v4",
+      "line": 3194,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v4, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v4)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v5",
+      "line": 3337,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v5, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v5)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v6",
+      "line": 3480,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v6, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v6)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v7",
+      "line": 3623,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v7, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v7)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v8",
+      "line": 3767,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v8, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v8)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v9",
+      "line": 3914,
+      "memory": [
+        "mem_acc_366",
+        98304,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v9, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v9)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v10",
+      "line": 4057,
+      "memory": [
+        "mem_acc_366",
+        102400,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v10, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v10)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v11",
+      "line": 4200,
+      "memory": [
+        "mem_acc_366",
+        106496,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v11, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v11)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v12",
+      "line": 4343,
+      "memory": [
+        "mem_acc_366",
+        110592,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v12, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v12)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v13",
+      "line": 4486,
+      "memory": [
+        "mem_acc_366",
+        114688,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v13, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v13)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v14",
+      "line": 4629,
+      "memory": [
+        "mem_acc_366",
+        118784,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v14, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v14)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_inline4710__ssa_v15",
+      "line": 4670,
+      "memory": [
+        "mem_acc_366",
+        122880,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_inline4746__ssa_v15, split_coefficient1_inline4754__ssa_v0, split_right1_inline4713__ssa_v15)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_ws_done_last_inline4707__ssa_v0",
+      "line": 4691,
+      "memory": [
+        "mem_acc_366",
+        126976,
+        4096
+      ],
+      "operation": "pl.tile.matmul_acc(split_ws_first_last_inline4708__ssa_v0, split_coefficient1_inline4754__ssa_v0, split_right1_last_inline4709__ssa_v0)",
+      "loops": [
+        "buf_item_inline4787__idx_v0",
+        "(buf_score_step_inline4736__idx_v0, (split_ws_pool_inline4778__iter_v1,))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "counts_per_1024": {
+    "qk_mma": 32,
+    "qk_fix": 32,
+    "ws_init": 16,
+    "ws_acc": 16,
+    "ws_store": 2
+  },
+  "early_fix_edges": [
+    {
+      "panel": 0,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 1,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 1,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 2,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 2,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 3,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 3,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 4,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 4,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 5,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 5,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 6,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 6,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 7,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 7,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 8,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 8,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 9,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 9,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": [
+        "EVENT_ID2"
+      ]
+    },
+    {
+      "panel": 10,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 10,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 11,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 11,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 12,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 12,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 13,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 13,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 14,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [
+        "EVENT_ID0"
+      ],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 14,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [
+        "EVENT_ID1"
+      ],
+      "wait": []
+    },
+    {
+      "panel": 15,
+      "edge": "QK0_FIX_to_QK1",
+      "set": [],
+      "wait": [
+        "EVENT_ID1"
+      ]
+    },
+    {
+      "panel": 15,
+      "edge": "QK1_FIX_to_previous_WS",
+      "set": [],
+      "wait": []
+    }
+  ],
+  "pool_overwrite_dependency": {
+    "event": "EVENT_ID2",
+    "qk9_fix_already_submitted": true,
+    "acquire_before_ws8_overwrite": true
+  },
+  "changed_functions": [
+    "_indexer_score_cube_split_store"
+  ],
+  "device_or_performance_proven": false,
+  "note": "机制/地址/事件证据不代替真机精度、完整L1或实际引擎重叠"
+}
