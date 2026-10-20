@@ -126,6 +126,10 @@ def combine(row, vector, ports, memory):
         l0b_current_assignment_us=pb,
         hbm_cold_max_reuse_read_us=memory["cold_read_max_reuse_us"],
         hbm_cold_per_query_read_writeback_us=memory["cold_read_writeback_per_query_us"],
+        # 用户要求的串行对照：表内四项完全不重叠时求和。
+        # 使用未取整原值；这不是阶段DAG串行模拟，也不含尚未建模的控制开销。
+        serial_table_sum_min_us=c+vlow+pb+memory["cold_read_max_reuse_us"],
+        serial_table_sum_max_us=c+vhigh+pb+memory["cold_read_writeback_per_query_us"],
         hot_capacity_resource_floor_us=hot, hot_generic_resource_model_us=hot_generic,
         cold_resource_floor_us=cold_min, cold_per_query_writeback_model_us=cold_scenario,
         actual_dynamic_l1_us=actual, actual_over_hot_resource_floor=actual/hot,
@@ -213,15 +217,21 @@ def report_markdown(report):
         "不是实测波动或所有可能实现的严格上下界。冷HBM两端分别是假设最大KV复用的"
         "只读冷供给，以及逐query供给并在窗口内完成外部输出写回。",
         "",
-        "| 档位 | Cube最忙核 | Vector服务模型 | L1→L0B最忙核 | 冷HBM场景 | 动态实测L1 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| 档位 | Cube最忙核 | Vector服务模型 | L1→L0B最忙核 | 冷HBM场景 | 串行总时间 | 动态实测L1 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
         lines.append(f"| {case_name(r)} | {r['cube_current_assignment_us']:.2f} | "
                      f"{r['vector_ideal_reduction_us']:.2f}～{r['vector_generic_reduction_max_us']:.2f} | "
                      f"{r['l0b_current_assignment_us']:.2f} | {r['hbm_cold_max_reuse_read_us']:.2f}～"
-                     f"{r['hbm_cold_per_query_read_writeback_us']:.2f} | {r['actual_dynamic_l1_us']:.2f} |")
+                     f"{r['hbm_cold_per_query_read_writeback_us']:.2f} | "
+                     f"{r['serial_table_sum_min_us']:.2f}～{r['serial_table_sum_max_us']:.2f} | "
+                     f"{r['actual_dynamic_l1_us']:.2f} |")
     lines += [
+        "",
+        "**串行总时间 = Cube + Vector + L1→L0B + 冷HBM**，按表内四项完全不重叠求和，"
+        "合计使用未取整原值。它是资源串行情景对照，不是当前代码的实测或完整阶段DAG"
+        "串行模拟；仍未计入Scalar、通知、指令启动等尚未定量的开销，不能称为真实耗时上界。",
         "",
         "下面取资源最大值。热起始一列允许起始L2中最多已有192MiB只读输入；仍受Cube、"
         "Vector及片上端口限制。冷场景一列增加外部输入首次供给。两者均没有将未知L2"
@@ -395,6 +405,7 @@ def main():
             "Vector归约给理想/通用实现敏感性，末级merge给exhausted处理量范围。",
             "HBM冷/热条件明确分开，GM总请求不等于HBM事务。",
             "L2实际聚合带宽未知，以2/4/6/7TB/s做条件分析，不标成实测规格。",
+            "serial_table_sum是表内Cube、Vector、L0B、冷HBM的无重叠算术和，不是完整串行执行时延。",
             "数学与输入保持不变；没有新的NPU运行、算法优化或push。",
         ],
         rows=rows,
