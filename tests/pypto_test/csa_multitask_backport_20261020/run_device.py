@@ -224,8 +224,8 @@ def main():
         raise ValueError("功能用例不采外层或L1性能")
     if args.capture_level4 and (not args.functional_only or args.current or args.compile_only or args.parse_only):
         raise ValueError("L4补采仅支持单一候选的functional-only设备模式")
-    if args.boundary_replay and (args.batch < 2 or args.history < 2):
-        raise ValueError("metadata/padding用例要求batch>=2且history>=2")
+    if args.boundary_replay and (args.batch < 1 or args.history < 2):
+        raise ValueError("metadata用例要求batch>=1且history>=2；B1只验证长度/页表变化")
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选及attempt必须是标识符")
     if args.current and (not args.current.isidentifier() or args.current == args.candidate):
@@ -253,6 +253,8 @@ def main():
         indexer_page_pattern=args.indexer_page_pattern,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
     )
+    # 初始来源清单保持原样；用户后来增加的测试范围单独记录。
+    report["requested_test_standard"] = json.loads((HERE / "CASE_STANDARD.json").read_text())
     # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
     report["provenance"]["initial_candidate"] = report["provenance"].pop("candidate", None)
     report["provenance"]["candidate"] = args.candidate

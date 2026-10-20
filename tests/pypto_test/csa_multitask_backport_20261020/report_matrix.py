@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""仅汇总指定冻结候选的一轮七档；逐域等权后按128K:8K=8:2计收益。"""
+"""汇总指定冻结候选的当前八档；旧七档显式使用--legacy-seven复算。"""
 
 import argparse
 import json
@@ -8,18 +8,20 @@ from pathlib import Path
 
 from summarize import HERE, summarize
 
-CASES = [(131072, b) for b in (4, 8, 16, 24, 28)] + [(8192, b) for b in (16, 32)]
+LEGACY_CASES = [(131072, b) for b in (4, 8, 16, 24, 28)] + [(8192, b) for b in (16, 32)]
+CASES = [tuple(case) for case in json.loads((HERE / "CASE_STANDARD.json").read_text())["cases"]]
 
 
-def build(candidate, attempt, case_attempts=None):
+def build(candidate, attempt, case_attempts=None, cases=None):
     case_attempts = case_attempts or {}
+    cases = CASES if cases is None else cases
     rows, environments, toolchains, wait_sources = [], [], [], []
-    for history, batch in CASES:
+    for history, batch in cases:
         selected_attempt = case_attempts.get((history, batch), attempt)
         path = HERE / "runs" / candidate / f"h{history}_b{batch}_{selected_attempt}" / "result.json"
         raw = json.loads(path.read_text())
         if not raw["passed"] or raw["stage"] != "complete":
-            raise ValueError(f"七档尚未完整通过：{path}")
+            raise ValueError(f"所选档位尚未完整通过：{path}")
         if (raw["history"], raw["batch"], raw["query_tokens"], raw["candidate"]) != (
             history,
             batch,
@@ -28,11 +30,11 @@ def build(candidate, attempt, case_attempts=None):
         ):
             raise ValueError(f"结果描述符与档位不符：{path}")
         if raw.get("indexer_page_pattern", "original") != "original":
-            raise ValueError("不能将扩展页布局混入七档性能表")
+            raise ValueError("不能将扩展页布局混入标准性能表")
         summarized = summarize(path)
         stats = raw["l1"]["statistics_us"]
         if any(len(v["samples_us"]) != 5 for v in stats.values()):
-            raise ValueError("七档主口径必须保留整组五窗")
+            raise ValueError("主口径必须保留整组五窗")
         environments.append(raw["environment"])
         toolchains.append(raw.get("toolchain_identity"))
         wait_sources.append(raw.get("shared_wait_source"))
@@ -81,13 +83,13 @@ def build(candidate, attempt, case_attempts=None):
             )
         )
     if any(e != environments[0] for e in environments[1:]):
-        raise ValueError("七档环境不一致，不能按同一冻结环境汇总")
+        raise ValueError("所选档位环境不一致，不能按同一冻结环境汇总")
     if any(t != toolchains[0] for t in toolchains[1:]):
-        raise ValueError("七档实际工具链路径/版本记录不一致")
+        raise ValueError("所选档位实际工具链路径/版本记录不一致")
     if any(s != wait_sources[0] for s in wait_sources[1:]):
-        raise ValueError("七档配套等待源码不是同一份")
+        raise ValueError("所选档位配套等待源码不是同一份")
     if any(row["candidate_wait_policy"] != rows[0]["candidate_wait_policy"] for row in rows[1:]):
-        raise ValueError("七档等待编译策略不一致，不能混合默认TWAIT与100 tick结果")
+        raise ValueError("所选档位等待编译策略不一致，不能混合默认TWAIT与100 tick结果")
     regions = {}
     metrics = ["reduction_vs_original_pct", "reduction_vs_spmd_pct"]
     if all(r["reduction_vs_current_pct"] is not None for r in rows):
@@ -100,6 +102,7 @@ def build(candidate, attempt, case_attempts=None):
     return dict(
         candidate=candidate,
         attempt=attempt,
+        cases=cases,
         case_attempts={f"{h}/{b}": v for (h, b), v in case_attempts.items()},
         passed=True,
         environment=environments[0],
@@ -118,6 +121,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--attempt", default="matrix_v1")
+    parser.add_argument("--legacy-seven", action="store_true", help="仅复算旧七档，输出另加legacy7后缀")
     parser.add_argument(
         "--case-attempt",
         action="append",
@@ -133,8 +137,9 @@ def main():
         if not attempt.isidentifier() or (int(history), int(batch)) in case_attempts:
             raise ValueError("档位attempt必须唯一且为标识符")
         case_attempts[(int(history), int(batch))] = attempt
-    report = build(args.candidate, args.attempt, case_attempts)
-    destination = HERE / f"MATRIX_{args.candidate}_{args.attempt}.json"
+    report = build(args.candidate, args.attempt, case_attempts, LEGACY_CASES if args.legacy_seven else CASES)
+    suffix = "_legacy7" if args.legacy_seven else ""
+    destination = HERE / f"MATRIX_{args.candidate}_{args.attempt}{suffix}.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(destination)
     print(json.dumps(report["weighted"], ensure_ascii=False))
