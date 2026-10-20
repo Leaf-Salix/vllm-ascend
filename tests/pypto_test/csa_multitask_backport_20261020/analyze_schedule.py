@@ -23,11 +23,18 @@ def phase(name):
         return "query_dequant"
     if name.startswith("qr_proj_matmul"):
         return "qa"
+    if name.startswith("weights_proj_reduce"):
+        return "weights_reduce"
+    if name.startswith("weights_proj"):
+        return "weights_project"
     for prefix, label in (
         ("idx_qr_proj_matmul", "indexer_query_project"),
         ("qr_hadamard_matmul", "query_hadamard"),
         ("qproj_matmul", "qb"),
         ("kv_proj_matmul", "original_kv_project"),
+        ("kv_rms_norm_rope", "original_kv_normalize"),
+        ("csa_cache_writeback", "original_cache_writeback"),
+        ("indexer_topk_query_merge", "topk_merge"),
     ):
         if name.startswith(prefix):
             return label

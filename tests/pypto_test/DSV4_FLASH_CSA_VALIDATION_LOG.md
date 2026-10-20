@@ -18006,3 +18006,151 @@ incore最早开始至最晚结束，包含内部任务间隙。Native与本表�
 不沿用旧表的median），以及
 [PTO七档](csa_multitask_backport_20261020/MATRIX_cooperative_policy_v1_matrix_v1.json)；
 PTO逐窗字段及路径见671节。
+
+## 673. 2026-10-20：恢复优化，检查Score优先造成的后段排队并适配Q就绪依赖
+
+用户恢复goal后重读目标，正式代码仍为671节的plan_workers_v1，沿用
+冻结13259f92来源和同一PyPTO/PTOAS/Simpler副本，不改共享环境。
+先读取669节既有五窗：B16候选Q反量化在490.91～529.02μs，
+Top-K合并在499.46～523.65μs；正式Plan的Top-K为507.72～519.78μs。
+B28候选Q反量化721.12～786.49μs，Top-K为733.02～770.37μs，
+正式Plan的Top-K为737.58～753.46μs。这里是各窗阶段位置的均值，
+不能把它们拼成一条真实时间线或归因为if/else固定成本。
+
+候选的Q反量化被显式Score依赖后置，Score结束后与Top-K及原KV写回
+争用AIV；整组Top-K首尾跨度从B16的12.06扩大为24.19μs，
+B28从15.88扩大为37.35μs。冻结单SPMD的vector_schedule.py则明确
+先q_dequant_rope_stage，再indexer_score_vector_lane_stage。仅提前
+Python调用次序不足：旧cooperative_prefix_v1也出现Score先启动，
+Q/KV在后续排队的窗口，所以此次增加明确的任务就绪顺序做消融。
+
+私有cooperative_query_ready_v1从已归档cooperative_q_only_sync_v1出发：
+
+- 去掉Q反量化对Score的后置依赖，改为等待QB与原scale-layout任务；
+  仍用48路原数学体，返回该组TaskId。
+- 把Q/KV尾链的提交移到Score之前。Score原layout依赖改为上述Q就绪
+  TaskId，由layout→Q→Score传递保留原布局生产者，不新增dummy或GM信号。
+- 保留4核Hadamard/20核QB、非空Plan、QK整组启动及原early resolve。
+  多task等整组Q，来源是逐AIV的Q→Score顺序，两者调度粒度并不相同。
+
+生成器prepare_query_ready.py和阶段读取器analyze_schedule.py保存在
+csa_multitask_backport_20261020；读取器补充Top-K、KV归一化和cache写回
+阶段，不重新运行已有用例。完整CPU lowering/PTOAS/AICPU链接通过，
+此时尚不是设备功能或性能PASS。128K/B16与B28分别通过队列提交为
+task_20261020_225057_19799314375、task_20261020_225057_198017412956，
+对照原多task、正式Plan、候选及单SPMD，五窗并另采外层；B16补同图
+metadata/padding。等待完整输出/状态/保护及mean/max后决定后续范围。
+
+## 674. 2026-10-20：Q就绪依赖两长档未获益，发现QB20任务重复占核
+
+673节两任务均completed/exit0，输出/Top-K/score/cache/state/保护及
+图检查通过，B16另通过同图metadata/padding。完整CSA L1五窗，μs：
+
+| 档位 | 正式Plan min/mean/max | Q就绪候选 min/mean/max | 单SPMD min/mean/max |
+|---|---|---|---|
+| 128K/B16 | 841.50 / 846.96 / 852.16 | 836.40 / 850.29 / 858.14 | 800.44 / 804.46 / 810.94 |
+| 128K/B28 | 1159.02 / 1190.65 / 1209.24 | 1190.66 / 1211.64 / 1225.20 | 1149.16 / 1168.19 / 1188.24 |
+
+mean分别增加0.394%/1.763%，max增加5.98/15.96μs，不采用、不扩七档。
+Q已经在Score前完成：B16 Q末尾291.632、Score首启307.724μs；
+B28为397.344、414.220μs。B28相对同轮正式Plan的Score首启
+382.496μs后移31.724μs，抵消了后段排队减少的机会。不能把单SPMD
+逐AIV的Q→Score顺序等同于多task整组Q完成后才能启动MIX的时序收益。
+生成编排中的layout→Q→Score依赖已核实，未发生参数丢失。
+
+随后按真实物理核计数：B16五窗的QB20任务仅使用16/12/17/12/16个AIC，
+B28为16/16/20/16/16；其余逻辑块在已跑过QB的核上串行执行。
+QB首启离散均值48.864/56.120μs。单窗中8核head-weight投影与QB同时
+进入，先有16个QB启动，剩余4块等待已运行QB的核；这是当前协同前段
+分派的直接证据，不将“20个逻辑worker”当作20个物理核同时执行。
+详见[诊断](csa_multitask_backport_20261020/QUERY_READY_DIAGNOSIS.json)、
+[阶段和完整数据](csa_multitask_backport_20261020/QUERY_READY_PHASES.json)与
+[逐窗占核](csa_multitask_backport_20261020/QUERY_READY_QB_DISTRIBUTION.json)。
+
+准备cooperative_query_groups_v1，仅给NZ QB20和query Hadamard4设置
+sync_start=True，保持各自原early resolve、全部依赖和核内数学。
+源码来源仍是13259f92的4/20分工；这是多task准入方式的适配，不声称
+单SPMD使用了相同API。第220节旧24核QB单独同步曾回退，本轮保留该
+历史限制，以当前明确的重复占核及新的协同上下文作为验证理由。
+CPU依赖图解析通过，先测两长档；即使首启收窄，也必须看完整mean/max。
+
+## 675. 2026-10-20：4/20整组启动恢复占核，完整收益仍未出现
+
+cooperative_query_groups_v1两任务task_20261020_230252_259366711540、
+task_20261020_230252_25937076634均completed/exit0；精确、状态、保护、
+图检查通过，B16 metadata/padding通过。完整CSA L1五窗，μs：
+
+| 档位 | 正式Plan min/mean/max | 4/20整组候选 min/mean/max | 单SPMD min/mean/max |
+|---|---|---|---|
+| 128K/B16 | 826.22 / 835.38 / 842.64 | 836.98 / 849.61 / 865.82 | 789.72 / 797.32 / 801.76 |
+| 128K/B28 | 1149.88 / 1191.91 / 1213.02 | 1202.42 / 1210.76 / 1227.92 | 1168.90 / 1171.33 / 1175.34 |
+
+十个候选窗口均为20个不同AIC执行QB、4个不同AIC执行Hadamard。
+QB首启离散均值B16/B28为0.380/0.400μs，重复占核消除；但相对同轮
+正式Plan的完整mean增加1.703%/1.582%，max也增加23.18/14.90μs。
+同步准入不等于完整加速，不采用、不扩七档。不能跨轮把674节和本节
+均值差额解释成两项sync_start的独立成本。详见
+[完整和占核证据](csa_multitask_backport_20261020/PROJECTION_GROUPS_PHASES.json)。
+
+继续核对来源projection_overlap_stages.py：head-weight投影在进入
+4/20分支之前完成，按24个AIC的非空unit分工；当前迁移版本只把它放在
+main Compressor之后，仍可与QB争用AIC，没有完整复制来源的生产次序。
+cooperative_prefix_weights_v1复用原权重投影/四K归约，改为最多24路
+非空worker，先生成head_weights再派发Hadamard/QB；Score直接消费该
+结果，不重复投影。多task等待完整权重归约，来源逐核发布，粒度差异
+仍须实测，不预设收益。完整CPU lowering/PTOAS/AICPU链接通过。
+两长档已提交task_20261020_231808_320153122151、
+task_20261020_231808_320159722351；此处尚无设备采用结论。
+
+## 676. 2026-10-20：核对单SPMD session仍值得借鉴的内容
+
+用户询问剩余参考价值。单SPMD正式算法最后提交仍为13259f92；另一个
+session新提交c49ee5b2归档了精确Top-K短前缀v5七档，尚未正式采用。
+不把其新工具链下的数据混入本轮已固定工具链的配对结论。
+
+| 方向 | 来源与当前差距 | 当前处置 |
+|---|---|---|
+| 精确Top-K短前缀 | c49ee5b2：完整L1中位数在128K/B8、B16、B28净省17.52/4.32/21.00μs；B4/B24回退 | 新线索优先跟进；未整体采用，须核对收益区间及边界，不能直接全域迁入 |
+| 完整前段协同 | e91e9f17：main Compressor→head权重→4核Hadamard/20核QB，以及Q/KV消费者次序 | 674/675已证明单独改顺序或占核不够；head权重前置候选正在验证 |
+| Score→Top-K→Plan→Attention真实行依赖 | 5da1bf0c：消费者只等所需的行/根生产者；多task仍存在整组交接 | 已有融合负例，不照搬软轮询；需要重新设计较小范围的生产消费关系 |
+| HC行级流水和局部复用 | 来源HC_ROW_DEPENDENCIES；多task仍有归约、gate、norm之间的任务交接 | 既有局部融合曾减少HC阶段时间，但没有稳定完整收益，保留证据、后置处理 |
+| 输出组流水 | 2417166f及冻结OUTPUT_GROUP_PIPELINE；多task已有按组依赖，但局部交接仍有成本 | 局部MIX版本未获益；不再把整条组流水称为未实现，重点是减少额外信号和分派 |
+| 几何前置及共同计划复用 | 25de3f32及已验证的前置几何区间；可提前计算不依赖Top-K的部分 | 多task已有私有消融且收益分档不一致，需按资源域选择，保留每次metadata更新与页保护 |
+
+已经正式迁入的Score双QK早FIX、Attention本地统计、物理行plan和批量
+索引、连续scale页证明、Query整波分组、短G2预取、O_B裁尾、QA小M16及
+非空Plan不重复计为剩余项。SDMA O_B预取和Attention统一尺度都只有
+完整负收益证据，当前不作为有效来源迁入。
+
+新Top-K详情见
+[PAYLOAD_PERFORMANCE.md](csa_roofline_optimization_20261020/PAYLOAD_PERFORMANCE.md)；
+其依赖的PyPTO计数及PTOAS比较/布尔表达式修复也须一并核对，并让所有
+对照使用同一份工具链。当前v5的S1/S5及全部资源边界未验收，不将七档
+S6通过扩大为所有动态范围或整模型token已验证。
+
+## 677. 2026-10-20：head权重前置两长档回退，前段三项消融收口
+
+675节cooperative_prefix_weights_v1两任务均completed/exit0，精确输出、
+Top-K/score、cache/state、保护区和图检查通过，B16动态边界通过。
+完整CSA L1五窗，μs：
+
+| 档位 | 正式Plan min/mean/max | head权重前置 min/mean/max | 单SPMD min/mean/max |
+|---|---|---|---|
+| 128K/B16 | 835.20 / 843.56 / 851.86 | 845.40 / 855.18 / 863.52 | 797.72 / 803.95 / 810.60 |
+| 128K/B28 | 1142.46 / 1180.10 / 1212.72 | 1212.42 / 1215.01 / 1218.80 | 1166.52 / 1174.81 / 1192.16 |
+
+mean增加1.377%/2.958%，max增加11.66/6.08μs，不采用、不扩七档。
+候选head投影已在QB前完成，B16/B28权重归约末尾196.64/255.87μs，
+QB首启204.04/265.52μs；但Score首启316.87/418.22μs，相对正式
+Plan的286.18/371.99μs仍后移。更窄的任务跨度不能抵消新的阶段等待，
+不能将source的逐核生产顺序等同于多task整组TaskId屏障。
+阶段、五窗和功能证据见
+[PREFIX_WEIGHTS_PHASES.json](csa_multitask_backport_20261020/PREFIX_WEIGHTS_PHASES.json)
+及RESULTS.json；六个相关设备任务全部终态，正式算子保持plan_workers_v1。
+
+本轮已分别验证Q就绪、4/20整组准入、head权重先生产三项；不继续无依据
+叠加前段门禁或按最快窗采用。下一步从正式Plan独立准备精确Top-K候选，
+读取c49ee5b2提交的v5 helper及实际调用位置，优先迁移其已测受益机制；
+仍是私有实验，不将来源七档未整体采用的状态改写为全域有效。
+相关PyPTO/PTOAS现有隔离树的代码提交已核对，统一配套后再做同轮四路
+对照；不把旧工具链性能表作为新候选的收益分母。
