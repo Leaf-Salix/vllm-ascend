@@ -288,7 +288,9 @@ def migrate_local_stats(source, donor, entry):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--candidate", choices=("score_split", "ob_active", "score_split_ob", "local_stats"), default="score_split"
+        "--candidate",
+        choices=("score_split", "ob_active", "score_split_ob", "local_stats", "score_stats_ob"),
+        default="score_split",
     )
     args = parser.parse_args()
     sources = HERE / "sources"
@@ -302,15 +304,15 @@ def main():
     destination = sources / args.candidate
     shutil.copytree(sources / "baseline", destination)
     changed = []
-    if args.candidate.startswith("score_split"):
+    if args.candidate.startswith("score_"):
         target = destination / "decode_indexer.py"
         target.write_text(migrate_score(target.read_text(), (sources / "spmd/indexer_score_stages.py").read_text()))
         changed.append(target.name)
-    if args.candidate in ("ob_active", "score_split_ob"):
+    if args.candidate in ("ob_active", "score_split_ob", "score_stats_ob"):
         target = destination / "decode_o_proj.py"
         target.write_text(migrate_ob(target.read_text()))
         changed.append(target.name)
-    if args.candidate == "local_stats":
+    if args.candidate in ("local_stats", "score_stats_ob"):
         target = destination / "decode_sparse_attn_csa.py"
         entry = destination / "decode_csa.py"
         rewritten, entry_source = migrate_local_stats(

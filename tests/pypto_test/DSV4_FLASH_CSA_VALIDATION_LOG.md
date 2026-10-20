@@ -16494,3 +16494,218 @@ min增加6.42μs；五窗保留，不只取最优值。
 QK/PV的AIC核内mean154.44→152.04μs，AIV157.99→155.68μs，
 包含握手等待。仅说明本档局部与完整均值受益，尚未正式接入该项，
 下一步同轮测试与Score、O_B的组合，不能把独立轮次收益相加。
+
+## 624. 2026-10-20：组合候选进入四方同轮验证
+
+正式Score提交为`6b5fbc03`，验证框架与首轮证据提交为`6eb8060f`，均未push。
+正式目录当前仅改变`decode_indexer.py`；O_B和mi/li统计环仍在私有候选中。
+
+私有`score_stats_ob`组合上述三项，CPU全量kernel编译通过。测试增加可选
+`--current score_split`，同轮轮换“原多task／仅Score／三项组合／正式单SPMD”，
+分别报告组合相对原基线、当前已保留版本和单SPMD的收益，不跨轮相加。
+三个优化各沿自己的区间：长G6 T>=32的Score、长G6 24<=T<=96的统计环、
+NZ大M128的O_B尾行；不是按B16/B28枚举分支。
+
+- 128K/B16：`task_20261020_123631_312408617745`。
+- 128K/B28：`task_20261020_123639_313188515258`。
+
+本节追加时两任务均经队列查询为running，尚无完整性能结论。
+先回收这两项，按完整CSA与核内结果判定组合；之后继续迁移Attention物理行plan、
+批量索引读取及尚缺的Query头分组区间，并覆盖七档和受影响边界。
+多task目前仍慢于单SPMD，最终目标保持进行中。
+
+## 625. 2026-10-20：明确单SPMD主参考日志与迁移状态
+
+本轮以
+[DSV4_CSA_SPMD_OPTIMIZATION_LOG.md](../../vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md)
+为单SPMD优化的主参考，再核对已提交源码和该条目引用的设备结果。
+不是把日志中所有尝试都当作有效优化；目前按项目审查，尚未逐条审完两万行历史。
+本任务目标与过程仍仅追加在当前日志，不改写单SPMD会话的目标或失败结论。
+
+|迁移项目|单SPMD日志采用条目及来源提交|多task当前状态|
+|---|---|---|
+|Score双QK早FIX、完整系数分K后单次写回|2026-10-20“Score区间边界通过，四文件迁入正式动态SPMD”；13259f92|已由6b5fbc03迁入正式decode_indexer.py；长B16/B28通过，七档与边界待收口|
+|O_B有效尾行裁剪|2026-10-19“E49 O_B 有效行裁剪采用”；b26e8e86|私有ob_active及组合中；B28核内受益，不能用该收益替代完整CSA验收|
+|mi/li同AIV三槽UB缓存|2026-10-18“死Tile传递闭环修复，收口长历史本地统计区间”；f222a917|私有local_stats及组合中；保留长G6工作量区间，不跨task假定UB常驻|
+|Attention物理行plan、64项索引加载/MGATHER|2026-10-19“物理行plan七档复试通过，沿T>=64区间采用”及“物理行plan后复试MGATHER并正式采用”；05d2a3e9、289cc072|私有physical_plan；两长档设备通过，见626节|
+|连续scale页证明和合并读取|2026-10-19“将请求页连续性证明前移到既有 META”及后续区间采用结论；27711336|私有scale_pages，全量CPU编译通过，尚无设备采用结论|
+
+连续scale读取特别区分：每叶重复证明版并未采用；单SPMD保留的是前置整请求证明，
+并沿小M16或T>96的资源区间选择。多task没有相同的既有META生命周期，候选以一个
+独立AIV task生产证明并显式依赖，拟在balanced长G6域测量；这是需要验证的调度
+适配，不能把单SPMD的区间收益直接转记为多task收益。关闭路径和碎片页回退仍须保留。
+没有迁入后续列池、短尾联合裁剪、提前KV等已否决或未采用的单SPMD候选。
+
+## 626. 2026-10-20：回收组合、物理行plan及固定scratch形状的同轮结果
+
+624节两任务均已completed/exit0；以下各行是独立的同卡四方五窗，
+“当前”列均为该行实际消融参考，不能跨行累加收益。
+所有列口径都是完整CSA L1 incore首尾，包括内部等待与调度间隙。
+
+|候选／128K档位|当前消融参考|迁移前 min/mean/max μs|当前 min/mean/max μs|候选 min/mean/max μs|单SPMD min/mean/max μs|
+|---|---|---|---|---|---|
+|Score+统计+O_B，B16|仅Score|854.72/863.12/876.46|839.42/854.42/867.12|836.94/841.41/852.90|790.18/798.50/803.04|
+|Score+统计+O_B，B28|仅Score|1246.72/1277.84/1301.04|1234.34/1238.79/1248.40|1214.52/1244.27/1273.22|1161.20/1175.16/1191.56|
+|再加物理行plan，B16|上述三项组合|852.44/876.46/897.82|840.00/845.09/853.88|817.38/825.37/843.58|788.24/794.07/806.42|
+|再加物理行plan，B28|上述三项组合|1272.52/1283.93/1296.80|1234.68/1242.25/1247.66|1222.06/1231.06/1240.74|1168.42/1176.25/1191.56|
+|固定Attention scratch形状，B28|上述三项组合、无物理plan|1247.88/1269.08/1299.16|1215.58/1247.01/1274.38|1195.96/1223.58/1236.18|1170.08/1172.85/1177.64|
+
+三项组合相对仅Score：B16 mean降低1.52%，B28增加0.44%、max增加24.82μs。
+B28 O_B核内mean仍18.53→16.40μs，不能据此忽略完整CSA回退。
+现有泳道分段显示O投影到结束缩短约5.2μs，而Attention到O投影延长约11.4μs，
+前段亦有波动；这是定位线索，不是唯一因果证明。分段证据见
+[COMBINATION_B28_PHASES.json](csa_multitask_backport_20261020/COMBINATION_B28_PHASES.json)。
+
+物理plan在T>=64及容量受支持时，生产者以INT32生成真实物理行，消费者一次读取
+64项并MGATHER；能力外及SWA保留旧逻辑。没有更改外部Top-K和逻辑位置偏置。
+B16 QK/PV核内AIC mean151.23→133.51μs，AIV154.65→137.09μs；
+这些值仍含握手等待。B16/B28完整mean相对三项组合降低2.33%/0.90%，
+但仍比同轮单SPMD慢31.30/54.81μs；尚未达到目标。
+
+固定scratch形状处理的是迁移造成的代码生成变化：局部DSL变量使原固定9216/4608
+容量变成动态参数。改用Python常量后恢复原固定维度，容量和数学不变，
+关闭统计分支的AIC/AIV参数分别33→31、34→32。B28完整mean降低1.88%，
+max降低38.20μs。代码生成证据见
+[STATIC_SCRATCH_CODEGEN.json](csa_multitask_backport_20261020/STATIC_SCRATCH_CODEGEN.json)，
+不将操作码统计等同于机器码或纯算术性能。
+
+上述设备任务均通过A/B hidden、输出/Top-K/score、cache/state、保护区与图重放；
+本轮尚未完成动态边界、七档、含AICPU外层或整模型验证。
+所有候选仍保存在私有包，正式目录此时仅有Score改动。
+下一步将物理plan与固定scratch组合，在同轮消融连续scale读取；继续补受影响项，
+不把已测的独立收益相加。脚本及逐窗数据见本目录RESULTS.json、TASKS.json。
+
+## 627. 2026-10-20：连续scale读取核内受益但完整未受益，继续处理前置证明依赖
+
+`scale_pages`两长档终态completed/exit0。同轮消融参考`physical_static`包含
+Score、统计环、O_B、物理plan和固定scratch；每行五窗完整CSA L1。
+
+|128K档位|迁移前 min/mean/max μs|消融参考 min/mean/max μs|scale候选 min/mean/max μs|单SPMD min/mean/max μs|
+|---|---|---|---|---|
+|B16|855.58/863.77/871.96|818.22/827.55/835.80|827.98/838.41/856.38|806.70/810.35/817.26|
+|B28|1261.96/1288.20/1317.84|1177.32/1209.20/1223.72|1194.88/1213.37/1224.96|1162.50/1169.16/1179.42|
+
+候选两档完整mean分别增加1.31%/0.34%，不正式采用。
+但Score核内AIC mean为197.83→191.02、333.53→321.04μs，
+AIV为201.16→194.08、341.54→328.78μs，保留私有候选继续解决调度。
+物理plan与固定scratch的组合已在此两轮作为消融参考通过，不跨轮相加它们的收益。
+
+真实泳道明确显示页证明`indexer_scale_layout(r2t20)`仍有
+`idx_kv_scale_commit(r1t28)`的fanin，B16证明在224.98～277.70μs才开始，
+B28在261.72～339.18μs才开始；其自身只需要输入页表、长度和cache容量。
+候选准备把证明迁至HC前段，并将Tensor.dim取尺寸放在编排侧，传递证明workspace和
+TaskId到Score。保留实际页范围证明、碎片回退及Score对payload写回和证明的双重等待。
+这项是27711336前置META思路的多task调度适配，当前还没有真机收益，不能宣称已消除伪依赖。
+
+两档完整A/B、图重放、状态、保护、参考代际及实际Score直接fanin均通过。
+复用实际helper的小用例覆盖正/逆序、碎片、失活、负页、容量越界及1024+1证明尾块，
+同地址图更新方向/活动性后结果正确、未用workspace尾区保持37。
+首版小用例因显式关闭auto_scope而把Tile留在Spmd函数，CPU失败；改用与实际调用
+相同的CORE_GROUP incore作用域后CPU及设备通过，未改正式算子或编译器。
+
+## 628. 2026-10-20：Query整波头分组与短G2预取首轮结果
+
+从`physical_static`生成私有`query_prefetch`：
+9d5327e5的完整八行48-AIV整波最大head分组，补齐原多task缺少的8/32组，
+尾行仍固定4；ef608731仅沿短G2的半叶容量<=2048区间启用原一个Key面板预取。
+两个改动不增加task、同步或数学变化。CPU完整编译通过，两个设备任务exit0，
+输出/Top-K/score、cache/state、保护和图重放通过。
+
+|档位|迁移前 min/mean/max μs|physical_static min/mean/max μs|候选 min/mean/max μs|单SPMD min/mean/max μs|
+|---|---|---|---|---|
+|128K/B24|1104.54/1138.98/1159.98|1037.60/1068.11/1102.60|1024.14/1057.52/1087.90|1028.74/1034.90/1046.10|
+|8K/B32|960.16/996.92/1046.82|949.56/971.02/1013.40|961.20/976.37/1018.04|937.58/942.44/948.80|
+
+长B24 mean降低0.99%、max降低14.70μs；短B32 mean增加0.55%、max增加4.64μs。
+长档只启用Query分组变化，短档还包含Key预取，不能把短档回退唯一归因任一项。
+候选暂留，后续结合短B16及剩余七档决定采用区间；不据最小值优于单SPMD宣布完成。
+新增的同图metadata/padding与外层NPU event检查入口尚未设备验证，
+不会把此前S6静态输入的通过结果改写为边界已通过。
+
+## 629. 2026-10-20：前移证明候选及受影响边界进入队列
+
+`scale_early_v2`保留627节实际helper和连续读取数学，只把证明迁至HC前段；
+尺寸在编排侧读取，workspace及显式TaskId逐层传入Score。
+首版多层inline后仅在deps属性中引用的TaskId丢失绑定，CPU SSA检查失败；
+改为Score内通过一个单元素TaskId数组显式接收后，完整CPU编译通过。
+没有修改PyPTO/Simpler/PTOAS，也未关闭数据依赖校验。
+
+三个单卡任务已提交，使用同一冻结工具链及私有包：
+
+- `task_20261020_134333_23626861144`：scale_early_v2，128K/B16，对照physical_static；
+  附同地址metadata/padding回放和独立NPU event外层时间。
+- `task_20261020_134340_23668969895`：scale_early_v2，128K/B28，对照physical_static。
+- `task_20261020_134256_233840227425`：query_prefetch，8K/B16，对照physical_static；
+  本档Query分组未变，可单独观察短G2预取；附相同边界及外层检查。
+
+追加本节时三项均已完成各自原多task/消融参考/候选首轮数值比较，
+正在编译单SPMD参考，尚不能记完整性能、最终边界或采用结论。
+新边界脚本只检查多task的S6实际合同，不伪造单SPMD信号或内部TMR scratch保护结果。
+过程脚本Ruff通过。正式目录仍仅采用6b5fbc03的Score迁移；目标保持进行中。
+
+## 630. 2026-10-20：短B16预取、同图边界及外层口径通过
+
+`task_20261020_134256_233840227425`最终completed/exit0。
+8K/B16的完整CSA L1 min/mean/max：原多task667.98/681.80/699.38μs，
+physical_static为680.18/691.41/704.04μs，query_prefetch为
+657.84/678.22/694.14μs，单SPMD665.56/670.55/677.20μs。
+本档Query分组保持16，新增Key预取相对消融参考mean降低1.91%、
+max降低9.90μs；仍比同轮单SPMDmean慢7.67μs。
+
+完整A/B输出、Top-K/score、cache/state、保护区和原图重放通过，
+新增六次同址回放A→B→A→P15→P1→A也通过。B由Native fixture生成
+历史-1、位置和页顺序变化；P沿Native builder/compact producer构造补位，
+检查有效输出、全allocation、非法写区、只读metadata和固定输入地址。
+不规定dummy输出、不声称检查TMR内部scratch、mixed-query或整模型token。
+
+另采的五次单图NPU event外层min/mean/max为：
+原多task752.18/770.47/805.50μs，physical_static748.58/785.28/862.54μs，
+候选728.24/763.63/791.92μs，单SPMD796.46/809.52/854.42μs。
+这是DFX窗口外的整图口径，包含运行时/AICPU；不与L1相减解释成纯AICPU。
+goal仍以完整L1首尾验收，此项外层优势不能替代尚未完成的L1目标。
+
+## 631. 2026-10-20：前移证明已采到完整收益，修复根TaskId解析并准备七档组合
+
+629节两个scale_early_v2任务均退出1，错误发生在计时后的测试解析：
+页证明迁至根作用域后名字为`indexer_scale_layout(t3)`，
+原`verify_edges`只识别`r2t20`形式，误报没有执行证明task。
+改为同时解析根和嵌套TaskId，逐一重读已有十个候选泳道，
+所有Score物理核记录均直接依赖t3；证明只有入口t0依赖，不再等待cache写回。
+证明开始相对最早incore为B16全部0μs，B28为0～1.04μs。
+
+原失败result和退出状态保持，修正后的只读证据另存
+[EARLY_SCALE_DEPENDENCIES.json](csa_multitask_backport_20261020/EARLY_SCALE_DEPENDENCIES.json)。
+原任务的A/B、图输出、cache/state及guard检查已通过；计时后单SPMD代际/
+scratch检查及长B16新增metadata/padding尚未执行，不能把退出1改记完整PASS。
+
+已采五窗L1如下，仅作为待补完验收的观察结果：
+
+|128K档位|迁移前 min/mean/max μs|physical_static min/mean/max μs|前移证明 min/mean/max μs|单SPMD min/mean/max μs|
+|---|---|---|---|---|
+|B16|860.12/893.77/978.70|827.30/831.08/835.02|813.76/827.51/832.46|796.68/805.55/811.18|
+|B28|1254.22/1284.40/1320.00|1207.84/1225.16/1246.26|1180.08/1189.02/1196.40|1155.56/1162.96/1176.70|
+
+相对同轮physical_static，mean降低0.43%/2.95%，max降低2.56/49.86μs。
+两档仍慢于单SPMD；没有以原基线B16的978.70μs异常max夸大候选收益。
+
+组合`core_v2`在上述前移证明之上加入628节Query分组和短G2预取；
+完整CPU编译通过。布局证明helper与已测版本逐字相同，不再逐档重复相同微用例，
+但每档继续检查实际Score依赖、输出/状态/保护、图重放与参考代际。
+七档矩阵先提交长B16/B28，均使用独立外层计时，长B16补边界：
+`task_20261020_135149_280742231048`、`task_20261020_135152_28112957568`。
+本节追加时尚未终态；其余五档待代表档回收后扩展。
+
+从空sources重建该组合的顺序如下，脚本拒绝覆盖已有私有包：
+
+```bash
+python tests/pypto_test/csa_multitask_backport_20261020/prepare.py --candidate score_stats_ob
+python tests/pypto_test/csa_multitask_backport_20261020/prepare_physical.py
+python tests/pypto_test/csa_multitask_backport_20261020/prepare_static_shapes.py --base physical_plan --candidate physical_static
+python tests/pypto_test/csa_multitask_backport_20261020/prepare_scale.py
+python tests/pypto_test/csa_multitask_backport_20261020/prepare_scale_early.py --candidate scale_early_v2
+python tests/pypto_test/csa_multitask_backport_20261020/prepare_query_prefetch.py --base scale_early_v2 --candidate core_v2
+```
+
+本阶段只扩充测试脚本、私有候选生成器与已有日志；正式多task仍仅采用Score，
+依赖仓及共享安装未改，无push。后续继续七档、受影响尾块和正式迁入，
+并按单SPMD已采用的前段协同及行依赖记录核查剩余调度差异。

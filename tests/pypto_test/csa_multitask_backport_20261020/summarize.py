@@ -36,6 +36,8 @@ def summarize(path):
         "stage": report["stage"],
         "passed": report.get("passed", False),
         "candidate": report["candidate"],
+        "current": report.get("current"),
+        "indexer_page_pattern": report.get("indexer_page_pattern", "original"),
         "batch": report["batch"],
         "history": report["history"],
     }
@@ -44,8 +46,18 @@ def summarize(path):
         return summary
     l1 = report["l1"]
     summary["full_csa_l1_us"] = l1["statistics_us"]
+    if "outer" in l1:
+        summary["outer_graph"] = l1["outer"]
+    if "boundary_replay" in report:
+        summary["boundary_replay"] = {
+            "passed": report["boundary_replay"]["passed"],
+            "same_graph_replays": report["boundary_replay"].get("same_graph_replays"),
+            "result": str(path.parent.relative_to(HERE) / "boundary_replay.json"),
+        }
     summary["candidate_reduction_vs_original_pct"] = l1["candidate_reduction_vs_original_pct"]
     summary["candidate_reduction_vs_spmd_pct"] = l1["candidate_reduction_vs_spmd_pct"]
+    if "candidate_reduction_vs_current_pct" in l1:
+        summary["candidate_reduction_vs_current_pct"] = l1["candidate_reduction_vs_current_pct"]
     summary["incore_scope"] = (
         "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，"
         "不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益"

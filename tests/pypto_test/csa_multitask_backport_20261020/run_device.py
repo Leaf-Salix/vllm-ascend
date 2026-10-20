@@ -41,14 +41,14 @@ def save(output, report):
     print(json.dumps({"stage": report["stage"], "passed": report.get("passed", False)}, ensure_ascii=False), flush=True)
 
 
-def profile(entries, reset, verify, output, configs, windows):
+def profile(entries, reset, verify, output, configs, windows, measure_outer=False):
     import pypto.torch
     import torch
     from l1_compare import export_window
 
     stream = torch.npu.Stream()
     stream.wait_stream(torch.npu.current_stream())
-    graphs, checks, records = {}, {}, []
+    graphs, checks, records, outer_samples = {}, {}, [], {side: [] for side in entries}
     replay_counts = {side: 0 for side in entries}
 
     def order(index):
@@ -97,6 +97,21 @@ def profile(entries, reset, verify, output, configs, windows):
                     )
                 if index == 2 + windows:
                     checks[side + "_after_l1"] = verify(side)
+        if measure_outer:
+            for index in range(windows):
+                for side in order(index):
+                    reset()
+                    stream.synchronize()
+                    begin = torch.npu.Event(enable_timing=True)
+                    end = torch.npu.Event(enable_timing=True)
+                    begin.record(stream)
+                    graphs[side].replay()
+                    end.record(stream)
+                    stream.synchronize()
+                    replay_counts[side] += 1
+                    outer_samples[side].append(begin.elapsed_time(end) * 1000)
+                    if index == windows - 1:
+                        checks[side + "_after_outer"] = verify(side)
     samples = {side: [r["incore_span_us"] for r in records if r["side"] == side] for side in entries}
     stats = {
         side: dict(
@@ -108,8 +123,10 @@ def profile(entries, reset, verify, output, configs, windows):
         )
         for side, values in samples.items()
     }
-    original, candidate, spmd = (stats[s]["mean_us"] for s in entries)
-    return {
+    original = stats["multitask_original"]["mean_us"]
+    candidate = stats["multitask_candidate"]["mean_us"]
+    spmd = stats["single_spmd"]["mean_us"]
+    result = {
         "scope": "完整CSA最早incore开始至最晚结束，包含内部等待与调度间隙",
         "statistics_us": stats,
         "windows": records,
@@ -119,23 +136,46 @@ def profile(entries, reset, verify, output, configs, windows):
         "candidate_reduction_vs_original_pct": 100 * (original - candidate) / original,
         "candidate_reduction_vs_spmd_pct": 100 * (spmd - candidate) / spmd,
     }
+    if "multitask_current" in stats:
+        current = stats["multitask_current"]["mean_us"]
+        result["candidate_reduction_vs_current_pct"] = 100 * (current - candidate) / current
+    if measure_outer:
+        result["outer"] = {
+            "scope": "DFX窗口外NPU event包围单次graph.replay；含AICPU/运行时，不与L1相减认领纯AICPU",
+            "samples_per_side": windows,
+            "statistics_us": {
+                side: dict(samples_us=values, min_us=min(values), mean_us=statistics.mean(values), max_us=max(values))
+                for side, values in outer_samples.items()
+            },
+        }
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", default="score_split")
+    parser.add_argument("--current", help="可选的已保留私有包；与原基线、候选和单SPMD同轮比较")
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
     parser.add_argument("--attempt", default="v1")
     parser.add_argument("--windows", type=int, default=5)
     parser.add_argument("--parse-only", action="store_true")
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--compile-layout-probe", action="store_true")
+    parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
+    parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
+    parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
+    parser.add_argument(
+        "--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original"
+    )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选及attempt必须是标识符")
+    if args.current and (not args.current.isidentifier() or args.current == args.candidate):
+        raise ValueError("current必须是不同于candidate的私有包名")
     output = HERE / "runs" / args.candidate / f"h{args.history}_b{args.batch}_{args.attempt}"
-    if args.parse_only or args.compile_only:
+    if args.parse_only or args.compile_only or args.compile_layout_probe:
         output = HERE / "runs" / args.candidate / f"cpu_{args.attempt}"
     output.mkdir(parents=True, exist_ok=False)
     os.environ.update(
@@ -149,7 +189,9 @@ def main():
         batch=args.batch,
         history=args.history,
         candidate=args.candidate,
+        current=args.current,
         query_tokens=6,
+        indexer_page_pattern=args.indexer_page_pattern,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
     )
     try:
@@ -170,6 +212,7 @@ def main():
 
         original = load_multitask(HERE / "sources/baseline", "original")
         candidate_adapter = load_multitask(HERE / "sources" / args.candidate, "candidate")
+        current_adapter = load_multitask(HERE / "sources" / args.current, "current") if args.current else None
         donor = load_binding(HERE / "sources/spmd", "backport_reference")
         report["environment"] = {
             "cann": os.environ.get("ASCEND_HOME_PATH"),
@@ -178,6 +221,29 @@ def main():
             "simpler": os.environ["HCA_SIMPLER_ROOT"],
             "atomic_add": os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"],
         }
+        if args.compile_layout_probe:
+            from layout_probe import make_probe
+
+            helper = importlib.import_module(candidate_adapter.__package__ + ".indexer_scale_layout").prove_scale_layout
+            probe = make_probe(helper)
+            artifact = probe._resolve_kernel_artifact(
+                (),
+                {
+                    "config": CompileOptions(
+                        platform="a2a3",
+                        output_dir=str(output / "kernel"),
+                        memory_planner=passes.MemoryPlanner.PYPTO,
+                    )
+                },
+                allow_signature_mode=True,
+            )
+            report.update(
+                stage="layout_probe_compiled",
+                passed=True,
+                device_execution=False,
+                compiled_artifact=str(artifact.output_dir),
+            )
+            return
         if args.parse_only or args.compile_only:
             candidate_adapter.decode_csa_tp1_layer_test._get_dep_graph()
             if args.compile_only:
@@ -256,7 +322,15 @@ def main():
         with native_session(config, device_id), torch.inference_mode():
             device = torch.device(f"npu:{device_id}")
             layer, report["weights"] = make_layer(config, Path(config.model_config.model), device, 4)
-            fixture = make_fixture(config, layer.self_attn, args.batch, args.history, 1024, device)
+            fixture = make_fixture(
+                config,
+                layer.self_attn,
+                args.batch,
+                args.history,
+                1024,
+                device,
+                indexer_page_pattern=args.indexer_page_pattern,
+            )
             idx = fixture["groups"]["indexer"]
             scale = idx["views"][1]
             rows = torch.arange(scale.numel(), dtype=torch.int64, device=device)
@@ -307,6 +381,13 @@ def main():
             spmd = donor.prepared(call.args, max_query_tokens=6, max_seq_len=args.history + 6, allocator=allocate)
             protocol = WaveSignalVerifier(spmd)
             options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
+            has_scale_layout = (HERE / "sources" / args.candidate / "indexer_scale_layout.py").exists()
+            if has_scale_layout and args.layout_probe:
+                from layout_probe import validate as validate_layout
+
+                report["stage"] = "layout_proof_validation"
+                save(output, report)
+                report["layout_probe"] = validate_layout(candidate_adapter, device, options)
             entries = {
                 "multitask_original": lambda: original.decode_csa_tp1_layer_test(*call.core_args, config=options),
                 "multitask_candidate": lambda: candidate_adapter.decode_csa_tp1_layer_test(
@@ -314,6 +395,15 @@ def main():
                 ),
                 "single_spmd": lambda: spmd(config=options),
             }
+            if current_adapter is not None:
+                entries = {
+                    "multitask_original": entries["multitask_original"],
+                    "multitask_current": lambda: current_adapter.decode_csa_tp1_layer_test(
+                        *call.core_args, config=options
+                    ),
+                    "multitask_candidate": entries["multitask_candidate"],
+                    "single_spmd": entries["single_spmd"],
+                }
             input_a = fixture["hidden"].clone()
             reference, configs = {}, {}
             spmd_calls = 0
@@ -375,7 +465,14 @@ def main():
                             raise AssertionError("单SPMD参考协议检查失败")
             report["stage"] = "paired_l1"
             save(output, report)
-            report["l1"] = profile(entries, reset, verify, output, configs, args.windows)
+            report["l1"] = profile(entries, reset, verify, output, configs, args.windows, args.measure_outer)
+            if has_scale_layout:
+                from layout_probe import verify_edges
+
+                first = next(w for w in report["l1"]["windows"] if w["side"] == "multitask_candidate")
+                report["layout_dependency"] = verify_edges(json.loads(Path(first["trace"]).read_text()))
+                if (args.history + 6) // 4 > 8192 and tokens >= 24 and not report["layout_dependency"]["applicable"]:
+                    raise AssertionError("长G6实际未执行布局证明task")
             signals = signal_view(spmd)
             expected = spmd_calls + report["l1"]["replay_counts"]["single_spmd"]
             report["spmd_protocol"] = bool(
@@ -389,6 +486,23 @@ def main():
             }
             if not report["spmd_protocol"] or not all(report["scratch_guards"].values()):
                 raise AssertionError("计时后参考协议或scratch保护区失败")
+            if args.boundary_replay:
+                from boundary_replay import validate as validate_boundary
+
+                report["stage"] = "boundary_replay"
+                save(output, report)
+                report["boundary_replay"] = validate_boundary(
+                    config,
+                    layer,
+                    fixture,
+                    call,
+                    original,
+                    entries["multitask_original"],
+                    entries["multitask_candidate"],
+                    output / "boundary_replay.json",
+                    args.history,
+                    args.batch,
+                )
             report.update(
                 stage="complete",
                 passed=True,
