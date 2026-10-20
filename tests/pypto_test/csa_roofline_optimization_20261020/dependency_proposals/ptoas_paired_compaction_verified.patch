@@ -1,0 +1,464 @@
+diff --git a/docs/designs/a3-paired-compact-compare.md b/docs/designs/a3-paired-compact-compare.md
+new file mode 100644
+index 00000000..443cfc17
+--- /dev/null
++++ b/docs/designs/a3-paired-compact-compare.md
+@@ -0,0 +1,29 @@
++# A3 bounded paired compaction prototype
++
++`pto.tcompact.compare` selects FP32 values and their INT32 column indices with
++one scalar comparison mask. It is an explicit DPS operation with values, indices
++and exact per-row counts as results, plus a separate write/read scratch operand.
++This is a local A3 prototype, not a claim of upstream or A5 support.
++
++Supported predicates are `eq`, `gt` and `ge`. Source physical columns must be a
++multiple of 64; valid rows and columns may vary at runtime. Values and indices
++have equal, 32-byte-aligned per-row capacities no larger than the source columns.
++Count storage is `[1, align_up(source_rows, 8)]` INT32. Scratch needs
++`4*C + max(1024, align_up(C,256)/8 + 4*C)` bytes, where `C` is physical columns.
++
++For each row, only the first `min(count, capacity)` outputs are defined. Count
++always reports the full number of matches. Zero matches write only count, and
++overflow cannot write beyond output capacity. Selected indices are
++`offset + original_column` using INT32 arithmetic; callers must ensure the sum
++fits INT32. Selected FP32 values are moved as 32-bit data, without conversion.
++Source order and the selected values' bit representations are retained.
++
++The implementation constructs integer indices on Vector, compares source values,
++and reuses the mask for two `vreducev2` operations. Bounded copies publish results.
++The compiler models Vector output writes, Scalar count writes and scratch effects.
++There is no hidden output in scratch and no global memory or host synchronization.
++
++The consumer decides whether compaction was worthwhile. It must not read undefined
++tails as valid values, and must preserve its original sorting tie policy. The
++additional value reduction and output copy may outweigh removed random gathers;
++whole-kernel paired measurements are required before adopting an optimization.
+diff --git a/include/PTO/IR/PTOOps.td b/include/PTO/IR/PTOOps.td
+index 967d8e0c..7bc251a6 100644
+--- a/include/PTO/IR/PTOOps.td
++++ b/include/PTO/IR/PTOOps.td
+@@ -4798,6 +4798,41 @@ def TGatherOp : PTO_TOp<"tgather", [
+   }];
+ }
+ 
++def TCompactCompareOp : PTO_TOp<"tcompact.compare", [
++  PTO_DpsInitOpInterface,
++  OpPipeInterface,
++  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
++]> {
++  let summary = "Stable bounded compaction of FP32 values and INT32 column indices";
++  let description = [{
++    A3 Vec prototype. A single scalar predicate selects corresponding values and
++    indices in source order. Index = offset + source column (integer arithmetic).
++    Each row produces an exact match count; only min(count, output capacity)
++    entries of each output are defined. Source valid rows/cols can be dynamic.
++    Scratch is explicit and is not a returned value. No sorting is performed.
++  }];
++  let arguments = (ins
++    PTODpsType:$src, F32:$kValue, I32:$offset,
++    PTODpsType:$values, PTODpsType:$indices, PTODpsType:$count,
++    PTODpsType:$tmp, PTO_CmpModeAttr:$cmpMode
++  );
++  let results = (outs);
++  let assemblyFormat = [{
++    `ins` `(` $src `,` $kValue `,` $offset
++    `:` type($src) `,` type($kValue) `,` type($offset) `)`
++    `outs` `(` $values `,` $indices `,` $count `,` $tmp
++    `:` type($values) `,` type($indices) `,` type($count) `,` type($tmp) `)`
++    attr-dict
++  }];
++  let hasVerifier = 1;
++  let extraClassDeclaration = [{
++    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
++    ::mlir::MutableOperandRange getDpsInitsMutable() {
++      return ::mlir::MutableOperandRange(getOperation(), 3, 3);
++    }
++  }];
++}
++
+ def TGatherBOp : PTO_TOp<"tgatherb", [
+   PTO_DpsInitOpInterface,
+   OpPipeInterface,
+diff --git a/lib/PTO/IR/PTOInterfaces/PTOMemoryAndElementwiseEffects.cpp b/lib/PTO/IR/PTOInterfaces/PTOMemoryAndElementwiseEffects.cpp
+index 3efcf7b3..f6a29b50 100644
+--- a/lib/PTO/IR/PTOInterfaces/PTOMemoryAndElementwiseEffects.cpp
++++ b/lib/PTO/IR/PTOInterfaces/PTOMemoryAndElementwiseEffects.cpp
+@@ -171,6 +171,17 @@ void TGatherOp::getEffects(
+ }
+ 
+ PTO_DEFINE_BINARY_EFFECTS(TGatherBOp, getSrcMutable(), getOffsetsMutable(), getDstMutable())
++
++void mlir::pto::TCompactCompareOp::getEffects(
++    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
++  PTO_ADD_READ(effects, getSrcMutable());
++  PTO_ADD_WRITE(effects, getValuesMutable());
++  PTO_ADD_WRITE(effects, getIndicesMutable());
++  PTO_ADD_WRITE(effects, getCountMutable());
++  PTO_ADD_READ(effects, getTmpMutable());
++  PTO_ADD_WRITE(effects, getTmpMutable());
++}
++
+ PTO_DEFINE_UNARY_EFFECTS(TLogOp, getSrcMutable(), getDstMutable())
+ PTO_DEFINE_UNARY_EFFECTS(TLReluOp, getSrcMutable(), getDstMutable())
+ 
+diff --git a/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp b/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
+index 264cb1e9..0dd2dc24 100644
+--- a/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
++++ b/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
+@@ -46,6 +46,50 @@ llvm::LogicalResult mlir::pto::TGatherOp::verify() {
+   auto verifyA5 = [this]() { return verifyTGatherArch(*this, true); };
+   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+ }
++
++llvm::LogicalResult mlir::pto::TCompactCompareOp::verify() {
++  if (getTargetArch(getOperation()) != PTOArch::A3)
++    return emitOpError("compact compare currently requires A3");
++  auto mode = getCmpMode();
++  if (mode != CmpMode::EQ && mode != CmpMode::GT && mode != CmpMode::GE)
++    return emitOpError("compact compare supports eq/gt/ge");
++  for (Value value : {getSrc(), getValues(), getIndices(), getCount(), getTmp()}) {
++    Type type = value.getType();
++    if (failed(verifyTileBufCommon(getOperation(), type, "compact operand")) ||
++        !isRowMajorTileBuf(type))
++      return emitOpError("compact operands must be row-major tile buffers");
++    auto space = getPTOMemorySpaceEnum(type);
++    if (!space || *space != pto::AddressSpace::VEC)
++      return emitOpError("compact operands must be in vec memory");
++  }
++  if (!getElemTy(getSrc().getType()).isF32() ||
++      !getElemTy(getValues().getType()).isF32() ||
++      !getElemTy(getIndices().getType()).isInteger(32) ||
++      !getElemTy(getCount().getType()).isInteger(32) ||
++      !getElemTy(getTmp().getType()).isInteger(8))
++    return emitOpError("expects f32 src/values, i32 indices/count, i8 tmp");
++  auto src = getShapeVec(getSrc().getType());
++  auto values = getShapeVec(getValues().getType());
++  auto indices = getShapeVec(getIndices().getType());
++  auto count = getShapeVec(getCount().getType());
++  auto tmp = getShapeVec(getTmp().getType());
++  if (src.size() != 2 || values.size() != 2 || indices.size() != 2 ||
++      count.size() != 2 || tmp.size() != 2 ||
++      src[0] <= 0 || src[1] <= 0 || src[1] % 64 != 0)
++    return emitOpError("expects static 2D physical shapes and src cols divisible by 64");
++  if (values != indices || values[0] != src[0] || values[1] <= 0 ||
++      values[1] % 8 != 0 || values[1] > src[1])
++    return emitOpError("values/indices shapes must match, share src rows, and have aligned capacity <= src cols");
++  if (count[0] != 1 || count[1] < src[0] || count[1] % 8 != 0)
++    return emitOpError("count must be [1, aligned capacity >= src rows]");
++  const int64_t indexBytes = src[1] * 4;
++  const int64_t maskBytes = ((src[1] + 255) / 256) * 32;
++  const int64_t needed = indexBytes + std::max<int64_t>(1024, maskBytes + indexBytes);
++  if (tmp[0] <= 0 || tmp[1] <= 0 || tmp[0] * tmp[1] < needed)
++    return emitOpError("compact scratch is too small");
++  return success();
++}
++
+ static std::optional<unsigned> tgatherbElemBytes(Type ty) {
+   unsigned elemBytes = getPTOStorageElemByteSize(ty);
+   if (elemBytes == 0) {
+diff --git a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+index 0068ce68..a69dfee2 100644
+--- a/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
++++ b/lib/PTO/Transforms/InsertSync/PTOInsertSync.cpp
+@@ -49,7 +49,7 @@ namespace {
+ static bool hasGatherScatterLikeOps(func::FuncOp func) {
+   bool found = false;
+   func.walk([&](Operation *op) {
+-    if (isa<pto::TGatherOp, pto::TGatherBOp, pto::TScatterOp, pto::MGatherOp,
++    if (isa<pto::TGatherOp, pto::TGatherBOp, pto::TCompactCompareOp, pto::TScatterOp, pto::MGatherOp,
+             pto::MScatterOp>(op)) {
+       found = true;
+       return WalkResult::interrupt();
+diff --git a/lib/PTO/Transforms/InsertSync/SyncMacroModel.cpp b/lib/PTO/Transforms/InsertSync/SyncMacroModel.cpp
+index d46eb462..0521d88e 100644
+--- a/lib/PTO/Transforms/InsertSync/SyncMacroModel.cpp
++++ b/lib/PTO/Transforms/InsertSync/SyncMacroModel.cpp
+@@ -443,6 +443,18 @@ std::optional<SyncMacroModel> mlir::pto::getSyncMacroModel(Operation *op) {
+   if (auto tgather = dyn_cast<pto::TGatherOp>(op)) {
+     return getTGatherSyncMacroModel(tgather);
+   }
++  if (auto compact = dyn_cast<pto::TCompactCompareOp>(op)) {
++    SyncMacroModel model;
++    // 索引构造、比较及双路压缩都在V管线；count由Scalar写回。
++    // 三个结果和scratch的效果显式进入同步分析，不能把count误判为V写。
++    addPhase(model, PipelineType::PIPE_V, ValueRange{compact.getTmp()},
++             ValueRange{compact.getSrc()});
++    addPhase(model, PipelineType::PIPE_V,
++             ValueRange{compact.getValues(), compact.getIndices()},
++             ValueRange{compact.getSrc(), compact.getTmp()});
++    addPhase(model, PipelineType::PIPE_S, ValueRange{compact.getCount()}, ValueRange{});
++    return model;
++  }
+   if (auto mgather = dyn_cast<pto::MGatherOp>(op)) {
+     return getMGatherSyncMacroModel(mgather);
+   }
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index f0cc3a59..c2d92816 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -713,6 +713,8 @@ struct EmitPTOManualPass
+         if (gather.getCdst())
+           flags.gatherCompareScalar = true;
+       }
++      if (isa<mlir::pto::TCompactCompareOp>(op))
++        flags.gatherCompareScalar = true;
+       if (auto cmo = dyn_cast<mlir::pto::CmoCacheInvalidOp>(op)) {
+         if (cmo.getAddr())
+           flags.globalTensorData = true;
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h b/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
+index 943c5c09..7bb840a0 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
+@@ -13,33 +13,11 @@
+ // 此辅助实现保持 Scalar 类型，使用硬件压缩；所有临时字节都位于调用方 tmp。
+ // 只在 A3 的 compare-form 实际出现时发出，不改变索引或固定 pattern gather。
+ inline constexpr const char *kGatherCompareScalarSupport = R"cpp(
+-template <typename D, typename S, typename Tmp, typename C, CmpMode Mode>
+-__tf__ AICORE void PTOAS__GATHER_COMPARE_SCALAR_RAW(
+-    typename D::TileDType __out__ dst,
+-    typename S::TileDType __in__ src,
+-    typename Tmp::TileDType __out__ tmp,
+-    typename C::TileDType __out__ count,
+-    typename S::DType threshold, int32_t offset, unsigned rows, unsigned cols) {
+-  // index 按 64 个 INT32 对齐；后区先生成 Vector 索引种子，随后复用为
+-  // bit mask 和完整压缩暂存，不能再从 tmp 的末尾继续越界分配。
+-  constexpr unsigned indexCols = ((S::Cols + 63) / 64) * 64;
+-  constexpr unsigned indexBytes = indexCols * 4;
+-  constexpr unsigned maskBytes = ((S::Cols + 255) / 256) * 32;
+-  constexpr unsigned collectBytes = maskBytes + indexBytes;
+-  constexpr unsigned scratchBytes = collectBytes > 1024 ? collectBytes : 1024;
+-  static_assert(Tmp::Rows * Tmp::Cols * sizeof(typename Tmp::DType) >=
+-                indexBytes + scratchBytes, "compare gather tmp is too small");
+-  static_assert(Mode == CmpMode::EQ || Mode == CmpMode::GT || Mode == CmpMode::GE,
+-                "A3 scalar compare gather currently supports eq/gt/ge");
+-  auto out = reinterpret_cast<__ubuf__ int32_t*>(__cce_get_tile_ptr(dst));
+-  auto input = reinterpret_cast<__ubuf__ typename S::DType*>(__cce_get_tile_ptr(src));
+-  auto base = reinterpret_cast<__ubuf__ uint8_t*>(__cce_get_tile_ptr(tmp));
+-  auto counts = reinterpret_cast<__ubuf__ typename C::DType*>(__cce_get_tile_ptr(count));
+-  auto indices = reinterpret_cast<__ubuf__ int32_t*>(base);
+-  auto work = base + indexBytes;
++template <unsigned indexCols>
++AICORE inline void PTOAS__MAKE_LINEAR_INDICES(
++    __ubuf__ int32_t *indices, __ubuf__ uint8_t *work, int32_t offset) {
+   auto seed0 = reinterpret_cast<__ubuf__ float*>(work);
+   auto seed1 = seed0 + 128;
+-
+   // 与 ISA 的带 scratch TCI 同一 Vector 构造方式；没有按候选逐项 Scalar 写入。
+   set_mask_count();
+   set_vector_mask(0, 8);
+@@ -68,6 +46,35 @@ __tf__ AICORE void PTOAS__GATHER_COMPARE_SCALAR_RAW(
+           offset + i * 64, 1, 1, 1, 8, 8);
+   pipe_barrier(PIPE_V);
+ 
++}
++
++template <typename D, typename S, typename Tmp, typename C, CmpMode Mode>
++__tf__ AICORE void PTOAS__GATHER_COMPARE_SCALAR_RAW(
++    typename D::TileDType __out__ dst,
++    typename S::TileDType __in__ src,
++    typename Tmp::TileDType __out__ tmp,
++    typename C::TileDType __out__ count,
++    typename S::DType threshold, int32_t offset, unsigned rows, unsigned cols) {
++  // index 按 64 个 INT32 对齐；后区先生成 Vector 索引种子，随后复用为
++  // bit mask 和完整压缩暂存，不能再从 tmp 的末尾继续越界分配。
++  constexpr unsigned indexCols = ((S::Cols + 63) / 64) * 64;
++  constexpr unsigned indexBytes = indexCols * 4;
++  constexpr unsigned maskBytes = ((S::Cols + 255) / 256) * 32;
++  constexpr unsigned collectBytes = maskBytes + indexBytes;
++  constexpr unsigned scratchBytes = collectBytes > 1024 ? collectBytes : 1024;
++  static_assert(Tmp::Rows * Tmp::Cols * sizeof(typename Tmp::DType) >=
++                indexBytes + scratchBytes, "compare gather tmp is too small");
++  static_assert(Mode == CmpMode::EQ || Mode == CmpMode::GT || Mode == CmpMode::GE,
++                "A3 scalar compare gather currently supports eq/gt/ge");
++  auto out = reinterpret_cast<__ubuf__ int32_t*>(__cce_get_tile_ptr(dst));
++  auto input = reinterpret_cast<__ubuf__ typename S::DType*>(__cce_get_tile_ptr(src));
++  auto base = reinterpret_cast<__ubuf__ uint8_t*>(__cce_get_tile_ptr(tmp));
++  auto counts = reinterpret_cast<__ubuf__ typename C::DType*>(__cce_get_tile_ptr(count));
++  auto indices = reinterpret_cast<__ubuf__ int32_t*>(base);
++  auto work = base + indexBytes;
++
++  PTOAS__MAKE_LINEAR_INDICES<indexCols>(indices, work, offset);
++
+   auto mask = work;
+   auto packed = reinterpret_cast<__ubuf__ uint32_t*>(work + maskBytes);
+   for (unsigned row = 0; row < rows; ++row) {
+@@ -124,6 +131,90 @@ AICORE inline void PTOAS__GATHER_COMPARE_SCALAR(
+       dst.data(), src.data(), tmp.data(), count.data(),
+       threshold, offset, src.GetValidRow(), src.GetValidCol());
+ }
++
++// 成对压缩共用比较掩码。所有索引始终是整数，FP32 score只做位搬运。
++// 未命中的尾部不定义；输出写入严格限定在capacity内，count始终返回真实值。
++template <typename D, typename S, typename I, typename Tmp, typename C, CmpMode Mode>
++__tf__ AICORE void PTOAS__COMPACT_COMPARE_RAW(
++    typename D::TileDType __out__ dst,
++    typename S::TileDType __in__ src,
++    typename I::TileDType __out__ ids,
++    typename Tmp::TileDType __out__ tmp,
++    typename C::TileDType __out__ count,
++    float threshold, int32_t offset, unsigned rows, unsigned cols) {
++  constexpr unsigned indexCols = ((S::Cols + 63) / 64) * 64;
++  constexpr unsigned indexBytes = indexCols * 4;
++  constexpr unsigned maskBytes = ((S::Cols + 255) / 256) * 32;
++  constexpr unsigned collectBytes = maskBytes + indexBytes;
++  constexpr unsigned scratchBytes = collectBytes > 1024 ? collectBytes : 1024;
++  static_assert(Tmp::Rows * Tmp::Cols * sizeof(typename Tmp::DType) >=
++                indexBytes + scratchBytes, "compact scratch is too small");
++  static_assert(D::Cols == I::Cols, "compact output capacities must match");
++  auto values = reinterpret_cast<__ubuf__ uint32_t*>(__cce_get_tile_ptr(dst));
++  auto outIds = reinterpret_cast<__ubuf__ uint32_t*>(__cce_get_tile_ptr(ids));
++  auto input = reinterpret_cast<__ubuf__ float*>(__cce_get_tile_ptr(src));
++  auto counts = reinterpret_cast<__ubuf__ int32_t*>(__cce_get_tile_ptr(count));
++  auto base = reinterpret_cast<__ubuf__ uint8_t*>(__cce_get_tile_ptr(tmp));
++  auto indices = reinterpret_cast<__ubuf__ int32_t*>(base);
++  auto work = base + indexBytes;
++  PTOAS__MAKE_LINEAR_INDICES<indexCols>(indices, work, offset);
++  auto mask = work;
++  auto packed = reinterpret_cast<__ubuf__ uint32_t*>(work + maskBytes);
++  for (unsigned row = 0; row < rows; ++row) {
++    if (cols == 0) {
++      counts[row] = 0;
++      continue;
++    }
++    set_mask_norm();
++    set_vector_mask(-1, -1);
++    const unsigned repeats = (cols + 63) / 64;
++    for (unsigned rep = 0; rep < repeats; rep += 240) {
++      const unsigned num = repeats - rep < 240 ? repeats - rep : 240;
++      if constexpr (Mode == CmpMode::GT)
++        vcmpvs_gt(mask + rep * 8, input + row * S::RowStride + rep * 64,
++                  threshold, num, 1, 1, 8, 8);
++      else if constexpr (Mode == CmpMode::GE)
++        vcmpvs_ge(mask + rep * 8, input + row * S::RowStride + rep * 64,
++                  threshold, num, 1, 1, 8, 8);
++      else
++        vcmpvs_eq(mask + rep * 8, input + row * S::RowStride + rep * 64,
++                  threshold, num, 1, 1, 8, 8);
++    }
++    pipe_barrier(PIPE_V);
++    set_mask_count();
++    set_vector_mask(0, cols);
++    vreducev2(packed, reinterpret_cast<__ubuf__ uint32_t*>(indices),
++              reinterpret_cast<__ubuf__ uint32_t*>(mask), 1, 1, 0, 8, 0);
++    const unsigned kept = get_rsvd_cnt();
++    counts[row] = kept;
++    pipe_barrier(PIPE_V);
++    const unsigned copied = kept < D::Cols ? kept : D::Cols;
++    if (copied != 0) {
++      set_vector_mask(0, copied);
++      vcopy(outIds + row * I::RowStride, packed, 1, 1, 1, 8, 8);
++      pipe_barrier(PIPE_V);
++      // 使用相同mask压缩score的32位表示，不执行浮点转换或重新计算。
++      set_vector_mask(0, cols);
++      vreducev2(packed,
++                reinterpret_cast<__ubuf__ uint32_t*>(input + row * S::RowStride),
++                reinterpret_cast<__ubuf__ uint32_t*>(mask), 1, 1, 0, 8, 0);
++      pipe_barrier(PIPE_V);
++      set_vector_mask(0, copied);
++      vcopy(values + row * D::RowStride, packed, 1, 1, 1, 8, 8);
++      pipe_barrier(PIPE_V);
++    }
++  }
++  set_mask_norm();
++  set_vector_mask(-1, -1);
++}
++
++template <typename D, typename S, typename I, typename Tmp, typename C, CmpMode Mode>
++AICORE inline void PTOAS__COMPACT_COMPARE(
++    D &dst, S &src, I &indices, float threshold, Tmp &tmp, C &count, int32_t offset) {
++  PTOAS__COMPACT_COMPARE_RAW<D, S, I, Tmp, C, Mode>(
++      dst.data(), src.data(), indices.data(), tmp.data(), count.data(),
++      threshold, offset, src.GetValidRow(), src.GetValidCol());
++}
+ )cpp";
+ 
+ #endif
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp b/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
+index f0bd3380..9d5b3447 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
+@@ -161,6 +161,32 @@ struct PTOGatherToEmitC : public OpConversionPattern<pto::TGatherOp> {
+   }
+ };
+ 
++struct PTOCompactCompareToEmitC : public OpConversionPattern<pto::TCompactCompareOp> {
++  using OpConversionPattern::OpConversionPattern;
++
++  LogicalResult matchAndRewrite(pto::TCompactCompareOp op, OpAdaptor adaptor,
++                                ConversionPatternRewriter &rewriter) const override {
++    auto *ctx = rewriter.getContext();
++    SmallVector<Attribute> args;
++    for (Value value : {adaptor.getValues(), adaptor.getSrc(), adaptor.getIndices(),
++                        adaptor.getTmp(), adaptor.getCount()}) {
++      auto type = dyn_cast<emitc::OpaqueType>(value.getType());
++      if (!type)
++        return rewriter.notifyMatchFailure(op, "expected opaque tile operand");
++      args.push_back(emitc::OpaqueAttr::get(ctx, type.getValue()));
++    }
++    args.push_back(emitc::OpaqueAttr::get(ctx, cmpModeTok(op.getCmpModeAttr())));
++    rewriter.create<emitc::CallOpaqueOp>(
++        op.getLoc(), TypeRange{}, "PTOAS__COMPACT_COMPARE",
++        ArrayAttr{}, rewriter.getArrayAttr(args),
++        ValueRange{adaptor.getValues(), adaptor.getSrc(), adaptor.getIndices(),
++                   adaptor.getKValue(), adaptor.getTmp(), adaptor.getCount(),
++                   adaptor.getOffset()});
++    rewriter.eraseOp(op);
++    return success();
++  }
++};
++
+ struct PTOGatherbToEmitC : public OpConversionPattern<pto::TGatherBOp> {
+   using OpConversionPattern<pto::TGatherBOp>::OpConversionPattern;
+ 
+@@ -187,6 +213,7 @@ void populateTensorTGatherPatterns(RewritePatternSet &patterns,
+                         PTOArch targetArch) {
+   patterns.add<PTOGatherToEmitC>(typeConverter, ctx, targetArch);
+   patterns.add<PTOGatherbToEmitC>(typeConverter, ctx);
++  patterns.add<PTOCompactCompareToEmitC>(typeConverter, ctx);
+ }
+ 
+ } // namespace pto
+diff --git a/test/lit/pto/tcompact_compare_a3.pto b/test/lit/pto/tcompact_compare_a3.pto
+new file mode 100644
+index 00000000..3dba3ee6
+--- /dev/null
++++ b/test/lit/pto/tcompact_compare_a3.pto
+@@ -0,0 +1,38 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++// CANN Open Software License Agreement Version 2.0 (the "License").
++// Please refer to the License for details. You may not use this file except in compliance with the License.
++// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++// See LICENSE in the root of the software repository for the full text of the License.
++//
++// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - | FileCheck %s
++// RUN: ptoas --pto-arch=a3 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s --check-prefix=SYNC
++// 验证三个DPS结果及动态INT32基址；设备位一致性另由成对压缩回归验证。
++
++!src = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!values = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!indices = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!count = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!scratch = !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=1280, v_row=1, v_col=1280, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++module {
++  func.func @compact_pair(%threshold: f32, %offset: i32) {
++    %src = pto.alloc_tile : !src
++    %values = pto.alloc_tile : !values
++    %indices = pto.alloc_tile : !indices
++    %count = pto.alloc_tile : !count
++    %scratch = pto.alloc_tile : !scratch
++    pto.tcompact.compare ins(%src, %threshold, %offset : !src, f32, i32)
++      outs(%values, %indices, %count, %scratch : !values, !indices, !count, !scratch)
++      {cmpMode = #pto<cmp ge>}
++    return
++  }
++}
++
++// CHECK: void compact_pair(float [[THRESHOLD:[_A-Za-z0-9]+]], int32_t [[OFFSET:[_A-Za-z0-9]+]])
++// CHECK: PTOAS__COMPACT_COMPARE<Tile<{{.*}}CmpMode::GE>(
++// CHECK-SAME: {{.*}}[[THRESHOLD]], {{.*}}[[OFFSET]]);
++// SYNC-LABEL: After Sync Motion
++// SYNC: COMPOUND pto.tcompact.compare [PIPE_V]
++// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_V]
++// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_S]
