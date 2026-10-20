@@ -18304,3 +18304,42 @@ B28及8K/B16、B32；不混入尚未采用的Top-K或WS候选。
 同目录README和manifest说明版本、口径、来源及记录数；父目录提供同名zip。
 旧多窗口文件及PARTIAL压缩包在打包完成后清理。export_download.py可从
 已有原始产物重建下载包；任务ID仍保存在TASKS.json，不额外提交大型trace副本。
+
+## 682. 2026-10-21：核对短档关闭路径，正式保留精确Top-K短前缀
+
+上一轮bdf5188b收齐七档并交付下载包，是实际阶段进展。继续核对8K/B32：
+从当前与候选实际trace和各自唯一kernel_config定位到
+indexer_score_topk_native_pair_3_aic/aiv，func_id为51/52。两份C++只有
+入口绑定变量的编译期inline编号不同，保持一一对应重命名后相同；实际
+kernel_51.bin和kernel_52.bin分别5420/15400字节，两侧内容相同，未做hash。
+两份短档代码均没有Scalar GE筛选调用。核对仅限这两个实际Score kernel，
+不能扩大为整程序、运行时状态或装载地址相同。
+
+原8K/B32的mean增加12.624μs仍保留。已有阶段分解显示Score之前增加
+6.264μs、Score首启至Attention首启增加14.976μs，而输出段缩短10.668μs；
+各段包含并发和调度，尚不能唯一归因。见
+[关闭路径检查](csa_multitask_backport_20261020/TOPK_SHORT_DISABLED_REVIEW.json)。
+没有重测来挑选更好的短档数字，也没有新增batch单点白名单。
+
+采用依据是680节五个128K档mean全部改善、七档max全部降低，以及完整
+功能和受影响边界通过；原8:2描述口径相对正式Plan改善1.095%。将
+topk_prefix_v1迁入正式deepseek_v4_flash_csa，仅新增topk_threshold_stages.py
+并修改decode_indexer.py。保持原balanced长历史选择范围，短档仍走原路径；
+原GE同分保留、incoming优先、首段/短段/高保留率回退和Score数学不变。
+
+adopt_topk_prefix.py检查目标仍等于本轮Plan、七档和边界证据，再整理格式。
+初次私有排版因forest遗留长行被ruff拒绝，尚未替换正式文件；补齐相关函数
+排版后通过。正式两文件与实测候选的算法AST及导入符号一致，仅更新模块
+验证说明；没有为排版重复跑设备测试。见
+[采用记录](csa_multitask_backport_20261020/ADOPTION_topk_prefix.json)。
+
+本优化依赖已验证的PyPTO 65477973、PTOAS b48c84eb及Simpler 57e499238
+配套工具链，复现入口为run_topk_case.sh；没有更新公共安装或公共env。
+不据隔离环境通过宣称旧PTOAS发行包也支持这些新增能力。七档优于单SPMD
+的总目标仍未达到，S6入口范围与单卡/合成历史的验证边界均不变。
+
+后续独立topk_ws_pool_v1由当前Top-K包加fd55e29a的WS列池生成，CPU完整
+编译通过。两项都作用于同一Score READY/ACK流水，下一轮实测生产侧
+减少写回与消费侧减少排序的联动，不把两轮收益相加。B16/B28分别为
+task_20261021_003526_346669422、task_20261021_003526_34667348528；
+参照改为topk_prefix_v1，仍四路五窗并检查mean/max，当前无设备结论。

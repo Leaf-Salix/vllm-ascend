@@ -31,6 +31,7 @@ from .layout import (
     INDEXER_PAGE_BYTES_DYN,
     INDEXER_TABLE_COLUMNS_DYN,
 )
+from .topk_threshold_stages import threshold_merge_top512
 
 B_DYN = pl.dynamic("B_DYN")
 
@@ -1525,134 +1526,156 @@ def indexer_score_topk_native_cube(
                                             [1, 2 * BUFFERED_LONG_SCORE_TILE],
                                             target_memory=pl.MemorySpace.Vec,
                                         )
-                                        logical_i32 = pl.cast(single_segment_begin, pl.INT32)
-                                        if single_segment_valid <= 512:
-                                            tiny_indices = pl.add(
-                                                pl.tile.arange(0, [1, 512], dtype=pl.INT32),
-                                                logical_i32,
-                                            )
-                                            tiny_tile = pl.tile.extract(
-                                                single_segment_data,
-                                                0,
-                                                0,
-                                                [1, 512],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                            tiny_raw = pl.set_validshape(tiny_tile, 1, single_segment_valid)
-                                            tiny_scores = pl.maximum(
-                                                pl.tile.fillpad(tiny_raw, pad_value=pl.PadValue.min),
-                                                FP32_NEG_INF,
-                                            )
-                                            tiny_pairs = pl.sort32(
-                                                tiny_scores,
-                                                pl.reinterpret_view(tiny_indices, pl.UINT32),
-                                            )
-                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
-                                            tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
-                                            single_new_root = pl.tile.extract(
-                                                tiny_pairs,
-                                                0,
-                                                0,
-                                                [1, TOPK_PAIR_WIDTH],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                        elif single_segment_valid <= 1024:
-                                            small_indices = pl.add(
-                                                pl.tile.arange(0, [1, 1024], dtype=pl.INT32),
-                                                logical_i32,
-                                            )
-                                            small_tile = pl.tile.extract(
-                                                single_segment_data,
-                                                0,
-                                                0,
-                                                [1, 1024],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                            small_raw = pl.set_validshape(small_tile, 1, single_segment_valid)
-                                            small_scores = pl.maximum(
-                                                pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min),
-                                                FP32_NEG_INF,
-                                            )
-                                            small_pairs = pl.sort32(
-                                                small_scores,
-                                                pl.reinterpret_view(small_indices, pl.UINT32),
-                                            )
-                                            small_pairs = pl.mrgsort(small_pairs, block_len=64)
-                                            small_pairs = pl.mrgsort(small_pairs, block_len=256)
-                                            small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
-                                            small_right = pl.tile.slice(
-                                                small_pairs,
-                                                [1, TOPK_PAIR_WIDTH],
-                                                [0, 1024],
-                                            )
-                                            small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                                            small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
-                                            single_new_root = pl.tile.extract(
-                                                small_merged,
-                                                0,
-                                                0,
-                                                [1, TOPK_PAIR_WIDTH],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                        else:
-                                            large_indices = pl.add(
-                                                pl.tile.arange(0, [1, 2048], dtype=pl.INT32),
-                                                logical_i32,
-                                            )
-                                            large_tile = pl.tile.extract(
-                                                single_segment_data,
-                                                0,
-                                                0,
-                                                [1, 2048],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                            large_raw = pl.set_validshape(large_tile, 1, single_segment_valid)
-                                            large_scores = pl.maximum(
-                                                pl.tile.fillpad(large_raw, pad_value=pl.PadValue.min),
-                                                FP32_NEG_INF,
-                                            )
-                                            large_pairs = pl.sort32(
-                                                large_scores,
-                                                pl.reinterpret_view(large_indices, pl.UINT32),
-                                            )
-                                            large_pairs = pl.mrgsort(large_pairs, block_len=64)
-                                            large_pairs = pl.mrgsort(large_pairs, block_len=256)
-                                            large_pairs = pl.mrgsort(large_pairs, block_len=1024)
-                                            single_new_root = pl.tile.extract(
-                                                large_pairs,
-                                                0,
-                                                0,
-                                                [1, TOPK_PAIR_WIDTH],
-                                                target_memory=pl.MemorySpace.Vec,
-                                            )
-                                        if single_step < 2:
-                                            single_roots = pl.tile.assemble(
-                                                single_roots, single_new_root, [single_local, 0]
-                                            )
-                                        else:
-                                            single_old_root = pl.tile.extract(
+                                        if single_step >= 2 and single_segment_valid > 512:
+                                            threshold_old_root = pl.tile.extract(
                                                 single_roots,
                                                 single_local,
                                                 0,
                                                 [1, TOPK_PAIR_WIDTH],
                                                 target_memory=pl.MemorySpace.Vec,
                                             )
-                                            single_merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
-                                            # Native merges each new contiguous 2048 segment
-                                            # before the accumulated root when scores tie.
-                                            single_merged = pl.tile.mrgsort(
-                                                single_new_root, single_old_root, tmp=single_merge_tmp
-                                            )
-                                            single_next_root = pl.tile.extract(
-                                                single_merged,
-                                                0,
-                                                0,
-                                                [1, TOPK_PAIR_WIDTH],
-                                                target_memory=pl.MemorySpace.Vec,
+                                            threshold_next = threshold_merge_top512(
+                                                single_segment_data,
+                                                threshold_old_root,
+                                                pl.cast(single_segment_begin, pl.INT32),
+                                                pl.cast(single_segment_valid, pl.INT32),
                                             )
                                             single_roots = pl.tile.assemble(
-                                                single_roots, single_next_root, [single_local, 0]
+                                                single_roots,
+                                                threshold_next,
+                                                [single_local, 0],
                                             )
+                                        else:
+                                            logical_i32 = pl.cast(single_segment_begin, pl.INT32)
+                                            if single_segment_valid <= 512:
+                                                tiny_indices = pl.add(
+                                                    pl.tile.arange(0, [1, 512], dtype=pl.INT32),
+                                                    logical_i32,
+                                                )
+                                                tiny_tile = pl.tile.extract(
+                                                    single_segment_data,
+                                                    0,
+                                                    0,
+                                                    [1, 512],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                                tiny_raw = pl.set_validshape(tiny_tile, 1, single_segment_valid)
+                                                tiny_scores = pl.maximum(
+                                                    pl.tile.fillpad(tiny_raw, pad_value=pl.PadValue.min),
+                                                    FP32_NEG_INF,
+                                                )
+                                                tiny_pairs = pl.sort32(
+                                                    tiny_scores,
+                                                    pl.reinterpret_view(tiny_indices, pl.UINT32),
+                                                )
+                                                tiny_pairs = pl.mrgsort(tiny_pairs, block_len=64)
+                                                tiny_pairs = pl.mrgsort(tiny_pairs, block_len=256)
+                                                single_new_root = pl.tile.extract(
+                                                    tiny_pairs,
+                                                    0,
+                                                    0,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                            elif single_segment_valid <= 1024:
+                                                small_indices = pl.add(
+                                                    pl.tile.arange(0, [1, 1024], dtype=pl.INT32),
+                                                    logical_i32,
+                                                )
+                                                small_tile = pl.tile.extract(
+                                                    single_segment_data,
+                                                    0,
+                                                    0,
+                                                    [1, 1024],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                                small_raw = pl.set_validshape(small_tile, 1, single_segment_valid)
+                                                small_scores = pl.maximum(
+                                                    pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min),
+                                                    FP32_NEG_INF,
+                                                )
+                                                small_pairs = pl.sort32(
+                                                    small_scores,
+                                                    pl.reinterpret_view(small_indices, pl.UINT32),
+                                                )
+                                                small_pairs = pl.mrgsort(small_pairs, block_len=64)
+                                                small_pairs = pl.mrgsort(small_pairs, block_len=256)
+                                                small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
+                                                small_right = pl.tile.slice(
+                                                    small_pairs,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    [0, 1024],
+                                                )
+                                                small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                                                small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
+                                                single_new_root = pl.tile.extract(
+                                                    small_merged,
+                                                    0,
+                                                    0,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                            else:
+                                                large_indices = pl.add(
+                                                    pl.tile.arange(0, [1, 2048], dtype=pl.INT32),
+                                                    logical_i32,
+                                                )
+                                                large_tile = pl.tile.extract(
+                                                    single_segment_data,
+                                                    0,
+                                                    0,
+                                                    [1, 2048],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                                large_raw = pl.set_validshape(large_tile, 1, single_segment_valid)
+                                                large_scores = pl.maximum(
+                                                    pl.tile.fillpad(large_raw, pad_value=pl.PadValue.min),
+                                                    FP32_NEG_INF,
+                                                )
+                                                large_pairs = pl.sort32(
+                                                    large_scores,
+                                                    pl.reinterpret_view(large_indices, pl.UINT32),
+                                                )
+                                                large_pairs = pl.mrgsort(large_pairs, block_len=64)
+                                                large_pairs = pl.mrgsort(large_pairs, block_len=256)
+                                                large_pairs = pl.mrgsort(large_pairs, block_len=1024)
+                                                single_new_root = pl.tile.extract(
+                                                    large_pairs,
+                                                    0,
+                                                    0,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                            if single_step < 2:
+                                                single_roots = pl.tile.assemble(
+                                                    single_roots, single_new_root, [single_local, 0]
+                                                )
+                                            else:
+                                                single_old_root = pl.tile.extract(
+                                                    single_roots,
+                                                    single_local,
+                                                    0,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                                single_merge_tmp = pl.tile.create(
+                                                    [1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32
+                                                )
+                                                # Native merges each new contiguous 2048 segment
+                                                # before the accumulated root when scores tie.
+                                                single_merged = pl.tile.mrgsort(
+                                                    single_new_root, single_old_root, tmp=single_merge_tmp
+                                                )
+                                                single_next_root = pl.tile.extract(
+                                                    single_merged,
+                                                    0,
+                                                    0,
+                                                    [1, TOPK_PAIR_WIDTH],
+                                                    target_memory=pl.MemorySpace.Vec,
+                                                )
+                                                single_roots = pl.tile.assemble(
+                                                    single_roots, single_next_root, [single_local, 0]
+                                                )
                         for single_local in pl.unroll(query_group_size // 2):
                             single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
                             single_root = pl.tile.extract(
