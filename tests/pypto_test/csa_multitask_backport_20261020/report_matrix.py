@@ -13,7 +13,7 @@ CASES = [(131072, b) for b in (4, 8, 16, 24, 28)] + [(8192, b) for b in (16, 32)
 
 def build(candidate, attempt, case_attempts=None):
     case_attempts = case_attempts or {}
-    rows, environments = [], []
+    rows, environments, toolchains, wait_sources = [], [], [], []
     for history, batch in CASES:
         selected_attempt = case_attempts.get((history, batch), attempt)
         path = HERE / "runs" / candidate / f"h{history}_b{batch}_{selected_attempt}" / "result.json"
@@ -34,6 +34,16 @@ def build(candidate, attempt, case_attempts=None):
         if any(len(v["samples_us"]) != 5 for v in stats.values()):
             raise ValueError("七档主口径必须保留整组五窗")
         environments.append(raw["environment"])
+        toolchains.append(raw.get("toolchain_identity"))
+        wait_sources.append(raw.get("shared_wait_source"))
+        if raw.get("toolchain_identity"):
+            expected_roles = set(stats)
+            if set(raw.get("same_toolchain_roles", [])) != expected_roles:
+                raise ValueError("配对角色未全部核对同一工具链")
+            if raw.get("actual_ptoas_invocations", {}).get("executables") != [
+                raw["toolchain_identity"]["ptoas_executable"]
+            ]:
+                raise ValueError("实际PTOAS调用记录不符合共同工具链")
         topology = {}
         for role in ("multitask_candidate", "single_spmd"):
             window = next(w for w in raw["l1"]["windows"] if w["side"] == role)
@@ -72,6 +82,10 @@ def build(candidate, attempt, case_attempts=None):
         )
     if any(e != environments[0] for e in environments[1:]):
         raise ValueError("七档环境不一致，不能按同一冻结环境汇总")
+    if any(t != toolchains[0] for t in toolchains[1:]):
+        raise ValueError("七档实际工具链路径/版本记录不一致")
+    if any(s != wait_sources[0] for s in wait_sources[1:]):
+        raise ValueError("七档配套等待源码不是同一份")
     if any(row["candidate_wait_policy"] != rows[0]["candidate_wait_policy"] for row in rows[1:]):
         raise ValueError("七档等待编译策略不一致，不能混合默认TWAIT与100 tick结果")
     regions = {}
@@ -89,6 +103,8 @@ def build(candidate, attempt, case_attempts=None):
         case_attempts={f"{h}/{b}": v for (h, b), v in case_attempts.items()},
         passed=True,
         environment=environments[0],
+        toolchain_identity=toolchains[0],
+        shared_wait_source=wait_sources[0],
         candidate_wait_policy=rows[0]["candidate_wait_policy"],
         scope="同轮/同卡/同根输入；L1最早incore到最晚结束，外层单列；非整模型",
         weighting="各history内对每档百分比等权平均，再128K乘0.8、8K乘0.2",

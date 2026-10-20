@@ -1,0 +1,17 @@
+{
+  "candidate": "cooperative_prefix_v1",
+  "cpu_result": "runs/cooperative_prefix_v1/cpu_lower_v1/result.json",
+  "qb_math_unchanged_after_taskid_bookkeeping_removed": true,
+  "unchanged_modules": {
+    "decode_compressor_ratio4.py": true,
+    "decode_indexer_compressor.py": true
+  },
+  "dependency_chain": [
+    "QA/QR -> Indexer query投影",
+    "Indexer query投影 -> 主Compressor投影",
+    "主Compressor投影 -> Hadamard4 / QB20 / head权重",
+    "QB投影完成 -> 原KV投影及后处理"
+  ],
+  "retained_dependencies": "Hadamard仍有query RoPE数据依赖；Indexer cache完整写回后Score才能消费；pool先读历史再提交state",
+  "device_execution": false
+}

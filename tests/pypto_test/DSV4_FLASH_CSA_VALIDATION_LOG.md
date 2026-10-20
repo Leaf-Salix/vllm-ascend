@@ -17546,3 +17546,173 @@ Git版本；各侧首次编译前核对相同路径，结束时检查实际PTOAS
 最晚结束，包含内部间隙。两类窗口独立采集，差值不等于纯AICPU耗时。
 所有路径、原始五窗及额外的单SPMD外层记录见
 [LATEST_THREE_METRICS_20261020.json](csa_multitask_backport_20261020/LATEST_THREE_METRICS_20261020.json)。
+
+## 656. 2026-10-20：统一100 tick后的Attention行融合两长档未获益
+
+attention_rows_wait100_v1的两个shared_v1任务均completed/exit0，
+B16还通过同图metadata/padding。原多task、当前qa_m16_v3、候选和
+单SPMD四侧的实际导入路径及三仓版本一致；每档239次PTOAS调用均为
+同一冻结可执行文件。候选9个生成单元与单SPMD的dynamic_csa_full
+（45个等待点）明确共用同一份冻结wait_codegen.py，均为100 tick。
+
+五窗完整CSA L1，单位μs：
+
+|档位|当前 min/mean/max|行融合100 tick min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|818.94/827.15/836.64|837.10/849.57/857.08|789.12/797.69/805.12|
+|128K/B28|1181.34/1199.45/1208.04|1205.10/1213.92/1228.62|1158.32/1163.40/1174.12|
+
+相对当前mean退化2.711%/1.206%，max均上升约20μs，暂不采用，不扩七档。
+这轮比较的是完整配套策略相对当前正式路径，不能跨轮与653节相减，
+把差值解释成100 tick本身的独立效果。
+
+Score首启到局部Attention入口的平均区间分别245.168→229.888、
+400.404→377.692μs；但Attention入口到O_A首启分别145.256→176.304、
+237.256→277.688μs。候选入口已包含Plan，区间工作范围不同；这些数据
+说明取消独立Plan交接尚未改善最终就绪，不能说QK/PV数学本身退化同样多。
+原始五窗、外层event及阶段记录见RESULTS和
+[ATTENTION_WAIT_PHASES.json](csa_multitask_backport_20261020/ATTENTION_WAIT_PHASES.json)。
+
+## 657. 2026-10-20：协同前段均值接近持平，定位到窗口内次序翻转
+
+cooperative_prefix_v1的B5/T30功能/图边界及长B16/B28均completed/exit0；
+QB数学去除TaskId返回记账后与原函数AST一致，两条Compressor模块保持
+原文。见[COOPERATIVE_PREFIX_CODEGEN.json](csa_multitask_backport_20261020/COOPERATIVE_PREFIX_CODEGEN.json)。
+
+|档位|当前 min/mean/max|协同前段 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|825.40/838.65/847.34|833.60/836.92/843.48|803.18/808.56/816.52|
+|128K/B28|1160.80/1183.09/1203.20|1141.42/1186.52/1207.58|1163.30/1171.24/1183.32|
+
+mean分别改善0.207%、退化0.290%，不足以正式采用。Indexer query投影
+整组首启离散从61.240→0.996μs、53.320→4.076μs；QB首启离散也收窄，
+但这没有稳定变成完整收益。阶段平均位置不是某个窗口的实际时间线：
+同轮五窗中，Q反量化/原KV既出现先于Score执行，也出现被Score推迟至
+尾部执行，不能把两种先后次序的均值画成一张物理泳道。
+
+B28的1141.42μs窗口中Score在316.88μs首启，Q反量化在588.76μs首启；
+1206.52μs窗口则先做Q反量化（320.00μs），Score到394.72μs才首启。
+最快窗仅作为进一步调度假设，未拿它代替五窗均值。完整记录见
+[COOPERATIVE_PREFIX_PHASES.json](csa_multitask_backport_20261020/COOPERATIVE_PREFIX_PHASES.json)。
+
+据此准备cooperative_score_first：保留QB Cube原位置，将Q反量化与原KV
+通过直接Score TaskId后置，避免新建dummy。QB缓冲提升至外层同一scope，
+沿原Native单dense-tile容量合同保留真实T及量化/尾块数学。这个显式
+顺序边可能损失部分重叠，需配对验证，不能预设必然受益。
+v1在CPU的SSA阶段暴露仅出现在deps属性的score_dep未被inline替换；
+v2用实际值数组携带同一TaskId，修复参数使用位置，未改共享编译器。
+当前仍为CPU准备阶段，设备结果另记。
+
+## 658. 2026-10-20：保留独立Plan，只迁移非空48路分工
+
+行融合未获益后，将来源八行tile/48路条带单独适配为plan_workers_v1。
+Plan仍是独立任务，launch=min(48,ceil(T/8))，stride固定48路；没有
+新增信号、等待、初始化或scratch，数学及页保护完全保留。B16从16个
+worker（12个有工作）改为12个；B28从16个（其中5个做两tile）改为
+21个各做一tile。该选择随实际T变化，不枚举batch或history测试点。
+
+两长档均completed/exit0且精确/状态/保护/图检查通过，B16同图边界
+通过。五窗完整CSA L1，单位μs：
+
+|档位|当前 min/mean/max|Plan非空分工 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|831.66/840.37/848.06|816.74/832.23/850.84|790.64/796.73/804.38|
+|128K/B28|1171.08/1192.12/1214.78|1129.18/1167.96/1198.34|1150.54/1160.80/1182.56|
+
+mean分别降低8.144/24.160μs；B28 max降低16.44μs，B16 max增加2.78μs。
+已排入其余五档matrix_v1，统一带外层event；先收齐七档再决定正式采用。
+七档报告新增实际模块/SDK/编译器路径、版本及共同等待源码核对，既有
+历史报告保持原样，不做文件hash扫描。
+
+核内与完整收益分开看：B16的Plan整组跨度16.276→16.216μs、每窗最慢
+worker均值16.200→16.092μs，基本不变；减少的是4个空worker，不能把
+完整8.144μs下降解释为Plan数学提速。B28的整组跨度26.208→17.324μs、
+每窗最慢worker均值26.052→17.208μs，体现了两tile拆成单tile的负载
+改善。但其Score首启也从384.032→368.776μs前移，发生在Plan之前；
+完整24.160μs差值不能全部归因于Plan核内。见
+[PLAN_WORKERS_PHASES.json](csa_multitask_backport_20261020/PLAN_WORKERS_PHASES.json)。
+
+## 659. 2026-10-20：Score次序候选完成CPU，另准备HC同AIV小融合
+
+cooperative_score_first_v2随后在KV的late_dep处暴露相同的deps属性
+SSA替换问题；v3在Q反量化与KV helper内都使用一元素TaskId值数组，
+完整CPU lowering/PTOAS/AICPU链接通过。去除显式调度依赖记账后，
+两个helper的数学AST分别与原实现一致；没有修改共享PyPTO或PTOAS。
+证据见[SCORE_FIRST_CODEGEN.json](csa_multitask_backport_20261020/SCORE_FIRST_CODEGEN.json)。
+两长档已排队，以cooperative_prefix_v1作为同轮消融参考，另带迁移前
+和单SPMD；B16附同图metadata/padding。
+
+HC整段局部MIX涉及多次GM通知，另取冻结来源中“gate与mix/norm共用
+同一AIV行owner”这一部分，准备hc_gate_norm_v1。直接提取当前gate与
+mix/norm的数学体，在每个M8行块内连续执行；四项混合树、BF16舍入
+边界、RMS分段及partial row暂存保持不变。HC widen、Cube投影、RAW
+归约、Sinkhorn仍各自独立，未采用来源默认关闭的消费者归约策略。
+
+新任务按min(ceil(T/8),48)个非空worker分派。没有新GM信号、TWAIT、
+初始化任务或持久状态；只是合并原split_pre_post与mix_x_rms_norm。
+完整CPU编译通过，两段数学AST核对一致，编排中旧两个task名称由
+hc_gate_mix_norm替代。见
+[HC_GATE_NORM_CODEGEN.json](csa_multitask_backport_20261020/HC_GATE_NORM_CODEGEN.json)；
+B5/T30功能及图边界已排队，尚无设备性能结论。
+
+当前等待来自共享队列的整机CI作业占用16张卡；维护模式关闭，任务仍
+正常pending。保留原任务ID继续排队，没有裸跑、重提或抢占其他作业。
+
+## 660. 2026-10-20：独立Plan非空分工完成七档，保留小幅回退与最终目标差距
+
+七档均完成且通过；每档原多task、当前qa_m16_v3、候选和冻结单SPMD
+使用同一卡、同根输入、同工具链的五窗配对，实际PTOAS调用路径一致。
+以下为完整CSA L1的min/mean/max，单位μs；原始五窗、外层event、
+逐task核内数据及版本证据见
+[MATRIX_plan_workers_v1_matrix_v1.json](csa_multitask_backport_20261020/MATRIX_plan_workers_v1_matrix_v1.json)。
+
+|档位|迁移前原多task|当前QA版|Plan非空分工|同轮单SPMD|相对当前mean降低|
+|---|---|---|---|---|---|
+|128K/B4|488.54/499.16/515.40|491.20/497.52/506.80|481.02/488.98/494.92|462.94/474.75/491.52|+1.717%|
+|128K/B8|625.84/633.26/646.60|620.74/631.76/656.58|613.08/621.06/630.46|623.20/627.00/630.98|+1.692%|
+|128K/B16|850.60/863.99/875.26|831.66/840.37/848.06|816.74/832.23/850.84|790.64/796.73/804.38|+0.969%|
+|128K/B24|1133.48/1161.48/1171.78|1039.18/1055.87/1072.44|1063.68/1071.48/1077.16|1027.76/1040.69/1049.54|-1.479%|
+|128K/B28|1271.04/1279.67/1287.24|1171.08/1192.12/1214.78|1129.18/1167.96/1198.34|1150.54/1160.80/1182.56|+2.027%|
+|8K/B16|663.40/668.96/679.82|640.74/654.81/665.82|637.98/655.72/666.86|649.22/653.31/658.02|-0.139%|
+|8K/B32|963.74/981.06/1014.58|940.10/969.14/997.98|941.68/956.88/966.80|929.10/935.19/941.24|+1.266%|
+
+按各上下文档位等权、长短8:2汇总，相对当前改善0.901%，相对迁移前
+改善4.304%，但仍比单SPMD慢1.882%，最终目标未达成。128K/B24 mean
+回退1.479%，max增加4.72μs；8K/B16 mean回退0.139%，max增加1.04μs。
+128K/B28与8K/B32的max分别降低16.44/31.18μs。不能只报受益档位。
+
+本次只改变Plan工作条带和非空launch数量，源码数学及尾行保护不变。
+B16同图history、页owner、padding及有效请求数变化已通过；补一个
+B5/T30功能用例覆盖不满八行的最后worker，再将这两处修改独立提交。
+核内因果解释沿用658节，完整收益还包含其他阶段调度位置的变化。
+
+## 661. 2026-10-20：显式Score次序两长档获益，继续与Plan组合验证
+
+cooperative_score_first_v3两档完成且精确输出/索引/score/cache/state、
+保护区、A/B/A图重放通过，B16另通过同图metadata/padding。消融参考
+明确为cooperative_prefix_v1，并非正式QA版；两版都保留多task。
+
+|档位|协同前段 min/mean/max|Score优先 min/mean/max|同轮单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|811.14/835.40/852.28|797.42/815.72/825.30|790.06/793.09/796.40|
+|128K/B28|1181.64/1203.49/1218.92|1161.26/1183.32/1206.62|1166.86/1174.02/1187.96|
+
+B16/B28 mean分别减少19.676/20.172μs（2.355%/1.676%），max分别
+减少26.98/12.30μs。五窗均把Q反量化和原KV置于Score之后，原先
+Q反量化抢先、Score启动翻转的情况消失。Score平均首启前移
+23.164/55.028μs；Attention首启只前移13.028/21.272μs，因为后置
+Q/KV尾链仍需要时间。不能把Score提前量全算成完整收益。
+
+详细逐窗时序见
+[SCORE_FIRST_PHASES.json](csa_multitask_backport_20261020/SCORE_FIRST_PHASES.json)。
+保留直接TaskId依赖，未引入dummy或修改allow_early_resolve。
+准备cooperative_plan_v1：只将已测Score次序与Plan非空分工叠加；
+CPU lowering/PTOAS/AICPU链接已通过，两长档以plan_workers_v1作为
+同轮current排队，检验协同前段的净增益，不拼接跨轮最好结果。
+
+HC小融合的B5/T30已通过功能、A/B/A图和同图动态边界；两长档性能
+另行排队，基线仍为qa_m16_v3，未先假定融合必然受益。
+
+Plan的B5/T30补测现已completed/exit0：末尾不足八行、A/B/A图重放、
+同图history/page owner及有效请求数变化均通过，输出/索引/score、
+cache/state与保护区检查通过。七档与受影响尾块的采用验证已齐。

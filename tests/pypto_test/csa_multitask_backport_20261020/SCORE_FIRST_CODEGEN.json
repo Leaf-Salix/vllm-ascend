@@ -1,0 +1,20 @@
+{
+  "candidate": "cooperative_score_first_v3",
+  "cpu_result": "runs/cooperative_score_first_v3/cpu_lower_v1/result.json",
+  "math_ast_equal_ignoring_explicit_scheduling_deps": {
+    "cooperative_q_dequant_after_score": true,
+    "_kv_project": true
+  },
+  "failures": [
+    {
+      "candidate": "cooperative_score_first_v1",
+      "reason": "score_dep only present in deps attribute lost inline SSA substitution"
+    },
+    {
+      "candidate": "cooperative_score_first_v2",
+      "reason": "KV late_dep hit same attribute-only case"
+    }
+  ],
+  "fix": "Use one-element TaskId value arrays inside both helpers; no dummy tasks",
+  "device_execution": false
+}

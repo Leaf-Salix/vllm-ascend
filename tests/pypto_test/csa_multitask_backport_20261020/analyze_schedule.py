@@ -13,6 +13,8 @@ def phase(name):
         return "score"
     if name.startswith(("qk_pv_", "attention_rows_cube", "attention_rows_vector", "attention_plan_rows_pipeline")):
         return "attention"
+    if name.startswith("csa_slots_build_valid_qk_plan"):
+        return "attention_plan"
     if name.startswith(("proj_a_mm", "proj_b_mm", "quant", "proj_b_act_hc_post", "output_cube", "output_vector")):
         return "output"
     if name.startswith(("hc_", "split_pre_post", "comb_sinkhorn", "mix_x_rms_norm")):
@@ -21,6 +23,14 @@ def phase(name):
         return "query_dequant"
     if name.startswith("qr_proj_matmul"):
         return "qa"
+    for prefix, label in (
+        ("idx_qr_proj_matmul", "indexer_query_project"),
+        ("qr_hadamard_matmul", "query_hadamard"),
+        ("qproj_matmul", "qb"),
+        ("kv_proj_matmul", "original_kv_project"),
+    ):
+        if name.startswith(prefix):
+            return label
     if name.startswith("indexer_head_coefficients"):
         return "coefficients"
     return None
