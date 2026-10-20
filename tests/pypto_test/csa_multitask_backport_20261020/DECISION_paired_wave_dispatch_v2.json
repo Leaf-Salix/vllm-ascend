@@ -1,0 +1,40 @@
+{
+  "candidate": "paired_wave_dispatch_v2",
+  "formal_base": "4d5b2ed9",
+  "adopted": false,
+  "private_candidate_retained": true,
+  "standard": "128K B1/B4/B8/B16/B24/B28；8K B16/B32；S6",
+  "reason": "长B16/B24/B28核内有收益，但B8完整mean/max和短B16完整min/mean/max回退；综合改善0.102%不足以证明可靠净收益，不整体采用",
+  "matrix": "MATRIX_paired_wave_dispatch_v2_dispatch_v1.json",
+  "focus": "PAIRED_DISPATCH_FOCUS.json",
+  "codegen": "PAIRED_DISPATCH_CODEGEN.json",
+  "spmd_reference": {
+    "source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/sources/spmd_7061c112",
+    "source_commit": "7061c112",
+    "backoff_ticks": 150
+  },
+  "weighted": {
+    "reduction_vs_original_pct": 5.976764526868806,
+    "reduction_vs_spmd_pct": -0.9002064170001262,
+    "reduction_vs_current_pct": 0.10152043034071989
+  },
+  "correctness": "八档完整输出/TopK/score/cache/state/保护/图检查通过；B8额外同图metadata/padding/32765长度跨界",
+  "scope_limits": "S6单卡，非整模型token/DSpark证明；min/mean/max保留五原始窗口",
+  "b1_formal": {
+    "samples_us": [
+      387.5,
+      389.74,
+      385.18,
+      377.92,
+      389.6
+    ],
+    "min_us": 377.92,
+    "mean_us": 385.988,
+    "max_us": 389.74,
+    "median_us": 387.5
+  },
+  "b1_formal_adoption": "4d5b2ed9；ADOPTION_b1_request_score.json",
+  "next": "优先缩小成对压缩的多波G6采用范围或检查其它已提交来源优化，不重复旧Score/Q整组依赖失败候选",
+  "goal_complete": false,
+  "pushed": false
+}
