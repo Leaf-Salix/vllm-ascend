@@ -1,0 +1,152 @@
+diff --git a/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp b/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
+index 0dd2dc24..26900f75 100644
+--- a/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
++++ b/lib/PTO/IR/PTOTile/PTOGatherAndExtremaOps.cpp
+@@ -84,7 +84,10 @@ llvm::LogicalResult mlir::pto::TCompactCompareOp::verify() {
+     return emitOpError("count must be [1, aligned capacity >= src rows]");
+   const int64_t indexBytes = src[1] * 4;
+   const int64_t maskBytes = ((src[1] + 255) / 256) * 32;
+-  const int64_t needed = indexBytes + std::max<int64_t>(1024, maskBytes + indexBytes);
++  // 满容量DPS输出直接接收压缩结果；scratch只保存索引及mask/种子。
++  // 容量较小时仍保留完整压缩暂存，避免先写越界再读取真实count。
++  const int64_t collectBytes = values[1] >= src[1] ? maskBytes : maskBytes + indexBytes;
++  const int64_t needed = indexBytes + std::max<int64_t>(1024, collectBytes);
+   if (tmp[0] <= 0 || tmp[1] <= 0 || tmp[0] * tmp[1] < needed)
+     return emitOpError("compact scratch is too small");
+   return success();
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h b/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
+index 7bb840a0..6286a682 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/GatherCompareScalarSupport.h
+@@ -40,12 +40,23 @@ AICORE inline void PTOAS__MAKE_LINEAR_INDICES(
+   pipe_barrier(PIPE_V);
+   vconv_f322s32r(reinterpret_cast<__ubuf__ int32_t*>(seed1), seed1, 1, 1, 1, 8, 8);
+   pipe_barrier(PIPE_V);
+-  #pragma unroll
+-  for (int i = 0; i < indexCols / 64; ++i)
+-    vadds(indices + i * 64, reinterpret_cast<__ubuf__ int32_t*>(seed1),
+-          offset + i * 64, 1, 1, 1, 8, 8);
++  // 先构造64项，再复用已生成的前缀倍增。INT32基址只加一次，
++  // 不将大索引经FP32转换；每层读上一层结果，必须等待V流水完成。
++  vadds(indices, reinterpret_cast<__ubuf__ int32_t*>(seed1),
++        offset, 1, 1, 1, 8, 8);
+   pipe_barrier(PIPE_V);
+-
++  #pragma unroll
++  for (unsigned built = 64; built < indexCols; built *= 2) {
++    const unsigned copied = indexCols - built < built ? indexCols - built : built;
++    // 兼容非2幂和较大索引容量，禁止repeat超过硬件字段宽度。
++    for (unsigned start = 0; start < copied; start += 240 * 64) {
++      const unsigned repeats = (copied - start) / 64;
++      const unsigned limited = repeats < 240 ? repeats : 240;
++      vadds(indices + built + start, indices + start,
++            static_cast<int32_t>(built), limited, 1, 1, 8, 8);
++    }
++    pipe_barrier(PIPE_V);
++  }
+ }
+ 
+ template <typename D, typename S, typename Tmp, typename C, CmpMode Mode>
+@@ -145,7 +156,9 @@ __tf__ AICORE void PTOAS__COMPACT_COMPARE_RAW(
+   constexpr unsigned indexCols = ((S::Cols + 63) / 64) * 64;
+   constexpr unsigned indexBytes = indexCols * 4;
+   constexpr unsigned maskBytes = ((S::Cols + 255) / 256) * 32;
+-  constexpr unsigned collectBytes = maskBytes + indexBytes;
++  // 满容量输出可接收任意匹配数，直接压缩到输出，不需要packed暂存。
++  constexpr bool directOutput = D::Cols >= S::Cols;
++  constexpr unsigned collectBytes = directOutput ? maskBytes : maskBytes + indexBytes;
+   constexpr unsigned scratchBytes = collectBytes > 1024 ? collectBytes : 1024;
+   static_assert(Tmp::Rows * Tmp::Cols * sizeof(typename Tmp::DType) >=
+                 indexBytes + scratchBytes, "compact scratch is too small");
+@@ -159,6 +172,7 @@ __tf__ AICORE void PTOAS__COMPACT_COMPARE_RAW(
+   auto work = base + indexBytes;
+   PTOAS__MAKE_LINEAR_INDICES<indexCols>(indices, work, offset);
+   auto mask = work;
++  // 满容量路径不访问该地址；较小容量仍必须先暂存再按容量复制。
+   auto packed = reinterpret_cast<__ubuf__ uint32_t*>(work + maskBytes);
+   for (unsigned row = 0; row < rows; ++row) {
+     if (cols == 0) {
+@@ -183,25 +197,31 @@ __tf__ AICORE void PTOAS__COMPACT_COMPARE_RAW(
+     pipe_barrier(PIPE_V);
+     set_mask_count();
+     set_vector_mask(0, cols);
+-    vreducev2(packed, reinterpret_cast<__ubuf__ uint32_t*>(indices),
++    auto indexTarget = directOutput ? outIds + row * I::RowStride : packed;
++    vreducev2(indexTarget, reinterpret_cast<__ubuf__ uint32_t*>(indices),
+               reinterpret_cast<__ubuf__ uint32_t*>(mask), 1, 1, 0, 8, 0);
+     const unsigned kept = get_rsvd_cnt();
+     counts[row] = kept;
+     pipe_barrier(PIPE_V);
+     const unsigned copied = kept < D::Cols ? kept : D::Cols;
+     if (copied != 0) {
+-      set_vector_mask(0, copied);
+-      vcopy(outIds + row * I::RowStride, packed, 1, 1, 1, 8, 8);
+-      pipe_barrier(PIPE_V);
++      if constexpr (!directOutput) {
++        set_vector_mask(0, copied);
++        vcopy(outIds + row * I::RowStride, packed, 1, 1, 1, 8, 8);
++        pipe_barrier(PIPE_V);
++      }
+       // 使用相同mask压缩score的32位表示，不执行浮点转换或重新计算。
+       set_vector_mask(0, cols);
+-      vreducev2(packed,
++      auto valueTarget = directOutput ? values + row * D::RowStride : packed;
++      vreducev2(valueTarget,
+                 reinterpret_cast<__ubuf__ uint32_t*>(input + row * S::RowStride),
+                 reinterpret_cast<__ubuf__ uint32_t*>(mask), 1, 1, 0, 8, 0);
+       pipe_barrier(PIPE_V);
+-      set_vector_mask(0, copied);
+-      vcopy(values + row * D::RowStride, packed, 1, 1, 1, 8, 8);
+-      pipe_barrier(PIPE_V);
++      if constexpr (!directOutput) {
++        set_vector_mask(0, copied);
++        vcopy(values + row * D::RowStride, packed, 1, 1, 1, 8, 8);
++        pipe_barrier(PIPE_V);
++      }
+     }
+   }
+   set_mask_norm();
+diff --git a/test/lit/pto/tcompact_compare_direct_a3.pto b/test/lit/pto/tcompact_compare_direct_a3.pto
+new file mode 100644
+index 00000000..27b0a988
+--- /dev/null
++++ b/test/lit/pto/tcompact_compare_direct_a3.pto
+@@ -0,0 +1,38 @@
++// Copyright (c) 2026 Huawei Technologies Co., Ltd.
++// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++// CANN Open Software License Agreement Version 2.0 (the "License").
++// Please refer to the License for details. You may not use this file except in compliance with the License.
++// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++// See LICENSE in the root of the software repository for the full text of the License.
++//
++// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - | FileCheck %s
++// RUN: ptoas --pto-arch=a3 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s --check-prefix=SYNC
++// 满容量输出2048列只需9216字节scratch；容量不足的有界路径另有回归。
++
++!src = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!values = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!indices = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!count = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++!scratch = !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=9216, v_row=1, v_col=9216, blayout=row_major, slayout=none_box, fractal=512, pad=0>
++module {
++  func.func @compact_pair_direct(%threshold: f32, %offset: i32) {
++    %src = pto.alloc_tile : !src
++    %values = pto.alloc_tile : !values
++    %indices = pto.alloc_tile : !indices
++    %count = pto.alloc_tile : !count
++    %scratch = pto.alloc_tile : !scratch
++    pto.tcompact.compare ins(%src, %threshold, %offset : !src, f32, i32)
++      outs(%values, %indices, %count, %scratch : !values, !indices, !count, !scratch)
++      {cmpMode = #pto<cmp ge>}
++    return
++  }
++}
++
++// CHECK: void compact_pair_direct(float [[THRESHOLD:[_A-Za-z0-9]+]], int32_t [[OFFSET:[_A-Za-z0-9]+]])
++// CHECK: PTOAS__COMPACT_COMPARE<Tile<{{.*}}CmpMode::GE>(
++// CHECK-SAME: {{.*}}[[THRESHOLD]], {{.*}}[[OFFSET]]);
++// SYNC-LABEL: After Sync Motion
++// SYNC: COMPOUND pto.tcompact.compare [PIPE_V]
++// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_V]
++// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_S]

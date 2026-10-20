@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s --check-prefix=SYNC
+// 满容量输出2048列只需9216字节scratch；容量不足的有界路径另有回归。
+
+!src = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!values = !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!indices = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=2048, v_row=1, v_col=2048, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!count = !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+!scratch = !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=9184, v_row=1, v_col=9184, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+module {
+  func.func @compact_pair_direct(%threshold: f32, %offset: i32) {
+    %src = pto.alloc_tile : !src
+    %values = pto.alloc_tile : !values
+    %indices = pto.alloc_tile : !indices
+    %count = pto.alloc_tile : !count
+    %scratch = pto.alloc_tile : !scratch
+    pto.tcompact.compare ins(%src, %threshold, %offset : !src, f32, i32)
+      outs(%values, %indices, %count, %scratch : !values, !indices, !count, !scratch)
+      {cmpMode = #pto<cmp ge>}
+    return
+  }
+}
+
+// CHECK: void compact_pair_direct(float [[THRESHOLD:[_A-Za-z0-9]+]], int32_t [[OFFSET:[_A-Za-z0-9]+]])
+// CHECK: PTOAS__COMPACT_COMPARE<Tile<{{.*}}CmpMode::GE>(
+// CHECK-SAME: {{.*}}[[THRESHOLD]], {{.*}}[[OFFSET]]);
+// SYNC-LABEL: After Sync Motion
+// SYNC: COMPOUND pto.tcompact.compare [PIPE_V]
+// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_V]
+// SYNC-NEXT: COMPOUND pto.tcompact.compare [PIPE_S]
