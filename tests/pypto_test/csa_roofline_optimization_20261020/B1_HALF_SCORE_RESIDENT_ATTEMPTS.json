@@ -1,0 +1,32 @@
+{
+  "v1": {
+    "result": "runner路径错误，未进入编译",
+    "log": "b1_half_score_resident_cpu_v1.log"
+  },
+  "v2": {
+    "result": "未提供Tile形状和dtype，参数类型不完整；补为pl.Tile[[1,4096],pl.FP32]",
+    "log": "b1_half_score_resident_cpu_v2.log"
+  },
+  "v3": {
+    "result": "ConvertToSSA作用域检查失败；将Tile定义从单个if分支移至共同作用域，保留constexpr消费分支",
+    "diagnostics": [
+      "Variable 'legacy_half_scores_inline856' used outside its defining scope",
+      "Variable 'legacy_half_scores_inline856' used outside its defining scope",
+      "Variable 'legacy_half_scores_inline856' used outside its defining scope"
+    ],
+    "log": "b1_half_score_resident_cpu_v3.log",
+    "error_json_local_only": "b1_half_score_resident_cpu_v3/result.json"
+  },
+  "compiler_modified": false,
+  "component_bug_confirmed": false,
+  "v4": {
+    "result": "同一4096列父Tile按动态col assemble时PTOAS拒绝non-mat TMOV shape；改成4×1024按row assemble再reshape，数学顺序不变",
+    "log": "b1_half_score_resident_cpu_v4.log",
+    "component_repro": "待最小列/行对照，尚不宣称新组件bug"
+  },
+  "v5": {
+    "result": "完整符号编译通过，单MIX/58轴；Vec声明上界163872B，和GM版相同",
+    "log": "b1_half_score_resident_cpu_v5.log"
+  },
+  "ptoas_tmov_subview_issue": "https://github.com/hw-native-sys/PTOAS/issues/1649#issuecomment-6299434307"
+}

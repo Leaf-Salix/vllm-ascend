@@ -21,16 +21,20 @@ def main():
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--wait-policy-source", type=Path, required=True)
+    ap.add_argument("--frozen-pypto-source", type=Path, default=here / "frozen_pypto",
+                    help="冻结公共helper及多task的目录；默认保持历史实验路径")
     args, forwarded = ap.parse_known_args()
     if not args.wait_policy_source.is_file():
         raise FileNotFoundError(args.wait_policy_source)
+    if not (args.frozen_pypto_source / "__init__.py").is_file():
+        raise FileNotFoundError(args.frozen_pypto_source)
     if "--wait-backoff" not in forwarded:
         raise ValueError("必须启用现有编译回调，不能将仅绑定模块当作策略已生效")
     prefix = "vllm_ascend.ops.pypto"
     if any(name.startswith(prefix + ".") for name in sys.modules):
         raise RuntimeError("冻结前已有公共子模块导入")
     package = importlib.import_module(prefix)
-    package.__path__ = [str(here / "frozen_pypto")]
+    package.__path__ = [str(args.frozen_pypto_source.resolve())]
     package.__spec__.submodule_search_locations = package.__path__
     parent = prefix + ".deepseek_v4_flash_csa_spmd"
     parent_module = importlib.import_module(parent)
@@ -59,7 +63,8 @@ def main():
             audits[role] = audit_actual_sources(set(folder.glob("kernels/*/*.cpp")), ticks)
         (args.output / "CURRENT_WAIT_POLICY_AUDIT.json").write_text(
             json.dumps(dict(passed=True, ticks=ticks, roles=audits,
-                            source=str(args.wait_policy_source.resolve())),
+                            source=str(args.wait_policy_source.resolve()),
+                            frozen_pypto_source=str(args.frozen_pypto_source.resolve())),
                        ensure_ascii=False, indent=2) + "\n"
         )
     finally:

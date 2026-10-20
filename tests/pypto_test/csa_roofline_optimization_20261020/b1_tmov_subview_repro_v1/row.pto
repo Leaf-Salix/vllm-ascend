@@ -1,0 +1,10 @@
+module {
+  func.func @assemble_row(%offset: index) {
+    %c0 = arith.constant 0 : index
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=1024, v_row=1, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %parent = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=1024, v_row=4, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %view = pto.subview %parent[%offset, %c0] sizes [1, 1024] : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=1024, v_row=4, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=1024, v_row=1, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=1024, v_row=1, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%view : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=1024, v_row=1, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

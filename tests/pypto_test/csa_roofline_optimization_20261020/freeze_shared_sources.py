@@ -14,12 +14,18 @@ def main():
     here = Path(__file__).resolve().parent
     repo = here.parents[2]
     source = repo / "vllm_ascend/ops/pypto"
-    target = here / "frozen_pypto"
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--snapshot-name", default="frozen_pypto",
+                        help="本目录下的新快照名；不覆盖已有实验")
+    parser.add_argument("--record-name", default="SHARED_SOURCE_FREEZE.json",
+                        help="本目录下的对应记录名")
     parser.add_argument("--from-record", action="store_true",
                         help="从已提交的路径记录和对应Git对象恢复；不使用当前工作树")
     args = parser.parse_args()
-    record = here / "SHARED_SOURCE_FREEZE.json"
+    if any(Path(name).name != name for name in (args.snapshot_name, args.record_name)):
+        raise ValueError("快照和记录必须是本目录下的单级名称")
+    target = here / args.snapshot_name
+    record = here / args.record_name
     if args.from_record:
         manifest = json.loads(record.read_text())
         if any(name.endswith(".py") for name in manifest["tracked_modifications"]):
@@ -66,7 +72,7 @@ def main():
         "includes_binaries": False,
         "hashes_computed": False,
     }
-    (here / "SHARED_SOURCE_FREEZE.json").write_text(
+    record.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
     )
     print(json.dumps({"files": len(files), "bytes": sum(map(len, files.values()))}))
