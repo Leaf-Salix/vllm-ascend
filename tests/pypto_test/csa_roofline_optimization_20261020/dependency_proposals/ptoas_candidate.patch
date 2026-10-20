@@ -1,0 +1,123 @@
+diff --git a/lib/PTO/IR/PTOTile/PTOGatherVerification.cpp b/lib/PTO/IR/PTOTile/PTOGatherVerification.cpp
+index 4bc98170..19848d22 100644
+--- a/lib/PTO/IR/PTOTile/PTOGatherVerification.cpp
++++ b/lib/PTO/IR/PTOTile/PTOGatherVerification.cpp
+@@ -246,8 +246,9 @@ static LogicalResult verifyTGatherCompareElementTypes(TGatherOp op,
+   }
+   auto cmpAttr = op.getCmpModeAttr();
+   auto cmpMode = cmpAttr ? cmpAttr.getValue() : pto::CmpMode::EQ;
+-  if (cmpMode != pto::CmpMode::EQ && cmpMode != pto::CmpMode::GT) {
+-    return op.emitOpError("expects compare-form tgather cmpMode to be eq or gt");
++  if (cmpMode != pto::CmpMode::EQ && cmpMode != pto::CmpMode::GT &&
++      !(cmpMode == pto::CmpMode::GE && !allowA5SrcTypes)) {
++    return op.emitOpError("expects compare-form tgather cmpMode to be eq or gt (A2/A3 also supports ge)");
+   }
+   return verifyTGatherCompareSrcType(op, srcElem, cmpMode, allowA5SrcTypes);
+ }
+diff --git a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+index 1117b7e7..f0cc3a59 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/PTOToEmitCPass.cpp
+@@ -10,6 +10,7 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "PTOToEmitCPatterns.h"
++#include "Tensor/GatherCompareScalarSupport.h"
+ 
+ #include "mlir/Target/Cpp/CppEmitter.h"
+ 
+@@ -685,6 +686,10 @@ struct EmitPTOManualPass
+       builder.setInsertionPointToStart(mop.getBody());
+       emitPreambleIncludesAndStructs(mop, builder, flags);
+       emitPreambleRuntimeHelpers(mop, builder, flags);
++      if (targetArch == PTOArch::A3 && flags.gatherCompareScalar) {
++        builder.create<emitc::VerbatimOp>(
++            mop->getLoc(), builder.getStringAttr(kGatherCompareScalarSupport));
++      }
+       emitPreambleTailHelpers(mop, builder, flags);
+   }
+ 
+@@ -694,6 +699,7 @@ struct EmitPTOManualPass
+     bool tRandom = false;
+     bool globalTensorData = false;
+     bool bitcast = false;
++    bool gatherCompareScalar = false;
+   };
+ 
+   static HelperFlags collectHelperFlags(ModuleOp mop) {
+@@ -703,6 +709,10 @@ struct EmitPTOManualPass
+         flags.eventIdArray = true;
+       if (isa<mlir::pto::TRandomOp>(op))
+         flags.tRandom = true;
++      if (auto gather = dyn_cast<mlir::pto::TGatherOp>(op)) {
++        if (gather.getCdst())
++          flags.gatherCompareScalar = true;
++      }
+       if (auto cmo = dyn_cast<mlir::pto::CmoCacheInvalidOp>(op)) {
+         if (cmo.getAddr())
+           flags.globalTensorData = true;
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp b/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
+index 10ebdc58..f0bd3380 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/TGather.cpp
+@@ -20,7 +20,10 @@ namespace mlir {
+ namespace pto {
+ 
+ struct PTOGatherToEmitC : public OpConversionPattern<pto::TGatherOp> {
+-  using OpConversionPattern<pto::TGatherOp>::OpConversionPattern;
++  PTOGatherToEmitC(TypeConverter &converter, MLIRContext *ctx, PTOArch arch)
++      : OpConversionPattern<pto::TGatherOp>(converter, ctx), targetArch(arch) {}
++
++  PTOArch targetArch;
+ 
+   LogicalResult matchAndRewrite(pto::TGatherOp op, OpAdaptor adaptor,
+                                 ConversionPatternRewriter &rewriter) const override {
+@@ -148,7 +151,8 @@ struct PTOGatherToEmitC : public OpConversionPattern<pto::TGatherOp> {
+     });
+ 
+     rewriter.create<emitc::CallOpaqueOp>(
+-        loc, TypeRange{}, "TGATHER",
++        loc, TypeRange{}, targetArch == PTOArch::A3
++                              ? "PTOAS__GATHER_COMPARE_SCALAR" : "TGATHER",
+         /*args=*/ArrayAttr{}, /*templateArgs=*/targs,
+         /*operands=*/ValueRange{dst, src0, kValue, tmp, cdst, offsetVal});
+ 
+@@ -179,8 +183,9 @@ struct PTOGatherbToEmitC : public OpConversionPattern<pto::TGatherBOp> {
+ };
+ 
+ void populateTensorTGatherPatterns(RewritePatternSet &patterns,
+-                        TypeConverter &typeConverter, MLIRContext *ctx) {
+-  patterns.add<PTOGatherToEmitC>(typeConverter, ctx);
++                        TypeConverter &typeConverter, MLIRContext *ctx,
++                        PTOArch targetArch) {
++  patterns.add<PTOGatherToEmitC>(typeConverter, ctx, targetArch);
+   patterns.add<PTOGatherbToEmitC>(typeConverter, ctx);
+ }
+ 
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorInternal.h b/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorInternal.h
+index 77132896..dd696219 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorInternal.h
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorInternal.h
+@@ -61,7 +61,8 @@ void populateTensorTExtractInsertPatterns(RewritePatternSet &patterns,
+ void populateTensorTFillPadPatterns(RewritePatternSet &patterns,
+                         TypeConverter &typeConverter, MLIRContext *ctx);
+ void populateTensorTGatherPatterns(RewritePatternSet &patterns,
+-                        TypeConverter &typeConverter, MLIRContext *ctx);
++                        TypeConverter &typeConverter, MLIRContext *ctx,
++                        PTOArch targetArch);
+ void populateTensorTMinMaxPatterns(RewritePatternSet &patterns,
+                         TypeConverter &typeConverter, MLIRContext *ctx);
+ void populateTensorTMovPatterns(RewritePatternSet &patterns,
+diff --git a/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorPatterns.cpp b/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorPatterns.cpp
+index 0e3c1a31..05f9b666 100644
+--- a/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorPatterns.cpp
++++ b/lib/PTO/Transforms/PTOToEmitC/Tensor/TensorPatterns.cpp
+@@ -37,7 +37,7 @@ static void populateTensorFamilyPatterns(RewritePatternSet &patterns,
+   populateTensorTExpPatterns(patterns, typeConverter, ctx);
+   populateTensorTExtractInsertPatterns(patterns, typeConverter, ctx);
+   populateTensorTFillPadPatterns(patterns, typeConverter, ctx);
+-  populateTensorTGatherPatterns(patterns, typeConverter, ctx);
++  populateTensorTGatherPatterns(patterns, typeConverter, ctx, targetArch);
+   populateTensorTMinMaxPatterns(patterns, typeConverter, ctx);
+   populateTensorTMovPatterns(patterns, typeConverter, ctx);
+   populateTensorTMulPatterns(patterns, typeConverter, ctx);

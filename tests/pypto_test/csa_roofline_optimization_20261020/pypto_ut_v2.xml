@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="39" time="2.920" timestamp="2026-10-20T18:12:03.170482+08:00" hostname="liteserver-hps-365a-00001"><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-1]" time="0.012" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-9]" time="0.012" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-2]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-7]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-16]" time="0.004"><failure message="AttributeError: 'NoneType' object has no attribute 'valid_shape'">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde6e0bdc0&gt;
+rows = 16, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+&gt;       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-8]" time="0.004"><failure message="AttributeError: 'NoneType' object has no attribute 'valid_shape'">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfefdfbb0&gt;
+rows = 8, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+&gt;       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-1]" time="0.006" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-2]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-7]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype1]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-8]" time="0.004"><failure message="AttributeError: 'NoneType' object has no attribute 'valid_shape'">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfee1c070&gt;
+rows = 8, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+&gt;       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype2]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype3]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-9]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_dtype_selects_cdst_dtype" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-16]" time="0.004"><failure message="AttributeError: 'NoneType' object has no attribute 'valid_shape'">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfee1c1f0&gt;
+rows = 16, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+&gt;       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_destinations_are_not_arguments" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype0]" time="0.293" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype0]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype3]" time="0.284" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_kvalue_dtype_mismatch_raises" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype1]" time="0.006" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_default_eq" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype2]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_gt_with_offset" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_invalid_cmp_mode_string" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_int_cmp_mode" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_invalid_cmp_mode_int" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype0]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype1]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype2]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype0]" time="0.011" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype3]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype1]" time="0.011" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype2]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_compare_with_offset" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype3]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_mutually_exclusive_index_and_compare" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_mutually_exclusive_mask_and_compare" time="0.003" /></testsuite></testsuites>

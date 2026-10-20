@@ -1,0 +1,11 @@
+# 依赖原型快照
+
+只作本地建议与复现记录，不代表提交到上游或完整验证成功。
+PyPTO基线2dfa7f12，应用pypto_candidate.patch；已构建并通过39项类型UT。
+PTOAS基线e5c1c432，应用ptoas_candidate.patch后，把同目录
+GatherCompareScalarSupport.h复制至lib/PTO/Transforms/PTOToEmitC/Tensor。
+完整PTOAS仍在构建。使用本轮build脚本，不复制其它worktree的二进制。
+GT/EQ为ABI修复方向，GE为精确阈值筛选所需的明确A3扩展；A5路径未变。
+helper对tmp有静态容量检查，当前candidate显式提供18432字节；自动生成
+scratch的tensor.gather_compare尚未评估，不能宣称所有API路径已修复。
+未修改Simpler或PTO-ISA；ISA同分CPU问题只提交issue364。

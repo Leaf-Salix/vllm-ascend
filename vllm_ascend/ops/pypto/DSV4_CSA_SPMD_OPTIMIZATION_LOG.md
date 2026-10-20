@@ -20086,3 +20086,60 @@ B16/B28实测约为乐观资源下界4.67/3.57倍，但630/840μs差额不能直
 核对37个正式SPMD源码文件与实测13259f92快照逐字一致，共享RMS helper亦一致；
 15矩阵独立计数、既有Score逐核块数真机对照、七档逐query候选覆盖、
 Softmax/query/HCpost元素守恒均通过。仅本地记录阶段结果，不自动push。
+
+
+## 2026-10-20：启动 roofline 驱动的精确筛选及大通路优化
+
+用户重设目标并授权恢复优化，完整目标与候选说明保存在
+`tests/pypto_test/csa_roofline_optimization_20261020/GOAL.md`、README。
+五个128K档相对同轮多task完整L1降低30%的目标仍未完成；重点档候选
+门槛为至少一档净省20μs且另一档无明确退步。正式单SPMD仍13259f92，
+本轮起点f20efd87包含其它会话对多task的更新，不能借旧多task数值验收。
+先核实精确Top-K阈值筛选的同分顺序与压缩接口，不改数学合同。小型设备
+排序probe只验证语义，不能代替完整CSA性能。没有修改共享依赖或push。
+
+
+### 精确阈值首版、知识借鉴和组件问题阶段记录
+
+本轮目录csa_roofline_optimization_20261020。A3排序语义任务
+`task_20261020_172756_41138729719`已completed/exit0，46组保序压缩后
+的score/index逐bit一致；这不是完整CSA，也未测候选性能。正式37源不变。
+冻结source_reference与38文件source_topk_candidate；初版已写device GE
+筛选和512/1024/2048回退，无batch单点白名单。首轮DSL的INDEX类型及
+TSELS编写错误全部留证；当前改为直接GE，旧PTOAS在已知验证限制处拒绝。
+
+必要组件问题已分别提交：PyPTO #3079（计数物理对齐）、PTOAS #1647
+（compare ABI与真实Scalar阈值）、PTO-ISA #364（CPU同分按payload排序
+与A3不同）。没有PR/标签/push。新独立PyPTO树修复count容量并完成39项
+UT；新PTOAS树实现Vector索引及压缩helper，GT/GE拼接最小C++通过CCEC，
+但完整新后端构建尚未完成，不预记PASS，不改共享安装/ISA/Simpler。
+
+用户提供cannbot知识库；定向阅读的来源/平台/草稿边界记在
+KNOWLEDGE_REVIEW.md。缺少query索引，不重建或伪造检索覆盖。
+用户已明确授权Attention统一尺度数值候选；设计扣除两块KV重读后，
+B16/B28语义GM请求净减少上限75.50/132.12MB，未实测。sink必须参加
+统一max，原共享HEAD_RING_ROWS轴限制物理容量复用；这些已补入设计。
+该候选尚未实现；数学实数等价不代表BF16舍入/FP32归约或token已验证。
+
+五个128K档相对同轮多task完整L1降低30%的目标继续active。当前仅阶段
+归档，不代表候选采用或目标完成；没有新增整层性能数字。
+
+### Attention统一尺度候选v5完成符号编译，B16独立验证已提交
+
+用户已授权独立验证数值等价但非逐bit候选；正式源码仍未替换。
+当前五块QK统一max（包含sink）后生成BF16 P，四份64×128 FP32 L0C
+跨块累加，最终PV只交接一次。三块KV驻L1，最多两块从已采集GM重读；
+不重复Native页采集。GM五槽保留到query完成，真实metadata仍device。
+
+v1缺少NEG_INF导入；v2的80KiB score加后续临时总Vec197376B超限；
+v3拆32行gather仍197376B，已撤回；v4恢复64行gather、每AIV两轮16头
+使score降40KiB，但仍197376B。v5去掉旧在线合并遗留的左右PV常驻和
+concat，改每轮直接读16×512最终PV，不增加读取量或改变收尾数学。
+完整B28区间CPU编译通过，Vec172032B、Mat458752B、Acc131072B，
+58动态轴、唯一MIX和sync_start审计通过。没有放宽容量或修改共享编译器。
+全部尝试源、编译结果和说明保存在本轮目录，不删除失败记录。
+
+公共helper及多task冻结97份Python源，记录路径/大小/Git提交，不做hash。
+B16任务task_20261020_190632_268921518547已提交；仍运行原逐bit测试器，
+尚无设备精度、图重放或性能结论。数学等价不代表BF16、FP32或token一致；
+独立验证授权不等于采用，也没有放宽冻结门槛。没有push。

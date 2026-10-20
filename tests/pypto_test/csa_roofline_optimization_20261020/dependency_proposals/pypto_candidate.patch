@@ -1,0 +1,78 @@
+diff --git a/src/ir/op/tile_ops/gather.cpp b/src/ir/op/tile_ops/gather.cpp
+index a7367b774..a98f880b0 100644
+--- a/src/ir/op/tile_ops/gather.cpp
++++ b/src/ir/op/tile_ops/gather.cpp
+@@ -445,10 +445,8 @@ static TypePtr DeduceTileGatherCompareType(const std::vector<ExprPtr>& args,
+   std::vector<ExprPtr> dst_shape = {rows_expr, out_cols_expr};
+   auto dst_type = std::make_shared<TileType>(dst_shape, DataType::INT32, std::nullopt, dst_view);
+ 
+-  // cdst is shaped as [1, rows] (one count per src-row, laid out as a single
+-  // row of `rows` int32s) — required by the PTOAS pto.tgather verifier
+-  // (cdst must use row_major blayout) AND the PTO TileConfig 32-byte
+-  // alignment static_assert (row_major + cols*sizeof(int) % 32 == 0).
++  // 每个源行产生一个连续计数；逻辑有效列数不变，物理列数必须覆盖完整
++  // 32B UB 单位。特别是单行源只能写一个计数，但不能分配 4B 的 Tile。
+   // The compare-form ISA writes `cdstPtr + i` for i in [0, srcValidRow),
+   // so the rows-many counts must be physically contiguous, which the
+   // [1, rows] row_major layout provides.
+@@ -456,7 +454,22 @@ static TypePtr DeduceTileGatherCompareType(const std::vector<ExprPtr>& args,
+   TileView cdst_view;
+   cdst_view.valid_shape = {one_expr, rows_expr};
+   cdst_view.blayout = TileLayout::row_major;
+-  std::vector<ExprPtr> cdst_shape = {one_expr, rows_expr};
++  constexpr int64_t kCountElementsPerUbBlock = 8;  // INT32/UINT32 均为 4B。
++  auto alignment = std::make_shared<ConstInt>(
++      kCountElementsPerUbBlock, DataType::INDEX, rows_expr->span_);
++  ExprPtr count_capacity;
++  if (auto rows_const = As<ConstInt>(rows_expr)) {
++    const int64_t rounded = ((rows_const->value_ + kCountElementsPerUbBlock - 1) /
++                             kCountElementsPerUbBlock) * kCountElementsPerUbBlock;
++    count_capacity = std::make_shared<ConstInt>(rounded, DataType::INDEX, rows_expr->span_);
++  } else {
++    auto padding = std::make_shared<ConstInt>(
++        kCountElementsPerUbBlock - 1, DataType::INDEX, rows_expr->span_);
++    count_capacity = MakeMul(
++        MakeFloorDiv(MakeAdd(rows_expr, padding, rows_expr->span_), alignment, rows_expr->span_),
++        alignment, rows_expr->span_);
++  }
++  std::vector<ExprPtr> cdst_shape = {one_expr, count_capacity};
+   auto cdst_type = std::make_shared<TileType>(cdst_shape, count_dtype, std::nullopt, cdst_view);
+ 
+   std::vector<TypePtr> elements{dst_type, cdst_type};
+diff --git a/tests/ut/ir/operators/test_gather_compare.py b/tests/ut/ir/operators/test_gather_compare.py
+index 156233997..3153d5ac8 100644
+--- a/tests/ut/ir/operators/test_gather_compare.py
++++ b/tests/ut/ir/operators/test_gather_compare.py
+@@ -96,6 +96,32 @@ def _build_program(cmp_mode: str | int = "eq", offset=0, src_dtype=pl.FP32, coun
+ class TestTileGatherCompareTypes:
+     """Type-contract tests: dtype allowed / disallowed, dst INT32, kvalue matches src."""
+ 
++    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
++    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
++    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
++        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
++        @pl.program
++        class Program:
++            @pl.function(type=pl.FunctionType.InCore)
++            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
++                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
++                values = pl.load(src, [0, 0], [rows, 64])
++                tmp = pl.tile.create([1, 4096], pl.UINT8)
++                ids, counts = pl.tile.gather_compare(
++                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
++                    out_cols=64, count_dtype=count_dtype,
++                )
++                pl.store(counts, [0, 0], out)
++                return out
++
++        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
++        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
++        # 全容量有效时 parser 可以省略等价的 TileView；非对齐行数必须
++        # 保留较短 valid_shape，不能把 padding 计数作为业务输出。
++        valid_shape = (count_type.tile_view.valid_shape
++                       if count_type.tile_view is not None else count_type.shape)
++        assert [dim.value for dim in valid_shape] == [1, rows]
++
+     @pytest.mark.parametrize("src_dtype", _VALID_SRC_DTYPES)
+     def test_valid_src_dtype(self, src_dtype):
+         call = _find_call(_build_program(src_dtype=src_dtype), "tile.gather_compare")

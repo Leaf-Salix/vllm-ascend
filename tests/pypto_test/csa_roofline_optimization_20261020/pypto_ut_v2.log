@@ -1,0 +1,132 @@
+bringing up nodes...
+bringing up nodes...
+
+....F.F....F....F......................                                  [100%]
+=================================== FAILURES ===================================
+_ TestTileGatherCompareTypes.test_count_physical_alignment_preserves_valid_rows[count_dtype0-16] _
+[gw0] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde6e0bdc0>
+rows = 16, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+>       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError
+_ TestTileGatherCompareTypes.test_count_physical_alignment_preserves_valid_rows[count_dtype0-8] _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfefdfbb0>
+rows = 8, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+>       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError
+_ TestTileGatherCompareTypes.test_count_physical_alignment_preserves_valid_rows[count_dtype1-8] _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfee1c070>
+rows = 8, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+>       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError
+_ TestTileGatherCompareTypes.test_count_physical_alignment_preserves_valid_rows[count_dtype1-16] _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdfee1c1f0>
+rows = 16, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+        assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+>       assert [dim.value for dim in count_type.tile_view.valid_shape] == [1, rows]
+E       AttributeError: 'NoneType' object has no attribute 'valid_shape'
+
+tests/ut/ir/operators/test_gather_compare.py:119: AttributeError
+- generated xml file: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_roofline_optimization_20261020/pypto_ut_v2.xml -
+=========================== short test summary info ============================
+FAILED tests/ut/ir/operators/test_gather_compare.py::TestTileGatherCompareTypes::test_count_physical_alignment_preserves_valid_rows[count_dtype0-16]
+FAILED tests/ut/ir/operators/test_gather_compare.py::TestTileGatherCompareTypes::test_count_physical_alignment_preserves_valid_rows[count_dtype0-8]
+FAILED tests/ut/ir/operators/test_gather_compare.py::TestTileGatherCompareTypes::test_count_physical_alignment_preserves_valid_rows[count_dtype1-8]
+FAILED tests/ut/ir/operators/test_gather_compare.py::TestTileGatherCompareTypes::test_count_physical_alignment_preserves_valid_rows[count_dtype1-16]
+4 failed, 35 passed in 2.91s
