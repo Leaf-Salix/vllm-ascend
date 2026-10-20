@@ -1,0 +1,57 @@
+{
+  "candidate": "ws_pool_v2",
+  "donor": "fd55e29a",
+  "source": "tests/pypto_test/csa_multitask_backport_20261020/runs/ws_pool_v2/cpu_preflight_v1/kernel/kernels/aic/indexer_score_topk_native_pair_aic.cpp",
+  "cpu_preflight_passed": true,
+  "scope": "已启用长G6/N64的生成代码，非设备采用结论",
+  "store_sites": [
+    {
+      "line": 3867,
+      "instruction": "TSTORE(v1202, v311);"
+    },
+    {
+      "line": 5965,
+      "instruction": "TSTORE(v1806, v311);"
+    },
+    {
+      "line": 8702,
+      "instruction": "TSTORE(v783, v770);"
+    },
+    {
+      "line": 8747,
+      "instruction": "TSTORE(v797, v784);"
+    },
+    {
+      "line": 8792,
+      "instruction": "TSTORE(v811, v798);"
+    }
+  ],
+  "pool_shape": [
+    16,
+    512
+  ],
+  "qk_shapes": [
+    [
+      192,
+      64
+    ],
+    [
+      192,
+      64
+    ]
+  ],
+  "declared_acc_bytes": 131072,
+  "source_invariants": "生成器核对AIV及后续编排不变、matmul_acc与sync_set/sync_wait调用数不变",
+  "failed_v1_result": "runs/ws_pool_v1/cpu_preflight_v1/result.json",
+  "v1_reason": "前端提前检查未启用G2/N128分支，8面板超过768列FIFO；v2用半步列宽，真实长G6仍512",
+  "pool_store_sites": [
+    {
+      "line": 3867,
+      "instruction": "TSTORE(v1202, v311);"
+    },
+    {
+      "line": 5965,
+      "instruction": "TSTORE(v1806, v311);"
+    }
+  ]
+}

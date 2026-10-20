@@ -34357,5 +34357,1644 @@
       "multitask_candidate",
       "single_spmd"
     ]
+  },
+  {
+    "result": "runs/topk_prefix_v1/h131072_b16_topk_v1/result.json",
+    "stage": "complete",
+    "passed": true,
+    "candidate": "topk_prefix_v1",
+    "candidate_wait_backoff": "off",
+    "candidate_wait_units": "score",
+    "current": "plan_workers_v1",
+    "indexer_page_pattern": "original",
+    "batch": 16,
+    "history": 131072,
+    "full_csa_l1_us": {
+      "multitask_original": {
+        "samples_us": [
+          867.6,
+          857.3,
+          881.38,
+          865.02,
+          872.36
+        ],
+        "min_us": 857.3,
+        "mean_us": 868.732,
+        "max_us": 881.38,
+        "median_us": 867.6
+      },
+      "multitask_current": {
+        "samples_us": [
+          822.5,
+          818.12,
+          830.88,
+          831.8,
+          844.5
+        ],
+        "min_us": 818.12,
+        "mean_us": 829.56,
+        "max_us": 844.5,
+        "median_us": 830.88
+      },
+      "multitask_candidate": {
+        "samples_us": [
+          819.64,
+          820.4,
+          833.62,
+          812.88,
+          817.86
+        ],
+        "min_us": 812.88,
+        "mean_us": 820.88,
+        "max_us": 833.62,
+        "median_us": 819.64
+      },
+      "single_spmd": {
+        "samples_us": [
+          802.46,
+          807.48,
+          804.26,
+          801.78,
+          817.72
+        ],
+        "min_us": 801.78,
+        "mean_us": 806.74,
+        "max_us": 817.72,
+        "median_us": 804.26
+      }
+    },
+    "outer_graph": {
+      "scope": "DFX窗口外NPU event包围单次graph.replay；含AICPU/运行时，不与L1相减认领纯AICPU",
+      "samples_per_side": 5,
+      "statistics_us": {
+        "multitask_original": {
+          "samples_us": [
+            1077.340006828308,
+            962.1000289916992,
+            949.9199986457825,
+            963.5800123214722,
+            989.8200035095215
+          ],
+          "min_us": 949.9199986457825,
+          "mean_us": 988.5520100593567,
+          "max_us": 1077.340006828308
+        },
+        "multitask_current": {
+          "samples_us": [
+            932.6199889183044,
+            903.659999370575,
+            946.9599723815918,
+            1137.0799541473389,
+            1041.5799617767334
+          ],
+          "min_us": 903.659999370575,
+          "mean_us": 992.3799753189087,
+          "max_us": 1137.0799541473389
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            917.5800085067749,
+            897.9799747467041,
+            896.9799876213074,
+            902.1000266075134,
+            1042.6599979400635
+          ],
+          "min_us": 896.9799876213074,
+          "mean_us": 931.4599990844727,
+          "max_us": 1042.6599979400635
+        },
+        "single_spmd": {
+          "samples_us": [
+            936.1000061035156,
+            924.4800209999084,
+            922.7399826049805,
+            954.9800157546997,
+            1064.460039138794
+          ],
+          "min_us": 922.7399826049805,
+          "mean_us": 960.5520129203796,
+          "max_us": 1064.460039138794
+        }
+      }
+    },
+    "boundary_replay": {
+      "passed": true,
+      "same_graph_replays": 6,
+      "result": "runs/topk_prefix_v1/h131072_b16_topk_v1/boundary_replay.json"
+    },
+    "candidate_reduction_vs_original_pct": 5.508258012827889,
+    "candidate_reduction_vs_spmd_pct": -1.7527332225995966,
+    "candidate_reduction_vs_current_pct": 1.04633781763826,
+    "incore_scope": "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益",
+    "task_incore_us": {
+      "multitask_candidate": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 122.75999999999999,
+          "mean_us": 133.97916666666666,
+          "max_us": 143.53999999999996,
+          "median_us": 133.95
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 126.22000000000003,
+          "mean_us": 137.28458333333333,
+          "max_us": 147.1400000000001,
+          "median_us": 137.36
+        },
+        "qa_aic": {
+          "samples": 120,
+          "min_us": 14.97999999999999,
+          "mean_us": 17.2055,
+          "max_us": 19.86,
+          "median_us": 17.21
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 28.039999999999992,
+          "mean_us": 36.9232,
+          "max_us": 48.099999999999994,
+          "median_us": 36.61999999999999
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 14.080000000000041,
+          "mean_us": 18.68091666666667,
+          "max_us": 23.78000000000003,
+          "median_us": 18.50999999999999
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 186.0,
+          "mean_us": 193.61383333333333,
+          "max_us": 198.57999999999998,
+          "median_us": 193.85000000000002
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 188.07999999999998,
+          "mean_us": 196.748,
+          "max_us": 203.54000000000002,
+          "median_us": 196.81
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.43999999999994,
+          "mean_us": 26.806499999999996,
+          "max_us": 33.960000000000036,
+          "median_us": 26.420000000000016
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.939999999999941,
+          "mean_us": 10.8813125,
+          "max_us": 15.379999999999995,
+          "median_us": 10.740000000000009
+        }
+      },
+      "multitask_current": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 128.0,
+          "mean_us": 139.79616666666666,
+          "max_us": 154.36,
+          "median_us": 138.96000000000004
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 130.29999999999995,
+          "mean_us": 143.11425,
+          "max_us": 157.82000000000005,
+          "median_us": 142.37
+        },
+        "qa_aic": {
+          "samples": 120,
+          "min_us": 12.5,
+          "mean_us": 14.550333333333334,
+          "max_us": 17.040000000000006,
+          "median_us": 14.560000000000002
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 28.659999999999997,
+          "mean_us": 40.3128,
+          "max_us": 50.74000000000001,
+          "median_us": 40.870000000000005
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 13.839999999999975,
+          "mean_us": 19.553583333333332,
+          "max_us": 25.180000000000007,
+          "median_us": 19.829999999999984
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 195.14,
+          "mean_us": 201.60483333333335,
+          "max_us": 208.42000000000002,
+          "median_us": 201.75
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 193.60000000000002,
+          "mean_us": 204.87158333333335,
+          "max_us": 213.72000000000003,
+          "median_us": 204.79
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.639999999999986,
+          "mean_us": 27.504125000000002,
+          "max_us": 32.91999999999996,
+          "median_us": 27.25
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.960000000000036,
+          "mean_us": 10.587937499999997,
+          "max_us": 15.019999999999982,
+          "median_us": 10.490000000000009
+        }
+      },
+      "multitask_original": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 153.77999999999997,
+          "mean_us": 159.58983333333333,
+          "max_us": 170.12,
+          "median_us": 158.39999999999998
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 157.33999999999992,
+          "mean_us": 163.414,
+          "max_us": 173.66000000000008,
+          "median_us": 162.51
+        },
+        "qa_aic": {
+          "samples": 120,
+          "min_us": 11.86,
+          "mean_us": 13.391666666666667,
+          "max_us": 16.060000000000002,
+          "median_us": 13.29
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 29.439999999999998,
+          "mean_us": 38.925,
+          "max_us": 49.31999999999999,
+          "median_us": 39.120000000000005
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 14.180000000000007,
+          "mean_us": 24.7845,
+          "max_us": 34.64000000000004,
+          "median_us": 25.019999999999996
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 207.94000000000005,
+          "mean_us": 215.44683333333333,
+          "max_us": 219.16000000000003,
+          "median_us": 215.90000000000006
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 210.44,
+          "mean_us": 218.84675000000001,
+          "max_us": 225.45999999999998,
+          "median_us": 218.33999999999997
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.100000000000023,
+          "mean_us": 27.600562500000002,
+          "max_us": 32.01999999999998,
+          "median_us": 28.049999999999955
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.740000000000009,
+          "mean_us": 10.736312500000002,
+          "max_us": 15.840000000000032,
+          "median_us": 10.419999999999959
+        }
+      }
+    },
+    "correctness_evidence": {
+      "raw_result": "runs/topk_prefix_v1/h131072_b16_topk_v1/result.json",
+      "eager": {
+        "multitask_original_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_current_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_candidate_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "single_spmd_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_original_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_current_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_candidate_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "single_spmd_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        }
+      },
+      "scratch_guard_count": 70,
+      "scratch_failed": [],
+      "spmd_protocol": true
+    }
+  },
+  {
+    "result": "runs/topk_prefix_v1/h131072_b28_topk_v1/result.json",
+    "stage": "complete",
+    "passed": true,
+    "candidate": "topk_prefix_v1",
+    "candidate_wait_backoff": "off",
+    "candidate_wait_units": "score",
+    "current": "plan_workers_v1",
+    "indexer_page_pattern": "original",
+    "batch": 28,
+    "history": 131072,
+    "full_csa_l1_us": {
+      "multitask_original": {
+        "samples_us": [
+          1262.54,
+          1294.9,
+          1274.72,
+          1326.34,
+          1306.94
+        ],
+        "min_us": 1262.54,
+        "mean_us": 1293.088,
+        "max_us": 1326.34,
+        "median_us": 1294.9
+      },
+      "multitask_current": {
+        "samples_us": [
+          1175.16,
+          1186.5,
+          1172.4,
+          1192.5,
+          1207.02
+        ],
+        "min_us": 1172.4,
+        "mean_us": 1186.7160000000001,
+        "max_us": 1207.02,
+        "median_us": 1186.5
+      },
+      "multitask_candidate": {
+        "samples_us": [
+          1186.96,
+          1183.3,
+          1196.04,
+          1146.82,
+          1181.0
+        ],
+        "min_us": 1146.82,
+        "mean_us": 1178.824,
+        "max_us": 1196.04,
+        "median_us": 1183.3
+      },
+      "single_spmd": {
+        "samples_us": [
+          1163.5,
+          1180.38,
+          1169.74,
+          1180.28,
+          1185.3
+        ],
+        "min_us": 1163.5,
+        "mean_us": 1175.84,
+        "max_us": 1185.3,
+        "median_us": 1180.28
+      }
+    },
+    "outer_graph": {
+      "scope": "DFX窗口外NPU event包围单次graph.replay；含AICPU/运行时，不与L1相减认领纯AICPU",
+      "samples_per_side": 5,
+      "statistics_us": {
+        "multitask_original": {
+          "samples_us": [
+            1563.1200075149536,
+            1383.4799528121948,
+            1324.9399662017822,
+            1373.4400272369385,
+            1375.4199743270874
+          ],
+          "min_us": 1324.9399662017822,
+          "mean_us": 1404.0799856185913,
+          "max_us": 1563.1200075149536
+        },
+        "multitask_current": {
+          "samples_us": [
+            1304.0399551391602,
+            1267.799973487854,
+            1293.720006942749,
+            1296.4799404144287,
+            1469.8400497436523
+          ],
+          "min_us": 1267.799973487854,
+          "mean_us": 1326.3759851455688,
+          "max_us": 1469.8400497436523
+        },
+        "multitask_candidate": {
+          "samples_us": [
+            1299.340009689331,
+            1308.7199926376343,
+            1269.8800563812256,
+            1238.5200262069702,
+            1443.6999559402466
+          ],
+          "min_us": 1238.5200262069702,
+          "mean_us": 1312.0320081710815,
+          "max_us": 1443.6999559402466
+        },
+        "single_spmd": {
+          "samples_us": [
+            1315.3599500656128,
+            1297.2400188446045,
+            1315.9600496292114,
+            1346.060037612915,
+            1656.1399698257446
+          ],
+          "min_us": 1297.2400188446045,
+          "mean_us": 1386.1520051956177,
+          "max_us": 1656.1399698257446
+        }
+      }
+    },
+    "candidate_reduction_vs_original_pct": 8.836521566977646,
+    "candidate_reduction_vs_spmd_pct": -0.25377602394884946,
+    "candidate_reduction_vs_current_pct": 0.665028532521686,
+    "incore_scope": "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益",
+    "task_incore_us": {
+      "multitask_candidate": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 225.36,
+          "mean_us": 234.17583333333334,
+          "max_us": 242.88,
+          "median_us": 234.51000000000005
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 228.89999999999998,
+          "mean_us": 237.62033333333335,
+          "max_us": 246.46000000000015,
+          "median_us": 237.86
+        },
+        "qa_aic": {
+          "samples": 80,
+          "min_us": 22.140000000000015,
+          "mean_us": 28.17925,
+          "max_us": 34.84,
+          "median_us": 28.709999999999994
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 49.91999999999996,
+          "mean_us": 60.889599999999994,
+          "max_us": 72.33999999999997,
+          "median_us": 60.66
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 29.960000000000036,
+          "mean_us": 33.464,
+          "max_us": 37.60000000000002,
+          "median_us": 33.35000000000002
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 270.84,
+          "mean_us": 318.90383333333335,
+          "max_us": 343.34000000000003,
+          "median_us": 336.28000000000003
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 271.3,
+          "mean_us": 323.29466666666667,
+          "max_us": 348.14,
+          "median_us": 341.49
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 16.820000000000164,
+          "mean_us": 26.849500000000003,
+          "max_us": 37.92000000000007,
+          "median_us": 27.940000000000055
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 15.240000000000009,
+          "mean_us": 16.511624999999995,
+          "max_us": 18.960000000000036,
+          "median_us": 16.479999999999905
+        }
+      },
+      "multitask_current": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 210.5,
+          "mean_us": 222.28750000000002,
+          "max_us": 234.7800000000001,
+          "median_us": 222.4000000000001
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 213.3599999999999,
+          "mean_us": 225.75475,
+          "max_us": 237.89999999999998,
+          "median_us": 225.64999999999998
+        },
+        "qa_aic": {
+          "samples": 80,
+          "min_us": 20.599999999999994,
+          "mean_us": 27.986,
+          "max_us": 34.05999999999999,
+          "median_us": 27.259999999999998
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 50.68000000000001,
+          "mean_us": 61.3198,
+          "max_us": 77.44,
+          "median_us": 59.78999999999999
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 29.19999999999999,
+          "mean_us": 33.91866666666667,
+          "max_us": 39.56,
+          "median_us": 33.85000000000002
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 274.42,
+          "mean_us": 319.8391666666667,
+          "max_us": 344.94,
+          "median_us": 336.79
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 275.02,
+          "mean_us": 327.74358333333333,
+          "max_us": 354.46000000000004,
+          "median_us": 347.08000000000004
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 17.04000000000019,
+          "mean_us": 26.788625000000007,
+          "max_us": 39.020000000000095,
+          "median_us": 27.559999999999945
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 15.160000000000082,
+          "mean_us": 16.611625000000007,
+          "max_us": 18.12000000000012,
+          "median_us": 16.6400000000001
+        }
+      },
+      "multitask_original": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 252.45999999999992,
+          "mean_us": 261.68233333333336,
+          "max_us": 268.29999999999995,
+          "median_us": 262.28999999999996
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 255.62000000000012,
+          "mean_us": 265.2200833333333,
+          "max_us": 272.22,
+          "median_us": 266.04000000000013
+        },
+        "qa_aic": {
+          "samples": 80,
+          "min_us": 22.0,
+          "mean_us": 29.518,
+          "max_us": 35.120000000000005,
+          "median_us": 28.93
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 52.39999999999998,
+          "mean_us": 65.1636,
+          "max_us": 79.91999999999999,
+          "median_us": 66.45000000000002
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 29.24000000000001,
+          "mean_us": 32.83091666666667,
+          "max_us": 45.48000000000002,
+          "median_us": 32.68000000000001
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 312.24,
+          "mean_us": 365.79466666666667,
+          "max_us": 393.65999999999997,
+          "median_us": 386.39
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 311.91999999999996,
+          "mean_us": 373.64158333333336,
+          "max_us": 403.44,
+          "median_us": 396.0
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 16.920000000000073,
+          "mean_us": 26.79649999999999,
+          "max_us": 37.61999999999989,
+          "median_us": 27.5
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 17.340000000000146,
+          "mean_us": 18.961999999999996,
+          "max_us": 22.38000000000011,
+          "median_us": 18.850000000000023
+        }
+      }
+    },
+    "correctness_evidence": {
+      "raw_result": "runs/topk_prefix_v1/h131072_b28_topk_v1/result.json",
+      "eager": {
+        "multitask_original_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_current_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_candidate_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "single_spmd_A": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_original_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_current_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "multitask_candidate_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        },
+        "single_spmd_B": {
+          "passed": true,
+          "guard_count": 31,
+          "failed_guards": [],
+          "tensors": {
+            "x_out": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "swa.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "compressed.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": null,
+              "mismatches": 0
+            },
+            "indexer.1": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "indexer_state.0": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            },
+            "idx_topk_scores": {
+              "status": "PASS",
+              "nonfinite": 0,
+              "max_abs": 0.0,
+              "mismatches": 0
+            }
+          }
+        }
+      },
+      "scratch_guard_count": 70,
+      "scratch_failed": [],
+      "spmd_protocol": true
+    }
   }
 ]

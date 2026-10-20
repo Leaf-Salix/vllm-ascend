@@ -18154,3 +18154,83 @@ Plan的286.18/371.99μs仍后移。更窄的任务跨度不能抵消新的阶段
 仍是私有实验，不将来源七档未整体采用的状态改写为全域有效。
 相关PyPTO/PTOAS现有隔离树的代码提交已核对，统一配套后再做同轮四路
 对照；不把旧工具链性能表作为新候选的收益分母。
+
+## 678. 2026-10-20：精确Top-K短前缀迁移两长档受益，继续七档与边界
+
+上一轮收取了两个已提交任务的完整终态，属于获得改变下一行动的证据，
+不是重复状态等待。私有topk_prefix_v1从正式plan_workers_v1出发，生成器
+直接读取c49ee5b2中的topk_threshold_stages.py与调用位置，不读取另一
+session未提交的新原语。只在原balanced路径已有Top-512根之后筛选；
+旧根第512项作阈值，GE保留全部同分项，incoming优先归并及原回退不变。
+Score算术、AIC代码、TaskId拓扑、READY/ACK、动态页与有效长度均不改。
+
+四路使用相同隔离工具链：PyPTO 65477973、PTOAS b48c84eb（包含Scalar
+compare及LLVM19布尔表达式分组修复）、Simpler 57e499238、CANN 9.2。
+run_topk_case.sh只读复用已有构建；旧run_case.sh与共享安装未修改。
+记录三个构建产物的stat以发现并发重建，不复制二进制或做hash校验。
+
+task_20261020_234156_2905746799及task_20261020_234156_29062119673均
+completed/exit0。A/-A输出、Top-K/score、cache/state、保护和图检查精确
+通过，B16另通过六次同址metadata/padding回放；仍仅S6，不声称覆盖S1/S5、
+任意混合query或整模型token。完整CSA L1五窗，单位μs：
+
+| 档位 | 正式Plan min/mean/max | Top-K候选 min/mean/max | 单SPMD min/mean/max |
+|---|---|---|---|
+| 128K/B16 | 818.12 / 829.56 / 844.50 | 812.88 / 820.88 / 833.62 | 801.78 / 806.74 / 817.72 |
+| 128K/B28 | 1172.40 / 1186.72 / 1207.02 | 1146.82 / 1178.82 / 1196.04 | 1163.50 / 1175.84 / 1185.30 |
+
+mean净省8.680/7.892μs，max降低10.88/10.98μs；候选仍慢于同轮单SPMD，
+不能据两代表档宣称完成。Score AIV每核task均值B16为204.872→196.748μs，
+B28为327.744→323.295μs；AIC分别201.605→193.614、319.839→318.904μs。
+这些核内时间包含等待，不是纯Vector/Cube计算；AIC数学未改，不能把
+AIC缩短记成矩阵运算减少。阶段和原始窗口见
+[TOPK_PREFIX_FOCUS_PHASES.json](csa_multitask_backport_20261020/TOPK_PREFIX_FOCUS_PHASES.json)
+及RESULTS.json中对应runs/topk_prefix_v1/h131072_b*_topk_v1/result.json。
+
+其余128K/B4、B8、B24和8K/B16、B32已按相同入口排队，ID记录在TASKS.json；
+先保留全部五窗，不跨轮挑快项。正式算子尚不采用；受益区间、短档关闭路径、
+S1/S5及相关资源边界尚需补齐。无需重复已验证且源码未改的阈值微测试。
+
+对676节候选盘点补充：fd55e29a的新双QK早FIX＋WS列池与旧单QK列池负例
+不同；同轮单SPMD B16/B28完整L1中位数净省5.42/12.12μs，4/5与5/5窗口
+更快，仅因该session的20μs门槛未扩档，不能统称无收益。当前多task未迁入，
+本任务不继承20μs门槛，可独立评估；不把它与Top-K收益相加。99e29cb3的
+score/index成对压缩仅有前端/构建进展，暂无真机收益，继续跟踪而不采用。
+
+## 679. 2026-10-21：明确S6入口边界，完成WS列池迁移的CPU验证
+
+边界准备先核对正式NativeCSACall：hidden行数必须等于batch×6，实际
+metadata token数也必须是6的倍数；Indexer使用DECODE_SEQ作为请求步长。
+该限制在迁移前已存在。本次Top-K不改变query分组/地址合同，没有把S6的
+padding测试写成S1/S5通过，也没有为了测试去掉入口检查。S1/S5入口支持
+仍是独立的未覆盖项；本轮不以两长档通过声称覆盖全部单SPMD动态能力。
+
+topk_prefix_boundary_v1与topk_prefix_v1的算子源码相同，仅测试清单增加
+context_switch_history=32765。使用B5/T30、history=131071和碎片历史页，
+同图覆盖长度/页表变化、长G6关闭分支与padding，再回到原状态；仅做功能
+及图重放，不重复采性能。任务task_20261020_235459_105411424050排队。
+该用例与其余五档的ID均已入TASKS.json。
+
+Top-K生成代码确认3个Scalar GE站点，score gather分别使用512/1024容量；
+索引fillpad仍为2048，count物理列数8，未把这两项写成已缩短。见
+[TOPK_PREFIX_CODEGEN.json](csa_multitask_backport_20261020/TOPK_PREFIX_CODEGEN.json)。
+
+等卡期间准备独立ws_pool候选，来源只读fd55e29a的已提交代码。
+prepare_ws_pool.py仅迁移Acc创建、面板内WS及末尾写回三段；保留两份M192
+早FIX、原两段K192累加、全部AIV与TaskId/硬件握手。生成器核对这些范围，
+没有把单SPMD调度器或其它未采用实验一并复制。
+
+ws_pool_v1的CPU前端拒绝未启用的G2/N128分支：固定8面板会得到1024列，
+超过该分支768列FIFO。没有上卡，也没有修改编译器放宽检查。v2将列池
+表达为整步一半宽度，使折叠constexpr前的其它分支也合法；实际启用的
+长G6/N64仍严格是8面板、16×512。v1失败源码和错误保留在runs/ws_pool_v1。
+
+ws_pool_v2完整CPU lowering、PTOAS及编排编译通过；生成长G6 AIC中列池
+确有两处512列写回，两份192×64 INT32 QK与16×512 FP32池共128KiB Acc。
+它只证明生成机制和容量，不是硬件重叠或设备功能/性能通过。证据见
+[WS_POOL_CODEGEN.json](csa_multitask_backport_20261020/WS_POOL_CODEGEN.json)。
+两长代表档已按同一Top-K工具链、四路五窗入口提交；独立对照正式Plan，
+不与Top-K组合，不将两轮收益相加。设备结果待收，正式算子仍未修改。
+
+00时队列查询确认CI任务占用全部16卡，其余用例pending；保持原任务排队，
+未重提或抢占。新增生成器/工具链记录通过ruff，入口通过bash语法检查。
