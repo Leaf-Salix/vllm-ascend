@@ -98,6 +98,11 @@ def summarize(path):
         summary["candidate_scope_change"] = (
             "候选Score AIV包含Top-K及信号等待；等待源码策略见candidate_wait_backoff和candidate_wait_codegen/audit.json"
         )
+    if report["candidate"].startswith("query_score"):
+        summary["candidate_scope_change"] = (
+            "长G6拆M的Score AIV包含Q反量化/RMS/RoPE；与原Score不能按等工作量相减，"
+            "完整CSA及QB结束到Attention首启另列；短档或小批仍是独立Q任务"
+        )
     if report["candidate"].startswith(("output_groups", "hc_rows", "attention_rows")):
         summary["candidate_scope_change"] = (
             "局部MIX核内时间合并多个数学阶段与软等待；与原分离task不能按同名数学直接相减"

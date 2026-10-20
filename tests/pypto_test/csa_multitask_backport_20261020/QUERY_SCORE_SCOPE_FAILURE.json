@@ -1,0 +1,50 @@
+{
+  "candidate": "query_score_scope_v4",
+  "cause": "新增层级将Indexer约130MiB工作区放到32MiB heap ring 3",
+  "scope": "配置容量与scope层级不匹配，未完成数值或性能验收",
+  "rows": [
+    {
+      "history": 8192,
+      "batch": 16,
+      "result": "runs/query_score_scope_v4/h8192_b16_scope_v1/result.json",
+      "logs": [
+        "runs/query_score_scope_v4/h8192_b16_scope_v1/ascend/debug/device-4/device-2151233_20261021041837456.log"
+      ],
+      "root_cause_lines": [
+        "[ERROR] AICPU(8214,aicpu_scheduler):2026-10-21-04:19:59.959.401 [device_log.cpp:96]8229 report_deadlock \"[ring_buffer.h:426] FATAL: Task Allocator Deadlock - Heap Exhausted! ring=3\"",
+        "[ERROR] AICPU(8214,aicpu_scheduler):2026-10-21-04:19:59.959.444 [device_log.cpp:96]8229 report_deadlock \"[ring_buffer.h:448]   Heap ring 3: top=589824, tail=589824, size=33554432, used=0, available=33554432\"",
+        "[ERROR] AICPU(8214,aicpu_scheduler):2026-10-21-04:19:59.959.450 [device_log.cpp:96]8229 report_deadlock \"[ring_buffer.h:450]   Requested:  135856128 bytes\""
+      ],
+      "performance_measured": false
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "result": "runs/query_score_scope_v4/h8192_b32_scope_v1/result.json",
+      "logs": [
+        "runs/query_score_scope_v4/h8192_b32_scope_v1/ascend/debug/device-5/device-2151469_20261021041837456.log"
+      ],
+      "root_cause_lines": [
+        "[ERROR] AICPU(8193,aicpu_scheduler):2026-10-21-04:20:02.332.416 [device_log.cpp:96]8209 report_deadlock \"[ring_buffer.h:426] FATAL: Task Allocator Deadlock - Heap Exhausted! ring=3\"",
+        "[ERROR] AICPU(8193,aicpu_scheduler):2026-10-21-04:20:02.332.462 [device_log.cpp:96]8209 report_deadlock \"[ring_buffer.h:448]   Heap ring 3: top=1179648, tail=1179648, size=33554432, used=0, available=33554432\"",
+        "[ERROR] AICPU(8193,aicpu_scheduler):2026-10-21-04:20:02.332.469 [device_log.cpp:96]8209 report_deadlock \"[ring_buffer.h:450]   Requested:  135856128 bytes\""
+      ],
+      "performance_measured": false
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "result": "runs/query_score_scope_v4/h131072_b28_scope_v1/result.json",
+      "logs": [
+        "runs/query_score_scope_v4/h131072_b28_scope_v1/ascend/debug/device-6/device-2151586_20261021041838024.log"
+      ],
+      "root_cause_lines": [
+        "[ERROR] AICPU(2098,aicpu_scheduler):2026-10-21-04:20:07.563.668 [device_log.cpp:96]2113 report_deadlock \"[ring_buffer.h:426] FATAL: Task Allocator Deadlock - Heap Exhausted! ring=3\"",
+        "[ERROR] AICPU(2098,aicpu_scheduler):2026-10-21-04:20:07.563.709 [device_log.cpp:96]2113 report_deadlock \"[ring_buffer.h:448]   Heap ring 3: top=1081344, tail=1081344, size=33554432, used=0, available=33554432\"",
+        "[ERROR] AICPU(2098,aicpu_scheduler):2026-10-21-04:20:07.563.716 [device_log.cpp:96]2113 report_deadlock \"[ring_buffer.h:450]   Requested:  135856128 bytes\""
+      ],
+      "performance_measured": false
+    }
+  ],
+  "next": "v5前移原Indexer scope起点，移除冗余内层scope，不增加公共heap"
+}
