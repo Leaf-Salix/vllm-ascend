@@ -5897,25 +5897,2357 @@
   },
   {
     "result": "runs/fused_topk_v4/h131072_b16_v1/result.json",
-    "stage": "compile_call_multitask_candidate_A",
-    "passed": false,
+    "stage": "complete",
+    "passed": true,
     "candidate": "fused_topk_v4",
     "current": "core_v2",
     "indexer_page_pattern": "original",
     "batch": 16,
     "history": 131072,
-    "error": []
+    "full_csa_l1_us": {
+      "multitask_original": {
+        "samples_us": [
+          869.72,
+          883.36,
+          868.58,
+          864.86,
+          863.52
+        ],
+        "min_us": 863.52,
+        "mean_us": 870.008,
+        "max_us": 883.36,
+        "median_us": 868.58
+      },
+      "multitask_current": {
+        "samples_us": [
+          832.18,
+          831.44,
+          843.5,
+          818.6,
+          817.78
+        ],
+        "min_us": 817.78,
+        "mean_us": 828.7,
+        "max_us": 843.5,
+        "median_us": 831.44
+      },
+      "multitask_candidate": {
+        "samples_us": [
+          834.04,
+          840.36,
+          832.16,
+          821.64,
+          829.08
+        ],
+        "min_us": 821.64,
+        "mean_us": 831.456,
+        "max_us": 840.36,
+        "median_us": 832.16
+      },
+      "single_spmd": {
+        "samples_us": [
+          793.52,
+          796.62,
+          787.74,
+          811.74,
+          795.32
+        ],
+        "min_us": 787.74,
+        "mean_us": 796.988,
+        "max_us": 811.74,
+        "median_us": 795.32
+      }
+    },
+    "candidate_reduction_vs_original_pct": 4.431223620932223,
+    "candidate_reduction_vs_spmd_pct": -4.324782807269364,
+    "candidate_reduction_vs_current_pct": -0.332569084107635,
+    "incore_scope": "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益",
+    "candidate_scope_change": "候选Score AIV还包含根发布/等待和最终Top-K；不能与原分离版Score AIV直接作等工作量核内比较",
+    "task_incore_us": {
+      "multitask_candidate": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 132.62,
+          "mean_us": 141.90483333333333,
+          "max_us": 149.53999999999996,
+          "median_us": 142.08999999999997
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 136.06000000000006,
+          "mean_us": 145.2835,
+          "max_us": 152.94000000000005,
+          "median_us": 145.43
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 28.120000000000005,
+          "mean_us": 46.0946,
+          "max_us": 57.940000000000026,
+          "median_us": 46.47
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 13.939999999999998,
+          "mean_us": 17.81383333333333,
+          "max_us": 24.45999999999998,
+          "median_us": 17.340000000000032
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 188.85999999999996,
+          "mean_us": 194.36066666666667,
+          "max_us": 198.59999999999997,
+          "median_us": 194.28
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 201.42000000000002,
+          "mean_us": 208.55133333333333,
+          "max_us": 213.21999999999997,
+          "median_us": 208.73
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.199999999999932,
+          "mean_us": 26.552625000000006,
+          "max_us": 32.32000000000005,
+          "median_us": 25.75999999999999
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.7999999999999545,
+          "mean_us": 10.938437500000001,
+          "max_us": 15.040000000000077,
+          "median_us": 10.75
+        }
+      },
+      "multitask_current": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 126.03999999999996,
+          "mean_us": 137.05983333333333,
+          "max_us": 149.10000000000002,
+          "median_us": 137.17000000000002
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 129.24,
+          "mean_us": 140.42849999999999,
+          "max_us": 152.64,
+          "median_us": 140.62
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 27.440000000000026,
+          "mean_us": 42.6068,
+          "max_us": 55.379999999999995,
+          "median_us": 43.72
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 13.980000000000018,
+          "mean_us": 16.782833333333333,
+          "max_us": 21.95999999999998,
+          "median_us": 16.560000000000002
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 187.82000000000005,
+          "mean_us": 193.469,
+          "max_us": 201.03999999999996,
+          "median_us": 192.98000000000002
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 188.44,
+          "mean_us": 196.67808333333335,
+          "max_us": 205.42000000000002,
+          "median_us": 196.61
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.160000000000082,
+          "mean_us": 26.6796875,
+          "max_us": 32.379999999999995,
+          "median_us": 26.00999999999999
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.680000000000064,
+          "mean_us": 11.099875000000003,
+          "max_us": 14.319999999999936,
+          "median_us": 11.300000000000068
+        }
+      },
+      "multitask_original": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 140.0200000000001,
+          "mean_us": 152.61966666666666,
+          "max_us": 159.2800000000001,
+          "median_us": 152.57
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 143.86,
+          "mean_us": 156.25675,
+          "max_us": 162.79999999999995,
+          "median_us": 156.31
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 31.72,
+          "mean_us": 39.5368,
+          "max_us": 52.29999999999998,
+          "median_us": 39.260000000000005
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 14.079999999999984,
+          "mean_us": 17.950833333333332,
+          "max_us": 21.78000000000003,
+          "median_us": 17.890000000000015
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 209.02000000000004,
+          "mean_us": 217.525,
+          "max_us": 225.2,
+          "median_us": 217.89
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 211.98000000000002,
+          "mean_us": 220.93975,
+          "max_us": 227.56000000000006,
+          "median_us": 220.89
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 21.360000000000014,
+          "mean_us": 27.242875,
+          "max_us": 33.5,
+          "median_us": 26.25
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 7.760000000000105,
+          "mean_us": 11.2086875,
+          "max_us": 14.740000000000009,
+          "median_us": 11.419999999999959
+        }
+      }
+    },
+    "task_windows": [
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_00_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 134.91999999999996,
+            "mean_us": 142.80666666666667,
+            "max_us": 147.94000000000005,
+            "median_us": 142.82999999999998
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 138.15999999999997,
+            "mean_us": 146.12708333333333,
+            "max_us": 150.98000000000002,
+            "median_us": 146.23999999999995
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 28.120000000000005,
+            "mean_us": 49.757,
+            "max_us": 57.940000000000026,
+            "median_us": 52.39999999999999
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 18.159999999999968,
+            "mean_us": 21.10333333333333,
+            "max_us": 24.45999999999998,
+            "median_us": 20.78
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 188.85999999999996,
+            "mean_us": 192.46166666666667,
+            "max_us": 194.62,
+            "median_us": 192.77000000000004
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 204.07999999999998,
+            "mean_us": 206.91583333333335,
+            "max_us": 210.22000000000003,
+            "median_us": 206.83
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 23.519999999999982,
+            "mean_us": 26.666250000000012,
+            "max_us": 30.660000000000082,
+            "median_us": 26.060000000000002
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.079999999999927,
+            "mean_us": 10.420625,
+            "max_us": 13.219999999999914,
+            "median_us": 10.259999999999991
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_00_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 126.03999999999996,
+            "mean_us": 134.23583333333332,
+            "max_us": 138.67999999999995,
+            "median_us": 134.86999999999995
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 129.24,
+            "mean_us": 137.55124999999998,
+            "max_us": 142.12,
+            "median_us": 138.24
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 40.94,
+            "mean_us": 47.487,
+            "max_us": 54.5,
+            "median_us": 46.870000000000005
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 13.980000000000018,
+            "mean_us": 16.28083333333333,
+            "max_us": 19.480000000000018,
+            "median_us": 15.97999999999999
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 191.2,
+            "mean_us": 193.7725,
+            "max_us": 197.66000000000003,
+            "median_us": 193.84000000000003
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 191.48000000000002,
+            "mean_us": 197.05208333333334,
+            "max_us": 203.54000000000002,
+            "median_us": 196.85
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.160000000000082,
+            "mean_us": 26.684375000000003,
+            "max_us": 32.24000000000001,
+            "median_us": 25.5
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 7.680000000000064,
+            "mean_us": 10.800625000000004,
+            "max_us": 13.659999999999968,
+            "median_us": 11.180000000000007
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_00_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 149.12,
+            "mean_us": 154.19083333333333,
+            "max_us": 159.2800000000001,
+            "median_us": 152.87000000000006
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 152.5200000000001,
+            "mean_us": 157.66375,
+            "max_us": 162.32000000000005,
+            "median_us": 156.68
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 33.5,
+            "mean_us": 44.178999999999995,
+            "max_us": 52.29999999999998,
+            "median_us": 44.099999999999994
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 15.579999999999984,
+            "mean_us": 17.235416666666666,
+            "max_us": 19.140000000000015,
+            "median_us": 17.190000000000012
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 210.35999999999996,
+            "mean_us": 217.7825,
+            "max_us": 221.17999999999995,
+            "median_us": 218.32
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 216.76,
+            "mean_us": 221.21166666666667,
+            "max_us": 225.77999999999997,
+            "median_us": 220.85999999999999
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.799999999999955,
+            "mean_us": 27.948749999999997,
+            "max_us": 33.5,
+            "median_us": 26.84999999999991
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 7.760000000000105,
+            "mean_us": 10.634375000000007,
+            "max_us": 13.700000000000045,
+            "median_us": 11.080000000000041
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_01_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 140.0200000000001,
+            "mean_us": 147.52916666666667,
+            "max_us": 152.60000000000002,
+            "median_us": 148.11999999999995
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 143.86,
+            "mean_us": 151.14333333333335,
+            "max_us": 156.48000000000002,
+            "median_us": 151.53000000000003
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 32.69999999999999,
+            "mean_us": 38.151,
+            "max_us": 42.0,
+            "median_us": 39.14999999999998
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.079999999999984,
+            "mean_us": 17.13375,
+            "max_us": 20.45999999999998,
+            "median_us": 16.740000000000038
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 209.02000000000004,
+            "mean_us": 216.72583333333336,
+            "max_us": 220.03999999999996,
+            "median_us": 217.50999999999996
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 216.64000000000004,
+            "mean_us": 220.25666666666666,
+            "max_us": 225.12,
+            "median_us": 219.84999999999997
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.659999999999968,
+            "mean_us": 27.216875000000005,
+            "max_us": 32.42000000000007,
+            "median_us": 25.74000000000001
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 7.9799999999999045,
+            "mean_us": 11.65499999999999,
+            "max_us": 14.740000000000009,
+            "median_us": 11.569999999999993
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_01_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 131.36,
+            "mean_us": 138.685,
+            "max_us": 144.64,
+            "median_us": 139.57000000000005
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 134.86,
+            "mean_us": 142.09708333333333,
+            "max_us": 148.12,
+            "median_us": 142.94
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 27.440000000000026,
+            "mean_us": 42.432,
+            "max_us": 51.18000000000001,
+            "median_us": 43.25
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.0,
+            "mean_us": 16.380833333333328,
+            "max_us": 19.560000000000002,
+            "median_us": 16.75
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 190.10000000000002,
+            "mean_us": 192.90416666666667,
+            "max_us": 195.51999999999998,
+            "median_us": 192.94
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 190.26000000000005,
+            "mean_us": 195.92791666666668,
+            "max_us": 200.99999999999994,
+            "median_us": 196.24
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.5,
+            "mean_us": 26.416874999999997,
+            "max_us": 30.720000000000027,
+            "median_us": 26.130000000000052
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.56000000000006,
+            "mean_us": 10.825624999999999,
+            "max_us": 13.580000000000041,
+            "median_us": 10.95999999999998
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_01_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 134.08000000000004,
+            "mean_us": 140.22666666666666,
+            "max_us": 145.56000000000006,
+            "median_us": 140.68000000000006
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 137.34000000000003,
+            "mean_us": 143.57625000000002,
+            "max_us": 148.9000000000001,
+            "median_us": 144.10000000000002
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 28.180000000000007,
+            "mean_us": 43.44500000000001,
+            "max_us": 53.620000000000005,
+            "median_us": 45.58
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.699999999999989,
+            "mean_us": 15.965416666666666,
+            "max_us": 17.140000000000043,
+            "median_us": 16.05000000000001
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 193.36000000000007,
+            "mean_us": 196.21083333333334,
+            "max_us": 198.36,
+            "median_us": 196.59000000000003
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 206.59999999999997,
+            "mean_us": 210.30958333333334,
+            "max_us": 213.21999999999997,
+            "median_us": 210.54
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.420000000000073,
+            "mean_us": 26.809375000000006,
+            "max_us": 31.680000000000064,
+            "median_us": 25.799999999999955
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 9.259999999999991,
+            "mean_us": 11.276250000000001,
+            "max_us": 14.519999999999982,
+            "median_us": 10.96999999999997
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_02_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 145.34000000000003,
+            "mean_us": 150.33999999999997,
+            "max_us": 155.29999999999995,
+            "median_us": 150.26
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 148.86,
+            "mean_us": 153.81583333333333,
+            "max_us": 158.57999999999993,
+            "median_us": 153.7399999999999
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 31.939999999999998,
+            "mean_us": 38.883,
+            "max_us": 47.80000000000001,
+            "median_us": 40.11
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 15.060000000000002,
+            "mean_us": 18.257500000000004,
+            "max_us": 20.360000000000014,
+            "median_us": 18.659999999999997
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 214.14000000000004,
+            "mean_us": 219.26666666666668,
+            "max_us": 225.2,
+            "median_us": 218.97999999999996
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 217.40000000000003,
+            "mean_us": 222.92083333333335,
+            "max_us": 227.56000000000006,
+            "median_us": 222.46000000000004
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.360000000000014,
+            "mean_us": 26.742187500000007,
+            "max_us": 31.32000000000005,
+            "median_us": 26.37000000000006
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.099999999999909,
+            "mean_us": 10.6484375,
+            "max_us": 14.399999999999977,
+            "median_us": 10.829999999999984
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_02_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 132.62,
+            "mean_us": 140.42583333333332,
+            "max_us": 145.06000000000006,
+            "median_us": 141.34999999999997
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 136.06000000000006,
+            "mean_us": 143.94208333333333,
+            "max_us": 148.42000000000007,
+            "median_us": 144.95
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 37.0,
+            "mean_us": 47.903,
+            "max_us": 57.80000000000001,
+            "median_us": 46.790000000000006
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.779999999999973,
+            "mean_us": 16.254166666666666,
+            "max_us": 18.5,
+            "median_us": 16.180000000000035
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 193.07999999999998,
+            "mean_us": 194.94666666666666,
+            "max_us": 197.53999999999996,
+            "median_us": 194.96999999999997
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 205.68000000000006,
+            "mean_us": 209.18666666666667,
+            "max_us": 212.66000000000003,
+            "median_us": 209.13
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.799999999999955,
+            "mean_us": 26.521875000000005,
+            "max_us": 31.480000000000018,
+            "median_us": 25.340000000000032
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.159999999999968,
+            "mean_us": 11.277812500000003,
+            "max_us": 15.040000000000077,
+            "median_us": 11.159999999999968
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_02_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 128.65999999999997,
+            "mean_us": 134.93416666666667,
+            "max_us": 140.98000000000002,
+            "median_us": 135.26999999999998
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 131.84000000000003,
+            "mean_us": 138.27666666666667,
+            "max_us": 144.45999999999992,
+            "median_us": 138.49999999999994
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 34.31999999999999,
+            "mean_us": 46.784,
+            "max_us": 55.379999999999995,
+            "median_us": 47.010000000000005
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.100000000000023,
+            "mean_us": 15.897499999999999,
+            "max_us": 17.960000000000036,
+            "median_us": 15.930000000000035
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 187.82000000000005,
+            "mean_us": 190.51166666666666,
+            "max_us": 192.33999999999997,
+            "median_us": 190.91000000000003
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 188.44,
+            "mean_us": 194.04458333333335,
+            "max_us": 198.76,
+            "median_us": 194.25
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.200000000000045,
+            "mean_us": 26.805,
+            "max_us": 31.360000000000014,
+            "median_us": 25.94999999999999
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 9.740000000000009,
+            "mean_us": 11.784687500000011,
+            "max_us": 13.420000000000073,
+            "median_us": 12.009999999999991
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_03_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 135.51999999999998,
+            "mean_us": 142.90666666666667,
+            "max_us": 146.95999999999992,
+            "median_us": 142.95000000000005
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 138.89999999999998,
+            "mean_us": 146.27833333333334,
+            "max_us": 150.36,
+            "median_us": 146.64000000000004
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 28.22,
+            "mean_us": 42.445,
+            "max_us": 51.620000000000005,
+            "median_us": 44.3
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 13.939999999999998,
+            "mean_us": 17.227499999999996,
+            "max_us": 21.079999999999984,
+            "median_us": 17.659999999999997
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 193.88000000000005,
+            "mean_us": 196.29916666666668,
+            "max_us": 198.59999999999997,
+            "median_us": 196.70000000000002
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 205.88,
+            "mean_us": 209.89375,
+            "max_us": 212.95999999999998,
+            "median_us": 209.79999999999998
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.539999999999964,
+            "mean_us": 26.458125000000003,
+            "max_us": 31.40000000000009,
+            "median_us": 25.77000000000004
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 7.7999999999999545,
+            "mean_us": 10.78875,
+            "max_us": 13.539999999999964,
+            "median_us": 10.509999999999991
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_03_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 149.15999999999997,
+            "mean_us": 154.60083333333336,
+            "max_us": 157.7800000000001,
+            "median_us": 155.76999999999998
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 152.82000000000005,
+            "mean_us": 158.07416666666666,
+            "max_us": 161.41999999999996,
+            "median_us": 159.39
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 32.46000000000001,
+            "mean_us": 41.566,
+            "max_us": 49.860000000000014,
+            "median_us": 41.42
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.519999999999982,
+            "mean_us": 17.56,
+            "max_us": 20.120000000000005,
+            "median_us": 17.36999999999999
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 211.59999999999997,
+            "mean_us": 216.47083333333333,
+            "max_us": 218.56,
+            "median_us": 217.34
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 211.98000000000002,
+            "mean_us": 219.6275,
+            "max_us": 223.56,
+            "median_us": 220.29
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.56000000000006,
+            "mean_us": 26.762187499999996,
+            "max_us": 31.09999999999991,
+            "median_us": 26.370000000000005
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.17999999999995,
+            "mean_us": 10.981874999999993,
+            "max_us": 14.479999999999905,
+            "median_us": 10.920000000000016
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_03_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 128.26,
+            "mean_us": 134.73916666666668,
+            "max_us": 139.22000000000003,
+            "median_us": 135.61
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 131.30000000000007,
+            "mean_us": 138.12041666666667,
+            "max_us": 142.5200000000001,
+            "median_us": 139.15999999999997
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 33.139999999999986,
+            "mean_us": 42.617,
+            "max_us": 49.18000000000001,
+            "median_us": 42.55
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.0,
+            "mean_us": 16.473750000000003,
+            "max_us": 18.840000000000032,
+            "median_us": 17.07000000000002
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 190.82,
+            "mean_us": 192.75083333333333,
+            "max_us": 195.20000000000005,
+            "median_us": 192.7
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 191.14,
+            "mean_us": 195.76916666666668,
+            "max_us": 200.8,
+            "median_us": 196.37
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.59999999999991,
+            "mean_us": 26.608750000000008,
+            "max_us": 32.379999999999995,
+            "median_us": 25.810000000000002
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.519999999999982,
+            "mean_us": 10.958124999999997,
+            "max_us": 14.319999999999936,
+            "median_us": 10.919999999999959
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_04_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 136.14,
+            "mean_us": 143.15833333333333,
+            "max_us": 149.53999999999996,
+            "median_us": 143.42999999999995
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 139.66000000000008,
+            "mean_us": 146.49375,
+            "max_us": 152.94000000000005,
+            "median_us": 146.8
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 31.220000000000027,
+            "mean_us": 46.923,
+            "max_us": 53.880000000000024,
+            "median_us": 45.67999999999999
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 15.45999999999998,
+            "mean_us": 18.518750000000004,
+            "max_us": 20.47999999999996,
+            "median_us": 18.599999999999994
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 190.38,
+            "mean_us": 191.885,
+            "max_us": 193.7,
+            "median_us": 191.65999999999997
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 201.42000000000002,
+            "mean_us": 206.45083333333332,
+            "max_us": 210.06,
+            "median_us": 206.60000000000002
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 21.199999999999932,
+            "mean_us": 26.307500000000005,
+            "max_us": 32.32000000000005,
+            "median_us": 25.629999999999995
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.43999999999994,
+            "mean_us": 10.928750000000004,
+            "max_us": 13.899999999999977,
+            "median_us": 10.849999999999909
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_04_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 134.48000000000002,
+            "mean_us": 142.705,
+            "max_us": 149.10000000000002,
+            "median_us": 143.10999999999996
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 137.34000000000003,
+            "mean_us": 146.09708333333333,
+            "max_us": 152.64,
+            "median_us": 146.43000000000006
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 28.76000000000002,
+            "mean_us": 33.714,
+            "max_us": 39.01999999999998,
+            "median_us": 32.769999999999996
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 14.019999999999982,
+            "mean_us": 18.881250000000005,
+            "max_us": 21.95999999999998,
+            "median_us": 18.75999999999999
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 193.68,
+            "mean_us": 197.40583333333333,
+            "max_us": 201.03999999999996,
+            "median_us": 197.72
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 194.0,
+            "mean_us": 200.59666666666666,
+            "max_us": 205.42000000000002,
+            "median_us": 200.95
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.459999999999923,
+            "mean_us": 26.8834375,
+            "max_us": 30.90000000000009,
+            "median_us": 26.420000000000016
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 8.239999999999895,
+            "mean_us": 11.130312500000004,
+            "max_us": 14.180000000000064,
+            "median_us": 11.269999999999982
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b16_v1/l1_04_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 151.84000000000003,
+            "mean_us": 156.4375,
+            "max_us": 158.62,
+            "median_us": 156.57
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 155.46000000000004,
+            "mean_us": 160.58666666666667,
+            "max_us": 162.79999999999995,
+            "median_us": 160.97000000000003
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 31.72,
+            "mean_us": 34.905,
+            "max_us": 37.52000000000001,
+            "median_us": 36.18999999999998
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 17.359999999999985,
+            "mean_us": 19.567499999999995,
+            "max_us": 21.78000000000003,
+            "median_us": 19.47999999999999
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 211.93999999999994,
+            "mean_us": 217.37916666666666,
+            "max_us": 220.95999999999998,
+            "median_us": 218.10999999999999
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 216.11999999999995,
+            "mean_us": 220.68208333333334,
+            "max_us": 225.78000000000003,
+            "median_us": 219.98000000000002
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.659999999999968,
+            "mean_us": 27.54437500000001,
+            "max_us": 32.639999999999986,
+            "median_us": 26.08000000000004
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 9.539999999999964,
+            "mean_us": 12.12375000000001,
+            "max_us": 14.539999999999964,
+            "median_us": 12.240000000000009
+          }
+        }
+      }
+    ]
   },
   {
     "result": "runs/fused_topk_v4/h131072_b28_v1/result.json",
-    "stage": "compile_call_multitask_candidate_A",
-    "passed": false,
+    "stage": "complete",
+    "passed": true,
     "candidate": "fused_topk_v4",
     "current": "core_v2",
     "indexer_page_pattern": "original",
     "batch": 28,
     "history": 131072,
-    "error": []
+    "full_csa_l1_us": {
+      "multitask_original": {
+        "samples_us": [
+          1280.38,
+          1320.92,
+          1286.78,
+          1275.42,
+          1321.14
+        ],
+        "min_us": 1275.42,
+        "mean_us": 1296.928,
+        "max_us": 1321.14,
+        "median_us": 1286.78
+      },
+      "multitask_current": {
+        "samples_us": [
+          1180.54,
+          1207.34,
+          1200.98,
+          1192.68,
+          1197.04
+        ],
+        "min_us": 1180.54,
+        "mean_us": 1195.716,
+        "max_us": 1207.34,
+        "median_us": 1197.04
+      },
+      "multitask_candidate": {
+        "samples_us": [
+          1209.56,
+          1145.56,
+          1204.66,
+          1203.56,
+          1219.62
+        ],
+        "min_us": 1145.56,
+        "mean_us": 1196.5919999999999,
+        "max_us": 1219.62,
+        "median_us": 1204.66
+      },
+      "single_spmd": {
+        "samples_us": [
+          1159.86,
+          1161.04,
+          1161.64,
+          1156.64,
+          1181.1
+        ],
+        "min_us": 1156.64,
+        "mean_us": 1164.056,
+        "max_us": 1181.1,
+        "median_us": 1161.04
+      }
+    },
+    "candidate_reduction_vs_original_pct": 7.736435638678495,
+    "candidate_reduction_vs_spmd_pct": -2.7950545334588566,
+    "candidate_reduction_vs_current_pct": -0.07326154371104647,
+    "incore_scope": "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益",
+    "candidate_scope_change": "候选Score AIV还包含根发布/等待和最终Top-K；不能与原分离版Score AIV直接作等工作量核内比较",
+    "task_incore_us": {
+      "multitask_candidate": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 207.98000000000002,
+          "mean_us": 219.384,
+          "max_us": 228.9999999999999,
+          "median_us": 219.5100000000001
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 211.5200000000001,
+          "mean_us": 222.80925,
+          "max_us": 232.66000000000008,
+          "median_us": 222.98000000000002
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 53.02000000000004,
+          "mean_us": 63.7028,
+          "max_us": 82.69999999999999,
+          "median_us": 64.23000000000002
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 28.560000000000002,
+          "mean_us": 32.565916666666666,
+          "max_us": 38.27999999999997,
+          "median_us": 32.52000000000004
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 268.40000000000003,
+          "mean_us": 315.099,
+          "max_us": 339.94000000000005,
+          "median_us": 332.65
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 349.06,
+          "mean_us": 356.6046666666667,
+          "max_us": 362.20000000000005,
+          "median_us": 356.54
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 16.940000000000055,
+          "mean_us": 26.957875,
+          "max_us": 39.8599999999999,
+          "median_us": 27.62000000000006
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 15.38000000000011,
+          "mean_us": 16.7073125,
+          "max_us": 20.039999999999964,
+          "median_us": 16.519999999999982
+        }
+      },
+      "multitask_current": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 210.64,
+          "mean_us": 222.4785,
+          "max_us": 236.84000000000003,
+          "median_us": 222.15999999999997
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 214.07999999999993,
+          "mean_us": 225.88241666666667,
+          "max_us": 240.12,
+          "median_us": 225.57999999999998
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 49.51999999999998,
+          "mean_us": 61.8058,
+          "max_us": 77.36000000000001,
+          "median_us": 62.599999999999994
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 29.04000000000002,
+          "mean_us": 32.75391666666667,
+          "max_us": 38.079999999999984,
+          "median_us": 33.00000000000003
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 269.62,
+          "mean_us": 316.9241666666667,
+          "max_us": 341.18,
+          "median_us": 334.41999999999996
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 273.12,
+          "mean_us": 325.00483333333335,
+          "max_us": 350.64000000000004,
+          "median_us": 344.58
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 16.87999999999988,
+          "mean_us": 26.619375000000005,
+          "max_us": 37.319999999999936,
+          "median_us": 26.83000000000004
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 15.299999999999955,
+          "mean_us": 16.779562499999994,
+          "max_us": 19.079999999999927,
+          "median_us": 16.709999999999923
+        }
+      },
+      "multitask_original": {
+        "qk_pv_aic": {
+          "samples": 120,
+          "min_us": 252.48000000000002,
+          "mean_us": 263.23016666666666,
+          "max_us": 275.46000000000004,
+          "median_us": 261.14
+        },
+        "qk_pv_aiv": {
+          "samples": 240,
+          "min_us": 255.54000000000008,
+          "mean_us": 266.5566666666667,
+          "max_us": 278.76,
+          "median_us": 264.46000000000004
+        },
+        "qproj_matmul": {
+          "samples": 100,
+          "min_us": 49.839999999999975,
+          "mean_us": 63.7036,
+          "max_us": 85.44000000000003,
+          "median_us": 65.48000000000002
+        },
+        "qproj_dequant_rms_nope_rope": {
+          "samples": 240,
+          "min_us": 28.960000000000036,
+          "mean_us": 34.135083333333334,
+          "max_us": 40.5,
+          "median_us": 34.849999999999994
+        },
+        "score_aic": {
+          "samples": 120,
+          "min_us": 309.72,
+          "mean_us": 364.56983333333335,
+          "max_us": 390.94,
+          "median_us": 385.99
+        },
+        "score_aiv": {
+          "samples": 240,
+          "min_us": 313.96000000000004,
+          "mean_us": 372.488,
+          "max_us": 400.34000000000003,
+          "median_us": 395.59000000000003
+        },
+        "proj_a_mm": {
+          "samples": 320,
+          "min_us": 17.079999999999927,
+          "mean_us": 26.809687500000003,
+          "max_us": 36.92000000000007,
+          "median_us": 27.529999999999973
+        },
+        "proj_b_mm": {
+          "samples": 320,
+          "min_us": 17.460000000000036,
+          "mean_us": 18.893749999999997,
+          "max_us": 21.460000000000036,
+          "median_us": 18.74000000000001
+        }
+      }
+    },
+    "task_windows": [
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_00_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 209.17999999999995,
+            "mean_us": 218.61,
+            "max_us": 228.42000000000007,
+            "median_us": 218.63000000000005
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 212.4799999999999,
+            "mean_us": 222.00916666666666,
+            "max_us": 231.96000000000004,
+            "median_us": 221.96000000000004
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 54.69999999999999,
+            "mean_us": 62.122,
+            "max_us": 67.94,
+            "median_us": 64.21000000000001
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 28.78000000000003,
+            "mean_us": 31.975833333333334,
+            "max_us": 34.58000000000004,
+            "median_us": 32.01999999999998
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 271.5,
+            "mean_us": 316.17833333333334,
+            "max_us": 339.94000000000005,
+            "median_us": 334.33
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 354.58,
+            "mean_us": 357.83375,
+            "max_us": 362.20000000000005,
+            "median_us": 357.72
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.320000000000164,
+            "mean_us": 26.59781250000001,
+            "max_us": 35.919999999999845,
+            "median_us": 27.410000000000082
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.519999999999982,
+            "mean_us": 16.4240625,
+            "max_us": 17.6400000000001,
+            "median_us": 16.409999999999854
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_00_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 210.64,
+            "mean_us": 220.91583333333335,
+            "max_us": 228.94000000000005,
+            "median_us": 221.37
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 214.07999999999993,
+            "mean_us": 224.275,
+            "max_us": 232.15999999999997,
+            "median_us": 224.90999999999997
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 54.900000000000006,
+            "mean_us": 59.09799999999999,
+            "max_us": 66.29999999999998,
+            "median_us": 56.62999999999997
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 29.539999999999964,
+            "mean_us": 31.97083333333333,
+            "max_us": 34.5,
+            "median_us": 31.829999999999984
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 269.62,
+            "mean_us": 316.3641666666667,
+            "max_us": 339.28000000000003,
+            "median_us": 333.80999999999995
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 275.94,
+            "mean_us": 324.40291666666667,
+            "max_us": 349.22,
+            "median_us": 343.46000000000004
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.0,
+            "mean_us": 26.45687500000001,
+            "max_us": 35.7800000000002,
+            "median_us": 26.680000000000064
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.299999999999955,
+            "mean_us": 17.007187499999983,
+            "max_us": 19.079999999999927,
+            "median_us": 17.08000000000004
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_00_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 252.4999999999999,
+            "mean_us": 256.0675,
+            "max_us": 260.43999999999994,
+            "median_us": 254.72000000000003
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 255.54000000000008,
+            "mean_us": 259.435,
+            "max_us": 264.10000000000014,
+            "median_us": 258.07000000000005
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 56.01999999999998,
+            "mean_us": 63.803,
+            "max_us": 68.78,
+            "median_us": 66.57000000000001
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 29.160000000000025,
+            "mean_us": 32.13333333333333,
+            "max_us": 37.19999999999999,
+            "median_us": 30.620000000000005
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 312.26,
+            "mean_us": 364.74916666666667,
+            "max_us": 387.74,
+            "median_us": 386.25
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 314.79999999999995,
+            "mean_us": 372.49625000000003,
+            "max_us": 397.14000000000004,
+            "median_us": 395.64
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.279999999999973,
+            "mean_us": 26.732812499999984,
+            "max_us": 36.580000000000155,
+            "median_us": 27.50999999999999
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 17.600000000000136,
+            "mean_us": 19.16062500000001,
+            "max_us": 21.460000000000036,
+            "median_us": 19.07000000000005
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_01_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 265.86,
+            "mean_us": 269.5191666666667,
+            "max_us": 274.02,
+            "median_us": 268.77
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 269.15999999999985,
+            "mean_us": 272.96333333333337,
+            "max_us": 277.32000000000005,
+            "median_us": 272.14000000000004
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 55.34000000000003,
+            "mean_us": 62.66700000000001,
+            "max_us": 68.38,
+            "median_us": 64.65
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 28.960000000000036,
+            "mean_us": 31.981666666666666,
+            "max_us": 34.77999999999997,
+            "median_us": 32.34000000000003
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 313.7,
+            "mean_us": 364.6591666666667,
+            "max_us": 390.94,
+            "median_us": 386.40000000000003
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 313.96000000000004,
+            "mean_us": 372.47083333333336,
+            "max_us": 400.34000000000003,
+            "median_us": 395.86
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.080000000000155,
+            "mean_us": 26.747187500000017,
+            "max_us": 36.5,
+            "median_us": 27.789999999999964
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 17.680000000000064,
+            "mean_us": 18.605312499999993,
+            "max_us": 20.59999999999991,
+            "median_us": 18.539999999999964
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_01_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 214.54000000000008,
+            "mean_us": 223.23666666666665,
+            "max_us": 230.62,
+            "median_us": 222.81999999999994
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 218.03999999999996,
+            "mean_us": 226.69041666666666,
+            "max_us": 234.24,
+            "median_us": 226.14000000000004
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 51.73999999999998,
+            "mean_us": 58.213,
+            "max_us": 65.66,
+            "median_us": 55.43000000000001
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 29.04000000000002,
+            "mean_us": 31.735000000000003,
+            "max_us": 36.02000000000004,
+            "median_us": 32.089999999999975
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 271.03999999999996,
+            "mean_us": 316.93083333333334,
+            "max_us": 340.18,
+            "median_us": 334.52
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 273.52000000000004,
+            "mean_us": 324.60041666666666,
+            "max_us": 349.28000000000003,
+            "median_us": 344.04999999999995
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 22.25999999999999,
+            "mean_us": 26.728437499999984,
+            "max_us": 31.059999999999945,
+            "median_us": 26.690000000000055
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.439999999999827,
+            "mean_us": 16.639687499999997,
+            "max_us": 18.76000000000022,
+            "median_us": 16.480000000000018
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_01_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 207.98000000000002,
+            "mean_us": 215.15916666666666,
+            "max_us": 222.18000000000006,
+            "median_us": 215.24
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 211.5200000000001,
+            "mean_us": 218.58541666666667,
+            "max_us": 225.70000000000005,
+            "median_us": 218.65000000000003
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 56.24000000000001,
+            "mean_us": 63.845,
+            "max_us": 70.91999999999999,
+            "median_us": 61.18000000000002
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 30.480000000000018,
+            "mean_us": 33.14583333333333,
+            "max_us": 35.180000000000064,
+            "median_us": 33.25
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 269.08,
+            "mean_us": 313.89166666666665,
+            "max_us": 335.58000000000004,
+            "median_us": 331.56000000000006
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 353.64,
+            "mean_us": 356.9845833333333,
+            "max_us": 362.09999999999997,
+            "median_us": 356.6
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.0,
+            "mean_us": 27.85500000000001,
+            "max_us": 38.680000000000064,
+            "median_us": 28.33000000000004
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.799999999999955,
+            "mean_us": 17.47249999999999,
+            "max_us": 20.039999999999964,
+            "median_us": 17.00999999999999
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_02_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 255.95999999999992,
+            "mean_us": 260.73,
+            "max_us": 266.6,
+            "median_us": 260.27000000000004
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 259.51999999999987,
+            "mean_us": 264.205,
+            "max_us": 269.72000000000014,
+            "median_us": 263.8
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 56.08000000000001,
+            "mean_us": 62.188,
+            "max_us": 69.19999999999999,
+            "median_us": 61.879999999999995
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 33.120000000000005,
+            "mean_us": 36.36625000000001,
+            "max_us": 40.5,
+            "median_us": 36.47
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 309.72,
+            "mean_us": 363.6441666666667,
+            "max_us": 388.80000000000007,
+            "median_us": 385.12
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 314.78000000000003,
+            "mean_us": 371.14125,
+            "max_us": 398.84000000000003,
+            "median_us": 394.35
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 23.200000000000045,
+            "mean_us": 27.214062500000004,
+            "max_us": 31.200000000000045,
+            "median_us": 27.209999999999923
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 17.539999999999964,
+            "mean_us": 18.941249999999982,
+            "max_us": 21.139999999999873,
+            "median_us": 18.63000000000011
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_02_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 213.3599999999999,
+            "mean_us": 220.0283333333333,
+            "max_us": 227.65999999999985,
+            "median_us": 219.2899999999999
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 216.72000000000003,
+            "mean_us": 223.41583333333335,
+            "max_us": 231.17999999999995,
+            "median_us": 222.69
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 59.640000000000015,
+            "mean_us": 70.843,
+            "max_us": 82.69999999999999,
+            "median_us": 71.81
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 32.02000000000004,
+            "mean_us": 35.19666666666667,
+            "max_us": 38.27999999999997,
+            "median_us": 35.27000000000001
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 268.40000000000003,
+            "mean_us": 314.3941666666667,
+            "max_us": 336.66,
+            "median_us": 331.84000000000003
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 349.06,
+            "mean_us": 355.2441666666667,
+            "max_us": 360.32000000000005,
+            "median_us": 355.23
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.100000000000136,
+            "mean_us": 27.068437499999995,
+            "max_us": 39.8599999999999,
+            "median_us": 27.480000000000018
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.38000000000011,
+            "mean_us": 16.780937500000018,
+            "max_us": 19.75999999999999,
+            "median_us": 16.629999999999995
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_02_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 215.25999999999988,
+            "mean_us": 222.24583333333334,
+            "max_us": 229.7600000000001,
+            "median_us": 221.49000000000007
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 218.67999999999995,
+            "mean_us": 225.725,
+            "max_us": 232.87999999999988,
+            "median_us": 225.13000000000005
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 49.51999999999998,
+            "mean_us": 61.613,
+            "max_us": 69.75999999999999,
+            "median_us": 60.65000000000002
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 31.80000000000001,
+            "mean_us": 33.20416666666667,
+            "max_us": 34.76000000000005,
+            "median_us": 33.19
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 270.96000000000004,
+            "mean_us": 315.41833333333335,
+            "max_us": 337.7800000000001,
+            "median_us": 334.07
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 273.12,
+            "mean_us": 323.54375,
+            "max_us": 348.7,
+            "median_us": 343.66
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.480000000000018,
+            "mean_us": 26.942812500000002,
+            "max_us": 37.319999999999936,
+            "median_us": 27.24000000000001
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.339999999999918,
+            "mean_us": 16.624687499999986,
+            "max_us": 18.180000000000064,
+            "median_us": 16.59999999999991
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_03_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 213.3800000000001,
+            "mean_us": 222.42666666666668,
+            "max_us": 228.41999999999996,
+            "median_us": 222.43000000000006
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 217.01999999999998,
+            "mean_us": 225.86916666666667,
+            "max_us": 231.87999999999988,
+            "median_us": 225.81
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 53.02000000000004,
+            "mean_us": 60.162,
+            "max_us": 67.43999999999997,
+            "median_us": 58.31999999999998
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 29.120000000000005,
+            "mean_us": 31.30458333333334,
+            "max_us": 34.379999999999995,
+            "median_us": 31.660000000000025
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 272.78,
+            "mean_us": 315.24333333333334,
+            "max_us": 337.79999999999995,
+            "median_us": 332.78999999999996
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 352.88000000000005,
+            "mean_us": 356.4116666666667,
+            "max_us": 360.31999999999994,
+            "median_us": 355.95000000000005
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 16.940000000000055,
+            "mean_us": 26.722187500000004,
+            "max_us": 34.72000000000003,
+            "median_us": 27.309999999999945
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.419999999999845,
+            "mean_us": 16.421874999999993,
+            "max_us": 18.419999999999845,
+            "median_us": 16.339999999999918
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_03_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 252.48000000000002,
+            "mean_us": 257.77333333333337,
+            "max_us": 261.36,
+            "median_us": 257.65999999999997
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 255.86,
+            "mean_us": 261.2,
+            "max_us": 264.84000000000003,
+            "median_us": 261.2100000000001
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 49.839999999999975,
+            "mean_us": 58.373000000000005,
+            "max_us": 68.6,
+            "median_us": 57.08999999999999
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 34.60000000000002,
+            "mean_us": 36.72416666666667,
+            "max_us": 40.24000000000001,
+            "median_us": 36.56999999999999
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 310.40000000000003,
+            "mean_us": 363.65333333333336,
+            "max_us": 388.26000000000005,
+            "median_us": 385.44
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 315.34000000000003,
+            "mean_us": 372.3925,
+            "max_us": 398.42,
+            "median_us": 395.36
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.079999999999927,
+            "mean_us": 26.782499999999995,
+            "max_us": 35.460000000000036,
+            "median_us": 27.930000000000064
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 17.920000000000073,
+            "mean_us": 19.143125,
+            "max_us": 21.09999999999991,
+            "median_us": 19.08000000000004
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_03_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 215.39999999999998,
+            "mean_us": 220.21583333333334,
+            "max_us": 225.8599999999999,
+            "median_us": 219.7100000000001
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 218.7800000000001,
+            "mean_us": 223.63333333333333,
+            "max_us": 229.10000000000002,
+            "median_us": 223.03000000000003
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 51.35999999999996,
+            "mean_us": 61.224999999999994,
+            "max_us": 68.13999999999999,
+            "median_us": 59.79999999999998
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 31.099999999999966,
+            "mean_us": 33.191250000000004,
+            "max_us": 34.56,
+            "median_us": 33.329999999999984
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 271.4200000000001,
+            "mean_us": 317.30583333333334,
+            "max_us": 339.85999999999996,
+            "median_us": 334.96
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 273.58000000000004,
+            "mean_us": 325.6075,
+            "max_us": 349.44000000000005,
+            "median_us": 345.15000000000003
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.160000000000082,
+            "mean_us": 26.314062500000027,
+            "max_us": 33.56000000000017,
+            "median_us": 26.770000000000095
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.779999999999973,
+            "mean_us": 16.779687499999998,
+            "max_us": 18.800000000000182,
+            "median_us": 16.680000000000064
+          }
+        }
+      },
+      {
+        "side": "multitask_candidate",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_04_multitask_candidate/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 212.54000000000008,
+            "mean_us": 220.69583333333333,
+            "max_us": 228.9999999999999,
+            "median_us": 220.63
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 215.42000000000007,
+            "mean_us": 224.16666666666666,
+            "max_us": 232.66000000000008,
+            "median_us": 224.22000000000003
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 56.52000000000001,
+            "mean_us": 61.542,
+            "max_us": 70.08000000000001,
+            "median_us": 60.0
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 28.560000000000002,
+            "mean_us": 31.206666666666667,
+            "max_us": 33.80000000000001,
+            "median_us": 31.370000000000005
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 271.81999999999994,
+            "mean_us": 315.7875,
+            "max_us": 337.85999999999996,
+            "median_us": 333.24
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 351.96000000000004,
+            "mean_us": 356.5491666666667,
+            "max_us": 360.98,
+            "median_us": 356.56000000000006
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.12000000000012,
+            "mean_us": 26.54593749999999,
+            "max_us": 35.93999999999983,
+            "median_us": 27.260000000000105
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.580000000000155,
+            "mean_us": 16.437187500000004,
+            "max_us": 18.340000000000146,
+            "median_us": 16.340000000000146
+          }
+        }
+      },
+      {
+        "side": "multitask_current",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_04_multitask_current/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 216.7399999999999,
+            "mean_us": 225.77833333333336,
+            "max_us": 236.84000000000003,
+            "median_us": 226.42000000000002
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 219.93999999999994,
+            "mean_us": 229.0883333333333,
+            "max_us": 240.12,
+            "median_us": 229.7299999999999
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 60.56,
+            "mean_us": 68.88000000000001,
+            "max_us": 77.36000000000001,
+            "median_us": 67.41999999999999
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 31.819999999999993,
+            "mean_us": 33.66833333333334,
+            "max_us": 38.079999999999984,
+            "median_us": 33.45000000000002
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 271.78000000000003,
+            "mean_us": 318.6016666666667,
+            "max_us": 341.18,
+            "median_us": 336.89
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 273.88,
+            "mean_us": 326.8695833333333,
+            "max_us": 350.64000000000004,
+            "median_us": 347.56000000000006
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 16.87999999999988,
+            "mean_us": 26.6546875,
+            "max_us": 35.88000000000011,
+            "median_us": 26.950000000000045
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 15.360000000000127,
+            "mean_us": 16.846562499999997,
+            "max_us": 18.519999999999982,
+            "median_us": 16.75
+          }
+        }
+      },
+      {
+        "side": "multitask_original",
+        "trace": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_multitask_backport_20261020/runs/fused_topk_v4/h131072_b28_v1/l1_04_multitask_original/swimlane.json",
+        "tasks": {
+          "qk_pv_aic": {
+            "samples": 24,
+            "min_us": 263.78,
+            "mean_us": 272.06083333333333,
+            "max_us": 275.46000000000004,
+            "median_us": 272.96999999999997
+          },
+          "qk_pv_aiv": {
+            "samples": 48,
+            "min_us": 266.88,
+            "mean_us": 274.98,
+            "max_us": 278.76,
+            "median_us": 275.6
+          },
+          "qproj_matmul": {
+            "samples": 20,
+            "min_us": 61.18000000000001,
+            "mean_us": 71.48700000000001,
+            "max_us": 85.44000000000003,
+            "median_us": 69.09999999999998
+          },
+          "qproj_dequant_rms_nope_rope": {
+            "samples": 48,
+            "min_us": 28.980000000000018,
+            "mean_us": 33.47,
+            "max_us": 36.940000000000055,
+            "median_us": 34.5
+          },
+          "score_aic": {
+            "samples": 24,
+            "min_us": 313.96,
+            "mean_us": 366.1433333333333,
+            "max_us": 390.14000000000004,
+            "median_us": 386.94000000000005
+          },
+          "score_aiv": {
+            "samples": 48,
+            "min_us": 314.52000000000004,
+            "mean_us": 373.93916666666667,
+            "max_us": 399.64,
+            "median_us": 396.23
+          },
+          "proj_a_mm": {
+            "samples": 64,
+            "min_us": 17.200000000000045,
+            "mean_us": 26.57187500000001,
+            "max_us": 36.92000000000007,
+            "median_us": 27.25999999999999
+          },
+          "proj_b_mm": {
+            "samples": 64,
+            "min_us": 17.460000000000036,
+            "mean_us": 18.61843749999999,
+            "max_us": 20.320000000000164,
+            "median_us": 18.589999999999918
+          }
+        }
+      }
+    ]
   },
   {
     "result": "runs/fused_topk_v4/h131072_b5_functional_v1/result.json",

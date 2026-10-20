@@ -74,6 +74,10 @@ def summarize(path):
         "每物理核task执行时长，含核内等待/握手；不包含receive_to_start，"
         "不等于纯Cube/Vector运算，也不能把各核时间相加当作关键路径收益"
     )
+    if report["candidate"].startswith("fused_topk") and report["history"] > 32768 and report["batch"] >= 4:
+        summary["candidate_scope_change"] = (
+            "候选Score AIV还包含根发布/等待和最终Top-K；不能与原分离版Score AIV直接作等工作量核内比较"
+        )
     timings, per_window = {}, []
     for window in l1["windows"]:
         if window["side"] == "single_spmd":
