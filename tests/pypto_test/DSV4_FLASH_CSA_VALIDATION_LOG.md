@@ -17910,3 +17910,42 @@ Attention首启却从541.668→544.944、778.532→801.464μs后移。收益
 没有修改共享PyPTO/PTOAS/Simpler，没有自动push，没有新增16卡或
 整模型token/DSpark验收的声明。后续恢复时优先核对669节的真实分档
 控制流与依赖，再决定是否继续；不沿用独立候选最快样本作为正式基线。
+
+## 671. 2026-10-20：正式多task外层、L1与单SPMD的最新七档对比
+
+按用户要求汇总已有数据并提交，不新增测试，不恢复已暂停的优化。
+采用669节同轮七档中的`multitask_current`，即正式保留的
+`plan_workers_v1`（代码提交`cc07f727`）；不取未采用的
+`cooperative_policy_v1`候选结果，也不跨轮拼接最快窗口。
+
+范围统一为HC_pre＋input RMSNorm＋CSA＋HC_post。使用单卡、真实权重
+`/data/model/DeepSeek-V4-Flash-0731-w8a8`、layer4、TP1、NZ2、S6、
+CANN 9.2及同一冻结PyPTO/PTOAS/Simpler。每档各统计五个窗口，单位μs，
+各耗时列顺序均为min / mean / max：
+
+| 档位 | 多task含AICPU外层 | 多task仅L1 incore | 单SPMD L1 | L1相对单SPMD的均值差距 |
+|---|---|---|---|---|
+| 128K/B4 | 569.42 / 602.40 / 619.60 | 476.78 / 483.55 / 497.10 | 468.54 / 480.90 / 503.42 | +2.65 μs（+0.55%） |
+| 128K/B8 | 689.40 / 758.51 / 830.08 | 603.40 / 621.55 / 664.38 | 625.26 / 632.06 / 644.70 | −10.51 μs（−1.66%） |
+| 128K/B16 | 930.12 / 986.24 / 1083.50 | 821.40 / 832.97 / 843.04 | 792.86 / 801.68 / 808.24 | +31.28 μs（+3.90%） |
+| 128K/B24 | 1142.66 / 1187.00 / 1301.40 | 1043.20 / 1058.38 / 1090.52 | 1031.06 / 1038.21 / 1046.76 | +20.17 μs（+1.94%） |
+| 128K/B28 | 1266.16 / 1345.30 / 1479.36 | 1173.48 / 1191.71 / 1210.76 | 1167.84 / 1172.86 / 1184.96 | +18.85 μs（+1.61%） |
+| 8K/B16 | 725.74 / 757.28 / 790.40 | 642.02 / 653.45 / 673.56 | 629.52 / 638.35 / 646.62 | +15.10 μs（+2.36%） |
+| 8K/B32 | 1051.00 / 1084.92 / 1149.28 | 946.08 / 968.45 / 991.28 | 942.58 / 947.04 / 951.64 | +21.41 μs（+2.26%） |
+
+差距由未舍入的原始均值计算：绝对值为多task L1 mean减单SPMD L1 mean，
+百分比再除以单SPMD L1 mean。正值表示多task更慢，负值表示更快。
+本轮128K/B8的L1均值快1.66%，其余六档慢0.55%～3.90%，不能宣称
+正式多task已全面超过单SPMD。
+
+外层为单次graph.replay两侧的NPU event，包含AICPU/runtime等执行；
+L1为首个incore开始至最后一个incore结束的AICore首尾跨度，包含内部
+任务间隙，不是把各核耗时求和。外层与L1在同轮分别采样，因此二者
+差值不能解释为纯AICPU执行时间；这里也不是整模型forward指标。
+
+汇总及五窗证据见
+[MATRIX_cooperative_policy_v1_matrix_v1.json](csa_multitask_backport_20261020/MATRIX_cooperative_policy_v1_matrix_v1.json)。
+原始记录位于`csa_multitask_backport_20261020/runs/cooperative_policy_v1/`下
+七个`h{history}_b{batch}_matrix_v1/result.json`；取值字段分别为
+`l1.outer.statistics_us.multitask_current`、
+`l1.statistics_us.multitask_current`与`l1.statistics_us.single_spmd`。
