@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - | FileCheck %s
+//
+// 回归：IR 的阈值是 FP32 Scalar，旧 EmitC 调用却匹配 Tile 阈值 ABI。
+// GE 必须保留边界同分；它与 GT 分别生成真实模式参数，offset 是运行时实参。
+// 本测试只检查 lowering；CCEC 与设备语义由完整压缩 probe 单独验证。
+
+module {
+  func.func @compare_scalar_fp32(%threshold: f32) {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=1280, v_row=1, v_col=1280, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %count = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tgather ins(%src, %threshold, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32, !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=1280, v_row=1, v_col=1280, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst, %count : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {cmpMode = #pto<cmp ge>, offset = 7 : i32}
+    pto.tgather ins(%src, %threshold, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32, !pto.tile_buf<loc=vec, dtype=ui8, rows=1, cols=1280, v_row=1, v_col=1280, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst, %count : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8, v_row=1, v_col=1, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {cmpMode = #pto<cmp gt>, offset = 0 : i32}
+    return
+  }
+}
+
+// CHECK: AICORE void PTOAS__GATHER_COMPARE_SCALAR_RAW(
+// CHECK: typename S::DType threshold
+// CHECK: void compare_scalar_fp32(float [[THRESHOLD:[_A-Za-z0-9]+]])
+// CHECK: PTOAS__GATHER_COMPARE_SCALAR<Tile<{{.*}}CmpMode::GE>(
+// CHECK-SAME: {{[_A-Za-z0-9]+}}, {{[_A-Za-z0-9]+}}, [[THRESHOLD]],
+// CHECK: PTOAS__GATHER_COMPARE_SCALAR<Tile<{{.*}}CmpMode::GT>(
+// CHECK-SAME: {{[_A-Za-z0-9]+}}, {{[_A-Za-z0-9]+}}, [[THRESHOLD]],
