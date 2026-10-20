@@ -1,0 +1,464 @@
+{
+  "passed": true,
+  "dynamic_axes": 58,
+  "root_tensors": 130,
+  "single_mix": true,
+  "actual_allocation_totals": {
+    "cube_schedule": {
+      "pl.Mem.Left": 65536,
+      "pl.Mem.Acc": 131072,
+      "pl.Mem.Right": 65536,
+      "pl.Mem.Mat": 475136
+    },
+    "vector_schedule": {
+      "pl.Mem.Vec": 163872
+    }
+  },
+  "modified_files": [
+    "compressor_projection_stages.py"
+  ],
+  "main_mat": [
+    {
+      "name": "x_l1_0_inline4579__ssa_v0",
+      "line": 985,
+      "memory": [
+        "mem_mat_631",
+        65536,
+        65536
+      ],
+      "operation": "pl.tile.load(normed__ssa_v0, [global_row0_inline4587__ssa_v0, k0_inline4571__ssa_v0], [64, 512], [x_rows_inline4585__ssa_v0, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "kv_l1_0_inline4591__ssa_v0",
+      "line": 988,
+      "memory": [
+        "mem_mat_631",
+        131072,
+        65536
+      ],
+      "operation": "pl.tile.load(main_wkv__ssa_v0, [o0_inline4586__ssa_v0, k0_inline4571__ssa_v0], [64, 512], [64, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_l1_0_inline4583__ssa_v0",
+      "line": 991,
+      "memory": [
+        "mem_mat_631",
+        196608,
+        65536
+      ],
+      "operation": "pl.tile.load(main_wgate__ssa_v0, [o0_inline4586__ssa_v0, k0_inline4571__ssa_v0], [64, 512], [64, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "x_l1_1_inline4592__ssa_v0",
+      "line": 994,
+      "memory": [
+        "mem_mat_631",
+        262144,
+        65536
+      ],
+      "operation": "pl.tile.load(normed__ssa_v0, [global_row0_inline4587__ssa_v0, k1_inline4572__ssa_v0], [64, 512], [x_rows_inline4585__ssa_v0, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "kv_l1_1_inline4597__ssa_v0",
+      "line": 997,
+      "memory": [
+        "mem_mat_631",
+        327680,
+        65536
+      ],
+      "operation": "pl.tile.load(main_wkv__ssa_v0, [o0_inline4586__ssa_v0, k1_inline4572__ssa_v0], [64, 512], [64, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_l1_1_inline4593__ssa_v0",
+      "line": 1000,
+      "memory": [
+        "mem_mat_631",
+        393216,
+        65536
+      ],
+      "operation": "pl.tile.load(main_wgate__ssa_v0, [o0_inline4586__ssa_v0, k1_inline4572__ssa_v0], [64, 512], [64, 512], target_memory=pl.Mem.Mat)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "main_left": [
+    {
+      "name": "left0_0_inline4599__ssa_v0",
+      "line": 1003,
+      "memory": [
+        "mem_left_326",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(x_l1_0_inline4579__ssa_v0, 0, 0, [64, 256], target_memory=pl.Mem.Left)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "left0_1_inline4598__ssa_v0",
+      "line": 1010,
+      "memory": [
+        "mem_left_326",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(x_l1_0_inline4579__ssa_v0, 0, 256, [64, 256], target_memory=pl.Mem.Left)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "left1_0_inline4580__ssa_v0",
+      "line": 1047,
+      "memory": [
+        "mem_left_326",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(x_l1_1_inline4592__ssa_v0, 0, 0, [64, 256], target_memory=pl.Mem.Left)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "left1_1_inline4601__ssa_v0",
+      "line": 1054,
+      "memory": [
+        "mem_left_326",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(x_l1_1_inline4592__ssa_v0, 0, 256, [64, 256], target_memory=pl.Mem.Left)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "main_right": [
+    {
+      "name": "kv_right0_0_inline4575__ssa_v0",
+      "line": 1023,
+      "memory": [
+        "mem_right_339",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(kv_trans0_inline4590__ssa_v0, 0, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_right0_0_inline4595__ssa_v0",
+      "line": 1026,
+      "memory": [
+        "mem_right_339",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(gate_trans0_inline4584__ssa_v0, 0, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "kv_right0_1_inline4596__ssa_v0",
+      "line": 1032,
+      "memory": [
+        "mem_right_339",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(kv_trans0_inline4590__ssa_v0, 256, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_right0_1_inline4600__ssa_v0",
+      "line": 1038,
+      "memory": [
+        "mem_right_339",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(gate_trans0_inline4584__ssa_v0, 256, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "kv_right1_0_inline4568__ssa_v0",
+      "line": 1067,
+      "memory": [
+        "mem_right_339",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(kv_trans1_inline4570__ssa_v0, 0, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_right1_0_inline4589__ssa_v0",
+      "line": 1070,
+      "memory": [
+        "mem_right_339",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(gate_trans1_inline4569__ssa_v0, 0, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "kv_right1_1_inline4567__ssa_v0",
+      "line": 1076,
+      "memory": [
+        "mem_right_339",
+        0,
+        32768
+      ],
+      "operation": "pl.tile.extract(kv_trans1_inline4570__ssa_v0, 256, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "gate_right1_1_inline4594__ssa_v0",
+      "line": 1082,
+      "memory": [
+        "mem_right_339",
+        32768,
+        32768
+      ],
+      "operation": "pl.tile.extract(gate_trans1_inline4569__ssa_v0, 256, 0, [256, 64], target_memory=pl.Mem.Right)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "main_mma": [
+    {
+      "name": "kv_acc_inline4573__ssa_v3",
+      "line": 1029,
+      "memory": [
+        "mem_acc_328",
+        0,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(kv_acc_inline4573__iter_v1, left0_0_inline4599__ssa_v0, kv_right0_0_inline4575__ssa_v0, kb_inline4578__idx_v0 == 0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left0_0_inline4599__ssa_v0",
+      "rhs": "kv_right0_0_inline4575__ssa_v0"
+    },
+    {
+      "name": "score_acc_inline4574__ssa_v3",
+      "line": 1035,
+      "memory": [
+        "mem_acc_328",
+        16384,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(score_acc_inline4574__iter_v1, left0_0_inline4599__ssa_v0, gate_right0_0_inline4595__ssa_v0, kb_inline4578__idx_v0 == 0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left0_0_inline4599__ssa_v0",
+      "rhs": "gate_right0_0_inline4595__ssa_v0"
+    },
+    {
+      "name": "kv_acc_inline4573__ssa_v4",
+      "line": 1041,
+      "memory": [
+        "mem_acc_328",
+        0,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(kv_acc_inline4573__ssa_v3, left0_1_inline4598__ssa_v0, kv_right0_1_inline4596__ssa_v0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left0_1_inline4598__ssa_v0",
+      "rhs": "kv_right0_1_inline4596__ssa_v0"
+    },
+    {
+      "name": "score_acc_inline4574__ssa_v4",
+      "line": 1044,
+      "memory": [
+        "mem_acc_328",
+        16384,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(score_acc_inline4574__ssa_v3, left0_1_inline4598__ssa_v0, gate_right0_1_inline4600__ssa_v0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left0_1_inline4598__ssa_v0",
+      "rhs": "gate_right0_1_inline4600__ssa_v0"
+    },
+    {
+      "name": "kv_acc_inline4573__ssa_v5",
+      "line": 1073,
+      "memory": [
+        "mem_acc_328",
+        0,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(kv_acc_inline4573__ssa_v4, left1_0_inline4580__ssa_v0, kv_right1_0_inline4568__ssa_v0, pl.const(0, pl.BOOL))",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left1_0_inline4580__ssa_v0",
+      "rhs": "kv_right1_0_inline4568__ssa_v0"
+    },
+    {
+      "name": "score_acc_inline4574__ssa_v5",
+      "line": 1079,
+      "memory": [
+        "mem_acc_328",
+        16384,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(score_acc_inline4574__ssa_v4, left1_0_inline4580__ssa_v0, gate_right1_0_inline4589__ssa_v0, pl.const(0, pl.BOOL))",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left1_0_inline4580__ssa_v0",
+      "rhs": "gate_right1_0_inline4589__ssa_v0"
+    },
+    {
+      "name": "kv_acc_inline4573__ssa_v6",
+      "line": 1085,
+      "memory": [
+        "mem_acc_328",
+        0,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(kv_acc_inline4573__ssa_v5, left1_1_inline4601__ssa_v0, kv_right1_1_inline4567__ssa_v0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left1_1_inline4601__ssa_v0",
+      "rhs": "kv_right1_1_inline4567__ssa_v0"
+    },
+    {
+      "name": "score_acc_inline4574__ssa_v6",
+      "line": 1088,
+      "memory": [
+        "mem_acc_328",
+        16384,
+        16384
+      ],
+      "operation": "pl.tile.matmul_acc(score_acc_inline4574__ssa_v5, left1_1_inline4601__ssa_v0, gate_right1_1_inline4594__ssa_v0)",
+      "loops": [
+        "(idx_inline4581__idx_v0, (main_score__iter_v1, main_value__iter_v1))",
+        "(kb_inline4578__idx_v0, (kv_acc_inline4573__iter_v1, score_acc_inline4574__iter_v1))"
+      ],
+      "in_wave": false,
+      "lhs": "left1_1_inline4601__ssa_v0",
+      "rhs": "gate_right1_1_inline4594__ssa_v0"
+    }
+  ],
+  "left_reused_by_two_outputs": {
+    "left0_0_inline4599__ssa_v0": [
+      "kv_acc_inline4573__ssa_v3",
+      "score_acc_inline4574__ssa_v3"
+    ],
+    "left0_1_inline4598__ssa_v0": [
+      "kv_acc_inline4573__ssa_v4",
+      "score_acc_inline4574__ssa_v4"
+    ],
+    "left1_0_inline4580__ssa_v0": [
+      "kv_acc_inline4573__ssa_v5",
+      "score_acc_inline4574__ssa_v5"
+    ],
+    "left1_1_inline4601__ssa_v0": [
+      "kv_acc_inline4573__ssa_v6",
+      "score_acc_inline4574__ssa_v6"
+    ]
+  },
+  "dynamic_compact_acc_preserved": true,
+  "main_per_1024_k": {
+    "reference_left_restores": 8,
+    "candidate_left_restores": 4,
+    "reference_mma": 8,
+    "candidate_mma": 8,
+    "reference_mat_loads": 6,
+    "candidate_mat_loads": 6
+  },
+  "device_proven": false,
+  "performance_eligible": false,
+  "note": "检查资源、操作数及源码顺序，尚不能证明真实流水重叠或完整收益"
+}
