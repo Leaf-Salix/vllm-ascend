@@ -369,22 +369,36 @@ def indexer_topk_segment_pairs(
 
 
 @pl.jit.inline
+def indexer_use_long_s6(query_count: pl.Scalar[pl.INDEX]):
+    use_group = pl.cast(0, pl.INT32)
+    if query_count >= LONG_S6_MIN_QUERY_ROWS:
+        use_group = pl.cast(1, pl.INT32)
+    if query_count == S:
+        use_group = pl.cast(1, pl.INT32)
+    return use_group
+
+
+@pl.jit.inline
 def indexer_long_leaf_plan(
     max_cache_count: pl.Scalar[pl.INDEX],
     query_groups: pl.Scalar[pl.INDEX],
 ):
-    """Balance four/eight/sixteen request groups over the 24 Score workers.
+    """Balance the supported request groups over the 24 Score workers.
 
     S6 reuses each Key panel for all six queries. Round four groups to six
     leaves, eight/sixteen groups to three-leaf multiples, within the existing
-    pair arena. Other request counts preserve the original leaf partition.
+    pair arena. B1 targets 24 leaves, capped by the actual tile count;
+    other request counts preserve the original leaf partition.
     """
     tile_count = (max_cache_count + BUFFERED_LONG_SCORE_TILE - 1) // BUFFERED_LONG_SCORE_TILE
     leaf_count = pl.max((max_cache_count + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF, 1)
     leaf_tiles = TOPK_CANDIDATES_PER_LEAF // BUFFERED_LONG_SCORE_TILE
     extra_leaves = 0
     leaf_multiple = 1
-    if 3 * query_groups == 2 * TOPK_SCORE_WORKERS:  # noqa: SIM114 - explicit scalar branches for PyPTO
+    # 用户允许B1专门策略：整请求复用Key，增加独立叶覆盖24个Cube worker。
+    if query_groups == 1:
+        leaf_multiple = TOPK_SCORE_WORKERS
+    elif 3 * query_groups == 2 * TOPK_SCORE_WORKERS:  # noqa: SIM114 - PyPTO Scalar branches
         leaf_multiple = 3
     elif 3 * query_groups == TOPK_SCORE_WORKERS:
         leaf_multiple = 3
@@ -392,6 +406,9 @@ def indexer_long_leaf_plan(
         leaf_multiple = 6
     if leaf_multiple > 1:
         balanced_count = (leaf_count + leaf_multiple - 1) // leaf_multiple * leaf_multiple
+        if query_groups == 1:
+            # 至少一叶避免空历史除零，也不创建超过实际1024列段数的叶。
+            balanced_count = pl.min(balanced_count, pl.max(tile_count, 1))
         if balanced_count <= TOPK_MAX_LEAVES:
             leaf_count = balanced_count
             leaf_tiles = pl.max(tile_count // balanced_count, 1)
@@ -427,7 +444,8 @@ def indexer_topk_query_merge_one(
             leaf_count = larger_leaf_count + (remaining_tiles + leaf_tiles - 1) // leaf_tiles
         half_count = leaf_count * 2
         if multiway:
-            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+            long_s6_group = indexer_use_long_s6(pl.tensor.dim(position_ids, 0))
+            if long_s6_group == 1:
                 half_count = leaf_count
         arena_base = query * TOPK_ROWS_PER_QUERY
         if multiway:
@@ -471,7 +489,8 @@ def indexer_topk_query_merge(
         for batch in pl.range(query_count // S):
             max_cache_count = pl.max(max_cache_count, pl.read(kv_seq_lens, [batch]) // COMPRESS_RATIO)
         query_groups = query_count // 2
-        if query_count >= LONG_S6_MIN_QUERY_ROWS:
+        merge_s6_group = indexer_use_long_s6(query_count)
+        if merge_s6_group == 1:
             query_groups = query_count // S
         _merge_leaf_count, merge_leaf_tiles, merge_extra_leaves = indexer_long_leaf_plan(
             pl.min(max_cache_count, TOPK_MAX_CANDIDATES), query_groups
@@ -1910,7 +1929,8 @@ def indexer_score_topk_forest(
             # 短档沿用原调度；sync_start不代表各核硬件同时起跑。
             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
             # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
-            if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
+            long_s6_group = indexer_use_long_s6(pl.tensor.dim(position_ids, 0))
+            if long_s6_group == 1:
                 if pl.tensor.dim(position_ids, 0) >= SCORE_SPLIT_MIN_QUERY_ROWS:
                     score_tid = indexer_score_topk_native_cube(
                         qr_hadamard_i8,

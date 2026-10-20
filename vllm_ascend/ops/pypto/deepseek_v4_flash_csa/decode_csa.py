@@ -26,7 +26,7 @@ from .config import (
     TP as TP_SIZE,
 )
 from .decode_compressor_ratio4 import compressor_ratio4
-from .decode_indexer import LONG_S6_MIN_QUERY_ROWS, TOPK_CANDIDATES_PER_LEAF, indexer
+from .decode_indexer import LONG_S6_MIN_QUERY_ROWS, TOPK_CANDIDATES_PER_LEAF, indexer, indexer_use_long_s6
 from .decode_indexer_compressor import indexer_compressor
 from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
 from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
@@ -330,7 +330,8 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         early_scale_deps = pl.array.create(1, pl.TASK_ID)
         early_scale_deps[0] = _widen_tid
         if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
-            if t_dim >= LONG_S6_MIN_QUERY_ROWS:
+            early_s6_group = indexer_use_long_s6(t_dim)
+            if early_s6_group == 1:
                 with pl.at(level=pl.Level.CORE_GROUP, name_hint="indexer_scale_layout",
                            allow_early_resolve=True) as early_scale_tid:
                     early_scale_layout = prove_scale_layout(
