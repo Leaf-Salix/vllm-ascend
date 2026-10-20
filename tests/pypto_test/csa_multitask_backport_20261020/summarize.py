@@ -23,6 +23,11 @@ def task_name(name):
     name = name.lstrip("_")
     if name.startswith("indexer_score_topk_native_pair"):
         return "score_aic" if "_aic" in name else "score_aiv"
+    if name.startswith("qk_pv_"):
+        if "_aic" in name:
+            return "qk_pv_aic"
+        if "_aiv" in name:
+            return "qk_pv_aiv"
     for prefix in ("qk_pv_aic", "qk_pv_aiv", "proj_b_mm", "qproj_matmul", "qproj_dequant_rms_nope_rope", "proj_a_mm"):
         if name.startswith(prefix):
             return prefix
@@ -41,8 +46,15 @@ def summarize(path):
         "batch": report["batch"],
         "history": report["history"],
     }
-    if not summary["passed"] or "l1" not in report:
+    if not summary["passed"]:
         summary["error"] = report.get("error", "").splitlines()[-1:]
+        return summary
+    if "l1" not in report:
+        summary.update(
+            performance_measured=False,
+            functional_graph_checks=len(report.get("functional_graph", {})),
+            boundary_replay=report.get("boundary_replay", {}).get("passed"),
+        )
         return summary
     l1 = report["l1"]
     summary["full_csa_l1_us"] = l1["statistics_us"]

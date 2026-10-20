@@ -34,6 +34,12 @@ def add_calls(source, names, arguments):
     lines = source.splitlines(keepends=True)
     for node in sorted(calls, key=lambda n: n.lineno, reverse=True):
         close = lines[node.end_lineno - 1]
+        if node.lineno == node.end_lineno:
+            position = node.end_col_offset - 1
+            if close[position] != ")":
+                raise AssertionError("单行调用结束位置不是右括号")
+            lines[node.end_lineno - 1] = close[:position] + ", " + ", ".join(arguments) + close[position:]
+            continue
         if close.strip() != ")":
             raise AssertionError("需要独立闭合行以保留调用注释")
         indent = " " * (len(close) - len(close.lstrip()) + 4)

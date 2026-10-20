@@ -41,6 +41,31 @@ def save(output, report):
     print(json.dumps({"stage": report["stage"], "passed": report.get("passed", False)}, ensure_ascii=False), flush=True)
 
 
+def functional_replay(entries, reset, verify, input_a):
+    """边界用例只比较原多task与候选，不重编无关SPMD参考或重复采性能。"""
+    import torch
+
+    checked = {}
+    stream = torch.npu.Stream()
+    stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(stream):
+        for side, entry in entries.items():
+            if side == "multitask_original":
+                continue
+            reset(input_a)
+            stream.synchronize()
+            graph = torch.npu.NPUGraph()
+            with torch.npu.graph(graph, stream=stream):
+                entry()
+            stream.synchronize()
+            for number, (label, hidden) in enumerate((("A", input_a), ("B", -input_a), ("A", input_a))):
+                reset(hidden)
+                graph.replay()
+                stream.synchronize()
+                checked[f"{side}_{number}_{label}"] = verify(side, label)
+    return checked
+
+
 def profile(entries, reset, verify, output, configs, windows, measure_outer=False):
     import pypto.torch
     import torch
@@ -165,11 +190,16 @@ def main():
     parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
+    parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
     parser.add_argument(
         "--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original"
     )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.functional_only and args.measure_outer:
+        raise ValueError("功能用例不采外层或L1性能")
+    if args.boundary_replay and (args.batch < 2 or args.history < 2):
+        raise ValueError("metadata/padding用例要求batch>=2且history>=2")
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选及attempt必须是标识符")
     if args.current and (not args.current.isidentifier() or args.current == args.candidate):
@@ -190,6 +220,7 @@ def main():
         history=args.history,
         candidate=args.candidate,
         current=args.current,
+        performance_measured=False,
         query_tokens=6,
         indexer_page_pattern=args.indexer_page_pattern,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
@@ -259,9 +290,20 @@ def main():
                     allow_signature_mode=True,
                 )
                 report["compiled_artifact"] = str(artifact.output_dir)
+                from pypto.runtime.kernel_compiler import KernelCompiler
+
+                sources = list(Path(artifact.output_dir).glob("orchestration/*.cpp"))
+                if len(sources) != 1:
+                    raise AssertionError("CPU编译需要唯一AICPU编排入口")
+                record_invocations(output / "COMPILER_INVOCATIONS.jsonl")
+                binary = KernelCompiler(platform="a2a3").compile_orchestration(
+                    "tensormap_and_ringbuffer", str(sources[0])
+                )
+                report["orchestration_shared_object_bytes"] = len(binary)
+                report["incore_binary_compiled"] = False
             report.update(stage="dependency_graph_parsed", passed=True, device_execution=False)
             if args.compile_only:
-                report["stage"] = "kernel_compiled_on_cpu"
+                report["stage"] = "kernel_codegen_and_orchestration_compiled_on_cpu"
             return
         if "TASK_DEVICE" not in os.environ:
             raise RuntimeError("必须经task-submit --device auto执行")
@@ -378,8 +420,12 @@ def main():
                 allocations[name] = (storage, guard)
                 return storage[guard:-guard].view(shape)
 
-            spmd = donor.prepared(call.args, max_query_tokens=6, max_seq_len=args.history + 6, allocator=allocate)
-            protocol = WaveSignalVerifier(spmd)
+            spmd = (
+                None
+                if args.functional_only
+                else donor.prepared(call.args, max_query_tokens=6, max_seq_len=args.history + 6, allocator=allocate)
+            )
+            protocol = None if args.functional_only else WaveSignalVerifier(spmd)
             options = CompileOptions(platform="a2a3", memory_planner=passes.MemoryPlanner.PYPTO)
             has_scale_layout = (HERE / "sources" / args.candidate / "indexer_scale_layout.py").exists()
             if has_scale_layout and args.layout_probe:
@@ -404,6 +450,8 @@ def main():
                     "multitask_candidate": entries["multitask_candidate"],
                     "single_spmd": entries["single_spmd"],
                 }
+            if args.functional_only:
+                entries.pop("single_spmd")
             input_a = fixture["hidden"].clone()
             reference, configs = {}, {}
             spmd_calls = 0
@@ -463,29 +511,41 @@ def main():
                             and protocol.check(signals, spmd_calls)["passed"]
                         ):
                             raise AssertionError("单SPMD参考协议检查失败")
-            report["stage"] = "paired_l1"
-            save(output, report)
-            report["l1"] = profile(entries, reset, verify, output, configs, args.windows, args.measure_outer)
-            if has_scale_layout:
-                from layout_probe import verify_edges
+            if args.functional_only:
+                report["stage"] = "functional_graph_replay"
+                save(output, report)
+                report["functional_graph"] = functional_replay(entries, reset, verify, input_a)
+                report["spmd_protocol"] = None
+                report["spmd_reference_scope"] = "未运行SPMD；功能边界只对照迁移前多task"
+            else:
+                report["stage"] = "paired_l1"
+                save(output, report)
+                report["l1"] = profile(entries, reset, verify, output, configs, args.windows, args.measure_outer)
+                report["performance_measured"] = True
+                if has_scale_layout:
+                    from layout_probe import verify_edges
 
-                first = next(w for w in report["l1"]["windows"] if w["side"] == "multitask_candidate")
-                report["layout_dependency"] = verify_edges(json.loads(Path(first["trace"]).read_text()))
-                if (args.history + 6) // 4 > 8192 and tokens >= 24 and not report["layout_dependency"]["applicable"]:
-                    raise AssertionError("长G6实际未执行布局证明task")
-            signals = signal_view(spmd)
-            expected = spmd_calls + report["l1"]["replay_counts"]["single_spmd"]
-            report["spmd_protocol"] = bool(
-                (signals[0, :, 0] == expected).all()
-                and signal_padding_ok(signals)
-                and protocol.check(signals, expected)["passed"]
-            )
-            report["scratch_guards"] = {
-                n: bool((base[:g].cpu() == 37).all() and (base[-g:].cpu() == 37).all())
-                for n, (base, g) in allocations.items()
-            }
-            if not report["spmd_protocol"] or not all(report["scratch_guards"].values()):
-                raise AssertionError("计时后参考协议或scratch保护区失败")
+                    first = next(w for w in report["l1"]["windows"] if w["side"] == "multitask_candidate")
+                    report["layout_dependency"] = verify_edges(json.loads(Path(first["trace"]).read_text()))
+                    if (
+                        (args.history + 6) // 4 > 8192
+                        and tokens >= 24
+                        and not report["layout_dependency"]["applicable"]
+                    ):
+                        raise AssertionError("长G6实际未执行布局证明task")
+                signals = signal_view(spmd)
+                expected = spmd_calls + report["l1"]["replay_counts"]["single_spmd"]
+                report["spmd_protocol"] = bool(
+                    (signals[0, :, 0] == expected).all()
+                    and signal_padding_ok(signals)
+                    and protocol.check(signals, expected)["passed"]
+                )
+                report["scratch_guards"] = {
+                    n: bool((base[:g].cpu() == 37).all() and (base[-g:].cpu() == 37).all())
+                    for n, (base, g) in allocations.items()
+                }
+                if not report["spmd_protocol"] or not all(report["scratch_guards"].values()):
+                    raise AssertionError("计时后参考协议或scratch保护区失败")
             if args.boundary_replay:
                 from boundary_replay import validate as validate_boundary
 
