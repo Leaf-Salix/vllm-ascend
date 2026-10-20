@@ -1,0 +1,103 @@
+{
+  "passed": true,
+  "ir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/score_joint_tail/cpu_b28_v5/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/score_joint_tail/cpu_b28_v5/kernel/ptoas/dynamic_csa_full.cpp",
+  "dynamic_axes": 58,
+  "root_tensors": 130,
+  "single_mix": true,
+  "allocation_totals": {
+    "cube_schedule": {
+      "pl.Mem.Vec": 16384,
+      "pl.Mem.Left": 65536,
+      "pl.Mem.Acc": 131072,
+      "pl.Mem.Right": 65536,
+      "pl.Mem.Mat": 475136
+    },
+    "vector_schedule": {
+      "pl.Mem.Vec": 163872
+    }
+  },
+  "branch_counts": {
+    "short": {
+      "matmuls": 4,
+      "fifo_stores": 1
+    },
+    "full": {
+      "matmuls": 64,
+      "fifo_stores": 2
+    }
+  },
+  "short_condition": "buf_valid_count_inline4810__ssa_v0 - buf_score_begin_inline4828__ssa_v1 <= 64",
+  "vector_short_condition": "single_valid_inline869__ssa_v0 - single_step_inline819__idx_v0 * 1024 <= 64",
+  "tail_fifo_load": [
+    {
+      "name": "tail_single_scores_inline858__ssa_v0",
+      "line": 11870,
+      "memory": [
+        "mem_vec_1759",
+        90112,
+        768
+      ],
+      "operation": "pl.tile.load(indexer_transfer__ssa_v0, [single_transfer_row_inline826__ssa_v0, 0], [3, 64], [3, 64], target_memory=pl.Mem.Vec)",
+      "loops": [
+        "buf_item_inline942__idx_v0",
+        "(single_step_inline819__idx_v0, (single_roots_inline844__iter_v1, single_segments_inline857__iter_v1))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "qk_acc": [
+    {
+      "name": "split_qk_acc0_inline4823__ssa_v0",
+      "line": 2403,
+      "memory": [
+        "mem_acc_366",
+        0,
+        49152
+      ],
+      "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+      "loops": [
+        "buf_item_inline4804__idx_v0"
+      ],
+      "in_wave": false
+    },
+    {
+      "name": "split_qk_acc1_inline4826__ssa_v0",
+      "line": 2412,
+      "memory": [
+        "mem_acc_366",
+        49152,
+        49152
+      ],
+      "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+      "loops": [
+        "buf_item_inline4804__idx_v0"
+      ],
+      "in_wave": false
+    }
+  ],
+  "tail_ws_store": {
+    "name": "tail_ws_store_inline4758__ssa_v0",
+    "line": 2541,
+    "memory": [
+      "mem_acc_366",
+      98304,
+      4096
+    ],
+    "operation": "pl.tile.slice(tail_ws_done_inline4759__ssa_v0, [16, 64], [0, 0], [6, 64])",
+    "loops": [
+      "buf_item_inline4804__idx_v0",
+      "(buf_score_step_inline4827__idx_v0, (split_ws_pool_inline4780__iter_v1,))"
+    ],
+    "in_wave": false
+  },
+  "cpp_qk_mma_and_fix_per_half": 17,
+  "changed_files_vs_pool": [
+    "entry.py",
+    "indexer_score_stages.py",
+    "vector_schedule.py"
+  ],
+  "sorting_source_unchanged": true,
+  "one_ready_ack_per_branch": true,
+  "device_or_performance_proven": false
+}
