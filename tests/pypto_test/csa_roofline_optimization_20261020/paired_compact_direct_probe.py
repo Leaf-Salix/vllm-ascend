@@ -33,7 +33,11 @@ def compact_rows(
 ):
     for row in pl.range(pl.tensor.dim(src, 0)):
         values = pl.load(src, [row, 0], [1, 2048])
-        values = pl.set_validshape(values, 1, pl.cast(pl.read(valid, [row]), pl.INDEX))
+        # 给动态有效长度独立SSA名字，避免嵌套read/cast被复制进类型元数据。
+        # v1的编译器失败和原始写法保留在pair_direct_v1/probe_source.py。
+        n = pl.read(valid, [row])
+        valid_cols = pl.cast(n, pl.INDEX)
+        values = pl.set_validshape(values, 1, valid_cols)
         threshold = pl.read(thresholds, [row])
         offset = pl.read(offsets, [row])
         scratch = pl.tile.create([1, 18432], dtype=pl.UINT8)
@@ -87,17 +91,37 @@ def make_inputs(torch, seed):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument("--cpu-only", action="store_true")
     ap.add_argument("--device", type=int)
     args = ap.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     pypto.configure_cache(pypto.CacheConfig(enabled=False))
     report = {"passed": False, "full_csa_validated": False, "cases": []}
     try:
+        from pypto import passes
+        from pypto.runtime import CompileOptions
+
+        if args.cpu_only:
+            # CPU先验证三种模式，不占卡也不将lowering当作设备执行。
+            for mode in ("ge", "gt", "eq"):
+                config = CompileOptions(
+                    platform="a2a3", output_dir=str(args.output / mode),
+                    dump_passes=True, memory_planner=passes.MemoryPlanner.PYPTO,
+                )
+                artifact = entry._resolve_kernel_artifact(
+                    (), {"MODE": mode, "config": config}, allow_signature_mode=True,
+                )
+                report["cases"].append(dict(mode=mode, artifact=str(artifact.output_dir)))
+            report.update(passed=True, cpu_only=True, device_execution=False)
+            (args.output / "result.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+            )
+            print(json.dumps(report, ensure_ascii=False), flush=True)
+            return
+
         from pypto import torch as pypto_torch
         import torch
         import torch_npu
-        from pypto import passes
-        from pypto.runtime import CompileOptions
 
         dev = int(os.environ["TASK_DEVICE"])
         assert args.device is None or args.device == dev
@@ -141,8 +165,19 @@ def main():
                                         expected_v.view(torch.int32))
                     good &= torch.equal(actual_i[row, 8:8 + len(selected)], expected_i)
                     if not good:
+                        observed_v = actual_v[row, 8:8 + len(selected)].view(torch.int32)
+                        expected_bits = expected_v.view(torch.int32)
+                        observed_i = actual_i[row, 8:8 + len(selected)]
+                        bad_v = (observed_v != expected_bits).nonzero().flatten()[:8].tolist()
+                        bad_i = (observed_i != expected_i).nonzero().flatten()[:8].tolist()
                         failures.append({"row": row, **name, "expected_count": kept,
-                                         "actual_count": int(actual_c[row, 8])})
+                                         "actual_count": int(actual_c[row, 8]),
+                                         "score_bit_differences": [
+                                             [i, int(expected_bits[i]), int(observed_v[i])]
+                                             for i in bad_v],
+                                         "index_differences": [
+                                             [i, int(expected_i[i]), int(observed_i[i])]
+                                             for i in bad_i]})
                 guards = all(bool((x[:, :8] == -777).all() and (x[:, -8:] == -777).all())
                              for x in (actual_v, actual_i))
                 guards &= bool((actual_c[:, :8] == -777).all() and

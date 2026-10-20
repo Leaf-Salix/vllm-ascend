@@ -1,0 +1,412 @@
+diff --git a/docs/en/dev/language/tile-compact-compare.md b/docs/en/dev/language/tile-compact-compare.md
+new file mode 100644
+index 000000000..310bb3da8
+--- /dev/null
++++ b/docs/en/dev/language/tile-compact-compare.md
+@@ -0,0 +1,29 @@
++# Paired compare compaction (local A3 prototype)
++
++`pl.tile.compact_compare(src, threshold, scratch, offset, cmp_mode="ge",
++out_cols=capacity)` returns three SSA values: packed FP32 values, INT32 column
++indices, and exact per-row INT32 counts. It is a Tile-level operation inside an
++InCore function; a Tensor-level convenience API is not provided.
++
++Selection is stable and moves FP32 bit representations without conversion.
++Indices use `offset + source_column` in INT32 arithmetic; offset is a device
++Scalar and must not overflow INT32 when combined with the source column.
++Predicates `eq`, `gt` and `ge` are supported by this prototype.
++
++Source physical columns must be divisible by 64. Output capacity is divisible by
++8 and no larger than source columns. Source valid rows and columns can vary at
++runtime. Each output row defines only `min(count, capacity)` prefix entries;
++tails are undefined. Count is never truncated, and overflow does not write
++beyond the output allocation. Count storage has shape
++`[1, align_up(source_rows, 8)]`, with logical valid shape `[1, source_rows]`.
++
++Scratch is a UINT8 Tile requiring
++`4*C + max(1024, align_up(C,256)/8 + 4*C)` bytes for physical source width `C`.
++It is explicitly marked as a workspace and cannot be used as a hidden output.
++The three results use the existing multi-output allocation and tuple projection
++infrastructure. Generic `create_op_call` bindings need no new nanobind entry.
++
++PTO codegen emits `pto.tcompact.compare`, so the matching local PTOAS extension
++is required. The extension provides a Vector implementation, Scalar count
++effects, capacity checks and synchronization modeling. This documentation does
++not imply upstream availability, A5 support or measured performance benefit.
+diff --git a/docs/zh/dev/language/tile-compact-compare.md b/docs/zh/dev/language/tile-compact-compare.md
+new file mode 100644
+index 000000000..4a67e415c
+--- /dev/null
++++ b/docs/zh/dev/language/tile-compact-compare.md
+@@ -0,0 +1,24 @@
++# 成对比较压缩（本地 A3 原型）
++
++`pl.tile.compact_compare(src, threshold, scratch, offset, cmp_mode="ge",
++out_cols=capacity)` 返回三个 SSA 值：压缩后的 FP32 数值、INT32 列索引、
++各行的真实 INT32 匹配数。它用于 InCore 内的 Tile，尚无 Tensor 层便捷接口。
++
++选中项保持原顺序，FP32 仅搬运位表示，不做数值转换。索引通过 INT32 运算
++构造 `offset + 原列号`；offset 是设备 Scalar，调用方需保证相加不溢出。
++本地原型支持 `eq`、`gt`、`ge`。
++
++源物理列数是64的倍数；输出容量是8的倍数且不超过源列数。
++源有效行列数可在运行时变化。每个输出行只有 `min(count, capacity)` 个
++前缀项有效，尾部未定义。count 不截断，超容量不能越界写。
++count 的物理形状为 `[1, align_up(source_rows, 8)]`，有效形状为
++`[1, source_rows]`。
++
++scratch 是显式 UINT8 工作区；源物理列数 C 对应的最小容量为
++`4*C + max(1024, align_up(C,256)/8 + 4*C)` 字节。
++scratch 不能承载隐含返回值。三个结果复用现有多输出分配和 tuple 投影；
++通用 `create_op_call` 绑定无需新增 nanobind 入口。
++
++代码生成使用 `pto.tcompact.compare`，因此需要配套本地 PTOAS 扩展。
++扩展提供 Vector 实现、Scalar 计数效果、容量检查及同步模型。
++该说明不表示主线已有此能力、已支持 A5 或已证明性能收益。
+diff --git a/python/pypto/ir/op/tile_ops.py b/python/pypto/ir/op/tile_ops.py
+index c81dbfdee..87b665583 100644
+--- a/python/pypto/ir/op/tile_ops.py
++++ b/python/pypto/ir/op/tile_ops.py
+@@ -728,7 +728,7 @@ def get_block_num(span: Span | None = None) -> Call:
+ def full(
+     shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+     dtype: DataType,
+-    value: int | float,
++    value: int | float | Expr,
+     span: Span | None = None,
+ ) -> Call:
+     """Create a tile from a shape and fill with value in UB.
+@@ -736,7 +736,7 @@ def full(
+     Args:
+         shape: Shape of the tile, or a MakeTuple
+         dtype: Data type of the tile
+-        value: filling scalar
++        value: Numeric fill value or parsed scalar constant (runtime values are not supported)
+         span: Optional source span for debugging (auto-captured if not provided)
+ 
+     Returns:
+@@ -744,10 +744,8 @@ def full(
+     """
+     actual_span = _get_span_or_capture(span)
+     shape_tuple = _to_make_tuple(shape, actual_span)
+-    if isinstance(value, int):
+-        value_expr = ConstInt(value, dtype, actual_span)
+-    else:
+-        value_expr = ConstFloat(value, dtype, actual_span)
++    # 回移主线#2846的统一归一化，避免ConstInt(0, FP32)生成非法浮点常量。
++    value_expr = _normalize_const_to_dtype(value, dtype, actual_span)
+     kwargs: dict[str, Any] = {"dtype": dtype}
+     return _ir_core.create_op_call("tile.full", [shape_tuple, value_expr], kwargs, actual_span)
+ 
+@@ -3520,6 +3518,29 @@ def gather_compare(
+     return _ir_core.create_op_call("tile.gather_compare", [src, kvalue, tmp], kwargs, actual_span)
+ 
+ 
++def compact_compare(
++    src: Expr,
++    kvalue: Expr,
++    tmp: Expr,
++    offset: Expr,
++    *,
++    cmp_mode: str | int = "ge",
++    out_cols: int,
++    span: Span | None = None,
++) -> Call:
++    """Build bounded FP32 value/INT32 index compaction and exact per-row counts.
++
++    Only min(count, out_cols) entries per row are defined. Selection is stable.
++    The INT32 offset is a runtime operand, not a shape-specialization attribute.
++    """
++    return _ir_core.create_op_call(
++        "tile.compact_compare",
++        [src, kvalue, tmp, offset],
++        {"cmp_mode": resolve_gather_compare_cmp_mode(cmp_mode), "out_cols": out_cols},
++        _get_span_or_capture(span),
++    )
++
++
+ # ============================================================================
+ # Scatter Operations
+ # ============================================================================
+diff --git a/python/pypto/language/op/tile_ops.py b/python/pypto/language/op/tile_ops.py
+index 06afad67e..8225f03a9 100644
+--- a/python/pypto/language/op/tile_ops.py
++++ b/python/pypto/language/op/tile_ops.py
+@@ -158,6 +158,7 @@ __all__ = [
+     "gatherb",
+     "gather_mask",
+     "gather_compare",
++    "compact_compare",
+     "scatter",
+     "scatter_mask",
+     "mscatter",
+@@ -3212,6 +3213,38 @@ def gather_compare(
+     )
+ 
+ 
++def compact_compare(
++    src: Tile,
++    kvalue: Scalar | Expr,
++    tmp: Tile,
++    offset: Scalar | Expr,
++    *,
++    cmp_mode: str | int = "ge",
++    out_cols: int,
++) -> tuple[Tile, Tile, Tile]:
++    """保序压缩 FP32 score 与 INT32 索引，返回 (values, indices, count)。
++
++    当前是 A3 原型。每行只有 min(count, out_cols) 项有效，尾部未定义；
++    count 始终是完整匹配数，超容量时只写容量内前缀。offset 为运行时
++    INT32 Scalar，按整数构造全局索引，不经过 FP32 转换。
++    src 物理列数必须为64的倍数，out_cols为8的倍数且不超过源列数。
++    tmp 是显式 UINT8 scratch，不承载调用方可消费的隐藏返回值。
++    """
++    call_expr = _ir_ops.compact_compare(
++        src.unwrap(),
++        kvalue.unwrap() if isinstance(kvalue, Scalar) else kvalue,
++        tmp.unwrap(),
++        offset.unwrap() if isinstance(offset, Scalar) else offset,
++        cmp_mode=cmp_mode,
++        out_cols=out_cols,
++    )
++    return (
++        Tile(expr=_ir_core.TupleGetItemExpr(call_expr, 0, call_expr.span)),
++        Tile(expr=_ir_core.TupleGetItemExpr(call_expr, 1, call_expr.span)),
++        Tile(expr=_ir_core.TupleGetItemExpr(call_expr, 2, call_expr.span)),
++    )
++
++
+ def scatter(dst: Tile, src: Tile, indexes: Tile) -> Tile:
+     """Scatter elements of ``src`` into ``dst`` at per-element flattened indices.
+ 
+diff --git a/src/backend/common/pto_ops_datamove.cpp b/src/backend/common/pto_ops_datamove.cpp
+index df183e6d0..7511195d8 100644
+--- a/src/backend/common/pto_ops_datamove.cpp
++++ b/src/backend/common/pto_ops_datamove.cpp
+@@ -731,6 +731,39 @@ static std::string MakeGatherCompareCodegenPTO(const CallPtr& op, codegen::Codeg
+   return "";
+ }
+ 
++static std::string MakeCompactCompareCodegenPTO(
++    const CallPtr& op, codegen::CodegenBase& codegen_base) {
++  auto& codegen = AsPto(codegen_base);
++  INTERNAL_CHECK_SPAN(op->args_.size() == 4, op->span_)
++      << "tile.compact_compare requires four arguments";
++  const auto outs = codegen.PrepareTupleOutputs(op);
++  INTERNAL_CHECK_SPAN(outs.size() == 3, op->span_)
++      << "tile.compact_compare must bind three outputs";
++  const int mode = op->GetKwarg<int>("cmp_mode");
++  static constexpr const char* kCmpNames[] = {"eq", "ne", "lt", "le", "gt", "ge"};
++  INTERNAL_CHECK_SPAN(mode >= 0 && mode < 6, op->span_) << "invalid compact compare mode";
++  std::ostringstream oss;
++  oss << "pto.tcompact.compare ins(";
++  const std::vector<int> inputs{0, 1, 3};
++  for (size_t i = 0; i < inputs.size(); ++i) {
++    if (i) oss << ", ";
++    oss << codegen.GetExprAsCode(op->args_[inputs[i]]);
++  }
++  oss << " : ";
++  for (size_t i = 0; i < inputs.size(); ++i) {
++    if (i) oss << ", ";
++    oss << codegen.GetExprTypeAnnotation(op->args_[inputs[i]]);
++  }
++  oss << ") outs(";
++  for (const auto& out : outs) oss << out.name << ", ";
++  oss << codegen.GetExprAsCode(op->args_[2]) << " : ";
++  for (const auto& out : outs) oss << out.type_str << ", ";
++  oss << codegen.GetExprTypeAnnotation(op->args_[2]) << ") {cmpMode = #pto<cmp "
++      << kCmpNames[mode] << ">}";
++  codegen.Emit(oss.str());
++  return "";
++}
++
+ // Helper for compiler-generated tile.tget_scale_addr (DPS, A5):
+ //   pto.tget_scale_addr ins(%src : src_ty) outs(%dst_scale : dst_ty)
+ //
+@@ -1159,6 +1192,9 @@ void RegisterDataMoveOps(Backend& backend, const std::unordered_set<std::string>
+   reg("tile.gather_compare", [](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+     return MakeGatherCompareCodegenPTO(op, codegen);
+   });
++  reg("tile.compact_compare", [](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
++    return MakeCompactCompareCodegenPTO(op, codegen);
++  });
+   reg("tile.tget_scale_addr", [](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+     return MakeTGetScaleAddrCodegenPTO(op, codegen);
+   });
+diff --git a/src/ir/op/tile_ops/gather.cpp b/src/ir/op/tile_ops/gather.cpp
+index a98f880b0..2c44de3cf 100644
+--- a/src/ir/op/tile_ops/gather.cpp
++++ b/src/ir/op/tile_ops/gather.cpp
+@@ -511,5 +511,70 @@ REGISTER_OP("tile.gather_compare")
+       return DeduceTileGatherCompareType(args, kwargs, "tile.gather_compare");
+     });
+ 
++// 成对压缩是独立的三输出算子；tmp仅是scratch，不能被当作隐含返回值。
++static TypePtr DeduceTileCompactCompareType(
++    const std::vector<ExprPtr>& args,
++    const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  CHECK(args.size() == 4)
++      << "tile.compact_compare requires src, kvalue, tmp, offset";
++  std::vector<ExprPtr> gather_args{args[0], args[1], args[2]};
++  auto pair = As<TupleType>(
++      DeduceTileGatherCompareType(gather_args, kwargs, "tile.compact_compare"));
++  INTERNAL_CHECK(pair) << "Internal error: gather deduction must return a tuple";
++  auto src = As<TileType>(args[0]->GetType());
++  CHECK(src->dtype_ == DataType::FP32)
++      << "tile.compact_compare currently requires FP32 src";
++  auto offset = As<ScalarType>(args[3]->GetType());
++  CHECK(offset && offset->dtype_ == DataType::INT32)
++      << "tile.compact_compare requires an INT32 scalar offset";
++  auto tmp = As<TileType>(args[2]->GetType());
++  CHECK(tmp->dtype_ == DataType::UINT8)
++      << "tile.compact_compare requires UINT8 tmp";
++  for (const auto& [key, value] : kwargs) {
++    if (key == "cmp_mode") {
++      const auto mode = AnyCast<int>(value, "cmp_mode");
++      CHECK(mode == 0 || mode == 4 || mode == 5)
++          << "tile.compact_compare supports eq/gt/ge";
++    }
++    if (key == "out_cols") {
++      const auto cols = AnyCast<int>(value, "out_cols");
++      CHECK(cols % 8 == 0) << "tile.compact_compare out_cols must be divisible by 8";
++      if (auto src_cols = As<ConstInt>(src->shape_[1]))
++        CHECK(cols <= src_cols->value_)
++            << "tile.compact_compare out_cols cannot exceed source columns";
++    }
++  }
++  if (auto cols = As<ConstInt>(src->shape_[1]))
++    CHECK(cols->value_ > 0 && cols->value_ % 64 == 0)
++        << "tile.compact_compare source columns must be divisible by 64";
++  auto indices = As<TileType>(pair->types_[0]);
++  auto values = std::make_shared<TileType>(
++      indices->shape_, DataType::FP32, std::nullopt, indices->tile_view_);
++  return std::make_shared<TupleType>(
++      std::vector<TypePtr>{values, pair->types_[0], pair->types_[1]});
++}
++
++REGISTER_OP("tile.compact_compare")
++    .set_op_category("TileOp")
++    .set_description("Stable bounded FP32 value/INT32 index compaction with exact counts")
++    .add_argument("src", "Source FP32 tile")
++    .add_argument("kvalue", "FP32 scalar comparison threshold")
++    .add_argument("tmp", "Explicit UINT8 workspace")
++    .add_argument("offset", "INT32 scalar index base")
++    .set_attr<int>("cmp_mode")
++    .set_attr<int>("out_cols")
++    .set_input_memory(0, MemorySpace::Vec)
++    .set_input_memory(2, MemorySpace::Vec)
++    .set_output_arity(3)
++    .set_arg_effect(0, ArgEffect::Read)
++    .set_arg_effect(1, ArgEffect::Read)
++    .set_arg_effect(2, ArgEffect::Write)
++    .set_arg_effect(3, ArgEffect::Read)
++    .set_workspace_arg(2)
++    .set_output_memory(MemorySpace::Vec)
++    .not_inplace_safe()
++    .set_lane_invariant_arg(2)
++    .f_deduce_type(DeduceTileCompactCompareType);
++
+ }  // namespace ir
+ }  // namespace pypto
+diff --git a/tests/ut/ir/operators/test_gather_compare.py b/tests/ut/ir/operators/test_gather_compare.py
+index 3153d5ac8..309cc85e9 100644
+--- a/tests/ut/ir/operators/test_gather_compare.py
++++ b/tests/ut/ir/operators/test_gather_compare.py
+@@ -272,5 +272,61 @@ class TestTensorGatherCompareTypes:
+                     return pl.tensor.gather(src, mask_pattern=1, kvalue=kv, cmp_mode="eq", out_cols=8)
+ 
+ 
++def _build_compact_program(rows=1, cols=64, capacity=32, mode="ge", offset_dtype=pl.INT32):
++    @pl.program
++    class Program:
++        @pl.function(type=pl.FunctionType.InCore)
++        def main(
++            self,
++            src: pl.Tensor[[rows, cols], pl.FP32],
++            threshold: pl.Scalar[pl.FP32],
++            offset: pl.Scalar[offset_dtype],
++            values_out: pl.Tensor[[rows, capacity], pl.FP32],
++            ids_out: pl.Tensor[[rows, capacity], pl.INT32],
++            counts_out: pl.Tensor[[1, rows], pl.INT32],
++        ):
++            values = pl.load(src, [0, 0], [rows, cols])
++            scratch = pl.tile.create([1, 18432], pl.UINT8)
++            packed, ids, counts = pl.tile.compact_compare(
++                values, threshold, scratch, offset, cmp_mode=mode, out_cols=capacity,
++            )
++            pl.store(packed, [0, 0], values_out)
++            pl.store(ids, [0, 0], ids_out)
++            pl.store(counts, [0, 0], counts_out)
++    return Program
++
++
++@pytest.mark.parametrize("rows", [1, 3, 8, 9])
++@pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
++def test_compact_three_outputs_and_runtime_offset(rows, mode):
++    call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
++    values, indices, counts = _tuple_elements(call)
++    assert _static_shape(values) == _static_shape(indices) == [rows, 32]
++    assert values.dtype == pl.FP32
++    assert indices.dtype == counts.dtype == pl.INT32
++    assert _static_shape(counts) == [1, ((rows + 7) // 8) * 8]
++    assert len(call.args) == 4
++    assert isinstance(call.args[3], _ir.Var)
++    assert call.args[3].type.dtype == pl.INT32
++    assert _ir.get_op_output_arity("tile.compact_compare") == 3
++    assert _ir.get_op_argument_count("tile.compact_compare") == 4
++    assert all(t.memory_space == _ir.MemorySpace.Vec for t in (values, indices, counts))
++
++
++@pytest.mark.parametrize(
++    ("kwargs", "message"),
++    [
++        ({"mode": "lt"}, "supports eq/gt/ge"),
++        ({"capacity": 31}, "divisible by 8"),
++        ({"capacity": 128}, "cannot exceed"),
++        ({"cols": 72}, "divisible by 64"),
++        ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
++    ],
++)
++def test_compact_rejects_invalid_contract(kwargs, message):
++    with pytest.raises(InvalidOperationError, match=message):
++        _build_compact_program(**kwargs)
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])
+diff --git a/tests/ut/ir/operators/test_tile_ops.py b/tests/ut/ir/operators/test_tile_ops.py
+index 0c9a81b4d..a874535f9 100644
+--- a/tests/ut/ir/operators/test_tile_ops.py
++++ b/tests/ut/ir/operators/test_tile_ops.py
+@@ -6023,7 +6023,30 @@ class TestTileLoadStoreShapeElements:
+ 
+ 
+ class TestTileCreateOp:
+-    """Tests for tile.create layout inference."""
++    """Tests for tile.create layout inference and tile.full scalar constants."""
++
++    @pytest.mark.parametrize("dtype", [DataType.FP16, DataType.BF16, DataType.FP32])
++    @pytest.mark.parametrize("value", [0, 1, -3, 0.5])
++    def test_full_float_dtype_builds_float_constant(self, dtype, value):
++        """整数填充值和浮点目标不能生成ConstInt(..., FP32)这种错误组合。"""
++        call = tile.full([1, 64], dtype, value)
++        assert isinstance(call.args[1], ir.ConstFloat)
++        assert call.args[1].dtype == dtype
++        assert call.args[1].value == float(value)
++
++    @pytest.mark.parametrize("dtype", [DataType.INT16, DataType.INT32, DataType.UINT32])
++    def test_full_integer_dtype_keeps_integer_constant(self, dtype):
++        call = tile.full([1, 64], dtype, 3)
++        assert isinstance(call.args[1], ir.ConstInt)
++        assert call.args[1].dtype == dtype
++        assert call.args[1].value == 3
++
++    def test_full_parsed_index_placeholder_becomes_float_constant(self):
++        value = ir.ConstInt(0, DataType.INDEX, ir.Span.unknown())
++        call = tile.full([1, 64], DataType.FP32, value)
++        assert isinstance(call.args[1], ir.ConstFloat)
++        assert call.args[1].dtype == DataType.FP32
++        assert call.args[1].value == 0.0
+ 
+     def test_create_column_vector_uses_col_major_layout(self):
+         """Static `[N, 1]` Vec tiles should infer col-major block layout."""

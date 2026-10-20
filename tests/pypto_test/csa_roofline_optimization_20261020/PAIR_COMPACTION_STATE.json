@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-20T23:20:55.791084+08:00",
+  "checked_at": "2026-10-21T00:28:53.964025+08:00",
   "formal_operator_changed": false,
   "adopted": false,
   "goal_complete": false,
@@ -15,10 +15,12 @@
   "ptoas": {
     "tree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-pair-compact-20261020",
     "base": "b48c84ebfea88c58439181e76f5e00fd12950418",
-    "changes": "uncommitted prototype",
+    "changes": "committed locally; not pushed",
     "build_session": 81771,
-    "build_status": "running; revalidated with write_stdin",
-    "build_log": "pair_ptoas_build_v3.log"
+    "build_status": "completed/exit0",
+    "build_log": "pair_ptoas_build_v3.log",
+    "regressions": "pair_ptoas_regressions_v1/result.json: six checks PASS",
+    "head": "b27d5a0fe9f010d6d50e0287b92b8ac413cfc732"
   },
   "helper_cc_compilation": "pair_helper_cpp_v2/result.json: PASS, no device execution, not actual new PTOAS",
   "frontend": "pair_frontend_v2/result.json: expected old PTOAS unknown-op rejection; new PyPTO lowered successfully; not complete backend PASS",
@@ -29,13 +31,37 @@
     "pypto": "https://github.com/hw-native-sys/pypto/issues/3085"
   },
   "existing_full_fix": "FULL_LITERAL_UPSTREAM_FIX.json; upstream PR2846 subset backported, no duplicate issue",
-  "device_tasks": [],
+  "device_tasks": [
+    {
+      "kind": "direct",
+      "task": "task_20261020_235212_86999528768",
+      "output": "tests/pypto_test/csa_roofline_optimization_20261020/pair_direct_v1",
+      "command": [
+        "bash",
+        "tests/pypto_test/csa_roofline_optimization_20261020/run_pair_isolated.sh",
+        "tests/pypto_test/csa_roofline_optimization_20261020/paired_compact_direct_probe.py",
+        "--output",
+        "tests/pypto_test/csa_roofline_optimization_20261020/pair_direct_v1"
+      ],
+      "status": "completed/exit1"
+    },
+    {
+      "kind": "merge",
+      "task": "task_20261020_235212_87008627354",
+      "output": "tests/pypto_test/csa_roofline_optimization_20261020/pair_merge_device_v1",
+      "command": [
+        "bash",
+        "tests/pypto_test/csa_roofline_optimization_20261020/run_pair_isolated.sh",
+        "tests/pypto_test/csa_roofline_optimization_20261020/run_pair_probe.py",
+        "--output",
+        "tests/pypto_test/csa_roofline_optimization_20261020/pair_merge_device_v1"
+      ],
+      "status": "completed/exit0"
+    }
+  ],
   "next": [
-    "poll existing build session81771; do not start a duplicate build",
-    "after build exit0: run_pair_ptoas_regressions.py and actual new-PTOAS run_pair_probe.py --cpu-only",
-    "after CPU passes: submit paired_compact_direct_probe.py and run_pair_probe.py through task-submit",
-    "only after exact device probes pass: same-toolchain 5-window B16/B28 full compare using source_topk_paired",
-    "do not reuse old payload_query_regression source symlink as new candidate; bind new source for S1/S5 before adoption"
+    "保留原语/完整精度与负收益证据，不扩七档",
+    "先分析实际压缩成本和关键路径，再选择下一项有机制差异的候选"
   ],
   "failures_retained": {
     "build_v1": "GitCode cann-cmake fetch unavailable; reused existing source path, not binaries",
@@ -43,5 +69,29 @@
     "ut_v1": "shared editable finder intercepted PyPTO; process-only source finder fixed binding",
     "helper_v1": "test Tile constructor passed two arguments with one dynamic extent; corrected test",
     "frontend_v1": "inherited tile.full ConstInt/FP32 bug; upstream fix backported"
-  }
+  },
+  "full_frontend": "pair_full_frontend_b28_v1/result.json: dynamic parse and allocation reached 3 compact sites; old backend rejects new op; not full codegen PASS",
+  "full_frontend_audit": "pair_full_frontend_b28_v1/compact_ir_audit.json",
+  "full_cpu_harness": "run_pair_full_cpu.py + pair_cpu_harness",
+  "micro_cpu": "pair_cpu_v1/result.json: actual new PTOAS PASS",
+  "full_cpu": "pair_full_cpu_b28_v1/result.json: complete dynamic CSA actual new PTOAS PASS",
+  "actual_ccec": {
+    "micro": "pair_micro_ccec_v1/result.json: PASS",
+    "full": "pair_full_ccec_v1/result.json: PASS",
+    "device_performance_proof": false
+  },
+  "device_probe_results": {
+    "merge": "task_20261020_235212_87008627354 completed/exit0: 59 fixtures x3 graph replay exact PASS",
+    "direct": "task_20261020_235212_86999528768 completed/exit1: compiler InitMemRef rejected values_v1 free variable; no direct primitive device proof"
+  },
+  "direct_probe_v2": {
+    "task": "task_20261021_002040_27855266616",
+    "status": "completed/exit0",
+    "cases": "65 x GE/GT/EQ x 3 graph replays; exact values/indices/count/guards PASS"
+  },
+  "full_tasks": "PAIR_FULL_TASKS.json",
+  "nested_validshape_issue": "https://github.com/hw-native-sys/pypto/issues/3087",
+  "full_tasks_status": "both completed/exit0",
+  "full_results": "PAIR_PERFORMANCE.json",
+  "decision": "完整精度通过；B16净省-1.88us，B28净省10.28us，未达到重点档20us门槛。不扩档，不将局部排序减少当作完整收益。"
 }
