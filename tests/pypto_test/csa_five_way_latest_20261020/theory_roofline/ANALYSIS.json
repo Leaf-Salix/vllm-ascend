@@ -1,0 +1,6732 @@
+{
+  "scope": "TP1、正式W8A8、第4层、S6；HC_pre+输入RMS+完整CSA+HCpost；无MoE/整网",
+  "source_snapshot": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/source_dynamic",
+  "measured_dynamic_commit": "13259f92",
+  "hardware": {
+    "soc": "Ascend910_9392",
+    "logical_device_scope": "一个die",
+    "cube_cores": 24,
+    "vector_cores": 48,
+    "cube_frequency_hz": 1850000000.0,
+    "fp16_bf16_peak_ops_per_second": 363724800000000.0,
+    "int8_peak_ops_per_second": 727449600000000.0,
+    "fp32_peak_model_assumption": 90931200000000.0,
+    "hbm_peak_bytes_per_second": 1600000000000.0,
+    "l2_bytes": 201326592,
+    "platform_source": "/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux/data/platform_config/Ascend910_9392.ini"
+  },
+  "hardware_sources": [
+    "https://arxiv.org/html/2506.12708v2#S3.SS3.SSS1",
+    "https://www-file.huawei.com/admin/asset/v1/pro/view/6ca306adab0a4852bacffce25f5573ec.pdf"
+  ],
+  "limits": [
+    "峰值上限模型，不是实测可持续算力或带宽。",
+    "Vector排序/归约/exp、Scalar寻址、同步、启动、片上端口延迟未折成普通FLOP。",
+    "冷缓存账本不适用于声称ACLGraph热重放的精确HBM流量；GM请求不等于HBM事务。",
+    "实际Sparse Top-K跨query重合率未知，显式给出最大复用与逐query读取情形。",
+    "当前缓存BYPASS声明无有效地址offset，生成普通TLOAD，不能假设其每次必访HBM。",
+    "当前分块计算估计保留M16、WS M16和历史尾块；不是逐条硬件指令动态计数。"
+  ],
+  "rows": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "query_tokens": 6,
+      "tokens": 24,
+      "padded_cube_rows": 32,
+      "ob_rows": 32,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 128,
+        "OB_ROWS": 32,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": true,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": true,
+        "SCALE_PAGE_COALESCING": true,
+        "PLAN_PHYSICAL_ROWS": false,
+        "SPLIT_SCORE_ROWS": false
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 18874368,
+          "issued_ops": 33554432,
+          "useful_peak_us": 0.20756756756756756,
+          "issued_peak_us": 0.369009009009009,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201326592,
+          "issued_ops": 268435456,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.738018018018018,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 1610612736,
+          "issued_ops": 2147483648,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.952072072072072,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 100663296,
+          "issued_ops": 134217728,
+          "useful_peak_us": 0.27675675675675676,
+          "issued_peak_us": 0.369009009009009,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 536870912,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.476036036036036,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 100663296,
+          "issued_ops": 134217728,
+          "useful_peak_us": 0.27675675675675676,
+          "issued_peak_us": 0.369009009009009,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 402653184,
+          "issued_ops": 536870912,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.738018018018018,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 50331648,
+          "issued_ops": 50331648,
+          "useful_peak_us": 0.13837837837837838,
+          "issued_peak_us": 0.13837837837837838,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 131072,
+          "issued_ops": 524288,
+          "useful_peak_us": 0.00036036036036036037,
+          "issued_peak_us": 0.0014414414414414415,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 12582912,
+          "issued_ops": 16777216,
+          "useful_peak_us": 0.034594594594594595,
+          "issued_peak_us": 0.04612612612612613,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 12885098496,
+          "issued_ops": 13287555072,
+          "useful_peak_us": 17.712702702702703,
+          "issued_peak_us": 18.265945945945944,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 100664832,
+          "issued_ops": 1660944384,
+          "useful_peak_us": 0.27676097972972974,
+          "issued_peak_us": 4.566486486486486,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 2013265920,
+          "issued_ops": 2013265920,
+          "useful_peak_us": 5.535135135135135,
+          "issued_peak_us": 5.535135135135135,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1610612736,
+          "issued_ops": 2147483648,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 5.904144144144144,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 1610612736,
+          "issued_ops": 2147483648,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.952072072072072,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 4,
+        "group_size": 6,
+        "compressed_rows": 32769,
+        "visible_query_row_sum": 786444,
+        "group_visible": [
+          32769,
+          32769,
+          32769,
+          32769
+        ],
+        "leaves": 6,
+        "leaf_tiles": 5,
+        "extra_leaves": 3,
+        "core_score_blocks": [
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5,
+          5
+        ],
+        "total_score_blocks": 132,
+        "score_tile": 1024,
+        "qk_ops": 13287555072,
+        "ws_ops": 1660944384,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 1,
+            "owner": 4,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 1,
+            "owner": 5,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 1,
+            "owner": 6,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 1,
+            "owner": 7,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 2,
+            "owner": 8,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 2,
+            "owner": 9,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 2,
+            "owner": 10,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 2,
+            "owner": 11,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 3,
+            "owner": 12,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 3,
+            "owner": 13,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 3,
+            "owner": 14,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 3,
+            "owner": 15,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 4,
+            "owner": 16,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 4,
+            "owner": 17,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 4,
+            "owner": 18,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 4,
+            "owner": 19,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 5,
+            "owner": 20,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 5,
+            "owner": 21,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 5,
+            "owner": 22,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 5,
+            "owner": 23,
+            "valid": 4097,
+            "steps": 5
+          }
+        ],
+        "core_cube_peak_us": [
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          24.908108108108106,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754,
+          20.756756756756754
+        ],
+        "balanced_cube_peak_us": 22.832432432432437,
+        "slowest_core_cube_peak_us": 24.908108108108106,
+        "right_bytes_per_block": 917504
+      },
+      "useful_cube_us": 35.52928350225225,
+      "issued_cube_us": 44.42090090090089,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 44.14414414414413,
+        "4": 44.42090090090089,
+        "8": 44.789909909909895
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 17039880,
+        "sparse_kv_max_reuse": 2641920,
+        "sparse_kv_per_query": 15728640,
+        "hidden_input_output": 1572864
+      },
+      "cold_main_bytes_max_reuse": 199545352,
+      "cold_main_bytes_per_query": 212632072,
+      "cold_hbm_max_reuse_us": 124.715845,
+      "cold_hbm_per_query_us": 132.89504499999998,
+      "cold_roofline_max_reuse_us": 124.715845,
+      "cold_roofline_per_query_us": 132.89504499999998,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 15728640,
+        "kv_ring_write": 15728640,
+        "kv_ring_read": 15728640,
+        "qk_score_write_read": 7864320,
+        "probability_write_read": 3932160,
+        "pv_write_read": 31457280,
+        "query_read": 1572864,
+        "packed_output_write": 1572864
+      },
+      "attention_gm_total_bytes": 93585408,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 46.792704,
+        "4": 23.396352,
+        "6": 15.597568
+      },
+      "actual_dynamic_l1_us": 476.4,
+      "original_multitask_l1_us": 492.78,
+      "thirty_percent_target_us": 344.94599999999997,
+      "remaining_to_target_us": 131.454,
+      "issued_cube_peak_occupancy_model": 0.09324286503127811,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b4/l1_v1/result.json"
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "query_tokens": 6,
+      "tokens": 48,
+      "padded_cube_rows": 48,
+      "ob_rows": 96,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 128,
+        "OB_ROWS": 96,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": false,
+        "LOCAL_ATTENTION_STATS": true,
+        "SCALE_PAGE_COALESCING": false,
+        "PLAN_PHYSICAL_ROWS": false,
+        "SPLIT_SCORE_ROWS": true
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 37748736,
+          "issued_ops": 50331648,
+          "useful_peak_us": 0.4151351351351351,
+          "issued_peak_us": 0.5535135135135135,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 3221225472,
+          "issued_ops": 3221225472,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 4.428108108108108,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201326592,
+          "issued_ops": 201326592,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.5535135135135135,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201326592,
+          "issued_ops": 201326592,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.5535135135135135,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 100663296,
+          "issued_ops": 100663296,
+          "useful_peak_us": 0.27675675675675676,
+          "issued_peak_us": 0.27675675675675676,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 262144,
+          "issued_ops": 524288,
+          "useful_peak_us": 0.0007207207207207207,
+          "issued_peak_us": 0.0014414414414414415,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 25165824,
+          "issued_ops": 25165824,
+          "useful_peak_us": 0.06918918918918919,
+          "issued_peak_us": 0.06918918918918919,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 25770196992,
+          "issued_ops": 26575110144,
+          "useful_peak_us": 35.42540540540541,
+          "issued_peak_us": 36.53189189189189,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201329664,
+          "issued_ops": 3321888768,
+          "useful_peak_us": 0.5535219594594595,
+          "issued_peak_us": 9.132972972972972,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 4026531840,
+          "issued_ops": 4026531840,
+          "useful_peak_us": 11.07027027027027,
+          "issued_peak_us": 11.07027027027027,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 3221225472,
+          "issued_ops": 3221225472,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 3221225472,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 8.856216216216216,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 8,
+        "group_size": 6,
+        "compressed_rows": 32769,
+        "visible_query_row_sum": 1572888,
+        "group_visible": [
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769
+        ],
+        "leaves": 6,
+        "leaf_tiles": 5,
+        "extra_leaves": 3,
+        "core_score_blocks": [
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11
+        ],
+        "total_score_blocks": 264,
+        "score_tile": 1024,
+        "qk_ops": 26575110144,
+        "ws_ops": 3321888768,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 1,
+            "owner": 8,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 1,
+            "owner": 9,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 1,
+            "owner": 10,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 1,
+            "owner": 11,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 1,
+            "owner": 12,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 1,
+            "owner": 13,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 1,
+            "owner": 14,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 1,
+            "owner": 15,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 2,
+            "owner": 16,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 2,
+            "owner": 17,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 2,
+            "owner": 18,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 2,
+            "owner": 19,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 2,
+            "owner": 20,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 2,
+            "owner": 21,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 2,
+            "owner": 22,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 2,
+            "owner": 23,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 3,
+            "owner": 0,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 3,
+            "owner": 1,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 3,
+            "owner": 2,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 3,
+            "owner": 3,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 3,
+            "owner": 4,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 3,
+            "owner": 5,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 3,
+            "owner": 6,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 3,
+            "owner": 7,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 4,
+            "owner": 8,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 4,
+            "owner": 9,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 4,
+            "owner": 10,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 4,
+            "owner": 11,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 4,
+            "owner": 12,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 4,
+            "owner": 13,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 4,
+            "owner": 14,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 4,
+            "owner": 15,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 5,
+            "owner": 16,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 5,
+            "owner": 17,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 5,
+            "owner": 18,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 5,
+            "owner": 19,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 5,
+            "owner": 20,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 5,
+            "owner": 21,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 5,
+            "owner": 22,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 5,
+            "owner": 23,
+            "valid": 4097,
+            "steps": 5
+          }
+        ],
+        "core_cube_peak_us": [
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487,
+          45.66486486486487
+        ],
+        "balanced_cube_peak_us": 45.66486486486486,
+        "slowest_core_cube_peak_us": 45.66486486486487,
+        "right_bytes_per_block": 917504
+      },
+      "useful_cube_us": 71.0585670045045,
+      "issued_cube_us": 85.3117117117117,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 84.89657657657656,
+        "4": 85.3117117117117,
+        "8": 85.86522522522522
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 34079760,
+        "sparse_kv_max_reuse": 5283840,
+        "sparse_kv_per_query": 31457280,
+        "hidden_input_output": 3145728
+      },
+      "cold_main_bytes_max_reuse": 220800016,
+      "cold_main_bytes_per_query": 246973456,
+      "cold_hbm_max_reuse_us": 138.00001,
+      "cold_hbm_per_query_us": 154.35841,
+      "cold_roofline_max_reuse_us": 138.00001,
+      "cold_roofline_per_query_us": 154.35841,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 31457280,
+        "kv_ring_write": 31457280,
+        "kv_ring_read": 31457280,
+        "qk_score_write_read": 15728640,
+        "probability_write_read": 7864320,
+        "pv_write_read": 62914560,
+        "query_read": 3145728,
+        "packed_output_write": 3145728
+      },
+      "attention_gm_total_bytes": 187170816,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 93.585408,
+        "4": 46.792704,
+        "6": 31.195136
+      },
+      "actual_dynamic_l1_us": 626.5,
+      "original_multitask_l1_us": 629.54,
+      "thirty_percent_target_us": 440.67799999999994,
+      "remaining_to_target_us": 185.82200000000006,
+      "issued_cube_peak_occupancy_model": 0.13617192611606016,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b8/l1_v1/result.json"
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "tokens": 96,
+      "padded_cube_rows": 96,
+      "ob_rows": 96,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 128,
+        "OB_ROWS": 96,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": true,
+        "SCALE_PAGE_COALESCING": false,
+        "PLAN_PHYSICAL_ROWS": true,
+        "SPLIT_SCORE_ROWS": true
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 75497472,
+          "issued_ops": 100663296,
+          "useful_peak_us": 0.8302702702702702,
+          "issued_peak_us": 1.107027027027027,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1610612736,
+          "issued_ops": 1610612736,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 4.428108108108108,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 1610612736,
+          "issued_ops": 1610612736,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201326592,
+          "issued_ops": 201326592,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.5535135135135135,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 524288,
+          "issued_ops": 524288,
+          "useful_peak_us": 0.0014414414414414415,
+          "issued_peak_us": 0.0014414414414414415,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 50331648,
+          "issued_ops": 50331648,
+          "useful_peak_us": 0.13837837837837838,
+          "issued_peak_us": 0.13837837837837838,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 51540393984,
+          "issued_ops": 53150220288,
+          "useful_peak_us": 70.85081081081081,
+          "issued_peak_us": 73.06378378378378,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402659328,
+          "issued_ops": 6643777536,
+          "useful_peak_us": 1.107043918918919,
+          "issued_peak_us": 18.265945945945944,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 8053063680,
+          "issued_ops": 8053063680,
+          "useful_peak_us": 22.14054054054054,
+          "issued_peak_us": 22.14054054054054,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 17.712432432432433,
+          "issued_peak_us": 17.712432432432433,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 16,
+        "group_size": 6,
+        "compressed_rows": 32769,
+        "visible_query_row_sum": 3145776,
+        "group_visible": [
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769
+        ],
+        "leaves": 6,
+        "leaf_tiles": 5,
+        "extra_leaves": 3,
+        "core_score_blocks": [
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22,
+          22
+        ],
+        "total_score_blocks": 528,
+        "score_tile": 1024,
+        "qk_ops": 53150220288,
+        "ws_ops": 6643777536,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 8,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 9,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 10,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 11,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 12,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 13,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 14,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 15,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 1,
+            "owner": 16,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 1,
+            "owner": 17,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 1,
+            "owner": 18,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 1,
+            "owner": 19,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 1,
+            "owner": 20,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 1,
+            "owner": 21,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 1,
+            "owner": 22,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 1,
+            "owner": 23,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 8,
+            "leaf": 1,
+            "owner": 0,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 9,
+            "leaf": 1,
+            "owner": 1,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 10,
+            "leaf": 1,
+            "owner": 2,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 11,
+            "leaf": 1,
+            "owner": 3,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 12,
+            "leaf": 1,
+            "owner": 4,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 13,
+            "leaf": 1,
+            "owner": 5,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 14,
+            "leaf": 1,
+            "owner": 6,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 15,
+            "leaf": 1,
+            "owner": 7,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 2,
+            "owner": 8,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 1,
+            "leaf": 2,
+            "owner": 9,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 2,
+            "leaf": 2,
+            "owner": 10,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 3,
+            "leaf": 2,
+            "owner": 11,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 4,
+            "leaf": 2,
+            "owner": 12,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 5,
+            "leaf": 2,
+            "owner": 13,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 6,
+            "leaf": 2,
+            "owner": 14,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 7,
+            "leaf": 2,
+            "owner": 15,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 8,
+            "leaf": 2,
+            "owner": 16,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 9,
+            "leaf": 2,
+            "owner": 17,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 10,
+            "leaf": 2,
+            "owner": 18,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 11,
+            "leaf": 2,
+            "owner": 19,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 12,
+            "leaf": 2,
+            "owner": 20,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 13,
+            "leaf": 2,
+            "owner": 21,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 14,
+            "leaf": 2,
+            "owner": 22,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 15,
+            "leaf": 2,
+            "owner": 23,
+            "valid": 6144,
+            "steps": 6
+          },
+          {
+            "group": 0,
+            "leaf": 3,
+            "owner": 0,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 3,
+            "owner": 1,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 3,
+            "owner": 2,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 3,
+            "owner": 3,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 3,
+            "owner": 4,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 3,
+            "owner": 5,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 3,
+            "owner": 6,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 3,
+            "owner": 7,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 8,
+            "leaf": 3,
+            "owner": 8,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 9,
+            "leaf": 3,
+            "owner": 9,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 10,
+            "leaf": 3,
+            "owner": 10,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 11,
+            "leaf": 3,
+            "owner": 11,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 12,
+            "leaf": 3,
+            "owner": 12,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 13,
+            "leaf": 3,
+            "owner": 13,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 14,
+            "leaf": 3,
+            "owner": 14,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 15,
+            "leaf": 3,
+            "owner": 15,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 4,
+            "owner": 16,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 4,
+            "owner": 17,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 4,
+            "owner": 18,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 4,
+            "owner": 19,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 4,
+            "owner": 20,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 4,
+            "owner": 21,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 4,
+            "owner": 22,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 4,
+            "owner": 23,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 8,
+            "leaf": 4,
+            "owner": 0,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 9,
+            "leaf": 4,
+            "owner": 1,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 10,
+            "leaf": 4,
+            "owner": 2,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 11,
+            "leaf": 4,
+            "owner": 3,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 12,
+            "leaf": 4,
+            "owner": 4,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 13,
+            "leaf": 4,
+            "owner": 5,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 14,
+            "leaf": 4,
+            "owner": 6,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 15,
+            "leaf": 4,
+            "owner": 7,
+            "valid": 5120,
+            "steps": 5
+          },
+          {
+            "group": 0,
+            "leaf": 5,
+            "owner": 8,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 1,
+            "leaf": 5,
+            "owner": 9,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 2,
+            "leaf": 5,
+            "owner": 10,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 3,
+            "leaf": 5,
+            "owner": 11,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 4,
+            "leaf": 5,
+            "owner": 12,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 5,
+            "leaf": 5,
+            "owner": 13,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 6,
+            "leaf": 5,
+            "owner": 14,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 7,
+            "leaf": 5,
+            "owner": 15,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 8,
+            "leaf": 5,
+            "owner": 16,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 9,
+            "leaf": 5,
+            "owner": 17,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 10,
+            "leaf": 5,
+            "owner": 18,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 11,
+            "leaf": 5,
+            "owner": 19,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 12,
+            "leaf": 5,
+            "owner": 20,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 13,
+            "leaf": 5,
+            "owner": 21,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 14,
+            "leaf": 5,
+            "owner": 22,
+            "valid": 4097,
+            "steps": 5
+          },
+          {
+            "group": 15,
+            "leaf": 5,
+            "owner": 23,
+            "valid": 4097,
+            "steps": 5
+          }
+        ],
+        "core_cube_peak_us": [
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973,
+          91.32972972972973
+        ],
+        "balanced_cube_peak_us": 91.32972972972972,
+        "slowest_core_cube_peak_us": 91.32972972972973,
+        "right_bytes_per_block": 917504
+      },
+      "useful_cube_us": 142.117134009009,
+      "issued_cube_us": 161.76576576576574,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 160.93549549549547,
+        "4": 161.76576576576574,
+        "8": 162.87279279279278
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 68159520,
+        "sparse_kv_max_reuse": 10567680,
+        "sparse_kv_per_query": 62914560,
+        "hidden_input_output": 6291456
+      },
+      "cold_main_bytes_max_reuse": 263309344,
+      "cold_main_bytes_per_query": 315656224,
+      "cold_hbm_max_reuse_us": 164.56834,
+      "cold_hbm_per_query_us": 197.28513999999998,
+      "cold_roofline_max_reuse_us": 164.56834,
+      "cold_roofline_per_query_us": 197.28513999999998,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 62914560,
+        "kv_ring_write": 62914560,
+        "kv_ring_read": 62914560,
+        "qk_score_write_read": 31457280,
+        "probability_write_read": 15728640,
+        "pv_write_read": 125829120,
+        "query_read": 6291456,
+        "packed_output_write": 6291456
+      },
+      "attention_gm_total_bytes": 374341632,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 187.170816,
+        "4": 93.585408,
+        "6": 62.390272
+      },
+      "actual_dynamic_l1_us": 802.2,
+      "original_multitask_l1_us": 873.16,
+      "thirty_percent_target_us": 611.212,
+      "remaining_to_target_us": 190.98800000000006,
+      "issued_cube_peak_occupancy_model": 0.20165266238564664,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b16/l1_v1/result.json",
+      "observed_score_blocks_match": true,
+      "stage_probe": {
+        "QB": {
+          "roles": 24,
+          "latest_core": 4,
+          "start_us": {
+            "min": 162.8,
+            "median": 167.9,
+            "max": 180.02
+          },
+          "end_us": {
+            "min": 174.04,
+            "median": 228.95,
+            "max": 243.16
+          },
+          "interval_us": {
+            "min": 0.24,
+            "median": 60.57,
+            "max": 66.66
+          },
+          "gm_wait_us": {
+            "min": 0.0,
+            "median": 0.0,
+            "max": 0.0
+          },
+          "other_us": {
+            "min": 0.24,
+            "median": 60.57,
+            "max": 66.66
+          }
+        },
+        "SCORE_CUBE": {
+          "roles": 24,
+          "latest_core": 9,
+          "start_us": {
+            "min": 199.82,
+            "median": 244.53,
+            "max": 267.64
+          },
+          "end_us": {
+            "min": 458.6,
+            "median": 465.92,
+            "max": 469.7
+          },
+          "interval_us": {
+            "min": 200.84,
+            "median": 221.29,
+            "max": 264.04
+          },
+          "gm_wait_us": {
+            "min": 12.2,
+            "median": 27.67,
+            "max": 70.74
+          },
+          "other_us": {
+            "min": 188.12,
+            "median": 192.64,
+            "max": 196.36
+          }
+        },
+        "SCORE_VECTOR": {
+          "roles": 48,
+          "latest_core": 33,
+          "start_us": {
+            "min": 279.06,
+            "median": 282.03,
+            "max": 286.36
+          },
+          "end_us": {
+            "min": 464.0,
+            "median": 469.46,
+            "max": 474.98
+          },
+          "interval_us": {
+            "min": 178.8,
+            "median": 186.59,
+            "max": 194.94
+          },
+          "gm_wait_us": {
+            "min": 4.58,
+            "median": 4.9,
+            "max": 5.54
+          },
+          "other_us": {
+            "min": 174.1,
+            "median": 181.67,
+            "max": 190.12
+          }
+        },
+        "ATTN_CUBE": {
+          "roles": 24,
+          "latest_core": 17,
+          "start_us": {
+            "min": 458.6,
+            "median": 465.92,
+            "max": 469.7
+          },
+          "end_us": {
+            "min": 655.9,
+            "median": 669.79,
+            "max": 681.94
+          },
+          "interval_us": {
+            "min": 188.18,
+            "median": 203.8,
+            "max": 216.54
+          },
+          "gm_wait_us": {
+            "min": 43.96,
+            "median": 49.49,
+            "max": 59.38
+          },
+          "other_us": {
+            "min": 141.72,
+            "median": 153.47,
+            "max": 168.7
+          }
+        },
+        "ATTN_VECTOR": {
+          "roles": 48,
+          "latest_core": 59,
+          "start_us": {
+            "min": 477.88,
+            "median": 483.51,
+            "max": 508.6
+          },
+          "end_us": {
+            "min": 659.52,
+            "median": 673.64,
+            "max": 685.9
+          },
+          "interval_us": {
+            "min": 162.7,
+            "median": 183.8,
+            "max": 204.14
+          },
+          "gm_wait_us": {
+            "min": 5.8,
+            "median": 30.63,
+            "max": 36.98
+          },
+          "other_us": {
+            "min": 145.02,
+            "median": 158.41,
+            "max": 171.12
+          }
+        },
+        "OB": {
+          "roles": 24,
+          "latest_core": 14,
+          "start_us": {
+            "min": 746.96,
+            "median": 772.51,
+            "max": 775.02
+          },
+          "end_us": {
+            "min": 772.66,
+            "median": 799.19,
+            "max": 803.08
+          },
+          "interval_us": {
+            "min": 23.52,
+            "median": 25.93,
+            "max": 28.04
+          },
+          "gm_wait_us": {
+            "min": 0.58,
+            "median": 0.99,
+            "max": 5.5
+          },
+          "other_us": {
+            "min": 19.86,
+            "median": 24.95,
+            "max": 27.06
+          }
+        },
+        "OUT": {
+          "roles": 48,
+          "latest_core": 58,
+          "start_us": {
+            "min": 659.52,
+            "median": 708.22,
+            "max": 783.3
+          },
+          "end_us": {
+            "min": 824.46,
+            "median": 826.69,
+            "max": 829.24
+          },
+          "interval_us": {
+            "min": 42.16,
+            "median": 117.55,
+            "max": 166.54
+          },
+          "gm_wait_us": {
+            "min": 21.8,
+            "median": 96.22,
+            "max": 144.7
+          },
+          "other_us": {
+            "min": 19.78,
+            "median": 21.39,
+            "max": 23.82
+          }
+        }
+      },
+      "stage_probe_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/CURRENT_SCORE_PRESSURE_ANALYSIS.json"
+    },
+    {
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "tokens": 144,
+      "padded_cube_rows": 144,
+      "ob_rows": 144,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 256,
+        "OB_ROWS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": false,
+        "SCALE_PAGE_COALESCING": true,
+        "PLAN_PHYSICAL_ROWS": true,
+        "SPLIT_SCORE_ROWS": true
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 113246208,
+          "issued_ops": 150994944,
+          "useful_peak_us": 1.2454054054054053,
+          "issued_peak_us": 1.6605405405405405,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1207959552,
+          "issued_ops": 1207959552,
+          "useful_peak_us": 3.321081081081081,
+          "issued_peak_us": 3.321081081081081,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 9663676416,
+          "issued_ops": 9663676416,
+          "useful_peak_us": 13.284324324324324,
+          "issued_peak_us": 13.284324324324324,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 603979776,
+          "issued_ops": 603979776,
+          "useful_peak_us": 1.6605405405405405,
+          "issued_peak_us": 1.6605405405405405,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 2415919104,
+          "issued_ops": 2415919104,
+          "useful_peak_us": 6.642162162162162,
+          "issued_peak_us": 6.642162162162162,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 603979776,
+          "issued_ops": 603979776,
+          "useful_peak_us": 1.6605405405405405,
+          "issued_peak_us": 1.6605405405405405,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 2415919104,
+          "issued_ops": 2415919104,
+          "useful_peak_us": 3.321081081081081,
+          "issued_peak_us": 3.321081081081081,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 301989888,
+          "issued_ops": 301989888,
+          "useful_peak_us": 0.8302702702702702,
+          "issued_peak_us": 0.8302702702702702,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 786432,
+          "issued_ops": 1048576,
+          "useful_peak_us": 0.002162162162162162,
+          "issued_peak_us": 0.002882882882882883,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 75497472,
+          "issued_ops": 75497472,
+          "useful_peak_us": 0.20756756756756756,
+          "issued_peak_us": 0.20756756756756756,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 77310590976,
+          "issued_ops": 79725330432,
+          "useful_peak_us": 106.27621621621621,
+          "issued_peak_us": 109.59567567567566,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 603988992,
+          "issued_ops": 9965666304,
+          "useful_peak_us": 1.6605658783783783,
+          "issued_peak_us": 27.398918918918916,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 12079595520,
+          "issued_ops": 12079595520,
+          "useful_peak_us": 33.210810810810806,
+          "issued_peak_us": 33.210810810810806,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 9663676416,
+          "issued_ops": 9663676416,
+          "useful_peak_us": 26.568648648648647,
+          "issued_peak_us": 26.568648648648647,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 9663676416,
+          "issued_ops": 9663676416,
+          "useful_peak_us": 13.284324324324324,
+          "issued_peak_us": 13.284324324324324,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 24,
+        "group_size": 6,
+        "compressed_rows": 32769,
+        "visible_query_row_sum": 4718664,
+        "group_visible": [
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769
+        ],
+        "leaves": 5,
+        "leaf_tiles": 8,
+        "extra_leaves": 0,
+        "core_score_blocks": [
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33,
+          33
+        ],
+        "total_score_blocks": 792,
+        "score_tile": 1024,
+        "qk_ops": 79725330432,
+        "ws_ops": 9965666304,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 1,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 2,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 3,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 4,
+            "owner": 4,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 1,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 2,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 3,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 4,
+            "owner": 9,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 1,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 2,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 3,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 4,
+            "owner": 14,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 1,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 2,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 3,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 4,
+            "owner": 19,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 1,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 2,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 3,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 4,
+            "owner": 0,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 1,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 2,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 3,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 4,
+            "owner": 5,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 1,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 2,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 3,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 4,
+            "owner": 10,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 1,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 2,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 3,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 4,
+            "owner": 15,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 8,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 1,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 2,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 3,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 4,
+            "owner": 20,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 9,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 1,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 2,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 3,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 4,
+            "owner": 1,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 10,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 1,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 2,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 3,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 4,
+            "owner": 6,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 11,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 1,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 2,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 3,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 4,
+            "owner": 11,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 12,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 1,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 2,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 3,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 4,
+            "owner": 16,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 13,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 1,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 2,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 3,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 4,
+            "owner": 21,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 14,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 1,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 2,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 3,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 4,
+            "owner": 2,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 15,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 1,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 2,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 3,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 4,
+            "owner": 7,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 16,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 1,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 2,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 3,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 4,
+            "owner": 12,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 17,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 1,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 2,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 3,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 4,
+            "owner": 17,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 18,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 1,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 2,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 3,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 4,
+            "owner": 22,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 19,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 1,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 2,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 3,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 4,
+            "owner": 3,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 20,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 1,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 2,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 3,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 4,
+            "owner": 8,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 21,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 1,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 2,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 3,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 4,
+            "owner": 13,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 22,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 1,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 2,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 3,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 4,
+            "owner": 18,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 23,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 1,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 2,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 3,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 4,
+            "owner": 23,
+            "valid": 1,
+            "steps": 1
+          }
+        ],
+        "core_cube_peak_us": [
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946
+        ],
+        "balanced_cube_peak_us": 136.99459459459464,
+        "slowest_core_cube_peak_us": 136.9945945945946,
+        "right_bytes_per_block": 917504
+      },
+      "useful_cube_us": 213.17570101351353,
+      "issued_cube_us": 242.6493693693694,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 241.40396396396397,
+        "4": 242.6493693693694,
+        "8": 244.30990990990992
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 102239280,
+        "sparse_kv_max_reuse": 15851520,
+        "sparse_kv_per_query": 94371840,
+        "hidden_input_output": 9437184
+      },
+      "cold_main_bytes_max_reuse": 305818672,
+      "cold_main_bytes_per_query": 384338992,
+      "cold_hbm_max_reuse_us": 191.13666999999998,
+      "cold_hbm_per_query_us": 240.21186999999998,
+      "cold_roofline_max_reuse_us": 242.6493693693694,
+      "cold_roofline_per_query_us": 242.6493693693694,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 94371840,
+        "kv_ring_write": 94371840,
+        "kv_ring_read": 94371840,
+        "qk_score_write_read": 47185920,
+        "probability_write_read": 23592960,
+        "pv_write_read": 188743680,
+        "query_read": 9437184,
+        "packed_output_write": 9437184
+      },
+      "attention_gm_total_bytes": 561512448,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 280.756224,
+        "4": 140.378112,
+        "6": 93.585408
+      },
+      "actual_dynamic_l1_us": 1039.82,
+      "original_multitask_l1_us": 1119.08,
+      "thirty_percent_target_us": 783.3559999999999,
+      "remaining_to_target_us": 256.46400000000006,
+      "issued_cube_peak_occupancy_model": 0.23335709004382432,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b24/l1_v1/result.json"
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "query_tokens": 6,
+      "tokens": 168,
+      "padded_cube_rows": 176,
+      "ob_rows": 176,
+      "policy": {
+        "QUERY_GROUP": 6,
+        "QK_PANEL": 64,
+        "SCORE_TILE": 1024,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": true,
+        "ROOTS": 1,
+        "OA_COLS": 256,
+        "OB_ROWS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": false,
+        "SCALE_PAGE_COALESCING": true,
+        "PLAN_PHYSICAL_ROWS": true,
+        "SPLIT_SCORE_ROWS": true
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 132120576,
+          "issued_ops": 184549376,
+          "useful_peak_us": 1.4529729729729728,
+          "issued_peak_us": 2.0295495495495497,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1409286144,
+          "issued_ops": 1476395008,
+          "useful_peak_us": 3.874594594594595,
+          "issued_peak_us": 4.059099099099099,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 11274289152,
+          "issued_ops": 11811160064,
+          "useful_peak_us": 15.49837837837838,
+          "issued_peak_us": 16.236396396396398,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 704643072,
+          "issued_ops": 738197504,
+          "useful_peak_us": 1.9372972972972975,
+          "issued_peak_us": 2.0295495495495497,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 2818572288,
+          "issued_ops": 2952790016,
+          "useful_peak_us": 7.74918918918919,
+          "issued_peak_us": 8.118198198198199,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 704643072,
+          "issued_ops": 738197504,
+          "useful_peak_us": 1.9372972972972975,
+          "issued_peak_us": 2.0295495495495497,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 2818572288,
+          "issued_ops": 2952790016,
+          "useful_peak_us": 3.874594594594595,
+          "issued_peak_us": 4.059099099099099,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 352321536,
+          "issued_ops": 352321536,
+          "useful_peak_us": 0.9686486486486487,
+          "issued_peak_us": 0.9686486486486487,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 917504,
+          "issued_ops": 1048576,
+          "useful_peak_us": 0.0025225225225225228,
+          "issued_peak_us": 0.002882882882882883,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 88080384,
+          "issued_ops": 92274688,
+          "useful_peak_us": 0.2421621621621622,
+          "issued_peak_us": 0.2536936936936937,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 90195689472,
+          "issued_ops": 93012885504,
+          "useful_peak_us": 123.98891891891891,
+          "issued_peak_us": 127.86162162162161,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 704653824,
+          "issued_ops": 11626610688,
+          "useful_peak_us": 1.937326858108108,
+          "issued_peak_us": 31.965405405405402,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 14092861440,
+          "issued_ops": 14092861440,
+          "useful_peak_us": 38.74594594594595,
+          "issued_peak_us": 38.74594594594595,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 11274289152,
+          "issued_ops": 11811160064,
+          "useful_peak_us": 30.99675675675676,
+          "issued_peak_us": 32.472792792792795,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 11274289152,
+          "issued_ops": 11811160064,
+          "useful_peak_us": 15.49837837837838,
+          "issued_peak_us": 16.236396396396398,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 28,
+        "group_size": 6,
+        "compressed_rows": 32769,
+        "visible_query_row_sum": 5505108,
+        "group_visible": [
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769,
+          32769
+        ],
+        "leaves": 5,
+        "leaf_tiles": 8,
+        "extra_leaves": 0,
+        "core_score_blocks": [
+          41,
+          41,
+          41,
+          41,
+          34,
+          41,
+          41,
+          41,
+          41,
+          34,
+          41,
+          41,
+          41,
+          41,
+          34,
+          41,
+          41,
+          41,
+          41,
+          34,
+          33,
+          33,
+          33,
+          33
+        ],
+        "total_score_blocks": 924,
+        "score_tile": 1024,
+        "qk_ops": 93012885504,
+        "ws_ops": 11626610688,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 1,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 2,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 3,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 0,
+            "leaf": 4,
+            "owner": 4,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 1,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 2,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 3,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 1,
+            "leaf": 4,
+            "owner": 9,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 1,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 2,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 3,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 2,
+            "leaf": 4,
+            "owner": 14,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 1,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 2,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 3,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 3,
+            "leaf": 4,
+            "owner": 19,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 1,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 2,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 3,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 4,
+            "leaf": 4,
+            "owner": 0,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 1,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 2,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 3,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 5,
+            "leaf": 4,
+            "owner": 5,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 1,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 2,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 3,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 6,
+            "leaf": 4,
+            "owner": 10,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 1,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 2,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 3,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 7,
+            "leaf": 4,
+            "owner": 15,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 8,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 1,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 2,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 3,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 8,
+            "leaf": 4,
+            "owner": 20,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 9,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 1,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 2,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 3,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 9,
+            "leaf": 4,
+            "owner": 1,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 10,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 1,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 2,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 3,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 10,
+            "leaf": 4,
+            "owner": 6,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 11,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 1,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 2,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 3,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 11,
+            "leaf": 4,
+            "owner": 11,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 12,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 1,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 2,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 3,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 12,
+            "leaf": 4,
+            "owner": 16,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 13,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 1,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 2,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 3,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 13,
+            "leaf": 4,
+            "owner": 21,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 14,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 1,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 2,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 3,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 14,
+            "leaf": 4,
+            "owner": 2,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 15,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 1,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 2,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 3,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 15,
+            "leaf": 4,
+            "owner": 7,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 16,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 1,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 2,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 3,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 16,
+            "leaf": 4,
+            "owner": 12,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 17,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 1,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 2,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 3,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 17,
+            "leaf": 4,
+            "owner": 17,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 18,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 1,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 2,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 3,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 18,
+            "leaf": 4,
+            "owner": 22,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 19,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 1,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 2,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 3,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 19,
+            "leaf": 4,
+            "owner": 3,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 20,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 1,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 2,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 3,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 20,
+            "leaf": 4,
+            "owner": 8,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 21,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 1,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 2,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 3,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 21,
+            "leaf": 4,
+            "owner": 13,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 22,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 1,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 2,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 3,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 22,
+            "leaf": 4,
+            "owner": 18,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 23,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 1,
+            "owner": 20,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 2,
+            "owner": 21,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 3,
+            "owner": 22,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 23,
+            "leaf": 4,
+            "owner": 23,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 24,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 24,
+            "leaf": 1,
+            "owner": 1,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 24,
+            "leaf": 2,
+            "owner": 2,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 24,
+            "leaf": 3,
+            "owner": 3,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 24,
+            "leaf": 4,
+            "owner": 4,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 25,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 25,
+            "leaf": 1,
+            "owner": 6,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 25,
+            "leaf": 2,
+            "owner": 7,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 25,
+            "leaf": 3,
+            "owner": 8,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 25,
+            "leaf": 4,
+            "owner": 9,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 26,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 26,
+            "leaf": 1,
+            "owner": 11,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 26,
+            "leaf": 2,
+            "owner": 12,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 26,
+            "leaf": 3,
+            "owner": 13,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 26,
+            "leaf": 4,
+            "owner": 14,
+            "valid": 1,
+            "steps": 1
+          },
+          {
+            "group": 27,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 27,
+            "leaf": 1,
+            "owner": 16,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 27,
+            "leaf": 2,
+            "owner": 17,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 27,
+            "leaf": 3,
+            "owner": 18,
+            "valid": 8192,
+            "steps": 8
+          },
+          {
+            "group": 27,
+            "leaf": 4,
+            "owner": 19,
+            "valid": 1,
+            "steps": 1
+          }
+        ],
+        "core_cube_peak_us": [
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          141.14594594594595,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          141.14594594594595,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          141.14594594594595,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          170.2054054054054,
+          141.14594594594595,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946,
+          136.9945945945946
+        ],
+        "balanced_cube_peak_us": 159.82702702702707,
+        "slowest_core_cube_peak_us": 170.2054054054054,
+        "right_bytes_per_block": 917504
+      },
+      "useful_cube_us": 248.7049845157658,
+      "issued_cube_us": 287.0688288288288,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 285.5466666666667,
+        "4": 287.0688288288288,
+        "8": 289.0983783783784
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 119279160,
+        "sparse_kv_max_reuse": 18493440,
+        "sparse_kv_per_query": 110100480,
+        "hidden_input_output": 11010048
+      },
+      "cold_main_bytes_max_reuse": 327073336,
+      "cold_main_bytes_per_query": 418680376,
+      "cold_hbm_max_reuse_us": 204.42083499999998,
+      "cold_hbm_per_query_us": 261.675235,
+      "cold_roofline_max_reuse_us": 287.0688288288288,
+      "cold_roofline_per_query_us": 287.0688288288288,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 110100480,
+        "kv_ring_write": 110100480,
+        "kv_ring_read": 110100480,
+        "qk_score_write_read": 55050240,
+        "probability_write_read": 27525120,
+        "pv_write_read": 220200960,
+        "query_read": 11010048,
+        "packed_output_write": 11010048
+      },
+      "attention_gm_total_bytes": 655097856,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 327.54892800000005,
+        "4": 163.77446400000002,
+        "6": 109.182976
+      },
+      "actual_dynamic_l1_us": 1167.72,
+      "original_multitask_l1_us": 1280.12,
+      "thirty_percent_target_us": 896.0839999999998,
+      "remaining_to_target_us": 271.6360000000002,
+      "issued_cube_peak_occupancy_model": 0.24583704041108212,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h131072_b28/l1_v1/result.json",
+      "observed_score_blocks_match": true,
+      "stage_probe": {
+        "QB": {
+          "roles": 24,
+          "latest_core": 7,
+          "start_us": {
+            "min": 209.86,
+            "median": 219.6,
+            "max": 239.72
+          },
+          "end_us": {
+            "min": 232.1,
+            "median": 306.9,
+            "max": 327.68
+          },
+          "interval_us": {
+            "min": 0.22,
+            "median": 88.91,
+            "max": 99.48
+          },
+          "gm_wait_us": {
+            "min": 0.0,
+            "median": 0.0,
+            "max": 0.0
+          },
+          "other_us": {
+            "min": 0.22,
+            "median": 88.91,
+            "max": 99.48
+          }
+        },
+        "SCORE_CUBE": {
+          "roles": 24,
+          "latest_core": 6,
+          "start_us": {
+            "min": 277.22,
+            "median": 309.29,
+            "max": 385.82
+          },
+          "end_us": {
+            "min": 635.44,
+            "median": 700.29,
+            "max": 728.62
+          },
+          "interval_us": {
+            "min": 288.7,
+            "median": 343.97,
+            "max": 423.64
+          },
+          "gm_wait_us": {
+            "min": 12.32,
+            "median": 36.64,
+            "max": 68.06
+          },
+          "other_us": {
+            "min": 276.38,
+            "median": 329.82,
+            "max": 358.58
+          }
+        },
+        "SCORE_VECTOR": {
+          "roles": 48,
+          "latest_core": 36,
+          "start_us": {
+            "min": 373.9,
+            "median": 378.08,
+            "max": 384.22
+          },
+          "end_us": {
+            "min": 635.88,
+            "median": 709.91,
+            "max": 738.14
+          },
+          "interval_us": {
+            "min": 258.86,
+            "median": 329.87,
+            "max": 360.6
+          },
+          "gm_wait_us": {
+            "min": 4.6,
+            "median": 4.93,
+            "max": 5.62
+          },
+          "other_us": {
+            "min": 253.46,
+            "median": 324.7,
+            "max": 355.68
+          }
+        },
+        "ATTN_CUBE": {
+          "roles": 24,
+          "latest_core": 9,
+          "start_us": {
+            "min": 635.44,
+            "median": 700.29,
+            "max": 728.62
+          },
+          "end_us": {
+            "min": 1055.74,
+            "median": 1075.92,
+            "max": 1089.28
+          },
+          "interval_us": {
+            "min": 336.76,
+            "median": 382.69,
+            "max": 452.18
+          },
+          "gm_wait_us": {
+            "min": 44.94,
+            "median": 72.16,
+            "max": 136.22
+          },
+          "other_us": {
+            "min": 281.32,
+            "median": 304.19,
+            "max": 317.54
+          }
+        },
+        "ATTN_VECTOR": {
+          "roles": 48,
+          "latest_core": 43,
+          "start_us": {
+            "min": 723.34,
+            "median": 747.19,
+            "max": 767.02
+          },
+          "end_us": {
+            "min": 1059.44,
+            "median": 1079.85,
+            "max": 1093.12
+          },
+          "interval_us": {
+            "min": 297.72,
+            "median": 329.46,
+            "max": 369.3
+          },
+          "gm_wait_us": {
+            "min": 10.92,
+            "median": 25.17,
+            "max": 54.92
+          },
+          "other_us": {
+            "min": 282.9,
+            "median": 304.77,
+            "max": 319.32
+          }
+        },
+        "OB": {
+          "roles": 24,
+          "latest_core": 8,
+          "start_us": {
+            "min": 1148.08,
+            "median": 1173.15,
+            "max": 1182.94
+          },
+          "end_us": {
+            "min": 1183.84,
+            "median": 1224.47,
+            "max": 1235.58
+          },
+          "interval_us": {
+            "min": 35.22,
+            "median": 50.15,
+            "max": 51.92
+          },
+          "gm_wait_us": {
+            "min": 1.34,
+            "median": 2.08,
+            "max": 2.2
+          },
+          "other_us": {
+            "min": 33.84,
+            "median": 47.97,
+            "max": 49.8
+          }
+        },
+        "OUT": {
+          "roles": 48,
+          "latest_core": 46,
+          "start_us": {
+            "min": 1132.8,
+            "median": 1161.55,
+            "max": 1191.32
+          },
+          "end_us": {
+            "min": 1264.36,
+            "median": 1270.47,
+            "max": 1275.62
+          },
+          "interval_us": {
+            "min": 74.16,
+            "median": 108.08,
+            "max": 140.68
+          },
+          "gm_wait_us": {
+            "min": 47.36,
+            "median": 78.2,
+            "max": 107.28
+          },
+          "other_us": {
+            "min": 26.32,
+            "median": 31.11,
+            "max": 35.74
+          }
+        }
+      },
+      "stage_probe_source": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/CURRENT_SCORE_PRESSURE_ANALYSIS.json"
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "query_tokens": 6,
+      "tokens": 96,
+      "padded_cube_rows": 96,
+      "ob_rows": 96,
+      "policy": {
+        "QUERY_GROUP": 2,
+        "QK_PANEL": 128,
+        "SCORE_TILE": 768,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": false,
+        "ROOTS": 2,
+        "OA_COLS": 128,
+        "OB_ROWS": 96,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": false,
+        "SCALE_PAGE_COALESCING": false,
+        "PLAN_PHYSICAL_ROWS": true,
+        "SPLIT_SCORE_ROWS": false
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 75497472,
+          "issued_ops": 100663296,
+          "useful_peak_us": 0.8302702702702702,
+          "issued_peak_us": 1.107027027027027,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1610612736,
+          "issued_ops": 1610612736,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 4.428108108108108,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 1610612736,
+          "issued_ops": 1610612736,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 201326592,
+          "issued_ops": 201326592,
+          "useful_peak_us": 0.5535135135135135,
+          "issued_peak_us": 0.5535135135135135,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 524288,
+          "issued_ops": 524288,
+          "useful_peak_us": 0.0014414414414414415,
+          "issued_peak_us": 0.0014414414414414415,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 50331648,
+          "issued_ops": 50331648,
+          "useful_peak_us": 0.13837837837837838,
+          "issued_peak_us": 0.13837837837837838,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 3222011904,
+          "issued_ops": 3623878656,
+          "useful_peak_us": 4.42918918918919,
+          "issued_peak_us": 4.981621621621621,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 25171968,
+          "issued_ops": 452984832,
+          "useful_peak_us": 0.06920608108108109,
+          "issued_peak_us": 1.2454054054054053,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 8053063680,
+          "issued_ops": 8053063680,
+          "useful_peak_us": 22.14054054054054,
+          "issued_peak_us": 22.14054054054054,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 17.712432432432433,
+          "issued_peak_us": 17.712432432432433,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 6442450944,
+          "issued_ops": 6442450944,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 48,
+        "group_size": 2,
+        "compressed_rows": 2049,
+        "visible_query_row_sum": 196656,
+        "group_visible": [
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049
+        ],
+        "leaves": 1,
+        "leaf_tiles": 8,
+        "extra_leaves": 0,
+        "core_score_blocks": [
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6,
+          6
+        ],
+        "total_score_blocks": 144,
+        "score_tile": 768,
+        "qk_ops": 3623878656,
+        "ws_ops": 452984832,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 8,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 9,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 10,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 11,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 12,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 13,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 14,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 15,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 16,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 17,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 18,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 19,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 20,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 21,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 22,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 23,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 24,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 25,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 26,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 27,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 28,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 29,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 30,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 31,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 32,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 33,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 34,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 35,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 36,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 37,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 38,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 39,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 40,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 41,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 42,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 43,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 44,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 45,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 46,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 47,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          }
+        ],
+        "core_cube_peak_us": [
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265,
+          6.2270270270270265
+        ],
+        "balanced_cube_peak_us": 6.227027027027024,
+        "slowest_core_cube_peak_us": 6.2270270270270265,
+        "right_bytes_per_block": 294912
+      },
+      "useful_cube_us": 74.65767454954955,
+      "issued_cube_us": 76.66306306306306,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 75.83279279279279,
+        "4": 76.66306306306306,
+        "8": 77.7700900900901
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 4261920,
+        "sparse_kv_max_reuse": 10567680,
+        "sparse_kv_per_query": 62914560,
+        "hidden_input_output": 6291456
+      },
+      "cold_main_bytes_max_reuse": 199411744,
+      "cold_main_bytes_per_query": 251758624,
+      "cold_hbm_max_reuse_us": 124.63234,
+      "cold_hbm_per_query_us": 157.34914,
+      "cold_roofline_max_reuse_us": 124.63234,
+      "cold_roofline_per_query_us": 157.34914,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 62914560,
+        "kv_ring_write": 62914560,
+        "kv_ring_read": 62914560,
+        "qk_score_write_read": 31457280,
+        "probability_write_read": 15728640,
+        "pv_write_read": 125829120,
+        "query_read": 6291456,
+        "packed_output_write": 6291456
+      },
+      "attention_gm_total_bytes": 374341632,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 187.170816,
+        "4": 93.585408,
+        "6": 62.390272
+      },
+      "actual_dynamic_l1_us": 644.08,
+      "original_multitask_l1_us": 691.42,
+      "thirty_percent_target_us": 483.9939999999999,
+      "remaining_to_target_us": 160.08600000000013,
+      "issued_cube_peak_occupancy_model": 0.11902723739762616,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h8192_b16/l1_v1/result.json"
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "tokens": 192,
+      "padded_cube_rows": 192,
+      "ob_rows": 192,
+      "policy": {
+        "QUERY_GROUP": 2,
+        "QK_PANEL": 128,
+        "SCORE_TILE": 768,
+        "PREFETCH": 1,
+        "TO_L0": true,
+        "BALANCED": false,
+        "ROOTS": 2,
+        "OA_COLS": 256,
+        "OB_ROWS": 128,
+        "OUTPUT_GROUP_PIPELINE": true,
+        "HC_ROW_DEPENDENCIES": true,
+        "ATTENTION_QUERY_METADATA": false,
+        "HC_CONSUMER_REDUCE": false,
+        "QA_M16_PARALLEL": false,
+        "COOPERATIVE_PREFIX": true,
+        "EARLY_ATTENTION_GEOMETRY": true,
+        "LOCAL_ATTENTION_STATS": false,
+        "SCALE_PAGE_COALESCING": false,
+        "PLAN_PHYSICAL_ROWS": true,
+        "SPLIT_SCORE_ROWS": false
+      },
+      "stages": [
+        {
+          "name": "HC_pre 投影",
+          "dtype": "fp32",
+          "useful_ops": 150994944,
+          "issued_ops": 201326592,
+          "useful_peak_us": 1.6605405405405405,
+          "issued_peak_us": 2.214054054054054,
+          "source": "hc_stages.py::hc_project_range"
+        },
+        {
+          "name": "Q_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1610612736,
+          "issued_ops": 1610612736,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 4.428108108108108,
+          "source": "qkv_stages.py::q_a_stage"
+        },
+        {
+          "name": "Q_B",
+          "dtype": "int8",
+          "useful_ops": 12884901888,
+          "issued_ops": 12884901888,
+          "useful_peak_us": 17.712432432432433,
+          "issued_peak_us": 17.712432432432433,
+          "source": "query_projection_stages.py::_q_b_nz_stage"
+        },
+        {
+          "name": "KV 投影",
+          "dtype": "fp16_bf16",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "kv_stages.py::kv_project_stage"
+        },
+        {
+          "name": "主压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 3221225472,
+          "issued_ops": 3221225472,
+          "useful_peak_us": 8.856216216216216,
+          "issued_peak_us": 8.856216216216216,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer 压缩 value/gate",
+          "dtype": "fp16_bf16",
+          "useful_ops": 805306368,
+          "issued_ops": 805306368,
+          "useful_peak_us": 2.214054054054054,
+          "issued_peak_us": 2.214054054054054,
+          "source": "compressor_projection_stages.py"
+        },
+        {
+          "name": "Indexer query 投影",
+          "dtype": "int8",
+          "useful_ops": 3221225472,
+          "issued_ops": 3221225472,
+          "useful_peak_us": 4.428108108108108,
+          "issued_peak_us": 4.428108108108108,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer query Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 402653184,
+          "issued_ops": 402653184,
+          "useful_peak_us": 1.107027027027027,
+          "issued_peak_us": 1.107027027027027,
+          "source": "projection_overlap_stages.py"
+        },
+        {
+          "name": "Indexer compact Hadamard",
+          "dtype": "fp16_bf16",
+          "useful_ops": 1048576,
+          "issued_ops": 1048576,
+          "useful_peak_us": 0.002882882882882883,
+          "issued_peak_us": 0.002882882882882883,
+          "source": "indexer_compressor_output_stages.py"
+        },
+        {
+          "name": "Indexer head weights",
+          "dtype": "fp16_bf16",
+          "useful_ops": 100663296,
+          "issued_ops": 100663296,
+          "useful_peak_us": 0.27675675675675676,
+          "issued_peak_us": 0.27675675675675676,
+          "source": "indexer_query_stages.py"
+        },
+        {
+          "name": "Indexer QK",
+          "dtype": "int8",
+          "useful_ops": 6444023808,
+          "issued_ops": 7247757312,
+          "useful_peak_us": 8.85837837837838,
+          "issued_peak_us": 9.963243243243243,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Indexer WS",
+          "dtype": "fp16_bf16",
+          "useful_ops": 50343936,
+          "issued_ops": 905969664,
+          "useful_peak_us": 0.13841216216216218,
+          "issued_peak_us": 2.4908108108108107,
+          "source": "indexer_score_stages.py"
+        },
+        {
+          "name": "Sparse Attention QK+PV",
+          "dtype": "fp16_bf16",
+          "useful_ops": 16106127360,
+          "issued_ops": 16106127360,
+          "useful_peak_us": 44.28108108108108,
+          "issued_peak_us": 44.28108108108108,
+          "source": "attention_stream_stages.py"
+        },
+        {
+          "name": "O_A",
+          "dtype": "fp16_bf16",
+          "useful_ops": 12884901888,
+          "issued_ops": 12884901888,
+          "useful_peak_us": 35.424864864864865,
+          "issued_peak_us": 35.424864864864865,
+          "source": "output_projection_a_stages.py"
+        },
+        {
+          "name": "O_B",
+          "dtype": "int8",
+          "useful_ops": 12884901888,
+          "issued_ops": 12884901888,
+          "useful_peak_us": 17.712432432432433,
+          "issued_peak_us": 17.712432432432433,
+          "source": "output_projection_b_stages.py"
+        }
+      ],
+      "score_geometry": {
+        "groups": 96,
+        "group_size": 2,
+        "compressed_rows": 2049,
+        "visible_query_row_sum": 393312,
+        "group_visible": [
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049,
+          2048,
+          2049,
+          2049
+        ],
+        "leaves": 1,
+        "leaf_tiles": 8,
+        "extra_leaves": 0,
+        "core_score_blocks": [
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12
+        ],
+        "total_score_blocks": 288,
+        "score_tile": 768,
+        "qk_ops": 7247757312,
+        "ws_ops": 905969664,
+        "leaf_jobs": [
+          {
+            "group": 0,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 1,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 2,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 3,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 4,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 5,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 6,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 7,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 8,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 9,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 10,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 11,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 12,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 13,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 14,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 15,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 16,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 17,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 18,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 19,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 20,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 21,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 22,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 23,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 24,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 25,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 26,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 27,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 28,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 29,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 30,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 31,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 32,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 33,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 34,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 35,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 36,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 37,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 38,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 39,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 40,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 41,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 42,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 43,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 44,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 45,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 46,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 47,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 48,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 49,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 50,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 51,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 52,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 53,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 54,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 55,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 56,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 57,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 58,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 59,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 60,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 61,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 62,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 63,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 64,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 65,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 66,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 67,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 68,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 69,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 70,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 71,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 72,
+            "leaf": 0,
+            "owner": 0,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 73,
+            "leaf": 0,
+            "owner": 1,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 74,
+            "leaf": 0,
+            "owner": 2,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 75,
+            "leaf": 0,
+            "owner": 3,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 76,
+            "leaf": 0,
+            "owner": 4,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 77,
+            "leaf": 0,
+            "owner": 5,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 78,
+            "leaf": 0,
+            "owner": 6,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 79,
+            "leaf": 0,
+            "owner": 7,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 80,
+            "leaf": 0,
+            "owner": 8,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 81,
+            "leaf": 0,
+            "owner": 9,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 82,
+            "leaf": 0,
+            "owner": 10,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 83,
+            "leaf": 0,
+            "owner": 11,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 84,
+            "leaf": 0,
+            "owner": 12,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 85,
+            "leaf": 0,
+            "owner": 13,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 86,
+            "leaf": 0,
+            "owner": 14,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 87,
+            "leaf": 0,
+            "owner": 15,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 88,
+            "leaf": 0,
+            "owner": 16,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 89,
+            "leaf": 0,
+            "owner": 17,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 90,
+            "leaf": 0,
+            "owner": 18,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 91,
+            "leaf": 0,
+            "owner": 19,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 92,
+            "leaf": 0,
+            "owner": 20,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 93,
+            "leaf": 0,
+            "owner": 21,
+            "valid": 2048,
+            "steps": 3
+          },
+          {
+            "group": 94,
+            "leaf": 0,
+            "owner": 22,
+            "valid": 2049,
+            "steps": 3
+          },
+          {
+            "group": 95,
+            "leaf": 0,
+            "owner": 23,
+            "valid": 2049,
+            "steps": 3
+          }
+        ],
+        "core_cube_peak_us": [
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053,
+          12.454054054054053
+        ],
+        "balanced_cube_peak_us": 12.454054054054048,
+        "slowest_core_cube_peak_us": 12.454054054054053,
+        "right_bytes_per_block": 294912
+      },
+      "useful_cube_us": 149.3153490990991,
+      "issued_cube_us": 153.32612612612613,
+      "hc_fp32_peak_sensitivity_us": {
+        "1": 151.66558558558557,
+        "4": 153.32612612612613,
+        "8": 155.5401801801802
+      },
+      "main_matrix_weight_bytes": {
+        "hc_fn": 1572864,
+        "wq_a": 8388608,
+        "wq_b": 33554432,
+        "wkv": 4194304,
+        "main_value_gate": 16777216,
+        "indexer_value_gate": 4194304,
+        "indexer_query": 8388608,
+        "indexer_head": 524288,
+        "hadamard": 32768,
+        "wo_a": 67108864,
+        "wo_b": 33554432
+      },
+      "external_payload_bytes": {
+        "main_matrix_weights": 178290688,
+        "indexer_key_and_scale": 8523840,
+        "sparse_kv_max_reuse": 21135360,
+        "sparse_kv_per_query": 125829120,
+        "hidden_input_output": 12582912
+      },
+      "cold_main_bytes_max_reuse": 220532800,
+      "cold_main_bytes_per_query": 325226560,
+      "cold_hbm_max_reuse_us": 137.833,
+      "cold_hbm_per_query_us": 203.2666,
+      "cold_roofline_max_reuse_us": 153.32612612612613,
+      "cold_roofline_per_query_us": 203.2666,
+      "attention_gm_bytes": {
+        "native_cache_to_aiv": 125829120,
+        "kv_ring_write": 125829120,
+        "kv_ring_read": 125829120,
+        "qk_score_write_read": 62914560,
+        "probability_write_read": 31457280,
+        "pv_write_read": 251658240,
+        "query_read": 12582912,
+        "packed_output_write": 12582912
+      },
+      "attention_gm_total_bytes": 748683264,
+      "attention_gm_bandwidth_sensitivity_us": {
+        "2": 374.341632,
+        "4": 187.170816,
+        "6": 124.780544
+      },
+      "actual_dynamic_l1_us": 933.58,
+      "original_multitask_l1_us": 986.3,
+      "thirty_percent_target_us": 690.41,
+      "remaining_to_target_us": 243.17000000000007,
+      "issued_cube_peak_occupancy_model": 0.16423458742274483,
+      "measurement": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_five_way_latest_20261020/results/h8192_b32/l1_v1/result.json"
+    }
+  ]
+}
