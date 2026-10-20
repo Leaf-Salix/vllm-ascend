@@ -1,14 +1,15 @@
 {
-  "phase": "短gather v5七档精度通过但存在回退；成对压缩原语及完整候选已写，独立工具链在编译",
+  "phase": "八档等待参数数据已收齐；B1真实S6全部通过，100/150/200无稳定差异；默认150",
   "goal_complete": false,
-  "formal_operator_changed": false,
+  "formal_operator_changed": true,
   "push_performed": false,
   "issues": {
     "pypto_count": "https://github.com/hw-native-sys/pypto/issues/3079",
     "ptoas_compare": "https://github.com/hw-native-sys/PTOAS/issues/1647",
     "isa_cpu_ties": "https://github.com/hw-native-sys/pto-isa/issues/364",
     "ptoas_precedence": "https://github.com/hw-native-sys/PTOAS/issues/1648",
-    "ptoas_prefix_view": "https://github.com/hw-native-sys/PTOAS/issues/1649"
+    "ptoas_prefix_view": "https://github.com/hw-native-sys/PTOAS/issues/1649",
+    "pypto_nested_validshape": "https://github.com/hw-native-sys/pypto/issues/3087"
   },
   "sort_tie_task": "task_20261020_172756_41138729719",
   "sort_tie_device_cases": 46,
@@ -35,9 +36,9 @@
   "attention_numerical_candidate_authorized": true,
   "attention_implementation_started": true,
   "next": [
-    "完成成对压缩新工具链编译及接口/生成回归",
-    "先直接原语边界和59组×3次图微验证，再做B16/B28五窗完整配对",
-    "v5结果全部保留，S1/S5及最终采用验证未完成；Attention与失败SDMA候选不重测"
+    "阶段性详细中文本地commit，未经明确允许不push",
+    "后续仍优先128K性能；新增B1可独立分档，但本轮未获得专门等待策略的稳定收益证据",
+    "原七档与B1数据直接用于用户汇总，不重新测试"
   ],
   "attention_cpu": "attention_cpu_b28_v5/result.json",
   "attention_device_task": "task_20261020_190632_268921518547",
@@ -66,7 +67,7 @@
   },
   "topk_full_cpu": "topk_full_cpu_b28_v1/result.json: passed without sample shapes",
   "attention_decision": "用户明确放弃Attention方向；不采用、不扩档、不继续调测，历史证据保留",
-  "topk_decision": "v1精确通过，B16净省-0.46us、B28净省9.10us，未达到20us候选门槛，不扩档",
+  "topk_decision": "v1完整精度通过，B16净省-0.46us、B28净省9.10us；历史按20us门槛停止。门槛已撤销，保留结果供后续判断，不以局部收益代替完整收益。",
   "comparison": "FOCUS_COMPARISON.json",
   "gather_direct_probe_task": "task_20261020_194255_125154822107",
   "memory_profile_task": "task_20261020_195203_1895914849",
@@ -86,12 +87,31 @@
   "topk_pair_design": "TOPK_PAIRED_COMPACTION_DESIGN.md",
   "topk_pair_build_sessions": {
     "pypto": "completed/exit0",
-    "ptoas": 81771
+    "ptoas": "completed/exit0"
   },
   "topk_pair_state": "PAIR_COMPACTION_STATE.json",
   "topk_pair_issues": {
     "ptoas": "https://github.com/hw-native-sys/PTOAS/issues/1650",
     "pypto": "https://github.com/hw-native-sys/pypto/issues/3085"
   },
-  "last_local_phase_commit": "c49ee5b2"
+  "last_local_phase_commit": "ad7f4dec47667433c6c91f8578eece1faa17ff0c",
+  "wait_backoff_tasks": "WAIT_BACKOFF_TASKS.json",
+  "wait_backoff_design": "WAIT_BACKOFF_REVIEW.md",
+  "wait_backoff_result": "WAIT_BACKOFF_PERFORMANCE.json",
+  "wait_backoff_decision": "150对100七档中位改善并通过真实S1/S5；默认150。200六档中位改善但B28首轮/反向复核分别慢2.52/2.98us，保持显式可选。B1单独收取新实测。",
+  "topk_pair_result": "PAIR_PERFORMANCE.json",
+  "topk_pair_decision": "B16净省-1.88us，B28净省10.28us，完整精度通过；当时按20us门槛停止。用户已撤销该门槛，不能再据此排除，但其它区间尚未验证，当前不整体采用。",
+  "candidate_adoption_rule": "没有最低净省微秒门槛，允许稳定小收益累积；保留精度、范围及配对分布检查",
+  "wait_backoff_expansion_tasks": "WAIT_BACKOFF_EXPANSION_TASKS.json",
+  "wait_backoff_seven_result": "WAIT_BACKOFF_SEVEN_PERFORMANCE.json",
+  "wait_backoff_200_tasks": "WAIT_BACKOFF_200_TASKS.json",
+  "wait_backoff_query_tasks": "WAIT_BACKOFF_QUERY_TASKS.json",
+  "wait_backoff_adoption": "WAIT_POLICY_ADOPTION.md",
+  "wait_backoff_all_result": "WAIT_BACKOFF_ALL_PERFORMANCE.json",
+  "wait_backoff_b1_tasks": "WAIT_BACKOFF_B1_TASKS.json",
+  "performance_cases": "PERFORMANCE_CASES.json",
+  "b1_specific_policy_authorized": true,
+  "current_wait_snapshot": "SOURCE_AFTER_WAIT150.json",
+  "wait_backoff_b1_result": "WAIT_BACKOFF_B1_PERFORMANCE.json",
+  "wait_backoff_codegen_matched_cpp": 48
 }

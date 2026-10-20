@@ -86,7 +86,10 @@ def bypass_signal_wait(output, backoff_ticks=0, *, cached=False, ramp_backoff=Fa
         if cached and backoff_ticks == 100 and not ramp_backoff:
             from production_sources import load_operator_module
 
-            transformed, change = load_operator_module("wait_codegen").rewrite_wait_source(source)
+            # 历史静态复现明确请求100；不能跟随正式动态默认间隔的后续更新。
+            transformed, change = load_operator_module("wait_codegen").rewrite_wait_source(
+                source, backoff_ticks=backoff_ticks
+            )
             (directory / "original.cpp").write_text(source)
             (directory / "bypass_wait.cpp").write_text(transformed)
             (directory / "change.json").write_text(

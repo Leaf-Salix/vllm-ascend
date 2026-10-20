@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""仅在本测试进程比较 GM 信号轮询的 50/100/150 tick 固定退避。
+"""仅在本测试进程比较 GM 信号轮询的 50/100/150/200 tick 固定退避。
 
 整体流程：
 1. 复用已验证的完整 CSA、同址输入/状态、图重放与五窗交替 L1 测试。
-2. 候选和参考加载同一份正式动态 SPMD 的冻结源码；参考始终为 100 tick。
+2. 候选和参考加载同一份正式动态 SPMD 的冻结源码；参考默认 100 tick，
+   新增 200 对 150 时显式指定 reference-wait-ticks=150。
 3. 仅在现有编译回调内改变等待 helper 的计时常量，不改数学、分核、
    DCCI/volatile 读取、发布端或 payload fence，也不叠加 Top-K 压缩候选。
 4. 核对真实 CCEC 输入里的常量，防止复用未应用变换的旧产物。
 
 本文件不修改正式 wait_codegen.py 或共享安装。每次运行使用独立构建目录，
-关闭磁盘编译缓存。50 与 150 分别配同轮 100 对照，不拿跨轮耗时拼接收益。
+关闭磁盘编译缓存。只比较同轮参考与候选，不拿跨轮耗时拼接收益。
 """
 
 import argparse
@@ -29,8 +30,8 @@ DEFAULT_DELAY = DELAY_PREFIX + "100)"
 
 def rewrite_ticks(source, ticks, original_rewrite):
     """从原 100 tick 变换严格派生，只允许一个计时常量发生变化。"""
-    if ticks not in (50, 100, 150):
-        raise ValueError("本轮只验证 50、100、150 tick")
+    if ticks not in (50, 100, 150, 200):
+        raise ValueError("本轮只验证 50、100、150、200 tick")
     rewritten, audit = original_rewrite(source)
     if rewritten.count(DEFAULT_DELAY) != 1 or audit["backoff_syscnt_ticks"] != 100:
         raise AssertionError("原等待实现已改变，不能静默套用旧实验")
@@ -80,13 +81,16 @@ def normalize_comments(text):
 def main():
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--candidate-wait-ticks", type=int, choices=(50, 150), required=True)
+    parser.add_argument("--candidate-wait-ticks", type=int, choices=(50, 150, 200), required=True)
+    parser.add_argument("--reference-wait-ticks", type=int, choices=(100, 150, 200), default=100)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--spmd-source", type=Path, required=True)
     parser.add_argument("--source-matrix-reference", type=Path, required=True)
     args, forwarded = parser.parse_known_args()
     if args.spmd_source.resolve() != args.source_matrix_reference.resolve():
         raise ValueError("退避实验要求候选和参考使用同一个冻结算子目录")
+    if args.candidate_wait_ticks == args.reference_wait_ticks:
+        raise ValueError("参考与候选间隔相同，无需重复测试")
     if args.output.exists():
         raise FileExistsError(args.output)
     if "--wait-backoff" not in forwarded:
@@ -109,7 +113,7 @@ def main():
         if directory.name == "codegen_probe":
             role, ticks = "candidate", args.candidate_wait_ticks
         elif directory.name == "spmd_reference_codegen":
-            role, ticks = "reference", 100
+            role, ticks = "reference", args.reference_wait_ticks
         else:
             raise ValueError(f"未识别的编译角色：{directory}")
         # 此时 run_frozen_full 已绑定公共冻结源码；提前导入会破坏其隔离检查。
@@ -155,7 +159,7 @@ def main():
         if not report["passed"]:
             raise AssertionError("完整精度/图重放/状态检查未通过")
         if sorted(row["role"] for row in audit_rows) != ["candidate", "reference"]:
-            raise AssertionError("候选和 100 tick 参考未分别完成独立编译")
+            raise AssertionError("候选和指定间隔的参考未分别完成独立编译")
         if not report["compiler_comparison"]["same_operator_source"]:
             raise AssertionError("退避对照混入了其他算子源码差异")
         originals = [Path(row["probe"]) / "original.cpp" for row in audit_rows]
@@ -179,7 +183,7 @@ def main():
             (args.output / "WAIT_BACKOFF_REQUEST.json").write_text(
                 json.dumps(dict(
                     candidate_ticks=args.candidate_wait_ticks,
-                    reference_ticks=100,
+                    reference_ticks=args.reference_wait_ticks,
                     source=str(args.spmd_source.resolve()),
                     cache_disabled=True,
                     completed_codegen_audits=audit_rows,
