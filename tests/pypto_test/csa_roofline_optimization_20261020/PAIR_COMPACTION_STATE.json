@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-20T23:20:55.791084+08:00",
+  "formal_operator_changed": false,
+  "adopted": false,
+  "goal_complete": false,
+  "pushed": false,
+  "pypto": {
+    "tree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-pair-compact-20261020",
+    "head": "8c360367e0239779a93b495ecf7910e26a9f1fc6",
+    "build": "completed/exit0",
+    "api_tests": "pair_pypto_ut_v2.xml: 56 passed",
+    "full_backport_tests": "pair_full_literal_ut_v2.xml: 18 passed",
+    "cpu_backport": "full_literal_upstream_backport/result.json: PASS"
+  },
+  "ptoas": {
+    "tree": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/ptoas-csa-pair-compact-20261020",
+    "base": "b48c84ebfea88c58439181e76f5e00fd12950418",
+    "changes": "uncommitted prototype",
+    "build_session": 81771,
+    "build_status": "running; revalidated with write_stdin",
+    "build_log": "pair_ptoas_build_v3.log"
+  },
+  "helper_cc_compilation": "pair_helper_cpp_v2/result.json: PASS, no device execution, not actual new PTOAS",
+  "frontend": "pair_frontend_v2/result.json: expected old PTOAS unknown-op rejection; new PyPTO lowered successfully; not complete backend PASS",
+  "source": "source_topk_paired",
+  "design": "TOPK_PAIRED_COMPACTION_DESIGN.md",
+  "issues": {
+    "ptoas": "https://github.com/hw-native-sys/PTOAS/issues/1650",
+    "pypto": "https://github.com/hw-native-sys/pypto/issues/3085"
+  },
+  "existing_full_fix": "FULL_LITERAL_UPSTREAM_FIX.json; upstream PR2846 subset backported, no duplicate issue",
+  "device_tasks": [],
+  "next": [
+    "poll existing build session81771; do not start a duplicate build",
+    "after build exit0: run_pair_ptoas_regressions.py and actual new-PTOAS run_pair_probe.py --cpu-only",
+    "after CPU passes: submit paired_compact_direct_probe.py and run_pair_probe.py through task-submit",
+    "only after exact device probes pass: same-toolchain 5-window B16/B28 full compare using source_topk_paired",
+    "do not reuse old payload_query_regression source symlink as new candidate; bind new source for S1/S5 before adoption"
+  ],
+  "failures_retained": {
+    "build_v1": "GitCode cann-cmake fetch unavailable; reused existing source path, not binaries",
+    "build_v2": "prototype getEffects definition lacked namespace; corrected locally",
+    "ut_v1": "shared editable finder intercepted PyPTO; process-only source finder fixed binding",
+    "helper_v1": "test Tile constructor passed two arguments with one dynamic extent; corrected test",
+    "frontend_v1": "inherited tile.full ConstInt/FP32 bug; upstream fix backported"
+  }
+}

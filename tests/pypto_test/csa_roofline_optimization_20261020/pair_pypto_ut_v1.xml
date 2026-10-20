@@ -1,0 +1,1332 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="25" skipped="0" tests="56" time="8.861" timestamp="2026-10-20T22:56:40.344544+08:00" hostname="liteserver-hps-365a-00001"><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-1]" time="0.012"><failure message="assert [1, 1] == [1, 8]&#10;  &#10;  At index 1 diff: 1 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde9f8c7c0&gt;
+rows = 1, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 1] == [1, 8]
+E         
+E         At index 1 diff: 1 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-2]" time="0.012"><failure message="assert [1, 2] == [1, 8]&#10;  &#10;  At index 1 diff: 2 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde421eda0&gt;
+rows = 2, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 2] == [1, 8]
+E         
+E         At index 1 diff: 2 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-2]" time="0.004"><failure message="assert [1, 2] == [1, 8]&#10;  &#10;  At index 1 diff: 2 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde9f8c760&gt;
+rows = 2, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 2] == [1, 8]
+E         
+E         At index 1 diff: 2 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-7]" time="0.004"><failure message="assert [1, 7] == [1, 8]&#10;  &#10;  At index 1 diff: 7 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde421e5f0&gt;
+rows = 7, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 7] == [1, 8]
+E         
+E         At index 1 diff: 7 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-8]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-7]" time="0.004"><failure message="assert [1, 7] == [1, 8]&#10;  &#10;  At index 1 diff: 7 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdea21b580&gt;
+rows = 7, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 7] == [1, 8]
+E         
+E         At index 1 diff: 7 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-9]" time="0.004"><failure message="assert [1, 9] == [1, 16]&#10;  &#10;  At index 1 diff: 9 != 16&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffde421e7d0&gt;
+rows = 9, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 9] == [1, 16]
+E         
+E         At index 1 diff: 9 != 16
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-8]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-16]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-9]" time="0.004"><failure message="assert [1, 9] == [1, 16]&#10;  &#10;  At index 1 diff: 9 != 16&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdea21bf70&gt;
+rows = 9, count_dtype = int32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 9] == [1, 16]
+E         
+E         At index 1 diff: 9 != 16
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype0]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype1]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype0-16]" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype2]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_physical_alignment_preserves_valid_rows[count_dtype1-1]" time="0.004"><failure message="assert [1, 1] == [1, 8]&#10;  &#10;  At index 1 diff: 1 != 8&#10;  Use -v to get more diff">self = &lt;operators.test_gather_compare.TestTileGatherCompareTypes object at 0xfffdea21bd90&gt;
+rows = 1, count_dtype = uint32
+
+    @pytest.mark.parametrize("rows", [1, 2, 7, 8, 9, 16])
+    @pytest.mark.parametrize("count_dtype", [pl.INT32, pl.UINT32])
+    def test_count_physical_alignment_preserves_valid_rows(self, rows, count_dtype):
+        """#3079：小行数计数仍有合法 UB 容量，只暴露实际有效行数。"""
+        @pl.program
+        class Program:
+            @pl.function(type=pl.FunctionType.InCore)
+            def main(self, src: pl.Tensor[[rows, 64], pl.FP32],
+                     out: pl.Out[pl.Tensor[[1, rows], count_dtype]]):
+                values = pl.load(src, [0, 0], [rows, 64])
+                tmp = pl.tile.create([1, 4096], pl.UINT8)
+                ids, counts = pl.tile.gather_compare(
+                    values, pl.cast(0.5, pl.FP32), tmp, cmp_mode="gt",
+                    out_cols=64, count_dtype=count_dtype,
+                )
+                pl.store(counts, [0, 0], out)
+                return out
+    
+        _, count_type = _tuple_elements(_find_call(Program, "tile.gather_compare"))
+&gt;       assert _static_shape(count_type) == [1, ((rows + 7) // 8) * 8]
+E       assert [1, 1] == [1, 8]
+E         
+E         At index 1 diff: 1 != 8
+E         Use -v to get more diff
+
+tests/ut/ir/operators/test_gather_compare.py:118: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_valid_src_dtype[src_dtype3]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_count_dtype_selects_cdst_dtype" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_destinations_are_not_arguments" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype2]" time="0.297" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype0]" time="0.294" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype3]" time="0.006" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype1]" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_invalid_cmp_mode_string" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareTypes" name="test_kvalue_dtype_mismatch_raises" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_invalid_cmp_mode_int" time="0.004" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_default_eq" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype0]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_gt_with_offset" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype1]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTileGatherCompareCmpMode" name="test_int_cmp_mode" time="0.005" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype2]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype3]" time="0.011" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_valid_src_dtype[src_dtype3]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype0]" time="0.011" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_compare_with_offset" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_mutually_exclusive_index_and_compare" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype1]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_mutually_exclusive_mask_and_compare" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare.TestTensorGatherCompareTypes" name="test_invalid_src_dtype_raises[src_dtype2]" time="0.003" /><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[eq-1]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 1, mode = 'eq'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde412bdf0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde412a170&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[eq-9]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 9, mode = 'eq'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdea0b3df0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde9fa8490&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[eq-3]" time="0.007"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 3, mode = 'eq'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde421ce20&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde4129510&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[gt-1]" time="0.007"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 1, mode = 'gt'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdea0a0ca0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffdea0a2230&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[eq-8]" time="0.007"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 8, mode = 'eq'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde412acb0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde412a260&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[gt-3]" time="0.008"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 3, mode = 'gt'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde9f37070&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde9f34790&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[gt-9]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 9, mode = 'gt'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde415be80&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde41ffb50&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[gt-8]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 8, mode = 'gt'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde9f8fbb0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffdea088550&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[ge-1]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 1, mode = 'ge'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde41e9420&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde41ea0e0&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[ge-3]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 3, mode = 'ge'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdea21afb0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffdea21ad40&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[ge-8]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 8, mode = 'ge'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde415b0a0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde41f8b80&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_three_outputs_and_runtime_offset[ge-9]" time="0.005"><failure message="pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare">rows = 9, mode = 'ge'
+
+    @pytest.mark.parametrize("rows", [1, 3, 8, 9])
+    @pytest.mark.parametrize("mode", ["eq", "gt", "ge"])
+    def test_compact_three_outputs_and_runtime_offset(rows, mode):
+&gt;       call = _find_call(_build_compact_program(rows=rows, mode=mode), "tile.compact_compare")
+
+tests/ut/ir/operators/test_gather_compare.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdea0a0f70&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffdea0a3d60&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_rejects_invalid_contract[kwargs0-supports eq/gt/ge]" time="0.008"><failure message="AssertionError: Regex pattern did not match.&#10; Regex: 'supports eq/gt/ge'&#10; Input: 'Unknown pl.tile operation: compact_compare'">kwargs = {'mode': 'lt'}, message = 'supports eq/gt/ge'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+        with pytest.raises(InvalidOperationError, match=message):
+&gt;           _build_compact_program(**kwargs)
+
+tests/ut/ir/operators/test_gather_compare.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde412b0d0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde41282b0&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError
+
+During handling of the above exception, another exception occurred:
+
+kwargs = {'mode': 'lt'}, message = 'supports eq/gt/ge'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+&gt;       with pytest.raises(InvalidOperationError, match=message):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'supports eq/gt/ge'
+E        Input: 'Unknown pl.tile operation: compact_compare'
+
+tests/ut/ir/operators/test_gather_compare.py:327: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_rejects_invalid_contract[kwargs1-divisible by 8]" time="0.005"><failure message="AssertionError: Regex pattern did not match.&#10; Regex: 'divisible by 8'&#10; Input: 'Unknown pl.tile operation: compact_compare'">kwargs = {'capacity': 31}, message = 'divisible by 8'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+        with pytest.raises(InvalidOperationError, match=message):
+&gt;           _build_compact_program(**kwargs)
+
+tests/ut/ir/operators/test_gather_compare.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffdea2192d0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffdea21b3a0&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError
+
+During handling of the above exception, another exception occurred:
+
+kwargs = {'capacity': 31}, message = 'divisible by 8'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+&gt;       with pytest.raises(InvalidOperationError, match=message):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'divisible by 8'
+E        Input: 'Unknown pl.tile operation: compact_compare'
+
+tests/ut/ir/operators/test_gather_compare.py:327: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_rejects_invalid_contract[kwargs2-cannot exceed]" time="0.005"><failure message="AssertionError: Regex pattern did not match.&#10; Regex: 'cannot exceed'&#10; Input: 'Unknown pl.tile operation: compact_compare'">kwargs = {'capacity': 128}, message = 'cannot exceed'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+        with pytest.raises(InvalidOperationError, match=message):
+&gt;           _build_compact_program(**kwargs)
+
+tests/ut/ir/operators/test_gather_compare.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde415abf0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde41fe6e0&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError
+
+During handling of the above exception, another exception occurred:
+
+kwargs = {'capacity': 128}, message = 'cannot exceed'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+&gt;       with pytest.raises(InvalidOperationError, match=message):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'cannot exceed'
+E        Input: 'Unknown pl.tile operation: compact_compare'
+
+tests/ut/ir/operators/test_gather_compare.py:327: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_rejects_invalid_contract[kwargs3-divisible by 64]" time="0.006"><failure message="AssertionError: Regex pattern did not match.&#10; Regex: 'divisible by 64'&#10; Input: 'Unknown pl.tile operation: compact_compare'">kwargs = {'cols': 72}, message = 'divisible by 64'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+        with pytest.raises(InvalidOperationError, match=message):
+&gt;           _build_compact_program(**kwargs)
+
+tests/ut/ir/operators/test_gather_compare.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde9f8f7c0&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde9f3f460&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError
+
+During handling of the above exception, another exception occurred:
+
+kwargs = {'cols': 72}, message = 'divisible by 64'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+&gt;       with pytest.raises(InvalidOperationError, match=message):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'divisible by 64'
+E        Input: 'Unknown pl.tile operation: compact_compare'
+
+tests/ut/ir/operators/test_gather_compare.py:327: AssertionError</failure></testcase><testcase classname="tests.ut.ir.operators.test_gather_compare" name="test_compact_rejects_invalid_contract[kwargs4-INT32 scalar offset]" time="0.005"><failure message="AssertionError: Regex pattern did not match.&#10; Regex: 'INT32 scalar offset'&#10; Input: 'Unknown pl.tile operation: compact_compare'">kwargs = {'offset_dtype': int64}, message = 'INT32 scalar offset'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+        with pytest.raises(InvalidOperationError, match=message):
+&gt;           _build_compact_program(**kwargs)
+
+tests/ut/ir/operators/test_gather_compare.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/ut/ir/operators/test_gather_compare.py:277: in _build_compact_program
+    class Program:
+../../pypto/python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+../../pypto/python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+../../pypto/python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+../../pypto/python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+../../pypto/python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+../../pypto/python/pypto/language/parser/ast_parser.py:2022: in parse_assignment
+    value_expr = self.parse_expression(stmt.value)
+../../pypto/python/pypto/language/parser/ast_parser.py:6344: in parse_expression
+    return self.parse_call(expr)
+../../pypto/python/pypto/language/parser/ast_parser.py:6655: in parse_call
+    return self.parse_op_call(call)
+../../pypto/python/pypto/language/parser/ast_parser.py:6778: in parse_op_call
+    return self._parse_tile_op(op_name, call)
+../../pypto/python/pypto/language/parser/ast_parser.py:9142: in _parse_tile_op
+    return self._dispatch_ir_builder_op(ir_op.tile, "pl.tile", op_name, call)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;pypto.language.parser.ast_parser.ASTParser object at 0xfffde418fb50&gt;
+module = &lt;module 'pypto.ir.op.tile_ops' from '/data/pyptouser/qinchuanyu/pto-eager/pypto/python/pypto/ir/op/tile_ops.py'&gt;
+module_name = 'pl.tile', op_name = 'compact_compare'
+call = &lt;ast.Call object at 0xfffde418da50&gt;
+
+    def _dispatch_ir_builder_op(self, module: Any, module_name: str, op_name: str, call: ast.Call) -&gt; ir.Expr:
+        """Dispatch to a raw IR-builder op (no DSL wrapping).
+    
+        Used as a fallback when the DSL layer doesn't expose an op that the
+        printer emitted (e.g. pass-internal lowerings like ``tile.gather_mask``,
+        ``tile.mrgsort_format1``). IR builders take ``span=`` explicitly and
+        accept raw ``ir.Expr`` arguments — no DSL wrap/unwrap round-trip.
+        """
+        if not hasattr(module, op_name):
+&gt;           raise InvalidOperationError(
+                f"Unknown {module_name} operation: {op_name}",
+                span=self.span_tracker.get_span(call),
+                hint=f"Check if '{op_name}' is a valid {module_name} operation",
+            )
+E           pypto.language.parser.diagnostics.exceptions.InvalidOperationError: Unknown pl.tile operation: compact_compare
+
+../../pypto/python/pypto/language/parser/ast_parser.py:9153: InvalidOperationError
+
+During handling of the above exception, another exception occurred:
+
+kwargs = {'offset_dtype': int64}, message = 'INT32 scalar offset'
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"mode": "lt"}, "supports eq/gt/ge"),
+            ({"capacity": 31}, "divisible by 8"),
+            ({"capacity": 128}, "cannot exceed"),
+            ({"cols": 72}, "divisible by 64"),
+            ({"offset_dtype": pl.INT64}, "INT32 scalar offset"),
+        ],
+    )
+    def test_compact_rejects_invalid_contract(kwargs, message):
+&gt;       with pytest.raises(InvalidOperationError, match=message):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'INT32 scalar offset'
+E        Input: 'Unknown pl.tile operation: compact_compare'
+
+tests/ut/ir/operators/test_gather_compare.py:327: AssertionError</failure></testcase></testsuite></testsuites>
