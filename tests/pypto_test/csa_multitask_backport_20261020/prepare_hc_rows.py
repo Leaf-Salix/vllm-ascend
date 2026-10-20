@@ -97,6 +97,7 @@ def main():
                 scope="HC widen/投影/RAW/pre-post/norm局部MIX；Sinkhorn独立；其它CSA保持多task",
                 preserved="原四K左折叠、BF16边界、RMS分段、动态实际T及尾块；CONSUMER_REDUCE=False",
                 lifetime="单调用4阶段信号显式清零；真实行owner发布/等待，业务cache维护沿来源",
+                wait_policy={"backoff": "cached100", "unit_family": "hc"},
                 status="source_prepared_no_device_evidence",
             ),
             ensure_ascii=False,

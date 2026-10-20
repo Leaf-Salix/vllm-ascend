@@ -1,0 +1,59 @@
+{
+  "candidate": "attention_rows_v3",
+  "cpu_result": "runs/attention_rows_v3/cpu_lower_v1/result.json",
+  "source_checks": {
+    "cube_math_ast_equal": true,
+    "vector_math_ast_equal": true,
+    "plan_math_only_worker_stride_change": true
+  },
+  "mixed_dispatch": [
+    {
+      "group": "attention_plan_rows_pipeline",
+      "kernel_ids": [
+        63,
+        64,
+        64
+      ]
+    },
+    {
+      "group": "attention_plan_rows_pipeline_0",
+      "kernel_ids": [
+        67,
+        68,
+        68
+      ]
+    },
+    {
+      "group": "attention_plan_rows_pipeline_1",
+      "kernel_ids": [
+        71,
+        72,
+        72
+      ]
+    },
+    {
+      "group": "attention_plan_rows_pipeline_2",
+      "kernel_ids": [
+        75,
+        76,
+        76
+      ]
+    }
+  ],
+  "signal_bytes": 24576,
+  "actual_plan_tile_rows": 8,
+  "plan_workers": 48,
+  "attention_groups": 24,
+  "device_execution": false,
+  "cpu_failures": [
+    {
+      "candidate": "attention_rows_v1",
+      "reason": "JIT cannot infer q_flat metadata through t_heads scalar alias"
+    },
+    {
+      "candidate": "attention_rows_v2",
+      "reason": "explicit Tensor annotations do not replace missing callsite view metadata"
+    }
+  ],
+  "fix": "expand t_heads into tensor-derived t_dim * H in reshape; same runtime value"
+}

@@ -30,6 +30,10 @@ def task_name(name):
         ("output_vector", "output_mix_aiv"),
         ("hc_row_cube", "hc_prefix_aic"),
         ("hc_row_vector", "hc_prefix_aiv"),
+        ("attention_rows_cube", "attention_plan_mix_aic"),
+        ("attention_rows_vector", "attention_plan_mix_aiv"),
+        ("attention_plan_rows_pipeline_aic", "attention_plan_mix_aic"),
+        ("attention_plan_rows_pipeline_aiv", "attention_plan_mix_aiv"),
     ):
         if name.startswith(prefix):
             return label
@@ -94,7 +98,7 @@ def summarize(path):
         summary["candidate_scope_change"] = (
             "候选Score AIV包含Top-K及信号等待；等待源码策略见candidate_wait_backoff和candidate_wait_codegen/audit.json"
         )
-    if report["candidate"].startswith(("output_groups", "hc_rows")):
+    if report["candidate"].startswith(("output_groups", "hc_rows", "attention_rows")):
         summary["candidate_scope_change"] = (
             "局部MIX核内时间合并多个数学阶段与软等待；与原分离task不能按同名数学直接相减"
         )

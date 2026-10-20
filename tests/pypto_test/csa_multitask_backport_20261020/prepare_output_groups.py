@@ -91,6 +91,7 @@ def main():
                 scope="24组局部MIX执行O_A/组量化/O_B/HCpost；完整CSA保持多task",
                 preserved="组内K/量化/八组累加/BF16边界；原实际T策略和NZ物理权重",
                 lifetime="每次调用独占运行时arena flags，早期显式清零；尾段等待init和packed",
+                wait_policy={"backoff": "cached100", "unit_family": "output"},
                 limits="私有实验仅CANN9.2/NZ2；未证明设备结果或性能",
             ),
             ensure_ascii=False,

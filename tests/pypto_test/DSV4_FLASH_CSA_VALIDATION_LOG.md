@@ -17371,3 +17371,178 @@ QA首启86.876→86.960μs，Score首启392.384→383.824μs。不能将完整�
 七档汇总要求等待编译策略一致，禁止混入默认与100 tick样本。新结果将
 初始冻结清单中的score_split标签明确为initial_candidate，并另记真实
 候选及candidate.json，避免把首轮清单误当本轮源码描述。
+
+## 651. 2026-10-20：收齐HC退避和输出缓存对照，输出组合暂不采用
+
+650节的四个排队任务均completed/exit0，输出、索引/score、cache/state、
+保护区及图检查通过。以下为同轮五窗完整CSA L1，单位μs；不同表中的
+“当前”含义不同，不能将两项收益相加。
+
+HC等待消融的当前为`hc_rows_v7`，候选`hc_rows_wait100`仅在测试编译
+进程替换HC局部MIX的四个等待点，仍未接入正式service：
+
+|档位|当前 min/mean/max|100 tick min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|828.58/843.66/863.28|822.14/833.62/841.82|805.80/808.96/816.28|
+|128K/B28|1182.90/1201.43/1213.40|1183.84/1194.34/1204.60|1166.44/1176.20/1188.14|
+
+mean分别改善1.190%/0.590%，max分别降低21.46/8.80μs。HC候选继续保留，
+但它比同轮单SPMD仍慢3.049%/1.542%，不能据此宣称七档目标完成。
+核内/时序另看：B16 HC AIV核内mean 22.487→20.892μs，但norm就绪
+71.544→73.640μs、QA首启76.264→76.500μs；B28 HC AIV核内mean
+29.648→30.662μs，norm就绪77.120→90.640μs、QA首启80.704→95.904μs，
+而Score首启387.396→369.408μs。完整收益包含后续任务时序联动，
+并非两档HC数学均加速。见
+[HC_WAIT_PHASES.json](csa_multitask_backport_20261020/HC_WAIT_PHASES.json)。
+
+输出组合的当前为`qa_m16_v3`，候选`output_groups_ob_cache_v1`同时包含
+按组局部MIX、来源100 tick等待及保留原多task的O_B默认缓存：
+
+|档位|当前 min/mean/max|输出组合 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|814.14/820.70/830.80|820.74/832.28/842.80|775.30/794.49/845.44|
+|128K/B28|1166.28/1187.91/1195.48|1156.66/1200.74/1218.68|1155.14/1163.18/1180.90|
+
+相对当前mean分别退化1.411%/1.080%，max也上升。B28虽有更低min，
+不足以抵消其它窗口的退化；此组合暂不采用，也不扩七档。B16单SPMD
+最后一窗845.44μs明显高于其余775.30～787.78μs，完整保留该样本，
+没有挑选中位数或跨轮最佳值替换正式mean。
+
+原始五窗、核内统计和功能证据见
+[RESULTS.json](csa_multitask_backport_20261020/RESULTS.json)及其中四个
+`runs/*/h131072_b*_v1/result.json`链接。正式路径仍为core_v2＋QA M16，
+没有把实验等待回调或失败的输出融合混入正式算法。
+
+## 652. 2026-10-20：Plan→Attention按行就绪适配，CPU通过待设备
+
+继续迁移冻结13259f92中5da1bf0c已验证的`wait_attention_plan_rows`。
+本次只处理Plan→Attention这一条边，Top-K仍是独立完整任务，未宣称
+已经完成整个Score→Top-K→Plan→Attention的行流水。
+
+私有`attention_rows_v3`基于qa_m16_v3，将既有八行Plan数学放入QK/PV的
+AIV前段，由48个AIV轮转负责八行tile。每个AIV先完成本人全部tile，再
+发布一次完成信号，随后才能等其它owner。AIC组`g`和两个AIV实际读取
+`query=g+k*24`，只等待`(query//8)%48`这些Plan生产者。与来源一样，
+不把FIFO ACK当作GM结果完成；业务发布/获取、FFTS三槽流控均保留。
+
+24KiB独占信号每次调用由已有rope_cs任务清零，清零时间计入完整CSA，
+不新增初始化dispatch，不使用未初始化的代际。QK/PV仍保留原rope、
+Top-K及cache真实依赖，其余CSA阶段保持多task。原先Plan可以单独提前
+运行，局部融合后会受整个QK/PV入口依赖约束；这一潜在损失也需以完整
+L1判断，不能仅凭去掉一个task就判定受益。
+
+数学提取检查：QK Cube及原双AIV循环的AST与当前多task逐项一致，
+Plan数学仅改变worker数/步长，八行向量化、动态实际T、物理页快速路径、
+分页fallback、softmax/量化及输出BF16边界不变。没有引入来源通用
+query_request扫描，也没有把plan改为逐行向量计算。
+
+v1/v2在CPU元数据推导时失败：JIT不能通过二次Scalar别名`t_heads`推导
+传入子函数的q_flat。补Tensor注解不足以修复调用点缺失的view元数据；
+v3在reshape处将该别名展开为等价的`t_dim*H`，实际维度仍来自q。
+完整lowering、PTOAS及AICPU链接通过，四个物理页/本地统计策略均生成
+AIC＋AIV0＋AIV1，未修改共享编译器。
+
+见[prepare_attention_rows.py](csa_multitask_backport_20261020/prepare_attention_rows.py)
+和[ATTENTION_ROWS_CODEGEN.json](csa_multitask_backport_20261020/ATTENTION_ROWS_CODEGEN.json)。
+CPU通过不代表CCEC或设备通过；B5/T30及同图metadata/padding已排队，
+先验证功能，再决定两长档的完整收益测量。
+
+## 653. 2026-10-20：Plan行就绪通过设备，补齐来源等待策略
+
+attention_rows_v3的B5/T30及同图metadata/padding、长B16/B28均
+completed/exit0，输出、索引/score、状态、保护及图通过。两长档采用
+默认TWAIT，当前仍为qa_m16_v3；五窗完整CSA L1，单位μs：
+
+|档位|当前 min/mean/max|Plan行就绪 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|837.40/848.33/858.42|831.62/845.84/868.96|790.24/796.20/805.28|
+|128K/B28|1145.12/1195.31/1215.88|1167.82/1193.36/1213.08|1148.78/1159.92/1174.64|
+
+mean只减少2.492/1.944μs，B16 max反而上升10.54μs。候选的Attention
+入口包含Plan和软等待，不能与旧QK/PV当作相同数学直接相减：B16组跨度
+153.804→180.248μs、B28 233.428→276.844μs，而组首启分别前移
+21.120/41.864μs。最后完成仍分别晚5.324/1.552μs，说明提前进入局部
+MIX没有直接转化为尾端提前。见
+[ATTENTION_ROWS_PHASES.json](csa_multitask_backport_20261020/ATTENTION_ROWS_PHASES.json)。
+
+用户指出应该直接复用另一session的100 tick退避。这是本轮迁移遗漏：
+此前带入了Python信号接口，但默认编译没有带入配套等待源码变换。
+HC和输出后来虽已补上，Plan候选仍落回默认TWAIT。上述记录保留为默认
+等待消融，不能据它宣称完整复现了来源策略或据此结束此方向。
+
+现新增attention_rows_wait100_v1，直接调用冻结
+`sources/spmd/wait_codegen.py::rewrite_wait_source`，没有另写等待算法。
+第一次CPU检查仅因改写范围遗漏独立constexpr核函数单元而被拒绝；
+纳入同一Attention的Cube/Vector单元后，完整CPU编译通过。四个实际
+MIX单元各有2个等待点，另有5个独立生成单元各1个等待点，均为100 tick；
+writer及payload缓存维护保留。尚未进行该版本的设备性能验证。
+
+后续HC、输出、Attention生成器将配套等待策略写入候选清单，测试入口
+默认继承；只有显式`--candidate-wait-backoff off`才作为默认TWAIT消融。
+既有冻结私有包保持原样，旧清单的required_compile_option也可读取，
+避免同一个历史名字在后台编译期间被改写。
+
+接口来源亦已核实：`pl.system.signal_wait/notify`来自本地PyPTO提交
+2dfa7f120，当前GitHub main及feat/kernel-mode-integration-test对应
+system_ops.py均没有这两个接口。它们是临时本地GM同步扩展，底层复用
+TWAIT/TNOTIFY；100 tick则是独立的测试编译变换，不能称作上游Python
+接口自带能力。
+
+## 654. 2026-10-20：协同前段补全联动候选及工具链统一
+
+prepare_cooperative_prefix.py基于qa_m16_v3，按冻结e91e9f17的协同前段
+次序拆开QA/QR与QB编排：Indexer query投影先出，随后主Compressor投影，
+再让4核M256 Hadamard与已有20核QB获得派发资格。主KV移至QB投影完成后，
+不等QB的Vector反量化；head权重同样沿来源等待主压缩投影。各阶段继续
+独立task，投影K序、量化、compact offsets、state读后提交和cache保护
+保持原实现。
+
+这个多task适配用完整QB的TaskId作为KV前置，粒度比来源逐核QB→KV粗，
+需实测是否抵消前段收益。沿原Native入口的单dense-tile容量合同，不能
+把单个TaskId扩大解释成任意多tile的完成事件。cooperative_prefix_v1
+完整CPU编译通过，尚未进行设备验证，不作为已采用优化。
+
+用户要求单SPMD和多task使用同一份PyPTO/PTOAS/Simpler。现有测试本就
+通过同一bootstrap、同进程加载并初始化一次TMR；固定版本分别为
+2dfa7f120 / e5c1c432 / 57e49923。抽查已有attention_rows_v3长B16的
+239次PTOAS调用，全部指向同一冻结可执行文件，没有分侧换编译器。
+
+同时发现旧单SPMD编译probe导入共享正式目录的wait_codegen，虽当前
+文本与冻结副本一致，仍存在后续并发修改风险。现改为单SPMD与候选都
+通过同一个backoff_probe读取冻结副本。新增toolchain_identity.py，
+记录实际Python/扩展模块、Simpler SDK根目录、PTOAS可执行文件及三仓
+Git版本；各侧首次编译前核对相同路径，结束时检查实际PTOAS调用记录。
+没有文件hash扫描或额外设备探针。CPU入口核对通过；新编译probe的
+单SPMD设备执行仍随下一轮配对验证，不提前宣称已完成新轮性能测试。
+
+## 655. 2026-10-20：仅用历史记录汇总三种计时口径
+
+用户要求不新测，比较多task含AICPU外层、多task AICore L1、动态
+单SPMD。本次只读取既有结果；下面每行采用最近同时有外层和L1的
+配对记录，五窗min/mean/max，单位μs。单SPMD列同样为L1。
+
+|档位|多task含AICPU外层|多task AICore L1|动态单SPMD L1|
+|---|---|---|---|
+|128K/B4|546.00/579.65/634.60|467.62/483.54/504.02|475.04/483.95/506.56|
+|128K/B8|661.28/691.98/729.92|613.20/624.09/644.98|634.30/643.81/659.76|
+|128K/B16|912.88/956.81/1060.86|821.06/839.09/849.20|783.42/789.51/795.70|
+|128K/B24|1128.18/1181.60/1299.50|1031.64/1056.34/1068.02|1031.02/1041.68/1050.12|
+|128K/B28|1257.94/1333.75/1473.38|1178.60/1196.92/1223.06|1161.64/1169.66/1190.80|
+|8K/B16（旧core_v2）|745.50/776.63/810.44|650.48/656.03/664.90|652.46/658.72/662.38|
+|8K/B32|1076.82/1145.71/1355.28|935.44/978.98/1019.06|933.04/937.50/942.14|
+
+除明确标记的8K/B16旧版，均取正式qa_m16_v3的current或candidate角色，
+不把未采用的Hadamard/输出/Plan实验候选冒充正式路径。较新但只有L1的
+三档另列，避免跨轮把旧外层和新L1拼起来计算差值：
+
+|档位|较新正式多task L1|同轮动态单SPMD L1|
+|---|---|---|
+|128K/B16|837.40/848.33/858.42|790.24/796.20/805.28|
+|128K/B28|1145.12/1195.31/1215.88|1148.78/1159.92/1174.64|
+|8K/B16|669.90/680.60/699.30|635.58/645.56/655.10|
+
+范围统一HC_pre＋输入RMSNorm＋CSA＋HC_post。外层是DFX窗口外NPU event
+包围一次graph.replay，包含AICPU/运行时等成本；L1为最早incore开始到
+最晚结束，包含内部间隙。两类窗口独立采集，差值不等于纯AICPU耗时。
+所有路径、原始五窗及额外的单SPMD外层记录见
+[LATEST_THREE_METRICS_20261020.json](csa_multitask_backport_20261020/LATEST_THREE_METRICS_20261020.json)。

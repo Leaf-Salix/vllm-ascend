@@ -11,7 +11,7 @@ def phase(name):
     name = name.lstrip("_").split("(")[0]
     if name.startswith("indexer_score_topk_native_pair"):
         return "score"
-    if name.startswith("qk_pv_"):
+    if name.startswith(("qk_pv_", "attention_rows_cube", "attention_rows_vector", "attention_plan_rows_pipeline")):
         return "attention"
     if name.startswith(("proj_a_mm", "proj_b_mm", "quant", "proj_b_act_hc_post", "output_cube", "output_vector")):
         return "output"

@@ -193,13 +193,26 @@ def main():
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
-    parser.add_argument("--candidate-wait-backoff", choices=("off", "cached100"), default="off")
-    parser.add_argument("--candidate-wait-units", choices=("score", "output", "hc"), default="score")
+    parser.add_argument(
+        "--candidate-wait-backoff",
+        choices=("off", "cached100"),
+        help="默认继承候选清单的来源等待策略；显式off仅用于默认TWAIT消融",
+    )
+    parser.add_argument("--candidate-wait-units", choices=("score", "output", "hc", "attention"))
     parser.add_argument(
         "--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original"
     )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if not args.candidate.isidentifier():
+        raise ValueError("候选必须是标识符")
+    from candidate_wait_probe import resolve_wait_policy
+
+    candidate_manifest = HERE / "sources" / args.candidate / "candidate.json"
+    manifest = json.loads(candidate_manifest.read_text()) if candidate_manifest.exists() else {}
+    args.candidate_wait_backoff, args.candidate_wait_units = resolve_wait_policy(
+        manifest, args.candidate_wait_backoff, args.candidate_wait_units
+    )
     if args.compile_legacy_qr and not args.compile_only:
         raise ValueError("旧QR入口探针必须使用--compile-only")
     if args.dump_final_ir and not args.compile_only:
@@ -242,9 +255,8 @@ def main():
     report["provenance"]["candidate"] = args.candidate
     report["provenance"]["initial_changed_files"] = report["provenance"].pop("changed_files", [])
     report["provenance"]["initial_status"] = report["provenance"].pop("status", None)
-    candidate_manifest = HERE / "sources" / args.candidate / "candidate.json"
-    if candidate_manifest.exists():
-        report["provenance"]["candidate_manifest"] = json.loads(candidate_manifest.read_text())
+    if manifest:
+        report["provenance"]["candidate_manifest"] = manifest
     try:
         import dsv4_csa_env
 
@@ -253,12 +265,13 @@ def main():
         import pypto.torch
         import torch
         import torch_npu
-        from compile_diagnostics import compilation_probe
+        from candidate_wait_probe import backoff_probe
         from compiler_context import record_invocations
         from pypto import passes
         from pypto.runtime import CompileOptions
         from signal_checks import signal_padding_ok, signal_view
         from source_loader import load_binding
+        from toolchain_identity import check_ptoas_invocations, check_same, record
         from wave_signal_checks import WaveSignalVerifier
 
         original = load_multitask(HERE / "sources/baseline", "original")
@@ -269,8 +282,6 @@ def main():
         def candidate_compile_scope():
             if args.candidate_wait_backoff == "off":
                 return contextlib.nullcontext()
-            from candidate_wait_probe import backoff_probe
-
             return backoff_probe(
                 output / "candidate_wait_codegen",
                 HERE / "sources/spmd/wait_codegen.py",
@@ -284,6 +295,8 @@ def main():
             "simpler": os.environ["HCA_SIMPLER_ROOT"],
             "atomic_add": os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"],
         }
+        report["toolchain_identity"] = record()
+        report["shared_wait_source"] = str(HERE / "sources/spmd/wait_codegen.py")
         if args.compile_layout_probe:
             from layout_probe import make_probe
 
@@ -528,12 +541,15 @@ def main():
 
             for label, hidden in (("A", input_a), ("B", -input_a)):
                 for side, entry in entries.items():
+                    if label == "A":
+                        check_same(report["toolchain_identity"])
+                        report.setdefault("same_toolchain_roles", []).append(side)
                     reset(hidden)
                     before = set((output / "build_output").glob("*/kernel_config.py"))
                     report["stage"] = f"compile_call_{side}_{label}"
                     save(output, report)
                     probe = (
-                        compilation_probe(output / "spmd_codegen", wait_backoff=True, phase_clock=False)
+                        backoff_probe(output / "spmd_codegen", HERE / "sources/spmd/wait_codegen.py", "single_spmd")
                         if side == "single_spmd" and label == "A"
                         else contextlib.nullcontext()
                     )
@@ -611,6 +627,9 @@ def main():
                     args.history,
                     args.batch,
                 )
+            report["actual_ptoas_invocations"] = check_ptoas_invocations(
+                output / "COMPILER_INVOCATIONS.jsonl", report["toolchain_identity"]
+            )
             report.update(
                 stage="complete",
                 passed=True,
