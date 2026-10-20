@@ -19,6 +19,8 @@ def phase(name):
         return "hc_pre"
     if name.startswith("qproj_dequant"):
         return "query_dequant"
+    if name.startswith("qr_proj_matmul"):
+        return "qa"
     if name.startswith("indexer_head_coefficients"):
         return "coefficients"
     return None

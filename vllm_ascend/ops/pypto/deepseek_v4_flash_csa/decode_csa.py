@@ -57,7 +57,7 @@ from .layout import (
     STATE_TABLE_COLUMNS_DYN,
 )
 from .nz_mode import BF16_WEIGHT_LAYOUT, QUANT_WEIGHT_LAYOUT, WO_A_WEIGHT_LAYOUT
-from .qkv_proj_rope import qkv_proj_rope
+from .qkv_proj_rope import QR_M_TILE, qkv_proj_rope_policy
 
 # Dynamic shape variables.
 B_DYN = pl.dynamic("B_DYN")  # per-request axis
@@ -390,7 +390,13 @@ def _make_decode_csa_entry(*, host_metadata: bool):
         with pl.scope():
             # Projection-chain dependency marker.
             late_dep = pl.system.task_dummy(deps=[rope_tid])
-            q, qa_tid = qkv_proj_rope(
+            # 66882634：长G6且16<T<32；按实际T选择，不枚举batch点。
+            qa_m16_parallel = pl.cast(0, pl.INT32)
+            if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
+                if t_dim >= LONG_S6_MIN_QUERY_ROWS:
+                    if t_dim < 2 * QR_M_TILE:
+                        qa_m16_parallel = pl.cast(1, pl.INT32)
+            q, qa_tid = qkv_proj_rope_policy(
                 x_normed_t,
                 wq_a,
                 wq_b,
@@ -405,6 +411,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 qr,
                 qr_scale,
                 late_dep,
+                qa_m16_parallel,
             )
 
             ori_block_num = pl.tensor.dim(kv_cache, 0)

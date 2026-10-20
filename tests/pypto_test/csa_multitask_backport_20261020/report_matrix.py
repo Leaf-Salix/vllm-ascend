@@ -11,10 +11,12 @@ from summarize import HERE, summarize
 CASES = [(131072, b) for b in (4, 8, 16, 24, 28)] + [(8192, b) for b in (16, 32)]
 
 
-def build(candidate, attempt):
+def build(candidate, attempt, case_attempts=None):
+    case_attempts = case_attempts or {}
     rows, environments = [], []
     for history, batch in CASES:
-        path = HERE / "runs" / candidate / f"h{history}_b{batch}_{attempt}" / "result.json"
+        selected_attempt = case_attempts.get((history, batch), attempt)
+        path = HERE / "runs" / candidate / f"h{history}_b{batch}_{selected_attempt}" / "result.json"
         raw = json.loads(path.read_text())
         if not raw["passed"] or raw["stage"] != "complete":
             raise ValueError(f"七档尚未完整通过：{path}")
@@ -59,21 +61,26 @@ def build(candidate, attempt):
                 reduction_vs_original_pct=100 * (before - now) / before,
                 reduction_vs_spmd_pct=100 * (reference - now) / reference,
                 boundary_replay=raw.get("boundary_replay", {}).get("passed"),
+                current=raw.get("current"),
+                reduction_vs_current_pct=raw["l1"].get("candidate_reduction_vs_current_pct"),
                 scope=raw["scope"],
             )
         )
     if any(e != environments[0] for e in environments[1:]):
         raise ValueError("七档环境不一致，不能按同一冻结环境汇总")
     regions = {}
+    metrics = ["reduction_vs_original_pct", "reduction_vs_spmd_pct"]
+    if all(r["reduction_vs_current_pct"] is not None for r in rows):
+        if len({r["current"] for r in rows}) != 1:
+            raise ValueError("当前版本消融参考不一致，不能汇总其收益")
+        metrics.append("reduction_vs_current_pct")
     for history in (131072, 8192):
         subset = [r for r in rows if r["history"] == history]
-        regions[str(history)] = {
-            key: statistics.mean(r[key] for r in subset)
-            for key in ("reduction_vs_original_pct", "reduction_vs_spmd_pct")
-        }
+        regions[str(history)] = {key: statistics.mean(r[key] for r in subset) for key in metrics}
     return dict(
         candidate=candidate,
         attempt=attempt,
+        case_attempts={f"{h}/{b}": v for (h, b), v in case_attempts.items()},
         passed=True,
         environment=environments[0],
         scope="同轮/同卡/同根输入；L1最早incore到最晚结束，外层单列；非整模型",
@@ -88,10 +95,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--attempt", default="matrix_v1")
+    parser.add_argument(
+        "--case-attempt",
+        action="append",
+        default=[],
+        help="显式指定已完成代表档的history:batch:attempt，不自动选择最佳结果",
+    )
     args = parser.parse_args()
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
         raise ValueError("候选和attempt必须是标识符")
-    report = build(args.candidate, args.attempt)
+    case_attempts = {}
+    for item in args.case_attempt:
+        history, batch, attempt = item.split(":")
+        if not attempt.isidentifier() or (int(history), int(batch)) in case_attempts:
+            raise ValueError("档位attempt必须唯一且为标识符")
+        case_attempts[(int(history), int(batch))] = attempt
+    report = build(args.candidate, args.attempt, case_attempts)
     destination = HERE / f"MATRIX_{args.candidate}_{args.attempt}.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(destination)

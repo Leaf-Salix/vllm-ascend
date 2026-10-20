@@ -186,16 +186,20 @@ def main():
     parser.add_argument("--windows", type=int, default=5)
     parser.add_argument("--parse-only", action="store_true")
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--compile-legacy-qr", action="store_true", help="仅CPU编译HCA使用的旧QR入口")
     parser.add_argument("--compile-layout-probe", action="store_true")
     parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
+    parser.add_argument("--candidate-wait-backoff", choices=("off", "cached100"), default="off")
     parser.add_argument(
         "--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original"
     )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.compile_legacy_qr and not args.compile_only:
+        raise ValueError("旧QR入口探针必须使用--compile-only")
     if args.functional_only and args.measure_outer:
         raise ValueError("功能用例不采外层或L1性能")
     if args.boundary_replay and (args.batch < 2 or args.history < 2):
@@ -220,6 +224,7 @@ def main():
         history=args.history,
         candidate=args.candidate,
         current=args.current,
+        candidate_wait_backoff=args.candidate_wait_backoff,
         performance_measured=False,
         query_tokens=6,
         indexer_page_pattern=args.indexer_page_pattern,
@@ -245,6 +250,14 @@ def main():
         candidate_adapter = load_multitask(HERE / "sources" / args.candidate, "candidate")
         current_adapter = load_multitask(HERE / "sources" / args.current, "current") if args.current else None
         donor = load_binding(HERE / "sources/spmd", "backport_reference")
+
+        def candidate_compile_scope():
+            if args.candidate_wait_backoff == "off":
+                return contextlib.nullcontext()
+            from candidate_wait_probe import backoff_probe
+
+            return backoff_probe(output / "candidate_wait_codegen", HERE / "sources/spmd/wait_codegen.py")
+
         report["environment"] = {
             "cann": os.environ.get("ASCEND_HOME_PATH"),
             "pypto": pypto.__file__,
@@ -276,19 +289,27 @@ def main():
             )
             return
         if args.parse_only or args.compile_only:
-            candidate_adapter.decode_csa_tp1_layer_test._get_dep_graph()
+            compile_entry = candidate_adapter.decode_csa_tp1_layer_test
+            if args.compile_legacy_qr:
+                from qr_compat_probe import make_probe
+
+                helper = importlib.import_module(candidate_adapter.__package__ + ".qkv_proj_rope").q_proj_qr
+                compile_entry = make_probe(helper)
+                report["compile_scope"] = "仅HCA旧七参数QR入口，未运行HCA设备计算"
+            compile_entry._get_dep_graph()
             if args.compile_only:
-                artifact = candidate_adapter.decode_csa_tp1_layer_test._resolve_kernel_artifact(
-                    (),
-                    {
-                        "config": CompileOptions(
-                            platform="a2a3",
-                            output_dir=str(output / "kernel"),
-                            memory_planner=passes.MemoryPlanner.PYPTO,
-                        )
-                    },
-                    allow_signature_mode=True,
-                )
+                with candidate_compile_scope():
+                    artifact = compile_entry._resolve_kernel_artifact(
+                        (),
+                        {
+                            "config": CompileOptions(
+                                platform="a2a3",
+                                output_dir=str(output / "kernel"),
+                                memory_planner=passes.MemoryPlanner.PYPTO,
+                            )
+                        },
+                        allow_signature_mode=True,
+                    )
                 report["compiled_artifact"] = str(artifact.output_dir)
                 from pypto.runtime.kernel_compiler import KernelCompiler
 
@@ -491,6 +512,8 @@ def main():
                         if side == "single_spmd" and label == "A"
                         else contextlib.nullcontext()
                     )
+                    if side == "multitask_candidate" and label == "A":
+                        probe = candidate_compile_scope()
                     with probe:
                         entry()
                     torch.npu.synchronize()

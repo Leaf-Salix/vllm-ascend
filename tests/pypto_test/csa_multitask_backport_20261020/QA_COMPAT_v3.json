@@ -1,0 +1,32 @@
+{
+  "original_signatures_equal": {
+    "q_proj_qa": true,
+    "q_proj_qr": true,
+    "q_proj_rope": true,
+    "qkv_proj_rope": true
+  },
+  "active_v2_v3_algorithm_ast_equal_after_three_internal_renames": true,
+  "incore_cpp_count": 96,
+  "incore_cpp_executable_lines_equal": false,
+  "comparison_rule": "只忽略整行//注释；未改写任何C++执行语句",
+  "full_csa_cpu_compile_result": "runs/qa_m16_v3/cpu_v1/result.json",
+  "legacy_qr_cpu_result": "runs/qa_m16_v3/cpu_qr_compat_v3/result.json",
+  "device_evidence_reused": [
+    "runs/qa_m16_v2/h131072_b4_v1/result.json",
+    "runs/qa_m16_v2/h131072_b5_tail_v1/result.json",
+    "runs/qa_m16_v2/h131072_b3_g2_v1/result.json"
+  ],
+  "new_device_testing_for_api_wrappers": false,
+  "legacy_qr_cpu_passed": true,
+  "incore_cpp_note": "未将带inline局部变量重编号的C++称为逐字等价；active算法AST仅函数重命名，设备结果沿用V2，V3另做完整CSA及旧QR入口CPU编译。",
+  "legacy_probe_failures": [
+    {
+      "result": "runs/qa_m16_v3/cpu_qr_compat_v1/result.json",
+      "reason": "测试入口误包CORE_GROUP，导致动态编排临时Tensor被当作核内Tile；未执行设备"
+    },
+    {
+      "result": "runs/qa_m16_v3/cpu_qr_compat_v2/result.json",
+      "reason": "测试入口未绑定返回TaskId，AICPU生成空变量名；按HCA真实调用绑定后通过"
+    }
+  ]
+}

@@ -351,19 +351,60 @@ def _q_proj_qa_nz(
 _q_proj_qa_tiles = _q_proj_qa_nz if BF16_WEIGHT_NZ else _q_proj_qa_nd
 
 
+
+QA_M16_WORKER_LIMIT = QR_N_BLOCKS * QR_FIXED_M_GROUPS
+
+
 @pl.jit.inline(auto_scope=False)
-def q_proj_qa(
+def q_proj_qa_m16_parallel(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
     tile_base: pl.Scalar[pl.INDEX],
     tile_rows: pl.Scalar[pl.INDEX],
 ):
+    """66882634：每个M16/N128独立输出分核，K次序及实际尾行保持。"""
+    launch_workers = pl.min(
+        QA_M16_WORKER_LIMIT,
+        QR_N_BLOCKS * ((tile_rows + QR_M_TILE - 1) // QR_M_TILE),
+    )
+    with pl.spmd(launch_workers, name_hint="qr_proj_matmul_m16",
+                 allow_early_resolve=True) as qa_tid:
+        pl.set_cache_policy(wq_a, pl.CachePolicy.BYPASS)
+        worker_id = pl.tile.get_block_idx()
+        tokens = tile_rows
+        m16_blocks = (tokens + QR_M_TILE - 1) // QR_M_TILE
+        for logical_worker in pl.range(pl.max(worker_id, 0), QR_N_BLOCKS * m16_blocks, QA_M16_WORKER_LIMIT):
+            column = (logical_worker % QR_N_BLOCKS) * QR_N_TILE
+            row = (logical_worker // QR_N_BLOCKS) * QR_M_TILE
+            m16_acc = pl.create_tensor([QR_M_TILE, QR_N_TILE], dtype=pl.FP32)
+            for k_block in pl.pipeline(D // QR_K_TILE, stage=2):
+                k0 = k_block * QR_K_TILE
+                valid_rows = pl.min(QR_M_TILE, tokens - row)
+                m16_x = pl.slice(x, [QR_M_TILE, QR_K_TILE], [tile_base + row, k0],
+                                 valid_shape=[valid_rows, QR_K_TILE])
+                m16_weight = wq_a[column : column + QR_N_TILE, k0 : k0 + QR_K_TILE]
+                m16_acc = pl.matmul_acc(m16_acc, m16_x, m16_weight, b_trans=True, init_cond=(k_block == 0))
+            qr_fp32 = pl.assemble(qr_fp32, m16_acc, [row, column])
+    return qa_tid
+
+
+@pl.jit.inline(auto_scope=False)
+def q_proj_qa_policy(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
+    tile_base: pl.Scalar[pl.INDEX],
+    tile_rows: pl.Scalar[pl.INDEX],
+    qa_m16_parallel: pl.Scalar[pl.INT32],
+):
     """Keep complete K traversal; partition independent M/N outputs for fixed-K."""
     if ATOMIC_ADD == 1:
         qa_tid = _q_proj_qa_tiles(
             x, wq_a, qr_fp32, tile_base, tile_rows, QR_DENSE_M_TILE, 1,
         )
+    elif qa_m16_parallel != 0:
+        qa_tid = q_proj_qa_m16_parallel(x, wq_a, qr_fp32, tile_base, tile_rows)
     elif tile_rows < QR_FIXED_SMALL_ROWS:
         qa_tid = _q_proj_qa_tiles(
             x, wq_a, qr_fp32, tile_base, tile_rows, QR_FIXED_SMALL_M_TILE, QR_FIXED_M_GROUPS,
@@ -376,7 +417,7 @@ def q_proj_qa(
 
 
 @pl.jit.inline(auto_scope=False)
-def q_proj_qr(
+def q_proj_qr_policy(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
@@ -384,6 +425,7 @@ def q_proj_qr(
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
     qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
     qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
+    qa_m16_parallel: pl.Scalar[pl.INT32],
 ):
     """Q LoRA, RMSNorm and quantization -- the half the indexer query chain needs.
 
@@ -402,7 +444,7 @@ def q_proj_qr(
             qr_fp32 = pl.create_tensor([qr_t_matmul, Q_LORA], dtype=pl.FP32)
             # Bind before the array update: nested inline expansion otherwise
             # creates a reserved auto-name in the current PyPTO compiler.
-            qa_task = q_proj_qa(x, wq_a, qr_fp32, tile_base, tile_rows)
+            qa_task = q_proj_qa_policy(x, wq_a, qr_fp32, tile_base, tile_rows, qa_m16_parallel)
             qa_tids[0] = qa_task
 
             q_proj_qr_normalize(qr_fp32, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, tile_base, tile_rows)
@@ -772,7 +814,7 @@ def q_proj_q(
 
 
 @pl.jit.inline(auto_scope=False)
-def q_proj_rope(
+def q_proj_rope_policy(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
     wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
@@ -784,12 +826,13 @@ def q_proj_rope(
     q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
     qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
     qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+    qa_m16_parallel: pl.Scalar[pl.INT32],
 ):
     """Q LoRA, RMSNorm, quantization, and RoPE over bounded dense tiles."""
     qr_i8_matmul = pl.create_tensor([QPROJ_T_PAD, Q_LORA], dtype=pl.INT8)
     # The quant scale rides the qr_i8 -> qproj_matmul -> dequant chain.
     qr_scale_pad_store = pl.create_tensor([QPROJ_T_PAD, 1], dtype=pl.FP32, manual_dep=True)
-    qa_tid = q_proj_qr(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store)
+    qa_tid = q_proj_qr_policy(x, wq_a, gamma_cq, qr, qr_scale, qr_i8_matmul, qr_scale_pad_store, qa_m16_parallel)
     q_seq_dep = pl.system.task_dummy(deps=[])
     q_proj_q(
         x,
@@ -1069,6 +1112,56 @@ def kv_proj_rope(
 
 
 @pl.jit.inline(auto_scope=False)
+def qkv_proj_rope_policy(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
+    wkv: pl.Tensor[[D, HEAD_DIM], pl.BF16],
+    rope_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+    rope_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+    gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+    gamma_ckv: pl.Tensor[[HEAD_DIM], pl.BF16],
+    q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
+    kv: pl.Tensor[[T_DYN, HEAD_DIM], pl.BF16],
+    qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+    late_dep: pl.Scalar[pl.TASK_ID],
+    qa_m16_parallel: pl.Scalar[pl.INT32],
+):
+    """Fused q + kv projection: both branches share one token axis and one rope table."""
+    t_dim = pl.tensor.dim(x, 0)
+    q_rope_sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
+    q_rope_swap_idx = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.INT32)
+    rope_prepare(rope_sin, q_rope_sin_signed, q_rope_swap_idx)
+    qa_tid = q_proj_rope_policy(
+        x,
+        wq_a,
+        wq_b,
+        wq_b_scale,
+        gamma_cq,
+        rope_cos,
+        q_rope_sin_signed,
+        q_rope_swap_idx,
+        q,
+        qr,
+        qr_scale,
+        qa_m16_parallel,
+    )
+    kv_proj_rope(
+        x,
+        wkv,
+        gamma_ckv,
+        rope_cos,
+        q_rope_sin_signed,
+        q_rope_swap_idx,
+        kv,
+        late_dep,
+    )
+    return q, qa_tid
+
+
+@pl.jit.inline(auto_scope=False)
 def qkv_proj_rope(
     x: pl.Tensor[[T_DYN, D], pl.BF16],
     wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
@@ -1086,31 +1179,99 @@ def qkv_proj_rope(
     late_dep: pl.Scalar[pl.TASK_ID],
 ):
     """Fused q + kv projection: both branches share one token axis and one rope table."""
-    t_dim = pl.tensor.dim(x, 0)
-    q_rope_sin_signed = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.FP32)
-    q_rope_swap_idx = pl.create_tensor([t_dim, ROPE_DIM], dtype=pl.INT32)
-    rope_prepare(rope_sin, q_rope_sin_signed, q_rope_swap_idx)
-    qa_tid = q_proj_rope(
+    return qkv_proj_rope_policy(
+        x,
+        wq_a,
+        wq_b,
+        wq_b_scale,
+        wkv,
+        rope_cos,
+        rope_sin,
+        gamma_cq,
+        gamma_ckv,
+        q,
+        kv,
+        qr,
+        qr_scale,
+        late_dep,
+        pl.cast(0, pl.INT32),
+    )
+
+
+@pl.jit.inline(auto_scope=False)
+def q_proj_qa(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    qr_fp32: pl.Tensor[[QPROJ_MM_T_DYN, Q_LORA], pl.FP32],
+    tile_base: pl.Scalar[pl.INDEX],
+    tile_rows: pl.Scalar[pl.INDEX],
+):
+    """Keep complete K traversal; partition independent M/N outputs for fixed-K."""
+    return q_proj_qa_policy(
+        x,
+        wq_a,
+        qr_fp32,
+        tile_base,
+        tile_rows,
+        pl.cast(0, pl.INT32),
+    )
+
+
+@pl.jit.inline(auto_scope=False)
+def q_proj_qr(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+    qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+    qr_i8_matmul: pl.Tensor[[QPROJ_T_PAD, Q_LORA], pl.INT8],
+    qr_scale_pad_store: pl.Tensor[[QPROJ_T_PAD, 1], pl.FP32],
+):
+    """Q LoRA, RMSNorm and quantization -- the half the indexer query chain needs.
+
+    The two staging tensors are held by the caller so the qproj half can be issued
+    separately; they are rewritten per dense tile, so a caller that runs more than one
+    tile iteration must let the qproj half finish before the next one starts. Every
+    current caller has t_dim <= PREFILL_DENSE_TILE, i.e. a single iteration.
+    """
+    return q_proj_qr_policy(
+        x,
+        wq_a,
+        gamma_cq,
+        qr,
+        qr_scale,
+        qr_i8_matmul,
+        qr_scale_pad_store,
+        pl.cast(0, pl.INT32),
+    )
+
+
+@pl.jit.inline(auto_scope=False)
+def q_proj_rope(
+    x: pl.Tensor[[T_DYN, D], pl.BF16],
+    wq_a: pl.Tensor[[Q_LORA, D], pl.BF16, BF16_WEIGHT_LAYOUT],
+    wq_b: pl.Tensor[[Q_LORA, H * HEAD_DIM], pl.INT8, QUANT_WEIGHT_LAYOUT],
+    wq_b_scale: pl.Tensor[[H * HEAD_DIM], pl.FP32],
+    gamma_cq: pl.Tensor[[Q_LORA], pl.BF16],
+    rope_cos_il: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+    rope_sin_signed: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
+    rope_swap_idx: pl.Tensor[[T_DYN, ROPE_DIM], pl.INT32],
+    q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
+    qr: pl.Tensor[[T_DYN, Q_LORA], pl.INT8],
+    qr_scale: pl.Tensor[[T_DYN, 1], pl.FP32],
+):
+    """Q LoRA, RMSNorm, quantization, and RoPE over bounded dense tiles."""
+    return q_proj_rope_policy(
         x,
         wq_a,
         wq_b,
         wq_b_scale,
         gamma_cq,
-        rope_cos,
-        q_rope_sin_signed,
-        q_rope_swap_idx,
+        rope_cos_il,
+        rope_sin_signed,
+        rope_swap_idx,
         q,
         qr,
         qr_scale,
+        pl.cast(0, pl.INT32),
     )
-    kv_proj_rope(
-        x,
-        wkv,
-        gamma_ckv,
-        rope_cos,
-        q_rope_sin_signed,
-        q_rope_swap_idx,
-        kv,
-        late_dep,
-    )
-    return q, qa_tid

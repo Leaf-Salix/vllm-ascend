@@ -23,6 +23,8 @@ def task_name(name):
     name = name.lstrip("_")
     if name.startswith("indexer_score_topk_native_pair"):
         return "score_aic" if "_aic" in name else "score_aiv"
+    if name.startswith("qr_proj_matmul"):
+        return "qa_aic"
     if name.startswith("qk_pv_"):
         if "_aic" in name:
             return "qk_pv_aic"
@@ -41,6 +43,7 @@ def summarize(path):
         "stage": report["stage"],
         "passed": report.get("passed", False),
         "candidate": report["candidate"],
+        "candidate_wait_backoff": report.get("candidate_wait_backoff", "off"),
         "current": report.get("current"),
         "indexer_page_pattern": report.get("indexer_page_pattern", "original"),
         "batch": report["batch"],
@@ -78,6 +81,10 @@ def summarize(path):
         summary["candidate_scope_change"] = (
             "候选Score AIV还包含根发布/等待和最终Top-K；不能与原分离版Score AIV直接作等工作量核内比较"
         )
+    if report["candidate"].startswith("fused_wait"):
+        summary["candidate_scope_change"] = (
+            "候选Score AIV包含Top-K及信号等待；等待源码策略见candidate_wait_backoff和candidate_wait_codegen/audit.json"
+        )
     timings, per_window = {}, []
     for window in l1["windows"]:
         if window["side"] == "single_spmd":
@@ -107,6 +114,10 @@ def main():
     args = parser.parse_args()
     paths = args.results or sorted((HERE / "runs").glob("*/h*/result.json"))
     results = [summarize(path.resolve()) for path in paths]
+    # 每窗的原始trace及统计仍保留在runs；提交汇总只留完整CSA五窗和task聚合，
+    # 避免为每个历史case重复展开相同的几十组task字段。
+    for result in results:
+        result.pop("task_windows", None)
     destination = HERE / "RESULTS.json"
     destination.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
     for result in results:

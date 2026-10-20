@@ -1,0 +1,23 @@
+{
+  "source": "sources/qa_m16_v3",
+  "target": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/vllm_ascend/ops/pypto/deepseek_v4_flash_csa",
+  "files": [
+    "qkv_proj_rope.py",
+    "decode_csa.py"
+  ],
+  "donor": "66882634",
+  "scope": "固定K、长G6且24<=T<32；不对B4枚举，T30及关闭G2边界通过",
+  "evidence": [
+    "runs/qa_m16_v2/h131072_b4_v1/result.json",
+    "runs/qa_m16_v2/h131072_b5_tail_v1/result.json",
+    "runs/qa_m16_v2/h131072_b3_g2_v1/result.json",
+    "runs/qa_m16_v3/cpu_v1/result.json",
+    "runs/qa_m16_v3/cpu_qr_compat_v3/result.json"
+  ],
+  "compatibility": "QA_COMPAT_v3.json",
+  "performance_source": "qa_m16_v2；V3只重命名三个内部helper并新增旧签名包装，非新七档重测",
+  "csa_mean_us_before": 498.86,
+  "csa_mean_us_after": 486.856,
+  "goal_complete": false,
+  "pushed": false
+}
