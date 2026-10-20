@@ -626,6 +626,7 @@ def main():
                     output / "boundary_replay.json",
                     args.history,
                     args.batch,
+                    context_switch_history=manifest.get("context_switch_history") if manifest else None,
                 )
             report["actual_ptoas_invocations"] = check_ptoas_invocations(
                 output / "COMPILER_INVOCATIONS.jsonl", report["toolchain_identity"]

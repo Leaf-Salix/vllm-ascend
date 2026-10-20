@@ -14,7 +14,19 @@ from metadata_replay import METADATA_ARGUMENTS
 from padding_replay import COMPACT_ARGUMENTS, OUTPUT_ARGUMENTS
 
 
-def validate(config, layer, fixture, call, adapter, original, candidate, output_path, history, batch):
+def validate(
+    config,
+    layer,
+    fixture,
+    call,
+    adapter,
+    original,
+    candidate,
+    output_path,
+    history,
+    batch,
+    context_switch_history=None,
+):
     groups = fixture["groups"]
     device = fixture["hidden"].device
     original_inputs = {name: call.args[name].cpu().clone() for name in METADATA_ARGUMENTS}
@@ -33,6 +45,10 @@ def validate(config, layer, fixture, call, adapter, original, candidate, output_
     report = dict(
         passed=False, scope="S6同址metadata及padding；不计性能", runtime="多task TMR，不使用单SPMD代际协议", steps=[]
     )
+    if context_switch_history is not None:
+        if not 0 < context_switch_history < history:
+            raise ValueError("同图长短切换要求较短的正history")
+        report["context_switch_history"] = context_switch_history
 
     def save():
         output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -95,28 +111,39 @@ def validate(config, layer, fixture, call, adapter, original, candidate, output_
 
     try:
         # Native构造本轮不同长度、位置及页顺序；先快照A，避免常驻RoPE被覆盖。
-        variant = make_fixture(
-            config, layer.self_attn, batch, history - 1, 1024, device, table_history=history, reverse_pages=True
-        )
-        other_groups = {n: (variant["metadata"][g["prefix"]], g["views"]) for n, g in variant["groups"].items()}
-        other = adapter.NativeCSACall(
-            call.ops,
-            adapter.prepare_weights(layer.self_attn, other_groups["indexer"][0].hadamard, layer),
-            variant["hidden"],
-            variant["positions"],
-            other_groups,
-            layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
-            compact_metadata=variant["compact"],
-        )
-        for name in METADATA_ARGUMENTS:
-            if call.args[name].shape != other.args[name].shape or call.args[name].dtype != other.args[name].dtype:
-                raise AssertionError(f"metadata边界改变描述符：{name}")
-        states["B"] = dict(
-            inputs={n: other.args[n].cpu().clone() for n in METADATA_ARGUMENTS},
-            allowed={n: g["allowed"] for n, g in variant["groups"].items()},
-            active=batch,
-        )
-        del other, other_groups, variant
+        variants = [("B", history - 1, True)]
+        if context_switch_history is not None:
+            variants.append(("C", context_switch_history, False))
+        for label, alternate_history, reverse_pages in variants:
+            variant = make_fixture(
+                config,
+                layer.self_attn,
+                batch,
+                alternate_history,
+                1024,
+                device,
+                table_history=history,
+                reverse_pages=reverse_pages,
+            )
+            other_groups = {n: (variant["metadata"][g["prefix"]], g["views"]) for n, g in variant["groups"].items()}
+            other = adapter.NativeCSACall(
+                call.ops,
+                adapter.prepare_weights(layer.self_attn, other_groups["indexer"][0].hadamard, layer),
+                variant["hidden"],
+                variant["positions"],
+                other_groups,
+                layer_name=layer.self_attn.dsa_attn.dsa_attn.layer_name,
+                compact_metadata=variant["compact"],
+            )
+            for name in METADATA_ARGUMENTS:
+                if call.args[name].shape != other.args[name].shape or call.args[name].dtype != other.args[name].dtype:
+                    raise AssertionError(f"metadata边界改变描述符：{name}")
+            states[label] = dict(
+                inputs={n: other.args[n].cpu().clone() for n in METADATA_ARGUMENTS},
+                allowed={n: g["allowed"] for n, g in variant["groups"].items()},
+                active=batch,
+            )
+            del other, other_groups, variant
         for name, value in original_inputs.items():
             call.args[name].copy_(value)
         impl = layer.self_attn.dsa_attn.dsa_attn.impl
@@ -150,7 +177,9 @@ def validate(config, layer, fixture, call, adapter, original, candidate, output_
             candidate()
         torch.npu.synchronize()
         reference_a = None
-        for label in ["A", "B", "A", *[n for n in states if n.startswith("P")], "A"]:
+        labels = ["A", "B", "A"] + (["C", "A"] if "C" in states else [])
+        labels += [n for n in states if n.startswith("P")] + ["A"]
+        for label in labels:
             active = states[label]["active"]
             reset(label)
             original()
@@ -159,7 +188,7 @@ def validate(config, layer, fixture, call, adapter, original, candidate, output_
             reference_guards = guards(label)
             if label == "A" and reference_a is None:
                 reference_a = {n: v.clone() for n, v in expected.items() if n in OUTPUT_ARGUMENTS}
-            if label == "B" and torch.equal(expected["x_out"], reference_a["x_out"]):
+            if label in ("B", "C") and torch.equal(expected["x_out"], reference_a["x_out"]):
                 raise AssertionError("metadata变化没有形成有效输出变化")
             prefix = {}
             if label.startswith("P"):
