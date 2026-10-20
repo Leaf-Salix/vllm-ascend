@@ -20043,3 +20043,46 @@ Attention主要GM流量374.34/655.10MB，不能全部当HBM事务；当前BYPASS
 真机诊断逐核一致：B16全22，B28为33～41；理想均衡仅解释约10.38μs矩阵尾差。
 据现有阶段证据优先审视Score整段及Attention供数/Vector链，目标B16/B28仍需
 净省190.99/271.64μs。只给诊断方向与条件化模型，不启动下一轮优化或数学改写。
+
+## 2026-10-20：补齐Vector并建立完整CSA异构资源roofline
+
+用户指出上一版只有Cube，没有Vector。这是评估范围遗漏，不能以“Vector不是普通
+FLOP”作为省略理由。本节替代上一节中Cube+部分HBM的整层解释；历史稿保存到
+tests/pypto_test/csa_five_way_latest_20261020/theory_roofline/INITIAL_CUBE_ONLY.md，
+最新入口为同目录FULL_ROOFLINE.md、FULL_ROOFLINE.csv及full_roofline.py。
+本轮只做CPU建模与证据核对，没有提交NPU任务、改算子、修改依赖或push。
+
+硬件沿用单die24 AIC/48 AIV及1850MHz，按官方A3/2201指令表分开计算：
+FP32普通Vector算术64元素/cycle，Exp/Sqrt/Div为32，Sort32/MrgSort为2个排序项；
+不能将排序项、INT8矩阵运算和FP32特殊函数拼成统一TFLOPS。归约给理想有效元素
+与当前通用Tile折叠+ReduceRepeat两种敏感性口径；带tmp的高精度TRSQRT按
+sqrt+div计。L1→L0A/B按官方256/128 B/cycle，未挪用平台ini调优参数或A5带宽。
+
+Vector覆盖26个业务分组：HC加宽/RMS/门控/20轮Sinkhorn/混合输入norm、QR、
+主Query和KV的反量化/norm/RoPE、两套压缩pool/state/norm、Indexer query量化、
+head系数、scale与长G6/短G2两种排序、页证明与Attention计划、softmax/在线归并、
+O量化及HCpost。按真实48核owner求总服务量，再取最忙核；不把各阶段最大值相加。
+七档Vector服务模型范围分别为45.71～52.36、70.70～78.55、127.75～138.88、
+182.98～196.68、222.66～238.34、54.30～64.05、93.50～108.66μs。
+范围是归约/merge模型敏感性，非实测波动或精确机器指令计数。
+
+独立重建15个矩阵阶段的24核分工，逐阶段运算量与原Cube账本一致；纠正建模时
+QB logical=physical%20与KV循环置换，保留原源码。最忙AIC的Cube服务量依次为
+52.72/95.90/171.73/276.48/327.40/86.62/175.46μs。B16/B28的右矩阵L0B
+端口模型分别164.39/309.41μs，表明不能只看Cube运算量而忽略片上供数。
+
+HBM账本补齐norm/scale/APE、旧state、RoPE、metadata和外部输出，区分冷读、
+输出在窗口内写回与热起始192MiB容量条件。本轮生成的新KV不算外部冷读；
+GM物化与消费不一律按HBM收费。当前语义GM账本B16/B28约781.54/1231.50MB；
+L2聚合有效带宽未测，2/4/6/7TB/s仅是条件化敏感性，其中7TB/s来自官方示例的
+假设值，未标成9392实测规格。Scalar/通知/指令头/额外编译展开也没有伪装成零成本。
+
+Cube、Vector、片上端口及热缓存容量下界取max，七档得到
+81.37/110.70/171.73/276.48/327.40/86.62/175.46μs；对应已有动态实测
+476.40/626.50/802.20/1039.82/1167.72/644.08/933.58μs。
+B16/B28实测约为乐观资源下界4.67/3.57倍，但630/840μs差额不能直接当可实现收益。
+若GM总服务率只有2TB/s，按现有数据流的模型已抬到约391/616μs，尚未计完整依赖。
+
+核对37个正式SPMD源码文件与实测13259f92快照逐字一致，共享RMS helper亦一致；
+15矩阵独立计数、既有Score逐核块数真机对照、七档逐query候选覆盖、
+Softmax/query/HCpost元素守恒均通过。仅本地记录阶段结果，不自动push。

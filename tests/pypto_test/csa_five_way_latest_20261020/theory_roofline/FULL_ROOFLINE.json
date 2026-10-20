@@ -1,0 +1,2900 @@
+{
+  "status": "complete_heterogeneous_resource_roofline_with_explicit_limits",
+  "exact_end_to_end_latency_prediction": false,
+  "vector_compute_stages_covered": 26,
+  "source": {
+    "source_snapshot": "source_dynamic，实测13259f92",
+    "formal_files_equal": [
+      "__init__.py",
+      "attention_dependencies.py",
+      "attention_plan_stages.py",
+      "attention_stream_stages.py",
+      "binding.py",
+      "cache_stages.py",
+      "compressor_output_stages.py",
+      "compressor_pool_stages.py",
+      "compressor_projection_stages.py",
+      "cube_schedule.py",
+      "entry.py",
+      "hc_stages.py",
+      "indexer_cache_stages.py",
+      "indexer_compressor_output_stages.py",
+      "indexer_group_stages.py",
+      "indexer_publish_stages.py",
+      "indexer_query_stages.py",
+      "indexer_scale_layout_stages.py",
+      "indexer_scale_plan_stages.py",
+      "indexer_score_stages.py",
+      "indexer_topk_stages.py",
+      "kv_stages.py",
+      "metadata_stages.py",
+      "output_projection_a_stages.py",
+      "output_projection_b_stages.py",
+      "phase_sync.py",
+      "policy.py",
+      "projection_overlap_stages.py",
+      "qkv_stages.py",
+      "query_projection_stages.py",
+      "query_source.py",
+      "request_geometry.py",
+      "runtime_abi.py",
+      "signals.py",
+      "vector_prefix_stages.py",
+      "vector_schedule.py",
+      "wait_codegen.py"
+    ],
+    "rms_helper_equal": true,
+    "isa_reference_directory": "/data/pyptouser/qinchuanyu/pto-eager/pto-isa-src/include/pto/npu/a2a3",
+    "isa_managed_directory": "/data/pyptouser/qinchuanyu/pto-eager/.worktrees/simpler-csa-core-args-256-20261016/build/pto-isa/include/pto/npu/a2a3",
+    "isa_headers_byte_equal": {
+      "TUnaryOp.hpp": true,
+      "TRowReduceOps.hpp": true
+    },
+    "vector_reachable_functions": [
+      {
+        "function": "_scan_compact_offsets",
+        "file": "metadata_stages.py",
+        "line": 65,
+        "treatment": "Scalar前缀、紧凑行地址及MTE取行；RoPE Tile初始化计入两套压缩norm"
+      },
+      {
+        "function": "attention_geometry_prepare_stage",
+        "file": "attention_plan_stages.py",
+        "line": 184,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "attention_inverse_rope_sign_stage",
+        "file": "attention_plan_stages.py",
+        "line": 537,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "attention_qk_pv_vector_lane_stage",
+        "file": "attention_stream_stages.py",
+        "line": 218,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "attention_query_geometry",
+        "file": "attention_plan_stages.py",
+        "line": 500,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "attention_slot_plan_stage",
+        "file": "attention_plan_stages.py",
+        "line": 253,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "begin_invocation",
+        "file": "phase_sync.py",
+        "line": 65,
+        "treatment": "通知、轮询、fence；不作为零成本Vector指令"
+      },
+      {
+        "function": "compact_offsets_and_count_stage",
+        "file": "metadata_stages.py",
+        "line": 106,
+        "treatment": "Scalar前缀、紧凑行地址及MTE取行；RoPE Tile初始化计入两套压缩norm"
+      },
+      {
+        "function": "compressed_pages_all_valid",
+        "file": "attention_plan_stages.py",
+        "line": 138,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "compressor_norm_rope_cache_stage",
+        "file": "compressor_output_stages.py",
+        "line": 61,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "compressor_pool_stage",
+        "file": "compressor_pool_stages.py",
+        "line": 79,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "compressor_state_commit_stage",
+        "file": "compressor_pool_stages.py",
+        "line": 217,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "csa_signal_notify",
+        "file": "signals.py",
+        "line": 35,
+        "treatment": "通知、轮询、缓存维护；吞吐表不提供这些指令的roofline"
+      },
+      {
+        "function": "csa_signal_wait",
+        "file": "signals.py",
+        "line": 48,
+        "treatment": "通知、轮询、缓存维护；吞吐表不提供这些指令的roofline"
+      },
+      {
+        "function": "hc_comb_range",
+        "file": "hc_stages.py",
+        "line": 327,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "hc_gates_range",
+        "file": "hc_stages.py",
+        "line": 267,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "hc_mix_norm_range",
+        "file": "hc_stages.py",
+        "line": 510,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "hc_post_row_block",
+        "file": "output_projection_b_stages.py",
+        "line": 227,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "hc_projection_piece",
+        "file": "hc_stages.py",
+        "line": 237,
+        "treatment": "HC_CONSUMER_REDUCE分支；本次七档均关闭，运行的是hc_reduce_range"
+      },
+      {
+        "function": "hc_reduce_range",
+        "file": "hc_stages.py",
+        "line": 210,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "hc_widen_rms_range",
+        "file": "hc_stages.py",
+        "line": 113,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_compact_quant_cache_stage",
+        "file": "indexer_cache_stages.py",
+        "line": 69,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_compressor_norm_rope_stage",
+        "file": "indexer_compressor_output_stages.py",
+        "line": 72,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_compressor_pool_stage",
+        "file": "compressor_pool_stages.py",
+        "line": 149,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_compressor_state_commit_stage",
+        "file": "compressor_pool_stages.py",
+        "line": 254,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_compressor_vector_stage",
+        "file": "vector_prefix_stages.py",
+        "line": 84,
+        "treatment": "压缩/原KV业务helper的编排；无新增数学"
+      },
+      {
+        "function": "indexer_decode_group",
+        "file": "indexer_group_stages.py",
+        "line": 207,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_group_plan_stage",
+        "file": "indexer_group_stages.py",
+        "line": 111,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_head_coefficients_stage",
+        "file": "indexer_group_stages.py",
+        "line": 268,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_leaf_range",
+        "file": "indexer_group_stages.py",
+        "line": 254,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_long_leaf_plan",
+        "file": "indexer_group_stages.py",
+        "line": 85,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_pair_publish_stage",
+        "file": "indexer_publish_stages.py",
+        "line": 136,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_query_dequant_rope_stage",
+        "file": "indexer_query_stages.py",
+        "line": 107,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_query_quant_stage",
+        "file": "indexer_query_stages.py",
+        "line": 221,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_query_visibility",
+        "file": "indexer_group_stages.py",
+        "line": 184,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_scale_layout_base",
+        "file": "indexer_scale_layout_stages.py",
+        "line": 54,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_scale_layout_plan_stage",
+        "file": "indexer_scale_layout_stages.py",
+        "line": 65,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_scale_page_commit_stage",
+        "file": "indexer_scale_plan_stages.py",
+        "line": 102,
+        "treatment": "Scalar页owner链、FP16单值更新、64B页搬运"
+      },
+      {
+        "function": "indexer_scale_page_plan_stage",
+        "file": "indexer_scale_plan_stages.py",
+        "line": 54,
+        "treatment": "Scalar页owner链、FP16单值更新、64B页搬运"
+      },
+      {
+        "function": "indexer_scale_plan_base",
+        "file": "indexer_scale_plan_stages.py",
+        "line": 46,
+        "treatment": "Scalar页owner链、FP16单值更新、64B页搬运"
+      },
+      {
+        "function": "indexer_score_vector_lane_stage",
+        "file": "indexer_score_stages.py",
+        "line": 841,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_topk_half_leaf",
+        "file": "indexer_topk_stages.py",
+        "line": 110,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_visible_root_count",
+        "file": "indexer_publish_stages.py",
+        "line": 95,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "indexer_weights_reduce_stage",
+        "file": "indexer_query_stages.py",
+        "line": 290,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "indexer_work_item",
+        "file": "indexer_group_stages.py",
+        "line": 235,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "kv_norm_rope_stage",
+        "file": "kv_stages.py",
+        "line": 164,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "load_request_compact_rope_rows",
+        "file": "metadata_stages.py",
+        "line": 129,
+        "treatment": "Scalar前缀、紧凑行地址及MTE取行；RoPE Tile初始化计入两套压缩norm"
+      },
+      {
+        "function": "main_compressor_vector_stage",
+        "file": "vector_prefix_stages.py",
+        "line": 163,
+        "treatment": "压缩/原KV业务helper的编排；无新增数学"
+      },
+      {
+        "function": "merge2_top512_pairs",
+        "file": "indexer_topk_stages.py",
+        "line": 61,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "merge_top512_roots",
+        "file": "indexer_topk_stages.py",
+        "line": 78,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "o_dequant_hc_post_stage",
+        "file": "output_projection_b_stages.py",
+        "line": 266,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "o_projection_group_quant_stage",
+        "file": "output_projection_a_stages.py",
+        "line": 248,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "o_projection_groups_quant_stage",
+        "file": "output_projection_a_stages.py",
+        "line": 184,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "original_kv_vector_stage",
+        "file": "vector_prefix_stages.py",
+        "line": 245,
+        "treatment": "压缩/原KV业务helper的编排；无新增数学"
+      },
+      {
+        "function": "original_kv_writeback_stage",
+        "file": "cache_stages.py",
+        "line": 54,
+        "treatment": "原始KV写回；数据搬运计入字节账本"
+      },
+      {
+        "function": "physical_plan_supported",
+        "file": "attention_plan_stages.py",
+        "line": 119,
+        "treatment": "Scalar动态metadata；未冒充Vector算术，时长属于端到端预测缺口"
+      },
+      {
+        "function": "publish_phase",
+        "file": "phase_sync.py",
+        "line": 84,
+        "treatment": "通知、轮询、fence；不作为零成本Vector指令"
+      },
+      {
+        "function": "q_dequant_rope_stage",
+        "file": "query_projection_stages.py",
+        "line": 159,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "q_r_stage",
+        "file": "qkv_stages.py",
+        "line": 200,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "q_rope_prepare_stage",
+        "file": "query_projection_stages.py",
+        "line": 325,
+        "treatment": "数学/Vector metadata所属阶段已纳入工作量模型"
+      },
+      {
+        "function": "query_request",
+        "file": "request_geometry.py",
+        "line": 65,
+        "treatment": "Scalar请求边界/位置判定"
+      },
+      {
+        "function": "request_bounds",
+        "file": "request_geometry.py",
+        "line": 39,
+        "treatment": "Scalar请求边界/位置判定"
+      },
+      {
+        "function": "vector_schedule",
+        "file": "vector_schedule.py",
+        "line": 198,
+        "treatment": "48核分工和依赖编排"
+      },
+      {
+        "function": "wait_attention_plan_rows",
+        "file": "attention_dependencies.py",
+        "line": 82,
+        "treatment": "前驱owner等待和地址推导"
+      },
+      {
+        "function": "wait_indexer_query_roots",
+        "file": "attention_dependencies.py",
+        "line": 47,
+        "treatment": "前驱owner等待和地址推导"
+      },
+      {
+        "function": "wait_producer",
+        "file": "phase_sync.py",
+        "line": 103,
+        "treatment": "通知、轮询、fence；不作为零成本Vector指令"
+      },
+      {
+        "function": "wait_row_owners",
+        "file": "phase_sync.py",
+        "line": 121,
+        "treatment": "通知、轮询、fence；不作为零成本Vector指令"
+      }
+    ],
+    "vector_stage_count": 26,
+    "scope": "覆盖每个业务计算阶段；Scalar等待与编译生成的额外指令明确不作精确时长预测"
+  },
+  "hardware": {
+    "soc": "Ascend910_9392",
+    "logical_device_scope": "一个die",
+    "cube_cores": 24,
+    "vector_cores": 48,
+    "cube_frequency_hz": 1850000000.0,
+    "fp16_bf16_peak_ops_per_second": 363724800000000.0,
+    "int8_peak_ops_per_second": 727449600000000.0,
+    "fp32_peak_model_assumption": 90931200000000.0,
+    "hbm_peak_bytes_per_second": 1600000000000.0,
+    "l2_bytes": 201326592,
+    "platform_source": "/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux/data/platform_config/Ascend910_9392.ini"
+  },
+  "vector_rates": {
+    "arith32": 64,
+    "arith16": 128,
+    "exp32": 32,
+    "sqrt32": 32,
+    "div32": 32,
+    "recip32": 64,
+    "cast32": 64,
+    "cast16_to_int8": 128,
+    "fill32": 64,
+    "fill16": 128,
+    "index32": 64,
+    "gather32": 5,
+    "gatherb16": 42,
+    "gathermask32": 32,
+    "sort_items": 2,
+    "merge_items_min": 2,
+    "merge_items_extra": 2,
+    "reduce_repeat32": 9.142857142857142
+  },
+  "sources": [
+    "https://asc.gitcode.com/api/appendix/vector_instruction_theoretical_perf_summary.html",
+    "https://asc.gitcode.com/api/appendix/cube_instruction_theoretical_perf_summary.html",
+    "https://arxiv.org/html/2506.12708v2#S3.SS3.SSS1"
+  ],
+  "assumptions": [
+    "七档S6、无dummy；对应已有实测输入及13259f92源码。",
+    "峰值服务模型忽略指令头、Scalar、同步延迟和额外编译展开；非可达时间承诺。",
+    "Vector归约给理想/通用实现敏感性，末级merge给exhausted处理量范围。",
+    "HBM冷/热条件明确分开，GM总请求不等于HBM事务。",
+    "L2实际聚合带宽未知，以2/4/6/7TB/s做条件分析，不标成实测规格。",
+    "数学与输入保持不变；没有新的NPU运行、算法优化或push。"
+  ],
+  "rows": [
+    {
+      "history": 131072,
+      "batch": 4,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 44.42090090090089,
+      "cube_current_assignment_us": 52.722162162162164,
+      "vector_ideal_reduction_us": 45.70619666988417,
+      "vector_generic_reduction_max_us": 52.35630646718147,
+      "vector_generic_reduction_min_us": 51.66441457528958,
+      "l0b_current_assignment_us": 81.36648648648648,
+      "hbm_cold_max_reuse_read_us": 124.42480499999999,
+      "hbm_cold_per_query_read_writeback_us": 133.22897,
+      "hot_capacity_resource_floor_us": 81.36648648648648,
+      "hot_generic_resource_model_us": 81.36648648648648,
+      "cold_resource_floor_us": 124.42480499999999,
+      "cold_per_query_writeback_model_us": 133.22897,
+      "actual_dynamic_l1_us": 476.4,
+      "actual_over_hot_resource_floor": 5.8549904336734695,
+      "actual_over_cold_resource_floor": 3.8288185382327904,
+      "gap_to_hot_resource_floor_us": 395.0335135135135,
+      "theoretical_peak_headroom_fraction": 0.8292055279460822,
+      "memory_service_sensitivity_us": {
+        "2": 164.70932,
+        "4": 82.35466,
+        "6": 81.36648648648648,
+        "7": 81.36648648648648
+      },
+      "cube_peak_equivalent_fraction": 0.11066784668799783,
+      "vector_peak_equivalent_fraction": 0.10989988763052366,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 17039360,
+          "hidden_input": 786432,
+          "old_state_values_scores": 81920,
+          "metadata_and_rope": 50332
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 940,
+          "indexer_and_compressed_page_tables": 32800,
+          "original_and_state_selected_pages": 208,
+          "rope_main_and_compact": 16384
+        },
+        "sparse_old_kv_max_reuse_bytes": 2617344,
+        "sparse_old_kv_each_query_bytes": 15642624,
+        "output_dirty_bytes": {
+          "hidden_output": 786432,
+          "state_values_scores": 245760,
+          "original_kv": 24576,
+          "main_compact_kv": 4096,
+          "indexer_compact_key_scale": 520
+        },
+        "cold_read_max_reuse_us": 124.42480499999999,
+        "cold_read_per_query_us": 132.565605,
+        "cold_read_writeback_per_query_us": 133.22897,
+        "hot_start_capacity_floor_bytes": 0,
+        "hot_start_capacity_floor_us": 0.0,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 4718592,
+          "hc_partials_reduce_raw_gates": 47360,
+          "mixed_write_norm_read": 393216,
+          "normed_write_five_branches": 1179648,
+          "qa_write_read": 196608,
+          "qr_two_roots_write_read": 98688,
+          "main_query_acc_write_read": 6291456,
+          "main_query_bf16_write": 1572864,
+          "kv_acc_write_read_and_normed_write_read": 147456,
+          "compressor_projections_write_commit_read": 491520,
+          "compressor_pool_zero_close_read": 133120,
+          "main_normed_and_debug": 73728,
+          "indexer_compact_hadamard_quant": 8192,
+          "indexer_query_acc_write_read": 1572864,
+          "indexer_rope_write_read": 786432,
+          "indexer_hadamard_write_read": 1572864,
+          "indexer_quant_write_and_score_read": 1376256,
+          "head_weights_and_coefficients": 421888,
+          "score_transfer_write_read": 6488064,
+          "leaf_roots_write_read": 1179648,
+          "topk_output_and_indices_read": 147456,
+          "attention_plan_and_signed_rope": 236544,
+          "attention_payload": 93585408,
+          "oa_result_write_twice_read": 2359296,
+          "oa_quant_write_ob_read": 524288,
+          "ob_partial_write_read": 6291456
+        },
+        "semantic_gm_ledger_total_bytes": 329418640,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 164.70932,
+          "4": 82.35466,
+          "6": 54.903106666666666,
+          "7": 47.059805714285716
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 248.84960999999998,
+          "1.2": 165.89974,
+          "1.6": 124.42480499999999
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": null,
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 25116016640,
+          "cube_cycles": 1972288.0,
+          "left_bytes": 56352768,
+          "right_bytes": 350978048,
+          "fix_to_l1_bytes": 103809024
+        },
+        "balanced_us": {
+          "cube_cycles": 44.42090090090088,
+          "left_bytes": 4.957837837837836,
+          "right_bytes": 61.757117117117104,
+          "fix_to_l1_bytes": 18.265945945945944
+        },
+        "current_assignment_us": {
+          "cube_cycles": 52.722162162162164,
+          "left_bytes": 6.624864864864865,
+          "right_bytes": 81.36648648648648,
+          "fix_to_l1_bytes": 19.926486486486485
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 30.624424720479386,
+        "ideal_balance_max_us": 30.97037066642533,
+        "current_assignment_min_us": 51.66441457528958,
+        "current_assignment_max_us": 52.35630646718147,
+        "ideal_reduction_current_assignment_us": 45.70619666988417,
+        "ideal_reduction_balance_us": 28.98643555944335,
+        "service_min_us_per_aiv": [
+          51.66441457528958,
+          50.60525241312742,
+          50.55768484555985,
+          37.66803957528957,
+          34.75247876447877,
+          34.75247876447877,
+          34.75247876447877,
+          34.75247876447877,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          33.4626138996139,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323
+        ],
+        "service_max_us_per_aiv": [
+          52.35630646718147,
+          51.29714430501931,
+          51.24957673745174,
+          38.35993146718146,
+          35.44437065637066,
+          35.44437065637066,
+          35.44437065637066,
+          35.44437065637066,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          34.15450579150579,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          26.266191763191763,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323,
+          22.03700257400257,
+          24.1645448037323
+        ],
+        "counts": {
+          "cast32": 7832954,
+          "arith32": 33448940,
+          "fill32": 1673612,
+          "reduce_repeat32": 1526528,
+          "sqrt32": 1680,
+          "div32": 807740,
+          "exp32": 1039104,
+          "recip32": 1996,
+          "cast16_to_int8": 483840,
+          "index32": 853952,
+          "gather32": 299520,
+          "arith16": 1536,
+          "fill16": 360448,
+          "gatherb16": 270336,
+          "sort_items": 792576,
+          "merge_items_min": 2678784,
+          "merge_items_extra": 61440,
+          "gathermask32": 49152
+        },
+        "history": 131072,
+        "batch": 4,
+        "query_tokens": 6,
+        "tokens": 24,
+        "query_head_group": 4,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 8,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 85.3117117117117,
+      "cube_current_assignment_us": 95.89621621621622,
+      "vector_ideal_reduction_us": 70.7029070945946,
+      "vector_generic_reduction_max_us": 78.54963851351353,
+      "vector_generic_reduction_min_us": 77.85774662162163,
+      "l0b_current_assignment_us": 110.70270270270271,
+      "hbm_cold_max_reuse_read_us": 137.284415,
+      "hbm_cold_per_query_read_writeback_us": 154.89274500000002,
+      "hot_capacity_resource_floor_us": 110.70270270270271,
+      "hot_generic_resource_model_us": 110.70270270270271,
+      "cold_resource_floor_us": 137.284415,
+      "cold_per_query_writeback_model_us": 154.89274500000002,
+      "actual_dynamic_l1_us": 626.5,
+      "actual_over_hot_resource_floor": 5.6593017578125,
+      "actual_over_cold_resource_floor": 4.563518735903125,
+      "gap_to_hot_resource_floor_us": 515.7972972972973,
+      "theoretical_peak_headroom_fraction": 0.8232997562606501,
+      "memory_service_sensitivity_us": {
+        "2": 240.404052,
+        "4": 120.202026,
+        "6": 110.70270270270271,
+        "7": 110.70270270270271
+      },
+      "cube_peak_equivalent_fraction": 0.15306658613921184,
+      "vector_peak_equivalent_fraction": 0.12537851318996573,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 34078720,
+          "hidden_input": 1572864,
+          "old_state_values_scores": 163840,
+          "metadata_and_rope": 100652
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 1868,
+          "indexer_and_compressed_page_tables": 65600,
+          "original_and_state_selected_pages": 416,
+          "rope_main_and_compact": 32768
+        },
+        "sparse_old_kv_max_reuse_bytes": 5234688,
+        "sparse_old_kv_each_query_bytes": 31285248,
+        "output_dirty_bytes": {
+          "hidden_output": 1572864,
+          "state_values_scores": 491520,
+          "original_kv": 49152,
+          "main_compact_kv": 8192,
+          "indexer_compact_key_scale": 1040
+        },
+        "cold_read_max_reuse_us": 137.284415,
+        "cold_read_per_query_us": 153.566015,
+        "cold_read_writeback_per_query_us": 154.89274500000002,
+        "hot_start_capacity_floor_bytes": 18328472,
+        "hot_start_capacity_floor_us": 11.455295,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 9437184,
+          "hc_partials_reduce_raw_gates": 78336,
+          "mixed_write_norm_read": 786432,
+          "normed_write_five_branches": 2359296,
+          "qa_write_read": 393216,
+          "qr_two_roots_write_read": 197376,
+          "main_query_acc_write_read": 12582912,
+          "main_query_bf16_write": 3145728,
+          "kv_acc_write_read_and_normed_write_read": 294912,
+          "compressor_projections_write_commit_read": 983040,
+          "compressor_pool_zero_close_read": 266240,
+          "main_normed_and_debug": 147456,
+          "indexer_compact_hadamard_quant": 16384,
+          "indexer_query_acc_write_read": 3145728,
+          "indexer_rope_write_read": 1572864,
+          "indexer_hadamard_write_read": 3145728,
+          "indexer_quant_write_and_score_read": 2752512,
+          "head_weights_and_coefficients": 811008,
+          "score_transfer_write_read": 12976128,
+          "leaf_roots_write_read": 2359296,
+          "topk_output_and_indices_read": 294912,
+          "attention_plan_and_signed_rope": 473088,
+          "attention_payload": 187170816,
+          "oa_result_write_twice_read": 4718592,
+          "oa_quant_write_ob_read": 1572864,
+          "ob_partial_write_read": 12582912
+        },
+        "semantic_gm_ledger_total_bytes": 480808104,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 240.404052,
+          "4": 120.202026,
+          "6": 80.13468400000001,
+          "7": 68.686872
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 274.56883,
+          "1.2": 183.04588666666666,
+          "1.6": 137.284415
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": null,
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 49401036800,
+          "cube_cycles": 3787840.0,
+          "left_bytes": 99983360,
+          "right_bytes": 510558208,
+          "fix_to_l1_bytes": 207618048
+        },
+        "balanced_us": {
+          "cube_cycles": 85.3117117117117,
+          "left_bytes": 8.796396396396398,
+          "right_bytes": 89.83639639639637,
+          "fix_to_l1_bytes": 36.53189189189189
+        },
+        "current_assignment_us": {
+          "cube_cycles": 95.89621621621622,
+          "left_bytes": 11.217297297297296,
+          "right_bytes": 110.70270270270271,
+          "fix_to_l1_bytes": 36.531891891891895
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 60.75746973536034,
+        "ideal_balance_max_us": 61.44936162725223,
+        "current_assignment_min_us": 77.85774662162163,
+        "current_assignment_max_us": 78.54963851351353,
+        "ideal_reduction_current_assignment_us": 70.7029070945946,
+        "ideal_reduction_balance_us": 57.49087204391891,
+        "service_min_us_per_aiv": [
+          77.85774662162163,
+          77.13244932432433,
+          76.74823310810811,
+          76.3020168918919,
+          76.70066554054054,
+          76.3020168918919,
+          62.09875675675676,
+          61.700108108108104,
+          60.895999999999994,
+          60.49735135135135,
+          60.895999999999994,
+          60.49735135135135,
+          60.895999999999994,
+          60.49735135135135,
+          60.895999999999994,
+          60.49735135135135,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          59.26843243243243,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297,
+          55.03924324324324,
+          57.16678547297297
+        ],
+        "service_max_us_per_aiv": [
+          78.54963851351353,
+          77.82434121621621,
+          77.44012500000001,
+          76.9939087837838,
+          77.39255743243244,
+          76.9939087837838,
+          62.79064864864865,
+          62.391999999999996,
+          61.587891891891886,
+          61.18924324324324,
+          61.587891891891886,
+          61.18924324324324,
+          61.587891891891886,
+          61.18924324324324,
+          61.587891891891886,
+          61.18924324324324,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          59.96032432432432,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486,
+          55.73113513513513,
+          57.85867736486486
+        ],
+        "counts": {
+          "cast32": 15435436,
+          "arith32": 66030216,
+          "fill32": 2353560,
+          "reduce_repeat32": 3044864,
+          "sqrt32": 3360,
+          "div32": 1615480,
+          "exp32": 2078208,
+          "recip32": 3992,
+          "cast16_to_int8": 1229824,
+          "index32": 1626176,
+          "gather32": 599040,
+          "arith16": 3072,
+          "fill16": 983040,
+          "sort_items": 1585152,
+          "merge_items_min": 5357568,
+          "merge_items_extra": 122880,
+          "gathermask32": 98304
+        },
+        "history": 131072,
+        "batch": 8,
+        "query_tokens": 6,
+        "tokens": 48,
+        "query_head_group": 8,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 16,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 161.76576576576574,
+      "cube_current_assignment_us": 171.72756756756758,
+      "vector_ideal_reduction_us": 127.74724155405406,
+      "vector_generic_reduction_max_us": 138.8787027027027,
+      "vector_generic_reduction_min_us": 137.49491891891893,
+      "l0b_current_assignment_us": 164.3935135135135,
+      "hbm_cold_max_reuse_read_us": 163.003635,
+      "hbm_cold_per_query_read_writeback_us": 198.220295,
+      "hot_capacity_resource_floor_us": 171.72756756756758,
+      "hot_generic_resource_model_us": 171.72756756756758,
+      "cold_resource_floor_us": 171.72756756756758,
+      "cold_per_query_writeback_model_us": 198.220295,
+      "actual_dynamic_l1_us": 802.2,
+      "actual_over_hot_resource_floor": 4.671352487912974,
+      "actual_over_cold_resource_floor": 4.671352487912974,
+      "gap_to_hot_resource_floor_us": 630.4724324324325,
+      "theoretical_peak_headroom_fraction": 0.7859292351438949,
+      "memory_service_sensitivity_us": {
+        "2": 390.769516,
+        "4": 195.384758,
+        "6": 171.72756756756758,
+        "7": 171.72756756756758
+      },
+      "cube_peak_equivalent_fraction": 0.21407076485610516,
+      "vector_peak_equivalent_fraction": 0.17312229207517163,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 68157440,
+          "hidden_input": 3145728,
+          "old_state_values_scores": 327680,
+          "metadata_and_rope": 201292
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 3724,
+          "indexer_and_compressed_page_tables": 131200,
+          "original_and_state_selected_pages": 832,
+          "rope_main_and_compact": 65536
+        },
+        "sparse_old_kv_max_reuse_bytes": 10469376,
+        "sparse_old_kv_each_query_bytes": 62570496,
+        "output_dirty_bytes": {
+          "hidden_output": 3145728,
+          "state_values_scores": 983040,
+          "original_kv": 98304,
+          "main_compact_kv": 16384,
+          "indexer_compact_key_scale": 2080
+        },
+        "cold_read_max_reuse_us": 163.003635,
+        "cold_read_per_query_us": 195.566835,
+        "cold_read_writeback_per_query_us": 198.220295,
+        "hot_start_capacity_floor_bytes": 59479224,
+        "hot_start_capacity_floor_us": 37.174515,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 18874368,
+          "hc_partials_reduce_raw_gates": 156672,
+          "mixed_write_norm_read": 1572864,
+          "normed_write_five_branches": 4718592,
+          "qa_write_read": 786432,
+          "qr_two_roots_write_read": 394752,
+          "main_query_acc_write_read": 25165824,
+          "main_query_bf16_write": 6291456,
+          "kv_acc_write_read_and_normed_write_read": 589824,
+          "compressor_projections_write_commit_read": 1966080,
+          "compressor_pool_zero_close_read": 532480,
+          "main_normed_and_debug": 294912,
+          "indexer_compact_hadamard_quant": 32768,
+          "indexer_query_acc_write_read": 6291456,
+          "indexer_rope_write_read": 3145728,
+          "indexer_hadamard_write_read": 6291456,
+          "indexer_quant_write_and_score_read": 5505024,
+          "head_weights_and_coefficients": 1622016,
+          "score_transfer_write_read": 25952256,
+          "leaf_roots_write_read": 4718592,
+          "topk_output_and_indices_read": 589824,
+          "attention_plan_and_signed_rope": 946176,
+          "attention_payload": 374341632,
+          "oa_result_write_twice_read": 9437184,
+          "oa_quant_write_ob_read": 1572864,
+          "ob_partial_write_read": 25165824
+        },
+        "semantic_gm_ledger_total_bytes": 781539032,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 390.769516,
+          "4": 195.384758,
+          "6": 130.25650533333334,
+          "7": 111.64843314285714
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 326.00727,
+          "1.2": 217.33818000000002,
+          "1.6": 163.003635
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": {
+        "QB": {
+          "roles": 24,
+          "latest_core": 4,
+          "start_us": {
+            "min": 162.8,
+            "median": 167.9,
+            "max": 180.02
+          },
+          "end_us": {
+            "min": 174.04,
+            "median": 228.95,
+            "max": 243.16
+          },
+          "interval_us": {
+            "min": 0.24,
+            "median": 60.57,
+            "max": 66.66
+          },
+          "gm_wait_us": {
+            "min": 0.0,
+            "median": 0.0,
+            "max": 0.0
+          },
+          "other_us": {
+            "min": 0.24,
+            "median": 60.57,
+            "max": 66.66
+          }
+        },
+        "SCORE_CUBE": {
+          "roles": 24,
+          "latest_core": 9,
+          "start_us": {
+            "min": 199.82,
+            "median": 244.53,
+            "max": 267.64
+          },
+          "end_us": {
+            "min": 458.6,
+            "median": 465.92,
+            "max": 469.7
+          },
+          "interval_us": {
+            "min": 200.84,
+            "median": 221.29,
+            "max": 264.04
+          },
+          "gm_wait_us": {
+            "min": 12.2,
+            "median": 27.67,
+            "max": 70.74
+          },
+          "other_us": {
+            "min": 188.12,
+            "median": 192.64,
+            "max": 196.36
+          }
+        },
+        "SCORE_VECTOR": {
+          "roles": 48,
+          "latest_core": 33,
+          "start_us": {
+            "min": 279.06,
+            "median": 282.03,
+            "max": 286.36
+          },
+          "end_us": {
+            "min": 464.0,
+            "median": 469.46,
+            "max": 474.98
+          },
+          "interval_us": {
+            "min": 178.8,
+            "median": 186.59,
+            "max": 194.94
+          },
+          "gm_wait_us": {
+            "min": 4.58,
+            "median": 4.9,
+            "max": 5.54
+          },
+          "other_us": {
+            "min": 174.1,
+            "median": 181.67,
+            "max": 190.12
+          }
+        },
+        "ATTN_CUBE": {
+          "roles": 24,
+          "latest_core": 17,
+          "start_us": {
+            "min": 458.6,
+            "median": 465.92,
+            "max": 469.7
+          },
+          "end_us": {
+            "min": 655.9,
+            "median": 669.79,
+            "max": 681.94
+          },
+          "interval_us": {
+            "min": 188.18,
+            "median": 203.8,
+            "max": 216.54
+          },
+          "gm_wait_us": {
+            "min": 43.96,
+            "median": 49.49,
+            "max": 59.38
+          },
+          "other_us": {
+            "min": 141.72,
+            "median": 153.47,
+            "max": 168.7
+          }
+        },
+        "ATTN_VECTOR": {
+          "roles": 48,
+          "latest_core": 59,
+          "start_us": {
+            "min": 477.88,
+            "median": 483.51,
+            "max": 508.6
+          },
+          "end_us": {
+            "min": 659.52,
+            "median": 673.64,
+            "max": 685.9
+          },
+          "interval_us": {
+            "min": 162.7,
+            "median": 183.8,
+            "max": 204.14
+          },
+          "gm_wait_us": {
+            "min": 5.8,
+            "median": 30.63,
+            "max": 36.98
+          },
+          "other_us": {
+            "min": 145.02,
+            "median": 158.41,
+            "max": 171.12
+          }
+        },
+        "OB": {
+          "roles": 24,
+          "latest_core": 14,
+          "start_us": {
+            "min": 746.96,
+            "median": 772.51,
+            "max": 775.02
+          },
+          "end_us": {
+            "min": 772.66,
+            "median": 799.19,
+            "max": 803.08
+          },
+          "interval_us": {
+            "min": 23.52,
+            "median": 25.93,
+            "max": 28.04
+          },
+          "gm_wait_us": {
+            "min": 0.58,
+            "median": 0.99,
+            "max": 5.5
+          },
+          "other_us": {
+            "min": 19.86,
+            "median": 24.95,
+            "max": 27.06
+          }
+        },
+        "OUT": {
+          "roles": 48,
+          "latest_core": 58,
+          "start_us": {
+            "min": 659.52,
+            "median": 708.22,
+            "max": 783.3
+          },
+          "end_us": {
+            "min": 824.46,
+            "median": 826.69,
+            "max": 829.24
+          },
+          "interval_us": {
+            "min": 42.16,
+            "median": 117.55,
+            "max": 166.54
+          },
+          "gm_wait_us": {
+            "min": 21.8,
+            "median": 96.22,
+            "max": 144.7
+          },
+          "other_us": {
+            "min": 19.78,
+            "median": 21.39,
+            "max": 23.82
+          }
+        }
+      },
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 92359098368,
+          "cube_cycles": 7182400.0,
+          "left_bytes": 187375616,
+          "right_bytes": 874283008,
+          "fix_to_l1_bytes": 415236096
+        },
+        "balanced_us": {
+          "cube_cycles": 161.7657657657658,
+          "left_bytes": 16.485045045045045,
+          "right_bytes": 153.83639639639642,
+          "fix_to_l1_bytes": 73.06378378378378
+        },
+        "current_assignment_us": {
+          "cube_cycles": 171.72756756756758,
+          "left_bytes": 18.352432432432433,
+          "right_bytes": 164.3935135135135,
+          "fix_to_l1_bytes": 73.06378378378379
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 121.26728209459453,
+        "ideal_balance_max_us": 122.65106587837832,
+        "current_assignment_min_us": 137.49491891891893,
+        "current_assignment_max_us": 138.8787027027027,
+        "ideal_reduction_current_assignment_us": 127.74724155405406,
+        "ideal_reduction_balance_us": 114.76222860360356,
+        "service_min_us_per_aiv": [
+          137.49491891891893,
+          137.49491891891893,
+          137.49491891891893,
+          136.3854054054054,
+          136.3854054054054,
+          136.3854054054054,
+          136.33783783783787,
+          136.33783783783787,
+          136.33783783783787,
+          136.33783783783787,
+          136.33783783783787,
+          136.33783783783787,
+          121.11124324324324,
+          121.11124324324324,
+          121.11124324324324,
+          121.11124324324324,
+          115.67929729729728,
+          117.80683952702702,
+          115.67929729729728,
+          117.80683952702702,
+          115.67929729729728,
+          117.80683952702702,
+          115.67929729729728,
+          117.80683952702702,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946,
+          114.05172972972971,
+          116.17927195945946
+        ],
+        "service_max_us_per_aiv": [
+          138.8787027027027,
+          138.8787027027027,
+          138.8787027027027,
+          137.7691891891892,
+          137.7691891891892,
+          137.7691891891892,
+          137.72162162162164,
+          137.72162162162164,
+          137.72162162162164,
+          137.72162162162164,
+          137.72162162162164,
+          137.72162162162164,
+          122.49502702702702,
+          122.49502702702702,
+          122.49502702702702,
+          122.49502702702702,
+          117.06308108108107,
+          119.1906233108108,
+          117.06308108108107,
+          119.1906233108108,
+          117.06308108108107,
+          119.1906233108108,
+          117.06308108108107,
+          119.1906233108108,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324,
+          115.4355135135135,
+          117.56305574324324
+        ],
+        "counts": {
+          "cast32": 30781120,
+          "arith32": 132360336,
+          "fill32": 3450416,
+          "reduce_repeat32": 6065152,
+          "sqrt32": 6720,
+          "div32": 3230960,
+          "exp32": 4156416,
+          "recip32": 7984,
+          "cast16_to_int8": 1673216,
+          "index32": 3220736,
+          "gather32": 1247232,
+          "arith16": 6144,
+          "fill16": 1179648,
+          "sort_items": 3170304,
+          "merge_items_min": 10715136,
+          "merge_items_extra": 245760,
+          "gathermask32": 196608
+        },
+        "history": 131072,
+        "batch": 16,
+        "query_tokens": 6,
+        "tokens": 96,
+        "query_head_group": 16,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 24,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 242.6493693693694,
+      "cube_current_assignment_us": 276.48,
+      "vector_ideal_reduction_us": 182.98109266409267,
+      "vector_generic_reduction_max_us": 196.67958083976833,
+      "vector_generic_reduction_min_us": 195.43417543436294,
+      "l0b_current_assignment_us": 261.8118918918919,
+      "hbm_cold_max_reuse_read_us": 188.722855,
+      "hbm_cold_per_query_read_writeback_us": 241.547845,
+      "hot_capacity_resource_floor_us": 276.48,
+      "hot_generic_resource_model_us": 276.48,
+      "cold_resource_floor_us": 276.48,
+      "cold_per_query_writeback_model_us": 276.48,
+      "actual_dynamic_l1_us": 1039.82,
+      "actual_over_hot_resource_floor": 3.760923032407407,
+      "actual_over_cold_resource_floor": 3.760923032407407,
+      "gap_to_hot_resource_floor_us": 763.3399999999999,
+      "theoretical_peak_headroom_fraction": 0.7341078263545613,
+      "memory_service_sensitivity_us": {
+        "2": 540.8236840000001,
+        "4": 276.48,
+        "6": 276.48,
+        "7": 276.48
+      },
+      "cube_peak_equivalent_fraction": 0.26589217364543866,
+      "vector_peak_equivalent_fraction": 0.1891477186818568,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 102236160,
+          "hidden_input": 4718592,
+          "old_state_values_scores": 491520,
+          "metadata_and_rope": 301932
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 5580,
+          "indexer_and_compressed_page_tables": 196800,
+          "original_and_state_selected_pages": 1248,
+          "rope_main_and_compact": 98304
+        },
+        "sparse_old_kv_max_reuse_bytes": 15704064,
+        "sparse_old_kv_each_query_bytes": 93855744,
+        "output_dirty_bytes": {
+          "hidden_output": 4718592,
+          "state_values_scores": 1474560,
+          "original_kv": 147456,
+          "main_compact_kv": 24576,
+          "indexer_compact_key_scale": 3120
+        },
+        "cold_read_max_reuse_us": 188.722855,
+        "cold_read_per_query_us": 237.567655,
+        "cold_read_writeback_per_query_us": 241.547845,
+        "hot_start_capacity_floor_bytes": 100629976,
+        "hot_start_capacity_floor_us": 62.893735,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 28311552,
+          "hc_partials_reduce_raw_gates": 235008,
+          "mixed_write_norm_read": 2359296,
+          "normed_write_five_branches": 7077888,
+          "qa_write_read": 1179648,
+          "qr_two_roots_write_read": 592128,
+          "main_query_acc_write_read": 37748736,
+          "main_query_bf16_write": 9437184,
+          "kv_acc_write_read_and_normed_write_read": 884736,
+          "compressor_projections_write_commit_read": 2949120,
+          "compressor_pool_zero_close_read": 798720,
+          "main_normed_and_debug": 442368,
+          "indexer_compact_hadamard_quant": 49152,
+          "indexer_query_acc_write_read": 9437184,
+          "indexer_rope_write_read": 4718592,
+          "indexer_hadamard_write_read": 9437184,
+          "indexer_quant_write_and_score_read": 7077888,
+          "head_weights_and_coefficients": 2138112,
+          "score_transfer_write_read": 38928384,
+          "leaf_roots_write_read": 5308416,
+          "topk_output_and_indices_read": 884736,
+          "attention_plan_and_signed_rope": 1419264,
+          "attention_payload": 561512448,
+          "oa_result_write_twice_read": 14155776,
+          "oa_quant_write_ob_read": 4194304,
+          "ob_partial_write_read": 37748736
+        },
+        "semantic_gm_ledger_total_bytes": 1081647368,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 540.8236840000001,
+          "4": 270.41184200000004,
+          "6": 180.27456133333334,
+          "7": 154.52105257142856
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 377.44571,
+          "1.2": 251.63047333333333,
+          "1.6": 188.722855
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": null,
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 138538909696,
+          "cube_cycles": 10773632.0,
+          "left_bytes": 243318784,
+          "right_bytes": 1359675392,
+          "fix_to_l1_bytes": 622854144
+        },
+        "balanced_us": {
+          "cube_cycles": 242.64936936936945,
+          "left_bytes": 21.406846846846857,
+          "right_bytes": 239.24468468468464,
+          "fix_to_l1_bytes": 109.59567567567564
+        },
+        "current_assignment_us": {
+          "cube_cycles": 276.48,
+          "left_bytes": 26.387027027027028,
+          "right_bytes": 261.8118918918919,
+          "fix_to_l1_bytes": 109.59567567567568
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 183.18166135778642,
+        "ideal_balance_max_us": 184.42706676319182,
+        "current_assignment_min_us": 195.43417543436294,
+        "current_assignment_max_us": 196.67958083976833,
+        "ideal_reduction_current_assignment_us": 182.98109266409267,
+        "ideal_reduction_balance_us": 173.39593922940804,
+        "service_min_us_per_aiv": [
+          193.30663320463321,
+          194.60390516409268,
+          193.30663320463321,
+          195.43417543436294,
+          193.9651196911197,
+          194.3246619208494,
+          192.19711969111967,
+          193.49439165057913,
+          192.19711969111967,
+          194.4319592181467,
+          192.9798223938224,
+          194.27709435328183,
+          192.1495521235521,
+          193.44682408301156,
+          192.30441698841696,
+          194.27709435328183,
+          192.9798223938224,
+          194.27709435328183,
+          187.19978185328182,
+          178.37509435328184,
+          176.9229575289575,
+          179.05049975868724,
+          177.75322779922777,
+          179.05049975868724,
+          175.87506563706563,
+          177.01747273166023,
+          175.72020077220077,
+          177.8477430019305,
+          176.55047104247103,
+          178.00260786679536,
+          175.72020077220077,
+          177.01747273166023,
+          175.72020077220077,
+          177.8477430019305,
+          176.7053359073359,
+          177.8477430019305,
+          175.72020077220077,
+          177.01747273166023,
+          175.72020077220077,
+          178.00260786679536,
+          174.92290347490348,
+          176.22017543436291,
+          174.0926332046332,
+          175.38990516409265,
+          174.0926332046332,
+          176.22017543436291,
+          174.92290347490348,
+          176.22017543436291
+        ],
+        "service_max_us_per_aiv": [
+          194.5520386100386,
+          195.84931056949807,
+          194.5520386100386,
+          196.67958083976833,
+          195.21052509652512,
+          195.57006732625482,
+          193.4425250965251,
+          194.73979705598452,
+          193.4425250965251,
+          195.6773646235521,
+          194.22522779922778,
+          195.52249975868725,
+          193.39495752895752,
+          194.69222948841698,
+          193.54982239382238,
+          195.52249975868725,
+          194.22522779922778,
+          195.52249975868725,
+          188.44518725868724,
+          179.62049975868723,
+          178.1683629343629,
+          180.29590516409263,
+          178.9986332046332,
+          180.29590516409263,
+          177.12047104247102,
+          178.26287813706563,
+          176.96560617760616,
+          179.0931484073359,
+          177.79587644787642,
+          179.24801327220075,
+          176.96560617760616,
+          178.26287813706563,
+          176.96560617760616,
+          179.0931484073359,
+          177.95074131274131,
+          179.0931484073359,
+          176.96560617760616,
+          178.26287813706563,
+          176.96560617760616,
+          179.24801327220075,
+          176.16830888030887,
+          177.46558083976834,
+          175.3380386100386,
+          176.63531056949805,
+          175.3380386100386,
+          177.46558083976834,
+          176.16830888030887,
+          177.46558083976834
+        ],
+        "counts": {
+          "cast32": 46397816,
+          "arith32": 199965768,
+          "fill32": 4698440,
+          "reduce_repeat32": 9122304,
+          "sqrt32": 10080,
+          "div32": 4846440,
+          "exp32": 6234624,
+          "recip32": 11976,
+          "cast16_to_int8": 3427328,
+          "index32": 5015104,
+          "gather32": 1870848,
+          "arith16": 9216,
+          "fill16": 2686976,
+          "gatherb16": 1622016,
+          "sort_items": 4755456,
+          "merge_items_min": 16146432,
+          "merge_items_extra": 221184,
+          "gathermask32": 294912
+        },
+        "history": 131072,
+        "batch": 24,
+        "query_tokens": 6,
+        "tokens": 144,
+        "query_head_group": 8,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 131072,
+      "batch": 28,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 287.0688288288288,
+      "cube_current_assignment_us": 327.40324324324325,
+      "vector_ideal_reduction_us": 222.6641184041184,
+      "vector_generic_reduction_max_us": 238.33855252574003,
+      "vector_generic_reduction_min_us": 236.67801198519948,
+      "l0b_current_assignment_us": 309.4140540540541,
+      "hbm_cold_max_reuse_read_us": 201.58246499999998,
+      "hbm_cold_per_query_read_writeback_us": 263.21162,
+      "hot_capacity_resource_floor_us": 327.40324324324325,
+      "hot_generic_resource_model_us": 327.40324324324325,
+      "cold_resource_floor_us": 327.40324324324325,
+      "cold_per_query_writeback_model_us": 327.40324324324325,
+      "actual_dynamic_l1_us": 1167.72,
+      "actual_over_hot_resource_floor": 3.566610973161454,
+      "actual_over_cold_resource_floor": 3.566610973161454,
+      "gap_to_hot_resource_floor_us": 840.3167567567568,
+      "theoretical_peak_headroom_fraction": 0.719621790118142,
+      "memory_service_sensitivity_us": {
+        "2": 615.748368,
+        "4": 327.40324324324325,
+        "6": 327.40324324324325,
+        "7": 327.40324324324325
+      },
+      "cube_peak_equivalent_fraction": 0.280378209881858,
+      "vector_peak_equivalent_fraction": 0.20410590940100368,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 119275520,
+          "hidden_input": 5505024,
+          "old_state_values_scores": 573440,
+          "metadata_and_rope": 352252
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 6508,
+          "indexer_and_compressed_page_tables": 229600,
+          "original_and_state_selected_pages": 1456,
+          "rope_main_and_compact": 114688
+        },
+        "sparse_old_kv_max_reuse_bytes": 18321408,
+        "sparse_old_kv_each_query_bytes": 109498368,
+        "output_dirty_bytes": {
+          "hidden_output": 5505024,
+          "state_values_scores": 1720320,
+          "original_kv": 172032,
+          "main_compact_kv": 28672,
+          "indexer_compact_key_scale": 3640
+        },
+        "cold_read_max_reuse_us": 201.58246499999998,
+        "cold_read_per_query_us": 258.568065,
+        "cold_read_writeback_per_query_us": 263.21162,
+        "hot_start_capacity_floor_bytes": 121205352,
+        "hot_start_capacity_floor_us": 75.753345,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 33030144,
+          "hc_partials_reduce_raw_gates": 282368,
+          "mixed_write_norm_read": 2752512,
+          "normed_write_five_branches": 8257536,
+          "qa_write_read": 1376256,
+          "qr_two_roots_write_read": 690816,
+          "main_query_acc_write_read": 44040192,
+          "main_query_bf16_write": 11010048,
+          "kv_acc_write_read_and_normed_write_read": 1032192,
+          "compressor_projections_write_commit_read": 3440640,
+          "compressor_pool_zero_close_read": 931840,
+          "main_normed_and_debug": 516096,
+          "indexer_compact_hadamard_quant": 57344,
+          "indexer_query_acc_write_read": 11010048,
+          "indexer_rope_write_read": 5505024,
+          "indexer_hadamard_write_read": 11010048,
+          "indexer_quant_write_and_score_read": 8257536,
+          "head_weights_and_coefficients": 2510848,
+          "score_transfer_write_read": 45416448,
+          "leaf_roots_write_read": 6193152,
+          "topk_output_and_indices_read": 1032192,
+          "attention_plan_and_signed_rope": 1655808,
+          "attention_payload": 655097856,
+          "oa_result_write_twice_read": 16515072,
+          "oa_quant_write_ob_read": 4194304,
+          "ob_partial_write_read": 44040192
+        },
+        "semantic_gm_ledger_total_bytes": 1231496736,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 615.748368,
+          "4": 307.874184,
+          "6": 205.249456,
+          "7": 175.92810514285716
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 403.16492999999997,
+          "1.2": 268.77662,
+          "1.6": 201.58246499999998
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": {
+        "QB": {
+          "roles": 24,
+          "latest_core": 7,
+          "start_us": {
+            "min": 209.86,
+            "median": 219.6,
+            "max": 239.72
+          },
+          "end_us": {
+            "min": 232.1,
+            "median": 306.9,
+            "max": 327.68
+          },
+          "interval_us": {
+            "min": 0.22,
+            "median": 88.91,
+            "max": 99.48
+          },
+          "gm_wait_us": {
+            "min": 0.0,
+            "median": 0.0,
+            "max": 0.0
+          },
+          "other_us": {
+            "min": 0.22,
+            "median": 88.91,
+            "max": 99.48
+          }
+        },
+        "SCORE_CUBE": {
+          "roles": 24,
+          "latest_core": 6,
+          "start_us": {
+            "min": 277.22,
+            "median": 309.29,
+            "max": 385.82
+          },
+          "end_us": {
+            "min": 635.44,
+            "median": 700.29,
+            "max": 728.62
+          },
+          "interval_us": {
+            "min": 288.7,
+            "median": 343.97,
+            "max": 423.64
+          },
+          "gm_wait_us": {
+            "min": 12.32,
+            "median": 36.64,
+            "max": 68.06
+          },
+          "other_us": {
+            "min": 276.38,
+            "median": 329.82,
+            "max": 358.58
+          }
+        },
+        "SCORE_VECTOR": {
+          "roles": 48,
+          "latest_core": 36,
+          "start_us": {
+            "min": 373.9,
+            "median": 378.08,
+            "max": 384.22
+          },
+          "end_us": {
+            "min": 635.88,
+            "median": 709.91,
+            "max": 738.14
+          },
+          "interval_us": {
+            "min": 258.86,
+            "median": 329.87,
+            "max": 360.6
+          },
+          "gm_wait_us": {
+            "min": 4.6,
+            "median": 4.93,
+            "max": 5.62
+          },
+          "other_us": {
+            "min": 253.46,
+            "median": 324.7,
+            "max": 355.68
+          }
+        },
+        "ATTN_CUBE": {
+          "roles": 24,
+          "latest_core": 9,
+          "start_us": {
+            "min": 635.44,
+            "median": 700.29,
+            "max": 728.62
+          },
+          "end_us": {
+            "min": 1055.74,
+            "median": 1075.92,
+            "max": 1089.28
+          },
+          "interval_us": {
+            "min": 336.76,
+            "median": 382.69,
+            "max": 452.18
+          },
+          "gm_wait_us": {
+            "min": 44.94,
+            "median": 72.16,
+            "max": 136.22
+          },
+          "other_us": {
+            "min": 281.32,
+            "median": 304.19,
+            "max": 317.54
+          }
+        },
+        "ATTN_VECTOR": {
+          "roles": 48,
+          "latest_core": 43,
+          "start_us": {
+            "min": 723.34,
+            "median": 747.19,
+            "max": 767.02
+          },
+          "end_us": {
+            "min": 1059.44,
+            "median": 1079.85,
+            "max": 1093.12
+          },
+          "interval_us": {
+            "min": 297.72,
+            "median": 329.46,
+            "max": 369.3
+          },
+          "gm_wait_us": {
+            "min": 10.92,
+            "median": 25.17,
+            "max": 54.92
+          },
+          "other_us": {
+            "min": 282.9,
+            "median": 304.77,
+            "max": 319.32
+          }
+        },
+        "OB": {
+          "roles": 24,
+          "latest_core": 8,
+          "start_us": {
+            "min": 1148.08,
+            "median": 1173.15,
+            "max": 1182.94
+          },
+          "end_us": {
+            "min": 1183.84,
+            "median": 1224.47,
+            "max": 1235.58
+          },
+          "interval_us": {
+            "min": 35.22,
+            "median": 50.15,
+            "max": 51.92
+          },
+          "gm_wait_us": {
+            "min": 1.34,
+            "median": 2.08,
+            "max": 2.2
+          },
+          "other_us": {
+            "min": 33.84,
+            "median": 47.97,
+            "max": 49.8
+          }
+        },
+        "OUT": {
+          "roles": 48,
+          "latest_core": 46,
+          "start_us": {
+            "min": 1132.8,
+            "median": 1161.55,
+            "max": 1191.32
+          },
+          "end_us": {
+            "min": 1264.36,
+            "median": 1270.47,
+            "max": 1275.62
+          },
+          "interval_us": {
+            "min": 74.16,
+            "median": 108.08,
+            "max": 140.68
+          },
+          "gm_wait_us": {
+            "min": 47.36,
+            "median": 78.2,
+            "max": 107.28
+          },
+          "other_us": {
+            "min": 26.32,
+            "median": 31.11,
+            "max": 35.74
+          }
+        }
+      },
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 163654402048,
+          "cube_cycles": 12745856.0,
+          "left_bytes": 291274752,
+          "right_bytes": 1551237120,
+          "fix_to_l1_bytes": 726663168
+        },
+        "balanced_us": {
+          "cube_cycles": 287.06882882882894,
+          "left_bytes": 25.62594594594596,
+          "right_bytes": 272.9513513513514,
+          "fix_to_l1_bytes": 127.86162162162158
+        },
+        "current_assignment_us": {
+          "cube_cycles": 327.40324324324325,
+          "left_bytes": 30.572972972972973,
+          "right_bytes": 309.4140540540541,
+          "fix_to_l1_bytes": 136.16432432432433
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 213.75020777027035,
+        "ideal_balance_max_us": 215.2031807432433,
+        "current_assignment_min_us": 236.67801198519948,
+        "current_assignment_max_us": 238.33855252574003,
+        "ideal_reduction_current_assignment_us": 222.6641184041184,
+        "ideal_reduction_balance_us": 202.3335319538289,
+        "service_min_us_per_aiv": [
+          234.273712998713,
+          235.57098495817246,
+          234.273712998713,
+          236.67801198519948,
+          235.38074002574004,
+          235.61547144465897,
+          233.1641994851995,
+          234.46147144465897,
+          203.0795148005148,
+          206.78108574646075,
+          234.27122651222652,
+          235.06133630952382,
+          233.11663191763193,
+          234.4139038770914,
+          233.11663191763193,
+          235.52093090411842,
+          234.22365894465895,
+          235.06133630952382,
+          203.03194723294723,
+          205.62649115186616,
+          233.11663191763193,
+          232.2839646879022,
+          218.99706435006436,
+          219.83474171492924,
+          214.28841570141572,
+          215.58568766087518,
+          214.28841570141572,
+          216.41595793114544,
+          183.83124453024453,
+          185.96619385456887,
+          213.08565894465897,
+          214.38293090411844,
+          213.08565894465897,
+          215.2132011743887,
+          213.91592921492924,
+          214.7536065797941,
+          213.08565894465897,
+          214.38293090411844,
+          183.00097425997427,
+          186.42578844916346,
+          183.6959034749035,
+          184.53358083976835,
+          182.8656332046332,
+          184.16290516409268,
+          182.8656332046332,
+          184.99317543436294,
+          183.6959034749035,
+          184.53358083976835
+        ],
+        "service_max_us_per_aiv": [
+          235.93425353925355,
+          237.231525498713,
+          235.93425353925355,
+          238.33855252574003,
+          237.04128056628056,
+          237.27601198519952,
+          234.82474002574003,
+          236.1220119851995,
+          204.74005534105535,
+          208.4416262870013,
+          235.93176705276707,
+          236.72187685006438,
+          234.7771724581725,
+          236.07444441763192,
+          234.7771724581725,
+          237.18147144465897,
+          235.8841994851995,
+          236.72187685006438,
+          204.69248777348778,
+          207.28703169240669,
+          234.7771724581725,
+          233.94450522844275,
+          220.6576048906049,
+          221.49528225546976,
+          215.5338211068211,
+          216.83109306628057,
+          215.5338211068211,
+          217.66136333655083,
+          185.07664993564995,
+          187.21159925997426,
+          214.33106435006437,
+          215.62833630952383,
+          214.33106435006437,
+          216.4586065797941,
+          215.16133462033463,
+          215.9990119851995,
+          214.33106435006437,
+          215.62833630952383,
+          184.24637966537966,
+          187.67119385456886,
+          184.9413088803089,
+          185.77898624517377,
+          184.11103861003863,
+          185.40831056949807,
+          184.11103861003863,
+          186.23858083976836,
+          184.9413088803089,
+          185.77898624517377
+        ],
+        "counts": {
+          "cast32": 54547116,
+          "arith32": 233502932,
+          "fill32": 5337812,
+          "reduce_repeat32": 10642688,
+          "sqrt32": 11760,
+          "div32": 5654180,
+          "exp32": 7273728,
+          "recip32": 13972,
+          "cast16_to_int8": 3649024,
+          "index32": 5935808,
+          "gather32": 2182656,
+          "arith16": 10752,
+          "fill16": 2785280,
+          "gatherb16": 1892352,
+          "sort_items": 5548032,
+          "merge_items_min": 18837504,
+          "merge_items_extra": 258048,
+          "gathermask32": 344064
+        },
+        "history": 131072,
+        "batch": 28,
+        "query_tokens": 6,
+        "tokens": 168,
+        "query_head_group": 4,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 16,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 76.66306306306306,
+      "cube_current_assignment_us": 86.62486486486486,
+      "vector_ideal_reduction_us": 54.30075506756757,
+      "vector_generic_reduction_max_us": 64.04843243243243,
+      "vector_generic_reduction_min_us": 64.04843243243243,
+      "l0b_current_assignment_us": 86.62486486486486,
+      "hbm_cold_max_reuse_read_us": 122.990835,
+      "hbm_cold_per_query_read_writeback_us": 158.207495,
+      "hot_capacity_resource_floor_us": 86.62486486486486,
+      "hot_generic_resource_model_us": 86.62486486486486,
+      "cold_resource_floor_us": 122.990835,
+      "cold_per_query_writeback_model_us": 158.207495,
+      "actual_dynamic_l1_us": 644.08,
+      "actual_over_hot_resource_floor": 7.4352785543131,
+      "actual_over_cold_resource_floor": 5.236812970657529,
+      "gap_to_hot_resource_floor_us": 557.4551351351352,
+      "theoretical_peak_headroom_fraction": 0.8655060475952291,
+      "memory_service_sensitivity_us": {
+        "2": 343.42423599999995,
+        "4": 171.71211799999998,
+        "6": 114.47474533333333,
+        "7": 98.12121028571428
+      },
+      "cube_peak_equivalent_fraction": 0.1344939524047709,
+      "vector_peak_equivalent_fraction": 0.09944173461748917,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 4259840,
+          "hidden_input": 3145728,
+          "old_state_values_scores": 327680,
+          "metadata_and_rope": 78412
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 3724,
+          "indexer_and_compressed_page_tables": 8320,
+          "original_and_state_selected_pages": 832,
+          "rope_main_and_compact": 65536
+        },
+        "sparse_old_kv_max_reuse_bytes": 10469376,
+        "sparse_old_kv_each_query_bytes": 62570496,
+        "output_dirty_bytes": {
+          "hidden_output": 3145728,
+          "state_values_scores": 983040,
+          "original_kv": 98304,
+          "main_compact_kv": 16384,
+          "indexer_compact_key_scale": 2080
+        },
+        "cold_read_max_reuse_us": 122.990835,
+        "cold_read_per_query_us": 155.554035,
+        "cold_read_writeback_per_query_us": 158.207495,
+        "hot_start_capacity_floor_bytes": 0,
+        "hot_start_capacity_floor_us": 0.0,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 18874368,
+          "hc_partials_reduce_raw_gates": 156672,
+          "mixed_write_norm_read": 1572864,
+          "normed_write_five_branches": 4718592,
+          "qa_write_read": 786432,
+          "qr_two_roots_write_read": 394752,
+          "main_query_acc_write_read": 25165824,
+          "main_query_bf16_write": 6291456,
+          "kv_acc_write_read_and_normed_write_read": 589824,
+          "compressor_projections_write_commit_read": 1966080,
+          "compressor_pool_zero_close_read": 532480,
+          "main_normed_and_debug": 294912,
+          "indexer_compact_hadamard_quant": 32768,
+          "indexer_query_acc_write_read": 6291456,
+          "indexer_rope_write_read": 3145728,
+          "indexer_hadamard_write_read": 6291456,
+          "indexer_quant_write_and_score_read": 1572864,
+          "head_weights_and_coefficients": 638976,
+          "score_transfer_write_read": 1769472,
+          "leaf_roots_write_read": 1572864,
+          "topk_output_and_indices_read": 589824,
+          "attention_plan_and_signed_rope": 946176,
+          "attention_payload": 374341632,
+          "oa_result_write_twice_read": 9437184,
+          "oa_quant_write_ob_read": 1572864,
+          "ob_partial_write_read": 25165824,
+          "short_score_arena_write_read": 1573632
+        },
+        "semantic_gm_ledger_total_bytes": 686848472,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 343.42423599999995,
+          "4": 171.71211799999998,
+          "6": 114.47474533333333,
+          "7": 98.12121028571428
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 245.98167,
+          "1.2": 163.98778,
+          "1.6": 122.990835
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": null,
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 36641964032,
+          "cube_cycles": 3403840.0,
+          "left_bytes": 157884416,
+          "right_bytes": 432308224,
+          "fix_to_l1_bytes": 28311552
+        },
+        "balanced_us": {
+          "cube_cycles": 76.66306306306309,
+          "left_bytes": 13.890450450450446,
+          "right_bytes": 76.06774774774779,
+          "fix_to_l1_bytes": 4.981621621621624
+        },
+        "current_assignment_us": {
+          "cube_cycles": 86.62486486486486,
+          "left_bytes": 15.757837837837839,
+          "right_bytes": 86.62486486486486,
+          "fix_to_l1_bytes": 4.981621621621621
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 47.67484966216222,
+        "ideal_balance_max_us": 47.67484966216222,
+        "current_assignment_min_us": 64.04843243243243,
+        "current_assignment_max_us": 64.04843243243243,
+        "ideal_reduction_current_assignment_us": 54.30075506756757,
+        "ideal_reduction_balance_us": 41.169796171171214,
+        "service_min_us_per_aiv": [
+          64.04843243243243,
+          59.4905945945946,
+          64.04843243243243,
+          58.38106418918919,
+          62.93891891891892,
+          58.3810472972973,
+          62.891351351351354,
+          58.333513513513516,
+          62.891351351351354,
+          58.33349662162162,
+          62.891351351351354,
+          58.33347972972973,
+          47.66475675675675,
+          43.106918918918915,
+          47.66475675675675,
+          43.10690202702702,
+          46.49605405405406,
+          41.93818243243244,
+          46.49605405405406,
+          41.938216216216226,
+          46.49605405405406,
+          41.93819932432433,
+          46.49605405405406,
+          41.93818243243244,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874
+        ],
+        "service_max_us_per_aiv": [
+          64.04843243243243,
+          59.4905945945946,
+          64.04843243243243,
+          58.38106418918919,
+          62.93891891891892,
+          58.3810472972973,
+          62.891351351351354,
+          58.333513513513516,
+          62.891351351351354,
+          58.33349662162162,
+          62.891351351351354,
+          58.33347972972973,
+          47.66475675675675,
+          43.106918918918915,
+          47.66475675675675,
+          43.10690202702702,
+          46.49605405405406,
+          41.93818243243244,
+          46.49605405405406,
+          41.938216216216226,
+          46.49605405405406,
+          41.93819932432433,
+          46.49605405405406,
+          41.93818243243244,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874,
+          44.868486486486496,
+          40.31064864864865,
+          44.868486486486496,
+          40.31063175675676,
+          44.868486486486496,
+          40.310614864864874
+        ],
+        "counts": {
+          "cast32": 29810368,
+          "arith32": 123586704,
+          "fill32": 1754672,
+          "reduce_repeat32": 6065152,
+          "sqrt32": 6720,
+          "div32": 3230960,
+          "exp32": 4156416,
+          "recip32": 7984,
+          "cast16_to_int8": 1673216,
+          "index32": 345344,
+          "gather32": 1247232,
+          "arith16": 6144,
+          "fill16": 208896,
+          "sort_items": 294912,
+          "merge_items_min": 983040,
+          "gathermask32": 196608
+        },
+        "history": 8192,
+        "batch": 16,
+        "query_tokens": 6,
+        "tokens": 96,
+        "query_head_group": 16,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    },
+    {
+      "history": 8192,
+      "batch": 32,
+      "query_tokens": 6,
+      "cube_ideal_balance_us": 153.32612612612613,
+      "cube_current_assignment_us": 175.46378378378378,
+      "vector_ideal_reduction_us": 93.50248479729731,
+      "vector_generic_reduction_max_us": 108.66097297297297,
+      "vector_generic_reduction_min_us": 108.66097297297297,
+      "l0b_current_assignment_us": 153.32324324324324,
+      "hbm_cold_max_reuse_read_us": 134.416475,
+      "hbm_cold_per_query_read_writeback_us": 204.849795,
+      "hot_capacity_resource_floor_us": 175.46378378378378,
+      "hot_generic_resource_model_us": 175.46378378378378,
+      "cold_resource_floor_us": 175.46378378378378,
+      "cold_per_query_writeback_model_us": 204.849795,
+      "actual_dynamic_l1_us": 933.58,
+      "actual_over_hot_resource_floor": 5.320642128351735,
+      "actual_over_cold_resource_floor": 5.320642128351735,
+      "gap_to_hot_resource_floor_us": 758.1162162162162,
+      "theoretical_peak_headroom_fraction": 0.8120527605735086,
+      "memory_service_sensitivity_us": {
+        "2": 598.1206040000001,
+        "4": 299.06030200000004,
+        "6": 199.37353466666664,
+        "7": 175.46378378378378
+      },
+      "cube_peak_equivalent_fraction": 0.18794723942649133,
+      "vector_peak_equivalent_fraction": 0.11639171037615734,
+      "memory": {
+        "cold_read_ledger_bytes": {
+          "main_matrix_weights": 178290688,
+          "auxiliary_weights": 213612,
+          "old_indexer_keys_and_scales": 8519680,
+          "hidden_input": 6291456,
+          "old_state_values_scores": 655360,
+          "metadata_and_rope": 156812
+        },
+        "auxiliary_weight_bytes": {
+          "norm_and_gamma_bf16": 12544,
+          "projection_scales_fp32": 180224,
+          "hc_scale_base_sink_fp32": 364,
+          "compressor_ape_fp32": 20480
+        },
+        "metadata_bytes": {
+          "positions_bounds_lengths_slots": 7436,
+          "indexer_and_compressed_page_tables": 16640,
+          "original_and_state_selected_pages": 1664,
+          "rope_main_and_compact": 131072
+        },
+        "sparse_old_kv_max_reuse_bytes": 20938752,
+        "sparse_old_kv_each_query_bytes": 125140992,
+        "output_dirty_bytes": {
+          "hidden_output": 6291456,
+          "state_values_scores": 1966080,
+          "original_kv": 196608,
+          "main_compact_kv": 32768,
+          "indexer_compact_key_scale": 4160
+        },
+        "cold_read_max_reuse_us": 134.416475,
+        "cold_read_per_query_us": 199.542875,
+        "cold_read_writeback_per_query_us": 204.849795,
+        "hot_start_capacity_floor_bytes": 13739768,
+        "hot_start_capacity_floor_us": 8.587355,
+        "hbm_peak_bytes_per_second": 1600000000000.0,
+        "l2_capacity_bytes": 201326592,
+        "semantic_gm_materialization_bytes": {
+          "hc_widen_materialize_and_two_consumers": 37748736,
+          "hc_partials_reduce_raw_gates": 313344,
+          "mixed_write_norm_read": 3145728,
+          "normed_write_five_branches": 9437184,
+          "qa_write_read": 1572864,
+          "qr_two_roots_write_read": 789504,
+          "main_query_acc_write_read": 50331648,
+          "main_query_bf16_write": 12582912,
+          "kv_acc_write_read_and_normed_write_read": 1179648,
+          "compressor_projections_write_commit_read": 3932160,
+          "compressor_pool_zero_close_read": 1064960,
+          "main_normed_and_debug": 589824,
+          "indexer_compact_hadamard_quant": 65536,
+          "indexer_query_acc_write_read": 12582912,
+          "indexer_rope_write_read": 6291456,
+          "indexer_hadamard_write_read": 12582912,
+          "indexer_quant_write_and_score_read": 3145728,
+          "head_weights_and_coefficients": 1277952,
+          "score_transfer_write_read": 3538944,
+          "leaf_roots_write_read": 3145728,
+          "topk_output_and_indices_read": 1179648,
+          "attention_plan_and_signed_rope": 1892352,
+          "attention_payload": 748683264,
+          "oa_result_write_twice_read": 18874368,
+          "oa_quant_write_ob_read": 4194304,
+          "ob_partial_write_read": 50331648,
+          "short_score_arena_write_read": 3147264
+        },
+        "semantic_gm_ledger_total_bytes": 1196241208,
+        "gm_aggregate_rate_sensitivity_us": {
+          "2": 598.1206040000001,
+          "4": 299.06030200000004,
+          "6": 199.37353466666664,
+          "7": 170.89160114285716
+        },
+        "cold_bandwidth_sensitivity_us": {
+          "0.8": 268.83295,
+          "1.2": 179.22196666666665,
+          "1.6": 134.416475
+        },
+        "limits": [
+          "cold是假定这些外部只读输入首次在本die L2之外，不代表ACLGraph热重放。",
+          "输出可先留在L2，只有显式writeback场景才将全部脏输出算入同窗口HBM。",
+          "最强复用和逐query供给两端描述KV访问条件，不是实际命中率置信区间。",
+          "语义GM账本不含所有重复Tile搬入、Scalar信号、cacheline放大和临时溢出。",
+          "L2聚合带宽未实测且未找到本机公开保证值；2/4/6/7TB/s只是敏感性参数。",
+          "7TB/s来自官方192MB L2案例中的假设示例，不能充当Ascend910_9392实测规格。"
+        ]
+      },
+      "observed_phase_probe": null,
+      "ports_summary": {
+        "name": "整层合计",
+        "sum_counts": {
+          "ops": 73283928064,
+          "cube_cycles": 6807680.0,
+          "left_bytes": 265437184,
+          "right_bytes": 801701888,
+          "fix_to_l1_bytes": 56623104
+        },
+        "balanced_us": {
+          "cube_cycles": 153.32612612612613,
+          "left_bytes": 23.352792792792798,
+          "right_bytes": 141.0652252252252,
+          "fix_to_l1_bytes": 9.963243243243248
+        },
+        "current_assignment_us": {
+          "cube_cycles": 175.46378378378378,
+          "left_bytes": 26.257297297297296,
+          "right_bytes": 153.32324324324324,
+          "fix_to_l1_bytes": 9.963243243243243
+        },
+        "independent_cube_counts_match_all_15_stages": true,
+        "limitations": [
+          "左右端口分别给下界，不假定它们带宽可相加，也不计搬运启动。",
+          "每逻辑矩阵的最少L0输入脚印；后端再分块导致的重复加载只会增加请求。",
+          "双压缩矩阵的共同左Tile采用复用一次假设；不借它声称后端已做到复用。",
+          "FIX仅核算公开A3速率明确的Score QK→FP16 L1通路，不冒用A5的GM/UB数据。"
+        ]
+      },
+      "vector_summary": {
+        "ideal_balance_min_us": 95.18600563063072,
+        "ideal_balance_max_us": 95.18600563063072,
+        "current_assignment_min_us": 108.66097297297297,
+        "current_assignment_max_us": 108.66097297297297,
+        "ideal_reduction_current_assignment_us": 93.50248479729731,
+        "ideal_reduction_balance_us": 82.17589864864874,
+        "service_min_us_per_aiv": [
+          108.66097297297297,
+          99.54529729729731,
+          108.66097297297297,
+          99.54526351351352,
+          108.66097297297297,
+          100.09874324324325,
+          107.55145945945947,
+          98.43578378378379,
+          107.55145945945947,
+          98.43575000000001,
+          107.55145945945947,
+          98.98922972972973,
+          107.5038918918919,
+          98.38821621621622,
+          107.5038918918919,
+          98.38818243243244,
+          107.5038918918919,
+          98.94166216216217,
+          107.5038918918919,
+          98.38821621621622,
+          107.5038918918919,
+          98.38818243243244,
+          107.5038918918919,
+          98.94166216216217,
+          92.2772972972973,
+          83.16162162162162,
+          92.2772972972973,
+          83.16158783783784,
+          92.2772972972973,
+          83.71506756756757,
+          92.2772972972973,
+          83.16162162162162,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488,
+          91.1085945945946,
+          81.99291891891893,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488,
+          91.1085945945946,
+          81.99291891891893,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488
+        ],
+        "service_max_us_per_aiv": [
+          108.66097297297297,
+          99.54529729729731,
+          108.66097297297297,
+          99.54526351351352,
+          108.66097297297297,
+          100.09874324324325,
+          107.55145945945947,
+          98.43578378378379,
+          107.55145945945947,
+          98.43575000000001,
+          107.55145945945947,
+          98.98922972972973,
+          107.5038918918919,
+          98.38821621621622,
+          107.5038918918919,
+          98.38818243243244,
+          107.5038918918919,
+          98.94166216216217,
+          107.5038918918919,
+          98.38821621621622,
+          107.5038918918919,
+          98.38818243243244,
+          107.5038918918919,
+          98.94166216216217,
+          92.2772972972973,
+          83.16162162162162,
+          92.2772972972973,
+          83.16158783783784,
+          92.2772972972973,
+          83.71506756756757,
+          92.2772972972973,
+          83.16162162162162,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488,
+          91.1085945945946,
+          81.99291891891893,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488,
+          91.1085945945946,
+          81.99291891891893,
+          91.1085945945946,
+          81.99288513513515,
+          91.1085945945946,
+          82.54636486486488
+        ],
+        "counts": {
+          "cast32": 59421056,
+          "arith32": 246810144,
+          "fill32": 2649184,
+          "reduce_repeat32": 12130304,
+          "sqrt32": 13440,
+          "div32": 6461920,
+          "exp32": 8312832,
+          "recip32": 15968,
+          "cast16_to_int8": 3870720,
+          "index32": 659200,
+          "gather32": 2494464,
+          "arith16": 12288,
+          "fill16": 942080,
+          "sort_items": 589824,
+          "merge_items_min": 1966080,
+          "gathermask32": 393216
+        },
+        "history": 8192,
+        "batch": 32,
+        "query_tokens": 6,
+        "tokens": 192,
+        "query_head_group": 32,
+        "candidate_coverage_verified": true
+      },
+      "component_details": [
+        "VECTOR_MODEL.json",
+        "MEMORY_MODEL.json"
+      ]
+    }
+  ]
+}

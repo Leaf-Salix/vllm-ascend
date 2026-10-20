@@ -25,7 +25,8 @@ CORES = PLATFORM_CONFIG.getint("SoCInfo", "cube_core_cnt")
 FREQUENCY = PLATFORM_CONFIG.getfloat("AICoreSpec", "cube_freq") * 1e6
 FP16_PEAK = CORES * FREQUENCY * 2 * 16 * 16 * 16
 INT8_PEAK = FP16_PEAK * 2
-# HC FP32 投影很小；1/4 是显式建模假设，附 1/8～1/1 敏感性而非声称实测峰值。
+# 官方A3/2201 Mmad标准FP32 cube_k=4，BF16 cube_k=16。未开启HF32时为1/4；
+# 仍保留模式敏感性，不能仅凭Python dtype断言运行时全局HF32控制寄存器状态。
 FP32_MODEL_PEAK = FP16_PEAK / 4
 HBM_PEAK = 1.6e12  # 厂商论文的每 die 上限；不是本轮实测持续带宽。
 
@@ -205,6 +206,10 @@ def main():
                 for name in ("QB", "SCORE_CUBE", "SCORE_VECTOR", "ATTN_CUBE", "ATTN_VECTOR", "OB", "OUT")}
             row["stage_probe_source"] = str(PHASES)
     report = dict(
+        assessment_status="cube_component_see_FULL_ROOFLINE_for_vector_and_memory",
+        vector_model_in_this_file=False,
+        full_resource_report="FULL_ROOFLINE.json",
+        complete_csa_theoretical_latency_available=False,
         scope="TP1、正式W8A8、第4层、S6；HC_pre+输入RMS+完整CSA+HCpost；无MoE/整网",
         source_snapshot=str(FIVE/"source_dynamic"), measured_dynamic_commit="13259f92",
         hardware=dict(soc="Ascend910_9392", logical_device_scope="一个die",
@@ -214,6 +219,7 @@ def main():
                       l2_bytes=PLATFORM_CONFIG.getint("SoCInfo", "l2_size"), platform_source=str(PLATFORM)),
         hardware_sources=[
             "https://arxiv.org/html/2506.12708v2#S3.SS3.SSS1",
+            "https://asc.gitcode.com/api/appendix/cube_instruction_theoretical_perf_summary.html",
             "https://www-file.huawei.com/admin/asset/v1/pro/view/6ca306adab0a4852bacffce25f5573ec.pdf",
         ],
         limits=[
