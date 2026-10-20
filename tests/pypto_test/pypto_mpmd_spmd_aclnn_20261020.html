@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>PyPTO：从动态调度到独立执行 · HC_pre</title>
+<style>
+:root{--ink:#142c45;--muted:#607286;--blue:#245bd6;--pale:#edf3ff;--teal:#08796e;--green:#edf8f4;--orange:#a65d15;--amber:#fff5e7;--line:#d5e0eb;--paper:#f9fbfe}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%}
+body{overflow:hidden;background:#dce4ed;color:var(--ink);font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC","Droid Sans Fallback","Droid Sans",sans-serif;-webkit-font-smoothing:antialiased}
+button,a{-webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+button:focus-visible,a:focus-visible{outline:3px solid #edac40;outline-offset:4px}
+#stage{position:fixed;inset:0;display:grid;place-items:center}
+#frame{position:relative;width:1600px;height:900px}
+.slide{position:absolute;inset:0 auto auto 0;width:1600px;height:900px;padding:32px 52px 24px;background:var(--paper);transform-origin:top left;overflow:hidden;display:none}
+.slide.active{display:block}
+.slide:before{content:"";position:absolute;top:0;left:0;width:100%;height:6px;background:linear-gradient(90deg,var(--blue) 0 64%,var(--teal) 64%)}
+.mast{display:flex;align-items:center;justify-content:space-between;font-size:15px;letter-spacing:1px;color:var(--muted)}
+.mast strong{color:var(--blue);letter-spacing:1.2px}
+.mast .sep{display:inline-block;margin:0 13px;color:#b5c3d4}
+.series{display:flex;gap:16px;font-size:13px;letter-spacing:0}.series b{color:var(--blue)}
+h1{font-size:42px;letter-spacing:-1px;line-height:1.3;margin:18px 0 9px;font-weight:800}h1 em{color:var(--blue);font-style:normal}
+.subtitle{font-size:20px;color:var(--muted);line-height:1.5;margin:0}.subtitle b{color:var(--ink)}
+.ribbon{margin-top:24px;padding:17px 22px;display:flex;align-items:center;gap:17px;border-radius:10px;background:#203e73;color:white;font-size:23px;font-weight:700}
+.ribbon small{font-size:14px;background:#ffffff19;padding:5px 9px;border-radius:5px;color:#c1d6ff;white-space:nowrap}
+.ribbon .chev{color:#a9caff;font-size:23px}
+.three{display:grid;grid-template-columns:460px 36px 424px 36px 540px;margin-top:23px;align-items:stretch}
+.panel{border:1px solid var(--line);border-radius:13px;background:#fff;padding:20px 23px}
+.panel h2{font-size:26px;margin:7px 0 8px;line-height:1.25}
+.kicker{font:700 13px/1.4 Arial,sans-serif;color:var(--blue);letter-spacing:1.6px}
+.lead{font-size:17px;line-height:1.5;margin:0;color:var(--muted)}
+.arrow{display:flex;align-items:center;justify-content:center;color:#8ca5c3;font:400 29px/1 Arial,sans-serif}
+.diagram1 .panel{height:424px}
+.mpmd .tasks{display:flex;gap:8px;margin:16px 0 12px}
+.chip{border-radius:6px;padding:7px 11px;display:inline-block;font-size:15px;font-weight:700;background:var(--pale);color:#2354b2}
+.chip.v{background:#e2f4ed;color:#0c7062}.chip.wait{background:#f1f3f6;color:#7b8999;border:1px dashed #c5cfdb}
+.queue{padding:12px 16px;background:#f2f6fc;border:1px solid #d8e3f1;border-radius:8px;font-size:18px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.queue small{font-weight:400;font-size:14px;color:#5d7290}
+.lane-label{font-size:13px;color:#8795a4;text-align:right;margin:8px 0 6px}
+.lane{display:flex;gap:6px;align-items:center;height:27px;margin:5px 0}
+.lane>span{width:43px;flex-shrink:0;color:#63768f;font:700 12px Arial,sans-serif}
+.track{display:flex;gap:4px;flex:1;height:25px;background:#f4f6f9;border-radius:4px;padding:2px}
+.tile{border-radius:3px;background:#87a8ef;color:#173f8d;display:grid;place-items:center;font-size:11px;flex-shrink:0}
+.tile.v{background:#8ed2bf;color:#155f50}.tile.gap{background:transparent}
+.panel-note{font-size:16px;line-height:1.55;color:#627489;margin:12px 0 0}
+.plan{background:#f0f5ff;border-color:#c8d9f7}
+.plan .lead{font-size:16px}
+.plan-list{display:grid;gap:11px;margin:18px 0 16px}
+.plan-item{display:flex;align-items:flex-start;gap:12px}
+.plan-item i{display:grid;place-items:center;flex-shrink:0;width:24px;height:24px;border-radius:50%;background:#fff;color:var(--blue);font:700 12px Arial,sans-serif;font-style:normal}
+.plan-item b{display:block;font-size:18px;line-height:1.3}
+.plan-item span{display:block;font-size:15px;margin-top:5px;color:#687d96}
+.gate{border-top:1px solid #ccdaf0;padding-top:12px;font-size:17px;font-weight:700;color:#2354af}
+.spmd .kicker{color:var(--teal)}
+.groupbox{margin-top:16px;border:1px solid #c6e1d8;background:#f4fbf8;border-radius:9px;padding:11px 15px}
+.groupbox-head{display:flex;justify-content:space-between;font-size:15px;font-weight:700;margin-bottom:11px}
+.groupbox-head span{font-size:13px;font-weight:400;color:#618077}
+.group-row{display:flex;align-items:center;gap:8px;padding:5px 0}
+.group-id{font:700 13px Arial,sans-serif;width:58px;color:#5c7975}
+.mini-stage{font-size:13px;padding:7px 8px;border-radius:5px;background:#dce8ff;color:#2b5194}
+.mini-stage.tail{background:#d6eee5;color:#246657}
+.mini-sync{font-size:12px;color:#7d8d9c}
+.group-etc{text-align:center;color:#8b9eac;height:19px;font-size:18px;line-height:12px}
+.spmd .panel-note{font-size:16px}
+.loopback{display:flex;align-items:center;gap:12px;margin-top:19px;color:#a46423;font-size:17px}
+.loopback .line{height:1px;background:#ddc7a9;flex:1}
+.takeaway{margin-top:18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.take{padding:15px 18px;border-left:3px solid #a8c2ed;background:#f1f5fa;border-radius:0 7px 7px 0;font-size:17px;line-height:1.5}
+.take b{color:#244d91}
+.section-title{display:flex;align-items:center;gap:10px;margin:21px 0 13px}
+.section-title h2{font-size:22px;margin:0}.badge{font-size:12px;font-weight:700;padding:5px 9px;border-radius:5px;background:#e6f4ee;color:#147568}
+.section-title .aside{margin-left:auto;color:var(--muted);font-size:14px}
+.deploy-flow{display:grid;grid-template-columns:1fr 29px 1fr 29px 1fr 29px 1.25fr;align-items:stretch}
+.card{padding:17px 19px;border:1px solid var(--line);border-radius:10px;background:#fff;min-width:0}
+.card h3{font-size:21px;line-height:1.3;margin:0 0 10px}
+.card p{font-size:16px;line-height:1.55;margin:0;color:var(--muted)}
+.card strong{color:var(--ink)}
+.card.blue{background:var(--pale);border-color:#bbcff7}.card.green{background:var(--green);border-color:#b4dacc}
+.deploy-flow .card{height:142px}
+.api{font:600 14px/1.55 "DejaVu Sans Mono",Consolas,monospace;color:#1a5b90;overflow-wrap:anywhere}
+.runtime-strip{display:flex;justify-content:space-between;align-items:center;background:#edf4f0;color:#387364;padding:10px 16px;font-size:15px;margin-top:11px;border-radius:7px}
+.runtime-strip b{color:#176759}
+.sk-wrap{border:1px solid #d2dfef;border-radius:12px;padding:17px 21px;background:white;margin-top:20px}
+.sk-head{display:flex;align-items:center;gap:12px}
+.sk-head h2{font-size:24px;margin:0}.sk-head .source{margin-left:auto;font-size:15px}
+.chain{display:flex;align-items:center;justify-content:center;gap:13px;margin:16px auto}
+.chain .node{border-radius:7px;background:#e8f0fd;border:1px solid #c9d9f3;padding:10px 22px;font-size:18px;font-weight:700}
+.chain .node.core{background:#def3e9;border-color:#a9d5c1;color:#14634f}
+.chain .node small{font-size:12px;font-weight:400;margin-left:8px;color:#647c94}
+.chain .single{border:1px dashed #9eb7d6;background:#f3f7fd;color:#37547a;padding:11px 15px;border-radius:7px;font-size:16px}
+.sk-steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px}
+.sk-step{padding:13px 15px;background:#f4f7fb;border-radius:8px}
+.sk-step h3{margin:0 0 7px;font-size:18px;line-height:1.3}.sk-step p{font-size:15px;line-height:1.55;color:#607287;margin:0}
+.sk-step .api{font-size:13px}
+.early{margin-top:13px;border-top:1px solid #dfe7ef;padding-top:12px}
+.early-title{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:700}
+.early-title span{font-weight:400;font-size:14px;color:#758497}
+.early-flow{display:flex;align-items:center;gap:10px;font-size:14px;color:#5d7087;margin-top:10px}
+.early-flow .bound{border-radius:5px;background:#e5edf9;padding:7px 10px;font:600 13px "DejaVu Sans Mono",Consolas,monospace;color:#315b9b}
+.early-flow .calc{padding:7px 11px;background:#e9f4ee;border-radius:5px;color:#28664d}
+.verification{font-size:14px;color:#4c7565;display:flex;gap:15px;margin-top:12px;align-items:center}
+.verification b{color:#167151}
+.scope-flow{display:flex;align-items:center;gap:15px;margin:23px 0 19px}
+.scope-flow .scope{padding:11px 20px;border:1px solid #cad9ec;background:white;border-radius:8px;font-size:19px;font-weight:700;flex:1;text-align:center}
+.scope-flow .scope.wide{background:#edf3ff;color:#214f9a}
+.scope-flow .caption{font-size:14px;color:#8392a5;font-weight:400;display:block;margin-top:6px}
+.engine{background:#203e73;border-radius:13px;padding:22px 26px;color:white}
+.engine-title{display:flex;align-items:baseline;justify-content:space-between}
+.engine-title h2{font-size:25px;margin:0}.engine-title span{font-size:15px;color:#b4ccec}
+.engine-flow{display:grid;grid-template-columns:245px 42px 1fr 42px 245px;align-items:center;margin:20px 0 14px}
+.engine-node{background:#ffffff10;border:1px solid #6481ac;border-radius:8px;padding:17px;text-align:center;font-size:19px;font-weight:700;line-height:1.4}
+.engine-node small{font-size:14px;color:#c0d4ed;font-weight:400;display:block;margin-top:7px}
+.engine .arrow{color:#a9c7ed}
+.engine-workers{padding:12px 17px;border:1px solid #7895bd;border-radius:8px;background:#15335f}
+.worker-line{display:flex;align-items:center;gap:9px;font-size:13px;padding:6px 0}
+.worker-line .role{width:76px;flex-shrink:0;color:#b8d2f3;font-weight:700}
+.work-seg{background:#4872b1;border-radius:5px;padding:7px 10px;flex:1;text-align:center;white-space:nowrap}
+.work-seg.g{background:#277970}
+.worker-line .arrow{font-size:18px}
+.engine-tail{display:flex;justify-content:center;gap:24px;font-size:14px;color:#c6d8ef}
+.tradeoffs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:20px}
+.trade{border:1px solid #d3dfec;background:white;border-radius:10px;padding:17px 20px;height:191px}
+.trade h2{font-size:22px;margin:0 0 12px}.trade p{font-size:17px;line-height:1.6;margin:0 0 8px;color:#5e7087}.trade b{color:#2c527a}
+.trade.positive{background:#f0f9f4;border-color:#c6dfd1}.trade.positive h2{color:#166a55}
+.trade.cost{background:#fff8ef;border-color:#ead7bd}.trade.cost h2{color:#986022}
+.trade.balance{background:#f0f5fe;border-color:#c9d9f4}.trade.balance h2{color:#28549b}
+.horizon{margin-top:16px;color:#5a708c;font-size:16px;line-height:1.6;padding:0 4px}.horizon b{color:#254f89}
+.csa-path{display:grid;grid-template-columns:1fr 30px 1fr 30px 1fr 30px 1fr;align-items:center;margin:22px 0 18px}
+.csa-path .step{border:1px solid #d2e0ef;background:white;border-radius:8px;padding:12px 16px;text-align:center;font-size:18px;font-weight:700}
+.csa-path .step small{display:block;font-size:14px;color:#718399;font-weight:400;margin-top:5px}
+.csa-path .step.result{background:#eaf2ff;color:#2457a2}
+.balance-comparison{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.balance-card{border:1px solid #cbded7;border-radius:12px;background:#f3faf6;padding:20px 24px;height:282px}
+.balance-card.fixed{border-color:#d3dcec;background:#f3f6fc}
+.balance-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.balance-head h2{font-size:24px;margin:0;color:#156e59}
+.balance-card.fixed h2{color:#315b9b}
+.balance-head span{font-size:13px;color:#7b8c9d}
+.balance-card .desc{font-size:17px;color:#5f7482;margin:0 0 16px;line-height:1.5}
+.work-lane{display:flex;align-items:center;gap:10px;margin:8px 0}
+.work-lane .label{width:72px;flex-shrink:0;font:600 13px Arial,sans-serif;color:#62788f}
+.work-track{flex:1;height:30px;display:flex;gap:0;background:#e5ecef;border-radius:5px;overflow:hidden}
+.job{height:30px;display:grid;place-items:center;background:#78b7a4;color:#174f40;border-right:2px solid #f3faf6;font-size:13px;font-weight:700}
+.job.alt{background:#b3dbc9}.fixed .job{background:#8caee5;color:#234c87;border-right-color:#f3f6fc}.fixed .job.alt{background:#c0d2ed}
+.idle{display:flex;align-items:center;justify-content:center;flex:1;color:#8b98a6;font-size:12px;background:repeating-linear-gradient(135deg,#f1f4f7,#f1f4f7 5px,#e8edf2 5px,#e8edf2 6px)}
+.balance-note{margin:16px 0 0;font-size:16px;color:#4b7264;line-height:1.55}.fixed .balance-note{color:#596f8b}
+.decision-grid{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:18px;margin-top:18px}
+.decision{padding:17px 20px;border-radius:9px;border:1px solid #d3dfec;background:white;height:153px}
+.decision h3{font-size:21px;margin:0 0 10px}.decision p{font-size:16px;line-height:1.6;color:#65778d;margin:0}
+.decision.engine-choice{background:#eaf1fc;border-color:#c6d7ef}
+.decision-band{margin-top:17px;padding:15px 20px;border-radius:9px;background:#203e73;color:#f5f9ff;font-size:21px;line-height:1.5}
+.decision-band b{color:#b7e7d4}
+.metric-scope{display:flex;gap:18px;align-items:center;margin-top:22px;background:#eef3fa;border:1px solid #d4e0ee;border-radius:9px;padding:14px 18px}
+.metric-scope .metric-name{font-size:21px;font-weight:700;white-space:nowrap;color:#264d87}
+.metric-scope p{font-size:16px;line-height:1.55;margin:0;color:#60718a}
+.legend{display:flex;gap:23px;align-items:center;margin:17px 0 13px;font-size:16px;color:#596e85}
+.legend i{width:12px;height:12px;border-radius:3px;background:#14806a;display:inline-block;margin-right:7px}.legend i.blue{background:#3768ca}.legend .aside{margin-left:auto;color:#8290a2;font-size:14px}
+.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.evidence-card{padding:20px 24px;background:#fff;border:1px solid #cfdeeb;border-radius:12px;height:310px}
+.evidence-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.evidence-head h2{font-size:26px;margin:0}.winner{font-size:15px;padding:5px 10px;background:#e8f6ef;color:#167257;border-radius:6px}
+.winner.blue{background:#edf2ff;color:#305fbd}
+.bar-list{margin-top:21px}
+.bar-row{display:grid;grid-template-columns:78px 1fr 91px;align-items:center;gap:12px;margin:11px 0}
+.bar-label{font-size:15px;color:#5d718b}
+.bar-track{height:25px;background:#f0f3f7;border-radius:5px;overflow:hidden}
+.bar-fill{height:100%;background:#14806a;border-radius:5px}.bar-fill.blue{background:#3768ca}
+.bar-value{font:700 21px/1.2 Arial,sans-serif;text-align:right;color:#23466d}
+.bar-scale{display:flex;justify-content:space-between;margin:4px 103px 0 90px;color:#8a98aa;font-size:11px}
+.evidence-delta{margin:16px 0 12px;padding-top:12px;border-top:1px solid #e0e7f0;font-size:18px;font-weight:700;color:#246c57}
+.evidence-delta.blue{color:#32599d}
+.range-table{width:100%;border-collapse:collapse;font-size:14px;color:#66798f}
+.range-table th{font-weight:400;text-align:right;padding:2px 0}.range-table td{text-align:right;padding:3px 0;font-variant-numeric:tabular-nums}.range-table th:first-child,.range-table td:first-child{text-align:left}
+.coverage{display:flex;justify-content:flex-end;gap:18px;margin-top:13px;font-size:15px;color:#6a7e93;line-height:1.6}
+.evidence-conclusion{margin-top:19px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.evidence-conclusion .conclusion{padding:17px 20px;border-radius:10px;background:#203e73;color:#fff;min-height:117px}
+.evidence-conclusion .conclusion:last-child{background:#ecf6f0;border:1px solid #c5dfd0;color:#19644e}
+.conclusion h2{font-size:22px;line-height:1.35;margin:0 0 9px}.conclusion p{font-size:16px;line-height:1.55;margin:0;color:#d3e2f6}.conclusion:last-child p{color:#557a69}
+.causality-note{margin:13px 0 0;color:#7b8899;font-size:14px;line-height:1.5}
+footer{position:absolute;left:52px;right:52px;bottom:20px;border-top:1px solid #dce5ee;padding-top:11px;display:flex;justify-content:space-between;align-items:center;gap:20px;font-size:12px;color:#7a889a}
+footer p{margin:0;line-height:1.5;max-width:1040px}footer .links{display:flex;gap:17px;align-items:center;flex-shrink:0}
+footer a,footer button{color:#536d94;font-size:12px;border:0;background:transparent;padding:0}
+.controls{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:7px;z-index:4;background:#102a48ed;padding:6px 9px;border:1px solid #ffffff25;border-radius:9px;opacity:0;transition:opacity .15s;color:white}
+.controls:hover,.controls:focus-within,body.show-controls .controls{opacity:1}
+.controls button{border:0;background:transparent;color:#cfdef1;border-radius:5px;padding:5px 9px;font-size:12px}.controls button[aria-current="page"]{background:#4875b8;color:white}.controls button:disabled{opacity:.3;cursor:default}
+.controls .divider{width:1px;height:15px;background:#ffffff25;margin:0 4px}
+dialog{border:1px solid #d7e1ec;border-radius:15px;max-width:min(900px,92vw);max-height:85vh;overflow:auto;padding:29px 32px;color:var(--ink);font-size:16px;line-height:1.65}
+dialog::backdrop{background:#132b4970;backdrop-filter:blur(4px)}dialog h2{font-size:25px;margin:0 0 16px}dialog h3{font-size:18px;margin:19px 0 6px}dialog p{color:#5b6c81;margin:8px 0}dialog ul{padding-left:24px}
+dialog .close{float:right;border:0;background:#eef3f8;border-radius:6px;padding:5px 12px;color:#52667e}dialog a{overflow-wrap:anywhere}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+@media print{
+ @page{size:16in 9in;margin:0}
+ html,body{width:16in;height:auto;overflow:visible;background:white}
+ #stage{position:static;display:block}#frame{width:16in!important;height:auto!important}
+ .slide,.slide.active{display:block!important;position:relative!important;transform:none!important;zoom:.96;margin:0;break-inside:avoid;break-after:page;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .slide:last-child{break-after:auto}.controls,dialog{display:none!important}
+}
+</style>
+</head>
+<body>
+<main id="stage"><div id="frame">
+
+<article class="slide active" id="page1" aria-labelledby="title1">
+  <header>
+    <div class="mast"><div><strong>PyPTO</strong><span class="sep">/</span>从动态调度到独立执行</div><div class="series"><b>01 均衡与蒸馏</b><span>02 ACLNN 与 SuperKernel</span><span>03 动态负载权衡</span><span>04 L1 实测证据</span></div></div>
+    <h1 id="title1">先动态调度求均衡，再把执行图<em>蒸馏成单 SPMD</em></h1>
+    <p class="subtitle">本方案先利用 PyPTO 的 <b>MPMD</b> 执行能力探索性能，再把经过验证的任务切分、核分工与依赖固化。</p>
+  </header>
+  <div class="ribbon"><small>核心前提</small><span>动态调度下已取得可行、均衡的切分</span><span class="chev">→</span><span>才有将调度蒸馏进单 SPMD 的依据</span></div>
+  <div class="three diagram1">
+    <section class="panel mpmd">
+      <div class="kicker">01 / MPMD · EXPLORE</div><h2>先把任务图跑顺、跑均衡</h2>
+      <p class="lead">多个任务程序，处理不同数据与计算阶段。</p>
+      <div class="tasks"><span class="chip">投影</span><span class="chip v">RMS</span><span class="chip v">门控</span><span class="chip v">Sinkhorn</span></div>
+      <div class="queue"><span>就绪任务 → 动态调度</span><small>匹配空闲核资源</small></div>
+      <div class="lane-label">执行示意 · 非实测泳道</div>
+      <div class="lane"><span>AIC</span><div class="track"><div class="tile" style="width:31%">投影 0</div><div class="tile" style="width:31%">投影 1</div><div class="tile" style="width:31%">投影 2</div></div></div>
+      <div class="lane"><span>AIV 0</span><div class="track"><div class="tile v" style="width:23%">RMS</div><div class="tile v" style="width:35%">门控</div><div class="tile v" style="width:35%">混合</div></div></div>
+      <div class="lane"><span>AIV 1</span><div class="track"><div class="tile v" style="width:23%">RMS</div><div class="tile gap" style="width:7%"></div><div class="tile v" style="width:63%">Sinkhorn</div></div></div>
+      <p class="panel-note">开发者根据 profiling 调整 tile、任务粒度和依赖，消除长尾、空洞与不必要的串行。</p>
+    </section>
+    <div class="arrow" aria-hidden="true">→</div>
+    <section class="panel plan">
+      <div class="kicker">02 / PLAN · VALIDATE</div><h2>提取可复用的执行计划</h2>
+      <p class="lead">“均匀”按实际计算 / 搬运代价衡量。</p>
+      <div class="plan-list">
+        <div class="plan-item"><i>1</i><div><b>任务切分已均衡</b><span>按代价分工，避免少数核拖尾</span></div></div>
+        <div class="plan-item"><i>2</i><div><b>流水与依赖已明确</b><span>保留 C/V 重叠，只等待真正前驱</span></div></div>
+        <div class="plan-item"><i>3</i><div><b>缓冲与同步能闭合</b><span>确定 FIFO、复用周期和发布 / 获取</span></div></div>
+        <div class="plan-item"><i>4</i><div><b>多档位已有基线</b><span>正确性、负载变化、完整区间耗时</span></div></div>
+      </div>
+      <div class="gate">验证达标 → 再固化核分工与执行结构</div>
+    </section>
+    <div class="arrow" aria-hidden="true">→</div>
+    <section class="panel spmd">
+      <div class="kicker">03 / SPMD · DISTILL</div><h2>把调度决策变成设备程序</h2>
+      <p class="lead">一次启动同一组程序，以核号和数据范围分工。</p>
+      <div class="groupbox">
+        <div class="groupbox-head">一个完整 MIX SPMD<span>每组 1 AIC + 2 AIV</span></div>
+        <div class="group-row"><span class="group-id">组 0</span><span class="mini-stage">供数 / 投影 / RMS</span><span class="mini-sync">→ 同步 →</span><span class="mini-stage tail">门控 / 混合</span></div>
+        <div class="group-row"><span class="group-id">组 1</span><span class="mini-stage">供数 / 投影 / RMS</span><span class="mini-sync">→ 同步 →</span><span class="mini-stage tail">Sinkhorn</span></div>
+        <div class="group-etc">⋮</div>
+        <div class="group-row"><span class="group-id">组 N−1</span><span class="mini-stage">供数 / 投影 / RMS</span><span class="mini-sync">→ 同步 →</span><span class="mini-stage tail">按角色执行</span></div>
+      </div>
+      <p class="panel-note"><b>任务派发</b> → 核内循环与分工<br><b>任务依赖边</b> → 核内信号 / 屏障<br>执行流在本次 kernel 内持续推进。</p>
+    </section>
+  </div>
+  <div class="loopback"><span class="line"></span><span>↶ 静态化后仍要复测；遇到负载失衡或同步放大，回到 MPMD 调整切分</span><span class="line"></span></div>
+  <div class="takeaway">
+    <div class="take"><b>动态阶段：</b>用可调度的任务图找出<br>可行的均衡分工与计算 / 搬运流水。</div>
+    <div class="take"><b>蒸馏阶段：</b>把稳定的执行结构编译进去，<br>减少反复派发和任务交接。</div>
+    <div class="take"><b>部署阶段：</b>执行图收敛到独立核之后，<br>才进入本例的单 kernel ACLNN 路线。</div>
+  </div>
+  <footer><p>“蒸馏”指本方案的工程改写与验证流程，并非已经存在的一键自动转换功能；均衡分工不要求每个核执行相同角色。</p><div class="links"><button data-notes="1">依据与说明 ⓘ</button><button data-next>下一页 →</button><span>01 / 04</span></div></footer>
+</article>
+
+<article class="slide" id="page2" aria-labelledby="title2">
+  <header>
+    <div class="mast"><div><strong>HC_pre</strong><span class="sep">/</span>单核部署与融合接入</div><div class="series"><span>01 均衡与蒸馏</span><b>02 ACLNN 与 SuperKernel</b><span>03 动态负载权衡</span><span>04 L1 实测证据</span></div></div>
+    <h1 id="title2">单 SPMD 独立交付，<em>ACLNN 调用并接入 SuperKernel</em></h1>
+    <p class="subtitle">在本例“无额外任务运行时、一次启动一个 MIX kernel”的路线中，必须先让 <b>计算、分工、缓冲与同步全部闭合</b>。</p>
+  </header>
+  <div class="section-title"><h2>从 PyPTO 到 ACLNN</h2><span class="badge">已有实现</span><span class="aside">每次按 T 选一个分档；主机只负责参数与启动</span></div>
+  <div class="deploy-flow">
+    <section class="card blue"><h3>单 SPMD → PTO C++</h3><p>hc_pre.py 经 PyPTO / PTOAS<br>导出成对的 AIC / AIV 函数<br><strong>设备内保留 C/V 流水与同步</strong></p></section>
+    <div class="arrow" aria-hidden="true">→</div>
+    <section class="card"><h3>CANN Host + MIX 外壳</h3><p>Host：选档、Tiling、workspace<br>Kernel：参数对齐、分配 FIFO<br><strong>调用选中分档的生成函数</strong></p></section>
+    <div class="arrow" aria-hidden="true">→</div>
+    <section class="card"><h3>CANN 编译、安装 OPP</h3><p>CCEC + PTO-ISA 头文件<br>生成 ACLNN 库与设备二进制<br><strong>交付标准自定义算子包</strong></p></section>
+    <div class="arrow" aria-hidden="true">→</div>
+    <section class="card green"><h3>ACLNN 两段式调用</h3><p>GetWorkspaceSize → 分配工作区<br>aclnnHcPrePto → 提交到 stream<br><strong>输出 mixed / post / comb</strong></p></section>
+  </div>
+  <div class="runtime-strip"><b>部署执行不依赖 PyPTO / PTOAS / Simpler</b><span>单 SPMD 是本路线的收敛目标；ACLNN 接口本身也可封装多 kernel</span></div>
+  <section class="sk-wrap">
+    <div class="sk-head"><h2>SuperKernel：已跑通的三节点融合</h2><span class="badge">T96 功能验证通过</span><a class="source" href="https://github.com/mihudaner/vllm-ascend/pull/3" target="_blank" rel="noopener noreferrer">PR #2 / #3 ↗</a></div>
+    <div class="chain"><span class="node">Add<small>Ascend C</small></span><span class="arrow">→</span><span class="node core">HC_pre<small>PTO + ACLNN</small></span><span class="arrow">→</span><span class="node">Mul<small>Ascend C</small></span><span class="arrow">⇒</span><span class="single">一个 sk_entry_mix12 设备任务</span></div>
+    <div class="sk-steps">
+      <section class="sk-step"><h3>① 为在线编译提供完整源码</h3><p>include/ 与 generated/ 一同装入 OPP；<br>保持相对包含路径，让 CANN 能重编核。<br>Add / Mul 使用具备 SK 能力的 Ascend C 实现。</p></section>
+      <section class="sk-step"><h3>② 接通逻辑核号与资源分配</h3><p class="api">组号 = GetBlockIdx() / GetTaskRatio()</p><p>由 AscendC 逻辑索引恢复 MIX 组号；<br>按平台核数统一 Tiling、任务步长和 FIFO。</p></section>
+      <section class="sk-step"><h3>③ 标定范围 → 静态编译 → 融合</h3><p>Add → HC_pre → Mul 放入同一 scope；<br>启用 static_kernel_compile / super_kernel_optimize；<br>核对三个成员与唯一 SK 入口，再重放验收。</p></section>
+    </div>
+    <div class="early">
+      <div class="early-title">可选 Early-Start：在包装入口接 CANN 原生 Wait / Set<span>PR #3 已验证功能 · 默认关闭</span></div>
+      <div class="early-flow"><span>HC_pre 标量配置</span><span>→</span><span class="bound">WaitPreTaskEnd</span><span>→</span><span class="calc">生成的 AIC / AIV 函数（含完整收尾）</span><span>→</span><span class="bound">SetNextTaskStart</span></div>
+    </div>
+    <div class="verification"><b>✓ 融合成员与入口核验</b><span>✓ 两组输入重放</span><span>✓ 三输出精度与输入保护区</span><span>六个分档共用 Wait / Set 包装边界</span></div>
+  </section>
+  <footer><p>接入证据采用 PR #2 / #3 的 T96 验收：CANN 9.2.0，Ascend910_9362，20 AIC / 40 AIV。图初始化可在线编译已生成 C++；本页不展开上层框架用法。</p><div class="links"><button data-notes="2">来源与版本 ⓘ</button><button data-next>下一页 →</button><span>02 / 04</span></div></footer>
+</article>
+
+<article class="slide" id="page3" aria-labelledby="title3">
+  <header>
+    <div class="mast"><div><strong>CSA</strong><span class="sep">/</span>动态负载下的执行方式选择</div><div class="series"><span>01 均衡与蒸馏</span><span>02 ACLNN 与 SuperKernel</span><b>03 动态负载权衡</b><span>04 L1 实测证据</span></div></div>
+    <h1 id="title3">动态 Attention：<em>负载均衡收益可能超过调度成本</em></h1>
+    <p class="subtitle">以 CSA 为例：运行时工作量和就绪时刻会变化；<b>蒸馏为单 SPMD，不能自动保留 MPMD 的全部动态调度能力。</b></p>
+  </header>
+  <div class="csa-path">
+    <div class="step">运行时 metadata<small>Q / L、可见范围、压缩块</small></div><div class="arrow">→</div>
+    <div class="step">Indexer / Top-K<small>有效候选、页块与就绪时刻</small></div><div class="arrow">→</div>
+    <div class="step">Attention<small>不同 query 的有效 KV 工作量</small></div><div class="arrow">→</div>
+    <div class="step result">各核负载可能不同<small>变长、稀疏 Attention 同样适用</small></div>
+  </div>
+  <div class="balance-comparison">
+    <section class="balance-card">
+      <div class="balance-head"><h2>MPMD：运行时继续分配就绪任务</h2><span>有派发成本</span></div>
+      <p class="desc">在可调度的任务粒度上，让空闲的同类核接续工作。</p>
+      <div class="work-lane"><span class="label">worker 0</span><div class="work-track"><span class="job" style="width:33.333%">任务 A</span><span class="job alt" style="width:33.333%">任务 D</span></div></div>
+      <div class="work-lane"><span class="label">worker 1</span><div class="work-track"><span class="job" style="width:33.333%">任务 B</span><span class="job alt" style="width:16.667%">E</span></div></div>
+      <div class="work-lane"><span class="label">worker 2</span><div class="work-track"><span class="job" style="width:33.333%">任务 C</span><span class="job alt" style="width:16.667%">F</span></div></div>
+      <p class="balance-note">工作量变化时，有机会减少尾核拖延与资源空置，<br>其收益可能抵消、甚至超过动态调度的成本。</p>
+    </section>
+    <section class="balance-card fixed">
+      <div class="balance-head"><h2>单 SPMD：固定归属可能留下长尾</h2><span>外部派发更少</span></div>
+      <p class="desc">动态循环仍能变化，但空闲核不会自动接走别核工作。</p>
+      <div class="work-lane"><span class="label">worker 0</span><div class="work-track"><span class="job" style="width:33.333%">任务 A</span><span class="job" style="width:33.333%">任务 B</span><span class="job" style="width:33.334%">任务 C</span></div></div>
+      <div class="work-lane"><span class="label">worker 1</span><div class="work-track"><span class="job alt" style="width:33.333%">任务 D</span><span class="idle">空闲 / 等待</span></div></div>
+      <div class="work-lane"><span class="label">worker 2</span><div class="work-track"><span class="job alt" style="width:16.667%">E</span><span class="job alt" style="width:16.666%">F</span><span class="idle">空闲 / 等待</span></div></div>
+      <p class="balance-note">省下任务交接，同时可能增加负载不均和内部等待；<br>减少调度开销，并不等于完整 L1 更短。</p>
+    </section>
+  </div>
+  <div class="decision-grid">
+    <section class="decision"><h3>动态计算 ≠ 动态调度</h3><p>单 SPMD 可保留动态长度、索引和循环。<br>运行时将就绪任务重新分配给空闲核，<br>是另一项调度能力。</p></section>
+    <section class="decision"><h3>从 CSA 扩展到 Attention</h3><p>遇到变长、稀疏和数据相关的工作量，<br>MPMD 可能更适合保持负载均衡。<br>最终仍须在目标场景实测比较。</p></section>
+    <section class="decision engine-choice"><h3>AOT / 常驻执行仍是一种选择</h3><p>稳定子图可继续扩大并固化为 Engine Kernel；<br>需要动态平衡的区域，也可保留 MPMD。<br>静态化范围由收益和动态性需求共同决定。</p></section>
+  </div>
+  <div class="decision-band"><b>动态负载均衡收益</b> 与 <b>任务派发成本</b> 的权衡，决定保留 MPMD，还是蒸馏为单 SPMD。</div>
+  <footer><p>两侧使用同一组 A–F 工作量，仅示意固定归属可能造成的长尾，非实测泳道。MPMD 按就绪任务派发，不表示可抢占已运行的 task。</p><div class="links"><button data-notes="3">依据与说明 ⓘ</button><button data-next>查看实测 →</button><span>03 / 04</span></div></footer>
+</article>
+
+<article class="slide" id="page4" aria-labelledby="title4">
+  <header>
+    <div class="mast"><div><strong>CSA</strong><span class="sep">/</span>正式版本的代表性实测</div><div class="series"><span>01 均衡与蒸馏</span><span>02 ACLNN 与 SuperKernel</span><span>03 动态负载权衡</span><b>04 L1 实测证据</b></div></div>
+    <h1 id="title4">L1 实测：<em>MPMD 与单 SPMD 各有更合适的场景</em></h1>
+    <p class="subtitle">选取 <a href="https://github.com/nalinaly/vllm-ascend/commit/19a2048047b94996ffb38ce349b443da000e1518" target="_blank" rel="noopener noreferrer">19a20480</a> 同轮正式结果：<b>128K / B8 多 task 均值更短；128K / B16 单 SPMD 均值更短。</b></p>
+  </header>
+  <div class="metric-scope"><span class="metric-name">完整 AICore L1 首尾跨度</span><p>首个 incore 开始 → 最后一个 incore 结束；<b>保留内部任务间隙与等待</b>，不是各核耗时求和。<br>范围：HC_pre + input RMSNorm + CSA + HC_post。每档五个窗口，单位 μs，越低越好。</p></div>
+  <div class="legend"><span><i></i>MPMD 多 task（正式 plan_workers_v1）</span><span><i class="blue"></i>单 SPMD</span><span class="aside">条形表示本轮 mean · 两图统一 0–900 μs</span></div>
+  <div class="evidence-grid">
+    <section class="evidence-card" data-case="h131072_b8">
+      <div class="evidence-head"><h2>128K / B8 / S6</h2><span class="winner">多 task 均值更短</span></div>
+      <div class="bar-list">
+        <div class="bar-row"><span class="bar-label">多 task</span><div class="bar-track"><div class="bar-fill" style="width:69.0613333333%" data-value="621.552"></div></div><span class="bar-value">621.55</span></div>
+        <div class="bar-row"><span class="bar-label">单 SPMD</span><div class="bar-track"><div class="bar-fill blue" style="width:70.2288888889%" data-value="632.06"></div></div><span class="bar-value">632.06</span></div>
+      </div>
+      <div class="bar-scale"><span>0</span><span>450</span><span>900 μs</span></div>
+      <div class="evidence-delta">多 task 相对单 SPMD：−10.51 μs / −1.66%</div>
+      <table class="range-table" aria-label="128K B8 L1 统计"><thead><tr><th>五个窗口</th><th>min</th><th>mean</th><th>max</th></tr></thead><tbody><tr><td>多 task</td><td>603.40</td><td>621.55</td><td>664.38</td></tr><tr><td>单 SPMD</td><td>625.26</td><td>632.06</td><td>644.70</td></tr></tbody></table>
+    </section>
+    <section class="evidence-card" data-case="h131072_b16">
+      <div class="evidence-head"><h2>128K / B16 / S6</h2><span class="winner blue">单 SPMD 均值更短</span></div>
+      <div class="bar-list">
+        <div class="bar-row"><span class="bar-label">多 task</span><div class="bar-track"><div class="bar-fill" style="width:92.552%" data-value="832.968"></div></div><span class="bar-value">832.97</span></div>
+        <div class="bar-row"><span class="bar-label">单 SPMD</span><div class="bar-track"><div class="bar-fill blue" style="width:89.076%" data-value="801.684"></div></div><span class="bar-value">801.68</span></div>
+      </div>
+      <div class="bar-scale"><span>0</span><span>450</span><span>900 μs</span></div>
+      <div class="evidence-delta blue">多 task 相对单 SPMD：+31.28 μs / +3.90%</div>
+      <table class="range-table" aria-label="128K B16 L1 统计"><thead><tr><th>五个窗口</th><th>min</th><th>mean</th><th>max</th></tr></thead><tbody><tr><td>多 task</td><td>821.40</td><td>832.97</td><td>843.04</td></tr><tr><td>单 SPMD</td><td>792.86</td><td>801.68</td><td>808.24</td></tr></tbody></table>
+    </section>
+  </div>
+  <div class="coverage"><span>Δ% =（多 task − 单 SPMD）/ 单 SPMD</span></div>
+  <div class="evidence-conclusion">
+    <section class="conclusion"><h2>减少派发，并不保证 L1 更短</h2><p>动态 Attention 应同时评估负载均衡与调度成本；<br>单 SPMD 的独立部署价值，与具体场景的速度优势分别判断。</p></section>
+    <section class="conclusion"><h2>动态调度仍有继续优化的空间</h2><p>这是一轮正式版本的对照，不是 MPMD 的性能上限。<br>调度开销与执行效率仍可持续改进。</p></section>
+  </div>
+  <p class="causality-note">结果支持“单 SPMD 不必然更快”；这些总耗时未单独隔离调度策略，不能把差异全部归因为负载均衡，也不代表端到端整模型结果。</p>
+  <footer><p>来源：19a20480 · 验证日志 §671；正式多 task 为 cc07f727。单卡、layer4 真实权重、TP1、NZ2、S6、CANN 9.2、同一冻结工具链；差距按未舍入均值计算。</p><div class="links"><button data-notes="4">数据与口径 ⓘ</button><button data-first>回到主线 ↶</button><span>04 / 04</span></div></footer>
+</article>
+</div></main>
+
+<nav class="controls" aria-label="幻灯片控制">
+  <button id="prev" aria-label="上一页">←</button><button data-page="1" aria-current="page">1 · 均衡与蒸馏</button><button data-page="2">2 · 接入</button><button data-page="3">3 · 动态负载权衡</button><button data-page="4">4 · L1 实测</button><button id="next" aria-label="下一页">→</button><span class="divider"></span><button id="fullscreen">全屏 F</button><button id="print">打印 / PDF</button>
+</nav>
+<dialog id="notes"><button class="close" id="closeNotes">关闭 ×</button><div id="notesBody"></div></dialog>
+<template id="notes1">
+  <h2>01 · 动态调度到单 SPMD</h2>
+  <p>本页把用户指定的性能优化方法表达为“MPMD 动态探索 → 验证均衡切分 → 工程蒸馏为单 SPMD → 独立部署”。PyPTO 本身也允许直接编写 SPMD；先取得动态调度基线是本方案的方法与判断依据，不是语言语法限制。</p>
+  <p>MPMD 的动态调度负责在依赖满足后派发可运行任务。开发者仍需调整切分、依赖、核数和缓冲；运行时不会自动证明已取得最优或均衡切分。“蒸馏”也不表示现有编译器有一键自动从任意 MPMD 程序转换为最优单 SPMD 的能力。</p>
+  <ul>
+    <li><a href="https://github.com/hw-native-sys/pypto" target="_blank" rel="noopener noreferrer">PyPTO 项目介绍</a>：MPMD Execution Scheduling。</li>
+    <li><a href="https://github.com/hw-native-sys/pypto/blob/main/docs/zh/user/tutorials/04-task-graph.md" target="_blank" rel="noopener noreferrer">PyPTO 任务图文档</a>：依赖图与任务就绪。</li>
+    <li><a href="https://github.com/hw-native-sys/pypto/blob/main/docs/zh/user/performance/02-runtime-overhead.md" target="_blank" rel="noopener noreferrer">PyPTO 运行时开销文档</a>：SPMD 与 kernel 内同步。</li>
+    <li><a href="https://github.com/nalinaly/vllm-ascend/blob/e09b9f6f46e6ef43ca697baecdcdf8a410a41e8a/vllm_ascend/ops/pypto/hc_pre.py" target="_blank" rel="noopener noreferrer">HC_pre 源码（e09b9f6f）</a>：跨组投影 / RMS、会合和全体 AIV 尾段分工。</li>
+  </ul>
+  <p>泳道与核组图只表示工作组织，不是实测数据。SPMD 下核角色、循环次数和条件分支可以不同；“单程序”不要求所有核同时执行完全相同的指令。</p>
+</template>
+<template id="notes2">
+  <h2>02 · ACLNN 与 SuperKernel：实际接入依据</h2>
+  <p>本页使用用户提供的 PR #3 及其基础 PR #2。参考基线为 3142f276；基础 SuperKernel 适配提交为 eee187d0c，Early-Start 增量为 36f0a623f。相关记录均为已有验收，本轮只整理材料，没有新跑设备测试。</p>
+  <ul>
+    <li><a href="https://github.com/mihudaner/vllm-ascend/pull/2" target="_blank" rel="noopener noreferrer">PR #2：三节点 SuperKernel</a>。OPP 纳入 include/generated；PTO 核号经局部适配接入 AscendC 逻辑核号；按实际平台核数统一 Tiling、任务步长与 FIFO。Add/Mul 使用独立 Ascend C 示例以提供所需 SK 支持。</li>
+    <li><a href="https://github.com/mihudaner/vllm-ascend/pull/3" target="_blank" rel="noopener noreferrer">PR #3：可选原生 Early-Start</a>。HC_pre 在标量配置后、生成函数前 Wait，生成函数完整返回后 Set；六个 tiling key 共用边界，每个参与核各执行一次。Add/Mul 在 TPipe 构造前 Wait，计算循环后 Set，保留收尾。</li>
+    <li><a href="https://github.com/mihudaner/vllm-ascend/blob/eee187d0c284a482459136d28b13e952bade0108/examples/hc_pre_pto_aclnn/include/pto_superkernel_adapter.h" target="_blank" rel="noopener noreferrer">逻辑核号适配头文件</a>：GetBlockIdx / GetTaskRatio 恢复组号，GetBlockNum 提供组数。</li>
+    <li><a href="https://github.com/mihudaner/vllm-ascend/blob/3142f27651ae258cc733301236facbefb610065c/examples/hc_pre_pto_aclnn/tests/run_aclnn.cpp" target="_blank" rel="noopener noreferrer">C++ 直接调用 ACLNN</a>：查询、分配工作区、提交、同步后访问结果。</li>
+  </ul>
+  <h3>验证范围</h3>
+  <p>PR 记录环境为 Ascend910_9362、20 AIC / 40 AIV、CANN 9.2.0、Torch/TorchNPU 2.12，设备验收为 T96。普通 SuperKernel 使用 sk_entry_mix12；可选 Early-Start 验证使用 sk_entry_mix12_early_start。两个随机种子的三输出对照、输入保持、前后保护区和实际融合入口均有证据。此处仅展示功能可用。</p>
+  <h3>部署边界</h3>
+  <p>“先成为单 SPMD”限定本页的部署路线：不带外部任务调度器，一次 ACLNN 调用直接运行一个自洽 MIX kernel。ACLNN 接口本身并不禁止内部执行多个 kernel，额外实现编排也可支持其他方式。</p>
+  <p>普通 ACLNN 使用已编译设备核；本次 SuperKernel 验证路径还会在图初始化时通过 CANN 在线静态编译随包部署的 C++。二者均不需要在执行阶段调用 PyPTO、PTOAS 或 Simpler。本页不展示上层框架代码。</p>
+  <p>后续分支对外命名、生成核和验证环境已有变化。本页特意固定 PR #2 / #3 的历史验证范围，不把其结果外推为所有分档、所有后续版本与所有环境已通过。</p>
+</template>
+<template id="notes3">
+  <h2>03 · CSA 与动态 Attention 的权衡</h2>
+  <p>本页以 CSA 的 metadata、Indexer/Top-K、Attention 阶段为例，说明不同 query 的有效工作量及就绪时刻可能不同。MPMD 可在就绪任务粒度上继续分配工作；其机会受任务依赖、粒度和匹配核资源约束，并不表示能抢占或拆分已在运行的 task。</p>
+  <p>图中两侧总工作量相同：A/B/C/D 各为 4 个示意单位，E/F 各为 2 个示意单位。MPMD 三条泳道分别为 A+D、B+E、C+F；固定归属示意分别为 A+B+C、D、E+F。图只解释一种可能的长尾机制，不是本次 CSA 的实测调度轨迹，也没有用它推算加速比例。</p>
+  <p>当前单 SPMD 的设备循环和索引可以动态变化，但固定 owner 的工作不会自动迁移到空闲核。通用 SPMD 也可以自行实现核内工作队列，恢复部分动态分配，同时引入相应的调度和同步成本。因此不能把“SPMD”绝对等同于“只能静态调度”。</p>
+  <ul>
+    <li><a href="https://www.tilert.ai/blog/speed-as-the-next-scaling-law-zh.html" target="_blank" rel="noopener noreferrer">执行模型参考文章</a>：将任务编排前移、在设备内持续推进 tile 流水的方向。</li>
+    <li><a href="https://github.com/nalinaly/vllm-ascend/blob/e09b9f6f46e6ef43ca697baecdcdf8a410a41e8a/vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd/attention_dependencies.py" target="_blank" rel="noopener noreferrer">CSA Attention 依赖（e09b9f6f）</a>：核归属、query 计划与局部前驱等待。</li>
+    <li><a href="https://github.com/hw-native-sys/pypto/blob/main/docs/zh/user/tutorials/04-task-graph.md" target="_blank" rel="noopener noreferrer">PyPTO 任务图语义</a>：就绪任务与依赖。</li>
+  </ul>
+  <p>把稳定执行区域扩大并 AOT 固化成 Engine Kernel 仍是设计方向；但更大范围不自动意味着更快。设备在一次 kernel 生命周期内持续执行，与覆盖多轮解码的常驻服务循环不同，后者还需输入/退出协议、跨轮状态与资源生命周期设计。</p>
+</template>
+<template id="notes4">
+  <h2>04 · 代表性实测与完整计时口径</h2>
+  <p>数据固定于 <a href="https://github.com/nalinaly/vllm-ascend/commit/19a2048047b94996ffb38ce349b443da000e1518" target="_blank" rel="noopener noreferrer">19a2048047b94996ffb38ce349b443da000e1518</a>，验证日志第 671 节。本轮只读取已有数据，没有新增设备测试。</p>
+  <p>比较正式角色 multitask_current（plan_workers_v1，代码 cc07f727）与同轮 single_spmd，不使用 multitask_candidate，不跨轮选择最好样本。选择 B8 和 B16 作为两种情况的代表。</p>
+  <p><b>L1 定义：</b>最早 incore 开始至最晚 incore 结束的 AICore 首尾跨度，包含内部任务间隙及等待；不是各任务/各核时间之和，不是去掉等待后的有效计算时间，也不是整模型 forward。外层 NPU Event 另行采样，本页不使用外层值，也不将外层减 L1 解释为纯 AICPU 时间。</p>
+  <p>范围为 HC_pre + input RMSNorm + CSA + HC_post。条件为单卡、DeepSeek-V4-Flash-0731-w8a8 的第 4 层真实权重、TP1、NZ2、S6、CANN 9.2，以及冻结一致的 PyPTO/PTOAS/Simpler。每个实现每档取五个窗口；条形图显示 mean，表格同时保留 min/max。</p>
+  <ul>
+    <li><a href="https://github.com/nalinaly/vllm-ascend/blob/19a2048047b94996ffb38ce349b443da000e1518/tests/pypto_test/DSV4_FLASH_CSA_VALIDATION_LOG.md#671-2026-10-20正式多task外层l1与单spmd的最新七档对比" target="_blank" rel="noopener noreferrer">七档汇总记录</a></li>
+    <li>128K/B8 原始五窗（μs）：多 task [614.86, 605.86, 619.26, 603.40, 664.38]；单 SPMD [628.96, 630.72, 625.26, 630.66, 644.70]。</li>
+    <li>128K/B16 原始五窗（μs）：多 task [842.66, 843.04, 821.40, 823.92, 833.82]；单 SPMD [805.28, 797.80, 804.24, 808.24, 792.86]。</li>
+  </ul>
+  <p>上述样本摘自同轮本地结果文件，已内嵌于本页及 HTML 的 performance-data 数据块；汇总来源为上方已提交的验证日志，无需访问原工作区。</p>
+  <p>取值字段为 l1.statistics_us.multitask_current 和 l1.statistics_us.single_spmd。B8 未舍入均值为 621.552 / 632.060 μs；B16 为 832.968 / 801.684 μs。差值为多 task 减单 SPMD，百分比再除以单 SPMD；先按原始值计算，再四舍五入显示，所以显示均值直接相减可能有 0.01 μs 的差别。</p>
+  <p>这组结果说明所比较的单 SPMD 并非在所有档位都更快，但不是调度方式的单变量消融实验；不据此断言性能差异全部来自负载均衡，也不推断普遍或统计显著的优势。动态调度仍有继续降低成本、改善执行效率的空间。</p>
+</template>
+<script type="application/json" id="performance-data">
+{"commit":"19a2048047b94996ffb38ce349b443da000e1518","metric":"AICore L1 first incore start to last incore end, including task gaps","scope":"HC_pre + input RMSNorm + CSA + HC_post","unit":"us","statistic":"mean","windows":5,"axisMax":900,"cases":[{"id":"h131072_b8","multitask_current":{"samples_us":[614.86,605.86,619.26,603.4,664.38],"min_us":603.4,"mean_us":621.552,"max_us":664.38},"single_spmd":{"samples_us":[628.96,630.72,625.26,630.66,644.7],"min_us":625.26,"mean_us":632.06,"max_us":644.7}},{"id":"h131072_b16","multitask_current":{"samples_us":[842.66,843.04,821.4,823.92,833.82],"min_us":821.4,"mean_us":832.968,"max_us":843.04},"single_spmd":{"samples_us":[805.28,797.8,804.24,808.24,792.86],"min_us":792.86,"mean_us":801.684,"max_us":808.24}}]}
+</script>
+<script>
+(()=>{
+ const slides=[...document.querySelectorAll(".slide")],frame=document.getElementById("frame"),notes=document.getElementById("notes");
+ let page=1,timer;
+ function fit(){const s=Math.min(innerWidth/1600,innerHeight/900);frame.style.width=`${1600*s}px`;frame.style.height=`${900*s}px`;slides.forEach(e=>e.style.transform=`scale(${s})`)}
+ function show(n){page=Math.max(1,Math.min(slides.length,n));slides.forEach((e,i)=>{e.classList.toggle("active",i+1===page);e.setAttribute("aria-hidden",i+1===page?"false":"true")});document.querySelectorAll("[data-page]").forEach(e=>{if(+e.dataset.page===page)e.setAttribute("aria-current","page");else e.removeAttribute("aria-current")});document.getElementById("prev").disabled=page===1;document.getElementById("next").disabled=page===slides.length;history.replaceState(null,"",`#${page}`)}
+ function reveal(){document.body.classList.add("show-controls");clearTimeout(timer);timer=setTimeout(()=>document.body.classList.remove("show-controls"),1800)}
+ async function full(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(_){}}
+ document.querySelectorAll("[data-page]").forEach(e=>e.onclick=()=>show(+e.dataset.page));
+ document.querySelectorAll("[data-next]").forEach(e=>e.onclick=()=>show(page+1));
+ document.querySelectorAll("[data-first]").forEach(e=>e.onclick=()=>show(1));
+ document.querySelectorAll("[data-notes]").forEach(e=>e.onclick=()=>{document.getElementById("notesBody").innerHTML=document.getElementById(`notes${e.dataset.notes}`).innerHTML;notes.showModal()});
+ document.getElementById("prev").onclick=()=>show(page-1);document.getElementById("next").onclick=()=>show(page+1);document.getElementById("fullscreen").onclick=full;document.getElementById("print").onclick=()=>window.print();document.getElementById("closeNotes").onclick=()=>notes.close();
+ addEventListener("resize",fit);document.addEventListener("mousemove",reveal);document.addEventListener("touchstart",reveal,{passive:true});
+ document.addEventListener("keydown",e=>{if(notes.open||e.ctrlKey||e.metaKey||e.altKey)return;if(["ArrowRight","PageDown"," "].includes(e.key)){e.preventDefault();show(page+1)}if(["ArrowLeft","PageUp"].includes(e.key)){e.preventDefault();show(page-1)}if(/^[1-9]$/.test(e.key)&&+e.key<=slides.length)show(+e.key);if(e.key.toLowerCase()==="f")full();if(e.key==="Home")show(1);if(e.key==="End")show(slides.length)});
+ fit();show(Number(location.hash.slice(1))||1);reveal();
+ window.presentation={show,fit,get page(){return page}};
+})();
+</script>
+</body>
+</html>
