@@ -13,7 +13,7 @@ from prepare_fused_topk import add_parameter
 from prepare_scale_early import add_calls
 
 
-def migrate(source, donor, long_domain=False):
+def migrate(source, donor, long_domain=False, unified_dispatch=False):
     original_kernel = section(
         source[source.index("def indexer_qr_hadamard_mm(") :],
         "    with pl.spmd(\n        QH_WORKERS,",
@@ -61,26 +61,51 @@ def migrate(source, donor, long_domain=False):
         end = source.index("    with pl.spmd(\n        QH_QUANT_WORKERS,", start)
         body = source[start:end]
         cooperative = body[body.index("    with pl.spmd(") :]
-        body = body.replace(
-            cooperative,
+        selection = (
             "    use_cooperative_hadamard = pl.cast(0, pl.INT32)\n"
             "    if host_max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:\n"
             "        if bs >= QH_COOPERATIVE_MIN_ROWS:\n"
             "            use_cooperative_hadamard = pl.cast(1, pl.INT32)\n"
-            "    qh_branch_tids = pl.array.create(1, pl.TASK_ID)\n"
-            "    qh_branch_tids[0] = pl.system.task_invalid()\n"
-            "    if use_cooperative_hadamard != 0:\n"
-            + textwrap.indent(cooperative + "    qh_branch_tids[0] = qh_mm_tid\n", "    ")
-            + "    else:\n"
-            + textwrap.indent(original_kernel + "    qh_branch_tids[0] = qh_mm_tid\n", "    "),
+        )
+        if unified_dispatch:
+            worker_line = "        qh_worker = pl.tile.get_block_idx()\n"
+            old_math = original_kernel[original_kernel.index(worker_line) + len(worker_line) :]
+            new_math = cooperative[cooperative.index(worker_line) + len(worker_line) :]
+            replacement = (
+                selection
+                + "    qh_workers = pl.cast(QH_WORKERS, pl.INDEX)\n"
+                + "    if use_cooperative_hadamard != 0:\n"
+                + "        qh_workers = pl.cast(QH_COOPERATIVE_WORKERS, pl.INDEX)\n"
+                + '    with pl.spmd(qh_workers, name_hint="qr_hadamard_matmul",\n'
+                + "                 deps=[qh_mm_dep], allow_early_resolve=True) as qh_mm_tid:\n"
+                + worker_line
+                + "        if use_cooperative_hadamard != 0:\n"
+                + textwrap.indent(new_math, "    ")
+                + "        else:\n"
+                + textwrap.indent(old_math, "    ")
+            )
+        else:
+            replacement = (
+                selection
+                + "    qh_branch_tids = pl.array.create(1, pl.TASK_ID)\n"
+                + "    qh_branch_tids[0] = pl.system.task_invalid()\n"
+                + "    if use_cooperative_hadamard != 0:\n"
+                + textwrap.indent(cooperative + "    qh_branch_tids[0] = qh_mm_tid\n", "    ")
+                + "    else:\n"
+                + textwrap.indent(original_kernel + "    qh_branch_tids[0] = qh_mm_tid\n", "    ")
+            )
+        body = body.replace(
+            cooperative,
+            replacement,
             1,
         )
         source = source[:start] + body + source[end:]
-        source = source.replace(
-            "    return qh_mm_tid, qh_quant_tid\n",
-            "    return qh_branch_tids[0], qh_quant_tid\n",
-            1,
-        )
+        if not unified_dispatch:
+            source = source.replace(
+                "    return qh_mm_tid, qh_quant_tid\n",
+                "    return qh_branch_tids[0], qh_quant_tid\n",
+                1,
+            )
     ast.parse(source)
     return source
 
@@ -90,14 +115,17 @@ def main():
     parser.add_argument("--base", default="qa_m16_v3")
     parser.add_argument("--candidate", default="query_hadamard4")
     parser.add_argument("--long-domain", action="store_true", help="只在长历史且至少两轮M256工作量采用")
+    parser.add_argument("--unified-dispatch", action="store_true", help="一个SPMD入口，按策略选核数与核内M块")
     args = parser.parse_args()
+    if args.unified_dispatch and not args.long_domain:
+        raise ValueError("统一分派仅用于长短资源分支")
     if not args.base.isidentifier() or not args.candidate.isidentifier():
         raise ValueError("私有包名必须是标识符")
     target = HERE / "sources" / args.candidate
     shutil.copytree(HERE / "sources" / args.base, target)
     path = target / "decode_indexer.py"
     donor = (HERE / "sources/spmd/projection_overlap_stages.py").read_text()
-    path.write_text(migrate(path.read_text(), donor, args.long_domain))
+    path.write_text(migrate(path.read_text(), donor, args.long_domain, args.unified_dispatch))
     (target / "candidate.json").write_text(
         json.dumps(
             dict(
@@ -105,6 +133,7 @@ def main():
                 base=args.base,
                 donor="e91e9f17",
                 long_domain=args.long_domain,
+                unified_dispatch=args.unified_dispatch,
                 changed_files=["decode_indexer.py"],
                 scope="Query Hadamard四token M256与4核分工；实际T尾行、K128、FP32结果及量化不变",
                 scheduling="保留多task依赖/early_resolve；Q_B原为20核；compact Hadamard原为独立单核，先不变",

@@ -16987,3 +16987,271 @@ SWA v3已通过完整lowering/PTOAS与AICPU链接，先提交B5/T30功能及同�
 [TASKS.json](csa_multitask_backport_20261020/TASKS.json)，仍待设备结论。
 汇总`RESULTS.json`只保留完整CSA五窗、各task聚合及原结果路径；逐窗详细task
 统计和trace仍在原始runs内，不删除失败记录或原始窗口。
+
+## 640. 2026-10-20：区间Hadamard与独立SWA前置终态，暂不采用
+
+区间Hadamard v3的长B16、短B16和B6/T36三任务均completed/exit0，
+输出、索引/score、cache/state、保护及图通过，T36附metadata/padding。
+两侧各五窗完整L1；“当前”在这两行均为core_v2，单位μs：
+
+|档位|当前 min/mean/max|区间Hadamard min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|837.18/851.90/862.98|832.64/849.25/863.98|781.06/787.69/791.74|
+|8K/B16|630.28/642.15/655.70|665.42/676.59/687.72|633.84/636.16/639.28|
+
+长档mean降低0.311%，max略增；短档已关闭四核策略却仍慢5.363%，不能凭
+“关闭分支数学没变”认定没有性能影响。短档Hadamard的PTOAS数学C++在仅忽略
+整行注释、统一函数名后与core_v2相同，但完整差值同时分布在Score前、Score
+到Attention及输出段，不将其归因为Hadamard算术，也不宣称二进制逐字等价。
+候选还包含QA改动，需要独立隔离QA关闭区间与Hadamard编排变化。
+因此v3不正式采用；v4保留同一资源区间、改成一个SPMD入口选择核数与核内M块，
+已通过CPU代码生成/AICPU链接，长短B16在队列中等待。
+
+独立SWA前置v3的B5/T30功能及两长档也均completed/exit0；B5附同图边界。
+以下“当前”为已迁入QA的`qa_m16_v3`，不能与上表跨轮相减：
+
+|128K档位|当前 min/mean/max|独立SWA前置 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|B16|830.78/842.08/853.82|837.04/847.25/859.02|792.36/795.87/802.20|
+|B28|1168.22/1199.52/1218.12|1156.54/1199.56/1220.82|1158.34/1168.44/1178.00|
+
+B16 mean增加0.614%，B28基本持平，两个max均增加，不采用独立新增SWA任务。
+后续`shared_metadata_v1`将原SWA数学放进已有的长G6页证明task，不新增分派；
+仍保留晚期plan对真实生产者的依赖，短历史走原路径。CPU完整通过，长B16/B28
+已排队，尚无设备结论。单SPMD原版也是复用已有前段阶段，不能只搬运计算位置
+而忽略多task新增分派的成本。
+
+四核Hadamard的核内/完整差异另保留：
+长B16每核mean4.636→11.103μs，但24→4核后整组首尾15.944→11.504μs；
+长B28每核6.688→16.851μs，整组27.212→17.916μs。每核工作量不同，
+整组值还含启动离散，不能解释成同工作量数学加速。见
+[HADAMARD_FOUR_CORE_PHASES.json](csa_multitask_backport_20261020/HADAMARD_FOUR_CORE_PHASES.json)。
+全部任务ID、结果及失败保留；正式路径仍为f20efd87，未push。
+
+## 641. 2026-10-20：明确剩余待办，按来源与迁移状态计数
+
+当前已明确五个待收口优化方向，另有一个已采用项的补验；不将失败历史候选
+重复计入，也不将这五项视为已经证明可获得的收益。
+
+|方向|来源与多task差异|当前动作|
+|---|---|---|
+|协同前段|e91e9f17；20核Q_B已有，Hadamard及Compressor/KV时序尚需适配|统一Hadamard分派版等待长短代表；继续核对剩余真实依赖|
+|前置只读Attention几何|25de3f32；来源复用前段阶段，多task独立SWA分派无收益|shared_metadata_v1复用既有页证明task，等待两长档|
+|HC按行就绪依赖|冻结13259f92的HC_ROW_DEPENDENCIES默认启用；多task仍有整组依赖|尚未完成局部task划分/通知适配|
+|Top-K/Plan到Attention逐行就绪|5da1bf0c真实行生产者依赖；多task QK等待整个plan任务|尚未完成局部生命周期适配；不重复认领已否决Score融合的收益|
+|输出尾段核内组流水|冻结13259f92已采用的OUTPUT_GROUP_PIPELINE；多task已有按组依赖|检查局部MIX承载OA/量化/OB/HCpost，减少重复分派；尚无设备采用结论|
+|QA关闭区间补验|66882634已迁入；640节短档回退尚未隔离其来源|仅QA对core_v2的8K/B16已排队，不算新反哺方向|
+
+未启用的ATTENTION_QUERY_METADATA、HC_CONSUMER_REDUCE，以及归档的列池、
+双行DMA等失败候选不纳入有效优化迁移清单。没有宣称已经逐条审完全部历史。
+
+## 642. 2026-10-20：QA关闭区间补验与Hadamard统一分派，复用页证明的SWA不采用
+
+以下五个任务均重新查询队列确认为completed/exit0；输出、索引/score、
+cache/state、保护区与图重放通过。所有时间仍为同轮五窗完整CSA L1，单位μs。
+
+|候选/档位|当前 min/mean/max|候选 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|QA关闭区间，8K/B16|671.94/684.61/697.14|669.90/680.60/699.30|635.58/645.56/655.10|
+|统一Hadamard，128K/B16|822.40/834.98/852.94|811.54/829.57/837.44|801.52/805.02/808.10|
+|统一Hadamard，8K/B16|665.02/673.53/682.34|661.24/673.54/685.34|632.52/639.48/645.60|
+|复用页证明SWA，128K/B16|811.24/819.81/831.38|822.26/831.85/845.46|794.66/800.40/806.20|
+|复用页证明SWA，128K/B28|1161.10/1183.04/1200.84|1187.68/1199.36/1212.50|1161.84/1167.54/1178.54|
+
+首行当前为core_v2、候选为qa_m16_v3；后四行当前均为qa_m16_v3。
+QA独立补验没有复现640节短档约5%的回退，但max略增2.16μs，不能宣称所有
+关闭区间完全无噪声或所有档位均已证明等价性能。保留已验证QA策略。
+统一Hadamard v4长B16 mean下降0.648%、max下降15.50μs，短B16 mean基本
+持平，max增加3.00μs；候选继续保留验证，尚不代替正式七档结果。
+
+shared_metadata_v1虽然没有新增task，两个长档mean仍分别增加约1.47%、
+1.38%，两个max均增加，不正式采用。它还串行延长了已有早期页证明生产者；
+本轮没有将完整差值全部归因于这一点。长B16同图metadata/padding也通过。
+前置只读几何方向保留来源分析，这两个已否决组织方式不再重复扩七档。
+
+原始结果及五窗分别见：
+[QA补验](csa_multitask_backport_20261020/runs/qa_m16_v3/h8192_b16_off_perf_v1/result.json)、
+[Hadamard长档](csa_multitask_backport_20261020/runs/query_hadamard_long_v4/h131072_b16_v1/result.json)、
+[Hadamard短档](csa_multitask_backport_20261020/runs/query_hadamard_long_v4/h8192_b16_v1/result.json)、
+[SWA长B16](csa_multitask_backport_20261020/runs/shared_metadata_v1/h131072_b16_v1/result.json)、
+[SWA长B28](csa_multitask_backport_20261020/runs/shared_metadata_v1/h131072_b28_v1/result.json)。
+
+## 643. 2026-10-20：消除多task公共叶计划的重复扫描，先做独立候选
+
+用户指出单SPMD自管理的meta不应照搬到多task。核对冻结13259f92发现：
+来源2417166f的`indexer_group_plan_stage`已经由worker0扫描一次请求，
+生成8个INT32公共计划字段；Score/Top-K读取结果。这项集中推导在单SPMD
+已经实现，本次是补齐多task的重复工作，不能计作单SPMD尚未优化的新缺口。
+
+当前多task入口`_read_device_max_seq_len`已经扫描本轮lengths，Indexer
+编排拿到同一最大值，但每个Score worker又扫描一次，Top-K worker再扫描
+一次并重新计算叶计划。`NativeCSACall`明确要求T=6×lengths.numel，所有
+cache组的请求容量相同，因此这三个扫描覆盖相同请求范围；补位请求同样
+在本轮容量内。此处没有把不等长query的新通用合同加入多task。
+
+私有`leaf_plan_v1`基于正式算法对应的qa_m16_v3：
+
+- 复用入口最大长度，在Indexer编排层分别生成普通叶数和平衡叶计划。
+- 将必要Scalar参数传给Score/Top-K，删除核内全请求扫描；短历史Vector
+  Score也复用普通叶数。原平衡开关决定普通/平衡叶数，不改变分片策略。
+- 不新增AICore任务、不分配GM计划、不新增CPU读回；保留逐query的实际
+  长度、位置、页表、causal及padding检查，任务依赖和提前解析策略保持。
+- 编排每次调用重新计算，不把图首次capture时的长度冻结成常量。
+
+生成器为[prepare_leaf_plan.py](csa_multitask_backport_20261020/prepare_leaf_plan.py)。
+当前进行CPU lowering/PTOAS/AICPU链接检查，尚无设备收益结论。
+后续先验证长B16/B28及metadata/padding，再按受影响范围覆盖短档、
+小批G2/长G6、尾块与七档。公共meta减掉多少核内工作与完整CSA缩短多少
+分别记录，不把消除扫描直接等同于关键路径收益。
+
+CPU lowering/PTOAS与AICPU链接已通过；两侧生成PTOAS单元均85个，未新增
+任务类型。核内旧最大长度扫描消失，公共计划出现在编排C++中并以Scalar
+参数传入。见[LEAF_PLAN_CODEGEN.json](csa_multitask_backport_20261020/LEAF_PLAN_CODEGEN.json)。
+两个长档均completed/exit0，功能、状态、保护与图通过，B16附同图metadata/
+padding；以下“当前”为qa_m16_v3，完整CSA L1单位μs：
+
+|档位|当前 min/mean/max|公共叶计划 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|804.66/823.02/839.04|819.02/826.37/840.18|796.26/801.09/812.96|
+|128K/B28|1177.04/1197.74/1212.96|1163.84/1188.84/1204.68|1163.94/1173.61/1183.62|
+
+B16完整mean增加0.406%，B28降低0.742%，两档仍未超过同轮单SPMD。
+B16 Top-K每核mean10.875→7.913μs，但启动离散1.724→6.536μs、
+整组首尾13.424→13.704μs，核内收益未转化为完整收益。
+B28 Top-K每核mean10.886→11.999μs、整组15.892→21.136μs，不能把
+该档完整CSA降低的8.892μs归功于Top-K。Score两档每核及整组基本持平。
+原始五窗与阶段数据见
+[LEAF_PLAN_PHASES.json](csa_multitask_backport_20261020/LEAF_PLAN_PHASES.json)；
+外层NPU event另留在两个result.json，不与L1相减认领AICPU成本。
+
+当前保留私有候选，未正式采用。`leaf_plan_sync_v2`仅在其基础上给短叶/
+多叶Top-K merge增加sync_start，检查整组准入能否减少启动离散；仍不改变
+原allow_early_resolve、数据依赖及数学。CPU完整通过，长短B16相对
+leaf_plan_v1独立对照已排队。没有因为代码减少就宣称完整性能必然提高。
+
+另：统一Hadamard v4的长B28已完成：当前1148.00/1182.92/1205.50，
+候选1156.12/1192.79/1218.16，单SPMD1166.20/1172.42/1185.42。
+该档mean增加0.835%，与B16小幅改善方向不同；继续补齐尚缺四档作完整
+8:2加权判断，不按某一轮最好值拼装策略，仍未正式采用。
+
+## 644. 2026-10-20：输出组流水局部MIX的生命周期适配
+
+来源为2417166f及冻结13259f92已启用的OUTPUT_GROUP_PIPELINE。当前多task
+原本已有八组O_A→量化→O_B依赖，因此此项不重复认领“按组依赖”本身；
+候选要验证把这些阶段和HCpost放进一个局部MIX，减少输出尾段反复分派。
+前段、Indexer和Attention继续使用原多task，完整CSA不是改回单SPMD。
+
+数学直接取冻结的output_projection_a/b_stages；只调整包内config引用。
+O_A保留K256累加链，量化保留每组amax/127及原舍入，O_B保留NZ权重和
+实际M尾行，HCpost保留八组FP32累加与BF16边界。24个AIC/48个AIV沿来源
+全局logical条带所有权；每个AIC先完成本核全部O_A再等待量化，避免等到
+仍需本核生产的数据。各消费者按来源公式只等待真正参与该组的生产者。
+
+多task arena没有单SPMD外部persistent workspace的初始零保证，因此不
+搬用未经初始化的代际。每调用新建17×72×128个INT32信号槽（612KiB），
+CSA早期16核显式清零；尾段依赖清零task及packed生产者。本次发布值为1，
+每槽只有一个writer且只发布一次，所有消费者完成前不复用空间。初始化、
+新增调度和业务fence全部计入完整CSA，不把成本放到capture外隐藏。
+
+首个CPU候选的一维set_validshape写法不受当前API支持，v2改二维view。
+v2在SSA检查发现phase helper的动态容量从条件分支逃逸，v3将固定阶段
+信号容量明确为固定描述符。v3再发现条件内output reshape没有传递到
+MIX的循环view，v4将残差/输出二维GM描述符前置到策略分支之前。
+这些均未上设备，不是设备精度或同步失败；当前仍在CPU编译检查。
+
+生成器与模板：
+[prepare_output_groups.py](csa_multitask_backport_20261020/prepare_output_groups.py)、
+[output_group_mixed_template.py](csa_multitask_backport_20261020/output_group_mixed_template.py)。
+私有实验暂限定本轮CANN9.2/NZ2，正式mode选择没有改变；若有完整收益，
+再收口正式接口、ND兼容及数学helper复用，不能直接引入重复的正式实现。
+
+v4的输出view问题已消除，随后代码生成指出helper的动态scale容量不能从
+固定形状参数物化。v5把两个数学helper的MM/SCALE/PACK容量绑定到现有
+T_PAD，业务T仍来自真实Tensor维度，数学语句与每项动态有效行不变。
+v5完整lowering/PTOAS及AICPU链接通过，三个M策略均生成独立AIC/AIV角色；
+见[OUTPUT_GROUP_CODEGEN.json](csa_multitask_backport_20261020/OUTPUT_GROUP_CODEGEN.json)。
+尚未将CPU成功视为设备成功，先排B5/T30功能及同图metadata/padding。
+输出投影沿来源默认权重缓存属性，旧多task O_A显式BYPASS；若候选有效，
+报告须说明这一策略差异，不能把所有收益都声称为减少分派。
+
+## 645. 2026-10-20：统一Hadamard七档收口与公共计划Top-K整组准入
+
+统一Hadamard v4七档均completed/exit0，精确输出、索引/score、cache/state、
+保护及图通过。当前均为qa_m16_v3；同轮五窗完整CSA L1，单位μs：
+
+|档位|当前 min/mean/max|候选 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B4|467.62/483.54/504.02|487.26/497.54/528.78|475.04/483.95/506.56|
+|128K/B8|613.20/624.09/644.98|618.34/630.39/637.86|634.30/643.81/659.76|
+|128K/B16|822.40/834.98/852.94|811.54/829.57/837.44|801.52/805.02/808.10|
+|128K/B24|1031.64/1056.34/1068.02|1020.94/1040.71/1068.18|1031.02/1041.68/1050.12|
+|128K/B28|1148.00/1182.92/1205.50|1156.12/1192.79/1218.16|1166.20/1172.42/1185.42|
+|8K/B16|665.02/673.53/682.34|661.24/673.54/685.34|632.52/639.48/645.60|
+|8K/B32|935.44/978.98/1019.06|943.40/971.86/1000.50|933.04/937.50/942.14|
+
+8:2加权相对当前回退0.345%，比单SPMD慢1.766%，不正式采用。
+B4本应走原24核数学分支但仍有明显完整回退，表明动态核数与核内分支组织
+不能凭“关闭时算术不变”视为免费；本轮没有证实其唯一成因。B16/B24局部
+改善不抵消全域结论，也不直接枚举七个shape拼装一个未经验证的新策略。
+保留639节四核核内收益作为后续协同前段的证据，不继续重复七档试探。
+完整结果与原始五窗见
+[MATRIX_query_hadamard_long_v4_matrix_v1.json](csa_multitask_backport_20261020/MATRIX_query_hadamard_long_v4_matrix_v1.json)。
+
+公共叶计划后的Top-K整组准入`leaf_plan_sync_v2`两档均completed/exit0，
+功能/状态/图通过，短B16附同图metadata/padding。当前为leaf_plan_v1：
+
+|档位|无merge sync min/mean/max|有merge sync min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|821.08/826.63/831.66|812.06/826.08/838.70|798.70/805.38/818.06|
+|8K/B16|665.72/675.94/682.66|662.62/677.92/687.16|631.44/638.92/649.12|
+
+长档mean仅下降0.066%，短档增加0.294%，两个max都增加；这次简单sync
+组合不采用，不扩七档。公共叶计划本体仍作为已通过两长档的私有候选，
+尚未完成全域验收。下一阶段集中验证输出局部MIX，正式路径仍是f20efd87。
+
+## 646. 2026-10-20：输出局部MIX首次设备失败，补回来源的双AIV与缓存属性
+
+v5的B5/T30任务`task_20261020_172345_385985031319`终态exit1。
+原多task A通过，候选第一次eager执行在同步处报507018。设备原始日志为
+`runs/output_groups_v5/h131072_b5_tail_v1/ascend/debug/device-0/`
+`device-3860528_20261020172417705.log`；关键记录为
+`S1:running-stalled completed=67/68 running=1 ready=0 waiting=0 orch_done=1`。
+这不是通过精度后性能较差，也不是CPU链接失败，是尾段运行停滞。
+
+核对生成编排定位到适配遗漏：v5为`MixedKernels{82,83,INVALID_KERNEL_ID}`，
+只启动一条AIV lane；数学owner按`group*2+lane`等待48个AIV结果。冻结
+来源vector_schedule函数体第一行是`pl.func_attr({"split_aiv": True})`，
+本次提取尾段时漏掉了它。仅调用get_subblock_idx不会自动表达双AIV派发。
+v6补回来源属性；三个M策略生成的第三个kernel id均与第二个相同，形成
+真正的AIC+AIV0+AIV1。此项是本次适配的功能修复，不归咎于工具链。
+
+同时纠正644节缓存判断：来源cube_schedule函数体有cache_policy属性，
+其中参数50/53分别是wo_a/wo_b，均为BYPASS。v5也漏掉了这些函数属性；
+v6按本函数参数索引1/2补齐。644节“沿来源默认权重缓存属性”表述撤回：
+默认属性只是错误候选v5的行为，来源本来就显式设置了缓存策略。
+
+v6完整CPU编译和AICPU链接通过，派发核对结果追加到
+[OUTPUT_GROUP_CODEGEN.json](csa_multitask_backport_20261020/OUTPUT_GROUP_CODEGEN.json)。
+同一B5/T30功能与同图边界重新排队，未先扩性能档位；v5失败原始产物保留。
+
+## 647. 2026-10-20：加入cannbot-knowledge的定向参考
+
+用户指定知识目录：
+`/data/pyptouser/qinchuanyu/pto-eager/cannbot-knowledge/knowledge/ops`，
+读取时知识仓HEAD为b645391。本轮只读检索与阅读，没有修改知识仓。
+这些资料补充诊断方法，不把卡片的stable状态视为本CSA的设备验证，也不
+替代本目标“仅反哺已提交、已验证单SPMD优化”的来源约束。
+
+|资料（相对knowledge/ops）|对当前工作的用途|适用边界|
+|---|---|---|
+|ascendc/examples/fa_class_a3_mix_template.md|先核对AIC/AIV参与者、lane数量及生产消费集合，再诊断等待|A3/CANN9.0的AscendC案例；本项目用PyPTO GM信号，不能照搬CrossCore宏或event编号|
+|ascendc/optimizations/ol_200_mix_aic_software_pipeline_cube_vec_stagger.md|检查相邻工作项Cube/Vector是否实际错峰，防止局部融合退化为串行往返|A3参考；知识里的taskId是核内算法迭代，不等同于PyPTO运行时TaskId|
+|triton/optimizations/operator_optimization/loop_invariant_hoisting.md|识别重复页/长度/分片计算；对应643节公共叶计划复用|仅借鉴不变量条件；不能外提每次图重放变化的业务数据或取消真实页检查|
+|ascendc/optimizations/ol_116_lift_loop_invariant_scalar_instructions.md|审查生成代码中的重复模式设置与地址计算，区分Scalar核内工作和分派间隙|需要当前代码与profiling证据，不套用卡片百分比|
+|triton/optimizations/operator_optimization/latency_bound_tile_merge.md|评估小tile合并的发射收益与L0C/UB代价，解释四核Hadamard不一定完整受益|必须保留当前A3资源边界和动态尾块，不能照抄Triton tile或容量常数|
+
+本轮已实际借鉴第一项的检查顺序：核对生成MixedKernels后发现646节
+缺失第二条AIV派发。补回PyPTO来源属性才是修复动作，没有改成AscendC
+的同步API。P-P29批量Scalar预取卡为draft且平台标950，OL-206跨核抽象
+案例也针对A5；只保留一般数据可见性提醒，不把其模式4/flag偏移用于A3。
+知识中提出的固定参数特化同样不能覆盖本轮动态长度、位置及padding合同。

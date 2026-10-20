@@ -137,10 +137,79 @@ def migrate_entry(source):
     return source
 
 
+def reuse_scale_proof(attention, entry):
+    """沿已有长G6的单核metadata生命周期，不新增SWA分派。"""
+    start = attention.index("def prepare_swa_geometry(")
+    end = attention.index("@pl.jit.inline(auto_scope=False)\ndef sparse_attn_csa(", start)
+    helper = attention[start:end]
+    header = helper[: helper.index("    with pl.spmd(")]
+    body_start = helper.index("            bias_rows =")
+    body_end = helper.index("\n    return sparse_bias, valid_block_mask, prepared_tid")
+    body = textwrap.indent(textwrap.dedent(helper[body_start:body_end]), " " * 8)
+    helper = (
+        header.replace("def prepare_swa_geometry(", "def prepare_swa_geometry_stage(", 1)
+        + "    for bias_t0 in pl.range(0, t_dim, BIAS_T_TILE):\n"
+        + body
+        + "\n    return sparse_bias, valid_block_mask\n\n\n"
+    )
+    attention = attention[:start] + helper + attention[end:]
+    entry = entry.replace("prepare_swa_geometry", "prepare_swa_geometry_stage")
+    start = entry.index("        swa_prepared = pl.cast(0, pl.INT32)\n")
+    end = entry.index("        swa_prepare_deps = pl.array.create", start)
+    selection = (
+        "        swa_prepared = pl.cast(0, pl.INT32)\n"
+        "        if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:\n"
+        "            if t_dim >= LONG_S6_MIN_QUERY_ROWS:\n"
+        "                if t_dim >= SWA_EARLY_MIN_ROWS:\n"
+        "                    swa_prepared = pl.cast(1, pl.INT32)\n"
+        "                elif t_dim < SWA_EARLY_SMALL_LIMIT:\n"
+        "                    swa_prepared = pl.cast(1, pl.INT32)\n"
+    )
+    entry = entry[:start] + selection + entry[end:]
+    start = entry.index("        if swa_prepared != 0:\n")
+    end = entry.index("        # 27711336", start)
+    entry = entry[:start] + entry[end:]
+    tree = ast.parse(entry)
+    assignments = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Assign)
+        and isinstance(n.value, ast.Call)
+        and isinstance(n.value.func, ast.Name)
+        and n.value.func.id == "prove_scale_layout"
+    ]
+    if len(assignments) != 1:
+        raise AssertionError("需要唯一早期页证明")
+    call = assignments[0]
+    indent = " " * call.col_offset
+    lines = entry.splitlines(keepends=True)
+    lines.insert(
+        call.end_lineno,
+        indent
+        + "if swa_prepared != 0:\n"
+        + indent
+        + "    prepared_swa_bias, prepared_swa_mask = prepare_swa_geometry_stage(\n"
+        + indent
+        + "        position_ids_t1, kv_seq_lens, ori_block_table, prepared_swa_bias, prepared_swa_mask,\n"
+        + indent
+        + "    )\n",
+    )
+    entry = "".join(lines).replace(
+        "                early_scale_deps[0] = early_scale_tid\n",
+        "                early_scale_deps[0] = early_scale_tid\n"
+        "                swa_prepare_deps[0] = early_scale_tid\n",
+        1,
+    )
+    ast.parse(attention)
+    ast.parse(entry)
+    return attention, entry
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="qa_m16_v3")
     parser.add_argument("--candidate", default="early_swa")
+    parser.add_argument("--reuse-proof", action="store_true", help="长G6复用既有页证明task，不单独派发SWA")
     args = parser.parse_args()
     if not args.base.isidentifier() or not args.candidate.isidentifier():
         raise ValueError("私有包名必须是标识符")
@@ -149,12 +218,19 @@ def main():
     for name, fn in (("decode_sparse_attn_csa.py", migrate_attention), ("decode_csa.py", migrate_entry)):
         path = target / name
         path.write_text(fn(path.read_text()))
+    if args.reuse_proof:
+        attention, entry = reuse_scale_proof(
+            (target / "decode_sparse_attn_csa.py").read_text(), (target / "decode_csa.py").read_text()
+        )
+        (target / "decode_sparse_attn_csa.py").write_text(attention)
+        (target / "decode_csa.py").write_text(entry)
     (target / "candidate.json").write_text(
         json.dumps(
             dict(
                 candidate=args.candidate,
                 base=args.base,
                 donor="25de3f32",
+                reuse_existing_scale_proof=args.reuse_proof,
                 scope="前置只读SWA偏置/页检查，原数学保持；不是照搬SPMD动态owner扫描",
                 domain="T>=64或长G6的24<=T<32；其余路径仍在原plan中计算SWA",
                 dependency="晚期压缩plan显式等待SWA生产者；不并发写共享mask缓存行",
