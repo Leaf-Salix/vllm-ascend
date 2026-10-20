@@ -193,6 +193,7 @@ def main():
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
+    parser.add_argument("--capture-level4", action="store_true", help="功能模式后补采一个L4诊断窗口，不进入性能表")
     parser.add_argument(
         "--candidate-wait-backoff",
         choices=("off", "cached100"),
@@ -221,6 +222,8 @@ def main():
         raise ValueError("指定等待单元须同时启用--candidate-wait-backoff cached100")
     if args.functional_only and args.measure_outer:
         raise ValueError("功能用例不采外层或L1性能")
+    if args.capture_level4 and (not args.functional_only or args.current or args.compile_only or args.parse_only):
+        raise ValueError("L4补采仅支持单一候选的functional-only设备模式")
     if args.boundary_replay and (args.batch < 2 or args.history < 2):
         raise ValueError("metadata/padding用例要求batch>=2且history>=2")
     if not args.candidate.isidentifier() or not args.attempt.isidentifier():
@@ -441,7 +444,7 @@ def main():
                 device=device_id,
                 platform="a2a3",
                 runtime="tensormap_and_ringbuffer",
-                enable_chip_swimlane=1,
+                enable_chip_swimlane=4 if args.capture_level4 else 1,
                 enable_dep_gen=True,
                 output_dir=str(output / "dfx"),
                 **ring_sizing_kwargs(additional),
@@ -581,6 +584,18 @@ def main():
                 report["functional_graph"] = functional_replay(entries, reset, verify, input_a)
                 report["spmd_protocol"] = None
                 report["spmd_reference_scope"] = "未运行SPMD；功能边界只对照迁移前多task"
+                if args.capture_level4:
+                    from capture_level4 import capture
+
+                    report["stage"] = "capture_level4"
+                    save(output, report)
+                    report["diagnostic_swimlane"] = capture(
+                        entry=entries["multitask_candidate"],
+                        reset=reset,
+                        verify=lambda: verify("multitask_candidate"),
+                        output=output,
+                        kernel_config=configs["multitask_candidate"],
+                    )
             else:
                 report["stage"] = "paired_l1"
                 save(output, report)
