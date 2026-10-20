@@ -94,6 +94,9 @@ def profile_pair(*, entries, reset, verify, output, windows, warmup=3,
     def sample_order(sample):
         # 三方以上必须轮换位置；仅AB/BA会让中间角色永远处于同一测量位置。
         names = list(entries)
+        if len(names) == 2:
+            # 两方只反转一次；先轮转再反转会抵消，导致每轮都为AB。
+            return names if sample % 2 == 0 else list(reversed(names))
         shift = sample % len(names)
         names = names[shift:] + names[:shift]
         return list(reversed(names)) if sample % 2 else names

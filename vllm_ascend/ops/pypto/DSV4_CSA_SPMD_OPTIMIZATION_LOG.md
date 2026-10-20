@@ -19983,3 +19983,28 @@ LOCAL_ARTIFACTS路径/数量/字节，不做hash，不提交权重/二进制。
 本轮任务均终态，无待收设备任务。用户明确要求“这一轮优化之后就先停下”，
 本地详细中文归档commit后调用goal paused，不再启动优化。总目标仍未完成，
 不得标记complete；除非用户重新要求继续，不自动恢复。所有仓库仍不得push。
+
+
+## 2026-10-20：按用户要求重测七档五口径，优化目标保持暂停
+
+本次为测量任务，不恢复优化，不改正式37源和依赖。结果完整保存在
+`tests/pypto_test/csa_five_way_latest_20261020/PERFORMANCE.md`及JSON/CSV。
+七档均S6、NZ2、正式W8A8第4层、seed1024合成hidden/KV，完整HC_pre→
+RMSNorm→CSA→HCpost。Native/PTO外层各30次全流Profiler跨度；
+PTO多task与动态SPMD配对5窗，静态另配对5窗，使用incore头尾含内部等待。
+
+Native七档逐项确认fullgraph/dynamic=False、静态编译安装、SuperKernel
+成功返回、实际sk_*static_kernel和MatmulWeightNz trace、ACLGraph重放
+及四张核心投影格式29。PTO外层实际包含30次AICPU+30次AICore，
+固定地址重放一致性通过。七档动态及六档静态精确/状态/保护/图/代际通过，
+128K/B28没有可用静态实现，明确空值，不修复、不借邻档。七任务均exit0。
+
+动态L1新测：128K B4/B8/B16/B24/B28为476.40/626.50/802.20/1039.82/
+1167.72μs；8K B16/B32为644.08/933.58μs。各列均本次实测，无历史数字
+补格、无跨轮挑最小值；Native/外层与L1边界不同，比例按用户指定
+(基准−动态)/动态展示，不能代替相对多task L1降低30%的总目标验收。
+
+保留启动脚本--device解析失败；该失败未执行算子。L1采样前修正通用
+计量器两角色顺序抵消问题，实际七档均AB/BA交替；三角色顺序及计时
+边界不变。修改前后源、当时阶段、原始样本、配置与taskID全部可追溯。
+用户此前授权的18个提交已push至beaefa6f；本次新增记录不自动push。
