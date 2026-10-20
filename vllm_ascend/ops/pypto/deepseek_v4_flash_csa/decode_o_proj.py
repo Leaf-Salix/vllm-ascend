@@ -310,6 +310,7 @@ def _proj_b_mm_nd(
     col_g: pl.Scalar[pl.INDEX],
     proj_b_t_rows: pl.Scalar[pl.INDEX],
     q_tid: pl.Scalar[pl.TASK_ID],
+    tokens: pl.Scalar[pl.INDEX],
     ROW_TILE: pl.constexpr,
 ):
     """ND 版：(token 块 x D 块) 二维展开，与上游同形。"""
@@ -345,6 +346,7 @@ def _proj_b_mm_nz_kernel(
     g: pl.Scalar[pl.INDEX],
     col_g: pl.Scalar[pl.INDEX],
     proj_b_t_rows: pl.Scalar[pl.INDEX],
+    tokens: pl.Scalar[pl.INDEX],
     ROW_TILE: pl.constexpr,
 ):
     # Keep Native [G*K,N] NZ storage; all group offsets remain inside this kernel.
@@ -379,9 +381,15 @@ def _proj_b_mm_nz_kernel(
             weight_resident = wo_b[weight_k0 : weight_k0 + O_LORA, n0 : n0 + PROJ_B_MM_N_TILE]
             for tb in pl.range(proj_b_t_rows):
                 t0 = tb * ROW_TILE
-                b_act_full = o_r_i8_pad[t0 : t0 + ROW_TILE, col_g : col_g + O_LORA]
+                # b26e8e86：只裁掉真实T之外的padding；T内dummy行仍计算。
+                active_rows = pl.min(ROW_TILE, tokens - t0)
+                b_act_full = pl.slice(
+                    o_r_i8_pad, [ROW_TILE, O_LORA], [t0, col_g],
+                    valid_shape=[active_rows, O_LORA],
+                )
                 full_acc = pl.matmul(b_act_full, weight_resident, out_dtype=pl.INT32)
-                partials[t0 : t0 + ROW_TILE, g * D + n0 : g * D + n0 + PROJ_B_MM_N_TILE] = full_acc
+                # 尾部partial不再初始化；HC_post仅按真实T逐行消费。
+                partials = pl.assemble(partials, full_acc, [t0, g * D + n0])
     return partials
 
 
@@ -394,13 +402,14 @@ def _proj_b_mm_nz(
     col_g: pl.Scalar[pl.INDEX],
     proj_b_t_rows: pl.Scalar[pl.INDEX],
     q_tid: pl.Scalar[pl.TASK_ID],
+    tokens: pl.Scalar[pl.INDEX],
     ROW_TILE: pl.constexpr,
 ):
     """复用 Native 二维 NZ 权重，组号仅改变核内 K 偏移。"""
     with pl.spmd(
         D // PROJ_B_D_TILE, name_hint="proj_b_mm", deps=[q_tid], allow_early_resolve=True
     ) as pb_tid:
-        partials = _proj_b_mm_nz_kernel(o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, ROW_TILE)
+        partials = _proj_b_mm_nz_kernel(o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, tokens, ROW_TILE)
     return partials, pb_tid
 
 
@@ -491,7 +500,7 @@ def _decode_o_proj_tp1_tiled(
                         o_r_i8_pad = pl.assemble(o_r_i8_pad, pl.set_validshape(zero_i8, zero_rows, O_LORA), [zt, col_g])
 
             partials, pb_tid = proj_b_mm(
-                o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, ROW_TILE,
+                o_r_i8_pad, wo_b, partials, g, col_g, proj_b_t_rows, q_tid, t_dim, ROW_TILE,
             )
             proj_b_tids[g] = pb_tid
 

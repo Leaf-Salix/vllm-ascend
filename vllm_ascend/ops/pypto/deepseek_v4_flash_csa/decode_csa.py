@@ -26,7 +26,7 @@ from .config import (
     TP as TP_SIZE,
 )
 from .decode_compressor_ratio4 import compressor_ratio4
-from .decode_indexer import indexer
+from .decode_indexer import LONG_S6_MIN_QUERY_ROWS, TOPK_CANDIDATES_PER_LEAF, indexer
 from .decode_indexer_compressor import indexer_compressor
 from .decode_o_proj import LOCAL_T, LOCAL_T_PAD, decode_o_proj_tp1
 from .decode_sparse_attn_csa import T_PAD, sparse_attn_csa_tp1
@@ -42,6 +42,7 @@ from .hc_pre import (
     hc_mix_norm,
     hc_pre_gates_from_rms,
 )
+from .indexer_scale_layout import SCALE_LAYOUT_CAPACITY, prove_scale_layout
 from .layout import (
     COMPRESSED_ROWS_DYN,
     COMPRESSED_TABLE_COLUMNS_DYN,
@@ -322,6 +323,21 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 w_inv = pl.reshape(pl.rsqrt(w_mean, high_precision=True), [HC_WIDEN_T_TILE, 1])
                 inv_rms[w_t0:w_t0 + HC_WIDEN_T_TILE, 0:1] = w_inv
 
+        # 27711336前段证明的多task适配：尺寸在编排侧解析，证明只读页表/长度。
+        # 不让Tensor.dim在证明incore中引入对cache payload写回的伪依赖。
+        early_scale_pages = pl.tensor.dim(idx_native_kv_cache, 0)
+        early_scale_layout = pl.create_tensor([SCALE_LAYOUT_CAPACITY], dtype=pl.INT32)
+        early_scale_deps = pl.array.create(1, pl.TASK_ID)
+        early_scale_deps[0] = _widen_tid
+        if max_seq_len // COMPRESS_RATIO > TOPK_CANDIDATES_PER_LEAF:
+            if t_dim >= LONG_S6_MIN_QUERY_ROWS:
+                with pl.at(level=pl.Level.CORE_GROUP, name_hint="indexer_scale_layout",
+                           allow_early_resolve=True) as early_scale_tid:
+                    early_scale_layout = prove_scale_layout(
+                        kv_seq_lens, idx_block_table, early_scale_layout, t_dim, early_scale_pages,
+                    )
+                early_scale_deps[0] = early_scale_tid
+
         with pl.scope():
             pre_val_store = pl.create_tensor([hc_padded_rows, HC_PAD], dtype=pl.FP32)
             hc_pre_gates_from_rms(
@@ -356,7 +372,9 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 il_ones = pl.tile.full([CSA_ROPE_SIGN_T_TILE, ROPE_HEAD_DIM], dtype=pl.FP32, value=1.0)
                 il_lane_ids = pl.cast(pl.tile.arange(0, [1, ROPE_HEAD_DIM], dtype=pl.INT32), target_type=pl.FP32)
                 il_col = pl.col_expand_mul(il_ones, il_lane_ids)
-                il_dup_f = pl.cast(pl.cast(pl.mul(il_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32)
+                il_dup_f = pl.cast(
+                    pl.cast(pl.mul(il_col, 0.5), target_type=pl.INT32, mode="trunc"), target_type=pl.FP32
+                )
                 il_lane = pl.sub(il_col, pl.mul(il_dup_f, 2.0))
                 il_sign = pl.sub(pl.mul(il_lane, 2.0), 1.0)
                 rope_sin_rows = pl.load(freqs_sin, [rope_t0, 0], [CSA_ROPE_SIGN_T_TILE, ROPE_HEAD_DIM],
@@ -469,6 +487,8 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                     late_dep,
                     idx_cache_write_tid,
                     max_seq_len,
+                    early_scale_layout,
+                    early_scale_deps[0],
                 )
 
             # sparse_attn_csa folds the compressed-slot masking + valid-block flags in from the
@@ -487,6 +507,7 @@ def _make_decode_csa_entry(*, host_metadata: bool):
                 freqs_cos,
                 freqs_sin,
                 o_packed_heads,
+                max_seq_len,
             )
             with pl.scope():
                 layer_output = decode_o_proj_tp1(

@@ -22,6 +22,12 @@ from .config import (
     FLASH as M,
 )
 from .layout import COMPRESSED_TABLE_COLUMNS_DYN, ORIGINAL_TABLE_COLUMNS_DYN
+from .physical_attention_plan import (
+    PHYSICAL_PLAN_COLUMNS,
+    PHYSICAL_PLAN_MAX_PAGES,
+    PHYSICAL_PLAN_MIN_TOKENS,
+    compressed_physical_plan,
+)
 
 B_DYN = pl.dynamic("B_DYN")  # per-request axis (block tables)
 
@@ -171,6 +177,11 @@ if T % ATTENTION_PUBLISH_T_TILE != 0:
     raise ValueError("local token capacity must contain complete attention publish tiles")
 
 
+# 尺寸仅由硬件核数/固定tile决定；放在Python常量层，避免跨策略推导成动态维。
+ATTN_TRANSFER_HEADS = NUM_QK_CORES * QK_TRANSFER_SLOTS * H
+ATTN_TRANSFER_KV_ROWS = NUM_QK_CORES * QK_TRANSFER_SLOTS * ATTN_K_TILE
+
+
 @pl.jit.inline(auto_scope=False)
 def sparse_attn_csa(
     q: pl.Tensor[[T_DYN, H, HEAD_DIM], pl.BF16],
@@ -185,6 +196,8 @@ def sparse_attn_csa(
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+    LOCAL_ATTENTION_STATS: pl.constexpr,
+    PHYSICAL_ROWS: pl.constexpr,
 ) -> tuple[pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16], pl.Scalar[pl.TASK_ID]]:
     """Run CSA QK/PV and publish its final normalized, inverse-RoPE packed heads."""
     # Compressed index contract.
@@ -234,11 +247,33 @@ def sparse_attn_csa(
             c_lt_tile = pl.minimum(pl.maximum(pl.sub(c_upper_b, c_raw_tile), 0.0), 1.0)
             c_mask_tile = pl.mul(c_ge_tile, c_lt_tile)
             c_out_tile = pl.sub(pl.mul(c_mask_tile, pl.add(c_raw_tile, 1.0)), 1.0)
-            cmp_sparse_indices = pl.assemble(
-                cmp_sparse_indices,
-                pl.set_validshape(pl.cast(c_out_tile, target_type=pl.INT32), bias_rows, IDX_TOPK),
-                [bias_t0, 0],
-            )
+            if PHYSICAL_ROWS:
+                # 使用完整8行页mask；逐行写入后再限定valid_rows，与单SPMD相同。
+                c_pages_valid = pl.full([BIAS_T_TILE, IDX_TOPK], dtype=pl.FP32, value=0.0)
+                for plan_row in pl.range(bias_rows):
+                    plan_token = bias_t0 + plan_row
+                    plan_request = plan_token // S
+                    # 与现有HC内联入口相同：声明静态metadata供JIT推导，立即被计算值替换。
+                    plan_raw = pl.create_tensor([1, IDX_TOPK], dtype=pl.INT32)
+                    plan_raw = pl.cast(
+                        pl.slice(c_out_tile, [1, IDX_TOPK], [plan_row, 0], valid_shape=[1, IDX_TOPK]),
+                        target_type=pl.INT32,
+                    )
+                    plan_upper = pl.cast(pl.cast(pl.read(c_pos_q, [plan_row, 0]), pl.INT32), pl.INDEX)
+                    plan_physical, plan_valid = compressed_physical_plan(
+                        plan_raw, cmp_block_table, plan_request, plan_upper, pl.tensor.dim(cmp_kv, 0),
+                    )
+                    cmp_sparse_indices = pl.assemble(cmp_sparse_indices, plan_physical, [plan_token, 0])
+                    c_pages_valid = pl.assemble(c_pages_valid, plan_valid, [plan_row, 0])
+                c_mask_tile = pl.mul(c_mask_tile, pl.set_validshape(c_pages_valid, bias_rows, IDX_TOPK))
+                # 从原始raw重算一次原规范公式；不把物理地址或重复舍入混入bias。
+                c_out_tile = pl.sub(pl.mul(c_mask_tile, pl.add(c_raw_tile, 1.0)), 1.0)
+            else:
+                cmp_sparse_indices = pl.assemble(
+                    cmp_sparse_indices,
+                    pl.set_validshape(pl.cast(c_out_tile, target_type=pl.INT32), bias_rows, IDX_TOPK),
+                    [bias_t0, 0],
+                )
             sparse_bias = pl.assemble(
                 sparse_bias,
                 pl.set_validshape(pl.mul(pl.minimum(c_out_tile, 0.0), -NEG_INF), bias_rows, CMP_TOPK),
@@ -376,15 +411,12 @@ def sparse_attn_csa(
     # 每核 QK_TRANSFER_SLOTS 个轮转槽：AIV 采下一块 KV 的同时，AIC 还能算本块 QK
     # 与更早一块的 PV。单槽时三者只能首尾相接，泳道上就是 qk_pv 单次 246.8us
     # 对上游 140.2us 的来源。
-    transfer_slots = NUM_QK_CORES * QK_TRANSFER_SLOTS
-    transfer_heads = transfer_slots * H
-    transfer_kv_rows = transfer_slots * ATTN_K_TILE
-    kv_transfer = pl.create_tensor([transfer_kv_rows, HEAD_DIM], dtype=pl.BF16)
-    score_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.FP32)
-    probability_transfer = pl.create_tensor([transfer_heads, ATTN_K_TILE], dtype=pl.BF16)
-    pv_transfer = pl.create_tensor([transfer_heads, HEAD_DIM], dtype=pl.FP32)
-    mi_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
-    li_transfer = pl.create_tensor([transfer_heads, 1], dtype=pl.FP32)
+    kv_transfer = pl.create_tensor([ATTN_TRANSFER_KV_ROWS, HEAD_DIM], dtype=pl.BF16)
+    score_transfer = pl.create_tensor([ATTN_TRANSFER_HEADS, ATTN_K_TILE], dtype=pl.FP32)
+    probability_transfer = pl.create_tensor([ATTN_TRANSFER_HEADS, ATTN_K_TILE], dtype=pl.BF16)
+    pv_transfer = pl.create_tensor([ATTN_TRANSFER_HEADS, HEAD_DIM], dtype=pl.FP32)
+    mi_transfer = pl.create_tensor([ATTN_TRANSFER_HEADS, 1], dtype=pl.FP32)
+    li_transfer = pl.create_tensor([ATTN_TRANSFER_HEADS, 1], dtype=pl.FP32)
     ffts_workspace = pl.create_tensor([256], dtype=pl.INT64)
     with pl.spmd(NUM_QK_CORES, name_hint="qk_pv", deps=[qk_plan_tid, rope_tid], allow_early_resolve=True) as qk_tid:
         qk_core = pl.tile.get_block_idx()
@@ -479,9 +511,11 @@ def sparse_attn_csa(
             running_l = pl.tile.muls(running_m, 0.0)
             running_left = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
             running_right = pl.tile.full([H // 2, HEAD_DIM // 2], dtype=pl.FP32, value=0.0)
-            for qk_tick, (m_iter, l_iter, left_iter, right_iter) in pl.range(
+            # 三槽交错存mi/li，仅当前AIV消费；跨query保留环形编号。
+            local_stats_ring = pl.create_tile([QK_TRANSFER_SLOTS * 2, H // 2], dtype=pl.FP32)
+            for qk_tick, (m_iter, l_iter, left_iter, right_iter, stats_cache_iter) in pl.range(
                 qk_block_count + QK_PRE_LAUNCH + 1,
-                init_values=(running_m, running_l, running_left, running_right),
+                init_values=(running_m, running_l, running_left, running_right, local_stats_ring),
             ):
                 qk_t = qk_core + (qk_tick // SPARSE_BLOCKS) * NUM_QK_CORES
                 qk_b = qk_t // S
@@ -490,41 +524,50 @@ def sparse_attn_csa(
                     if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
                         qk_slot = qk_core * QK_TRANSFER_SLOTS + qk_tick % QK_TRANSFER_SLOTS
                         qk_kv_row = qk_slot * ATTN_K_TILE
-                        qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
-                        if qk_sb == 0:
-                            qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
-                            qk_win_len = pl.min(qk_pos + 1, WIN)
-                            qk_win_start = qk_pos - qk_win_len + 1
-                            qk_head = qk_win_start % BLOCK_SIZE
-                            qk_rows = pl.min(pl.max(qk_win_len - qk_lane_kv, 0), ATTN_K_TILE // 2)
-                            for qk_run in pl.unroll(SWA_RUNS):
-                                qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_lane_kv, 0)
-                                qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_lane_kv, qk_rows)
-                                if qk_hi > qk_lo:
-                                    qk_absolute = qk_win_start + qk_lane_kv + qk_lo
-                                    qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
-                                    if qk_raw_page >= 0:
-                                        qk_raw_row = (
-                                            pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
-                                        )
-                                        qk_kv_half = pl.gather_row(
-                                            qk_kv_half, ori_kv_flat, [qk_lo, 0], [qk_raw_row, 0],
-                                            [ATTN_K_TILE // 2, HEAD_DIM],
-                                            valid_shape=[qk_hi - qk_lo, HEAD_DIM],
-                                        )
+                        if PHYSICAL_ROWS and qk_sb > 0:
+                            # 与本轮plan共享同一表示和容量条件。MGATHER仍逐行DMA，不是并行采64行。
+                            physical_column = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv
+                            physical_rows = pl.load(
+                                cmp_sparse_indices, [qk_t, physical_column], [1, ATTN_K_TILE // 2],
+                                target_memory=pl.MemorySpace.Vec,
+                            )
+                            qk_kv_half = pl.tile.mgather(cmp_kv_flat, physical_rows, coalesce="row", gather_oob="zero")
                         else:
-                            for qk_row in pl.range(ATTN_K_TILE // 2):
-                                qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
-                                if qk_cmp_k < CMP_TOPK:
-                                    qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
-                                    if qk_ridx >= 0:
-                                        qk_page = pl.cast(
-                                            pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
-                                        )
-                                        qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
-                                        qk_kv_half = pl.gather_row(
-                                            qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
-                                        )
+                            qk_kv_half = pl.tile.full([ATTN_K_TILE // 2, HEAD_DIM], dtype=pl.BF16, value=0.0)
+                            if qk_sb == 0:
+                                qk_pos = pl.cast(pl.read(position_ids, [qk_t, 0]), pl.INDEX)
+                                qk_win_len = pl.min(qk_pos + 1, WIN)
+                                qk_win_start = qk_pos - qk_win_len + 1
+                                qk_head = qk_win_start % BLOCK_SIZE
+                                qk_rows = pl.min(pl.max(qk_win_len - qk_lane_kv, 0), ATTN_K_TILE // 2)
+                                for qk_run in pl.unroll(SWA_RUNS):
+                                    qk_lo = pl.max(qk_run * BLOCK_SIZE - qk_head - qk_lane_kv, 0)
+                                    qk_hi = pl.min((qk_run + 1) * BLOCK_SIZE - qk_head - qk_lane_kv, qk_rows)
+                                    if qk_hi > qk_lo:
+                                        qk_absolute = qk_win_start + qk_lane_kv + qk_lo
+                                        qk_raw_page = pl.read(ori_block_table, [qk_b, qk_absolute // BLOCK_SIZE])
+                                        if qk_raw_page >= 0:
+                                            qk_raw_row = (
+                                                pl.cast(qk_raw_page, pl.INDEX) * BLOCK_SIZE + qk_absolute % BLOCK_SIZE
+                                            )
+                                            qk_kv_half = pl.gather_row(
+                                                qk_kv_half, ori_kv_flat, [qk_lo, 0], [qk_raw_row, 0],
+                                                [ATTN_K_TILE // 2, HEAD_DIM],
+                                                valid_shape=[qk_hi - qk_lo, HEAD_DIM],
+                                            )
+                            else:
+                                for qk_row in pl.range(ATTN_K_TILE // 2):
+                                    qk_cmp_k = (qk_sb - 1) * ATTN_K_TILE + qk_lane_kv + qk_row
+                                    if qk_cmp_k < CMP_TOPK:
+                                        qk_ridx = pl.read(cmp_sparse_indices, [qk_t, qk_cmp_k])
+                                        if qk_ridx >= 0:
+                                            qk_page = pl.cast(
+                                                pl.read(cmp_block_table, [qk_b, qk_ridx // BLOCK_SIZE]), pl.INDEX
+                                            )
+                                            qk_src = qk_page * BLOCK_SIZE + qk_ridx % BLOCK_SIZE
+                                            qk_kv_half = pl.gather_row(
+                                                qk_kv_half, cmp_kv_flat, [qk_row, 0], [qk_src, 0], [1, HEAD_DIM]
+                                            )
                         pl.store(qk_kv_half, [qk_kv_row + qk_lane_kv, 0], kv_transfer)
                 # Consume the preceding Score notification before allowing
                 # the next QK to publish. KV is already written, so release
@@ -576,11 +619,36 @@ def sparse_attn_csa(
                         # 是为了复刻 Native SAS 的 CAST_ROUND——半数远离零。
                         qk_probability = pl.cast(qk_exp, target_type=pl.BF16, mode="rint")
                         pl.store(qk_probability, [qk_transfer_row + qk_lane_head, 0], probability_transfer)
-                        pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
-                        pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                        if LOCAL_ATTENTION_STATS:
+                            # mi/li没有跨核消费者，完整CSA也不读取其GM副本；本轮直接
+                            # 写入同lane UB环，省去两个MTE3写回及随后两个MTE2回读。
+                            # 这里只做 FP32 reshape/搬运，不改变 row_max/row_sum 的归约树。
+                            stats_cache_mi = pl.tile.assemble(
+                                stats_cache_iter,
+                                pl.reshape(qk_mi, [1, H // 2]),
+                                [(softmax_work % QK_TRANSFER_SLOTS) * 2, 0],
+                            )
+                            stats_cache_updated = pl.tile.assemble(
+                                stats_cache_mi,
+                                pl.reshape(qk_li, [1, H // 2]),
+                                [(softmax_work % QK_TRANSFER_SLOTS) * 2 + 1, 0],
+                            )
+                            stats_cache_updated_path = pl.yield_(stats_cache_updated)
+                        else:
+                            # 关闭路径保留原GM写出/回读；未使用的UB环由constexpr消除。
+                            pl.store(qk_mi, [qk_transfer_row + qk_lane_head, 0], mi_transfer)
+                            pl.store(qk_li, [qk_transfer_row + qk_lane_head, 0], li_transfer)
+                            stats_cache_updated_path = pl.yield_(stats_cache_iter)
                         pl.system.sync_set(
                             QK_PROB_READY_EVENT, pipe=pl.PipeType.MTE3, ffts_mode=2, core_type=pl.KernelType.AIV
                         )
+                        stats_cache_valid = pl.yield_(stats_cache_updated_path)
+                    else:
+                        # 与现有事件谓词一致：失效块不产生可消费的统计值。
+                        stats_cache_valid = pl.yield_(stats_cache_iter)
+                    stats_cache_ready = pl.yield_(stats_cache_valid)
+                else:
+                    stats_cache_ready = pl.yield_(stats_cache_iter)
                 if t_dim < EARLY_KV_MIN_TOKENS:
                     if qk_tick < qk_block_count:
                         if pl.read(valid_block_mask, [qk_t, qk_sb]) > 0:
@@ -595,8 +663,30 @@ def sparse_attn_csa(
                         pv_slot = qk_core * QK_TRANSFER_SLOTS + pv_work % QK_TRANSFER_SLOTS
                         pv_transfer_row = pv_slot * H
                         pl.system.sync_wait(QK_PV_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
-                        pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
-                        pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                        # 同一 work 的 mi/li 已在两拍前产生；使用本 tick 更新后的环，
+                        # 当前 softmax 与 merge 相差两槽，互不覆盖。仍先等 PV_READY，
+                        # 此优化不代替 Cube 写回完成通知，也不缩短原流水排空。
+                        if LOCAL_ATTENTION_STATS:
+                            # 动态slice后直接reshape存在已知运行时偏移保留限制；显式
+                            # extract两个128B行到本地临时Tile后reshape，保留真实copy与
+                            # 编译器依赖。不放开内存规划的安全门槛，也不经GM绕行。
+                            pv_m = pl.reshape(
+                                pl.tile.extract(
+                                    stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2, 0,
+                                    [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                                ),
+                                [H // 2, 1],
+                            )
+                            pv_l = pl.reshape(
+                                pl.tile.extract(
+                                    stats_cache_ready, (pv_work % QK_TRANSFER_SLOTS) * 2 + 1, 0,
+                                    [1, H // 2], target_memory=pl.MemorySpace.Vec,
+                                ),
+                                [H // 2, 1],
+                            )
+                        else:
+                            pv_m = pl.load(mi_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
+                            pv_l = pl.load(li_transfer, [pv_transfer_row + qk_lane_head, 0], [H // 2, 1])
                         next_m = pl.maximum(m_iter, pv_m)
                         alpha = pl.exp(pl.sub(m_iter, next_m))
                         beta = pl.exp(pl.sub(pv_m, next_m))
@@ -687,8 +777,8 @@ def sparse_attn_csa(
                     )
                 else:
                     m_after, l_after, left_after, right_after = pl.yield_(m_iter, l_iter, left_iter, right_iter)
-                running_m, running_l, running_left, running_right = pl.yield_(
-                    m_after, l_after, left_after, right_after
+                running_m, running_l, running_left, running_right, local_stats_ring = pl.yield_(
+                    m_after, l_after, left_after, right_after, stats_cache_ready
                 )
 
     return o_packed_heads, qk_tid
@@ -708,10 +798,43 @@ def sparse_attn_csa_tp1(
     freqs_cos: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     freqs_sin: pl.Tensor[[T_DYN, ROPE_DIM], pl.FP32],
     o_packed_heads: pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16],
+    max_seq_len: pl.Scalar[pl.INT32],
 ) -> tuple[pl.Tensor[[O_GROUPS * T_PAD, O_GROUP_IN], pl.BF16], pl.Scalar[pl.TASK_ID]]:
     """Publish packed CSA heads from the final QK/PV vector update."""
-    packed, ready = sparse_attn_csa(
-        q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
-        position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads,
-    )
+    # 对齐单SPMD已验证长G6且24<=T<=96的资源区间；有效T仍来自Tensor。
+    t_dim = pl.tensor.dim(q, 0)
+    use_local_stats = pl.cast(0, pl.INT32)
+    if max_seq_len // COMPRESS_RATIO > 8192:
+        if t_dim >= 24:
+            if t_dim <= 96:
+                use_local_stats = pl.cast(1, pl.INT32)
+    use_physical_rows = pl.cast(0, pl.INT32)
+    if t_dim >= PHYSICAL_PLAN_MIN_TOKENS:
+        if pl.tensor.dim(cmp_block_table, 1) > 0:
+            if pl.tensor.dim(cmp_block_table, 1) <= PHYSICAL_PLAN_COLUMNS:
+                if pl.tensor.dim(cmp_kv, 0) > 0:
+                    if pl.tensor.dim(cmp_kv, 0) <= PHYSICAL_PLAN_MAX_PAGES:
+                        use_physical_rows = pl.cast(1, pl.INT32)
+    if use_local_stats == 1:
+        if use_physical_rows == 1:
+            packed, ready = sparse_attn_csa(
+                q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
+                position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads, True, True,
+            )
+        else:
+            packed, ready = sparse_attn_csa(
+                q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
+                position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads, True, False,
+            )
+    else:
+        if use_physical_rows == 1:
+            packed, ready = sparse_attn_csa(
+                q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
+                position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads, False, True,
+            )
+        else:
+            packed, ready = sparse_attn_csa(
+                q, ori_kv, ori_block_table, cmp_kv, cmp_block_table, idx_topk,
+                position_ids, seq_lens, attn_sink, freqs_cos, freqs_sin, o_packed_heads, False, False,
+            )
     return packed, ready

@@ -535,17 +535,32 @@ def q_proj_q_dequant(
         name_hint="qproj_dequant_rms_nope_rope",
         allow_early_resolve=True,
     ):
-        # 按本档位的 token 数自适应放大 head 块（上游写法）。恒用 Q_ROPE_H_TILE=4 时
-        # Vector 块太小、指令条数多，in-core 实测 VECTOR 占 82%。生产档位 tile_rows=96
-        # 正好命中下面第二个分支，head 块 4 -> 16。
+        # 9d5327e5：完整八行按48-AIV整波选最大head组；尾行保持4。
+        dq_token_tiles = (tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE
         dq_head_tile = Q_ROPE_H_TILE
-        if tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE) == 0:
-            dq_head_tile = H
-        elif (
-            tile_rows >= Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H
-            and tile_rows % (Q_DEQUANT_WORKERS * Q_ROPE_T_TILE * 16 // H) == 0
-        ):
-            dq_head_tile = 16
+        # 只合并完整八行块的独立 head：选择最大的 64/32/16/8，使
+        # dq_token_tiles*(H/head_tile) 恰为正的 48-AIV 整波；不满足则保留4。
+        # 扩组后每个AIV的head迭代数不增，只减少scale/cos/sin/swap的重复准备。
+        # 此条件取实际设备T，不用B/S或测试点；WORKERS仍只决定任务条带。
+        # 有尾行必须留4，保持下面固定4-head尾循环及原recip(sqrt)数学。
+        if tile_rows % Q_ROPE_T_TILE == 0:
+            if dq_token_tiles >= Q_DEQUANT_WORKERS and dq_token_tiles % Q_DEQUANT_WORKERS == 0:
+                dq_head_tile = H
+            elif (
+                dq_token_tiles >= Q_DEQUANT_WORKERS * 32 // H
+                and dq_token_tiles % (Q_DEQUANT_WORKERS * 32 // H) == 0
+            ):
+                dq_head_tile = 32
+            elif (
+                dq_token_tiles >= Q_DEQUANT_WORKERS * 16 // H
+                and dq_token_tiles % (Q_DEQUANT_WORKERS * 16 // H) == 0
+            ):
+                dq_head_tile = 16
+            elif (
+                dq_token_tiles >= Q_DEQUANT_WORKERS * 8 // H
+                and dq_token_tiles % (Q_DEQUANT_WORKERS * 8 // H) == 0
+            ):
+                dq_head_tile = 8
         for dq_work in pl.range(
             dq_worker,
             ((tile_rows + Q_ROPE_T_TILE - 1) // Q_ROPE_T_TILE) * (H // dq_head_tile),

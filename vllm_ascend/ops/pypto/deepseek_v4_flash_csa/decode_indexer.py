@@ -25,6 +25,7 @@ from .config import (
 from .config import (
     FLASH as M,
 )
+from .indexer_scale_layout import SCALE_LAYOUT_CAPACITY
 from .layout import (
     INDEXER_KEY_BYTES,
     INDEXER_PAGE_BYTES_DYN,
@@ -171,6 +172,10 @@ SCORE_LANE_ROWS = SCORE_TILE // 2
 SCORE_MAX_QUERY_GROUP = S
 SCORE_ARENA_ROWS = max(T_PAD, TOPK_SCORE_WORKERS * 2 * SCORE_MAX_QUERY_GROUP)
 assert S % SCORE_MAX_QUERY_GROUP == 0 and T_PAD % SCORE_MAX_QUERY_GROUP == 0
+
+
+# 单SPMD已验证的半叶直接归并资源边界。
+SHORT_PREFETCH_HALF_SORT_LIMIT = 2048
 
 
 @pl.jit.inline
@@ -659,6 +664,8 @@ def indexer_score_topk_native_cube(
     key_prefetch_to_l0: pl.constexpr,
     balance_leaves: pl.constexpr,
     split_score_rows: pl.constexpr,
+    scale_layout: pl.Tensor[[SCALE_LAYOUT_CAPACITY], pl.INT32],
+    layout_tid: pl.Scalar[pl.TASK_ID],
 ):
     """同组query共用Key；长G6可用双M192早FIX，保持单MIX双槽READY/ACK。"""
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -678,13 +685,16 @@ def indexer_score_topk_native_cube(
         weights_tid,
         query_group_size,
     )
+    # 显式值通道，避免多层inline后仅attrs引用的TaskId失去绑定。
+    proof_dependencies = pl.array.create(1, pl.TASK_ID)
+    proof_dependencies[0] = layout_tid
     # 每个worker两个通信槽，每槽容纳整个query组的分数。
     buf_score_transfer = pl.create_tensor([TOPK_SCORE_WORKERS * 2 * query_group_size, score_tile], dtype=pl.FP32)
     buf_score_ffts = pl.create_tensor([256], dtype=pl.INT64)
     with pl.spmd(
         TOPK_SCORE_WORKERS,
         name_hint="indexer_score_topk_native_pair",
-        deps=[coefficients_tid, cache_write_tid],
+        deps=[coefficients_tid, cache_write_tid, proof_dependencies[0]],
         sync_start=score_sync_start,
         allow_early_resolve=score_early_resolve,
     ) as buffered_leaf_tid:
@@ -1369,6 +1379,13 @@ def indexer_score_topk_native_cube(
                     if single_begin < single_visible:
                         single_valid = pl.min(single_capacity, single_visible - single_begin)
                         single_steps = (single_valid + score_tile - 1) // score_tile
+                        # 同一调用的完整页证明；后续每个leaf/两个AIV复用，不重复扫描。
+                        single_page_begin = single_begin // BLOCK_SIZE
+                        single_page_count = (single_valid + BLOCK_SIZE - 1) // BLOCK_SIZE
+                        layout_row = 2 * single_batch
+                        single_contiguous = pl.read(scale_layout, [layout_row + 1])
+                        single_first_page = pl.cast(pl.read(scale_layout, [layout_row]), pl.INDEX)
+                        single_first_page = single_first_page + pl.cast(single_contiguous, pl.INDEX) * single_page_begin
                         # Native QLI ProcessVec1 assigns complete query rows to each AIV.
                         # Keep one root per query and a two-step contiguous 2048-score segment.
                         single_roots = pl.tile.full(
@@ -1386,22 +1403,83 @@ def indexer_score_topk_native_cube(
                             )
                             # Scales are shared across the three queries on one AIV. Reading
                             # the complete candidate tile duplicates scale traffic across AIVs.
-                            single_scale_bytes = pl.tile.create([1, score_tile * 2], dtype=pl.INT8)
-                            for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
-                                single_scale_logical = pl.min(
-                                    single_score_begin // BLOCK_SIZE + single_scale_page,
-                                    pl.max((single_cache_len - 1) // BLOCK_SIZE, 0),
+                            single_scale_bytes = pl.tile.reinterpret_view(
+                                pl.fillpad(
+                                    pl.tile.full([1, score_tile], dtype=pl.FP16, value=0.0), pad_value=pl.PadValue.zero
+                                ),
+                                pl.INT8,
+                            )
+                            if single_contiguous != 0:
+                                # Native每页的key后仍是原64B scale；源行距由Tensor描述符
+                                # 的page_bytes提供。一次二维MTE2搬入多页，不碰key区域。
+                                run_pages = pl.min(
+                                    score_tile // BLOCK_SIZE,
+                                    single_page_count - single_step * (score_tile // BLOCK_SIZE),
                                 )
-                                single_scale_physical = pl.max(
-                                    pl.cast(pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX), 0
+                                run_first = single_first_page + single_step * (score_tile // BLOCK_SIZE) * pl.cast(
+                                    single_contiguous, pl.INDEX
                                 )
-                                single_scale_bytes = pl.gather_row(
-                                    single_scale_bytes,
+                                run_lowest = run_first
+                                if single_contiguous < 0:
+                                    run_lowest = run_first - run_pages + 1
+                                run_bytes = pl.load(
                                     idx_native_kv_cache,
-                                    [0, single_scale_page * BLOCK_SIZE * 2],
-                                    [single_scale_physical, INDEXER_KEY_BYTES],
-                                    [1, BLOCK_SIZE * 2],
+                                    [run_lowest, INDEXER_KEY_BYTES],
+                                    [score_tile // BLOCK_SIZE, BLOCK_SIZE * 2],
+                                    valid_shape=[run_pages, BLOCK_SIZE * 2],
                                 )
+                                # 尾块只加载真实页。按FP16填零未加载的行，再展平，避免
+                                # INT8常量填充的不支持及将UB未初始化数据带入后续数学。
+                                run_half = pl.tile.reinterpret_view(run_bytes, pl.FP16)
+                                run_clean = pl.fillpad(run_half, pad_value=pl.PadValue.zero)
+                                run_full = pl.set_validshape(run_clean, score_tile // BLOCK_SIZE, BLOCK_SIZE)
+                                run_flat = pl.reshape(run_full, [1, score_tile])
+                                if single_contiguous < 0:
+                                    # MTE2始终按物理地址递增读。逆序页在UB按64B页倒序，
+                                    # 每页内部32个FP16保持原顺序。TGATHERB每索引搬32B，
+                                    # 两个索引组成一页，仅需64个UINT32字节偏移。
+                                    run_blocks = pl.tile.ci(0, [1, 2 * (score_tile // BLOCK_SIZE)], dtype=pl.INT32)
+                                    run_page_ids = pl.tile.shrs(run_blocks, 1)
+                                    run_halves = pl.sub(run_blocks, pl.mul(run_page_ids, 2))
+                                    run_reverse_pages = pl.maximum(
+                                        pl.add(pl.neg(run_page_ids), pl.cast(run_pages - 1, pl.INT32)), 0
+                                    )
+                                    run_offsets = pl.add(
+                                        pl.mul(run_reverse_pages, BLOCK_SIZE * 2), pl.mul(run_halves, 32)
+                                    )
+                                    run_reversed = pl.tile.gatherb(
+                                        run_flat, pl.tile.reinterpret_view(run_offsets, pl.UINT32)
+                                    )
+                                    # 尾页后的索引钳制到已加载第0页，不访问未加载或负地址；
+                                    # 随后按真实页数补零，保证无效区不会带入陈旧UB数据。
+                                    run_used = pl.set_validshape(run_reversed, 1, run_pages * BLOCK_SIZE)
+                                    run_flat = pl.set_validshape(
+                                        pl.fillpad(run_used, pad_value=pl.PadValue.zero), 1, score_tile
+                                    )
+                                single_scale_bytes = pl.tile.reinterpret_view(run_flat, pl.INT8)
+                            else:
+                                # 两AIV读取同一候选区间的scale；页表与slab容量检查先于gather。
+                                for single_scale_page in pl.range(score_tile // BLOCK_SIZE):
+                                    single_scale_logical = pl.min(
+                                        single_score_begin // BLOCK_SIZE + single_scale_page,
+                                        pl.max((single_cache_len - 1) // BLOCK_SIZE, 0),
+                                    )
+                                    if single_scale_logical >= 0 and single_scale_logical < pl.tensor.dim(
+                                        idx_block_table, 1
+                                    ):
+                                        single_scale_physical = pl.cast(
+                                            pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX
+                                        )
+                                        if single_scale_physical >= 0 and single_scale_physical < pl.tensor.dim(
+                                            idx_native_kv_cache, 0
+                                        ):
+                                            single_scale_bytes = pl.gather_row(
+                                                single_scale_bytes,
+                                                idx_native_kv_cache,
+                                                [0, single_scale_page * BLOCK_SIZE * 2],
+                                                [single_scale_physical, INDEXER_KEY_BYTES],
+                                                [1, BLOCK_SIZE * 2],
+                                            )
                             single_scale_half = pl.tile.reinterpret_view(single_scale_bytes, pl.FP16)
                             single_kv_scale = pl.cast(single_scale_half, pl.FP32)
                             pl.system.sync_wait(SCORE_READY_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIV)
@@ -1783,6 +1861,8 @@ def indexer_score_topk_forest(
     weights_tid: pl.Scalar[pl.TASK_ID],
     cache_write_tid: pl.Scalar[pl.TASK_ID],
     host_max_seq_len: pl.Scalar[pl.INT32],
+    scale_layout: pl.Tensor[[SCALE_LAYOUT_CAPACITY], pl.INT32],
+    layout_tid: pl.Scalar[pl.TASK_ID],
 ):
     """Score leaves and merge Top-K roots; long S6 publishes one root per leaf."""
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
@@ -1831,6 +1911,8 @@ def indexer_score_topk_forest(
                         True,
                         True,
                         True,
+                        scale_layout,
+                        layout_tid,
                     )
                 else:
                     score_tid = indexer_score_topk_native_cube(
@@ -1855,6 +1937,8 @@ def indexer_score_topk_forest(
                         True,
                         True,
                         False,
+                        scale_layout,
+                        layout_tid,
                     )
             else:
                 score_tid = indexer_score_topk_native_cube(
@@ -1880,6 +1964,8 @@ def indexer_score_topk_forest(
                     True,
                     False,
                     False,
+                    scale_layout,
+                    layout_tid,
                 )
         else:
             short_queries = pl.tensor.dim(position_ids, 0)
@@ -1914,31 +2000,65 @@ def indexer_score_topk_forest(
                     True,
                     False,
                     False,
+                    scale_layout,
+                    layout_tid,
                 )
             else:
-                score_tid = indexer_score_topk_native_cube(
-                    qr_hadamard_i8,
-                    qr_hadamard_scale_dq,
-                    weights,
-                    idx_native_kv_cache,
-                    idx_block_table,
-                    position_ids,
-                    kv_seq_lens,
-                    score_arena,
-                    pair_arena,
-                    qh_quant_tid,
-                    weights_tid,
-                    cache_write_tid,
-                    2,
-                    NATIVE_QLI_QK_COLS,
-                    BUFFERED_SCORE_TILE,
-                    False,
-                    True,
-                    0,
-                    True,
-                    False,
-                    False,
-                )
+                # ef608731：半叶排序不超过2048项时预取一个Key面板。
+                short_steps_upper = (max_topk_cache_len + BUFFERED_SCORE_TILE - 1) // BUFFERED_SCORE_TILE
+                short_half_span_upper = short_steps_upper * (BUFFERED_SCORE_TILE // 2)
+                if short_half_span_upper <= SHORT_PREFETCH_HALF_SORT_LIMIT:
+                    score_tid = indexer_score_topk_native_cube(
+                        qr_hadamard_i8,
+                        qr_hadamard_scale_dq,
+                        weights,
+                        idx_native_kv_cache,
+                        idx_block_table,
+                        position_ids,
+                        kv_seq_lens,
+                        score_arena,
+                        pair_arena,
+                        qh_quant_tid,
+                        weights_tid,
+                        cache_write_tid,
+                        2,
+                        NATIVE_QLI_QK_COLS,
+                        BUFFERED_SCORE_TILE,
+                        False,
+                        True,
+                        1,
+                        True,
+                        False,
+                        False,
+                        scale_layout,
+                        layout_tid,
+                    )
+                else:
+                    score_tid = indexer_score_topk_native_cube(
+                        qr_hadamard_i8,
+                        qr_hadamard_scale_dq,
+                        weights,
+                        idx_native_kv_cache,
+                        idx_block_table,
+                        position_ids,
+                        kv_seq_lens,
+                        score_arena,
+                        pair_arena,
+                        qh_quant_tid,
+                        weights_tid,
+                        cache_write_tid,
+                        2,
+                        NATIVE_QLI_QK_COLS,
+                        BUFFERED_SCORE_TILE,
+                        False,
+                        True,
+                        0,
+                        True,
+                        False,
+                        False,
+                        scale_layout,
+                        layout_tid,
+                    )
     else:
         with pl.spmd(
             TOPK_SCORE_WORKERS,
@@ -2383,6 +2503,8 @@ def indexer_weights_score(
     qh_quant_tid: pl.Scalar[pl.TASK_ID],
     weights_workers: pl.Scalar[pl.INDEX],
     host_max_seq_len: pl.Scalar[pl.INT32],
+    scale_layout: pl.Tensor[[SCALE_LAYOUT_CAPACITY], pl.INT32],
+    layout_tid: pl.Scalar[pl.TASK_ID],
 ) -> tuple[pl.Tensor[[T_DYN, IDX_TOPK], pl.FP32], pl.Tensor[[T_DYN, IDX_TOPK], pl.INT32], pl.Scalar[pl.TASK_ID]]:
     """Weights projection and the score/top-k forest over an already-quantized query."""
     weights, weights_tid = indexer_weights_project(x, weights_proj, weights_gate_dep, weights_workers)
@@ -2401,6 +2523,8 @@ def indexer_weights_score(
         weights_tid,
         cache_write_dep,
         host_max_seq_len,
+        scale_layout,
+        layout_tid,
     )
     return topk_scores, topk_idxs, leaf_tid
 
@@ -2425,6 +2549,8 @@ def indexer(
     late_dep: pl.Scalar[pl.TASK_ID],
     cache_write_dep: pl.Scalar[pl.TASK_ID],
     host_max_seq_len: pl.Scalar[pl.INT32],
+    scale_layout: pl.Tensor[[SCALE_LAYOUT_CAPACITY], pl.INT32],
+    layout_tid: pl.Scalar[pl.TASK_ID],
 ):
     qr_hadamard_i8 = pl.create_tensor([T_PAD * IDX_N_HEADS, IDX_HEAD_DIM], dtype=pl.INT8)
     qr_hadamard_scale_dq = pl.create_tensor([T_PAD * IDX_N_HEADS, 1], dtype=pl.FP32)
@@ -2457,5 +2583,7 @@ def indexer(
         qh_quant_tid,
         TP1_WEIGHTS_WORKERS,
         host_max_seq_len,
+        scale_layout,
+        layout_tid,
     )
     return topk_scores, topk_idxs
