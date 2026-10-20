@@ -1,0 +1,101 @@
+bringing up nodes...
+bringing up nodes...
+
+....................................................F.                   [100%]
+=================================== FAILURES ===================================
+_ TestFlattenTileNdTo2DMatLoadRoundtrip.test_padded_rank3_mat_load_preserves_multi_nd_source _
+[gw1] linux -- Python 3.10.19 /data/pyptouser/qinchuanyu/pto-eager/.venv-dsv4-0251rc1/bin/python
+
+self = <transforms.test_flatten_tile_nd_to_2d.TestFlattenTileNdTo2DMatLoadRoundtrip object at 0xfffdcc3a71f0>
+
+    def test_padded_rank3_mat_load_preserves_multi_nd_source(self):
+        """The tile becomes 2D while page pitch remains in the 3D GM view."""
+        from pypto import backend
+        from pypto.backend import BackendType
+    
+        @pl.program
+>       class Before:
+
+tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py:4043: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python/pypto/language/parser/decorator.py:1395: in program
+    return _decorator(cls)
+python/pypto/language/parser/decorator.py:1167: in _decorator
+    return _parse_program_body(c, strict_ssa, closure_vars)
+python/pypto/language/parser/decorator.py:1329: in _parse_program_body
+    ir_func = parser.parse_function(
+python/pypto/language/parser/ast_parser.py:1189: in parse_function
+    self._parse_body_siblings(body_stmts)
+python/pypto/language/parser/ast_parser.py:1434: in _parse_body_siblings
+    self.parse_statement(stmt)
+python/pypto/language/parser/ast_parser.py:1370: in parse_statement
+    self.parse_assignment(stmt)
+python/pypto/language/parser/ast_parser.py:2083: in parse_assignment
+    var = self._assign_or_let(var_name, value_expr, span)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pypto.language.parser.ast_parser.ASTParser object at 0xfffdcce63e20>
+var_name = 'tile'
+value_expr = <pypto.pypto_core.ir.Call object at 0xfffdce1020f0>
+span = /data/pyptouser/qinchuanyu/pto-eager/.worktrees/pypto-csa-key-multind-20261020/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py:4049:17
+override_type = None
+
+    def _assign_or_let(
+        self,
+        var_name: str,
+        value_expr: ir.Expr,
+        span: ir.Span,
+        override_type: ir.Type | None = None,
+    ) -> ir.Var:
+        """Assign to existing Var if possible, otherwise create a new let binding."""
+        existing_var = self.scope_manager.lookup_var(var_name)
+    
+        # ``n = pl.tensor.dim(x, 0)`` folded to a dyn-dim symbol (see
+        # ``_fold_tensor_dim``): bind the Python name straight to the symbol. A Let
+        # would copy it, and every shape later built from ``n`` would then carry the
+        # copy rather than the symbol — the aliasing the fold exists to remove.
+        # Both guards test the Var the name is bound to, never a parallel set of
+        # names: scopes are a stack, so a name-keyed alias set desyncs the moment a
+        # non-leaking scope rebinds the name and exits.
+        # An LHS annotation that simply restates the symbol's own type (``n:
+        # pl.Scalar[pl.INDEX] = pl.tensor.dim(x, 0)`` — the form the printer emits)
+        # must not defeat the alias; only an annotation asking for a *different*
+        # type falls through to a Let of its own.
+        if (
+            ir.is_orchestration_like(self._func_type)
+            and self._is_param_dim_symbol(value_expr)
+            and (existing_var is None or self._is_param_dim_symbol(existing_var))
+            and (override_type is None or _types_match(override_type, value_expr.type))
+        ):
+            return value_expr
+    
+        # The name is bound to a symbol, which is immutable — it names an argument's
+        # extent. Rebind the name to a fresh let rather than assigning *through* the
+        # alias into the symbol itself.
+        if self._is_param_dim_symbol(existing_var):
+            return self.builder.let(var_name, value_expr, type=override_type, span=span)
+    
+        if existing_var is not None and type(existing_var) is ir.Var and not self.scope_manager.strict_ssa:
+            # Reject reassignment with a different type (#642).  Same Python
+            # variable maps to the same Var node, so the type must match.
+            value_type = override_type or value_expr.type
+            if (
+                not isinstance(value_type, ir.UnknownType)
+                and not isinstance(existing_var.type, ir.UnknownType)
+                and not _types_match(existing_var.type, value_type)
+            ):
+                if not _tile_types_differ_only_by_unset_memory_space(existing_var.type, value_type):
+>                   raise ParserTypeError(
+                        f"Cannot reassign '{var_name}' with a different type: "
+                        f"was {ir.python_print_type(existing_var.type)}, "
+                        f"got {ir.python_print_type(value_type)}",
+                        span=span,
+                        hint="Use a different variable name for tensors with different shapes or dtypes",
+                    )
+E                   pypto.language.parser.diagnostics.exceptions.ParserTypeError: Cannot reassign 'tile' with a different type: was pl.Tile[[2, 32, 128], pl.INT8, pl.Mem.Mat], got pl.Tile[[64, 128], pl.INT8, pl.Mem.Mat]
+
+python/pypto/language/parser/ast_parser.py:1953: ParserTypeError
+- generated xml file: /data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/key_multind/ut_v1.xml -
+=========================== short test summary info ============================
+FAILED tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py::TestFlattenTileNdTo2DMatLoadRoundtrip::test_padded_rank3_mat_load_preserves_multi_nd_source
+1 failed, 53 passed in 5.46s

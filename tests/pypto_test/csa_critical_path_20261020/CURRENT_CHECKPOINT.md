@@ -155,3 +155,38 @@ PERFORMANCE及三个REVIEW报告。所有任务终态，没有待收任务。
 
 完整源和历次差异、轻量原始证据本地commit；大产物仅LOCAL_ARTIFACTS。
 正式37源和所有依赖保持，所有仓库未push，目标仍未完成。
+
+## 用户最新停止边界：Key多ND本轮结束后暂停
+
+用户明确要求“这一轮优化之后就先停下”。当前轮是key_multind，独立
+PyPTO worktree为.worktrees/pypto-csa-key-multind-20261020，基线2dfa7f12。
+已有14文件显式stride视图/多ND源保留的本地原型，尚未提交或验证成功。
+构建handle为exec session 44151，build_v1.log显示进展，不能重复启动。
+完成当前候选必要验证和过程归档后调用goal paused，不启动下一轮方向或
+参数扫描；若遇不能合理解决的能力问题，保存证据后也结束本轮。
+本地vllm-ascend仍17个未push commit，最新77904aa4；本轮PyPTO新增commit为0。
+所有仓库仍不得push。
+
+
+## 2026-10-20 10:38：Key多ND终态与用户要求的暂停边界
+
+Key多ND独立原型已完成。54项UT及三页宽12项点积/同图/保护probe通过；
+B28 task_20261020_102448_407774415351 completed/exit0，单MIX 58符号轴、
+130根，A/B/A、冻结精确/状态/保护、metadata六次/padding四次图及代际通过。
+同轮三方五窗多task1289.56、正式1163.64、候选1310.50μs，净省-146.86，
+0/5快；停止、不采用、不扩B16/其余档、不扫参数。没有新测Native/静态/8K。
+
+PyPTO独立树14文件/271新增行，原基线2dfa7f12，正式依赖和共享安装未变。
+旧API内联tensor.dim空描述符已无补丁复现并补充#2951；新显式stride/
+多ND的建议和验证范围补充#3038，URL和评论正文均保存。没有PR/标签/push。
+Mat父双槽assemble不支持，最终直接N64进两个Right槽；Mat复用改变，
+尚无足够时序证据定量归因回退，不能宣称只减少DMA或原双缓冲完全保持。
+
+完整源、两版依赖补丁/快照、编译失败、UT/probe/三方原始15窗和终态报告
+见key_multind/FINAL_REPORT.md、ROUND_SUMMARY.json及ARCHIVE_MANIFEST。
+设备PTOAS/等待变换后C++与CPU审查相符；正式37文件不变。大产物只登记
+LOCAL_ARTIFACTS路径/数量/字节，不做hash，不提交权重/二进制。
+
+本轮任务均终态，无待收设备任务。用户明确要求“这一轮优化之后就先停下”，
+本地详细中文归档commit后调用goal paused，不再启动优化。总目标仍未完成，
+不得标记complete；除非用户重新要求继续，不自动恢复。所有仓库仍不得push。

@@ -1,0 +1,2684 @@
+# Copyright (c) PyPTO Contributors.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+
+"""Tensor operations for PyPTO IR."""
+
+from collections.abc import Sequence
+from typing import Any
+
+from pypto.pypto_core import DataType
+from pypto.pypto_core import ir as _ir_core
+from pypto.pypto_core.ir import (
+    Call,
+    ConstFloat,
+    ConstInt,
+    Expr,
+    MemorySpace,
+    PadValue,
+    ScalarType,
+    Span,
+    TensorLayout,
+)
+
+from ..utils import (
+    _get_span_or_capture,
+    _normalize_expr,
+    _normalize_scalar_operand,
+    _normalize_signless_same_width_scalar_operand,
+    _to_int32_scalar,
+    _to_make_tuple,
+    resolve_cast_mode,
+    resolve_saturation_deviation,
+)
+from ._pad_value import normalize_pad_value
+from .tile_ops import resolve_gather_compare_cmp_mode
+
+
+def create(
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    dtype: DataType,
+    layout: TensorLayout = TensorLayout.ND,
+    manual_dep: bool = False,
+    init_value: int | float | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Create a new tensor with specified shape and dtype.
+
+    Args:
+        shape: List of dimension sizes (int or Expr), or a MakeTuple
+        dtype: Data type of tensor elements
+        layout: Tensor layout (default: ND)
+        init_value: **Removed.** Passing anything but ``None`` raises
+            ``ValueError``. The runtime dropped
+            ``TensorCreateInfo::set_initial_value``, so orchestration can no
+            longer pre-fill a runtime-allocated buffer; seed it with a kernel
+            instead (see the error message for the migration).
+        manual_dep: Opt this tensor out of OverlapMap auto-dep tracking
+            for its **entire lifetime**. When True, codegen marks the
+            ``tensor.create`` call so every task that reads or writes the
+            tensor skips OverlapMap lookup and insert. Creator retention
+            (the ``tensor.create``'s owner_task_id) still applies.
+
+            This is the **tensor-lifetime** granularity of opting out of
+            auto-dep tracking; the orthogonal scope-wide
+            (``with pl.manual_scope():``) and per-arg (``pl.no_dep(t)``)
+            granularities live in the language layer. The opt-outs
+            compose with explicit edges (``pl.submit(..., deps=[...])``
+            / ``pl.at(..., deps=)``): the final task fanin is
+            *auto-tracked deps* ∪ *explicit deps*.
+
+            Also used internally by ``InjectGMPipeBuffer`` to mark the
+            ring-buffer slots it synthesises.
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression creating a new tensor
+    """
+    actual_span = _get_span_or_capture(span)
+
+    shape_tuple = _to_make_tuple(shape, actual_span)
+
+    args = [shape_tuple]
+    kwargs: dict[str, Any] = {"dtype": dtype, "layout": layout}
+    if manual_dep:
+        kwargs["manual_dep"] = True
+    if init_value is not None:
+        # The fill was lowered to TensorCreateInfo::set_initial_value(), which the
+        # runtime removed: its host orchestrator cannot store to the GM-heap device
+        # address, so both runtimes dropped the create-info fill. Nothing in
+        # orchestration can pre-fill a runtime-allocated buffer any more, and
+        # silently ignoring the request would hand the kernel uninitialized memory.
+        raise ValueError(
+            f"create_tensor: init_value is no longer supported (got {init_value}). The runtime "
+            f"removed TensorCreateInfo::set_initial_value, so orchestration can no longer "
+            f"pre-fill a runtime-allocated buffer. Seed the buffer with a kernel that writes "
+            f"it, then order every reader after that kernel with an explicit dependency "
+            f"(pl.submit(..., deps=[seed_tid]) or pl.at(..., deps=[seed_tid]))."
+        )
+
+    return _ir_core.create_op_call("tensor.create", args, kwargs, actual_span)
+
+
+create_tensor = create
+
+
+def full(
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    dtype: DataType,
+    value: int | float,
+    span: Span | None = None,
+) -> Call:
+    """Create a tensor of specified shape filled with a constant value.
+
+    Args:
+        shape: Shape of the tensor (list of int/Expr, or MakeTuple)
+        dtype: Data type of tensor elements
+        value: Filling scalar value (int or float)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression that returns a TensorType
+    """
+    actual_span = _get_span_or_capture(span)
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    if isinstance(value, int):
+        value_expr = ConstInt(value, dtype, actual_span)
+    else:
+        value_expr = ConstFloat(value, dtype, actual_span)
+    kwargs: dict[str, Any] = {"dtype": dtype}
+    return _ir_core.create_op_call("tensor.full", [shape_tuple, value_expr], kwargs, actual_span)
+
+
+def ci(
+    start: int | Expr,
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    dtype: DataType = DataType.INT32,
+    descending: bool = False,
+    span: Span | None = None,
+) -> Call:
+    """Generate a contiguous integer sequence into a tensor (lowers to tile.ci).
+
+    Note:
+        Lowers to ``pto.tci`` which only populates the first row. Leading
+        dimensions must be 1 — prefer shapes of the form ``[1, N]``.
+
+    Args:
+        start: Starting integer (plain int or scalar Expr). Must match ``dtype``.
+        shape: Destination shape (leading dims must be 1, innermost dim != 1).
+        dtype: Destination dtype. One of {INT16, INT32}.
+        descending: If True, generate a descending sequence.
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression that returns a TensorType.
+    """
+    actual_span = _get_span_or_capture(span)
+    if isinstance(start, Expr):
+        if isinstance(start, ConstInt) and start.dtype != dtype:
+            start_expr = ConstInt(start.value, dtype, actual_span)
+        else:
+            start_expr = start
+    else:
+        start_expr = ConstInt(start, dtype, actual_span)
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    kwargs: dict[str, Any] = {"dtype": dtype, "descending": descending}
+    return _ir_core.create_op_call("tensor.ci", [start_expr, shape_tuple], kwargs, actual_span)
+
+
+arange = ci
+
+
+def random(
+    key0: int | Expr,
+    key1: int | Expr,
+    counter0: int | Expr,
+    counter1: int | Expr,
+    counter2: int | Expr,
+    counter3: int | Expr,
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    dtype: DataType = DataType.UINT32,
+    rounds: int = 10,
+    span: Span | None = None,
+) -> Call:
+    """Generate counter-based pseudo-random values into a tensor (lowers to tile.random).
+
+    Args:
+        key0, key1: The two INT32 key words.
+        counter0, counter1, counter2, counter3: The four INT32 counter words.
+        shape: Destination shape (static, tuple of integers).
+        dtype: Destination dtype. One of {INT32, UINT32}. Defaults to UINT32.
+        rounds: Cipher round count, 7 or 10. Defaults to 10.
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression that returns a TensorType filled with random values.
+    """
+    actual_span = _get_span_or_capture(span)
+    seeds = [_to_int32_scalar(v, actual_span) for v in (key0, key1, counter0, counter1, counter2, counter3)]
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    kwargs: dict[str, Any] = {"dtype": dtype, "rounds": rounds}
+    return _ir_core.create_op_call("tensor.random", [*seeds, shape_tuple], kwargs, actual_span)
+
+
+def read(
+    tensor: Expr, indices: Expr | list[int | Expr] | _ir_core.MakeTuple, span: Span | None = None
+) -> Call:
+    """Read a scalar value from a tensor at given indices.
+
+    Args:
+        tensor: Input tensor expression
+        indices: A single index expression (for 1-D flat access), a list of index
+            expressions (one per tensor dimension), or a MakeTuple
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression reading a scalar from the tensor
+    """
+    actual_span = _get_span_or_capture(span)
+
+    # Allow a bare Expr as a flat 1-D index for backwards compatibility
+    if isinstance(indices, Expr) and not isinstance(indices, _ir_core.MakeTuple):
+        indices = [indices]
+
+    indices_tuple = _to_make_tuple(indices, actual_span)
+
+    args = [tensor, indices_tuple]
+    return _ir_core.create_op_call("tensor.read", args, {}, actual_span)
+
+
+def write(
+    tensor: Expr,
+    indices: Expr | list[int | Expr] | _ir_core.MakeTuple,
+    value: Expr,
+    span: Span | None = None,
+) -> Call:
+    """Write a scalar value into a tensor at given indices.
+
+    Args:
+        tensor: Destination tensor expression (TensorType)
+        indices: A single index expression (for 1-D flat access), a list of index
+            expressions (one per tensor dimension), or a MakeTuple
+        value: Scalar value to write (ScalarType, must match tensor dtype)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression returning the tensor (for chaining)
+    """
+    actual_span = _get_span_or_capture(span)
+
+    # Allow a bare Expr as a flat 1-D index for backwards compatibility
+    if isinstance(indices, Expr) and not isinstance(indices, _ir_core.MakeTuple):
+        indices = [indices]
+
+    indices_tuple = _to_make_tuple(indices, actual_span)
+
+    args = [tensor, indices_tuple, value]
+    return _ir_core.create_op_call("tensor.write", args, {}, actual_span)
+
+
+def dim(tensor: Expr, axis: int | Expr, span: Span | None = None) -> Call:
+    """Extract a shape dimension from a tensor as a scalar value.
+
+    Args:
+        tensor: Input tensor expression
+        axis: Dimension index (supports negative indexing)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression returning the dimension size as ScalarType(INT64)
+    """
+    actual_span = _get_span_or_capture(span)
+    axis_expr = _normalize_expr(axis, actual_span, int_dtype=DataType.INDEX)
+    args = [tensor, axis_expr]
+    return _ir_core.create_op_call("tensor.dim", args, {}, actual_span)
+
+
+def slice(
+    tensor: Expr,
+    shape: list[int | Expr] | _ir_core.MakeTuple,
+    offset: list[int | Expr] | _ir_core.MakeTuple,
+    valid_shape: list[int | Expr] | _ir_core.MakeTuple | None = None,
+    drop_dims: Sequence[int | Expr] | None = None,
+    pad_value: PadValue | int | float | None = None,
+    clamp: bool = False,
+    span: Span | None = None,
+) -> Call:
+    """Create a slice of a tensor with new shape and offset.
+
+    The result is never valid where the source is not: its valid region is the
+    source's valid region, shifted by ``offset`` and cut to the window.
+
+    Args:
+        tensor: Input tensor expression
+        shape: New shape dimensions, or a MakeTuple. Always full-rank — a
+            scalar-indexed axis contributes a unit dim here and is listed in
+            ``drop_dims`` to be erased from the result type.
+        offset: Offset dimensions for the slice, or a MakeTuple
+        valid_shape: Valid shape dimensions (optional, defaults to empty). This
+            is a *request*: it narrows the result, but cannot widen it past what
+            the source actually has under the window.
+        drop_dims: Optional axes to erase from the result type (numpy-style rank
+            reduction). Each listed axis must be a static unit dim of ``shape``,
+            and must still be fully valid after the intersection above.
+            ``None`` / ``[]`` is fully backward compatible (drops nothing).
+        pad_value: Optional padding mode for out-of-valid-shape elements.
+            Accepts ``PadValue.zero`` / ``PadValue.max`` / ``PadValue.min``, or
+            the literal sugars ``0``, ``math.inf``, ``-math.inf`` (normalized
+            via :func:`normalize_pad_value`). ``PadValue.null`` is passed
+            through unchanged and means "no padding". When omitted (``None``),
+            the source's padding mode carries through.
+        clamp: Sanction a window that runs off the end of the source. By default
+            a slice asserts that ``offset + shape`` stays inside the source and
+            is rejected when that provably fails; with ``clamp=True`` the window
+            may overhang and the valid region is cut back to the source edge
+            instead. Use it for a fixed-width tail read whose overhang is never
+            addressed.
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression creating a tensor slice
+    """
+    actual_span = _get_span_or_capture(span)
+
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    offset_tuple = _to_make_tuple(offset, actual_span)
+
+    args = [tensor, shape_tuple, offset_tuple]
+    if drop_dims:
+        # drop_dims is the 5th positional operand, so valid_shape (the 4th) must
+        # be present; an empty MakeTuple stands in for "no valid_shape".
+        args.append(_to_make_tuple(valid_shape if valid_shape is not None else [], actual_span))
+        # `drop_dims` may be ints (direct API) or ConstInt exprs (text parser);
+        # _to_make_tuple normalizes either form. Non-ConstInt exprs are rejected
+        # by the deducer with a clear message.
+        args.append(_to_make_tuple(list(drop_dims), actual_span))
+    elif valid_shape is not None:
+        args.append(_to_make_tuple(valid_shape, actual_span))
+
+    kwargs: dict[str, Any] = {}
+    if pad_value is not None:
+        # PadValue.null is a legal "no padding" signal for slice (unlike
+        # fillpad, which requires a real padding mode). Pass it through;
+        # normalize the rest via the shared helper so numeric sugar and
+        # validation match tensor.fillpad exactly.
+        kwargs["pad_value"] = pad_value if pad_value is PadValue.null else normalize_pad_value(pad_value)
+    if clamp:
+        kwargs["clamp"] = True
+
+    return _ir_core.create_op_call("tensor.slice", args, kwargs, actual_span)
+
+
+def fillpad(
+    tensor: Expr, pad_value: PadValue | int | float = PadValue.zero, span: Span | None = None
+) -> Call:
+    """Fill invalid tensor view elements with the specified padding value.
+
+    Args:
+        tensor: Input tensor expression
+        pad_value: ``PadValue`` enum (``zero`` / ``max`` / ``min``), or one of
+            the literal sugars ``0``, ``math.inf``, ``-math.inf``. Other values
+            raise — the hardware only supports the three padding modes.
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression creating a padded tensor
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call(
+        "tensor.fillpad", [tensor], {"pad_value": normalize_pad_value(pad_value)}, actual_span
+    )
+
+
+def fillpad_expand(
+    tensor: Expr,
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    pad_value: PadValue | int | float = PadValue.zero,
+    span: Span | None = None,
+) -> Call:
+    """Copy a smaller source tensor into a larger destination tensor, padding the rest.
+
+    Unlike :func:`fillpad` (which keeps the same shape and only fills the invalid
+    view region), the destination ``shape`` may be larger than the source in
+    either dimension. The source's valid region is copied into the top-left of
+    the destination and every other element is filled with ``pad_value``.
+
+    Args:
+        tensor: Source tensor expression
+        shape: Destination shape; each dimension must be >= the source dimension
+        pad_value: ``PadValue`` enum (``zero`` / ``max`` / ``min``), or one of
+            the literal sugars ``0``, ``math.inf``, ``-math.inf``. Other values
+            raise — the hardware only supports the three padding modes.
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression creating the expanded and padded tensor
+    """
+    actual_span = _get_span_or_capture(span)
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    return _ir_core.create_op_call(
+        "tensor.fillpad_expand",
+        [tensor, shape_tuple],
+        {"pad_value": normalize_pad_value(pad_value)},
+        actual_span,
+    )
+
+
+def matmul(
+    lhs: Expr,
+    rhs: Expr,
+    out_dtype: int | DataType | None = None,
+    a_trans: bool = False,
+    b_trans: bool = False,
+    c_matrix_nz: bool = False,
+    span: Span | None = None,
+) -> Call:
+    """Matrix multiplication with optional transpose.
+
+    A transpose flag swaps its own operand's two trailing axes, so that operand
+    must be at least 2D: ``a_trans`` with a 1D ``lhs`` (or ``b_trans`` with a 1D
+    ``rhs``) raises rather than being ignored. On the mixed mat-vec / vec-mat
+    forms the flag applies to the matrix side, so a ``lhs`` stored ``[K, M]``
+    with ``a_trans=True`` against a ``[K]`` ``rhs`` deduces ``[M]``.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor
+        out_dtype: Output data type (optional, inferred if not provided)
+        a_trans: Whether to transpose lhs (requires a 2D+ lhs)
+        b_trans: Whether to transpose rhs (requires a 2D+ rhs)
+        c_matrix_nz: C matrix non-zero flag
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for matrix multiplication
+    """
+    actual_span = _get_span_or_capture(span)
+    args = [lhs, rhs]
+
+    kwargs: dict[str, Any] = {
+        "a_trans": a_trans,
+        "b_trans": b_trans,
+        "c_matrix_nz": c_matrix_nz,
+    }
+    if out_dtype is not None:
+        kwargs["out_dtype"] = out_dtype
+
+    return _ir_core.create_op_call("tensor.matmul", args, kwargs, actual_span)
+
+
+def quant_mx(
+    src: Expr,
+    *,
+    group_axis: int,
+    dtype: DataType = DataType.FP8E4M3FN,
+    span: Span | None = None,
+) -> Call:
+    """Quantize a 2D GM tensor into MXFP8 data and an MX scale tensor.
+
+    Args:
+        src: Source tensor expression. Must be a static-rank 2D FP16, BF16, or
+            FP32 tensor.
+        group_axis: Quantization group axis. ``1`` produces A-oriented data
+            and an ``MX_A_ZZ`` scale tensor; ``0`` produces B-oriented data
+            and an ``MX_B_NN`` scale tensor.
+        dtype: Quantized data dtype. Defaults to ``FP8E4M3FN``.
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression whose result is ``(quantized_data, scale)``.
+
+    Raises:
+        ValueError: If ``src`` is not a supported 2D floating tensor, K is not
+            statically divisible by 64, M is not divisible by 16 for
+            ``group_axis=1``, N is not divisible by 32 for ``group_axis=0``,
+            ``group_axis`` is not supported, or ``dtype`` is not a supported MX
+            data dtype.
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call(
+        "tensor.quant_mx", [src], {"group_axis": group_axis, "dtype": dtype}, actual_span
+    )
+
+
+def matmul_mx(
+    lhs: Expr,
+    lhs_scale: Expr,
+    rhs: Expr,
+    rhs_scale: Expr,
+    span: Span | None = None,
+) -> Call:
+    """MXFP8 matrix multiplication of oriented GM data and scale tensors.
+
+    Args:
+        lhs: A-side quantized data tensor with shape ``[M, K]``.
+        lhs_scale: A-side ``MX_A_ZZ`` FP8E8M0 scale tensor with shape
+            ``[M, K/32]``.
+        rhs: B-side quantized data tensor with shape ``[K, N]``.
+        rhs_scale: B-side ``MX_B_NN`` FP8E8M0 scale tensor with shape
+            ``[K/32, N]``.
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression for the FP32 ``[M, N]`` result tensor.
+
+    Raises:
+        ValueError: If data tensors are not static 2D MX data tensors, the inner
+            dimensions do not agree, M is not divisible by 16, N is not
+            divisible by 32, K is not divisible by 64, or either scale tensor
+            has the wrong dtype, shape, or MX layout.
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.matmul_mx", [lhs, lhs_scale, rhs, rhs_scale], {}, actual_span)
+
+
+def matmul_acc(
+    acc: Expr,
+    lhs: Expr,
+    rhs: Expr,
+    a_trans: bool = False,
+    b_trans: bool = False,
+    span: Span | None = None,
+    *,
+    init_cond: Expr | None = None,
+) -> Call:
+    """Matrix multiplication with accumulation: acc = acc + lhs @ rhs.
+
+    With ``init_cond``, the accumulator's initial value is conditional: on the
+    steps where the predicate holds, ``acc`` is overwritten with ``lhs @ rhs``
+    instead of accumulated into (the split-K ``k == 0`` idiom). Only 2D operands
+    support the predicate.
+
+    Args:
+        acc: Accumulator tensor
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor
+        a_trans: Whether to transpose lhs
+        b_trans: Whether to transpose rhs
+        span: Optional source span for debugging (auto-captured if not provided)
+        init_cond: Optional BOOL scalar predicate selecting overwrite over accumulate
+
+    Returns:
+        Call expression for matrix multiplication with accumulation
+    """
+    actual_span = _get_span_or_capture(span)
+    kwargs: dict[str, Any] = {"a_trans": a_trans, "b_trans": b_trans}
+    args = [acc, lhs, rhs] if init_cond is None else [acc, lhs, rhs, init_cond]
+    return _ir_core.create_op_call("tensor.matmul_acc", args, kwargs, actual_span)
+
+
+def mul(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise multiplication of tensor and tensor or scalar.
+
+    Automatically selects between tensor.mul (tensor x tensor) and
+    tensor.muls (tensor x scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise multiplication
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+
+    rhs_type = rhs_expr.type
+    if isinstance(rhs_type, ScalarType):
+        return _ir_core.create_op_call("tensor.muls", [lhs, rhs_expr], {}, actual_span)
+    else:
+        return _ir_core.create_op_call("tensor.mul", [lhs, rhs_expr], {}, actual_span)
+
+
+def muls(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise multiplication of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side scalar (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise multiplication with scalar
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.muls", [lhs, rhs_expr], {}, actual_span)
+
+
+def add(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise addition of tensor and tensor or scalar.
+
+    Automatically selects between tensor.add (tensor + tensor) and
+    tensor.adds (tensor + scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise addition
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+
+    rhs_type = rhs_expr.type
+    if isinstance(rhs_type, ScalarType):
+        return _ir_core.create_op_call("tensor.adds", [lhs, rhs_expr], {}, actual_span)
+    else:
+        return _ir_core.create_op_call("tensor.add", [lhs, rhs_expr], {}, actual_span)
+
+
+def adds(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise addition of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side scalar (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise addition with scalar
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.adds", [lhs, rhs_expr], {}, actual_span)
+
+
+def sub(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise subtraction of tensor and tensor or scalar.
+
+    Automatically selects between tensor.sub (tensor - tensor) and
+    tensor.subs (tensor - scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise subtraction
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+
+    rhs_type = rhs_expr.type
+    if isinstance(rhs_type, ScalarType):
+        return _ir_core.create_op_call("tensor.subs", [lhs, rhs_expr], {}, actual_span)
+    else:
+        return _ir_core.create_op_call("tensor.sub", [lhs, rhs_expr], {}, actual_span)
+
+
+def subs(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise subtraction of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side scalar (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise subtraction with scalar
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.subs", [lhs, rhs_expr], {}, actual_span)
+
+
+def div(
+    lhs: Expr,
+    rhs: int | float | Expr,
+    span: Span | None = None,
+    *,
+    high_precision: bool = False,
+) -> Call:
+    """Element-wise division of tensor and tensor or scalar.
+
+    Automatically selects between tensor.div (tensor / tensor) and
+    tensor.divs (tensor / scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+        high_precision: Whether to select PTOAS's high-precision division mode.
+            Only available when ``rhs`` has TensorType.
+
+    Returns:
+        Call expression for element-wise division
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+
+    rhs_type = rhs_expr.type
+    if isinstance(rhs_type, ScalarType):
+        if high_precision:
+            # TypeError, matching the unified pl.* guards: a kwarg this operand
+            # combination cannot honour is a wrong-arguments error, not a bad value.
+            raise TypeError("tensor.div(high_precision=True) requires a Tensor rhs")
+        return _ir_core.create_op_call("tensor.divs", [lhs, rhs_expr], {}, actual_span)
+    kwargs: dict[str, Any] = {"high_precision": True} if high_precision else {}
+    return _ir_core.create_op_call("tensor.div", [lhs, rhs_expr], kwargs, actual_span)
+
+
+def divs(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise division of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side scalar (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise division with scalar
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.divs", [lhs, rhs_expr], {}, actual_span)
+
+
+def part_add(lhs: Expr, rhs: Expr, span: Span | None = None) -> Call:
+    """Partial element-wise add of two tensors.
+
+    Args:
+        lhs: First source tensor
+        rhs: Second source tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for partial element-wise add
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.part_add", [lhs, rhs], {}, actual_span)
+
+
+def part_mul(lhs: Expr, rhs: Expr, span: Span | None = None) -> Call:
+    """Partial element-wise multiply of two tensors.
+
+    Args:
+        lhs: First source tensor
+        rhs: Second source tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for partial element-wise multiply
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.part_mul", [lhs, rhs], {}, actual_span)
+
+
+def part_max(lhs: Expr, rhs: Expr, span: Span | None = None) -> Call:
+    """Partial element-wise max of two tensors.
+
+    Args:
+        lhs: First source tensor
+        rhs: Second source tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for partial element-wise max
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.part_max", [lhs, rhs], {}, actual_span)
+
+
+def part_min(lhs: Expr, rhs: Expr, span: Span | None = None) -> Call:
+    """Partial element-wise min of two tensors.
+
+    Args:
+        lhs: First source tensor
+        rhs: Second source tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for partial element-wise min
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.part_min", [lhs, rhs], {}, actual_span)
+
+
+def fmod(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise truncating remainder of tensor and tensor or scalar.
+
+    Automatically selects between tensor.fmod (tensor, tensor) and
+    tensor.fmods (tensor, scalar) based on the rhs type. The result matches
+    ``torch.fmod`` (the remainder takes the sign of the dividend).
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise truncating remainder
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+
+    rhs_type = rhs_expr.type
+    if isinstance(rhs_type, ScalarType):
+        return _ir_core.create_op_call("tensor.fmods", [lhs, rhs_expr], {}, actual_span)
+    else:
+        return _ir_core.create_op_call("tensor.fmod", [lhs, rhs_expr], {}, actual_span)
+
+
+def fmods(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise truncating remainder of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side scalar (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise truncating remainder with scalar
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.fmods", [lhs, rhs_expr], {}, actual_span)
+
+
+def _bitwise_dispatch(
+    tensor_op: str,
+    scalar_op: str,
+    lhs: Expr,
+    rhs: int | Expr,
+    span: Span | None,
+) -> Call:
+    """Build a tensor bitwise/shift call, routing a scalar ``rhs`` to ``scalar_op``.
+
+    Bitwise ops are integer-only, so an untyped literal keeps
+    ``_normalize_scalar_operand``'s INT32 default instead of the FP32 fallback the
+    arithmetic wrappers use — a float shift or mask has no meaning here and is
+    rejected by type deduction rather than silently promoted.
+
+    Args:
+        tensor_op: Registered op name for the tensor-tensor form
+        scalar_op: Registered op name for the tensor-scalar form
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or integer scalar
+        span: Optional source span (auto-captured if not provided)
+
+    Returns:
+        Call expression for the selected operator
+    """
+    actual_span = _get_span_or_capture(span)
+    if scalar_op in {"tensor.ands", "tensor.ors", "tensor.xors"}:
+        rhs_expr = _normalize_signless_same_width_scalar_operand(lhs, rhs, actual_span)
+    else:
+        rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span)
+    chosen = scalar_op if isinstance(rhs_expr.type, ScalarType) else tensor_op
+    return _ir_core.create_op_call(chosen, [lhs, rhs_expr], {}, actual_span)
+
+
+def _bitwise_scalar(op_name: str, lhs: Expr, rhs: int | Expr, span: Span | None) -> Call:
+    """Build a tensor-scalar bitwise/shift call (the explicit ``*s`` entry points)."""
+    actual_span = _get_span_or_capture(span)
+    if op_name in {"tensor.ands", "tensor.ors", "tensor.xors"}:
+        rhs_expr = _normalize_signless_same_width_scalar_operand(lhs, rhs, actual_span)
+    else:
+        rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span)
+    return _ir_core.create_op_call(op_name, [lhs, rhs_expr], {}, actual_span)
+
+
+def and_(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise AND of tensor and tensor or scalar.
+
+    Automatically selects between tensor.and (tensor & tensor) and
+    tensor.ands (tensor & scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Right-hand side tensor or integer scalar
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise AND
+    """
+    return _bitwise_dispatch("tensor.and", "tensor.ands", lhs, rhs, span)
+
+
+def ands(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise AND of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Same-width signless integer scalar (int/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise AND with scalar
+    """
+    return _bitwise_scalar("tensor.ands", lhs, rhs, span)
+
+
+def or_(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise OR of tensor and tensor or scalar.
+
+    Automatically selects between tensor.or (tensor | tensor) and
+    tensor.ors (tensor | scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Right-hand side tensor or integer scalar
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise OR
+    """
+    return _bitwise_dispatch("tensor.or", "tensor.ors", lhs, rhs, span)
+
+
+def ors(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise OR of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Same-width signless integer scalar (int/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise OR with scalar
+    """
+    return _bitwise_scalar("tensor.ors", lhs, rhs, span)
+
+
+def xor(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise XOR of tensor and tensor or scalar.
+
+    Automatically selects between tensor.xor (tensor ^ tensor) and
+    tensor.xors (tensor ^ scalar) based on the rhs type.
+
+    Unlike ``tile.xor``, no ``tmp`` operand is required: ConvertTensorToTileOps
+    allocates the scratch tile that pto.txor needs.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Right-hand side tensor or integer scalar
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise XOR
+    """
+    return _bitwise_dispatch("tensor.xor", "tensor.xors", lhs, rhs, span)
+
+
+def xors(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise XOR of tensor and scalar.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Same-width signless integer scalar (int/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise XOR with scalar
+    """
+    return _bitwise_scalar("tensor.xors", lhs, rhs, span)
+
+
+def not_(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise NOT of a tensor.
+
+    Args:
+        input: Input tensor (int16 or uint16 dtype, matching the TNOT instruction)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise NOT
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.not", [input], {}, actual_span)
+
+
+def shl(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise left shift of tensor by tensor or scalar.
+
+    Automatically selects between tensor.shl (tensor << tensor) and
+    tensor.shls (tensor << scalar) based on the rhs type.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Shift amount as a tensor or integer scalar
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise left shift
+    """
+    return _bitwise_dispatch("tensor.shl", "tensor.shls", lhs, rhs, span)
+
+
+def shls(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise left shift of tensor by scalar.
+
+    Note:
+        The shift amount must be zero or positive. A negative constant is
+        rejected when the op is built; a negative value only known at runtime
+        is undefined behaviour on the hardware.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Shift amount; must be >= 0
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise left shift with scalar
+    """
+    return _bitwise_scalar("tensor.shls", lhs, rhs, span)
+
+
+def shr(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise right shift of tensor by tensor or scalar.
+
+    Automatically selects between tensor.shr (tensor >> tensor) and
+    tensor.shrs (tensor >> scalar) based on the rhs type. The shift is
+    arithmetic for signed dtypes and logical for unsigned ones, matching the
+    tile ops and the underlying ISA.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Shift amount as a tensor or integer scalar
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise right shift
+    """
+    return _bitwise_dispatch("tensor.shr", "tensor.shrs", lhs, rhs, span)
+
+
+def shrs(lhs: Expr, rhs: int | Expr, span: Span | None = None) -> Call:
+    """Element-wise bitwise right shift of tensor by scalar.
+
+    Note:
+        The shift amount must be zero or positive. A negative constant is
+        rejected when the op is built; a negative value only known at runtime
+        is undefined behaviour on the hardware.
+
+    Args:
+        lhs: Left-hand side tensor (integer dtype)
+        rhs: Shift amount; must be >= 0
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise bitwise right shift with scalar
+    """
+    return _bitwise_scalar("tensor.shrs", lhs, rhs, span)
+
+
+def maximum(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise maximum of tensor and tensor or scalar.
+
+    Emits a single ``tensor.maximum`` op; the conversion pass dispatches to
+    ``tile.maximum`` (tensor-vs-tensor) or ``tile.maximums`` (tensor-vs-scalar)
+    based on the rhs operand type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise maximum
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.maximum", [lhs, rhs_expr], {}, actual_span)
+
+
+def minimum(lhs: Expr, rhs: int | float | Expr, span: Span | None = None) -> Call:
+    """Element-wise minimum of tensor and tensor or scalar.
+
+    Emits a single ``tensor.minimum`` op; the conversion pass dispatches to
+    ``tile.minimum`` (tensor-vs-tensor) or ``tile.minimums`` (tensor-vs-scalar)
+    based on the rhs operand type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise minimum
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.minimum", [lhs, rhs_expr], {}, actual_span)
+
+
+def cmp(lhs: Expr, rhs: int | float | Expr, cmp_type: int = 0, span: Span | None = None) -> Call:
+    """Element-wise comparison of tensor and tensor or scalar (returns 0/1 tensor).
+
+    Emits a single ``tensor.cmp`` op; the conversion pass dispatches to
+    ``tile.cmp`` (tensor-vs-tensor) or ``tile.cmps`` (tensor-vs-scalar)
+    based on the rhs operand type.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor or scalar (int/float/Expr)
+        cmp_type: Comparison type code (0=eq, 1=ne, 2=lt, 3=le, 4=gt, 5=ge)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise comparison (0/1 tensor)
+    """
+    actual_span = _get_span_or_capture(span)
+    rhs_expr = _normalize_scalar_operand(lhs, rhs, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.cmp", [lhs, rhs_expr], {"cmp_type": cmp_type}, actual_span)
+
+
+def row_max(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise max reduction (reduces along last axis, keeps dim).
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise max reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_max", [input], {}, actual_span)
+
+
+def row_sum(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise sum reduction (reduces along last axis, keeps dim).
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise sum reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_sum", [input], {}, actual_span)
+
+
+def row_min(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise min reduction (reduces along last axis, keeps dim).
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise min reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_min", [input], {}, actual_span)
+
+
+def row_prod(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise product reduction (reduces along last axis, keeps dim).
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise product reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_prod", [input], {}, actual_span)
+
+
+def col_sum(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise sum reduction (reduces along axis=-2, keeps dim).
+
+    Output shape is ``[..., 1, N]`` for an input of shape ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise sum reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_sum", [input], {}, actual_span)
+
+
+def col_max(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise max reduction (reduces along axis=-2, keeps dim).
+
+    Output shape is ``[..., 1, N]`` for an input of shape ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise max reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_max", [input], {}, actual_span)
+
+
+def col_min(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise min reduction (reduces along axis=-2, keeps dim).
+
+    Output shape is ``[..., 1, N]`` for an input of shape ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise min reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_min", [input], {}, actual_span)
+
+
+def col_prod(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise product reduction (reduces along axis=-2, keeps dim).
+
+    Output shape is ``[..., 1, N]`` for an input of shape ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise product reduction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_prod", [input], {}, actual_span)
+
+
+def row_argmax(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise argmax: index of the per-row maximum (reduces along last axis, keeps dim).
+
+    Output dtype is int32. Output shape is ``[..., M, 1]`` for input ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise argmax
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_argmax", [input], {}, actual_span)
+
+
+def row_argmin(input: Expr, span: Span | None = None) -> Call:
+    """Row-wise argmin: index of the per-row minimum (reduces along last axis, keeps dim).
+
+    Output dtype is int32. Output shape is ``[..., M, 1]`` for input ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise argmin
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_argmin", [input], {}, actual_span)
+
+
+def col_argmax(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise argmax: index of the per-column maximum (reduces along axis=-2, keeps dim).
+
+    Output dtype is int32. Output shape is ``[..., 1, N]`` for input ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise argmax
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_argmax", [input], {}, actual_span)
+
+
+def col_argmin(input: Expr, span: Span | None = None) -> Call:
+    """Column-wise argmin: index of the per-column minimum (reduces along axis=-2, keeps dim).
+
+    Output dtype is int32. Output shape is ``[..., 1, N]`` for input ``[..., M, N]``.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise argmin
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_argmin", [input], {}, actual_span)
+
+
+def row_expand(target: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise expansion: expand row_vec [M, 1] to target shape [M, N].
+
+    Args:
+        target: Target tensor defining output shape (TensorType [M, N])
+        row_vec: Row vector to expand (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise expansion
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand", [target, row_vec], {}, actual_span)
+
+
+def row_expand_mul(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast multiplication.
+
+    Multiplies each row of the tensor by the corresponding row vector value.
+    tensor[i, :] * row_vec[i, 0] for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast multiplication
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_mul", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_div(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast division.
+
+    Divides each row of the tensor by the corresponding row vector value.
+    tensor[i, :] / row_vec[i, 0] for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast division
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_div", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_add(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast addition.
+
+    Adds a row vector to each row of the tensor.
+    tensor[i, :] + row_vec[i, 0] for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast addition
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_add", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_sub(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast subtraction.
+
+    Subtracts a row vector from each row of the tensor.
+    tensor[i, :] - row_vec[i, 0] for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast subtraction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_sub", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_max(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast maximum.
+
+    Takes the element-wise maximum of each row and the row vector value.
+    max(tensor[i, :], row_vec[i, 0]) for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast maximum
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_max", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_min(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise broadcast minimum.
+
+    Takes the element-wise minimum of each row and the row vector value.
+    min(tensor[i, :], row_vec[i, 0]) for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise broadcast minimum
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_min", [tensor, row_vec], {}, actual_span)
+
+
+def row_expand_expdif(tensor: Expr, row_vec: Expr, span: Span | None = None) -> Call:
+    """Row-wise exp-diff with per-row scalar.
+
+    Computes exp(tensor[i, :] - row_vec[i, 0]) for all i.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        row_vec: Row vector providing per-row scalar (TensorType [M, 1])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for row-wise exp-diff
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.row_expand_expdif", [tensor, row_vec], {}, actual_span)
+
+
+def col_expand_mul(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast multiplication.
+
+    Multiplies each column of the tensor by the corresponding column vector value.
+    tensor[:, j] * col_vec[0, j] for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast multiplication
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_mul", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise expansion: expand col_vec [1, N] to target shape [M, N].
+
+    Args:
+        tensor: Target tensor defining output shape (TensorType [M, N])
+        col_vec: Column vector to expand (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise expansion
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_sub(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast subtraction.
+
+    Subtracts a column vector from each column of the tensor.
+    tensor[:, j] - col_vec[0, j] for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast subtraction
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_sub", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_max(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast maximum.
+
+    max(tensor[:, j], col_vec[0, j]) for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast maximum
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_max", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_min(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast minimum.
+
+    min(tensor[:, j], col_vec[0, j]) for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast minimum
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_min", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_expdif(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise exp-diff with per-column scalar.
+
+    Computes exp(tensor[:, j] - col_vec[0, j]) for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector providing per-column scalar (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise exp-diff
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_expdif", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_div(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast division.
+
+    Divides each column of the tensor by the corresponding column vector value.
+    tensor[:, j] / col_vec[0, j] for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast division
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_div", [tensor, col_vec], {}, actual_span)
+
+
+def col_expand_add(tensor: Expr, col_vec: Expr, span: Span | None = None) -> Call:
+    """Column-wise broadcast addition.
+
+    Adds a column vector to each column of the tensor.
+    tensor[:, j] + col_vec[0, j] for all j.
+
+    Args:
+        tensor: Input tensor (TensorType [M, N])
+        col_vec: Column vector (TensorType [1, N])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise broadcast addition
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.col_expand_add", [tensor, col_vec], {}, actual_span)
+
+
+def expands(target: Expr, scalar: int | float | Expr, span: Span | None = None) -> Call:
+    """Expand scalar to target tensor shape.
+
+    Args:
+        target: Target tensor defining output shape (TensorType)
+        scalar: Scalar value to expand (int/float/Expr with ScalarType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for scalar expansion
+    """
+    actual_span = _get_span_or_capture(span)
+    scalar_expr = _normalize_scalar_operand(target, scalar, actual_span, fallback_int_dtype=DataType.FP32)
+    return _ir_core.create_op_call("tensor.expands", [target, scalar_expr], {}, actual_span)
+
+
+def expand_clone(
+    src: Expr,
+    target: Expr,
+    span: Span | None = None,
+) -> Call:
+    """Expand tensor to new shape.
+
+    Args:
+        src: Source tensor expression
+        target: Target tensor defining output shape
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for tensor expand_clone
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.expand_clone", [src, target], {}, actual_span)
+
+
+def exp(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise exponential operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise exponential
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.exp", [input], {}, actual_span)
+
+
+def log(input: Expr, span: Span | None = None, *, high_precision: bool = False) -> Call:
+    """Element-wise natural logarithm operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+        high_precision: Whether to select PTOAS's high-precision logarithm mode
+
+    Returns:
+        Call expression for element-wise natural logarithm
+    """
+    actual_span = _get_span_or_capture(span)
+    kwargs: dict[str, Any] = {"high_precision": True} if high_precision else {}
+    return _ir_core.create_op_call("tensor.log", [input], kwargs, actual_span)
+
+
+def sin(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise sine operation (input in radians). FP32-only.
+
+    Args:
+        input: Input tensor (must be FP32; cast explicitly otherwise)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise sine
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.sin", [input], {}, actual_span)
+
+
+def cos(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise cosine operation (input in radians). FP32-only.
+
+    Args:
+        input: Input tensor (must be FP32; cast explicitly otherwise)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise cosine
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.cos", [input], {}, actual_span)
+
+
+def neg(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise negation operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise negation
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.neg", [input], {}, actual_span)
+
+
+def abs(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise absolute value operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise absolute value
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.abs", [input], {}, actual_span)
+
+
+def recip(input: Expr, span: Span | None = None, *, high_precision: bool = False) -> Call:
+    """Element-wise reciprocal (1/x) operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+        high_precision: Whether to select PTOAS's high-precision reciprocal mode (FP16/FP32 only)
+
+    Returns:
+        Call expression for element-wise reciprocal
+    """
+    actual_span = _get_span_or_capture(span)
+    kwargs: dict[str, Any] = {"high_precision": True} if high_precision else {}
+    return _ir_core.create_op_call("tensor.recip", [input], kwargs, actual_span)
+
+
+def sqrt(input: Expr, span: Span | None = None) -> Call:
+    """Element-wise square root operation.
+
+    Args:
+        input: Input tensor
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise square root
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.sqrt", [input], {}, actual_span)
+
+
+def rsqrt(input: Expr, high_precision: bool = False, span: Span | None = None) -> Call:
+    """Element-wise reciprocal square root operation.
+
+    Args:
+        input: Input tensor
+        high_precision: If True, lower to the high-precision PTO path that
+            uses a scratch buffer (compiler-allocated during conversion).
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for element-wise reciprocal square root
+    """
+    actual_span = _get_span_or_capture(span)
+    kwargs: dict = {"high_precision": high_precision} if high_precision else {}
+    return _ir_core.create_op_call("tensor.rsqrt", [input], kwargs, actual_span)
+
+
+def cast(
+    input: Expr,
+    target_type: int | DataType,
+    mode: str | int = "round",
+    span: Span | None = None,
+    *,
+    saturation_mode: str | int | None = None,
+) -> Call:
+    """Type casting operation.
+
+    Args:
+        input: Input tensor
+        target_type: Target data type
+        mode: Rounding mode — string name ("none", "rint", "round", "floor",
+              "ceil", "trunc", "odd") or int (0–6)
+        span: Optional source span for debugging (auto-captured if not provided)
+        saturation_mode: Destination saturation — "on" (1) clamps out-of-range
+              results to the destination range, "off" (0) selects the target's
+              non-saturating conversion. ``None`` takes the destination's
+              own default — ``DEFAULT_SATURATION_MODE`` ("on") for an integer
+              destination, the target's own behavior for a float one. Only a
+              deviation from that default is recorded on the call.
+
+    Returns:
+        Call expression for type casting
+    """
+    mode_val = resolve_cast_mode(mode)
+
+    actual_span = _get_span_or_capture(span)
+
+    args = [input]
+    kwargs: dict[str, Any] = {
+        "target_type": target_type,
+        "mode": mode_val,
+    }
+    deviation = resolve_saturation_deviation(saturation_mode, target_type)
+    if deviation is not None:
+        kwargs["saturation_mode"] = deviation
+
+    return _ir_core.create_op_call("tensor.cast", args, kwargs, actual_span)
+
+
+def assemble(
+    target: Expr,
+    source: Expr,
+    offset: list[int | Expr] | _ir_core.MakeTuple,
+    span: Span | None = None,
+    *,
+    atomic: int = 0,
+) -> Call:
+    """Write/update tensor values at specified offset.
+
+    Args:
+        target: Target tensor to update
+        source: Source tensor to write
+        offset: Offset dimensions for where to write, or a MakeTuple
+        span: Optional source span for debugging (auto-captured if not provided)
+        atomic: ``AtomicType`` underlying int — 0 (``kNone``, plain overwrite) or
+            1 (``kAdd``, atomic-add into the global-memory target). The kwarg is
+            omitted entirely when 0 so non-atomic assembles are unchanged. ``kAdd``
+            requires a tile source stored into a global-memory target, i.e. an
+            assemble inside an InCore (``pl.at(level=pl.Level.CORE_GROUP, ...)``)
+            function; it has no lowering at the orchestration level and is rejected
+            there.
+
+    Returns:
+        Call expression for tensor assembly
+    """
+    actual_span = _get_span_or_capture(span)
+
+    offset_tuple = _to_make_tuple(offset, actual_span)
+
+    args = [target, source, offset_tuple]
+    kwargs: dict[str, Any] = {"atomic": atomic} if atomic else {}
+    return _ir_core.create_op_call("tensor.assemble", args, kwargs, actual_span)
+
+
+def concat(
+    src0: Expr,
+    src1: Expr,
+    span: Span | None = None,
+) -> Call:
+    """Concatenate two tensors along the column dimension.
+
+    Args:
+        src0: First source tensor (TensorType)
+        src1: Second source tensor (TensorType)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for column-wise concatenation
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.concat", [src0, src1], {}, actual_span)
+
+
+def reshape(
+    tensor: Expr,
+    shape: list[int | Expr] | _ir_core.MakeTuple,
+    valid_shape: list[int | Expr] | _ir_core.MakeTuple | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Reshape tensor to new shape.
+
+    Args:
+        tensor: Input tensor expression
+        shape: New shape dimensions, or a MakeTuple
+        valid_shape: Valid shape dimensions (optional, defaults to empty)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for tensor reshape
+    """
+    actual_span = _get_span_or_capture(span)
+
+    shape_tuple = _to_make_tuple(shape, actual_span)
+
+    args = [tensor, shape_tuple]
+    if valid_shape is not None:
+        args.append(_to_make_tuple(valid_shape, actual_span))
+    return _ir_core.create_op_call("tensor.reshape", args, {}, actual_span)
+
+
+def reinterpret_view(
+    data: Expr,
+    dtype: DataType,
+    *,
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Reinterpret a tensor over the same bytes with a different dtype.
+
+    Args:
+        data: Input tensor expression
+        dtype: Target element dtype
+        shape: Optional target shape. When omitted, the physically contiguous
+            dimension is scaled according to the source/target dtype byte ratio
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for a byte-preserving tensor reinterpret view
+    """
+    actual_span = _get_span_or_capture(span)
+    args = [data]
+    if shape is not None:
+        args.append(_to_make_tuple(shape, actual_span))
+    return _ir_core.create_op_call("tensor.reinterpret_view", args, {"dtype": dtype}, actual_span)
+
+
+def transpose(
+    tensor: Expr,
+    axis1: int | ConstInt,
+    axis2: int | ConstInt,
+    valid_shape: list[int | Expr] | _ir_core.MakeTuple | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Transpose tensor by swapping two axes.
+
+    Args:
+        tensor: Input tensor expression
+        axis1: First axis to swap as an int or ConstInt (supports negative indexing)
+        axis2: Second axis to swap as an int or ConstInt (supports negative indexing)
+        valid_shape: Valid shape dimensions (optional, defaults to empty)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for tensor transpose
+    """
+    actual_span = _get_span_or_capture(span)
+    if isinstance(axis1, ConstInt):
+        axis1_expr = axis1
+    elif isinstance(axis1, int):
+        axis1_expr = ConstInt(axis1, DataType.INDEX, actual_span)
+    else:
+        raise TypeError(f"axis1 must be int or ConstInt, got {type(axis1)}")
+
+    if isinstance(axis2, ConstInt):
+        axis2_expr = axis2
+    elif isinstance(axis2, int):
+        axis2_expr = ConstInt(axis2, DataType.INDEX, actual_span)
+    else:
+        raise TypeError(f"axis2 must be int or ConstInt, got {type(axis2)}")
+
+    args = [tensor, axis1_expr, axis2_expr]
+    if valid_shape is not None:
+        args.append(_to_make_tuple(valid_shape, actual_span))
+    return _ir_core.create_op_call("tensor.transpose", args, {}, actual_span)
+
+
+def view(
+    tensor: Expr,
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+    valid_shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+    strides: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+    *,
+    layout: TensorLayout | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Reinterpret ``tensor`` over the same physical memory.
+
+    At least one of ``shape`` or ``layout`` must be provided. ``shape`` derives
+    canonical strides for the requested shape; ``layout`` derives the canonical
+    ND/DN layout view and preserves the legacy layout-only behavior.
+
+    Type validity enforced by ``DeduceTensorViewType``:
+
+    1. The target shape must have rank at least 1. A DN target must have rank
+       at least 2 (RFC #1300 section 4.2 trailing-pair layout).
+    2. When ``shape`` is provided, the total element count must be
+       product-preserving (new product == old product), except for symbolic
+       dimensions where equality is unprovable and accepted optimistically.
+       Static target dimensions must be positive. A source with a partial
+       ``valid_shape`` can only use a packed ND leading-dimension collapse to
+       2D or a contiguous-prefix linear collapse to ``[1, product(shape)]``;
+       both require an explicit target ``valid_shape``.
+    Combining ``shape`` with a layout change is valid for type deduction and
+    PTO in-core lowering. Only orchestration lowering is restricted: it supports
+    ND shape reinterprets and shaped ND/MX_A_ZZ/MX_B_NN backing/consumer views
+    for FP8E8M0 MX scales; other layout-changing shape reinterprets are
+    unsupported because the runtime ``Tensor::reshape`` cannot express an
+    arbitrary-layout view.
+
+    Args:
+        tensor: Input tensor expression.
+        shape: New shape for the view. Must be product-preserving unless
+            symbolic dimensions are present. May introduce or remove unit
+            dimensions (RFC #1300 P4). Must be a sequence of ints or
+            Expr values, or a ``MakeTuple``. In an InCore function, the source
+            must remain a GM Tensor through tensor-to-tile conversion.
+        valid_shape: Explicit valid dimensions for a packed ND
+            leading-dimension collapse to 2D or contiguous-prefix linear
+            collapse to ``[1, product(shape)]``. Required when either supported
+            collapse reinterprets a source with partial validity.
+        strides: Optional positive, non-overlapping ND element strides over a
+            packed, fully valid local source. This in-core-only form can skip
+            padding without copying. It requires shape and a fully valid target.
+            Static storage spans are checked; symbolic positive, bounded spans
+            remain the caller's contract. Existing root input validation is unchanged.
+        layout: Target ``TensorLayout`` (ND or DN). Must not be ``NZ``.
+            When provided without ``shape``, performs a layout-only flip.
+            Orchestration also permits shaped ND/MX_A_ZZ/MX_B_NN backing and
+            consumer views for FP8E8M0 MX scales; other layout-changing shape
+            views remain limited to in-core lowering.
+        span: Optional source span for debugging (auto-captured if not
+            provided).
+
+    Returns:
+        ``Call`` expression for the ``tensor.view`` operation.
+
+    Raises:
+        ValueError: If the requested shape/layout is missing, unsupported, or
+            inconsistent with the source tensor metadata.
+    """
+    if shape is None and layout is None:
+        raise ValueError("tensor.view requires at least one of shape or layout")
+    if valid_shape is not None and shape is None:
+        raise ValueError("tensor.view valid_shape requires shape")
+    if strides is not None and shape is None:
+        raise ValueError("tensor.view strides requires shape")
+    actual_span = _get_span_or_capture(span)
+    args = [tensor]
+    if shape is not None:
+        args.append(_to_make_tuple(shape, actual_span))
+    if valid_shape is not None:
+        args.append(_to_make_tuple(valid_shape, actual_span))
+    elif strides is not None:
+        args.append(_to_make_tuple([], actual_span))
+    if strides is not None:
+        args.append(_to_make_tuple(strides, actual_span))
+    kwargs: dict[str, Any] = {}
+    if layout is not None:
+        kwargs["layout"] = layout
+    return _ir_core.create_op_call("tensor.view", args, kwargs, actual_span)
+
+
+def set_validshape(
+    tensor: Expr,
+    valid_rows: int | Expr,
+    valid_cols: int | Expr,
+    span: Span | None = None,
+) -> Call:
+    """Update valid-shape metadata of a tensor without data movement.
+
+    .. note::
+        Prefer expressing the extent at its source where possible —
+        ``pl.load(..., valid_shape=...)`` or a slice's ``valid_shape=`` — and use
+        this to pin an extent the type deducer cannot infer.
+
+    Args:
+        tensor: Input tensor expression (must be 2D TensorType)
+        valid_rows: Number of valid rows (int or Scalar INDEX expression)
+        valid_cols: Number of valid columns (int or Scalar INDEX expression)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for tensor.set_validshape
+    """
+    actual_span = _get_span_or_capture(span)
+    vr_expr = (
+        valid_rows if isinstance(valid_rows, Expr) else ConstInt(valid_rows, DataType.INDEX, actual_span)
+    )
+    vc_expr = (
+        valid_cols if isinstance(valid_cols, Expr) else ConstInt(valid_cols, DataType.INDEX, actual_span)
+    )
+    return _ir_core.create_op_call("tensor.set_validshape", [tensor, vr_expr, vc_expr], {}, actual_span)
+
+
+def scatter_update(
+    input: Expr,
+    *args: Expr | int,
+    dim: int | Expr | None = None,
+    index: Expr | None = None,
+    src: Expr | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Update input tensor rows at positions specified by 2D index with values from src.
+
+    Supports two variants based on input/src rank:
+    - 2D: input [rows, d], src [b*s, d], index [b, s]
+    - 4D: input [blockNum, blockSize, 1, d], src [b, s, 1, d], index [b, s]
+
+    For each (i, j): input[index[i*s+j]] row = src[i*s+j] row (linear layout).
+
+    Accepts both call forms:
+    - scatter_update(input, dim, index, src)
+    - scatter_update(input, index, src, dim=-2)
+
+    Args:
+        input: Destination tensor (2D or 4D TensorType)
+        dim: Dimension to scatter along (default: -2, currently the only supported value)
+        index: 2D index tensor [b, s] of integer dtype
+        src: Source tensor (2D [b*s, d] or 4D [b, s, 1, d])
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression returning the updated input tensor
+    """
+    if len(args) == 3 and dim is None and index is None and src is None:
+        dim, index, src = args
+    elif len(args) == 2 and dim is not None and index is None and src is None:
+        index, src = args
+    elif len(args) == 1 and dim is None and index is not None and src is not None:
+        # (input, dim, index=..., src=...) — dim passed positionally
+        dim = args[0]
+    elif len(args) != 0:
+        raise TypeError(
+            "scatter_update expects (input, dim, index, src), "
+            "(input, index, src, dim=...), or (input, dim, index=..., src=...)"
+        )
+
+    if dim is None or index is None or src is None:
+        raise TypeError("scatter_update requires input, dim, index, and src")
+
+    actual_span = _get_span_or_capture(span)
+    if isinstance(dim, _ir_core.ConstInt):
+        dim_val = int(dim.value)
+    elif isinstance(dim, int):
+        dim_val = dim
+    else:
+        raise TypeError(f"dim must be int or ConstInt, got {type(dim)}")
+
+    if not isinstance(index, Expr):
+        raise TypeError(f"index must be Expr, got {type(index)}")
+    if not isinstance(src, Expr):
+        raise TypeError(f"src must be Expr, got {type(src)}")
+    op_args: list[Expr] = [input, index, src]
+    kwargs: dict[str, Any] = {"dim": dim_val}
+    return _ir_core.create_op_call("tensor.scatter_update", op_args, kwargs, actual_span)
+
+
+# ============================================================================
+# Sort Operations
+# ============================================================================
+
+
+def sort32(src: Expr, idx: Expr, span: Span | None = None) -> Call:
+    """Sort fixed 32-element blocks with explicit index tensor (tensor-level).
+
+    Tensor-level counterpart of ``tile.sort32``. Sorts 32-element blocks in src
+    and permutes idx accordingly. Output tensor stores 8-byte value-index pairs;
+    its last dimension is 2x the input width for FP32 and 4x for FP16.
+
+    Args:
+        src: Input value tensor (TensorType, FP16 or FP32)
+        idx: Input index tensor (TensorType) with sequential offsets
+        span: Optional source span for debugging
+
+    Returns:
+        Call expression returning the dtype-dependent expanded sort output
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.sort32", [src, idx], {}, actual_span)
+
+
+def mrgsort(
+    src0: Expr,
+    src1: Expr | None = None,
+    src2: Expr | None = None,
+    src3: Expr | None = None,
+    *,
+    exhausted: bool = False,
+    block_len: int | Expr | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Merge sort — format1 (single-list) or format2 (2-4 way merge), tensor-level.
+
+    Tensor-level counterpart of ``tile.mrgsort``. Format1 sorts a tensor
+    containing multiple pre-sorted runs of length ``block_len``. Format2 merges
+    2, 3, or 4 pre-sorted input tensors into one sorted output.
+
+    The scratch ``tmp`` and ``executed`` tiles required by the tile-level op are
+    synthesized automatically during ConvertTensorToTileOps as local Vec tiles —
+    users do not pass them at the tensor level.
+
+    Args:
+        src0: For format1: input tensor with pre-sorted runs (FP16 or FP32).
+              For format2: first sorted input tensor.
+        src1: (format2) Second sorted input tensor.
+        src2: (format2, optional) Third sorted input tensor (3-way or 4-way).
+        src3: (format2, optional) Fourth sorted input tensor (4-way only).
+        exhausted: (format2) If True, marks inputs as exhausted (default: False).
+        block_len: (format1, keyword-only) Run length, must be multiple of 64.
+        span: Optional source span for debugging.
+
+    Returns:
+        Call expression returning merged sorted tensor.
+    """
+    actual_span = _get_span_or_capture(span)
+    if block_len is not None:
+        if exhausted or any(arg is not None for arg in (src1, src2, src3)):
+            raise ValueError(
+                "mrgsort() format1 (block_len=...) and format2 (src1, ...) "
+                "are mutually exclusive; do not pass format2 arguments or exhausted=True with block_len"
+            )
+        if isinstance(block_len, _ir_core.ConstInt):
+            block_len_expr = _ir_core.ConstInt(block_len.value, DataType.INT32, actual_span)
+        elif isinstance(block_len, Expr):
+            block_len_expr = block_len
+        else:
+            block_len_expr = _ir_core.ConstInt(block_len, DataType.INT32, actual_span)
+        return _ir_core.create_op_call("tensor.mrgsort_format1", [src0, block_len_expr], {}, actual_span)
+    # format2: 2-4 way merge
+    if src1 is None:
+        raise ValueError(
+            "mrgsort() requires either block_len=<int> for format1, or at least (src0, src1) for format2"
+        )
+    if src2 is None and src3 is not None:
+        raise ValueError("mrgsort() format2 requires src2 when src3 is provided")
+    kwargs: dict[str, Any] = {"exhausted": exhausted}
+    if src2 is None:
+        args = [src0, src1]
+    elif src3 is None:
+        args = [src0, src1, src2]
+    else:
+        args = [src0, src1, src2, src3]
+    return _ir_core.create_op_call("tensor.mrgsort_format2", args, kwargs, actual_span)
+
+
+def mrgsort_format1(src0: Expr, block_len: int | Expr, span: Span | None = None) -> Call:
+    """Single-list merge sort (format1). Used by the parser for roundtrip fidelity.
+
+    Prefer ``mrgsort(src, block_len=...)`` in user code.
+    """
+    return mrgsort(src0, block_len=block_len, span=span)
+
+
+def mrgsort_format2(*args: Expr, exhausted: bool = False, span: Span | None = None) -> Call:
+    """2-4 way merge sort (format2). Used by the parser for roundtrip fidelity.
+
+    Positional args: ``(src0, src1[, src2[, src3]])``.
+
+    Prefer ``mrgsort(src0, src1[, src2[, src3]])`` in user code.
+    """
+    if len(args) < 2 or len(args) > 4:
+        raise ValueError(
+            f"mrgsort_format2() requires 2-4 positional arguments "
+            f"(src0, src1[, src2[, src3]]), got {len(args)}"
+        )
+    src0 = args[0]
+    src1 = args[1]
+    src2 = args[2] if len(args) > 2 else None
+    src3 = args[3] if len(args) > 3 else None
+    return mrgsort(src0, src1, src2, src3, exhausted=exhausted, span=span)
+
+
+# ============================================================================
+# Gather Operation
+# ============================================================================
+
+
+def gather(  # noqa: PLR0913
+    input: Expr,
+    dim: int | Expr | None = None,
+    index: Expr | None = None,
+    *,
+    mask_pattern: int | None = None,
+    output_dtype: int | DataType | None = None,
+    kvalue: Expr | None = None,
+    cmp_mode: str | int | None = None,
+    out_cols: int | None = None,
+    offset: int = 0,
+    count_dtype: int | DataType | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Gather elements of ``input`` — flat / axis / mask / compare form.
+
+    The tensor layer keeps a single unified ``gather`` entry point. Based on
+    the arguments, it lowers to one of three C++ ops:
+
+    Flat form (``index``, no ``dim``) → ``tensor.gather``::
+
+        output = input.reshape(-1)[index]
+
+        Also accepts ``gather(input, index)``. Runtime indices are 2D INT32;
+        shape and valid shape follow ``index``, dtype follows ``input``
+        (FP16/FP32/INT16/INT32). Indices must address valid source elements;
+        negative indexing and bounds checking are unsupported.
+        Contiguous ND GM sources use ``tile.mgather``; static 2D unboxed
+        row-major Vec sources use ``tile.gather`` with managed packing/scratch.
+        On-chip source rows must be 32-byte aligned unless there is only one row.
+        GM operands accept local distributed windows; tile indices must be
+        unboxed row-major Vec. Physical index columns must be positive static
+        multiples of 16 for FP16/INT16, or 8 for FP32/INT32, including single-row
+        tiles. Pad physical storage and use ``set_validshape`` for narrower
+        valid regions, which need not be aligned.
+
+    Axis form (``dim`` + ``index``) → ``tensor.gather``, for example ``dim=1``::
+
+        output[b, k] = input[b, index[b, k]]
+
+        Lowering supports rank-2/rank-3 inputs and any axis, including negative axes.
+        ``index`` must be an INT32 tensor, or INT16 when ``input`` is a 16-bit
+        dtype (FP16/INT16; INT16 indices require A5). Its rank matches ``input``;
+        non-gather extents cannot exceed the source. Output shape == ``index.shape``,
+        dtype == ``input.dtype``.
+
+    Mask form (``mask_pattern=<int>``) → ``tensor.gather_mask``: selects columns
+        of each row by a fixed hardware mask. Last-dim shrinks by 2 (P0101/P1010)
+        or 4 (P0001..P1000), or stays the same for P1111. Optional ``output_dtype``
+        keyword reinterprets result bits to a same-bit-width dtype (e.g. FP32 →
+        UINT32).
+
+    Compare form (``kvalue`` + ``cmp_mode`` + ``out_cols``) → ``tensor.gather_compare``:
+        per-row threshold compare. Returns a tuple-typed Call ``(dst, cdst)`` with
+        ``dst : [rows, out_cols] INT32`` (gathered indices) and ``cdst : [1, rows]
+        count_dtype`` (per-row match count).
+
+    Args:
+        input: Source tensor; flat form also accepts an on-chip Tile.
+        dim: Axis along which to gather; omit for flat indexing. A tensor/tile
+            in this positional slot is interpreted as the flat index.
+        index: Flat form: 2D INT32 tensor/tile. Axis form: tensor with the same
+            rank as ``input`` and the index dtype constraints above.
+        mask_pattern: (mask form, keyword-only) Mask pattern selector in [1, 7].
+            1=P0101, 2=P1010, 3=P0001, 4=P0010, 5=P0100, 6=P1000, 7=P1111
+        output_dtype: (mask form, keyword-only) Optional output dtype with the same
+            bit width as ``input.dtype``.
+        kvalue: (compare form, keyword-only) Scalar threshold (ScalarType; dtype must
+            match ``input``, which must be one of FP16/FP32/INT16/INT32).
+        cmp_mode: (compare form, keyword-only) ``"eq"``/``"ne"``/``"lt"``/``"le"``/
+            ``"gt"``/``"ge"`` or int 0..5.
+        out_cols: (compare form, keyword-only) Output column count per row (positive int).
+        offset: (compare form, keyword-only) Starting index offset (default 0).
+        count_dtype: (compare form, keyword-only) Per-row count dtype, INT32 or UINT32.
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression with the appropriate result type for the chosen form.
+        Compare form returns a TupleType-result Call.
+    """
+    actual_span = _get_span_or_capture(span)
+    if isinstance(dim, Expr) and isinstance(dim.type, (_ir_core.TensorType, _ir_core.TileType)):
+        if index is not None:
+            raise ValueError("gather() received indices both positionally and through index")
+        index, dim = dim, None
+    is_index = dim is not None or index is not None
+    is_mask = mask_pattern is not None
+    is_compare = kvalue is not None or cmp_mode is not None or out_cols is not None
+    if int(is_index) + int(is_mask) + int(is_compare) > 1:
+        raise ValueError(
+            "gather() index form (dim, index), mask form (mask_pattern=...) and "
+            "compare form (kvalue=..., cmp_mode=..., out_cols=...) are mutually "
+            "exclusive; do not mix kwargs from different forms"
+        )
+    if (offset != 0 or count_dtype is not None) and not is_compare:
+        raise ValueError(
+            "gather() offset/count_dtype are only valid for the compare form; "
+            "use kvalue=..., cmp_mode=..., out_cols=..."
+        )
+    if is_mask:
+        kwargs: dict[str, Any] = {"mask_pattern": mask_pattern}
+        if output_dtype is not None:
+            kwargs["output_dtype"] = output_dtype
+        return _ir_core.create_op_call("tensor.gather_mask", [input], kwargs, actual_span)
+    if is_compare:
+        if kvalue is None or cmp_mode is None or out_cols is None:
+            raise ValueError("gather() compare form requires kvalue, cmp_mode and out_cols all set")
+        if output_dtype is not None:
+            raise ValueError("gather() output_dtype is only valid for the mask form; use mask_pattern=<int>")
+        cmp_kwargs: dict[str, Any] = {
+            "cmp_mode": resolve_gather_compare_cmp_mode(cmp_mode),
+            "offset": offset,
+            "out_cols": out_cols,
+        }
+        if count_dtype is not None:
+            cmp_kwargs["count_dtype"] = count_dtype
+        return _ir_core.create_op_call("tensor.gather_compare", [input, kvalue], cmp_kwargs, actual_span)
+    if index is None:
+        raise ValueError(
+            "gather() requires index (optionally dim), mask_pattern=<int> for mask form, "
+            "or (kvalue=..., cmp_mode=..., out_cols=...) for compare form"
+        )
+    if output_dtype is not None:
+        raise ValueError("gather() output_dtype is only valid for the mask form; use mask_pattern=<int>")
+    if dim is None:
+        return _ir_core.create_op_call("tensor.gather", [input, index], {}, actual_span)
+    if not isinstance(dim, (int, _ir_core.ConstInt)):
+        raise TypeError(f"dim must be int or ConstInt, got {type(dim)}")
+    dim_val = int(dim.value) if isinstance(dim, _ir_core.ConstInt) else dim
+    return _ir_core.create_op_call("tensor.gather", [input, index], {"dim": dim_val}, actual_span)
+
+
+def gather_mask(
+    input: Expr,
+    mask_pattern: int,
+    output_dtype: int | DataType | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Parser-roundtrip entry for the mask form (printed op name ``tensor.gather_mask``).
+
+    The tensor DSL layer only exposes the unified ``gather``; this IR-builder
+    function exists so that round-trip parsing of printed ``pl.tensor.gather_mask(...)``
+    calls (which never happen in user code, but can appear in pass dumps) still
+    works via ``_dispatch_ir_builder_op``. Prefer ``gather(input, mask_pattern=...)``
+    in user code.
+    """
+    return gather(input, mask_pattern=mask_pattern, output_dtype=output_dtype, span=span)
+
+
+def gather_compare(
+    input: Expr,
+    kvalue: Expr,
+    *,
+    cmp_mode: str | int,
+    offset: int = 0,
+    out_cols: int,
+    count_dtype: int | DataType | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Parser-roundtrip entry for the compare form (printed op name ``tensor.gather_compare``).
+
+    The tensor DSL layer only exposes the unified ``gather``; this IR-builder
+    function exists so that round-trip parsing of printed ``pl.tensor.gather_compare(...)``
+    calls (which never happen in user code, but can appear in pass dumps) still
+    works via ``_dispatch_ir_builder_op``. Prefer
+    ``gather(input, kvalue=..., cmp_mode=..., out_cols=...)`` in user code.
+    """
+    return gather(
+        input,
+        kvalue=kvalue,
+        cmp_mode=cmp_mode,
+        offset=offset,
+        out_cols=out_cols,
+        count_dtype=count_dtype,
+        span=span,
+    )
+
+
+# ============================================================================
+# Paged Gather Operation
+# ============================================================================
+
+
+def paged_gather(  # noqa: PLR0913
+    src: Expr,
+    indices: Expr,
+    block_table: Expr,
+    block_size: int,
+    size: int,
+    max_indices: int,
+    *,
+    space: MemorySpace = MemorySpace.Mat,
+    col_off: int = 0,
+    is_trans: bool = False,
+    is_b_matrix: bool = False,
+    span: Span | None = None,
+) -> Call:
+    """Paged gather directly into an on-chip buffer (tensor-level).
+
+    Gathers scattered rows of a 2D paged KV pool ``src`` selected by ``indices``,
+    translated through a paged ``block_table``, directly into an L1 (``space=Mat``,
+    default) or UB (``space=Vec``) tile. Lowered by ``ConvertTensorToTileOps`` to a
+    fully-scalar per-row ``GM -> on-chip`` load loop on the Cube core: the bulk KV
+    data goes straight to L1 (never UB), eliminating the GM round-trip.
+
+    Physical row resolution per logical index ``idx``::
+
+        phys = block_table[idx // block_size] * block_size + idx % block_size
+
+    Args:
+        src: Paged KV pool in GM (TensorType, 2D; FP16/BF16/FP32/INT8).
+        indices: Logical row indices to gather (TensorType, INT32; 1D ``[n]`` or 2D ``[1, n]``).
+        block_table: Page table mapping logical block -> physical block (TensorType, INT32).
+        block_size: Number of tokens per page block.
+        size: Number of elements gathered per row (<= src columns).
+        max_indices: Static upper bound on gathered rows; sizes the on-chip tile.
+        space: Destination memory space (``MemorySpace.Mat`` (L1) default, or ``MemorySpace.Vec``).
+        col_off: Column start offset within each src row (default 0).
+        is_trans: Transpose the gathered tile for matmul B-operand layout (requires ``space=Mat``).
+        is_b_matrix: Hint that the result feeds matmul as the B matrix (layout selection).
+        span: Optional source span for debugging (auto-captured if not provided).
+
+    Returns:
+        Call expression with TensorType result ``[max_indices, size]`` (or transposed).
+    """
+    actual_span = _get_span_or_capture(span)
+    kwargs: dict[str, Any] = {
+        "block_size": block_size,
+        "size": size,
+        "max_indices": max_indices,
+        "col_off": col_off,
+        "is_trans": is_trans,
+        "is_b_matrix": is_b_matrix,
+        "space": space,
+    }
+    return _ir_core.create_op_call("tensor.paged_gather", [src, indices, block_table], kwargs, actual_span)
+
+
+def create_l1(
+    shape: Sequence[int | Expr] | _ir_core.MakeTuple,
+    dtype: DataType,
+    transpose: bool = False,
+    span: Span | None = None,
+) -> Call:
+    """Create an on-chip (L1/Mat) accumulator tensor (tensor-level).
+
+    Companion of :func:`gather_row`: seeds the loop-carried accumulator that a
+    kernel-driven paged gather fills row by row. Deduces a ``TensorType`` so the
+    gathered result composes with tensor-level ``matmul`` / softmax; lowered by
+    ``ConvertTensorToTileOps`` to ``tile.create(target_memory=Mat)``.
+
+    Args:
+        shape: Accumulator shape (static dims), or a MakeTuple.
+        dtype: Element dtype.
+        transpose: Allocate the transposed Mat (ZN) fractal layout — required
+            when the accumulator is filled by ``transpose=True`` gathers (a
+            ``DN2ZN`` per-row load) and consumed as a matmul ``b_trans`` B-operand.
+        span: Optional source span (auto-captured if not provided).
+
+    Returns:
+        Call expression with TensorType result ``[*shape]`` (L1-backed).
+    """
+    actual_span = _get_span_or_capture(span)
+    shape_tuple = _to_make_tuple(shape, actual_span)
+    return _ir_core.create_op_call(
+        "tensor.create_l1", [shape_tuple], {"dtype": dtype, "transpose": transpose}, actual_span
+    )
+
+
+def gather_row(  # noqa: PLR0913
+    acc: Expr,
+    src: Expr,
+    dst_offset: Sequence[int | Expr] | _ir_core.MakeTuple,
+    src_offset: Sequence[int | Expr] | _ir_core.MakeTuple,
+    shapes: Sequence[int | Expr] | _ir_core.MakeTuple,
+    transpose: bool = False,
+    span: Span | None = None,
+    *,
+    valid_shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+) -> Call:
+    """Gather one GM row into a sub-region of an on-chip accumulator (tensor-level, DPS).
+
+    Per-row primitive for a kernel-driven paged gather into L1: the caller computes
+    the physical ``src_offset`` (block-table lookup + bias) and the ``dst_offset``
+    slot, then this op DMAs ``src[src_offset : src_offset + shapes]`` straight into
+    ``acc`` at ``dst_offset``. Lowered by ``ConvertTensorToTileOps`` to the per-row
+    ``tile.gather_row`` (``pto.subview`` + ``pto.tload``, no ``pto.tmov``). DPS —
+    writes ``acc`` in place, so a loop-carried accumulator is filled row by row.
+
+    Args:
+        acc: On-chip accumulator (from :func:`create_l1`).
+        src: Source tensor in GM.
+        dst_offset: ``[row, col]`` offset within ``acc``, or a MakeTuple.
+        src_offset: ``[row, col]`` offset within the GM ``src``, or a MakeTuple.
+        shapes: GM row window shape ``[r, c]``, or a MakeTuple. Must be
+            compile-time constant.
+        valid_shape: Runtime transfer extent within ``shapes``, or a MakeTuple.
+            May hold runtime ``Scalar[INDEX]`` values. Defaults to ``shapes``.
+        transpose: Place the GM row ``[r, c]`` as an L1 column ``[c, r]`` (for a
+            matmul B-operand the consumer reads with ``b_trans``).
+        span: Optional source span (auto-captured if not provided).
+
+    Returns:
+        Call expression aliasing ``acc`` (written in place).
+    """
+    actual_span = _get_span_or_capture(span)
+    dst_off = _to_make_tuple(dst_offset, actual_span)
+    src_off = _to_make_tuple(src_offset, actual_span)
+    shapes_tuple = _to_make_tuple(shapes, actual_span)
+    args: list[Any] = [acc, src, dst_off, src_off, shapes_tuple]
+    if valid_shape is not None:
+        args.append(_to_make_tuple(valid_shape, actual_span))
+    return _ir_core.create_op_call("tensor.gather_row", args, {"transpose": transpose}, actual_span)
+
+
+# ============================================================================
+# Scatter Operation
+# ============================================================================
+
+
+def scatter(  # noqa: PLR0913
+    input: Expr,
+    dim: int | None = None,
+    index: Expr | None = None,
+    src: Expr | None = None,
+    *,
+    mask_pattern: int | None = None,
+    dst: Expr | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Scatter elements of ``src`` into ``input`` (tensor-level) — index or mask form.
+
+    Index form (``dim`` + ``index`` + ``src``) → ``tensor.scatter`` — the
+    column-wise inverse of :func:`gather`, so ``index`` has the same shape as
+    ``src`` (just like gather's index matches its output)::
+
+        output = input
+        output[b, index[b, k]] = src[b, k]   # for all b, k
+
+        MVP limitation: rank-2 input with ``dim == -1``. ``src``/``index`` are
+        ``[rows, K]``; ``input``/output are ``[rows, S]`` with ``K <= S``.
+
+    Mask form (``mask_pattern=<int>`` + ``dst``) → ``tensor.scatter_mask``:
+        write each row of ``input`` into the columns of ``dst`` selected by the
+        hardware mask pattern. ``dst.cols`` equals ``input.cols * stride``
+        (stride = 2 for P0101/P1010, 4 for P0001..P1000, 1 for P1111).
+        Unlike the gather mask form (a real ``pto.tgather`` ISA op on A2/A3 and
+        A5), mask-pattern scatter is not a distinct pto-isa instruction — PyPTO
+        emits it as a ``pto.tscatter`` mask-form construct for A2/A3 / CPU-sim
+        style lowering paths.
+
+    Args:
+        input: Base tensor supplying unwritten elements (TensorType, 2D).
+        dim: (index form) Axis along which to scatter. MVP accepts -1.
+        index: (index form) Per-element destination column indices, same shape
+            as ``src`` (TensorType, INT16/INT32).
+        src: (index form) Source values tensor (same dtype as ``input``).
+        mask_pattern: (mask form, keyword-only) Mask selector in [1, 7].
+        dst: (mask form, keyword-only) Destination tensor (rewritten on mask
+            positions; same dtype as ``input``).
+        span: Optional source span (auto-captured if not provided).
+
+    Returns:
+        Call expression whose result type is the post-scatter tensor.
+    """
+    actual_span = _get_span_or_capture(span)
+    is_index = dim is not None or index is not None or src is not None
+    is_mask = mask_pattern is not None or dst is not None
+    if is_index and is_mask:
+        raise ValueError(
+            "scatter() index form (dim, index, src) and mask form (mask_pattern, dst) "
+            "are mutually exclusive; do not mix kwargs from different forms"
+        )
+    if is_mask:
+        if mask_pattern is None or dst is None:
+            raise ValueError("scatter() mask form requires both mask_pattern and dst")
+        return _ir_core.create_op_call(
+            "tensor.scatter_mask", [input, dst], {"mask_pattern": mask_pattern}, actual_span
+        )
+    if not is_index:
+        raise ValueError(
+            "scatter() requires (dim, index, src) for index form, or "
+            "(mask_pattern=<int>, dst=...) for mask form"
+        )
+    if dim is None or index is None or src is None:
+        raise ValueError("scatter() index form requires dim, index and src")
+    return _ir_core.create_op_call("tensor.scatter", [input, index, src], {"dim": dim}, actual_span)
+
+
+def scatter_mask(
+    input: Expr,
+    dst: Expr,
+    mask_pattern: int,
+    span: Span | None = None,
+) -> Call:
+    """Parser-roundtrip entry for the mask form (printed op name ``tensor.scatter_mask``).
+
+    The tensor DSL layer only exposes the unified ``scatter``; this IR-builder
+    function exists so round-trip parsing of printed ``pl.tensor.scatter_mask(...)``
+    calls (which appear in pass dumps but never in user code) still works via
+    ``_dispatch_ir_builder_op``. Prefer ``scatter(input, mask_pattern=..., dst=...)``
+    in user code.
+    """
+    return scatter(input, mask_pattern=mask_pattern, dst=dst, span=span)
+
+
+def get_block_idx(span: Span | None = None) -> Call:
+    """Get the current block index (tensor-scope alias of ``tile.get_block_idx``).
+
+    Lowers to ``tile.get_block_idx`` in ``ConvertTensorToTileOps``.
+
+    Args:
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression that returns an INDEX scalar representing the block index
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.get_block_idx", [], {}, actual_span)
+
+
+def get_subblock_idx(span: Span | None = None) -> Call:
+    """Get the current sub-block (vector core) index (tensor-scope alias of ``tile.get_subblock_idx``).
+
+    Lowers to ``tile.get_subblock_idx`` in ``ConvertTensorToTileOps``.
+
+    Args:
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression that returns an INDEX scalar representing the sub-block index
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.get_subblock_idx", [], {}, actual_span)
+
+
+def get_block_num(span: Span | None = None) -> Call:
+    """Get the total number of blocks in the current SPMD task (tensor-scope alias of ``tile.get_block_num``).
+
+    Lowers to ``tile.get_block_num`` in ``ConvertTensorToTileOps``.
+
+    Args:
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression that returns an INDEX scalar representing the total block count
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("tensor.get_block_num", [], {}, actual_span)

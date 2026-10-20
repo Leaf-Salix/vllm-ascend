@@ -1,0 +1,487 @@
+diff --git a/docs/en/dev/ir/05-operators.md b/docs/en/dev/ir/05-operators.md
+index 946b8f5e2..ef1212f48 100644
+--- a/docs/en/dev/ir/05-operators.md
++++ b/docs/en/dev/ir/05-operators.md
+@@ -762,3 +762,21 @@ workspace or silently turn a requested prefetch into a no-op. See
+ ## References
+ 
+ Core definitions live in `include/pypto/core/common.h` and `include/pypto/ir/`; registry and type-inference implementations are in `src/ir/`, with operator implementations grouped under `src/ir/op/{tensor_ops,tile_ops,sync_ops}/`.
++
++
++### Explicit-stride in-core tensor views
++
++`pl.tensor.view(root, shape, strides=...)` can describe positive, non-overlapping
++ND rows over a packed, fully valid local GM Tensor without allocating or copying.
++The result shares the original MemRef. This initial form requires a fully valid
++target, excludes sub-byte FP4 and distributed tensors, and is rejected in
++orchestration rather than converted to a runtime reshape. Static address spans
++are checked against source capacity; with symbolic extents the caller must ensure
++positive strides and an in-bounds final element before using the alias. Native
++cache bindings must retain their page-width/capacity checks. Normal root Tensor
++contiguity checks and ordinary shape-only view rules are unchanged.
++
++For example, a contiguous `[P,page_bytes]` INT8 cache can expose `[P,32,128]`
++with strides `[page_bytes,128,1]`, skipping each page's scale bytes. The compiler
++does not load the scale region or make a compact copy. This metadata capability
++alone does not prove multi-ND device correctness or full-operator speedup.
+diff --git a/docs/en/dev/passes/14-flatten_tile_nd_to_2d.md b/docs/en/dev/passes/14-flatten_tile_nd_to_2d.md
+index 046049f2a..b022a5a7d 100644
+--- a/docs/en/dev/passes/14-flatten_tile_nd_to_2d.md
++++ b/docs/en/dev/passes/14-flatten_tile_nd_to_2d.md
+@@ -462,3 +462,13 @@ The phase entry points and rewrite component interface are private to the transf
+ | 3D+ | Flattened to 2D |
+ 
+ Only InCore-type functions (InCore, AIC, AIV) are processed. Orchestration and Opaque functions are returned unchanged.
++
++
++### Padded multi-ND Mat source windows
++
++On a backend with `SupportsMultiNdMatLoad`, a non-packed rank-3 ND GM view
++keeps its original source window and element strides; only its destination
++Tile becomes 2D. A `[P,32,128]` view with strides `[page_bytes,128,1] loaded
++as `[2,32,128]` therefore retains the page gap while producing `[64,128]`
++Mat storage. Packed sources keep the previous 2D collapse. Unsupported backends
++reject this path instead of silently treating the source as dense.
+diff --git a/docs/zh/dev/ir/05-operators.md b/docs/zh/dev/ir/05-operators.md
+index 25939ab96..bd4869b63 100644
+--- a/docs/zh/dev/ir/05-operators.md
++++ b/docs/zh/dev/ir/05-operators.md
+@@ -715,3 +715,17 @@ a5 或不提供 SDMA provider 的 runtime 上，启用该能力的 worker 会在
+ ## 参考
+ 
+ 核心定义位于 `include/pypto/core/common.h` 和 `include/pypto/ir/`；注册表与类型推断实现在 `src/ir/`，算子实现按类别位于 `src/ir/op/{tensor_ops,tile_ops,sync_ops}/`。
++
++
++### 核内显式stride Tensor视图
++
++`pl.tensor.view(root, shape, strides=...)`可在packed且完全有效的本地GM
++Tensor上描述正stride、非重叠的ND行，保留原MemRef，不分配或复制数据。
++初版只支持完全有效目标，不支持亚字节FP4与分布式Tensor；在编排中明确
++拒绝，不能错误降低为runtime reshape。静态地址跨度按源容量检查；符号
++维度的正stride及末元素边界由调用方保证，Native缓存入口仍须保留页宽/
++容量检查。普通根Tensor的连续性检查、普通shape-only view合同均不变。
++
++例如连续INT8 `[P,page_bytes]`缓存可建立`[P,32,128]`、stride
++`[page_bytes,128,1]`视图，跳过每页scale尾部；不搬scale或生成紧凑副本。
++这项metadata能力本身不代表多ND真机正确或完整算子有性能收益。
+diff --git a/docs/zh/dev/passes/14-flatten_tile_nd_to_2d.md b/docs/zh/dev/passes/14-flatten_tile_nd_to_2d.md
+index fbd8dccf1..7443ccfe1 100644
+--- a/docs/zh/dev/passes/14-flatten_tile_nd_to_2d.md
++++ b/docs/zh/dev/passes/14-flatten_tile_nd_to_2d.md
+@@ -392,3 +392,12 @@ acc__tile      : Tile[[64, 256], INT32]                              <- pl.creat
+ | 3D+ | 展平为 2D |
+ 
+ 仅处理 InCore 类型函数（InCore、AIC、AIV）。Orchestration 和 Opaque 函数原样返回。
++
++
++### 带页间空隙的多ND Mat源窗口
++
++后端声明`SupportsMultiNdMatLoad`时，非紧密排列的三维ND GM视图保留
++原始源窗口和元素stride，只将目标Tile展成二维。例如`[P,32,128]`、
++stride`[page_bytes,128,1]`加载`[2,32,128]`后，页间空隙仍保留，Mat为
++`[64,128]`。原packed源保持既有二维折叠；不支持的后端明确拒绝，
++不能悄悄将源当作连续数据。
+diff --git a/include/pypto/backend/910B/backend_910b_handler.h b/include/pypto/backend/910B/backend_910b_handler.h
+index eaafe4b2d..4cbff095b 100644
+--- a/include/pypto/backend/910B/backend_910b_handler.h
++++ b/include/pypto/backend/910B/backend_910b_handler.h
+@@ -41,6 +41,7 @@ class Ascend910BHandler : public BackendHandler {
+   [[nodiscard]] std::vector<std::string> GetExtraPtoasFlags() const override { return {"--pto-arch", "a3"}; }
+ 
+   [[nodiscard]] bool RequiresGMPipeBuffer() const override { return true; }
++  [[nodiscard]] bool SupportsMultiNdMatLoad() const override { return true; }
+   [[nodiscard]] bool RequiresSplitLoadTpopWorkaround() const override { return true; }
+   [[nodiscard]] bool RequiresLevel3TmpScratch() const override { return true; }
+   [[nodiscard]] bool RequiresVtoCFractalAdapt() const override { return false; }
+diff --git a/include/pypto/backend/common/backend_handler.h b/include/pypto/backend/common/backend_handler.h
+index a8d6a7485..d3f5e5f25 100644
+--- a/include/pypto/backend/common/backend_handler.h
++++ b/include/pypto/backend/common/backend_handler.h
+@@ -193,6 +193,9 @@ class BackendHandler {
+    */
+   [[nodiscard]] virtual bool RequiresGMPipeBuffer() const = 0;
+ 
++  /// Whether a natural Mat load can retain a padded rank-3 ND source window.
++  [[nodiscard]] virtual bool SupportsMultiNdMatLoad() const { return false; }
++
+   /**
+    * @brief Whether this backend needs the MemoryReuse load + tpop_from_aic
+    *        in-place hazard guard for split-AIV functions.
+diff --git a/python/pypto/ir/op/tensor_ops.py b/python/pypto/ir/op/tensor_ops.py
+index d4e0a4983..08ac371f2 100644
+--- a/python/pypto/ir/op/tensor_ops.py
++++ b/python/pypto/ir/op/tensor_ops.py
+@@ -1936,6 +1936,7 @@ def view(
+     tensor: Expr,
+     shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+     valid_shape: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
++    strides: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
+     *,
+     layout: TensorLayout | None = None,
+     span: Span | None = None,
+@@ -1975,6 +1976,11 @@ def view(
+             leading-dimension collapse to 2D or contiguous-prefix linear
+             collapse to ``[1, product(shape)]``. Required when either supported
+             collapse reinterprets a source with partial validity.
++        strides: Optional positive, non-overlapping ND element strides over a
++            packed, fully valid local source. This in-core-only form can skip
++            padding without copying. It requires shape and a fully valid target.
++            Static storage spans are checked; symbolic positive, bounded spans
++            remain the caller's contract. Existing root input validation is unchanged.
+         layout: Target ``TensorLayout`` (ND or DN). Must not be ``NZ``.
+             When provided without ``shape``, performs a layout-only flip.
+             Orchestration also permits shaped ND/MX_A_ZZ/MX_B_NN backing and
+@@ -1994,12 +2000,18 @@ def view(
+         raise ValueError("tensor.view requires at least one of shape or layout")
+     if valid_shape is not None and shape is None:
+         raise ValueError("tensor.view valid_shape requires shape")
++    if strides is not None and shape is None:
++        raise ValueError("tensor.view strides requires shape")
+     actual_span = _get_span_or_capture(span)
+     args = [tensor]
+     if shape is not None:
+         args.append(_to_make_tuple(shape, actual_span))
+     if valid_shape is not None:
+         args.append(_to_make_tuple(valid_shape, actual_span))
++    elif strides is not None:
++        args.append(_to_make_tuple([], actual_span))
++    if strides is not None:
++        args.append(_to_make_tuple(strides, actual_span))
+     kwargs: dict[str, Any] = {}
+     if layout is not None:
+         kwargs["layout"] = layout
+diff --git a/python/pypto/language/op/tensor_ops.py b/python/pypto/language/op/tensor_ops.py
+index 8a94a68bb..0b4e24213 100644
+--- a/python/pypto/language/op/tensor_ops.py
++++ b/python/pypto/language/op/tensor_ops.py
+@@ -2114,6 +2114,7 @@ def view(
+     tensor: _TensorT,
+     shape: Sequence[IntLike] | None = None,
+     valid_shape: Sequence[IntLike] | None = None,
++    strides: Sequence[IntLike] | None = None,
+     *,
+     layout: TensorLayout | None = None,
+ ) -> _TensorT:
+@@ -2132,6 +2133,11 @@ def view(
+             leading-dimension collapse to 2D or contiguous-prefix linear
+             collapse to ``[1, product(shape)]``. Required when either supported
+             collapse reinterprets a source with partial validity.
++        strides: Optional positive, non-overlapping ND element strides over a
++            packed, fully valid local source. This in-core-only form can skip
++            padding without copying. It requires shape and a fully valid target.
++            Static storage spans are checked; symbolic positive, bounded spans
++            remain the caller's contract. Existing root input validation is unchanged.
+         layout: Target ``TensorLayout`` (ND or DN); DN requires rank at least 2.
+             Orchestration supports ND shape reinterprets and shaped
+             ND/MX_A_ZZ/MX_B_NN backing and consumer views for dynamic FP8E8M0
+@@ -2149,6 +2155,7 @@ def view(
+         tensor.unwrap(),
+         None if shape is None else _normalize_intlike(shape),
+         None if valid_shape is None else _normalize_intlike(valid_shape),
++        None if strides is None else _normalize_intlike(strides),
+         layout=layout,
+     )
+     return tensor.__class__(expr=call_expr)
+diff --git a/src/backend/common/pto_ops_memory.cpp b/src/backend/common/pto_ops_memory.cpp
+index 026a56e5c..e91f41d6d 100644
+--- a/src/backend/common/pto_ops_memory.cpp
++++ b/src/backend/common/pto_ops_memory.cpp
+@@ -988,8 +988,8 @@ void RegisterMemoryOps(Backend& backend, const std::unordered_set<std::string>&
+   // original storage.
+   reg("tensor.view", [](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+     auto& codegen = AsPto(codegen_base);
+-    INTERNAL_CHECK_SPAN(op->args_.size() >= 1 && op->args_.size() <= 3, op->span_)
+-        << "tensor.view requires 1 to 3 args (input[, shape[, valid_shape]])";
++    INTERNAL_CHECK_SPAN(op->args_.size() >= 1 && op->args_.size() <= 4, op->span_)
++        << "tensor.view requires 1 to 4 args (input[, shape[, valid_shape[, strides]]])";
+     auto input_var = AsVarLike(op->args_[0]);
+     INTERNAL_CHECK_SPAN(input_var, op->span_) << "tensor.view input must be a Var/IterArg";
+ 
+diff --git a/src/codegen/tensor_op_codegen.cpp b/src/codegen/tensor_op_codegen.cpp
+index e1ce71d9c..3178240d4 100644
+--- a/src/codegen/tensor_op_codegen.cpp
++++ b/src/codegen/tensor_op_codegen.cpp
+@@ -488,6 +488,9 @@ REGISTER_ORCHESTRATION_OP(tensor_transpose, ("tensor.transpose")) {
+ }
+ 
+ REGISTER_ORCHESTRATION_OP(tensor_view, ("tensor.view")) {
++  CHECK_SPAN(op->args_.size() != 4, op->span_)
++      << "tensor.view with explicit strides is currently in-core only; "
++         "pass the original packed tensor and construct the view inside the kernel";
+   // tensor.view(input[, shape[, valid_shape]], layout=...) is a metadata reinterpret over the
+   // same physical buffer. Runtime Tensor has no layout tag or arbitrary-stride
+   // constructor, so shape-changing orchestration views lower to reshape only
+diff --git a/src/ir/op/tensor_ops/transform.cpp b/src/ir/op/tensor_ops/transform.cpp
+index 21a6a7d83..8cc3240f4 100644
+--- a/src/ir/op/tensor_ops/transform.cpp
++++ b/src/ir/op/tensor_ops/transform.cpp
+@@ -21,6 +21,7 @@
+ #include <any>
+ #include <cstddef>
+ #include <cstdint>
++#include <limits>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -459,8 +460,96 @@ TypePtr DeduceTensorTransposeType(const std::vector<ExprPtr>& args,
+ // Registration Function for Tensor Transform Operations
+ // ============================================================================
+ 
++TypePtr DeduceExplicitStrideViewType(const std::vector<ExprPtr>& args,
++                                     const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  const auto span = args[0]->span_;
++  auto source = As<TensorType>(args[0]->GetType());
++  CHECK_SPAN(source && !As<DistributedTensorType>(args[0]->GetType()), span)
++      << "tensor.view explicit strides currently require a local GM Tensor";
++  CHECK_SPAN(source->dtype_ != DataType::FP4, span)
++      << "tensor.view explicit strides do not support sub-byte FP4 storage";
++  for (const auto& [name, value] : kwargs) {
++    if (name == "layout") {
++      CHECK_SPAN(AnyCast<TensorLayout>(value, "layout") == TensorLayout::ND, span)
++          << "tensor.view explicit strides currently support ND layout only";
++    }
++  }
++  if (source->tensor_view_) {
++    const auto& view = *source->tensor_view_;
++    CHECK_SPAN(view.layout == TensorLayout::ND, span)
++        << "tensor.view explicit strides require a packed ND source";
++    if (!view.stride.empty()) {
++      const auto packed = BuildRowMajorStrides(source->shape_);
++      CHECK_SPAN(view.stride.size() == packed.size() &&
++                     std::equal(view.stride.begin(), view.stride.end(), packed.begin(), ExprEqual), span)
++          << "tensor.view explicit strides require a packed ND source";
++    }
++    CHECK_SPAN(view.valid_shape.empty() ||
++                   (view.valid_shape.size() == source->shape_.size() &&
++                    std::equal(view.valid_shape.begin(), view.valid_shape.end(), source->shape_.begin(),
++                               ExprEqual)), span)
++        << "tensor.view explicit strides require a fully valid source";
++  }
++  auto shape_tuple = As<MakeTuple>(args[1]);
++  auto valid_tuple = As<MakeTuple>(args[2]);
++  auto stride_tuple = As<MakeTuple>(args[3]);
++  CHECK_SPAN(shape_tuple && valid_tuple && stride_tuple, span)
++      << "tensor.view shape, valid_shape and strides must be tuples";
++  const auto& shape = shape_tuple->elements_;
++  const auto& stride = stride_tuple->elements_;
++  CHECK_SPAN(!shape.empty() && shape.size() == stride.size(), span)
++      << "tensor.view strides must have the same nonzero rank as shape";
++  CHECK_SPAN(valid_tuple->elements_.empty() ||
++                 (valid_tuple->elements_.size() == shape.size() &&
++                  std::equal(valid_tuple->elements_.begin(), valid_tuple->elements_.end(), shape.begin(),
++                             ExprEqual)), span)
++      << "tensor.view explicit strides currently require a fully valid target";
++  int64_t static_end = 1;
++  bool static_span = true;
++  for (size_t i = 0; i < shape.size(); ++i) {
++    for (const auto& expr : {shape[i], stride[i]}) {
++      auto type = As<ScalarType>(expr->GetType());
++      CHECK_SPAN(type && type->dtype_.IsInt(), span)
++          << "tensor.view shape and strides must contain integer scalars";
++      if (auto constant = As<ConstInt>(expr)) {
++        CHECK_SPAN(constant->value_ > 0, span) << "tensor.view shape and strides must be positive";
++      }
++    }
++    auto extent = As<ConstInt>(shape[i]);
++    auto step = As<ConstInt>(stride[i]);
++    if (!extent || !step) {
++      static_span = false;
++    } else {
++      CHECK_SPAN(extent->value_ - 1 <= (std::numeric_limits<int64_t>::max() - static_end) / step->value_, span)
++          << "tensor.view explicit stride span overflows int64";
++      static_end += (extent->value_ - 1) * step->value_;
++    }
++  }
++  auto canonical = tensor_view_semantics::CheckCanonicalView(shape, stride, TensorLayout::ND, true);
++  CHECK_SPAN(canonical.ok, span) << "tensor.view explicit strides must describe non-overlapping ND rows: "
++                                 << canonical.reason;
++  int64_t capacity = 1;
++  bool static_capacity = true;
++  for (const auto& dim : source->shape_) {
++    if (auto extent = As<ConstInt>(dim)) {
++      CHECK_SPAN(extent->value_ > 0 && capacity <= std::numeric_limits<int64_t>::max() / extent->value_, span)
++          << "tensor.view source capacity must be positive and fit int64";
++      capacity *= extent->value_;
++    } else {
++      static_capacity = false;
++    }
++  }
++  CHECK_SPAN(!static_span || !static_capacity || static_end <= capacity, span)
++      << "tensor.view explicit stride span exceeds source storage capacity";
++  // Symbolic extents remain a caller contract, just as for existing dynamic
++  // tensor.slice/view. The operator must guard their positive, bounded span.
++  return std::make_shared<TensorType>(shape, source->dtype_, source->memref_,
++                                      TensorView(stride, TensorLayout::ND, shape));
++}
++
+ TypePtr DeduceTensorViewType(const std::vector<ExprPtr>& args,
+                              const std::vector<std::pair<std::string, std::any>>& kwargs) {
++  if (args.size() == 4) return DeduceExplicitStrideViewType(args, kwargs);
+   // tensor.view(src[, shape[, valid_shape]], *, layout=None) reinterprets a tensor over the
+   // same physical memory. shape-only derives a canonical view for that shape
+   // with the source layout; layout-only preserves the legacy layout-only trailing
+@@ -723,6 +812,7 @@ REGISTER_OP("tensor.view")
+     .add_argument("input", "Input tensor (TensorType or DistributedTensorType, packed canonical or bare)")
+     .add_argument("shape", "Optional target shape dimensions (TupleType of integer scalars)")
+     .add_argument("valid_shape", "Optional explicit target valid shape for shape reinterpretation")
++    .add_argument("strides", "Optional explicit positive ND strides; currently in-core, fully valid views")
+     .set_attr<TensorLayout>("layout")
+     .set_output_memory_inherit_input()
+     .f_deduce_type([](const std::vector<ExprPtr>& args,
+diff --git a/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp b/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp
+index 06511ef8e..ad432c92e 100644
+--- a/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp
++++ b/src/ir/transforms/flatten_tile_nd_to_2d/rewrite.cpp
+@@ -23,6 +23,7 @@
+ #include <vector>
+ 
+ #include "pypto/core/dtype.h"
++#include "pypto/backend/common/backend_handler.h"
+ #include "pypto/core/logging.h"
+ #include "pypto/ir/expr.h"
+ #include "pypto/ir/function.h"
+@@ -33,6 +34,9 @@
+ #include "pypto/ir/stmt.h"
+ #include "pypto/ir/tile_view_semantics.h"
+ #include "pypto/ir/transforms/utils/memref_utils.h"
++#include "pypto/ir/transforms/pass_context.h"
++#include "pypto/ir/transforms/structural_comparison.h"
++#include "pypto/ir/transforms/utils/tensor_view_semantics.h"
+ #include "pypto/ir/transforms/utils/mutable_copy.h"
+ #include "pypto/ir/transforms/utils/tile_conversion_utils.h"
+ #include "pypto/ir/transforms/utils/transform_utils.h"
+@@ -60,6 +64,28 @@ bool IsNaturalNzMatLoad(const TileTypePtr& result_tile, bool assume_mat = false)
+   return view.blayout == TileLayout::col_major && view.slayout == TileLayout::row_major;
+ }
+ 
++// Preserve a padded rank-3 ND source only on backends that can issue multi-ND
++// loads. Packed sources retain the established collapse and generated code.
++bool IsPaddedMultiNdMatSource(const std::vector<ExprPtr>& args) {
++  auto tensor = AsTensorTypeLike(args[0]->GetType());
++  if (!tensor || tensor->shape_.size() != 3 || !tensor->tensor_view_ ||
++      tensor->tensor_view_->layout != TensorLayout::ND || tensor->tensor_view_->stride.size() != 3) {
++    return false;
++  }
++  const auto packed = tensor_view_semantics::BuildRowMajorStrides(tensor->shape_);
++  const auto& stride = tensor->tensor_view_->stride;
++  const bool is_packed = std::equal(stride.begin(), stride.end(), packed.begin(),
++                                    [](const ExprPtr& a, const ExprPtr& b) { return structural_equal(a, b); });
++  if (is_packed) return false;
++  const auto* handler = PassContext::Current()->GetBackendHandler();
++  CHECK_SPAN(handler && handler->SupportsMultiNdMatLoad(), args[0]->span_)
++      << "padded rank-3 ND Mat loads are not supported on this backend; use per-page loads";
++  auto inner_stride = As<ConstInt>(stride.back());
++  CHECK_SPAN(inner_stride && inner_stride->value_ == 1, args[0]->span_)
++      << "multi-ND Mat load requires unit innermost stride";
++  return true;
++}
++
+ bool HasKwarg(const std::vector<std::pair<std::string, std::any>>& kwargs, const std::string& name) {
+   return std::any_of(kwargs.begin(), kwargs.end(),
+                      [&name](const auto& kwarg) { return kwarg.first == name; });
+@@ -1001,7 +1027,8 @@ std::vector<StmtPtr> TransformBody(const std::vector<StmtPtr>& stmts, FlattenCon
+         // Collapsing here would flatten the fractal dims into a row count and
+         // destroy that structure, so leave the window at tensor rank and only
+         // flatten the tile.
+-        if (IsNaturalNzMatLoad(result_tile, pending_batch_matmul_mat) && !IsNzSourceLoad(sub_args)) {
++        if (IsNaturalNzMatLoad(result_tile, pending_batch_matmul_mat) && !IsNzSourceLoad(sub_args) &&
++            !IsPaddedMultiNdMatSource(sub_args)) {
+           auto tensor = AsVarLike(sub_args[0]);
+           auto tensor_type = tensor ? AsTensorTypeLike(tensor->GetType()) : nullptr;
+           INTERNAL_CHECK_SPAN(tensor && tensor_type, span)
+diff --git a/tests/ut/ir/operators/test_tensor_ops.py b/tests/ut/ir/operators/test_tensor_ops.py
+index 1edc02014..7364be8b3 100644
+--- a/tests/ut/ir/operators/test_tensor_ops.py
++++ b/tests/ut/ir/operators/test_tensor_ops.py
+@@ -3119,6 +3119,46 @@ def test_tensor_set_validshape_preserves_existing_view():
+     assert len(result_type.tensor_view.valid_shape) == 2
+ 
+ 
++@pytest.mark.parametrize("pitch", [4160, 4224, 8192])
++def test_explicit_stride_view_skips_page_padding(pitch):
++    source = _tensor_var("cache", [9, pitch], DataType.INT8)
++    view = tensor.view(source, [9, 32, 128], strides=[pitch, 128, 1])
++    assert _const_shape(view) == [9, 32, 128]
++    assert [x.value for x in view.type.tensor_view.stride] == [pitch, 128, 1]
++    assert len(view.args) == 4
++    assert view.type.memref == source.type.memref
++
++
++@pytest.mark.parametrize(
++    "shape,strides,message",
++    [
++        ([9, 32, 128], [4160, 128], "same nonzero rank"),
++        ([9, 32, 128], [0, 128, 1], "positive"),
++        ([9, 32, 128], [-4160, 128, 1], "positive"),
++        ([9, 32, 128], [4000, 128, 1], "non-overlapping ND"),
++        ([10, 32, 128], [4160, 128, 1], "exceeds source storage"),
++        ([2**62, 4], [4, 1], "overflows int64"),
++    ],
++)
++def test_explicit_stride_view_rejects_invalid_storage(shape, strides, message):
++    source = _tensor_var("cache", [9, 4160], DataType.INT8)
++    with pytest.raises(ValueError, match=message):
++        tensor.view(source, shape, strides=strides)
++
++
++def test_explicit_stride_view_keeps_default_guards_and_dsl_api():
++    source = _tensor_var("cache", [9, 4160], DataType.INT8)
++    with pytest.raises(ValueError, match="cannot reinterpret tensor of size"):
++        tensor.view(source, [9, 32, 128])
++    with pytest.raises(ValueError, match="ND layout only"):
++        tensor.view(source, [9, 32, 128], strides=[4160, 128, 1], layout=ir.TensorLayout.DN)
++    with pytest.raises(ValueError, match="fully valid target"):
++        tensor.view(source, [9, 32, 128], [8, 32, 128], strides=[4160, 128, 1])
++    native = pl.create_tensor([9, 4160], pl.INT8)
++    alias = pl.tensor.view(native, [9, 32, 128], strides=[4160, 128, 1])
++    assert _const_shape(alias.unwrap()) == [9, 32, 128]
++
++
+ def test_pl_tensor_view_wrapper():
+     """pl.tensor.view wraps the IR builder and returns a Tensor."""
+     src = pl.create_tensor([8, 4], pl.FP32)
+diff --git a/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py b/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py
+index f22760282..2fd0a322b 100644
+--- a/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py
++++ b/tests/ut/ir/transforms/test_flatten_tile_nd_to_2d.py
+@@ -4034,6 +4034,40 @@ class TestFlattenTileNdTo2DMatLoadRoundtrip:
+         assert flat_call_type.memory_space == flat_var_type.memory_space
+         assert flat_call_type.tile_view == flat_var_type.tile_view
+ 
++    def test_padded_rank3_mat_load_preserves_multi_nd_source(self):
++        """The tile becomes 2D while page pitch remains in the 3D GM view."""
++        from pypto import backend
++        from pypto.backend import BackendType
++
++        @pl.program
++        class Before:
++            @pl.function(type=pl.FunctionType.InCore)
++            def main_incore_0(self, cache: pl.Tensor[[9, 4160], pl.INT8],
++                              out: pl.Out[pl.Tensor[[64, 128], pl.INT8]]):
++                keys = pl.tensor.view(cache, [9, 32, 128], [], [4160, 128, 1])
++                tile = pl.load(keys, [1, 0, 0], [2, 32, 128], target_memory=pl.Mem.Mat)
++                flat_tile = pl.reshape(tile, [64, 128])
++                out = pl.store(flat_tile, [0, 0], out)
++                return out
++
++        backend.reset_for_testing()
++        backend.set_backend_type(BackendType.Ascend910B)
++        try:
++            after = passes.flatten_tile_nd_to_2d()(Before)
++            fn = after.get_function("main_incore_0")
++            assigned = [n for n in fn.body.stmts if isinstance(n, ir.AssignStmt)]
++            loads = [n for n in assigned if isinstance(n.value, ir.Call) and n.value.op.name == _OP_TILE_LOAD]
++            assert len(loads) == 1
++            load = loads[0]
++            assert load.var.type.shape == [64, 128]
++            assert _const_int_values(load.value.args[1].elements) == [1, 0, 0]
++            assert _const_int_values(load.value.args[2].elements) == [2, 32, 128]
++            source = load.value.args[0].type
++            assert _const_int_values(source.tensor_view.stride) == [4160, 128, 1]
++            assert source.shape == [9, 32, 128]
++        finally:
++            backend.reset_for_testing()
++
+     def test_rank3_mat_load_materializes_2d_tensor_view(self):
+         """Natural NZ Mat loads collapse the GM tensor in IR via tensor.view."""
+ 
