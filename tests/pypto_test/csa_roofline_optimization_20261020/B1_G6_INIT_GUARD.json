@@ -1,0 +1,14 @@
+{
+  "before": "tests/pypto_test/csa_roofline_optimization_20261020/source_b1_half_score_resident",
+  "candidate": "tests/pypto_test/csa_roofline_optimization_20261020/source_b1_half_score_resident_guarded",
+  "only_change": "共同声明create，B1 constexpr内full初始化；B1算法不变，G6不发射无用填充",
+  "reason": "正式G6 CPU v1实际有16KiB TEXPANDS，不能认为未使用full会自动删除",
+  "before_codegen": "b1_adoption_g6_cpu_v1/kernel/ptoas/dynamic_csa_full.pto",
+  "passed": true,
+  "device_test_repeated": false,
+  "b1_codegen": "B1_GUARDED_IR_AUDIT.json",
+  "g6_full_compile_passed": true,
+  "g6_legacy_tile_or_init_present": false,
+  "new_device_tests_needed": false,
+  "reason_no_device_repeat": "B1完整PTO IR在只删除loc/SSA名字/空白后与已上卡v5逐字一致；没有删除运算、数值、地址或分支。G6清除了新增无用初始化。"
+}

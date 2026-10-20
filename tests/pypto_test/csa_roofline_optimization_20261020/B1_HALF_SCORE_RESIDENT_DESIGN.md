@@ -63,3 +63,17 @@ S6同轮多task388.40、半叶GM对照378.70、分数留UB候选376.10μs，
 
 接着核对实际S1/capacity6，并以正式source_after_wait150直接配对核对
 整体候选收益；任务见B1_ADOPTION_CONFIRM_TASKS.json。正式尚未采用。
+
+
+## 最终采用
+
+S1/capacity6和直接正式源确认均exit0。确认轮多task387.60、正式改前
+401.30、候选371.94μs，五窗均更快，净省29.36μs，相对多task4.21%。
+只采用B1既有授权区间，10%目标仍未达到，其余八档整轮未重测。
+
+G6 CPU核对发现无用full初始化仍发射16KiB填充，因而没有直接复制初版。
+最终source_b1_half_score_resident_guarded在共同作用域create、仅B1分支full。
+B1完整PTO IR仅去loc/SSA拼写/空白后与已测v5逐字一致；G6额外Tile与填充
+均消失。保留两版源与CPU证据，不为该等价B1代码重复设备测量。
+正式源只增加整体中文说明，运算AST与guarded一致；新正式快照
+source_after_b1_half_v2。首次source_after_b1_half仅作失败过程参考。

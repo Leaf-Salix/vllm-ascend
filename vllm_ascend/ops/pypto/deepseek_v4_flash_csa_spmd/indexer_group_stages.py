@@ -55,6 +55,12 @@
     其中 H=L-query_len。陈旧位置只被屏蔽，不被当作另一个合法 decode 场景。
     原始全局 Q 单调、不重叠及页表一致性仍是入口合同。正常组的计算顺序
     与原系数相同；新增 mixed/odd 分组及其设备数值/性能需要单独验证。
+
+B1原半叶调度
+    BALANCED且GROUP_SIZE=2表示把原8192叶的两个半叶独立分派。末叶
+    半跨度为min(ceil(original_valid/1024)*512,4096)，来自本轮device
+    visible；不能统一成4096。保留末尾空根及原前后半叶顺序，供最终归并
+    精确复现旧同分规则。GROUP_SIZE=6仍使用原1024粒度平衡叶计划。
 """
 
 import pypto.language as pl
@@ -168,7 +174,14 @@ def indexer_group_plan_stage(
         leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // SCORE_TILE, pl.INDEX)
         extra = pl.cast(0, pl.INDEX)
         if BALANCED:
-            leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
+            if GROUP_SIZE == 2:
+                # B1把原每个8192叶的两个半叶独立调度，包含尾部空根。
+                # 末叶边界依赖各组实际visible，不能把全部半叶静态等分为4096。
+                leaf_tiles = pl.cast(CANDIDATES_PER_LEAF // (2 * SCORE_TILE), pl.INDEX)
+                leaves = 2 * pl.max((max_history + CANDIDATES_PER_LEAF - 1)
+                                    // CANDIDATES_PER_LEAF, 1)
+            else:
+                leaves, leaf_tiles, extra = indexer_long_leaf_plan(max_history, groups)
         pl.write(plan, [0], pl.cast(groups, pl.INT32))
         pl.write(plan, [1], pl.cast(max_history, pl.INT32))
         pl.write(plan, [2], pl.cast(leaves, pl.INT32))
@@ -256,10 +269,19 @@ def indexer_leaf_range(
     leaf_tiles: pl.Scalar[pl.INDEX],
     extra: pl.Scalar[pl.INDEX],
     visible: pl.Scalar[pl.INDEX],
+    BALANCED: pl.constexpr,
+    GROUP_SIZE: pl.constexpr,
 ):
-    """先分1024候选的整tile，再按组/单query实际visible截断；返回begin/capacity/valid。"""
-    begin = (leaf * leaf_tiles + pl.min(leaf, extra)) * SCORE_TILE
-    capacity = (leaf_tiles + pl.cast(leaf < extra, pl.INDEX)) * SCORE_TILE
+    """普通叶沿1024分片；B1逐项复现原末叶半跨度，再返回begin/capacity/valid。"""
+    if BALANCED and GROUP_SIZE == 2:
+        original_begin = (leaf // 2) * CANDIDATES_PER_LEAF
+        original_valid = pl.max(pl.min(visible - original_begin, CANDIDATES_PER_LEAF), 0)
+        original_tiles = (original_valid + SCORE_TILE - 1) // SCORE_TILE
+        capacity = pl.min(original_tiles * (SCORE_TILE // 2), CANDIDATES_PER_LEAF // 2)
+        begin = original_begin + (leaf % 2) * capacity
+    else:
+        begin = (leaf * leaf_tiles + pl.min(leaf, extra)) * SCORE_TILE
+        capacity = (leaf_tiles + pl.cast(leaf < extra, pl.INDEX)) * SCORE_TILE
     valid = pl.max(pl.min(visible - begin, capacity), 0)
     return begin, capacity, valid
 

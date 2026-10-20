@@ -18,6 +18,8 @@ ROOT_NAMES = {
     "paired_compact_capacity_probe.py", "collect_goal10_focus.py",
     "prepare_goal10_archive.py",
     "ptoas_tmov_subview_issue_followup.md",
+    "SOURCE_AFTER_B1_HALF.json",
+    "SOURCE_AFTER_B1_HALF_V2.json",
 }
 PREFIXES = (
     "goal10", "b1", "pair_direct", "prepare_b1", "prepare_pair_direct", "controls_goal10",
@@ -27,6 +29,8 @@ SOURCE_NAMES = {
     "source_topk_pair_direct", "source_b1_leaf4k", "source_b1_root_resident",
     "source_b1_legacy_half", "source_b1_half_score_resident", "source_score_pool_goal10",
     "b1_root_query_regression",
+    "source_after_b1_half",
+    "source_after_b1_half_v2", "source_b1_half_score_resident_guarded",
 }
 EXCLUDED_DIRS = {
     "build_output", "compile_cache", "cache", "dfx", "passes_dump", "__pycache__",
@@ -92,6 +96,12 @@ def main():
                 add(current / name)
     log = REPO / "vllm_ascend/ops/pypto/DSV4_CSA_SPMD_OPTIMIZATION_LOG.md"
     add(log)
+    if (HERE / "B1_HALF_SCORE_ADOPTION.json").exists():
+        adoption = json.loads((HERE / "B1_HALF_SCORE_ADOPTION.json").read_text())
+        if adoption.get("adopted"):
+            formal = REPO / "vllm_ascend/ops/pypto/deepseek_v4_flash_csa_spmd"
+            for name in adoption["changed_files"]:
+                add(formal / name)
     record = HERE / "GOAL10_ARCHIVE_MANIFEST.json"
     manifest_path = str(record.relative_to(REPO))
     selected.pop(manifest_path, None)

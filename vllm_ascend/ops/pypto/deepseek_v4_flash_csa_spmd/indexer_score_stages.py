@@ -67,6 +67,13 @@
     全部T/B/历史/页表和合法尾组仍动态；SPLIT_SCORE_ROWS仅按既有Host
     容量T>=32选择编译策略，小域及其它资源组合沿原helper。完整验证范围
     与性能证据见统一优化日志，不能把数学helper数量当成多个incore task。
+
+B1原半叶路径
+    balanced/G2由一名AIC处理一个原半叶，两个AIV各处理一条query。
+    每AIV将各段1024分数保存在4×1024 UB Tile，再reshape后按原长度
+    分支排序；不写回中间score GM，也不改成流式2048归并。动态尾部与
+    空query仍按原协议消费/归还FIFO，空半叶显式发布空根。行布局避免
+    PTOAS将列子视图的物理宽度恢复成母Tile后导致A3 TMOV形状不匹配。
 """
 
 import pypto.language as pl
@@ -84,7 +91,10 @@ from .indexer_group_stages import (
     indexer_work_item,
 )
 from .indexer_scale_layout_stages import LAYOUT_WORDS_PER_REQUEST, indexer_scale_layout_base
-from .indexer_topk_stages import PAIR_ROWS_DYN, SCORE_ROWS_DYN, indexer_topk_half_leaf
+from .indexer_topk_stages import (
+    PAIR_ROWS_DYN, SCORE_ROWS_DYN, indexer_topk_half_leaf,
+    indexer_topk_half_leaf_resident,
+)
 from .request_geometry import QUERY_BOUNDS_DYN, REQUESTS_DYN
 
 QUERY_HEAD_ROWS_DYN = pl.dynamic("CSA_SCORE_QUERY_HEAD_ROWS")
@@ -147,7 +157,8 @@ def _indexer_score_cube_original(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )
         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
+            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
+            balance_leaves, query_group_size,
         )
         if work_valid > 0:
             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
@@ -440,7 +451,8 @@ def _indexer_score_cube_split_store(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )
         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
+            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
+            balance_leaves, query_group_size,
         )
         if work_valid > 0:
             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
@@ -873,7 +885,8 @@ def indexer_score_vector_lane_stage(
             bounds, kv_seq_lens, position_ids, offsets, buf_group, query_group_size
         )
         buf_logical_begin, buf_leaf_capacity, work_valid = indexer_leaf_range(
-            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count
+            buf_leaf, buf_leaf_tiles, buf_extra_leaves, buf_visible_count,
+            balance_leaves, query_group_size,
         )
         if work_valid > 0:
             buf_cache_len = pl.cast(pl.read(kv_seq_lens, [buf_batch_idx]), pl.INDEX) // COMPRESS_RATIO
@@ -907,7 +920,17 @@ def indexer_score_vector_lane_stage(
                 single_segments = pl.tile.full(
                     [query_group_size, BUFFERED_LONG_SCORE_TILE], dtype=pl.FP32, value=FP32_NEG_INF
                 )
-                # balanced每AIV持G/2条完整query；连续两轮凑2048候选，尾轮仍按实际valid排序。
+                # 在共同作用域声明Tile以保持SSA作用域；只有B1初始化内容。
+                # G6只保留未使用的描述符，不发射16KiB填充；不能假定full会被DCE删除。
+                legacy_half_scores = pl.tile.create(
+                    [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32
+                )
+                if query_group_size == 2:
+                    # B1保留原完整半叶、同分规则和有效前缀；不用流式2048归并。
+                    legacy_half_scores = pl.tile.full(
+                        [TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile], dtype=pl.FP32, value=FP32_NEG_INF
+                    )
+                # G6仍按原流式2048候选处理，B1分支在下方单独保留整半叶。
                 for single_step in pl.range(single_steps):
                     single_score_begin = single_begin + single_step * score_tile
                     single_transfer_row = (
@@ -994,10 +1017,17 @@ def indexer_score_vector_lane_stage(
                             single_scores, single_local, 0, [1, score_tile], target_memory=pl.MemorySpace.Vec
                         )
                         single_scaled = pl.mul(single_score_row, single_kv_scale)
-                        single_segments = pl.tile.assemble(
-                            single_segments, single_scaled, [single_local * 2 + single_step % 2, 0]
-                        )
-                    if single_step % 2 == 1 or single_step + 1 == single_steps:
+                        if query_group_size == 2:
+                            # 同一AIV连续收集1024分数，叶内无跨核消费者，
+                            # UB槽仅在本叶排序结束后复用，不需要GM发布。
+                            legacy_half_scores = pl.tile.assemble(
+                                legacy_half_scores, single_scaled, [single_step, 0]
+                            )
+                        else:
+                            single_segments = pl.tile.assemble(
+                                single_segments, single_scaled, [single_local * 2 + single_step % 2, 0]
+                            )
+                    if query_group_size != 2 and (single_step % 2 == 1 or single_step + 1 == single_steps):
                         single_segment_begin = single_begin + single_step // 2 * (2 * score_tile)
                         single_segment_span = (single_step % 2 + 1) * score_tile
                         single_segment_rows = pl.tile.reshape(
@@ -1108,14 +1138,30 @@ def indexer_score_vector_lane_stage(
                 for single_local in pl.unroll(query_group_size // 2):
                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
                     if single_query_lane < buf_live:
-                        single_root = pl.tile.extract(
-                            single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
-                        )
-                        pl.store(
-                            single_root,
-                            [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
-                            pair_arena,
-                        )
+                        if query_group_size == 2:
+                            legacy_visible, _legacy_causal = indexer_query_visibility(
+                                bounds, kv_seq_lens, position_ids, single_batch, single_query + single_query_lane
+                            )
+                            legacy_valid = pl.max(pl.min(legacy_visible - single_begin, single_capacity), 0)
+                            legacy_slot = (single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf
+                            if legacy_valid > 0:
+                                legacy_half_flat = pl.tile.reshape(legacy_half_scores, [1, TOPK_CANDIDATES_PER_LEAF // 2])
+                                indexer_topk_half_leaf_resident(
+                                    legacy_half_flat, pair_arena,
+                                    single_begin, legacy_valid, legacy_slot,
+                                )
+                            else:
+                                pl.store(pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+                                         [legacy_slot, 0], pair_arena)
+                        else:
+                            single_root = pl.tile.extract(
+                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec
+                            )
+                            pl.store(
+                                single_root,
+                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
+                                pair_arena,
+                            )
             else:
                 buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
                 buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
@@ -1213,4 +1259,11 @@ def indexer_score_vector_lane_stage(
                                 [buf_half_slot, 0],
                                 pair_arena,
                             )
+        elif balance_leaves and query_group_size == 2:
+            # 尾部空半叶不触发Cube/Vector交接，但仍发布原布局的空根。
+            # query根计数仍包含它，不能让消费者读到上一轮内容。
+            if buf_score_lane < buf_live:
+                empty_slot = (buf_query + buf_score_lane) * TOPK_ROWS_PER_QUERY + buf_leaf
+                pl.store(pl.tile.full([1, TOPK_PAIR_WIDTH], dtype=pl.FP32, value=FP32_NEG_INF),
+                         [empty_slot, 0], pair_arena)
     return score_arena, pair_arena

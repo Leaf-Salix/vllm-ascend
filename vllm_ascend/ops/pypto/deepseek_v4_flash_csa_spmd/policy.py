@@ -79,6 +79,12 @@ SPLIT_SCORE_ROWS在既有长G6域、T>=32时选择双QK早FIX和每panel单次WS
 长B8/B16/B24/B28完整实测改善，小域保留原Score。关闭/开启代码等价、
 真实S1/S5及T30/T36边界已核对后采用；范围和原始数据见统一优化日志。
 这不是所有动态输入都已测过或五档30%目标已完成的声明。
+
+B1原半叶区间
+    单请求、query容量5或6且压缩历史上界在(8192,65536]时，保留G2，
+    将原8192叶的两个动态半叶分别分派；不按固定S反推本轮有效query。
+    半叶分数和累计归并根留在UB，保持原末叶跨度及六条排序分支同分规则。
+    这是B1区间策略，其余请求数/容量继续使用原策略；不是固定128K模板。
 """
 
 from dataclasses import dataclass
@@ -173,6 +179,12 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
     short_steps_upper = (cache_rows + SHORT_SCORE_TILE - 1) // SHORT_SCORE_TILE
     short_half_span_upper = short_steps_upper * (SHORT_SCORE_TILE // 2)
     short_key_prefetch = group == 2 and short_half_span_upper <= SHORT_PREFETCH_HALF_SORT_LIMIT
+    # 用户允许单请求独立分档。仅改变已有G2的历史工作分配，
+    # 保留动态Q/L及原半叶边界（末叶可小于4096）；较大容量及S1维持原策略。
+    single_request_leaves = (
+        requests == 1 and long_history and cache_rows <= 65536
+        and 5 <= max_query_tokens <= 6
+    )
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
     parallel_small_qa = group == 6 and 16 < tokens < 32
     return CSASPMDPolicy(
@@ -180,8 +192,8 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
         qk_panel=64 if group == 6 else 128,
         score_tile=1024 if long_history else SHORT_SCORE_TILE,
         prefetch=1 if long_history or short_key_prefetch else 0,
-        balanced=long_history and group == 6,
-        roots=1 if long_history and group == 6 else 2,
+        balanced=(long_history and group == 6) or single_request_leaves,
+        roots=1 if (long_history and group == 6) or single_request_leaves else 2,
         oa_cols=128 if tokens <= 96 else 256,
         ob_rows=ob_rows,
         # 沿已有G6分界选择两M16尾块的并行；G2已观察回退，不按B4/B5白名单。
