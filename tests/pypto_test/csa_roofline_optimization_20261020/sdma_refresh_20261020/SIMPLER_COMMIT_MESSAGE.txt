@@ -1,0 +1,7 @@
+fix(csa): 吸纳SDMA驻留通道隔离与设备时钟头文件配套修复
+
+迁入 hw-native-sys/simpler PR #2583 从 0b34c256 到 97343062 的增量，保留当前256个Tensor和16个标量的派发、参数转储及图缓存ABI扩容。
+
+TMR/HBG冷启动与两份dispatch payload均按驻留AIV编号分配独立SDMA通道，避免同组两条AIV因原生block编号相同而共用通道。核编译路径增加架构platform include，供PyPTO预取等待适配层使用系统计数器频率。同步上游相关回归与问题调查记录。
+
+PTO-ISA保持327cd586原pin，不混入旧PTO-ISA等待修改；旧SDMA worktree的本地通道草稿原地保留，本次使用上游实现。此提交仅固定待验证的迁移源码，后续将在独立环境重建binding、runtime和PyPTO adapter，不将上游测试结果当作本机通过。

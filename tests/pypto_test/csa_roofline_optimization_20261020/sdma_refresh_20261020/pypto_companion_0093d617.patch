@@ -1,0 +1,1013 @@
+diff --git a/docs/en/dev/ir/05-operators.md b/docs/en/dev/ir/05-operators.md
+index 1b599376f..2c729fddd 100644
+--- a/docs/en/dev/ir/05-operators.md
++++ b/docs/en/dev/ir/05-operators.md
+@@ -598,9 +598,9 @@ See [TPUSH/TPOP ISA Reference](../../reference/pto-isa/01-tpush_tpop.md) and [Bu
+ ## PrefetchOp: Asynchronous GM→L2 Prefetch
+ 
+ A latency-hiding cache hint. `async_prefetch` starts an SDMA-backed pull of a
+-global-memory region into L2 while unrelated compute proceeds; `wait` blocks
+-until it lands. The prefetch changes no tensor values — a kernel is numerically
+-identical with or without it, so only performance differs.
++global-memory region into L2 while unrelated compute proceeds; `wait` checks
++completion with a bounded deadline. The prefetch changes no tensor values — a
++kernel is numerically identical with or without it, so only performance differs.
+ 
+ Unlike most PTO intrinsics, `TPREFETCH_ASYNC` carries no implicit wait-event
+ synchronization, so completion is explicit via an event/session pair.
+@@ -609,10 +609,14 @@ synchronization, so completion is explicit via an event/session pair.
+ 
+ | DSL | Operands | Result | PTOAS op |
+ | --- | -------- | ------ | -------- |
+-| `pl.prefetch.make_context()` | None | `PrefetchAsyncContextType` | `pto.make_prefetch_async_context` |
++| `pl.prefetch.make_context()` | None | `PrefetchAsyncContextType` | `func.call @pypto_make_prefetch_context` |
+ | `pl.prefetch.async_prefetch(src, ctx)` | GM Tensor, context | `AsyncEventType` | `pto.tprefetch_async` |
+ | `pl.prefetch.session(ctx)` | context | `AsyncSessionType` | `pto.get_prefetch_async_session` |
+-| `pl.prefetch.wait(evt, session)` | event, session | `BOOL` scalar | `pto.comm.wait_async_event` |
++| `pl.prefetch.wait(evt, session)` | event, session | `BOOL` scalar | `func.call @pypto_wait_prefetch` |
++
++The prefetch wait adapter uses the public `AsyncEvent::Test()` with approximately
++1 microsecond between incomplete probes and a 20 ms event deadline. A timeout
++returns false without cancelling the transfer. PTO-ISA itself is unchanged.
+ 
+ The three result types are opaque singleton markers (no shape, no buffer), in
+ the same family as `CommCtxType`. The SDMA workspace is not a program operand:
+diff --git a/docs/zh/api/prefetch.md b/docs/zh/api/prefetch.md
+index 936f1727f..42bc4fd8e 100644
+--- a/docs/zh/api/prefetch.md
++++ b/docs/zh/api/prefetch.md
+@@ -2,6 +2,29 @@
+ 
+ GM 到 L2 的异步预取。它们产出的句柄类型见[特性矩阵](../user/appendix/00-feature-matrix.md)。
+ 
++Kernel 模式需要在第一次调用前显式初始化 SDMA：
++
++```python
++import pypto.torch
++
++pypto.torch.init(runtime="tensormap_and_ringbuffer", enable_sdma=True)
++# HBG 使用 runtime="host_build_graph"
++```
++
++先在 capture 外编译并准备 kernel，再进行 ACLGraph capture/replay。
++初始化时未开启 SDMA 的 context 不能在调用时自动升级。
++Program 模式的一次性执行按产物元数据开启 SDMA；复用 `ChipWorker` 时需传入
++`enable_sdma=True`。
++
++在支持 SDMA 的 a2a3 runtime 中，每个常驻 AIV worker 使用独立通道。
++编译器为每个预取 context 预留 256 字节 UB，覆盖整个函数的生命周期，
++避免异步提交和等待覆盖仍存活的计算 tile。预取只改变缓存状态，不改变 tensor 的数值。
++
++`wait` 在设备端通过非阻塞 `Test` 检查完成状态，未完成时约间隔 1 微秒再检查，
++每个事件的等待期限为 20 毫秒。超时返回 `False`，不会取消传输；
++在途传输的 source/context 存储不能因此提前复用。该等待策略由 PyPTO 适配层实现，
++不需要修改 PTO-ISA 的通用 `Wait`。
++
+ ::: pypto.language.prefetch
+     options:
+       show_root_heading: false
+diff --git a/docs/zh/dev/ir/05-operators.md b/docs/zh/dev/ir/05-operators.md
+index 41d72ccb9..79066f00a 100644
+--- a/docs/zh/dev/ir/05-operators.md
++++ b/docs/zh/dev/ir/05-operators.md
+@@ -558,7 +558,7 @@ class CrossCoreExample:
+ ## PrefetchOp：GM→L2 异步预取
+ 
+ 一种隐藏访存延迟 (latency hiding) 的缓存提示。`async_prefetch` 通过 SDMA 异步地把一段
+-全局内存 (GM) 拉入 L2 缓存，期间可以并行执行不相关的计算；`wait` 阻塞直到预取完成。
++全局内存 (GM) 拉入 L2 缓存，期间可以并行执行不相关的计算；`wait` 在有限期限内等待预取完成。
+ 预取不改变任何张量的值——同一个 kernel 加不加预取在数值上完全一致，只影响性能。
+ 
+ 与大多数 PTO intrinsic 不同，`TPREFETCH_ASYNC` 不携带隐式的 wait-event 同步，
+@@ -568,10 +568,14 @@ class CrossCoreExample:
+ 
+ | DSL | 操作数 | 结果 | PTOAS op |
+ | --- | ------ | ---- | -------- |
+-| `pl.prefetch.make_context()` | 无 | `PrefetchAsyncContextType` | `pto.make_prefetch_async_context` |
++| `pl.prefetch.make_context()` | 无 | `PrefetchAsyncContextType` | `func.call @pypto_make_prefetch_context` |
+ | `pl.prefetch.async_prefetch(src, ctx)` | GM Tensor、context | `AsyncEventType` | `pto.tprefetch_async` |
+ | `pl.prefetch.session(ctx)` | context | `AsyncSessionType` | `pto.get_prefetch_async_session` |
+-| `pl.prefetch.wait(evt, session)` | event、session | `BOOL` 标量 | `pto.comm.wait_async_event` |
++| `pl.prefetch.wait(evt, session)` | event、session | `BOOL` 标量 | `func.call @pypto_wait_prefetch` |
++
++预取等待适配层通过公开的 `AsyncEvent::Test()` 查询完成状态；未完成时约间隔
++1 微秒再查询，每个事件等待最多 20 毫秒。超时返回 false，不会取消传输。
++无需修改 PTO-ISA 本身。
+ 
+ 这三个结果类型都是不透明的单例标记类型 (opaque singleton marker，无 shape、无 buffer)，
+ 与 `CommCtxType` 属于同一族。SDMA workspace 不是程序操作数：runtime 持有它，
+diff --git a/include/pypto/codegen/pto/pto_codegen.h b/include/pypto/codegen/pto/pto_codegen.h
+index 091b874cf..a4e626597 100644
+--- a/include/pypto/codegen/pto/pto_codegen.h
++++ b/include/pypto/codegen/pto/pto_codegen.h
+@@ -536,6 +536,13 @@ class PTOCodegen : public CodegenBase {
+    * argument. Returns empty when the function does not use prefetch.
+    */
+   [[nodiscard]] std::string GetSdmaWorkspaceArgSSA() const { return fs_.sdma_workspace_arg_ssa; }
++  /// Compiler-reserved UB address for this context, live for the entire function.
++  [[nodiscard]] std::string GetPrefetchScratchSSA(const ir::CallPtr& op) const {
++    auto it = fs_.prefetch_scratch_ssas.find(op.get());
++    INTERNAL_CHECK_SPAN(it != fs_.prefetch_scratch_ssas.end(), op->span_)
++        << "Prefetch context has no reserved scratch buffer";
++    return it->second;
++  }
+ 
+   /**
+    * @brief SSA name of the synthetic raw dispatch-args pointer parameter.
+@@ -1036,6 +1043,7 @@ class PTOCodegen : public CodegenBase {
+     /// SSA name of the synthetic runtime-owned SDMA workspace pointer param.
+     /// Empty when the current function does not use prefetch.make_context.
+     std::string sdma_workspace_arg_ssa;
++    std::map<const ir::Call*, std::string> prefetch_scratch_ssas;
+ 
+     /// Raw runtime dispatch-args pointer used by deferred completion adapters.
+     std::string deferred_completion_raw_args_ssa;
+@@ -1115,6 +1123,7 @@ class PTOCodegen : public CodegenBase {
+       ffts_workspace_vars.clear();
+ 
+       sdma_workspace_arg_ssa.clear();
++      prefetch_scratch_ssas.clear();
+       deferred_completion_raw_args_ssa.clear();
+       spmd_block_idx_arg.clear();
+       spmd_block_num_arg.clear();
+@@ -1136,6 +1145,7 @@ class PTOCodegen : public CodegenBase {
+ 
+   /// True when the module needs the wrapper-defined counter-completion adapter.
+   bool needs_deferred_completion_adapter_ = false;
++  bool needs_prefetch_adapter_ = false;
+ 
+   const backend::Backend* backend_;  ///< Backend instance for querying op info
+ 
+diff --git a/include/pypto/ir/transforms/utils/reserve_buffer_utils.h b/include/pypto/ir/transforms/utils/reserve_buffer_utils.h
+index dde89ebca..2e71552a9 100644
+--- a/include/pypto/ir/transforms/utils/reserve_buffer_utils.h
++++ b/include/pypto/ir/transforms/utils/reserve_buffer_utils.h
+@@ -32,6 +32,10 @@
+ namespace pypto {
+ namespace ir {
+ 
++// PTO-ISA SDMA contexts use a 256-byte Vec scratch tile. The generated
++// adapter statically checks this against the installed PTO-ISA headers.
++inline constexpr uint64_t kPrefetchScratchBytes = 256;
++
+ /// Shared `system.reserve_buffer` resolution — the SINGLE source of truth for both AllocateMemoryAddr
+ /// (which needs each reserve op's resolved base AND the per-space reserved end for address emission) and
+ /// MemoryReuse (which needs the per-space reserved end as `SpaceFootprint`'s `reserved_start`). Because
+@@ -66,8 +70,10 @@ struct ReserveBufferInfo {
+ class ReserveBufferCollector : public IRVisitor {
+  public:
+   [[nodiscard]] const std::vector<ReserveBufferInfo>& GetReserveBuffers() const { return reserve_buffers_; }
++  [[nodiscard]] const std::vector<const Call*>& GetPrefetchContexts() const { return prefetch_contexts_; }
+ 
+   void VisitExpr_(const CallPtr& op) override {
++    if (IsOp(op, "prefetch.make_context")) prefetch_contexts_.push_back(op.get());
+     if (IsOp(op, "system.reserve_buffer")) {
+       const int size = op->GetKwarg<int>("size", -1);
+       const int base = op->GetKwarg<int>("base", -1);
+@@ -80,10 +86,12 @@ class ReserveBufferCollector : public IRVisitor {
+ 
+  private:
+   std::vector<ReserveBufferInfo> reserve_buffers_;
++  std::vector<const Call*> prefetch_contexts_;
+ };
+ 
+ struct ReserveBufferResolution {
+   ReserveBufferBaseMap resolved_bases;
++  ReserveBufferBaseMap prefetch_scratch_bases;
+   ReservedEndBySpace reserved_end_by_space;
+ };
+ 
+@@ -96,7 +104,7 @@ inline ReserveBufferResolution ResolveReserveBufferBases(const FunctionPtr& func
+ 
+   ReserveBufferCollector collector;
+   collector.VisitStmt(func->body_);
+-  if (collector.GetReserveBuffers().empty()) return resolution;
++  if (collector.GetReserveBuffers().empty() && collector.GetPrefetchContexts().empty()) return resolution;
+ 
+   const MemorySpace reserve_space = GetReserveBufferMemorySpace(func);
+ 
+@@ -145,6 +153,14 @@ inline ReserveBufferResolution ResolveReserveBufferBases(const FunctionPtr& func
+     reserved_end = std::max(reserved_end, buffer_end);
+   }
+ 
++  // A context's hidden SDMA scratch remains live through submission and wait.
++  // Reserve it for the whole function, after explicit pipe/user reservations.
++  // This same floor is charged by MemoryReuse and AllocateMemoryAddr.
++  for (const Call* context : collector.GetPrefetchContexts()) {
++    auto& base = resolution.reserved_end_by_space[MemorySpace::Vec];
++    resolution.prefetch_scratch_bases[context] = static_cast<int64_t>(base);
++    base = policy.AlignAddress(base + kPrefetchScratchBytes, MemorySpace::Vec);
++  }
+   return resolution;
+ }
+ 
+diff --git a/python/pypto/_kernel_abi.py b/python/pypto/_kernel_abi.py
+index 38551d7d3..ff229ddb6 100644
+--- a/python/pypto/_kernel_abi.py
++++ b/python/pypto/_kernel_abi.py
+@@ -21,7 +21,7 @@ from typing import Any
+ 
+ # This is a PyPTO descriptor revision, not a version exported by simpler.
+ KERNEL_DESCRIPTOR_SCHEMA = 1
+-SIMPLER_KERNEL_REVISION = "0b34c256ff9c027f1afaf83c9c71eadda8ec2daf"
++SIMPLER_KERNEL_REVISION = "97343062d08ad2ce4fac73cc17e42180972da603"
+ TENSOR_DTYPE_TAGS = {
+     "fp32": 0,
+     "fp16": 1,
+diff --git a/python/pypto/backend/pto_backend.py b/python/pypto/backend/pto_backend.py
+index 2da831865..d247c69c9 100644
+--- a/python/pypto/backend/pto_backend.py
++++ b/python/pypto/backend/pto_backend.py
+@@ -269,6 +269,56 @@ using namespace pto;
+ 
+ """
+ 
++_PREFETCH_ADAPTER = """\
++#include "common/platform_config.h"
++
++// Scratch is reserved by both memory planners for the entire function.
++// Build the session explicitly so PTO-ISA never falls back to UB address zero
++// or to the launch block index (which aliases the two AIV lanes in a MIX).
++extern "C" inline __aicore__ pto::PrefetchAsyncContext pypto_make_prefetch_context(
++    __gm__ int8_t* workspace, int32_t channel, int32_t scratch_address)
++{
++    pto::PrefetchAsyncContext ctx(reinterpret_cast<__gm__ uint8_t*>(workspace));
++#if !defined(__CPU_SIM) && !defined(__PTO_AUTO__)
++    static_assert(pto::comm::sdma::UB_ALIGN_SIZE == 256,
++                  "Update the compiler prefetch scratch reservation");
++    pto::TASSIGN(ctx.scratchTile, scratch_address);
++    if (channel < 0 || !pto::comm::sdma::BuildSdmaSession(
++            ctx.scratchTile, ctx.workspace, ctx.session, 0U,
++            {64ULL * 1024ULL * 1024ULL, 0, 1}, static_cast<uint32_t>(channel))) {
++        trap();
++    }
++#endif
++    return ctx;
++}
++
++// Use the public nonblocking probe so pacing stays local to PyPTO prefetch.
++extern "C" inline __aicore__ bool pypto_wait_prefetch(
++    pto::comm::AsyncEvent event, pto::comm::AsyncSession session)
++{
++#if !defined(__CPU_SIM) && !defined(__PTO_AUTO__)
++    if (!session.valid) {
++        return event.Test(session);
++    }
++    constexpr uint64_t interval = PLATFORM_PROF_SYS_CNT_FREQ / 1000000ULL;
++    constexpr uint64_t timeout = PLATFORM_PROF_SYS_CNT_FREQ / 50ULL;
++    const uint64_t start = get_sys_cnt();
++    while (!event.Test(session)) {
++        const uint64_t poll_end = get_sys_cnt();
++        if (poll_end - start >= timeout) {
++            return false;
++        }
++        while (get_sys_cnt() - poll_end < interval) {
++        }
++    }
++    return true;
++#else
++    return event.Wait(session);
++#endif
++}
++
++"""
++
+ _DEFERRED_COMPLETION_ADAPTER = """\
+ // --- Deferred completion adapter ---
+ // ABI precondition: supported Simpler dispatchers provide kernel_entry with a
+@@ -1061,6 +1111,7 @@ def _generate_kernel_wrapper(
+             "    __gm__ int8_t* __pypto_sdma_workspace = "
+             "reinterpret_cast<__gm__ int8_t*>("
+             "get_dma_workspace(args, DMA_WORKSPACE_SDMA));\n\n"
++            "    int32_t __pypto_sdma_channel = get_sdma_channel_id(args);\n\n"
+         )
+ 
+     # PTOCodegen appends raw dispatch args for deferred completion after
+@@ -1072,6 +1123,7 @@ def _generate_kernel_wrapper(
+         call_args_list.append("args")
+     if func_uses_sdma:
+         call_args_list.append("__pypto_sdma_workspace")
++        call_args_list.append("__pypto_sdma_channel")
+     if func_uses_spmd:
+         call_args_list = call_args_list + ["__pypto_spmd_block_idx", "__pypto_spmd_block_num"]
+     if wrapper_uses_subblock:
+@@ -1098,7 +1150,8 @@ def _generate_kernel_wrapper(
+ 
+     deferred_completion_adapter = _DEFERRED_COMPLETION_ADAPTER if func_uses_deferred_completion else ""
+     return (
+-        f"{header}\n{deferred_completion_adapter}{fifo_lane_arg_bridge}"
++        f"{header}\n{_PREFETCH_ADAPTER if func_uses_sdma else ''}"
++        f"{deferred_completion_adapter}{fifo_lane_arg_bridge}"
+         f"// --- ptoas-generated code ---\n{ptoas_body}\n{fifo_lane_arg_cleanup}{wrapper_func}"
+     )
+ 
+diff --git a/python/pypto/language/op/prefetch_ops.py b/python/pypto/language/op/prefetch_ops.py
+index e969f0c66..5fc94a0f7 100644
+--- a/python/pypto/language/op/prefetch_ops.py
++++ b/python/pypto/language/op/prefetch_ops.py
+@@ -11,8 +11,9 @@
+ 
+ A latency-hiding cache hint: [`async_prefetch`][pypto.language.prefetch.async_prefetch] starts an SDMA-backed
+ pull of a global-memory region into L2 while unrelated compute proceeds, and
+-[`wait`][pypto.language.prefetch.wait] blocks until it lands. The prefetch changes no tensor values, so a
+-kernel is numerically identical with or without it — only performance differs.
++[`wait`][pypto.language.prefetch.wait] checks completion with a bounded deadline.
++The prefetch changes no tensor values, so a kernel is numerically identical
++with or without it — only performance differs.
+ 
+ Typical usage::
+ 
+@@ -22,11 +23,19 @@ Typical usage::
+     ...                                            # unrelated compute overlaps
+     pl.prefetch.wait(evt, session)                 # x is now resident in L2
+ 
+-The runtime owns and injects the SDMA scratch workspace. One-shot execution
+-enables SDMA automatically from generated artifact metadata; an explicitly
+-reused worker must be created with ``ChipWorker(enable_sdma=True)``. The current
+-runtime-provisioned path is covered on onboard a2a3. A runtime without an SDMA
+-provider fails during worker initialization; there is no fallback or no-op path.
++The runtime owns and injects the SDMA workspace. In program mode, one-shot
++execution enables SDMA from artifact metadata; an explicitly reused worker needs
++``ChipWorker(enable_sdma=True)``. In kernel mode, call
++``pypto.torch.init(runtime="tensormap_and_ringbuffer", enable_sdma=True)``
++(or ``runtime="host_build_graph"``) before the first kernel invocation. Compile
++and prepare the kernel before ACLGraph capture, then reuse its context on replay.
++SDMA cannot be enabled by a kernel invocation after initialization.
++
++On supported a2a3 runtimes, each resident AIV worker receives a distinct SDMA
++channel. Codegen reserves 256 bytes of UB per context for its entire function
++lifetime, including waits, so prefetch cannot overwrite live compute tiles.
++A runtime without an SDMA provider fails during initialization; there is no
++fallback or no-op path.
+ """
+ 
+ from typing import Any
+@@ -108,7 +117,10 @@ def wait(event: AsyncEvent, session_handle: AsyncSession) -> Scalar:
+             [`session`][pypto.language.prefetch.session].
+ 
+     Returns:
+-        A ``BOOL`` [`Scalar`][pypto.language.Scalar] done flag.
++        A ``BOOL`` [`Scalar`][pypto.language.Scalar] done flag. Device prefetch
++        probes completion about once per microsecond and returns ``False``
++        after a 20 ms event deadline. Timeout does not cancel the transfer
++        or permit the source/context storage to be reused while it is in flight.
+     """
+     return Scalar(expr=_ir_prefetch.wait(_unwrap(event), _unwrap(session_handle)))
+ 
+diff --git a/runtime b/runtime
+index 0b34c256f..97343062d 160000
+--- a/runtime
++++ b/runtime
+@@ -1 +1 @@
+-Subproject commit 0b34c256ff9c027f1afaf83c9c71eadda8ec2daf
++Subproject commit 97343062d08ad2ce4fac73cc17e42180972da603
+diff --git a/src/backend/common/pto_ops_prefetch.cpp b/src/backend/common/pto_ops_prefetch.cpp
+index 5e87e62b8..d32c1e87e 100644
+--- a/src/backend/common/pto_ops_prefetch.cpp
++++ b/src/backend/common/pto_ops_prefetch.cpp
+@@ -15,14 +15,15 @@
+  *
+  * Maps the PyPTO ``prefetch.*`` ops onto their PTOAS counterparts::
+  *
+- *     prefetch.make_context    -> pto.make_prefetch_async_context
++ *     prefetch.make_context    -> func.call @pypto_make_prefetch_context
+  *     prefetch.async_prefetch  -> pto.tprefetch_async
+  *     prefetch.session         -> pto.get_prefetch_async_session
+- *     prefetch.wait            -> pto.comm.wait_async_event
++ *     prefetch.wait            -> func.call @pypto_wait_prefetch
+  *
+  * Emitted shape for the full sequence::
+  *
+- *     %ctx = pto.make_prefetch_async_context(%arg2 : !pto.ptr<i8>)
++ *     %ctx = func.call @pypto_make_prefetch_context(%workspace, %channel, %scratch)
++ *         : (!pto.ptr<i8>, i32, i32)
+  *         -> !pto.prefetch_async_context
+  *     %x_pview = pto.partition_view %x_view, offsets = [%c0], sizes = [%c4096]
+  *         : !pto.tensor_view<4096xf32> -> !pto.partition_tensor_view<4096xf32>
+@@ -31,8 +32,8 @@
+  *         -> !pto.async_event
+  *     %sess = pto.get_prefetch_async_session %ctx
+  *         : !pto.prefetch_async_context -> !pto.async_session
+- *     %done = pto.comm.wait_async_event(%evt, %sess
+- *         : !pto.async_event, !pto.async_session) -> i1
++ *     %done = func.call @pypto_wait_prefetch(%evt, %sess)
++ *         : (!pto.async_event, !pto.async_session) -> i1
+  *
+  * The three handle types are opaque singletons in PyPTO IR — they carry no
+  * shape or buffer, so each emitter defines its result under the assignment's
+@@ -137,17 +138,17 @@ void RegisterPrefetchOps(Backend& backend, const std::unordered_set<std::string>
+     backend.RegisterOp(op_name).f_codegen(std::move(fn));
+   };
+ 
+-  // prefetch.make_context() -> pto.make_prefetch_async_context.
+-  // PTOCodegen injects the runtime-owned `!pto.ptr<i8>` function parameter.
++  // Bind the runtime-owned workspace/channel to compiler-reserved UB scratch.
+   reg("prefetch.make_context", [](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) -> std::string {
+     auto& cg = AsPto(codegen_base);
+-    pto_ops_detail::CheckArity(op, "pto.make_prefetch_async_context", 0);
++    pto_ops_detail::CheckArity(op, "prefetch.make_context", 0);
+     const std::string ws_ptr = cg.GetSdmaWorkspaceArgSSA();
+     INTERNAL_CHECK_SPAN(!ws_ptr.empty(), op->span_)
+         << "Internal error: prefetch.make_context was not detected by PTOCodegen's function pre-scan";
+ 
+     const std::string ctx = ResultSSA(cg);
+-    cg.Emit(ctx + " = pto.make_prefetch_async_context(" + ws_ptr + " : !pto.ptr<i8>) -> " + kCtxType);
++    cg.Emit(ctx + " = func.call @pypto_make_prefetch_context(" + ws_ptr + ", %__pypto_sdma_channel, " +
++            cg.GetPrefetchScratchSSA(op) + ") : (!pto.ptr<i8>, i32, i32) -> " + kCtxType);
+     cg.SetCurrentExprValue(ctx);
+     return "";
+   });
+@@ -179,17 +180,17 @@ void RegisterPrefetchOps(Backend& backend, const std::unordered_set<std::string>
+     return "";
+   });
+ 
+-  // prefetch.wait(event, session) -> pto.comm.wait_async_event.
++  // prefetch.wait(event, session) -> func.call @pypto_wait_prefetch.
+   // Result is an `i1` done flag; PyPTO types it as a BOOL scalar.
+   reg("prefetch.wait", [](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) -> std::string {
+     auto& cg = AsPto(codegen_base);
+-    pto_ops_detail::CheckArity(op, "pto.comm.wait_async_event", 2);
++    pto_ops_detail::CheckArity(op, "prefetch.wait", 2);
+     const std::string event = GetHandleSSA(op, 0, cg);
+     const std::string session = GetHandleSSA(op, 1, cg);
+ 
+     const std::string done = ResultSSA(cg);
+-    cg.Emit(done + " = pto.comm.wait_async_event(" + event + ", " + session + " : " + kEventType + ", " +
+-            kSessionType + ") -> i1");
++    cg.Emit(done + " = func.call @pypto_wait_prefetch(" + event + ", " + session + ") : (" + kEventType +
++            ", " + kSessionType + ") -> i1");
+     cg.SetCurrentExprValue(done);
+     return "";
+   });
+diff --git a/src/codegen/pto/pto_codegen.cpp b/src/codegen/pto/pto_codegen.cpp
+index ee514cf87..c807433c4 100644
+--- a/src/codegen/pto/pto_codegen.cpp
++++ b/src/codegen/pto/pto_codegen.cpp
+@@ -51,6 +51,7 @@
+ #include "pypto/ir/transforms/utils/auto_name_utils.h"
+ #include "pypto/ir/transforms/utils/memref_utils.h"
+ #include "pypto/ir/transforms/utils/op_predicates.h"
++#include "pypto/ir/transforms/utils/reserve_buffer_utils.h"
+ #include "pypto/ir/transforms/utils/tile_buf_signature.h"
+ #include "pypto/ir/transforms/utils/transform_utils.h"
+ #include "pypto/ir/transforms/utils/var_collectors.h"
+@@ -687,6 +688,7 @@ std::string PTOCodegen::Generate(const ProgramPtr& program, bool emit_tile_addr,
+   fs_.body_section.clear();
+   gm_slot_buffer_offsets_.clear();
+   needs_deferred_completion_adapter_ = false;
++  needs_prefetch_adapter_ = false;
+   PrepareGMSlotBufferLayout(program);
+ 
+   const std::string target_arch = backend_->GetHandler()->GetPtoTargetArch();
+@@ -708,6 +710,17 @@ std::string PTOCodegen::Generate(const ProgramPtr& program, bool emit_tile_addr,
+   }
+ 
+   EmitDeferredCompletionAdapterDeclaration();
++  if (needs_prefetch_adapter_) {
++    for (const auto& [gvar, func] : program->functions_) {
++      CHECK_SPAN(func->name_ != "pypto_make_prefetch_context" && func->name_ != "pypto_wait_prefetch",
++                 func->span_)
++          << "Function name is reserved for the prefetch runtime adapter";
++    }
++    stream_ << "  func.func private @pypto_make_prefetch_context"
++            << "(!pto.ptr<i8>, i32, i32) -> !pto.prefetch_async_context\n";
++    stream_ << "  func.func private @pypto_wait_prefetch"
++            << "(!pto.async_event, !pto.async_session) -> i1\n";
++  }
+ 
+   stream_ << "}\n";
+   return stream_.str();
+@@ -930,6 +943,7 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+   const bool uses_subblock_param = collector.UsesSubblockOp();
+   fs_.ffts_workspace_vars = collector.GetFFTSWorkspaceVars();
+   if (uses_sdma_workspace) {
++    fs_.used_ssa_names.insert("__pypto_sdma_channel");
+     fs_.used_ssa_names.insert("arg" + std::to_string(func->params_.size() + dyn_vars.size()));
+   }
+   if (uses_deferred_completion) {
+@@ -1105,7 +1119,8 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+   if (uses_sdma_workspace) {
+     if (!first_param) stream_ << ", ";
+     fs_.sdma_workspace_arg_ssa = "%arg" + std::to_string(next_arg_idx++);
+-    stream_ << fs_.sdma_workspace_arg_ssa << ": !pto.ptr<i8>";
++    stream_ << fs_.sdma_workspace_arg_ssa << ": !pto.ptr<i8>, %__pypto_sdma_channel: i32";
++    needs_prefetch_adapter_ = true;
+   }
+ 
+   // Append SPMD identity params after the dynamic-dim and SDMA workspace args,
+@@ -1210,6 +1225,23 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+   auto saved_stream = std::move(stream_);
+   stream_ = std::move(fs_.body_section);
+ 
++  if (uses_sdma_workspace) {
++    auto policy = backend_->CreateMemoryAllocatorPolicy();
++    const auto reserved = ir::ResolveReserveBufferBases(func, *policy);
++    ir::ReserveBufferCollector contexts;
++    contexts.VisitStmt(func->body_);
++    for (const auto* context : contexts.GetPrefetchContexts()) {
++      const auto scratch = NewNamedTemp("__pypto_prefetch_scratch");
++      fs_.prefetch_scratch_ssas[context] = scratch;
++      std::string placement =
++          emit_tile_addr_ ? "false, base = " + std::to_string(reserved.prefetch_scratch_bases.at(context))
++                          : "true";
++      Emit(scratch + " = pto.reserve_buffer {name = \"" + scratch.substr(1) +
++           "\", size = " + std::to_string(ir::kPrefetchScratchBytes) +
++           ", location = #pto.address_space<vec>, auto = " + placement + "} -> i32");
++    }
++  }
++
+   if (func->body_) {
+     VisitStmt(func->body_);
+   }
+diff --git a/tests/st/runtime/kernel/test_mix_prefetch.py b/tests/st/runtime/kernel/test_mix_prefetch.py
+new file mode 100644
+index 000000000..4eedab791
+--- /dev/null
++++ b/tests/st/runtime/kernel/test_mix_prefetch.py
+@@ -0,0 +1,238 @@
++# Copyright (c) PyPTO Contributors.
++# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
++# CANN Open Software License Agreement Version 2.0 (the "License").
++# Please refer to the License for details. You may not use this file except in compliance with the License.
++# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
++# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
++# See LICENSE in the root of the software repository for the full text of the License.
++# -----------------------------------------------------------------------------------------------------------
++
++"""Full 1C2V MIX prefetch must preserve tiles live across SDMA submit/wait."""
++
++import json
++import os
++import subprocess
++import sys
++from pathlib import Path
++
++import pypto.language as pl
++import pytest
++
++
++@pl.jit.incore
++def cube_copy(
++    a: pl.Tensor[[384, 16], pl.BF16],
++    b: pl.Tensor[[16, 16], pl.BF16],
++    out: pl.InOut[pl.Tensor[[384, 16], pl.FP32]],
++):
++    worker = pl.tile.get_block_idx()
++    left = pl.load(a, [worker * 16, 0], [16, 16])
++    right = pl.load(b, [0, 0], [16, 16])
++    value = pl.matmul(left, right, out_dtype=pl.FP32)
++    out = pl.store(value, [worker * 16, 0], out)
++    return out
++
++
++@pl.jit.incore
++def vector_prefetch(
++    x: pl.Tensor[[48, 1024], pl.FP32],
++    prefetch_src: pl.Tensor[[4096], pl.INT8],
++    issuer_mask: pl.Tensor[[48], pl.INT32],
++    out: pl.InOut[pl.Tensor[[48, 1024], pl.FP32]],
++    done: pl.InOut[pl.Tensor[[768], pl.INT32]],
++    post_count: pl.constexpr = 1,
++):
++    pl.func_attr({"split_aiv": True})
++    worker = pl.tile.get_block_idx() * 2 + pl.tile.get_subblock_idx()
++    # Keep business data live while the context uses its hidden UB scratch.
++    value = pl.load(x, [worker, 0], [1, 1024])
++    complete = pl.const(2, pl.INT32)
++    if pl.read(issuer_mask, [worker]) != 0:
++        ctx = pl.prefetch.make_context()
++        for _ in pl.range(post_count - 1):
++            pl.prefetch.async_prefetch(prefetch_src, ctx)
++        event = pl.prefetch.async_prefetch(prefetch_src, ctx)
++        session = pl.prefetch.session(ctx)
++        if pl.prefetch.wait(event, session):
++            complete = pl.const(2, pl.INT32)
++        else:
++            complete = pl.const(1, pl.INT32)
++    if complete == 2:
++        out = pl.store(pl.add(value, 1.0), [worker, 0], out)
++    pl.write(done, [worker * 16], complete)
++    pl.system.cacheinvalid(done, [1], [worker * 16])
++    pl.system.fence()
++    return out, done
++
++
++@pl.jit.inline(auto_scope=False)
++def mixed(
++    a: pl.Tensor,
++    b: pl.Tensor,
++    x: pl.Tensor,
++    prefetch_src: pl.Tensor,
++    issuer_mask: pl.Tensor,
++    cube_out: pl.InOut[pl.Tensor],
++    vector_out: pl.InOut[pl.Tensor],
++    done: pl.InOut[pl.Tensor],
++    post_count: pl.constexpr = 1,
++):
++    with pl.cluster(name_hint="sdma_mix_smoke"):
++        cube_out = cube_copy(a, b, cube_out)
++        vector_out, done = vector_prefetch(x, prefetch_src, issuer_mask, vector_out, done, post_count)
++    return cube_out, vector_out, done
++
++
++@pl.jit
++def entry(
++    a: pl.Tensor[[384, 16], pl.BF16],
++    b: pl.Tensor[[16, 16], pl.BF16],
++    x: pl.Tensor[[48, 1024], pl.FP32],
++    prefetch_src: pl.Tensor[[4096], pl.INT8],
++    issuer_mask: pl.Tensor[[48], pl.INT32],
++    cube_out: pl.InOut[pl.Tensor[[384, 16], pl.FP32]],
++    vector_out: pl.InOut[pl.Tensor[[48, 1024], pl.FP32]],
++    done: pl.InOut[pl.Tensor[[768], pl.INT32]],
++    post_count: pl.constexpr = 1,
++):
++    with pl.spmd(24, sync_start=True):
++        cube_out, vector_out, done = mixed(
++            a, b, x, prefetch_src, issuer_mask, cube_out, vector_out, done, post_count
++        )
++    return cube_out, vector_out, done
++
++
++def _run(device, directory, runtime, scenario, issuers, rounds=100, post_count=1):
++    import torch  # noqa: PLC0415
++    import torch_npu  # noqa: PLC0415
++    from pypto import CacheConfig, configure_cache  # noqa: PLC0415
++    from pypto.runtime.kernel.context import get_process_kernel_state  # noqa: PLC0415
++    from pypto.torch import init  # noqa: PLC0415
++
++    os.chdir(directory)
++    os.environ.pop("PYPTO_PROG_BUILD_DIR", None)
++    configure_cache(CacheConfig(enabled=False))
++    torch_npu.npu.set_device(device)
++    init(runtime=runtime, enable_sdma=True)
++    state = get_process_kernel_state()
++    a = torch.zeros((384, 16), dtype=torch.bfloat16, device=f"npu:{device}")
++    b = torch.eye(16, dtype=torch.bfloat16).to(a.device)
++    x = torch.zeros((48, 1024), dtype=torch.float32, device=a.device)
++    source = torch.zeros(4096, dtype=torch.int8, device=a.device)
++    mask_cpu = torch.ones(48, dtype=torch.int32)
++    if issuers in ("none", "single"):
++        mask_cpu.zero_()
++        if issuers == "single":
++            mask_cpu[32] = 1
++    mask = mask_cpu.to(a.device)
++    cube_out = torch.full((384, 16), -999.0, dtype=torch.float32, device=a.device)
++    vector_out = torch.full_like(x, -999)
++    done = torch.zeros(768, dtype=torch.int32, device=a.device)
++    values = (a, b, x, source, mask, cube_out, vector_out, done)
++    graph = None
++    try:
++        entry(*values, post_count=post_count)
++        torch_npu.npu.synchronize()
++        assert torch.equal(vector_out.cpu(), torch.ones((48, 1024))), (
++            f"warmup failed; completion={done.cpu()[::16].tolist()}"
++        )
++        registration = next(iter(state._registrations.values()))
++        assert registration.artifact.requires_sdma
++        orchestration = "\n".join(
++            path.read_text() for path in (registration.artifact.output_dir / "orchestration").glob("*.cpp")
++        )
++        assert "MixedKernels mixed_0 = {0, 1, 1}" in orchestration
++        if scenario == "replay":
++            graph = torch_npu.npu.NPUGraph()
++            with torch_npu.npu.graph(graph):
++                entry(*values, post_count=post_count)
++        expected_done = torch.zeros(768, dtype=torch.int32)
++        expected_done[::16] = 2
++        for iteration in range(rounds):
++            expected_a = ((torch.arange(384 * 16).reshape(384, 16) + iteration * 3) % 13).bfloat16()
++            expected_x = (torch.arange(48 * 1024).reshape(48, 1024) + iteration * 100000).float()
++            a.copy_(expected_a)
++            x.copy_(expected_x)
++            cube_out.fill_(-999)
++            vector_out.fill_(-999)
++            done.zero_()
++            if graph is None:
++                entry(*values, post_count=post_count)
++            else:
++                graph.replay()
++            torch_npu.npu.synchronize()
++            assert torch.equal(cube_out.cpu(), expected_a.float()), f"cube round={iteration}"
++            actual_vector = vector_out.cpu()
++            if not torch.equal(actual_vector, expected_x + 1):
++                bad = (actual_vector != expected_x + 1).nonzero()
++                Path("failure.json").write_text(
++                    json.dumps(
++                        {
++                            "iteration": iteration,
++                            "positions": bad.tolist(),
++                            "actual": actual_vector[bad[:, 0], bad[:, 1]].tolist(),
++                            "expected": (expected_x + 1)[bad[:, 0], bad[:, 1]].tolist(),
++                            "done": done.cpu().reshape(48, 16).tolist(),
++                        }
++                    )
++                )
++            assert torch.equal(actual_vector, expected_x + 1), (
++                f"vector round={iteration}; mismatches="
++                f"{(actual_vector != expected_x + 1).sum(dim=1).tolist()}; "
++                f"completion={done.cpu()[::16].tolist()}; details in failure.json"
++            )
++            assert torch.equal(done.cpu(), expected_done), f"completion/guard round={iteration}"
++        Path("result.json").write_text(
++            json.dumps(
++                dict(
++                    runtime=runtime, scenario=scenario, issuers=issuers, rounds=rounds, post_count=post_count
++                )
++            )
++        )
++    finally:
++        if graph is not None:
++            graph.reset()
++        state.close()
++
++
++@pytest.mark.platforms("a2a3")
++@pytest.mark.parametrize("runtime", ["tensormap_and_ringbuffer", "host_build_graph"])
++@pytest.mark.parametrize("scenario", ["eager", "replay"])
++@pytest.mark.parametrize("issuers,post_count", [("none", 1), ("single", 1), ("all", 1), ("all", 65)])
++def test_kernel_mix_prefetch_preserves_live_tiles(
++    test_config, tmp_path, runtime, scenario, issuers, post_count
++):
++    if test_config.codegen_only or test_config.platform != "a2a3":
++        pytest.skip("Requires an A2/A3 NPU and the native torch adapter")
++    pytest.importorskip("torch_npu")
++    logs = tmp_path / "ascend"
++    logs.mkdir()
++    env = dict(os.environ, ASCEND_PROCESS_LOG_PATH=str(logs))
++    with (tmp_path / "run.log").open("w") as log:
++        result = subprocess.run(
++            [
++                sys.executable,
++                "-c",
++                "from tests.st.runtime.kernel.test_mix_prefetch import _run; "
++                "import sys; _run(int(sys.argv[1]), *sys.argv[2:6], post_count=int(sys.argv[6]))",
++                str(test_config.device_id),
++                str(tmp_path),
++                runtime,
++                scenario,
++                issuers,
++                str(post_count),
++            ],
++            env=env,
++            stdout=log,
++            stderr=subprocess.STDOUT,
++            timeout=300,
++            check=False,
++        )
++    output = (tmp_path / "run.log").read_text()
++    assert result.returncode == 0, output
++    assert "PyPTO kernel shutdown did not complete" not in output
++    assert json.loads((tmp_path / "result.json").read_text())["rounds"] == 100
++
++
++if __name__ == "__main__":
++    pytest.main([__file__, "-v"])
+diff --git a/tests/ut/codegen/test_prefetch_codegen.py b/tests/ut/codegen/test_prefetch_codegen.py
+index 654961885..43cc565aa 100644
+--- a/tests/ut/codegen/test_prefetch_codegen.py
++++ b/tests/ut/codegen/test_prefetch_codegen.py
+@@ -10,6 +10,8 @@
+ """PTO codegen tests for the ``prefetch.*`` async GM->L2 prefetch op family."""
+ 
+ import re
++import shutil
++import subprocess
+ 
+ import pypto.language as pl
+ import pytest
+@@ -81,19 +83,26 @@ class OrderedSyntheticArgsProgram:
+ class TestPrefetchPTOCodegen:
+     """Each prefetch op lowers to its PTOAS counterpart with the right operand types."""
+ 
++    def test_context_reserves_scratch_and_uses_runtime_channel(self):
++        mlir = _generate_mlir(PrefetchProgram)
++        assert "pto.reserve_buffer" in mlir
++        assert "size = 256" in mlir
++        assert "%__pypto_sdma_channel: i32" in mlir
++        assert "func.call @pypto_make_prefetch_context" in mlir
++
+     def test_make_context_lowers_from_hidden_i8_pointer(self):
+-        """A synthetic INT8 pointer feeds ``pto.make_prefetch_async_context``."""
++        """The adapter receives workspace, worker channel, and reserved scratch."""
+         mlir = _generate_mlir(PrefetchProgram)
+         assert re.search(r"func\.func @main\([^)]*!pto\.ptr<i8>[^)]*\)", mlir), mlir
+         assert re.search(
+-            r"pto\.make_prefetch_async_context\(%\w+ : !pto\.ptr<i8>\)",
++            r"func.call @pypto_make_prefetch_context\(%\w+, %__pypto_sdma_channel, %\w+\)",
+             mlir,
+         ), mlir
+ 
+     def test_hidden_sdma_pointer_is_first_parameter_without_user_args(self):
+         """A hidden-only signature starts directly with ``%arg0``, not a comma."""
+         mlir = _generate_mlir(ZeroParamPrefetchProgram)
+-        assert "func.func @main(%arg0: !pto.ptr<i8>)" in mlir, mlir
++        assert "func.func @main(%arg0: !pto.ptr<i8>, %__pypto_sdma_channel: i32)" in mlir, mlir
+ 
+     def test_synthetic_argument_order_matches_wrapper(self):
+         """Dynamic dims precede SDMA, which precedes SPMD in both call layers."""
+@@ -110,7 +119,7 @@ class TestPrefetchPTOCodegen:
+         assert re.search(
+             r"func\.func @ordered\("
+             r"%arg0: !pto\.ptr<f32>, %arg1: !pto\.ptr<f32>, %arg2: !pto\.ptr<f32>, "
+-            r"%arg3: index, %arg4: !pto\.ptr<i8>, "
++            r"%arg3: index, %arg4: !pto\.ptr<i8>, %__pypto_sdma_channel: i32, "
+             r"%__pypto_spmd_block_idx: i32, %__pypto_spmd_block_num: i32\)",
+             signature_line,
+         ), signature_line
+@@ -121,7 +130,8 @@ class TestPrefetchPTOCodegen:
+         call_line = next(line.strip() for line in wrapper.splitlines() if line.strip().startswith("ordered("))
+         assert re.search(
+             r"ordered\(prefetch_src\w*, x\w*, out\w*, ROWS, "
+-            r"__pypto_sdma_workspace, __pypto_spmd_block_idx, __pypto_spmd_block_num\);",
++            r"__pypto_sdma_workspace, __pypto_sdma_channel, "
++            r"__pypto_spmd_block_idx, __pypto_spmd_block_num\);",
+             call_line,
+         ), call_line
+ 
+@@ -144,11 +154,11 @@ class TestPrefetchPTOCodegen:
+             mlir,
+         ), mlir
+ 
+-    def test_wait_lowers_to_comm_wait_async_event(self):
++    def test_wait_lowers_to_paced_prefetch_adapter(self):
+         """``wait`` pairs the event and session and yields an ``i1``."""
+         mlir = _generate_mlir(PrefetchProgram)
+         assert re.search(
+-            r"= pto\.comm\.wait_async_event\(%\w+, %\w+ : "
++            r"= func\.call @pypto_wait_prefetch\(%\w+, %\w+\) : \("
+             r"!pto\.async_event, !pto\.async_session\) -> i1",
+             mlir,
+         ), mlir
+@@ -170,7 +180,7 @@ class TestPrefetchPTOCodegen:
+                 operands = re.findall(r"%\w+", stripped.split(" = ", 1)[1])
+             else:
+                 lhs = None
+-            if "pto.tprefetch_async" in stripped or "pto.comm.wait_async_event" in stripped:
++            if "pto.tprefetch_async" in stripped or "func.call @pypto_wait_prefetch" in stripped:
+                 for operand in operands:
+                     assert operand in defined, f"{operand} used before definition in: {stripped}"
+             if lhs is not None:
+@@ -217,10 +227,10 @@ class TestPrefetchCoreAffinity:
+         optimized = PassManager.get_strategy(OptimizationStrategy.Default).run_passes(MixedPrefetchProgram)
+ 
+         lowered_prefetch_ops = (
+-            "pto.make_prefetch_async_context",
++            "func.call @pypto_make_prefetch_context",
+             "pto.tprefetch_async",
+             "pto.get_prefetch_async_session",
+-            "pto.comm.wait_async_event",
++            "func.call @pypto_wait_prefetch",
+         )
+         per_core: dict[str, int] = {}
+         for func in optimized.functions.values():
+@@ -310,5 +320,149 @@ class TestPrefetchBackendArtifact:
+         assert '"enable_sdma"' not in result["kernel_config.py"]
+ 
+ 
++@pl.program
++class LiveTilePrefetchProgram:
++    @pl.function(type=pl.FunctionType.InCore)
++    def main(self, x: pl.Tensor[[1, 1024], pl.FP32], out: pl.Tensor[[1, 1024], pl.FP32]):
++        value = pl.load(x, [0, 0], [1, 1024])
++        ctx = pl.prefetch.make_context()
++        event = pl.prefetch.async_prefetch(x, ctx)
++        pl.prefetch.wait(event, pl.prefetch.session(ctx))
++        return pl.store(pl.add(value, 1.0), [0, 0], out)
++
++
++@pl.program
++class ReservedMultiContextProgram:
++    @pl.function(type=pl.FunctionType.InCore)
++    def main(self, x: pl.Tensor[[1, 1024], pl.FP32], out: pl.Tensor[[1, 1024], pl.FP32]):
++        pipe_buf = pl.reserve_buffer(name="user_scratch", size=4096, base=1024)
++        pl.aiv_initialize_pipe(dir_mask=1, slot_size=512, c2v_consumer_buf=pipe_buf)
++        value = pl.load(x, [0, 0], [1, 1024])
++        ctx1 = pl.prefetch.make_context()
++        ctx2 = pl.prefetch.make_context()
++        event1 = pl.prefetch.async_prefetch(x, ctx1)
++        pl.prefetch.wait(event1, pl.prefetch.session(ctx1))
++        event2 = pl.prefetch.async_prefetch(x, ctx2)
++        pl.prefetch.wait(event2, pl.prefetch.session(ctx2))
++        return pl.store(pl.add(value, 1.0), [0, 0], out)
++
++
++@pytest.mark.parametrize(
++    "program,scratch_bases,tile_floor",
++    [(LiveTilePrefetchProgram, [0], 256), (ReservedMultiContextProgram, [5120, 5376], 5632)],
++)
++def test_prefetch_scratch_never_aliases_live_tiles_or_user_reservations(program, scratch_bases, tile_floor):
++    mlir = _generate_mlir(program)
++    reservations = [
++        line for line in mlir.splitlines() if "pto.reserve_buffer" in line and "size = 256" in line
++    ]
++    matches = [re.search(r"base = (\d+)", line) for line in reservations]
++    assert all(match is not None for match in matches)
++    assert [int(match.group(1)) for match in matches if match is not None] == scratch_bases
++    constants = {name: int(value) for name, value in re.findall(r"(%\w+) = arith.constant (\d+) : i64", mlir)}
++    addresses = re.findall(r"pto.alloc_tile addr = (%\w+)[^\n]*loc=vec", mlir)
++    assert addresses
++    assert all(constants[address] >= tile_floor for address in addresses), mlir
++    assert mlir.index("pto.tload") < mlir.index("func.call @pypto_make_prefetch_context")
++    assert mlir.index("func.call @pypto_wait_prefetch") < mlir.index("pto.tadds")
++
++
++def test_ptoas_planner_reserves_prefetch_scratch(tmp_path):
++    from pypto import passes  # noqa: PLC0415
++    from pypto.backend._ptoas_locate import find_ptoas_binary  # noqa: PLC0415
++    from pypto.backend.pto_backend import _compile_pto_module  # noqa: PLC0415
++
++    if find_ptoas_binary() is None:
++        pytest.skip("PTOAS is not available")
++    backend.reset_for_testing()
++    backend.set_backend_type(BackendType.Ascend910B)
++    with passes.PassContext([], memory_planner=passes.MemoryPlanner.PTOAS):
++        optimized = PassManager.get_strategy(OptimizationStrategy.Default).run_passes(LiveTilePrefetchProgram)
++        mlir = codegen.PTOCodegen().generate(optimized, emit_tile_addr=False)
++    assert "size = 256, location = #pto.address_space<vec>, auto = true" in mlir
++    cpp = _compile_pto_module(mlir, "live_prefetch", str(tmp_path), passes.MemoryPlanner.PTOAS)
++    constants = {}
++    for name, value in re.findall(r"(?:u?int(?:32|64)_t) (\w+) = (?:\(\w+\) )*(\w+);", cpp):
++        if value.isdecimal():
++            constants[name] = int(value)
++        elif value in constants:
++            constants[name] = constants[value]
++    addresses = [constants[value] for value in re.findall(r"TASSIGN\([^,]+, (\w+)\)", cpp)]
++    assert addresses, cpp
++    scratch_match = re.search(r"= pypto_make_prefetch_context\(\w+, \w+, (\w+)\)", cpp)
++    assert scratch_match is not None, cpp
++    scratch_arg = scratch_match.group(1)
++    scratch_base = constants[scratch_arg]
++    # PTOAS may put the reservation after ordinary tiles, unlike PyPTO's floor.
++    assert all(base + 4096 <= scratch_base or base >= scratch_base + 256 for base in addresses), cpp
++
++
++def test_prefetch_wait_adapter_paces_probes_and_bounds_failure(tmp_path):
++    """Exercise the emitted wait with a deterministic clock and completion probe."""
++    compiler = shutil.which("g++")
++    if compiler is None:
++        pytest.skip("C++ compiler is unavailable")
++    adapter = pto_backend._PREFETCH_ADAPTER
++    wait = adapter[adapter.index('extern "C" inline __aicore__ bool pypto_wait_prefetch') :]
++    source = tmp_path / "wait_contract.cpp"
++    source.write_text(
++        r"""
++#include <cassert>
++#include <cstdint>
++#define __aicore__
++constexpr uint64_t PLATFORM_PROF_SYS_CNT_FREQ = 50000000;
++uint64_t clock_ticks = 0;
++unsigned probe_count = 0;
++uint64_t get_sys_cnt() { return clock_ticks++; }
++namespace pto::comm {
++struct AsyncSession {
++    bool valid = true;
++    mutable unsigned probes = 0;
++    mutable uint64_t last_probe = 0;
++};
++struct AsyncEvent {
++    unsigned ready_after;
++    bool Test(const AsyncSession& session) const {
++        if (!session.valid) return false;
++        if (session.probes != 0) assert(clock_ticks - session.last_probe >= 50);
++        session.last_probe = clock_ticks;
++        ++session.probes;
++        ++probe_count;
++        return ready_after != 0 && session.probes >= ready_after;
++    }
++    bool Wait(const AsyncSession&) const { assert(false); return false; }
++};
++}
++"""
++        + wait
++        + r"""
++int main() {
++    pto::comm::AsyncSession ready;
++    assert(pypto_wait_prefetch({1}, ready));
++    assert(probe_count == 1 && clock_ticks < 50);
++    clock_ticks = 0;
++    probe_count = 0;
++    pto::comm::AsyncSession delayed;
++    assert(pypto_wait_prefetch({3}, delayed));
++    assert(probe_count == 3 && clock_ticks >= 100);
++    clock_ticks = 0;
++    probe_count = 0;
++    pto::comm::AsyncSession absent;
++    assert(!pypto_wait_prefetch({0}, absent));
++    assert(clock_ticks >= 1000000 && clock_ticks < 1000100);
++    assert(probe_count < 20001);
++    clock_ticks = 0;
++    pto::comm::AsyncSession invalid;
++    invalid.valid = false;
++    assert(!pypto_wait_prefetch({1}, invalid));
++    assert(clock_ticks == 0);
++}
++"""
++    )
++    binary = tmp_path / "wait_contract"
++    subprocess.run([compiler, "-std=c++17", "-O2", str(source), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True, timeout=10)
++
++
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])

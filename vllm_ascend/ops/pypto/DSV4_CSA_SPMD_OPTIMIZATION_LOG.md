@@ -20170,3 +20170,63 @@ NotAlloc全局偏移路径。只补B28 MemoryAccess/L2诊断，任务
  task_20261020_195203_1895914849，复用冻结正式源码及旧可靠工具链。
 它不修改算子，不以外层PMU时长更新性能表。队列当前整机CI占卡，
 两项任务pending；目标继续active。正式算子未改，没有任何仓库push。
+
+
+## 2026-10-20：吸纳 SDMA 完整 MIX 修复，转向输出后段预取
+
+用户要求重新吸纳 Simpler #2583 / PyPTO #3001 更新，Attention 方向仍按此前指令停止。
+前一用户指令允许将已有 vllm-ascend 17 个提交 push，远端已核对到 d6610d17；
+此授权不延伸到随后新增提交或依赖仓库，本轮依赖仅做本地提交。
+
+实际版本核对发现：Simpler PR head 是 97343062；PyPTO #3001 仍是 ed612fbd。
+最新配套修复是评论 6288341715 指定的 0093d617，配套 PR 关闭且未合并，不能
+使用 API 中旧 head 24b263c2 替代。两个新独立 worktree 继承原 CSA 修复，
+本地提交为 Simpler 685bec17d、PyPTO 9c36a3450。保留参数扩容、GM 子视图、
+NZ 整体展平，runtime gitlink/ABI 指向本地合成版本。原 SDMA 树及未提交草稿保留。
+
+新版由 runtime 提供驻留 AIV 唯一通道；编译器为每个 context 全函数保留 256B UB；
+等待使用公开 Test，未完成探测约每 1μs 一次、事件期限 20ms。PTO-ISA 保持
+327cd586，未加入此前已被替代的 ISA 等待修改。Simpler binding、TMR/HBG runtime
+重建完成，20 项编译路径 UT 通过。PyPTO 首次 CMake 自动从远端取本地未发布的
+runtime pin 失败；向新子模块导入本地提交后重新构建，未通过 push 绕过这个问题。
+PyPTO 与真机验证尚未结束，不能预记通过。
+
+B28 L2Cache 补采任务 task_20261020_203423_3258805852 完成，完整功能与图检查通过。
+真实 CSA MIX 的 AIC miss_allocate / (hit + miss_allocate) 三次中位比例为33.60%，
+多 task 为33.58%；AIV 为16.91%/17.21%。它是整层事件计数，不是HBM字节量或
+某一阶段的命中率，也不能用PMU外层Duration更新完整L1性能表。上一轮MemoryAccess
+附带的l2_cache.csv仅含夹具TensorMove，已经排除。原始字段和范围见
+`tests/pypto_test/csa_roofline_optimization_20261020/L2_BASELINE_SUMMARY.md`。
+
+新候选在原Attention完成且packed发布之后，由尾部四条AIV各预取8MiB O_B权重，
+让供数与AIC的O_A重叠；不修改Attention数学、FIFO或阶段，不重复前段Q_B负例。
+使用BALANCED且动态T>=64区间，保留所有AIV原工作。候选与设计已放在本轮
+`sdma_refresh_20261020`，正式算子未采用。先验证新版完整MIX与存活Tile、65次提交，
+再做B16/B28完整配对；净省20μs及最终五档30%目标均未据此宣布达到。
+
+
+### SDMA 新版本机验证完成，完整候选进入配对
+
+PyPTO core及torch adapter已在独立树重建；最终增量构建v3退出0。v2编译本身完成，
+但构建脚本在执行期间被更新导致shell尾部读取错误，记录保留；以未再改动脚本的v3
+退出0为最终依据，不将v2的非零退出伪称完整构建成功。预取相关15项UT通过。
+两套内存规划的scratch避让和等待限频/超时契约均由上游相应CPU用例检查。
+
+四个全24AIC/48AIV真机任务均completed/exit0，每个100轮变输入：
+TMR eager/1次提交 task_20261020_205431_375892919183；
+TMR replay/65次提交 task_20261020_205431_375899319728；
+HBG eager/1次提交 task_20261020_205431_375908110781；
+HBG replay/65次提交 task_20261020_205431_375921915473。
+存活Tile、Cube/Vector输出与完成保护区均精确通过，未插入诊断C++或更换ISA。
+本机实际为torch2.10.0+cpu、torch_npu2.10.0.post2、CANN9.2.0-beta.2。
+这四项不等于已在本机重跑上游全部16项矩阵，也不代表完整CSA性能通过。
+
+O_B候选动态CPU编译通过，实际C++使用驻留通道和新版等待。1896个Vec分配根
+均从256B以后开始，与[0,256)的scratch隔离；1953个可静态求值的Tile地址另行核对。
+25个动态子视图未伪作静态地址。首次审计器只处理常量，遇到动态view后改为区分
+分配根与子视图；未因此修改编译器或放宽设备精度、保护检查。
+
+完整B16任务task_20261020_205936_413515915616、B28任务
+ task_20261020_205936_413525719711已提交，三方共享新工具链、SDMA-enabled context、
+冻结公共源码与正式权重。先完整精度/状态/图，通过后五窗交替L1；当前结果待收取。
+额外构建并行度问题已提交PyPTO #3083，仅附建议，不提PR、不加标签。

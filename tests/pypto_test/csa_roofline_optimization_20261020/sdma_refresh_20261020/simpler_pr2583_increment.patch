@@ -1,0 +1,434 @@
+diff --git a/docs/investigations/2026-10-sdma-wait-probe-results.md b/docs/investigations/2026-10-sdma-wait-probe-results.md
+new file mode 100644
+index 000000000..c2ace1728
+--- /dev/null
++++ b/docs/investigations/2026-10-sdma-wait-probe-results.md
+@@ -0,0 +1,166 @@
++# SDMA Wait polling under full AIV fan-out
++
++**Date**: 2026-10-20
++**Verdict**: pace PyPTO prefetch waits through the existing public
++`AsyncEvent::Test` API. PTO-ISA changes are not required for this integration.
++
++## Scope and environment
++
++Simpler #2583 fixes resident AIV channel ownership. The companion patch
++on PyPTO #3001 gives each prefetch context compiler-managed UB scratch.
++Those changes address two independently reproduced defects.
++
++The remaining failure was an intermittent false return from SDMA Wait.
++Channel ownership and scratch allocation alone did not resolve it.
++
++The local environment uses A3 hardware, CANN 9.0.0, torch 2.6.0, and
++torch_npu 2.6.0.post2. Searches of the system toolkit, shared CANN
++packages, shared Conda environments, and the task's workspace found no
++CANN 9.2 / torch_npu 2.10 installation. Additional versions found were
++CANN 9.0.0-beta.2 and torch_npu 2.8.x.
++
++Tested revisions:
++
++- Simpler: `1d9d16e50711baa756e22274a2efc56399a93d82`.
++- PyPTO local patch: `1211c510cccf9549c2ef8d798af9194f5b25152f`.
++- PTO-ISA: `327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d`.
++
++## Unmodified regression result
++
++The test uses a full 24-AIC/48-AIV MIX. Every AIV issues prefetch while
++keeping a business tile live across submit/wait. Each iteration changes
++the input and checks Cube output, Vector output, completion flags, and
++guard elements.
++
++The latest device 10 run used an exclusive `task-submit` lock:
++
++| Runtime | Execution | Result |
++| ------- | --------- | ------ |
++| TMR | Eager | 100 rounds passed |
++| HBG | Eager | 100 rounds passed |
++| TMR | ACLGraph replay | Failed at iteration 42, counted from zero |
++| HBG | ACLGraph replay | 100 rounds passed |
++
++In the failure, worker 47 recorded completion value 1 (Wait returned
++false), and its entire 1024-element output stayed at the -999 sentinel.
++The same code had previously failed on device 10 at iteration 33 on
++worker 31. Thus one successful run cannot establish stability.
++
++Earlier failure-only diagnostics found valid events and sessions,
++distinct channel IDs, and an unread completion flag. The first Wait
++took approximately 17 ms. A second Wait sometimes succeeded and
++sometimes failed. These observations do not establish whether the
++cause is publication, completion visibility, or a lower-level runtime
++problem.
++
++## Controlled pacing result
++
++A diagnostic selected the polling interval through input data. All six
++runs used byte-identical AIV binaries (SHA-256
++`723321652df6ac09e4fc6ea400266f979837ca07c66077f1984a75f5d50d3964`)
++and the same 17 ms deadline:
++
++| Polling interval | Three fresh-process runs, 300 rounds each |
++| ---------------- | ----------------------------------------- |
++| No delay | Failed at iterations 204, 2, and 69 |
++| Approximately 1 microsecond | All passed |
++
++A separate paced probe with only 1000 attempts also passed three
++300-round runs. Thus the signal does not depend on increasing the
++original 100000-attempt allowance. The result identifies polling rate
++as a causal factor, but does not establish the hardware arbitration
++mechanism beneath it.
++
++The initial PTO-ISA proposal
++`ab4604f36c1a39d335080bc9e82c9629033a9f90` spaces
++unsuccessful blocking reads by approximately 1 microsecond, with a
++20 ms deadline per queue. `Test` remains nonblocking; a timeout still
++returns false and does not cancel the outstanding transfer. The
++final implementation passed four fresh-process TMR replay runs of
++300 rounds each. A native 48-worker test passed ready-record,
++nonblocking-incomplete, and bounded-timeout checks.
++
++The integration instead lowers `pl.prefetch.wait` to a PyPTO adapter
++using public `AsyncEvent::Test` with the same interval and a 20 ms event
++deadline. Prefetch contexts provision one queue. Test already reads the
++completion record and updates completion state; the adapter does not copy
++PTO-ISA queue or record internals. The original PTO-ISA pin
++`327cd5869f3a7c4d2c6a1b945b2aed06e7665c5d` is retained. Simpler exposes its
++architecture platform include directory so the adapter uses the existing
++system-counter frequency rather than duplicating architecture constants.
++
++This scopes the policy to PyPTO prefetch instead of changing all native
++SDMA Wait callers, including communication operations. It does not change
++PTO-ISA's internal submission waits or claim a generic library fix.
++The original-library prototype passed 300 rounds of full-AIV TMR replay
++and 100 replay rounds on each runtime with 65 consecutive posts before
++waiting for the last event.
++The expanded regression also covers that flag-slot reuse boundary for
++both runtimes and execution modes. Final integration results are recorded
++in the companion PRs.
++
++A separate device 10 framework-only eager/replay control passed. A
++300-round mapping probe observed exactly channels 0 through 47 with
++no aliases. A5 hardware and CANN 9.2 were unavailable; they are not
++claimed as validated.
++
++## Rejected probes
++
++Each header experiment used a private copy; production headers and
++the regression's expected results were unchanged.
++
++| Candidate change | Observed result on device 10 |
++| ---------------- | ---------------------------- |
++| Volatile UB scalar load in `GetValue` | Warmup failed |
++| Explicit MTE2-to-scalar synchronization in `GetValue` | Iteration 29 failed |
++| Scalar-to-MTE3 sync in `SetValue` | Later process: iteration 49 failed |
++| Compiler automatic scalar DCCI | Later process: warmup failed |
++| Upstream persistent post-ID lifecycle fix | Warmup failed on worker 42 |
++| Single publication of data and completion SQEs | Later process: warmup failed |
++| Scalar completion polling with cache invalidation | Iteration 1 failed |
++
++The upstream lifecycle probe applied only the SDMA lifecycle hunks from PTO-ISA
++commit `e6334fbd6c5d6bfdf550201bbdb81a71831a99af`: retain completion
++records and resume/persist post IDs across session reconstruction.
++That is a separate upstream correctness change, but it did not remove
++this failure and is not proposed as its fix.
++
++Optimized LLVM IR also keeps the completion load inside the polling
++loop. The available evidence does not support a hoisted-load fix.
++None of the rejected probes was incorporated into the production patch.
++
++## Evidence and limits
++
++The local PyPTO checkout keeps reproduction artifacts under
++`build/sdma-mix-review/`:
++
++- `environment-search.json`: versions, revisions, and search scope.
++- `zhangtao-confirm-device10.log` and `.xml`: four-case regression.
++- `zhangtao-confirm-device10/test_kernel_mix_prefetch_prese2/`:
++  failing input iteration, output differences, completion flags, and log.
++- `lifecycle-device10.log`: isolated upstream lifecycle probe.
++- `pacing-control-series.log`: same-binary, same-deadline A/B comparison.
++- `formal-paced-series.log`: four final-implementation stress runs.
++- `timeout-device10-timed-0/native-failure.json`: failure-only timing
++  and session diagnostics.
++
++Reproduction entry point:
++`tests/st/runtime/kernel/test_mix_prefetch.py`, select `-k all`,
++`--platform a2a3`, and the queue-assigned device, with `-n0`.
++
++Device 0 is not a clean control: an earlier invalid diagnostic MMIO
++read triggered a BIU error, and that shared device was not reset.
++Its later pure-framework data errors cannot explain the independent
++device 10 Wait failures.
++
++Reconsider a candidate fix only with a distinguishing causal test
++and repeated checks of the unmodified regression. Do not suppress
++Wait failures, change expected values, or increase the polling limit
++and call that a root-cause fix.
++
++## References
++
++- [Simpler #2583](https://github.com/hw-native-sys/simpler/pull/2583)
++- [PyPTO #3001](https://github.com/hw-native-sys/pypto/pull/3001)
++- [PTO-ISA lifecycle change](https://github.com/hw-native-sys/pto-isa/commit/e6334fbd6c5d6bfdf550201bbdb81a71831a99af)
++- [PTO-ISA polling fix #363](https://github.com/hw-native-sys/pto-isa/pull/363)
+diff --git a/docs/investigations/README.md b/docs/investigations/README.md
+index a479ab0cd..4d310fcd3 100644
+--- a/docs/investigations/README.md
++++ b/docs/investigations/README.md
+@@ -84,6 +84,11 @@ that ...".
+ 
+ Newest first.
+ 
++- [2026-10 — SDMA Wait probe results](2026-10-sdma-wait-probe-results.md) —
++  **PyPTO adapter validated; PTO-ISA unchanged**: identical device code
++  and equal deadlines isolate the polling interval; volatile loads, pipe synchronization,
++  automatic scalar DCCI, and post-ID persistence did not fix the failure.
++
+ - [2026-09 — Rebuilding the orchestrator's host views every run instead of caching them per allocation](2026-09-hbg-per-run-host-view-rebuild.md) — **measured & dropped**: the per-allocation view cache #2205 prescribes is needed, and the reason is a term #1848 could not see. #1848 read `halHostRegister`/`halHostUnregister` as essentially all per-byte (~6.7 ms/GiB) by *inferring* from the size asymmetry of one aggregate point, and its own text says the per-call split was never measured. Sweeping size at fixed call count finds **a ~5.2 µs floor per register/unregister pair** that is flat from 64 B to 4 KiB, alongside a **7.0 ms/GiB** slope above ~1 MiB that does confirm #1848 for large buffers — both readings are right in their own regime. Register is per mapped *page*, and the page size is the allocation's, so 256 KiB on ordinary pages (64 pages, 11.34 µs) costs more than 4 MiB on huge pages (2 pages, 3.43 µs); that non-monotonicity is the mechanism, not noise, and it is #1531's page-configuration sensitivity again. A realistic `paged_attention` bind reads two control tensors for **24 µs/run, ~4% of a 0.6 ms warm `chip.run`**, against a decision rule of 10 µs fixed before the number was seen. Two details beyond the ratio: the floor means cost tracks the *number* of accessed tensors rather than their size, so a 32-byte control tensor still costs 5.2 µs; and the slope makes #2205's stated trigger a cliff — rebuild would charge 1.77 ms/run for a 256 MiB orchestrator-accessed tensor, three times the whole run. Caching also removes a crossover nobody wants to own as policy: below ~3 accesses, per-access `rtMemcpy` (~1.5 µs) beats establishing a mapping at all. The three arguments for rebuilding that hold regardless of cost — invalidation safety, the accessed set changing between runs, and pinned page-table entries — survive as design constraints on the cache rather than as reasons to skip it
+ 
+ - [2026-09 — Widening the bounded WAIT-reduction bitmap past BL=64](2026-09-wait-reduction-bitmap-window-sizing.md) — **BL=64 shipped (#2009 / issue #1376), BL=128 and BL=256 deferred**, and the larger result: **BL=64 is end-to-end neutral on both production workloads** — but *amended 2026-09-07*, that is a property of those graphs, not of the mechanism: both are near-chains (per-task fanin degree ≤ 1.5 across the whole benchmark corpus, and two of its cases have **zero** redundant edges), so there is almost nothing for reduction to remove. Under a degree-16 graph (`sliding_window_deps`, 15,865 WAIT edges of which BL=64 removes 100%) the same code is **−20.47% `Orch` and −2.59% `Effective`**, and `Orch` *falls* rather than rises because `wire_fanin_task` is charged to that span — ~26 ns saved per removed edge against a per-submit bitmap cost an order of magnitude smaller. Widening only moves one of the two production workloads — Qwen3-14B decode removes 1 of 40 redundant edges at *every* window because 39 of them are cross-ring long edges outside BL=256 too, while DeepSeek-V4 FLASH decode goes 10,065 → 20,214 of 21,698 (2.0x) — against `WaitReachEntry` growing 16 → 40 B per slot (1 → 2.5 MiB) and a 1-word shift-merge becoming 4-word on the AICPU submit path for every task. But the same campaign shows the removals buy no time to begin with: 10 pinned-die rounds put every row inside the ±1.1% run-to-run band, which is the *expected* result because bounded reduction preserves WAIT reachability exactly, so no task's earliest start time moves. Instrumentation says why so little is left to make cheaper — **~90% of the 9,495 cleared edges point at producers already `CHIP_TASK_COMPLETED` at wiring**, which take the `completed_fanin` branch and never allocate a dep-pool entry, so the real saving is 990 of 19,114 entries (−5.2%) and −4.2% peak occupancy, not on the critical path of a ~30 ms AICore-bound step. Consequences worth carrying forward: the simulator's `estimated_dep_pool_entries_removed` is an **edge-count upper bound that overstates the runtime saving ~10x** (its *edge* counts are good — `drop` predicted exactly, total within 6%); and two DeepSeek-V4 aggregations produce wrong answers — keeping decode step 0 reports **−37.8%** from a single 7x launch-skew sample whose spike sits entirely in `Sched`, and the first step's *slow* rank cannot separate the arms at all (rank-sum U=5 against a critical value of 1), so only the fast rank is a clean first-step signal
+diff --git a/simpler_setup/kernel_compiler.py b/simpler_setup/kernel_compiler.py
+index 45cfb99f9..804e72981 100644
+--- a/simpler_setup/kernel_compiler.py
++++ b/simpler_setup/kernel_compiler.py
+@@ -207,12 +207,14 @@ class KernelCompiler:
+         these regardless of what extra_include_dirs the caller passes, so
+         kernels can include them without the call site knowing the dependency.
+ 
+-        Also carries ``src/common/platform/include`` so kernel-facing runtime
++        Carries the architecture platform constants (including the device clock)
++        and ``src/common/platform/include`` so kernel-facing runtime
+         headers (e.g. ``intrinsic.h``) can pull shared platform headers like
+         ``common/dma_workspace.h`` regardless of what the call site passes.
+         """
+         return [
+             str(Path(__file__).resolve().parent / "incore"),
++            str(self.platform_dir / "include"),
+             str(self.project_root / "src" / "common" / "platform" / "include"),
+         ]
+ 
+diff --git a/src/a2a3/runtime/host_build_graph/common/intrinsic.h b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+index f16519028..7008afab1 100644
+--- a/src/a2a3/runtime/host_build_graph/common/intrinsic.h
++++ b/src/a2a3/runtime/host_build_graph/common/intrinsic.h
+@@ -118,6 +118,8 @@ struct GlobalContext {
+     // Used by AIV to select the correct intra-cluster hw instruction.
+     // Not meaningful for AIC kernels or single-AIV tasks.
+     int32_t sub_block_id;
++    // Dense AIV worker slot, stable across logical tasks; -1 on non-AIV workers.
++    int32_t sdma_channel_id;
+     uint64_t dma_workspace[DMA_WORKSPACE_KIND_COUNT];
+ };
+ 
+@@ -158,6 +160,17 @@ struct LocalContext {
+     AsyncCtx async_ctx;
+ };
+ 
++/**
++ * Return the resident AIV worker's SDMA channel, or -1 on non-AIV workers.
++ * Unlike logical block IDs, this identity is unique across concurrent tasks
++ * and remains stable when a worker picks up its next dispatch.
++ */
++static __aicore__ inline int32_t get_sdma_channel_id(__gm__ int64_t *args) {
++    __gm__ GlobalContext *ctx =
++        reinterpret_cast<__gm__ GlobalContext *>(static_cast<uint64_t>(args[SPMD_GLOBAL_CONTEXT_INDEX]));
++    return ctx->sdma_channel_id;
++}
++
+ /**
+  * Return the AIV lane index within the cluster.
+  * In a MIX 1C2V task: AIV0(left)=0, AIV1(right)=1.
+diff --git a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+index 76998d30e..6242abf93 100644
+--- a/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/host_build_graph/runtime/scheduler/scheduler_cold_path.cpp
+@@ -968,6 +968,11 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime) {
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
++            // Handshake slots put all AICs first, then distinct AIV workers.
++            // Unlike block_idx, this identity never restarts for another task.
++            const int32_t aic_count = cores_total_num_ / PLATFORM_CORES_PER_BLOCKDIM;
++            dp.global_context.sdma_channel_id =
++                core_id >= aic_count && core_id < cores_total_num_ ? core_id - aic_count : -1;
+             for (int kind = 0; kind < DMA_WORKSPACE_KIND_COUNT; ++kind)
+                 dp.global_context.dma_workspace[kind] = runtime->get_dma_workspace_address(kind);
+             AsyncCtx &ac = dp.local_context.async_ctx;
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 1b4b3ef8d..ddef7bb2a 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -120,6 +120,8 @@ struct GlobalContext {
+     // Used by AIV to select the correct intra-cluster hw instruction.
+     // Not meaningful for AIC kernels or single-AIV tasks.
+     int32_t sub_block_id;
++    // Dense AIV worker slot, stable across logical tasks; -1 on non-AIV workers.
++    int32_t sdma_channel_id;
+     // Per-engine async-DMA workspace device addresses (0 when unavailable),
+     // indexed by DmaWorkspaceKind. The scheduler copies them from the resident
+     // config into every core's context during cold start.
+@@ -183,6 +185,17 @@ static __aicore__ inline int32_t get_sub_block_id(__gm__ int64_t *args) {
+     return ctx->sub_block_id;
+ }
+ 
++/**
++ * Return the resident AIV worker's SDMA channel, or -1 on non-AIV workers.
++ * Unlike logical block IDs, this identity is unique across concurrent tasks
++ * and remains stable when a worker picks up its next dispatch.
++ */
++static __aicore__ inline int32_t get_sdma_channel_id(__gm__ int64_t *args) {
++    __gm__ GlobalContext *ctx =
++        reinterpret_cast<__gm__ GlobalContext *>(static_cast<uint64_t>(args[SPMD_GLOBAL_CONTEXT_INDEX]));
++    return ctx->sdma_channel_id;
++}
++
+ /**
+  * Return the device-global async-DMA workspace address for one engine kind
+  * (see DmaWorkspaceKind), or nullptr when unavailable. Runtime-provided (like
+diff --git a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+index 0002a7aea..e28ee6086 100644
+--- a/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a2a3/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -987,6 +987,11 @@ void SchedulerContext::assign_own_clusters(int32_t tidx, Runtime *runtime) {
+             int32_t core_id = tracker.get_core_id_by_offset(c * PLATFORM_CORES_PER_BLOCKDIM + sub);
+             for (int32_t buf = 0; buf < 2; buf++) {
+                 DispatchPayload &dp = payload_per_core_[core_id][buf];
++                // Handshake slots put all AICs first, then distinct AIV workers.
++                // Unlike block_idx, this identity never restarts for another task.
++                const int32_t aic_count = cores_total_num_ / PLATFORM_CORES_PER_BLOCKDIM;
++                dp.global_context.sdma_channel_id =
++                    core_id >= aic_count && core_id < cores_total_num_ ? core_id - aic_count : -1;
+                 AsyncCtx &ac = dp.local_context.async_ctx;
+                 volatile DeferredCompletionSlab *slab = &deferred_slab_per_core_[core_id][buf];
+                 ac.completion_count = &slab->count;
+@@ -1339,6 +1344,11 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime, simpler::tmr::Ca
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
++            // Handshake slots put all AICs first, then distinct AIV workers.
++            // Unlike block_idx, this identity never restarts for another task.
++            const int32_t aic_count = cores_total_num_ / PLATFORM_CORES_PER_BLOCKDIM;
++            dp.global_context.sdma_channel_id =
++                core_id >= aic_count && core_id < cores_total_num_ ? core_id - aic_count : -1;
+             AsyncCtx &ac = dp.local_context.async_ctx;
+             volatile DeferredCompletionSlab *slab = &deferred_slab_per_core_[core_id][buf];
+             ac.completion_count = &slab->count;
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h b/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+index 4aa6c1182..325fecf56 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
++++ b/src/a5/runtime/tensormap_and_ringbuffer/common/intrinsic.h
+@@ -120,6 +120,8 @@ struct GlobalContext {
+     // Used by AIV to select the correct intra-cluster hw instruction.
+     // Not meaningful for AIC kernels or single-AIV tasks.
+     int32_t sub_block_id;
++    // Dense AIV worker slot, stable across logical tasks; -1 on non-AIV workers.
++    int32_t sdma_channel_id;
+     // Per-engine async-DMA workspace device addresses (0 when unavailable),
+     // indexed by DmaWorkspaceKind. The scheduler copies them from the resident
+     // config into every core's context during cold start.
+@@ -186,6 +188,17 @@ static __aicore__ inline int32_t get_sub_block_id(__gm__ int64_t *args) {
+     return ctx->sub_block_id;
+ }
+ 
++/**
++ * Return the resident AIV worker's SDMA channel, or -1 on non-AIV workers.
++ * Unlike logical block IDs, this identity is unique across concurrent tasks
++ * and remains stable when a worker picks up its next dispatch.
++ */
++static __aicore__ inline int32_t get_sdma_channel_id(__gm__ int64_t *args) {
++    __gm__ GlobalContext *ctx =
++        reinterpret_cast<__gm__ GlobalContext *>(static_cast<uint64_t>(args[SPMD_GLOBAL_CONTEXT_INDEX]));
++    return ctx->sdma_channel_id;
++}
++
+ /**
+  * Return the device-global async-DMA workspace address for one engine kind
+  * (see DmaWorkspaceKind), or nullptr when unavailable. Runtime-provided (like
+diff --git a/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp b/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+index de6a73bbd..773f5a8ca 100644
+--- a/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
++++ b/src/a5/runtime/tensormap_and_ringbuffer/runtime/scheduler/scheduler_cold_path.cpp
+@@ -957,6 +957,11 @@ void SchedulerContext::assign_own_clusters(int32_t tidx, Runtime *runtime) {
+             int32_t core_id = tracker.get_core_id_by_offset(c * PLATFORM_CORES_PER_BLOCKDIM + sub);
+             for (int32_t buf = 0; buf < 2; buf++) {
+                 DispatchPayload &dp = payload_per_core_[core_id][buf];
++                // Handshake slots put all AICs first, then distinct AIV workers.
++                // Unlike block_idx, this identity never restarts for another task.
++                const int32_t aic_count = cores_total_num_ / PLATFORM_CORES_PER_BLOCKDIM;
++                dp.global_context.sdma_channel_id =
++                    core_id >= aic_count && core_id < cores_total_num_ ? core_id - aic_count : -1;
+                 AsyncCtx &ac = dp.local_context.async_ctx;
+                 volatile DeferredCompletionSlab *slab = &deferred_slab_per_core_[core_id][buf];
+                 ac.completion_count = &slab->count;
+@@ -1299,6 +1304,11 @@ int32_t SchedulerContext::post_handshake_init(Runtime *runtime, simpler::tmr::Ca
+     for (int32_t core_id = 0; core_id < RUNTIME_MAX_WORKER; core_id++) {
+         for (int32_t buf = 0; buf < 2; buf++) {
+             DispatchPayload &dp = payload_per_core_[core_id][buf];
++            // Handshake slots put all AICs first, then distinct AIV workers.
++            // Unlike block_idx, this identity never restarts for another task.
++            const int32_t aic_count = cores_total_num_ / PLATFORM_CORES_PER_BLOCKDIM;
++            dp.global_context.sdma_channel_id =
++                core_id >= aic_count && core_id < cores_total_num_ ? core_id - aic_count : -1;
+             AsyncCtx &ac = dp.local_context.async_ctx;
+             volatile DeferredCompletionSlab *slab = &deferred_slab_per_core_[core_id][buf];
+             ac.completion_count = &slab->count;
+diff --git a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+index 9128621fc..596b037f9 100644
+--- a/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
++++ b/tests/ut/cpp/common/test_tmr_scheduler_execution_inputs.cpp
+@@ -164,6 +164,27 @@ TEST_F(TmrSchedulerExecutionInputsTest, ExplicitTableSurvivesHandshakeAndOrdinar
+     }
+ }
+ 
++TEST_F(TmrSchedulerExecutionInputsTest, SdmaChannelBelongsToWorkerAcrossPayloadBuffersAndTasks) {
++    initialize({table_a.data(), table_a.size()});
++    for (int buf = 0; buf < 2; ++buf) {
++        EXPECT_EQ(context->payload_per_core_[0][buf].global_context.sdma_channel_id, -1);
++        for (int core = 1; core < 3; ++core) {
++            auto &payload = context->payload_per_core_[core][buf];
++            // Concurrent tasks may both have logical block zero.
++            ASSERT_TRUE(context->build_payload(payload, slot, SubtaskSlot::AIV0, 0, false));
++            EXPECT_EQ(get_sdma_channel_id(reinterpret_cast<int64_t *>(payload.args)), core - 1);
++            ASSERT_TRUE(context->build_payload(payload, slot, SubtaskSlot::AIV0, 17, false));
++            EXPECT_EQ(get_sdma_channel_id(reinterpret_cast<int64_t *>(payload.args)), core - 1);
++        }
++    }
++    // The barrier-free path must publish the same mapping as the serial path.
++    context->assign_own_clusters(0, resident.get());
++    for (int buf = 0; buf < 2; ++buf) {
++        EXPECT_EQ(context->payload_per_core_[1][buf].global_context.sdma_channel_id, 0);
++        EXPECT_EQ(context->payload_per_core_[2][buf].global_context.sdma_channel_id, 1);
++    }
++}
++
+ TEST_F(TmrSchedulerExecutionInputsTest, ExplicitTableBuildsEarlyPayloadAcrossABA) {
+     for (const auto *table : {&table_a, &table_b, &table_a}) {
+         init_slot();
+diff --git a/tests/ut/py/test_kernel_compiler.py b/tests/ut/py/test_kernel_compiler.py
+index 4ca69d37d..7030dbddd 100644
+--- a/tests/ut/py/test_kernel_compiler.py
++++ b/tests/ut/py/test_kernel_compiler.py
+@@ -83,11 +83,12 @@ def test_host_orchestration_is_a_self_contained_log_consumer(
+     assert "graph_recorder_pool.cpp" not in source_names
+ 
+ 
+-def test_direct_compiler_command_uses_checkout_relative_paths(monkeypatch, tmp_path):
++@pytest.mark.parametrize("platform", ["a2a3sim", "a5sim"])
++def test_direct_compiler_command_uses_checkout_relative_paths(monkeypatch, tmp_path, platform):
+     from simpler_setup import kernel_compiler  # noqa: PLC0415
+     from simpler_setup.environment import PROJECT_ROOT  # noqa: PLC0415
+ 
+-    compiler = kernel_compiler.KernelCompiler("a2a3sim")
++    compiler = kernel_compiler.KernelCompiler(platform)
+     source = PROJECT_ROOT / "simpler_setup" / "incore" / "pipe_sync.h"
+     captured = {}
+     monkeypatch.setattr(compiler, "_make_temp_path", lambda **_kwargs: str(tmp_path / "kernel.so"))
+@@ -101,6 +102,9 @@ def test_direct_compiler_command_uses_checkout_relative_paths(monkeypatch, tmp_p
+     assert compiler._compile_incore_sim(str(source), core_type="aiv") == b"compiled"
+     assert captured["cmd"][-1] == str(Path("simpler_setup") / "incore" / "pipe_sync.h")
+     assert f"-I{Path('simpler_setup') / 'incore'}" in captured["cmd"]
++    architecture_headers = compiler.platform_dir / "include"
++    assert (architecture_headers / "common" / "platform_config.h").is_file()
++    assert f"-I{architecture_headers.relative_to(PROJECT_ROOT)}" in captured["cmd"]
+ 
+ 
+ def test_compiler_subprocess_runs_from_checkout_root(monkeypatch):

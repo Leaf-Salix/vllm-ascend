@@ -1,0 +1,7 @@
+fix(csa): 迁入SDMA隐藏工作区与完整MIX预取等待修复
+
+吸纳 hw-native-sys/pypto PR #3001 最新评论6288341715指定的配套提交0093d617；该提交尚未合入#3001，不能把关闭的配套PR旧head24b263c2当作最新实现。保留既有CSA编译修复、GM子视图和NZ整体展平元数据支持。
+
+每个prefetch context在两个memory planner中保留256字节UB，贯穿整个函数生命周期并避开业务Tile及用户保留区。生成代码显式接收Simpler驻留AIV独立通道，阻止同组双AIV通道别名；等待改用公开AsyncEvent::Test，未完成探测之间约1微秒，事件期限20毫秒，超时仍为false且不取消传输、不授权提前复用。
+
+runtime gitlink与ABI revision固定到本地合成Simpler 685bec17d4ab489d69c0e7b91f7bb8865d73e60f，保留参数扩容并使用原PTO-ISA pin327cd586，不引入ISA等待补丁。附带上游完整24AIC/48AIV、活跃Tile与65次提交回归及CPU检查。当前为待验证迁移源码，需独立重建后运行本机检查；未声称功能或性能已通过。

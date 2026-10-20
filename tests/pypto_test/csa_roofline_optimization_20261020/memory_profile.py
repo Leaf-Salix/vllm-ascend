@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from statistics import median
 
+METRIC = "MemoryAccess"
+
 
 def run_matrix(*, existing, baseline_entry, reset, verify, cache_guards,
                compile_options, output, update_stage, **unused):
@@ -19,7 +21,7 @@ def run_matrix(*, existing, baseline_entry, reset, verify, cache_guards,
     import torch_npu
     from signal_checks import signal_padding_ok, signal_padding_status, signal_view
 
-    destination = Path(output) / "memory_profile"
+    destination = Path(output) / ("l2_profile" if METRIC == "L2Cache" else "memory_profile")
     destination.mkdir(exist_ok=False)
     result = {
         "passed": False, "same_process": True, "same_root_addresses": True,
@@ -79,7 +81,8 @@ def run_matrix(*, existing, baseline_entry, reset, verify, cache_guards,
                 schedule=torch_npu.profiler.schedule(wait=0, warmup=0, active=6, repeat=1),
                 experimental_config=torch_npu.profiler._ExperimentalConfig(
                     profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
-                    aic_metrics=torch_npu.profiler.AiCMetrics.MemoryAccess, l2_cache=True),
+                    aic_metrics=getattr(torch_npu.profiler.AiCMetrics, METRIC),
+                    l2_cache=METRIC == "MemoryAccess"),
                 on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(destination)),
             ) as trace:
                 for step, name in enumerate(order):
@@ -134,8 +137,13 @@ def run_matrix(*, existing, baseline_entry, reset, verify, cache_guards,
             if "l2" in csv_path.name.lower() or "memory" in csv_path.name.lower():
                 with csv_path.open() as handle:
                     result["additional_csv"][csv_path.name] = list(csv.DictReader(handle))
-        result["aic_metric"] = "MemoryAccess"
-        result["l2_cache_requested"] = True
+        result["aic_metric"] = METRIC
+        result["l2_cache_requested"] = METRIC == "MemoryAccess"
+        if METRIC == "L2Cache":
+            result["l2_metric_columns"] = [key for key in rows[0]
+                                           if "cache_hit" in key or "cache_miss" in key]
+            if not result["l2_metric_columns"]:
+                raise RuntimeError("未返回CSA自身的L2 hit/miss列，不能据配置开关声称已采到")
         result["passed"] = True
         return result
     finally:
