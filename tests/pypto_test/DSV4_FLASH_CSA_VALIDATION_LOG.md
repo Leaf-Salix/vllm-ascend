@@ -16373,3 +16373,106 @@ CPU开关检查、构建通过；202358卡0固定链全部精确，标记mean295
 203350已排队，计划同卡顺序复核两项并检查开启profiling记录及实际设备时钟频率；不测50μs。
 [118](superkernel_cycle_gate_20261012/README.md)、[119](superkernel_clock_identity_20261012/README.md)、
 [复核脚本与诊断](superkernel_clock_round2_20261012/README.md)。
+
+
+## 620. 2026-10-12：修正排队客户端默认超时，当前没有新增设备结果
+
+203350因--run默认600s等待超时被取消，已确认未获卡、未运行。原配置补交204647，
+使用立即返回ID的位置参数提交，避免客户端再次自动取消；当前仍等待16卡作业释放。
+离线重编确认检查对象与固定5μs计时产物一致；CANN不提供可读反汇编且拒绝-S/print-after，
+未由此得出隐式屏障不存在的结论。无新性能成绩，正常SDK及295/250μs目标保持。
+[复核状态](superkernel_clock_round2_20261012/README.md)、
+[离线检查限制](superkernel_kernel_tail_audit_20261012/README.md)。
+
+## 621. 2026-10-20：启动单 SPMD 已验证优化向多 task 反哺
+
+用户确认本轮目标：修改 `vllm_ascend/ops/pypto/deepseek_v4_flash_csa`，
+最终保持多 task 调度，使完整 CSA L1 incore 首尾耗时优于正式单 SPMD。
+目标不是只优于迁移前多 task；未超过同轮单 SPMD 参考不能宣布完成。
+允许必要的 task 拆分/合并、缓冲与依赖调整，以及单 SPMD 已验证的数值策略。
+
+初始仓库 HEAD 为 `beaefa6f`，单 SPMD 正式算法最后修改为 `13259f92`；
+两个正式算子目录在启动时均无未提交修改。冻结来源、迁移前多 task 和实验包，
+不读取其他 session 的未提交实验作为有效优化。既有日志未提交内容保留，
+本轮仅追加自己的记录。证据统一放在
+[csa_multitask_backport_20261020](csa_multitask_backport_20261020/)。
+
+七档为 128K×B4/B8/B16/B24/B28、8K×B16/B32，均 S6；
+先测长 B16/B28，按影响范围扩档，阶段出口完整七档。
+正式 W8A8 第4层权重、TP1、NZ2、单卡；沿用现有 fixture 和同一隔离工具链，
+NPU 任务全部排队。范围为 HC_pre＋RMSNorm＋CSA＋HC_post。
+L1 取最早 incore 开始至最后 incore 结束，包含内部等待/调度间隙；
+另列含 AICPU 的外层口径。配对测量报告 min/mean/max 及原始窗口，
+不累加重叠任务、不跨轮拼接最佳值，不把外层减 L1 解释为纯 AICPU。
+长短档按各域内 batch 等权、128K:8K=8:2 汇总，逐档及长尾同时保留。
+本任务没有继承另一个目标的30%或20μs门槛。
+
+核内收益与完整 CSA 收益分别记录；前者明确改善但后者暂未获益的候选可暂留，
+继续分析调度，最终按完整 CSA 验收。数值、索引、cache/state、保护区、
+图重放及受影响动态边界分项检查；单卡不代表整模型 token/DSpark 已通过。
+仅补受影响验证，不做过度 hash 或无依据重复全量测试。
+按独立可验证项做详细中文 Signed-off-by 提交，不自动 push。
+
+初步迁移清单（尚未构成多 task 收益结论）：
+
+|来源|已验证优化|当前多 task 差异与动作|
+|---|---|---|
+|13259f92|长G6/N64双QK提前FIX、完整系数分K累计后每panel单次写回|仍为一份M384 QK；优先迁移数学内核，保留现有MIX与READY/ACK|
+|289cc072、05d2a3e9|Attention物理行plan及64项索引批量加载|核查当前gather路径，拆出几何、访存与依赖的实际差异后迁移|
+|f222a917|Attention同AIV统计量保留UB|核查当前QK/PV task内生产消费关系，禁止跨task假定UB常驻|
+|27711336|连续Native scale页的设备证明和批量读取|当前Score逐页gather；需保留碎片页回退和逐次metadata证明|
+|ef608731|G2小半叶短历史Key预取|核查短档既有prefetch配置和资源边界|
+|9d5327e5、66882634|Query分组与小M16 QA并行|核查多task已有分工，已有能力不重复移植|
+|e91e9f17、5da1bf0c、25de3f32|前段协作、真实行依赖及Attention几何前置|按多task已有依赖重建；不直接复制单SPMD轮询协议|
+|b26e8e86|O_B无效尾行裁剪|核查当前NZ O_B的ROW_TILE与实际有效行，作为独立迁移项|
+
+启动状态：来源与入口核查完成，尚未产生本轮设备性能或正确性结果。
+
+## 622. 2026-10-20：Score首轮长档改善，O_B仅核内受益，目标仍未完成
+
+本轮三方共用同一卡、同一份Native根Tensor、正式第4层W8A8权重和非均匀
+Indexer scale；保持CANN 9.2 beta2、NZ2、atomic_add=0。工具链版本见
+[TOOLCHAIN.json](csa_multitask_backport_20261020/TOOLCHAIN.json)。
+私有源码由已提交Git对象生成，脚本
+[prepare.py](csa_multitask_backport_20261020/prepare.py)可重建。
+每轮先验证A/B两种hidden，再检查图重放、保护区与单SPMD代际，
+随后同进程轮换三方采五窗。计时与数值通过状态、原始路径见
+[RESULTS.json](csa_multitask_backport_20261020/RESULTS.json)和
+[TASKS.json](csa_multitask_backport_20261020/TASKS.json)。
+
+Score来源13259f92，只迁移双M192早FIX及完整系数分K后单次写回。
+保留原MIX、AIV排序、双槽READY/ACK、sync_start及early-resolve设置。
+长G6且T>=32启用；小G6、G2与短历史保持原数学。
+两长档最终均保留66个活跃task；单SPMD参考为1个MIX，未把候选改为单SPMD。
+
+|候选/档位|迁移前 min/mean/max μs|候选 min/mean/max μs|同轮单SPMD min/mean/max μs|候选mean较迁移前|
+|---|---|---|---|---|
+|Score，128K/B16|871.38 / 883.14 / 898.90|843.34 / 856.69 / 876.64|795.40 / 800.48 / 807.26|降低3.00%|
+|Score，128K/B28|1238.02 / 1277.93 / 1290.76|1207.64 / 1229.31 / 1237.26|1157.16 / 1171.07 / 1180.48|降低3.80%|
+|仅O_B裁尾，128K/B28|1231.70 / 1264.74 / 1300.52|1243.00 / 1272.98 / 1300.50|1166.64 / 1174.62 / 1194.04|增加0.65%|
+
+Score B16的AIC单核执行均值216.09→196.81μs，AIV 219.62→200.07μs；
+这里包含核内流水等待与握手，不是纯Cube/Vector运算。AIV数学未改，
+其耗时降低不能归因于新Vector算法。完整CSA mean/max两档均改善，
+因此继续保留并扩展验证；两档mean仍比单SPMD慢56.20/58.24μs，目标尚未完成。
+
+O_B来源b26e8e86，仅NZ大M128路径以真实T裁剪末块，量化补零和HC_post按T读
+partial的合同保持。B28共320条核内记录（5窗×8组×8核）：
+原min/mean/max=17.38/18.72/20.72μs，候选15.30/16.48/18.64μs。
+核内均值降低约12%，完整CSA首轮未受益；按用户规则暂留私有候选，
+后续检查组合与调度，不把核内时间相加推算整体收益，也未宣称正式采用。
+本轮两个候选均已通过相应设备输出、Top-K/score、cache/state、
+metadata/保护区和图重放的精确比较；尚未覆盖七档、动态边界或整模型token/DSpark。
+
+迁移适配过程中修复三项源码问题：依赖调用必须显式绑定constexpr，
+未采用分支的tile形状也须合法，跨多个if定义/使用Tile会触发SSA作用域错误。
+Score改为两个完整Cube流水分支、一个共享AIV消费者后，CPU全量kernel编译通过。
+初始两次设备任务均在候选编译期退出，无候选性能数据；随后全量编译先在CPU执行。
+verifier重复打印完整IR的错误文本已收敛成首因/位置摘要，不保留GB级重复诊断。
+
+后续已准备f222a917的同AIV mi/li三槽UB缓存，沿长G6且24<=T<=96启用；
+整个QK/PV MIX内完成，不跨task假定UB常驻。CPU全量编译通过，B16单卡验证已排队。
+Query头分组核查发现多task已有4/16/64策略；B16/B28不能重复认领该项收益，
+仍需评估单SPMD新增8/32整波区间以及Attention物理行plan。
+本轮脚本Ruff与shell语法检查通过；`format.sh ci`因环境缺少pre-commit未运行，
+未修改共享安装。当前没有push。
