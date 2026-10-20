@@ -180,6 +180,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", default="score_split")
     parser.add_argument("--current", help="可选的已保留私有包；与原基线、候选和单SPMD同轮比较")
+    parser.add_argument(
+        "--spmd-reference",
+        choices=("spmd", "spmd_7061c112"),
+        default="spmd",
+        help="历史13259f92/100tick或已提交7061c112/150tick；不混合汇总",
+    )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
     parser.add_argument("--attempt", default="v1")
@@ -255,6 +261,13 @@ def main():
     )
     # 初始来源清单保持原样；用户后来增加的测试范围单独记录。
     report["requested_test_standard"] = json.loads((HERE / "CASE_STANDARD.json").read_text())
+    spmd_source = HERE / "sources" / args.spmd_reference
+    spmd_wait_ticks = 150 if args.spmd_reference == "spmd_7061c112" else 100
+    report["spmd_reference"] = {
+        "source": str(spmd_source),
+        "source_commit": "7061c112" if spmd_wait_ticks == 150 else "13259f92",
+        "backoff_ticks": spmd_wait_ticks,
+    }
     # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
     report["provenance"]["initial_candidate"] = report["provenance"].pop("candidate", None)
     report["provenance"]["candidate"] = args.candidate
@@ -282,14 +295,14 @@ def main():
         original = load_multitask(HERE / "sources/baseline", "original")
         candidate_adapter = load_multitask(HERE / "sources" / args.candidate, "candidate")
         current_adapter = load_multitask(HERE / "sources" / args.current, "current") if args.current else None
-        donor = load_binding(HERE / "sources/spmd", "backport_reference")
+        donor = load_binding(spmd_source, "backport_reference")
 
         def candidate_compile_scope():
             if args.candidate_wait_backoff == "off":
                 return contextlib.nullcontext()
             return backoff_probe(
                 output / "candidate_wait_codegen",
-                HERE / "sources/spmd/wait_codegen.py",
+                spmd_source / "wait_codegen.py",
                 args.candidate_wait_units,
             )
 
@@ -301,7 +314,7 @@ def main():
             "atomic_add": os.environ["VLLM_ASCEND_PTO_CSA_ATOMIC_ADD"],
         }
         report["toolchain_identity"] = record()
-        report["shared_wait_source"] = str(HERE / "sources/spmd/wait_codegen.py")
+        report["shared_wait_source"] = str(spmd_source / "wait_codegen.py")
         if args.compile_layout_probe:
             from layout_probe import make_probe
 
@@ -554,7 +567,12 @@ def main():
                     report["stage"] = f"compile_call_{side}_{label}"
                     save(output, report)
                     probe = (
-                        backoff_probe(output / "spmd_codegen", HERE / "sources/spmd/wait_codegen.py", "single_spmd")
+                        backoff_probe(
+                            output / "spmd_codegen",
+                            spmd_source / "wait_codegen.py",
+                            "single_spmd",
+                            expected_ticks=spmd_wait_ticks,
+                        )
                         if side == "single_spmd" and label == "A"
                         else contextlib.nullcontext()
                     )

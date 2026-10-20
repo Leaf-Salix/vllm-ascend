@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""私有编译进程复用冻结单SPMD的100 tick等待策略；限定被测局部MIX。"""
+"""私有编译进程复用冻结等待策略；显式记录tick并限定被测MIX。"""
 
 import argparse
 import contextlib
 import importlib.util
+import inspect
 import json
 import shlex
 import shutil
@@ -30,7 +31,7 @@ def resolve_wait_policy(manifest, backoff, unit_family):
 
 
 @contextlib.contextmanager
-def backoff_probe(directory, frozen_wait_source, unit_family="score"):
+def backoff_probe(directory, frozen_wait_source, unit_family="score", expected_ticks=100):
     from pypto.backend import pto_backend
 
     directory = Path(directory)
@@ -56,8 +57,13 @@ def backoff_probe(directory, frozen_wait_source, unit_family="score"):
             return source
         if not unit_name.startswith(allowed):
             raise ValueError(f"等待策略不能修改{unit_family}范围外单元：{unit_name}")
-        rewritten, audit = module.rewrite_wait_source(source)
-        if audit["backoff_syscnt_ticks"] != 100 or not audit["writer_unchanged"]:
+        if "backoff_ticks" in inspect.signature(module.rewrite_wait_source).parameters:
+            rewritten, audit = module.rewrite_wait_source(source, backoff_ticks=expected_ticks)
+        else:
+            if expected_ticks != module.WAIT_BACKOFF_TICKS:
+                raise ValueError("旧冻结等待源码不能表达指定tick")
+            rewritten, audit = module.rewrite_wait_source(source)
+        if audit["backoff_syscnt_ticks"] != expected_ticks or not audit["writer_unchanged"]:
             raise ValueError("冻结等待策略合同改变")
         name = str(unit_name)
         (directory / f"{name}.original.cpp").write_text(source)
@@ -76,6 +82,7 @@ def backoff_probe(directory, frozen_wait_source, unit_family="score"):
             json.dumps(
                 dict(
                     source=str(frozen_wait_source),
+                    expected_ticks=expected_ticks,
                     changes=changes,
                     unit_family=unit_family,
                     scope="仅本测试编译进程的指定局部MIX；未接入正式service或修改共享编译器",

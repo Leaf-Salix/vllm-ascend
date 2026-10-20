@@ -15,7 +15,7 @@ CASES = [tuple(case) for case in json.loads((HERE / "CASE_STANDARD.json").read_t
 def build(candidate, attempt, case_attempts=None, cases=None):
     case_attempts = case_attempts or {}
     cases = CASES if cases is None else cases
-    rows, environments, toolchains, wait_sources = [], [], [], []
+    rows, environments, toolchains, wait_sources, references = [], [], [], [], []
     for history, batch in cases:
         selected_attempt = case_attempts.get((history, batch), attempt)
         path = HERE / "runs" / candidate / f"h{history}_b{batch}_{selected_attempt}" / "result.json"
@@ -38,6 +38,12 @@ def build(candidate, attempt, case_attempts=None, cases=None):
         environments.append(raw["environment"])
         toolchains.append(raw.get("toolchain_identity"))
         wait_sources.append(raw.get("shared_wait_source"))
+        references.append(raw.get("spmd_reference"))
+        if raw.get("spmd_reference"):
+            audit = json.loads((path.parent / "spmd_codegen/audit.json").read_text())
+            expected_ticks = raw["spmd_reference"]["backoff_ticks"]
+            if not audit["changes"] or any(c["backoff_syscnt_ticks"] != expected_ticks for c in audit["changes"]):
+                raise ValueError("实际单SPMD等待常量与声明不符")
         if raw.get("toolchain_identity"):
             expected_roles = set(stats)
             if set(raw.get("same_toolchain_roles", [])) != expected_roles:
@@ -88,6 +94,8 @@ def build(candidate, attempt, case_attempts=None, cases=None):
         raise ValueError("所选档位实际工具链路径/版本记录不一致")
     if any(s != wait_sources[0] for s in wait_sources[1:]):
         raise ValueError("所选档位配套等待源码不是同一份")
+    if any(r != references[0] for r in references[1:]):
+        raise ValueError("所选档位混合了不同单SPMD参考版本或等待参数")
     if any(row["candidate_wait_policy"] != rows[0]["candidate_wait_policy"] for row in rows[1:]):
         raise ValueError("所选档位等待编译策略不一致，不能混合默认TWAIT与100 tick结果")
     regions = {}
@@ -108,6 +116,7 @@ def build(candidate, attempt, case_attempts=None, cases=None):
         environment=environments[0],
         toolchain_identity=toolchains[0],
         shared_wait_source=wait_sources[0],
+        spmd_reference=references[0],
         candidate_wait_policy=rows[0]["candidate_wait_policy"],
         scope="同轮/同卡/同根输入；L1最早incore到最晚结束，外层单列；非整模型",
         weighting="各history内对每档百分比等权平均，再128K乘0.8、8K乘0.2",
