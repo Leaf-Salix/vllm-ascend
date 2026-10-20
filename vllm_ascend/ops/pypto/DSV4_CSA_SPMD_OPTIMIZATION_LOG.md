@@ -20311,3 +20311,34 @@ B28五个窗口均改善，两个重点档达扩档门槛；B24五个窗口均�
 PAYLOAD_PERFORMANCE.md、PAYLOAD_PERFORMANCE.json及TOPK_DEPENDENCY_COMMITS.json。
 用户刚才授权的vllm-ascend push返回Everything up-to-date，远端19a20480；
 此后新提交仍不push。正式单SPMD未改，最终五个128K档30%目标未完成。
+
+### 成对压缩候选：显式返回score、索引和count，尚无真机结果
+
+为减少v5筛选后的索引补齐、短索引物化、随机gather和偏移加法，新建两份
+独立worktree：pypto-csa-pair-compact-20261020与ptoas-csa-pair-compact-20261020。
+它们继承65477973/b48c84eb，保留旧任务工具链不变。新增Tile级
+compact_compare和PTOAS tcompact.compare原型，使用同一个比较掩码分别压缩
+FP32位表示和INT32索引，返回三份显式DPS结果；scratch没有隐含返回值。
+真实count不截断，输出写入受容量限制；高保留率仍回退原排序，GE与同分归并不改。
+新增一遍连续压缩及复制也有成本，不能预先宣称比随机gather更快。
+
+PyPTO新树原生构建完成，本地提交8c360367。56项类型/接口回归通过。
+首轮25项UT失败来自共享editable finder抢先加载旧树，进程级源码绑定修正后通过；
+没有改共享安装。底层辅助模板三模式CCEC编译通过，未执行设备代码。
+CCEC首次失败是测试Tile只有一个动态维度却传了两个构造参数，修正测试后通过，
+不把这项草稿错误包装成上游bug。
+
+新PyPTO前端已经通过类型和内存分配，生成三输出的tcompact.compare；
+旧PTOAS按预期拒绝未知op。这不是完整后端编译通过。新PTOAS构建会话81771
+仍在运行；首轮GitCode下载不可用后复用现有CANN cmake源码，未复制其它树二进制；
+第二次原型getEffects定义缺少namespace，修正后继续构建。所有日志保留。
+
+同时发现继承分支tile.full的整数填充值/FP32目标会生成非法浮点常量。
+核对主线已有PR #2846、df193cd2修复，只回移该函数；18项回归及独立最小例子
+CPU lowering通过，不重复提bug，也不合入整套Buffer IR改动。
+
+能力请求已提交PTOAS #1650与PyPTO #3085，明确属于待验证性能扩展，不是
+主线正确性bug。附语义、容量、V/S同步及实现建议，未提PR、未加标签。
+完整动态候选、复现脚本、组件patch和恢复状态放在本轮目录，详见
+TOPK_PAIRED_COMPACTION_DESIGN.md及PAIR_COMPACTION_STATE.json。
+尚未运行新原语真机或完整CSA性能，未采用正式算子，所有新增提交不push。
