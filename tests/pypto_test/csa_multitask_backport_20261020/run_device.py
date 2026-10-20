@@ -182,9 +182,9 @@ def main():
     parser.add_argument("--current", help="可选的已保留私有包；与原基线、候选和单SPMD同轮比较")
     parser.add_argument(
         "--spmd-reference",
-        choices=("spmd", "spmd_7061c112"),
+        choices=("spmd", "spmd_7061c112", "spmd_a241fa61"),
         default="spmd",
-        help="历史13259f92/100tick或已提交7061c112/150tick；不混合汇总",
+        help="固定13259f92/100tick、7061c112/150tick或a241fa61/B1驻留UB；不混合汇总",
     )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--history", type=int, default=131072)
@@ -199,6 +199,7 @@ def main():
     parser.add_argument("--boundary-replay", action="store_true", help="单图metadata变化及Native补位，独立于性能")
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
+    parser.add_argument("--constant-indexer-history", action="store_true", help="仅功能模式：历史key为零制造严格同分")
     parser.add_argument("--capture-level4", action="store_true", help="功能模式后补采一个L4诊断窗口，不进入性能表")
     parser.add_argument(
         "--candidate-wait-backoff",
@@ -228,6 +229,8 @@ def main():
         raise ValueError("指定等待单元须同时启用--candidate-wait-backoff cached100")
     if args.functional_only and args.measure_outer:
         raise ValueError("功能用例不采外层或L1性能")
+    if args.constant_indexer_history and not args.functional_only:
+        raise ValueError("同分边界只用于功能模式，不混入主性能数据")
     if args.capture_level4 and (not args.functional_only or args.current or args.compile_only or args.parse_only):
         raise ValueError("L4补采仅支持单一候选的functional-only设备模式")
     if args.boundary_replay and (args.batch < 1 or args.history < 2):
@@ -257,15 +260,20 @@ def main():
         performance_measured=False,
         query_tokens=6,
         indexer_page_pattern=args.indexer_page_pattern,
+        constant_indexer_history=args.constant_indexer_history,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
     )
     # 初始来源清单保持原样；用户后来增加的测试范围单独记录。
     report["requested_test_standard"] = json.loads((HERE / "CASE_STANDARD.json").read_text())
     spmd_source = HERE / "sources" / args.spmd_reference
-    spmd_wait_ticks = 150 if args.spmd_reference == "spmd_7061c112" else 100
+    spmd_revision, spmd_wait_ticks = {
+        "spmd": ("13259f92", 100),
+        "spmd_7061c112": ("7061c112", 150),
+        "spmd_a241fa61": ("a241fa61", 150),
+    }[args.spmd_reference]
     report["spmd_reference"] = {
         "source": str(spmd_source),
-        "source_commit": "7061c112" if spmd_wait_ticks == 150 else "13259f92",
+        "source_commit": spmd_revision,
         "backoff_ticks": spmd_wait_ticks,
     }
     # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
@@ -454,6 +462,10 @@ def main():
             scale = idx["views"][1]
             rows = torch.arange(scale.numel(), dtype=torch.int64, device=device)
             scale.copy_((0.00390625 + ((rows * 37) % 251).float() / 16384).to(scale.dtype).reshape(scale.shape))
+            if args.constant_indexer_history:
+                # 与来源的同分回归一致；当前key仍由完整CSA写回，guard继续检查。
+                idx["views"][0].zero_()
+                scale.fill_(0.00390625)
             idx["initial"] = idx["allocation"].cpu()
             pypto.torch.init(
                 device=device_id,
