@@ -36,6 +36,8 @@ PyPTO、Simpler、PTOAS可在独立worktree改进，既有隔离工具链能力�
 
 ## 恢复点
 
-等待参数八档已完成，默认150，旧证据提交7061c112。
-上次清除goal前留下的pair直接输出/索引块倍增候选已完成PTOAS构建和模板CCEC预检，
-尚未完成真实PTOAS路径的微例或完整CSA上卡。保留并继续验证，不重复已完成的构建。
+正式源码已采用B1原半叶/分数与归并根留UB，当前快照source_after_b1_half_v2。
+采用记录B1_HALF_SCORE_ADOPTION.json，最新重点档表GOAL10_FOCUS_PERFORMANCE。
+B1直接配对净省29.36μs，但相对新多task仅4.21%，总体10%目标仍未完成。
+B16列池正向、B28混合，未整体采用。所有原任务已终态，下一步见CURRENT_CHECKPOINT。
+旧快照与失败记录保留，不能把旧4K同分失败候选或旧多task基线当当前结果。

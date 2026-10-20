@@ -42,6 +42,12 @@
     申请；tile.extract把循环携带root明确限制为1024个FP32，避免携带大scratch。
     中文注释说明关键阶段，但运算树、排序分支和输入先后保持canonical原样。
     当前数学AST及CPU编译不等于设备TopK/同分结果或性能已经验证。
+
+B1分数驻留UB
+    indexer_topk_half_leaf_resident对应同文件的GM半叶helper，只将输入
+    搬运改为UB等宽extract；六条候选长度分支及每次MrgSort输入先后必须
+    保持一致。不能把全部长度补到4096统一排序，否则同分Top-K会改变。
+    保留GM接口供原路径使用，避免给其它资源区间引入新的搬运或Tile存活期。
 """
 
 import pypto.language as pl
@@ -197,6 +203,128 @@ def indexer_topk_half_leaf(
         # 两份1024元素根，但GM只保存截取后的一个根。
         medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
         medium_scores_raw = pl.load(score_arena, [score_row, 0], [1, 4096], valid_shape=[1, valid_count])
+        medium_scores = pl.tile.fillpad(medium_scores_raw, pad_value=pl.PadValue.min)
+        medium_scores = pl.maximum(medium_scores, FP32_NEG_INF)
+        medium_pairs = pl.sort32(medium_scores, pl.reinterpret_view(medium_indices, pl.UINT32))
+        medium_pairs = pl.mrgsort(medium_pairs, block_len=64)
+        medium_pairs = pl.mrgsort(medium_pairs, block_len=256)
+        medium_pairs = pl.mrgsort(medium_pairs, block_len=1024)
+        medium_left = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
+        medium_right = pl.tile.slice(medium_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
+        medium_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        # 新的后2048段在前，因此同分时medium_right优先于medium_left。
+        medium_merged = pl.tile.mrgsort(medium_right, medium_left, tmp=medium_tmp)
+        pl.store(pl.tile.slice(medium_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
+
+
+@pl.jit.inline(auto_scope=False)
+def indexer_topk_half_leaf_resident(
+    half_scores: pl.Tile[[1, 4096], pl.FP32],
+    pair_arena: pl.InOut[pl.Tensor[[PAIR_ROWS_DYN, TOPK_PAIR_WIDTH], pl.FP32]],
+    logical_begin: pl.Scalar[pl.INDEX],
+    valid_count: pl.Scalar[pl.INDEX],
+    output_slot: pl.Scalar[pl.INDEX],
+) -> None:
+    """UB内原半叶：六条长度分支、物理排序宽度及同分顺序均复现GM版。"""
+    logical_begin_i32 = pl.cast(logical_begin, pl.INT32)
+    if valid_count <= 512:
+        # 即使只有一项，也按512候选的固定tile排序；尾列由valid_shape和fillpad
+        # 写成最小score。index先按全局位置生成，再只按位解释为UINT32给sort32。
+        short_indices = pl.add(pl.tile.arange(0, [1, 512], dtype=pl.INT32), logical_begin_i32)
+        short_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 512], target_memory=pl.MemorySpace.Vec
+        )
+        short_raw = pl.set_validshape(short_raw, 1, valid_count)
+        short_scores = pl.tile.fillpad(short_raw, pad_value=pl.PadValue.min)
+        short_scores = pl.maximum(short_scores, FP32_NEG_INF)
+        short_pairs = pl.sort32(short_scores, pl.reinterpret_view(short_indices, pl.UINT32))
+        # 32候选局部run→128候选run→512候选根；长度64/256是pair元素数。
+        short_pairs = pl.mrgsort(short_pairs, block_len=64)
+        short_pairs = pl.mrgsort(short_pairs, block_len=256)
+        pl.store(short_pairs, [output_slot, 0], pair_arena)
+    elif valid_count <= 1024:
+        # 两个512根分开取出后按原left/right顺序合并；不能套用其它分支的
+        # “后段优先”，因为1024分支的原输入顺序与2560/4096分支不同。
+        small_indices = pl.add(pl.tile.arange(0, [1, 1024], dtype=pl.INT32), logical_begin_i32)
+        small_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 1024], target_memory=pl.MemorySpace.Vec
+        )
+        small_raw = pl.set_validshape(small_raw, 1, valid_count)
+        small_scores = pl.tile.fillpad(small_raw, pad_value=pl.PadValue.min)
+        small_scores = pl.maximum(small_scores, FP32_NEG_INF)
+        small_pairs = pl.sort32(small_scores, pl.reinterpret_view(small_indices, pl.UINT32))
+        small_pairs = pl.mrgsort(small_pairs, block_len=64)
+        small_pairs = pl.mrgsort(small_pairs, block_len=256)
+        small_left = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 0])
+        small_right = pl.tile.slice(small_pairs, [1, TOPK_PAIR_WIDTH], [0, 1024])
+        small_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        small_merged = pl.tile.mrgsort(small_left, small_right, tmp=small_tmp)
+        small_top = pl.tile.slice(small_merged, [1, TOPK_PAIR_WIDTH], [0, 0])
+        pl.store(small_top, [output_slot, 0], pair_arena)
+    elif valid_count <= 2048:
+        # 三轮归并完成2048候选排序，仅前512对写GM；其余排序结果不外传。
+        leaf_indices = pl.add(pl.tile.arange(0, [1, 2048], dtype=pl.INT32), logical_begin_i32)
+        leaf_scores_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 2048], target_memory=pl.MemorySpace.Vec
+        )
+        leaf_scores_raw = pl.set_validshape(leaf_scores_raw, 1, valid_count)
+        leaf_scores = pl.tile.fillpad(leaf_scores_raw, pad_value=pl.PadValue.min)
+        leaf_scores = pl.maximum(leaf_scores, FP32_NEG_INF)
+        pairs = pl.sort32(leaf_scores, pl.reinterpret_view(leaf_indices, pl.UINT32))
+        pairs = pl.mrgsort(pairs, block_len=64)
+        pairs = pl.mrgsort(pairs, block_len=256)
+        pairs = pl.mrgsort(pairs, block_len=1024)
+        pl.store(pl.tile.slice(pairs, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
+    elif valid_count <= 2560:
+        # 2560恰好五个512候选run：前四组先组成2048，再让最后一组优先于前缀。
+        # 不补到4096，既保持原tile容量，也保持同分时后2048段的优先关系。
+        partial_indices = pl.add(pl.tile.arange(0, [1, 2560], dtype=pl.INT32), logical_begin_i32)
+        partial_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 2560], target_memory=pl.MemorySpace.Vec
+        )
+        partial_raw = pl.set_validshape(partial_raw, 1, valid_count)
+        partial_scores = pl.tile.fillpad(partial_raw, pad_value=pl.PadValue.min)
+        partial_scores = pl.maximum(partial_scores, FP32_NEG_INF)
+        partial_pairs = pl.sort32(partial_scores, pl.reinterpret_view(partial_indices, pl.UINT32))
+        partial_pairs = pl.mrgsort(partial_pairs, block_len=64)
+        partial_pairs = pl.mrgsort(partial_pairs, block_len=256)
+        partial_prefix = pl.set_validshape(partial_pairs, 1, 4096)
+        # 这里4096是2048个(score,index)的元素宽度，不是4096个候选。
+        partial_prefix = pl.mrgsort(partial_prefix, block_len=1024)
+        partial_left = pl.tile.slice(partial_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
+        partial_right = pl.tile.slice(partial_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
+        partial_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        partial_merged = pl.tile.mrgsort(partial_right, partial_left, tmp=partial_tmp)
+        pl.store(pl.tile.slice(partial_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
+    elif valid_count <= 3072:
+        # 六个512候选run：前四组归并，两份右根按原顺序一起置于前缀之前。
+        triple_indices = pl.add(pl.tile.arange(0, [1, 3072], dtype=pl.INT32), logical_begin_i32)
+        triple_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 3072], target_memory=pl.MemorySpace.Vec
+        )
+        triple_raw = pl.set_validshape(triple_raw, 1, valid_count)
+        triple_scores = pl.tile.fillpad(triple_raw, pad_value=pl.PadValue.min)
+        triple_scores = pl.maximum(triple_scores, FP32_NEG_INF)
+        triple_pairs = pl.sort32(triple_scores, pl.reinterpret_view(triple_indices, pl.UINT32))
+        triple_pairs = pl.mrgsort(triple_pairs, block_len=64)
+        triple_pairs = pl.mrgsort(triple_pairs, block_len=256)
+        triple_prefix = pl.set_validshape(triple_pairs, 1, 4096)
+        triple_prefix = pl.mrgsort(triple_prefix, block_len=1024)
+        triple_left = pl.tile.slice(triple_prefix, [1, TOPK_PAIR_WIDTH], [0, 0])
+        triple_right0 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 4096])
+        triple_right1 = pl.tile.slice(triple_pairs, [1, TOPK_PAIR_WIDTH], [0, 5120])
+        triple_tmp = pl.tile.create([1, 3 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+        # right0→right1→left是原三路tie优先序；不要为了按地址排序改成逆序。
+        triple_merged = pl.tile.mrgsort(triple_right0, triple_right1, triple_left, tmp=triple_tmp)
+        pl.store(pl.tile.slice(triple_merged, [1, TOPK_PAIR_WIDTH], [0, 0]), [output_slot, 0], pair_arena)
+    elif valid_count <= 4096:
+        # 八个512 run先各合成2048半段，再合成Top512；完整scratch允许容纳
+        # 两份1024元素根，但GM只保存截取后的一个根。
+        medium_indices = pl.add(pl.tile.arange(0, [1, 4096], dtype=pl.INT32), logical_begin_i32)
+        medium_scores_raw = pl.tile.extract(
+            half_scores, 0, 0, [1, 4096], target_memory=pl.MemorySpace.Vec
+        )
+        medium_scores_raw = pl.set_validshape(medium_scores_raw, 1, valid_count)
         medium_scores = pl.tile.fillpad(medium_scores_raw, pad_value=pl.PadValue.min)
         medium_scores = pl.maximum(medium_scores, FP32_NEG_INF)
         medium_pairs = pl.sort32(medium_scores, pl.reinterpret_view(medium_indices, pl.UINT32))

@@ -54,6 +54,12 @@
     的未满部分沿用原排序pad语义，不另换分数或排序算法。
     计划/容量不合法的防越界分支同样写空行，但这不是异常输入支持承诺；外层
     仍须统一拒绝不匹配策略和容量。本模块无Host数值回读，不使用冻结IR。
+
+B1半叶根
+    balanced/G2的根仍对应原8192叶的前/后半叶，包含最后的空后半根。
+    累计根留在UB，逐child按incoming优先左折叠，只在末尾写根0；不能
+    替换成balanced/G6使用的多路归并树。根数和实际等待写者来自同一
+    device计划，保留本轮代际及业务数据发布/获取。
 """
 
 import pypto.language as pl
@@ -115,7 +121,12 @@ def indexer_visible_root_count(
             if leaves > 0 and leaves <= MAX_LEAVES and leaf_tiles > 0:
                 if extra_leaves >= 0 and extra_leaves < leaves:
                     leaf_count = (visible + TOPK_CANDIDATES_PER_LEAF - 1) // TOPK_CANDIDATES_PER_LEAF
-                    if BALANCED:
+                    if BALANCED and pl.read(plan, [5]) == 2:
+                        # B1独立调度原半叶，保留原2*ceil(visible/8192)个根。
+                        # 包含末叶的空后半根，叶内与最终归并顺序均不改变。
+                        if leaf_count > 0 and leaf_count * 2 <= leaves:
+                            roots = leaf_count * 2
+                    elif BALANCED:
                         # 与canonical一致：先覆盖extra个大叶，再覆盖其余普通叶。
                         # 用visible的1024向上取整计算叶前缀，不能用ceil(visible/8192)。
                         visible_tiles = (visible + SCORE_TILE - 1) // SCORE_TILE
@@ -185,9 +196,25 @@ def indexer_pair_publish_stage(
                 signals, plan, group, local_query % QUERY_GROUP, root_count,
                 generation, QUERY_GROUP, BALANCED,
             )
-            if BALANCED:
+            if BALANCED and QUERY_GROUP != 2:
+                # G2独立半叶仍走下方原顺序左折叠，保持同分规则。
                 # 多路归并helper保持incoming3/2/1/root顺序及最后不足四路分支。
                 root_pairs = merge_top512_roots(pair_arena, arena_base, root_count)
+            elif BALANCED and QUERY_GROUP == 2:
+                # 单请求4K叶仍按child递增左折叠，incoming始终放在旧根之前。
+                # 累积根在UB跨轮复用，不能换成另一棵归并树或交换同分优先级。
+                root_pairs = pl.load(pair_arena, [arena_base, 0], [1, TOPK_PAIR_WIDTH])
+                for child in pl.range(1, root_count):
+                    next_pairs = pl.load(pair_arena, [arena_base + child, 0], [1, TOPK_PAIR_WIDTH])
+                    resident_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
+                    resident_merged = pl.tile.mrgsort(next_pairs, root_pairs, tmp=resident_tmp)
+                    # 实取1024元素，避免把整个2048结果的生命周期带进下一轮。
+                    root_pairs = pl.tile.extract(
+                        resident_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
+                        target_memory=pl.MemorySpace.Vec,
+                    )
+                # 保留原根0最终内容；只消除无人消费的中间写回。
+                pl.store(root_pairs, [arena_base, 0], pair_arena)
             else:
                 # 原始短路径逐child向根0左折叠，且每次incoming先于旧root。
                 # 保留原位写入及顺序；不能为了“统一接口”替换成另一棵merge树。

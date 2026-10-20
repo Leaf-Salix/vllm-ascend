@@ -48,6 +48,9 @@ def main():
                     "H139264/S5 全同分边界失败；2560个Top-K索引及57510个输出元素不同。"
                     "普通S6性能仍是实测，但不能认定达到可采用的10%目标。"
                 )
+            adoption_path = HERE / "B1_HALF_SCORE_ADOPTION.json"
+            if label in ("B1/半叶分数留UB", "B1/正式源确认") and adoption_path.exists():
+                row["adopted"] = json.loads(adoption_path.read_text()).get("adopted", False)
             if result_file.exists():
                 result = json.loads(result_file.read_text())
                 if (result.get("passed") and
