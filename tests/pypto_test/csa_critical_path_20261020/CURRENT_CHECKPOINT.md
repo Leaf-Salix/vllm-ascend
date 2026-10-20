@@ -31,19 +31,41 @@ N128宽面板候选也已完整结束，不采用、不扩档、不扫更多tile
 检查通过，实际96KiB QK/8KiB WS和FIX/WS交错机制成立，完整L1仍各0/5快：
 - B16：原多task866.58、当前正式795.54、候选823.50μs。
 - B28：原多task1300.30、当前正式1175.42、候选1223.84μs。
-这些是截至本检查点新正式B16/B28的最新同轮reference数据；不得与其它轮
-参考相减计收益。宽面板实际私有N128与公共policy选择条件64明确区分，
+这些是宽面板验证轮的同轮reference数据；不得与其它轮参考相减计收益。
+宽面板实际私有N128与公共policy选择条件64明确区分，
 只留测试源source_score_wide_pipeline；详见SCORE_WIDE_PIPELINE_DESIGN.md。
 
-**本轮全部CPU/NPU任务已终态，无悬挂任务，无须继续等待或重提。**
+上述两组负例及下述wave候选任务均已终态，没有悬挂任务。
 
 ## 下一步与验收边界
 
-下一大方向审查在NEXT_WAVE_COMPOSITION_REVIEW.md：重做跨请求Score/
-Attention流水时，当前物理plan/MGATHER、local统计、连续scale和N64早FIX
-必须真正进入活跃step，不能搬旧交错文件后以policy字段存在声称已生效。
-旧861.06对811.10负例仍保留，group计划规则实际未变。尚未创建新的交错
-候选、编译或提交设备任务；不要误把只读设计当已执行。
+跨请求Score/Attention的新候选已在wave_current_math/source_candidate完成，
+尚未采用到正式ops。当前物理plan/MGATHER、local统计、连续scale和N64
+早FIX已真正进入活跃step；保留旧动态wave、首wave原KV和三阶段发布获取。
+旧861.06对811.10负例仍保留，group计划规则未变，不能跨轮相减算收益。
+
+两档完整CPU均通过58动态轴/130根/单MIX，AIC Mat 496KiB、Left/Right
+各64KiB、Acc128KiB，AIV Vec184KiB，未放宽预算。实际生成审计确认两个
+wave调用都走当前数学/数据路径。首次迁移误判merge-file冲突返回码已
+记录并修正，非组件问题。详见wave_current_math/README.md及CODEGEN报告。
+
+设备B16 task_20261020_074844_4911330778、B28
+task_20261020_074844_491555648均completed/exit0。完整精确/状态/保护/
+metadata/padding/图/波次代际通过。同轮三方五窗完整L1：
+- B16多task878.56、当前正式807.88、wave850.52μs，净省-42.64，0/5快。
+- B28多task1290.20、当前正式1167.66、wave1369.50μs，净省-201.84，0/5快。
+这是当前正式B16/B28的最新reference测量，不与旧轮次相减计优化。
+两档未达门槛，结束该组合、不采用、不扩档、不扫wave宽度或局部参数。
+
+实际设备C++匹配CPU审计版。离线读取已有metadata/IR发现：每叶一次的
+60KiB Left恢复变为每step一次，额外操作字节模型B16/B28为25.3125/
+45.9375MiB；B28整段最大41步、各wave最大步数之和56，提示切开全局工作
+范围会暴露局部不均衡。不是实测带宽/关键路径，也不是wave全核集合。
+其它片上竞争、启动排空、Attention两L1槽成本未定量分离，不编造唯一
+回退原因。详见wave_current_math/README.md、WAVE_WORK_ANALYSIS.json。
+
+接下来回到正式源，优先寻找减少实际计算/搬运的关键路径改动。当前本轮
+只完成上述负例和离线归因边界，没有建立新的替代候选或提交新设备任务。
 
 目标仍为128K B4/B8/B16/B24/B28相对多task完整L1降低>=30%，当前0/5；
 优先B16/B28，8K不明显退步。每候选至少一重点档较同轮当前正式净省20μs，

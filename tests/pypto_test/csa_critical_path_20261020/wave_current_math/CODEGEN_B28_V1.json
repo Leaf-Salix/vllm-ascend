@@ -1,0 +1,1236 @@
+{
+  "passed": true,
+  "ir": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/wave_current_math/cpu_b28_v1/kernel/passes_dump/38_after_AllocateMemoryAddr.py",
+  "cpp": "/data/pyptouser/qinchuanyu/pto-eager/vllm-ascend-dsv4-pto-0251rc1/tests/pypto_test/csa_critical_path_20261020/wave_current_math/cpu_b28_v1/kernel/ptoas/dynamic_csa_full.cpp",
+  "dynamic_axes": 58,
+  "root_tensors": 130,
+  "single_mix": true,
+  "allocation_totals": {
+    "cube_schedule": {
+      "totals": {
+        "pl.Mem.Vec": 16384,
+        "pl.Mem.Left": 65536,
+        "pl.Mem.Acc": 131072,
+        "pl.Mem.Right": 65536,
+        "pl.Mem.Mat": 507904
+      },
+      "pools": [
+        {
+          "root": "mem_vec_273",
+          "space": "pl.Mem.Vec",
+          "bytes": 16384
+        },
+        {
+          "root": "mem_left_364",
+          "space": "pl.Mem.Left",
+          "bytes": 65536
+        },
+        {
+          "root": "mem_acc_366",
+          "space": "pl.Mem.Acc",
+          "bytes": 131072
+        },
+        {
+          "root": "mem_right_377",
+          "space": "pl.Mem.Right",
+          "bytes": 65536
+        },
+        {
+          "root": "mem_mat_519",
+          "space": "pl.Mem.Mat",
+          "bytes": 24576
+        },
+        {
+          "root": "mem_mat_520",
+          "space": "pl.Mem.Mat",
+          "bytes": 24576
+        },
+        {
+          "root": "mem_mat_1130",
+          "space": "pl.Mem.Mat",
+          "bytes": 65536
+        },
+        {
+          "root": "mem_mat_1131",
+          "space": "pl.Mem.Mat",
+          "bytes": 393216
+        }
+      ]
+    },
+    "vector_schedule": {
+      "totals": {
+        "pl.Mem.Vec": 188416
+      },
+      "pools": [
+        {
+          "root": "mem_vec_1280",
+          "space": "pl.Mem.Vec",
+          "bytes": 32768
+        },
+        {
+          "root": "mem_vec_1281",
+          "space": "pl.Mem.Vec",
+          "bytes": 32768
+        },
+        {
+          "root": "mem_vec_1282",
+          "space": "pl.Mem.Vec",
+          "bytes": 12288
+        },
+        {
+          "root": "mem_vec_1285",
+          "space": "pl.Mem.Vec",
+          "bytes": 65536
+        },
+        {
+          "root": "mem_vec_1399",
+          "space": "pl.Mem.Vec",
+          "bytes": 12288
+        },
+        {
+          "root": "mem_vec_2758",
+          "space": "pl.Mem.Vec",
+          "bytes": 32768
+        }
+      ]
+    }
+  },
+  "active_mgather": [
+    {
+      "name": "qk_kv_half_inline5296__ssa_v0",
+      "line": 18061,
+      "memory": [
+        "mem_vec_1285",
+        77824,
+        65536
+      ],
+      "operation": "pl.tile.mgather(main_cache__ssa_v14, physical_rows_inline5281__ssa_v0, coalesce=0, gather_oob=3)",
+      "loops": [
+        "(wave_iter, group_begin_iter, previous_query_begin_iter, previous_query_end_iter, query_begin_iter, cache_rows__iter_v17, kv__iter_v19)",
+        "(round_id_inline862__idx_v0, (m_iter, l_iter, left_iter, right_iter, roots_iter, segments_iter, next_item_iter, leaf_iter, batch_iter, query_iter, live_iter, cache_len_iter, begin_iter, valid_iter, steps_iter, step_iter, wrote_iter))"
+      ],
+      "in_wave": true
+    },
+    {
+      "name": "qk_kv_half_inline6007__ssa_v0",
+      "line": 22326,
+      "memory": [
+        "mem_vec_1285",
+        77824,
+        65536
+      ],
+      "operation": "pl.tile.mgather(main_cache__ssa_v14, physical_rows_inline5992__ssa_v0, coalesce=0, gather_oob=3)",
+      "loops": [
+        "(round_id_inline1147__idx_v0, (m_iter_1, l_iter_1, left_iter_1, right_iter_1, roots_iter_1, segments_iter_1, next_item_iter_1, leaf_iter_1, batch_iter_1, query_iter_1, live_iter_1, cache_len_iter_1, begin_iter_1, valid_iter_1, steps_iter_1, step_iter_1))"
+      ],
+      "in_wave": true
+    },
+    {
+      "name": "qk_kv_half_inline1540__ssa_v0",
+      "line": 27222,
+      "memory": [
+        "mem_vec_1285",
+        77824,
+        65536
+      ],
+      "operation": "pl.tile.mgather(main_cache__ssa_v14, physical_rows_inline1621__ssa_v0, coalesce=0, gather_oob=3)",
+      "loops": [
+        "(qk_tick_inline1536__idx_v0, (m_iter_2, l_iter_2, left_iter_2, right_iter_2))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "active_local_stats": [],
+  "active_scale_coalescing": [
+    {
+      "name": "run_bytes_inline5376__ssa_v0",
+      "line": 19011,
+      "memory": [
+        "mem_vec_1285",
+        104448,
+        2048
+      ],
+      "operation": "pl.tile.load(idx_cache_v1__ssa_v0, [run_lowest_inline5352__phi_v2, 4096], [32, 64], [run_pages_inline5383__ssa_v0, 64], target_memory=pl.Mem.Vec)",
+      "loops": [
+        "(wave_iter, group_begin_iter, previous_query_begin_iter, previous_query_end_iter, query_begin_iter, cache_rows__iter_v17, kv__iter_v19)",
+        "(round_id_inline862__idx_v0, (m_iter, l_iter, left_iter, right_iter, roots_iter, segments_iter, next_item_iter, leaf_iter, batch_iter, query_iter, live_iter, cache_len_iter, begin_iter, valid_iter, steps_iter, step_iter, wrote_iter))"
+      ],
+      "in_wave": true
+    },
+    {
+      "name": "run_bytes_inline6087__ssa_v0",
+      "line": 23266,
+      "memory": [
+        "mem_vec_1285",
+        104448,
+        2048
+      ],
+      "operation": "pl.tile.load(idx_cache_v1__ssa_v0, [run_lowest_inline6063__phi_v2, 4096], [32, 64], [run_pages_inline6094__ssa_v0, 64], target_memory=pl.Mem.Vec)",
+      "loops": [
+        "(round_id_inline1147__idx_v0, (m_iter_1, l_iter_1, left_iter_1, right_iter_1, roots_iter_1, segments_iter_1, next_item_iter_1, leaf_iter_1, batch_iter_1, query_iter_1, live_iter_1, cache_len_iter_1, begin_iter_1, valid_iter_1, steps_iter_1, step_iter_1))"
+      ],
+      "in_wave": true
+    },
+    {
+      "name": "run_bytes_inline1271__ssa_v0",
+      "line": 24683,
+      "memory": [
+        "mem_vec_1285",
+        104448,
+        2048
+      ],
+      "operation": "pl.tile.load(idx_cache_v1__ssa_v0, [run_lowest_inline1299__phi_v2, 4096], [32, 64], [run_pages_inline1284__ssa_v0, 64], target_memory=pl.Mem.Vec)",
+      "loops": [
+        "buf_item_inline1295__idx_v0",
+        "(single_step_inline1321__idx_v0, (single_roots_inline1297__iter_v1, single_segments_inline1257__iter_v1))"
+      ],
+      "in_wave": false
+    }
+  ],
+  "score_instances": [
+    {
+      "qk0": {
+        "name": "split_qk_acc0_inline7421__ssa_v0",
+        "line": 2809,
+        "memory": [
+          "mem_acc_366",
+          0,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(wave_iter, group_begin_iter, previous_query_begin_iter, previous_query_end_iter, query_begin_iter)",
+          "(local_round_inline3633__idx_v0, (query_iter, coeff_iter, attention_q_iter, attention_kv_iter, cursor_iter, step_iter, steps_iter, batch_iter, cache_iter, begin_iter))"
+        ],
+        "in_wave": true
+      },
+      "qk1": {
+        "name": "split_qk_acc1_inline7414__ssa_v0",
+        "line": 2818,
+        "memory": [
+          "mem_acc_366",
+          49152,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(wave_iter, group_begin_iter, previous_query_begin_iter, previous_query_end_iter, query_begin_iter)",
+          "(local_round_inline3633__idx_v0, (query_iter, coeff_iter, attention_q_iter, attention_kv_iter, cursor_iter, step_iter, steps_iter, batch_iter, cache_iter, begin_iter))"
+        ],
+        "in_wave": true
+      },
+      "ws": {
+        "name": "split_ws_acc_inline7418__ssa_v0",
+        "line": 2821,
+        "memory": [
+          "mem_acc_366",
+          98304,
+          4096
+        ],
+        "operation": "pl.tile.create([16, 64], dtype=pl.FP32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(wave_iter, group_begin_iter, previous_query_begin_iter, previous_query_end_iter, query_begin_iter)",
+          "(local_round_inline3633__idx_v0, (query_iter, coeff_iter, attention_q_iter, attention_kv_iter, cursor_iter, step_iter, steps_iter, batch_iter, cache_iter, begin_iter))"
+        ],
+        "in_wave": true
+      },
+      "cpp_vars": [
+        "v3609",
+        "v3619",
+        "v3621"
+      ],
+      "counts": {
+        "qk": 32,
+        "fix": 32,
+        "ws_init": 16,
+        "ws_acc": 16,
+        "store": 16
+      },
+      "events": [
+        {
+          "panel": 0,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 1,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 2,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 3,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 4,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 5,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 6,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 7,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 8,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 9,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 10,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 11,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 12,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 13,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 14,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 15,
+          "qk0_to_qk1": {
+            "set": [],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "qk0": {
+        "name": "split_qk_acc0_inline7607__ssa_v0",
+        "line": 5669,
+        "memory": [
+          "mem_acc_366",
+          0,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(local_round_inline3717__idx_v0, (query_iter_1, coeff_iter_1, attention_q_iter_1, attention_kv_iter_1, cursor_iter_1, step_iter_1, steps_iter_1, batch_iter_1, cache_iter_1, begin_iter_1))"
+        ],
+        "in_wave": true
+      },
+      "qk1": {
+        "name": "split_qk_acc1_inline7600__ssa_v0",
+        "line": 5678,
+        "memory": [
+          "mem_acc_366",
+          49152,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(local_round_inline3717__idx_v0, (query_iter_1, coeff_iter_1, attention_q_iter_1, attention_kv_iter_1, cursor_iter_1, step_iter_1, steps_iter_1, batch_iter_1, cache_iter_1, begin_iter_1))"
+        ],
+        "in_wave": true
+      },
+      "ws": {
+        "name": "split_ws_acc_inline7604__ssa_v0",
+        "line": 5681,
+        "memory": [
+          "mem_acc_366",
+          98304,
+          4096
+        ],
+        "operation": "pl.tile.create([16, 64], dtype=pl.FP32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "(local_round_inline3717__idx_v0, (query_iter_1, coeff_iter_1, attention_q_iter_1, attention_kv_iter_1, cursor_iter_1, step_iter_1, steps_iter_1, batch_iter_1, cache_iter_1, begin_iter_1))"
+        ],
+        "in_wave": true
+      },
+      "cpp_vars": [
+        "v5607",
+        "v5617",
+        "v5619"
+      ],
+      "counts": {
+        "qk": 32,
+        "fix": 32,
+        "ws_init": 16,
+        "ws_acc": 16,
+        "store": 16
+      },
+      "events": [
+        {
+          "panel": 0,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 1,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 2,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 3,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 4,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 5,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 6,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 7,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 8,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 9,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 10,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 11,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 12,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 13,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 14,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID2"
+            ],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        },
+        {
+          "panel": 15,
+          "qk0_to_qk1": {
+            "set": [],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [],
+            "wait": [
+              "EVENT_ID3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "qk0": {
+        "name": "split_qk_acc0_inline7712__ssa_v0",
+        "line": 8313,
+        "memory": [
+          "mem_acc_366",
+          0,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "buf_item_inline7684__idx_v0"
+        ],
+        "in_wave": false
+      },
+      "qk1": {
+        "name": "split_qk_acc1_inline7730__ssa_v0",
+        "line": 8322,
+        "memory": [
+          "mem_acc_366",
+          49152,
+          49152
+        ],
+        "operation": "pl.tile.create([192, 64], dtype=pl.INT32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "buf_item_inline7684__idx_v0"
+        ],
+        "in_wave": false
+      },
+      "ws": {
+        "name": "split_ws_acc_inline7716__ssa_v0",
+        "line": 8325,
+        "memory": [
+          "mem_acc_366",
+          98304,
+          4096
+        ],
+        "operation": "pl.tile.create([16, 64], dtype=pl.FP32, target_memory=pl.Mem.Acc)",
+        "loops": [
+          "buf_item_inline7684__idx_v0"
+        ],
+        "in_wave": false
+      },
+      "cpp_vars": [
+        "v7668",
+        "v7678",
+        "v7680"
+      ],
+      "counts": {
+        "qk": 32,
+        "fix": 32,
+        "ws_init": 16,
+        "ws_acc": 16,
+        "store": 16
+      },
+      "events": [
+        {
+          "panel": 0,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 1,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": []
+          }
+        },
+        {
+          "panel": 2,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 3,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 4,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 5,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 6,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 7,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 8,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 9,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 10,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 11,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 12,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 13,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 14,
+          "qk0_to_qk1": {
+            "set": [
+              "EVENT_ID0"
+            ],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [
+              "EVENT_ID1"
+            ],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        },
+        {
+          "panel": 15,
+          "qk0_to_qk1": {
+            "set": [],
+            "wait": [
+              "EVENT_ID1"
+            ]
+          },
+          "qk1_to_previous_ws": {
+            "set": [],
+            "wait": [
+              "EVENT_ID2"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "device_executed": false,
+  "performance_eligible": false,
+  "note": "完整分配总量及真实wave代码路径/事件证据；不替代设备协议、精度或性能"
+}
