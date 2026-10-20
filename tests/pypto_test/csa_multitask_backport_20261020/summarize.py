@@ -103,6 +103,10 @@ def summarize(path):
             "长G6拆M的Score AIV包含Q反量化/RMS/RoPE；与原Score不能按等工作量相减，"
             "完整CSA及QB结束到Attention首启另列；短档或小批仍是独立Q任务"
         )
+        if (report.get("current") or "").startswith("query_score"):
+            summary["current_scope_change"] = (
+                "当前对照同样是未采用的Q融合候选，两者Score工作范围相同；原始多task的Score仍不含Q，不能混作同工作量对照"
+            )
     if report["candidate"].startswith(("output_groups", "hc_rows", "attention_rows")):
         summary["candidate_scope_change"] = (
             "局部MIX核内时间合并多个数学阶段与软等待；与原分离task不能按同名数学直接相减"

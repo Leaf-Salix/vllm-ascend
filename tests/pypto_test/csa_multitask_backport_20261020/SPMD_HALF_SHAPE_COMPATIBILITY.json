@@ -1,0 +1,10 @@
+{
+  "base_commit": "a241fa61",
+  "changed_file": "indexer_score_stages.py",
+  "old": "[TOPK_CANDIDATES_PER_LEAF // (2 * score_tile), score_tile]",
+  "new": "[TOPK_CANDIDATES_PER_LEAF // (2 * BUFFERED_LONG_SCORE_TILE), BUFFERED_LONG_SCORE_TILE]",
+  "occurrences": 2,
+  "reason": "短档score_tile=768时旧Tile为5×768，未执行B1分支也被解析并要求reshape至4096",
+  "effect": "将B1专用Tile固定为4×1024；实际B1驻留域score_tile=1024，表达式值不变",
+  "scope": "私有参考兼容补丁；不冒充原a241fa61完整八档验证，不改正式SPMD或多task"
+}

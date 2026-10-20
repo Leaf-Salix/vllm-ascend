@@ -182,7 +182,7 @@ def main():
     parser.add_argument("--current", help="可选的已保留私有包；与原基线、候选和单SPMD同轮比较")
     parser.add_argument(
         "--spmd-reference",
-        choices=("spmd", "spmd_7061c112", "spmd_a241fa61"),
+        choices=("spmd", "spmd_7061c112", "spmd_a241fa61", "spmd_a241fa61_half_shape_fix"),
         default="spmd",
         help="固定13259f92/100tick、7061c112/150tick或a241fa61/B1驻留UB；不混合汇总",
     )
@@ -192,6 +192,7 @@ def main():
     parser.add_argument("--windows", type=int, default=5)
     parser.add_argument("--parse-only", action="store_true")
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--compile-spmd-reference", action="store_true", help="CPU核对所选参考的策略类型与代码生成")
     parser.add_argument("--dump-final-ir", action="store_true", help="仅CPU失败诊断，保存一份最终IR")
     parser.add_argument("--compile-legacy-qr", action="store_true", help="仅CPU编译HCA使用的旧QR入口")
     parser.add_argument("--compile-layout-probe", action="store_true")
@@ -212,6 +213,8 @@ def main():
     )
     parser.add_argument("--device", type=int)
     args = parser.parse_args()
+    if args.compile_spmd_reference and not args.compile_only:
+        raise ValueError("参考CPU编译必须同时使用--compile-only")
     if not args.candidate.isidentifier():
         raise ValueError("候选必须是标识符")
     from candidate_wait_probe import resolve_wait_policy
@@ -270,12 +273,17 @@ def main():
         "spmd": ("13259f92", 100),
         "spmd_7061c112": ("7061c112", 150),
         "spmd_a241fa61": ("a241fa61", 150),
+        "spmd_a241fa61_half_shape_fix": ("a241fa61", 150),
     }[args.spmd_reference]
     report["spmd_reference"] = {
         "source": str(spmd_source),
         "source_commit": spmd_revision,
         "backoff_ticks": spmd_wait_ticks,
     }
+    if args.spmd_reference == "spmd_a241fa61_half_shape_fix":
+        report["spmd_reference"]["private_compatibility_patch"] = json.loads(
+            (spmd_source / "compatibility_patch.json").read_text()
+        )
     # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
     report["provenance"]["initial_candidate"] = report["provenance"].pop("candidate", None)
     report["provenance"]["candidate"] = args.candidate
@@ -348,6 +356,17 @@ def main():
             return
         if args.parse_only or args.compile_only:
             compile_entry = candidate_adapter.decode_csa_tp1_layer_test
+            compile_keywords = {}
+            if args.compile_spmd_reference:
+                compile_entry = importlib.import_module(donor.name + ".entry").decode_csa_spmd
+                compile_keywords = donor.select_policy(
+                    tokens=args.batch * 6,
+                    requests=args.batch,
+                    max_query_tokens=6,
+                    max_seq_len=args.history + 6,
+                ).constexprs()
+                report["compile_scope"] = "仅所选单SPMD参考的CPU编译，不构造设备输入或执行NPU"
+                report["reference_controls"] = compile_keywords
             if args.compile_legacy_qr:
                 from qr_compat_probe import make_probe
 
@@ -366,11 +385,12 @@ def main():
                     artifact = compile_entry._resolve_kernel_artifact(
                         (),
                         {
+                            **compile_keywords,
                             "config": CompileOptions(
                                 platform="a2a3",
                                 output_dir=str(output / "kernel"),
                                 memory_planner=passes.MemoryPlanner.PYPTO,
-                            )
+                            ),
                         },
                         allow_signature_mode=True,
                     )

@@ -43,7 +43,8 @@ def analyze(path):
         if not all((qb, score, attention)):
             raise ValueError("缺少QB、Score或Attention阶段")
         producers = {label for event in qb_events for label in re.findall(TASK_LABEL, event["name"])}
-        fused = side == "multitask_candidate" and expected_fusion
+        fusion_package = raw["candidate"] if side == "multitask_candidate" else raw.get("current") or ""
+        fused = expected_fusion and fusion_package.startswith("query_score")
         if fused:
             if q_events or not producers or len(score_events) != 72:
                 raise AssertionError("融合档应无独立Q尾段，并保留24AIC+48AIV Score记录")
@@ -52,7 +53,7 @@ def analyze(path):
                 if not producers.issubset(fanin):
                     raise AssertionError("融合MIX缺少QB真实生产者依赖")
         elif not q_events:
-            raise AssertionError("正式对照和未融合区间必须保留独立Q尾段")
+            raise AssertionError("非融合对照和未融合区间必须保留独立Q尾段")
         full = span(events)
         rows.append(
             dict(
