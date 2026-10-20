@@ -64,8 +64,8 @@ from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.norm_wkv_sta
 from vllm_ascend.ops.pypto.deepseek_v4_flash_csa_tnd_precision_spmd.rendezvous import GROUPS
 
 from ..deepseek_v4_flash_csa_tnd_precision_spmd.indexer import indexer
-from ..deepseek_v4_flash_csa_tnd_precision_spmd.qkv_proj_rope import qkv_proj_rope
 from .prefix import prepacked_prefix_indexer_group
+from .qkv_precision126 import qkv_proj_rope
 
 
 def _full_csa_tnd_prepacked(

@@ -1,0 +1,88 @@
+{
+  "branch": "dev/pypto-dsv4-csa-nalinaly-tnd-20261008-codex",
+  "base_commit": "c17805ed052c3c62f6be2d8ac5b53d4e8817201d",
+  "candidate_sources": {
+    "decode_csa.py": "03a897fae7e806086dbc67abf34573074cd426a465326f7931483a992d59d1ea",
+    "prefix.py": "1b9cac9f325684d0d66e316c6215a4e81552ac5cef7c9d603400cc85507fddf4",
+    "service.py": "8ecd4909fa8cc1f1d6db8508207c2e751fc62b50d866268b882148c99c75232e",
+    "native_adapter.py": "fb2ab9cc2211c815e7f6a781215301c9c6b484df985d98c111b37cd48e9e9f8e",
+    "input_layout.py": "02d8531e5bdfe144557225659e8c332666e97e3ceb7d0e4d5e2e29a8b99c1566",
+    "__init__.py": "23e38dadf60f1a71dff290fd498b792fea72cdf1499ca58bba79262c9b3b5625",
+    "qkv_precision126.py": "4811033e502518bcf6e5dcb05bbc936fc5f35a287c51ca41997034f2cc8693b4",
+    "qkv_proj_rope.py": "800372cb23073287bf17a8f24e70cb205e1de7e25d58a43315f92977c1225aa3"
+  },
+  "preserved_baseline_source_files": 63,
+  "root_ABI": 64,
+  "pure_DSL": true,
+  "single_layer": {
+    "t126": {
+      "pass": true,
+      "real_tokens": 126,
+      "physical_graph_tokens": 126,
+      "per_request_padding": 0,
+      "all8_A_B_boundaries_bit_exact": true,
+      "ABA": true,
+      "cross_bucket_checks": 80,
+      "timings_SK0": {
+        "native": {
+          "min": 1084.2840194702148,
+          "mean": 1091.3447380065918,
+          "max": 1116.3740158081055
+        },
+        "candidate": {
+          "min": 1601.3259887695312,
+          "mean": 1606.6624879837036,
+          "max": 1613.5099411010742
+        }
+      }
+    },
+    "t240": {
+      "pass": true,
+      "real_tokens": 240,
+      "physical_graph_tokens": 240,
+      "per_request_padding": 0,
+      "all8_A_B_boundaries_bit_exact": true,
+      "ABA": true,
+      "cross_bucket_checks": 80,
+      "timings_SK0": {
+        "native": {
+          "min": 1366.7659759521484,
+          "mean": 1371.5582609176636,
+          "max": 1376.8360137939453
+        },
+        "candidate": {
+          "min": 2195.475959777832,
+          "mean": 2204.522466659546,
+          "max": 2213.6959075927734
+        }
+      }
+    }
+  },
+  "whole_model": {
+    "8k": {
+      "tokens_equal_native": 491520,
+      "accept_events_equal_native": 105152,
+      "zero_preemptions": true,
+      "target_forward_ms": 107.09020665486653,
+      "target_cycle_ms": 123.77094549881785,
+      "Native_historical_forward_ms": 89.48216819763184,
+      "Native_historical_cycle_ms": 105.57450880084122
+    },
+    "128k": {
+      "tokens_equal_native": 294912,
+      "accept_events_equal_native": 61568,
+      "zero_preemptions": true,
+      "target_forward_ms": 92.21415227254231,
+      "target_cycle_ms": 107.40914060358415,
+      "Native_historical_forward_ms": 79.72985229492187,
+      "Native_historical_cycle_ms": 92.29292618600945
+    }
+  },
+  "limits": [
+    "single-layer real weights and synthetic hidden/history; not whole-model internal tensor proof",
+    "whole-model warm192 plus three measured192-token rounds; only token/event exact",
+    "historical Native timings, no new Native2, no controlled causal speedup claim",
+    "128K submitted24/active21, graph144/real126; fixed phase matched CPU records strict except call",
+    "all NPU tasks max780s and internal750s; baseline preserved; opt-in candidate"
+  ]
+}
