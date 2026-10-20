@@ -160,6 +160,8 @@ BUFFERED_LONG_SCORE_TILE = 1024
 BUFFERED_SCORE_LANE_TILE = BUFFERED_SCORE_TILE // 2
 BUFFERED_SCORE_SCALE = 1024.0
 NATIVE_QLI_WEIGHT_ROWS = 16
+# 13259f92：G6按head行拆为两半，WS仍累计完整六query后单次写回。
+SCORE_SPLIT_MIN_QUERY_ROWS = 32
 NATIVE_QLI_QK_COLS = 128
 SCORE_READY_EVENT = 0
 SCORE_CONSUMED_EVENT = 1
@@ -656,8 +658,9 @@ def indexer_score_topk_native_cube(
     key_prefetch_panels: pl.constexpr,
     key_prefetch_to_l0: pl.constexpr,
     balance_leaves: pl.constexpr,
+    split_score_rows: pl.constexpr,
 ):
-    """同组query共用Key：双query/M128/N128或S6/M384/N64，保持FP16/Cube策略。"""
+    """同组query共用Key；长G6可用双M192早FIX，保持单MIX双槽READY/ACK。"""
     native_page_bytes = pl.tensor.dim(idx_native_kv_cache, 1)
     # Zero-copy GM descriptors inside orchestration, as validation log §116.
     # One writable root allocation avoids partial-overlap Torch ABI arguments.
@@ -700,268 +703,646 @@ def indexer_score_topk_native_cube(
             )
         pl.system.set_ffts(buf_score_ffts)
         # S=6可作为一整组或三组2，均不跨请求；共享Key用组内最后query可见范围。
-        for buf_item in pl.range(buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS):
-            if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
-                # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
-                buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
-                buf_leaf = buf_item // (buf_query_count // query_group_size)
-            else:
-                buf_query = buf_item // buf_max_leaves * query_group_size
-                buf_leaf = buf_item % buf_max_leaves
-            buf_batch_idx = buf_query // S
-            buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
-            buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
-            buf_visible_count = pl.max(
-                pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
-            )
-            buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
-            buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
-            if balance_leaves:
-                buf_logical_begin = (
-                    buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
-                ) * BUFFERED_LONG_SCORE_TILE
-                buf_leaf_capacity = (
-                    buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
-                ) * BUFFERED_LONG_SCORE_TILE
-            if buf_logical_begin < buf_visible_count:
-                buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
-                buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
-                buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
-                buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
-                buf_query_vector = pl.load(
-                    qr_hadamard_i8,
-                    [buf_query * IDX_N_HEADS, 0],
-                    [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
-                    target_memory=pl.MemorySpace.Mat,
+        if split_score_rows:
+            for buf_item in pl.range(
+                buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
+            ):
+                if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                    buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
+                    buf_leaf = buf_item // (buf_query_count // query_group_size)
+                else:
+                    buf_query = buf_item // buf_max_leaves * query_group_size
+                    buf_leaf = buf_item % buf_max_leaves
+                buf_batch_idx = buf_query // S
+                buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
+                buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
+                buf_visible_count = pl.max(
+                    pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
                 )
-                buf_coefficients_l1 = pl.load(
-                    coefficients,
-                    [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
-                    [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
-                    target_memory=pl.MemorySpace.Mat,
-                )
-                buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
-                buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
-                for buf_score_step in pl.range(buf_score_iters):
-                    if buf_score_step >= 2:
-                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
-                    buf_score_begin = buf_score_step * (score_tile // 2)
-                    if balance_leaves:
-                        buf_score_begin = buf_score_step * score_tile
-                    buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
-                    buf_previous_l1 = pl.tile.create(
-                        [query_group_size * IDX_N_HEADS, qk_panel_cols],
-                        dtype=pl.FP16,
+                buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
+                buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
+                if balance_leaves:
+                    buf_logical_begin = (
+                        buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
+                    ) * BUFFERED_LONG_SCORE_TILE
+                    buf_leaf_capacity = (
+                        buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
+                    ) * BUFFERED_LONG_SCORE_TILE
+                if buf_logical_begin < buf_visible_count:
+                    buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                    buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                    buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                    buf_score_iters = (buf_lane_span + score_tile // 2 - 1) // (score_tile // 2)
+                    buf_query_vector = pl.load(
+                        qr_hadamard_i8,
+                        [buf_query * IDX_N_HEADS, 0],
+                        [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
                         target_memory=pl.MemorySpace.Mat,
                     )
-                    buf_current_key = pl.tile.create(
-                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    buf_coefficients_l1 = pl.load(
+                        coefficients,
+                        [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
+                        [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                        target_memory=pl.MemorySpace.Mat,
                     )
-                    buf_prefetched_key = pl.tile.create(
-                        [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                    split_query0 = pl.tile.extract(
+                        buf_query_vector,
+                        0 * (query_group_size // 2 * IDX_N_HEADS),
+                        0,
+                        [query_group_size // 2 * IDX_N_HEADS, IDX_HEAD_DIM],
+                        target_memory=pl.MemorySpace.Left,
                     )
-                    # Native QLI keeps Key L1 separate from FIXPIPE's Score L1.
-                    # A live two-panel pool prevents the allocator from recycling
-                    # each next-Key staging tile as the current Score destination.
-                    buf_key_l1_pool = pl.tile.create(
-                        [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                    split_coefficient0 = pl.tile.extract(
+                        buf_coefficients_l1,
+                        0,
+                        0 * (query_group_size // 2 * IDX_N_HEADS),
+                        [NATIVE_QLI_WEIGHT_ROWS, query_group_size // 2 * IDX_N_HEADS],
+                        target_memory=pl.MemorySpace.Left,
                     )
-                    # Keep QK/WS outside a conditional prologue so their Mat
-                    # intermediates retain the original lifetimes.
-                    if key_prefetch_panels > 0:
-                        buf_prime_col = 0
-                        # Native QLI streams N128 key panels, overlapping the next
-                        # MTE2 load with QK/WS instead of loading the entire N768/1024.
-                        for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
-                            buf_prime_key_row = (
-                                buf_logical_begin
-                                + buf_score_begin
-                                + (buf_prime_col // (score_tile // 2)) * buf_lane_span
-                                + buf_prime_col % (score_tile // 2)
-                                + buf_prime_key_page * BLOCK_SIZE
+                    split_qk_acc0 = pl.tile.create(
+                        [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                        dtype=pl.INT32,
+                        target_memory=pl.MemorySpace.Acc,
+                    )
+                    split_query1 = pl.tile.extract(
+                        buf_query_vector,
+                        1 * (query_group_size // 2 * IDX_N_HEADS),
+                        0,
+                        [query_group_size // 2 * IDX_N_HEADS, IDX_HEAD_DIM],
+                        target_memory=pl.MemorySpace.Left,
+                    )
+                    split_coefficient1 = pl.tile.extract(
+                        buf_coefficients_l1,
+                        0,
+                        1 * (query_group_size // 2 * IDX_N_HEADS),
+                        [NATIVE_QLI_WEIGHT_ROWS, query_group_size // 2 * IDX_N_HEADS],
+                        target_memory=pl.MemorySpace.Left,
+                    )
+                    split_qk_acc1 = pl.tile.create(
+                        [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                        dtype=pl.INT32,
+                        target_memory=pl.MemorySpace.Acc,
+                    )
+                    split_ws_acc = pl.tile.create(
+                        [NATIVE_QLI_WEIGHT_ROWS, qk_panel_cols], dtype=pl.FP32, target_memory=pl.MemorySpace.Acc
+                    )
+                    for buf_score_step in pl.range(buf_score_iters):
+                        if buf_score_step >= 2:
+                            pl.system.sync_wait(
+                                SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
                             )
-                            if balance_leaves:
-                                buf_prime_key_row = (
-                                    buf_logical_begin + buf_score_begin
-                                    + buf_prime_col + buf_prime_key_page * BLOCK_SIZE
-                                )
-                            buf_prime_safe_page = pl.min(
-                                buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
-                            )
-                            buf_prime_physical_page = pl.max(
-                                pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX), 0
-                            )
-                            buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
-                            if buf_prime_native_byte % IDX_HEAD_DIM == 0:
-                                buf_key_l1_pool = pl.gather_row(
-                                    buf_key_l1_pool,
-                                    idx_kv_cache,
-                                    [buf_prime_key_page * BLOCK_SIZE, 0],
-                                    [buf_prime_native_byte // IDX_HEAD_DIM, 0],
-                                    [BLOCK_SIZE, IDX_HEAD_DIM],
-                                )
-                            else:
-                                buf_key_l1_pool = pl.gather_row(
-                                    buf_key_l1_pool,
-                                    idx_kv_cache_shift64,
-                                    [buf_prime_key_page * BLOCK_SIZE, 0],
-                                    [buf_prime_native_byte // IDX_HEAD_DIM, 0],
-                                    [BLOCK_SIZE, IDX_HEAD_DIM],
-                                )
-                        if key_prefetch_to_l0:
-                            buf_current_key = pl.tile.extract(
-                                pl.tile.transpose_view(buf_key_l1_pool),
-                                0,
-                                0,
-                                [IDX_HEAD_DIM, qk_panel_cols],
-                                target_memory=pl.MemorySpace.Right,
-                            )
-                    for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
-                        buf_panel_col = buf_qk_panel * qk_panel_cols
-                        buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
-                        buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                        buf_score_begin = buf_score_step * (score_tile // 2)
+                        if balance_leaves:
+                            buf_score_begin = buf_score_step * score_tile
+                        buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+                        split_previous0 = pl.tile.create(
+                            [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                            dtype=pl.FP16,
+                            target_memory=pl.MemorySpace.Mat,
+                        )
+                        split_previous1 = pl.tile.create(
+                            [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                            dtype=pl.FP16,
+                            target_memory=pl.MemorySpace.Mat,
+                        )
+                        buf_current_key = pl.tile.create(
+                            [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                        )
+                        buf_prefetched_key = pl.tile.create(
+                            [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                        )
+                        buf_key_l1_pool = pl.tile.create(
+                            [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                        )
                         if key_prefetch_panels > 0:
-                            if not key_prefetch_to_l0:
-                                # M192/N128 leaves only one 16KiB Key Right tile.
-                                # Extract the current Key before staging the next
-                                # L1 panel so its move does not depend on that DMA.
+                            buf_prime_col = 0
+                            for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + buf_score_begin
+                                    + buf_prime_col // (score_tile // 2) * buf_lane_span
+                                    + buf_prime_col % (score_tile // 2)
+                                    + buf_prime_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    buf_prime_key_row = (
+                                        buf_logical_begin
+                                        + buf_score_begin
+                                        + buf_prime_col
+                                        + buf_prime_key_page * BLOCK_SIZE
+                                    )
+                                buf_prime_safe_page = pl.min(
+                                    buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                buf_prime_physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX), 0
+                                )
+                                buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
+                                if buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                                else:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache_shift64,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                            if key_prefetch_to_l0:
                                 buf_current_key = pl.tile.extract(
                                     pl.tile.transpose_view(buf_key_l1_pool),
                                     0,
-                                    buf_qk_panel % 2 * qk_panel_cols,
+                                    0,
                                     [IDX_HEAD_DIM, qk_panel_cols],
                                     target_memory=pl.MemorySpace.Right,
                                 )
-                        if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
-                            # Native QLI streams N128 key panels, overlapping the next
-                            # MTE2 load with QK/WS instead of loading the entire N768/1024.
-                            buf_panel_keys = pl.tile.create(
-                                [qk_panel_cols, IDX_HEAD_DIM],
-                                dtype=pl.INT8,
-                                target_memory=pl.MemorySpace.Mat,
-                            )
-                            for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
-                                buf_key_row = (
-                                    buf_logical_begin
-                                    + buf_score_begin
-                                    + (buf_load_col // (score_tile // 2)) * buf_lane_span
-                                    + buf_load_col % (score_tile // 2)
-                                    + buf_key_page * BLOCK_SIZE
-                                )
-                                if balance_leaves:
-                                    buf_key_row = (buf_logical_begin + buf_score_begin
-                                                   + buf_load_col + buf_key_page * BLOCK_SIZE)
-                                buf_safe_page = pl.min(
-                                    buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
-                                )
-                                buf_physical_page = pl.max(
-                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
-                                )
-                                buf_native_byte = buf_physical_page * native_page_bytes
-                                if buf_native_byte % IDX_HEAD_DIM == 0:
-                                    if key_prefetch_panels > 0:
-                                        buf_key_l1_pool = pl.gather_row(
-                                            buf_key_l1_pool,
-                                            idx_kv_cache,
-                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
-                                            [BLOCK_SIZE, IDX_HEAD_DIM],
-                                        )
-                                    else:
-                                        buf_panel_keys = pl.gather_row(
-                                            buf_panel_keys,
-                                            idx_kv_cache,
-                                            [buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
-                                            [BLOCK_SIZE, IDX_HEAD_DIM],
-                                        )
-                                else:
-                                    if key_prefetch_panels > 0:
-                                        buf_key_l1_pool = pl.gather_row(
-                                            buf_key_l1_pool,
-                                            idx_kv_cache_shift64,
-                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
-                                            [BLOCK_SIZE, IDX_HEAD_DIM],
-                                        )
-                                    else:
-                                        buf_panel_keys = pl.gather_row(
-                                            buf_panel_keys,
-                                            idx_kv_cache_shift64,
-                                            [buf_key_page * BLOCK_SIZE, 0],
-                                            [buf_native_byte // IDX_HEAD_DIM, 0],
-                                            [BLOCK_SIZE, IDX_HEAD_DIM],
-                                        )
+                        for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                            buf_panel_col = buf_qk_panel * qk_panel_cols
+                            buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                            buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
                             if key_prefetch_panels > 0:
-                                if key_prefetch_to_l0:
-                                    buf_prefetched_key = pl.tile.extract(
+                                if not key_prefetch_to_l0:
+                                    buf_current_key = pl.tile.extract(
                                         pl.tile.transpose_view(buf_key_l1_pool),
                                         0,
-                                        buf_load_slot,
+                                        buf_qk_panel % 2 * qk_panel_cols,
                                         [IDX_HEAD_DIM, qk_panel_cols],
                                         target_memory=pl.MemorySpace.Right,
                                     )
+                            if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                                buf_panel_keys = pl.tile.create(
+                                    [qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                                )
+                                for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                    buf_key_row = (
+                                        buf_logical_begin
+                                        + buf_score_begin
+                                        + buf_load_col // (score_tile // 2) * buf_lane_span
+                                        + buf_load_col % (score_tile // 2)
+                                        + buf_key_page * BLOCK_SIZE
+                                    )
+                                    if balance_leaves:
+                                        buf_key_row = (
+                                            buf_logical_begin
+                                            + buf_score_begin
+                                            + buf_load_col
+                                            + buf_key_page * BLOCK_SIZE
+                                        )
+                                    buf_safe_page = pl.min(
+                                        buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                    )
+                                    buf_physical_page = pl.max(
+                                        pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                                    )
+                                    buf_native_byte = buf_physical_page * native_page_bytes
+                                    if buf_native_byte % IDX_HEAD_DIM == 0:
+                                        if key_prefetch_panels > 0:
+                                            buf_key_l1_pool = pl.gather_row(
+                                                buf_key_l1_pool,
+                                                idx_kv_cache,
+                                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            buf_panel_keys = pl.gather_row(
+                                                buf_panel_keys,
+                                                idx_kv_cache,
+                                                [buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                    elif key_prefetch_panels > 0:
+                                        buf_key_l1_pool = pl.gather_row(
+                                            buf_key_l1_pool,
+                                            idx_kv_cache_shift64,
+                                            [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                    else:
+                                        buf_panel_keys = pl.gather_row(
+                                            buf_panel_keys,
+                                            idx_kv_cache_shift64,
+                                            [buf_key_page * BLOCK_SIZE, 0],
+                                            [buf_native_byte // IDX_HEAD_DIM, 0],
+                                            [BLOCK_SIZE, IDX_HEAD_DIM],
+                                        )
+                                if key_prefetch_panels > 0:
+                                    if key_prefetch_to_l0:
+                                        buf_prefetched_key = pl.tile.extract(
+                                            pl.tile.transpose_view(buf_key_l1_pool),
+                                            0,
+                                            buf_load_slot,
+                                            [IDX_HEAD_DIM, qk_panel_cols],
+                                            target_memory=pl.MemorySpace.Right,
+                                        )
+                                else:
+                                    buf_prefetched_key = pl.tile.move(
+                                        pl.tile.transpose_view(buf_panel_keys), target_memory=pl.MemorySpace.Right
+                                    )
+                            if key_prefetch_panels > 0:
+                                buf_key_panel = buf_current_key
                             else:
-                                buf_prefetched_key = pl.tile.move(
-                                    pl.tile.transpose_view(buf_panel_keys),
+                                buf_key_panel = buf_prefetched_key
+                            split_current0 = pl.tile.create(
+                                [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                                dtype=pl.FP16,
+                                target_memory=pl.MemorySpace.Mat,
+                            )
+                            split_current1 = pl.tile.create(
+                                [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                                dtype=pl.FP16,
+                                target_memory=pl.MemorySpace.Mat,
+                            )
+                            if buf_qk_panel > 0:
+                                split_right0 = pl.tile.extract(
+                                    split_previous0,
+                                    0,
+                                    0,
+                                    [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
                                     target_memory=pl.MemorySpace.Right,
                                 )
-                        if key_prefetch_panels > 0:
-                            buf_key_panel = buf_current_key
-                        else:
-                            buf_key_panel = buf_prefetched_key
-                        buf_scores_l1 = pl.tile.create(
+                                split_right1 = pl.tile.extract(
+                                    split_previous1,
+                                    0,
+                                    0,
+                                    [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                                split_qk0 = pl.tile.matmul_acc(
+                                    split_qk_acc0, split_query0, buf_key_panel, init_cond=True
+                                )
+                                split_current0 = pl.tile.assemble(
+                                    split_current0,
+                                    split_qk0,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                                split_qk1 = pl.tile.matmul_acc(
+                                    split_qk_acc1, split_query1, buf_key_panel, init_cond=True
+                                )
+                                split_current1 = pl.tile.assemble(
+                                    split_current1,
+                                    split_qk1,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                                split_ws_first = pl.tile.matmul_acc(
+                                    split_ws_acc, split_coefficient0, split_right0, init_cond=True
+                                )
+                                split_ws_done = pl.tile.matmul_acc(split_ws_first, split_coefficient1, split_right1)
+                                pl.store(
+                                    pl.set_validshape(split_ws_done, query_group_size, qk_panel_cols),
+                                    [buf_transfer_row, buf_panel_col - qk_panel_cols],
+                                    buf_score_transfer,
+                                )
+                            else:
+                                split_qk0 = pl.tile.matmul_acc(
+                                    split_qk_acc0, split_query0, buf_key_panel, init_cond=True
+                                )
+                                split_current0 = pl.tile.assemble(
+                                    split_current0,
+                                    split_qk0,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                                split_qk1 = pl.tile.matmul_acc(
+                                    split_qk_acc1, split_query1, buf_key_panel, init_cond=True
+                                )
+                                split_current1 = pl.tile.assemble(
+                                    split_current1,
+                                    split_qk1,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                            split_previous0 = split_current0
+                            split_previous1 = split_current1
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                        buf_current_key = buf_prefetched_key
+                        split_right0_last = pl.tile.extract(
+                            split_previous0,
+                            0,
+                            0,
+                            [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                        split_right1_last = pl.tile.extract(
+                            split_previous1,
+                            0,
+                            0,
+                            [query_group_size // 2 * IDX_N_HEADS, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                        split_ws_first_last = pl.tile.matmul_acc(
+                            split_ws_acc, split_coefficient0, split_right0_last, init_cond=True
+                        )
+                        split_ws_done_last = pl.tile.matmul_acc(
+                            split_ws_first_last, split_coefficient1, split_right1_last
+                        )
+                        pl.store(
+                            pl.set_validshape(split_ws_done_last, query_group_size, qk_panel_cols),
+                            [buf_transfer_row, score_tile - qk_panel_cols],
+                            buf_score_transfer,
+                        )
+                        pl.system.sync_set(
+                            SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                        )
+                    for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+        else:
+            for buf_item in pl.range(
+                buf_worker, buf_query_count // query_group_size * buf_max_leaves, TOPK_SCORE_WORKERS
+            ):
+                if buf_query_count < query_group_size * TOPK_SCORE_WORKERS:
+                    # 小批次先分完整leaf，避免极短尾leaf占掉完整leaf的轮转名额。
+                    buf_query = buf_item % (buf_query_count // query_group_size) * query_group_size
+                    buf_leaf = buf_item // (buf_query_count // query_group_size)
+                else:
+                    buf_query = buf_item // buf_max_leaves * query_group_size
+                    buf_leaf = buf_item % buf_max_leaves
+                buf_batch_idx = buf_query // S
+                buf_last_position = pl.read(position_ids, [buf_query + query_group_size - 1])
+                buf_cache_len = pl.read(kv_seq_lens, [buf_batch_idx]) // COMPRESS_RATIO
+                buf_visible_count = pl.max(
+                    pl.min(pl.min(buf_cache_len, (buf_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES), 0
+                )
+                buf_logical_begin = buf_leaf * TOPK_CANDIDATES_PER_LEAF
+                buf_leaf_capacity = TOPK_CANDIDATES_PER_LEAF
+                if balance_leaves:
+                    buf_logical_begin = (
+                        buf_leaf * buf_leaf_tiles + pl.min(buf_leaf, buf_extra_leaves)
+                    ) * BUFFERED_LONG_SCORE_TILE
+                    buf_leaf_capacity = (
+                        buf_leaf_tiles + pl.cast(buf_leaf < buf_extra_leaves, pl.INDEX)
+                    ) * BUFFERED_LONG_SCORE_TILE
+                if buf_logical_begin < buf_visible_count:
+                    buf_valid_count = pl.min(buf_leaf_capacity, buf_visible_count - buf_logical_begin)
+                    buf_tile_count = (buf_valid_count + score_tile - 1) // score_tile
+                    buf_lane_span = pl.min(buf_tile_count * (score_tile // 2), TOPK_CANDIDATES_PER_LEAF // 2)
+                    buf_score_iters = (buf_lane_span + (score_tile // 2) - 1) // (score_tile // 2)
+                    buf_query_vector = pl.load(
+                        qr_hadamard_i8,
+                        [buf_query * IDX_N_HEADS, 0],
+                        [query_group_size * IDX_N_HEADS, IDX_HEAD_DIM],
+                        target_memory=pl.MemorySpace.Mat,
+                    )
+                    buf_coefficients_l1 = pl.load(
+                        coefficients,
+                        [buf_query // query_group_size * NATIVE_QLI_WEIGHT_ROWS, 0],
+                        [NATIVE_QLI_WEIGHT_ROWS, query_group_size * IDX_N_HEADS],
+                        target_memory=pl.MemorySpace.Mat,
+                    )
+                    buf_query_left = pl.tile.move(buf_query_vector, target_memory=pl.MemorySpace.Left)
+                    buf_coefficient_pair = pl.tile.move(buf_coefficients_l1, target_memory=pl.MemorySpace.Left)
+                    for buf_score_step in pl.range(buf_score_iters):
+                        if buf_score_step >= 2:
+                            pl.system.sync_wait(
+                                SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC
+                            )
+                        buf_score_begin = buf_score_step * (score_tile // 2)
+                        if balance_leaves:
+                            buf_score_begin = buf_score_step * score_tile
+                        buf_transfer_row = buf_worker * 2 * query_group_size + buf_score_step % 2 * query_group_size
+                        buf_previous_l1 = pl.tile.create(
                             [query_group_size * IDX_N_HEADS, qk_panel_cols],
                             dtype=pl.FP16,
                             target_memory=pl.MemorySpace.Mat,
                         )
-                        if buf_qk_panel > 0:
-                            buf_previous_pair = pl.tile.extract(
-                                buf_previous_l1,
-                                0,
-                                0,
-                                [query_group_size * IDX_N_HEADS, qk_panel_cols],
-                                target_memory=pl.MemorySpace.Right,
-                            )
-                            # QK与上一panel的head规约同时存活；M192的Acc占96KiB，WS另占8KiB。
-                            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
-                            buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
-                            buf_scores_l1 = pl.tile.assemble(
-                                buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
-                            )
-                            pl.store(
-                                pl.set_validshape(buf_reduced_pair, query_group_size, qk_panel_cols),
-                                [buf_transfer_row, buf_panel_col - qk_panel_cols],
-                                buf_score_transfer,
-                            )
-                        else:
-                            buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
-                            buf_scores_l1 = pl.tile.assemble(
-                                buf_scores_l1, buf_scores, [0, 0], pre_quant=1.0 / BUFFERED_SCORE_SCALE, pre_relu=True
-                            )
-                        buf_previous_l1 = buf_scores_l1
+                        buf_current_key = pl.tile.create(
+                            [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                        )
+                        buf_prefetched_key = pl.tile.create(
+                            [IDX_HEAD_DIM, qk_panel_cols], dtype=pl.INT8, target_memory=pl.MemorySpace.Right
+                        )
+                        # Native QLI keeps Key L1 separate from FIXPIPE's Score L1.
+                        # A live two-panel pool prevents the allocator from recycling
+                        # each next-Key staging tile as the current Score destination.
+                        buf_key_l1_pool = pl.tile.create(
+                            [2 * qk_panel_cols, IDX_HEAD_DIM], dtype=pl.INT8, target_memory=pl.MemorySpace.Mat
+                        )
+                        # Keep QK/WS outside a conditional prologue so their Mat
+                        # intermediates retain the original lifetimes.
                         if key_prefetch_panels > 0:
+                            buf_prime_col = 0
+                            # Native QLI streams N128 key panels, overlapping the next
+                            # MTE2 load with QK/WS instead of loading the entire N768/1024.
+                            for buf_prime_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                buf_prime_key_row = (
+                                    buf_logical_begin
+                                    + buf_score_begin
+                                    + (buf_prime_col // (score_tile // 2)) * buf_lane_span
+                                    + buf_prime_col % (score_tile // 2)
+                                    + buf_prime_key_page * BLOCK_SIZE
+                                )
+                                if balance_leaves:
+                                    buf_prime_key_row = (
+                                        buf_logical_begin
+                                        + buf_score_begin
+                                        + buf_prime_col
+                                        + buf_prime_key_page * BLOCK_SIZE
+                                    )
+                                buf_prime_safe_page = pl.min(
+                                    buf_prime_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                )
+                                buf_prime_physical_page = pl.max(
+                                    pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_prime_safe_page]), pl.INDEX), 0
+                                )
+                                buf_prime_native_byte = buf_prime_physical_page * native_page_bytes
+                                if buf_prime_native_byte % IDX_HEAD_DIM == 0:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
+                                else:
+                                    buf_key_l1_pool = pl.gather_row(
+                                        buf_key_l1_pool,
+                                        idx_kv_cache_shift64,
+                                        [buf_prime_key_page * BLOCK_SIZE, 0],
+                                        [buf_prime_native_byte // IDX_HEAD_DIM, 0],
+                                        [BLOCK_SIZE, IDX_HEAD_DIM],
+                                    )
                             if key_prefetch_to_l0:
-                                if buf_qk_panel + 1 < score_tile // qk_panel_cols:
-                                    buf_current_key = buf_prefetched_key
-                    buf_last_pair = pl.tile.extract(
-                        buf_previous_l1,
-                        0,
-                        0,
-                        [query_group_size * IDX_N_HEADS, qk_panel_cols],
-                        target_memory=pl.MemorySpace.Right,
-                    )
-                    buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
-                    pl.store(
-                        pl.set_validshape(buf_last_scores, query_group_size, qk_panel_cols),
-                        [buf_transfer_row, score_tile - qk_panel_cols],
-                        buf_score_transfer,
-                    )
-                    pl.system.sync_set(
-                        SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
-                    )
-                for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
-                    pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
+                                buf_current_key = pl.tile.extract(
+                                    pl.tile.transpose_view(buf_key_l1_pool),
+                                    0,
+                                    0,
+                                    [IDX_HEAD_DIM, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                        for buf_qk_panel in pl.unroll(score_tile // qk_panel_cols):
+                            buf_panel_col = buf_qk_panel * qk_panel_cols
+                            buf_load_col = (buf_qk_panel + key_prefetch_panels) * qk_panel_cols
+                            buf_load_slot = (buf_qk_panel + key_prefetch_panels) % 2 * qk_panel_cols
+                            if key_prefetch_panels > 0:
+                                if not key_prefetch_to_l0:
+                                    # M192/N128 leaves only one 16KiB Key Right tile.
+                                    # Extract the current Key before staging the next
+                                    # L1 panel so its move does not depend on that DMA.
+                                    buf_current_key = pl.tile.extract(
+                                        pl.tile.transpose_view(buf_key_l1_pool),
+                                        0,
+                                        buf_qk_panel % 2 * qk_panel_cols,
+                                        [IDX_HEAD_DIM, qk_panel_cols],
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            if buf_qk_panel + key_prefetch_panels < score_tile // qk_panel_cols:
+                                # Native QLI streams N128 key panels, overlapping the next
+                                # MTE2 load with QK/WS instead of loading the entire N768/1024.
+                                buf_panel_keys = pl.tile.create(
+                                    [qk_panel_cols, IDX_HEAD_DIM],
+                                    dtype=pl.INT8,
+                                    target_memory=pl.MemorySpace.Mat,
+                                )
+                                for buf_key_page in pl.unroll(qk_panel_cols // BLOCK_SIZE):
+                                    buf_key_row = (
+                                        buf_logical_begin
+                                        + buf_score_begin
+                                        + (buf_load_col // (score_tile // 2)) * buf_lane_span
+                                        + buf_load_col % (score_tile // 2)
+                                        + buf_key_page * BLOCK_SIZE
+                                    )
+                                    if balance_leaves:
+                                        buf_key_row = (
+                                            buf_logical_begin
+                                            + buf_score_begin
+                                            + buf_load_col
+                                            + buf_key_page * BLOCK_SIZE
+                                        )
+                                    buf_safe_page = pl.min(
+                                        buf_key_row // BLOCK_SIZE, pl.max((buf_cache_len - 1) // BLOCK_SIZE, 0)
+                                    )
+                                    buf_physical_page = pl.max(
+                                        pl.cast(pl.read(idx_block_table, [buf_batch_idx, buf_safe_page]), pl.INDEX), 0
+                                    )
+                                    buf_native_byte = buf_physical_page * native_page_bytes
+                                    if buf_native_byte % IDX_HEAD_DIM == 0:
+                                        if key_prefetch_panels > 0:
+                                            buf_key_l1_pool = pl.gather_row(
+                                                buf_key_l1_pool,
+                                                idx_kv_cache,
+                                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            buf_panel_keys = pl.gather_row(
+                                                buf_panel_keys,
+                                                idx_kv_cache,
+                                                [buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                    else:
+                                        if key_prefetch_panels > 0:
+                                            buf_key_l1_pool = pl.gather_row(
+                                                buf_key_l1_pool,
+                                                idx_kv_cache_shift64,
+                                                [buf_load_slot + buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                        else:
+                                            buf_panel_keys = pl.gather_row(
+                                                buf_panel_keys,
+                                                idx_kv_cache_shift64,
+                                                [buf_key_page * BLOCK_SIZE, 0],
+                                                [buf_native_byte // IDX_HEAD_DIM, 0],
+                                                [BLOCK_SIZE, IDX_HEAD_DIM],
+                                            )
+                                if key_prefetch_panels > 0:
+                                    if key_prefetch_to_l0:
+                                        buf_prefetched_key = pl.tile.extract(
+                                            pl.tile.transpose_view(buf_key_l1_pool),
+                                            0,
+                                            buf_load_slot,
+                                            [IDX_HEAD_DIM, qk_panel_cols],
+                                            target_memory=pl.MemorySpace.Right,
+                                        )
+                                else:
+                                    buf_prefetched_key = pl.tile.move(
+                                        pl.tile.transpose_view(buf_panel_keys),
+                                        target_memory=pl.MemorySpace.Right,
+                                    )
+                            if key_prefetch_panels > 0:
+                                buf_key_panel = buf_current_key
+                            else:
+                                buf_key_panel = buf_prefetched_key
+                            buf_scores_l1 = pl.tile.create(
+                                [query_group_size * IDX_N_HEADS, qk_panel_cols],
+                                dtype=pl.FP16,
+                                target_memory=pl.MemorySpace.Mat,
+                            )
+                            if buf_qk_panel > 0:
+                                buf_previous_pair = pl.tile.extract(
+                                    buf_previous_l1,
+                                    0,
+                                    0,
+                                    [query_group_size * IDX_N_HEADS, qk_panel_cols],
+                                    target_memory=pl.MemorySpace.Right,
+                                )
+                                # QK与上一panel的head规约同时存活；M192的Acc占96KiB，WS另占8KiB。
+                                buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
+                                buf_reduced_pair = pl.tile.matmul(buf_coefficient_pair, buf_previous_pair)
+                                buf_scores_l1 = pl.tile.assemble(
+                                    buf_scores_l1,
+                                    buf_scores,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                                pl.store(
+                                    pl.set_validshape(buf_reduced_pair, query_group_size, qk_panel_cols),
+                                    [buf_transfer_row, buf_panel_col - qk_panel_cols],
+                                    buf_score_transfer,
+                                )
+                            else:
+                                buf_scores = pl.tile.matmul(buf_query_left, buf_key_panel)
+                                buf_scores_l1 = pl.tile.assemble(
+                                    buf_scores_l1,
+                                    buf_scores,
+                                    [0, 0],
+                                    pre_quant=1.0 / BUFFERED_SCORE_SCALE,
+                                    pre_relu=True,
+                                )
+                            buf_previous_l1 = buf_scores_l1
+                            if key_prefetch_panels > 0:
+                                if key_prefetch_to_l0:
+                                    if buf_qk_panel + 1 < score_tile // qk_panel_cols:
+                                        buf_current_key = buf_prefetched_key
+                        buf_last_pair = pl.tile.extract(
+                            buf_previous_l1,
+                            0,
+                            0,
+                            [query_group_size * IDX_N_HEADS, qk_panel_cols],
+                            target_memory=pl.MemorySpace.Right,
+                        )
+                        buf_last_scores = pl.tile.matmul(buf_coefficient_pair, buf_last_pair)
+                        pl.store(
+                            pl.set_validshape(buf_last_scores, query_group_size, qk_panel_cols),
+                            [buf_transfer_row, score_tile - qk_panel_cols],
+                            buf_score_transfer,
+                        )
+                        pl.system.sync_set(
+                            SCORE_READY_EVENT, pipe=pl.PipeType.FIX, ffts_mode=2, core_type=pl.KernelType.AIC
+                        )
+                    for buf_score_drain in pl.range(pl.min(buf_score_iters, 2)):
+                        pl.system.sync_wait(SCORE_CONSUMED_EVENT, pipe=pl.PipeType.MTE2, core_type=pl.KernelType.AIC)
 
         for buf_score_lane in pl.split_aiv(2, mode=pl.SplitMode.NONE):
             if balance_leaves:
@@ -978,8 +1359,10 @@ def indexer_score_topk_native_cube(
                     single_cache_len = pl.read(kv_seq_lens, [single_batch]) // COMPRESS_RATIO
                     single_last_position = pl.read(position_ids, [single_query + query_group_size - 1])
                     single_visible = pl.max(
-                        pl.min(pl.min(single_cache_len, (single_last_position + 1) // COMPRESS_RATIO),
-                               TOPK_MAX_CANDIDATES), 0
+                        pl.min(
+                            pl.min(single_cache_len, (single_last_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
+                        ),
+                        0,
                     )
                     single_begin = (single_leaf * buf_leaf_tiles + pl.min(single_leaf, buf_extra_leaves)) * score_tile
                     single_capacity = (buf_leaf_tiles + pl.cast(single_leaf < buf_extra_leaves, pl.INDEX)) * score_tile
@@ -997,7 +1380,8 @@ def indexer_score_topk_native_cube(
                         for single_step in pl.range(single_steps):
                             single_score_begin = single_begin + single_step * score_tile
                             single_transfer_row = (
-                                buf_worker * 2 * query_group_size + single_step % 2 * query_group_size
+                                buf_worker * 2 * query_group_size
+                                + single_step % 2 * query_group_size
                                 + buf_score_lane * (query_group_size // 2)
                             )
                             # Scales are shared across the three queries on one AIV. Reading
@@ -1012,9 +1396,11 @@ def indexer_score_topk_native_cube(
                                     pl.cast(pl.read(idx_block_table, [single_batch, single_scale_logical]), pl.INDEX), 0
                                 )
                                 single_scale_bytes = pl.gather_row(
-                                    single_scale_bytes, idx_native_kv_cache,
+                                    single_scale_bytes,
+                                    idx_native_kv_cache,
                                     [0, single_scale_page * BLOCK_SIZE * 2],
-                                    [single_scale_physical, INDEXER_KEY_BYTES], [1, BLOCK_SIZE * 2],
+                                    [single_scale_physical, INDEXER_KEY_BYTES],
+                                    [1, BLOCK_SIZE * 2],
                                 )
                             single_scale_half = pl.tile.reinterpret_view(single_scale_bytes, pl.FP16)
                             single_kv_scale = pl.cast(single_scale_half, pl.FP32)
@@ -1044,15 +1430,21 @@ def indexer_score_topk_native_cube(
                                     single_query_lane = buf_score_lane * (query_group_size // 2) + single_local
                                     single_position = pl.read(position_ids, [single_query + single_query_lane])
                                     single_query_visible = pl.max(
-                                        pl.min(pl.min(single_cache_len, (single_position + 1) // COMPRESS_RATIO),
-                                               TOPK_MAX_CANDIDATES), 0
+                                        pl.min(
+                                            pl.min(single_cache_len, (single_position + 1) // COMPRESS_RATIO),
+                                            TOPK_MAX_CANDIDATES,
+                                        ),
+                                        0,
                                     )
                                     single_segment_valid = pl.max(
                                         pl.min(single_query_visible - single_segment_begin, single_segment_span), 0
                                     )
                                     if single_segment_valid > 0:
                                         single_segment_data = pl.tile.extract(
-                                            single_segment_rows, single_local, 0, [1, 2 * BUFFERED_LONG_SCORE_TILE],
+                                            single_segment_rows,
+                                            single_local,
+                                            0,
+                                            [1, 2 * BUFFERED_LONG_SCORE_TILE],
                                             target_memory=pl.MemorySpace.Vec,
                                         )
                                         logical_i32 = pl.cast(single_segment_begin, pl.INT32)
@@ -1161,7 +1553,10 @@ def indexer_score_topk_native_cube(
                                             )
                                         else:
                                             single_old_root = pl.tile.extract(
-                                                single_roots, single_local, 0, [1, TOPK_PAIR_WIDTH],
+                                                single_roots,
+                                                single_local,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
                                                 target_memory=pl.MemorySpace.Vec,
                                             )
                                             single_merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
@@ -1171,7 +1566,10 @@ def indexer_score_topk_native_cube(
                                                 single_new_root, single_old_root, tmp=single_merge_tmp
                                             )
                                             single_next_root = pl.tile.extract(
-                                                single_merged, 0, 0, [1, TOPK_PAIR_WIDTH],
+                                                single_merged,
+                                                0,
+                                                0,
+                                                [1, TOPK_PAIR_WIDTH],
                                                 target_memory=pl.MemorySpace.Vec,
                                             )
                                             single_roots = pl.tile.assemble(
@@ -1184,7 +1582,8 @@ def indexer_score_topk_native_cube(
                             )
                             pl.store(
                                 single_root,
-                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0], pair_arena,
+                                [(single_query + single_query_lane) * TOPK_ROWS_PER_QUERY + single_leaf, 0],
+                                pair_arena,
                             )
             else:
                 for buf_item in pl.range(
@@ -1286,8 +1685,11 @@ def indexer_score_topk_native_cube(
                                     for stream_lane in pl.unroll(query_group_size):
                                         stream_position = pl.read(position_ids, [buf_query + stream_lane])
                                         stream_visible = pl.max(
-                                            pl.min(pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
-                                                   TOPK_MAX_CANDIDATES), 0
+                                            pl.min(
+                                                pl.min(buf_cache_len, (stream_position + 1) // COMPRESS_RATIO),
+                                                TOPK_MAX_CANDIDATES,
+                                            ),
+                                            0,
                                         )
                                         stream_begin = buf_logical_begin + buf_lane_begin
                                         stream_valid = pl.max(pl.min(stream_visible - stream_begin, 2048), 0)
@@ -1295,14 +1697,18 @@ def indexer_score_topk_native_cube(
                                             stream_root = indexer_topk_segment_pairs(
                                                 score_arena,
                                                 buf_worker * 2 * query_group_size + stream_lane * 2 + buf_score_lane,
-                                                stream_begin, stream_valid, 0,
+                                                stream_begin,
+                                                stream_valid,
+                                                0,
                                             )
                                             prefix_roots = pl.tile.assemble(prefix_roots, stream_root, [stream_lane, 0])
                         for buf_query_lane in pl.unroll(query_group_size):
                             buf_position = pl.read(position_ids, [buf_query + buf_query_lane])
                             buf_query_visible = pl.max(
-                                pl.min(pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO),
-                                       TOPK_MAX_CANDIDATES), 0
+                                pl.min(
+                                    pl.min(buf_cache_len, (buf_position + 1) // COMPRESS_RATIO), TOPK_MAX_CANDIDATES
+                                ),
+                                0,
                             )
                             buf_half_begin = buf_logical_begin + buf_lane_begin
                             buf_half_valid = pl.max(pl.min(buf_query_visible - buf_half_begin, buf_lane_span), 0)
@@ -1314,19 +1720,34 @@ def indexer_score_topk_native_cube(
                                     tail = indexer_topk_segment_pairs(
                                         score_arena,
                                         buf_worker * 2 * query_group_size + buf_query_lane * 2 + buf_score_lane,
-                                        buf_half_begin + 2048, buf_half_valid - 2048, 2048,
+                                        buf_half_begin + 2048,
+                                        buf_half_valid - 2048,
+                                        2048,
                                     )
-                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+                                    prefix = pl.tile.extract(
+                                        prefix_roots,
+                                        buf_query_lane,
+                                        0,
+                                        [1, TOPK_PAIR_WIDTH],
+                                        target_memory=pl.MemorySpace.Vec,
+                                    )
                                     merge_tmp = pl.tile.create([1, 2 * TOPK_PAIR_WIDTH], dtype=pl.FP32)
                                     # Preserve the later-2048-chunk priority of the
                                     # existing 2560/3072/4096 half-leaf paths.
                                     merged = pl.tile.mrgsort(tail, prefix, tmp=merge_tmp)
-                                    pl.store(pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
-                                             [buf_half_slot, 0], pair_arena)
+                                    pl.store(
+                                        pl.tile.slice(merged, [1, TOPK_PAIR_WIDTH], [0, 0]),
+                                        [buf_half_slot, 0],
+                                        pair_arena,
+                                    )
                                 else:
-                                    prefix = pl.tile.extract(prefix_roots, buf_query_lane, 0,
-                                                             [1, TOPK_PAIR_WIDTH], target_memory=pl.MemorySpace.Vec)
+                                    prefix = pl.tile.extract(
+                                        prefix_roots,
+                                        buf_query_lane,
+                                        0,
+                                        [1, TOPK_PAIR_WIDTH],
+                                        target_memory=pl.MemorySpace.Vec,
+                                    )
                                     pl.store(prefix, [buf_half_slot, 0], pair_arena)
                             else:
                                 if buf_half_valid > 0:
@@ -1387,28 +1808,54 @@ def indexer_score_topk_forest(
             # 完整S6共用Key；N64令M384的QK累加仍为96 KiB。
             # B4/B8通过leaf分配补齐并行度，复用整请求Key；B<4仍用双query。
             if pl.tensor.dim(position_ids, 0) >= LONG_S6_MIN_QUERY_ROWS:
-                score_tid = indexer_score_topk_native_cube(
-                    qr_hadamard_i8,
-                    qr_hadamard_scale_dq,
-                    weights,
-                    idx_native_kv_cache,
-                    idx_block_table,
-                    position_ids,
-                    kv_seq_lens,
-                    score_arena,
-                    pair_arena,
-                    qh_quant_tid,
-                    weights_tid,
-                    cache_write_tid,
-                    S,
-                    64,
-                    BUFFERED_LONG_SCORE_TILE,
-                    True,
-                    False,
-                    1,
-                    True,
-                    True,
-                )
+                if pl.tensor.dim(position_ids, 0) >= SCORE_SPLIT_MIN_QUERY_ROWS:
+                    score_tid = indexer_score_topk_native_cube(
+                        qr_hadamard_i8,
+                        qr_hadamard_scale_dq,
+                        weights,
+                        idx_native_kv_cache,
+                        idx_block_table,
+                        position_ids,
+                        kv_seq_lens,
+                        score_arena,
+                        pair_arena,
+                        qh_quant_tid,
+                        weights_tid,
+                        cache_write_tid,
+                        S,
+                        64,
+                        BUFFERED_LONG_SCORE_TILE,
+                        True,
+                        False,
+                        1,
+                        True,
+                        True,
+                        True,
+                    )
+                else:
+                    score_tid = indexer_score_topk_native_cube(
+                        qr_hadamard_i8,
+                        qr_hadamard_scale_dq,
+                        weights,
+                        idx_native_kv_cache,
+                        idx_block_table,
+                        position_ids,
+                        kv_seq_lens,
+                        score_arena,
+                        pair_arena,
+                        qh_quant_tid,
+                        weights_tid,
+                        cache_write_tid,
+                        S,
+                        64,
+                        BUFFERED_LONG_SCORE_TILE,
+                        True,
+                        False,
+                        1,
+                        True,
+                        True,
+                        False,
+                    )
             else:
                 score_tid = indexer_score_topk_native_cube(
                     qr_hadamard_i8,
@@ -1431,6 +1878,7 @@ def indexer_score_topk_forest(
                     # M128/N128 fits two 16KiB Key slots plus 32KiB WS in L0B.
                     1,
                     True,
+                    False,
                     False,
                 )
         else:
@@ -1465,6 +1913,7 @@ def indexer_score_topk_forest(
                     0,
                     True,
                     False,
+                    False,
                 )
             else:
                 score_tid = indexer_score_topk_native_cube(
@@ -1487,6 +1936,7 @@ def indexer_score_topk_forest(
                     True,
                     0,
                     True,
+                    False,
                     False,
                 )
     else:
