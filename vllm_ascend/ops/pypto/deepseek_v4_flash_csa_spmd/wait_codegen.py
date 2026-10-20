@@ -13,21 +13,23 @@
     通用等待函数。槽的单写者、代际和隔离区由
     phase_sync.py 保证；此处只支持 GE，不更改发布端或业务数据维护。
     每次读前 DCCI，再用 volatile 读取，避免只命中本核 Scalar 旧缓存。
-    这不是 ld_dev，不声称必然访问 HBM。未就绪时等待 100 个设备计时 tick
-    再访问该槽；tick 不能解释成微秒。首次检查没有延迟，周期 PIPE_ALL
+    这不是 ld_dev，不声称必然访问 HBM。未就绪时默认等待 150 个设备计时 tick
+    再访问该槽；显式编译参数可固定历史实验的间隔，避免默认值更新后
+    改变旧实验。tick 不能解释成微秒。首次检查没有延迟，周期 PIPE_ALL
     只维护本核流水，不是全核集合。
 
 接入与验证边界
     编译集成必须显式调用并核对替换数量；仅导入本模块不会改变 JIT。
-    这条退避策略来自历史实验，新的动态组件 CPU 探针尚未应用它，不能
-    把历史等待性能直接用于新入口。当前仍由隔离编译进程安装源码回调，
-    不修改共享 PyPTO backend；返回的 device_validated=False 表明本次
-    变换自身没有设备证据。完整算子的精度、同步和性能仍需另行验证。
+    当前默认来自完整动态CSA七档100/150配对与真实S1/S5图重放验证；
+    200可显式选择，其七档对照和B28复核保留在本仓测试记录中。
+    集成仍须在编译进程显式安装源码回调，不修改共享PyPTO backend。
+    返回的device_validated=False表示“对这份新输入源码只完成了变换”，
+    不能据函数被调用就宣称另一个算子/新shape已通过设备验证。
 """
 
-WAIT_BACKOFF_TICKS = 100
+WAIT_BACKOFF_TICKS = 150
 
-WAIT_HELPER = r"""
+_WAIT_HELPER_TEMPLATE = r"""
 template <typename Signal>
 static AICORE inline void CSA_WAIT_LOCAL_GM(Signal& signal, int32_t expected, pto::comm::WaitCmp cmp) {
   // 单写者单调进度。写侧仍由 TNOTIFY 清理/失效并 DSB，payload 由调用方维护。
@@ -41,7 +43,7 @@ static AICORE inline void CSA_WAIT_LOCAL_GM(Signal& signal, int32_t expected, pt
     if (*ptr >= expected) break;
     // 首次读取不延迟；只有尚未就绪时，短暂只读本核计时寄存器。
     const uint64_t csa_wait_start = get_sys_cnt();
-    while ((uint64_t)(get_sys_cnt() - csa_wait_start) < 100) {
+    while ((uint64_t)(get_sys_cnt() - csa_wait_start) < __CSA_BACKOFF_TICKS__) {
       __asm__ __volatile__("" ::: "memory");
     }
     PTO_ASSERT(spin < 100000000, "CSA local wait spin limit");
@@ -52,9 +54,19 @@ static AICORE inline void CSA_WAIT_LOCAL_GM(Signal& signal, int32_t expected, pt
 }
 """
 
+WAIT_HELPER = _WAIT_HELPER_TEMPLATE.replace("__CSA_BACKOFF_TICKS__", str(WAIT_BACKOFF_TICKS))
 
-def rewrite_wait_source(source):
-    """只替换本次完整 MIX SPMD 的等待；保留发布和业务数据维护。"""
+
+def rewrite_wait_source(source, *, backoff_ticks=None):
+    """只替换本次完整 MIX SPMD 的等待；保留发布和业务数据维护。
+
+    backoff_ticks 是编译时策略参数，不是新的 kernel 入参。省略时采用
+    当前默认；历史复现可显式指定 100，参数对照可显式指定其它已选间隔。
+    返回审计记录必须报告实际插入的常量，不能只记录默认值。
+    """
+    ticks = WAIT_BACKOFF_TICKS if backoff_ticks is None else backoff_ticks
+    if type(ticks) is not int or not 1 <= ticks <= 1000:
+        raise ValueError("等待退避必须是1..1000范围内的整数SYS_CNT tick")
     needle = "pto::comm::TWAIT("
     marker = "using namespace pto;"
     count = source.count(needle)
@@ -63,13 +75,14 @@ def rewrite_wait_source(source):
     if count <= 0 or source.count(marker) != 1 or "CSA_WAIT_LOCAL_GM(" in source:
         raise ValueError("融合源码的等待/命名空间合同改变或已经执行过替换")
     source = source.replace(needle, "CSA_WAIT_LOCAL_GM(")
-    source = source.replace(marker, marker + "\n" + WAIT_HELPER)
+    helper = _WAIT_HELPER_TEMPLATE.replace("__CSA_BACKOFF_TICKS__", str(ticks))
+    source = source.replace(marker, marker + "\n" + helper)
     return source, {
         "wait_sites": count,
         "reader": "dcci_then_volatile_load",
-        "backoff_syscnt_ticks": WAIT_BACKOFF_TICKS,
+        "backoff_syscnt_ticks": ticks,
         "ramp_backoff": False,
-        "initial_backoff_syscnt_ticks": WAIT_BACKOFF_TICKS,
+        "initial_backoff_syscnt_ticks": ticks,
         "writer_unchanged": True,
         "payload_maintenance_unchanged": True,
         "device_validated": False,
