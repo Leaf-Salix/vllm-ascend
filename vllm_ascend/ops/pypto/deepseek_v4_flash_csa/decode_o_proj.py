@@ -107,7 +107,7 @@ PROJ_B_D_TILE = 512  # proj_b_mm D chunk per task; coarser starves the 24 AIC co
 PROJ_B_ACT_T_TILE = 1
 
 PROJ_B_ACT_TASK_T_TILE = 4  # proj_b_act token block per task
-PROJ_B_ACT_WORKERS = 48  # A3 AIV capacity; use only the measured T=96 strategy.
+PROJ_B_ACT_WORKERS = 48  # A3 AIV capacity; T<=48 and T96 use synchronized token owners.
 
 O_A_T_TILE = 128
 
@@ -561,7 +561,13 @@ def decode_o_proj_tp1(
     if t_dim <= PROJ_B_SMALL_T_TILE:
         x_out = _decode_o_proj_tp1_tiled(
             o_packed, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep,
-            PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE, False,
+            PROJ_B_SMALL_T_TILE, PROJ_A_MM_N_TILE, True,
+        )
+    elif t_dim <= PROJ_B_ACT_WORKERS:
+        # 一个有效token一个AIV；最多48个任务，满足sync_start同时准入。
+        x_out = _decode_o_proj_tp1_tiled(
+            o_packed, wo_a, wo_b, wo_b_scale, residual, post, comb, x_out, heads_dep,
+            PROJ_B_MEDIUM_T_TILE, PROJ_A_MM_N_TILE, True,
         )
     elif t_dim == PROJ_B_MEDIUM_T_TILE:
         # T=96: 24x4 -> 48x2 real tokens. Keep the 1xD tile, stage=2
