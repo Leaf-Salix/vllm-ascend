@@ -25,6 +25,14 @@ def task_name(name):
         return "score_aic" if "_aic" in name else "score_aiv"
     if name.startswith("qr_proj_matmul"):
         return "qa_aic"
+    for prefix, label in (
+        ("output_cube", "output_mix_aic"),
+        ("output_vector", "output_mix_aiv"),
+        ("hc_row_cube", "hc_prefix_aic"),
+        ("hc_row_vector", "hc_prefix_aiv"),
+    ):
+        if name.startswith(prefix):
+            return label
     if name.startswith("qk_pv_"):
         if "_aic" in name:
             return "qk_pv_aic"
@@ -44,6 +52,7 @@ def summarize(path):
         "passed": report.get("passed", False),
         "candidate": report["candidate"],
         "candidate_wait_backoff": report.get("candidate_wait_backoff", "off"),
+        "candidate_wait_units": report.get("candidate_wait_units", "score"),
         "current": report.get("current"),
         "indexer_page_pattern": report.get("indexer_page_pattern", "original"),
         "batch": report["batch"],
@@ -84,6 +93,10 @@ def summarize(path):
     if report["candidate"].startswith("fused_wait"):
         summary["candidate_scope_change"] = (
             "候选Score AIV包含Top-K及信号等待；等待源码策略见candidate_wait_backoff和candidate_wait_codegen/audit.json"
+        )
+    if report["candidate"].startswith(("output_groups", "hc_rows")):
+        summary["candidate_scope_change"] = (
+            "局部MIX核内时间合并多个数学阶段与软等待；与原分离task不能按同名数学直接相减"
         )
     timings, per_window = {}, []
     for window in l1["windows"]:

@@ -62,12 +62,18 @@ def build(candidate, attempt, case_attempts=None):
                 reduction_vs_spmd_pct=100 * (reference - now) / reference,
                 boundary_replay=raw.get("boundary_replay", {}).get("passed"),
                 current=raw.get("current"),
+                candidate_wait_policy={
+                    "backoff": raw.get("candidate_wait_backoff", "off"),
+                    "units": raw.get("candidate_wait_units", "score"),
+                },
                 reduction_vs_current_pct=raw["l1"].get("candidate_reduction_vs_current_pct"),
                 scope=raw["scope"],
             )
         )
     if any(e != environments[0] for e in environments[1:]):
         raise ValueError("七档环境不一致，不能按同一冻结环境汇总")
+    if any(row["candidate_wait_policy"] != rows[0]["candidate_wait_policy"] for row in rows[1:]):
+        raise ValueError("七档等待编译策略不一致，不能混合默认TWAIT与100 tick结果")
     regions = {}
     metrics = ["reduction_vs_original_pct", "reduction_vs_spmd_pct"]
     if all(r["reduction_vs_current_pct"] is not None for r in rows):
@@ -83,6 +89,7 @@ def build(candidate, attempt, case_attempts=None):
         case_attempts={f"{h}/{b}": v for (h, b), v in case_attempts.items()},
         passed=True,
         environment=environments[0],
+        candidate_wait_policy=rows[0]["candidate_wait_policy"],
         scope="同轮/同卡/同根输入；L1最早incore到最晚结束，外层单列；非整模型",
         weighting="各history内对每档百分比等权平均，再128K乘0.8、8K乘0.2",
         rows=rows,

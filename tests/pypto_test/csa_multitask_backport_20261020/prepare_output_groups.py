@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="qa_m16_v3")
     parser.add_argument("--candidate", default="output_groups_v1")
+    parser.add_argument("--original-ob-cache", action="store_true", help="保留原多task NZ O_B默认缓存属性")
     args = parser.parse_args()
     if not args.base.isidentifier() or not args.candidate.isidentifier():
         raise ValueError("私有包名必须是标识符")
@@ -51,6 +52,11 @@ def main():
                 )
         (target / name).write_text(source)
     source = (HERE / "output_group_mixed_template.py").read_text()
+    if args.original_ob_cache:
+        marker = 'pl.func_attr({"cache_policy": [(1, 1), (2, 1)]})'
+        if source.count(marker) != 1:
+            raise AssertionError("需要唯一的输出Cube缓存属性")
+        source = source.replace(marker, 'pl.func_attr({"cache_policy": [(1, 1)]})', 1)
     (target / "output_group_mixed.py").write_text(source)
     path = target / "decode_csa.py"
     source = path.read_text()
@@ -81,6 +87,7 @@ def main():
                 candidate=args.candidate,
                 base=args.base,
                 donor="2417166f，冻结13259f92的OUTPUT_GROUP_PIPELINE",
+                original_ob_cache=args.original_ob_cache,
                 scope="24组局部MIX执行O_A/组量化/O_B/HCpost；完整CSA保持多task",
                 preserved="组内K/量化/八组累加/BF16边界；原实际T策略和NZ物理权重",
                 lifetime="每次调用独占运行时arena flags，早期显式清零；尾段等待init和packed",

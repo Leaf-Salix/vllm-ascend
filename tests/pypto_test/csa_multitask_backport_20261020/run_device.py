@@ -186,6 +186,7 @@ def main():
     parser.add_argument("--windows", type=int, default=5)
     parser.add_argument("--parse-only", action="store_true")
     parser.add_argument("--compile-only", action="store_true")
+    parser.add_argument("--dump-final-ir", action="store_true", help="仅CPU失败诊断，保存一份最终IR")
     parser.add_argument("--compile-legacy-qr", action="store_true", help="仅CPU编译HCA使用的旧QR入口")
     parser.add_argument("--compile-layout-probe", action="store_true")
     parser.add_argument("--layout-probe", action="store_true", help="新页证明helper需测；相同helper已通过时不重复")
@@ -193,6 +194,7 @@ def main():
     parser.add_argument("--measure-outer", action="store_true", help="另采NPU event外层耗时，保持L1口径独立")
     parser.add_argument("--functional-only", action="store_true", help="只做原多task/候选精确与A/B/A图检查")
     parser.add_argument("--candidate-wait-backoff", choices=("off", "cached100"), default="off")
+    parser.add_argument("--candidate-wait-units", choices=("score", "output", "hc"), default="score")
     parser.add_argument(
         "--indexer-page-pattern", choices=("original", "ascending_history", "fragmented_history"), default="original"
     )
@@ -200,6 +202,10 @@ def main():
     args = parser.parse_args()
     if args.compile_legacy_qr and not args.compile_only:
         raise ValueError("旧QR入口探针必须使用--compile-only")
+    if args.dump_final_ir and not args.compile_only:
+        raise ValueError("最终IR诊断仅支持--compile-only")
+    if args.candidate_wait_backoff == "off" and args.candidate_wait_units != "score":
+        raise ValueError("指定等待单元须同时启用--candidate-wait-backoff cached100")
     if args.functional_only and args.measure_outer:
         raise ValueError("功能用例不采外层或L1性能")
     if args.boundary_replay and (args.batch < 2 or args.history < 2):
@@ -225,11 +231,20 @@ def main():
         candidate=args.candidate,
         current=args.current,
         candidate_wait_backoff=args.candidate_wait_backoff,
+        candidate_wait_units=args.candidate_wait_units,
         performance_measured=False,
         query_tokens=6,
         indexer_page_pattern=args.indexer_page_pattern,
         provenance=json.loads((HERE / "PROVENANCE.json").read_text()),
     )
+    # 公共清单描述最初冻结，不能把其score_split标签当成后续候选的来源。
+    report["provenance"]["initial_candidate"] = report["provenance"].pop("candidate", None)
+    report["provenance"]["candidate"] = args.candidate
+    report["provenance"]["initial_changed_files"] = report["provenance"].pop("changed_files", [])
+    report["provenance"]["initial_status"] = report["provenance"].pop("status", None)
+    candidate_manifest = HERE / "sources" / args.candidate / "candidate.json"
+    if candidate_manifest.exists():
+        report["provenance"]["candidate_manifest"] = json.loads(candidate_manifest.read_text())
     try:
         import dsv4_csa_env
 
@@ -256,7 +271,11 @@ def main():
                 return contextlib.nullcontext()
             from candidate_wait_probe import backoff_probe
 
-            return backoff_probe(output / "candidate_wait_codegen", HERE / "sources/spmd/wait_codegen.py")
+            return backoff_probe(
+                output / "candidate_wait_codegen",
+                HERE / "sources/spmd/wait_codegen.py",
+                args.candidate_wait_units,
+            )
 
         report["environment"] = {
             "cann": os.environ.get("ASCEND_HOME_PATH"),
@@ -298,7 +317,13 @@ def main():
                 report["compile_scope"] = "仅HCA旧七参数QR入口，未运行HCA设备计算"
             compile_entry._get_dep_graph()
             if args.compile_only:
-                with candidate_compile_scope():
+                debug_scope = contextlib.nullcontext()
+                if args.dump_final_ir:
+                    from codegen_debug import final_ir_capture
+
+                    report["final_ir"] = str(output / "final_program.py")
+                    debug_scope = final_ir_capture(report["final_ir"])
+                with candidate_compile_scope(), debug_scope:
                     artifact = compile_entry._resolve_kernel_artifact(
                         (),
                         {

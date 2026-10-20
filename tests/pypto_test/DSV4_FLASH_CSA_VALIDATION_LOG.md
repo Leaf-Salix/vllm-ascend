@@ -17255,3 +17255,119 @@ v6完整CPU编译和AICPU链接通过，派发核对结果追加到
 的同步API。P-P29批量Scalar预取卡为draft且平台标950，OL-206跨核抽象
 案例也针对A5；只保留一般数据可见性提醒，不把其模式4/flag偏移用于A3。
 知识中提出的固定参数特化同样不能覆盖本轮动态长度、位置及padding合同。
+
+## 648. 2026-10-20：输出局部MIX功能通过，默认等待下的完整性能回退
+
+v6的B5/T30任务`task_20261020_173318_48461013779`completed/exit0：
+eager A/B、A-B-A图、metadata/padding重放、输出、Top-K/score、cache/state、
+保护区均通过。补齐split_aiv后未复现v5停滞；本轮证据仍是单卡，不涉及
+整模型token或DSpark统计。
+
+随后两长档相对qa_m16_v3同轮五窗完成，均exit0且功能/状态/图通过。
+完整CSA L1单位μs，含早期信号初始化与所有内部等待：
+
+|档位|当前 min/mean/max|输出局部MIX min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|821.06/839.09/849.20|881.52/887.65/894.16|783.42/789.51/795.70|
+|128K/B28|1178.60/1196.92/1223.06|1249.86/1263.95/1295.44|1161.64/1169.66/1190.80|
+
+当前候选不采用。按输出首个incore切分：
+B16输出前687.012→687.580μs，输出至结束152.076→200.072μs；
+B28输出前1023.976→1031.300μs，输出至结束172.944→232.648μs。
+主要完整回退位于输出段，不能解释为纯AICPU或初始化成本。原窗口、初始化
+整组时长与该分段见
+[OUTPUT_GROUP_PHASES.json](csa_multitask_backport_20261020/OUTPUT_GROUP_PHASES.json)。
+外层NPU event另留各result.json，不与L1相减。
+
+来源单SPMD性能参考采用wait_codegen.py的100 tick策略；v6使用默认TWAIT，
+此前不能将其差值全归因于融合组织。核对冻结PTO-ISA
+`build/pto-isa/include/pto/comm/a2a3/TWait.hpp`，默认实现是不带定时退避的
+DCCI/volatile紧轮询，每64轮PIPE_ALL；不是“默认睡很久才检查”。
+100 tick路径首次立即检查，仅未就绪时读本核计时器退避，发布与业务cache
+维护保持不变；是否减少轮询竞争仍需配对测量，不能凭源码预判收益。
+
+新增`output_groups_wait100`只在测试编译进程替换输出三个M策略的等待；
+CPU代码生成记录每个单元3个实际替换点，未触碰Score或共享编译器。
+long B16/B28对v6的独立消融已排队。此编译回调尚未接入正式service，
+即使实验获益也不能直接宣称正式路径已获得同样收益。
+
+## 649. 2026-10-20：HC真实行依赖的局部前段适配，CPU通过待设备
+
+来源为冻结13259f92的HC_ROW_DEPENDENCIES及hc_stages.py，包含在2417166f。
+来源统一日志15904节有同进程开启/关闭的完整收益证据，且正式policy默认
+开启；未采用来源默认关闭的HC_CONSUMER_REDUCE。
+
+私有`hc_rows_v7`基于qa_m16_v3，局部MIX承载widen/RMS、四K投影、RAW归约、
+pre/post及mix/norm；整个CSA其余部分保持多task。24个AIC仅等自己实际
+M16输入的M8生产者，48个AIV仅等自己RAW行的四份K partial及相应RAW
+owner。gate和norm仍由同一AIV处理。Sinkhorn留作独立task，在前段完成后
+与QKV并行，避免把只有最终HCpost需要的comb串到QKV之前。
+
+每次调用4×72×128个INT32信号（144KiB）显式清零并计入完整CSA。
+数学helper函数体与冻结来源AST逐项一致：四K左折叠、BF16边界、RMS分段、
+实际动态T和尾行均保留。完整初始化、RAW及临时区容量仍由实际T求出，
+没有改成最大容量计算或七档shape白名单。
+
+CPU适配过程：最初post/norm赋值的动态轴别名不一致；新二维view解决赋值
+检查后，最终IR又暴露内部T_DYN不在MIX实际参数维度中。尝试在inline内对
+内部tensor使用bind_dynamic不受当前接口支持，未上设备。只保存一份
+4.8MB最终IR定位（`hc_rows_v2/cpu_debug_v1/final_program.py`），没有打开
+全部pass或设备大体积profiling。随后让inline/helper Tensor合同从真实
+调用者推导，并在MIX接口保留原始post/norm物理行轴；v7完整lowering、
+PTOAS和AICPU链接通过，编排明确派发AIC+AIV0+AIV1。
+
+见[HC_ROWS_CODEGEN.json](csa_multitask_backport_20261020/HC_ROWS_CODEGEN.json)、
+[prepare_hc_rows.py](csa_multitask_backport_20261020/prepare_hc_rows.py)、
+[hc_row_mixed_template.py](csa_multitask_backport_20261020/hc_row_mixed_template.py)。
+这些类型适配不替代Native入口容量检查；B5/T30功能及同图边界已排队，
+尚无设备采用结论。为同类编译失败新增CPU专用`--dump-final-ir`诊断入口，
+只保存代码生成前的一份IR，默认关闭且不允许用于NPU性能采集。
+
+## 650. 2026-10-20：输出等待策略消融与HC行流水两长档结果
+
+`output_groups_wait100`长B16/B28均completed/exit0，输出、Top-K/score、
+cache/state、保护和图通过。当前为输出局部MIX v6；除等待源码变换外，
+数学、owner、缓存属性、初始化和调度相同。完整CSA L1五窗，单位μs：
+
+|档位|默认TWAIT min/mean/max|100 tick min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|871.54/894.05/907.06|813.46/822.96/837.78|790.78/796.30/804.38|
+|128K/B28|1247.68/1262.61/1284.60|1183.12/1209.50/1224.42|1161.90/1174.94/1191.64|
+
+只改等待就分别降低71.092/53.112μs，说明默认等待与来源策略的差异必须
+计入局部融合评估。现有证据证明等待策略影响完整性能；“减少紧轮询对
+访存的竞争”仍是机制推断，没有PMU数据将全部收益归为某条硬件流水。
+两档候选仍慢于单SPMD，且本轮未包含qa_m16_v3这一当前正式参考，不能
+跨轮拿648节的当前均值相减作为正式增益。
+
+进一步核对缓存：原多task NZ O_B helper没有BYPASS属性，来源单SPMD
+对wo_b显式BYPASS。`output_groups_ob_cache_v1`保留当前多task的O_B默认
+缓存、O_A仍BYPASS，并使用100 tick等待；CPU通过，长B16/B28相对
+qa_m16_v3排队。此轮判断的是适配后的完整组合，不从跨轮差值认领独立
+O_B缓存收益。100 tick仍只在隔离测试编译进程生效，尚未正式接入。
+
+HC v7的B5/T30功能及metadata/padding先completed/exit0，继而两个长档
+也completed/exit0且精确/状态/保护/图通过。以下当前为qa_m16_v3：
+
+|档位|当前 min/mean/max|HC行流水 min/mean/max|单SPMD min/mean/max|
+|---|---|---|---|
+|128K/B16|832.08/841.42/857.34|827.08/838.94/846.90|794.54/802.12/805.84|
+|128K/B28|1159.16/1201.24/1230.92|1153.24/1193.70/1214.74|1155.04/1166.71/1178.60|
+
+两档完整mean分别降低0.294%/0.628%，max分别降低10.44/16.18μs，
+保留候选继续验证，尚不正式采用。B16 norm就绪69.436→70.868μs、QA首启
+71.944→73.948μs，没有前段就绪收益；B28 norm就绪84.372→81.788μs，
+QA首启86.876→86.960μs，Score首启392.384→383.824μs。不能将完整改善
+直接解释为HC数学加速。原始窗口及阶段数据见
+[HC_ROWS_PHASES.json](csa_multitask_backport_20261020/HC_ROWS_PHASES.json)。
+
+为对齐来源等待策略，另准备hc_rows_wait100；只在hc_row_pipeline改写4个
+等待点，CPU完整通过，长B16/B28相对默认等待的v7排队。先收取这两类
+代表档，再确定需扩七档的组合；收益不能按上述各轮百分比线性相加。
+余下的Top-K/Plan→Attention行就绪、协同前段的真实时序适配继续保留目标，
+没有用这些局部结果代替完整七档超过单SPMD的最终验收。
+
+报告脚本补充局部MIX的核内分组，并标明其覆盖多个数学阶段/软等待；
+七档汇总要求等待编译策略一致，禁止混入默认与100 tick样本。新结果将
+初始冻结清单中的score_split标签明确为initial_candidate，并另记真实
+候选及candidate.json，避免把首轮清单误当本轮源码描述。
