@@ -1,0 +1,21 @@
+{
+  "candidate": "plan_workers_v1",
+  "target": "vllm_ascend/ops/pypto/deepseek_v4_flash_csa/decode_sparse_attn_csa.py",
+  "donor": "13259f92冻结attention_slot_plan_stage的8行/48路分工",
+  "changes": [
+    "CSA_PLAN_WORKERS: 16 -> 48",
+    "launch=min(48,ceil(actual_T/8)); fixed stride=48*8"
+  ],
+  "math_ast_matches_tested_candidate": true,
+  "comparison_note": "忽略顶层import排序与格式，执行体AST逐项相等；未做hash",
+  "matrix": "MATRIX_plan_workers_v1_matrix_v1.json",
+  "tail_result": "runs/plan_workers_v1/h131072_b5_tail_v1/result.json",
+  "weighted": {
+    "reduction_vs_original_pct": 4.303842708239391,
+    "reduction_vs_spmd_pct": -1.882107248525382,
+    "reduction_vs_current_pct": 0.9008921401118339
+  },
+  "adopted": true,
+  "remaining": "仍比同轮单SPMD加权慢1.882%；继续前段调度与HC融合组合，不宣称完成目标",
+  "scope": "单卡真实权重layer4 TP1 NZ2；没有整模型token或DSpark验收"
+}

@@ -17716,3 +17716,17 @@ HC小融合的B5/T30已通过功能、A/B/A图和同图动态边界；两长档�
 Plan的B5/T30补测现已completed/exit0：末尾不足八行、A/B/A图重放、
 同图history/page owner及有效请求数变化均通过，输出/索引/score、
 cache/state与保护区检查通过。七档与受影响尾块的采用验证已齐。
+
+## 662. 2026-10-20：正式采用独立Plan非空分工
+
+七档与B5/T30尾块/图边界证据已齐，将Plan worker上限16→48、
+launch改为min(48,ceil(T/8))两处修改迁入正式decode_sparse_attn_csa.py。
+执行体AST与已测私有包相等，仅忽略顶层import排序和格式；没有重新
+拷贝其他模块，没有修改工具链或权重布局。动态T超过一个48路wave时
+仍按48×8行stride继续遍历；尾行沿原valid_rows处理。
+
+采用依据为660节完整七档8:2加权改善0.901%，接受其中已披露的
+B24及短B16小幅回退；这不是最终已快于单SPMD的结论。核内、完整
+CSA和外层event分别保留，下一步以此作为current验证前段次序叠加。
+来源、代码对应及验证路径见
+[ADOPTION_plan_workers.json](csa_multitask_backport_20261020/ADOPTION_plan_workers.json)。
