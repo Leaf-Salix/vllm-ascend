@@ -68,8 +68,8 @@ def main():
                 "device_id": result["device_id"],
                 "statistics_us": result["statistics_us"],
                 "ratio": ratio,
-                "extra_control_source": result["sources"]["mpmd_control"],
-                "candidate_over_extra_control": result["candidate_over_control"],
+                "extra_control_source": result["sources"]["mpmd_control"] if "mpmd_control" in sides else None,
+                "candidate_over_extra_control": result.get("candidate_over_control"),
                 "all_bit_equal": all(
                     v["bit_equal"] for check in result["checks"].values() for v in check["numerical"].values()
                 ),

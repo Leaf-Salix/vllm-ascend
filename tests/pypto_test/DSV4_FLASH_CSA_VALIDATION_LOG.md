@@ -21337,3 +21337,43 @@ B1 Score首启mean217.52→181.37μs，B4为233.76→185.18μs，改善主要在
 候选，B8和S1～S6边界尚需覆盖；分档合并后再做统一八档，不能挑各轮最快窗拼表。
 全部五窗、阶段和检查摘要见
 [small_front_pipeline_results.json](csa_mpmd_tnd_20261021/small_front_pipeline_results.json)。
+
+### 735.33：Main KV与长历史中段组合通过，两档mean/max继续降低
+
+v37将v34 Main KV流水与v35中段流水组合；中段仅在既有BALANCED策略开启时使用，
+非balanced继续原Score/Top-K/plan/Attention四task。长档从18减为15个task。
+分支内产生的attn_tid与消费它的输出task保持同一作用域，避免在SSA阶段跨分支
+引用TaskId；没有删除输出对Attention的完成依赖。长短两条CPU分支通过。
+
+长B16/B24两项设备任务均completed(exit=0)，三侧eager、graph、post-L1的9类
+张量逐bit一致，保护区通过。完整L1单位μs：
+
+| 场景 | 冻结SPMD min/mean/max | v34控制 min/mean/max | v37 min/mean/max | 相对控制mean |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 728.06 / 731.264 / 735.68 | 710.28 / 714.116 / 719.30 | 707.40 / 712.032 / 716.72 | −0.29% |
+| 128K/B24 | 840.24 / 845.228 / 849.18 | 866.02 / 875.804 / 886.48 | 839.82 / 844.452 / 851.36 | −3.58% |
+
+组合相对冻结SPMD的mean耗时比分别0.973700/0.999082。B16增量比此前单独中段
+试验更小，不能相加两轮百分比；B24的max下降35.12μs。仍未达到统一八档10%。
+样本与阶段见[balanced_middle_results.json](csa_mpmd_tnd_20261021/balanced_middle_results.json)。
+
+### 735.34：冻结统一分档候选v38，重新收集八档，不拼接历次最佳结果
+
+v38从v37扩展已验证的小容量前段策略：正容量使用Indexer/Main两条前段及Main KV
+流水，balanced长历史使用按行中段流水，短历史保留原四task。小容量中段是新组合，
+B1的G2及B4的G6分支CPU编译通过，设备正确性由本轮八档检查，不能预记通过。
+所有测试沿用cases.json及冻结84751e34、公共SDK，不改Host metadata或验收权重。
+
+统一候选八档只测冻结SPMD和MPMD两侧，同卡同进程warmup3次后交替5窗；前几轮
+额外控制已经完成归因，本轮不再加入第三个控制，以减少编译和采样开销。收集器
+兼容没有额外控制的结果，不对不存在的控制计算加权值；原完整L1/五窗/数值及
+保护区检查保留。计划与唯一任务ID见
+[all_capacity_matrix_plan.json](csa_mpmd_tnd_20261021/all_capacity_matrix_plan.json)。
+当前为排队/执行阶段，尚无新的八档G，不能把局部收益标成目标完成。正式目标
+包仍未替换；S1～S6额外边界、连续状态/同址metadata和真实16卡验证继续待办。
+
+另核对SPMD会话提交2ecdf08b的实际Query AIV分工：Main仅32个AIV，原helper却
+按48个选择head组，T96因此不均衡。该会话v3设备任务
+`task_20261022_045018_19010782266`已完成且对原SPMD严格一致，但整个分链候选
+mean808.772μs，对照798.900μs，尚无完整收益，也不是只改变head选择的单项A/B。
+这是一项待本MPMD独立验证的线索，未将它混入v38或宣称为已获得的优化收益。
