@@ -13,10 +13,25 @@ from dsv4_csa_single_layer import writable_bytes
 
 
 def make_fixture(
-    config, attention, batch, history, seed, device, table_history=None, reverse_pages=False,
-    *, query_tokens=6, indexer_page_pattern="original", query_lengths=None, history_lengths=None,
-    token_capacity=None, request_capacity=None, page_owners=None, physical_request_capacity=None,
+    config,
+    attention,
+    batch,
+    history,
+    seed,
+    device,
+    table_history=None,
+    reverse_pages=False,
+    *,
+    query_tokens=6,
+    indexer_page_pattern="original",
+    query_lengths=None,
+    history_lengths=None,
+    token_capacity=None,
+    request_capacity=None,
+    page_owners=None,
+    physical_request_capacity=None,
     allow_unassigned_tail=False,
+    cache_template=None,
 ):
     """按实际本轮长度构造Native输入；Dspark配置上限与本轮有效长度分开。
 
@@ -59,7 +74,8 @@ def make_fixture(
     if type(physical_requests) is not int or physical_requests < requests:
         raise ValueError("物理页请求容量须覆盖metadata请求容量")
     if page_owners is not None and (
-        len(page_owners) != batch or len(set(page_owners)) != batch
+        len(page_owners) != batch
+        or len(set(page_owners)) != batch
         or any(type(owner) is not int or not 0 <= owner < physical_requests for owner in page_owners)
     ):
         raise ValueError("page_owners须为有效且互异的物理请求槽")
@@ -73,7 +89,8 @@ def make_fixture(
     bounds_cpu = torch.zeros(requests + 1, dtype=torch.int32)
     bounds_cpu[1:] = torch.tensor(padded_queries, dtype=torch.int32).cumsum(0)
     lengths_cpu = torch.tensor(
-        [h + q for h, q in zip(histories, queries)] + [0] * (requests - batch), dtype=torch.int32,
+        [h + q for h, q in zip(histories, queries)] + [0] * (requests - batch),
+        dtype=torch.int32,
     )
     bounds, lengths = bounds_cpu.to(device), lengths_cpu.to(device)
     active_positions = torch.cat([h + torch.arange(q) for h, q in zip(histories, queries)])
@@ -97,20 +114,35 @@ def make_fixture(
         if name == "state" and attention.compress_ratio == 128:
             per_request = 18
         pages = physical_requests * per_request + 1
-        group["layout"] = allocate_native_cache(group, pages, device)
-        for i, view in enumerate(group["views"]):
-            if view.dtype == torch.int8:
-                view.random_(-64, 64)
-            elif name == "indexer" and i == 1:
-                view.fill_(0.01)
-            else:
-                view.normal_(0, 0.5)
+        if cache_template is None:
+            group["layout"] = allocate_native_cache(group, pages, device)
+            for i, view in enumerate(group["views"]):
+                if view.dtype == torch.int8:
+                    view.random_(-64, 64)
+                elif name == "indexer" and i == 1:
+                    view.fill_(0.01)
+                else:
+                    view.normal_(0, 0.5)
+        else:
+            # 仅供同址功能验证构造新metadata；不重分配、清零或随机化持久cache。
+            template = cache_template[name]
+            if template["pages"] != pages or template["raw"].numel() != pages * spec.page_size_bytes:
+                raise ValueError(f"{name}: 同址metadata场景改变了物理页容量")
+            if template["allocation"].device != device:
+                raise ValueError("同址cache须与场景位于同一设备")
+            for field in ("layout", "allocation", "raw", "views", "page_size", "pages"):
+                group[field] = template[field]
         group["owner"].kv_cache = [group["views"]] if name == "indexer" else group["views"]
         # 保留原七档的 40 请求 / 256 token 容量；较大的单层边界用例按实际
         # 请求数和 token 数扩容，避免 scenario 在进入算子前发生页表越界。
         table = BlockTable(
-            spec.block_size, max(40, requests), columns, max(256, tokens),
-            True, device, num_speculative_tokens=5,
+            spec.block_size,
+            max(40, requests),
+            columns,
+            max(256, tokens),
+            True,
+            device,
+            num_speculative_tokens=5,
         )
         for row in range(requests):
             if row >= batch:
@@ -168,7 +200,7 @@ def make_fixture(
     for name, group in groups.items():
         slots = compact[name][2] if name in compact else metadata[group["prefix"]].decode.slot_mapping
         group["allowed"] = writable_bytes(group["allocation"], group["views"], slots)
-        group["initial"] = group["allocation"].cpu()
+        group["initial"] = group["allocation"].cpu() if cache_template is None else cache_template[name]["initial"]
     readonly = {"positions": positions}
     for name, group in groups.items():
         req = metadata[group["prefix"]].decode

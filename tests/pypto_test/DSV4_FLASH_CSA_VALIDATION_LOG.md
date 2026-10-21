@@ -21671,3 +21671,31 @@ v51两项设备任务均completed(exit=0)，三侧eager/graph/post-L1的9类业�
 [hc_metadata_overlap_results.json](csa_mpmd_tnd_20261021/hc_metadata_overlap_results.json)，
 策略边界见[v51_policy_adoption.json](csa_mpmd_tnd_20261021/v51_policy_adoption.json)。
 最新完整八档仍是v49的G=0.975115，不拼接本轮B28替换分母或虚构新的综合G。
+
+### 735.45：补同址metadata与连续状态矩阵，并独立移植连续head核内候选
+
+冻结当前正式06dced14为v52。新增`--state-validation`独立功能模式，只接受
+长B16的T64/R17根；页表单独多预留128历史位置，报告明确排除于性能矩阵。
+固定八档cases.json不变。场景仍由Native builder/compact生产者构造，测试
+仅把新metadata内容写入已捕获根；生产算子不增加Host逐请求规划。
+
+新增state_replay.py覆盖同址S1/S6/S2/S3/S4/S5、零compact输出、混合请求反转
+物理页owner、再回到S1；连续四步覆盖长度改变、请求顺序与成员变化。SPMD与
+MPMD各自从上一轮cache/state继续，不在连续步中恢复初态。每次检查根地址、
+全部metadata只读、signal代际及隔离区、C4几何、各cache合法写入范围和9类
+业务结果，容差沿用既有冻结规则。场景构造支持复用原设备cache分配，只更新
+metadata，不为每一步重分配或重随机化整份KV。启动器冻结该新增验证模块。
+
+CPU入口解析通过；唯一设备任务`task_20261022_071043_17314681625`已排队，
+尚未记为矩阵通过。该矩阵也不代替真实服务/16卡验收和B1的独立容量边界。
+
+另从已提交0c52ab13提取连续head源码变换v4，参照c05436d1的设备结果：其T96
+场景有收益，T56与短B32未证明收益，因此不能直接全域采用。v53在MPMD设置
+独立QUERY_CONTIGUOUS_HEADS constexpr，仅长G6、64≤T≤96开启；非8整除
+设备T仍完整走旧helper。8个连续head组成Tile，512列RMS顺序、两次FP32乘法、
+RoPE和BF16舍入保留，scale/RoPE重读代价由本MPMD完整对照判断。
+
+首次CPU发现PyPTO依赖调用不读取constexpr默认值，已在旧独立task显式传False，
+不修改SDK。长B24开启与短B16关闭分支CPU编译通过，长B24/B16已提交同轮对照，
+以冻结v52为控制；暂无设备收益结论。来源与限制见
+[query_contiguous_provenance.json](csa_mpmd_tnd_20261021/query_contiguous_provenance.json)。

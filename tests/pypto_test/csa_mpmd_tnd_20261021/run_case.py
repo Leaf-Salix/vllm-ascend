@@ -134,6 +134,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", required=True)
     parser.add_argument("--boundary-query-length", type=int, choices=range(1, 7), help="使用已冻结B1边界，排除于八档G")
+    parser.add_argument("--state-validation", action="store_true", help="独立同址metadata/连续状态验证，不测性能")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frozen", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
@@ -152,6 +153,12 @@ def main():
     manifest = json.loads(args.cases.read_text())
     case = select_case(manifest, args.case, args.boundary_query_length)
     check_case(case)
+    if args.state_validation:
+        if args.case != "h131072_b16" or args.boundary_query_length or args.control_mpmd or args.baseline_only:
+            raise ValueError("状态矩阵只从长B16构造SPMD/MPMD两侧功能场景，不能混入其它对照")
+        # 独立功能场景预留连续decode的页表容量；固定八档清单完全不修改。
+        case["name"] += "_state_validation"
+        case["table_history"] += 128
     max_query_tokens = max(case["query_lengths"])
     report = {
         "case": case,
@@ -166,6 +173,9 @@ def main():
     }
     if args.boundary_query_length is not None:
         report["scope"] = "full CSA L1, fixed B1 boundary excluded from eight-case G"
+    if args.state_validation:
+        report["scope"] = "same-address metadata and continuous state; excluded from performance matrix"
+        report["performance_measured"] = False
 
     def save(stage=None):
         if stage:
@@ -430,6 +440,28 @@ def main():
                     report["checks"][side + "_graph"] = {"guards": check, "numerical": numerical}
                     if not all(check.values()) or not all(v["status"] == "PASS" for v in numerical.values()):
                         raise AssertionError(f"{side} 图重放失败")
+                if args.state_validation:
+                    from state_replay import validate
+
+                    result = validate(
+                        config=config,
+                        layer=layer,
+                        fixture=fixture,
+                        root=native,
+                        native_bind=native_bind,
+                        entries=entries,
+                        graphs=graphs,
+                        guards=guards,
+                        compare=compare,
+                        case=case,
+                        report=report,
+                        save=save,
+                    )
+                    if not result["passed"]:
+                        raise AssertionError("同址metadata或连续状态验证失败")
+                    report["passed"] = True
+                    save("complete")
+                    return
                 for sample in range(3):
                     order = list(graphs) if sample % 2 == 0 else list(reversed(graphs))
                     for side in order:
