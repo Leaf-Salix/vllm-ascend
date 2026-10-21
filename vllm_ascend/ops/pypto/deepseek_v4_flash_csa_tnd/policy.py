@@ -123,7 +123,11 @@ def select_policy(*, tokens: int, requests: int, max_query_tokens: int, max_seq_
     single_request_leaves = requests == 1 and long_history and cache_rows <= 65536 and 5 <= max_query_tokens <= 6
     ob_rows = 32 if tokens <= 32 else 96 if tokens <= 96 else 128
     parallel_small_qa = group == 6 and 16 < tokens < 32
-    hc_groups = min(24, max(4, 4 * ((tokens + 15) // 16)))
+    hc_linear_units = 4 * ((tokens + 15) // 16)
+    # 长历史的metadata页证明较重；不增加最大投影波数时，为它保留独立AIV。
+    # 短历史保持24组：同轮短B32对照显示16组回退。
+    hc_overlap = long_history and hc_linear_units > 24 and (hc_linear_units + 15) // 16 == (hc_linear_units + 23) // 24
+    hc_groups = 16 if hc_overlap else min(24, max(4, hc_linear_units))
     hc_row_tile = next((tile for tile in (1, 2, 4, 8) if tokens <= 2 * hc_groups * tile), 8)
     return CSAMPMDPolicy(
         hc_groups=hc_groups,
