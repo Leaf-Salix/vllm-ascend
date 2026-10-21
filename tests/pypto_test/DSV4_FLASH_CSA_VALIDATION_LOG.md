@@ -20784,3 +20784,42 @@ query MIX因此到248.46μs才启动。这个局部MIX把系数生成一起合�
 本轮v22/冻结SPMD的mean比值仍为1.211914（长）和1.259077（短），显著未达到
 0.90目标；不能用相对上一候选的小幅收益代替最终验收。固定八档、B1边界与
 动态连续状态、真实TND的16卡整模型验证仍待完成。
+
+
+### 735.16：head weights纳入局部query MIX，长档完整mean下降1.40%
+
+v23从v22出发，将原head weights投影与规约两个task移入Indexer query局部MIX，
+完整CSA仍为34个task。AIC先发布query投影完成，随后利用AIV做RoPE的区间计算
+四份weights partial；AIV先发布RoPE，再等真实partial owner并执行原左折叠规约。
+新增WEIGHTS_PROJECT阶段。QUANT发布前包含本核head weights写回，系数先等全部
+quant owner；weights的ceil(T/16)个行块owner属于min(T,48)个quant owner集合，
+T>=48时后者覆盖全部AIV，因此无需额外全核阶段屏障。Cube发布weights在等待RoPE
+之前，Vector发布RoPE在等待weights之前，没有互等循环。
+
+信号工作区由180KiB增为216KiB，仅新准备对象首次清零；不复用旧五槽协议的状态。
+所有72个参与者每次各推进一次代际，空worker也不跳过。各wrapper的InOut参数
+与返回顺序一致；所有原weights和query数学helper保持不变，未增加Host metadata。
+长短B16完整CPU后端通过后，完成同卡同进程SPMD/v22/v23五窗L1对照。
+
+| 场景 | 冻结SPMD min/mean/max | v22控制 min/mean/max | v23 min/mean/max | mean变化 |
+|---|---:|---:|---:|---:|
+| 128K/B16 | 728.96 / 733.11 / 736.50 | 873.42 / 892.68 / 908.64 | 863.90 / 880.14 / 891.24 | −1.40% |
+| 8K/B16 | 590.18 / 593.25 / 596.76 | 723.18 / 734.76 / 743.04 | 728.66 / 737.32 / 748.82 | +0.35% |
+
+单位μs。三侧eager、图重放、采样后各9项业务张量逐bit一致，所有保护检查通过。
+长档min/mean/max均改善；短档三项均轻微回退。保留长档候选，不覆盖正式入口，
+也不把本轮短档较高SPMD绝对时间与历史其它卡次混算收益。
+
+长档query MIX平均范围234.892→314.968μs变为162.896→250.704μs，完成提前64.264μs。
+局部MIX AIC实例mean53.032→56.850μs、AIV76.279→83.202μs，含新增weights工作和
+等待；不能声称纯核内数学变快。Score首启383.072→369.012μs，Attention首启
+618.032→603.284μs，完整mean减少12.540μs。短档query同样提前，但完整并未获益。
+完整样本和阶段见[query_weights_results.json](csa_mpmd_tnd_20261021/query_weights_results.json)。
+
+随后审查Score：长G6为避免动态Acc行距问题，现有实现安全补满六个query；当本组
+实际live<=3时，head系数矩阵后半由完整零填保证严格为零。INT8 K128点积经1/1024
+缩放最多2048，FP16中有限；不存在用删除0×Inf改变语义的前提。准备v24让这类组
+只计算固定M192前半QK与WS，仍写原六行FIFO；live>=4完整保留原双半，短G2不变。
+叶计划、Top-K、页检查、ACK和排空不变；两分支局部变量隔离以避免异形Tile phi。
+省略加零是否逐bit等价仍以设备检查为准，未放宽容差。长档CPU后端已通过，
+长短B16单卡对照已入队，尚未记录设备成功或性能收益。
