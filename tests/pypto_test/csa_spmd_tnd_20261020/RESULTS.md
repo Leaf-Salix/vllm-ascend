@@ -105,6 +105,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | mixed [6, 6, 4] / 128K 独立工作区 | BSH150@a241fa61+静态形状修复 | 499.24 | 498.02 | -0.24% | 不适用 | PASS | [结果](runs/single_m16_qa_t16_mixed664_v86/result.json) |
 | 128K/B16/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 784.24 | 785.46 | +0.16% | 不适用 | PASS | [结果](runs/borrowed_score_stream_h131072_b16_s6_v90/result.json) |
 | 128K/B28/S6 独立工作区 | BSH150@a241fa61+静态形状修复 | 1142.46 | 1160.02 | +1.54% | 不适用 | PASS | [结果](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) |
+| 128K/B1/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 358.08 | 366.26 | +2.28% | 不适用 | PASS | [结果](runs/qa_incremental_b1_s6_v93b/result.json) |
+| 128K/B16/S6 独立工作区 | TND output_balance v4 (incremental comparison only) | 785.02 | 788.22 | +0.41% | 不适用 | PASS | [结果](runs/ws_incremental_b16_s6_v93b/result.json) |
 
 ## 任务与原始证据
 
@@ -220,8 +222,8 @@ a241fa61 BSH静态形状修复；候选为O_A/O_B互补分工v4。B1/B16经完�
 | `task_20261021_140935_275288020871` | [borrowed_score_owner_h131072_b28_s6_v90](runs/borrowed_score_owner_h131072_b28_s6_v90/result.json) | completed (exit=0) | complete | PASS |
 | `task_20261021_141858_318904115435` | [qa_incremental_b1_s6_v93](runs/qa_incremental_b1_s6_v93/result.json) | 未知 | 缺少结果 | 否 |
 | `task_20261021_141858_318908415657` | [ws_incremental_b16_s6_v93](runs/ws_incremental_b16_s6_v93/result.json) | 未知 | 缺少结果 | 否 |
-| `task_20261021_142045_325426029053` | [qa_incremental_b1_s6_v93b](runs/qa_incremental_b1_s6_v93b/result.json) | 未知 | 缺少结果 | 否 |
-| `task_20261021_142045_32543028090` | [ws_incremental_b16_s6_v93b](runs/ws_incremental_b16_s6_v93b/result.json) | 未知 | 缺少结果 | 否 |
+| `task_20261021_142045_325426029053` | [qa_incremental_b1_s6_v93b](runs/qa_incremental_b1_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
+| `task_20261021_142045_32543028090` | [ws_incremental_b16_s6_v93b](runs/ws_incremental_b16_s6_v93b/result.json) | completed (exit=0) | complete | PASS |
 
 各任务完整命令和固定launcher SHA256见 `jobs.json`。
 Native超阈值元素、Top-K替换、cache/state及保护区明细仍在原始result.json；
